@@ -12,7 +12,7 @@ from pathlib import Path
 
 from .core import init_soul, get_soul_context, SOUL_DIR
 from .conversations import start_conversation, end_conversation
-from .wisdom import semantic_recall
+from .wisdom import quick_recall
 
 
 def get_project_name() -> str:
@@ -110,11 +110,15 @@ def session_end() -> str:
 def user_prompt(user_input: str) -> str:
     """
     UserPromptSubmit hook - Inject relevant wisdom for the task at hand.
+
+    Uses quick_recall (keyword-based) instead of semantic_recall to avoid
+    loading the embedding model on every prompt. This reduces latency from
+    ~2s to ~50ms.
     """
     if len(user_input.strip()) < 20:
         return ""
 
-    results = semantic_recall(user_input, limit=3)
+    results = quick_recall(user_input, limit=3)
 
     if not results:
         return ""

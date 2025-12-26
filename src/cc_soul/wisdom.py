@@ -214,6 +214,80 @@ def recall_wisdom(
     return results[:limit]
 
 
+def quick_recall(query: str, limit: int = 5, domain: str = None) -> List[Dict]:
+    """
+    Fast keyword-based recall for hooks. No embedding model required.
+
+    Tokenizes query and matches any word against wisdom titles/content.
+    Much faster than semantic_recall since it skips model loading.
+    """
+    conn = get_db_connection()
+    c = conn.cursor()
+
+    # Tokenize query into meaningful words (skip short ones)
+    words = [w.lower() for w in query.split() if len(w) > 3]
+
+    if not words:
+        # Fallback: get highest confidence wisdom
+        c.execute('''
+            SELECT id, type, title, content, domain, confidence, last_used,
+                   success_count, failure_count
+            FROM wisdom
+            ORDER BY confidence DESC
+            LIMIT ?
+        ''', (limit,))
+    else:
+        # Build OR query for any word match
+        conditions = []
+        params = []
+        for word in words[:5]:  # Limit to first 5 words
+            conditions.append('(LOWER(title) LIKE ? OR LOWER(content) LIKE ?)')
+            params.extend([f'%{word}%', f'%{word}%'])
+
+        if domain:
+            domain_clause = 'AND (domain = ? OR domain IS NULL)'
+            params.append(domain)
+        else:
+            domain_clause = ''
+
+        sql = f'''
+            SELECT id, type, title, content, domain, confidence, last_used,
+                   success_count, failure_count
+            FROM wisdom
+            WHERE ({' OR '.join(conditions)}) {domain_clause}
+        '''
+        c.execute(sql, params)
+
+    results = []
+    for row in c.fetchall():
+        effective_conf = _calculate_decay(row[6], row[5])
+        total = row[7] + row[8]
+
+        # Calculate match score based on word hits
+        title_lower = row[2].lower()
+        content_lower = row[3].lower()
+        hits = sum(1 for w in words if w in title_lower or w in content_lower)
+        match_score = hits / len(words) if words else 0.5
+
+        combined_score = match_score * 0.5 + effective_conf * 0.5
+
+        results.append({
+            'id': row[0],
+            'type': row[1],
+            'title': row[2],
+            'content': row[3],
+            'domain': row[4],
+            'confidence': row[5],
+            'effective_confidence': effective_conf,
+            'success_rate': row[7] / total if total > 0 else None,
+            'combined_score': combined_score,
+        })
+
+    conn.close()
+    results.sort(key=lambda x: x['combined_score'], reverse=True)
+    return results[:limit]
+
+
 def semantic_recall(query: str, limit: int = 5, domain: str = None) -> List[Dict]:
     """
     Semantic search for relevant wisdom using vector similarity.

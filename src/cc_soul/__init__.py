@@ -18,6 +18,7 @@ from .core import (
 from .wisdom import (
     gain_wisdom,
     recall_wisdom,
+    quick_recall,
     semantic_recall,
     apply_wisdom,
     confirm_outcome,
@@ -88,6 +89,7 @@ __all__ = [
     # Wisdom
     "gain_wisdom",
     "recall_wisdom",
+    "quick_recall",
     "semantic_recall",
     "apply_wisdom",
     "confirm_outcome",
