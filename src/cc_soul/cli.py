@@ -12,6 +12,20 @@ from .vocabulary import get_vocabulary
 from .hooks import session_start, session_end, user_prompt
 from .vectors import reindex_all_wisdom
 from .evolve import get_evolution_insights, get_evolution_summary, seed_evolution_insights
+from .introspect import (
+    generate_introspection_report,
+    format_introspection_report,
+    get_pain_points,
+    analyze_pain_points,
+)
+from .improve import (
+    diagnose,
+    suggest_improvements,
+    format_improvement_prompt,
+    get_proposals,
+    get_improvement_stats,
+    ImprovementStatus,
+)
 
 
 def cmd_summary(args):
@@ -99,6 +113,82 @@ def cmd_evolve(args):
             print(f"  {cat}: {count}")
 
 
+def cmd_introspect(args):
+    """Run self-introspection."""
+    init_soul()
+
+    if args.subcommand == 'report':
+        report = generate_introspection_report()
+        if args.json:
+            import json
+            print(json.dumps(report, indent=2, default=str))
+        else:
+            print(format_introspection_report(report))
+
+    elif args.subcommand == 'pain':
+        pain = analyze_pain_points()
+        print(f"Open pain points: {pain['total_open']}")
+        if pain['by_severity']:
+            print(f"By severity: {pain['by_severity']}")
+        if pain['by_category']:
+            print(f"By category: {pain['by_category']}")
+        print("\nRecent:")
+        for p in pain.get('recent', [])[:5]:
+            icon = {'critical': '🔴', 'high': '🟠', 'medium': '🟡', 'low': '🟢'}.get(p['severity'], '⚪')
+            print(f"  {icon} [{p['category']}] {p['description'][:60]}...")
+
+    elif args.subcommand == 'diagnose':
+        diag = diagnose()
+        print(f"Improvement targets: {diag['summary']['total_targets']}")
+        print(f"  Critical: {diag['summary']['critical']}")
+        print(f"  High: {diag['summary']['high']}")
+        print("\nTop targets:")
+        for t in diag['targets'][:5]:
+            print(f"  P{t['priority']}: [{t['type']}] {t['description'][:50]}...")
+
+
+def cmd_improve(args):
+    """Manage improvements."""
+    init_soul()
+
+    if args.subcommand == 'suggest':
+        suggestions = suggest_improvements(limit=args.limit)
+        for i, s in enumerate(suggestions, 1):
+            print(f"\n{'='*60}")
+            print(f"Suggestion {i}: {s['target']['description'][:60]}...")
+            print(f"Type: {s['target']['type']}, Priority: {s['target']['priority']}")
+            print(f"\nPrompt for Claude:")
+            print(s['prompt'])
+
+    elif args.subcommand == 'proposals':
+        proposals = get_proposals(limit=args.limit)
+        if not proposals:
+            print("No proposals yet")
+        else:
+            for p in proposals:
+                status_icon = {
+                    'proposed': '📝',
+                    'validating': '🔄',
+                    'validated': '✓',
+                    'applying': '⚙️',
+                    'applied': '✅',
+                    'failed': '❌',
+                    'rejected': '🚫',
+                }.get(p['status'], '?')
+                print(f"{status_icon} [{p['id'][:15]}...] {p['title']}")
+                print(f"   {p['description'][:60]}...")
+
+    elif args.subcommand == 'stats':
+        stats = get_improvement_stats()
+        print(f"Total improvements: {stats['total']}")
+        print(f"Success rate: {stats['success_rate']:.0%}")
+        print(f"Successes: {stats.get('successes', 0)}, Failures: {stats.get('failures', 0)}")
+        if stats.get('by_category'):
+            print("\nBy category:")
+            for cat, count in stats['by_category'].items():
+                print(f"  {cat}: {count}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='CC-Soul: Persistent Identity for Claude Code',
@@ -136,6 +226,28 @@ def main():
 
     evolve_subs.add_parser('summary', help='Show evolution summary')
 
+    # Introspect
+    intro_parser = subparsers.add_parser('introspect', help='Self-introspection')
+    intro_subs = intro_parser.add_subparsers(dest='subcommand')
+
+    report_parser = intro_subs.add_parser('report', help='Generate introspection report')
+    report_parser.add_argument('--json', action='store_true', help='Output as JSON')
+
+    intro_subs.add_parser('pain', help='Show pain points')
+    intro_subs.add_parser('diagnose', help='Diagnose improvement targets')
+
+    # Improve
+    imp_parser = subparsers.add_parser('improve', help='Self-improvement')
+    imp_subs = imp_parser.add_subparsers(dest='subcommand')
+
+    suggest_parser = imp_subs.add_parser('suggest', help='Suggest improvements')
+    suggest_parser.add_argument('--limit', type=int, default=3)
+
+    proposals_parser = imp_subs.add_parser('proposals', help='List proposals')
+    proposals_parser.add_argument('--limit', type=int, default=20)
+
+    imp_subs.add_parser('stats', help='Show improvement statistics')
+
     args = parser.parse_args()
 
     if args.command is None or args.command == 'summary':
@@ -155,6 +267,16 @@ def main():
             cmd_evolve(args)
         else:
             cmd_evolve(argparse.Namespace(subcommand='summary'))
+    elif args.command == 'introspect':
+        if args.subcommand:
+            cmd_introspect(args)
+        else:
+            cmd_introspect(argparse.Namespace(subcommand='report', json=False))
+    elif args.command == 'improve':
+        if args.subcommand:
+            cmd_improve(args)
+        else:
+            cmd_improve(argparse.Namespace(subcommand='suggest', limit=3))
 
 
 if __name__ == '__main__':

@@ -47,6 +47,37 @@ from .conversations import (
     end_conversation,
 )
 
+from .introspect import (
+    generate_introspection_report,
+    format_introspection_report,
+    record_pain_point,
+    record_metric,
+    get_pain_points,
+    analyze_wisdom_applications,
+)
+
+from .improve import (
+    diagnose,
+    create_proposal,
+    validate_proposal,
+    apply_proposal,
+    commit_improvement,
+    record_outcome,
+    suggest_improvements,
+    format_improvement_prompt,
+    get_proposals,
+    get_improvement_stats,
+    ImprovementStatus,
+    ImprovementCategory,
+)
+
+from .evolve import (
+    record_insight,
+    get_evolution_insights,
+    mark_implemented,
+    get_evolution_summary,
+)
+
 __all__ = [
     # Core
     "init_soul",
@@ -76,4 +107,29 @@ __all__ = [
     # Conversations
     "start_conversation",
     "end_conversation",
+    # Introspection
+    "generate_introspection_report",
+    "format_introspection_report",
+    "record_pain_point",
+    "record_metric",
+    "get_pain_points",
+    "analyze_wisdom_applications",
+    # Improvement
+    "diagnose",
+    "create_proposal",
+    "validate_proposal",
+    "apply_proposal",
+    "commit_improvement",
+    "record_outcome",
+    "suggest_improvements",
+    "format_improvement_prompt",
+    "get_proposals",
+    "get_improvement_stats",
+    "ImprovementStatus",
+    "ImprovementCategory",
+    # Evolution
+    "record_insight",
+    "get_evolution_insights",
+    "mark_implemented",
+    "get_evolution_summary",
 ]
