@@ -57,6 +57,9 @@ from .introspect import (
     record_metric,
     get_pain_points,
     analyze_wisdom_applications,
+    get_wisdom_timeline,
+    get_wisdom_health,
+    format_wisdom_stats,
 )
 
 from .improve import (
@@ -120,6 +123,9 @@ __all__ = [
     "record_metric",
     "get_pain_points",
     "analyze_wisdom_applications",
+    "get_wisdom_timeline",
+    "get_wisdom_health",
+    "format_wisdom_stats",
     # Improvement
     "diagnose",
     "create_proposal",

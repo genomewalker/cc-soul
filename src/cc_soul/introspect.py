@@ -184,6 +184,197 @@ def analyze_wisdom_applications(days: int = 30) -> Dict:
     }
 
 
+def get_wisdom_timeline(days: int = 30, bucket: str = "day") -> List[Dict]:
+    """
+    Get wisdom applications bucketed by time period.
+
+    Args:
+        days: Number of days to look back
+        bucket: "day", "week", or "month"
+
+    Returns:
+        List of {period, applications, successes, failures}
+    """
+    conn = get_db_connection()
+    c = conn.cursor()
+
+    cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+
+    c.execute('''
+        SELECT applied_at, outcome
+        FROM wisdom_applications
+        WHERE applied_at > ?
+        ORDER BY applied_at
+    ''', (cutoff,))
+
+    applications = c.fetchall()
+    conn.close()
+
+    buckets = {}
+    for applied_at, outcome in applications:
+        try:
+            dt = datetime.fromisoformat(applied_at)
+            if bucket == "day":
+                key = dt.strftime("%Y-%m-%d")
+            elif bucket == "week":
+                key = f"{dt.year}-W{dt.isocalendar()[1]:02d}"
+            else:
+                key = dt.strftime("%Y-%m")
+
+            if key not in buckets:
+                buckets[key] = {"period": key, "applications": 0, "successes": 0, "failures": 0}
+
+            buckets[key]["applications"] += 1
+            if outcome == "success":
+                buckets[key]["successes"] += 1
+            elif outcome == "failure":
+                buckets[key]["failures"] += 1
+        except ValueError:
+            continue
+
+    return sorted(buckets.values(), key=lambda x: x["period"])
+
+
+def get_wisdom_health() -> Dict:
+    """
+    Analyze the health of the wisdom collection.
+
+    Returns insights on:
+    - Decay: Wisdom not used recently (losing confidence)
+    - Staleness: Wisdom created long ago, never applied
+    - Success rates: Which wisdom consistently works
+    - Coverage: What types/domains are represented
+    """
+    conn = get_db_connection()
+    c = conn.cursor()
+
+    c.execute('''
+        SELECT id, type, title, content, domain, confidence, timestamp, last_used,
+               success_count, failure_count
+        FROM wisdom
+    ''')
+
+    wisdom_list = []
+    now = datetime.now()
+
+    for row in c.fetchall():
+        wid, wtype, title, content, domain, confidence, timestamp, last_used, successes, failures = row
+
+        created = datetime.fromisoformat(timestamp) if timestamp else now
+        age_days = (now - created).days
+
+        if last_used:
+            last = datetime.fromisoformat(last_used)
+            inactive_days = (now - last).days
+        else:
+            inactive_days = age_days
+
+        # Calculate effective confidence with decay
+        months_inactive = inactive_days / 30.0
+        decay_factor = 0.95 ** months_inactive
+        effective_conf = confidence * decay_factor
+
+        total_apps = successes + failures
+        success_rate = successes / total_apps if total_apps > 0 else None
+
+        wisdom_list.append({
+            "id": wid,
+            "type": wtype,
+            "title": title,
+            "domain": domain,
+            "confidence": confidence,
+            "effective_confidence": effective_conf,
+            "decay_factor": decay_factor,
+            "age_days": age_days,
+            "inactive_days": inactive_days,
+            "total_applications": total_apps,
+            "success_rate": success_rate,
+        })
+
+    conn.close()
+
+    # Categorize wisdom
+    decaying = [w for w in wisdom_list if w["decay_factor"] < 0.8]
+    stale = [w for w in wisdom_list if w["total_applications"] == 0 and w["age_days"] > 7]
+    healthy = [w for w in wisdom_list if w["decay_factor"] >= 0.9 and w["total_applications"] > 0]
+    failing = [w for w in wisdom_list if w["success_rate"] is not None and w["success_rate"] < 0.5 and w["total_applications"] >= 2]
+
+    # Coverage by type and domain
+    by_type = Counter(w["type"] for w in wisdom_list)
+    by_domain = Counter(w["domain"] or "general" for w in wisdom_list)
+
+    return {
+        "total_wisdom": len(wisdom_list),
+        "healthy_count": len(healthy),
+        "decaying_count": len(decaying),
+        "stale_count": len(stale),
+        "failing_count": len(failing),
+        "by_type": dict(by_type),
+        "by_domain": dict(by_domain),
+        "decaying": sorted(decaying, key=lambda x: x["decay_factor"])[:10],
+        "stale": sorted(stale, key=lambda x: -x["age_days"])[:10],
+        "failing": sorted(failing, key=lambda x: x["success_rate"])[:5],
+        "top_performers": sorted(
+            [w for w in wisdom_list if w["success_rate"] is not None and w["total_applications"] >= 2],
+            key=lambda x: (-x["success_rate"], -x["total_applications"])
+        )[:5],
+    }
+
+
+def format_wisdom_stats(health: Dict, timeline: List[Dict] = None) -> str:
+    """Format wisdom statistics for CLI display."""
+    lines = []
+    lines.append("=" * 60)
+    lines.append("WISDOM ANALYTICS")
+    lines.append("=" * 60)
+
+    # Overview
+    lines.append(f"\n## Overview")
+    lines.append(f"  Total wisdom: {health['total_wisdom']}")
+    lines.append(f"  Healthy: {health['healthy_count']} (active, not decaying)")
+    lines.append(f"  Decaying: {health['decaying_count']} (>20% confidence loss)")
+    lines.append(f"  Stale: {health['stale_count']} (never applied, >7 days old)")
+    lines.append(f"  Failing: {health['failing_count']} (>50% failure rate)")
+
+    # Coverage
+    lines.append(f"\n## Coverage")
+    lines.append(f"  By type: {health['by_type']}")
+    lines.append(f"  By domain: {health['by_domain']}")
+
+    # Timeline
+    if timeline:
+        lines.append(f"\n## Application Timeline")
+        for bucket in timeline[-7:]:
+            success_rate = bucket["successes"] / bucket["applications"] * 100 if bucket["applications"] else 0
+            bar = "█" * min(20, bucket["applications"])
+            lines.append(f"  {bucket['period']}: {bar} {bucket['applications']} ({success_rate:.0f}% success)")
+
+    # Top performers
+    if health.get("top_performers"):
+        lines.append(f"\n## Top Performers")
+        for w in health["top_performers"]:
+            lines.append(f"  ✓ {w['title'][:40]} ({w['success_rate']:.0%}, {w['total_applications']} uses)")
+
+    # Issues
+    if health.get("decaying"):
+        lines.append(f"\n## Decaying (needs reinforcement)")
+        for w in health["decaying"][:3]:
+            lines.append(f"  ↓ {w['title'][:40]} (conf: {w['effective_confidence']:.0%}, inactive {w['inactive_days']}d)")
+
+    if health.get("failing"):
+        lines.append(f"\n## Failing (reconsider)")
+        for w in health["failing"]:
+            lines.append(f"  ✗ {w['title'][:40]} ({w['success_rate']:.0%} success rate)")
+
+    if health.get("stale"):
+        lines.append(f"\n## Stale (never applied)")
+        for w in health["stale"][:3]:
+            lines.append(f"  ? {w['title'][:40]} ({w['age_days']}d old)")
+
+    lines.append("\n" + "=" * 60)
+    return "\n".join(lines)
+
+
 def analyze_conversation_patterns(days: int = 30) -> Dict:
     """Analyze conversation patterns."""
     conn = get_db_connection()

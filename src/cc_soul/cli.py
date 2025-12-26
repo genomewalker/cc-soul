@@ -18,6 +18,9 @@ from .introspect import (
     format_introspection_report,
     get_pain_points,
     analyze_pain_points,
+    get_wisdom_timeline,
+    get_wisdom_health,
+    format_wisdom_stats,
 )
 from .improve import (
     diagnose,
@@ -130,6 +133,70 @@ def cmd_grow(args):
     else:
         print("Usage: soul grow <type> 'title' 'content'")
         print("Types: wisdom, insight, fail, belief, identity, vocab")
+
+
+def cmd_stats(args):
+    """Show wisdom analytics and usage patterns."""
+    init_soul()
+
+    if args.subcommand == 'health':
+        health = get_wisdom_health()
+        timeline = get_wisdom_timeline(days=args.days)
+        print(format_wisdom_stats(health, timeline))
+
+    elif args.subcommand == 'timeline':
+        timeline = get_wisdom_timeline(days=args.days, bucket=args.bucket)
+        if not timeline:
+            print("No wisdom applications in this period")
+        else:
+            print(f"Wisdom applications (last {args.days} days, by {args.bucket}):\n")
+            for bucket in timeline:
+                apps = bucket["applications"]
+                success_rate = bucket["successes"] / apps * 100 if apps else 0
+                bar = "█" * min(30, apps)
+                print(f"  {bucket['period']}: {bar} {apps} ({success_rate:.0f}%)")
+
+    elif args.subcommand == 'top':
+        health = get_wisdom_health()
+        if health.get("top_performers"):
+            print("Top performing wisdom:\n")
+            for w in health["top_performers"]:
+                print(f"  ✓ {w['title']}")
+                print(f"    Success rate: {w['success_rate']:.0%}, Applications: {w['total_applications']}")
+                print()
+        else:
+            print("No wisdom with enough applications to rank")
+
+    elif args.subcommand == 'issues':
+        health = get_wisdom_health()
+        has_issues = False
+
+        if health.get("decaying"):
+            has_issues = True
+            print("Decaying wisdom (confidence dropping):\n")
+            for w in health["decaying"][:5]:
+                print(f"  ↓ {w['title']}")
+                print(f"    Effective confidence: {w['effective_confidence']:.0%}, Inactive: {w['inactive_days']}d")
+            print()
+
+        if health.get("failing"):
+            has_issues = True
+            print("Failing wisdom (>50% failure rate):\n")
+            for w in health["failing"]:
+                print(f"  ✗ {w['title']}")
+                print(f"    Success rate: {w['success_rate']:.0%}, Applications: {w['total_applications']}")
+            print()
+
+        if health.get("stale"):
+            has_issues = True
+            print("Stale wisdom (never applied):\n")
+            for w in health["stale"][:5]:
+                print(f"  ? {w['title']}")
+                print(f"    Age: {w['age_days']}d, Type: {w['type']}")
+            print()
+
+        if not has_issues:
+            print("No issues found - all wisdom is healthy!")
 
 
 def cmd_reindex(args):
@@ -325,6 +392,20 @@ def main():
 
     imp_subs.add_parser('stats', help='Show improvement statistics')
 
+    # Stats (wisdom analytics)
+    stats_parser = subparsers.add_parser('stats', help='Wisdom analytics and usage patterns')
+    stats_subs = stats_parser.add_subparsers(dest='subcommand')
+
+    health_parser = stats_subs.add_parser('health', help='Overall wisdom health report')
+    health_parser.add_argument('--days', type=int, default=30, help='Days to analyze')
+
+    timeline_parser = stats_subs.add_parser('timeline', help='Application timeline')
+    timeline_parser.add_argument('--days', type=int, default=30, help='Days to analyze')
+    timeline_parser.add_argument('--bucket', choices=['day', 'week', 'month'], default='day')
+
+    stats_subs.add_parser('top', help='Top performing wisdom')
+    stats_subs.add_parser('issues', help='Wisdom issues (decaying, failing, stale)')
+
     args = parser.parse_args()
 
     if args.command is None or args.command == 'summary':
@@ -358,6 +439,11 @@ def main():
             cmd_improve(args)
         else:
             cmd_improve(argparse.Namespace(subcommand='suggest', limit=3))
+    elif args.command == 'stats':
+        if args.subcommand:
+            cmd_stats(args)
+        else:
+            cmd_stats(argparse.Namespace(subcommand='health', days=30))
 
 
 if __name__ == '__main__':
