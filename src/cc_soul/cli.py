@@ -3,7 +3,10 @@ Command-line interface for cc-soul.
 """
 
 import sys
+import os
+import shutil
 import argparse
+from pathlib import Path
 
 from .core import init_soul, summarize_soul, get_soul_context
 from .wisdom import recall_wisdom, get_pending_applications, get_session_wisdom, gain_wisdom, WisdomType
@@ -278,6 +281,52 @@ def cmd_reindex(args):
     reindex_all_wisdom()
 
 
+def cmd_install_skills(args):
+    """Install bundled skills to ~/.claude/skills."""
+    import importlib.resources as pkg_resources
+
+    skills_dest = Path.home() / ".claude" / "skills"
+    skills_dest.mkdir(parents=True, exist_ok=True)
+
+    try:
+        skills_src = Path(pkg_resources.files("cc_soul") / "skills")
+    except (TypeError, AttributeError):
+        import pkg_resources as old_pkg
+        skills_src = Path(old_pkg.resource_filename("cc_soul", "skills"))
+
+    if not skills_src.exists():
+        print(f"Error: Skills directory not found in package at {skills_src}")
+        return 1
+
+    installed = []
+    skipped = []
+
+    for skill_dir in skills_src.iterdir():
+        if not skill_dir.is_dir():
+            continue
+
+        dest_dir = skills_dest / skill_dir.name
+
+        if dest_dir.exists() and not args.force:
+            skipped.append(skill_dir.name)
+            continue
+
+        if dest_dir.exists():
+            shutil.rmtree(dest_dir)
+
+        shutil.copytree(skill_dir, dest_dir)
+        installed.append(skill_dir.name)
+
+    if installed:
+        print(f"Installed skills: {', '.join(installed)}")
+    if skipped:
+        print(f"Skipped (already exist, use --force to overwrite): {', '.join(skipped)}")
+    if not installed and not skipped:
+        print("No skills found in package")
+
+    return 0
+
+
 def cmd_hook(args):
     """Run a hook."""
     init_soul()
@@ -428,6 +477,10 @@ def main():
     # Reindex
     subparsers.add_parser('reindex', help='Reindex wisdom vectors')
 
+    # Install skills
+    install_parser = subparsers.add_parser('install-skills', help='Install bundled skills to ~/.claude/skills')
+    install_parser.add_argument('--force', action='store_true', help='Overwrite existing skills')
+
     # Hook
     hook_parser = subparsers.add_parser('hook', help='Run a Claude Code hook')
     hook_parser.add_argument('hook', choices=['start', 'end', 'prompt'])
@@ -511,6 +564,8 @@ def main():
         cmd_grow(args)
     elif args.command == 'reindex':
         cmd_reindex(args)
+    elif args.command == 'install-skills':
+        cmd_install_skills(args)
     elif args.command == 'hook':
         cmd_hook(args)
     elif args.command == 'evolve':
