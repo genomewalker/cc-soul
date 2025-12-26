@@ -6,7 +6,7 @@ import sys
 import argparse
 
 from .core import init_soul, summarize_soul, get_soul_context
-from .wisdom import recall_wisdom, get_pending_applications, WisdomType
+from .wisdom import recall_wisdom, get_pending_applications, get_session_wisdom, WisdomType
 from .beliefs import get_beliefs
 from .vocabulary import get_vocabulary
 from .hooks import session_start, session_end, user_prompt
@@ -63,6 +63,21 @@ def cmd_pending(args):
             print(f"  Applied: {p['applied_at']}")
             if p['context']:
                 print(f"  Context: {p['context'][:60]}...")
+
+
+def cmd_session(args):
+    """Show wisdom applied in current session."""
+    init_soul()
+    session = get_session_wisdom()
+    if not session:
+        print("No wisdom applied this session")
+    else:
+        print(f"Wisdom applied this session: {len(session)}")
+        for w in session:
+            print(f"  - {w['title']}")
+            if w.get('context'):
+                print(f"    Context: {w['context'][:50]}...")
+            print(f"    Applied: {w['applied_at']}")
 
 
 def cmd_reindex(args):
@@ -208,6 +223,9 @@ def main():
     # Pending
     subparsers.add_parser('pending', help='Show pending wisdom applications')
 
+    # Session
+    subparsers.add_parser('session', help='Show wisdom applied this session')
+
     # Reindex
     subparsers.add_parser('reindex', help='Reindex wisdom vectors')
 
@@ -258,6 +276,8 @@ def main():
         cmd_wisdom(args)
     elif args.command == 'pending':
         cmd_pending(args)
+    elif args.command == 'session':
+        cmd_session(args)
     elif args.command == 'reindex':
         cmd_reindex(args)
     elif args.command == 'hook':

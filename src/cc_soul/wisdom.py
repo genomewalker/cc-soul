@@ -2,11 +2,16 @@
 Wisdom operations: gain, recall, apply, and track outcomes.
 """
 
+import json
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
 from typing import List, Dict, Optional
 
-from .core import get_db_connection, SOUL_DB
+from .core import get_db_connection, SOUL_DB, SOUL_DIR
+
+# Session-scoped log for tracking what wisdom was applied
+SESSION_WISDOM_LOG = SOUL_DIR / ".session_wisdom.json"
 
 
 class WisdomType(Enum):
@@ -74,6 +79,47 @@ def gain_wisdom(
     return wisdom_id
 
 
+def _log_session_wisdom(wisdom_id: str, title: str, context: str):
+    """Log wisdom application to session-scoped file."""
+    try:
+        if SESSION_WISDOM_LOG.exists():
+            data = json.loads(SESSION_WISDOM_LOG.read_text())
+        else:
+            data = {"applied": [], "session_start": datetime.now().isoformat()}
+
+        data["applied"].append({
+            "wisdom_id": wisdom_id,
+            "title": title,
+            "context": context,
+            "applied_at": datetime.now().isoformat()
+        })
+
+        SESSION_WISDOM_LOG.write_text(json.dumps(data, indent=2))
+    except Exception:
+        pass  # Don't fail wisdom application if logging fails
+
+
+def clear_session_wisdom():
+    """Clear session wisdom log. Called at session start."""
+    try:
+        if SESSION_WISDOM_LOG.exists():
+            SESSION_WISDOM_LOG.unlink()
+    except Exception:
+        pass
+
+
+def get_session_wisdom() -> List[Dict]:
+    """Get wisdom applied in current session."""
+    if not SESSION_WISDOM_LOG.exists():
+        return []
+
+    try:
+        data = json.loads(SESSION_WISDOM_LOG.read_text())
+        return data.get("applied", [])
+    except Exception:
+        return []
+
+
 def apply_wisdom(wisdom_id: str, context: str = "") -> int:
     """
     Record that wisdom is being applied. Returns application ID.
@@ -94,8 +140,17 @@ def apply_wisdom(wisdom_id: str, context: str = "") -> int:
 
     c.execute('UPDATE wisdom SET last_used = ? WHERE id = ?', (now, wisdom_id))
 
+    # Get title for session log
+    c.execute('SELECT title FROM wisdom WHERE id = ?', (wisdom_id,))
+    row = c.fetchone()
+    title = row[0] if row else wisdom_id
+
     conn.commit()
     conn.close()
+
+    # Log to session-scoped file
+    _log_session_wisdom(wisdom_id, title, context)
+
     return app_id
 
 

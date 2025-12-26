@@ -23,6 +23,8 @@ from .wisdom import (
     apply_wisdom,
     confirm_outcome,
     get_pending_applications,
+    get_session_wisdom,
+    clear_session_wisdom,
     WisdomType,
 )
 
@@ -94,6 +96,8 @@ __all__ = [
     "apply_wisdom",
     "confirm_outcome",
     "get_pending_applications",
+    "get_session_wisdom",
+    "clear_session_wisdom",
     "WisdomType",
     # Identity
     "observe_identity",

@@ -12,7 +12,7 @@ from pathlib import Path
 
 from .core import init_soul, get_soul_context, SOUL_DIR
 from .conversations import start_conversation, end_conversation
-from .wisdom import quick_recall
+from .wisdom import quick_recall, clear_session_wisdom, get_session_wisdom
 
 
 def get_project_name() -> str:
@@ -39,6 +39,9 @@ def session_start() -> str:
     Returns formatted context for injection.
     """
     init_soul()
+
+    # Clear session wisdom log for new session
+    clear_session_wisdom()
 
     project = get_project_name()
     conv_id = start_conversation(project)
@@ -93,6 +96,8 @@ def session_start() -> str:
 def session_end() -> str:
     """
     Session end hook - Close the conversation record.
+
+    Shows wisdom that was applied during the session.
     """
     conv_file = SOUL_DIR / ".current_conversation"
 
@@ -104,7 +109,19 @@ def session_end() -> str:
         except (ValueError, FileNotFoundError):
             pass
 
-    return "\n# 🌙 Session Complete\n"
+    # Show session wisdom summary
+    output = ["\n# 🌙 Session Complete\n"]
+
+    session_wisdom = get_session_wisdom()
+    if session_wisdom:
+        output.append(f"## Wisdom Applied This Session ({len(session_wisdom)})")
+        for w in session_wisdom:
+            output.append(f"- **{w['title']}**")
+            if w.get('context'):
+                output.append(f"  Context: {w['context'][:60]}...")
+        output.append("")
+
+    return "\n".join(output)
 
 
 def user_prompt(user_input: str) -> str:
