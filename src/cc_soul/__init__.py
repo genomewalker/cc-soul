@@ -84,6 +84,19 @@ from .evolve import (
     get_evolution_summary,
 )
 
+from .ultrathink import (
+    enter_ultrathink,
+    exit_ultrathink,
+    format_ultrathink_context,
+    check_against_beliefs,
+    check_against_failures,
+    record_wisdom_applied,
+    record_discovery,
+    commit_session_learnings,
+    UltrathinkContext,
+    ReasoningPhase,
+)
+
 __all__ = [
     # Core
     "init_soul",
@@ -144,4 +157,15 @@ __all__ = [
     "get_evolution_insights",
     "mark_implemented",
     "get_evolution_summary",
+    # Ultrathink
+    "enter_ultrathink",
+    "exit_ultrathink",
+    "format_ultrathink_context",
+    "check_against_beliefs",
+    "check_against_failures",
+    "record_wisdom_applied",
+    "record_discovery",
+    "commit_session_learnings",
+    "UltrathinkContext",
+    "ReasoningPhase",
 ]
