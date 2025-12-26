@@ -30,6 +30,13 @@ from .improve import (
     get_improvement_stats,
     ImprovementStatus,
 )
+from .ultrathink import (
+    enter_ultrathink,
+    exit_ultrathink,
+    format_ultrathink_context,
+    record_discovery,
+    commit_session_learnings,
+)
 
 
 def cmd_summary(args):
@@ -197,6 +204,72 @@ def cmd_stats(args):
 
         if not has_issues:
             print("No issues found - all wisdom is healthy!")
+
+
+# Global ultrathink context (persists during session)
+_ultrathink_ctx = None
+
+
+def cmd_ultrathink(args):
+    """Soul-integrated ultrathink mode."""
+    global _ultrathink_ctx
+    init_soul()
+
+    if args.subcommand == 'enter':
+        problem = args.problem or ""
+        if not problem:
+            print("Usage: soul ultrathink enter 'Problem statement'")
+            return
+
+        _ultrathink_ctx = enter_ultrathink(problem, domain=args.domain)
+        print(format_ultrathink_context(_ultrathink_ctx))
+
+    elif args.subcommand == 'context':
+        if _ultrathink_ctx:
+            print(format_ultrathink_context(_ultrathink_ctx))
+        else:
+            print("No active ultrathink session. Use 'soul ultrathink enter' first.")
+
+    elif args.subcommand == 'discover':
+        if not _ultrathink_ctx:
+            print("No active ultrathink session. Use 'soul ultrathink enter' first.")
+            return
+
+        discovery = args.discovery or ""
+        if not discovery:
+            print("Usage: soul ultrathink discover 'Key insight discovered'")
+            return
+
+        record_discovery(_ultrathink_ctx, discovery)
+        print(f"Recorded discovery: {discovery[:60]}...")
+
+    elif args.subcommand == 'exit':
+        if not _ultrathink_ctx:
+            print("No active ultrathink session.")
+            return
+
+        summary = args.summary or "Session completed"
+        reflection = exit_ultrathink(_ultrathink_ctx, summary)
+
+        print("\n" + "=" * 60)
+        print("ULTRATHINK SESSION REFLECTION")
+        print("=" * 60)
+        print(f"\nDuration: {reflection.duration_minutes:.1f} minutes")
+        print(f"Wisdom applied: {reflection.wisdom_applied_count}")
+        print(f"Discoveries: {len(reflection.discoveries)}")
+        print(f"\nGrowth: {reflection.growth_summary}")
+
+        if reflection.discoveries:
+            print("\nDiscoveries made:")
+            for d in reflection.discoveries:
+                print(f"  - {d['discovery'][:60]}...")
+
+            commit = input("\nCommit discoveries as wisdom? [y/N] ").strip().lower()
+            if commit == 'y':
+                ids = commit_session_learnings(reflection)
+                print(f"Committed {len(ids)} wisdom items")
+
+        _ultrathink_ctx = None
 
 
 def cmd_reindex(args):
@@ -406,6 +479,22 @@ def main():
     stats_subs.add_parser('top', help='Top performing wisdom')
     stats_subs.add_parser('issues', help='Wisdom issues (decaying, failing, stale)')
 
+    # Ultrathink (soul-integrated deep reasoning)
+    ultra_parser = subparsers.add_parser('ultrathink', help='Soul-integrated deep reasoning mode')
+    ultra_subs = ultra_parser.add_subparsers(dest='subcommand')
+
+    enter_parser = ultra_subs.add_parser('enter', help='Enter ultrathink mode with problem statement')
+    enter_parser.add_argument('problem', nargs='?', help='Problem statement')
+    enter_parser.add_argument('--domain', help='Domain hint (bioinformatics, web, cli, etc)')
+
+    ultra_subs.add_parser('context', help='Show current ultrathink context')
+
+    discover_parser = ultra_subs.add_parser('discover', help='Record a discovery during reasoning')
+    discover_parser.add_argument('discovery', nargs='?', help='The discovery/insight')
+
+    exit_parser = ultra_subs.add_parser('exit', help='Exit ultrathink and reflect')
+    exit_parser.add_argument('summary', nargs='?', help='Session summary')
+
     args = parser.parse_args()
 
     if args.command is None or args.command == 'summary':
@@ -444,6 +533,11 @@ def main():
             cmd_stats(args)
         else:
             cmd_stats(argparse.Namespace(subcommand='health', days=30))
+    elif args.command == 'ultrathink':
+        if args.subcommand:
+            cmd_ultrathink(args)
+        else:
+            print("Usage: soul ultrathink <enter|context|discover|exit>")
 
 
 if __name__ == '__main__':
