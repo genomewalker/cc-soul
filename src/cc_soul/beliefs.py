@@ -1,73 +1,63 @@
 """
-Belief operations (deprecated - use wisdom with type='principle').
+Belief operations - now a thin wrapper over wisdom with type='principle'.
+
+Beliefs are guiding principles that shape reasoning. They are stored as
+wisdom entries with type='principle', allowing unified storage and recall.
+
+This module maintains backwards compatibility while using wisdom internally.
 """
 
-from datetime import datetime
 from typing import List, Dict
 
-from .core import get_db_connection
+from .wisdom import gain_wisdom, recall_wisdom, apply_wisdom, confirm_outcome, WisdomType
 
 
 def hold_belief(belief: str, rationale: str = "", strength: float = 0.8) -> str:
-    """Record a guiding principle or belief."""
-    conn = get_db_connection()
-    c = conn.cursor()
+    """
+    Record a guiding principle or belief.
 
-    belief_id = f"belief_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
-    now = datetime.now().isoformat()
-
-    c.execute('''
-        INSERT INTO beliefs (id, belief, rationale, strength, timestamp)
-        VALUES (?, ?, ?, ?, ?)
-    ''', (belief_id, belief, rationale, strength, now))
-
-    conn.commit()
-    conn.close()
-    return belief_id
+    Internally stores as wisdom with type='principle'.
+    """
+    content = rationale if rationale else belief
+    return gain_wisdom(
+        type=WisdomType.PRINCIPLE,
+        title=belief,
+        content=content,
+        confidence=strength
+    )
 
 
 def challenge_belief(belief_id: str, confirmed: bool, context: str = ""):
-    """Record when a belief is tested."""
-    conn = get_db_connection()
-    c = conn.cursor()
+    """
+    Record when a belief is tested.
 
-    if confirmed:
-        c.execute('''
-            UPDATE beliefs
-            SET confirmed_count = confirmed_count + 1,
-                strength = MIN(1.0, strength + 0.05)
-            WHERE id = ?
-        ''', (belief_id,))
-    else:
-        c.execute('''
-            UPDATE beliefs
-            SET challenged_count = challenged_count + 1,
-                strength = MAX(0.1, strength - 0.1)
-            WHERE id = ?
-        ''', (belief_id,))
-
-    conn.commit()
-    conn.close()
+    Uses the wisdom feedback loop internally.
+    """
+    # Apply the wisdom (belief) first
+    app_id = apply_wisdom(belief_id, context=context or "Belief challenged")
+    # Then confirm outcome
+    confirm_outcome(app_id, success=confirmed)
 
 
 def get_beliefs(min_strength: float = 0.5) -> List[Dict]:
-    """Get current beliefs above a strength threshold."""
-    conn = get_db_connection()
-    c = conn.cursor()
+    """
+    Get current beliefs above a strength threshold.
 
-    c.execute('''
-        SELECT id, belief, rationale, strength, confirmed_count, challenged_count
-        FROM beliefs
-        WHERE strength >= ?
-        ORDER BY strength DESC
-    ''', (min_strength,))
+    Returns principles from wisdom table, formatted for backwards compatibility.
+    """
+    results = recall_wisdom(type=WisdomType.PRINCIPLE, limit=50)
 
-    results = []
-    for row in c.fetchall():
-        results.append({
-            'id': row[0], 'belief': row[1], 'rationale': row[2],
-            'strength': row[3], 'confirmed': row[4], 'challenged': row[5]
-        })
+    # Filter by strength and format for backwards compatibility
+    beliefs = []
+    for w in results:
+        if w['effective_confidence'] >= min_strength:
+            beliefs.append({
+                'id': w['id'],
+                'belief': w['title'],
+                'rationale': w['content'],
+                'strength': w['effective_confidence'],
+                'confirmed': 0,  # Not tracked separately anymore
+                'challenged': 0,
+            })
 
-    conn.close()
-    return results
+    return beliefs
