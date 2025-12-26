@@ -6,9 +6,10 @@ import sys
 import argparse
 
 from .core import init_soul, summarize_soul, get_soul_context
-from .wisdom import recall_wisdom, get_pending_applications, get_session_wisdom, WisdomType
-from .beliefs import get_beliefs
-from .vocabulary import get_vocabulary
+from .wisdom import recall_wisdom, get_pending_applications, get_session_wisdom, gain_wisdom, WisdomType
+from .beliefs import get_beliefs, hold_belief
+from .vocabulary import get_vocabulary, learn_term
+from .identity import observe_identity, IdentityAspect
 from .hooks import session_start, session_end, user_prompt
 from .vectors import reindex_all_wisdom
 from .evolve import get_evolution_insights, get_evolution_summary, seed_evolution_insights
@@ -78,6 +79,57 @@ def cmd_session(args):
             if w.get('context'):
                 print(f"    Context: {w['context'][:50]}...")
             print(f"    Applied: {w['applied_at']}")
+
+
+def cmd_grow(args):
+    """Grow the soul - add wisdom, beliefs, identity, vocabulary."""
+    init_soul()
+
+    if args.type == 'wisdom':
+        if not args.title or not args.content:
+            print("Usage: soul grow wisdom 'Title' 'Content'")
+            return
+        gain_wisdom(WisdomType.PATTERN, args.title, args.content)
+        print(f"✓ Wisdom: {args.title}")
+
+    elif args.type == 'insight':
+        if not args.title or not args.content:
+            print("Usage: soul grow insight 'Title' 'Content'")
+            return
+        gain_wisdom(WisdomType.INSIGHT, args.title, args.content)
+        print(f"✓ Insight: {args.title}")
+
+    elif args.type == 'fail':
+        if not args.title or not args.content:
+            print("Usage: soul grow fail 'What failed' 'Why and what was learned'")
+            return
+        gain_wisdom(WisdomType.FAILURE, args.title, args.content)
+        print(f"✓ Failure recorded: {args.title}")
+
+    elif args.type == 'belief':
+        if not args.title:
+            print("Usage: soul grow belief 'Belief statement'")
+            return
+        hold_belief(args.title, args.content or "")
+        print(f"✓ Belief: {args.title}")
+
+    elif args.type == 'identity':
+        if not args.title or not args.content:
+            print("Usage: soul grow identity 'key' 'value'")
+            return
+        observe_identity(IdentityAspect.WORKFLOW, args.title, args.content)
+        print(f"✓ Identity: {args.title}")
+
+    elif args.type == 'vocab':
+        if not args.title or not args.content:
+            print("Usage: soul grow vocab 'term' 'meaning'")
+            return
+        learn_term(args.title, args.content)
+        print(f"✓ Vocabulary: {args.title}")
+
+    else:
+        print("Usage: soul grow <type> 'title' 'content'")
+        print("Types: wisdom, insight, fail, belief, identity, vocab")
 
 
 def cmd_reindex(args):
@@ -226,6 +278,13 @@ def main():
     # Session
     subparsers.add_parser('session', help='Show wisdom applied this session')
 
+    # Grow
+    grow_parser = subparsers.add_parser('grow', help='Grow the soul (add wisdom, beliefs, etc)')
+    grow_parser.add_argument('type', choices=['wisdom', 'insight', 'fail', 'belief', 'identity', 'vocab'],
+                            help='Type of entry to add')
+    grow_parser.add_argument('title', nargs='?', help='Title or key')
+    grow_parser.add_argument('content', nargs='?', help='Content or value')
+
     # Reindex
     subparsers.add_parser('reindex', help='Reindex wisdom vectors')
 
@@ -278,6 +337,8 @@ def main():
         cmd_pending(args)
     elif args.command == 'session':
         cmd_session(args)
+    elif args.command == 'grow':
+        cmd_grow(args)
     elif args.command == 'reindex':
         cmd_reindex(args)
     elif args.command == 'hook':
