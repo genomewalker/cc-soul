@@ -46,14 +46,14 @@ soul = "cc_soul.cli:main"
 cc-soul = "cc_soul.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/anthropics/cc-soul"
-Repository = "https://github.com/anthropics/cc-soul"
+Homepage = "https://github.com/genomewalker/cc-soul"
+Repository = "https://github.com/genomewalker/cc-soul"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-cc_soul = ["py.typed"]
+cc_soul = ["py.typed", "skills/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
