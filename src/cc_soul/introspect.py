@@ -568,6 +568,328 @@ def analyze_metrics(hours: int = 24) -> Dict:
 
 
 # =============================================================================
+# CROSS-SESSION TRENDS
+# =============================================================================
+
+def get_session_comparison(session_count: int = 10) -> Dict:
+    """
+    Compare recent sessions to identify trends and changes.
+
+    Returns insights on:
+    - Wisdom growth per session
+    - New domains explored
+    - Belief changes
+    - Problem types tackled
+    """
+    conn = get_db_connection()
+    c = conn.cursor()
+
+    c.execute('''
+        SELECT id, project, started_at, ended_at, summary
+        FROM conversations
+        WHERE ended_at IS NOT NULL
+        ORDER BY started_at DESC
+        LIMIT ?
+    ''', (session_count,))
+
+    sessions = []
+    for row in c.fetchall():
+        sessions.append({
+            'id': row[0],
+            'project': row[1],
+            'started_at': row[2],
+            'ended_at': row[3],
+            'summary': row[4]
+        })
+
+    c.execute('''
+        SELECT COUNT(*) FROM wisdom WHERE timestamp >= ?
+    ''', (sessions[-1]['started_at'] if sessions else '1970-01-01',))
+    wisdom_before = 0
+
+    session_data = []
+    for i, session in enumerate(reversed(sessions)):
+        c.execute('''
+            SELECT COUNT(*) FROM wisdom
+            WHERE timestamp <= ?
+        ''', (session['ended_at'] or session['started_at'],))
+        wisdom_count = c.fetchone()[0]
+
+        c.execute('''
+            SELECT COUNT(*) FROM wisdom_applications
+            WHERE conversation_id = ?
+        ''', (session['id'],))
+        wisdom_applied = c.fetchone()[0]
+
+        c.execute('''
+            SELECT DISTINCT domain FROM wisdom
+            WHERE timestamp BETWEEN ? AND ?
+        ''', (session['started_at'], session['ended_at'] or session['started_at']))
+        new_domains = [r[0] for r in c.fetchall() if r[0]]
+
+        session_data.append({
+            'session_id': session['id'],
+            'project': session['project'],
+            'date': session['started_at'][:10] if session['started_at'] else None,
+            'wisdom_total': wisdom_count,
+            'wisdom_gained': wisdom_count - wisdom_before,
+            'wisdom_applied': wisdom_applied,
+            'new_domains': new_domains,
+            'summary': session['summary'][:100] if session['summary'] else None
+        })
+        wisdom_before = wisdom_count
+
+    conn.close()
+
+    total_gained = sum(s['wisdom_gained'] for s in session_data)
+    avg_per_session = total_gained / len(session_data) if session_data else 0
+
+    return {
+        'sessions_analyzed': len(session_data),
+        'total_wisdom_gained': total_gained,
+        'avg_wisdom_per_session': round(avg_per_session, 1),
+        'sessions': session_data
+    }
+
+
+def get_growth_trajectory(days: int = 90) -> Dict:
+    """
+    Analyze soul growth trajectory over time.
+
+    Returns:
+    - Wisdom accumulation curve
+    - Learning velocity (wisdom per week)
+    - Domain expansion
+    - Belief evolution
+    """
+    conn = get_db_connection()
+    c = conn.cursor()
+
+    cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+
+    c.execute('''
+        SELECT type, domain, timestamp
+        FROM wisdom
+        WHERE timestamp >= ?
+        ORDER BY timestamp
+    ''', (cutoff,))
+
+    wisdom_by_week = {}
+    domain_first_seen = {}
+    type_counts = Counter()
+
+    for wtype, domain, timestamp in c.fetchall():
+        try:
+            dt = datetime.fromisoformat(timestamp)
+            week = f"{dt.year}-W{dt.isocalendar()[1]:02d}"
+
+            if week not in wisdom_by_week:
+                wisdom_by_week[week] = {'count': 0, 'types': Counter(), 'domains': set()}
+
+            wisdom_by_week[week]['count'] += 1
+            wisdom_by_week[week]['types'][wtype] += 1
+            if domain:
+                wisdom_by_week[week]['domains'].add(domain)
+                if domain not in domain_first_seen:
+                    domain_first_seen[domain] = week
+
+            type_counts[wtype] += 1
+        except ValueError:
+            continue
+
+    c.execute('''
+        SELECT COUNT(*), SUM(challenged_count), SUM(confirmed_count)
+        FROM beliefs
+        WHERE timestamp >= ?
+    ''', (cutoff,))
+
+    belief_row = c.fetchone()
+    beliefs_added = belief_row[0] or 0
+    beliefs_challenged = belief_row[1] or 0
+    beliefs_confirmed = belief_row[2] or 0
+
+    c.execute('''
+        SELECT id, belief, strength, challenged_count, confirmed_count
+        FROM beliefs
+        WHERE challenged_count > 0
+        ORDER BY challenged_count DESC
+        LIMIT 5
+    ''')
+    most_challenged = [{'belief': r[1], 'strength': r[2], 'challenges': r[3], 'confirmations': r[4]}
+                       for r in c.fetchall()]
+
+    conn.close()
+
+    weeks = sorted(wisdom_by_week.keys())
+    cumulative = 0
+    trajectory = []
+    for week in weeks:
+        cumulative += wisdom_by_week[week]['count']
+        trajectory.append({
+            'week': week,
+            'gained': wisdom_by_week[week]['count'],
+            'cumulative': cumulative,
+            'types': dict(wisdom_by_week[week]['types']),
+            'new_domains': list(d for d in wisdom_by_week[week]['domains'] if domain_first_seen.get(d) == week)
+        })
+
+    velocities = [t['gained'] for t in trajectory]
+    avg_velocity = sum(velocities) / len(velocities) if velocities else 0
+    recent_velocity = sum(velocities[-4:]) / min(4, len(velocities)) if velocities else 0
+
+    return {
+        'period_days': days,
+        'total_wisdom_gained': cumulative,
+        'total_domains': len(domain_first_seen),
+        'avg_weekly_velocity': round(avg_velocity, 1),
+        'recent_velocity': round(recent_velocity, 1),
+        'velocity_trend': 'accelerating' if recent_velocity > avg_velocity * 1.2 else
+                         'decelerating' if recent_velocity < avg_velocity * 0.8 else 'stable',
+        'type_distribution': dict(type_counts),
+        'domain_timeline': domain_first_seen,
+        'trajectory': trajectory,
+        'beliefs': {
+            'added': beliefs_added,
+            'challenged': beliefs_challenged,
+            'confirmed': beliefs_confirmed,
+            'most_challenged': most_challenged
+        }
+    }
+
+
+def get_learning_patterns() -> Dict:
+    """
+    Identify learning patterns and trends.
+
+    Analyzes:
+    - What types of wisdom are gained most
+    - Which domains are growing
+    - Time patterns (when learning happens)
+    - Correlation between failures and subsequent wisdom
+    """
+    conn = get_db_connection()
+    c = conn.cursor()
+
+    c.execute('''
+        SELECT type, domain, timestamp
+        FROM wisdom
+        ORDER BY timestamp DESC
+        LIMIT 100
+    ''')
+
+    recent = c.fetchall()
+
+    by_type = Counter(r[0] for r in recent)
+    by_domain = Counter(r[1] or 'general' for r in recent)
+
+    hour_counts = Counter()
+    day_counts = Counter()
+    for _, _, ts in recent:
+        try:
+            dt = datetime.fromisoformat(ts)
+            hour_counts[dt.hour] += 1
+            day_counts[dt.strftime('%A')] += 1
+        except ValueError:
+            continue
+
+    c.execute('''
+        SELECT w.type, w.title, w.timestamp, prev.type as prev_type
+        FROM wisdom w
+        LEFT JOIN wisdom prev ON prev.timestamp < w.timestamp
+        WHERE w.type = 'failure'
+        ORDER BY w.timestamp DESC
+        LIMIT 20
+    ''')
+
+    c.execute('''
+        SELECT
+            f.id as failure_id,
+            f.title as failure_title,
+            f.timestamp as failure_time,
+            (SELECT COUNT(*) FROM wisdom w2
+             WHERE w2.timestamp > f.timestamp
+             AND w2.timestamp < datetime(f.timestamp, '+7 days')
+             AND w2.type IN ('pattern', 'insight')) as learnings_after
+        FROM wisdom f
+        WHERE f.type = 'failure'
+        ORDER BY f.timestamp DESC
+        LIMIT 10
+    ''')
+
+    failure_learning = []
+    for row in c.fetchall():
+        failure_learning.append({
+            'failure': row[1],
+            'learnings_within_week': row[3]
+        })
+
+    conn.close()
+
+    peak_hour = max(hour_counts, key=hour_counts.get) if hour_counts else None
+    peak_day = max(day_counts, key=day_counts.get) if day_counts else None
+
+    return {
+        'recent_wisdom_count': len(recent),
+        'type_distribution': dict(by_type),
+        'domain_distribution': dict(by_domain),
+        'temporal_patterns': {
+            'peak_hour': peak_hour,
+            'peak_day': peak_day,
+            'hour_distribution': dict(hour_counts),
+            'day_distribution': dict(day_counts)
+        },
+        'failure_to_learning': failure_learning,
+        'growing_domains': [d for d, c in by_domain.most_common(3)],
+        'dominant_type': by_type.most_common(1)[0][0] if by_type else None
+    }
+
+
+def format_trends_report(comparison: Dict, trajectory: Dict, patterns: Dict) -> str:
+    """Format cross-session trends for CLI display."""
+    lines = []
+    lines.append("=" * 60)
+    lines.append("CROSS-SESSION TRENDS")
+    lines.append("=" * 60)
+
+    lines.append(f"\n## Growth Trajectory ({trajectory['period_days']} days)")
+    lines.append(f"  Total wisdom gained: {trajectory['total_wisdom_gained']}")
+    lines.append(f"  Domains explored: {trajectory['total_domains']}")
+    lines.append(f"  Weekly velocity: {trajectory['avg_weekly_velocity']} wisdom/week")
+    lines.append(f"  Recent velocity: {trajectory['recent_velocity']} ({trajectory['velocity_trend']})")
+
+    if trajectory.get('trajectory'):
+        lines.append(f"\n  Weekly progress:")
+        for t in trajectory['trajectory'][-8:]:
+            bar = "█" * min(20, t['gained'])
+            new_d = f" +{len(t['new_domains'])}d" if t['new_domains'] else ""
+            lines.append(f"    {t['week']}: {bar} {t['gained']}{new_d}")
+
+    lines.append(f"\n## Session Analysis ({comparison['sessions_analyzed']} sessions)")
+    lines.append(f"  Avg wisdom per session: {comparison['avg_wisdom_per_session']}")
+
+    for s in comparison['sessions'][-5:]:
+        gained = f"+{s['wisdom_gained']}" if s['wisdom_gained'] > 0 else "0"
+        project = s['project'] or 'unknown'
+        lines.append(f"    {s['date']}: {project[:20]} ({gained} wisdom, {s['wisdom_applied']} applied)")
+
+    lines.append(f"\n## Learning Patterns")
+    lines.append(f"  Dominant type: {patterns['dominant_type']}")
+    lines.append(f"  Growing domains: {', '.join(patterns['growing_domains'])}")
+    if patterns['temporal_patterns']['peak_hour'] is not None:
+        lines.append(f"  Peak learning: {patterns['temporal_patterns']['peak_day']}s at {patterns['temporal_patterns']['peak_hour']}:00")
+
+    beliefs = trajectory.get('beliefs', {})
+    if beliefs.get('most_challenged'):
+        lines.append(f"\n## Belief Evolution")
+        lines.append(f"  Added: {beliefs['added']}, Challenged: {beliefs['challenged']}, Confirmed: {beliefs['confirmed']}")
+        for b in beliefs['most_challenged'][:3]:
+            lines.append(f"    ⚔ {b['belief'][:40]}... ({b['challenges']} challenges)")
+
+    lines.append("\n" + "=" * 60)
+    return "\n".join(lines)
+
+
+# =============================================================================
 # FULL INTROSPECTION
 # =============================================================================
 

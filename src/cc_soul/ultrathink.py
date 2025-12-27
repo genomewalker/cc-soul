@@ -18,6 +18,7 @@ from enum import Enum
 from .core import get_db_connection, init_soul
 from .wisdom import semantic_recall, recall_wisdom, gain_wisdom, WisdomType
 from .beliefs import get_beliefs
+from .vocabulary import get_vocabulary
 
 
 class ReasoningPhase(Enum):
@@ -84,6 +85,7 @@ class UltrathinkContext:
     guards: List[FailureGuard] = field(default_factory=list)
     patterns: List[PatternMatch] = field(default_factory=list)
     relevant_wisdom: List[Dict] = field(default_factory=list)
+    vocabulary: Dict[str, str] = field(default_factory=dict)  # Shared terminology
 
     # Session tracking
     wisdom_applied: List[str] = field(default_factory=list)
@@ -161,6 +163,10 @@ def enter_ultrathink(problem_statement: str, domain: str = None) -> UltrathinkCo
     # 4. Store all relevant wisdom
     ctx.relevant_wisdom = semantic_recall(problem_statement, limit=15, domain=ctx.detected_domain)
 
+    # 5. Load vocabulary filtered by relevance to problem
+    all_vocab = get_vocabulary()
+    ctx.vocabulary = _filter_vocabulary(all_vocab, problem_statement)
+
     return ctx
 
 
@@ -199,6 +205,12 @@ def format_ultrathink_context(ctx: UltrathinkContext) -> str:
         lines.append("\n## Relevant Wisdom")
         for w in ctx.relevant_wisdom[:5]:
             lines.append(f"  [{w['type']}] {w['title']}")
+
+    # Vocabulary
+    if ctx.vocabulary:
+        lines.append("\n## Shared Vocabulary")
+        for term, meaning in list(ctx.vocabulary.items())[:10]:
+            lines.append(f"  {term}: {meaning[:60]}...")
 
     lines.append("\n" + "=" * 60)
     return "\n".join(lines)
@@ -409,3 +421,41 @@ def _score_relevance(items: List[Dict], query: str) -> List[Dict]:
         item['relevance_score'] = title_overlap * 2 + content_overlap
 
     return sorted(items, key=lambda x: x['relevance_score'], reverse=True)
+
+
+def _filter_vocabulary(vocab: Dict[str, str], query: str) -> Dict[str, str]:
+    """Filter vocabulary terms relevant to the query."""
+    if not vocab:
+        return {}
+
+    query_lower = query.lower()
+    query_words = set(query_lower.split())
+
+    scored = []
+    for term, meaning in vocab.items():
+        term_lower = term.lower()
+        meaning_lower = meaning.lower()
+
+        # Direct term match in query
+        if term_lower in query_lower:
+            scored.append((term, meaning, 10))
+            continue
+
+        # Word overlap scoring
+        term_words = set(term_lower.split())
+        meaning_words = set(meaning_lower.split())
+
+        term_overlap = len(query_words & term_words)
+        meaning_overlap = len(query_words & meaning_words)
+
+        score = term_overlap * 3 + meaning_overlap
+        if score > 0:
+            scored.append((term, meaning, score))
+
+    # Return top relevant terms, or all if vocab is small
+    scored.sort(key=lambda x: x[2], reverse=True)
+
+    if len(vocab) <= 15:
+        return vocab  # Return all if small vocabulary
+
+    return {term: meaning for term, meaning, _ in scored[:15]}

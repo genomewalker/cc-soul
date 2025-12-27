@@ -48,6 +48,13 @@ from .vocabulary import (
 from .conversations import (
     start_conversation,
     end_conversation,
+    get_conversation,
+    get_conversations,
+    get_project_context,
+    get_conversation_wisdom,
+    get_conversation_stats,
+    search_conversations,
+    link_wisdom_application,
 )
 
 from .introspect import (
@@ -60,6 +67,10 @@ from .introspect import (
     get_wisdom_timeline,
     get_wisdom_health,
     format_wisdom_stats,
+    get_session_comparison,
+    get_growth_trajectory,
+    get_learning_patterns,
+    format_trends_report,
 )
 
 from .improve import (
@@ -129,6 +140,13 @@ __all__ = [
     # Conversations
     "start_conversation",
     "end_conversation",
+    "get_conversation",
+    "get_conversations",
+    "get_project_context",
+    "get_conversation_wisdom",
+    "get_conversation_stats",
+    "search_conversations",
+    "link_wisdom_application",
     # Introspection
     "generate_introspection_report",
     "format_introspection_report",
@@ -139,6 +157,10 @@ __all__ = [
     "get_wisdom_timeline",
     "get_wisdom_health",
     "format_wisdom_stats",
+    "get_session_comparison",
+    "get_growth_trajectory",
+    "get_learning_patterns",
+    "format_trends_report",
     # Improvement
     "diagnose",
     "create_proposal",
