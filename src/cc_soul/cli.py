@@ -19,6 +19,15 @@ from .vectors import reindex_all_wisdom
 from .evolve import get_evolution_insights, get_evolution_summary, seed_evolution_insights
 from .seed import seed_soul, is_seeded
 from .mood import compute_mood, format_mood_display, get_mood_reflection
+from .bridge import (
+    is_memory_available,
+    get_project_memory,
+    promote_observation,
+    unified_context,
+    format_unified_context,
+    get_project_signals,
+    detect_wisdom_candidates,
+)
 from .introspect import (
     generate_introspection_report,
     format_introspection_report,
@@ -386,6 +395,91 @@ def cmd_mood(args):
         print(get_mood_reflection(mood))
     else:
         print(format_mood_display(mood))
+
+
+def cmd_bridge(args):
+    """Bridge between soul and project memory."""
+    init_soul()
+
+    if args.subcommand == 'status':
+        print("=" * 55)
+        print("SOUL-MEMORY BRIDGE")
+        print("=" * 55)
+        print()
+
+        if is_memory_available():
+            print("[+] cc-memory: installed")
+            project_mem = get_project_memory()
+            if project_mem and "error" not in project_mem:
+                print(f"[+] Project: {project_mem['project']}")
+                print(f"    Observations: {project_mem['stats'].get('observations', 0)}")
+                print(f"    Sessions: {project_mem['stats'].get('sessions', 0)}")
+            else:
+                print("[-] No project memory in current directory")
+        else:
+            print("[-] cc-memory: not installed")
+            print("    Install with: pip install cc-memory")
+
+    elif args.subcommand == 'context':
+        ctx = unified_context(compact=args.compact)
+        if args.raw:
+            import json
+            print(json.dumps(ctx, indent=2, default=str))
+        else:
+            print(format_unified_context(ctx))
+
+    elif args.subcommand == 'promote':
+        if not args.observation_id:
+            print("Usage: soul bridge promote <observation-id>")
+            return
+
+        result = promote_observation(args.observation_id, as_type=args.type)
+        if result.get("promoted"):
+            print(f"Promoted observation to wisdom!")
+            print(f"  Observation: {result['observation_id']}")
+            print(f"  Wisdom ID: {result['wisdom_id']}")
+            print(f"  Type: {result['wisdom_type']}")
+            print(f"  From project: {result['project']}")
+        else:
+            print(f"Failed: {result.get('error', 'Unknown error')}")
+
+    elif args.subcommand == 'candidates':
+        candidates = detect_wisdom_candidates()
+        if not candidates:
+            print("No wisdom candidates found across projects.")
+            return
+
+        print("=" * 55)
+        print("WISDOM CANDIDATES")
+        print("=" * 55)
+        print("(Observations appearing across multiple projects)")
+        print()
+
+        for c in candidates[:10]:
+            print(f"[{c['occurrences']}x] {c['title']}")
+            print(f"    Category: {c['category']}")
+            print(f"    Projects: {', '.join(c['projects'])}")
+            print()
+
+    elif args.subcommand == 'signals':
+        signals = get_project_signals()
+        if not signals or "error" in signals:
+            print("No project signals available.")
+            return
+
+        print("=" * 55)
+        print(f"PROJECT SIGNALS: {signals['project']}")
+        print("=" * 55)
+        print()
+        print(f"  Total observations: {signals['total_observations']}")
+        print(f"  Recent failures: {signals['recent_failures']}")
+        print(f"  Recent discoveries: {signals['recent_discoveries']}")
+        print(f"  Recent features: {signals['recent_features']}")
+        print(f"  Sessions: {signals['sessions']}")
+        print(f"  Tokens invested: {signals['tokens_invested']:,}")
+
+    else:
+        print("Subcommands: status, context, promote, candidates, signals")
 
 
 def cmd_budget(args):
@@ -1662,6 +1756,23 @@ def main():
     mood_parser = subparsers.add_parser('mood', help='Show current soul mood')
     mood_parser.add_argument('--reflect', action='store_true', help='Show reflective narrative')
 
+    # Bridge (soul <-> memory integration)
+    bridge_parser = subparsers.add_parser('bridge', help='Bridge between soul and project memory')
+    bridge_sub = bridge_parser.add_subparsers(dest='subcommand')
+
+    bridge_sub.add_parser('status', help='Show bridge status')
+
+    ctx_parser = bridge_sub.add_parser('context', help='Show unified context')
+    ctx_parser.add_argument('--compact', action='store_true', help='Compact output')
+    ctx_parser.add_argument('--raw', action='store_true', help='Raw JSON output')
+
+    promote_parser = bridge_sub.add_parser('promote', help='Promote observation to wisdom')
+    promote_parser.add_argument('observation_id', nargs='?', help='Observation ID to promote')
+    promote_parser.add_argument('--type', default='pattern', help='Wisdom type (pattern, insight, principle, failure)')
+
+    bridge_sub.add_parser('candidates', help='Find wisdom candidates across projects')
+    bridge_sub.add_parser('signals', help='Show project signals for mood')
+
     # Budget (context window tracking)
     budget_parser = subparsers.add_parser('budget', help='Check context window budget')
     budget_parser.add_argument('transcript', nargs='?', help='Path to transcript file')
@@ -1986,6 +2097,8 @@ def main():
         cmd_health(args)
     elif args.command == 'mood':
         cmd_mood(args)
+    elif args.command == 'bridge':
+        cmd_bridge(args)
     elif args.command == 'budget':
         cmd_budget(args)
     elif args.command == 'context':

@@ -64,7 +64,7 @@ class Mood:
     connection: Connection
     energy: Energy
 
-    # Raw signals
+    # Raw signals (soul-level)
     context_remaining_pct: float
     wisdom_7d: int
     failures_7d: int
@@ -72,9 +72,15 @@ class Mood:
     partner_observations: int
     sessions_today: int
 
+    # Project signals (from cc-memory if available)
+    project_name: Optional[str] = None
+    project_observations: int = 0
+    project_failures: int = 0
+    project_discoveries: int = 0
+
     # Synthesis
-    summary: str
-    timestamp: str
+    summary: str = ""
+    timestamp: str = ""
 
     def is_optimal(self) -> bool:
         """Check if mood is in optimal state."""
@@ -96,7 +102,7 @@ class Mood:
 
     def to_dict(self) -> Dict:
         """Convert to dictionary for serialization."""
-        return {
+        result = {
             "clarity": self.clarity.value,
             "growth": self.growth.value,
             "engagement": self.engagement.value,
@@ -113,6 +119,17 @@ class Mood:
             "summary": self.summary,
             "timestamp": self.timestamp,
         }
+
+        # Add project signals if available
+        if self.project_name:
+            result["project"] = {
+                "name": self.project_name,
+                "observations": self.project_observations,
+                "failures": self.project_failures,
+                "discoveries": self.project_discoveries,
+            }
+
+        return result
 
 
 def _count_recent_wisdom(days: int = 7) -> int:
@@ -229,7 +246,7 @@ def _synthesize_summary(mood: Dict) -> str:
     return ", ".join(parts)
 
 
-def compute_mood(budget: ContextBudget = None) -> Mood:
+def compute_mood(budget: ContextBudget = None, include_project: bool = True) -> Mood:
     """
     Compute current mood from observable signals.
 
@@ -239,8 +256,9 @@ def compute_mood(budget: ContextBudget = None) -> Mood:
     - Wisdom applications (engagement)
     - Partner observations (connection)
     - Activity patterns (energy)
+    - Project signals (if cc-memory available)
     """
-    # Gather signals
+    # Gather soul-level signals
     if budget is None:
         budget = get_context_budget()
 
@@ -251,6 +269,25 @@ def compute_mood(budget: ContextBudget = None) -> Mood:
     partner_observations = _count_partner_observations()
     sessions_today = _count_sessions_today()
 
+    # Get project signals from bridge if available
+    project_name = None
+    project_observations = 0
+    project_failures = 0
+    project_discoveries = 0
+
+    if include_project:
+        try:
+            from .bridge import get_project_signals, is_memory_available
+            if is_memory_available():
+                signals = get_project_signals()
+                if signals and "error" not in signals:
+                    project_name = signals.get("project")
+                    project_observations = signals.get("total_observations", 0)
+                    project_failures = signals.get("recent_failures", 0)
+                    project_discoveries = signals.get("recent_discoveries", 0)
+        except ImportError:
+            pass
+
     # Compute clarity from context budget
     if context_remaining_pct > 0.6:
         clarity = Clarity.CLEAR
@@ -260,7 +297,8 @@ def compute_mood(budget: ContextBudget = None) -> Mood:
         clarity = Clarity.FOGGY
 
     # Compute growth from learning activity
-    learning_activity = wisdom_7d + failures_7d  # Failures count as learning!
+    # Include project discoveries if available
+    learning_activity = wisdom_7d + failures_7d + project_discoveries
     if learning_activity > 5:
         growth = Growth.GROWING
     elif learning_activity > 0:
@@ -269,9 +307,11 @@ def compute_mood(budget: ContextBudget = None) -> Mood:
         growth = Growth.STAGNANT
 
     # Compute engagement from wisdom applications
-    if applications_7d > 3:
+    # Project observations indicate engagement too
+    engagement_signals = applications_7d + (1 if project_observations > 10 else 0)
+    if engagement_signals > 3:
         engagement = Engagement.ENGAGED
-    elif applications_7d > 0:
+    elif engagement_signals > 0:
         engagement = Engagement.ACTIVE
     else:
         engagement = Engagement.DORMANT
@@ -285,7 +325,11 @@ def compute_mood(budget: ContextBudget = None) -> Mood:
         connection = Connection.ISOLATED
 
     # Compute energy from activity patterns
-    if wisdom_7d > failures_7d and applications_7d == 0:
+    # Project failures might indicate struggle → focused work
+    if project_failures > 3:
+        # Lots of debugging - focused on problem
+        energy = Energy.FOCUSED
+    elif wisdom_7d > failures_7d and applications_7d == 0:
         # Learning but not applying - curious exploration
         energy = Energy.CURIOUS
     elif applications_7d > 3:
@@ -321,6 +365,10 @@ def compute_mood(budget: ContextBudget = None) -> Mood:
         applications_7d=applications_7d,
         partner_observations=partner_observations,
         sessions_today=sessions_today,
+        project_name=project_name,
+        project_observations=project_observations,
+        project_failures=project_failures,
+        project_discoveries=project_discoveries,
         summary=summary,
         timestamp=datetime.now().isoformat(),
     )
@@ -425,6 +473,16 @@ def format_mood_display(mood: Mood) -> str:
     lines.append(f"  Learning: +{mood.wisdom_7d} wisdom, +{mood.failures_7d} failures (7d)")
     lines.append(f"  Applications: {mood.applications_7d} (7d)")
     lines.append(f"  Partner observations: {mood.partner_observations}")
+
+    # Project signals (if cc-memory available)
+    if mood.project_name:
+        lines.append("")
+        lines.append(f"PROJECT: {mood.project_name}")
+        lines.append("-" * 40)
+        lines.append(f"  Observations: {mood.project_observations}")
+        lines.append(f"  Recent failures: {mood.project_failures}")
+        lines.append(f"  Recent discoveries: {mood.project_discoveries}")
+
     lines.append("")
 
     # Status

@@ -42,3 +42,6 @@ htmlcov/
 *.db
 *.jsonl
 vectors/
+
+# Project memory (cc-memory local episodic memory)
+.memory/
