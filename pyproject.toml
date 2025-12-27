@@ -36,9 +36,13 @@ vectors = [
 graph = [
     "kuzu>=0.4.0",
 ]
+mcp = [
+    "mcp>=1.2.0",
+]
 all = [
     "cc-soul[vectors]",
     "cc-soul[graph]",
+    "cc-soul[mcp]",
 ]
 dev = [
     "pytest>=7.0.0",
@@ -48,6 +52,7 @@ dev = [
 [project.scripts]
 soul = "cc_soul.cli:main"
 cc-soul = "cc_soul.cli:main"
+soul-mcp = "cc_soul.mcp_server:main"
 
 [project.urls]
 Homepage = "https://github.com/genomewalker/cc-soul"

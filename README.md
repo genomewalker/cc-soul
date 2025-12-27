@@ -310,6 +310,38 @@ create_resonance(
 )
 ```
 
+## MCP Server (Native Integration)
+
+Instead of bash commands, the soul can run as an MCP server for native Claude Code integration:
+
+```bash
+# Install with MCP support
+pip install "cc-soul[mcp]"
+
+# Register with Claude Code
+claude mcp add soul -- soul-mcp
+```
+
+This exposes soul operations as native tools:
+
+| Tool | Description |
+|------|-------------|
+| `grow_wisdom` | Add universal patterns |
+| `recall_wisdom` | Search wisdom by query |
+| `grow_insight` | Add insights |
+| `grow_failure` | Record failures (gold!) |
+| `hold_belief` | Add core beliefs/axioms |
+| `get_beliefs` | List all beliefs |
+| `observe_identity` | Record how we work |
+| `learn_term` | Add vocabulary |
+| `check_budget` | Context window status |
+| `save_context` | Persist before compaction |
+| `soul_summary` | Quick overview |
+| `soul_health` | System health check |
+| `introspect` | Deep introspection report |
+
+No bash spawning, no process overhead - direct tool integration.
+
 ## License
 
 MIT
