@@ -108,7 +108,9 @@ def format_memory_for_greeting() -> str:
 
     if mem['recent_work']:
         rw = mem['recent_work']
-        parts.append(f"Recent [{rw['type']}]: {rw['content'][:80]}")
+        # Show whichever field has more content (handles old swapped data)
+        content = rw['content'] if len(rw['content']) > len(rw['type']) else rw['type']
+        parts.append(f"Recent: {content[:80]}")
 
     if mem['emotional_thread']:
         et = mem['emotional_thread']
