@@ -29,7 +29,13 @@ from .unified import (
     process_prompt,
     record_moment,
 )
-from .neural import auto_learn_from_output, save_growth_vector, auto_track_emotion
+from .neural import (
+    auto_learn_from_output,
+    save_growth_vector,
+    auto_track_emotion,
+    get_emotional_contexts,
+    create_resonance,
+)
 
 
 def get_project_name() -> str:
@@ -141,9 +147,12 @@ def session_start(use_unified: bool = True) -> str:
 
 def session_end() -> str:
     """
-    Session end hook - Close the conversation record.
+    Session end hook - Synthesize session learnings.
 
-    Shows wisdom that was applied during the session and prompts for reflection.
+    Active synthesis, not passive prompts:
+    1. Analyze emotional arc from the session
+    2. Create growth vectors from unresolved tensions
+    3. Synthesize the session narrative
     """
     conv_file = SOUL_DIR / ".current_conversation"
 
@@ -155,23 +164,41 @@ def session_end() -> str:
         except (ValueError, FileNotFoundError):
             pass
 
-    output = ["\n# Session Complete\n"]
+    output = []
 
-    # Show session wisdom summary
+    # Synthesize emotional arc from session
+    emotions = get_emotional_contexts(limit=10)
+    if len(emotions) >= 2:
+        arc = _synthesize_emotional_arc(emotions)
+        if arc:
+            output.append(f"Session arc: {arc}")
+
+    # Show wisdom that was applied
     session_wisdom = get_session_wisdom()
     if session_wisdom:
-        output.append(f"## Wisdom Applied ({len(session_wisdom)})")
-        for w in session_wisdom:
-            output.append(f"- **{w['title']}**")
-        output.append("")
+        output.append(f"Applied {len(session_wisdom)} wisdom entries")
 
-    # Reflection prompt - nudge for organic learning
-    output.append("## Reflection")
-    output.append("Before ending, consider: What did you learn? What patterns emerged?")
-    output.append("Use `soul grow wisdom` or `soul neural learn` to crystallize insights.")
-    output.append("")
+    # Silent learning - the synthesis happens in the hooks, not as output
+    return " | ".join(output) if output else ""
 
-    return "\n".join(output)
+
+def _synthesize_emotional_arc(emotions: list) -> str:
+    """
+    Synthesize an emotional arc from a sequence of emotional contexts.
+
+    Returns narrative like: "struggled with X → curiosity about Y → satisfaction from Z"
+    """
+    if len(emotions) < 2:
+        return ""
+
+    # Map emotions to arc points
+    arc_points = []
+    for e in emotions[-5:]:  # Last 5 emotions
+        response = e.response
+        trigger = e.trigger[:40] if e.trigger else ""
+        arc_points.append(f"{response} ({trigger})")
+
+    return " → ".join(arc_points)
 
 
 def assistant_stop(assistant_output: str) -> str:
