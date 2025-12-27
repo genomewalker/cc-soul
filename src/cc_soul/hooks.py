@@ -2,9 +2,13 @@
 Claude Code hooks for soul integration.
 
 These hooks integrate with Claude Code to automatically:
-1. Load soul context at session start
-2. Inject relevant wisdom during work
-3. Track conversations at session end
+1. Load soul context at session start (unified forward pass)
+2. Inject relevant wisdom during work (neural → graph → wisdom flow)
+3. Track conversations at session end (story episodes)
+
+The unified processor mirrors transformer architecture:
+- Neural (attention) → Graph (normalization) → Wisdom (feed-forward)
+- → Bridges (residual) → Story (state) → Curiosity (output)
 """
 
 from datetime import datetime
@@ -16,6 +20,14 @@ from .wisdom import quick_recall, clear_session_wisdom, get_session_wisdom
 from .vocabulary import get_vocabulary
 from .efficiency import format_efficiency_injection, get_compact_context
 from .curiosity import run_curiosity_cycle, format_questions_for_prompt, get_curiosity_stats
+from .unified import (
+    forward_pass,
+    format_session_start,
+    format_prompt_context,
+    process_session_start,
+    process_prompt,
+    record_moment,
+)
 
 
 def get_project_name() -> str:
@@ -35,9 +47,12 @@ def get_project_name() -> str:
     return cwd.name
 
 
-def session_start() -> str:
+def session_start(use_unified: bool = True) -> str:
     """
-    Session start hook - Load soul context.
+    Session start hook - Load soul context through unified forward pass.
+
+    The unified processor flows the session through all modules:
+    Neural → Graph → Wisdom → Bridges → Story → Curiosity
 
     Returns formatted context for injection.
     """
@@ -52,6 +67,15 @@ def session_start() -> str:
     conv_file = SOUL_DIR / ".current_conversation"
     conv_file.write_text(str(conv_id))
 
+    if use_unified:
+        # Use unified forward pass - the soul's transformer-like architecture
+        try:
+            return process_session_start()
+        except Exception:
+            # Fall back to classic mode on error
+            pass
+
+    # Classic mode (fallback)
     ctx = get_soul_context()
 
     output = []

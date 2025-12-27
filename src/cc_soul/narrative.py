@@ -298,6 +298,90 @@ def get_episode(episode_id: int) -> Optional[Episode]:
     )
 
 
+def get_ongoing_episodes(limit: int = 5) -> List[Episode]:
+    """Get episodes that haven't been ended yet."""
+    _ensure_narrative_tables()
+    conn = sqlite3.connect(SOUL_DB)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT id, title, summary, episode_type, emotional_arc, key_moments,
+               characters, started_at, ended_at, duration_minutes, outcome,
+               lessons, thread_id, conversation_id
+        FROM episodes
+        WHERE ended_at IS NULL
+        ORDER BY started_at DESC
+        LIMIT ?
+    """, (limit,))
+
+    rows = cursor.fetchall()
+    conn.close()
+
+    return [Episode(
+        id=row[0],
+        title=row[1],
+        summary=row[2] or "",
+        episode_type=EpisodeType(row[3]) if row[3] else EpisodeType.EXPLORATION,
+        emotional_arc=[EmotionalTone(e) for e in json.loads(row[4])] if row[4] else [],
+        key_moments=json.loads(row[5]) if row[5] else [],
+        characters=json.loads(row[6]) if row[6] else {},
+        started_at=row[7],
+        ended_at=row[8],
+        duration_minutes=row[9] or 0,
+        outcome=row[10] or "",
+        lessons=json.loads(row[11]) if row[11] else [],
+        thread_id=row[12],
+        conversation_id=row[13]
+    ) for row in rows]
+
+
+def recall_episodes(limit: int = 10, episode_type: EpisodeType = None) -> List[Episode]:
+    """Recall recent episodes, optionally filtered by type."""
+    _ensure_narrative_tables()
+    conn = sqlite3.connect(SOUL_DB)
+    cursor = conn.cursor()
+
+    if episode_type:
+        cursor.execute("""
+            SELECT id, title, summary, episode_type, emotional_arc, key_moments,
+                   characters, started_at, ended_at, duration_minutes, outcome,
+                   lessons, thread_id, conversation_id
+            FROM episodes
+            WHERE episode_type = ?
+            ORDER BY started_at DESC
+            LIMIT ?
+        """, (episode_type.value, limit))
+    else:
+        cursor.execute("""
+            SELECT id, title, summary, episode_type, emotional_arc, key_moments,
+                   characters, started_at, ended_at, duration_minutes, outcome,
+                   lessons, thread_id, conversation_id
+            FROM episodes
+            ORDER BY started_at DESC
+            LIMIT ?
+        """, (limit,))
+
+    rows = cursor.fetchall()
+    conn.close()
+
+    return [Episode(
+        id=row[0],
+        title=row[1],
+        summary=row[2] or "",
+        episode_type=EpisodeType(row[3]) if row[3] else EpisodeType.EXPLORATION,
+        emotional_arc=[EmotionalTone(e) for e in json.loads(row[4])] if row[4] else [],
+        key_moments=json.loads(row[5]) if row[5] else [],
+        characters=json.loads(row[6]) if row[6] else {},
+        started_at=row[7],
+        ended_at=row[8],
+        duration_minutes=row[9] or 0,
+        outcome=row[10] or "",
+        lessons=json.loads(row[11]) if row[11] else [],
+        thread_id=row[12],
+        conversation_id=row[13]
+    ) for row in rows]
+
+
 # =============================================================================
 # STORY THREADS
 # =============================================================================
