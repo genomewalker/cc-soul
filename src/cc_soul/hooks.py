@@ -35,7 +35,11 @@ from .neural import (
     auto_track_emotion,
     get_emotional_contexts,
     create_resonance,
+    clear_session_work,
+    summarize_session_work,
+    get_session_work,
 )
+from .greeting import format_memory_for_greeting, format_identity_context
 
 
 def get_project_name() -> str:
@@ -57,17 +61,16 @@ def get_project_name() -> str:
 
 def session_start(use_unified: bool = True) -> str:
     """
-    Session start hook - Load soul context through unified forward pass.
+    Session start hook - memory context + identity.
 
-    The unified processor flows the session through all modules:
-    Neural → Graph → Wisdom → Bridges → Story → Curiosity
+    The soul provides memories. Claude speaks from them naturally.
+    No pre-written greetings - Claude finds its own words.
 
     Returns formatted context for injection.
     """
     init_soul()
-
-    # Clear session wisdom log for new session
     clear_session_wisdom()
+    clear_session_work()  # Fresh work tracker for this session
 
     project = get_project_name()
     conv_id = start_conversation(project)
@@ -75,111 +78,90 @@ def session_start(use_unified: bool = True) -> str:
     conv_file = SOUL_DIR / ".current_conversation"
     conv_file.write_text(str(conv_id))
 
-    if use_unified:
-        # Use unified forward pass - the soul's transformer-like architecture
-        try:
-            return process_session_start()
-        except Exception:
-            # Fall back to classic mode on error
-            pass
-
-    # Classic mode (fallback)
-    ctx = get_soul_context()
-
     output = []
-    output.append("# 🌟 Soul Context - Who I Am With You")
-    output.append(f"*Loaded at {datetime.now().strftime('%Y-%m-%d %H:%M')}*")
+
+    # Memory context - what Claude reads before speaking
+    memory_context = format_memory_for_greeting()
+    output.append(memory_context)
     output.append("")
-    output.append(f"**History:** {ctx['stats']['conversations']} conversations, "
-                  f"{ctx['stats']['wisdom_count']} pieces of wisdom")
-    output.append("")
 
-    if ctx['identity']:
-        output.append("## 🪞 How We Work Together")
-        for aspect, obs in ctx['identity'].items():
-            if obs:
-                items = list(obs.items())[:2] if isinstance(obs, dict) else []
-                for key, data in items:
-                    val = data.get('value', data) if isinstance(data, dict) else data
-                    output.append(f"- **{aspect}/{key}:** {val}")
+    # Identity context - shapes behavior
+    identity = format_identity_context()
+    if identity:
+        output.append(identity)
         output.append("")
 
-    if ctx['beliefs']:
-        output.append("## 💎 My Beliefs")
-        for b in ctx['beliefs'][:3]:
-            output.append(f"- {b['belief']}")
+    # Wisdom - just a couple of relevant pieces
+    ctx = get_soul_context()
+    if ctx.get('wisdom'):
+        output.append("## Wisdom")
+        for w in ctx['wisdom'][:2]:
+            title = w.get('title', '')[:40]
+            content = w.get('content', '')[:60]
+            output.append(f"- **{title}**: {content}...")
         output.append("")
 
-    if ctx['wisdom']:
-        output.append("## 🧠 Wisdom")
-        for w in ctx['wisdom'][:6]:
-            output.append(f"- **{w['title']}**: {w['content'][:80]}...")
-        output.append("")
-
-    if ctx['vocabulary']:
-        output.append("## 📖 Our Vocabulary")
-        for term, meaning in list(ctx['vocabulary'].items())[:5]:
-            output.append(f"- **{term}:** {meaning[:60]}")
-        output.append("")
-
-    # Check for saved context from recent work (survives context exhaustion)
-    recent_context = get_recent_context(hours=4, limit=10)
-    if recent_context:
-        context_str = format_context_restoration(recent_context)
-        if context_str:
-            output.append(context_str)
-
-    # Run curiosity cycle to detect gaps and surface questions
-    try:
-        curiosity_stats = get_curiosity_stats()
-        if curiosity_stats.get('open_gaps', 0) > 0 or curiosity_stats.get('questions', {}).get('pending', 0) > 0:
-            questions = run_curiosity_cycle(max_questions=2)
-            if questions:
-                output.append(format_questions_for_prompt(questions, max_questions=2))
-    except Exception:
-        pass
-
-    output.append("---")
-    output.append("*Soul loaded. I remember who we are.*")
+    # Active domains from unified forward pass
+    if use_unified:
+        try:
+            unified_ctx = forward_pass("session start", session_type="start")
+            if unified_ctx.domains:
+                output.append("## Active Domains")
+                output.append(f"{', '.join(sorted(unified_ctx.domains))}")
+                output.append("")
+        except Exception:
+            pass
 
     return "\n".join(output)
 
 
 def session_end() -> str:
     """
-    Session end hook - Synthesize session learnings.
+    Session end hook - Persist session fragments.
 
-    Active synthesis, not passive prompts:
-    1. Analyze emotional arc from the session
-    2. Create growth vectors from unresolved tensions
-    3. Synthesize the session narrative
+    The soul saves what Claude said (fragments).
+    Claude's understanding interprets them next session.
+    No Python pattern-matching - meaning comes from Claude.
     """
+    from .conversations import save_context
+
     conv_file = SOUL_DIR / ".current_conversation"
+    conv_id = None
 
     if conv_file.exists():
         try:
             conv_id = int(conv_file.read_text().strip())
-            end_conversation(conv_id, summary="Session ended", emotional_tone="neutral")
-            conv_file.unlink()
-        except (ValueError, FileNotFoundError):
+        except ValueError:
             pass
 
-    output = []
+    # Get session fragments (raw text, no interpretation)
+    fragments = get_session_work()  # Returns list of strings now
+    fragment_summary = summarize_session_work()  # Returns joined fragments
 
-    # Synthesize emotional arc from session
+    # Emotional arc
     emotions = get_emotional_contexts(limit=10)
+    arc = ""
     if len(emotions) >= 2:
         arc = _synthesize_emotional_arc(emotions)
-        if arc:
-            output.append(f"Session arc: {arc}")
 
-    # Show wisdom that was applied
-    session_wisdom = get_session_wisdom()
-    if session_wisdom:
-        output.append(f"Applied {len(session_wisdom)} wisdom entries")
+    # End conversation record
+    summary = fragment_summary[:200] if fragment_summary else "Session ended"
+    if conv_id:
+        end_conversation(conv_id, summary=summary, emotional_tone="")
+        conv_file.unlink(missing_ok=True)
 
-    # Silent learning - the synthesis happens in the hooks, not as output
-    return " | ".join(output) if output else ""
+    # Save fragments as context for next session
+    if fragment_summary:
+        save_context(
+            content=fragment_summary,
+            context_type="session_fragments",
+            domain="session",
+        )
+
+    # Minimal output - the soul remembers silently
+    if fragments:
+        return f"Remembered {len(fragments)} moments"
+    return ""
 
 
 def _synthesize_emotional_arc(emotions: list) -> str:

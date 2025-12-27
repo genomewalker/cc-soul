@@ -692,6 +692,10 @@ BREAKTHROUGH_PATTERNS = [
     r"unexpectedly",
 ]
 
+# Session fragments - significant outputs to remember
+# No pattern matching for meaning - just save significant text
+# Claude's understanding provides meaning when reading, not Python when writing
+
 
 def detect_breakthrough(text: str) -> Optional[Dict]:
     """
@@ -775,17 +779,98 @@ def detect_tension(text: str) -> Optional[Dict]:
     return None
 
 
+# =============================================================================
+# SESSION FRAGMENTS - Raw text memories for Claude to interpret
+# =============================================================================
+
+def _get_fragments_path() -> Path:
+    return NEURAL_DIR / ".session_fragments.json"
+
+
+def _load_fragments() -> List[str]:
+    path = _get_fragments_path()
+    if not path.exists():
+        return []
+    with open(path) as f:
+        return json.load(f)
+
+
+def _save_fragments(fragments: List[str]):
+    _ensure_neural_dir()
+    path = _get_fragments_path()
+    with open(path, 'w') as f:
+        json.dump(fragments, f, indent=2)
+
+
+def clear_session_fragments():
+    """Clear session fragments (call at session start)."""
+    path = _get_fragments_path()
+    if path.exists():
+        path.unlink()
+
+
+def save_fragment(text: str, max_len: int = 200):
+    """
+    Save a significant text fragment from this session.
+
+    No interpretation - just the raw text.
+    Claude's understanding provides meaning when reading.
+    """
+    fragment = text.strip()[:max_len]
+    if not fragment:
+        return
+
+    fragments = _load_fragments()
+    fragments.append(fragment)
+    # Keep last 10 fragments
+    fragments = fragments[-10:]
+    _save_fragments(fragments)
+
+
+def get_session_fragments() -> List[str]:
+    """Get fragments from this session."""
+    return _load_fragments()
+
+
+# Compatibility shims for hooks
+def clear_session_work():
+    """Alias for clear_session_fragments."""
+    clear_session_fragments()
+
+
+def get_session_work():
+    """Return fragments as simple work items for compatibility."""
+    return get_session_fragments()
+
+
+def summarize_session_work() -> str:
+    """Return fragments joined - Claude interprets at read time."""
+    fragments = get_session_fragments()
+    return " | ".join(fragments) if fragments else ""
+
+
 def auto_learn_from_output(output: str, context: str = "") -> Optional[Dict]:
     """
-    Automatically extract and save learning from assistant output.
+    Organic learning from assistant output.
 
-    Called by hooks after significant completions.
-    Returns dict with what was learned, or None.
+    Philosophy: Save significant fragments as raw text.
+    Let Claude's understanding provide meaning when reading.
+    No pattern matching for structured extraction.
     """
-    # Check for breakthrough
+    # Save significant outputs as fragments
+    # The fragment IS the learning - Claude interprets it later
+    if len(output) > 50:  # Lower threshold - most meaningful sentences are 50+ chars
+        # Extract first meaningful sentence as fragment
+        sentences = re.split(r'[.!?]', output)
+        for sentence in sentences:
+            s = sentence.strip()
+            if len(s) > 20:  # Meaningful sentences have 20+ chars
+                save_fragment(s)
+                break
+
+    # Still detect breakthroughs - these create triggers for knowledge activation
     breakthrough = detect_breakthrough(output)
     if breakthrough:
-        # Create trigger from the insight
         trigger = create_trigger(breakthrough['insight'], breakthrough['domain'])
         return {
             'type': 'breakthrough',
@@ -793,20 +878,9 @@ def auto_learn_from_output(output: str, context: str = "") -> Optional[Dict]:
             'trigger_id': trigger.id,
         }
 
-    # Check for explicit learning
-    learning = extract_learning(output)
-    if learning:
-        trigger = create_trigger(learning)
-        return {
-            'type': 'learning',
-            'content': learning,
-            'trigger_id': trigger.id,
-        }
-
-    # Check for unresolved tensions -> create growth vectors
+    # Still detect tensions - these create growth vectors
     tension = detect_tension(output)
     if tension:
-        # Create a growth vector for future exploration
         vector = save_growth_vector(
             observation=tension['tension'][:100],
             tension="This remains unresolved",
