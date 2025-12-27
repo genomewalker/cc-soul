@@ -211,12 +211,12 @@ def notification_shown(tool_name: str, success: bool, output: str) -> str:
     return ""
 
 
-def user_prompt(user_input: str, use_woven: bool = False) -> str:
+def user_prompt(user_input: str, use_woven: bool = True) -> str:
     """
     UserPromptSubmit hook - Inject soul context organically.
 
     Two modes:
-    - woven (default: False): Organic fragments without headers
+    - woven (default: True): Organic fragments without headers
     - structured: Header-based for visibility
 
     Uses unified forward pass for coherent context.
