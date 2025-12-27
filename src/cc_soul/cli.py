@@ -351,6 +351,45 @@ def cmd_health(args):
     print("=" * 55)
 
 
+def cmd_budget(args):
+    """Check context window budget from transcript."""
+    from .budget import get_context_budget, format_budget_status
+
+    transcript = args.transcript
+    budget = get_context_budget(transcript)
+
+    if budget is None:
+        if transcript:
+            print(f"Could not read transcript: {transcript}")
+        else:
+            print("No transcript specified and no current session found.")
+            print("Usage: soul budget /path/to/transcript.jsonl")
+        return
+
+    print("=" * 55)
+    print("CONTEXT BUDGET")
+    print("=" * 55)
+    print()
+    print(format_budget_status(budget))
+    print()
+    print(f"  Total tokens:  {budget.total_tokens:,}")
+    print(f"  Input tokens:  {budget.input_tokens:,}")
+    print(f"  Output tokens: {budget.output_tokens:,}")
+    print(f"  Cache tokens:  {budget.cache_tokens:,}")
+    print()
+    print(f"  Context size:  {budget.context_size:,}")
+    print(f"  Usable size:   {budget.usable_size:,}")
+    print(f"  Remaining:     {budget.remaining:,}")
+    print()
+    print(f"  Messages:      {budget.message_count}")
+    print()
+
+    if budget.should_urgent_save:
+        print("! URGENT: Context nearly full. Save important context NOW.")
+    elif budget.should_compact:
+        print("! COMPACT: Switching to reduced soul injection.")
+
+
 def cmd_context(args):
     """Show full context dump."""
     import pprint
@@ -1555,6 +1594,10 @@ def main():
     # Health check
     subparsers.add_parser('health', help='Check system health and dependencies')
 
+    # Budget (context window tracking)
+    budget_parser = subparsers.add_parser('budget', help='Check context window budget')
+    budget_parser.add_argument('transcript', nargs='?', help='Path to transcript file')
+
     # Context
     subparsers.add_parser('context', help='Show full context dump')
 
@@ -1871,6 +1914,8 @@ def main():
         cmd_summary(args)
     elif args.command == 'health':
         cmd_health(args)
+    elif args.command == 'budget':
+        cmd_budget(args)
     elif args.command == 'context':
         cmd_context(args)
     elif args.command == 'wisdom':

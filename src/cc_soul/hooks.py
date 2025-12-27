@@ -42,6 +42,7 @@ from .neural import (
     get_session_commands,
 )
 from .greeting import format_memory_for_greeting, format_identity_context
+from .budget import check_budget_before_inject, save_transcript_path, get_context_budget
 
 
 def get_project_name() -> str:
@@ -222,7 +223,7 @@ def notification_shown(tool_name: str, success: bool, output: str) -> str:
     return ""
 
 
-def user_prompt(user_input: str, use_woven: bool = True) -> str:
+def user_prompt(user_input: str, use_woven: bool = True, transcript_path: str = None) -> str:
     """
     UserPromptSubmit hook - Inject soul context organically.
 
@@ -230,10 +231,26 @@ def user_prompt(user_input: str, use_woven: bool = True) -> str:
     - woven (default: True): Organic fragments without headers
     - structured: Header-based for visibility
 
+    Budget-aware: Reduces injection when context is low.
     Uses unified forward pass for coherent context.
     """
     if len(user_input.strip()) < 20:
         return ""
+
+    # Check context budget before deciding what to inject
+    budget_check = check_budget_before_inject(transcript_path)
+
+    # If urgent, save context first
+    if budget_check.get('save_first'):
+        from .conversations import save_context
+        save_context(
+            content=f"Context approaching limit. Last prompt: {user_input[:200]}",
+            context_type="pre_compact",
+            priority=9,
+        )
+
+    # Adjust injection based on budget mode
+    mode = budget_check.get('mode', 'full')
 
     output = []
 
@@ -241,10 +258,20 @@ def user_prompt(user_input: str, use_woven: bool = True) -> str:
     try:
         ctx = forward_pass(user_input, session_type="prompt")
 
+        if mode == 'minimal':
+            # Minimal mode: just one key wisdom if highly relevant
+            if ctx.wisdom and ctx.wisdom[0].get('combined_score', 0) > 0.5:
+                w = ctx.wisdom[0]
+                return f"Remember: {w.get('title', '')}"
+            return ""
+
         if use_woven:
             # Organic weaving - no headers, just flowing context
             woven = format_context(ctx, style='woven')
             if woven:
+                # In compact mode, truncate
+                if mode == 'compact':
+                    return woven[:500] if len(woven) > 500 else woven
                 return woven
         else:
             # Structured format for clarity (current default)
