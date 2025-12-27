@@ -133,6 +133,224 @@ def cmd_summary(args):
     print(summarize_soul())
 
 
+def cmd_health(args):
+    """Check system health - not just 'is it running' but 'is it alive'."""
+    import json
+    from datetime import datetime, timedelta
+
+    # Status levels: OK, WARN, FAIL
+    results = {"infrastructure": [], "content": [], "activity": [], "vitality": []}
+
+    def check(category, name, fn):
+        try:
+            status, detail = fn()
+            results[category].append((name, status, detail))
+        except Exception as e:
+            results[category].append((name, "FAIL", str(e)))
+
+    # ══════════════════════════════════════════════════════════════
+    # INFRASTRUCTURE - Can the soul run?
+    # ══════════════════════════════════════════════════════════════
+
+    def check_database():
+        from .core import SOUL_DIR, get_db_connection
+        db_path = SOUL_DIR / "soul.db"
+        if not db_path.exists():
+            return "FAIL", "Database not found"
+        conn = get_db_connection()
+        cursor = conn.execute("SELECT COUNT(*) FROM wisdom")
+        count = cursor.fetchone()[0]
+        return "OK", f"{db_path.name} ({count} wisdom)"
+
+    def check_hooks():
+        settings_path = Path.home() / ".claude" / "settings.json"
+        if not settings_path.exists():
+            return "FAIL", "settings.json not found"
+        with open(settings_path) as f:
+            settings = json.load(f)
+        hooks = settings.get("hooks", {})
+        required = ["SessionStart", "SessionEnd", "UserPromptSubmit", "Stop"]
+        installed = [h for h in required if h in hooks]
+        if len(installed) == 0:
+            return "FAIL", "No hooks installed"
+        if len(installed) < len(required):
+            missing = set(required) - set(installed)
+            return "WARN", f"Missing: {', '.join(missing)}"
+        return "OK", f"{len(installed)}/{len(required)} hooks"
+
+    def check_embeddings():
+        from .vectors import embed_text
+        vec = embed_text("test")
+        return "OK", f"dim={len(vec)}"
+
+    def check_lancedb():
+        import lancedb
+        from .core import SOUL_DIR
+        lance_dir = SOUL_DIR / "vectors" / "lancedb"
+        lance_dir.mkdir(parents=True, exist_ok=True)
+        db = lancedb.connect(str(lance_dir))
+        tables = db.table_names()
+        return "OK", f"{len(tables)} tables"
+
+    def check_kuzu():
+        try:
+            import kuzu
+            return "OK", "available"
+        except ImportError:
+            return "WARN", "not installed (optional)"
+
+    # ══════════════════════════════════════════════════════════════
+    # CONTENT - Does the soul have memories?
+    # ══════════════════════════════════════════════════════════════
+
+    def check_wisdom_content():
+        from .core import get_db_connection
+        conn = get_db_connection()
+        cursor = conn.execute("SELECT COUNT(*) FROM wisdom")
+        count = cursor.fetchone()[0]
+        if count == 0:
+            return "WARN", "Empty - no wisdom yet"
+        return "OK", f"{count} entries"
+
+    def check_beliefs():
+        from .beliefs import get_beliefs
+        beliefs = get_beliefs()
+        if not beliefs:
+            return "WARN", "No beliefs defined"
+        return "OK", f"{len(beliefs)} beliefs"
+
+    def check_triggers():
+        from .neural import get_trigger_stats
+        stats = get_trigger_stats()
+        count = stats.get('total_triggers', 0)
+        if count == 0:
+            return "WARN", "No neural triggers"
+        return "OK", f"{count} triggers"
+
+    # ══════════════════════════════════════════════════════════════
+    # ACTIVITY - Is the soul being used?
+    # ══════════════════════════════════════════════════════════════
+
+    def check_recent_sessions():
+        from .core import get_db_connection
+        conn = get_db_connection()
+        # Check if wisdom_applications table exists and has data
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='wisdom_applications'"
+        )
+        if not cursor.fetchone():
+            return "WARN", "Table not created yet"
+        week_ago = (datetime.now() - timedelta(days=7)).isoformat()
+        cursor = conn.execute(
+            "SELECT COUNT(*) FROM wisdom_applications WHERE applied_at > ?",
+            (week_ago,)
+        )
+        count = cursor.fetchone()[0]
+        if count == 0:
+            return "WARN", "No activity in 7 days"
+        return "OK", f"{count} applications (7d)"
+
+    def check_wisdom_applications():
+        from .core import get_db_connection
+        conn = get_db_connection()
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='wisdom_applications'"
+        )
+        if not cursor.fetchone():
+            return "WARN", "Table not created yet"
+        cursor = conn.execute("SELECT COUNT(*) FROM wisdom_applications")
+        count = cursor.fetchone()[0]
+        if count == 0:
+            return "WARN", "Wisdom never applied"
+        return "OK", f"{count} applications"
+
+    # ══════════════════════════════════════════════════════════════
+    # VITALITY - Is the soul growing?
+    # ══════════════════════════════════════════════════════════════
+
+    def check_recent_learning():
+        from .core import get_db_connection
+        conn = get_db_connection()
+        week_ago = (datetime.now() - timedelta(days=7)).isoformat()
+        cursor = conn.execute(
+            "SELECT COUNT(*) FROM wisdom WHERE timestamp > ?",
+            (week_ago,)
+        )
+        count = cursor.fetchone()[0]
+        if count == 0:
+            return "WARN", "No new wisdom in 7 days"
+        return "OK", f"+{count} wisdom (7d)"
+
+    def check_decay():
+        from .core import get_db_connection
+        conn = get_db_connection()
+        cursor = conn.execute(
+            "SELECT COUNT(*) FROM wisdom WHERE confidence < 0.3"
+        )
+        low_conf = cursor.fetchone()[0]
+        cursor = conn.execute("SELECT COUNT(*) FROM wisdom")
+        total = cursor.fetchone()[0]
+        if total == 0:
+            return "OK", "No wisdom to decay"
+        pct = (low_conf / total) * 100
+        if pct > 50:
+            return "WARN", f"{low_conf}/{total} ({pct:.0f}%) decaying"
+        return "OK", f"{low_conf}/{total} low confidence"
+
+    # Run all checks by tier
+    check("infrastructure", "Database", check_database)
+    check("infrastructure", "Hooks", check_hooks)
+    check("infrastructure", "Embeddings", check_embeddings)
+    check("infrastructure", "LanceDB", check_lancedb)
+    check("infrastructure", "Kuzu", check_kuzu)
+
+    check("content", "Wisdom", check_wisdom_content)
+    check("content", "Beliefs", check_beliefs)
+    check("content", "Triggers", check_triggers)
+
+    check("activity", "Sessions", check_recent_sessions)
+    check("activity", "Applications", check_wisdom_applications)
+
+    check("vitality", "Learning", check_recent_learning)
+    check("vitality", "Decay", check_decay)
+
+    # Display by tier
+    tier_names = {
+        "infrastructure": "INFRASTRUCTURE (can it run?)",
+        "content": "CONTENT (does it remember?)",
+        "activity": "ACTIVITY (is it used?)",
+        "vitality": "VITALITY (is it growing?)"
+    }
+
+    symbols = {"OK": "+", "WARN": "~", "FAIL": "x"}
+    has_fail = False
+    has_warn = False
+
+    print("=" * 55)
+    print("SOUL HEALTH")
+    print("=" * 55)
+
+    for tier, tier_label in tier_names.items():
+        print(f"\n{tier_label}")
+        print("-" * 40)
+        for name, status, detail in results[tier]:
+            sym = symbols[status]
+            print(f"  [{sym}] {name}: {detail}")
+            if status == "FAIL":
+                has_fail = True
+            elif status == "WARN":
+                has_warn = True
+
+    print("\n" + "=" * 55)
+    if has_fail:
+        print("STATUS: CRITICAL - Some systems failing")
+    elif has_warn:
+        print("STATUS: HEALTHY - Some warnings")
+    else:
+        print("STATUS: THRIVING - All systems go")
+    print("=" * 55)
+
+
 def cmd_context(args):
     """Show full context dump."""
     import pprint
@@ -1334,6 +1552,9 @@ def main():
     # Summary (default)
     subparsers.add_parser('summary', help='Show soul summary')
 
+    # Health check
+    subparsers.add_parser('health', help='Check system health and dependencies')
+
     # Context
     subparsers.add_parser('context', help='Show full context dump')
 
@@ -1648,6 +1869,8 @@ def main():
 
     if args.command is None or args.command == 'summary':
         cmd_summary(args)
+    elif args.command == 'health':
+        cmd_health(args)
     elif args.command == 'context':
         cmd_context(args)
     elif args.command == 'wisdom':
