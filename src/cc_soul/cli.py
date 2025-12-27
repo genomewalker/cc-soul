@@ -58,6 +58,12 @@ from .efficiency import (
     format_efficiency_injection,
     get_token_stats,
 )
+from .observe import (
+    get_pending_observations,
+    promote_observation_to_wisdom,
+    auto_promote_high_confidence,
+    format_reflection_summary,
+)
 
 
 def cmd_summary(args):
@@ -468,6 +474,53 @@ def cmd_efficiency(args):
             print("No efficiency hints for this prompt")
 
 
+def cmd_observe(args):
+    """Manage passive observations from sessions."""
+    init_soul()
+
+    if args.subcommand == 'pending':
+        observations = get_pending_observations(limit=args.limit)
+        if not observations:
+            print("No pending observations")
+        else:
+            print(f"Pending observations ({len(observations)}):\n")
+            type_icons = {
+                'correction': '🔄',
+                'preference': '👤',
+                'pattern': '🔁',
+                'struggle': '💪',
+                'breakthrough': '💡',
+                'file_pattern': '📁',
+                'decision': '⚖️',
+            }
+            for obs in observations:
+                icon = type_icons.get(obs['type'], '•')
+                conf = obs['confidence']
+                print(f"  {icon} [{obs['id']}] ({conf:.0%}) {obs['content'][:60]}...")
+
+    elif args.subcommand == 'promote':
+        if args.id:
+            wisdom_id = promote_observation_to_wisdom(args.id)
+            if wisdom_id:
+                print(f"Promoted observation {args.id} to wisdom {wisdom_id}")
+            else:
+                print(f"Observation {args.id} not found")
+        elif args.all:
+            promoted = auto_promote_high_confidence(threshold=args.threshold)
+            print(f"Promoted {len(promoted)} high-confidence observations")
+        else:
+            print("Usage: soul observe promote <id> or soul observe promote --all")
+
+    elif args.subcommand == 'stats':
+        observations = get_pending_observations(limit=100)
+        from collections import Counter
+        by_type = Counter(obs['type'] for obs in observations)
+        print(f"Pending observations: {len(observations)}\n")
+        print("By type:")
+        for t, count in by_type.most_common():
+            print(f"  {t}: {count}")
+
+
 def cmd_reindex(args):
     """Reindex wisdom vectors."""
     init_soul()
@@ -813,6 +866,20 @@ def main():
     check_parser = eff_subs.add_parser('check', help='Check efficiency hints for a prompt')
     check_parser.add_argument('prompt', nargs='*', help='Prompt to check')
 
+    # Observe (passive learning)
+    obs_parser = subparsers.add_parser('observe', help='Manage passive observations')
+    obs_subs = obs_parser.add_subparsers(dest='subcommand')
+
+    pending_parser = obs_subs.add_parser('pending', help='Show pending observations')
+    pending_parser.add_argument('--limit', type=int, default=20, help='Max items to show')
+
+    promote_parser = obs_subs.add_parser('promote', help='Promote observation to wisdom')
+    promote_parser.add_argument('id', type=int, nargs='?', help='Observation ID to promote')
+    promote_parser.add_argument('--all', action='store_true', help='Promote all high-confidence')
+    promote_parser.add_argument('--threshold', type=float, default=0.75, help='Confidence threshold')
+
+    obs_subs.add_parser('stats', help='Show observation statistics')
+
     args = parser.parse_args()
 
     if args.command is None or args.command == 'summary':
@@ -875,6 +942,11 @@ def main():
             cmd_efficiency(args)
         else:
             cmd_efficiency(argparse.Namespace(subcommand='stats'))
+    elif args.command == 'observe':
+        if args.subcommand:
+            cmd_observe(args)
+        else:
+            cmd_observe(argparse.Namespace(subcommand='pending', limit=20))
 
 
 if __name__ == '__main__':
