@@ -696,6 +696,54 @@ BREAKTHROUGH_PATTERNS = [
 # No pattern matching for meaning - just save significant text
 # Claude's understanding provides meaning when reading, not Python when writing
 
+# Session command buffer - for within-session recall accuracy
+# Commands extracted from Claude's narration, not tool introspection
+_session_commands: List[str] = []
+
+
+def note_command(cmd: str):
+    """Note a command for session recall. Called when Claude narrates a command."""
+    global _session_commands
+    cmd = cmd.strip()
+    if cmd and cmd not in _session_commands:
+        _session_commands.append(cmd)
+        # Keep last 20
+        if len(_session_commands) > 20:
+            _session_commands.pop(0)
+
+
+def get_session_commands() -> List[str]:
+    """Get commands noted this session."""
+    return _session_commands.copy()
+
+
+def clear_session_commands():
+    """Clear command buffer at session start."""
+    global _session_commands
+    _session_commands = []
+
+
+def extract_commands_from_text(text: str) -> List[str]:
+    """
+    Extract command-like strings from text.
+
+    Looks for backtick-wrapped commands or common command patterns.
+    Surface extraction only - Claude provides meaning.
+    """
+    commands = []
+
+    # Backtick-wrapped commands: `command here`
+    backtick_pattern = r'`([^`]+)`'
+    matches = re.findall(backtick_pattern, text)
+    for match in matches:
+        # Filter to things that look like commands
+        if any(match.startswith(prefix) for prefix in
+               ['python', 'pip', 'git', 'make', 'npm', 'cargo', 'go ', 'bash',
+                'sh ', 'cd ', 'ls', 'cat', 'grep', 'find', 'docker', 'kubectl']):
+            commands.append(match)
+
+    return commands
+
 
 def detect_breakthrough(text: str) -> Optional[Dict]:
     """
@@ -857,6 +905,11 @@ def auto_learn_from_output(output: str, context: str = "") -> Optional[Dict]:
     Let Claude's understanding provide meaning when reading.
     No pattern matching for structured extraction.
     """
+    # Extract commands for session recall (accuracy, not significance)
+    commands = extract_commands_from_text(output)
+    for cmd in commands:
+        note_command(cmd)
+
     # Save significant outputs as fragments
     # The fragment IS the learning - Claude interprets it later
     if len(output) > 50:  # Lower threshold - most meaningful sentences are 50+ chars
