@@ -107,6 +107,18 @@ from .narrative import (
     EmotionalTone,
 )
 
+from .neural import (
+    create_trigger,
+    find_triggers,
+    activate,
+    activate_with_bridges,
+    create_bridge,
+    get_trigger_stats,
+    sync_wisdom_to_triggers,
+    format_neural_context,
+    reinforce_trigger,
+)
+
 
 def cmd_summary(args):
     """Show soul summary."""
@@ -821,6 +833,85 @@ def cmd_story(args):
                     print(f"    {ep.summary[:60]}...")
 
 
+def cmd_neural(args):
+    """Neural triggers - activation keys for Claude's latent knowledge."""
+    init_soul()
+
+    if args.subcommand == 'stats':
+        stats = get_trigger_stats()
+        print("Neural Trigger Statistics\n")
+        print(f"Total triggers: {stats.get('total_triggers', 0)}")
+        print(f"Total bridges: {stats.get('total_bridges', 0)}")
+        print(f"Total uses: {stats.get('total_uses', 0)}")
+        if stats.get('avg_strength'):
+            print(f"Avg strength: {stats['avg_strength']:.2f}")
+        if stats.get('domains'):
+            print(f"\nDomains: {', '.join(stats['domains'][:10])}")
+
+    elif args.subcommand == 'sync':
+        print("Converting wisdom to neural triggers...")
+        result = sync_wisdom_to_triggers()
+        print(f"Processed {result['wisdom_count']} wisdom entries")
+        print(f"Created {result['triggers_created']} triggers")
+
+    elif args.subcommand == 'activate':
+        if not args.prompt:
+            print("Usage: soul neural activate 'your prompt'")
+            return
+        prompt = ' '.join(args.prompt)
+        activation = activate_with_bridges(prompt)
+        if activation:
+            print("Neural activation key:\n")
+            print(activation)
+        else:
+            print("No triggers matched this prompt")
+
+    elif args.subcommand == 'context':
+        if not args.prompt:
+            print("Usage: soul neural context 'your prompt'")
+            return
+        prompt = ' '.join(args.prompt)
+        ctx = format_neural_context(prompt)
+        if ctx:
+            print("Inject this into context:\n")
+            print(ctx)
+        else:
+            print("No neural context generated")
+
+    elif args.subcommand == 'extract':
+        if not args.text or not args.domain:
+            print("Usage: soul neural extract --domain <domain> 'text'")
+            return
+        text = ' '.join(args.text)
+        trigger = create_trigger(text, args.domain)
+        print(f"Created trigger: {trigger.id}")
+        print(f"Domain: {trigger.domain}")
+        print(f"Anchor tokens: {' '.join(trigger.anchor_tokens)}")
+
+    elif args.subcommand == 'bridge':
+        if not args.source or not args.target:
+            print("Usage: soul neural bridge <source_domain> <target_domain> --via 'connecting text'")
+            return
+        via = ' '.join(args.via) if args.via else f"{args.source} {args.target}"
+        bridge = create_bridge(args.source, args.target, via, args.evidence or "")
+        print(f"Bridge created: {args.source} <-> {args.target}")
+        print(f"Via: {' '.join(bridge.bridge_tokens)}")
+
+    elif args.subcommand == 'find':
+        if not args.prompt:
+            print("Usage: soul neural find 'prompt'")
+            return
+        prompt = ' '.join(args.prompt)
+        triggers = find_triggers(prompt, top_k=args.limit)
+        if not triggers:
+            print("No matching triggers")
+        else:
+            print(f"Found {len(triggers)} triggers:\n")
+            for trigger, score in triggers:
+                print(f"  [{score:.0%}] {trigger.domain}")
+                print(f"       {' '.join(trigger.anchor_tokens)}")
+
+
 def cmd_reindex(args):
     """Reindex wisdom vectors."""
     init_soul()
@@ -1255,6 +1346,33 @@ def main():
     recall_parser.add_argument('--character', help='Character name (file, concept)')
     recall_parser.add_argument('--limit', type=int, default=10, help='Max episodes')
 
+    # Neural (activation triggers)
+    neural_parser = subparsers.add_parser('neural', help='Neural triggers - activation keys for latent knowledge')
+    neural_subs = neural_parser.add_subparsers(dest='subcommand')
+
+    neural_subs.add_parser('stats', help='Show trigger statistics')
+    neural_subs.add_parser('sync', help='Convert wisdom to neural triggers')
+
+    neural_activate = neural_subs.add_parser('activate', help='Generate activation for a prompt')
+    neural_activate.add_argument('prompt', nargs='*', help='Prompt text')
+
+    neural_context = neural_subs.add_parser('context', help='Generate injectable context')
+    neural_context.add_argument('prompt', nargs='*', help='Prompt text')
+
+    neural_extract = neural_subs.add_parser('extract', help='Extract trigger from text')
+    neural_extract.add_argument('text', nargs='*', help='Text to extract from')
+    neural_extract.add_argument('--domain', required=True, help='Knowledge domain')
+
+    neural_bridge = neural_subs.add_parser('bridge', help='Create bridge between domains')
+    neural_bridge.add_argument('source', nargs='?', help='Source domain')
+    neural_bridge.add_argument('target', nargs='?', help='Target domain')
+    neural_bridge.add_argument('--via', nargs='*', help='Connecting text')
+    neural_bridge.add_argument('--evidence', help='Why this connection exists')
+
+    neural_find = neural_subs.add_parser('find', help='Find triggers matching a prompt')
+    neural_find.add_argument('prompt', nargs='*', help='Prompt text')
+    neural_find.add_argument('--limit', type=int, default=5, help='Max results')
+
     args = parser.parse_args()
 
     if args.command is None or args.command == 'summary':
@@ -1337,6 +1455,11 @@ def main():
             cmd_story(args)
         else:
             cmd_story(argparse.Namespace(subcommand='stats'))
+    elif args.command == 'neural':
+        if args.subcommand:
+            cmd_neural(args)
+        else:
+            cmd_neural(argparse.Namespace(subcommand='stats'))
 
 
 if __name__ == '__main__':
