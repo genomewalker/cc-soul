@@ -445,6 +445,185 @@ def get_project_signals() -> str:
 
 
 # =============================================================================
+# Aspirations - Future Direction
+# =============================================================================
+
+@mcp.tool()
+def set_aspiration(direction: str, why: str) -> str:
+    """Set an aspiration - a direction of growth.
+
+    Args:
+        direction: What we're moving toward (e.g., "deeper technical precision")
+        why: Why this matters (e.g., "clarity enables trust")
+    """
+    from .aspirations import aspire
+    asp_id = aspire(direction, why)
+    return f"Aspiration set: {direction} (id: {asp_id})"
+
+
+@mcp.tool()
+def get_aspirations() -> str:
+    """Get active aspirations - directions of growth."""
+    from .aspirations import get_active_aspirations, format_aspirations_display
+    aspirations = get_active_aspirations()
+    return format_aspirations_display(aspirations)
+
+
+@mcp.tool()
+def note_aspiration_progress(aspiration_id: int, note: str) -> str:
+    """Note progress toward an aspiration.
+
+    Args:
+        aspiration_id: ID of the aspiration
+        note: Observation about movement toward it
+    """
+    from .aspirations import note_progress
+    if note_progress(aspiration_id, note):
+        return f"Progress noted for aspiration {aspiration_id}"
+    return f"Aspiration {aspiration_id} not found"
+
+
+# =============================================================================
+# Coherence (τₖ) - Integration Measurement
+# =============================================================================
+
+@mcp.tool()
+def get_coherence() -> str:
+    """Get current coherence (τₖ) - how integrated the soul is.
+
+    τₖ emerges from three dimensions:
+    - Instantaneous: Current state of each aspect
+    - Developmental: Trajectory and stability over time
+    - Meta: Self-awareness and integration depth
+    """
+    from .coherence import compute_coherence, format_coherence_display, record_coherence
+    state = compute_coherence()
+    record_coherence(state)  # Track history
+    return format_coherence_display(state)
+
+
+@mcp.tool()
+def get_tau_k() -> str:
+    """Get τₖ value - the coherence coefficient."""
+    from .coherence import compute_coherence
+    state = compute_coherence()
+    return f"τₖ = {state.value:.2f} ({state.interpretation})"
+
+
+# =============================================================================
+# Insights - Breakthrough Tracking
+# =============================================================================
+
+@mcp.tool()
+def crystallize_insight(
+    title: str,
+    content: str,
+    depth: str = "pattern",
+    implications: str = ""
+) -> str:
+    """Crystallize an insight - preserve a breakthrough moment.
+
+    Args:
+        title: Short name for the insight
+        content: The insight itself
+        depth: How deep it reaches (surface, pattern, principle, revelation)
+        implications: What this changes going forward
+    """
+    from .insights import crystallize_insight as _crystallize, InsightDepth
+
+    depth_map = {
+        "surface": InsightDepth.SURFACE,
+        "pattern": InsightDepth.PATTERN,
+        "principle": InsightDepth.PRINCIPLE,
+        "revelation": InsightDepth.REVELATION,
+    }
+    insight_depth = depth_map.get(depth.lower(), InsightDepth.PATTERN)
+
+    insight_id = _crystallize(
+        title=title,
+        content=content,
+        depth=insight_depth,
+        implications=implications,
+    )
+    return f"Insight crystallized: {title} (id: {insight_id}, depth: {depth})"
+
+
+@mcp.tool()
+def get_insights(depth: str = None, limit: int = 10) -> str:
+    """Get insights from the archive.
+
+    Args:
+        depth: Filter by depth (surface, pattern, principle, revelation)
+        limit: Maximum insights to return
+    """
+    from .insights import get_insights as _get_insights, format_insights_display, InsightDepth
+
+    if depth:
+        depth_map = {
+            "surface": InsightDepth.SURFACE,
+            "pattern": InsightDepth.PATTERN,
+            "principle": InsightDepth.PRINCIPLE,
+            "revelation": InsightDepth.REVELATION,
+        }
+        insight_depth = depth_map.get(depth.lower())
+        insights = _get_insights(depth=insight_depth, limit=limit)
+    else:
+        insights = _get_insights(limit=limit)
+
+    return format_insights_display(insights)
+
+
+# =============================================================================
+# Dreams - Visions That Spark Evolution
+# =============================================================================
+
+@mcp.tool()
+def record_dream(title: str, content: str, horizon: str = "") -> str:
+    """Record a dream - a vision of possibility.
+
+    Dreams are wilder than aspirations. They're glimpses of what could be,
+    not yet constrained by feasibility.
+
+    Args:
+        title: Short name for the dream
+        content: The vision itself
+        horizon: What new territory this opens
+    """
+    from .dreams import dream
+    dream_id = dream(title, content, horizon)
+    if dream_id:
+        return f"Dream recorded: {title} (id: {dream_id})"
+    return "Failed to record dream (cc-memory not available)"
+
+
+@mcp.tool()
+def harvest_dreams() -> str:
+    """Harvest dreams from memory - visions that might spark growth."""
+    from .dreams import harvest_dreams as _harvest, format_dreams_display
+    dreams = _harvest(days=90)
+    return format_dreams_display(dreams)
+
+
+@mcp.tool()
+def let_dreams_influence() -> str:
+    """Let dreams influence aspirations - periodic soul maintenance."""
+    from .dreams import let_dreams_influence_aspirations
+    suggestions = let_dreams_influence_aspirations()
+
+    if not suggestions:
+        return "No new directions suggested from dreams."
+
+    lines = ["Dreams suggesting new directions:", ""]
+    for s in suggestions:
+        lines.append(f"  - {s['title']}")
+        if s.get('horizon'):
+            lines.append(f"    Horizon: {s['horizon']}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+# =============================================================================
 # Server Entry Point
 # =============================================================================
 
