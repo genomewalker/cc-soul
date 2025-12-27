@@ -155,7 +155,6 @@ def session_end() -> str:
         save_context(
             content=fragment_summary,
             context_type="session_fragments",
-            domain="session",
         )
 
     # Minimal output - the soul remembers silently
