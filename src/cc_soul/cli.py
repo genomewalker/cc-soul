@@ -13,7 +13,7 @@ from .wisdom import recall_wisdom, get_pending_applications, get_session_wisdom,
 from .beliefs import get_beliefs, hold_belief
 from .vocabulary import get_vocabulary, learn_term
 from .identity import observe_identity, IdentityAspect
-from .hooks import session_start, session_end, user_prompt
+from .hooks import session_start, session_end, user_prompt, assistant_stop
 from .conversations import save_context, get_saved_context, get_recent_context, format_context_restoration
 from .vectors import reindex_all_wisdom
 from .evolve import get_evolution_insights, get_evolution_summary, seed_evolution_insights
@@ -1081,6 +1081,12 @@ def cmd_hook(args):
         output = user_prompt(text)
         if output:
             print(output)
+    elif args.hook == 'stop':
+        if args.input:
+            text = " ".join(args.input)
+        else:
+            text = sys.stdin.read()
+        assistant_stop(text)
 
 
 def cmd_evolve(args):
@@ -1239,8 +1245,8 @@ def main():
 
     # Hook
     hook_parser = subparsers.add_parser('hook', help='Run a Claude Code hook')
-    hook_parser.add_argument('hook', choices=['start', 'end', 'prompt'])
-    hook_parser.add_argument('input', nargs='*', help='Input for prompt hook')
+    hook_parser.add_argument('hook', choices=['start', 'end', 'prompt', 'stop'])
+    hook_parser.add_argument('input', nargs='*', help='Input for prompt/stop hook')
 
     # Evolve
     evolve_parser = subparsers.add_parser('evolve', help='Manage evolution insights')
