@@ -139,6 +139,31 @@ from .observe import (
     SessionTranscript,
 )
 
+# Graph is optional (requires kuzu)
+try:
+    from .graph import (
+        add_concept,
+        add_edge,
+        link_concepts,
+        get_concept,
+        get_neighbors,
+        search_concepts,
+        spreading_activation,
+        activate_from_prompt,
+        format_activation_result,
+        get_graph_stats,
+        sync_wisdom_to_graph,
+        auto_link_new_concept,
+        Concept,
+        Edge,
+        ConceptType,
+        RelationType,
+        ActivationResult,
+        KUZU_AVAILABLE,
+    )
+except ImportError:
+    KUZU_AVAILABLE = False
+
 __all__ = [
     # Core
     "init_soul",
@@ -248,4 +273,23 @@ __all__ = [
     "LearningType",
     "Learning",
     "SessionTranscript",
+    # Concept Graph (optional)
+    "KUZU_AVAILABLE",
+    "add_concept",
+    "add_edge",
+    "link_concepts",
+    "get_concept",
+    "get_neighbors",
+    "search_concepts",
+    "spreading_activation",
+    "activate_from_prompt",
+    "format_activation_result",
+    "get_graph_stats",
+    "sync_wisdom_to_graph",
+    "auto_link_new_concept",
+    "Concept",
+    "Edge",
+    "ConceptType",
+    "RelationType",
+    "ActivationResult",
 ]

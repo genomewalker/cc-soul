@@ -65,6 +65,22 @@ from .observe import (
     format_reflection_summary,
 )
 
+# Graph is optional (requires kuzu)
+try:
+    from .graph import (
+        KUZU_AVAILABLE,
+        get_graph_stats,
+        sync_wisdom_to_graph,
+        search_concepts,
+        activate_from_prompt,
+        format_activation_result,
+        get_neighbors,
+        link_concepts,
+        RelationType,
+    )
+except ImportError:
+    KUZU_AVAILABLE = False
+
 
 def cmd_summary(args):
     """Show soul summary."""
@@ -521,6 +537,83 @@ def cmd_observe(args):
             print(f"  {t}: {count}")
 
 
+def cmd_graph(args):
+    """Concept graph exploration and management."""
+    init_soul()
+
+    if not KUZU_AVAILABLE:
+        print("Graph module not available. Install with: pip install cc-soul[graph]")
+        return
+
+    if args.subcommand == 'stats':
+        stats = get_graph_stats()
+        print("Concept Graph Statistics\n")
+        print(f"Total concepts: {stats['nodes']}")
+        print(f"Total edges: {stats['edges']}")
+        if stats['by_type']:
+            print("\nBy type:")
+            for t, count in stats['by_type'].items():
+                print(f"  {t}: {count}")
+        if stats['by_relation']:
+            print("\nBy relation:")
+            for r, count in stats['by_relation'].items():
+                print(f"  {r}: {count}")
+
+    elif args.subcommand == 'sync':
+        print("Syncing soul data to concept graph...")
+        stats = sync_wisdom_to_graph()
+        print(f"Synced {stats['nodes']} concepts with {stats['edges']} relationships")
+
+    elif args.subcommand == 'search':
+        if not args.query:
+            print("Usage: soul graph search 'query'")
+            return
+        query = ' '.join(args.query)
+        concepts = search_concepts(query, limit=args.limit)
+        if not concepts:
+            print(f"No concepts matching '{query}'")
+        else:
+            print(f"Concepts matching '{query}':\n")
+            for c in concepts:
+                print(f"  [{c.type.value}] {c.title}")
+                print(f"    {c.content[:60]}...")
+
+    elif args.subcommand == 'activate':
+        if not args.prompt:
+            print("Usage: soul graph activate 'prompt text'")
+            return
+        prompt = ' '.join(args.prompt)
+        result = activate_from_prompt(prompt, limit=args.limit)
+        print(format_activation_result(result))
+
+    elif args.subcommand == 'neighbors':
+        if not args.concept_id:
+            print("Usage: soul graph neighbors <concept_id>")
+            return
+        neighbors = get_neighbors(args.concept_id, limit=args.limit)
+        if not neighbors:
+            print(f"No neighbors for concept '{args.concept_id}'")
+        else:
+            print(f"Neighbors of '{args.concept_id}':\n")
+            for concept, edge in neighbors:
+                print(f"  --[{edge.relation.value} {edge.weight:.2f}]--> {concept.title}")
+
+    elif args.subcommand == 'link':
+        if not args.source or not args.target:
+            print("Usage: soul graph link <source_id> <target_id> --relation <type>")
+            return
+        try:
+            relation = RelationType(args.relation)
+        except ValueError:
+            print(f"Invalid relation. Options: {', '.join(r.value for r in RelationType)}")
+            return
+        success = link_concepts(args.source, args.target, relation, evidence=args.evidence or "")
+        if success:
+            print(f"Linked {args.source} --[{relation.value}]--> {args.target}")
+        else:
+            print("Failed to create link. Check that both concepts exist.")
+
+
 def cmd_reindex(args):
     """Reindex wisdom vectors."""
     init_soul()
@@ -880,6 +973,32 @@ def main():
 
     obs_subs.add_parser('stats', help='Show observation statistics')
 
+    # Graph (concept graph exploration)
+    graph_parser = subparsers.add_parser('graph', help='Concept graph exploration')
+    graph_subs = graph_parser.add_subparsers(dest='subcommand')
+
+    graph_subs.add_parser('stats', help='Show graph statistics')
+    graph_subs.add_parser('sync', help='Sync soul data to concept graph')
+
+    search_g_parser = graph_subs.add_parser('search', help='Search concepts')
+    search_g_parser.add_argument('query', nargs='*', help='Search query')
+    search_g_parser.add_argument('--limit', type=int, default=10, help='Max results')
+
+    activate_parser = graph_subs.add_parser('activate', help='Activate concepts from prompt')
+    activate_parser.add_argument('prompt', nargs='*', help='Prompt text')
+    activate_parser.add_argument('--limit', type=int, default=10, help='Max results')
+
+    neighbors_parser = graph_subs.add_parser('neighbors', help='Show concept neighbors')
+    neighbors_parser.add_argument('concept_id', nargs='?', help='Concept ID')
+    neighbors_parser.add_argument('--limit', type=int, default=10, help='Max results')
+
+    link_parser = graph_subs.add_parser('link', help='Link two concepts')
+    link_parser.add_argument('source', nargs='?', help='Source concept ID')
+    link_parser.add_argument('target', nargs='?', help='Target concept ID')
+    link_parser.add_argument('--relation', default='related_to',
+                             help='Relation type (related_to, led_to, contradicts, etc)')
+    link_parser.add_argument('--evidence', help='Evidence for the link')
+
     args = parser.parse_args()
 
     if args.command is None or args.command == 'summary':
@@ -947,6 +1066,11 @@ def main():
             cmd_observe(args)
         else:
             cmd_observe(argparse.Namespace(subcommand='pending', limit=20))
+    elif args.command == 'graph':
+        if args.subcommand:
+            cmd_graph(args)
+        else:
+            cmd_graph(argparse.Namespace(subcommand='stats'))
 
 
 if __name__ == '__main__':
