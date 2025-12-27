@@ -68,6 +68,17 @@ soul pending            # Pending wisdom applications
 soul reindex            # Rebuild vector index
 ```
 
+### Context Persistence (Survive Context Exhaustion)
+
+```bash
+soul save "key insight"                    # Save context for later
+soul save "blocker" --type blocker         # Save with type
+soul save "critical" --priority 10         # High priority context
+soul restore                               # Show recent saved context
+soul restore recent --hours 48             # Last 48 hours
+soul restore session                       # Current session only
+```
+
 ### Growing the Soul
 
 ```bash
@@ -87,6 +98,7 @@ soul stats health       # Detailed health overview
 soul stats timeline     # Application history over time
 soul stats top          # Top performing wisdom
 soul stats issues       # Decaying, failing, stale wisdom
+soul stats decay        # Visualize confidence decay over time
 ```
 
 ### Cross-Session Trends

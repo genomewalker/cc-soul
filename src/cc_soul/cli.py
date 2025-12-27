@@ -14,6 +14,7 @@ from .beliefs import get_beliefs, hold_belief
 from .vocabulary import get_vocabulary, learn_term
 from .identity import observe_identity, IdentityAspect
 from .hooks import session_start, session_end, user_prompt
+from .conversations import save_context, get_saved_context, get_recent_context, format_context_restoration
 from .vectors import reindex_all_wisdom
 from .evolve import get_evolution_insights, get_evolution_summary, seed_evolution_insights
 from .introspect import (
@@ -28,6 +29,8 @@ from .introspect import (
     get_growth_trajectory,
     get_learning_patterns,
     format_trends_report,
+    get_decay_visualization,
+    format_decay_chart,
 )
 from .improve import (
     diagnose,
@@ -96,6 +99,50 @@ def cmd_session(args):
             if w.get('context'):
                 print(f"    Context: {w['context'][:50]}...")
             print(f"    Applied: {w['applied_at']}")
+
+
+def cmd_save(args):
+    """Save context for later restoration."""
+    init_soul()
+
+    content = args.content
+    if not content:
+        print("Usage: soul save 'context to remember' [--type insight] [--priority 5]")
+        return
+
+    ctx_id = save_context(
+        content=content,
+        context_type=args.type,
+        priority=args.priority
+    )
+    print(f"Saved context [{args.type}] (id={ctx_id}, priority={args.priority})")
+
+
+def cmd_restore(args):
+    """Show saved context for restoration."""
+    init_soul()
+
+    if args.subcommand == 'recent':
+        contexts = get_recent_context(hours=args.hours, limit=args.limit)
+        if not contexts:
+            print(f"No context saved in the last {args.hours} hours")
+        else:
+            print(format_context_restoration(contexts))
+
+    elif args.subcommand == 'session':
+        contexts = get_saved_context(limit=args.limit)
+        if not contexts:
+            print("No context saved for current session")
+        else:
+            print(f"Saved context ({len(contexts)} items):\n")
+            for ctx in contexts:
+                icon = {'insight': '💡', 'decision': '⚖️', 'blocker': '🚧', 'progress': '📊', 'key_file': '📁', 'todo': '☐'}.get(ctx['type'], '•')
+                print(f"  {icon} [{ctx['type']}] P{ctx['priority']}: {ctx['content'][:80]}...")
+
+    else:
+        # Default: show recent
+        contexts = get_recent_context(hours=24, limit=20)
+        print(format_context_restoration(contexts))
 
 
 def cmd_grow(args):
@@ -211,6 +258,10 @@ def cmd_stats(args):
 
         if not has_issues:
             print("No issues found - all wisdom is healthy!")
+
+    elif args.subcommand == 'decay':
+        decay_data = get_decay_visualization(limit=args.limit)
+        print(format_decay_chart(decay_data))
 
 
 def cmd_trends(args):
@@ -520,6 +571,24 @@ def main():
     # Session
     subparsers.add_parser('session', help='Show wisdom applied this session')
 
+    # Save (context persistence)
+    save_parser = subparsers.add_parser('save', help='Save context for later restoration')
+    save_parser.add_argument('content', nargs='?', help='Context to save')
+    save_parser.add_argument('--type', choices=['insight', 'decision', 'blocker', 'progress', 'key_file', 'todo'],
+                            default='insight', help='Type of context')
+    save_parser.add_argument('--priority', type=int, default=5, help='Priority 1-10 (higher = more important)')
+
+    # Restore (context restoration)
+    restore_parser = subparsers.add_parser('restore', help='Restore saved context')
+    restore_subs = restore_parser.add_subparsers(dest='subcommand')
+
+    recent_parser = restore_subs.add_parser('recent', help='Show context from last N hours')
+    recent_parser.add_argument('--hours', type=int, default=24, help='Hours to look back')
+    recent_parser.add_argument('--limit', type=int, default=20, help='Max items to show')
+
+    session_ctx_parser = restore_subs.add_parser('session', help='Show context from current session')
+    session_ctx_parser.add_argument('--limit', type=int, default=20, help='Max items to show')
+
     # Grow
     grow_parser = subparsers.add_parser('grow', help='Grow the soul (add wisdom, beliefs, etc)')
     grow_parser.add_argument('type', choices=['wisdom', 'insight', 'fail', 'belief', 'identity', 'vocab'],
@@ -585,6 +654,9 @@ def main():
     stats_subs.add_parser('top', help='Top performing wisdom')
     stats_subs.add_parser('issues', help='Wisdom issues (decaying, failing, stale)')
 
+    decay_parser = stats_subs.add_parser('decay', help='Visualize wisdom confidence decay over time')
+    decay_parser.add_argument('--limit', type=int, default=20, help='Number of wisdom items to show')
+
     # Trends (cross-session analysis)
     trends_parser = subparsers.add_parser('trends', help='Cross-session trends and growth trajectory')
     trends_subs = trends_parser.add_subparsers(dest='subcommand')
@@ -629,6 +701,13 @@ def main():
         cmd_pending(args)
     elif args.command == 'session':
         cmd_session(args)
+    elif args.command == 'save':
+        cmd_save(args)
+    elif args.command == 'restore':
+        if args.subcommand:
+            cmd_restore(args)
+        else:
+            cmd_restore(argparse.Namespace(subcommand='recent', hours=24, limit=20))
     elif args.command == 'grow':
         cmd_grow(args)
     elif args.command == 'reindex':

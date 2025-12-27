@@ -317,3 +317,212 @@ def search_conversations(query: str, limit: int = 10) -> List[Dict]:
 
     conn.close()
     return results
+
+
+# =============================================================================
+# CONTEXT PERSISTENCE - Survive context exhaustion
+# =============================================================================
+
+def _ensure_context_table():
+    """Ensure session_context table exists."""
+    conn = get_db_connection()
+    c = conn.cursor()
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS session_context (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation_id INTEGER,
+            context_type TEXT NOT NULL,
+            content TEXT NOT NULL,
+            priority INTEGER DEFAULT 5,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (conversation_id) REFERENCES conversations(id)
+        )
+    ''')
+
+    conn.commit()
+    conn.close()
+
+
+def save_context(content: str, context_type: str = "insight", priority: int = 5, conv_id: int = None) -> int:
+    """
+    Save key context to survive context exhaustion.
+
+    Args:
+        content: The context to save
+        context_type: Type of context (insight, decision, blocker, progress, key_file)
+        priority: 1-10, higher = more important to restore
+        conv_id: Conversation ID (auto-detected if not provided)
+
+    Returns:
+        Context ID
+    """
+    _ensure_context_table()
+
+    from .core import SOUL_DIR
+    conv_file = SOUL_DIR / ".current_conversation"
+    if conv_id is None and conv_file.exists():
+        try:
+            conv_id = int(conv_file.read_text().strip())
+        except (ValueError, FileNotFoundError):
+            pass
+
+    conn = get_db_connection()
+    c = conn.cursor()
+
+    c.execute('''
+        INSERT INTO session_context (conversation_id, context_type, content, priority, created_at)
+        VALUES (?, ?, ?, ?, ?)
+    ''', (conv_id, context_type, content, priority, datetime.now().isoformat()))
+
+    ctx_id = c.lastrowid
+    conn.commit()
+    conn.close()
+
+    return ctx_id
+
+
+def get_saved_context(conv_id: int = None, limit: int = 20) -> List[Dict]:
+    """
+    Get saved context for current or specified session.
+
+    Returns context ordered by priority (highest first).
+    """
+    _ensure_context_table()
+
+    from .core import SOUL_DIR
+    conv_file = SOUL_DIR / ".current_conversation"
+    if conv_id is None and conv_file.exists():
+        try:
+            conv_id = int(conv_file.read_text().strip())
+        except (ValueError, FileNotFoundError):
+            pass
+
+    conn = get_db_connection()
+    c = conn.cursor()
+
+    if conv_id:
+        c.execute('''
+            SELECT id, context_type, content, priority, created_at
+            FROM session_context
+            WHERE conversation_id = ?
+            ORDER BY priority DESC, created_at DESC
+            LIMIT ?
+        ''', (conv_id, limit))
+    else:
+        c.execute('''
+            SELECT id, context_type, content, priority, created_at
+            FROM session_context
+            ORDER BY created_at DESC
+            LIMIT ?
+        ''', (limit,))
+
+    results = []
+    for row in c.fetchall():
+        results.append({
+            'id': row[0],
+            'type': row[1],
+            'content': row[2],
+            'priority': row[3],
+            'created_at': row[4]
+        })
+
+    conn.close()
+    return results
+
+
+def get_recent_context(hours: int = 24, limit: int = 30) -> List[Dict]:
+    """
+    Get context saved in the last N hours across all sessions.
+
+    Useful for resuming work after context exhaustion.
+    """
+    _ensure_context_table()
+
+    conn = get_db_connection()
+    c = conn.cursor()
+
+    cutoff = (datetime.now() - timedelta(hours=hours)).isoformat()
+
+    c.execute('''
+        SELECT sc.id, sc.context_type, sc.content, sc.priority, sc.created_at,
+               c.project, c.summary
+        FROM session_context sc
+        LEFT JOIN conversations c ON sc.conversation_id = c.id
+        WHERE sc.created_at > ?
+        ORDER BY sc.priority DESC, sc.created_at DESC
+        LIMIT ?
+    ''', (cutoff, limit))
+
+    results = []
+    for row in c.fetchall():
+        results.append({
+            'id': row[0],
+            'type': row[1],
+            'content': row[2],
+            'priority': row[3],
+            'created_at': row[4],
+            'project': row[5],
+            'session_summary': row[6]
+        })
+
+    conn.close()
+    return results
+
+
+def format_context_restoration(contexts: List[Dict]) -> str:
+    """Format saved context for injection at session start."""
+    if not contexts:
+        return ""
+
+    lines = []
+    lines.append("## 📚 Saved Context (from recent work)")
+    lines.append("")
+
+    type_icons = {
+        'insight': '💡',
+        'decision': '⚖️',
+        'blocker': '🚧',
+        'progress': '📊',
+        'key_file': '📁',
+        'todo': '☐',
+    }
+
+    by_type = {}
+    for ctx in contexts:
+        t = ctx['type']
+        if t not in by_type:
+            by_type[t] = []
+        by_type[t].append(ctx)
+
+    for ctx_type, items in by_type.items():
+        icon = type_icons.get(ctx_type, '•')
+        # Handle plural forms properly
+        if ctx_type.endswith('s'):
+            plural = ctx_type.title()
+        else:
+            plural = f"{ctx_type.title()}s"
+        lines.append(f"### {icon} {plural}")
+        for item in items[:5]:
+            content = item['content'][:150] + "..." if len(item['content']) > 150 else item['content']
+            lines.append(f"- {content}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def clear_old_context(days: int = 7):
+    """Clear context older than N days."""
+    _ensure_context_table()
+
+    conn = get_db_connection()
+    c = conn.cursor()
+
+    cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+    c.execute('DELETE FROM session_context WHERE created_at < ?', (cutoff,))
+
+    deleted = c.rowcount
+    conn.commit()
+    conn.close()
+
+    return deleted

@@ -375,6 +375,117 @@ def format_wisdom_stats(health: Dict, timeline: List[Dict] = None) -> str:
     return "\n".join(lines)
 
 
+def get_decay_visualization(limit: int = 20) -> Dict:
+    """
+    Get wisdom items with their decay curves for visualization.
+
+    Returns data structure suitable for ASCII chart rendering.
+    """
+    conn = get_db_connection()
+    c = conn.cursor()
+
+    c.execute('''
+        SELECT id, title, confidence, timestamp, last_used
+        FROM wisdom
+        ORDER BY confidence DESC
+        LIMIT ?
+    ''', (limit,))
+
+    wisdom_list = []
+    now = datetime.now()
+
+    for wid, title, confidence, timestamp, last_used in c.fetchall():
+        created = datetime.fromisoformat(timestamp) if timestamp else now
+        age_days = (now - created).days
+
+        if last_used:
+            last = datetime.fromisoformat(last_used)
+            inactive_days = (now - last).days
+        else:
+            inactive_days = age_days
+
+        # Calculate decay curve points (past and projected future)
+        months_inactive = inactive_days / 30.0
+        current_decay = 0.95 ** months_inactive
+        effective_conf = confidence * current_decay
+
+        # Project 6 months of decay
+        decay_curve = []
+        for future_months in range(7):
+            total_months = months_inactive + future_months
+            decay = 0.95 ** total_months
+            projected = confidence * decay
+            decay_curve.append({
+                'month': future_months,
+                'confidence': round(projected, 3),
+                'is_current': future_months == 0
+            })
+
+        wisdom_list.append({
+            'id': wid,
+            'title': title[:40],
+            'base_confidence': confidence,
+            'effective_confidence': effective_conf,
+            'inactive_days': inactive_days,
+            'decay_curve': decay_curve,
+        })
+
+    conn.close()
+
+    return {
+        'wisdom': wisdom_list,
+        'decay_rate': 0.95,
+        'decay_unit': 'month',
+    }
+
+
+def format_decay_chart(decay_data: Dict) -> str:
+    """Format decay visualization as ASCII chart."""
+    lines = []
+    lines.append("=" * 70)
+    lines.append("WISDOM DECAY VISUALIZATION")
+    lines.append("=" * 70)
+    lines.append(f"\nDecay rate: {decay_data['decay_rate']:.0%} per {decay_data['decay_unit']}")
+    lines.append("Bars show current effective confidence, projected 6 months\n")
+
+    for w in decay_data['wisdom'][:15]:
+        title = w['title'][:30].ljust(30)
+        eff = w['effective_confidence']
+        base = w['base_confidence']
+        inactive = w['inactive_days']
+
+        # Current bar
+        bar_len = int(eff * 40)
+        bar = "█" * bar_len + "░" * (40 - bar_len)
+
+        # Decay indicator
+        decay_pct = (1 - eff / base) * 100 if base > 0 else 0
+        if decay_pct > 20:
+            indicator = f"↓{decay_pct:.0f}%"
+        elif decay_pct > 0:
+            indicator = f"-{decay_pct:.0f}%"
+        else:
+            indicator = "new"
+
+        lines.append(f"{title} |{bar}| {eff:.0%} ({indicator})")
+
+        # Show projected decay for items with high confidence
+        if eff > 0.5 and inactive > 0:
+            future_bars = []
+            for point in w['decay_curve'][1:4]:  # Next 3 months
+                future_len = int(point['confidence'] * 10)
+                future_bars.append("▓" * future_len + "░" * (10 - future_len))
+            lines.append(f"{'':30} └─ Future: {' → '.join(future_bars)}")
+
+    # Legend
+    lines.append("\n" + "-" * 70)
+    lines.append("Legend: █ = current confidence, ▓ = projected future (3 months)")
+    lines.append("        ↓ = significant decay (>20%), - = minor decay")
+    lines.append("=" * 70)
+
+    return "\n".join(lines)
+
+
 def analyze_conversation_patterns(days: int = 30) -> Dict:
     """Analyze conversation patterns."""
     conn = get_db_connection()
