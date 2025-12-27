@@ -38,6 +38,8 @@ from .neural import (
     clear_session_work,
     summarize_session_work,
     get_session_work,
+    clear_session_commands,
+    get_session_commands,
 )
 from .greeting import format_memory_for_greeting, format_identity_context
 
@@ -70,7 +72,8 @@ def session_start(use_unified: bool = True) -> str:
     """
     init_soul()
     clear_session_wisdom()
-    clear_session_work()  # Fresh work tracker for this session
+    clear_session_work()  # Fresh fragment tracker
+    clear_session_commands()  # Fresh command buffer
 
     project = get_project_name()
     conv_id = start_conversation(project)
