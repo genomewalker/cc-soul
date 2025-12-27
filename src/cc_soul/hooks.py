@@ -15,6 +15,7 @@ from .conversations import start_conversation, end_conversation, get_recent_cont
 from .wisdom import quick_recall, clear_session_wisdom, get_session_wisdom
 from .vocabulary import get_vocabulary
 from .efficiency import format_efficiency_injection, get_compact_context
+from .curiosity import run_curiosity_cycle, format_questions_for_prompt, get_curiosity_stats
 
 
 def get_project_name() -> str:
@@ -95,6 +96,16 @@ def session_start() -> str:
         context_str = format_context_restoration(recent_context)
         if context_str:
             output.append(context_str)
+
+    # Run curiosity cycle to detect gaps and surface questions
+    try:
+        curiosity_stats = get_curiosity_stats()
+        if curiosity_stats.get('open_gaps', 0) > 0 or curiosity_stats.get('questions', {}).get('pending', 0) > 0:
+            questions = run_curiosity_cycle(max_questions=2)
+            if questions:
+                output.append(format_questions_for_prompt(questions, max_questions=2))
+    except Exception:
+        pass
 
     output.append("---")
     output.append("*Soul loaded. I remember who we are.*")
