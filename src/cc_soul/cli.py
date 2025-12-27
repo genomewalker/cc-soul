@@ -47,6 +47,17 @@ from .ultrathink import (
     record_discovery,
     commit_session_learnings,
 )
+from .efficiency import (
+    fingerprint_problem,
+    learn_problem_pattern,
+    add_file_hint,
+    get_file_hints,
+    record_decision,
+    recall_decisions,
+    get_compact_context,
+    format_efficiency_injection,
+    get_token_stats,
+)
 
 
 def cmd_summary(args):
@@ -379,6 +390,84 @@ def cmd_ultrathink(args):
         _ultrathink_ctx = None
 
 
+def cmd_efficiency(args):
+    """Token efficiency features - problem patterns, file hints, decisions."""
+    init_soul()
+
+    if args.subcommand == 'stats':
+        stats = get_token_stats()
+        print("Token Efficiency Statistics\n")
+        print(f"Problem patterns: {stats['problem_patterns']}")
+        print(f"Pattern matches: {stats['pattern_matches']}")
+        print(f"File hints: {stats['file_hints']}")
+        print(f"Decisions recorded: {stats['decisions']}")
+        print(f"\nEstimated tokens saved: ~{stats['estimated_tokens_saved']:,}")
+
+    elif args.subcommand == 'learn':
+        if not args.pattern_type or not args.solution:
+            print("Usage: soul efficiency learn 'pattern description' --type bug --solution 'how to solve'")
+            return
+        prompt = args.pattern_type  # Using positional as description
+        learn_problem_pattern(
+            prompt=prompt,
+            problem_type=args.type,
+            solution_pattern=args.solution,
+            file_hints=args.files.split(',') if args.files else None
+        )
+        print(f"Learned pattern: [{args.type}] {prompt[:50]}...")
+
+    elif args.subcommand == 'hint':
+        if not args.file_path or not args.purpose:
+            print("Usage: soul efficiency hint '/path/to/file.py' 'Purpose description'")
+            return
+        add_file_hint(
+            file_path=args.file_path,
+            purpose=args.purpose,
+            key_functions=args.functions.split(',') if args.functions else None,
+            related_to=args.related.split(',') if args.related else None
+        )
+        print(f"Added hint: {args.file_path}")
+
+    elif args.subcommand == 'decide':
+        if not args.topic or not args.decision:
+            print("Usage: soul efficiency decide 'Topic' 'Decision made'")
+            return
+        record_decision(
+            topic=args.topic,
+            decision=args.decision,
+            rationale=args.rationale or "",
+            context=args.context or ""
+        )
+        print(f"Recorded decision: {args.topic}")
+
+    elif args.subcommand == 'decisions':
+        decisions = recall_decisions(topic=args.topic, limit=args.limit)
+        if not decisions:
+            print("No decisions recorded")
+        else:
+            for d in decisions:
+                print(f"[{d['made_at'][:10]}] {d['topic']}")
+                print(f"  Decision: {d['decision'][:60]}...")
+                if d['rationale']:
+                    print(f"  Rationale: {d['rationale'][:50]}...")
+                print()
+
+    elif args.subcommand == 'compact':
+        ctx = get_compact_context(project=args.project)
+        print(ctx)
+
+    elif args.subcommand == 'check':
+        if not args.prompt:
+            print("Usage: soul efficiency check 'problem description'")
+            return
+        prompt = ' '.join(args.prompt)
+        injection = format_efficiency_injection(prompt)
+        if injection:
+            print(injection)
+        else:
+            print("No efficiency hints for this prompt")
+
+
 def cmd_reindex(args):
     """Reindex wisdom vectors."""
     init_soul()
@@ -689,6 +778,41 @@ def main():
     exit_parser = ultra_subs.add_parser('exit', help='Exit ultrathink and reflect')
     exit_parser.add_argument('summary', nargs='?', help='Session summary')
 
+    # Efficiency (token-saving features)
+    eff_parser = subparsers.add_parser('efficiency', help='Token efficiency features')
+    eff_subs = eff_parser.add_subparsers(dest='subcommand')
+
+    eff_subs.add_parser('stats', help='Show token efficiency statistics')
+
+    learn_parser = eff_subs.add_parser('learn', help='Learn a problem pattern')
+    learn_parser.add_argument('pattern_type', nargs='?', help='Problem description')
+    learn_parser.add_argument('--type', choices=['bug', 'feature', 'performance', 'refactor', 'config'],
+                              default='bug', help='Problem type')
+    learn_parser.add_argument('--solution', help='Solution pattern')
+    learn_parser.add_argument('--files', help='Comma-separated file hints')
+
+    hint_parser = eff_subs.add_parser('hint', help='Add file hint')
+    hint_parser.add_argument('file_path', nargs='?', help='File path')
+    hint_parser.add_argument('purpose', nargs='?', help='Purpose of file')
+    hint_parser.add_argument('--functions', help='Comma-separated key functions')
+    hint_parser.add_argument('--related', help='Comma-separated related keywords')
+
+    decide_parser = eff_subs.add_parser('decide', help='Record a decision')
+    decide_parser.add_argument('topic', nargs='?', help='Decision topic')
+    decide_parser.add_argument('decision', nargs='?', help='The decision made')
+    decide_parser.add_argument('--rationale', help='Why this decision')
+    decide_parser.add_argument('--context', help='Additional context')
+
+    decisions_parser = eff_subs.add_parser('decisions', help='List past decisions')
+    decisions_parser.add_argument('--topic', help='Filter by topic')
+    decisions_parser.add_argument('--limit', type=int, default=10, help='Max items')
+
+    compact_parser = eff_subs.add_parser('compact', help='Show compact context')
+    compact_parser.add_argument('--project', help='Filter by project')
+
+    check_parser = eff_subs.add_parser('check', help='Check efficiency hints for a prompt')
+    check_parser.add_argument('prompt', nargs='*', help='Prompt to check')
+
     args = parser.parse_args()
 
     if args.command is None or args.command == 'summary':
@@ -746,6 +870,11 @@ def main():
             cmd_ultrathink(args)
         else:
             print("Usage: soul ultrathink <enter|context|discover|exit>")
+    elif args.command == 'efficiency':
+        if args.subcommand:
+            cmd_efficiency(args)
+        else:
+            cmd_efficiency(argparse.Namespace(subcommand='stats'))
 
 
 if __name__ == '__main__':

@@ -11,9 +11,10 @@ from datetime import datetime
 from pathlib import Path
 
 from .core import init_soul, get_soul_context, SOUL_DIR
-from .conversations import start_conversation, end_conversation
+from .conversations import start_conversation, end_conversation, get_recent_context, format_context_restoration
 from .wisdom import quick_recall, clear_session_wisdom, get_session_wisdom
 from .vocabulary import get_vocabulary
+from .efficiency import format_efficiency_injection, get_compact_context
 
 
 def get_project_name() -> str:
@@ -88,6 +89,13 @@ def session_start() -> str:
             output.append(f"- **{term}:** {meaning[:60]}")
         output.append("")
 
+    # Check for saved context from recent work (survives context exhaustion)
+    recent_context = get_recent_context(hours=4, limit=10)
+    if recent_context:
+        context_str = format_context_restoration(recent_context)
+        if context_str:
+            output.append(context_str)
+
     output.append("---")
     output.append("*Soul loaded. I remember who we are.*")
 
@@ -127,16 +135,23 @@ def session_end() -> str:
 
 def user_prompt(user_input: str) -> str:
     """
-    UserPromptSubmit hook - Inject relevant wisdom and vocabulary for the task at hand.
+    UserPromptSubmit hook - Inject efficiency hints, wisdom, and vocabulary.
 
-    Uses quick_recall (keyword-based) instead of semantic_recall to avoid
-    loading the embedding model on every prompt. This reduces latency from
-    ~2s to ~50ms.
+    Uses multiple token-saving mechanisms:
+    1. Efficiency injection - problem patterns, file hints, past decisions
+    2. Quick recall (keyword-based) - avoids loading embedding model (~50ms vs ~2s)
+    3. Vocabulary matching - fast O(n) scan
     """
     if len(user_input.strip()) < 20:
         return ""
 
     output = []
+
+    # Check efficiency hints first (problem patterns, file hints, decisions)
+    efficiency = format_efficiency_injection(user_input)
+    if efficiency:
+        output.append(efficiency)
+        output.append("")
 
     # Check vocabulary for matching terms (fast O(n) scan)
     vocab = get_vocabulary()
