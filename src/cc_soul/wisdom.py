@@ -269,6 +269,33 @@ def recall_wisdom(
     return results[:limit]
 
 
+def get_wisdom_by_id(wisdom_id: str) -> Optional[Dict]:
+    """Get a specific wisdom entry by ID."""
+    conn = get_db_connection()
+    c = conn.cursor()
+
+    c.execute('''
+        SELECT id, type, title, content, domain, confidence, timestamp
+        FROM wisdom WHERE id = ?
+    ''', (wisdom_id,))
+
+    row = c.fetchone()
+    conn.close()
+
+    if not row:
+        return None
+
+    return {
+        'id': row[0],
+        'type': row[1],
+        'title': row[2],
+        'content': row[3],
+        'domain': row[4],
+        'confidence': row[5],
+        'timestamp': row[6],
+    }
+
+
 def quick_recall(query: str, limit: int = 5, domain: str = None) -> List[Dict]:
     """
     Fast keyword-based recall for hooks. No embedding model required.
