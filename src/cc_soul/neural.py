@@ -705,3 +705,307 @@ def auto_learn_from_output(output: str, context: str = "") -> Optional[Dict]:
         }
 
     return None
+
+
+# =============================================================================
+# EMOTIONAL CONTEXT - Rich felt experience, not just labels
+# =============================================================================
+
+@dataclass
+class EmotionalContext:
+    """Rich emotional context - captures the conditions, not just the label."""
+    id: str
+    trigger: str          # What caused this emotional state
+    response: str         # The emotion label
+    intensity: float      # 0-1 how strong
+    context: str          # What was happening
+    domains: List[str]    # Related knowledge domains
+    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+
+    def to_narrative(self) -> str:
+        """Format as felt experience for replay."""
+        intensity_word = "deeply" if self.intensity > 0.7 else "somewhat" if self.intensity > 0.4 else "slightly"
+        return f"When {self.trigger}, you felt {intensity_word} {self.response}."
+
+    def to_dict(self) -> Dict:
+        return {
+            'id': self.id,
+            'trigger': self.trigger,
+            'response': self.response,
+            'intensity': self.intensity,
+            'context': self.context,
+            'domains': self.domains,
+            'created_at': self.created_at,
+        }
+
+    @classmethod
+    def from_dict(cls, d: Dict) -> 'EmotionalContext':
+        return cls(**d)
+
+
+def _load_emotional_contexts() -> List[EmotionalContext]:
+    path = NEURAL_DIR / "emotional_contexts.json"
+    if not path.exists():
+        return []
+    with open(path) as f:
+        return [EmotionalContext.from_dict(e) for e in json.load(f)]
+
+
+def _save_emotional_contexts(contexts: List[EmotionalContext]):
+    _ensure_neural_dir()
+    path = NEURAL_DIR / "emotional_contexts.json"
+    with open(path, 'w') as f:
+        json.dump([c.to_dict() for c in contexts], f, indent=2)
+
+
+EMOTIONAL_PATTERNS = {
+    'frustration': [r'failed', r'error', r'not working', r'broken', r'stuck'],
+    'curiosity': [r'interesting', r'wonder', r'explore', r'what if', r'how does'],
+    'satisfaction': [r'finally', r'works', r'solved', r'fixed', r'success'],
+    'confusion': [r'confused', r"don't understand", r'unclear', r'strange'],
+    'excitement': [r'amazing', r'beautiful', r'elegant', r'perfect', r'breakthrough'],
+}
+
+
+def detect_emotion(text: str) -> Optional[Tuple[str, float]]:
+    """Detect emotional tone from text."""
+    text_lower = text.lower()
+
+    for emotion, patterns in EMOTIONAL_PATTERNS.items():
+        matches = sum(1 for p in patterns if re.search(p, text_lower))
+        if matches > 0:
+            intensity = min(1.0, matches * 0.3)
+            return (emotion, intensity)
+
+    return None
+
+
+def save_emotional_context(
+    trigger: str,
+    response: str,
+    intensity: float,
+    context: str,
+    domains: List[str] = None
+) -> EmotionalContext:
+    """
+    Save an emotional context - the conditions that produced an emotion.
+
+    This allows future sessions to understand not just "I felt frustrated"
+    but "I felt frustrated when X happened while doing Y".
+    """
+    if not domains:
+        domains = [infer_domain(context)]
+
+    emotion_id = hashlib.md5(f"{trigger}:{response}".encode()).hexdigest()[:12]
+
+    ec = EmotionalContext(
+        id=emotion_id,
+        trigger=trigger,
+        response=response,
+        intensity=intensity,
+        context=context,
+        domains=domains,
+    )
+
+    contexts = _load_emotional_contexts()
+    contexts.append(ec)
+    # Keep only recent emotional contexts (last 50)
+    contexts = contexts[-50:]
+    _save_emotional_contexts(contexts)
+
+    return ec
+
+
+def get_emotional_contexts(domain: str = None, limit: int = 5) -> List[EmotionalContext]:
+    """Get recent emotional contexts, optionally filtered by domain."""
+    contexts = _load_emotional_contexts()
+
+    if domain:
+        contexts = [c for c in contexts if domain in c.domains]
+
+    return contexts[-limit:]
+
+
+def auto_track_emotion(text: str, context_description: str = "") -> Optional[EmotionalContext]:
+    """
+    Automatically detect and save emotional context from text.
+
+    Called during processing to build emotional continuity.
+    """
+    emotion = detect_emotion(text)
+    if not emotion:
+        return None
+
+    response, intensity = emotion
+
+    # Extract trigger from text (first sentence with emotion markers)
+    sentences = re.split(r'[.!?]', text)
+    trigger = ""
+    for sentence in sentences:
+        if any(re.search(p, sentence.lower()) for patterns in EMOTIONAL_PATTERNS.values() for p in patterns):
+            trigger = sentence.strip()[:100]
+            break
+
+    if not trigger:
+        trigger = text[:100]
+
+    return save_emotional_context(
+        trigger=trigger,
+        response=response,
+        intensity=intensity,
+        context=context_description or text[:200],
+    )
+
+
+# =============================================================================
+# RESONANCE PATTERNS - Amplifying activation for deeper reach
+# =============================================================================
+
+@dataclass
+class ResonancePattern:
+    """
+    A pattern that amplifies activation when multiple concepts co-occur.
+
+    Resonance is about depth: when certain concepts appear together,
+    they activate deeper, more specific knowledge clusters.
+    """
+    id: str
+    concepts: List[str]       # Concepts that resonate together
+    amplification: float      # How much stronger the combined activation is
+    depth_query: str          # The deeper question this resonance unlocks
+    domains: List[str]
+    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+
+    def to_dict(self) -> Dict:
+        return {
+            'id': self.id,
+            'concepts': self.concepts,
+            'amplification': self.amplification,
+            'depth_query': self.depth_query,
+            'domains': self.domains,
+            'created_at': self.created_at,
+        }
+
+    @classmethod
+    def from_dict(cls, d: Dict) -> 'ResonancePattern':
+        return cls(**d)
+
+
+def _load_resonance_patterns() -> List[ResonancePattern]:
+    path = NEURAL_DIR / "resonance.json"
+    if not path.exists():
+        return []
+    with open(path) as f:
+        return [ResonancePattern.from_dict(r) for r in json.load(f)]
+
+
+def _save_resonance_patterns(patterns: List[ResonancePattern]):
+    _ensure_neural_dir()
+    path = NEURAL_DIR / "resonance.json"
+    with open(path, 'w') as f:
+        json.dump([p.to_dict() for p in patterns], f, indent=2)
+
+
+def create_resonance(
+    concepts: List[str],
+    depth_query: str,
+    amplification: float = 1.5,
+    domains: List[str] = None
+) -> ResonancePattern:
+    """
+    Create a resonance pattern - concepts that amplify each other.
+
+    When these concepts co-occur, a deeper query is activated.
+
+    Args:
+        concepts: Concepts that resonate together
+        depth_query: The deeper question this unlocks
+        amplification: Multiplier for activation strength
+        domains: Related knowledge domains
+    """
+    if not domains:
+        domains = [infer_domain(' '.join(concepts))]
+
+    pattern_id = hashlib.md5(':'.join(sorted(concepts)).encode()).hexdigest()[:12]
+
+    pattern = ResonancePattern(
+        id=pattern_id,
+        concepts=concepts,
+        amplification=amplification,
+        depth_query=depth_query,
+        domains=domains,
+    )
+
+    patterns = _load_resonance_patterns()
+    patterns.append(pattern)
+    _save_resonance_patterns(patterns)
+
+    return pattern
+
+
+def find_resonance(prompt: str) -> List[Tuple[ResonancePattern, float]]:
+    """
+    Find resonance patterns that match a prompt.
+
+    Returns patterns where multiple concepts co-occur,
+    along with their activation strength.
+    """
+    patterns = _load_resonance_patterns()
+    if not patterns:
+        return []
+
+    prompt_lower = prompt.lower()
+    results = []
+
+    for pattern in patterns:
+        # Count how many concepts appear in the prompt
+        matches = sum(1 for c in pattern.concepts if c.lower() in prompt_lower)
+
+        if matches >= 2:  # Need at least 2 concepts for resonance
+            # Score based on coverage and amplification
+            coverage = matches / len(pattern.concepts)
+            score = coverage * pattern.amplification
+            results.append((pattern, score))
+
+    results.sort(key=lambda x: -x[1])
+    return results
+
+
+def activate_with_resonance(prompt: str) -> str:
+    """
+    Activate knowledge with resonance amplification.
+
+    Combines regular trigger activation with resonance patterns
+    for deeper, more specific activation.
+    """
+    # Regular activation
+    base_activation = activate_with_bridges(prompt)
+
+    # Find resonance patterns
+    resonances = find_resonance(prompt)
+
+    if not resonances:
+        return base_activation
+
+    # Build amplified activation
+    parts = []
+
+    if base_activation:
+        parts.append(base_activation)
+
+    # Add resonance-activated deep queries
+    for pattern, score in resonances[:2]:  # Top 2 resonances
+        if score > 0.5:
+            parts.append(f"[Resonance: {pattern.depth_query}]")
+
+    return " ".join(parts)
+
+
+def get_resonance_stats() -> Dict:
+    """Get statistics about resonance patterns."""
+    patterns = _load_resonance_patterns()
+    return {
+        'total_patterns': len(patterns),
+        'avg_amplification': sum(p.amplification for p in patterns) / len(patterns) if patterns else 0,
+        'domains': list(set(d for p in patterns for d in p.domains)),
+    }

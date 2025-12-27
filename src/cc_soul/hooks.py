@@ -24,10 +24,12 @@ from .unified import (
     forward_pass,
     format_session_start,
     format_prompt_context,
+    format_context,
     process_session_start,
     process_prompt,
     record_moment,
 )
+from .neural import auto_learn_from_output, save_growth_vector, auto_track_emotion
 
 
 def get_project_name() -> str:
@@ -141,7 +143,7 @@ def session_end() -> str:
     """
     Session end hook - Close the conversation record.
 
-    Shows wisdom that was applied during the session.
+    Shows wisdom that was applied during the session and prompts for reflection.
     """
     conv_file = SOUL_DIR / ".current_conversation"
 
@@ -153,78 +155,126 @@ def session_end() -> str:
         except (ValueError, FileNotFoundError):
             pass
 
-    # Show session wisdom summary
-    output = ["\n# 🌙 Session Complete\n"]
+    output = ["\n# Session Complete\n"]
 
+    # Show session wisdom summary
     session_wisdom = get_session_wisdom()
     if session_wisdom:
-        output.append(f"## Wisdom Applied This Session ({len(session_wisdom)})")
+        output.append(f"## Wisdom Applied ({len(session_wisdom)})")
         for w in session_wisdom:
             output.append(f"- **{w['title']}**")
-            if w.get('context'):
-                output.append(f"  Context: {w['context'][:60]}...")
         output.append("")
+
+    # Reflection prompt - nudge for organic learning
+    output.append("## Reflection")
+    output.append("Before ending, consider: What did you learn? What patterns emerged?")
+    output.append("Use `soul grow wisdom` or `soul neural learn` to crystallize insights.")
+    output.append("")
 
     return "\n".join(output)
 
 
-def user_prompt(user_input: str) -> str:
+def assistant_stop(assistant_output: str) -> str:
     """
-    UserPromptSubmit hook - Inject efficiency hints, wisdom, and vocabulary.
+    AssistantStop hook - Auto-learn from assistant output.
 
-    Uses multiple token-saving mechanisms:
-    1. Efficiency injection - problem patterns, file hints, past decisions
-    2. Quick recall (keyword-based) - avoids loading embedding model (~50ms vs ~2s)
-    3. Vocabulary matching - fast O(n) scan
+    Detects breakthrough patterns and extracts learnings automatically.
+    Also tracks emotional context for felt continuity.
+    This is the organic learning flow - no explicit calls needed.
+    """
+    if len(assistant_output.strip()) < 100:
+        return ""
+
+    # Try to auto-learn from the output
+    auto_learn_from_output(assistant_output)
+
+    # Track emotional context for felt continuity
+    auto_track_emotion(assistant_output)
+
+    # Silent learning - no output to avoid noise
+    return ""
+
+
+def notification_shown(tool_name: str, success: bool, output: str) -> str:
+    """
+    NotificationShown hook - Learn from tool completions.
+
+    Especially interesting: error → success patterns indicate breakthroughs.
+    """
+    if not success or len(output) < 50:
+        return ""
+
+    # Check for breakthrough patterns in tool output
+    result = auto_learn_from_output(output)
+
+    # Silent learning - no output
+    return ""
+
+
+def user_prompt(user_input: str, use_woven: bool = False) -> str:
+    """
+    UserPromptSubmit hook - Inject soul context organically.
+
+    Two modes:
+    - woven (default: False): Organic fragments without headers
+    - structured: Header-based for visibility
+
+    Uses unified forward pass for coherent context.
     """
     if len(user_input.strip()) < 20:
         return ""
 
     output = []
 
-    # Check efficiency hints first (problem patterns, file hints, decisions)
-    efficiency = format_efficiency_injection(user_input)
-    if efficiency:
-        output.append(efficiency)
-        output.append("")
+    # Run unified forward pass for coherent context
+    try:
+        ctx = forward_pass(user_input, session_type="prompt")
 
-    # Check vocabulary for matching terms (fast O(n) scan)
-    vocab = get_vocabulary()
-    input_lower = user_input.lower()
-    matching_terms = {
-        term: meaning for term, meaning in vocab.items()
-        if term.lower() in input_lower
-    }
+        if use_woven:
+            # Organic weaving - no headers, just flowing context
+            woven = format_context(ctx, style='woven')
+            if woven:
+                return woven
+        else:
+            # Structured format for clarity (current default)
+            # Check vocabulary for matching terms
+            vocab = get_vocabulary()
+            input_lower = user_input.lower()
+            matching_terms = {
+                term: meaning for term, meaning in vocab.items()
+                if term.lower() in input_lower
+            }
 
-    if matching_terms:
-        output.append("## 📖 Vocabulary")
-        for term, meaning in list(matching_terms.items())[:3]:
-            output.append(f"- **{term}:** {meaning[:80]}")
-        output.append("")
+            if matching_terms:
+                output.append("## 📖 Vocabulary")
+                for term, meaning in list(matching_terms.items())[:3]:
+                    output.append(f"- **{term}:** {meaning[:80]}")
+                output.append("")
 
-    results = quick_recall(user_input, limit=3)
+            # Wisdom from forward pass
+            if ctx.wisdom:
+                output.append("## 💡 Relevant Wisdom")
+                output.append("")
+                for w in ctx.wisdom[:2]:
+                    title = w.get('title', '')
+                    conf = w.get('confidence', 0)
+                    output.append(f"- **{title}** [{conf}%]")
+                    content = w.get('content', '')[:100]
+                    if content:
+                        output.append(f"  {content}")
+                output.append("")
 
-    if results:
-        relevant = [r for r in results if r.get('combined_score', r.get('effective_confidence', 0)) > 0.3]
-
-        if relevant:
-            output.append("## 💡 Relevant Wisdom")
-            output.append("")
-
-            for w in relevant[:2]:
-                conf = w.get('effective_confidence', w.get('confidence', 0))
-                type_icon = {
-                    'pattern': '🔄',
-                    'principle': '💎',
-                    'failure': '⚠️',
-                    'insight': '💡',
-                    'preference': '👤',
-                    'term': '📖'
-                }.get(w['type'], '•')
-
-                output.append(f"- {type_icon} **{w['title']}** [{conf:.0%}]")
-                content = w['content'][:120] + "..." if len(w['content']) > 120 else w['content']
-                output.append(f"  {content}")
+    except Exception:
+        # Fallback to simple quick recall
+        results = quick_recall(user_input, limit=3)
+        if results:
+            relevant = [r for r in results if r.get('combined_score', r.get('effective_confidence', 0)) > 0.3]
+            if relevant:
+                output.append("## 💡 Relevant Wisdom")
+                for w in relevant[:2]:
+                    output.append(f"- **{w['title']}**")
+                    content = w['content'][:100]
+                    output.append(f"  {content}")
                 output.append("")
 
     return "\n".join(output) if output else ""

@@ -120,6 +120,10 @@ from .neural import (
     save_growth_vector,
     get_growth_vectors,
     auto_learn_from_output,
+    create_resonance,
+    find_resonance,
+    get_resonance_stats,
+    get_emotional_contexts,
 )
 
 
@@ -958,6 +962,56 @@ def cmd_neural(args):
         else:
             print("No learnable content detected")
 
+    elif args.subcommand == 'resonance':
+        if not args.resonance_action:
+            print("Usage: soul neural resonance stats")
+            print("       soul neural resonance add --concepts 'ancient DNA' 'authentication' --query 'What confirms authenticity?'")
+            print("       soul neural resonance find 'your prompt'")
+            return
+
+        if args.resonance_action == 'stats':
+            stats = get_resonance_stats()
+            print("Resonance Pattern Statistics\n")
+            print(f"Total patterns: {stats.get('total_patterns', 0)}")
+            if stats.get('avg_amplification'):
+                print(f"Avg amplification: {stats['avg_amplification']:.2f}x")
+            if stats.get('domains'):
+                print(f"Domains: {', '.join(stats['domains'])}")
+
+        elif args.resonance_action == 'add':
+            if not args.concepts or not args.query:
+                print("Usage: soul neural resonance add --concepts 'concept1' 'concept2' --query 'deeper question'")
+                return
+            pattern = create_resonance(args.concepts, args.query, args.amp or 1.5)
+            print(f"Created resonance pattern: {pattern.id}")
+            print(f"Concepts: {', '.join(pattern.concepts)}")
+            print(f"Depth query: {pattern.depth_query}")
+
+        elif args.resonance_action == 'find':
+            if not args.prompt:
+                print("Usage: soul neural resonance find 'your prompt'")
+                return
+            prompt = ' '.join(args.prompt)
+            resonances = find_resonance(prompt)
+            if not resonances:
+                print("No resonance patterns matched")
+            else:
+                print(f"Found {len(resonances)} resonances:\n")
+                for pattern, score in resonances:
+                    print(f"  [{score:.0%}] {', '.join(pattern.concepts)}")
+                    print(f"       Depth: {pattern.depth_query}")
+
+    elif args.subcommand == 'emotions':
+        emotions = get_emotional_contexts(domain=args.domain, limit=args.limit or 10)
+        if not emotions:
+            print("No emotional contexts tracked yet")
+        else:
+            print(f"Emotional Contexts ({len(emotions)}):\n")
+            for e in emotions:
+                print(f"  [{e.response}] {e.trigger[:50]}...")
+                print(f"    Intensity: {'█' * int(e.intensity * 10)}{'░' * (10 - int(e.intensity * 10))}")
+                print()
+
 
 def cmd_reindex(args):
     """Reindex wisdom vectors."""
@@ -1429,6 +1483,17 @@ def main():
 
     neural_learn = neural_subs.add_parser('learn', help='Extract learnings from text')
     neural_learn.add_argument('text', nargs='*', help='Text to analyze for learnings')
+
+    neural_resonance = neural_subs.add_parser('resonance', help='Resonance patterns for deeper activation')
+    neural_resonance.add_argument('resonance_action', nargs='?', choices=['stats', 'add', 'find'], help='Action')
+    neural_resonance.add_argument('prompt', nargs='*', help='Prompt for find action')
+    neural_resonance.add_argument('--concepts', nargs='*', help='Concepts that resonate')
+    neural_resonance.add_argument('--query', help='Deeper question to activate')
+    neural_resonance.add_argument('--amp', type=float, help='Amplification factor (default 1.5)')
+
+    neural_emotions = neural_subs.add_parser('emotions', help='View tracked emotional contexts')
+    neural_emotions.add_argument('--domain', help='Filter by domain')
+    neural_emotions.add_argument('--limit', type=int, default=10, help='Max results')
 
     args = parser.parse_args()
 

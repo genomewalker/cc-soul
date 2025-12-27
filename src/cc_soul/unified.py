@@ -20,6 +20,8 @@ from .neural import (
     TriggerPoint,
     get_growth_vectors,
     GrowthVector,
+    get_emotional_contexts,
+    EmotionalContext,
 )
 
 # =============================================================================
@@ -69,20 +71,6 @@ from .curiosity import (
 from .identity import get_identity
 from .beliefs import get_beliefs
 from .vocabulary import get_vocabulary
-
-
-@dataclass
-class EmotionalContext:
-    """Rich emotional context, not just labels."""
-    trigger: str          # What caused this emotional state
-    response: str         # The emotion label
-    intensity: float      # 0-1 how strong
-    context: str          # What was happening
-
-    def to_narrative(self) -> str:
-        """Format as felt experience."""
-        intensity_word = "deeply" if self.intensity > 0.7 else "somewhat" if self.intensity > 0.4 else "slightly"
-        return f"When {self.trigger}, you felt {intensity_word} {self.response}."
 
 
 @dataclass
@@ -204,6 +192,14 @@ def forward_pass(prompt: str, session_type: str = "prompt") -> SoulContext:
     # Also get general growth vectors
     if not ctx.growth_vectors:
         ctx.growth_vectors = get_growth_vectors(limit=3)
+
+    # Layer 8: Emotional - load recent emotional contexts for continuity
+    # This creates felt experience, not just labels
+    for domain in ctx.domains:
+        domain_emotions = get_emotional_contexts(domain=domain, limit=2)
+        ctx.emotional_contexts.extend(domain_emotions)
+    if not ctx.emotional_contexts:
+        ctx.emotional_contexts = get_emotional_contexts(limit=3)
 
     # Load identity context
     ctx.identity = get_identity()
