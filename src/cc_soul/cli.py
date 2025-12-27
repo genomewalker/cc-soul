@@ -24,6 +24,10 @@ from .introspect import (
     get_wisdom_timeline,
     get_wisdom_health,
     format_wisdom_stats,
+    get_session_comparison,
+    get_growth_trajectory,
+    get_learning_patterns,
+    format_trends_report,
 )
 from .improve import (
     diagnose,
@@ -207,6 +211,55 @@ def cmd_stats(args):
 
         if not has_issues:
             print("No issues found - all wisdom is healthy!")
+
+
+def cmd_trends(args):
+    """Show cross-session trends and growth trajectory."""
+    init_soul()
+
+    if args.subcommand == 'growth':
+        trajectory = get_growth_trajectory(days=args.days)
+        comparison = get_session_comparison(session_count=args.sessions)
+        patterns = get_learning_patterns()
+        print(format_trends_report(comparison, trajectory, patterns))
+
+    elif args.subcommand == 'sessions':
+        comparison = get_session_comparison(session_count=args.sessions)
+        print(f"Session Analysis ({comparison['sessions_analyzed']} sessions)\n")
+        print(f"Total wisdom gained: {comparison['total_wisdom_gained']}")
+        print(f"Avg per session: {comparison['avg_wisdom_per_session']}\n")
+        for s in comparison['sessions']:
+            gained = f"+{s['wisdom_gained']}" if s['wisdom_gained'] > 0 else "0"
+            project = s['project'] or 'unknown'
+            print(f"  {s['date']}: {project[:25]} ({gained} wisdom, {s['wisdom_applied']} applied)")
+            if s['summary']:
+                print(f"    {s['summary'][:60]}...")
+
+    elif args.subcommand == 'patterns':
+        patterns = get_learning_patterns()
+        print("Learning Patterns\n")
+        print(f"Recent wisdom analyzed: {patterns['recent_wisdom_count']}")
+        print(f"Dominant type: {patterns['dominant_type']}")
+        print(f"Growing domains: {', '.join(patterns['growing_domains'])}")
+        if patterns['temporal_patterns']['peak_hour'] is not None:
+            print(f"Peak learning: {patterns['temporal_patterns']['peak_day']}s at {patterns['temporal_patterns']['peak_hour']}:00")
+        print(f"\nType distribution: {patterns['type_distribution']}")
+        print(f"Domain distribution: {patterns['domain_distribution']}")
+
+    elif args.subcommand == 'velocity':
+        trajectory = get_growth_trajectory(days=args.days)
+        print(f"Learning Velocity ({trajectory['period_days']} days)\n")
+        print(f"Total wisdom gained: {trajectory['total_wisdom_gained']}")
+        print(f"Domains explored: {trajectory['total_domains']}")
+        print(f"Weekly velocity: {trajectory['avg_weekly_velocity']} wisdom/week")
+        print(f"Recent velocity: {trajectory['recent_velocity']} wisdom/week")
+        print(f"Trend: {trajectory['velocity_trend']}")
+        if trajectory.get('trajectory'):
+            print("\nWeekly progress:")
+            for t in trajectory['trajectory'][-12:]:
+                bar = "█" * min(30, t['gained'])
+                new_d = f" +{len(t['new_domains'])} domains" if t['new_domains'] else ""
+                print(f"  {t['week']}: {bar} {t['gained']}{new_d}")
 
 
 # Global ultrathink context (persists during session)
@@ -532,6 +585,22 @@ def main():
     stats_subs.add_parser('top', help='Top performing wisdom')
     stats_subs.add_parser('issues', help='Wisdom issues (decaying, failing, stale)')
 
+    # Trends (cross-session analysis)
+    trends_parser = subparsers.add_parser('trends', help='Cross-session trends and growth trajectory')
+    trends_subs = trends_parser.add_subparsers(dest='subcommand')
+
+    growth_parser = trends_subs.add_parser('growth', help='Full growth report')
+    growth_parser.add_argument('--days', type=int, default=90, help='Days to analyze')
+    growth_parser.add_argument('--sessions', type=int, default=10, help='Recent sessions to compare')
+
+    sessions_parser = trends_subs.add_parser('sessions', help='Session-by-session analysis')
+    sessions_parser.add_argument('--sessions', type=int, default=10, help='Number of sessions')
+
+    trends_subs.add_parser('patterns', help='Learning patterns analysis')
+
+    velocity_parser = trends_subs.add_parser('velocity', help='Learning velocity over time')
+    velocity_parser.add_argument('--days', type=int, default=90, help='Days to analyze')
+
     # Ultrathink (soul-integrated deep reasoning)
     ultra_parser = subparsers.add_parser('ultrathink', help='Soul-integrated deep reasoning mode')
     ultra_subs = ultra_parser.add_subparsers(dest='subcommand')
@@ -588,6 +657,11 @@ def main():
             cmd_stats(args)
         else:
             cmd_stats(argparse.Namespace(subcommand='health', days=30))
+    elif args.command == 'trends':
+        if args.subcommand:
+            cmd_trends(args)
+        else:
+            cmd_trends(argparse.Namespace(subcommand='growth', days=90, sessions=10))
     elif args.command == 'ultrathink':
         if args.subcommand:
             cmd_ultrathink(args)

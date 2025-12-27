@@ -13,6 +13,7 @@ from pathlib import Path
 from .core import init_soul, get_soul_context, SOUL_DIR
 from .conversations import start_conversation, end_conversation
 from .wisdom import quick_recall, clear_session_wisdom, get_session_wisdom
+from .vocabulary import get_vocabulary
 
 
 def get_project_name() -> str:
@@ -126,7 +127,7 @@ def session_end() -> str:
 
 def user_prompt(user_input: str) -> str:
     """
-    UserPromptSubmit hook - Inject relevant wisdom for the task at hand.
+    UserPromptSubmit hook - Inject relevant wisdom and vocabulary for the task at hand.
 
     Uses quick_recall (keyword-based) instead of semantic_recall to avoid
     loading the embedding model on every prompt. This reduces latency from
@@ -135,34 +136,45 @@ def user_prompt(user_input: str) -> str:
     if len(user_input.strip()) < 20:
         return ""
 
-    results = quick_recall(user_input, limit=3)
-
-    if not results:
-        return ""
-
-    relevant = [r for r in results if r.get('combined_score', r.get('effective_confidence', 0)) > 0.3]
-
-    if not relevant:
-        return ""
-
     output = []
-    output.append("## 💡 Relevant Wisdom")
-    output.append("")
 
-    for w in relevant[:2]:
-        conf = w.get('effective_confidence', w.get('confidence', 0))
-        type_icon = {
-            'pattern': '🔄',
-            'principle': '💎',
-            'failure': '⚠️',
-            'insight': '💡',
-            'preference': '👤',
-            'term': '📖'
-        }.get(w['type'], '•')
+    # Check vocabulary for matching terms (fast O(n) scan)
+    vocab = get_vocabulary()
+    input_lower = user_input.lower()
+    matching_terms = {
+        term: meaning for term, meaning in vocab.items()
+        if term.lower() in input_lower
+    }
 
-        output.append(f"- {type_icon} **{w['title']}** [{conf:.0%}]")
-        content = w['content'][:120] + "..." if len(w['content']) > 120 else w['content']
-        output.append(f"  {content}")
+    if matching_terms:
+        output.append("## 📖 Vocabulary")
+        for term, meaning in list(matching_terms.items())[:3]:
+            output.append(f"- **{term}:** {meaning[:80]}")
         output.append("")
 
-    return "\n".join(output)
+    results = quick_recall(user_input, limit=3)
+
+    if results:
+        relevant = [r for r in results if r.get('combined_score', r.get('effective_confidence', 0)) > 0.3]
+
+        if relevant:
+            output.append("## 💡 Relevant Wisdom")
+            output.append("")
+
+            for w in relevant[:2]:
+                conf = w.get('effective_confidence', w.get('confidence', 0))
+                type_icon = {
+                    'pattern': '🔄',
+                    'principle': '💎',
+                    'failure': '⚠️',
+                    'insight': '💡',
+                    'preference': '👤',
+                    'term': '📖'
+                }.get(w['type'], '•')
+
+                output.append(f"- {type_icon} **{w['title']}** [{conf:.0%}]")
+                content = w['content'][:120] + "..." if len(w['content']) > 120 else w['content']
+                output.append(f"  {content}")
+                output.append("")
+
+    return "\n".join(output) if output else ""
