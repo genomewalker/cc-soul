@@ -48,9 +48,9 @@ def grow_insight(title: str, content: str, domain: str = None) -> str:
     """
     from .wisdom import gain_wisdom, WisdomType
     result = gain_wisdom(
+        type=WisdomType.INSIGHT,
         title=title,
         content=content,
-        wisdom_type=WisdomType.INSIGHT,
         domain=domain
     )
     return f"Insight added: {title} (id: {result})"
@@ -67,9 +67,9 @@ def grow_failure(what_failed: str, why_it_failed: str, domain: str = None) -> st
     """
     from .wisdom import gain_wisdom, WisdomType
     result = gain_wisdom(
+        type=WisdomType.FAILURE,
         title=what_failed,
         content=why_it_failed,
-        wisdom_type=WisdomType.FAILURE,
         domain=domain
     )
     return f"Failure recorded: {what_failed} (id: {result})"
@@ -84,7 +84,7 @@ def hold_belief(statement: str, confidence: float = 0.8) -> str:
         confidence: Confidence level 0.0-1.0
     """
     from .beliefs import hold_belief as _hold_belief
-    result = _hold_belief(statement, confidence=confidence)
+    result = _hold_belief(statement, strength=confidence)
     return f"Belief held: {statement[:50]}... (id: {result})"
 
 
@@ -246,6 +246,26 @@ def soul_health() -> str:
 
     conn.close()
     return "\n".join(lines)
+
+
+@mcp.tool()
+def soul_mood(reflect: bool = False) -> str:
+    """Get the soul's current mood - its state of being.
+
+    Mood emerges from observable signals: context clarity, learning momentum,
+    wisdom engagement, partner connection, and energy patterns.
+
+    Args:
+        reflect: If True, returns a first-person reflective narrative.
+                 If False (default), returns structured status display.
+    """
+    from .mood import compute_mood, format_mood_display, get_mood_reflection
+    mood = compute_mood()
+
+    if reflect:
+        return get_mood_reflection(mood)
+    else:
+        return format_mood_display(mood)
 
 
 @mcp.tool()

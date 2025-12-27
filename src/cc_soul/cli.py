@@ -18,6 +18,7 @@ from .conversations import save_context, get_saved_context, get_recent_context, 
 from .vectors import reindex_all_wisdom
 from .evolve import get_evolution_insights, get_evolution_summary, seed_evolution_insights
 from .seed import seed_soul, is_seeded
+from .mood import compute_mood, format_mood_display, get_mood_reflection
 from .introspect import (
     generate_introspection_report,
     format_introspection_report,
@@ -374,6 +375,17 @@ def cmd_health(args):
     else:
         print("STATUS: THRIVING - All systems go")
     print("=" * 55)
+
+
+def cmd_mood(args):
+    """Show current soul mood."""
+    init_soul()
+    mood = compute_mood()
+
+    if args.reflect:
+        print(get_mood_reflection(mood))
+    else:
+        print(format_mood_display(mood))
 
 
 def cmd_budget(args):
@@ -1646,6 +1658,10 @@ def main():
     # Health check
     subparsers.add_parser('health', help='Check system health and dependencies')
 
+    # Mood
+    mood_parser = subparsers.add_parser('mood', help='Show current soul mood')
+    mood_parser.add_argument('--reflect', action='store_true', help='Show reflective narrative')
+
     # Budget (context window tracking)
     budget_parser = subparsers.add_parser('budget', help='Check context window budget')
     budget_parser.add_argument('transcript', nargs='?', help='Path to transcript file')
@@ -1968,6 +1984,8 @@ def main():
         cmd_seed(args)
     elif args.command == 'health':
         cmd_health(args)
+    elif args.command == 'mood':
+        cmd_mood(args)
     elif args.command == 'budget':
         cmd_budget(args)
     elif args.command == 'context':
