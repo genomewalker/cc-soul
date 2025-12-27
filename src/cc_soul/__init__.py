@@ -55,6 +55,11 @@ from .conversations import (
     get_conversation_stats,
     search_conversations,
     link_wisdom_application,
+    save_context,
+    get_saved_context,
+    get_recent_context,
+    format_context_restoration,
+    clear_old_context,
 )
 
 from .introspect import (
@@ -71,6 +76,8 @@ from .introspect import (
     get_growth_trajectory,
     get_learning_patterns,
     format_trends_report,
+    get_decay_visualization,
+    format_decay_chart,
 )
 
 from .improve import (
@@ -147,6 +154,11 @@ __all__ = [
     "get_conversation_stats",
     "search_conversations",
     "link_wisdom_application",
+    "save_context",
+    "get_saved_context",
+    "get_recent_context",
+    "format_context_restoration",
+    "clear_old_context",
     # Introspection
     "generate_introspection_report",
     "format_introspection_report",
@@ -161,6 +173,8 @@ __all__ = [
     "get_growth_trajectory",
     "get_learning_patterns",
     "format_trends_report",
+    "get_decay_visualization",
+    "format_decay_chart",
     # Improvement
     "diagnose",
     "create_proposal",
