@@ -6,11 +6,127 @@ No pre-written greetings - just context that Claude responds to naturally.
 """
 
 import sqlite3
+import subprocess
+from pathlib import Path
 from typing import Dict, List
 
 from .core import SOUL_DIR
 from .neural import get_emotional_contexts, get_growth_vectors
 from .conversations import get_recent_context
+
+
+def get_recent_files(project_dir: Path = None, limit: int = 5, hours: int = 24) -> List[str]:
+    """
+    Get recently modified files - exploits existing infrastructure.
+
+    Tries git first (canonical source of truth for version-controlled projects).
+    Falls back to filesystem modification times (works everywhere).
+    Claude interprets the file list naturally.
+    """
+    if project_dir is None:
+        project_dir = Path.cwd()
+
+    # Try git first
+    try:
+        result = subprocess.run(
+            ['git', 'rev-parse', '--is-inside-work-tree'],
+            capture_output=True, cwd=project_dir, timeout=2
+        )
+        if result.returncode == 0:
+            return _get_files_from_git(project_dir, limit)
+    except Exception:
+        pass
+
+    # Fall back to filesystem
+    return _get_files_from_filesystem(project_dir, limit, hours)
+
+
+def _get_files_from_git(project_dir: Path, limit: int) -> List[str]:
+    """Get files from git."""
+    try:
+        # Files changed in recent commits
+        result = subprocess.run(
+            ['git', 'diff', '--name-only', 'HEAD~3'],
+            capture_output=True, cwd=project_dir, timeout=5
+        )
+        files = [f for f in result.stdout.decode().split('\n') if f.strip()]
+
+        # Also check uncommitted changes
+        result2 = subprocess.run(
+            ['git', 'diff', '--name-only'],
+            capture_output=True, cwd=project_dir, timeout=5
+        )
+        uncommitted = [f for f in result2.stdout.decode().split('\n') if f.strip()]
+
+        # Combine and dedupe
+        all_files = list(dict.fromkeys(uncommitted + files))
+        return all_files[:limit]
+    except Exception:
+        return []
+
+
+def _get_files_from_filesystem(project_dir: Path, limit: int, hours: int) -> List[str]:
+    """Get recently modified files from filesystem modification times."""
+    import time
+
+    cutoff = time.time() - (hours * 3600)
+
+    # Skip common non-interesting directories
+    skip_dirs = {'.git', '__pycache__', 'node_modules', '.venv', 'venv', '.tox', 'dist', 'build'}
+
+    files = []
+    try:
+        for path in project_dir.rglob('*'):
+            # Skip directories and files in skip_dirs
+            if path.is_dir():
+                continue
+            if any(skip in path.parts for skip in skip_dirs):
+                continue
+
+            try:
+                mtime = path.stat().st_mtime
+                if mtime > cutoff:
+                    files.append((str(path.relative_to(project_dir)), mtime))
+            except (OSError, ValueError):
+                continue
+
+        # Sort by modification time, most recent first
+        files.sort(key=lambda x: -x[1])
+        return [f[0] for f in files[:limit]]
+    except Exception:
+        return []
+
+
+def get_project_status(project_dir: Path = None) -> Dict:
+    """
+    Query project status from git.
+
+    Provides context about the working state without tracking commands.
+    """
+    if project_dir is None:
+        project_dir = Path.cwd()
+
+    status = {'clean': True, 'branch': 'unknown', 'ahead': 0, 'behind': 0}
+
+    try:
+        # Check if working tree is clean
+        result = subprocess.run(
+            ['git', 'status', '--porcelain'],
+            capture_output=True, cwd=project_dir, timeout=5
+        )
+        status['clean'] = len(result.stdout.decode().strip()) == 0
+
+        # Get branch name
+        result = subprocess.run(
+            ['git', 'branch', '--show-current'],
+            capture_output=True, cwd=project_dir, timeout=5
+        )
+        status['branch'] = result.stdout.decode().strip()
+
+    except Exception:
+        pass
+
+    return status
 
 
 def get_memory_context() -> Dict:
@@ -21,6 +137,8 @@ def get_memory_context() -> Dict:
     - session_count: How many sessions we've had
     - last_project: What project we were in
     - recent_work: Recent progress/insights/blockers
+    - recent_files: Files we've been working with (from git)
+    - project_status: Current git status
     - emotional_thread: Recent emotional context
     - open_tension: Active growth vectors
     """
@@ -29,9 +147,15 @@ def get_memory_context() -> Dict:
         'session_count': 0,
         'last_project': None,
         'recent_work': None,
+        'recent_files': [],
+        'project_status': None,
         'emotional_thread': None,
         'open_tension': None,
     }
+
+    # Files from git - exploiting existing infrastructure
+    memories['recent_files'] = get_recent_files()
+    memories['project_status'] = get_project_status()
 
     if db_path.exists():
         conn = sqlite3.connect(db_path)
@@ -111,6 +235,15 @@ def format_memory_for_greeting() -> str:
         # Show whichever field has more content (handles old swapped data)
         content = rw['content'] if len(rw['content']) > len(rw['type']) else rw['type']
         parts.append(f"Recent: {content[:80]}")
+
+    # Files from git - what we've been working with
+    if mem['recent_files']:
+        files_str = ', '.join(mem['recent_files'][:5])
+        parts.append(f"Working with: {files_str}")
+
+    # Project status
+    if mem['project_status'] and not mem['project_status']['clean']:
+        parts.append("(uncommitted changes)")
 
     if mem['emotional_thread']:
         et = mem['emotional_thread']
