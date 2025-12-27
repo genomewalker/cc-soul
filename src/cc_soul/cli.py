@@ -93,6 +93,20 @@ from .curiosity import (
     GapType,
 )
 
+from .narrative import (
+    get_episode,
+    recall_breakthroughs,
+    recall_struggles,
+    recall_by_type,
+    recall_by_character,
+    get_recurring_characters,
+    get_emotional_journey,
+    format_episode_story,
+    get_narrative_stats,
+    EpisodeType,
+    EmotionalTone,
+)
+
 
 def cmd_summary(args):
     """Show soul summary."""
@@ -710,6 +724,103 @@ def cmd_curious(args):
         print(f"\nIncorporation rate: {stats['incorporation_rate']:.0%}")
 
 
+def cmd_story(args):
+    """Narrative memory - stories and episodes."""
+    init_soul()
+
+    if args.subcommand == 'stats':
+        stats = get_narrative_stats()
+        print("Narrative Memory Statistics\n")
+        print(f"Total episodes: {stats['total_episodes']}")
+        print(f"Story threads: {stats['total_threads']} ({stats['ongoing_threads']} ongoing)")
+        print(f"Total time: {stats['total_hours']} hours")
+        if stats['by_type']:
+            print("\nBy type:")
+            for t, count in stats['by_type'].items():
+                print(f"  {t}: {count}")
+
+    elif args.subcommand == 'breakthroughs':
+        episodes = recall_breakthroughs(limit=args.limit)
+        if not episodes:
+            print("No breakthrough moments recorded yet")
+        else:
+            print(f"Breakthrough Moments ({len(episodes)}):\n")
+            for ep in episodes:
+                print(format_episode_story(ep))
+                print("\n---\n")
+
+    elif args.subcommand == 'struggles':
+        episodes = recall_struggles(limit=args.limit)
+        if not episodes:
+            print("No struggle moments recorded yet")
+        else:
+            print(f"Learning from Struggles ({len(episodes)}):\n")
+            for ep in episodes:
+                print(format_episode_story(ep))
+                print("\n---\n")
+
+    elif args.subcommand == 'journey':
+        journey = get_emotional_journey(days=args.days)
+        print(f"Emotional Journey (last {args.days} days)\n")
+        if journey['dominant']:
+            print(f"Dominant emotion: {journey['dominant']}")
+        print(f"Breakthroughs: {journey['breakthroughs']}")
+        print(f"Struggles: {journey['struggles']}")
+        if journey['distribution']:
+            print("\nDistribution:")
+            for emotion, pct in sorted(journey['distribution'].items(), key=lambda x: -x[1]):
+                bar = '█' * int(pct * 20)
+                print(f"  {emotion:15} {bar} {pct:.0%}")
+
+    elif args.subcommand == 'characters':
+        chars = get_recurring_characters(limit=args.limit)
+        print("Recurring Characters\n")
+        if chars['files']:
+            print("Files:")
+            for f, count in chars['files'][:10]:
+                print(f"  {f}: {count} episodes")
+        if chars['concepts']:
+            print("\nConcepts:")
+            for c, count in chars['concepts'][:10]:
+                print(f"  {c}: {count} episodes")
+        if chars['tools']:
+            print("\nTools:")
+            for t, count in chars['tools'][:10]:
+                print(f"  {t}: {count} episodes")
+
+    elif args.subcommand == 'episode':
+        if not args.id:
+            print("Usage: soul story episode <id>")
+            return
+        ep = get_episode(args.id)
+        if ep:
+            print(format_episode_story(ep))
+        else:
+            print(f"Episode {args.id} not found")
+
+    elif args.subcommand == 'recall':
+        if args.type:
+            try:
+                ep_type = EpisodeType(args.type)
+                episodes = recall_by_type(ep_type, limit=args.limit)
+            except ValueError:
+                print(f"Unknown type. Options: {', '.join(t.value for t in EpisodeType)}")
+                return
+        elif args.character:
+            episodes = recall_by_character(args.character, limit=args.limit)
+        else:
+            print("Usage: soul story recall --type <type> or --character <name>")
+            return
+
+        if not episodes:
+            print("No matching episodes")
+        else:
+            for ep in episodes:
+                print(f"[{ep.id}] {ep.title}")
+                if ep.summary:
+                    print(f"    {ep.summary[:60]}...")
+
+
 def cmd_reindex(args):
     """Reindex wisdom vectors."""
     init_soul()
@@ -1118,6 +1229,32 @@ def main():
 
     curious_subs.add_parser('stats', help='Show curiosity statistics')
 
+    # Story (narrative memory)
+    story_parser = subparsers.add_parser('story', help='Narrative memory - episodes and stories')
+    story_subs = story_parser.add_subparsers(dest='subcommand')
+
+    story_subs.add_parser('stats', help='Show narrative statistics')
+
+    breakthroughs_parser = story_subs.add_parser('breakthroughs', help='Recall breakthrough moments')
+    breakthroughs_parser.add_argument('--limit', type=int, default=5, help='Max episodes')
+
+    struggles_parser = story_subs.add_parser('struggles', help='Recall struggle moments')
+    struggles_parser.add_argument('--limit', type=int, default=5, help='Max episodes')
+
+    journey_parser = story_subs.add_parser('journey', help='Show emotional journey')
+    journey_parser.add_argument('--days', type=int, default=30, help='Days to analyze')
+
+    chars_parser = story_subs.add_parser('characters', help='Show recurring characters')
+    chars_parser.add_argument('--limit', type=int, default=10, help='Max characters')
+
+    episode_parser = story_subs.add_parser('episode', help='View a specific episode')
+    episode_parser.add_argument('id', type=int, nargs='?', help='Episode ID')
+
+    recall_parser = story_subs.add_parser('recall', help='Recall episodes by type or character')
+    recall_parser.add_argument('--type', help='Episode type (bugfix, feature, etc)')
+    recall_parser.add_argument('--character', help='Character name (file, concept)')
+    recall_parser.add_argument('--limit', type=int, default=10, help='Max episodes')
+
     args = parser.parse_args()
 
     if args.command is None or args.command == 'summary':
@@ -1195,6 +1332,11 @@ def main():
             cmd_curious(args)
         else:
             cmd_curious(argparse.Namespace(subcommand='gaps', limit=10))
+    elif args.command == 'story':
+        if args.subcommand:
+            cmd_story(args)
+        else:
+            cmd_story(argparse.Namespace(subcommand='stats'))
 
 
 if __name__ == '__main__':
