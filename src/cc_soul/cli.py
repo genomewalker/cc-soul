@@ -117,6 +117,9 @@ from .neural import (
     sync_wisdom_to_triggers,
     format_neural_context,
     reinforce_trigger,
+    save_growth_vector,
+    get_growth_vectors,
+    auto_learn_from_output,
 )
 
 
@@ -911,6 +914,50 @@ def cmd_neural(args):
                 print(f"  [{score:.0%}] {trigger.domain}")
                 print(f"       {' '.join(trigger.anchor_tokens)}")
 
+    elif args.subcommand == 'potential':
+        if not args.potential_action:
+            print("Usage: soul neural potential list [--domain <domain>]")
+            print("       soul neural potential add --obs 'what you noticed' --tension 'what seems unresolved' --potential 'what you might understand'")
+            return
+
+        if args.potential_action == 'list':
+            vectors = get_growth_vectors(domain=args.domain, limit=10)
+            if not vectors:
+                print("No growth vectors stored yet")
+            else:
+                print(f"Growth Vectors ({len(vectors)}):\n")
+                for v in vectors:
+                    print(f"  [{', '.join(v.domains)}]")
+                    print(f"    Observed: {v.observation[:60]}...")
+                    print(f"    Tension: {v.tension[:60]}...")
+                    print(f"    Potential: {v.potential[:60]}...")
+                    print()
+
+        elif args.potential_action == 'add':
+            if not args.obs or not args.tension or not args.potential:
+                print("Usage: soul neural potential add --obs '...' --tension '...' --potential '...'")
+                return
+            domains = [args.domain] if args.domain else None
+            v = save_growth_vector(args.obs, args.tension, args.potential, domains)
+            print(f"Saved growth vector: {v.id}")
+            print(f"Domains: {', '.join(v.domains)}")
+
+    elif args.subcommand == 'learn':
+        if not args.text:
+            print("Usage: soul neural learn 'text with potential insight'")
+            return
+        text = ' '.join(args.text)
+        result = auto_learn_from_output(text)
+        if result:
+            print(f"Extracted {result['type']}:")
+            if result['type'] == 'breakthrough':
+                print(f"  Insight: {result['insight'][:80]}...")
+            else:
+                print(f"  Learning: {result['content'][:80]}...")
+            print(f"  Trigger ID: {result['trigger_id']}")
+        else:
+            print("No learnable content detected")
+
 
 def cmd_reindex(args):
     """Reindex wisdom vectors."""
@@ -1372,6 +1419,16 @@ def main():
     neural_find = neural_subs.add_parser('find', help='Find triggers matching a prompt')
     neural_find.add_argument('prompt', nargs='*', help='Prompt text')
     neural_find.add_argument('--limit', type=int, default=5, help='Max results')
+
+    neural_potential = neural_subs.add_parser('potential', help='Manage growth vectors (unrealized potential)')
+    neural_potential.add_argument('potential_action', nargs='?', choices=['list', 'add'], help='Action')
+    neural_potential.add_argument('--domain', help='Filter by domain')
+    neural_potential.add_argument('--obs', help='What you observed')
+    neural_potential.add_argument('--tension', help='What seems unresolved')
+    neural_potential.add_argument('--potential', help='What you might understand')
+
+    neural_learn = neural_subs.add_parser('learn', help='Extract learnings from text')
+    neural_learn.add_argument('text', nargs='*', help='Text to analyze for learnings')
 
     args = parser.parse_args()
 
