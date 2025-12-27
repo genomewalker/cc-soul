@@ -115,6 +115,18 @@ from .ultrathink import (
     ReasoningPhase,
 )
 
+from .efficiency import (
+    fingerprint_problem,
+    learn_problem_pattern,
+    add_file_hint,
+    get_file_hints,
+    record_decision,
+    recall_decisions,
+    get_compact_context,
+    format_efficiency_injection,
+    get_token_stats,
+)
+
 __all__ = [
     # Core
     "init_soul",
@@ -204,4 +216,14 @@ __all__ = [
     "commit_session_learnings",
     "UltrathinkContext",
     "ReasoningPhase",
+    # Efficiency
+    "fingerprint_problem",
+    "learn_problem_pattern",
+    "add_file_hint",
+    "get_file_hints",
+    "record_decision",
+    "recall_decisions",
+    "get_compact_context",
+    "format_efficiency_injection",
+    "get_token_stats",
 ]
