@@ -676,6 +676,43 @@ def extract_learning(text: str) -> Optional[str]:
     return None
 
 
+TENSION_PATTERNS = [
+    r"the question remains",
+    r"still unclear",
+    r"need to explore",
+    r"worth investigating",
+    r"open question",
+    r"tension between",
+    r"trade-?off",
+    r"not yet clear",
+    r"remains to be seen",
+    r"might be worth",
+]
+
+
+def detect_tension(text: str) -> Optional[Dict]:
+    """
+    Detect unresolved tensions or open questions in text.
+
+    Returns extracted tension if found.
+    """
+    text_lower = text.lower()
+
+    for pattern in TENSION_PATTERNS:
+        if re.search(pattern, text_lower):
+            # Extract the sentence containing the pattern
+            sentences = re.split(r'[.!?]', text)
+            for sentence in sentences:
+                if re.search(pattern, sentence.lower()):
+                    return {
+                        'pattern': pattern,
+                        'tension': sentence.strip(),
+                        'domain': infer_domain(sentence),
+                    }
+
+    return None
+
+
 def auto_learn_from_output(output: str, context: str = "") -> Optional[Dict]:
     """
     Automatically extract and save learning from assistant output.
@@ -702,6 +739,22 @@ def auto_learn_from_output(output: str, context: str = "") -> Optional[Dict]:
             'type': 'learning',
             'content': learning,
             'trigger_id': trigger.id,
+        }
+
+    # Check for unresolved tensions -> create growth vectors
+    tension = detect_tension(output)
+    if tension:
+        # Create a growth vector for future exploration
+        vector = save_growth_vector(
+            observation=tension['tension'][:100],
+            tension="This remains unresolved",
+            potential="Deeper understanding may emerge",
+            domains=[tension['domain']],
+        )
+        return {
+            'type': 'tension',
+            'content': tension['tension'],
+            'vector_id': vector.id,
         }
 
     return None

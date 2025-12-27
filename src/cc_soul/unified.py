@@ -22,6 +22,8 @@ from .neural import (
     GrowthVector,
     get_emotional_contexts,
     EmotionalContext,
+    find_resonance,
+    ResonancePattern,
 )
 
 # =============================================================================
@@ -104,6 +106,9 @@ class SoulContext:
     # Layer 7: Potential (amplifier, not just mirror)
     growth_vectors: List[GrowthVector] = field(default_factory=list)
     emotional_contexts: List[EmotionalContext] = field(default_factory=list)
+
+    # Layer 8: Resonance (concepts that amplify together)
+    resonance_patterns: List[Tuple[ResonancePattern, float]] = field(default_factory=list)
 
     # Identity
     identity: Dict = field(default_factory=dict)
@@ -200,6 +205,10 @@ def forward_pass(prompt: str, session_type: str = "prompt") -> SoulContext:
         ctx.emotional_contexts.extend(domain_emotions)
     if not ctx.emotional_contexts:
         ctx.emotional_contexts = get_emotional_contexts(limit=3)
+
+    # Layer 9: Resonance - find amplifying concept patterns
+    # When multiple concepts co-occur, deeper queries are activated
+    ctx.resonance_patterns = find_resonance(prompt)
 
     # Load identity context
     ctx.identity = get_identity()
@@ -307,6 +316,11 @@ def _format_woven(ctx: SoulContext) -> str:
     # Weave emotional context as felt continuity
     for ec in ctx.emotional_contexts[:1]:
         fragments.append(ec.to_narrative())
+
+    # Weave resonance as deeper queries (when concepts amplify together)
+    for pattern, score in ctx.resonance_patterns[:1]:
+        if score > 0.5:
+            fragments.append(f"A deeper question: {pattern.depth_query}")
 
     # Weave questions as open threads
     for q in ctx.questions[:1]:
