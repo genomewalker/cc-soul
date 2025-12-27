@@ -81,6 +81,18 @@ try:
 except ImportError:
     KUZU_AVAILABLE = False
 
+from .curiosity import (
+    detect_all_gaps,
+    run_curiosity_cycle,
+    get_pending_questions,
+    get_curiosity_stats,
+    answer_question,
+    dismiss_question,
+    incorporate_answer_as_wisdom,
+    format_questions_for_prompt,
+    GapType,
+)
+
 
 def cmd_summary(args):
     """Show soul summary."""
@@ -614,6 +626,90 @@ def cmd_graph(args):
             print("Failed to create link. Check that both concepts exist.")
 
 
+def cmd_curious(args):
+    """Curiosity engine - detect gaps and ask questions."""
+    init_soul()
+
+    if args.subcommand == 'gaps':
+        gaps = detect_all_gaps()
+        if not gaps:
+            print("No knowledge gaps detected")
+        else:
+            type_icons = {
+                'recurring_problem': '🔄',
+                'repeated_correction': '✏️',
+                'unknown_file': '📁',
+                'missing_rationale': '❓',
+                'new_domain': '🌍',
+                'stale_wisdom': '📦',
+                'failed_pattern': '❌',
+            }
+            print(f"Knowledge Gaps ({len(gaps)}):\n")
+            for gap in gaps[:args.limit]:
+                icon = type_icons.get(gap.type.value, '•')
+                print(f"  {icon} [{gap.priority:.0%}] {gap.description[:60]}...")
+                if gap.evidence:
+                    print(f"      Evidence: {gap.evidence[0][:50]}...")
+
+    elif args.subcommand == 'questions':
+        questions = get_pending_questions(limit=args.limit)
+        if not questions:
+            print("No pending questions")
+        else:
+            print(f"Pending Questions ({len(questions)}):\n")
+            for q in questions:
+                print(f"  [{q.id}] ({q.priority:.0%}) {q.question}")
+                if q.context:
+                    print(f"      Context: {q.context[:50]}...")
+
+    elif args.subcommand == 'ask':
+        questions = run_curiosity_cycle(max_questions=args.limit)
+        if not questions:
+            print("No questions to ask right now")
+        else:
+            print(format_questions_for_prompt(questions, max_questions=args.limit))
+
+    elif args.subcommand == 'answer':
+        if not args.id or not args.answer:
+            print("Usage: soul curious answer <question_id> 'your answer'")
+            return
+        answer_text = ' '.join(args.answer)
+        success = answer_question(args.id, answer_text, incorporate=args.incorporate)
+        if success:
+            print(f"Recorded answer for question {args.id}")
+            if args.incorporate:
+                wisdom_id = incorporate_answer_as_wisdom(args.id)
+                if wisdom_id:
+                    print(f"Created wisdom entry {wisdom_id}")
+        else:
+            print(f"Question {args.id} not found")
+
+    elif args.subcommand == 'dismiss':
+        if not args.id:
+            print("Usage: soul curious dismiss <question_id>")
+            return
+        success = dismiss_question(args.id)
+        if success:
+            print(f"Dismissed question {args.id}")
+        else:
+            print(f"Question {args.id} not found")
+
+    elif args.subcommand == 'stats':
+        stats = get_curiosity_stats()
+        print("Curiosity Engine Statistics\n")
+        print(f"Open gaps: {stats['open_gaps']}")
+        if stats['gaps_by_type']:
+            print("\nGaps by type:")
+            for t, count in stats['gaps_by_type'].items():
+                print(f"  {t}: {count}")
+        print(f"\nQuestions:")
+        print(f"  Pending: {stats['questions']['pending']}")
+        print(f"  Answered: {stats['questions']['answered']}")
+        print(f"  Incorporated: {stats['questions']['incorporated']}")
+        print(f"  Dismissed: {stats['questions']['dismissed']}")
+        print(f"\nIncorporation rate: {stats['incorporation_rate']:.0%}")
+
+
 def cmd_reindex(args):
     """Reindex wisdom vectors."""
     init_soul()
@@ -999,6 +1095,29 @@ def main():
                              help='Relation type (related_to, led_to, contradicts, etc)')
     link_parser.add_argument('--evidence', help='Evidence for the link')
 
+    # Curious (curiosity engine)
+    curious_parser = subparsers.add_parser('curious', help='Curiosity engine - gaps and questions')
+    curious_subs = curious_parser.add_subparsers(dest='subcommand')
+
+    gaps_parser = curious_subs.add_parser('gaps', help='Detect knowledge gaps')
+    gaps_parser.add_argument('--limit', type=int, default=10, help='Max gaps to show')
+
+    questions_parser = curious_subs.add_parser('questions', help='Show pending questions')
+    questions_parser.add_argument('--limit', type=int, default=10, help='Max questions to show')
+
+    ask_parser = curious_subs.add_parser('ask', help='Run curiosity cycle and show questions to ask')
+    ask_parser.add_argument('--limit', type=int, default=3, help='Max questions to ask')
+
+    answer_parser = curious_subs.add_parser('answer', help='Answer a question')
+    answer_parser.add_argument('id', type=int, nargs='?', help='Question ID')
+    answer_parser.add_argument('answer', nargs='*', help='Your answer')
+    answer_parser.add_argument('--incorporate', action='store_true', help='Also create wisdom from answer')
+
+    dismiss_parser = curious_subs.add_parser('dismiss', help='Dismiss a question')
+    dismiss_parser.add_argument('id', type=int, nargs='?', help='Question ID')
+
+    curious_subs.add_parser('stats', help='Show curiosity statistics')
+
     args = parser.parse_args()
 
     if args.command is None or args.command == 'summary':
@@ -1071,6 +1190,11 @@ def main():
             cmd_graph(args)
         else:
             cmd_graph(argparse.Namespace(subcommand='stats'))
+    elif args.command == 'curious':
+        if args.subcommand:
+            cmd_curious(args)
+        else:
+            cmd_curious(argparse.Namespace(subcommand='gaps', limit=10))
 
 
 if __name__ == '__main__':

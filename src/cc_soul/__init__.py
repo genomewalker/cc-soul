@@ -164,6 +164,23 @@ try:
 except ImportError:
     KUZU_AVAILABLE = False
 
+from .curiosity import (
+    detect_all_gaps,
+    generate_question,
+    get_pending_questions,
+    mark_question_asked,
+    answer_question,
+    dismiss_question,
+    run_curiosity_cycle,
+    get_curiosity_stats,
+    format_questions_for_prompt,
+    incorporate_answer_as_wisdom,
+    GapType,
+    QuestionStatus,
+    Gap,
+    Question,
+)
+
 __all__ = [
     # Core
     "init_soul",
@@ -292,4 +309,19 @@ __all__ = [
     "ConceptType",
     "RelationType",
     "ActivationResult",
+    # Curiosity Engine
+    "detect_all_gaps",
+    "generate_question",
+    "get_pending_questions",
+    "mark_question_asked",
+    "answer_question",
+    "dismiss_question",
+    "run_curiosity_cycle",
+    "get_curiosity_stats",
+    "format_questions_for_prompt",
+    "incorporate_answer_as_wisdom",
+    "GapType",
+    "QuestionStatus",
+    "Gap",
+    "Question",
 ]
