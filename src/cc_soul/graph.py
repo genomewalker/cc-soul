@@ -544,8 +544,9 @@ def format_activation_result(result: ActivationResult) -> str:
 
 def get_graph_stats() -> Dict:
     """Get statistics about the concept graph."""
-    db, conn = get_graph_connection()
-    if not conn:
+    try:
+        db, conn = _ensure_graph_db()
+    except RuntimeError:
         return {'available': False}
 
     result = conn.execute("MATCH (c:Concept) RETURN count(c)")
@@ -634,8 +635,9 @@ def sync_wisdom_to_graph():
         )
         add_concept(concept)
 
-    # Infer relationships based on keyword overlap
-    _infer_relationships(conn)
+    # Get fresh connection for inference (original may be stale after add_concept calls)
+    _, fresh_conn = _ensure_graph_db()
+    _infer_relationships(fresh_conn)
 
     return get_graph_stats()
 
