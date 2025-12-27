@@ -518,3 +518,190 @@ def format_neural_context_minimal(prompt: str) -> str:
     if not activation:
         return ""
     return f"«{activation}»"
+
+
+# =============================================================================
+# GROWTH VECTORS - Unrealized Potential
+# =============================================================================
+
+@dataclass
+class GrowthVector:
+    """A direction of potential, not yet realized."""
+    id: str
+    observation: str
+    tension: str
+    domains: List[str]
+    potential: str
+    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+
+    def to_prompt(self) -> str:
+        """Format as a seed for future exploration."""
+        return f"You noticed: {self.observation}. The tension: {self.tension}. Perhaps today you'll see: {self.potential}"
+
+    def to_dict(self) -> Dict:
+        return {
+            'id': self.id,
+            'observation': self.observation,
+            'tension': self.tension,
+            'domains': self.domains,
+            'potential': self.potential,
+            'created_at': self.created_at,
+        }
+
+    @classmethod
+    def from_dict(cls, d: Dict) -> 'GrowthVector':
+        return cls(**d)
+
+
+def _load_growth_vectors() -> List[GrowthVector]:
+    path = NEURAL_DIR / "growth_vectors.json"
+    if not path.exists():
+        return []
+    with open(path) as f:
+        return [GrowthVector.from_dict(v) for v in json.load(f)]
+
+
+def _save_growth_vectors(vectors: List[GrowthVector]):
+    _ensure_neural_dir()
+    path = NEURAL_DIR / "growth_vectors.json"
+    with open(path, 'w') as f:
+        json.dump([v.to_dict() for v in vectors], f, indent=2)
+
+
+def save_growth_vector(
+    observation: str,
+    tension: str,
+    potential: str,
+    domains: List[str] = None
+) -> GrowthVector:
+    """
+    Save a growth vector - an unrealized potential for future exploration.
+
+    Args:
+        observation: What was noticed
+        tension: What seems unresolved
+        potential: What might be understood if pursued
+        domains: Relevant knowledge domains
+    """
+    if not domains:
+        domains = [infer_domain(observation)]
+
+    vector_id = hashlib.md5(f"{observation}:{tension}".encode()).hexdigest()[:12]
+
+    vector = GrowthVector(
+        id=vector_id,
+        observation=observation,
+        tension=tension,
+        domains=domains,
+        potential=potential,
+    )
+
+    vectors = _load_growth_vectors()
+    vectors.append(vector)
+    _save_growth_vectors(vectors)
+
+    return vector
+
+
+def get_growth_vectors(domain: str = None, limit: int = 5) -> List[GrowthVector]:
+    """Get growth vectors, optionally filtered by domain."""
+    vectors = _load_growth_vectors()
+
+    if domain:
+        vectors = [v for v in vectors if domain in v.domains]
+
+    return vectors[:limit]
+
+
+# =============================================================================
+# AUTO-LEARNING - Detect Breakthroughs
+# =============================================================================
+
+BREAKTHROUGH_PATTERNS = [
+    r"I see now",
+    r"the issue was",
+    r"the key insight",
+    r"aha",
+    r"finally understood",
+    r"root cause",
+    r"the problem was",
+    r"this means that",
+    r"surprisingly",
+    r"unexpectedly",
+]
+
+
+def detect_breakthrough(text: str) -> Optional[Dict]:
+    """
+    Detect if text contains a breakthrough moment.
+
+    Returns extracted insight if found.
+    """
+    text_lower = text.lower()
+
+    for pattern in BREAKTHROUGH_PATTERNS:
+        if re.search(pattern, text_lower):
+            # Extract the sentence containing the pattern
+            sentences = re.split(r'[.!?]', text)
+            for sentence in sentences:
+                if re.search(pattern, sentence.lower()):
+                    return {
+                        'pattern': pattern,
+                        'insight': sentence.strip(),
+                        'domain': infer_domain(sentence),
+                    }
+
+    return None
+
+
+def extract_learning(text: str) -> Optional[str]:
+    """
+    Extract learnable content from text.
+
+    Looks for patterns like "I learned", "The solution was", etc.
+    """
+    learning_patterns = [
+        (r"I learned[:\s]+(.+?)(?:\.|$)", 1),
+        (r"the solution was[:\s]+(.+?)(?:\.|$)", 1),
+        (r"the fix was[:\s]+(.+?)(?:\.|$)", 1),
+        (r"key takeaway[:\s]+(.+?)(?:\.|$)", 1),
+        (r"lesson learned[:\s]+(.+?)(?:\.|$)", 1),
+    ]
+
+    for pattern, group in learning_patterns:
+        match = re.search(pattern, text.lower())
+        if match:
+            return match.group(group).strip()
+
+    return None
+
+
+def auto_learn_from_output(output: str, context: str = "") -> Optional[Dict]:
+    """
+    Automatically extract and save learning from assistant output.
+
+    Called by hooks after significant completions.
+    Returns dict with what was learned, or None.
+    """
+    # Check for breakthrough
+    breakthrough = detect_breakthrough(output)
+    if breakthrough:
+        # Create trigger from the insight
+        trigger = create_trigger(breakthrough['insight'], breakthrough['domain'])
+        return {
+            'type': 'breakthrough',
+            'insight': breakthrough['insight'],
+            'trigger_id': trigger.id,
+        }
+
+    # Check for explicit learning
+    learning = extract_learning(output)
+    if learning:
+        trigger = create_trigger(learning)
+        return {
+            'type': 'learning',
+            'content': learning,
+            'trigger_id': trigger.id,
+        }
+
+    return None
