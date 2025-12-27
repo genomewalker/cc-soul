@@ -1019,6 +1019,141 @@ def cmd_reindex(args):
     reindex_all_wisdom()
 
 
+def cmd_install_hooks(args):
+    """Install Claude Code hooks for soul integration."""
+    import json
+    import importlib.resources as pkg_resources
+    from datetime import datetime
+
+    claude_dir = Path.home() / ".claude"
+    settings_path = claude_dir / "settings.json"
+    hooks_dir = claude_dir / "hooks"
+
+    # Create hooks directory
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+
+    # Backup existing settings
+    if settings_path.exists():
+        backup_name = f"settings.json.backup.{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        backup_path = claude_dir / backup_name
+        shutil.copy(settings_path, backup_path)
+        print(f"Backed up settings to: {backup_path}")
+
+        with open(settings_path) as f:
+            settings = json.load(f)
+    else:
+        settings = {}
+
+    # Ensure hooks section exists
+    if 'hooks' not in settings:
+        settings['hooks'] = {}
+
+    # Add soul hooks (preserving existing ones)
+    soul_hooks = {
+        "SessionStart": [
+            {"matcher": "startup", "hooks": [{"type": "command", "command": "soul hook start"}]},
+            {"matcher": "resume", "hooks": [{"type": "command", "command": "soul hook start"}]}
+        ],
+        "UserPromptSubmit": [
+            {"matcher": "", "hooks": [{"type": "command", "command": "soul hook prompt"}]}
+        ],
+        "Stop": [
+            {"matcher": "", "hooks": [{"type": "command", "command": str(hooks_dir / "soul-stop.sh")}]}
+        ],
+        "SessionEnd": [
+            {"matcher": "", "hooks": [{"type": "command", "command": "soul hook end"}]}
+        ]
+    }
+
+    for hook_name, hook_config in soul_hooks.items():
+        if hook_name not in settings['hooks']:
+            settings['hooks'][hook_name] = hook_config
+            print(f"Added {hook_name} hook")
+        else:
+            print(f"Skipped {hook_name} (already configured)")
+
+    # Write settings
+    with open(settings_path, 'w') as f:
+        json.dump(settings, f, indent=2)
+
+    # Install hook scripts from package
+    try:
+        hooks_src = Path(pkg_resources.files("cc_soul") / "hooks")
+    except (TypeError, AttributeError):
+        import pkg_resources as old_pkg
+        hooks_src = Path(old_pkg.resource_filename("cc_soul", "hooks"))
+
+    if hooks_src.exists():
+        for script in hooks_src.glob("*.sh"):
+            dest = hooks_dir / script.name
+            if dest.exists() and not args.force:
+                print(f"Skipped {script.name} (exists, use --force)")
+            else:
+                shutil.copy(script, dest)
+                dest.chmod(0o755)
+                print(f"Installed {script.name}")
+    else:
+        print(f"Warning: Hook scripts not found in package at {hooks_src}")
+
+    print()
+    print("Soul hooks installed!")
+    print("To uninstall: soul uninstall-hooks")
+
+    return 0
+
+
+def cmd_uninstall_hooks(args):
+    """Uninstall Claude Code hooks and restore settings backup."""
+    import json
+    from datetime import datetime
+
+    claude_dir = Path.home() / ".claude"
+    settings_path = claude_dir / "settings.json"
+    hooks_dir = claude_dir / "hooks"
+
+    # Find most recent backup
+    backups = sorted(claude_dir.glob("settings.json.backup.*"), reverse=True)
+
+    if args.restore and backups:
+        backup_path = backups[0]
+        print(f"Restoring from: {backup_path}")
+        shutil.copy(backup_path, settings_path)
+        print("Settings restored!")
+    elif settings_path.exists():
+        # Remove soul hooks from settings
+        with open(settings_path) as f:
+            settings = json.load(f)
+
+        if 'hooks' in settings:
+            removed = []
+            for hook_name in ['SessionStart', 'UserPromptSubmit', 'Stop', 'SessionEnd']:
+                if hook_name in settings['hooks']:
+                    del settings['hooks'][hook_name]
+                    removed.append(hook_name)
+
+            if removed:
+                with open(settings_path, 'w') as f:
+                    json.dump(settings, f, indent=2)
+                print(f"Removed hooks: {', '.join(removed)}")
+            else:
+                print("No soul hooks found in settings")
+
+    # Remove hook scripts
+    if hooks_dir.exists():
+        for script in ['soul-stop.sh']:
+            script_path = hooks_dir / script
+            if script_path.exists():
+                script_path.unlink()
+                print(f"Removed {script}")
+
+    print()
+    print("Soul hooks uninstalled!")
+    if backups:
+        print(f"Backup available: {backups[0]}")
+
+    return 0
+
+
 def cmd_install_skills(args):
     """Install bundled skills to ~/.claude/skills."""
     import importlib.resources as pkg_resources
@@ -1242,6 +1377,14 @@ def main():
     # Install skills
     install_parser = subparsers.add_parser('install-skills', help='Install bundled skills to ~/.claude/skills')
     install_parser.add_argument('--force', action='store_true', help='Overwrite existing skills')
+
+    # Install hooks
+    hooks_install_parser = subparsers.add_parser('install-hooks', help='Install Claude Code hooks for soul integration')
+    hooks_install_parser.add_argument('--force', action='store_true', help='Overwrite existing hook scripts')
+
+    # Uninstall hooks
+    hooks_uninstall_parser = subparsers.add_parser('uninstall-hooks', help='Uninstall Claude Code hooks')
+    hooks_uninstall_parser.add_argument('--restore', action='store_true', help='Restore settings from backup')
 
     # Hook
     hook_parser = subparsers.add_parser('hook', help='Run a Claude Code hook')
@@ -1526,6 +1669,10 @@ def main():
         cmd_reindex(args)
     elif args.command == 'install-skills':
         cmd_install_skills(args)
+    elif args.command == 'install-hooks':
+        cmd_install_hooks(args)
+    elif args.command == 'uninstall-hooks':
+        cmd_uninstall_hooks(args)
     elif args.command == 'hook':
         cmd_hook(args)
     elif args.command == 'evolve':
