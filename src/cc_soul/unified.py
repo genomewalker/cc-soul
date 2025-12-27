@@ -335,6 +335,13 @@ def _format_woven(ctx: SoulContext) -> str:
         domain_str = " and ".join(sorted(ctx.domains))
         fragments.append(f"Drawing on your understanding of {domain_str}.")
 
+    # Liminal probing - when conditions suggest depth is needed
+    # Multiple domains or strong resonance = probe the edges
+    if len(ctx.domains) > 1 or (ctx.resonance_patterns and ctx.resonance_patterns[0][1] > 0.6):
+        # Pick one domain and probe its fuzzy edges
+        domain = sorted(ctx.domains)[0] if ctx.domains else "this topic"
+        fragments.append(f"What aspects of {domain} feel just at the edge of your understanding?")
+
     return " ".join(fragments)
 
 
