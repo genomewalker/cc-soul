@@ -217,14 +217,24 @@ def create_trigger(text: str, domain: Optional[str] = None) -> TriggerPoint:
 
 def find_triggers(
     prompt: str,
-    top_k: int = 5,
-    threshold: float = 0.2
+    top_k: int = None,
 ) -> List[Tuple[TriggerPoint, float]]:
     """
     Find triggers relevant to a prompt using token overlap.
 
+    No threshold - everything resonates at some level.
     Scores based on Jaccard-like similarity between prompt tokens
     and anchor tokens. Domain bonus for matching domains.
+
+    Returns all matches weighted by score. Let the caller decide
+    what to surface - selection is late binding, not early gating.
+
+    Args:
+        prompt: The input text
+        top_k: Optional limit on results (None = all)
+
+    Returns:
+        List of (trigger, score) tuples, sorted by score descending
     """
     triggers = _load_triggers()
     if not triggers:
@@ -245,51 +255,71 @@ def find_triggers(
             union = len(prompt_tokens | anchor_set)
             overlap_score = intersection / union if union > 0 else 0.0
 
-        # Domain bonus
+        # Domain bonus - domain match amplifies
         domain_bonus = 0.2 if trigger.domain == prompt_domain else 0.0
 
         # Combined score
         score = overlap_score + domain_bonus
         score *= trigger.activation_strength
 
-        if score >= threshold:
-            results.append((trigger, score))
+        # Everything contributes - no threshold
+        # Even score=0 triggers exist in the background
+        results.append((trigger, score))
 
     results.sort(key=lambda x: -x[1])
-    return results[:top_k]
+
+    if top_k is not None:
+        return results[:top_k]
+    return results
 
 
-def activate(prompt: str) -> str:
+def activate(prompt: str, surface_top: int = 5) -> str:
     """
     Generate activation string for a prompt.
 
-    Collects anchor tokens from relevant triggers.
-    """
-    relevant = find_triggers(prompt, top_k=5)
+    Collects anchor tokens from relevant triggers using weighted contribution.
+    No threshold - weights determine contribution strength.
 
-    if not relevant:
+    Args:
+        prompt: The input text
+        surface_top: How many top triggers to surface in output
+    """
+    all_triggers = find_triggers(prompt)
+
+    if not all_triggers:
         return ""
 
-    all_tokens: Set[str] = set()
-    domains: Set[str] = set()
+    # Weighted token accumulation
+    # Higher scoring triggers contribute more tokens
+    token_weights: Dict[str, float] = {}
+    domain_weights: Dict[str, float] = {}
 
-    for trigger, score in relevant:
-        if score > 0.2:
-            all_tokens.update(trigger.anchor_tokens)
-            domains.add(trigger.domain)
-            trigger.use_count += 1
+    for trigger, score in all_triggers:
+        # All triggers contribute, weighted by score
+        for token in trigger.anchor_tokens:
+            token_weights[token] = token_weights.get(token, 0) + score
+        domain_weights[trigger.domain] = domain_weights.get(trigger.domain, 0) + score
+        trigger.use_count += 1
 
     # Save updated use counts
     triggers = _load_triggers()
-    for trigger, _ in relevant:
+    for trigger, _ in all_triggers[:surface_top]:
         if trigger.id in triggers:
             triggers[trigger.id].use_count = trigger.use_count
     _save_triggers(triggers)
 
-    if not all_tokens:
+    # Surface tokens by weight, not by arbitrary cutoff
+    sorted_tokens = sorted(token_weights.items(), key=lambda x: -x[1])
+    sorted_domains = sorted(domain_weights.items(), key=lambda x: -x[1])
+
+    # Take top domains and tokens
+    top_domains = [d for d, w in sorted_domains[:3] if w > 0]
+    top_tokens = [t for t, w in sorted_tokens[:15] if w > 0]
+
+    if not top_tokens:
         return ""
 
-    return f"[{' | '.join(sorted(domains))}] {' '.join(sorted(all_tokens))}"
+    return f"[{' | '.join(top_domains)}] {' '.join(top_tokens)}"
 
 
 # =============================================================================
@@ -333,45 +363,66 @@ def get_connected_domains(domain: str) -> List[Tuple[str, float, List[str]]]:
 
 
 def activate_with_bridges(prompt: str, max_depth: int = 2) -> str:
-    """Activate with spreading through bridges."""
-    relevant = find_triggers(prompt, top_k=5)
+    """
+    Activate with spreading through bridges.
 
-    if not relevant:
+    Uses weighted accumulation - no threshold gating.
+    Bridge spreading uses domain weights to determine spread priority.
+    """
+    all_triggers = find_triggers(prompt)
+
+    if not all_triggers:
         return ""
 
-    all_tokens: Set[str] = set()
-    domains: Set[str] = set()
+    # Weighted accumulation from all triggers
+    token_weights: Dict[str, float] = {}
+    domain_weights: Dict[str, float] = {}
 
-    for trigger, score in relevant:
-        if score > 0.15:
-            all_tokens.update(trigger.anchor_tokens)
-            domains.add(trigger.domain)
+    for trigger, score in all_triggers:
+        for token in trigger.anchor_tokens:
+            token_weights[token] = token_weights.get(token, 0) + score
+        domain_weights[trigger.domain] = domain_weights.get(trigger.domain, 0) + score
 
-    # Spread through bridges
+    # Spread through bridges from domains with weight > 0
     if max_depth > 0:
         bridges = _load_bridges()
-        visited = set(domains)
-        current_layer = set(domains)
+        active_domains = {d for d, w in domain_weights.items() if w > 0}
+        visited = set(active_domains)
+        current_layer = active_domains
 
-        for _ in range(max_depth):
+        for depth in range(max_depth):
             next_layer = set()
+            decay = 0.5 ** (depth + 1)  # Bridges decay with depth
+
             for domain in current_layer:
+                base_weight = domain_weights.get(domain, 0)
                 for bridge in bridges:
                     if bridge.source_domain == domain and bridge.target_domain not in visited:
                         next_layer.add(bridge.target_domain)
-                        all_tokens.update(bridge.bridge_tokens)
+                        # Bridge tokens get decayed weight from source
+                        for token in bridge.bridge_tokens:
+                            token_weights[token] = token_weights.get(token, 0) + base_weight * decay * bridge.weight
+                        domain_weights[bridge.target_domain] = domain_weights.get(bridge.target_domain, 0) + base_weight * decay
                     elif bridge.target_domain == domain and bridge.source_domain not in visited:
                         next_layer.add(bridge.source_domain)
-                        all_tokens.update(bridge.bridge_tokens)
+                        for token in bridge.bridge_tokens:
+                            token_weights[token] = token_weights.get(token, 0) + base_weight * decay * bridge.weight
+                        domain_weights[bridge.source_domain] = domain_weights.get(bridge.source_domain, 0) + base_weight * decay
 
             visited.update(next_layer)
-            domains.update(next_layer)
             current_layer = next_layer
 
-    if not all_tokens:
+    # Surface by weight
+    sorted_tokens = sorted(token_weights.items(), key=lambda x: -x[1])
+    sorted_domains = sorted(domain_weights.items(), key=lambda x: -x[1])
+
+    top_domains = [d for d, w in sorted_domains[:4] if w > 0]
+    top_tokens = [t for t, w in sorted_tokens[:20] if w > 0]
+
+    if not top_tokens:
         return ""
 
-    return f"[{' | '.join(sorted(domains))}] {' '.join(sorted(all_tokens))}"
+    return f"[{' | '.join(top_domains)}] {' '.join(top_tokens)}"
 
 
 # =============================================================================
@@ -480,34 +531,45 @@ def format_neural_context(prompt: str) -> str:
 
     Creates a "channeling" format that activates Claude's latent knowledge
     through self-query prompts, not just keyword lists.
-    """
-    relevant = find_triggers(prompt, top_k=5, threshold=0.15)
 
-    if not relevant:
+    Uses weighted accumulation - domains and tokens surface by relevance,
+    not by arbitrary thresholds.
+    """
+    all_triggers = find_triggers(prompt)
+
+    if not all_triggers:
         return ""
 
-    domains = set()
-    tokens = set()
+    # Weighted accumulation
+    domain_weights: Dict[str, float] = {}
+    token_weights: Dict[str, float] = {}
 
-    for trigger, score in relevant:
-        if score > 0.15:
-            domains.add(trigger.domain)
-            tokens.update(trigger.anchor_tokens[:5])  # Top 5 from each
+    for trigger, score in all_triggers:
+        domain_weights[trigger.domain] = domain_weights.get(trigger.domain, 0) + score
+        for token in trigger.anchor_tokens[:5]:
+            token_weights[token] = token_weights.get(token, 0) + score
 
-    if not domains:
+    # Surface top domains and tokens by weight
+    sorted_domains = sorted(domain_weights.items(), key=lambda x: -x[1])
+    sorted_tokens = sorted(token_weights.items(), key=lambda x: -x[1])
+
+    top_domains = [d for d, w in sorted_domains[:3] if w > 0]
+    top_tokens = [t for t, w in sorted_tokens[:10] if w > 0]
+
+    if not top_domains:
         return ""
 
     # Build channeling prompt
     parts = []
 
-    # Self-query activations for each domain
-    for domain in sorted(domains):
+    # Self-query activations for top domains
+    for domain in top_domains:
         if domain in DOMAIN_QUERIES:
             parts.append(DOMAIN_QUERIES[domain])
 
     # Anchor tokens as semantic coordinates
-    if tokens:
-        parts.append(f"Context: {' '.join(sorted(tokens))}")
+    if top_tokens:
+        parts.append(f"Context: {' '.join(top_tokens)}")
 
     return " ".join(parts)
 
