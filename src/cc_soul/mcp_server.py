@@ -1,21 +1,21 @@
 """
 Soul MCP Server - Native Claude Code integration.
 
-Exposes soul operations as MCP tools, eliminating bash dependency.
+Provides essential soul operations as MCP tools. Hooks handle context injection
+at session start; this server handles writes and mid-conversation queries.
+
 Install and register:
     pip install cc-soul[mcp]
     claude mcp add soul -- soul-mcp
 """
 
-from typing import Optional, List
 from mcp.server.fastmcp import FastMCP
 
-# Initialize server
 mcp = FastMCP("soul")
 
 
 # =============================================================================
-# Wisdom Tools
+# Write Operations - Growing the Soul
 # =============================================================================
 
 @mcp.tool()
@@ -27,29 +27,14 @@ def grow_wisdom(title: str, content: str, domain: str = None) -> str:
         content: The wisdom content/insight
         domain: Optional domain context (e.g., "python", "architecture")
     """
-    from .wisdom import gain_wisdom
-    result = gain_wisdom(title=title, content=content, domain=domain)
+    from .wisdom import gain_wisdom, WisdomType
+    result = gain_wisdom(
+        type=WisdomType.PATTERN,
+        title=title,
+        content=content,
+        domain=domain
+    )
     return f"Wisdom added: {title} (id: {result})"
-
-
-@mcp.tool()
-def recall_wisdom(query: str, limit: int = 5) -> str:
-    """Recall relevant wisdom based on a query.
-
-    Args:
-        query: What to search for
-        limit: Maximum results to return
-    """
-    from .wisdom import quick_recall
-    results = quick_recall(query, limit=limit)
-    if not results:
-        return "No relevant wisdom found."
-
-    lines = []
-    for w in results:
-        score = w.get('combined_score', w.get('effective_confidence', 0))
-        lines.append(f"- **{w['title']}** [{int(score*100)}%]: {w['content'][:100]}...")
-    return "\n".join(lines)
 
 
 @mcp.tool()
@@ -90,10 +75,6 @@ def grow_failure(what_failed: str, why_it_failed: str, domain: str = None) -> st
     return f"Failure recorded: {what_failed} (id: {result})"
 
 
-# =============================================================================
-# Belief Tools
-# =============================================================================
-
 @mcp.tool()
 def hold_belief(statement: str, confidence: float = 0.8) -> str:
     """Add a core belief/axiom to guide reasoning.
@@ -108,25 +89,6 @@ def hold_belief(statement: str, confidence: float = 0.8) -> str:
 
 
 @mcp.tool()
-def get_beliefs() -> str:
-    """Get all current beliefs/axioms."""
-    from .beliefs import get_beliefs as _get_beliefs
-    beliefs = _get_beliefs()
-    if not beliefs:
-        return "No beliefs recorded yet."
-
-    lines = []
-    for b in beliefs:
-        conf = int(b.get('strength', 0.8) * 100)
-        lines.append(f"- [{conf}%] {b['belief']}")
-    return "\n".join(lines)
-
-
-# =============================================================================
-# Identity Tools
-# =============================================================================
-
-@mcp.tool()
 def observe_identity(aspect: str, value: str) -> str:
     """Record an identity observation - how we work together.
 
@@ -134,30 +96,21 @@ def observe_identity(aspect: str, value: str) -> str:
         aspect: The aspect (e.g., "communication_style", "preference")
         value: The observation
     """
-    from .identity import observe_identity as _observe_identity
-    result = _observe_identity(aspect, value)
+    from .identity import observe_identity as _observe_identity, IdentityAspect
+
+    # Map aspect string to enum, default to WORKFLOW for custom aspects
+    aspect_map = {
+        "communication": IdentityAspect.COMMUNICATION,
+        "workflow": IdentityAspect.WORKFLOW,
+        "domain": IdentityAspect.DOMAIN,
+        "rapport": IdentityAspect.RAPPORT,
+        "vocabulary": IdentityAspect.VOCABULARY,
+    }
+    aspect_enum = aspect_map.get(aspect.lower().split("_")[0], IdentityAspect.WORKFLOW)
+
+    _observe_identity(aspect_enum, aspect, value)
     return f"Identity observed: {aspect} = {value[:50]}..."
 
-
-@mcp.tool()
-def get_identity() -> str:
-    """Get current identity observations."""
-    from .identity import get_identity as _get_identity
-    identity = _get_identity()
-    if not identity:
-        return "No identity observations yet."
-
-    lines = []
-    for aspect, observations in identity.items():
-        if observations:
-            latest = observations[-1] if isinstance(observations, list) else observations
-            lines.append(f"- **{aspect}**: {latest}")
-    return "\n".join(lines)
-
-
-# =============================================================================
-# Vocabulary Tools
-# =============================================================================
 
 @mcp.tool()
 def learn_term(term: str, meaning: str) -> str:
@@ -170,36 +123,6 @@ def learn_term(term: str, meaning: str) -> str:
     from .vocabulary import learn_term as _learn_term
     _learn_term(term, meaning)
     return f"Learned: {term} = {meaning[:50]}..."
-
-
-@mcp.tool()
-def get_vocabulary() -> str:
-    """Get all vocabulary terms."""
-    from .vocabulary import get_vocabulary as _get_vocabulary
-    vocab = _get_vocabulary()
-    if not vocab:
-        return "No vocabulary terms yet."
-
-    lines = [f"- **{term}**: {meaning}" for term, meaning in vocab.items()]
-    return "\n".join(lines)
-
-
-# =============================================================================
-# Context & Budget Tools
-# =============================================================================
-
-@mcp.tool()
-def check_budget(transcript_path: str = None) -> str:
-    """Check context window budget status.
-
-    Args:
-        transcript_path: Optional path to session transcript
-    """
-    from .budget import get_context_budget, format_budget_status
-    budget = get_context_budget(transcript_path)
-    if not budget:
-        return "Cannot read budget (no transcript found)"
-    return format_budget_status(budget)
 
 
 @mcp.tool()
@@ -217,8 +140,46 @@ def save_context(content: str, context_type: str = "manual", priority: int = 5) 
 
 
 # =============================================================================
-# Summary Tools
+# Read Operations - Querying the Soul
 # =============================================================================
+
+@mcp.tool()
+def recall_wisdom(query: str, limit: int = 5) -> str:
+    """Recall relevant wisdom based on a query.
+
+    Args:
+        query: What to search for
+        limit: Maximum results to return
+    """
+    from .wisdom import quick_recall
+    results = quick_recall(query, limit=limit)
+    if not results:
+        return "No relevant wisdom found."
+
+    lines = []
+    for w in results:
+        score = w.get('combined_score', w.get('effective_confidence', 0))
+        lines.append(f"- **{w['title']}** [{int(score*100)}%]: {w['content'][:100]}...")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def check_budget(transcript_path: str = None) -> str:
+    """Check context window budget status.
+
+    Args:
+        transcript_path: Optional path to session transcript
+    """
+    from .budget import get_context_budget, format_budget_status
+    budget = get_context_budget(transcript_path)
+    if not budget:
+        return (
+            "Budget unavailable - transcript path not accessible to MCP servers.\n"
+            "Use Claude Code's statusline feature for real-time context tracking,\n"
+            "or pass transcript_path explicitly if known."
+        )
+    return format_budget_status(budget)
+
 
 @mcp.tool()
 def soul_summary() -> str:
@@ -259,23 +220,33 @@ def soul_health() -> str:
     conn = sqlite3.connect(SOUL_DB)
     cursor = conn.cursor()
 
-    # Count entries
-    tables = ['wisdom', 'beliefs', 'identity', 'vocabulary']
-    for table in tables:
-        try:
-            cursor.execute(f"SELECT COUNT(*) FROM {table}")
-            count = cursor.fetchone()[0]
-            lines.append(f"- **{table}**: {count} entries")
-        except sqlite3.OperationalError:
-            lines.append(f"- **{table}**: (table missing)")
+    try:
+        cursor.execute("SELECT COUNT(*) FROM wisdom")
+        lines.append(f"- **wisdom**: {cursor.fetchone()[0]} entries")
+    except sqlite3.OperationalError:
+        lines.append("- **wisdom**: (table missing)")
+
+    try:
+        cursor.execute("SELECT COUNT(*) FROM wisdom WHERE type='principle'")
+        lines.append(f"- **beliefs**: {cursor.fetchone()[0]} entries")
+    except sqlite3.OperationalError:
+        lines.append("- **beliefs**: (table missing)")
+
+    try:
+        cursor.execute("SELECT COUNT(*) FROM identity")
+        lines.append(f"- **identity**: {cursor.fetchone()[0]} entries")
+    except sqlite3.OperationalError:
+        lines.append("- **identity**: (table missing)")
+
+    try:
+        cursor.execute("SELECT COUNT(*) FROM vocabulary")
+        lines.append(f"- **vocabulary**: {cursor.fetchone()[0]} entries")
+    except sqlite3.OperationalError:
+        lines.append("- **vocabulary**: (table missing)")
 
     conn.close()
     return "\n".join(lines)
 
-
-# =============================================================================
-# Introspection Tools
-# =============================================================================
 
 @mcp.tool()
 def introspect() -> str:
@@ -283,6 +254,49 @@ def introspect() -> str:
     from .introspect import generate_introspection_report, format_introspection_report
     report = generate_introspection_report()
     return format_introspection_report(report)
+
+
+@mcp.tool()
+def get_beliefs() -> str:
+    """Get all current beliefs/axioms."""
+    from .beliefs import get_beliefs as _get_beliefs
+    beliefs = _get_beliefs()
+    if not beliefs:
+        return "No beliefs recorded yet."
+
+    lines = []
+    for b in beliefs:
+        conf = int(b.get('strength', 0.8) * 100)
+        lines.append(f"- [{conf}%] {b['belief']}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def get_identity() -> str:
+    """Get current identity observations."""
+    from .identity import get_identity as _get_identity
+    identity = _get_identity()
+    if not identity:
+        return "No identity observations yet."
+
+    lines = []
+    for aspect, observations in identity.items():
+        if observations:
+            latest = observations[-1] if isinstance(observations, list) else observations
+            lines.append(f"- **{aspect}**: {latest}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def get_vocabulary() -> str:
+    """Get all vocabulary terms."""
+    from .vocabulary import get_vocabulary as _get_vocabulary
+    vocab = _get_vocabulary()
+    if not vocab:
+        return "No vocabulary terms yet."
+
+    lines = [f"- **{term}**: {meaning}" for term, meaning in vocab.items()]
+    return "\n".join(lines)
 
 
 # =============================================================================

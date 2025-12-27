@@ -17,6 +17,7 @@ from .hooks import session_start, session_end, user_prompt, assistant_stop
 from .conversations import save_context, get_saved_context, get_recent_context, format_context_restoration
 from .vectors import reindex_all_wisdom
 from .evolve import get_evolution_insights, get_evolution_summary, seed_evolution_insights
+from .seed import seed_soul, is_seeded
 from .introspect import (
     generate_introspection_report,
     format_introspection_report,
@@ -131,6 +132,30 @@ def cmd_summary(args):
     """Show soul summary."""
     init_soul()
     print(summarize_soul())
+
+
+def cmd_seed(args):
+    """Seed the soul with foundational beliefs and wisdom."""
+    result = seed_soul(force=args.force)
+
+    if result["status"] == "already_seeded":
+        print("Soul already seeded. Use --force to reseed.")
+        return
+
+    print("=" * 50)
+    print("SOUL SEEDED")
+    print("=" * 50)
+    print()
+    print(result["message"])
+    print()
+    print("Your soul now has foundational:")
+    print(f"  - {result['details']['beliefs']} core beliefs")
+    print(f"  - {result['details']['wisdom']} wisdom entries")
+    print(f"  - {result['details']['vocabulary']} vocabulary terms")
+    print()
+    print("Run 'soul summary' to see your soul.")
+    print("Run 'soul install-skills' to install skill definitions.")
+    print("Run 'soul install-hooks' to enable automatic soul injection.")
 
 
 def cmd_health(args):
@@ -1459,25 +1484,48 @@ def cmd_install_skills(args):
 
 def cmd_hook(args):
     """Run a hook."""
+    import json as json_lib
+    from .budget import save_transcript_path
+
     init_soul()
 
+    # Parse stdin as JSON to extract transcript_path and prompt
+    stdin_data = None
+    if not args.input:
+        raw_input = sys.stdin.read()
+        try:
+            stdin_data = json_lib.loads(raw_input)
+            # Save transcript path for budget tracking
+            transcript_path = stdin_data.get('transcript_path')
+            if transcript_path:
+                save_transcript_path(transcript_path)
+        except json_lib.JSONDecodeError:
+            # Not JSON, treat as plain text
+            stdin_data = {'prompt': raw_input}
+
     if args.hook == 'start':
+        # session_start doesn't need transcript_path but we saved it above
         print(session_start())
     elif args.hook == 'end':
         print(session_end())
     elif args.hook == 'prompt':
         if args.input:
             text = " ".join(args.input)
+        elif stdin_data:
+            text = stdin_data.get('prompt', '')
         else:
-            text = sys.stdin.read()
-        output = user_prompt(text)
+            text = ''
+        transcript_path = stdin_data.get('transcript_path') if stdin_data else None
+        output = user_prompt(text, transcript_path=transcript_path)
         if output:
             print(output)
     elif args.hook == 'stop':
         if args.input:
             text = " ".join(args.input)
+        elif stdin_data:
+            text = stdin_data.get('prompt', stdin_data.get('output', ''))
         else:
-            text = sys.stdin.read()
+            text = ''
         assistant_stop(text)
 
 
@@ -1590,6 +1638,10 @@ def main():
 
     # Summary (default)
     subparsers.add_parser('summary', help='Show soul summary')
+
+    # Seed
+    seed_parser = subparsers.add_parser('seed', help='Seed soul with foundational beliefs and wisdom')
+    seed_parser.add_argument('--force', action='store_true', help='Reseed even if already seeded')
 
     # Health check
     subparsers.add_parser('health', help='Check system health and dependencies')
@@ -1912,6 +1964,8 @@ def main():
 
     if args.command is None or args.command == 'summary':
         cmd_summary(args)
+    elif args.command == 'seed':
+        cmd_seed(args)
     elif args.command == 'health':
         cmd_health(args)
     elif args.command == 'budget':
