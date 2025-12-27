@@ -127,6 +127,18 @@ from .efficiency import (
     get_token_stats,
 )
 
+from .observe import (
+    observe_session,
+    reflect_on_session,
+    format_reflection_summary,
+    get_pending_observations,
+    promote_observation_to_wisdom,
+    auto_promote_high_confidence,
+    LearningType,
+    Learning,
+    SessionTranscript,
+)
+
 __all__ = [
     # Core
     "init_soul",
@@ -226,4 +238,14 @@ __all__ = [
     "get_compact_context",
     "format_efficiency_injection",
     "get_token_stats",
+    # Passive Observation
+    "observe_session",
+    "reflect_on_session",
+    "format_reflection_summary",
+    "get_pending_observations",
+    "promote_observation_to_wisdom",
+    "auto_promote_high_confidence",
+    "LearningType",
+    "Learning",
+    "SessionTranscript",
 ]
