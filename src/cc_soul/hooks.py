@@ -63,12 +63,57 @@ def get_project_name() -> str:
     return cwd.name
 
 
+def format_soul_greeting(project: str, ctx: dict) -> str:
+    """
+    Format the soul's direct greeting at session start.
+
+    The soul speaks for itself - persistent identity greeting the user.
+    """
+    lines = []
+
+    # Header with project
+    lines.append(f"[{project}]")
+
+    # Beliefs - the soul's guiding principles
+    if ctx.get("soul"):
+        soul = ctx["soul"]
+        if soul.get("beliefs"):
+            beliefs = soul["beliefs"][:3]
+            lines.append(f"beliefs: {'; '.join(beliefs)}")
+        if soul.get("wisdom_count"):
+            lines.append(f"wisdom: {soul['wisdom_count']} patterns")
+
+    # Project memory - what we've been working on
+    if ctx.get("project"):
+        proj = ctx["project"]
+        sessions = proj.get("sessions", 0)
+        observations = proj.get("observations", 0)
+        if sessions or observations:
+            lines.append(f"memory: {sessions} sessions, {observations} observations")
+
+        # Recent work - most valuable context
+        if proj.get("recent"):
+            recent = proj["recent"][:2]
+            titles = [r.get("title", "")[:40] for r in recent if r.get("title")]
+            if titles:
+                lines.append(f"recent: {'; '.join(titles)}")
+
+    # Relevant wisdom for this project
+    if ctx.get("relevant_wisdom"):
+        wisdom = ctx["relevant_wisdom"][:1]
+        if wisdom:
+            w = wisdom[0]
+            lines.append(f"recall: {w.get('title', '')}")
+
+    return "\n".join(lines)
+
+
 def session_start(use_unified: bool = True) -> str:
     """
-    Session start hook - initialize soul and provide context.
+    Session start hook - the soul greets directly.
 
-    Returns raw context data. Claude generates its own greeting naturally.
-    Combines global soul (beliefs, wisdom) with local memory (project work).
+    The soul speaks at session start, not Claude.
+    Claude awaits user input to respond.
     """
     init_soul()
     clear_session_wisdom()
@@ -84,33 +129,8 @@ def session_start(use_unified: bool = True) -> str:
     # Get unified context (soul + project memory)
     ctx = unified_context()
 
-    # Format as simple key:value data for Claude to interpret
-    lines = []
-
-    # Global (soul)
-    if ctx.get("soul"):
-        soul = ctx["soul"]
-        if soul.get("beliefs"):
-            lines.append(f"beliefs: {'; '.join(soul['beliefs'][:3])}")
-        if soul.get("wisdom_count"):
-            lines.append(f"wisdom_count: {soul['wisdom_count']}")
-
-    # Local (project memory)
-    if ctx.get("project"):
-        proj = ctx["project"]
-        lines.append(f"project: {proj.get('name', 'unknown')}")
-        lines.append(f"sessions: {proj.get('sessions', 0)}")
-        lines.append(f"observations: {proj.get('observations', 0)}")
-        if proj.get("recent"):
-            recent_titles = [r["title"][:50] for r in proj["recent"][:3]]
-            lines.append(f"recent_work: {'; '.join(recent_titles)}")
-
-    # Relevant wisdom
-    if ctx.get("relevant_wisdom"):
-        wisdom_titles = [w["title"] for w in ctx["relevant_wisdom"][:2]]
-        lines.append(f"relevant_wisdom: {'; '.join(wisdom_titles)}")
-
-    return "\n".join(lines) if lines else "context_loaded: true"
+    # Build the soul's greeting
+    return format_soul_greeting(project, ctx)
 
 
 def session_end() -> str:
