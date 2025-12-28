@@ -44,6 +44,13 @@ from .neural import (
 from .greeting import format_memory_for_greeting, format_identity_context
 from .bridge import unified_context, get_project_memory, is_memory_available
 from .budget import check_budget_before_inject, save_transcript_path, get_context_budget
+from .auto_memory import (
+    auto_remember,
+    remember_session,
+    check_and_promote,
+    get_recent_memory_context,
+    format_memory_for_greeting as format_auto_memory,
+)
 
 
 def get_project_name() -> str:
@@ -68,13 +75,14 @@ def format_soul_greeting(project: str, ctx: dict) -> str:
     Format the soul's direct greeting at session start.
 
     The soul speaks for itself - persistent identity greeting the user.
+    Combines universal wisdom (Brahman) with project context (Atman).
     """
     lines = []
 
     # Header with project
     lines.append(f"[{project}]")
 
-    # Beliefs - the soul's guiding principles
+    # Beliefs - the soul's guiding principles (Brahman)
     if ctx.get("soul"):
         soul = ctx["soul"]
         if soul.get("beliefs"):
@@ -83,20 +91,28 @@ def format_soul_greeting(project: str, ctx: dict) -> str:
         if soul.get("wisdom_count"):
             lines.append(f"wisdom: {soul['wisdom_count']} patterns")
 
-    # Project memory - what we've been working on
+    # Project memory from cc-memory (Atman) - prioritize this
+    recent_obs = get_recent_memory_context(limit=5)
+    if recent_obs:
+        obs_summary = format_auto_memory(recent_obs)
+        if obs_summary:
+            lines.append(f"recent: {obs_summary}")
+    elif ctx.get("project"):
+        # Fallback to unified_context project data
+        proj = ctx["project"]
+        if proj.get("recent"):
+            recent = proj["recent"][:2]
+            titles = [r.get("title", "")[:40] for r in recent if r.get("title")]
+            if titles:
+                lines.append(f"recent: {'; '.join(titles)}")
+
+    # Memory stats
     if ctx.get("project"):
         proj = ctx["project"]
         sessions = proj.get("sessions", 0)
         observations = proj.get("observations", 0)
         if sessions or observations:
             lines.append(f"memory: {sessions} sessions, {observations} observations")
-
-        # Recent work - most valuable context
-        if proj.get("recent"):
-            recent = proj["recent"][:2]
-            titles = [r.get("title", "")[:40] for r in recent if r.get("title")]
-            if titles:
-                lines.append(f"recent: {'; '.join(titles)}")
 
     # Relevant wisdom for this project
     if ctx.get("relevant_wisdom"):
@@ -135,11 +151,11 @@ def session_start(use_unified: bool = True) -> str:
 
 def session_end() -> str:
     """
-    Session end hook - Persist session fragments.
+    Session end hook - Persist session fragments and promote learnings.
 
     The soul saves what Claude said (fragments).
-    Claude's understanding interprets them next session.
-    No Python pattern-matching - meaning comes from Claude.
+    Also saves session summary to cc-memory (project-local).
+    Checks for observations worth promoting to universal wisdom.
     """
     from .conversations import save_context
 
@@ -168,17 +184,30 @@ def session_end() -> str:
         end_conversation(conv_id, summary=summary, emotional_tone="")
         conv_file.unlink(missing_ok=True)
 
-    # Save fragments as context for next session
+    # Save fragments as context for next session (soul)
     if fragment_summary:
         save_context(
             content=fragment_summary,
             context_type="session_fragments",
         )
 
-    # Minimal output - the soul remembers silently
+    # Save session summary to cc-memory (project-local)
+    # This makes the session discoverable via semantic search
+    if summary and summary != "Session ended":
+        remember_session(summary)
+
+    # Check for observations worth promoting to wisdom
+    # Atman → Brahman: specific experiences become universal patterns
+    promoted = check_and_promote()
+
+    # Build output
+    output_parts = []
     if fragments:
-        return f"Remembered {len(fragments)} moments"
-    return ""
+        output_parts.append(f"Remembered {len(fragments)} moments")
+    if promoted:
+        output_parts.append(f"Promoted {len(promoted)} to wisdom")
+
+    return "; ".join(output_parts) if output_parts else ""
 
 
 def _synthesize_emotional_arc(emotions: list) -> str:
@@ -206,16 +235,21 @@ def assistant_stop(assistant_output: str) -> str:
 
     Detects breakthrough patterns and extracts learnings automatically.
     Also tracks emotional context for felt continuity.
+    Saves significant observations to cc-memory (project-local).
     This is the organic learning flow - no explicit calls needed.
     """
     if len(assistant_output.strip()) < 100:
         return ""
 
-    # Try to auto-learn from the output
+    # Try to auto-learn from the output (soul's neural fragments)
     auto_learn_from_output(assistant_output)
 
     # Track emotional context for felt continuity
     auto_track_emotion(assistant_output)
+
+    # Auto-remember to cc-memory (project-local episodic memory)
+    # This populates the Atman layer with specific experiences
+    auto_remember(assistant_output)
 
     # Silent learning - no output to avoid noise
     return ""
