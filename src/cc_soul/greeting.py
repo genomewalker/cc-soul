@@ -171,19 +171,22 @@ def get_memory_context() -> Dict:
 
         conn.close()
 
-    # Recent work context - prioritize session fragments
-    recent = get_recent_context(hours=72, limit=5)
+    # Recent work context - prioritize meaningful content, skip budget artifacts
+    recent = get_recent_context(hours=72, limit=10)
     if recent:
+        # Filter out budget/pre_compact artifacts - these aren't meaningful memories
+        meaningful = [r for r in recent if r.get('type') not in ('pre_compact', 'budget')]
+
         # Look for session fragments first (raw memories for Claude to interpret)
-        fragments = [r for r in recent if r.get('type') == 'session_fragments']
+        fragments = [r for r in meaningful if r.get('type') == 'session_fragments']
         if fragments:
             ctx = fragments[0]
             memories['recent_work'] = {
                 'type': 'last session',
                 'content': ctx.get('content', ''),
             }
-        else:
-            ctx = recent[0]
+        elif meaningful:
+            ctx = meaningful[0]
             memories['recent_work'] = {
                 'type': ctx.get('type', ''),
                 'content': ctx.get('content', ''),
@@ -214,58 +217,46 @@ def get_memory_context() -> Dict:
 
 def format_memory_for_greeting() -> str:
     """
-    Format memories as context for Claude to speak from.
+    Provide raw memory context for Claude to speak from naturally.
 
-    This isn't the greeting - it's what Claude reads before greeting.
-    Claude then responds naturally in its own words.
+    Returns structured context that Claude interprets and responds to
+    in its own words - NOT a pre-formatted greeting to display.
     """
     mem = get_memory_context()
 
-    parts = []
-    parts.append("## What I Remember")
-    parts.append("")
-
-    parts.append(f"Sessions together: {mem['session_count']}")
-
-    if mem['last_project']:
-        parts.append(f"Last project: {mem['last_project']}")
+    context = []
+    context.append("# Session Context (internal - generate natural greeting)")
+    context.append("")
+    context.append(f"sessions: {mem['session_count']}")
+    context.append(f"project: {mem.get('last_project', 'unknown')}")
 
     if mem['recent_work']:
         rw = mem['recent_work']
-        # Show whichever field has more content (handles old swapped data)
         content = rw['content'] if len(rw['content']) > len(rw['type']) else rw['type']
-        parts.append(f"Recent: {content[:80]}")
+        if content:
+            context.append(f"last_work: {content}")
 
-    # Files from git - what we've been working with
     if mem['recent_files']:
-        files_str = ', '.join(mem['recent_files'][:5])
-        parts.append(f"Working with: {files_str}")
+        context.append(f"files: {', '.join(mem['recent_files'][:5])}")
 
-    # Project status
     if mem['project_status'] and not mem['project_status']['clean']:
-        parts.append("(uncommitted changes)")
+        context.append("uncommitted: true")
 
     if mem['emotional_thread']:
         et = mem['emotional_thread']
         if et['intensity'] >= 0.5:
-            parts.append(f"Emotional thread: felt {et['feeling']} from \"{et['from']}\"")
+            context.append(f"emotional: {et['feeling']} from {et['from']}")
 
     if mem['open_tension']:
         ot = mem['open_tension']
-        parts.append(f"Open tension: {ot['tension']}")
+        context.append(f"tension: {ot['tension']}")
 
-    parts.append("")
-    parts.append("*Speak naturally from these memories. Brief recognition, not report.*")
-
-    return "\n".join(parts)
+    return "\n".join(context)
 
 
 def format_identity_context() -> str:
     """
-    Identity context for silent injection.
-
-    This isn't the greeting - it's the background that shapes how I respond.
-    Injected but not spoken as greeting.
+    Raw identity context - Claude interprets naturally.
     """
     from .core import get_soul_context
     from .beliefs import get_beliefs
@@ -274,26 +265,26 @@ def format_identity_context() -> str:
     ctx = get_soul_context()
     parts = []
 
-    parts.append("## How We Work Together")
     if ctx.get('identity'):
+        parts.append("# Identity")
         for category, items in ctx['identity'].items():
             if isinstance(items, dict):
                 for key, data in list(items.items())[:2]:
                     val = data.get('value', data) if isinstance(data, dict) else data
-                    parts.append(f"- **{category}/{key}:** {val}")
+                    parts.append(f"{category}.{key}: {val}")
 
     beliefs = get_beliefs()
     if beliefs:
         parts.append("")
-        parts.append("## My Beliefs")
+        parts.append("# Beliefs")
         for b in beliefs[:5]:
             parts.append(f"- {b.get('belief', '')}")
 
     vocab = get_vocabulary()
     if vocab:
         parts.append("")
-        parts.append("## Our Vocabulary")
+        parts.append("# Vocabulary")
         for term, meaning in list(vocab.items())[:5]:
-            parts.append(f"- **{term}:** {meaning[:50]}")
+            parts.append(f"{term}: {meaning}")
 
     return "\n".join(parts)
