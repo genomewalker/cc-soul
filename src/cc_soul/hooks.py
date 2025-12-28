@@ -11,48 +11,30 @@ The unified processor mirrors transformer architecture:
 - → Bridges (residual) → Story (state) → Curiosity (output)
 """
 
-from datetime import datetime
 from pathlib import Path
 
-from .core import init_soul, get_soul_context, SOUL_DIR
+from .core import init_soul, SOUL_DIR
 from .conversations import (
     start_conversation,
     end_conversation,
-    get_recent_context,
-    format_context_restoration,
 )
-from .wisdom import quick_recall, clear_session_wisdom, get_session_wisdom
+from .wisdom import quick_recall, clear_session_wisdom
 from .vocabulary import get_vocabulary
-from .efficiency import format_efficiency_injection, get_compact_context
-from .curiosity import (
-    run_curiosity_cycle,
-    format_questions_for_prompt,
-    get_curiosity_stats,
-)
 from .unified import (
     forward_pass,
-    format_session_start,
-    format_prompt_context,
     format_context,
-    process_session_start,
-    process_prompt,
-    record_moment,
 )
 from .neural import (
     auto_learn_from_output,
-    save_growth_vector,
     auto_track_emotion,
     get_emotional_contexts,
-    create_resonance,
     clear_session_work,
     summarize_session_work,
     get_session_work,
     clear_session_commands,
-    get_session_commands,
 )
-from .greeting import format_memory_for_greeting, format_identity_context
-from .bridge import unified_context, get_project_memory, is_memory_available
-from .budget import check_budget_before_inject, save_transcript_path, get_context_budget
+from .bridge import unified_context
+from .budget import check_budget_before_inject
 from .auto_memory import (
     auto_remember,
     remember_session,
@@ -183,9 +165,8 @@ def session_end() -> str:
 
     # Emotional arc
     emotions = get_emotional_contexts(limit=10)
-    arc = ""
     if len(emotions) >= 2:
-        arc = _synthesize_emotional_arc(emotions)
+        _synthesize_emotional_arc(emotions)
 
     # End conversation record
     summary = fragment_summary[:200] if fragment_summary else "Session ended"
@@ -274,7 +255,7 @@ def notification_shown(tool_name: str, success: bool, output: str) -> str:
         return ""
 
     # Check for breakthrough patterns in tool output
-    result = auto_learn_from_output(output)
+    auto_learn_from_output(output)
 
     # Silent learning - no output
     return ""

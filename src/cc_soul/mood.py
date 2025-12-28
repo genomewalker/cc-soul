@@ -12,10 +12,10 @@ without being tied to specific events (that's emotion).
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Optional, Dict, List
+from typing import Optional, Dict
 from enum import Enum
 
-from .core import get_db_connection, SOUL_DIR
+from .core import get_db_connection
 from .budget import get_context_budget, ContextBudget
 
 

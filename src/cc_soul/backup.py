@@ -452,7 +452,7 @@ def cleanup_old_backups(keep_daily: int = 7, keep_weekly: int = 4) -> Dict:
         return {"deleted": 0, "kept": 0}
 
     now = datetime.now()
-    daily_cutoff = now - timedelta(days=keep_daily)
+    now - timedelta(days=keep_daily)
     weekly_cutoff = now - timedelta(weeks=keep_weekly)
 
     to_keep = set()

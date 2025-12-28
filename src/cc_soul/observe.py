@@ -17,11 +17,11 @@ import re
 import json
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Dict, Optional, Tuple, Set
+from typing import List, Dict, Optional, Set
 from collections import Counter
 from enum import Enum
 
-from .core import get_db_connection, init_soul
+from .core import get_db_connection
 from .wisdom import gain_wisdom, WisdomType
 
 
@@ -211,7 +211,7 @@ def extract_file_patterns(transcript: SessionTranscript) -> List[Learning]:
 
     for msg in transcript.messages:
         content = msg.get("content", "")
-        files = re.findall(file_pattern, content)
+        re.findall(file_pattern, content)
         # Reconstruct full matches
         for match in re.finditer(file_pattern, content):
             file_counts[match.group()] += 1
@@ -637,12 +637,12 @@ def reflect_on_session(
 
     return {
         "observations": len(learnings),
-        "by_type": Counter(l.type.value for l in learnings),
+        "by_type": Counter(item.type.value for item in learnings),
         "promoted_to_wisdom": len(promoted),
         "pending_review": len(learnings) - len(promoted),
         "learnings": [
-            {"type": l.type.value, "title": l.title, "confidence": l.confidence}
-            for l in learnings
+            {"type": item.type.value, "title": item.title, "confidence": item.confidence}
+            for item in learnings
         ],
     }
 

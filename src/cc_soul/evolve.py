@@ -7,10 +7,9 @@ enabling continuous refinement of the system itself.
 
 import json
 from datetime import datetime
-from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict
 
-from .core import get_db_connection, SOUL_DIR
+from .core import SOUL_DIR
 
 # Evolution log lives with the soul data
 EVOLUTION_LOG = SOUL_DIR / "evolution.jsonl"

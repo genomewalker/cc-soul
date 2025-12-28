@@ -12,7 +12,7 @@ calculate remaining context capacity from this.
 import json
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Optional, List, Dict
+from typing import Optional, Dict
 from datetime import datetime
 
 from .core import SOUL_DIR

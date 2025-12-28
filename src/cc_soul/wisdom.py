@@ -5,10 +5,9 @@ Wisdom operations: gain, recall, apply, and track outcomes.
 import json
 from datetime import datetime
 from enum import Enum
-from pathlib import Path
 from typing import List, Dict, Optional
 
-from .core import get_db_connection, SOUL_DB, SOUL_DIR
+from .core import get_db_connection, SOUL_DIR
 
 # Session-scoped log for tracking what wisdom was applied
 SESSION_WISDOM_LOG = SOUL_DIR / ".session_wisdom.json"

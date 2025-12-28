@@ -5,8 +5,7 @@ Provides embedding-based retrieval for wisdom entries,
 enabling queries like "find wisdom relevant to this problem".
 """
 
-from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict
 import numpy as np
 
 from .core import SOUL_DIR, get_db_connection
