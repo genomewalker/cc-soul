@@ -28,6 +28,9 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
+memory = [
+    "cc-memory @ git+https://github.com/genomewalker/cc-memory.git",
+]
 vectors = [
     "lancedb>=0.1.0",
     "sentence-transformers>=2.0.0",
@@ -40,6 +43,7 @@ mcp = [
     "mcp>=1.2.0",
 ]
 all = [
+    "cc-soul[memory]",
     "cc-soul[vectors]",
     "cc-soul[graph]",
     "cc-soul[mcp]",

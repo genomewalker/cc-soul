@@ -66,11 +66,11 @@ def dream(title: str, content: str, horizon: str = "") -> Optional[str]:
         if horizon:
             full_content += f"\n\nHorizon: {horizon}"
 
-        obs_id = cc_memory.add_observation(
-            project_dir=project_dir,
-            title=title,
-            content=full_content,
-            category=DREAM_CATEGORY,
+        obs_id = cc_memory.remember(
+            project_dir,
+            DREAM_CATEGORY,
+            title,
+            full_content,
         )
 
         return obs_id
