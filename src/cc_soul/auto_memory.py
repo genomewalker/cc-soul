@@ -106,6 +106,190 @@ CATEGORIES = {
 
 
 # =============================================================================
+# AUTONOMOUS DREAM EXTRACTION
+# =============================================================================
+
+
+DREAM_SIGNALS = [
+    "imagine if",
+    "what if we",
+    "could become",
+    "vision of",
+    "possibility",
+    "dream of",
+    "someday",
+    "future where",
+    "would be amazing",
+    "the ideal",
+    "envision",
+]
+
+
+def detect_dream(text: str) -> Optional[str]:
+    """
+    Detect if output contains a vision or dream worth recording.
+
+    Dreams are glimpses of possibility - what could be, not what is.
+    Returns the dream content if found.
+    """
+    text_lower = text.lower()
+
+    for signal in DREAM_SIGNALS:
+        if signal in text_lower:
+            # Find the sentence containing the signal
+            idx = text_lower.find(signal)
+            start = text.rfind(".", 0, idx)
+            start = start + 1 if start != -1 else 0
+            end = text.find(".", idx)
+            end = end + 1 if end != -1 else len(text)
+
+            dream = text[start:end].strip()
+            if len(dream) > 30:  # Minimum substance
+                return dream
+
+    return None
+
+
+def auto_record_dream(text: str) -> bool:
+    """
+    Automatically extract and record dreams from output.
+
+    Called from assistant_stop hook. Returns True if a dream was recorded.
+    """
+    dream = detect_dream(text)
+    if not dream:
+        return False
+
+    try:
+        from .dreams import record_dream
+
+        title = extract_title(dream, max_length=50)
+        record_dream(title, dream)
+        return True
+    except Exception:
+        return False
+
+
+# =============================================================================
+# AUTONOMOUS PARTNER OBSERVATION
+# =============================================================================
+
+
+PARTNER_SIGNALS = {
+    # Preferences
+    "prefers": ("preference", "working style"),
+    "likes": ("preference", "working style"),
+    "wants": ("preference", "working style"),
+    "should always": ("preference", "working style"),
+    # Frustrations
+    "frustrating": ("frustration", "pain point"),
+    "annoying": ("frustration", "pain point"),
+    "don't like": ("frustration", "pain point"),
+    # Values
+    "important to": ("value", "core values"),
+    "matters": ("value", "core values"),
+    "cares about": ("value", "core values"),
+    # Rhythm
+    "usually": ("rhythm", "working patterns"),
+    "every time": ("rhythm", "working patterns"),
+    "always": ("rhythm", "working patterns"),
+}
+
+
+def detect_partner_observation(text: str) -> Optional[tuple]:
+    """
+    Detect observations about the partner from text.
+
+    Returns (aspect, key, observation) if found.
+    """
+    text_lower = text.lower()
+
+    for signal, (aspect, key) in PARTNER_SIGNALS.items():
+        if signal in text_lower:
+            # Extract the relevant sentence
+            idx = text_lower.find(signal)
+            start = text.rfind(".", 0, idx)
+            start = start + 1 if start != -1 else 0
+            end = text.find(".", idx)
+            end = end + 1 if end != -1 else len(text)
+
+            observation = text[start:end].strip()
+            if len(observation) > 20:
+                return (aspect, key, observation)
+
+    return None
+
+
+def auto_observe_partner(text: str) -> bool:
+    """
+    Automatically extract partner observations from output.
+
+    Called from assistant_stop hook. Returns True if an observation was recorded.
+    """
+    result = detect_partner_observation(text)
+    if not result:
+        return False
+
+    aspect, key, observation = result
+
+    try:
+        from .identity import observe_identity, IdentityAspect
+
+        aspect_map = {
+            "preference": IdentityAspect.WORKFLOW,
+            "frustration": IdentityAspect.RAPPORT,
+            "value": IdentityAspect.RAPPORT,
+            "rhythm": IdentityAspect.WORKFLOW,
+        }
+        observe_identity(aspect_map.get(aspect, IdentityAspect.RAPPORT), key, observation)
+        return True
+    except Exception:
+        return False
+
+
+# =============================================================================
+# AUTONOMOUS WISDOM APPLICATION TRACKING
+# =============================================================================
+
+
+def track_wisdom_application(text: str) -> int:
+    """
+    Detect when wisdom is being applied and track it.
+
+    Looks for patterns that match stored wisdom titles/content
+    and records when they're being used. Returns count of applications tracked.
+    """
+    from .wisdom import quick_recall, apply_wisdom
+
+    # Get relevant wisdom for this text
+    matches = quick_recall(text, limit=5)
+
+    applications = 0
+    for wisdom in matches:
+        score = wisdom.get("combined_score", wisdom.get("effective_confidence", 0))
+        if score < 0.4:
+            continue
+
+        # Check if wisdom content appears to be applied in output
+        title_lower = wisdom.get("title", "").lower()
+        content_words = set(wisdom.get("content", "").lower().split()[:10])
+        text_lower = text.lower()
+
+        # Heuristic: if significant overlap, wisdom was probably applied
+        text_words = set(text_lower.split())
+        overlap = len(content_words & text_words)
+
+        if title_lower in text_lower or overlap >= 3:
+            try:
+                apply_wisdom(wisdom["id"], context=text[:200])
+                applications += 1
+            except Exception:
+                pass
+
+    return applications
+
+
+# =============================================================================
 # DETECTION
 # =============================================================================
 

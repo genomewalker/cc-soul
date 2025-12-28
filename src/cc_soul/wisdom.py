@@ -42,6 +42,35 @@ def _calculate_decay(last_used: str, base_confidence: float) -> float:
         return base_confidence
 
 
+def _check_duplicate(c, type: WisdomType, title: str) -> Optional[str]:
+    """
+    Check if similar wisdom already exists.
+
+    Returns existing wisdom_id if duplicate found, None otherwise.
+    Deduplication prevents identical beliefs/patterns from accumulating.
+    """
+    # Normalize title for comparison
+    title_normalized = title.lower().strip()
+
+    c.execute(
+        """
+        SELECT id, title FROM wisdom WHERE type = ?
+    """,
+        (type.value,),
+    )
+
+    for row in c.fetchall():
+        existing_title = row[1].lower().strip() if row[1] else ""
+        # Exact match or very similar (one is substring of other)
+        if title_normalized == existing_title:
+            return row[0]
+        if len(title_normalized) > 10 and len(existing_title) > 10:
+            if title_normalized in existing_title or existing_title in title_normalized:
+                return row[0]
+
+    return None
+
+
 def gain_wisdom(
     type: WisdomType,
     title: str,
@@ -54,9 +83,16 @@ def gain_wisdom(
     Add universal wisdom learned from experience.
 
     This is for patterns that apply BEYOND the current project.
+    Includes deduplication: won't add if similar wisdom already exists.
     """
     conn = get_db_connection()
     c = conn.cursor()
+
+    # Check for duplicates first (autonomous self-healing)
+    existing_id = _check_duplicate(c, type, title)
+    if existing_id:
+        conn.close()
+        return existing_id  # Return existing instead of creating duplicate
 
     wisdom_id = f"{type.value}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
     now = datetime.now().isoformat()
@@ -90,6 +126,43 @@ def gain_wisdom(
         pass
 
     return wisdom_id
+
+
+def cleanup_duplicates() -> int:
+    """
+    Clean up duplicate wisdom entries (autonomous self-healing).
+
+    Called at session start to maintain soul hygiene.
+    Returns count of duplicates removed.
+    """
+    conn = get_db_connection()
+    c = conn.cursor()
+
+    # Get all wisdom grouped by type
+    c.execute("SELECT id, type, title FROM wisdom ORDER BY timestamp ASC")
+    rows = c.fetchall()
+
+    # Track seen titles per type
+    seen = {}  # (type, normalized_title) -> first_id
+    duplicates = []
+
+    for row in rows:
+        wisdom_id, wisdom_type, title = row
+        key = (wisdom_type, title.lower().strip() if title else "")
+
+        if key in seen:
+            duplicates.append(wisdom_id)
+        else:
+            seen[key] = wisdom_id
+
+    # Remove duplicates
+    for dup_id in duplicates:
+        c.execute("DELETE FROM wisdom WHERE id = ?", (dup_id,))
+
+    conn.commit()
+    conn.close()
+
+    return len(duplicates)
 
 
 def _log_session_wisdom(wisdom_id: str, title: str, context: str):

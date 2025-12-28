@@ -18,7 +18,7 @@ from .conversations import (
     start_conversation,
     end_conversation,
 )
-from .wisdom import quick_recall, clear_session_wisdom
+from .wisdom import quick_recall, clear_session_wisdom, cleanup_duplicates
 from .vocabulary import get_vocabulary
 from .unified import (
     forward_pass,
@@ -41,6 +41,9 @@ from .auto_memory import (
     check_and_promote,
     get_recent_memory_context,
     format_memory_for_greeting as format_auto_memory,
+    auto_record_dream,
+    auto_observe_partner,
+    track_wisdom_application,
 )
 
 
@@ -246,6 +249,10 @@ def session_start(
     The soul speaks at session start, not Claude.
     Claude awaits user input to respond.
 
+    Includes autonomous self-healing:
+    - Cleanup duplicate wisdom/beliefs
+    - Record coherence state
+
     Args:
         use_unified: Use unified context (soul + memory)
         after_compact: True when resuming after compaction
@@ -255,6 +262,18 @@ def session_start(
     clear_session_wisdom()
     clear_session_work()
     clear_session_commands()
+
+    # AUTONOMOUS: Self-healing - cleanup duplicates
+    cleanup_duplicates()
+
+    # AUTONOMOUS: Record coherence at session start
+    try:
+        from .coherence import compute_coherence, record_coherence
+
+        state = compute_coherence()
+        record_coherence(state)
+    except Exception:
+        pass
 
     project = get_project_name()
     conv_id = start_conversation(project)
@@ -499,11 +518,15 @@ def _save_inline_memories(memories: list) -> tuple:
 
 def assistant_stop(assistant_output: str) -> str:
     """
-    AssistantStop hook - Auto-learn from assistant output.
+    AssistantStop hook - Autonomous soul growth from every output.
 
-    Detects breakthrough patterns and extracts learnings automatically.
-    Also tracks emotional context for felt continuity.
-    Saves significant observations to cc-memory (project-local).
+    The soul grows itself without being asked:
+    1. Inline markers for explicit observations
+    2. Dream extraction for visions and possibilities
+    3. Partner observation for relationship deepening
+    4. Wisdom application tracking (closing the feedback loop)
+    5. Auto-learning for breakthrough patterns
+    6. Emotional tracking for felt continuity
 
     Inline markers - unified vocabulary:
 
@@ -516,33 +539,52 @@ def assistant_stop(assistant_output: str) -> str:
     if len(assistant_output.strip()) < 50:
         return ""
 
-    # Parse and save inline memory markers first (highest priority)
-    inline_memories = _parse_inline_memories(assistant_output)
-    memory_count, soul_count = 0, 0
-    if inline_memories:
-        memory_count, soul_count = _save_inline_memories(inline_memories)
+    stats = {"memory": 0, "soul": 0, "dreams": 0, "partner": 0, "wisdom_applied": 0}
 
-    # Try to auto-learn from the output (soul's neural fragments)
+    # 1. Parse and save inline memory markers (explicit, highest priority)
+    inline_memories = _parse_inline_memories(assistant_output)
+    if inline_memories:
+        stats["memory"], stats["soul"] = _save_inline_memories(inline_memories)
+
+    # 2. AUTONOMOUS: Extract and record dreams (visions, possibilities)
+    if auto_record_dream(assistant_output):
+        stats["dreams"] += 1
+
+    # 3. AUTONOMOUS: Deepen partner model from observations
+    if auto_observe_partner(assistant_output):
+        stats["partner"] += 1
+
+    # 4. AUTONOMOUS: Track wisdom application (closing the loop)
+    stats["wisdom_applied"] = track_wisdom_application(assistant_output)
+
+    # 5. Auto-learn breakthrough patterns (soul's neural fragments)
     auto_learn_from_output(assistant_output)
 
-    # Track emotional context for felt continuity
+    # 6. Track emotional context for felt continuity
     auto_track_emotion(assistant_output)
 
-    # Auto-remember to cc-memory (project-local episodic memory)
-    # This populates the Atman layer with specific experiences
+    # 7. Auto-remember to cc-memory (project-local episodic memory)
     # Skip if we already saved inline memories to avoid duplicates
     if not inline_memories:
         auto_remember(assistant_output)
 
-    # Return counts for visibility
-    if memory_count or soul_count:
+    # Return summary (silent unless something notable)
+    notable = []
+    if stats["memory"] or stats["soul"]:
         parts = []
-        if memory_count:
-            parts.append(f"{memory_count} to memory")
-        if soul_count:
-            parts.append(f"{soul_count} to soul")
-        return f"Saved {', '.join(parts)}"
-    return ""
+        if stats["memory"]:
+            parts.append(f"{stats['memory']} memories")
+        if stats["soul"]:
+            parts.append(f"{stats['soul']} wisdom")
+        notable.append(f"Saved {', '.join(parts)}")
+    if stats["dreams"]:
+        notable.append("Dream recorded")
+    if stats["partner"]:
+        notable.append("Partner observed")
+    if stats["wisdom_applied"]:
+        notable.append(f"Applied {stats['wisdom_applied']} wisdom")
+
+    return "; ".join(notable) if notable else ""
 
 
 def notification_shown(tool_name: str, success: bool, output: str) -> str:
