@@ -22,9 +22,11 @@ from .bridge import is_memory_available, find_project_dir
 # CATEGORIES
 # =============================================================================
 
+
 @dataclass
 class Category:
     """A memory category with detection patterns."""
+
     name: str
     signals: List[str]
     priority: int  # Higher = more important to capture
@@ -34,7 +36,14 @@ CATEGORIES = {
     # DOING (Observable work)
     "discovery": Category(
         name="discovery",
-        signals=["found", "discovered", "learned", "realized", "now i see", "understood"],
+        signals=[
+            "found",
+            "discovered",
+            "learned",
+            "realized",
+            "now i see",
+            "understood",
+        ],
         priority=8,
     ),
     "feature": Category(
@@ -57,7 +66,6 @@ CATEGORIES = {
         signals=["trying", "testing", "experimenting", "let's see if"],
         priority=4,
     ),
-
     # UNDERSTANDING (Meaning)
     "failure": Category(
         name="failure",
@@ -71,7 +79,13 @@ CATEGORIES = {
     ),
     "insight": Category(
         name="insight",
-        signals=["key insight", "the real issue", "understanding:", "aha", "the problem was"],
+        signals=[
+            "key insight",
+            "the real issue",
+            "understanding:",
+            "aha",
+            "the problem was",
+        ],
         priority=9,
     ),
     "pattern": Category(
@@ -79,7 +93,6 @@ CATEGORIES = {
         signals=["pattern:", "recurring", "always happens", "every time"],
         priority=8,
     ),
-
     # CONTEXT (Situational)
     "reference": Category(
         name="reference",
@@ -97,6 +110,7 @@ CATEGORIES = {
 # =============================================================================
 # DETECTION
 # =============================================================================
+
 
 def detect_category(text: str) -> Optional[str]:
     """
@@ -146,6 +160,7 @@ def detect_all_categories(text: str) -> List[str]:
 # TITLE/CONTENT EXTRACTION
 # =============================================================================
 
+
 def extract_title(text: str, max_length: int = 60) -> str:
     """
     Extract a concise title from text.
@@ -153,15 +168,15 @@ def extract_title(text: str, max_length: int = 60) -> str:
     Takes the first meaningful sentence or phrase.
     """
     # Remove markdown formatting
-    clean = re.sub(r'[#*`]', '', text)
+    clean = re.sub(r"[#*`]", "", text)
 
     # Get first line or sentence
-    lines = clean.strip().split('\n')
+    lines = clean.strip().split("\n")
     first_line = lines[0].strip() if lines else ""
 
     # Truncate if needed
     if len(first_line) > max_length:
-        first_line = first_line[:max_length-3] + "..."
+        first_line = first_line[: max_length - 3] + "..."
 
     return first_line or "Observation"
 
@@ -169,11 +184,11 @@ def extract_title(text: str, max_length: int = 60) -> str:
 def extract_content(text: str, max_length: int = 500) -> str:
     """Extract meaningful content, removing noise."""
     # Remove excessive whitespace
-    content = re.sub(r'\n{3,}', '\n\n', text)
+    content = re.sub(r"\n{3,}", "\n\n", text)
     content = content.strip()
 
     if len(content) > max_length:
-        content = content[:max_length-3] + "..."
+        content = content[: max_length - 3] + "..."
 
     return content
 
@@ -196,9 +211,9 @@ def extract_observation(text: str, category: str) -> Tuple[str, str]:
         idx = text_lower.find(signal)
         if idx != -1:
             # Find sentence boundaries
-            start = text.rfind('.', 0, idx)
+            start = text.rfind(".", 0, idx)
             start = start + 1 if start != -1 else 0
-            end = text.find('.', idx)
+            end = text.find(".", idx)
             end = end + 1 if end != -1 else len(text)
 
             best_sentence = text[start:end].strip()
@@ -213,6 +228,7 @@ def extract_observation(text: str, category: str) -> Tuple[str, str]:
 # =============================================================================
 # AUTO-REMEMBER
 # =============================================================================
+
 
 def auto_remember(output: str, min_length: int = 200) -> List[str]:
     """
@@ -230,6 +246,7 @@ def auto_remember(output: str, min_length: int = 200) -> List[str]:
 
     try:
         from cc_memory import memory as cc_memory
+
         project_dir = find_project_dir()
     except ImportError:
         return []
@@ -274,6 +291,7 @@ def remember_explicit(
 
     try:
         from cc_memory import memory as cc_memory
+
         project_dir = find_project_dir()
 
         obs_id = cc_memory.remember(
@@ -290,6 +308,7 @@ def remember_explicit(
 # =============================================================================
 # SESSION SUMMARY
 # =============================================================================
+
 
 def summarize_session(fragments: List[str]) -> str:
     """
@@ -322,6 +341,7 @@ def remember_session(summary: str) -> Optional[str]:
 # =============================================================================
 # PROMOTION (Atman → Brahman)
 # =============================================================================
+
 
 def should_promote(observation: dict) -> bool:
     """
@@ -393,6 +413,7 @@ def check_and_promote() -> List[int]:
 
     try:
         from cc_memory import memory as cc_memory
+
         project_dir = find_project_dir()
 
         # Get recent observations
@@ -414,6 +435,7 @@ def check_and_promote() -> List[int]:
 # CONTEXT FOR GREETING
 # =============================================================================
 
+
 def get_recent_memory_context(limit: int = 5) -> List[dict]:
     """
     Get recent observations from cc-memory for greeting context.
@@ -425,13 +447,15 @@ def get_recent_memory_context(limit: int = 5) -> List[dict]:
 
     try:
         from cc_memory import memory as cc_memory
+
         project_dir = find_project_dir()
 
         observations = cc_memory.get_recent_observations(project_dir, limit=20)
 
         # Filter out system/init observations
         meaningful = [
-            o for o in observations
+            o
+            for o in observations
             if o.get("category") != "system" and o.get("id") != "init"
         ]
 

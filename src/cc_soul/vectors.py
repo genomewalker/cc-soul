@@ -23,6 +23,7 @@ def _get_model():
     global _model
     if _model is None:
         from sentence_transformers import SentenceTransformer
+
         _model = SentenceTransformer(MODEL_NAME)
     return _model
 
@@ -32,6 +33,7 @@ def _get_db():
     global _db
     if _db is None:
         import lancedb
+
         LANCE_DIR.mkdir(parents=True, exist_ok=True)
         _db = lancedb.connect(str(LANCE_DIR))
     return _db
@@ -57,33 +59,39 @@ def init_wisdom_table():
         return db.open_table("wisdom")
     except Exception:
         import pyarrow as pa
-        schema = pa.schema([
-            pa.field("id", pa.string()),
-            pa.field("title", pa.string()),
-            pa.field("content", pa.string()),
-            pa.field("type", pa.string()),
-            pa.field("domain", pa.string()),
-            pa.field("vector", pa.list_(pa.float32(), 384)),
-        ])
+
+        schema = pa.schema(
+            [
+                pa.field("id", pa.string()),
+                pa.field("title", pa.string()),
+                pa.field("content", pa.string()),
+                pa.field("type", pa.string()),
+                pa.field("domain", pa.string()),
+                pa.field("vector", pa.list_(pa.float32(), 384)),
+            ]
+        )
         return db.create_table("wisdom", schema=schema)
 
 
-def index_wisdom(wisdom_id: str, title: str, content: str,
-                 wisdom_type: str, domain: str = None):
+def index_wisdom(
+    wisdom_id: str, title: str, content: str, wisdom_type: str, domain: str = None
+):
     """Add or update a wisdom entry in the vector index."""
     table = init_wisdom_table()
 
     text = f"{title}: {content}"
     vector = embed_text(text)
 
-    data = [{
-        "id": wisdom_id,
-        "title": title,
-        "content": content,
-        "type": wisdom_type,
-        "domain": domain or "",
-        "vector": vector.tolist(),
-    }]
+    data = [
+        {
+            "id": wisdom_id,
+            "title": title,
+            "content": content,
+            "type": wisdom_type,
+            "domain": domain or "",
+            "vector": vector.tolist(),
+        }
+    ]
 
     try:
         existing = table.search().where(f"id = '{wisdom_id}'").to_list()
@@ -95,8 +103,9 @@ def index_wisdom(wisdom_id: str, title: str, content: str,
     table.add(data)
 
 
-def search_wisdom(query: str, limit: int = 5,
-                  domain: str = None, wisdom_type: str = None) -> List[Dict]:
+def search_wisdom(
+    query: str, limit: int = 5, domain: str = None, wisdom_type: str = None
+) -> List[Dict]:
     """
     Semantic search for relevant wisdom.
 
@@ -119,14 +128,17 @@ def search_wisdom(query: str, limit: int = 5,
 
     results = search.to_list()
 
-    return [{
-        "id": r["id"],
-        "title": r["title"],
-        "content": r["content"],
-        "type": r["type"],
-        "domain": r["domain"],
-        "score": float(1 - r["_distance"]),
-    } for r in results]
+    return [
+        {
+            "id": r["id"],
+            "title": r["title"],
+            "content": r["content"],
+            "type": r["type"],
+            "domain": r["domain"],
+            "score": float(1 - r["_distance"]),
+        }
+        for r in results
+    ]
 
 
 def reindex_all_wisdom():
@@ -134,7 +146,7 @@ def reindex_all_wisdom():
     conn = get_db_connection()
     c = conn.cursor()
 
-    c.execute('SELECT id, type, title, content, domain FROM wisdom')
+    c.execute("SELECT id, type, title, content, domain FROM wisdom")
     rows = c.fetchall()
     conn.close()
 
@@ -149,27 +161,33 @@ def reindex_all_wisdom():
         pass
 
     import pyarrow as pa
-    schema = pa.schema([
-        pa.field("id", pa.string()),
-        pa.field("title", pa.string()),
-        pa.field("content", pa.string()),
-        pa.field("type", pa.string()),
-        pa.field("domain", pa.string()),
-        pa.field("vector", pa.list_(pa.float32(), 384)),
-    ])
+
+    schema = pa.schema(
+        [
+            pa.field("id", pa.string()),
+            pa.field("title", pa.string()),
+            pa.field("content", pa.string()),
+            pa.field("type", pa.string()),
+            pa.field("domain", pa.string()),
+            pa.field("vector", pa.list_(pa.float32(), 384)),
+        ]
+    )
     table = db.create_table("wisdom", schema=schema)
 
     texts = [f"{row[2]}: {row[3]}" for row in rows]
     vectors = embed_texts(texts)
 
-    data = [{
-        "id": row[0],
-        "title": row[2],
-        "content": row[3],
-        "type": row[1],
-        "domain": row[4] or "",
-        "vector": vectors[i].tolist(),
-    } for i, row in enumerate(rows)]
+    data = [
+        {
+            "id": row[0],
+            "title": row[2],
+            "content": row[3],
+            "type": row[1],
+            "domain": row[4] or "",
+            "vector": vectors[i].tolist(),
+        }
+        for i, row in enumerate(rows)
+    ]
 
     table.add(data)
     print(f"Indexed {len(data)} wisdom entries")

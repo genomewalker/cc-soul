@@ -24,31 +24,32 @@ from .core import SOUL_DB, init_soul
 
 
 class GapType(str, Enum):
-    RECURRING_PROBLEM = "recurring_problem"      # Same issue keeps appearing
+    RECURRING_PROBLEM = "recurring_problem"  # Same issue keeps appearing
     REPEATED_CORRECTION = "repeated_correction"  # User corrects same mistake
-    UNKNOWN_FILE = "unknown_file"                # File touched but no hints
-    MISSING_RATIONALE = "missing_rationale"      # Decision without explanation
-    NEW_DOMAIN = "new_domain"                    # Unfamiliar territory
-    STALE_WISDOM = "stale_wisdom"                # Old wisdom never applied
-    FAILED_PATTERN = "failed_pattern"            # Pattern that keeps failing
+    UNKNOWN_FILE = "unknown_file"  # File touched but no hints
+    MISSING_RATIONALE = "missing_rationale"  # Decision without explanation
+    NEW_DOMAIN = "new_domain"  # Unfamiliar territory
+    STALE_WISDOM = "stale_wisdom"  # Old wisdom never applied
+    FAILED_PATTERN = "failed_pattern"  # Pattern that keeps failing
 
 
 class QuestionStatus(str, Enum):
-    PENDING = "pending"          # Not yet asked
-    ASKED = "asked"              # Asked but not answered
-    ANSWERED = "answered"        # User provided answer
-    DISMISSED = "dismissed"      # User dismissed as not relevant
+    PENDING = "pending"  # Not yet asked
+    ASKED = "asked"  # Asked but not answered
+    ANSWERED = "answered"  # User provided answer
+    DISMISSED = "dismissed"  # User dismissed as not relevant
     INCORPORATED = "incorporated"  # Answer turned into wisdom
 
 
 @dataclass
 class Gap:
     """A detected knowledge gap."""
+
     id: str
     type: GapType
     description: str
-    evidence: List[str]           # What triggered this gap detection
-    priority: float               # 0-1, higher = more important
+    evidence: List[str]  # What triggered this gap detection
+    priority: float  # 0-1, higher = more important
     detected_at: str = field(default_factory=lambda: datetime.now().isoformat())
     occurrences: int = 1
     related_files: List[str] = field(default_factory=list)
@@ -58,10 +59,11 @@ class Gap:
 @dataclass
 class Question:
     """A question the soul wants to ask."""
+
     id: int
     gap_id: str
     question: str
-    context: str                  # Why the soul is asking
+    context: str  # Why the soul is asking
     priority: float
     status: QuestionStatus = QuestionStatus.PENDING
     asked_at: Optional[str] = None
@@ -115,6 +117,7 @@ def _ensure_curiosity_tables():
 # GAP DETECTION
 # =============================================================================
 
+
 def detect_recurring_problems() -> List[Gap]:
     """Detect problems that keep occurring without learned patterns."""
     from .efficiency import get_token_stats
@@ -144,7 +147,7 @@ def detect_recurring_problems() -> List[Gap]:
             description=f"Problem type '{problem_type}' occurred {count} times without a solution pattern",
             evidence=[f"Fingerprint: {fingerprint[:50]}..."],
             priority=min(count * 0.1, 1.0),
-            occurrences=count
+            occurrences=count,
         )
         gaps.append(gap)
 
@@ -181,7 +184,7 @@ def detect_repeated_corrections() -> List[Gap]:
             description=f"User corrected the same issue {count} times",
             evidence=[content[:100]],
             priority=min(count * 0.15, 1.0),
-            occurrences=count
+            occurrences=count,
         )
         gaps.append(gap)
 
@@ -226,7 +229,7 @@ def detect_unknown_files() -> List[Gap]:
                 evidence=[f"Appeared in {count} problem patterns"],
                 priority=min(count * 0.1, 0.8),
                 occurrences=count,
-                related_files=[file_path]
+                related_files=[file_path],
             )
             gaps.append(gap)
 
@@ -257,7 +260,7 @@ def detect_missing_rationale() -> List[Gap]:
             description=f"Decision about '{topic}' has no rationale",
             evidence=[f"Decision: {decision[:80]}..."],
             priority=0.5,
-            detected_at=made_at
+            detected_at=made_at,
         )
         gaps.append(gap)
 
@@ -287,8 +290,18 @@ def detect_new_domains() -> List[Gap]:
     """)
 
     mentioned_domains = Counter()
-    domain_keywords = ['bioinformatics', 'web', 'cli', 'api', 'database', 'ml',
-                       'devops', 'testing', 'security', 'performance']
+    domain_keywords = [
+        "bioinformatics",
+        "web",
+        "cli",
+        "api",
+        "database",
+        "ml",
+        "devops",
+        "testing",
+        "security",
+        "performance",
+    ]
 
     for row in cursor.fetchall():
         context = row[0].lower()
@@ -306,7 +319,7 @@ def detect_new_domains() -> List[Gap]:
                 evidence=[f"Mentioned {count} times in recent work"],
                 priority=min(count * 0.1, 0.7),
                 occurrences=count,
-                related_concepts=[domain]
+                related_concepts=[domain],
             )
             gaps.append(gap)
 
@@ -342,7 +355,7 @@ def detect_stale_wisdom() -> List[Gap]:
             evidence=[f"Created: {created_at[:10]}, Applied: {app_count} times"],
             priority=0.4,
             detected_at=created_at,
-            related_concepts=[str(wisdom_id)]
+            related_concepts=[str(wisdom_id)],
         )
         gaps.append(gap)
 
@@ -396,21 +409,24 @@ def save_gap(gap: Gap) -> str:
     conn = sqlite3.connect(SOUL_DB)
     cursor = conn.cursor()
 
-    cursor.execute("""
+    cursor.execute(
+        """
         INSERT OR REPLACE INTO gaps
         (id, type, description, evidence, priority, detected_at, occurrences, related_files, related_concepts)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        gap.id,
-        gap.type.value,
-        gap.description,
-        json.dumps(gap.evidence),
-        gap.priority,
-        gap.detected_at,
-        gap.occurrences,
-        json.dumps(gap.related_files),
-        json.dumps(gap.related_concepts)
-    ))
+    """,
+        (
+            gap.id,
+            gap.type.value,
+            gap.description,
+            json.dumps(gap.evidence),
+            gap.priority,
+            gap.detected_at,
+            gap.occurrences,
+            json.dumps(gap.related_files),
+            json.dumps(gap.related_concepts),
+        ),
+    )
 
     conn.commit()
     conn.close()
@@ -420,6 +436,7 @@ def save_gap(gap: Gap) -> str:
 # =============================================================================
 # QUESTION GENERATION
 # =============================================================================
+
 
 def generate_question(gap: Gap) -> Question:
     """Generate a natural question from a gap."""
@@ -460,8 +477,10 @@ def generate_question(gap: Gap) -> Question:
     # Fill template
     question_text = template.format(
         desc=gap.description[:100],
-        files=', '.join(gap.related_files[:3]) if gap.related_files else 'these files',
-        concepts=', '.join(gap.related_concepts[:3]) if gap.related_concepts else 'this area'
+        files=", ".join(gap.related_files[:3]) if gap.related_files else "these files",
+        concepts=", ".join(gap.related_concepts[:3])
+        if gap.related_concepts
+        else "this area",
     )
 
     # Generate context
@@ -475,9 +494,9 @@ def generate_question(gap: Gap) -> Question:
         id=0,  # Will be assigned by DB
         gap_id=gap.id,
         question=question_text,
-        context='; '.join(context_parts),
+        context="; ".join(context_parts),
         priority=gap.priority,
-        status=QuestionStatus.PENDING
+        status=QuestionStatus.PENDING,
     )
 
 
@@ -487,18 +506,21 @@ def save_question(question: Question) -> int:
     conn = sqlite3.connect(SOUL_DB)
     cursor = conn.cursor()
 
-    cursor.execute("""
+    cursor.execute(
+        """
         INSERT INTO questions
         (gap_id, question, context, priority, status, created_at)
         VALUES (?, ?, ?, ?, ?, ?)
-    """, (
-        question.gap_id,
-        question.question,
-        question.context,
-        question.priority,
-        question.status.value,
-        question.created_at
-    ))
+    """,
+        (
+            question.gap_id,
+            question.question,
+            question.context,
+            question.priority,
+            question.status.value,
+            question.created_at,
+        ),
+    )
 
     question_id = cursor.lastrowid
     conn.commit()
@@ -512,28 +534,33 @@ def get_pending_questions(limit: int = 10) -> List[Question]:
     conn = sqlite3.connect(SOUL_DB)
     cursor = conn.cursor()
 
-    cursor.execute("""
+    cursor.execute(
+        """
         SELECT id, gap_id, question, context, priority, status, asked_at, answered_at, answer, created_at
         FROM questions
         WHERE status = 'pending'
         ORDER BY priority DESC, created_at DESC
         LIMIT ?
-    """, (limit,))
+    """,
+        (limit,),
+    )
 
     questions = []
     for row in cursor.fetchall():
-        questions.append(Question(
-            id=row[0],
-            gap_id=row[1],
-            question=row[2],
-            context=row[3],
-            priority=row[4],
-            status=QuestionStatus(row[5]),
-            asked_at=row[6],
-            answered_at=row[7],
-            answer=row[8],
-            created_at=row[9]
-        ))
+        questions.append(
+            Question(
+                id=row[0],
+                gap_id=row[1],
+                question=row[2],
+                context=row[3],
+                priority=row[4],
+                status=QuestionStatus(row[5]),
+                asked_at=row[6],
+                answered_at=row[7],
+                answer=row[8],
+                created_at=row[9],
+            )
+        )
 
     conn.close()
     return questions
@@ -545,11 +572,14 @@ def mark_question_asked(question_id: int) -> bool:
     conn = sqlite3.connect(SOUL_DB)
     cursor = conn.cursor()
 
-    cursor.execute("""
+    cursor.execute(
+        """
         UPDATE questions
         SET status = 'asked', asked_at = ?
         WHERE id = ?
-    """, (datetime.now().isoformat(), question_id))
+    """,
+        (datetime.now().isoformat(), question_id),
+    )
 
     success = cursor.rowcount > 0
     conn.commit()
@@ -565,11 +595,14 @@ def answer_question(question_id: int, answer: str, incorporate: bool = False) ->
 
     status = QuestionStatus.INCORPORATED if incorporate else QuestionStatus.ANSWERED
 
-    cursor.execute("""
+    cursor.execute(
+        """
         UPDATE questions
         SET status = ?, answered_at = ?, answer = ?
         WHERE id = ?
-    """, (status.value, datetime.now().isoformat(), answer, question_id))
+    """,
+        (status.value, datetime.now().isoformat(), answer, question_id),
+    )
 
     success = cursor.rowcount > 0
     conn.commit()
@@ -578,10 +611,13 @@ def answer_question(question_id: int, answer: str, incorporate: bool = False) ->
     # If incorporating, also mark the gap as resolved
     if incorporate and success:
         cursor = conn.cursor()
-        cursor.execute("""
+        cursor.execute(
+            """
             UPDATE gaps SET resolved = 1
             WHERE id = (SELECT gap_id FROM questions WHERE id = ?)
-        """, (question_id,))
+        """,
+            (question_id,),
+        )
         conn.commit()
 
     return success
@@ -593,11 +629,14 @@ def dismiss_question(question_id: int) -> bool:
     conn = sqlite3.connect(SOUL_DB)
     cursor = conn.cursor()
 
-    cursor.execute("""
+    cursor.execute(
+        """
         UPDATE questions
         SET status = 'dismissed'
         WHERE id = ?
-    """, (question_id,))
+    """,
+        (question_id,),
+    )
 
     success = cursor.rowcount > 0
     conn.commit()
@@ -608,6 +647,7 @@ def dismiss_question(question_id: int) -> bool:
 # =============================================================================
 # CURIOSITY CYCLE
 # =============================================================================
+
 
 def run_curiosity_cycle(max_questions: int = 5) -> List[Question]:
     """
@@ -622,7 +662,7 @@ def run_curiosity_cycle(max_questions: int = 5) -> List[Question]:
     gaps = detect_all_gaps()
 
     # Save gaps and generate questions
-    for gap in gaps[:max_questions * 2]:  # Generate more than needed, then prioritize
+    for gap in gaps[: max_questions * 2]:  # Generate more than needed, then prioritize
         save_gap(gap)
         question = generate_question(gap)
         save_question(question)
@@ -660,20 +700,22 @@ def get_curiosity_stats() -> Dict:
     conn.close()
 
     return {
-        'open_gaps': open_gaps,
-        'gaps_by_type': gaps_by_type,
-        'questions': {
-            'pending': pending,
-            'answered': answered,
-            'incorporated': incorporated,
-            'dismissed': dismissed,
-            'total': pending + answered + incorporated + dismissed
+        "open_gaps": open_gaps,
+        "gaps_by_type": gaps_by_type,
+        "questions": {
+            "pending": pending,
+            "answered": answered,
+            "incorporated": incorporated,
+            "dismissed": dismissed,
+            "total": pending + answered + incorporated + dismissed,
         },
-        'incorporation_rate': incorporated / max(answered + incorporated, 1)
+        "incorporation_rate": incorporated / max(answered + incorporated, 1),
     }
 
 
-def format_questions_for_prompt(questions: List[Question], max_questions: int = 3) -> str:
+def format_questions_for_prompt(
+    questions: List[Question], max_questions: int = 3
+) -> str:
     """Format questions for injection into a prompt."""
     if not questions:
         return ""
@@ -690,10 +732,12 @@ def format_questions_for_prompt(questions: List[Question], max_questions: int = 
     lines.append("")
     lines.append("_Answer any of these to help me learn, or dismiss if not relevant._")
 
-    return '\n'.join(lines)
+    return "\n".join(lines)
 
 
-def incorporate_answer_as_wisdom(question_id: int, wisdom_type: str = "insight") -> Optional[int]:
+def incorporate_answer_as_wisdom(
+    question_id: int, wisdom_type: str = "insight"
+) -> Optional[int]:
     """Turn an answered question into wisdom."""
     from .wisdom import gain_wisdom, WisdomType
 
@@ -701,12 +745,15 @@ def incorporate_answer_as_wisdom(question_id: int, wisdom_type: str = "insight")
     conn = sqlite3.connect(SOUL_DB)
     cursor = conn.cursor()
 
-    cursor.execute("""
+    cursor.execute(
+        """
         SELECT q.question, q.answer, g.type, g.related_concepts
         FROM questions q
         JOIN gaps g ON q.gap_id = g.id
         WHERE q.id = ? AND q.answer IS NOT NULL
-    """, (question_id,))
+    """,
+        (question_id,),
+    )
 
     row = cursor.fetchone()
     conn.close()
@@ -731,7 +778,7 @@ def incorporate_answer_as_wisdom(question_id: int, wisdom_type: str = "insight")
         title=title,
         content=content,
         domain=domain,
-        confidence=0.8  # Learned directly from user
+        confidence=0.8,  # Learned directly from user
     )
 
     # Mark as incorporated

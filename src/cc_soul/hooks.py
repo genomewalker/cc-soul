@@ -15,11 +15,20 @@ from datetime import datetime
 from pathlib import Path
 
 from .core import init_soul, get_soul_context, SOUL_DIR
-from .conversations import start_conversation, end_conversation, get_recent_context, format_context_restoration
+from .conversations import (
+    start_conversation,
+    end_conversation,
+    get_recent_context,
+    format_context_restoration,
+)
 from .wisdom import quick_recall, clear_session_wisdom, get_session_wisdom
 from .vocabulary import get_vocabulary
 from .efficiency import format_efficiency_injection, get_compact_context
-from .curiosity import run_curiosity_cycle, format_questions_for_prompt, get_curiosity_stats
+from .curiosity import (
+    run_curiosity_cycle,
+    format_questions_for_prompt,
+    get_curiosity_stats,
+)
 from .unified import (
     forward_pass,
     format_session_start,
@@ -271,7 +280,9 @@ def notification_shown(tool_name: str, success: bool, output: str) -> str:
     return ""
 
 
-def user_prompt(user_input: str, use_woven: bool = True, transcript_path: str = None) -> str:
+def user_prompt(
+    user_input: str, use_woven: bool = True, transcript_path: str = None
+) -> str:
     """
     UserPromptSubmit hook - Inject soul context organically.
 
@@ -289,8 +300,9 @@ def user_prompt(user_input: str, use_woven: bool = True, transcript_path: str = 
     budget_check = check_budget_before_inject(transcript_path)
 
     # If urgent, save context first
-    if budget_check.get('save_first'):
+    if budget_check.get("save_first"):
         from .conversations import save_context
+
         save_context(
             content=f"Context approaching limit. Last prompt: {user_input[:200]}",
             context_type="pre_compact",
@@ -298,7 +310,7 @@ def user_prompt(user_input: str, use_woven: bool = True, transcript_path: str = 
         )
 
     # Adjust injection based on budget mode
-    mode = budget_check.get('mode', 'full')
+    mode = budget_check.get("mode", "full")
 
     output = []
 
@@ -306,19 +318,19 @@ def user_prompt(user_input: str, use_woven: bool = True, transcript_path: str = 
     try:
         ctx = forward_pass(user_input, session_type="prompt")
 
-        if mode == 'minimal':
+        if mode == "minimal":
             # Minimal mode: just one key wisdom if highly relevant
-            if ctx.wisdom and ctx.wisdom[0].get('combined_score', 0) > 0.5:
+            if ctx.wisdom and ctx.wisdom[0].get("combined_score", 0) > 0.5:
                 w = ctx.wisdom[0]
                 return f"Remember: {w.get('title', '')}"
             return ""
 
         if use_woven:
             # Organic weaving - no headers, just flowing context
-            woven = format_context(ctx, style='woven')
+            woven = format_context(ctx, style="woven")
             if woven:
                 # In compact mode, truncate
-                if mode == 'compact':
+                if mode == "compact":
                     return woven[:500] if len(woven) > 500 else woven
                 return woven
         else:
@@ -327,7 +339,8 @@ def user_prompt(user_input: str, use_woven: bool = True, transcript_path: str = 
             vocab = get_vocabulary()
             input_lower = user_input.lower()
             matching_terms = {
-                term: meaning for term, meaning in vocab.items()
+                term: meaning
+                for term, meaning in vocab.items()
                 if term.lower() in input_lower
             }
 
@@ -342,10 +355,10 @@ def user_prompt(user_input: str, use_woven: bool = True, transcript_path: str = 
                 output.append("## 💡 Relevant Wisdom")
                 output.append("")
                 for w in ctx.wisdom[:2]:
-                    title = w.get('title', '')
-                    conf = w.get('confidence', 0)
+                    title = w.get("title", "")
+                    conf = w.get("confidence", 0)
                     output.append(f"- **{title}** [{conf}%]")
-                    content = w.get('content', '')[:100]
+                    content = w.get("content", "")[:100]
                     if content:
                         output.append(f"  {content}")
                 output.append("")
@@ -354,12 +367,16 @@ def user_prompt(user_input: str, use_woven: bool = True, transcript_path: str = 
         # Fallback to simple quick recall
         results = quick_recall(user_input, limit=3)
         if results:
-            relevant = [r for r in results if r.get('combined_score', r.get('effective_confidence', 0)) > 0.3]
+            relevant = [
+                r
+                for r in results
+                if r.get("combined_score", r.get("effective_confidence", 0)) > 0.3
+            ]
             if relevant:
                 output.append("## 💡 Relevant Wisdom")
                 for w in relevant[:2]:
                     output.append(f"- **{w['title']}**")
-                    content = w['content'][:100]
+                    content = w["content"][:100]
                     output.append(f"  {content}")
                 output.append("")
 

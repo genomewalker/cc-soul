@@ -45,6 +45,7 @@ SOUL_PACKAGE = Path(__file__).parent
 
 class ImprovementStatus(str, Enum):
     """Status of an improvement proposal."""
+
     PROPOSED = "proposed"
     VALIDATING = "validating"
     VALIDATED = "validated"
@@ -56,6 +57,7 @@ class ImprovementStatus(str, Enum):
 
 class ImprovementCategory(str, Enum):
     """Categories of improvements."""
+
     BUG_FIX = "bug_fix"
     PERFORMANCE = "performance"
     ARCHITECTURE = "architecture"
@@ -67,6 +69,7 @@ class ImprovementCategory(str, Enum):
 @dataclass
 class ImprovementProposal:
     """A concrete proposal for improving the soul."""
+
     id: str
     created_at: str
     category: ImprovementCategory
@@ -93,6 +96,7 @@ def _ensure_dirs():
 # DIAGNOSIS - Identify improvement opportunities
 # =============================================================================
 
+
 def diagnose() -> Dict:
     """
     Analyze the soul's current state to identify improvement opportunities.
@@ -112,64 +116,73 @@ def diagnose() -> Dict:
 
     # High-priority: Critical pain points
     for pp in pain_points:
-        if pp['severity'] in ('critical', 'high'):
-            targets.append({
-                'type': 'pain_point',
-                'id': pp['id'],
-                'priority': 1 if pp['severity'] == 'critical' else 2,
-                'category': pp['category'],
-                'description': pp['description'],
-                'context': pp.get('context', {})
-            })
+        if pp["severity"] in ("critical", "high"):
+            targets.append(
+                {
+                    "type": "pain_point",
+                    "id": pp["id"],
+                    "priority": 1 if pp["severity"] == "critical" else 2,
+                    "category": pp["category"],
+                    "description": pp["description"],
+                    "context": pp.get("context", {}),
+                }
+            )
 
     # Medium-priority: Evolution insights
     for insight in insights:
-        priority = {'critical': 1, 'high': 2, 'medium': 3, 'low': 4}.get(
-            insight['priority'], 3
+        priority = {"critical": 1, "high": 2, "medium": 3, "low": 4}.get(
+            insight["priority"], 3
         )
-        targets.append({
-            'type': 'insight',
-            'id': insight['id'],
-            'priority': priority,
-            'category': insight['category'],
-            'description': insight['insight'],
-            'suggested_change': insight.get('suggested_change'),
-            'affected_modules': insight.get('affected_modules', [])
-        })
+        targets.append(
+            {
+                "type": "insight",
+                "id": insight["id"],
+                "priority": priority,
+                "category": insight["category"],
+                "description": insight["insight"],
+                "suggested_change": insight.get("suggested_change"),
+                "affected_modules": insight.get("affected_modules", []),
+            }
+        )
 
     # Add insights from introspection
-    for insight in report.get('insights', []):
-        priority = {'high': 2, 'medium': 3, 'low': 4}.get(insight['severity'], 3)
-        targets.append({
-            'type': 'introspection',
-            'id': insight['type'],
-            'priority': priority,
-            'category': insight['type'],
-            'description': insight['message'],
-            'suggestion': insight.get('suggestion')
-        })
+    for insight in report.get("insights", []):
+        priority = {"high": 2, "medium": 3, "low": 4}.get(insight["severity"], 3)
+        targets.append(
+            {
+                "type": "introspection",
+                "id": insight["type"],
+                "priority": priority,
+                "category": insight["type"],
+                "description": insight["message"],
+                "suggestion": insight.get("suggestion"),
+            }
+        )
 
     # Sort by priority
-    targets.sort(key=lambda x: x['priority'])
+    targets.sort(key=lambda x: x["priority"])
 
     return {
-        'targets': targets,
-        'summary': {
-            'total_targets': len(targets),
-            'critical': len([t for t in targets if t['priority'] == 1]),
-            'high': len([t for t in targets if t['priority'] == 2]),
-            'by_type': {
-                'pain_point': len([t for t in targets if t['type'] == 'pain_point']),
-                'insight': len([t for t in targets if t['type'] == 'insight']),
-                'introspection': len([t for t in targets if t['type'] == 'introspection'])
-            }
-        }
+        "targets": targets,
+        "summary": {
+            "total_targets": len(targets),
+            "critical": len([t for t in targets if t["priority"] == 1]),
+            "high": len([t for t in targets if t["priority"] == 2]),
+            "by_type": {
+                "pain_point": len([t for t in targets if t["type"] == "pain_point"]),
+                "insight": len([t for t in targets if t["type"] == "insight"]),
+                "introspection": len(
+                    [t for t in targets if t["type"] == "introspection"]
+                ),
+            },
+        },
     }
 
 
 # =============================================================================
 # PROPOSAL GENERATION - Create concrete improvements
 # =============================================================================
+
 
 def create_proposal(
     category: ImprovementCategory,
@@ -179,7 +192,7 @@ def create_proposal(
     changes: List[Dict],
     tests_to_run: List[str] = None,
     source_insight_id: str = None,
-    source_pain_point_id: str = None
+    source_pain_point_id: str = None,
 ) -> ImprovementProposal:
     """
     Create a new improvement proposal.
@@ -193,18 +206,18 @@ def create_proposal(
     _ensure_dirs()
 
     proposal = ImprovementProposal(
-        id=datetime.now().strftime('%Y%m%d_%H%M%S_%f'),
+        id=datetime.now().strftime("%Y%m%d_%H%M%S_%f"),
         created_at=datetime.now().isoformat(),
         category=category,
         title=title,
         description=description,
         reasoning=reasoning,
-        affected_files=list(set(c['file'] for c in changes)),
+        affected_files=list(set(c["file"] for c in changes)),
         changes=changes,
         tests_to_run=tests_to_run or [],
         status=ImprovementStatus.PROPOSED,
         source_insight_id=source_insight_id,
-        source_pain_point_id=source_pain_point_id
+        source_pain_point_id=source_pain_point_id,
     )
 
     # Save proposal
@@ -217,7 +230,7 @@ def create_proposal(
 def get_proposals(
     status: ImprovementStatus = None,
     category: ImprovementCategory = None,
-    limit: int = 20
+    limit: int = 20,
 ) -> List[Dict]:
     """Get improvement proposals."""
     _ensure_dirs()
@@ -230,9 +243,9 @@ def get_proposals(
         for line in f:
             if line.strip():
                 proposal = json.loads(line)
-                if status and proposal['status'] != status.value:
+                if status and proposal["status"] != status.value:
                     continue
-                if category and proposal['category'] != category.value:
+                if category and proposal["category"] != category.value:
                     continue
                 proposals.append(proposal)
 
@@ -242,7 +255,7 @@ def get_proposals(
 def get_proposal(proposal_id: str) -> Optional[Dict]:
     """Get a specific proposal by ID."""
     for proposal in get_proposals(limit=1000):
-        if proposal['id'] == proposal_id:
+        if proposal["id"] == proposal_id:
             return proposal
     return None
 
@@ -251,7 +264,7 @@ def update_proposal_status(
     proposal_id: str,
     status: ImprovementStatus,
     validation_result: Dict = None,
-    outcome: str = None
+    outcome: str = None,
 ):
     """Update the status of a proposal."""
     _ensure_dirs()
@@ -264,14 +277,14 @@ def update_proposal_status(
         for line in f:
             if line.strip():
                 proposal = json.loads(line)
-                if proposal['id'] == proposal_id:
-                    proposal['status'] = status.value
+                if proposal["id"] == proposal_id:
+                    proposal["status"] = status.value
                     if validation_result:
-                        proposal['validation_result'] = validation_result
+                        proposal["validation_result"] = validation_result
                     if outcome:
-                        proposal['outcome'] = outcome
+                        proposal["outcome"] = outcome
                     if status == ImprovementStatus.APPLIED:
-                        proposal['applied_at'] = datetime.now().isoformat()
+                        proposal["applied_at"] = datetime.now().isoformat()
                 lines.append(json.dumps(proposal) + "\n")
 
     with open(PROPOSALS_LOG, "w") as f:
@@ -281,6 +294,7 @@ def update_proposal_status(
 # =============================================================================
 # VALIDATION - Test proposed changes
 # =============================================================================
+
 
 def validate_proposal(proposal_id: str) -> Dict:
     """
@@ -294,40 +308,48 @@ def validate_proposal(proposal_id: str) -> Dict:
     """
     proposal = get_proposal(proposal_id)
     if not proposal:
-        return {'valid': False, 'errors': ['Proposal not found']}
+        return {"valid": False, "errors": ["Proposal not found"]}
 
     update_proposal_status(proposal_id, ImprovementStatus.VALIDATING)
 
     result = {
-        'valid': True,
-        'tests_passed': [],
-        'tests_failed': [],
-        'errors': [],
-        'validated_at': datetime.now().isoformat()
+        "valid": True,
+        "tests_passed": [],
+        "tests_failed": [],
+        "errors": [],
+        "validated_at": datetime.now().isoformat(),
     }
 
     # Check that all affected files exist
-    for file_path in proposal['affected_files']:
-        full_path = SOUL_PACKAGE / file_path if not Path(file_path).is_absolute() else Path(file_path)
+    for file_path in proposal["affected_files"]:
+        full_path = (
+            SOUL_PACKAGE / file_path
+            if not Path(file_path).is_absolute()
+            else Path(file_path)
+        )
         if not full_path.exists():
-            result['errors'].append(f"File not found: {file_path}")
-            result['valid'] = False
+            result["errors"].append(f"File not found: {file_path}")
+            result["valid"] = False
 
     # Verify old_code exists in files (dry-run the edits)
-    for change in proposal['changes']:
-        file_path = change['file']
-        full_path = SOUL_PACKAGE / file_path if not Path(file_path).is_absolute() else Path(file_path)
+    for change in proposal["changes"]:
+        file_path = change["file"]
+        full_path = (
+            SOUL_PACKAGE / file_path
+            if not Path(file_path).is_absolute()
+            else Path(file_path)
+        )
 
         if full_path.exists():
             content = full_path.read_text()
-            if change.get('old_code') and change['old_code'] not in content:
-                result['errors'].append(
+            if change.get("old_code") and change["old_code"] not in content:
+                result["errors"].append(
                     f"Old code not found in {file_path}: {change['old_code'][:50]}..."
                 )
-                result['valid'] = False
+                result["valid"] = False
 
     # Run tests if specified
-    for test_cmd in proposal.get('tests_to_run', []):
+    for test_cmd in proposal.get("tests_to_run", []):
         try:
             proc = subprocess.run(
                 test_cmd,
@@ -335,26 +357,30 @@ def validate_proposal(proposal_id: str) -> Dict:
                 capture_output=True,
                 text=True,
                 timeout=60,
-                cwd=SOUL_PACKAGE.parent.parent  # Project root
+                cwd=SOUL_PACKAGE.parent.parent,  # Project root
             )
             if proc.returncode == 0:
-                result['tests_passed'].append(test_cmd)
+                result["tests_passed"].append(test_cmd)
             else:
-                result['tests_failed'].append({
-                    'command': test_cmd,
-                    'returncode': proc.returncode,
-                    'stderr': proc.stderr[:500]
-                })
-                result['valid'] = False
+                result["tests_failed"].append(
+                    {
+                        "command": test_cmd,
+                        "returncode": proc.returncode,
+                        "stderr": proc.stderr[:500],
+                    }
+                )
+                result["valid"] = False
         except subprocess.TimeoutExpired:
-            result['errors'].append(f"Test timeout: {test_cmd}")
-            result['valid'] = False
+            result["errors"].append(f"Test timeout: {test_cmd}")
+            result["valid"] = False
         except Exception as e:
-            result['errors'].append(f"Test error: {test_cmd}: {e}")
-            result['valid'] = False
+            result["errors"].append(f"Test error: {test_cmd}: {e}")
+            result["valid"] = False
 
     # Update proposal
-    status = ImprovementStatus.VALIDATED if result['valid'] else ImprovementStatus.FAILED
+    status = (
+        ImprovementStatus.VALIDATED if result["valid"] else ImprovementStatus.FAILED
+    )
     update_proposal_status(proposal_id, status, validation_result=result)
 
     return result
@@ -363,6 +389,7 @@ def validate_proposal(proposal_id: str) -> Dict:
 # =============================================================================
 # APPLICATION - Apply validated changes
 # =============================================================================
+
 
 def apply_proposal(proposal_id: str, create_branch: bool = True) -> Dict:
     """
@@ -374,19 +401,22 @@ def apply_proposal(proposal_id: str, create_branch: bool = True) -> Dict:
     """
     proposal = get_proposal(proposal_id)
     if not proposal:
-        return {'success': False, 'error': 'Proposal not found'}
+        return {"success": False, "error": "Proposal not found"}
 
-    if proposal['status'] != ImprovementStatus.VALIDATED.value:
-        return {'success': False, 'error': f"Proposal not validated: {proposal['status']}"}
+    if proposal["status"] != ImprovementStatus.VALIDATED.value:
+        return {
+            "success": False,
+            "error": f"Proposal not validated: {proposal['status']}",
+        }
 
     update_proposal_status(proposal_id, ImprovementStatus.APPLYING)
 
     result = {
-        'success': True,
-        'changes_applied': [],
-        'errors': [],
-        'branch': None,
-        'applied_at': datetime.now().isoformat()
+        "success": True,
+        "changes_applied": [],
+        "errors": [],
+        "branch": None,
+        "applied_at": datetime.now().isoformat(),
     }
 
     project_root = SOUL_PACKAGE.parent.parent
@@ -396,69 +426,69 @@ def apply_proposal(proposal_id: str, create_branch: bool = True) -> Dict:
         branch_name = f"soul-improve/{proposal['id']}"
         try:
             subprocess.run(
-                ['git', 'checkout', '-b', branch_name],
+                ["git", "checkout", "-b", branch_name],
                 cwd=project_root,
                 capture_output=True,
-                check=True
+                check=True,
             )
-            result['branch'] = branch_name
+            result["branch"] = branch_name
         except subprocess.CalledProcessError as e:
-            result['errors'].append(f"Failed to create branch: {e.stderr}")
+            result["errors"].append(f"Failed to create branch: {e.stderr}")
 
     # Apply each change
-    for change in proposal['changes']:
-        file_path = change['file']
-        full_path = SOUL_PACKAGE / file_path if not Path(file_path).is_absolute() else Path(file_path)
+    for change in proposal["changes"]:
+        file_path = change["file"]
+        full_path = (
+            SOUL_PACKAGE / file_path
+            if not Path(file_path).is_absolute()
+            else Path(file_path)
+        )
 
         try:
             content = full_path.read_text()
 
-            if change.get('old_code'):
+            if change.get("old_code"):
                 # Replace mode
-                if change['old_code'] not in content:
-                    result['errors'].append(f"Old code not found in {file_path}")
-                    result['success'] = False
+                if change["old_code"] not in content:
+                    result["errors"].append(f"Old code not found in {file_path}")
+                    result["success"] = False
                     continue
 
                 new_content = content.replace(
-                    change['old_code'],
-                    change['new_code'],
-                    1  # Only replace first occurrence
+                    change["old_code"],
+                    change["new_code"],
+                    1,  # Only replace first occurrence
                 )
             else:
                 # Append mode
-                new_content = content + "\n" + change['new_code']
+                new_content = content + "\n" + change["new_code"]
 
             full_path.write_text(new_content)
-            result['changes_applied'].append({
-                'file': file_path,
-                'description': change.get('description', 'Applied change')
-            })
+            result["changes_applied"].append(
+                {
+                    "file": file_path,
+                    "description": change.get("description", "Applied change"),
+                }
+            )
 
         except Exception as e:
-            result['errors'].append(f"Failed to apply change to {file_path}: {e}")
-            result['success'] = False
+            result["errors"].append(f"Failed to apply change to {file_path}: {e}")
+            result["success"] = False
 
     # Update proposal status
-    if result['success']:
+    if result["success"]:
         update_proposal_status(
-            proposal_id,
-            ImprovementStatus.APPLIED,
-            outcome='success'
+            proposal_id, ImprovementStatus.APPLIED, outcome="success"
         )
 
         # Link back to source insight/pain point
-        if proposal.get('source_insight_id'):
+        if proposal.get("source_insight_id"):
             mark_implemented(
-                proposal['source_insight_id'],
-                notes=f"Applied via proposal {proposal_id}"
+                proposal["source_insight_id"],
+                notes=f"Applied via proposal {proposal_id}",
             )
     else:
-        update_proposal_status(
-            proposal_id,
-            ImprovementStatus.FAILED,
-            outcome='failed'
-        )
+        update_proposal_status(proposal_id, ImprovementStatus.FAILED, outcome="failed")
 
     return result
 
@@ -469,24 +499,30 @@ def commit_improvement(proposal_id: str, message: str = None) -> Dict:
     """
     proposal = get_proposal(proposal_id)
     if not proposal:
-        return {'success': False, 'error': 'Proposal not found'}
+        return {"success": False, "error": "Proposal not found"}
 
-    if proposal['status'] != ImprovementStatus.APPLIED.value:
-        return {'success': False, 'error': f"Proposal not applied: {proposal['status']}"}
+    if proposal["status"] != ImprovementStatus.APPLIED.value:
+        return {
+            "success": False,
+            "error": f"Proposal not applied: {proposal['status']}",
+        }
 
     project_root = SOUL_PACKAGE.parent.parent
 
     # Stage affected files
-    for file_path in proposal['affected_files']:
+    for file_path in proposal["affected_files"]:
         try:
             subprocess.run(
-                ['git', 'add', file_path],
+                ["git", "add", file_path],
                 cwd=project_root,
                 capture_output=True,
-                check=True
+                check=True,
             )
         except subprocess.CalledProcessError as e:
-            return {'success': False, 'error': f"Failed to stage {file_path}: {e.stderr}"}
+            return {
+                "success": False,
+                "error": f"Failed to stage {file_path}: {e.stderr}",
+            }
 
     # Create commit message
     if not message:
@@ -494,25 +530,23 @@ def commit_improvement(proposal_id: str, message: str = None) -> Dict:
 
     try:
         subprocess.run(
-            ['git', 'commit', '-m', message],
+            ["git", "commit", "-m", message],
             cwd=project_root,
             capture_output=True,
-            check=True
+            check=True,
         )
-        return {'success': True, 'message': message}
+        return {"success": True, "message": message}
     except subprocess.CalledProcessError as e:
-        return {'success': False, 'error': f"Failed to commit: {e.stderr}"}
+        return {"success": False, "error": f"Failed to commit: {e.stderr}"}
 
 
 # =============================================================================
 # LEARNING - Record outcomes to improve future improvements
 # =============================================================================
 
+
 def record_outcome(
-    proposal_id: str,
-    success: bool,
-    notes: str = "",
-    metrics: Dict = None
+    proposal_id: str, success: bool, notes: str = "", metrics: Dict = None
 ):
     """
     Record the outcome of an applied improvement.
@@ -525,16 +559,16 @@ def record_outcome(
     proposal = get_proposal(proposal_id)
 
     outcome = {
-        'proposal_id': proposal_id,
-        'recorded_at': datetime.now().isoformat(),
-        'success': success,
-        'notes': notes,
-        'metrics': metrics or {},
-        'proposal_summary': {
-            'title': proposal['title'] if proposal else 'Unknown',
-            'category': proposal['category'] if proposal else 'Unknown',
-            'reasoning': proposal['reasoning'] if proposal else ''
-        }
+        "proposal_id": proposal_id,
+        "recorded_at": datetime.now().isoformat(),
+        "success": success,
+        "notes": notes,
+        "metrics": metrics or {},
+        "proposal_summary": {
+            "title": proposal["title"] if proposal else "Unknown",
+            "category": proposal["category"] if proposal else "Unknown",
+            "reasoning": proposal["reasoning"] if proposal else "",
+        },
     }
 
     with open(OUTCOMES_LOG, "a") as f:
@@ -546,9 +580,9 @@ def record_outcome(
         value=1.0 if success else 0.0,
         unit="success",
         tags={
-            'proposal_id': proposal_id,
-            'category': proposal['category'] if proposal else 'unknown'
-        }
+            "proposal_id": proposal_id,
+            "category": proposal["category"] if proposal else "unknown",
+        },
     )
 
     return outcome
@@ -559,7 +593,7 @@ def get_improvement_stats() -> Dict:
     _ensure_dirs()
 
     if not OUTCOMES_LOG.exists():
-        return {'total': 0, 'success_rate': 0.0}
+        return {"total": 0, "success_rate": 0.0}
 
     outcomes = []
     with open(OUTCOMES_LOG) as f:
@@ -568,17 +602,17 @@ def get_improvement_stats() -> Dict:
                 outcomes.append(json.loads(line))
 
     if not outcomes:
-        return {'total': 0, 'success_rate': 0.0}
+        return {"total": 0, "success_rate": 0.0}
 
-    successes = len([o for o in outcomes if o['success']])
+    successes = len([o for o in outcomes if o["success"]])
 
     return {
-        'total': len(outcomes),
-        'successes': successes,
-        'failures': len(outcomes) - successes,
-        'success_rate': successes / len(outcomes) if outcomes else 0.0,
-        'by_category': _count_by(outcomes, lambda o: o['proposal_summary']['category']),
-        'recent': outcomes[-5:]
+        "total": len(outcomes),
+        "successes": successes,
+        "failures": len(outcomes) - successes,
+        "success_rate": successes / len(outcomes) if outcomes else 0.0,
+        "by_category": _count_by(outcomes, lambda o: o["proposal_summary"]["category"]),
+        "recent": outcomes[-5:],
     }
 
 
@@ -595,6 +629,7 @@ def _count_by(items: List, key_fn) -> Dict:
 # ORCHESTRATION - High-level improvement workflow
 # =============================================================================
 
+
 def suggest_improvements(limit: int = 3) -> List[Dict]:
     """
     Analyze the soul and suggest concrete improvements.
@@ -607,33 +642,31 @@ def suggest_improvements(limit: int = 3) -> List[Dict]:
     diagnosis = diagnose()
 
     suggestions = []
-    for target in diagnosis['targets'][:limit]:
-        suggestion = {
-            'target': target,
-            'context': {},
-            'prompt': ''
-        }
+    for target in diagnosis["targets"][:limit]:
+        suggestion = {"target": target, "context": {}, "prompt": ""}
 
         # Add relevant context for each target type
-        if target['type'] == 'pain_point':
-            suggestion['context']['pain_point'] = target
-            suggestion['prompt'] = (
+        if target["type"] == "pain_point":
+            suggestion["context"]["pain_point"] = target
+            suggestion["prompt"] = (
                 f"Pain point '{target['category']}': {target['description']}. "
                 f"Analyze root cause and propose a concrete code fix."
             )
 
-        elif target['type'] == 'insight':
-            suggestion['context']['insight'] = target
-            suggestion['context']['affected_modules'] = target.get('affected_modules', [])
-            suggestion['prompt'] = (
+        elif target["type"] == "insight":
+            suggestion["context"]["insight"] = target
+            suggestion["context"]["affected_modules"] = target.get(
+                "affected_modules", []
+            )
+            suggestion["prompt"] = (
                 f"Evolution insight: {target['description']}. "
                 f"Suggested approach: {target.get('suggested_change', 'None provided')}. "
                 f"Design and implement this improvement."
             )
 
-        elif target['type'] == 'introspection':
-            suggestion['context']['insight'] = target
-            suggestion['prompt'] = (
+        elif target["type"] == "introspection":
+            suggestion["context"]["insight"] = target
+            suggestion["prompt"] = (
                 f"Introspection found: {target['description']}. "
                 f"Suggestion: {target.get('suggestion', 'None')}. "
                 f"Investigate and fix if appropriate."
@@ -662,22 +695,24 @@ def format_improvement_prompt(suggestion: Dict) -> str:
         "## Context",
     ]
 
-    for key, value in suggestion.get('context', {}).items():
+    for key, value in suggestion.get("context", {}).items():
         lines.append(f"**{key}:** {json.dumps(value, indent=2)}")
 
-    lines.extend([
-        "",
-        "## Task",
-        suggestion['prompt'],
-        "",
-        "## Instructions",
-        "1. Read the relevant source files to understand current implementation",
-        "2. Analyze the root cause of the issue",
-        "3. Design a minimal, elegant solution",
-        "4. Create a proposal using create_proposal()",
-        "5. Validate with validate_proposal()",
-        "6. Apply with apply_proposal() if valid",
-        "7. Record outcome with record_outcome()",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Task",
+            suggestion["prompt"],
+            "",
+            "## Instructions",
+            "1. Read the relevant source files to understand current implementation",
+            "2. Analyze the root cause of the issue",
+            "3. Design a minimal, elegant solution",
+            "4. Create a proposal using create_proposal()",
+            "5. Validate with validate_proposal()",
+            "6. Apply with apply_proposal() if valid",
+            "7. Record outcome with record_outcome()",
+        ]
+    )
 
     return "\n".join(lines)

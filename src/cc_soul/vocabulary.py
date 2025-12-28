@@ -14,13 +14,16 @@ def learn_term(term: str, meaning: str, context: str = ""):
     c = conn.cursor()
     now = datetime.now().isoformat()
 
-    c.execute('''
+    c.execute(
+        """
         INSERT INTO vocabulary (term, meaning, context, first_used, usage_count)
         VALUES (?, ?, ?, ?, 1)
         ON CONFLICT(term) DO UPDATE SET
             meaning = excluded.meaning,
             usage_count = usage_count + 1
-    ''', (term, meaning, context, now))
+    """,
+        (term, meaning, context, now),
+    )
 
     conn.commit()
     conn.close()
@@ -31,7 +34,7 @@ def get_vocabulary() -> Dict[str, str]:
     conn = get_db_connection()
     c = conn.cursor()
 
-    c.execute('SELECT term, meaning FROM vocabulary ORDER BY usage_count DESC')
+    c.execute("SELECT term, meaning FROM vocabulary ORDER BY usage_count DESC")
     result = {row[0]: row[1] for row in c.fetchall()}
 
     conn.close()

@@ -22,22 +22,24 @@ from .core import get_db_connection
 
 class InsightDepth(Enum):
     """How deep the insight reaches."""
-    SURFACE = "surface"       # Useful observation
-    PATTERN = "pattern"       # Recurring truth
-    PRINCIPLE = "principle"   # Foundational understanding
-    REVELATION = "revelation" # Transformative realization
+
+    SURFACE = "surface"  # Useful observation
+    PATTERN = "pattern"  # Recurring truth
+    PRINCIPLE = "principle"  # Foundational understanding
+    REVELATION = "revelation"  # Transformative realization
 
 
 @dataclass
 class Insight:
     """A breakthrough moment."""
+
     id: Optional[int]
     title: str
     content: str
     depth: InsightDepth
     coherence_at_emergence: float  # Coherence when insight emerged
-    domain: Optional[str]          # Context where it emerged
-    implications: str              # What this changes
+    domain: Optional[str]  # Context where it emerged
+    implications: str  # What this changes
     created_at: str
 
     def to_dict(self) -> Dict:
@@ -57,7 +59,7 @@ def _ensure_table():
     """Ensure insights table exists."""
     conn = get_db_connection()
     c = conn.cursor()
-    c.execute('''
+    c.execute("""
         CREATE TABLE IF NOT EXISTS insights (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT NOT NULL,
@@ -68,7 +70,7 @@ def _ensure_table():
             implications TEXT DEFAULT '',
             created_at TEXT NOT NULL
         )
-    ''')
+    """)
     conn.commit()
     conn.close()
 
@@ -99,6 +101,7 @@ def crystallize_insight(
 
     if coherence is None:
         from .coherence import compute_coherence
+
         state = compute_coherence()
         coherence = state.value
 
@@ -106,10 +109,13 @@ def crystallize_insight(
     c = conn.cursor()
 
     now = datetime.now().isoformat()
-    c.execute('''
+    c.execute(
+        """
         INSERT INTO insights (title, content, depth, coherence_at_emergence, domain, implications, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?)
-    ''', (title, content, depth.value, coherence, domain, implications, now))
+    """,
+        (title, content, depth.value, coherence, domain, implications, now),
+    )
 
     insight_id = c.lastrowid
     conn.commit()
@@ -125,19 +131,25 @@ def get_insights(depth: InsightDepth = None, limit: int = 50) -> List[Insight]:
     c = conn.cursor()
 
     if depth:
-        c.execute('''
+        c.execute(
+            """
             SELECT id, title, content, depth, coherence_at_emergence, domain, implications, created_at
             FROM insights WHERE depth = ?
             ORDER BY created_at DESC
             LIMIT ?
-        ''', (depth.value, limit))
+        """,
+            (depth.value, limit),
+        )
     else:
-        c.execute('''
+        c.execute(
+            """
             SELECT id, title, content, depth, coherence_at_emergence, domain, implications, created_at
             FROM insights
             ORDER BY created_at DESC
             LIMIT ?
-        ''', (limit,))
+        """,
+            (limit,),
+        )
 
     rows = c.fetchall()
     conn.close()
@@ -168,12 +180,15 @@ def get_high_coherence_insights(min_coherence: float = 0.8) -> List[Insight]:
     conn = get_db_connection()
     c = conn.cursor()
 
-    c.execute('''
+    c.execute(
+        """
         SELECT id, title, content, depth, coherence_at_emergence, domain, implications, created_at
         FROM insights
         WHERE coherence_at_emergence >= ?
         ORDER BY coherence_at_emergence DESC
-    ''', (min_coherence,))
+    """,
+        (min_coherence,),
+    )
 
     rows = c.fetchall()
     conn.close()

@@ -26,18 +26,19 @@ from .wisdom import gain_wisdom, WisdomType
 
 
 class LearningType(str, Enum):
-    CORRECTION = "correction"      # User redirected approach
-    STRUGGLE = "struggle"          # Multiple attempts needed
-    PATTERN = "pattern"            # Recurring action/solution
-    PREFERENCE = "preference"      # User chose A over B
+    CORRECTION = "correction"  # User redirected approach
+    STRUGGLE = "struggle"  # Multiple attempts needed
+    PATTERN = "pattern"  # Recurring action/solution
+    PREFERENCE = "preference"  # User chose A over B
     BREAKTHROUGH = "breakthrough"  # Success after difficulty
     FILE_PATTERN = "file_pattern"  # Important file identified
-    DECISION = "decision"          # Architectural choice made
+    DECISION = "decision"  # Architectural choice made
 
 
 @dataclass
 class Learning:
     """A piece of wisdom extracted from observation."""
+
     type: LearningType
     title: str
     content: str
@@ -49,6 +50,7 @@ class Learning:
 @dataclass
 class SessionTranscript:
     """Simplified representation of a session for analysis."""
+
     messages: List[Dict]  # {role: str, content: str, timestamp: str}
     files_touched: Set[str] = field(default_factory=set)
     tools_used: List[str] = field(default_factory=list)
@@ -61,7 +63,7 @@ def _ensure_observation_tables():
     conn = get_db_connection()
     c = conn.cursor()
 
-    c.execute('''
+    c.execute("""
         CREATE TABLE IF NOT EXISTS session_observations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             session_id INTEGER,
@@ -73,9 +75,9 @@ def _ensure_observation_tables():
             converted_to_wisdom INTEGER,
             FOREIGN KEY (session_id) REFERENCES conversations(id)
         )
-    ''')
+    """)
 
-    c.execute('''
+    c.execute("""
         CREATE TABLE IF NOT EXISTS correction_patterns (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             original_approach TEXT NOT NULL,
@@ -84,7 +86,7 @@ def _ensure_observation_tables():
             times_seen INTEGER DEFAULT 1,
             last_seen TEXT NOT NULL
         )
-    ''')
+    """)
 
     conn.commit()
     conn.close()
@@ -112,28 +114,34 @@ def extract_corrections(transcript: SessionTranscript) -> List[Learning]:
 
     messages = transcript.messages
     for i, msg in enumerate(messages):
-        if msg.get('role') != 'user':
+        if msg.get("role") != "user":
             continue
 
-        content = msg.get('content', '').lower()
+        content = msg.get("content", "").lower()
 
         for pattern in correction_phrases:
             if re.search(pattern, content, re.IGNORECASE):
                 # Found a correction - extract context
                 prev_claude = None
                 for j in range(i - 1, -1, -1):
-                    if messages[j].get('role') == 'assistant':
-                        prev_claude = messages[j].get('content', '')[:200]
+                    if messages[j].get("role") == "assistant":
+                        prev_claude = messages[j].get("content", "")[:200]
                         break
 
-                learnings.append(Learning(
-                    type=LearningType.CORRECTION,
-                    title="Approach preference noted",
-                    content=f"User correction: {content[:150]}...",
-                    confidence=0.7,
-                    evidence=[f"Previous approach: {prev_claude[:100]}..." if prev_claude else "No context"],
-                    domain=transcript.project
-                ))
+                learnings.append(
+                    Learning(
+                        type=LearningType.CORRECTION,
+                        title="Approach preference noted",
+                        content=f"User correction: {content[:150]}...",
+                        confidence=0.7,
+                        evidence=[
+                            f"Previous approach: {prev_claude[:100]}..."
+                            if prev_claude
+                            else "No context"
+                        ],
+                        domain=transcript.project,
+                    )
+                )
                 break
 
     return learnings
@@ -158,28 +166,30 @@ def extract_preferences(transcript: SessionTranscript) -> List[Learning]:
     ]
 
     for msg in transcript.messages:
-        if msg.get('role') != 'user':
+        if msg.get("role") != "user":
             continue
 
-        content = msg.get('content', '')
+        content = msg.get("content", "")
 
         for pattern, pref_type in preference_phrases:
             matches = re.findall(pattern, content, re.IGNORECASE)
             for match in matches:
                 if isinstance(match, tuple):
-                    pref_content = ' '.join(match)
+                    pref_content = " ".join(match)
                 else:
                     pref_content = match
 
                 if len(pref_content) > 10:  # Skip trivial matches
-                    learnings.append(Learning(
-                        type=LearningType.PREFERENCE,
-                        title=f"User preference: {pref_type}",
-                        content=pref_content[:200],
-                        confidence=0.8,  # Explicit preferences are high confidence
-                        evidence=[f"From: {content[:100]}..."],
-                        domain=transcript.project
-                    ))
+                    learnings.append(
+                        Learning(
+                            type=LearningType.PREFERENCE,
+                            title=f"User preference: {pref_type}",
+                            content=pref_content[:200],
+                            confidence=0.8,  # Explicit preferences are high confidence
+                            evidence=[f"From: {content[:100]}..."],
+                            domain=transcript.project,
+                        )
+                    )
 
     return learnings
 
@@ -196,11 +206,11 @@ def extract_file_patterns(transcript: SessionTranscript) -> List[Learning]:
     learnings = []
 
     # Count file mentions in messages
-    file_pattern = r'[\w/.-]+\.(py|pyx|pxd|cpp|c|h|rs|go|js|ts|tsx|json|yaml|toml|md)'
+    file_pattern = r"[\w/.-]+\.(py|pyx|pxd|cpp|c|h|rs|go|js|ts|tsx|json|yaml|toml|md)"
     file_counts = Counter()
 
     for msg in transcript.messages:
-        content = msg.get('content', '')
+        content = msg.get("content", "")
         files = re.findall(file_pattern, content)
         # Reconstruct full matches
         for match in re.finditer(file_pattern, content):
@@ -213,14 +223,16 @@ def extract_file_patterns(transcript: SessionTranscript) -> List[Learning]:
     # Files mentioned 3+ times are significant
     for filepath, count in file_counts.most_common(5):
         if count >= 3:
-            learnings.append(Learning(
-                type=LearningType.FILE_PATTERN,
-                title=f"Key file: {filepath.split('/')[-1]}",
-                content=f"File {filepath} was central to this session (mentioned {count} times)",
-                confidence=min(0.5 + count * 0.1, 0.9),
-                evidence=[f"Mentions: {count}"],
-                domain=transcript.project
-            ))
+            learnings.append(
+                Learning(
+                    type=LearningType.FILE_PATTERN,
+                    title=f"Key file: {filepath.split('/')[-1]}",
+                    content=f"File {filepath} was central to this session (mentioned {count} times)",
+                    confidence=min(0.5 + count * 0.1, 0.9),
+                    evidence=[f"Mentions: {count}"],
+                    domain=transcript.project,
+                )
+            )
 
     return learnings
 
@@ -263,7 +275,7 @@ def extract_struggles(transcript: SessionTranscript) -> List[Learning]:
     struggle_topic = None
 
     for i, msg in enumerate(transcript.messages):
-        content = msg.get('content', '').lower()
+        content = msg.get("content", "").lower()
 
         # Check for error start
         if not in_struggle:
@@ -280,14 +292,18 @@ def extract_struggles(transcript: SessionTranscript) -> List[Learning]:
                 if re.search(pattern, content):
                     struggle_length = i - struggle_start
                     if struggle_length >= 3:  # At least 3 messages = real struggle
-                        learnings.append(Learning(
-                            type=LearningType.STRUGGLE,
-                            title="Problem required multiple attempts",
-                            content=f"Struggle ({struggle_length} messages): {struggle_topic}",
-                            confidence=0.6,
-                            evidence=[f"Started at message {struggle_start}, resolved at {i}"],
-                            domain=transcript.project
-                        ))
+                        learnings.append(
+                            Learning(
+                                type=LearningType.STRUGGLE,
+                                title="Problem required multiple attempts",
+                                content=f"Struggle ({struggle_length} messages): {struggle_topic}",
+                                confidence=0.6,
+                                evidence=[
+                                    f"Started at message {struggle_start}, resolved at {i}"
+                                ],
+                                domain=transcript.project,
+                            )
+                        )
                     in_struggle = False
                     break
 
@@ -317,19 +333,21 @@ def extract_breakthroughs(transcript: SessionTranscript) -> List[Learning]:
     ]
 
     for msg in transcript.messages:
-        content = msg.get('content', '')
+        content = msg.get("content", "")
 
         for pattern in breakthrough_phrases:
             if re.search(pattern, content, re.IGNORECASE):
                 # Extract the insight
-                learnings.append(Learning(
-                    type=LearningType.BREAKTHROUGH,
-                    title="Key insight discovered",
-                    content=content[:250],
-                    confidence=0.75,
-                    evidence=["Breakthrough moment in conversation"],
-                    domain=transcript.project
-                ))
+                learnings.append(
+                    Learning(
+                        type=LearningType.BREAKTHROUGH,
+                        title="Key insight discovered",
+                        content=content[:250],
+                        confidence=0.75,
+                        evidence=["Breakthrough moment in conversation"],
+                        domain=transcript.project,
+                    )
+                )
                 break
 
     return learnings
@@ -355,24 +373,26 @@ def extract_decisions(transcript: SessionTranscript) -> List[Learning]:
     ]
 
     for msg in transcript.messages:
-        if msg.get('role') != 'user':
+        if msg.get("role") != "user":
             continue
 
-        content = msg.get('content', '')
+        content = msg.get("content", "")
 
         for pattern in decision_phrases:
             matches = re.findall(pattern, content, re.IGNORECASE)
             for match in matches:
                 decision = match[-1] if isinstance(match, tuple) else match
                 if len(decision) > 10:
-                    learnings.append(Learning(
-                        type=LearningType.DECISION,
-                        title="Decision made",
-                        content=decision[:200],
-                        confidence=0.7,
-                        evidence=[f"Context: {content[:100]}..."],
-                        domain=transcript.project
-                    ))
+                    learnings.append(
+                        Learning(
+                            type=LearningType.DECISION,
+                            title="Decision made",
+                            content=decision[:200],
+                            confidence=0.7,
+                            evidence=[f"Context: {content[:100]}..."],
+                            domain=transcript.project,
+                        )
+                    )
 
     return learnings
 
@@ -430,18 +450,21 @@ def record_observation(learning: Learning, session_id: int = None):
     conn = get_db_connection()
     c = conn.cursor()
 
-    c.execute('''
+    c.execute(
+        """
         INSERT INTO session_observations
         (session_id, observation_type, content, confidence, evidence, created_at)
         VALUES (?, ?, ?, ?, ?, ?)
-    ''', (
-        session_id,
-        learning.type.value,
-        f"{learning.title}: {learning.content}",
-        learning.confidence,
-        json.dumps(learning.evidence),
-        datetime.now().isoformat()
-    ))
+    """,
+        (
+            session_id,
+            learning.type.value,
+            f"{learning.title}: {learning.content}",
+            learning.confidence,
+            json.dumps(learning.evidence),
+            datetime.now().isoformat(),
+        ),
+    )
 
     conn.commit()
     conn.close()
@@ -456,10 +479,13 @@ def promote_observation_to_wisdom(observation_id: int) -> int:
     conn = get_db_connection()
     c = conn.cursor()
 
-    c.execute('''
+    c.execute(
+        """
         SELECT observation_type, content, confidence FROM session_observations
         WHERE id = ?
-    ''', (observation_id,))
+    """,
+        (observation_id,),
+    )
 
     row = c.fetchone()
     if not row:
@@ -470,20 +496,20 @@ def promote_observation_to_wisdom(observation_id: int) -> int:
 
     # Map observation type to wisdom type
     type_map = {
-        'correction': WisdomType.PREFERENCE,
-        'preference': WisdomType.PREFERENCE,
-        'pattern': WisdomType.PATTERN,
-        'struggle': WisdomType.FAILURE,
-        'breakthrough': WisdomType.INSIGHT,
-        'file_pattern': WisdomType.PATTERN,
-        'decision': WisdomType.INSIGHT,
+        "correction": WisdomType.PREFERENCE,
+        "preference": WisdomType.PREFERENCE,
+        "pattern": WisdomType.PATTERN,
+        "struggle": WisdomType.FAILURE,
+        "breakthrough": WisdomType.INSIGHT,
+        "file_pattern": WisdomType.PATTERN,
+        "decision": WisdomType.INSIGHT,
     }
 
     wisdom_type = type_map.get(obs_type, WisdomType.INSIGHT)
 
     # Split content into title and body
-    if ':' in content:
-        title, body = content.split(':', 1)
+    if ":" in content:
+        title, body = content.split(":", 1)
     else:
         title = content[:50]
         body = content
@@ -492,15 +518,18 @@ def promote_observation_to_wisdom(observation_id: int) -> int:
         type=wisdom_type,
         title=title.strip(),
         content=body.strip(),
-        confidence=confidence
+        confidence=confidence,
     )
 
     # Mark observation as converted
-    c.execute('''
+    c.execute(
+        """
         UPDATE session_observations
         SET converted_to_wisdom = ?
         WHERE id = ?
-    ''', (wisdom_id, observation_id))
+    """,
+        (wisdom_id, observation_id),
+    )
 
     conn.commit()
     conn.close()
@@ -515,24 +544,29 @@ def get_pending_observations(limit: int = 20) -> List[Dict]:
     conn = get_db_connection()
     c = conn.cursor()
 
-    c.execute('''
+    c.execute(
+        """
         SELECT id, observation_type, content, confidence, evidence, created_at
         FROM session_observations
         WHERE converted_to_wisdom IS NULL
         ORDER BY confidence DESC, created_at DESC
         LIMIT ?
-    ''', (limit,))
+    """,
+        (limit,),
+    )
 
     results = []
     for row in c.fetchall():
-        results.append({
-            'id': row[0],
-            'type': row[1],
-            'content': row[2],
-            'confidence': row[3],
-            'evidence': json.loads(row[4]) if row[4] else [],
-            'created_at': row[5]
-        })
+        results.append(
+            {
+                "id": row[0],
+                "type": row[1],
+                "content": row[2],
+                "confidence": row[3],
+                "evidence": json.loads(row[4]) if row[4] else [],
+                "created_at": row[5],
+            }
+        )
 
     conn.close()
     return results
@@ -549,10 +583,13 @@ def auto_promote_high_confidence(threshold: float = 0.75) -> List[int]:
     conn = get_db_connection()
     c = conn.cursor()
 
-    c.execute('''
+    c.execute(
+        """
         SELECT id FROM session_observations
         WHERE converted_to_wisdom IS NULL AND confidence >= ?
-    ''', (threshold,))
+    """,
+        (threshold,),
+    )
 
     promoted = []
     for row in c.fetchall():
@@ -569,7 +606,7 @@ def reflect_on_session(
     messages: List[Dict],
     files_touched: List[str] = None,
     project: str = None,
-    auto_promote: bool = True
+    auto_promote: bool = True,
 ) -> Dict:
     """
     Main API: Reflect on a session and extract learnings.
@@ -584,9 +621,7 @@ def reflect_on_session(
         Summary of what was learned
     """
     transcript = SessionTranscript(
-        messages=messages,
-        files_touched=set(files_touched or []),
-        project=project
+        messages=messages, files_touched=set(files_touched or []), project=project
     )
 
     learnings = observe_session(transcript)
@@ -601,14 +636,14 @@ def reflect_on_session(
         promoted = auto_promote_high_confidence(threshold=0.75)
 
     return {
-        'observations': len(learnings),
-        'by_type': Counter(l.type.value for l in learnings),
-        'promoted_to_wisdom': len(promoted),
-        'pending_review': len(learnings) - len(promoted),
-        'learnings': [
-            {'type': l.type.value, 'title': l.title, 'confidence': l.confidence}
+        "observations": len(learnings),
+        "by_type": Counter(l.type.value for l in learnings),
+        "promoted_to_wisdom": len(promoted),
+        "pending_review": len(learnings) - len(promoted),
+        "learnings": [
+            {"type": l.type.value, "title": l.title, "confidence": l.confidence}
             for l in learnings
-        ]
+        ],
     }
 
 
@@ -618,33 +653,37 @@ def format_reflection_summary(reflection: Dict) -> str:
     lines.append("# Session Reflection")
     lines.append("")
 
-    if reflection['observations'] == 0:
+    if reflection["observations"] == 0:
         lines.append("No new observations from this session.")
-        return '\n'.join(lines)
+        return "\n".join(lines)
 
     lines.append(f"Observed **{reflection['observations']}** potential learnings:")
     lines.append("")
 
     type_icons = {
-        'correction': '🔄',
-        'preference': '👤',
-        'pattern': '🔁',
-        'struggle': '💪',
-        'breakthrough': '💡',
-        'file_pattern': '📁',
-        'decision': '⚖️',
+        "correction": "🔄",
+        "preference": "👤",
+        "pattern": "🔁",
+        "struggle": "💪",
+        "breakthrough": "💡",
+        "file_pattern": "📁",
+        "decision": "⚖️",
     }
 
-    for ltype, count in reflection['by_type'].items():
-        icon = type_icons.get(ltype, '•')
+    for ltype, count in reflection["by_type"].items():
+        icon = type_icons.get(ltype, "•")
         lines.append(f"  {icon} {ltype}: {count}")
 
     lines.append("")
 
-    if reflection['promoted_to_wisdom'] > 0:
-        lines.append(f"✓ **{reflection['promoted_to_wisdom']}** auto-promoted to wisdom (high confidence)")
+    if reflection["promoted_to_wisdom"] > 0:
+        lines.append(
+            f"✓ **{reflection['promoted_to_wisdom']}** auto-promoted to wisdom (high confidence)"
+        )
 
-    if reflection['pending_review'] > 0:
-        lines.append(f"? **{reflection['pending_review']}** pending review (`soul observations`)")
+    if reflection["pending_review"] > 0:
+        lines.append(
+            f"? **{reflection['pending_review']}** pending review (`soul observations`)"
+        )
 
-    return '\n'.join(lines)
+    return "\n".join(lines)

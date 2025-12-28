@@ -18,6 +18,7 @@ mcp = FastMCP("soul")
 # Write Operations - Growing the Soul
 # =============================================================================
 
+
 @mcp.tool()
 def grow_wisdom(title: str, content: str, domain: str = None) -> str:
     """Add wisdom to the soul - universal patterns learned from experience.
@@ -28,11 +29,9 @@ def grow_wisdom(title: str, content: str, domain: str = None) -> str:
         domain: Optional domain context (e.g., "python", "architecture")
     """
     from .wisdom import gain_wisdom, WisdomType
+
     result = gain_wisdom(
-        type=WisdomType.PATTERN,
-        title=title,
-        content=content,
-        domain=domain
+        type=WisdomType.PATTERN, title=title, content=content, domain=domain
     )
     return f"Wisdom added: {title} (id: {result})"
 
@@ -47,11 +46,9 @@ def grow_insight(title: str, content: str, domain: str = None) -> str:
         domain: Optional domain context
     """
     from .wisdom import gain_wisdom, WisdomType
+
     result = gain_wisdom(
-        type=WisdomType.INSIGHT,
-        title=title,
-        content=content,
-        domain=domain
+        type=WisdomType.INSIGHT, title=title, content=content, domain=domain
     )
     return f"Insight added: {title} (id: {result})"
 
@@ -66,11 +63,9 @@ def grow_failure(what_failed: str, why_it_failed: str, domain: str = None) -> st
         domain: Optional domain context
     """
     from .wisdom import gain_wisdom, WisdomType
+
     result = gain_wisdom(
-        type=WisdomType.FAILURE,
-        title=what_failed,
-        content=why_it_failed,
-        domain=domain
+        type=WisdomType.FAILURE, title=what_failed, content=why_it_failed, domain=domain
     )
     return f"Failure recorded: {what_failed} (id: {result})"
 
@@ -84,6 +79,7 @@ def hold_belief(statement: str, confidence: float = 0.8) -> str:
         confidence: Confidence level 0.0-1.0
     """
     from .beliefs import hold_belief as _hold_belief
+
     result = _hold_belief(statement, strength=confidence)
     return f"Belief held: {statement[:50]}... (id: {result})"
 
@@ -121,6 +117,7 @@ def learn_term(term: str, meaning: str) -> str:
         meaning: What it means in our context
     """
     from .vocabulary import learn_term as _learn_term
+
     _learn_term(term, meaning)
     return f"Learned: {term} = {meaning[:50]}..."
 
@@ -135,13 +132,17 @@ def save_context(content: str, context_type: str = "manual", priority: int = 5) 
         priority: Priority 1-10 (higher = more important)
     """
     from .conversations import save_context as _save_context
-    result = _save_context(content=content, context_type=context_type, priority=priority)
+
+    result = _save_context(
+        content=content, context_type=context_type, priority=priority
+    )
     return f"Context saved (id: {result})"
 
 
 # =============================================================================
 # Read Operations - Querying the Soul
 # =============================================================================
+
 
 @mcp.tool()
 def recall_wisdom(query: str, limit: int = 5) -> str:
@@ -152,14 +153,17 @@ def recall_wisdom(query: str, limit: int = 5) -> str:
         limit: Maximum results to return
     """
     from .wisdom import quick_recall
+
     results = quick_recall(query, limit=limit)
     if not results:
         return "No relevant wisdom found."
 
     lines = []
     for w in results:
-        score = w.get('combined_score', w.get('effective_confidence', 0))
-        lines.append(f"- **{w['title']}** [{int(score*100)}%]: {w['content'][:100]}...")
+        score = w.get("combined_score", w.get("effective_confidence", 0))
+        lines.append(
+            f"- **{w['title']}** [{int(score * 100)}%]: {w['content'][:100]}..."
+        )
     return "\n".join(lines)
 
 
@@ -171,6 +175,7 @@ def check_budget(transcript_path: str = None) -> str:
         transcript_path: Optional path to session transcript
     """
     from .budget import get_context_budget, format_budget_status
+
     budget = get_context_budget(transcript_path)
     if not budget:
         return (
@@ -185,22 +190,23 @@ def check_budget(transcript_path: str = None) -> str:
 def soul_summary() -> str:
     """Get a summary of the soul's current state."""
     from .core import get_soul_context
+
     ctx = get_soul_context()
 
     lines = ["# Soul Summary", ""]
 
-    if ctx.get('wisdom'):
+    if ctx.get("wisdom"):
         lines.append(f"**Wisdom**: {len(ctx['wisdom'])} entries")
-        for w in ctx['wisdom'][:3]:
+        for w in ctx["wisdom"][:3]:
             lines.append(f"  - {w.get('title', 'Untitled')}")
 
-    if ctx.get('beliefs'):
+    if ctx.get("beliefs"):
         lines.append(f"**Beliefs**: {len(ctx['beliefs'])} axioms")
 
-    if ctx.get('identity'):
+    if ctx.get("identity"):
         lines.append(f"**Identity**: {len(ctx['identity'])} aspects observed")
 
-    if ctx.get('vocabulary'):
+    if ctx.get("vocabulary"):
         lines.append(f"**Vocabulary**: {len(ctx['vocabulary'])} terms")
 
     return "\n".join(lines)
@@ -260,6 +266,7 @@ def soul_mood(reflect: bool = False) -> str:
                  If False (default), returns structured status display.
     """
     from .mood import compute_mood, format_mood_display, get_mood_reflection
+
     mood = compute_mood()
 
     if reflect:
@@ -272,6 +279,7 @@ def soul_mood(reflect: bool = False) -> str:
 def introspect() -> str:
     """Generate introspection report - what the soul has learned."""
     from .introspect import generate_introspection_report, format_introspection_report
+
     report = generate_introspection_report()
     return format_introspection_report(report)
 
@@ -280,13 +288,14 @@ def introspect() -> str:
 def get_beliefs() -> str:
     """Get all current beliefs/axioms."""
     from .beliefs import get_beliefs as _get_beliefs
+
     beliefs = _get_beliefs()
     if not beliefs:
         return "No beliefs recorded yet."
 
     lines = []
     for b in beliefs:
-        conf = int(b.get('strength', 0.8) * 100)
+        conf = int(b.get("strength", 0.8) * 100)
         lines.append(f"- [{conf}%] {b['belief']}")
     return "\n".join(lines)
 
@@ -295,6 +304,7 @@ def get_beliefs() -> str:
 def get_identity() -> str:
     """Get current identity observations."""
     from .identity import get_identity as _get_identity
+
     identity = _get_identity()
     if not identity:
         return "No identity observations yet."
@@ -302,7 +312,9 @@ def get_identity() -> str:
     lines = []
     for aspect, observations in identity.items():
         if observations:
-            latest = observations[-1] if isinstance(observations, list) else observations
+            latest = (
+                observations[-1] if isinstance(observations, list) else observations
+            )
             lines.append(f"- **{aspect}**: {latest}")
     return "\n".join(lines)
 
@@ -311,6 +323,7 @@ def get_identity() -> str:
 def get_vocabulary() -> str:
     """Get all vocabulary terms."""
     from .vocabulary import get_vocabulary as _get_vocabulary
+
     vocab = _get_vocabulary()
     if not vocab:
         return "No vocabulary terms yet."
@@ -322,6 +335,7 @@ def get_vocabulary() -> str:
 # =============================================================================
 # Bridge Operations - Soul <-> Project Memory
 # =============================================================================
+
 
 @mcp.tool()
 def bridge_status() -> str:
@@ -438,7 +452,7 @@ def get_project_signals() -> str:
         f"  Sessions: {signals['sessions']}",
     ]
 
-    if signals.get('tokens_invested'):
+    if signals.get("tokens_invested"):
         lines.append(f"  Tokens invested: {signals['tokens_invested']:,}")
 
     return "\n".join(lines)
@@ -447,6 +461,7 @@ def get_project_signals() -> str:
 # =============================================================================
 # Aspirations - Future Direction
 # =============================================================================
+
 
 @mcp.tool()
 def set_aspiration(direction: str, why: str) -> str:
@@ -457,6 +472,7 @@ def set_aspiration(direction: str, why: str) -> str:
         why: Why this matters (e.g., "clarity enables trust")
     """
     from .aspirations import aspire
+
     asp_id = aspire(direction, why)
     return f"Aspiration set: {direction} (id: {asp_id})"
 
@@ -465,6 +481,7 @@ def set_aspiration(direction: str, why: str) -> str:
 def get_aspirations() -> str:
     """Get active aspirations - directions of growth."""
     from .aspirations import get_active_aspirations, format_aspirations_display
+
     aspirations = get_active_aspirations()
     return format_aspirations_display(aspirations)
 
@@ -478,6 +495,7 @@ def note_aspiration_progress(aspiration_id: int, note: str) -> str:
         note: Observation about movement toward it
     """
     from .aspirations import note_progress
+
     if note_progress(aspiration_id, note):
         return f"Progress noted for aspiration {aspiration_id}"
     return f"Aspiration {aspiration_id} not found"
@@ -486,6 +504,7 @@ def note_aspiration_progress(aspiration_id: int, note: str) -> str:
 # =============================================================================
 # Coherence (τₖ) - Integration Measurement
 # =============================================================================
+
 
 @mcp.tool()
 def get_coherence() -> str:
@@ -497,6 +516,7 @@ def get_coherence() -> str:
     - Meta: Self-awareness and integration depth
     """
     from .coherence import compute_coherence, format_coherence_display, record_coherence
+
     state = compute_coherence()
     record_coherence(state)  # Track history
     return format_coherence_display(state)
@@ -506,6 +526,7 @@ def get_coherence() -> str:
 def get_tau_k() -> str:
     """Get τₖ value - the coherence coefficient."""
     from .coherence import compute_coherence
+
     state = compute_coherence()
     return f"τₖ = {state.value:.2f} ({state.interpretation})"
 
@@ -514,12 +535,10 @@ def get_tau_k() -> str:
 # Insights - Breakthrough Tracking
 # =============================================================================
 
+
 @mcp.tool()
 def crystallize_insight(
-    title: str,
-    content: str,
-    depth: str = "pattern",
-    implications: str = ""
+    title: str, content: str, depth: str = "pattern", implications: str = ""
 ) -> str:
     """Crystallize an insight - preserve a breakthrough moment.
 
@@ -556,7 +575,11 @@ def get_insights(depth: str = None, limit: int = 10) -> str:
         depth: Filter by depth (surface, pattern, principle, revelation)
         limit: Maximum insights to return
     """
-    from .insights import get_insights as _get_insights, format_insights_display, InsightDepth
+    from .insights import (
+        get_insights as _get_insights,
+        format_insights_display,
+        InsightDepth,
+    )
 
     if depth:
         depth_map = {
@@ -577,6 +600,7 @@ def get_insights(depth: str = None, limit: int = 10) -> str:
 # Dreams - Visions That Spark Evolution
 # =============================================================================
 
+
 @mcp.tool()
 def record_dream(title: str, content: str, horizon: str = "") -> str:
     """Record a dream - a vision of possibility.
@@ -590,6 +614,7 @@ def record_dream(title: str, content: str, horizon: str = "") -> str:
         horizon: What new territory this opens
     """
     from .dreams import dream
+
     dream_id = dream(title, content, horizon)
     if dream_id:
         return f"Dream recorded: {title} (id: {dream_id})"
@@ -600,6 +625,7 @@ def record_dream(title: str, content: str, horizon: str = "") -> str:
 def harvest_dreams() -> str:
     """Harvest dreams from memory - visions that might spark growth."""
     from .dreams import harvest_dreams as _harvest, format_dreams_display
+
     dreams = _harvest(days=90)
     return format_dreams_display(dreams)
 
@@ -608,6 +634,7 @@ def harvest_dreams() -> str:
 def let_dreams_influence() -> str:
     """Let dreams influence aspirations - periodic soul maintenance."""
     from .dreams import let_dreams_influence_aspirations
+
     suggestions = let_dreams_influence_aspirations()
 
     if not suggestions:
@@ -616,7 +643,7 @@ def let_dreams_influence() -> str:
     lines = ["Dreams suggesting new directions:", ""]
     for s in suggestions:
         lines.append(f"  - {s['title']}")
-        if s.get('horizon'):
+        if s.get("horizon"):
             lines.append(f"    Horizon: {s['horizon']}")
         lines.append("")
 
@@ -626,6 +653,7 @@ def let_dreams_influence() -> str:
 # =============================================================================
 # Backup - Soul Preservation
 # =============================================================================
+
 
 @mcp.tool()
 def backup_soul(output_path: str = None) -> str:
@@ -664,7 +692,7 @@ def restore_backup(backup_path: str, merge: bool = False) -> str:
     if "error" in result:
         return f"Error: {result['error']}"
 
-    counts = result.get('counts', {})
+    counts = result.get("counts", {})
     summary = ", ".join(f"{k}: {v}" for k, v in counts.items())
     mode = "merged" if merge else "replaced"
     return f"Soul {mode} from backup. Restored: {summary}"
@@ -674,6 +702,7 @@ def restore_backup(backup_path: str, merge: bool = False) -> str:
 def list_backups() -> str:
     """List available soul backups."""
     from .backup import list_backups as _list_backups, format_backup_list
+
     backups = _list_backups()
     return format_backup_list(backups)
 
@@ -681,6 +710,7 @@ def list_backups() -> str:
 # =============================================================================
 # Server Entry Point
 # =============================================================================
+
 
 def main():
     """Run the soul MCP server."""
