@@ -95,32 +95,17 @@ Wilder than aspirations. Glimpses of possibility not yet constrained by feasibil
 ## Installation
 
 ```bash
-# Core soul (no external dependencies)
 pip install cc-soul
-
-# With project memory integration
-pip install "cc-soul[memory]"
-
-# With semantic search (embeddings)
-pip install "cc-soul[vectors]"
-
-# With everything
-pip install "cc-soul[all]"
 
 # Install hooks and skills
 soul install-hooks
 soul install-skills
-```
 
-## MCP Server Setup
-
-```bash
-# Install with MCP support
-pip install "cc-soul[mcp]"
-
-# Register with Claude Code
+# Register MCP server with Claude Code
 claude mcp add soul -- soul-mcp
 ```
+
+Everything is included: memory, vectors, graph, and MCP.
 
 ### Available MCP Tools
 
