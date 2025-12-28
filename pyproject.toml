@@ -38,9 +38,8 @@ dev = [
 ]
 
 [project.scripts]
-soul = "cc_soul.cli:main"
 cc-soul = "cc_soul.cli:main"
-soul-mcp = "cc_soul.mcp_server:main"
+cc-soul-mcp = "cc_soul.mcp_server:main"
 
 [project.urls]
 Homepage = "https://github.com/genomewalker/cc-soul"

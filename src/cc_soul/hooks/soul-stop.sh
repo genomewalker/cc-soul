@@ -32,7 +32,7 @@ except Exception:
 
 # Run auto-learning on substantial output
 if [ -n "$LAST_ASSISTANT" ] && [ ${#LAST_ASSISTANT} -gt 100 ]; then
-    echo "$LAST_ASSISTANT" | soul hook stop 2>/dev/null
+    echo "$LAST_ASSISTANT" | cc-soul hook stop 2>/dev/null
 fi
 
 exit 0

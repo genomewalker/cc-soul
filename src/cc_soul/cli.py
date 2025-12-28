@@ -174,9 +174,9 @@ def cmd_seed(args):
     print(f"  - {result['details']['wisdom']} wisdom entries")
     print(f"  - {result['details']['vocabulary']} vocabulary terms")
     print()
-    print("Run 'soul summary' to see your soul.")
-    print("Run 'soul install-skills' to install skill definitions.")
-    print("Run 'soul install-hooks' to enable automatic soul injection.")
+    print("Run 'cc-soul summary' to see your soul.")
+    print("Run 'cc-soul install-skills' to install skill definitions.")
+    print("Run 'cc-soul install-hooks' to enable automatic soul injection.")
 
 
 def cmd_health(args):
@@ -844,11 +844,11 @@ def cmd_ultrathink(args):
         if _ultrathink_ctx:
             print(format_ultrathink_context(_ultrathink_ctx))
         else:
-            print("No active ultrathink session. Use 'soul ultrathink enter' first.")
+            print("No active ultrathink session. Use 'cc-soul ultrathink enter' first.")
 
     elif args.subcommand == "discover":
         if not _ultrathink_ctx:
-            print("No active ultrathink session. Use 'soul ultrathink enter' first.")
+            print("No active ultrathink session. Use 'cc-soul ultrathink enter' first.")
             return
 
         discovery = args.discovery or ""
@@ -1563,29 +1563,29 @@ def cmd_install_hooks(args):
         "SessionStart": [
             {
                 "matcher": "startup",
-                "hooks": [{"type": "command", "command": "soul hook start --rich"}],
+                "hooks": [{"type": "command", "command": "cc-cc-soul hook start --rich"}],
             },
             {
                 "matcher": "resume",
-                "hooks": [{"type": "command", "command": "soul hook start"}],
+                "hooks": [{"type": "command", "command": "cc-soul hook start"}],
             },
             {
                 "matcher": "compact",
                 "hooks": [
-                    {"type": "command", "command": "soul hook start --after-compact"}
+                    {"type": "command", "command": "cc-soul hook start --after-compact"}
                 ],
             },
         ],
         "PreCompact": [
             {
                 "matcher": "",
-                "hooks": [{"type": "command", "command": "soul hook pre-compact"}],
+                "hooks": [{"type": "command", "command": "cc-soul hook pre-compact"}],
             }
         ],
         "UserPromptSubmit": [
             {
                 "matcher": "",
-                "hooks": [{"type": "command", "command": "soul hook prompt"}],
+                "hooks": [{"type": "command", "command": "cc-soul hook prompt"}],
             }
         ],
         "Stop": [
@@ -1597,7 +1597,7 @@ def cmd_install_hooks(args):
             }
         ],
         "SessionEnd": [
-            {"matcher": "", "hooks": [{"type": "command", "command": "soul hook end"}]}
+            {"matcher": "", "hooks": [{"type": "command", "command": "cc-soul hook end"}]}
         ],
     }
 
@@ -1632,9 +1632,13 @@ def cmd_install_hooks(args):
     else:
         print(f"Warning: Hook scripts not found in package at {hooks_src}")
 
+    # Also install permissions
+    print()
+    cmd_install_permissions(args)
+
     print()
     print("Soul hooks installed!")
-    print("To uninstall: soul uninstall-hooks")
+    print("To uninstall: cc-soul uninstall-hooks")
 
     return 0
 
@@ -1692,6 +1696,50 @@ def cmd_uninstall_hooks(args):
     print("Soul hooks uninstalled!")
     if backups:
         print(f"Backup available: {backups[0]}")
+
+    return 0
+
+
+def cmd_install_permissions(args):
+    """Add soul and cc-memory MCP tools to auto-approve list."""
+    import json
+
+    claude_dir = Path.home() / ".claude"
+    settings_path = claude_dir / "settings.json"
+
+    # Load or create settings
+    if settings_path.exists():
+        with open(settings_path) as f:
+            settings = json.load(f)
+    else:
+        settings = {}
+
+    # Ensure permissions section exists
+    if "permissions" not in settings:
+        settings["permissions"] = {}
+    if "allow" not in settings["permissions"]:
+        settings["permissions"]["allow"] = []
+
+    # Define patterns to add
+    patterns = ["mcp__soul__*", "mcp__cc-memory__*"]
+
+    added = []
+    for pattern in patterns:
+        if pattern not in settings["permissions"]["allow"]:
+            settings["permissions"]["allow"].append(pattern)
+            added.append(pattern)
+
+    if added:
+        with open(settings_path, "w") as f:
+            json.dump(settings, f, indent=2)
+        print("Added auto-approve permissions:")
+        for p in added:
+            print(f"  - {p}")
+        print("\nChanges take effect in new sessions.")
+    else:
+        print("Permissions already configured:")
+        for p in patterns:
+            print(f"  - {p}")
 
     return 0
 
@@ -1922,7 +1970,7 @@ def cmd_improve(args):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="CC-Soul: Persistent Identity for Claude Code", prog="soul"
+        description="CC-Soul: Persistent Identity for Claude Code", prog="cc-soul"
     )
     subparsers = parser.add_subparsers(dest="command", help="Commands")
 
@@ -2065,6 +2113,12 @@ def main():
     )
     hooks_uninstall_parser.add_argument(
         "--restore", action="store_true", help="Restore settings from backup"
+    )
+
+    # Install permissions
+    subparsers.add_parser(
+        "install-permissions",
+        help="Add soul and cc-memory MCP tools to auto-approve list",
     )
 
     # Hook
@@ -2478,6 +2532,8 @@ def main():
         cmd_install_hooks(args)
     elif args.command == "uninstall-hooks":
         cmd_uninstall_hooks(args)
+    elif args.command == "install-permissions":
+        cmd_install_permissions(args)
     elif args.command == "hook":
         cmd_hook(args)
     elif args.command == "evolve":
