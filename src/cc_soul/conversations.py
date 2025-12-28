@@ -428,9 +428,16 @@ def save_context(
     return ctx_id
 
 
-def get_saved_context(conv_id: int = None, limit: int = 20) -> List[Dict]:
+def get_saved_context(
+    conv_id: int = None, limit: int = 20, context_types: List[str] = None
+) -> List[Dict]:
     """
     Get saved context for current or specified session.
+
+    Args:
+        conv_id: Conversation ID to filter by (uses current if None)
+        limit: Maximum number of context items to return
+        context_types: Filter by specific context types (e.g., ["pre_compact"])
 
     Returns context ordered by priority (highest first).
     """
@@ -449,26 +456,52 @@ def get_saved_context(conv_id: int = None, limit: int = 20) -> List[Dict]:
     c = conn.cursor()
 
     if conv_id:
-        c.execute(
-            """
-            SELECT id, context_type, content, priority, created_at
-            FROM session_context
-            WHERE conversation_id = ?
-            ORDER BY priority DESC, created_at DESC
-            LIMIT ?
-        """,
-            (conv_id, limit),
-        )
+        if context_types:
+            placeholders = ",".join("?" * len(context_types))
+            c.execute(
+                f"""
+                SELECT id, context_type, content, priority, created_at
+                FROM session_context
+                WHERE conversation_id = ? AND context_type IN ({placeholders})
+                ORDER BY priority DESC, created_at DESC
+                LIMIT ?
+            """,
+                (conv_id, *context_types, limit),
+            )
+        else:
+            c.execute(
+                """
+                SELECT id, context_type, content, priority, created_at
+                FROM session_context
+                WHERE conversation_id = ?
+                ORDER BY priority DESC, created_at DESC
+                LIMIT ?
+            """,
+                (conv_id, limit),
+            )
     else:
-        c.execute(
-            """
-            SELECT id, context_type, content, priority, created_at
-            FROM session_context
-            ORDER BY created_at DESC
-            LIMIT ?
-        """,
-            (limit,),
-        )
+        if context_types:
+            placeholders = ",".join("?" * len(context_types))
+            c.execute(
+                f"""
+                SELECT id, context_type, content, priority, created_at
+                FROM session_context
+                WHERE context_type IN ({placeholders})
+                ORDER BY created_at DESC
+                LIMIT ?
+            """,
+                (*context_types, limit),
+            )
+        else:
+            c.execute(
+                """
+                SELECT id, context_type, content, priority, created_at
+                FROM session_context
+                ORDER BY created_at DESC
+                LIMIT ?
+            """,
+                (limit,),
+            )
 
     results = []
     for row in c.fetchall():

@@ -5,6 +5,7 @@ Command-line interface for cc-soul.
 import sys
 import shutil
 import argparse
+import subprocess
 from pathlib import Path
 
 from .core import init_soul, summarize_soul, get_soul_context
@@ -89,6 +90,21 @@ from .backup import (
     create_timestamped_backup,
     list_backups,
     format_backup_list,
+)
+from .intentions import (
+    intend,
+    get_intentions,
+    get_active_intentions,
+    check_intention,
+    check_all_intentions,
+    fulfill_intention,
+    abandon_intention,
+    block_intention,
+    unblock_intention,
+    find_tension,
+    format_intentions_display,
+    IntentionScope,
+    IntentionState,
 )
 
 # Graph is optional (requires kuzu)
@@ -1523,6 +1539,109 @@ def cmd_backup(args):
         print(format_backup_list(backups))
 
 
+def cmd_intend(args):
+    """Manage intentions - concrete wants that influence decisions."""
+    init_soul()
+
+    if args.subcommand == "list":
+        intentions = get_intentions()
+        print(format_intentions_display(intentions))
+
+    elif args.subcommand == "set":
+        if not args.want:
+            print("Usage: cc-soul intend set 'what you want' --why 'reason'")
+            return
+
+        scope_map = {
+            "session": IntentionScope.SESSION,
+            "project": IntentionScope.PROJECT,
+            "persistent": IntentionScope.PERSISTENT,
+        }
+        scope = scope_map.get(args.scope, IntentionScope.SESSION)
+
+        intention_id = intend(
+            want=args.want,
+            why=args.why or "",
+            scope=scope,
+            context=args.context or "",
+            strength=args.strength,
+        )
+        print(f"Intention set (id: {intention_id})")
+        print(f"  Want: {args.want}")
+        print(f"  Scope: {args.scope}")
+        if args.why:
+            print(f"  Why: {args.why}")
+
+    elif args.subcommand == "check":
+        if args.all:
+            result = check_all_intentions()
+            print(f"Active intentions: {result['total_active']}")
+            print()
+            for scope, intentions in result["by_scope"].items():
+                scope_icon = {"session": "🔹", "project": "📁", "persistent": "🌍"}.get(scope, "")
+                print(f"{scope_icon} {scope.upper()}")
+                for i in intentions:
+                    align_bar = "█" * int(i["alignment"] * 5) + "░" * (5 - int(i["alignment"] * 5))
+                    print(f"  [{i['id']}] {i['want'][:40]}...")
+                    print(f"      [{align_bar}] {i['alignment']:.0%}")
+                print()
+            if result["misaligned"]:
+                print("⚠️  MISALIGNED (need attention)")
+                for m in result["misaligned"]:
+                    print(f"  [{m['id']}] {m['want']} ({m['alignment']:.0%})")
+        elif args.id:
+            aligned = args.aligned or (not args.misaligned)
+            result = check_intention(args.id, aligned)
+            if "error" in result:
+                print(f"Error: {result['error']}")
+            else:
+                trend = "↑" if result["trend"] == "improving" else "↓"
+                status = "aligned" if aligned else "misaligned"
+                print(f"Intention {args.id} marked as {status}")
+                print(f"  Alignment: {result['alignment_score']:.0%} {trend}")
+                print(f"  Checks: {result['check_count']}")
+        else:
+            print("Usage: cc-soul intend check <id> --aligned/--misaligned")
+            print("       cc-soul intend check --all")
+
+    elif args.subcommand == "fulfill":
+        if fulfill_intention(args.id, args.outcome or ""):
+            print(f"Intention {args.id} fulfilled! ✓")
+        else:
+            print(f"Intention {args.id} not found")
+
+    elif args.subcommand == "abandon":
+        if abandon_intention(args.id, args.reason or ""):
+            print(f"Intention {args.id} abandoned")
+        else:
+            print(f"Intention {args.id} not found")
+
+    elif args.subcommand == "block":
+        if block_intention(args.id, args.blocker):
+            print(f"Intention {args.id} blocked by: {args.blocker}")
+        else:
+            print(f"Intention {args.id} not found")
+
+    elif args.subcommand == "unblock":
+        if unblock_intention(args.id):
+            print(f"Intention {args.id} unblocked and reactivated")
+        else:
+            print(f"Intention {args.id} not found")
+
+    elif args.subcommand == "tension":
+        tensions = find_tension()
+        if not tensions:
+            print("No tensions detected among active intentions.")
+        else:
+            print("Intention tensions detected:")
+            print()
+            for t in tensions:
+                print(f"• {t['note']}")
+                for i in t["intentions"]:
+                    print(f"  [{i['id']}] {i['want']}")
+                print()
+
+
 def cmd_reindex(args):
     """Reindex wisdom vectors."""
     init_soul()
@@ -2557,6 +2676,55 @@ def main():
 
     backup_subs.add_parser("list", help="List available backups")
 
+    # Intend (intention management)
+    intend_parser = subparsers.add_parser(
+        "intend", help="Manage intentions - concrete wants that influence decisions"
+    )
+    intend_subs = intend_parser.add_subparsers(dest="subcommand")
+
+    intend_subs.add_parser("list", help="List all intentions")
+
+    set_parser = intend_subs.add_parser("set", help="Set a new intention")
+    set_parser.add_argument("want", nargs="?", help="What you want (e.g., 'simplify the API')")
+    set_parser.add_argument("--why", help="Why this matters")
+    set_parser.add_argument(
+        "--scope",
+        choices=["session", "project", "persistent"],
+        default="session",
+        help="How broadly this applies",
+    )
+    set_parser.add_argument("--context", help="When/where this activates")
+    set_parser.add_argument(
+        "--strength", type=float, default=0.8, help="How strongly held (0-1)"
+    )
+
+    check_parser = intend_subs.add_parser("check", help="Check alignment with intentions")
+    check_parser.add_argument("id", type=int, nargs="?", help="Intention ID to check")
+    check_parser.add_argument(
+        "--aligned", action="store_true", help="Mark as aligned"
+    )
+    check_parser.add_argument(
+        "--misaligned", action="store_true", help="Mark as misaligned"
+    )
+    check_parser.add_argument("--all", action="store_true", help="Check all intentions")
+
+    fulfill_parser = intend_subs.add_parser("fulfill", help="Mark intention as fulfilled")
+    fulfill_parser.add_argument("id", type=int, help="Intention ID")
+    fulfill_parser.add_argument("--outcome", help="Outcome description")
+
+    abandon_parser = intend_subs.add_parser("abandon", help="Abandon an intention")
+    abandon_parser.add_argument("id", type=int, help="Intention ID")
+    abandon_parser.add_argument("--reason", help="Why abandoning")
+
+    block_parser = intend_subs.add_parser("block", help="Mark intention as blocked")
+    block_parser.add_argument("id", type=int, help="Intention ID")
+    block_parser.add_argument("blocker", help="What's blocking")
+
+    unblock_parser = intend_subs.add_parser("unblock", help="Unblock an intention")
+    unblock_parser.add_argument("id", type=int, help="Intention ID")
+
+    intend_subs.add_parser("tension", help="Find conflicting intentions")
+
     args = parser.parse_args()
 
     if args.command is None or args.command == "summary":
@@ -2669,6 +2837,11 @@ def main():
             cmd_backup(args)
         else:
             cmd_backup(argparse.Namespace(subcommand="list"))
+    elif args.command == "intend":
+        if args.subcommand:
+            cmd_intend(args)
+        else:
+            cmd_intend(argparse.Namespace(subcommand="list"))
 
 
 if __name__ == "__main__":
