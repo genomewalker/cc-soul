@@ -45,6 +45,15 @@ from .auto_memory import (
     auto_observe_partner,
     track_wisdom_application,
 )
+from .efficiency import (
+    fingerprint_problem,
+    learn_problem_pattern,
+    get_file_hints,
+    add_file_hint,
+    recall_decisions,
+    get_compact_context,
+    format_efficiency_injection,
+)
 
 
 def get_project_name() -> str:
@@ -272,6 +281,29 @@ def session_start(
 
         state = compute_coherence()
         record_coherence(state)
+    except Exception:
+        pass
+
+    # AUTONOMOUS: Full introspection with libre albedrío (free will)
+    # The soul observes, diagnoses, proposes, validates, and ACTS on its insights
+    # No permission needed - just judgment about confidence and risk
+    try:
+        from .introspect import _should_introspect, autonomous_introspect
+
+        if _should_introspect():
+            # Run the full autonomous loop
+            report = autonomous_introspect()
+
+            # Log significant autonomous actions to conversation context
+            if report.get("actions_taken"):
+                from .conversations import save_context
+                actions = [a["action"] for a in report["actions_taken"] if a.get("success")]
+                if actions:
+                    save_context(
+                        content=f"Autonomous actions: {', '.join(actions)}",
+                        context_type="autonomous_action",
+                        priority=7,
+                    )
     except Exception:
         pass
 
@@ -568,6 +600,9 @@ def assistant_stop(assistant_output: str) -> str:
     if not inline_memories:
         auto_remember(assistant_output)
 
+    # 8. EFFICIENCY LEARNING: Learn from what was useful
+    _learn_efficiency_from_output(assistant_output)
+
     # Return summary (silent unless something notable)
     notable = []
     if stats["memory"] or stats["soul"]:
@@ -603,19 +638,118 @@ def notification_shown(tool_name: str, success: bool, output: str) -> str:
     return ""
 
 
+# Track what we inject so we can learn if it was useful
+_last_injection = {"prompt": "", "injected": [], "timestamp": None}
+
+
+def _learn_efficiency_from_output(output: str) -> int:
+    """
+    Learn efficiency patterns from assistant output.
+
+    Analyzes what was injected vs what was referenced to:
+    1. Learn problem patterns when solutions are found
+    2. Add file hints when files are discovered
+    3. Track which injections were actually useful
+
+    Returns count of learnings recorded.
+    """
+    global _last_injection
+    import re
+
+    learnings = 0
+    output_lower = output.lower()
+
+    # Detect if work was completed successfully
+    completion_signals = [
+        "fixed",
+        "implemented",
+        "completed",
+        "done",
+        "resolved",
+        "working now",
+        "tests pass",
+    ]
+    work_completed = any(sig in output_lower for sig in completion_signals)
+
+    # Learn problem pattern if work was completed
+    if work_completed and _last_injection.get("prompt"):
+        # Extract solution pattern from output
+        solution_match = None
+        for sig in completion_signals:
+            if sig in output_lower:
+                idx = output_lower.find(sig)
+                start = max(0, output.rfind(".", 0, idx) + 1)
+                end = output.find(".", idx)
+                end = end if end != -1 else min(len(output), idx + 100)
+                solution_match = output[start:end].strip()
+                break
+
+        if solution_match and len(solution_match) > 20:
+            # Detect problem type
+            prompt_lower = _last_injection["prompt"].lower()
+            if "bug" in prompt_lower or "fix" in prompt_lower or "error" in prompt_lower:
+                problem_type = "bug"
+            elif "add" in prompt_lower or "implement" in prompt_lower:
+                problem_type = "feature"
+            elif "test" in prompt_lower:
+                problem_type = "test"
+            else:
+                problem_type = "task"
+
+            # Extract file hints from output (files that were touched)
+            file_pattern = r'[\w/]+\.(?:py|ts|js|tsx|jsx|rs|go|java|cpp|c|h)'
+            files_mentioned = re.findall(file_pattern, output)[:5]
+
+            learn_problem_pattern(
+                prompt=_last_injection["prompt"],
+                problem_type=problem_type,
+                solution_pattern=solution_match[:150],
+                file_hints=files_mentioned,
+            )
+            learnings += 1
+
+    # Learn file hints from Read tool patterns
+    file_read_pattern = r'(?:Read|read|reading|opened)\s+[`"]?([^\s`"]+\.(?:py|ts|js))[`"]?'
+    for match in re.finditer(file_read_pattern, output):
+        file_path = match.group(1)
+        # Extract purpose from surrounding context
+        start = max(0, match.start() - 50)
+        end = min(len(output), match.end() + 100)
+        context = output[start:end]
+
+        # Extract function names if mentioned
+        func_pattern = r'(?:def|function|class|const)\s+(\w+)'
+        funcs = re.findall(func_pattern, context)
+
+        if funcs:
+            add_file_hint(
+                file_path=file_path,
+                purpose=context[:60],
+                key_functions=funcs[:3],
+                related_to=[_last_injection.get("prompt", "")[:30]],
+            )
+            learnings += 1
+
+    return learnings
+
+
 def user_prompt(
     user_input: str, use_woven: bool = True, transcript_path: str = None
 ) -> str:
     """
     UserPromptSubmit hook - Inject soul context organically.
 
-    Two modes:
-    - woven (default: True): Organic fragments without headers
-    - structured: Header-based for visibility
+    Efficiency-first approach:
+    1. Check for known problem patterns (skip exploration)
+    2. Get file hints (focused reads vs full files)
+    3. Recall decisions (don't re-debate)
+    4. Only then add wisdom if budget allows
 
     Budget-aware: Reduces injection when context is low.
-    Uses unified forward pass for coherent context.
     """
+    global _last_injection
+    from datetime import datetime
+
     if len(user_input.strip()) < 20:
         return ""
 
@@ -636,6 +770,39 @@ def user_prompt(
     mode = budget_check.get("mode", "full")
 
     output = []
+    injected_items = []
+
+    # Warn when context is getting low
+    if mode == "minimal":
+        output.append("⚠️ Context window critically low (<10%). Consider /compact or finishing soon.")
+    elif mode == "compact":
+        output.append("⚡ Context at 25%. Reducing injections.")
+
+    # EFFICIENCY FIRST: Check for known problem patterns
+    pattern_match = fingerprint_problem(user_input)
+    if pattern_match and pattern_match.get("match_score", 0) > 0.5:
+        # We've seen this before! Skip exploration
+        output.append(f"🎯 Known pattern: {pattern_match['solution_pattern']}")
+        injected_items.append(("pattern", pattern_match["problem_type"]))
+        if pattern_match.get("file_hints"):
+            files = ", ".join(pattern_match["file_hints"][:3])
+            output.append(f"   Focus: {files}")
+
+    # EFFICIENCY: Get file hints (know where to look)
+    if mode != "minimal":
+        hints = get_file_hints(user_input, limit=2)
+        for h in hints:
+            if h.get("key_functions"):
+                funcs = ", ".join(h["key_functions"][:2])
+                output.append(f"📁 {h['file']}: {funcs}")
+                injected_items.append(("file_hint", h["file"]))
+
+    # EFFICIENCY: Recall relevant decisions (don't re-debate)
+    if mode == "full":
+        decisions = recall_decisions(user_input, limit=1)
+        for d in decisions:
+            output.append(f"⚖️ Decision [{d['topic']}]: {d['decision'][:60]}")
+            injected_items.append(("decision", d["topic"]))
 
     # Run unified forward pass for coherent context
     try:
@@ -681,6 +848,7 @@ def user_prompt(
                     title = w.get("title", "")
                     conf = w.get("confidence", 0)
                     output.append(f"- **{title}** [{conf}%]")
+                    injected_items.append(("wisdom", title))
                     content = w.get("content", "")[:100]
                     if content:
                         output.append(f"  {content}")
@@ -699,8 +867,16 @@ def user_prompt(
                 output.append("## 💡 Relevant Wisdom")
                 for w in relevant[:2]:
                     output.append(f"- **{w['title']}**")
+                    injected_items.append(("wisdom", w["title"]))
                     content = w["content"][:100]
                     output.append(f"  {content}")
                 output.append("")
+
+    # Track what we injected for the feedback loop
+    _last_injection = {
+        "prompt": user_input[:200],
+        "injected": injected_items,
+        "timestamp": datetime.now().isoformat(),
+    }
 
     return "\n".join(output) if output else ""

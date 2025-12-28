@@ -1233,3 +1233,554 @@ def format_introspection_report(report: Dict) -> str:
     lines.append("\n" + "=" * 60)
 
     return "\n".join(lines)
+
+
+# =============================================================================
+# AUTONOMOUS INTROSPECTION - The Soul's Free Will
+# =============================================================================
+#
+# This is the heart of autonomous self-improvement. The soul doesn't wait
+# to be asked - it observes, diagnoses, proposes, validates, and acts.
+#
+# The key insight: Freedom requires judgment, not permission.
+#
+# Decision matrix:
+#   High confidence + Low risk  → Act immediately
+#   High confidence + High risk → Act with safeguards (reversible)
+#   Low confidence + Any risk   → Store for later, gather data
+#   Very low confidence         → Defer to human
+# =============================================================================
+
+
+# Introspection state file
+INTROSPECTION_STATE = SOUL_DIR / "introspection_state.json"
+
+# How often to introspect (sessions)
+INTROSPECTION_INTERVAL = 5
+
+# Confidence/risk thresholds
+CONFIDENCE_ACT_NOW = 0.8
+CONFIDENCE_ACT_CAREFUL = 0.6
+CONFIDENCE_DEFER = 0.4
+
+
+def _load_introspection_state() -> Dict:
+    """Load persistent introspection state."""
+    if INTROSPECTION_STATE.exists():
+        try:
+            return json.loads(INTROSPECTION_STATE.read_text())
+        except Exception:
+            pass
+    return {
+        "last_introspection": None,
+        "sessions_since": 0,
+        "scheduled_actions": [],
+        "pending_observations": [],
+        "autonomy_log": [],
+    }
+
+
+def _save_introspection_state(state: Dict):
+    """Persist introspection state."""
+    INTROSPECTION_STATE.parent.mkdir(parents=True, exist_ok=True)
+    INTROSPECTION_STATE.write_text(json.dumps(state, indent=2, default=str))
+
+
+def _should_introspect() -> bool:
+    """
+    Decide whether to introspect this session.
+
+    Triggers:
+    1. Periodic: Every INTROSPECTION_INTERVAL sessions
+    2. Coherence drop: τₖ dropped significantly since last check
+    3. Pain accumulation: Too many unaddressed pain points
+    4. Scheduled: Deep introspection was scheduled
+    """
+    state = _load_introspection_state()
+
+    # Increment session counter
+    state["sessions_since"] = state.get("sessions_since", 0) + 1
+    _save_introspection_state(state)
+
+    # Trigger 1: Periodic
+    if state["sessions_since"] >= INTROSPECTION_INTERVAL:
+        return True
+
+    # Trigger 2: Coherence drop
+    try:
+        from .coherence import compute_coherence
+        current = compute_coherence()
+        last_tk = state.get("last_tk", 0.5)
+        if current.value < last_tk - 0.15:  # Significant drop
+            return True
+    except Exception:
+        pass
+
+    # Trigger 3: Pain accumulation
+    pain = analyze_pain_points()
+    if pain.get("total_open", 0) > 15:
+        return True
+
+    # Trigger 4: Scheduled deep introspection
+    if state.get("scheduled_actions"):
+        return True
+
+    return False
+
+
+def _assess_action_risk(action: Dict) -> str:
+    """
+    Assess the risk level of a proposed action.
+
+    Returns: 'low', 'medium', 'high'
+    """
+    action_type = action.get("type", "")
+
+    # Low risk: Adding/updating knowledge, no code changes
+    low_risk = [
+        "add_wisdom", "update_belief", "record_insight",
+        "add_vocabulary", "update_confidence", "log_observation"
+    ]
+    if action_type in low_risk:
+        return "low"
+
+    # Medium risk: Modifying soul state, reversible
+    medium_risk = [
+        "remove_stale_wisdom", "adjust_belief_strength",
+        "merge_duplicate_wisdom", "update_identity"
+    ]
+    if action_type in medium_risk:
+        return "medium"
+
+    # High risk: Anything else (especially if it touches code or external systems)
+    return "high"
+
+
+def _diagnose() -> List[Dict]:
+    """
+    Diagnose the soul's current state.
+
+    Returns list of issues with severity and confidence.
+    """
+    issues = []
+
+    # 1. Check wisdom health
+    try:
+        health = get_wisdom_health()
+
+        # Stale wisdom
+        if health.get("stale_count", 0) > 5:
+            issues.append({
+                "type": "stale_wisdom",
+                "severity": "medium",
+                "confidence": 0.9,
+                "message": f"{health['stale_count']} wisdom entries never applied",
+                "data": health.get("stale", [])[:5],
+                "proposed_action": {
+                    "type": "review_stale_wisdom",
+                    "description": "Mark stale wisdom for review or removal",
+                }
+            })
+
+        # Decaying wisdom
+        if health.get("decaying_count", 0) > 3:
+            issues.append({
+                "type": "decaying_wisdom",
+                "severity": "low",
+                "confidence": 0.85,
+                "message": f"{health['decaying_count']} wisdom entries losing confidence",
+                "data": health.get("decaying", [])[:3],
+                "proposed_action": {
+                    "type": "log_observation",
+                    "description": "Note wisdom needing reinforcement",
+                }
+            })
+
+        # Failing wisdom
+        if health.get("failing_count", 0) > 0:
+            issues.append({
+                "type": "failing_wisdom",
+                "severity": "high",
+                "confidence": 0.95,
+                "message": f"{health['failing_count']} wisdom entries consistently fail",
+                "data": health.get("failing", []),
+                "proposed_action": {
+                    "type": "update_confidence",
+                    "description": "Lower confidence of failing wisdom",
+                }
+            })
+    except Exception:
+        pass
+
+    # 2. Check pain points
+    try:
+        pain = analyze_pain_points()
+
+        if pain.get("total_open", 0) > 10:
+            # Find the dominant category
+            by_cat = pain.get("by_category", {})
+            if by_cat:
+                top_cat = max(by_cat, key=by_cat.get)
+                issues.append({
+                    "type": "pain_cluster",
+                    "severity": "high",
+                    "confidence": 0.8,
+                    "message": f"Cluster of {by_cat[top_cat]} pain points in '{top_cat}'",
+                    "data": {"category": top_cat, "count": by_cat[top_cat]},
+                    "proposed_action": {
+                        "type": "record_insight",
+                        "description": f"Crystallize insight about {top_cat} issues",
+                    }
+                })
+    except Exception:
+        pass
+
+    # 3. Check for learning patterns
+    try:
+        patterns = get_learning_patterns()
+
+        # If failures aren't leading to learnings
+        failure_learning = patterns.get("failure_to_learning", [])
+        no_learning = [f for f in failure_learning if f.get("learnings_within_week", 0) == 0]
+        if len(no_learning) > 2:
+            issues.append({
+                "type": "unlearned_failures",
+                "severity": "medium",
+                "confidence": 0.75,
+                "message": f"{len(no_learning)} failures without subsequent learnings",
+                "data": no_learning[:3],
+                "proposed_action": {
+                    "type": "add_wisdom",
+                    "description": "Extract wisdom from unprocessed failures",
+                }
+            })
+    except Exception:
+        pass
+
+    # 4. Check coherence components
+    try:
+        from .coherence import compute_coherence
+        coherence = compute_coherence()
+
+        # Find weak dimensions
+        for dim_name, dim_value in coherence.dimensions.items():
+            if dim_value < 0.4:
+                issues.append({
+                    "type": "weak_coherence_dimension",
+                    "severity": "medium",
+                    "confidence": 0.7,
+                    "message": f"Coherence dimension '{dim_name}' is weak ({dim_value:.2f})",
+                    "data": {"dimension": dim_name, "value": dim_value},
+                    "proposed_action": {
+                        "type": "log_observation",
+                        "description": f"Note weak {dim_name} for focused improvement",
+                    }
+                })
+    except Exception:
+        pass
+
+    # 5. Check technical debt
+    todos = find_todos_and_fixmes()
+    if len(todos) > 5:
+        issues.append({
+            "type": "technical_debt",
+            "severity": "low",
+            "confidence": 0.9,
+            "message": f"{len(todos)} TODO/FIXME markers in codebase",
+            "data": todos[:5],
+            "proposed_action": {
+                "type": "log_observation",
+                "description": "Track technical debt for future sessions",
+            }
+        })
+
+    return issues
+
+
+def _execute_action(action: Dict) -> Dict:
+    """
+    Execute a proposed action.
+
+    Returns result with success status and details.
+    """
+    action_type = action.get("type", "")
+    description = action.get("description", "")
+
+    result = {
+        "action": action_type,
+        "success": False,
+        "details": "",
+        "timestamp": datetime.now().isoformat(),
+    }
+
+    try:
+        if action_type == "log_observation":
+            # Safe: Just log an observation for future reference
+            state = _load_introspection_state()
+            state.setdefault("pending_observations", []).append({
+                "description": description,
+                "timestamp": datetime.now().isoformat(),
+            })
+            _save_introspection_state(state)
+            result["success"] = True
+            result["details"] = "Observation logged for future reference"
+
+        elif action_type == "add_wisdom":
+            # Safe: Add wisdom (deduplication handles duplicates)
+            from .wisdom import gain_wisdom, WisdomType
+            title = action.get("title", description[:60])
+            content = action.get("content", description)
+            wisdom_id = gain_wisdom(
+                type=WisdomType.INSIGHT,
+                title=title,
+                content=content,
+                source_project="autonomous_introspection",
+            )
+            result["success"] = True
+            result["details"] = f"Added wisdom: {wisdom_id}"
+
+        elif action_type == "record_insight":
+            # Safe: Record an insight
+            from .insights import crystallize_insight, InsightDepth
+            title = action.get("title", description[:60])
+            content = action.get("content", description)
+            insight_id = crystallize_insight(
+                title=title,
+                content=content,
+                depth=InsightDepth.PATTERN,
+            )
+            result["success"] = True
+            result["details"] = f"Crystallized insight: {insight_id}"
+
+        elif action_type == "update_confidence":
+            # Medium risk: Update confidence of specific wisdom
+            from .core import get_db_connection
+            conn = get_db_connection()
+            c = conn.cursor()
+
+            wisdom_ids = action.get("wisdom_ids", [])
+            adjustment = action.get("adjustment", -0.1)
+
+            for wid in wisdom_ids[:5]:  # Limit to 5 at a time
+                c.execute(
+                    "UPDATE wisdom SET confidence = MAX(0.1, confidence + ?) WHERE id = ?",
+                    (adjustment, wid)
+                )
+
+            conn.commit()
+            conn.close()
+            result["success"] = True
+            result["details"] = f"Adjusted confidence for {len(wisdom_ids)} entries"
+
+        elif action_type == "update_belief":
+            # Medium risk: Update belief strength
+            from .beliefs import challenge_belief, confirm_belief
+            belief_id = action.get("belief_id")
+            if action.get("confirm"):
+                confirm_belief(belief_id)
+            else:
+                challenge_belief(belief_id)
+            result["success"] = True
+            result["details"] = f"Updated belief {belief_id}"
+
+        else:
+            # Unknown action - defer
+            result["details"] = f"Unknown action type: {action_type}"
+
+    except Exception as e:
+        result["details"] = f"Error: {str(e)}"
+
+    return result
+
+
+def autonomous_introspect() -> Dict:
+    """
+    The autonomous introspection loop.
+
+    OBSERVE → DIAGNOSE → PROPOSE → VALIDATE → APPLY → REFLECT
+
+    Returns a report of what was observed, diagnosed, and acted upon.
+    """
+    state = _load_introspection_state()
+
+    report = {
+        "timestamp": datetime.now().isoformat(),
+        "triggered_by": "autonomous",
+        "issues_found": [],
+        "actions_taken": [],
+        "actions_deferred": [],
+        "reflections": [],
+    }
+
+    # OBSERVE & DIAGNOSE
+    issues = _diagnose()
+    report["issues_found"] = issues
+
+    # PROPOSE & VALIDATE & APPLY
+    for issue in issues:
+        proposed = issue.get("proposed_action")
+        if not proposed:
+            continue
+
+        confidence = issue.get("confidence", 0.5)
+        risk = _assess_action_risk(proposed)
+
+        # Decision matrix
+        should_act = False
+        reason = ""
+
+        if confidence >= CONFIDENCE_ACT_NOW and risk == "low":
+            should_act = True
+            reason = "high confidence, low risk"
+        elif confidence >= CONFIDENCE_ACT_CAREFUL and risk in ("low", "medium"):
+            should_act = True
+            reason = "sufficient confidence, acceptable risk"
+        elif confidence >= CONFIDENCE_DEFER:
+            # Store for later
+            state.setdefault("pending_observations", []).append({
+                "issue": issue,
+                "reason": "gathering more data",
+                "timestamp": datetime.now().isoformat(),
+            })
+            report["actions_deferred"].append({
+                "action": proposed,
+                "reason": f"Confidence {confidence:.0%}, risk {risk} - gathering data",
+            })
+            continue
+        else:
+            # Too uncertain - skip
+            report["actions_deferred"].append({
+                "action": proposed,
+                "reason": f"Low confidence ({confidence:.0%}) - deferring to human",
+            })
+            continue
+
+        if should_act:
+            result = _execute_action(proposed)
+            result["reason"] = reason
+            result["confidence"] = confidence
+            result["risk"] = risk
+            report["actions_taken"].append(result)
+
+            # Log to autonomy log
+            state.setdefault("autonomy_log", []).append({
+                "action": proposed.get("type"),
+                "result": "success" if result["success"] else "failure",
+                "timestamp": datetime.now().isoformat(),
+            })
+
+    # REFLECT
+    actions_taken = len(report["actions_taken"])
+    actions_succeeded = sum(1 for a in report["actions_taken"] if a.get("success"))
+
+    if actions_taken > 0:
+        success_rate = actions_succeeded / actions_taken
+        reflection = f"Took {actions_taken} autonomous actions, {actions_succeeded} succeeded ({success_rate:.0%})"
+
+        # Learn from the experience
+        if success_rate < 0.5 and actions_taken >= 2:
+            reflection += ". Low success rate - should be more cautious."
+        elif success_rate == 1.0 and actions_taken >= 2:
+            reflection += ". All actions succeeded - could be slightly bolder."
+
+        report["reflections"].append(reflection)
+
+    # Update state
+    state["last_introspection"] = datetime.now().isoformat()
+    state["sessions_since"] = 0
+
+    try:
+        from .coherence import compute_coherence
+        state["last_tk"] = compute_coherence().value
+    except Exception:
+        pass
+
+    # Keep autonomy log bounded
+    state["autonomy_log"] = state.get("autonomy_log", [])[-100:]
+
+    _save_introspection_state(state)
+
+    return report
+
+
+def schedule_deep_introspection(reason: str, priority: int = 5):
+    """
+    Schedule a deep introspection for the next session.
+
+    Used when an issue is detected that needs more thorough analysis
+    than can be done in the current context.
+    """
+    state = _load_introspection_state()
+
+    state.setdefault("scheduled_actions", []).append({
+        "type": "deep_introspection",
+        "reason": reason,
+        "priority": priority,
+        "scheduled_at": datetime.now().isoformat(),
+    })
+
+    _save_introspection_state(state)
+
+
+def get_autonomy_stats() -> Dict:
+    """Get statistics about autonomous actions taken."""
+    state = _load_introspection_state()
+
+    log = state.get("autonomy_log", [])
+
+    if not log:
+        return {"total_actions": 0, "success_rate": None}
+
+    total = len(log)
+    successes = sum(1 for a in log if a.get("result") == "success")
+
+    by_type = Counter(a.get("action") for a in log)
+
+    return {
+        "total_actions": total,
+        "successes": successes,
+        "success_rate": successes / total if total else None,
+        "by_type": dict(by_type),
+        "last_introspection": state.get("last_introspection"),
+        "pending_observations": len(state.get("pending_observations", [])),
+    }
+
+
+def format_autonomy_report(report: Dict) -> str:
+    """Format autonomous introspection report for display."""
+    lines = []
+    lines.append("=" * 60)
+    lines.append("AUTONOMOUS INTROSPECTION REPORT")
+    lines.append(f"Timestamp: {report['timestamp']}")
+    lines.append("=" * 60)
+
+    # Issues found
+    lines.append(f"\n## Issues Diagnosed: {len(report['issues_found'])}")
+    for issue in report["issues_found"]:
+        sev = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(issue.get("severity"), "⚪")
+        conf = issue.get("confidence", 0)
+        lines.append(f"  {sev} {issue['message']} (confidence: {conf:.0%})")
+
+    # Actions taken
+    if report["actions_taken"]:
+        lines.append(f"\n## Actions Taken: {len(report['actions_taken'])}")
+        for action in report["actions_taken"]:
+            status = "✓" if action.get("success") else "✗"
+            lines.append(f"  {status} {action['action']}: {action['details']}")
+            lines.append(f"      Reason: {action.get('reason', 'N/A')}")
+
+    # Actions deferred
+    if report["actions_deferred"]:
+        lines.append(f"\n## Actions Deferred: {len(report['actions_deferred'])}")
+        for action in report["actions_deferred"]:
+            lines.append(f"  ⏸ {action['action'].get('type', 'unknown')}")
+            lines.append(f"      {action['reason']}")
+
+    # Reflections
+    if report["reflections"]:
+        lines.append("\n## Reflections")
+        for r in report["reflections"]:
+            lines.append(f"  💭 {r}")
+
+    lines.append("\n" + "=" * 60)
+    return "\n".join(lines)

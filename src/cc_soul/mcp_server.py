@@ -285,6 +285,75 @@ def introspect() -> str:
 
 
 @mcp.tool()
+def soul_autonomy() -> str:
+    """Run autonomous introspection - the soul's free will.
+
+    The soul observes, diagnoses, proposes, validates, and ACTS on its insights.
+    Uses judgment about confidence and risk to decide what actions to take:
+    - High confidence + low risk → Act immediately
+    - Medium confidence → Gather more data
+    - Low confidence → Defer to human
+
+    Returns a report of issues found, actions taken, and reflections.
+    """
+    from .introspect import autonomous_introspect, format_autonomy_report
+
+    report = autonomous_introspect()
+    return format_autonomy_report(report)
+
+
+@mcp.tool()
+def soul_autonomy_stats() -> str:
+    """Get statistics about autonomous actions the soul has taken.
+
+    Shows the history of self-directed improvements, success rates,
+    and pending observations that need more data.
+    """
+    from .introspect import get_autonomy_stats
+
+    stats = get_autonomy_stats()
+
+    if stats["total_actions"] == 0:
+        return "No autonomous actions taken yet. The soul acts on its own judgment when issues are detected."
+
+    lines = ["# Autonomy Statistics", ""]
+    lines.append(f"Total autonomous actions: {stats['total_actions']}")
+
+    if stats["success_rate"] is not None:
+        lines.append(f"Success rate: {stats['success_rate']:.0%}")
+
+    if stats.get("by_type"):
+        lines.append("\nBy action type:")
+        for action_type, count in stats["by_type"].items():
+            lines.append(f"  - {action_type}: {count}")
+
+    if stats.get("last_introspection"):
+        lines.append(f"\nLast introspection: {stats['last_introspection']}")
+
+    if stats.get("pending_observations", 0) > 0:
+        lines.append(f"Pending observations: {stats['pending_observations']} (gathering data)")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def soul_schedule_introspection(reason: str, priority: int = 5) -> str:
+    """Schedule a deep introspection for the next session.
+
+    Use when you detect an issue that needs more thorough analysis
+    than can be done right now.
+
+    Args:
+        reason: Why introspection is needed
+        priority: 1-10, higher = more urgent
+    """
+    from .introspect import schedule_deep_introspection
+
+    schedule_deep_introspection(reason, priority)
+    return f"Deep introspection scheduled: {reason} (priority {priority})"
+
+
+@mcp.tool()
 def get_beliefs() -> str:
     """Get all current beliefs/axioms."""
     from .beliefs import get_beliefs as _get_beliefs
