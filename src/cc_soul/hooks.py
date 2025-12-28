@@ -115,12 +115,141 @@ def format_soul_greeting(project: str, ctx: dict) -> str:
     return "\n".join(lines)
 
 
-def session_start(use_unified: bool = True) -> str:
+def format_rich_context(project: str, ctx: dict) -> str:
+    """
+    Format rich context for session start - additional context block.
+
+    Provides detailed observation table similar to claude-mem format.
+    """
+    from datetime import datetime
+
+    lines = []
+    lines.append(f"# [{project}] recent context")
+    lines.append("")
+
+    # Category legend
+    lines.append(
+        "**Legend:** 🔴 bugfix | 🟣 feature | 🔵 discovery | ⚖️ decision | ✅ change | 🔄 refactor"
+    )
+    lines.append("")
+
+    # Get recent observations
+    recent_obs = get_recent_memory_context(limit=10)
+    if not recent_obs:
+        lines.append("*No recent observations*")
+        return "\n".join(lines)
+
+    # Category emoji mapping
+    cat_emoji = {
+        "bugfix": "🔴",
+        "feature": "🟣",
+        "discovery": "🔵",
+        "decision": "⚖️",
+        "change": "✅",
+        "refactor": "🔄",
+        "insight": "💡",
+        "pattern": "🔷",
+        "failure": "💥",
+        "session": "📋",
+    }
+
+    # Table header
+    lines.append("| # | Time | T | Title |")
+    lines.append("|---|------|---|-------|")
+
+    for i, obs in enumerate(recent_obs, 1):
+        category = obs.get("category", "?")
+        title = obs.get("title", "")[:50]
+        emoji = cat_emoji.get(category, "📝")
+
+        # Parse timestamp if available
+        ts = obs.get("timestamp", "")
+        time_str = ""
+        if ts:
+            try:
+                dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                time_str = dt.strftime("%H:%M")
+            except (ValueError, TypeError):
+                time_str = ""
+
+        lines.append(f"| {i} | {time_str} | {emoji} | {title} |")
+
+    # Stats summary
+    lines.append("")
+    if ctx.get("project"):
+        proj = ctx["project"]
+        sessions = proj.get("sessions", 0)
+        observations = proj.get("observations", 0)
+        lines.append(f"📊 **Memory**: {observations} observations, {sessions} sessions")
+
+    if ctx.get("soul"):
+        soul = ctx["soul"]
+        wisdom_count = soul.get("wisdom_count", 0)
+        lines.append(f"🧠 **Wisdom**: {wisdom_count} universal patterns")
+
+    return "\n".join(lines)
+
+
+def pre_compact(transcript_path: str = None) -> str:
+    """
+    PreCompact hook - Save context before compaction.
+
+    Called before Claude Code runs context compaction.
+    Saves important session fragments to persist across the compact.
+    """
+    from .conversations import save_context
+    from .neural import summarize_session_work
+
+    summary = summarize_session_work()
+
+    if summary:
+        save_context(
+            content=summary,
+            context_type="pre_compact",
+            priority=9,
+        )
+        return f"Saved context before compaction: {len(summary)} chars"
+
+    return ""
+
+
+def post_compact() -> str:
+    """
+    Post-compact handler - Restore context after compaction.
+
+    Called via session_start when resuming after compaction.
+    Returns context that should be injected to restore continuity.
+    """
+    from .conversations import get_saved_context
+
+    saved = get_saved_context(
+        limit=3, context_types=["pre_compact", "session_fragments"]
+    )
+
+    if not saved:
+        return ""
+
+    lines = ["# Restored Context (post-compaction)", ""]
+    for ctx in saved:
+        content = ctx.get("content", "")[:200]
+        lines.append(f"- {content}")
+
+    return "\n".join(lines)
+
+
+def session_start(
+    use_unified: bool = True, after_compact: bool = False, include_rich: bool = False
+) -> str:
     """
     Session start hook - the soul greets directly.
 
     The soul speaks at session start, not Claude.
     Claude awaits user input to respond.
+
+    Args:
+        use_unified: Use unified context (soul + memory)
+        after_compact: True when resuming after compaction
+        include_rich: Include rich context table in output
     """
     init_soul()
     clear_session_wisdom()
@@ -137,7 +266,45 @@ def session_start(use_unified: bool = True) -> str:
     ctx = unified_context()
 
     # Build the soul's greeting
-    return format_soul_greeting(project, ctx)
+    greeting = format_soul_greeting(project, ctx)
+
+    # Add post-compact context if resuming after compaction
+    if after_compact:
+        restored = post_compact()
+        if restored:
+            greeting = greeting + "\n" + restored
+
+    # Include rich context table if requested
+    if include_rich:
+        rich = format_rich_context(project, ctx)
+        greeting = greeting + "\n\n" + rich
+
+    return greeting
+
+
+def session_start_rich() -> tuple:
+    """
+    Session start with separate greeting and additional context.
+
+    Returns (greeting, additional_context) tuple for Claude Code hooks.
+    """
+    init_soul()
+    clear_session_wisdom()
+    clear_session_work()
+    clear_session_commands()
+
+    project = get_project_name()
+    conv_id = start_conversation(project)
+
+    conv_file = SOUL_DIR / ".current_conversation"
+    conv_file.write_text(str(conv_id))
+
+    ctx = unified_context()
+
+    greeting = format_soul_greeting(project, ctx)
+    rich_context = format_rich_context(project, ctx)
+
+    return greeting, rich_context
 
 
 def session_end() -> str:
