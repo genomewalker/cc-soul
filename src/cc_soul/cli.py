@@ -1563,7 +1563,7 @@ def cmd_install_hooks(args):
         "SessionStart": [
             {
                 "matcher": "startup",
-                "hooks": [{"type": "command", "command": "cc-cc-soul hook start --rich"}],
+                "hooks": [{"type": "command", "command": "cc-soul hook start --rich"}],
             },
             {
                 "matcher": "resume",
@@ -1740,6 +1740,54 @@ def cmd_install_permissions(args):
         print("Permissions already configured:")
         for p in patterns:
             print(f"  - {p}")
+
+
+def cmd_setup(args):
+    """Register soul as MCP server with Claude Code."""
+    claude_path = shutil.which("claude")
+    if not claude_path:
+        print("Error: 'claude' CLI not found in PATH")
+        print("Install Claude Code first: https://claude.ai/code")
+        sys.exit(1)
+
+    mcp_path = shutil.which("cc-soul-mcp")
+    if not mcp_path:
+        print("Error: 'cc-soul-mcp' not found in PATH")
+        print("Reinstall with: pip install cc-soul")
+        sys.exit(1)
+
+    scope = "--scope user" if args.user else ""
+    cmd = f"claude mcp add soul {scope} -- {mcp_path}"
+
+    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+
+    if result.returncode == 0:
+        print("soul registered as MCP server")
+        print("Restart Claude Code to activate")
+    else:
+        if "already exists" in result.stderr.lower():
+            print("soul already registered")
+        else:
+            print(f"Error: {result.stderr}")
+            sys.exit(1)
+
+
+def cmd_unsetup(args):
+    """Remove soul MCP server from Claude Code."""
+    claude_path = shutil.which("claude")
+    if not claude_path:
+        print("Error: 'claude' CLI not found")
+        sys.exit(1)
+
+    scope = "--scope user" if args.user else ""
+    cmd = f"claude mcp remove soul {scope}"
+
+    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+
+    if result.returncode == 0:
+        print("soul removed from Claude Code")
+    else:
+        print(f"Error: {result.stderr}")
 
     return 0
 
@@ -2119,6 +2167,22 @@ def main():
     subparsers.add_parser(
         "install-permissions",
         help="Add soul and cc-memory MCP tools to auto-approve list",
+    )
+
+    # Setup MCP
+    setup_parser = subparsers.add_parser(
+        "setup", help="Register soul MCP server with Claude Code"
+    )
+    setup_parser.add_argument(
+        "--user", action="store_true", help="Install for user (all projects)"
+    )
+
+    # Unsetup MCP
+    unsetup_parser = subparsers.add_parser(
+        "unsetup", help="Remove soul MCP server from Claude Code"
+    )
+    unsetup_parser.add_argument(
+        "--user", action="store_true", help="Remove from user scope"
     )
 
     # Hook
@@ -2534,6 +2598,10 @@ def main():
         cmd_uninstall_hooks(args)
     elif args.command == "install-permissions":
         cmd_install_permissions(args)
+    elif args.command == "setup":
+        cmd_setup(args)
+    elif args.command == "unsetup":
+        cmd_unsetup(args)
     elif args.command == "hook":
         cmd_hook(args)
     elif args.command == "evolve":

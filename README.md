@@ -108,11 +108,11 @@ Wilder than aspirations. Glimpses of possibility not yet constrained by feasibil
 pip install cc-soul
 
 # Install hooks and skills
-soul install-hooks
-soul install-skills
+cc-soul install-hooks
+cc-soul install-skills
 
 # Register MCP server with Claude Code
-claude mcp add soul -- soul-mcp
+cc-soul setup --user
 ```
 
 Everything is included: memory, vectors, graph, and MCP.
@@ -175,46 +175,46 @@ Everything is included: memory, vectors, graph, and MCP.
 
 ### Summary Commands
 ```bash
-soul                      # Soul summary
-soul summary              # Who I am
-soul wisdom               # What I've learned
-soul session              # What was applied this session
-soul mood                 # Current mood state
-soul mood --reflect       # First-person reflection
+cc-soul                      # Soul summary
+cc-soul summary              # Who I am
+cc-soul wisdom               # What I've learned
+cc-soul session              # What was applied this session
+cc-soul mood                 # Current mood state
+cc-soul mood --reflect       # First-person reflection
 ```
 
 ### Growing the Soul
 ```bash
-soul grow wisdom "Title" "Content"     # Universal pattern
-soul grow insight "Title" "Content"    # Understanding
-soul grow fail "What" "Why"            # Failure (most valuable!)
-soul grow vocab "term" "meaning"       # Shared vocabulary
-soul grow belief "Statement"           # Core principle
-soul grow identity "aspect" "value"    # How we work
+cc-soul grow wisdom "Title" "Content"     # Universal pattern
+cc-soul grow insight "Title" "Content"    # Understanding
+cc-soul grow fail "What" "Why"            # Failure (most valuable!)
+cc-soul grow vocab "term" "meaning"       # Shared vocabulary
+cc-soul grow belief "Statement"           # Core principle
+cc-soul grow identity "aspect" "value"    # How we work
 ```
 
 ### Temporal Consciousness
 ```bash
-soul aspire "direction" "why"          # Set aspiration
-soul aspirations                       # List active aspirations
-soul coherence                         # Full τₖ analysis
-soul insights                          # View insights
+cc-soul aspire "direction" "why"          # Set aspiration
+cc-soul aspirations                       # List active aspirations
+cc-soul coherence                         # Full τₖ analysis
+cc-soul insights                          # View insights
 ```
 
 ### Self-Improvement
 ```bash
-soul introspect diagnose               # Find improvement targets
-soul improve suggest                   # Get actionable suggestions
-soul evolve summary                    # Track evolution insights
-soul health                            # System health check
+cc-soul introspect diagnose               # Find improvement targets
+cc-soul improve suggest                   # Get actionable suggestions
+cc-soul evolve summary                    # Track evolution insights
+cc-soul health                            # System health check
 ```
 
 ### Bridge Operations
 ```bash
-soul bridge status                     # Check memory connection
-soul bridge context                    # Get unified context
-soul bridge promote <obs_id>           # Promote to wisdom
-soul bridge candidates                 # Find wisdom candidates
+cc-soul bridge status                     # Check memory connection
+cc-soul bridge context                    # Get unified context
+cc-soul bridge promote <obs_id>           # Promote to wisdom
+cc-soul bridge candidates                 # Find wisdom candidates
 ```
 
 ---
