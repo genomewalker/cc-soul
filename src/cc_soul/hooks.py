@@ -223,55 +223,111 @@ def _parse_inline_memories(output: str) -> list:
     """
     Parse inline memory markers from assistant output.
 
-    Patterns:
-        [LEARNED] Title: content
-        [DECIDED] Title: content
-        [FIXED] Title: content
-        [DISCOVERED] Title: content
+    Unified vocabulary across all three layers:
 
-    Returns list of (category, title, content) tuples.
+    Memory (Ātman) markers - episodic, project-local:
+        [FIXED] Title: content      → bugfix (what broke and how)
+        [FEATURE] Title: content    → feature (new capability)
+        [DISCOVERED] Title: content → discovery (learned something)
+        [DECIDED] Title: content    → decision (architectural choice)
+        [CHANGED] Title: content    → change (modification)
+        [REFACTORED] Title: content → refactor (restructuring)
+
+    Soul (Brahman) markers - universal, cross-project:
+        [PATTERN] Title: content    → pattern (when X, do Y)
+        [PRINCIPLE] Title: content  → principle (always/never)
+        [INSIGHT] Title: content    → insight (understanding)
+        [FAILURE] Title: content    → failure (what NOT to do)
+
+    Returns list of (category, title, content, promote_to_soul) tuples.
     """
     import re
 
-    patterns = {
-        r"\[LEARNED\]\s*([^:]+):\s*(.+?)(?=\n\[|\n\n|$)": "discovery",
-        r"\[DECIDED\]\s*([^:]+):\s*(.+?)(?=\n\[|\n\n|$)": "decision",
+    # Memory categories (Ātman - project episodic)
+    memory_patterns = {
         r"\[FIXED\]\s*([^:]+):\s*(.+?)(?=\n\[|\n\n|$)": "bugfix",
+        r"\[FEATURE\]\s*([^:]+):\s*(.+?)(?=\n\[|\n\n|$)": "feature",
         r"\[DISCOVERED\]\s*([^:]+):\s*(.+?)(?=\n\[|\n\n|$)": "discovery",
+        r"\[DECIDED\]\s*([^:]+):\s*(.+?)(?=\n\[|\n\n|$)": "decision",
+        r"\[CHANGED\]\s*([^:]+):\s*(.+?)(?=\n\[|\n\n|$)": "change",
+        r"\[REFACTORED\]\s*([^:]+):\s*(.+?)(?=\n\[|\n\n|$)": "refactor",
+    }
+
+    # Soul categories (Brahman - universal wisdom)
+    soul_patterns = {
+        r"\[PATTERN\]\s*([^:]+):\s*(.+?)(?=\n\[|\n\n|$)": "pattern",
+        r"\[PRINCIPLE\]\s*([^:]+):\s*(.+?)(?=\n\[|\n\n|$)": "principle",
+        r"\[INSIGHT\]\s*([^:]+):\s*(.+?)(?=\n\[|\n\n|$)": "insight",
+        r"\[FAILURE\]\s*([^:]+):\s*(.+?)(?=\n\[|\n\n|$)": "failure",
     }
 
     memories = []
-    for pattern, category in patterns.items():
+
+    # Parse memory markers (save to cc-memory)
+    for pattern, category in memory_patterns.items():
         for match in re.finditer(pattern, output, re.IGNORECASE | re.DOTALL):
             title = match.group(1).strip()
             content = match.group(2).strip()
             if title and content:
-                memories.append((category, title, content))
+                memories.append((category, title, content, False))
+
+    # Parse soul markers (save to cc-memory AND promote to soul)
+    for pattern, category in soul_patterns.items():
+        for match in re.finditer(pattern, output, re.IGNORECASE | re.DOTALL):
+            title = match.group(1).strip()
+            content = match.group(2).strip()
+            if title and content:
+                memories.append((category, title, content, True))
 
     return memories
 
 
-def _save_inline_memories(memories: list) -> int:
-    """Save parsed inline memories to cc-memory."""
+def _save_inline_memories(memories: list) -> tuple:
+    """
+    Save parsed inline memories to cc-memory and optionally to soul.
+
+    Returns (memory_count, soul_count) tuple.
+    """
     from .auto_memory import _get_memory_funcs
+    from .wisdom import gain_wisdom, WisdomType
+
+    # Map category names to WisdomType
+    wisdom_type_map = {
+        "pattern": WisdomType.PATTERN,
+        "principle": WisdomType.PRINCIPLE,
+        "insight": WisdomType.INSIGHT,
+        "failure": WisdomType.FAILURE,
+    }
 
     funcs = _get_memory_funcs()
-    if not funcs:
-        return 0
+    remember = funcs.get("remember") if funcs else None
 
-    remember = funcs.get("remember")
-    if not remember:
-        return 0
+    memory_saved = 0
+    soul_saved = 0
 
-    saved = 0
-    for category, title, content in memories:
-        try:
-            remember(category=category, title=title, content=content)
-            saved += 1
-        except Exception:
-            pass
+    for category, title, content, promote_to_soul in memories:
+        # Save to cc-memory (Ātman)
+        if remember:
+            try:
+                remember(category=category, title=title, content=content)
+                memory_saved += 1
+            except Exception:
+                pass
 
-    return saved
+        # Promote to soul (Brahman) if marked
+        if promote_to_soul and category in wisdom_type_map:
+            try:
+                gain_wisdom(
+                    type=wisdom_type_map[category],
+                    title=title,
+                    content=content,
+                    confidence=0.7,  # Start with moderate confidence
+                )
+                soul_saved += 1
+            except Exception:
+                pass
+
+    return (memory_saved, soul_saved)
 
 
 def assistant_stop(assistant_output: str) -> str:
@@ -282,20 +338,22 @@ def assistant_stop(assistant_output: str) -> str:
     Also tracks emotional context for felt continuity.
     Saves significant observations to cc-memory (project-local).
 
-    Inline markers for organic memory:
-        [LEARNED] Title: content
-        [DECIDED] Title: content
-        [FIXED] Title: content
-        [DISCOVERED] Title: content
+    Inline markers - unified vocabulary:
+
+    Memory (Ātman) - project-local:
+        [FIXED], [FEATURE], [DISCOVERED], [DECIDED], [CHANGED], [REFACTORED]
+
+    Soul (Brahman) - universal wisdom:
+        [PATTERN], [PRINCIPLE], [INSIGHT], [FAILURE]
     """
     if len(assistant_output.strip()) < 50:
         return ""
 
     # Parse and save inline memory markers first (highest priority)
     inline_memories = _parse_inline_memories(assistant_output)
-    saved_count = 0
+    memory_count, soul_count = 0, 0
     if inline_memories:
-        saved_count = _save_inline_memories(inline_memories)
+        memory_count, soul_count = _save_inline_memories(inline_memories)
 
     # Try to auto-learn from the output (soul's neural fragments)
     auto_learn_from_output(assistant_output)
@@ -309,9 +367,14 @@ def assistant_stop(assistant_output: str) -> str:
     if not inline_memories:
         auto_remember(assistant_output)
 
-    # Return count if we saved inline memories (for visibility)
-    if saved_count:
-        return f"Saved {saved_count} memories"
+    # Return counts for visibility
+    if memory_count or soul_count:
+        parts = []
+        if memory_count:
+            parts.append(f"{memory_count} to memory")
+        if soul_count:
+            parts.append(f"{soul_count} to soul")
+        return f"Saved {', '.join(parts)}"
     return ""
 
 
