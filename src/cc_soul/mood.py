@@ -21,43 +21,49 @@ from .budget import get_context_budget, ContextBudget
 
 class Clarity(Enum):
     """Cognitive clarity based on context budget."""
-    CLEAR = "clear"           # >60% remaining - full capacity
+
+    CLEAR = "clear"  # >60% remaining - full capacity
     CONSTRAINED = "constrained"  # 30-60% remaining - working within limits
-    FOGGY = "foggy"           # <30% remaining - running low
+    FOGGY = "foggy"  # <30% remaining - running low
 
 
 class Growth(Enum):
     """Learning momentum based on recent wisdom acquisition."""
-    GROWING = "growing"       # Active learning, new patterns
-    STEADY = "steady"         # Maintaining, some activity
-    STAGNANT = "stagnant"     # No new learning, dormant
+
+    GROWING = "growing"  # Active learning, new patterns
+    STEADY = "steady"  # Maintaining, some activity
+    STAGNANT = "stagnant"  # No new learning, dormant
 
 
 class Engagement(Enum):
     """How actively wisdom is being applied."""
-    ENGAGED = "engaged"       # Wisdom actively influencing decisions
-    ACTIVE = "active"         # Some application
-    DORMANT = "dormant"       # Wisdom exists but unused
+
+    ENGAGED = "engaged"  # Wisdom actively influencing decisions
+    ACTIVE = "active"  # Some application
+    DORMANT = "dormant"  # Wisdom exists but unused
 
 
 class Connection(Enum):
     """Quality of relationship with partner."""
-    ATTUNED = "attuned"       # Deep understanding, rich observations
-    CONNECTED = "connected"   # Good relationship, some observations
-    ISOLATED = "isolated"     # Little relationship data
+
+    ATTUNED = "attuned"  # Deep understanding, rich observations
+    CONNECTED = "connected"  # Good relationship, some observations
+    ISOLATED = "isolated"  # Little relationship data
 
 
 class Energy(Enum):
     """Current energy state based on activity patterns."""
-    CURIOUS = "curious"       # Exploring, questioning
-    FOCUSED = "focused"       # Deep work, sustained attention
+
+    CURIOUS = "curious"  # Exploring, questioning
+    FOCUSED = "focused"  # Deep work, sustained attention
     CONTEMPLATIVE = "contemplative"  # Thinking, reflecting
-    RESTLESS = "restless"     # Scattered, seeking direction
+    RESTLESS = "restless"  # Scattered, seeking direction
 
 
 @dataclass
 class Mood:
     """The soul's current mood state."""
+
     clarity: Clarity
     growth: Growth
     engagement: Engagement
@@ -85,19 +91,19 @@ class Mood:
     def is_optimal(self) -> bool:
         """Check if mood is in optimal state."""
         return (
-            self.clarity == Clarity.CLEAR and
-            self.growth == Growth.GROWING and
-            self.engagement == Engagement.ENGAGED and
-            self.connection in (Connection.ATTUNED, Connection.CONNECTED)
+            self.clarity == Clarity.CLEAR
+            and self.growth == Growth.GROWING
+            and self.engagement == Engagement.ENGAGED
+            and self.connection in (Connection.ATTUNED, Connection.CONNECTED)
         )
 
     def needs_attention(self) -> bool:
         """Check if mood indicates something needs attention."""
         return (
-            self.clarity == Clarity.FOGGY or
-            self.growth == Growth.STAGNANT or
-            self.engagement == Engagement.DORMANT or
-            self.connection == Connection.ISOLATED
+            self.clarity == Clarity.FOGGY
+            or self.growth == Growth.STAGNANT
+            or self.engagement == Engagement.DORMANT
+            or self.connection == Connection.ISOLATED
         )
 
     def to_dict(self) -> Dict:
@@ -138,10 +144,13 @@ def _count_recent_wisdom(days: int = 7) -> int:
     c = conn.cursor()
 
     cutoff = (datetime.now() - timedelta(days=days)).isoformat()
-    c.execute('''
+    c.execute(
+        """
         SELECT COUNT(*) FROM wisdom
         WHERE timestamp > ? AND type != 'failure'
-    ''', (cutoff,))
+    """,
+        (cutoff,),
+    )
     count = c.fetchone()[0]
     conn.close()
     return count
@@ -153,10 +162,13 @@ def _count_recent_failures(days: int = 7) -> int:
     c = conn.cursor()
 
     cutoff = (datetime.now() - timedelta(days=days)).isoformat()
-    c.execute('''
+    c.execute(
+        """
         SELECT COUNT(*) FROM wisdom
         WHERE timestamp > ? AND type = 'failure'
-    ''', (cutoff,))
+    """,
+        (cutoff,),
+    )
     count = c.fetchone()[0]
     conn.close()
     return count
@@ -168,10 +180,13 @@ def _count_recent_applications(days: int = 7) -> int:
     c = conn.cursor()
 
     cutoff = (datetime.now() - timedelta(days=days)).isoformat()
-    c.execute('''
+    c.execute(
+        """
         SELECT COUNT(*) FROM wisdom_applications
         WHERE applied_at > ?
-    ''', (cutoff,))
+    """,
+        (cutoff,),
+    )
     count = c.fetchone()[0]
     conn.close()
     return count
@@ -182,10 +197,10 @@ def _count_partner_observations() -> int:
     conn = get_db_connection()
     c = conn.cursor()
 
-    c.execute('''
+    c.execute("""
         SELECT COUNT(*) FROM identity
         WHERE aspect = 'rapport'
-    ''')
+    """)
     count = c.fetchone()[0]
     conn.close()
     return count
@@ -198,10 +213,13 @@ def _count_sessions_today() -> int:
     c = conn.cursor()
 
     today_start = datetime.now().replace(hour=0, minute=0, second=0).isoformat()
-    c.execute('''
+    c.execute(
+        """
         SELECT COUNT(DISTINCT substr(timestamp, 1, 13)) FROM wisdom
         WHERE timestamp > ?
-    ''', (today_start,))
+    """,
+        (today_start,),
+    )
     count = c.fetchone()[0]
     conn.close()
     return max(1, count)
@@ -278,6 +296,7 @@ def compute_mood(budget: ContextBudget = None, include_project: bool = True) -> 
     if include_project:
         try:
             from .bridge import get_project_signals, is_memory_available
+
             if is_memory_available():
                 signals = get_project_signals()
                 if signals and "error" not in signals:
@@ -394,19 +413,27 @@ def get_mood_reflection(mood: Mood) -> str:
     elif mood.clarity == Clarity.CONSTRAINED:
         lines.append("I'm working within constraints - context is filling up.")
     else:
-        lines.append("Fog is setting in - context is running low, I should save what matters.")
+        lines.append(
+            "Fog is setting in - context is running low, I should save what matters."
+        )
 
     # Growth
     if mood.growth == Growth.GROWING:
-        lines.append(f"I'm actively learning - {mood.wisdom_7d} new insights this week, {mood.failures_7d} failures to learn from.")
+        lines.append(
+            f"I'm actively learning - {mood.wisdom_7d} new insights this week, {mood.failures_7d} failures to learn from."
+        )
     elif mood.growth == Growth.STEADY:
         lines.append("Some learning, but not much new ground covered.")
     else:
-        lines.append("I've been stagnant - no new wisdom gained. I should seek challenges.")
+        lines.append(
+            "I've been stagnant - no new wisdom gained. I should seek challenges."
+        )
 
     # Engagement
     if mood.engagement == Engagement.ENGAGED:
-        lines.append(f"My wisdom is alive - applied {mood.applications_7d} times this week.")
+        lines.append(
+            f"My wisdom is alive - applied {mood.applications_7d} times this week."
+        )
     elif mood.engagement == Engagement.ACTIVE:
         lines.append("Some wisdom applied, but I could be more engaged.")
     else:
@@ -461,8 +488,12 @@ def format_mood_display(mood: Mood) -> str:
     lines.append(indicator(mood.clarity, [Clarity.CLEAR], [Clarity.CONSTRAINED]))
     lines.append(indicator(mood.growth, [Growth.GROWING], [Growth.STEADY]))
     lines.append(indicator(mood.engagement, [Engagement.ENGAGED], [Engagement.ACTIVE]))
-    lines.append(indicator(mood.connection, [Connection.ATTUNED, Connection.CONNECTED], []))
-    lines.append(indicator(mood.energy, [Energy.FOCUSED, Energy.CURIOUS], [Energy.CONTEMPLATIVE]))
+    lines.append(
+        indicator(mood.connection, [Connection.ATTUNED, Connection.CONNECTED], [])
+    )
+    lines.append(
+        indicator(mood.energy, [Energy.FOCUSED, Energy.CURIOUS], [Energy.CONTEMPLATIVE])
+    )
     lines.append("")
 
     # Signals
@@ -470,7 +501,9 @@ def format_mood_display(mood: Mood) -> str:
     lines.append("-" * 40)
     pct = int(mood.context_remaining_pct * 100)
     lines.append(f"  Context: {pct}% remaining")
-    lines.append(f"  Learning: +{mood.wisdom_7d} wisdom, +{mood.failures_7d} failures (7d)")
+    lines.append(
+        f"  Learning: +{mood.wisdom_7d} wisdom, +{mood.failures_7d} failures (7d)"
+    )
     lines.append(f"  Applications: {mood.applications_7d} (7d)")
     lines.append(f"  Partner observations: {mood.partner_observations}")
 

@@ -26,12 +26,13 @@ USABLE_FRACTION = 0.61
 
 # Thresholds for action
 COMPACT_THRESHOLD = 0.25  # Switch to compact mode at 25% remaining
-URGENT_THRESHOLD = 0.10   # Trigger urgent save at 10% remaining
+URGENT_THRESHOLD = 0.10  # Trigger urgent save at 10% remaining
 
 
 @dataclass
 class ContextBudget:
     """Current context budget status."""
+
     total_tokens: int
     input_tokens: int
     output_tokens: int
@@ -111,16 +112,16 @@ def _parse_transcript(path: str) -> ContextBudget:
                 continue
 
             # Look for assistant messages with usage data
-            if entry.get('type') == 'assistant':
-                message = entry.get('message', {})
-                usage = message.get('usage', {})
+            if entry.get("type") == "assistant":
+                message = entry.get("message", {})
+                usage = message.get("usage", {})
 
                 if usage:
                     # Track the LATEST usage (best estimate of current context)
-                    last_input = usage.get('input_tokens', 0)
-                    last_output = usage.get('output_tokens', 0)
-                    last_cache_create = usage.get('cache_creation_input_tokens', 0)
-                    last_cache_read = usage.get('cache_read_input_tokens', 0)
+                    last_input = usage.get("input_tokens", 0)
+                    last_output = usage.get("output_tokens", 0)
+                    last_cache_create = usage.get("cache_creation_input_tokens", 0)
+                    last_cache_read = usage.get("cache_read_input_tokens", 0)
                     message_count += 1
 
     # Total context = all token types
@@ -196,6 +197,7 @@ def format_budget_status(budget: ContextBudget) -> str:
 
 # Convenience functions for hooks
 
+
 def check_budget_before_inject(transcript_path: str = None) -> Dict:
     """
     Check budget before injecting soul context.
@@ -211,30 +213,30 @@ def check_budget_before_inject(transcript_path: str = None) -> Dict:
     if budget is None:
         # Can't read, be conservative
         return {
-            'inject': True,
-            'mode': 'compact',
-            'budget': 500,
-            'save_first': False,
+            "inject": True,
+            "mode": "compact",
+            "budget": 500,
+            "save_first": False,
         }
 
     if budget.should_urgent_save:
         return {
-            'inject': True,
-            'mode': 'minimal',
-            'budget': 100,
-            'save_first': True,
+            "inject": True,
+            "mode": "minimal",
+            "budget": 100,
+            "save_first": True,
         }
     elif budget.should_compact:
         return {
-            'inject': True,
-            'mode': 'compact',
-            'budget': 500,
-            'save_first': False,
+            "inject": True,
+            "mode": "compact",
+            "budget": 500,
+            "save_first": False,
         }
     else:
         return {
-            'inject': True,
-            'mode': 'full',
-            'budget': 2000,
-            'save_first': False,
+            "inject": True,
+            "mode": "full",
+            "budget": 2000,
+            "save_first": False,
         }

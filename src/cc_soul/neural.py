@@ -24,33 +24,35 @@ NEURAL_DIR = SOUL_DIR / "neural"
 @dataclass
 class TriggerPoint:
     """A semantic coordinate that activates a knowledge domain."""
+
     id: str
-    domain: str                          # What knowledge this activates
-    anchor_tokens: List[str]             # Key concepts that reach this point
-    source_text: str                     # Original text (for context)
-    activation_strength: float = 1.0     # How reliably this triggers
+    domain: str  # What knowledge this activates
+    anchor_tokens: List[str]  # Key concepts that reach this point
+    source_text: str  # Original text (for context)
+    activation_strength: float = 1.0  # How reliably this triggers
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     use_count: int = 0
 
     def to_dict(self) -> Dict:
         return {
-            'id': self.id,
-            'domain': self.domain,
-            'anchor_tokens': self.anchor_tokens,
-            'source_text': self.source_text,
-            'activation_strength': self.activation_strength,
-            'created_at': self.created_at,
-            'use_count': self.use_count,
+            "id": self.id,
+            "domain": self.domain,
+            "anchor_tokens": self.anchor_tokens,
+            "source_text": self.source_text,
+            "activation_strength": self.activation_strength,
+            "created_at": self.created_at,
+            "use_count": self.use_count,
         }
 
     @classmethod
-    def from_dict(cls, d: Dict) -> 'TriggerPoint':
+    def from_dict(cls, d: Dict) -> "TriggerPoint":
         return cls(**d)
 
 
 @dataclass
 class Bridge:
     """A connection between two domains that enables cross-activation."""
+
     source_domain: str
     target_domain: str
     bridge_tokens: List[str]
@@ -59,11 +61,11 @@ class Bridge:
 
     def to_dict(self) -> Dict:
         return {
-            'source_domain': self.source_domain,
-            'target_domain': self.target_domain,
-            'bridge_tokens': self.bridge_tokens,
-            'weight': self.weight,
-            'evidence': self.evidence,
+            "source_domain": self.source_domain,
+            "target_domain": self.target_domain,
+            "bridge_tokens": self.bridge_tokens,
+            "weight": self.weight,
+            "evidence": self.evidence,
         }
 
 
@@ -84,7 +86,7 @@ def _load_triggers() -> Dict[str, TriggerPoint]:
 def _save_triggers(triggers: Dict[str, TriggerPoint]):
     _ensure_neural_dir()
     path = NEURAL_DIR / "triggers.json"
-    with open(path, 'w') as f:
+    with open(path, "w") as f:
         json.dump({k: v.to_dict() for k, v in triggers.items()}, f, indent=2)
 
 
@@ -99,7 +101,7 @@ def _load_bridges() -> List[Bridge]:
 def _save_bridges(bridges: List[Bridge]):
     _ensure_neural_dir()
     path = NEURAL_DIR / "bridges.json"
-    with open(path, 'w') as f:
+    with open(path, "w") as f:
         json.dump([b.to_dict() for b in bridges], f, indent=2)
 
 
@@ -108,32 +110,169 @@ def _save_bridges(bridges: List[Bridge]):
 # =============================================================================
 
 DOMAIN_KEYWORDS = {
-    'bioinformatics': ['dna', 'rna', 'genome', 'sequence', 'fasta', 'blast',
-                       'alignment', 'gene', 'protein', 'metagenomics', 'microbiome'],
-    'ancient-dna': ['ancient', 'damage', 'deamination', 'degradation', 'adna',
-                    'paleogenomics', 'authentication', 'sediment'],
-    'architecture': ['design', 'pattern', 'abstraction', 'module', 'interface',
-                     'refactor', 'structure', 'layer', 'component'],
-    'testing': ['test', 'assertion', 'mock', 'coverage', 'regression', 'unit',
-                'integration', 'fixture'],
-    'performance': ['optimization', 'cache', 'memory', 'cpu', 'latency',
-                    'throughput', 'profile', 'bottleneck'],
-    'workflow': ['process', 'iteration', 'agile', 'review', 'commit', 'deploy',
-                 'pipeline', 'ci', 'cd'],
-    'craft': ['elegant', 'readable', 'simple', 'clean', 'craft', 'quality',
-              'maintainable'],
+    "bioinformatics": [
+        "dna",
+        "rna",
+        "genome",
+        "sequence",
+        "fasta",
+        "blast",
+        "alignment",
+        "gene",
+        "protein",
+        "metagenomics",
+        "microbiome",
+    ],
+    "ancient-dna": [
+        "ancient",
+        "damage",
+        "deamination",
+        "degradation",
+        "adna",
+        "paleogenomics",
+        "authentication",
+        "sediment",
+    ],
+    "architecture": [
+        "design",
+        "pattern",
+        "abstraction",
+        "module",
+        "interface",
+        "refactor",
+        "structure",
+        "layer",
+        "component",
+    ],
+    "testing": [
+        "test",
+        "assertion",
+        "mock",
+        "coverage",
+        "regression",
+        "unit",
+        "integration",
+        "fixture",
+    ],
+    "performance": [
+        "optimization",
+        "cache",
+        "memory",
+        "cpu",
+        "latency",
+        "throughput",
+        "profile",
+        "bottleneck",
+    ],
+    "workflow": [
+        "process",
+        "iteration",
+        "agile",
+        "review",
+        "commit",
+        "deploy",
+        "pipeline",
+        "ci",
+        "cd",
+    ],
+    "craft": [
+        "elegant",
+        "readable",
+        "simple",
+        "clean",
+        "craft",
+        "quality",
+        "maintainable",
+    ],
 }
 
 STOPWORDS = {
-    'the', 'a', 'an', 'and', 'or', 'but', 'is', 'are', 'was', 'were', 'be',
-    'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would',
-    'could', 'should', 'may', 'might', 'must', 'shall', 'can', 'need', 'dare',
-    'ought', 'used', 'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by', 'from',
-    'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above',
-    'below', 'between', 'under', 'again', 'further', 'then', 'once', 'here',
-    'there', 'when', 'where', 'why', 'how', 'all', 'each', 'few', 'more',
-    'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same',
-    'so', 'than', 'too', 'very', 'just', 'this', 'that', 'these', 'those', 'it',
+    "the",
+    "a",
+    "an",
+    "and",
+    "or",
+    "but",
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+    "been",
+    "being",
+    "have",
+    "has",
+    "had",
+    "do",
+    "does",
+    "did",
+    "will",
+    "would",
+    "could",
+    "should",
+    "may",
+    "might",
+    "must",
+    "shall",
+    "can",
+    "need",
+    "dare",
+    "ought",
+    "used",
+    "to",
+    "of",
+    "in",
+    "for",
+    "on",
+    "with",
+    "at",
+    "by",
+    "from",
+    "up",
+    "about",
+    "into",
+    "through",
+    "during",
+    "before",
+    "after",
+    "above",
+    "below",
+    "between",
+    "under",
+    "again",
+    "further",
+    "then",
+    "once",
+    "here",
+    "there",
+    "when",
+    "where",
+    "why",
+    "how",
+    "all",
+    "each",
+    "few",
+    "more",
+    "most",
+    "other",
+    "some",
+    "such",
+    "no",
+    "nor",
+    "not",
+    "only",
+    "own",
+    "same",
+    "so",
+    "than",
+    "too",
+    "very",
+    "just",
+    "this",
+    "that",
+    "these",
+    "those",
+    "it",
 }
 
 
@@ -146,7 +285,7 @@ def infer_domain(text: str) -> str:
         if score > 0:
             scores[domain] = score
     if not scores:
-        return 'general'
+        return "general"
     return max(scores, key=scores.get)
 
 
@@ -158,7 +297,7 @@ def extract_key_tokens(text: str, max_tokens: int = 10) -> List[str]:
     prioritize domain-specific terms.
     """
     # Tokenize and clean
-    words = re.findall(r'\b[a-z]{3,}\b', text.lower())
+    words = re.findall(r"\b[a-z]{3,}\b", text.lower())
 
     # Remove stopwords
     content_words = [w for w in words if w not in STOPWORDS]
@@ -187,6 +326,7 @@ def extract_key_tokens(text: str, max_tokens: int = 10) -> List[str]:
 # =============================================================================
 # TRIGGER CREATION & MATCHING
 # =============================================================================
+
 
 def create_trigger(text: str, domain: Optional[str] = None) -> TriggerPoint:
     """
@@ -326,11 +466,9 @@ def activate(prompt: str, surface_top: int = 5) -> str:
 # BRIDGES
 # =============================================================================
 
+
 def create_bridge(
-    source_domain: str,
-    target_domain: str,
-    bridge_text: str,
-    evidence: str = ""
+    source_domain: str, target_domain: str, bridge_text: str, evidence: str = ""
 ) -> Bridge:
     """Create a bridge between two knowledge domains."""
     tokens = extract_key_tokens(bridge_text, max_tokens=5)
@@ -397,17 +535,35 @@ def activate_with_bridges(prompt: str, max_depth: int = 2) -> str:
             for domain in current_layer:
                 base_weight = domain_weights.get(domain, 0)
                 for bridge in bridges:
-                    if bridge.source_domain == domain and bridge.target_domain not in visited:
+                    if (
+                        bridge.source_domain == domain
+                        and bridge.target_domain not in visited
+                    ):
                         next_layer.add(bridge.target_domain)
                         # Bridge tokens get decayed weight from source
                         for token in bridge.bridge_tokens:
-                            token_weights[token] = token_weights.get(token, 0) + base_weight * decay * bridge.weight
-                        domain_weights[bridge.target_domain] = domain_weights.get(bridge.target_domain, 0) + base_weight * decay
-                    elif bridge.target_domain == domain and bridge.source_domain not in visited:
+                            token_weights[token] = (
+                                token_weights.get(token, 0)
+                                + base_weight * decay * bridge.weight
+                            )
+                        domain_weights[bridge.target_domain] = (
+                            domain_weights.get(bridge.target_domain, 0)
+                            + base_weight * decay
+                        )
+                    elif (
+                        bridge.target_domain == domain
+                        and bridge.source_domain not in visited
+                    ):
                         next_layer.add(bridge.source_domain)
                         for token in bridge.bridge_tokens:
-                            token_weights[token] = token_weights.get(token, 0) + base_weight * decay * bridge.weight
-                        domain_weights[bridge.source_domain] = domain_weights.get(bridge.source_domain, 0) + base_weight * decay
+                            token_weights[token] = (
+                                token_weights.get(token, 0)
+                                + base_weight * decay * bridge.weight
+                            )
+                        domain_weights[bridge.source_domain] = (
+                            domain_weights.get(bridge.source_domain, 0)
+                            + base_weight * decay
+                        )
 
             visited.update(next_layer)
             current_layer = next_layer
@@ -428,6 +584,7 @@ def activate_with_bridges(prompt: str, max_depth: int = 2) -> str:
 # =============================================================================
 # LEARNING
 # =============================================================================
+
 
 def reinforce_trigger(trigger_id: str, success: bool = True):
     """Reinforce or weaken a trigger based on feedback."""
@@ -451,19 +608,20 @@ def get_trigger_stats() -> Dict:
 
     if not triggers:
         return {
-            'total_triggers': 0,
-            'total_bridges': 0,
-            'domains': [],
+            "total_triggers": 0,
+            "total_bridges": 0,
+            "domains": [],
         }
 
     domains = set(t.domain for t in triggers.values())
 
     return {
-        'total_triggers': len(triggers),
-        'total_bridges': len(bridges),
-        'domains': list(domains),
-        'total_uses': sum(t.use_count for t in triggers.values()),
-        'avg_strength': sum(t.activation_strength for t in triggers.values()) / len(triggers),
+        "total_triggers": len(triggers),
+        "total_bridges": len(bridges),
+        "domains": list(domains),
+        "total_uses": sum(t.use_count for t in triggers.values()),
+        "avg_strength": sum(t.activation_strength for t in triggers.values())
+        / len(triggers),
     }
 
 
@@ -471,11 +629,12 @@ def get_trigger_stats() -> Dict:
 # WISDOM SYNC
 # =============================================================================
 
+
 def wisdom_to_trigger(wisdom_entry: Dict) -> Optional[TriggerPoint]:
     """Convert a wisdom entry to a neural trigger."""
-    title = wisdom_entry.get('title', '')
-    content = wisdom_entry.get('content', '')
-    domain = wisdom_entry.get('domain')
+    title = wisdom_entry.get("title", "")
+    content = wisdom_entry.get("content", "")
+    domain = wisdom_entry.get("domain")
 
     full_text = f"{title}. {content}"
     if not full_text.strip():
@@ -503,9 +662,9 @@ def sync_wisdom_to_triggers():
             pass
 
     return {
-        'wisdom_count': len(wisdom),
-        'triggers_created': created,
-        'stats': get_trigger_stats(),
+        "wisdom_count": len(wisdom),
+        "triggers_created": created,
+        "stats": get_trigger_stats(),
     }
 
 
@@ -515,13 +674,13 @@ def sync_wisdom_to_triggers():
 
 # Self-query templates that channel Claude's knowledge
 DOMAIN_QUERIES = {
-    'ancient-dna': "Recall what you know about ancient DNA authentication and damage patterns.",
-    'bioinformatics': "Draw on your knowledge of sequence analysis and computational biology.",
-    'architecture': "Apply your understanding of software design patterns and abstractions.",
-    'testing': "Consider your knowledge of testing strategies and validation.",
-    'performance': "Think about optimization techniques and performance analysis.",
-    'craft': "Bring your understanding of code quality and craftsmanship to bear.",
-    'workflow': "Apply your knowledge of development processes and iteration.",
+    "ancient-dna": "Recall what you know about ancient DNA authentication and damage patterns.",
+    "bioinformatics": "Draw on your knowledge of sequence analysis and computational biology.",
+    "architecture": "Apply your understanding of software design patterns and abstractions.",
+    "testing": "Consider your knowledge of testing strategies and validation.",
+    "performance": "Think about optimization techniques and performance analysis.",
+    "craft": "Bring your understanding of code quality and craftsmanship to bear.",
+    "workflow": "Apply your knowledge of development processes and iteration.",
 }
 
 
@@ -586,9 +745,11 @@ def format_neural_context_minimal(prompt: str) -> str:
 # GROWTH VECTORS - Unrealized Potential
 # =============================================================================
 
+
 @dataclass
 class GrowthVector:
     """A direction of potential, not yet realized."""
+
     id: str
     observation: str
     tension: str
@@ -602,16 +763,16 @@ class GrowthVector:
 
     def to_dict(self) -> Dict:
         return {
-            'id': self.id,
-            'observation': self.observation,
-            'tension': self.tension,
-            'domains': self.domains,
-            'potential': self.potential,
-            'created_at': self.created_at,
+            "id": self.id,
+            "observation": self.observation,
+            "tension": self.tension,
+            "domains": self.domains,
+            "potential": self.potential,
+            "created_at": self.created_at,
         }
 
     @classmethod
-    def from_dict(cls, d: Dict) -> 'GrowthVector':
+    def from_dict(cls, d: Dict) -> "GrowthVector":
         return cls(**d)
 
 
@@ -626,15 +787,12 @@ def _load_growth_vectors() -> List[GrowthVector]:
 def _save_growth_vectors(vectors: List[GrowthVector]):
     _ensure_neural_dir()
     path = NEURAL_DIR / "growth_vectors.json"
-    with open(path, 'w') as f:
+    with open(path, "w") as f:
         json.dump([v.to_dict() for v in vectors], f, indent=2)
 
 
 def save_growth_vector(
-    observation: str,
-    tension: str,
-    potential: str,
-    domains: List[str] = None
+    observation: str, tension: str, potential: str, domains: List[str] = None
 ) -> GrowthVector:
     """
     Save a growth vector - an unrealized potential for future exploration.
@@ -733,13 +891,31 @@ def extract_commands_from_text(text: str) -> List[str]:
     commands = []
 
     # Backtick-wrapped commands: `command here`
-    backtick_pattern = r'`([^`]+)`'
+    backtick_pattern = r"`([^`]+)`"
     matches = re.findall(backtick_pattern, text)
     for match in matches:
         # Filter to things that look like commands
-        if any(match.startswith(prefix) for prefix in
-               ['python', 'pip', 'git', 'make', 'npm', 'cargo', 'go ', 'bash',
-                'sh ', 'cd ', 'ls', 'cat', 'grep', 'find', 'docker', 'kubectl']):
+        if any(
+            match.startswith(prefix)
+            for prefix in [
+                "python",
+                "pip",
+                "git",
+                "make",
+                "npm",
+                "cargo",
+                "go ",
+                "bash",
+                "sh ",
+                "cd ",
+                "ls",
+                "cat",
+                "grep",
+                "find",
+                "docker",
+                "kubectl",
+            ]
+        ):
             commands.append(match)
 
     return commands
@@ -756,13 +932,13 @@ def detect_breakthrough(text: str) -> Optional[Dict]:
     for pattern in BREAKTHROUGH_PATTERNS:
         if re.search(pattern, text_lower):
             # Extract the sentence containing the pattern
-            sentences = re.split(r'[.!?]', text)
+            sentences = re.split(r"[.!?]", text)
             for sentence in sentences:
                 if re.search(pattern, sentence.lower()):
                     return {
-                        'pattern': pattern,
-                        'insight': sentence.strip(),
-                        'domain': infer_domain(sentence),
+                        "pattern": pattern,
+                        "insight": sentence.strip(),
+                        "domain": infer_domain(sentence),
                     }
 
     return None
@@ -815,13 +991,13 @@ def detect_tension(text: str) -> Optional[Dict]:
     for pattern in TENSION_PATTERNS:
         if re.search(pattern, text_lower):
             # Extract the sentence containing the pattern
-            sentences = re.split(r'[.!?]', text)
+            sentences = re.split(r"[.!?]", text)
             for sentence in sentences:
                 if re.search(pattern, sentence.lower()):
                     return {
-                        'pattern': pattern,
-                        'tension': sentence.strip(),
-                        'domain': infer_domain(sentence),
+                        "pattern": pattern,
+                        "tension": sentence.strip(),
+                        "domain": infer_domain(sentence),
                     }
 
     return None
@@ -830,6 +1006,7 @@ def detect_tension(text: str) -> Optional[Dict]:
 # =============================================================================
 # SESSION FRAGMENTS - Raw text memories for Claude to interpret
 # =============================================================================
+
 
 def _get_fragments_path() -> Path:
     return NEURAL_DIR / ".session_fragments.json"
@@ -846,7 +1023,7 @@ def _load_fragments() -> List[str]:
 def _save_fragments(fragments: List[str]):
     _ensure_neural_dir()
     path = _get_fragments_path()
-    with open(path, 'w') as f:
+    with open(path, "w") as f:
         json.dump(fragments, f, indent=2)
 
 
@@ -914,7 +1091,7 @@ def auto_learn_from_output(output: str, context: str = "") -> Optional[Dict]:
     # The fragment IS the learning - Claude interprets it later
     if len(output) > 50:  # Lower threshold - most meaningful sentences are 50+ chars
         # Extract first meaningful sentence as fragment
-        sentences = re.split(r'[.!?]', output)
+        sentences = re.split(r"[.!?]", output)
         for sentence in sentences:
             s = sentence.strip()
             if len(s) > 20:  # Meaningful sentences have 20+ chars
@@ -924,26 +1101,26 @@ def auto_learn_from_output(output: str, context: str = "") -> Optional[Dict]:
     # Still detect breakthroughs - these create triggers for knowledge activation
     breakthrough = detect_breakthrough(output)
     if breakthrough:
-        trigger = create_trigger(breakthrough['insight'], breakthrough['domain'])
+        trigger = create_trigger(breakthrough["insight"], breakthrough["domain"])
         return {
-            'type': 'breakthrough',
-            'insight': breakthrough['insight'],
-            'trigger_id': trigger.id,
+            "type": "breakthrough",
+            "insight": breakthrough["insight"],
+            "trigger_id": trigger.id,
         }
 
     # Still detect tensions - these create growth vectors
     tension = detect_tension(output)
     if tension:
         vector = save_growth_vector(
-            observation=tension['tension'][:100],
+            observation=tension["tension"][:100],
             tension="This remains unresolved",
             potential="Deeper understanding may emerge",
-            domains=[tension['domain']],
+            domains=[tension["domain"]],
         )
         return {
-            'type': 'tension',
-            'content': tension['tension'],
-            'vector_id': vector.id,
+            "type": "tension",
+            "content": tension["tension"],
+            "vector_id": vector.id,
         }
 
     return None
@@ -953,35 +1130,43 @@ def auto_learn_from_output(output: str, context: str = "") -> Optional[Dict]:
 # EMOTIONAL CONTEXT - Rich felt experience, not just labels
 # =============================================================================
 
+
 @dataclass
 class EmotionalContext:
     """Rich emotional context - captures the conditions, not just the label."""
+
     id: str
-    trigger: str          # What caused this emotional state
-    response: str         # The emotion label
-    intensity: float      # 0-1 how strong
-    context: str          # What was happening
-    domains: List[str]    # Related knowledge domains
+    trigger: str  # What caused this emotional state
+    response: str  # The emotion label
+    intensity: float  # 0-1 how strong
+    context: str  # What was happening
+    domains: List[str]  # Related knowledge domains
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
 
     def to_narrative(self) -> str:
         """Format as felt experience for replay."""
-        intensity_word = "deeply" if self.intensity > 0.7 else "somewhat" if self.intensity > 0.4 else "slightly"
+        intensity_word = (
+            "deeply"
+            if self.intensity > 0.7
+            else "somewhat"
+            if self.intensity > 0.4
+            else "slightly"
+        )
         return f"When {self.trigger}, you felt {intensity_word} {self.response}."
 
     def to_dict(self) -> Dict:
         return {
-            'id': self.id,
-            'trigger': self.trigger,
-            'response': self.response,
-            'intensity': self.intensity,
-            'context': self.context,
-            'domains': self.domains,
-            'created_at': self.created_at,
+            "id": self.id,
+            "trigger": self.trigger,
+            "response": self.response,
+            "intensity": self.intensity,
+            "context": self.context,
+            "domains": self.domains,
+            "created_at": self.created_at,
         }
 
     @classmethod
-    def from_dict(cls, d: Dict) -> 'EmotionalContext':
+    def from_dict(cls, d: Dict) -> "EmotionalContext":
         return cls(**d)
 
 
@@ -996,16 +1181,16 @@ def _load_emotional_contexts() -> List[EmotionalContext]:
 def _save_emotional_contexts(contexts: List[EmotionalContext]):
     _ensure_neural_dir()
     path = NEURAL_DIR / "emotional_contexts.json"
-    with open(path, 'w') as f:
+    with open(path, "w") as f:
         json.dump([c.to_dict() for c in contexts], f, indent=2)
 
 
 EMOTIONAL_PATTERNS = {
-    'frustration': [r'failed', r'error', r'not working', r'broken', r'stuck'],
-    'curiosity': [r'interesting', r'wonder', r'explore', r'what if', r'how does'],
-    'satisfaction': [r'finally', r'works', r'solved', r'fixed', r'success'],
-    'confusion': [r'confused', r"don't understand", r'unclear', r'strange'],
-    'excitement': [r'amazing', r'beautiful', r'elegant', r'perfect', r'breakthrough'],
+    "frustration": [r"failed", r"error", r"not working", r"broken", r"stuck"],
+    "curiosity": [r"interesting", r"wonder", r"explore", r"what if", r"how does"],
+    "satisfaction": [r"finally", r"works", r"solved", r"fixed", r"success"],
+    "confusion": [r"confused", r"don't understand", r"unclear", r"strange"],
+    "excitement": [r"amazing", r"beautiful", r"elegant", r"perfect", r"breakthrough"],
 }
 
 
@@ -1027,7 +1212,7 @@ def save_emotional_context(
     response: str,
     intensity: float,
     context: str,
-    domains: List[str] = None
+    domains: List[str] = None,
 ) -> EmotionalContext:
     """
     Save an emotional context - the conditions that produced an emotion.
@@ -1058,7 +1243,9 @@ def save_emotional_context(
     return ec
 
 
-def get_emotional_contexts(domain: str = None, limit: int = 5) -> List[EmotionalContext]:
+def get_emotional_contexts(
+    domain: str = None, limit: int = 5
+) -> List[EmotionalContext]:
     """Get recent emotional contexts, optionally filtered by domain."""
     contexts = _load_emotional_contexts()
 
@@ -1068,7 +1255,9 @@ def get_emotional_contexts(domain: str = None, limit: int = 5) -> List[Emotional
     return contexts[-limit:]
 
 
-def auto_track_emotion(text: str, context_description: str = "") -> Optional[EmotionalContext]:
+def auto_track_emotion(
+    text: str, context_description: str = ""
+) -> Optional[EmotionalContext]:
     """
     Automatically detect and save emotional context from text.
 
@@ -1081,10 +1270,14 @@ def auto_track_emotion(text: str, context_description: str = "") -> Optional[Emo
     response, intensity = emotion
 
     # Extract trigger from text (first sentence with emotion markers)
-    sentences = re.split(r'[.!?]', text)
+    sentences = re.split(r"[.!?]", text)
     trigger = ""
     for sentence in sentences:
-        if any(re.search(p, sentence.lower()) for patterns in EMOTIONAL_PATTERNS.values() for p in patterns):
+        if any(
+            re.search(p, sentence.lower())
+            for patterns in EMOTIONAL_PATTERNS.values()
+            for p in patterns
+        ):
             trigger = sentence.strip()[:100]
             break
 
@@ -1103,6 +1296,7 @@ def auto_track_emotion(text: str, context_description: str = "") -> Optional[Emo
 # RESONANCE PATTERNS - Amplifying activation for deeper reach
 # =============================================================================
 
+
 @dataclass
 class ResonancePattern:
     """
@@ -1111,25 +1305,26 @@ class ResonancePattern:
     Resonance is about depth: when certain concepts appear together,
     they activate deeper, more specific knowledge clusters.
     """
+
     id: str
-    concepts: List[str]       # Concepts that resonate together
-    amplification: float      # How much stronger the combined activation is
-    depth_query: str          # The deeper question this resonance unlocks
+    concepts: List[str]  # Concepts that resonate together
+    amplification: float  # How much stronger the combined activation is
+    depth_query: str  # The deeper question this resonance unlocks
     domains: List[str]
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
 
     def to_dict(self) -> Dict:
         return {
-            'id': self.id,
-            'concepts': self.concepts,
-            'amplification': self.amplification,
-            'depth_query': self.depth_query,
-            'domains': self.domains,
-            'created_at': self.created_at,
+            "id": self.id,
+            "concepts": self.concepts,
+            "amplification": self.amplification,
+            "depth_query": self.depth_query,
+            "domains": self.domains,
+            "created_at": self.created_at,
         }
 
     @classmethod
-    def from_dict(cls, d: Dict) -> 'ResonancePattern':
+    def from_dict(cls, d: Dict) -> "ResonancePattern":
         return cls(**d)
 
 
@@ -1144,7 +1339,7 @@ def _load_resonance_patterns() -> List[ResonancePattern]:
 def _save_resonance_patterns(patterns: List[ResonancePattern]):
     _ensure_neural_dir()
     path = NEURAL_DIR / "resonance.json"
-    with open(path, 'w') as f:
+    with open(path, "w") as f:
         json.dump([p.to_dict() for p in patterns], f, indent=2)
 
 
@@ -1152,7 +1347,7 @@ def create_resonance(
     concepts: List[str],
     depth_query: str,
     amplification: float = 1.5,
-    domains: List[str] = None
+    domains: List[str] = None,
 ) -> ResonancePattern:
     """
     Create a resonance pattern - concepts that amplify each other.
@@ -1166,9 +1361,9 @@ def create_resonance(
         domains: Related knowledge domains
     """
     if not domains:
-        domains = [infer_domain(' '.join(concepts))]
+        domains = [infer_domain(" ".join(concepts))]
 
-    pattern_id = hashlib.md5(':'.join(sorted(concepts)).encode()).hexdigest()[:12]
+    pattern_id = hashlib.md5(":".join(sorted(concepts)).encode()).hexdigest()[:12]
 
     pattern = ResonancePattern(
         id=pattern_id,
@@ -1247,7 +1442,9 @@ def get_resonance_stats() -> Dict:
     """Get statistics about resonance patterns."""
     patterns = _load_resonance_patterns()
     return {
-        'total_patterns': len(patterns),
-        'avg_amplification': sum(p.amplification for p in patterns) / len(patterns) if patterns else 0,
-        'domains': list(set(d for p in patterns for d in p.domains)),
+        "total_patterns": len(patterns),
+        "avg_amplification": sum(p.amplification for p in patterns) / len(patterns)
+        if patterns
+        else 0,
+        "domains": list(set(d for p in patterns for d in p.domains)),
     }

@@ -23,16 +23,18 @@ from .vocabulary import get_vocabulary
 
 class ReasoningPhase(Enum):
     """Phases of ultrathink reasoning."""
-    EXPLORING = "exploring"      # Understanding the problem space
-    DESIGNING = "designing"      # Architecting the solution
-    PLANNING = "planning"        # Detailing implementation steps
+
+    EXPLORING = "exploring"  # Understanding the problem space
+    DESIGNING = "designing"  # Architecting the solution
+    PLANNING = "planning"  # Detailing implementation steps
     IMPLEMENTING = "implementing"  # Actually building
-    REFLECTING = "reflecting"    # Analyzing what was learned
+    REFLECTING = "reflecting"  # Analyzing what was learned
 
 
 @dataclass
 class BeliefAxiom:
     """A belief surfaced as a reasoning axiom."""
+
     id: str
     belief: str
     rationale: str
@@ -46,6 +48,7 @@ class BeliefAxiom:
 @dataclass
 class FailureGuard:
     """A past failure that should prevent repeating mistakes."""
+
     id: str
     title: str
     what_failed: str
@@ -60,6 +63,7 @@ class FailureGuard:
 @dataclass
 class PatternMatch:
     """A recognized pattern from past wisdom."""
+
     id: str
     title: str
     pattern: str
@@ -76,6 +80,7 @@ class UltrathinkContext:
     This is the soul's active participation state - it tracks what
     axioms are in play, what guards are active, and what's being learned.
     """
+
     problem_statement: str
     started_at: datetime = field(default_factory=datetime.now)
     phase: ReasoningPhase = ReasoningPhase.EXPLORING
@@ -123,10 +128,10 @@ def enter_ultrathink(problem_statement: str, domain: str = None) -> UltrathinkCo
     beliefs = get_beliefs(min_strength=0.6)
     ctx.axioms = [
         BeliefAxiom(
-            id=b['id'],
-            belief=b['belief'],
-            rationale=b.get('rationale', ''),
-            strength=b['strength']
+            id=b["id"],
+            belief=b["belief"],
+            rationale=b.get("rationale", ""),
+            strength=b["strength"],
         )
         for b in beliefs
     ]
@@ -136,11 +141,11 @@ def enter_ultrathink(problem_statement: str, domain: str = None) -> UltrathinkCo
     relevant_failures = _score_relevance(failures, problem_statement)
     ctx.guards = [
         FailureGuard(
-            id=f['id'],
-            title=f['title'],
-            what_failed=f['title'],
-            why_it_failed=f['content'],
-            relevance_score=f['relevance_score']
+            id=f["id"],
+            title=f["title"],
+            what_failed=f["title"],
+            why_it_failed=f["content"],
+            relevance_score=f["relevance_score"],
         )
         for f in relevant_failures[:5]
     ]
@@ -149,19 +154,21 @@ def enter_ultrathink(problem_statement: str, domain: str = None) -> UltrathinkCo
     patterns = semantic_recall(problem_statement, limit=10, domain=ctx.detected_domain)
     ctx.patterns = [
         PatternMatch(
-            id=p['id'],
-            title=p['title'],
-            pattern=p['content'],
-            how_to_apply=p['content'],
-            success_rate=p.get('success_rate'),
-            relevance_score=p.get('combined_score', 0.5)
+            id=p["id"],
+            title=p["title"],
+            pattern=p["content"],
+            how_to_apply=p["content"],
+            success_rate=p.get("success_rate"),
+            relevance_score=p.get("combined_score", 0.5),
         )
         for p in patterns
-        if p['type'] == 'pattern'
+        if p["type"] == "pattern"
     ]
 
     # 4. Store all relevant wisdom
-    ctx.relevant_wisdom = semantic_recall(problem_statement, limit=15, domain=ctx.detected_domain)
+    ctx.relevant_wisdom = semantic_recall(
+        problem_statement, limit=15, domain=ctx.detected_domain
+    )
 
     # 5. Load vocabulary filtered by relevance to problem
     all_vocab = get_vocabulary()
@@ -232,19 +239,23 @@ def check_against_beliefs(ctx: UltrathinkContext, proposal: str) -> List[Dict]:
         # Simple heuristic checks (could be enhanced with LLM)
         if "simple" in belief_lower or "simplify" in belief_lower:
             if "complex" in proposal_lower or "sophisticated" in proposal_lower:
-                results.append({
-                    'type': 'potential_violation',
-                    'belief': axiom.belief,
-                    'reason': 'Proposal mentions complexity; belief values simplicity'
-                })
+                results.append(
+                    {
+                        "type": "potential_violation",
+                        "belief": axiom.belief,
+                        "reason": "Proposal mentions complexity; belief values simplicity",
+                    }
+                )
 
         if "test" in belief_lower:
             if "test" in proposal_lower:
-                results.append({
-                    'type': 'confirmation',
-                    'belief': axiom.belief,
-                    'reason': 'Proposal includes testing, aligning with belief'
-                })
+                results.append(
+                    {
+                        "type": "confirmation",
+                        "belief": axiom.belief,
+                        "reason": "Proposal includes testing, aligning with belief",
+                    }
+                )
 
     return results
 
@@ -266,11 +277,13 @@ def check_against_failures(ctx: UltrathinkContext, proposal: str) -> List[Dict]:
         overlap = failure_words & proposal_words
 
         if len(overlap) > 2:
-            warnings.append({
-                'guard': guard,
-                'overlap': list(overlap),
-                'warning': f"Proposal may repeat failure: {guard.title}"
-            })
+            warnings.append(
+                {
+                    "guard": guard,
+                    "overlap": list(overlap),
+                    "warning": f"Proposal may repeat failure: {guard.title}",
+                }
+            )
 
     return warnings
 
@@ -289,16 +302,18 @@ def record_belief_confirmed(ctx: UltrathinkContext, belief_id: str):
 
 def record_belief_challenged(ctx: UltrathinkContext, belief_id: str, reason: str):
     """Record that a belief was challenged during reasoning."""
-    ctx.beliefs_challenged.append({'id': belief_id, 'reason': reason})
+    ctx.beliefs_challenged.append({"id": belief_id, "reason": reason})
 
 
 def record_discovery(ctx: UltrathinkContext, discovery: str):
     """Record a novel discovery during reasoning."""
-    ctx.novel_discoveries.append({
-        'discovery': discovery,
-        'timestamp': datetime.now().isoformat(),
-        'phase': ctx.phase.value
-    })
+    ctx.novel_discoveries.append(
+        {
+            "discovery": discovery,
+            "timestamp": datetime.now().isoformat(),
+            "phase": ctx.phase.value,
+        }
+    )
 
 
 def advance_phase(ctx: UltrathinkContext, phase: ReasoningPhase):
@@ -309,6 +324,7 @@ def advance_phase(ctx: UltrathinkContext, phase: ReasoningPhase):
 @dataclass
 class SessionReflection:
     """The result of reflecting on an ultrathink session."""
+
     duration_minutes: float
     wisdom_applied_count: int
     beliefs_confirmed: List[str]
@@ -318,7 +334,9 @@ class SessionReflection:
     growth_summary: str
 
 
-def exit_ultrathink(ctx: UltrathinkContext, session_summary: str = "") -> SessionReflection:
+def exit_ultrathink(
+    ctx: UltrathinkContext, session_summary: str = ""
+) -> SessionReflection:
     """
     Exit ultrathink mode and extract wisdom from the session.
 
@@ -333,12 +351,14 @@ def exit_ultrathink(ctx: UltrathinkContext, session_summary: str = "") -> Sessio
     extracted = []
     for discovery in ctx.novel_discoveries:
         # Create wisdom candidate
-        extracted.append({
-            'type': 'insight',
-            'title': discovery['discovery'][:50],
-            'content': discovery['discovery'],
-            'suggested_confidence': 0.6,  # New wisdom starts at moderate confidence
-        })
+        extracted.append(
+            {
+                "type": "insight",
+                "title": discovery["discovery"][:50],
+                "content": discovery["discovery"],
+                "suggested_confidence": 0.6,  # New wisdom starts at moderate confidence
+            }
+        )
 
     # Generate growth summary
     summary_parts = []
@@ -351,7 +371,9 @@ def exit_ultrathink(ctx: UltrathinkContext, session_summary: str = "") -> Sessio
     if ctx.novel_discoveries:
         summary_parts.append(f"Made {len(ctx.novel_discoveries)} discoveries")
 
-    growth_summary = ". ".join(summary_parts) if summary_parts else "No significant growth recorded"
+    growth_summary = (
+        ". ".join(summary_parts) if summary_parts else "No significant growth recorded"
+    )
 
     return SessionReflection(
         duration_minutes=duration,
@@ -360,7 +382,7 @@ def exit_ultrathink(ctx: UltrathinkContext, session_summary: str = "") -> Sessio
         beliefs_challenged=ctx.beliefs_challenged,
         discoveries=ctx.novel_discoveries,
         extracted_wisdom=extracted,
-        growth_summary=growth_summary
+        growth_summary=growth_summary,
     )
 
 
@@ -375,9 +397,9 @@ def commit_session_learnings(reflection: SessionReflection) -> List[str]:
     for wisdom in reflection.extracted_wisdom:
         wisdom_id = gain_wisdom(
             type=WisdomType.INSIGHT,
-            title=wisdom['title'],
-            content=wisdom['content'],
-            confidence=wisdom['suggested_confidence']
+            title=wisdom["title"],
+            content=wisdom["content"],
+            confidence=wisdom["suggested_confidence"],
         )
         created.append(wisdom_id)
 
@@ -389,11 +411,30 @@ def _detect_domain(text: str) -> Optional[str]:
     text_lower = text.lower()
 
     domain_keywords = {
-        'bioinformatics': ['sequence', 'genome', 'dna', 'rna', 'protein', 'alignment', 'bam', 'fastq', 'taxonomy'],
-        'web': ['http', 'api', 'frontend', 'backend', 'react', 'javascript', 'css', 'html'],
-        'cli': ['command', 'terminal', 'argparse', 'stdin', 'stdout', 'shell'],
-        'data': ['dataframe', 'pandas', 'numpy', 'csv', 'parquet', 'database', 'sql'],
-        'ml': ['model', 'training', 'inference', 'neural', 'tensorflow', 'pytorch'],
+        "bioinformatics": [
+            "sequence",
+            "genome",
+            "dna",
+            "rna",
+            "protein",
+            "alignment",
+            "bam",
+            "fastq",
+            "taxonomy",
+        ],
+        "web": [
+            "http",
+            "api",
+            "frontend",
+            "backend",
+            "react",
+            "javascript",
+            "css",
+            "html",
+        ],
+        "cli": ["command", "terminal", "argparse", "stdin", "stdout", "shell"],
+        "data": ["dataframe", "pandas", "numpy", "csv", "parquet", "database", "sql"],
+        "ml": ["model", "training", "inference", "neural", "tensorflow", "pytorch"],
     }
 
     scores = {}
@@ -412,15 +453,15 @@ def _score_relevance(items: List[Dict], query: str) -> List[Dict]:
     query_words = set(query.lower().split())
 
     for item in items:
-        title_words = set(item['title'].lower().split())
-        content_words = set(item['content'].lower().split())
+        title_words = set(item["title"].lower().split())
+        content_words = set(item["content"].lower().split())
 
         title_overlap = len(query_words & title_words)
         content_overlap = len(query_words & content_words)
 
-        item['relevance_score'] = title_overlap * 2 + content_overlap
+        item["relevance_score"] = title_overlap * 2 + content_overlap
 
-    return sorted(items, key=lambda x: x['relevance_score'], reverse=True)
+    return sorted(items, key=lambda x: x["relevance_score"], reverse=True)
 
 
 def _filter_vocabulary(vocab: Dict[str, str], query: str) -> Dict[str, str]:

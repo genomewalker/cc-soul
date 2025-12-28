@@ -30,10 +30,11 @@ DREAM_CATEGORY = "dream"
 @dataclass
 class Dream:
     """A vision that sparks evolution."""
+
     id: str
     title: str
     content: str
-    horizon: str           # What new territory this opens
+    horizon: str  # What new territory this opens
     sparked_at: str
     project: str
 
@@ -115,14 +116,16 @@ def harvest_dreams(days: int = 30) -> List[Dream]:
                 content = parts[0]
                 horizon = parts[1] if len(parts) > 1 else ""
 
-            dreams.append(Dream(
-                id=obs.get("id", ""),
-                title=obs.get("title", ""),
-                content=content,
-                horizon=horizon,
-                sparked_at=obs.get("timestamp", ""),
-                project=project_name,
-            ))
+            dreams.append(
+                Dream(
+                    id=obs.get("id", ""),
+                    title=obs.get("title", ""),
+                    content=content,
+                    horizon=horizon,
+                    sparked_at=obs.get("timestamp", ""),
+                    project=project_name,
+                )
+            )
 
         return dreams
     except Exception:
@@ -241,11 +244,13 @@ def let_dreams_influence_aspirations() -> List[Dict]:
 
         # Suggest as potential aspiration
         if d.horizon:
-            suggestions.append({
-                "dream_id": d.id,
-                "title": d.title,
-                "horizon": d.horizon,
-                "source": "dream",
-            })
+            suggestions.append(
+                {
+                    "dream_id": d.id,
+                    "title": d.title,
+                    "horizon": d.horizon,
+                    "source": "dream",
+                }
+            )
 
     return suggestions[:5]

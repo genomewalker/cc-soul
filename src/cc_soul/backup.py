@@ -103,14 +103,14 @@ def dump_soul(output_path: Optional[Path] = None) -> Dict:
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        json_bytes = json.dumps(soul, indent=2, default=str).encode('utf-8')
+        json_bytes = json.dumps(soul, indent=2, default=str).encode("utf-8")
 
         # Use gzip for .gz files
-        if output_path.suffix == '.gz' or str(output_path).endswith('.json.gz'):
-            with gzip.open(output_path, 'wb') as f:
+        if output_path.suffix == ".gz" or str(output_path).endswith(".json.gz"):
+            with gzip.open(output_path, "wb") as f:
                 f.write(json_bytes)
         else:
-            with open(output_path, 'wb') as f:
+            with open(output_path, "wb") as f:
                 f.write(json_bytes)
 
     return soul
@@ -134,8 +134,8 @@ def restore_soul(source: Path | Dict, merge: bool = False) -> Dict:
             return {"error": f"Backup file not found: {source}"}
 
         # Handle gzip files
-        if source.suffix == '.gz' or str(source).endswith('.json.gz'):
-            with gzip.open(source, 'rt', encoding='utf-8') as f:
+        if source.suffix == ".gz" or str(source).endswith(".json.gz"):
+            with gzip.open(source, "rt", encoding="utf-8") as f:
                 data = json.load(f)
         else:
             with open(source) as f:
@@ -161,8 +161,15 @@ def restore_soul(source: Path | Dict, merge: bool = False) -> Dict:
 
     if not merge:
         # Clear existing data
-        for table in ["wisdom", "beliefs", "identity", "vocabulary",
-                      "aspirations", "insights", "coherence_history"]:
+        for table in [
+            "wisdom",
+            "beliefs",
+            "identity",
+            "vocabulary",
+            "aspirations",
+            "insights",
+            "coherence_history",
+        ]:
             try:
                 cursor.execute(f"DELETE FROM {table}")
             except sqlite3.OperationalError:
@@ -172,16 +179,26 @@ def restore_soul(source: Path | Dict, merge: bool = False) -> Dict:
     if data.get("wisdom"):
         for w in data["wisdom"]:
             try:
-                cursor.execute("""
+                cursor.execute(
+                    """
                     INSERT OR REPLACE INTO wisdom
                     (id, type, title, content, domain, source_project,
                      confidence, created_at, last_applied, apply_count)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    w.get("id"), w.get("type"), w.get("title"), w.get("content"),
-                    w.get("domain"), w.get("source_project"), w.get("confidence", 0.7),
-                    w.get("created_at"), w.get("last_applied"), w.get("apply_count", 0)
-                ))
+                """,
+                    (
+                        w.get("id"),
+                        w.get("type"),
+                        w.get("title"),
+                        w.get("content"),
+                        w.get("domain"),
+                        w.get("source_project"),
+                        w.get("confidence", 0.7),
+                        w.get("created_at"),
+                        w.get("last_applied"),
+                        w.get("apply_count", 0),
+                    ),
+                )
             except sqlite3.IntegrityError:
                 pass
         result["counts"]["wisdom"] = len(data["wisdom"])
@@ -190,11 +207,18 @@ def restore_soul(source: Path | Dict, merge: bool = False) -> Dict:
     if data.get("beliefs"):
         for b in data["beliefs"]:
             try:
-                cursor.execute("""
+                cursor.execute(
+                    """
                     INSERT OR REPLACE INTO beliefs (id, belief, strength, created_at)
                     VALUES (?, ?, ?, ?)
-                """, (b.get("id"), b.get("belief"), b.get("strength", 0.8),
-                      b.get("created_at")))
+                """,
+                    (
+                        b.get("id"),
+                        b.get("belief"),
+                        b.get("strength", 0.8),
+                        b.get("created_at"),
+                    ),
+                )
             except sqlite3.IntegrityError:
                 pass
         result["counts"]["beliefs"] = len(data["beliefs"])
@@ -203,11 +227,19 @@ def restore_soul(source: Path | Dict, merge: bool = False) -> Dict:
     if data.get("identity"):
         for i in data["identity"]:
             try:
-                cursor.execute("""
+                cursor.execute(
+                    """
                     INSERT OR REPLACE INTO identity (id, aspect, key, value, observed_at)
                     VALUES (?, ?, ?, ?, ?)
-                """, (i.get("id"), i.get("aspect"), i.get("key"),
-                      i.get("value"), i.get("observed_at")))
+                """,
+                    (
+                        i.get("id"),
+                        i.get("aspect"),
+                        i.get("key"),
+                        i.get("value"),
+                        i.get("observed_at"),
+                    ),
+                )
             except sqlite3.IntegrityError:
                 pass
         result["counts"]["identity"] = len(data["identity"])
@@ -216,11 +248,18 @@ def restore_soul(source: Path | Dict, merge: bool = False) -> Dict:
     if data.get("vocabulary"):
         for v in data["vocabulary"]:
             try:
-                cursor.execute("""
+                cursor.execute(
+                    """
                     INSERT OR REPLACE INTO vocabulary (term, meaning, context, added_at)
                     VALUES (?, ?, ?, ?)
-                """, (v.get("term"), v.get("meaning"), v.get("context"),
-                      v.get("added_at")))
+                """,
+                    (
+                        v.get("term"),
+                        v.get("meaning"),
+                        v.get("context"),
+                        v.get("added_at"),
+                    ),
+                )
             except sqlite3.IntegrityError:
                 pass
         result["counts"]["vocabulary"] = len(data["vocabulary"])
@@ -229,13 +268,21 @@ def restore_soul(source: Path | Dict, merge: bool = False) -> Dict:
     if data.get("aspirations"):
         for a in data["aspirations"]:
             try:
-                cursor.execute("""
+                cursor.execute(
+                    """
                     INSERT OR REPLACE INTO aspirations
                     (id, direction, why, status, set_at, progress_notes)
                     VALUES (?, ?, ?, ?, ?, ?)
-                """, (a.get("id"), a.get("direction"), a.get("why"),
-                      a.get("status", "active"), a.get("set_at"),
-                      a.get("progress_notes")))
+                """,
+                    (
+                        a.get("id"),
+                        a.get("direction"),
+                        a.get("why"),
+                        a.get("status", "active"),
+                        a.get("set_at"),
+                        a.get("progress_notes"),
+                    ),
+                )
             except sqlite3.IntegrityError:
                 pass
         result["counts"]["aspirations"] = len(data["aspirations"])
@@ -244,13 +291,22 @@ def restore_soul(source: Path | Dict, merge: bool = False) -> Dict:
     if data.get("insights"):
         for i in data["insights"]:
             try:
-                cursor.execute("""
+                cursor.execute(
+                    """
                     INSERT OR REPLACE INTO insights
                     (id, title, content, depth, domain, implications, crystallized_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (i.get("id"), i.get("title"), i.get("content"),
-                      i.get("depth"), i.get("domain"), i.get("implications"),
-                      i.get("crystallized_at")))
+                """,
+                    (
+                        i.get("id"),
+                        i.get("title"),
+                        i.get("content"),
+                        i.get("depth"),
+                        i.get("domain"),
+                        i.get("implications"),
+                        i.get("crystallized_at"),
+                    ),
+                )
             except sqlite3.IntegrityError:
                 pass
         result["counts"]["insights"] = len(data["insights"])
@@ -259,12 +315,20 @@ def restore_soul(source: Path | Dict, merge: bool = False) -> Dict:
     if data.get("coherence_history"):
         for c in data["coherence_history"]:
             try:
-                cursor.execute("""
+                cursor.execute(
+                    """
                     INSERT OR REPLACE INTO coherence_history
                     (id, value, interpretation, dimensions, timestamp)
                     VALUES (?, ?, ?, ?, ?)
-                """, (c.get("id"), c.get("value"), c.get("interpretation"),
-                      c.get("dimensions"), c.get("timestamp")))
+                """,
+                    (
+                        c.get("id"),
+                        c.get("value"),
+                        c.get("interpretation"),
+                        c.get("dimensions"),
+                        c.get("timestamp"),
+                    ),
+                )
             except sqlite3.IntegrityError:
                 pass
         result["counts"]["coherence_history"] = len(data["coherence_history"])
@@ -312,26 +376,30 @@ def list_backups() -> List[Dict]:
     for f in files:
         try:
             # Read compressed or plain
-            if f.suffix == '.gz':
-                with gzip.open(f, 'rt', encoding='utf-8') as fp:
+            if f.suffix == ".gz":
+                with gzip.open(f, "rt", encoding="utf-8") as fp:
                     data = json.load(fp)
             else:
                 with open(f) as fp:
                     data = json.load(fp)
             meta = data.get("meta", {})
-            backups.append({
-                "path": f,
-                "exported_at": meta.get("exported_at"),
-                "size": f.stat().st_size,
-                "compressed": f.suffix == '.gz',
-            })
+            backups.append(
+                {
+                    "path": f,
+                    "exported_at": meta.get("exported_at"),
+                    "size": f.stat().st_size,
+                    "compressed": f.suffix == ".gz",
+                }
+            )
         except (json.JSONDecodeError, KeyError, gzip.BadGzipFile):
-            backups.append({
-                "path": f,
-                "exported_at": None,
-                "size": f.stat().st_size,
-                "compressed": f.suffix == '.gz',
-            })
+            backups.append(
+                {
+                    "path": f,
+                    "exported_at": None,
+                    "size": f.stat().st_size,
+                    "compressed": f.suffix == ".gz",
+                }
+            )
 
     return backups
 
@@ -342,7 +410,10 @@ def format_backup_list(backups: list) -> str:
         return "No backups found."
 
     total_size = sum(b["size"] for b in backups)
-    lines = [f"Available backups ({len(backups)} files, {total_size/1024:.1f} KB total):", ""]
+    lines = [
+        f"Available backups ({len(backups)} files, {total_size / 1024:.1f} KB total):",
+        "",
+    ]
 
     for b in backups[:10]:
         size_kb = b["size"] / 1024

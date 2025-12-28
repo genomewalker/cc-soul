@@ -46,21 +46,21 @@ class CoherenceState:
     value: float
 
     # Instantaneous signals (present state)
-    clarity_signal: float      # From mood - is the mind clear?
-    growth_signal: float       # Is learning happening?
-    engagement_signal: float   # Is wisdom being applied?
-    connection_signal: float   # Is there partnership?
-    direction_signal: float    # Are aspirations active?
-    alignment_signal: float    # Do beliefs match behavior?
+    clarity_signal: float  # From mood - is the mind clear?
+    growth_signal: float  # Is learning happening?
+    engagement_signal: float  # Is wisdom being applied?
+    connection_signal: float  # Is there partnership?
+    direction_signal: float  # Are aspirations active?
+    alignment_signal: float  # Do beliefs match behavior?
 
     # Developmental signals (trajectory over time)
-    trajectory_signal: float   # Is coherence trending up?
-    stability_signal: float    # How stable is coherence?
-    peak_ratio: float          # How close to our best?
+    trajectory_signal: float  # Is coherence trending up?
+    stability_signal: float  # How stable is coherence?
+    peak_ratio: float  # How close to our best?
 
     # Meta-awareness signals
-    self_knowledge: float      # Accuracy of self-perception
-    wisdom_depth: float        # How far back active wisdom reaches
+    self_knowledge: float  # Accuracy of self-perception
+    wisdom_depth: float  # How far back active wisdom reaches
     integration_active: float  # Recent synthesis activity
 
     # Interpretation
@@ -245,9 +245,11 @@ def compute_coherence(mood: Mood = None) -> CoherenceState:
 
     # Self-knowledge: Does the soul have observations about itself?
     from .identity import get_identity
+
     identity = get_identity()
-    identity_count = sum(len(v) if isinstance(v, list) else 1
-                        for v in identity.values() if v)
+    identity_count = sum(
+        len(v) if isinstance(v, list) else 1 for v in identity.values() if v
+    )
     if identity_count >= 5:
         self_knowledge = 1.0
     elif identity_count >= 2:
@@ -269,10 +271,10 @@ def compute_coherence(mood: Mood = None) -> CoherenceState:
     # Integration active: Recent insights crystallized?
     try:
         from .insights import get_insights
+
         recent_insights = get_insights(limit=10)
         week_ago = (datetime.now() - timedelta(days=7)).isoformat()
-        recent_count = sum(1 for i in recent_insights
-                         if i.created_at > week_ago)
+        recent_count = sum(1 for i in recent_insights if i.created_at > week_ago)
         if recent_count >= 3:
             integration_active = 1.0
         elif recent_count >= 1:
@@ -289,7 +291,11 @@ def compute_coherence(mood: Mood = None) -> CoherenceState:
     # =========================================================================
 
     # τₖ = 50% instantaneous + 25% developmental + 25% meta
-    tau_k = (0.5 * instant_coherence) + (0.25 * developmental_coherence) + (0.25 * meta_coherence)
+    tau_k = (
+        (0.5 * instant_coherence)
+        + (0.25 * developmental_coherence)
+        + (0.25 * meta_coherence)
+    )
 
     # Interpretation
     interpretation = _interpret_coherence(
@@ -351,14 +357,16 @@ def _interpret_coherence(
     if coherence >= 0.4:
         # Find multiple issues
         low_signals = [
-            name for name, val in {
+            name
+            for name, val in {
                 "clarity": clarity,
                 "growth": growth,
                 "engagement": engagement,
                 "connection": connection,
                 "direction": direction,
                 "alignment": alignment,
-            }.items() if val < 0.5
+            }.items()
+            if val < 0.5
         ]
         issues = ", ".join(low_signals[:2])
         return f"Fragmented. {issues.capitalize()} need attention."
@@ -374,17 +382,21 @@ def get_coherence_history(days: int = 7) -> List[Dict]:
     c = conn.cursor()
 
     cutoff = (datetime.now() - timedelta(days=days)).isoformat()
-    c.execute('''
+    c.execute(
+        """
         SELECT coherence, signals, interpretation, timestamp
         FROM coherence_history
         WHERE timestamp > ?
         ORDER BY timestamp DESC
-    ''', (cutoff,))
+    """,
+        (cutoff,),
+    )
 
     rows = c.fetchall()
     conn.close()
 
     import json
+
     return [
         {
             "coherence": row[0],
@@ -403,12 +415,16 @@ def record_coherence(state: CoherenceState) -> None:
     c = conn.cursor()
 
     import json
+
     signals_json = json.dumps(state.to_dict()["signals"])
 
-    c.execute('''
+    c.execute(
+        """
         INSERT INTO coherence_history (coherence, signals, interpretation, timestamp)
         VALUES (?, ?, ?, ?)
-    ''', (state.value, signals_json, state.interpretation, state.timestamp))
+    """,
+        (state.value, signals_json, state.interpretation, state.timestamp),
+    )
 
     conn.commit()
     conn.close()
@@ -418,7 +434,7 @@ def _ensure_history_table():
     """Ensure coherence history table exists."""
     conn = get_db_connection()
     c = conn.cursor()
-    c.execute('''
+    c.execute("""
         CREATE TABLE IF NOT EXISTS coherence_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             coherence REAL NOT NULL,
@@ -426,7 +442,7 @@ def _ensure_history_table():
             interpretation TEXT,
             timestamp TEXT NOT NULL
         )
-    ''')
+    """)
     conn.commit()
     conn.close()
 

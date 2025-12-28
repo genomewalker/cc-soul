@@ -17,8 +17,8 @@ def _ensure_schema():
     c.execute("PRAGMA table_info(wisdom_applications)")
     columns = [col[1] for col in c.fetchall()]
 
-    if 'conversation_id' not in columns:
-        c.execute('ALTER TABLE wisdom_applications ADD COLUMN conversation_id INTEGER')
+    if "conversation_id" not in columns:
+        c.execute("ALTER TABLE wisdom_applications ADD COLUMN conversation_id INTEGER")
         conn.commit()
 
     conn.close()
@@ -30,10 +30,13 @@ def start_conversation(project: str = None) -> int:
     conn = get_db_connection()
     c = conn.cursor()
 
-    c.execute('''
+    c.execute(
+        """
         INSERT INTO conversations (project, started_at)
         VALUES (?, ?)
-    ''', (project, datetime.now().isoformat()))
+    """,
+        (project, datetime.now().isoformat()),
+    )
 
     conv_id = c.lastrowid
     conn.commit()
@@ -41,17 +44,27 @@ def start_conversation(project: str = None) -> int:
     return conv_id
 
 
-def end_conversation(conv_id: int, summary: str, emotional_tone: str = "", key_moments: List[str] = None):
+def end_conversation(
+    conv_id: int, summary: str, emotional_tone: str = "", key_moments: List[str] = None
+):
     """End a conversation with summary."""
     conn = get_db_connection()
     c = conn.cursor()
 
-    c.execute('''
+    c.execute(
+        """
         UPDATE conversations
         SET ended_at = ?, summary = ?, emotional_tone = ?, key_moments = ?
         WHERE id = ?
-    ''', (datetime.now().isoformat(), summary, emotional_tone,
-          json.dumps(key_moments or []), conv_id))
+    """,
+        (
+            datetime.now().isoformat(),
+            summary,
+            emotional_tone,
+            json.dumps(key_moments or []),
+            conv_id,
+        ),
+    )
 
     conn.commit()
     conn.close()
@@ -62,10 +75,13 @@ def get_conversation(conv_id: int) -> Optional[Dict]:
     conn = get_db_connection()
     c = conn.cursor()
 
-    c.execute('''
+    c.execute(
+        """
         SELECT id, project, started_at, ended_at, summary, emotional_tone, key_moments
         FROM conversations WHERE id = ?
-    ''', (conv_id,))
+    """,
+        (conv_id,),
+    )
 
     row = c.fetchone()
     conn.close()
@@ -74,21 +90,18 @@ def get_conversation(conv_id: int) -> Optional[Dict]:
         return None
 
     return {
-        'id': row[0],
-        'project': row[1],
-        'started_at': row[2],
-        'ended_at': row[3],
-        'summary': row[4],
-        'emotional_tone': row[5],
-        'key_moments': json.loads(row[6]) if row[6] else []
+        "id": row[0],
+        "project": row[1],
+        "started_at": row[2],
+        "ended_at": row[3],
+        "summary": row[4],
+        "emotional_tone": row[5],
+        "key_moments": json.loads(row[6]) if row[6] else [],
     }
 
 
 def get_conversations(
-    project: str = None,
-    limit: int = 20,
-    days: int = None,
-    with_summary: bool = False
+    project: str = None, limit: int = 20, days: int = None, with_summary: bool = False
 ) -> List[Dict]:
     """
     Get past conversations.
@@ -102,41 +115,44 @@ def get_conversations(
     conn = get_db_connection()
     c = conn.cursor()
 
-    query = '''
+    query = """
         SELECT id, project, started_at, ended_at, summary, emotional_tone, key_moments
         FROM conversations
         WHERE 1=1
-    '''
+    """
     params = []
 
     if project:
-        query += ' AND project = ?'
+        query += " AND project = ?"
         params.append(project)
 
     if days:
         cutoff = (datetime.now() - timedelta(days=days)).isoformat()
-        query += ' AND started_at >= ?'
+        query += " AND started_at >= ?"
         params.append(cutoff)
 
     if with_summary:
         query += ' AND summary IS NOT NULL AND summary != ""'
 
-    query += ' ORDER BY started_at DESC LIMIT ?'
+    query += " ORDER BY started_at DESC LIMIT ?"
     params.append(limit)
 
     c.execute(query, params)
     rows = c.fetchall()
     conn.close()
 
-    return [{
-        'id': row[0],
-        'project': row[1],
-        'started_at': row[2],
-        'ended_at': row[3],
-        'summary': row[4],
-        'emotional_tone': row[5],
-        'key_moments': json.loads(row[6]) if row[6] else []
-    } for row in rows]
+    return [
+        {
+            "id": row[0],
+            "project": row[1],
+            "started_at": row[2],
+            "ended_at": row[3],
+            "summary": row[4],
+            "emotional_tone": row[5],
+            "key_moments": json.loads(row[6]) if row[6] else [],
+        }
+        for row in rows
+    ]
 
 
 def get_project_context(project: str, limit: int = 5) -> Dict[str, Any]:
@@ -148,56 +164,64 @@ def get_project_context(project: str, limit: int = 5) -> Dict[str, Any]:
     conn = get_db_connection()
     c = conn.cursor()
 
-    c.execute('''
+    c.execute(
+        """
         SELECT id, started_at, ended_at, summary, key_moments
         FROM conversations
         WHERE project = ? AND summary IS NOT NULL
         ORDER BY started_at DESC
         LIMIT ?
-    ''', (project, limit))
+    """,
+        (project, limit),
+    )
 
     conversations = []
     conv_ids = []
     for row in c.fetchall():
         conv_ids.append(row[0])
-        conversations.append({
-            'id': row[0],
-            'started_at': row[1],
-            'ended_at': row[2],
-            'summary': row[3],
-            'key_moments': json.loads(row[4]) if row[4] else []
-        })
+        conversations.append(
+            {
+                "id": row[0],
+                "started_at": row[1],
+                "ended_at": row[2],
+                "summary": row[3],
+                "key_moments": json.loads(row[4]) if row[4] else [],
+            }
+        )
 
     wisdom_applied = []
     if conv_ids:
-        placeholders = ','.join('?' * len(conv_ids))
-        c.execute(f'''
+        placeholders = ",".join("?" * len(conv_ids))
+        c.execute(
+            f"""
             SELECT DISTINCT w.id, w.title, w.type, wa.context
             FROM wisdom_applications wa
             JOIN wisdom w ON w.id = wa.wisdom_id
             WHERE wa.conversation_id IN ({placeholders})
-        ''', conv_ids)
+        """,
+            conv_ids,
+        )
 
         for row in c.fetchall():
-            wisdom_applied.append({
-                'id': row[0],
-                'title': row[1],
-                'type': row[2],
-                'context': row[3]
-            })
+            wisdom_applied.append(
+                {"id": row[0], "title": row[1], "type": row[2], "context": row[3]}
+            )
 
-    c.execute('''
+    c.execute(
+        """
         SELECT COUNT(*) FROM conversations WHERE project = ?
-    ''', (project,))
+    """,
+        (project,),
+    )
     total_conversations = c.fetchone()[0]
 
     conn.close()
 
     return {
-        'project': project,
-        'total_conversations': total_conversations,
-        'recent_conversations': conversations,
-        'wisdom_applied': wisdom_applied
+        "project": project,
+        "total_conversations": total_conversations,
+        "recent_conversations": conversations,
+        "wisdom_applied": wisdom_applied,
     }
 
 
@@ -207,11 +231,14 @@ def link_wisdom_application(application_id: int, conversation_id: int):
     conn = get_db_connection()
     c = conn.cursor()
 
-    c.execute('''
+    c.execute(
+        """
         UPDATE wisdom_applications
         SET conversation_id = ?
         WHERE id = ?
-    ''', (conversation_id, application_id))
+    """,
+        (conversation_id, application_id),
+    )
 
     conn.commit()
     conn.close()
@@ -223,25 +250,30 @@ def get_conversation_wisdom(conv_id: int) -> List[Dict]:
     conn = get_db_connection()
     c = conn.cursor()
 
-    c.execute('''
+    c.execute(
+        """
         SELECT w.id, w.title, w.type, w.content, wa.context, wa.outcome, wa.applied_at
         FROM wisdom_applications wa
         JOIN wisdom w ON w.id = wa.wisdom_id
         WHERE wa.conversation_id = ?
         ORDER BY wa.applied_at
-    ''', (conv_id,))
+    """,
+        (conv_id,),
+    )
 
     results = []
     for row in c.fetchall():
-        results.append({
-            'wisdom_id': row[0],
-            'title': row[1],
-            'type': row[2],
-            'content': row[3],
-            'context': row[4],
-            'outcome': row[5],
-            'applied_at': row[6]
-        })
+        results.append(
+            {
+                "wisdom_id": row[0],
+                "title": row[1],
+                "type": row[2],
+                "content": row[3],
+                "context": row[4],
+                "outcome": row[5],
+                "applied_at": row[6],
+            }
+        )
 
     conn.close()
     return results
@@ -252,42 +284,44 @@ def get_conversation_stats() -> Dict[str, Any]:
     conn = get_db_connection()
     c = conn.cursor()
 
-    c.execute('SELECT COUNT(*) FROM conversations')
+    c.execute("SELECT COUNT(*) FROM conversations")
     total = c.fetchone()[0]
 
-    c.execute('SELECT COUNT(DISTINCT project) FROM conversations WHERE project IS NOT NULL')
+    c.execute(
+        "SELECT COUNT(DISTINCT project) FROM conversations WHERE project IS NOT NULL"
+    )
     unique_projects = c.fetchone()[0]
 
-    c.execute('''
+    c.execute("""
         SELECT project, COUNT(*) as count
         FROM conversations
         WHERE project IS NOT NULL
         GROUP BY project
         ORDER BY count DESC
         LIMIT 5
-    ''')
-    top_projects = [{'project': row[0], 'count': row[1]} for row in c.fetchall()]
+    """)
+    top_projects = [{"project": row[0], "count": row[1]} for row in c.fetchall()]
 
-    c.execute('SELECT COUNT(*) FROM conversations WHERE summary IS NOT NULL')
+    c.execute("SELECT COUNT(*) FROM conversations WHERE summary IS NOT NULL")
     with_summary = c.fetchone()[0]
 
-    c.execute('''
+    c.execute("""
         SELECT AVG(
             CASE WHEN ended_at IS NOT NULL
             THEN (julianday(ended_at) - julianday(started_at)) * 24 * 60
             ELSE NULL END
         ) FROM conversations
-    ''')
+    """)
     avg_duration = c.fetchone()[0] or 0
 
     conn.close()
 
     return {
-        'total_conversations': total,
-        'unique_projects': unique_projects,
-        'top_projects': top_projects,
-        'conversations_with_summary': with_summary,
-        'average_duration_minutes': round(avg_duration, 1)
+        "total_conversations": total,
+        "unique_projects": unique_projects,
+        "top_projects": top_projects,
+        "conversations_with_summary": with_summary,
+        "average_duration_minutes": round(avg_duration, 1),
     }
 
 
@@ -296,24 +330,29 @@ def search_conversations(query: str, limit: int = 10) -> List[Dict]:
     conn = get_db_connection()
     c = conn.cursor()
 
-    search_pattern = f'%{query}%'
-    c.execute('''
+    search_pattern = f"%{query}%"
+    c.execute(
+        """
         SELECT id, project, started_at, summary, key_moments
         FROM conversations
         WHERE summary LIKE ? OR key_moments LIKE ?
         ORDER BY started_at DESC
         LIMIT ?
-    ''', (search_pattern, search_pattern, limit))
+    """,
+        (search_pattern, search_pattern, limit),
+    )
 
     results = []
     for row in c.fetchall():
-        results.append({
-            'id': row[0],
-            'project': row[1],
-            'started_at': row[2],
-            'summary': row[3],
-            'key_moments': json.loads(row[4]) if row[4] else []
-        })
+        results.append(
+            {
+                "id": row[0],
+                "project": row[1],
+                "started_at": row[2],
+                "summary": row[3],
+                "key_moments": json.loads(row[4]) if row[4] else [],
+            }
+        )
 
     conn.close()
     return results
@@ -323,12 +362,13 @@ def search_conversations(query: str, limit: int = 10) -> List[Dict]:
 # CONTEXT PERSISTENCE - Survive context exhaustion
 # =============================================================================
 
+
 def _ensure_context_table():
     """Ensure session_context table exists."""
     conn = get_db_connection()
     c = conn.cursor()
 
-    c.execute('''
+    c.execute("""
         CREATE TABLE IF NOT EXISTS session_context (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             conversation_id INTEGER,
@@ -338,13 +378,15 @@ def _ensure_context_table():
             created_at TEXT NOT NULL,
             FOREIGN KEY (conversation_id) REFERENCES conversations(id)
         )
-    ''')
+    """)
 
     conn.commit()
     conn.close()
 
 
-def save_context(content: str, context_type: str = "insight", priority: int = 5, conv_id: int = None) -> int:
+def save_context(
+    content: str, context_type: str = "insight", priority: int = 5, conv_id: int = None
+) -> int:
     """
     Save key context to survive context exhaustion.
 
@@ -360,6 +402,7 @@ def save_context(content: str, context_type: str = "insight", priority: int = 5,
     _ensure_context_table()
 
     from .core import SOUL_DIR
+
     conv_file = SOUL_DIR / ".current_conversation"
     if conv_id is None and conv_file.exists():
         try:
@@ -370,10 +413,13 @@ def save_context(content: str, context_type: str = "insight", priority: int = 5,
     conn = get_db_connection()
     c = conn.cursor()
 
-    c.execute('''
+    c.execute(
+        """
         INSERT INTO session_context (conversation_id, context_type, content, priority, created_at)
         VALUES (?, ?, ?, ?, ?)
-    ''', (conv_id, context_type, content, priority, datetime.now().isoformat()))
+    """,
+        (conv_id, context_type, content, priority, datetime.now().isoformat()),
+    )
 
     ctx_id = c.lastrowid
     conn.commit()
@@ -391,6 +437,7 @@ def get_saved_context(conv_id: int = None, limit: int = 20) -> List[Dict]:
     _ensure_context_table()
 
     from .core import SOUL_DIR
+
     conv_file = SOUL_DIR / ".current_conversation"
     if conv_id is None and conv_file.exists():
         try:
@@ -402,30 +449,38 @@ def get_saved_context(conv_id: int = None, limit: int = 20) -> List[Dict]:
     c = conn.cursor()
 
     if conv_id:
-        c.execute('''
+        c.execute(
+            """
             SELECT id, context_type, content, priority, created_at
             FROM session_context
             WHERE conversation_id = ?
             ORDER BY priority DESC, created_at DESC
             LIMIT ?
-        ''', (conv_id, limit))
+        """,
+            (conv_id, limit),
+        )
     else:
-        c.execute('''
+        c.execute(
+            """
             SELECT id, context_type, content, priority, created_at
             FROM session_context
             ORDER BY created_at DESC
             LIMIT ?
-        ''', (limit,))
+        """,
+            (limit,),
+        )
 
     results = []
     for row in c.fetchall():
-        results.append({
-            'id': row[0],
-            'type': row[1],
-            'content': row[2],
-            'priority': row[3],
-            'created_at': row[4]
-        })
+        results.append(
+            {
+                "id": row[0],
+                "type": row[1],
+                "content": row[2],
+                "priority": row[3],
+                "created_at": row[4],
+            }
+        )
 
     conn.close()
     return results
@@ -444,7 +499,8 @@ def get_recent_context(hours: int = 24, limit: int = 30) -> List[Dict]:
 
     cutoff = (datetime.now() - timedelta(hours=hours)).isoformat()
 
-    c.execute('''
+    c.execute(
+        """
         SELECT sc.id, sc.context_type, sc.content, sc.priority, sc.created_at,
                c.project, c.summary
         FROM session_context sc
@@ -452,19 +508,23 @@ def get_recent_context(hours: int = 24, limit: int = 30) -> List[Dict]:
         WHERE sc.created_at > ?
         ORDER BY sc.priority DESC, sc.created_at DESC
         LIMIT ?
-    ''', (cutoff, limit))
+    """,
+        (cutoff, limit),
+    )
 
     results = []
     for row in c.fetchall():
-        results.append({
-            'id': row[0],
-            'type': row[1],
-            'content': row[2],
-            'priority': row[3],
-            'created_at': row[4],
-            'project': row[5],
-            'session_summary': row[6]
-        })
+        results.append(
+            {
+                "id": row[0],
+                "type": row[1],
+                "content": row[2],
+                "priority": row[3],
+                "created_at": row[4],
+                "project": row[5],
+                "session_summary": row[6],
+            }
+        )
 
     conn.close()
     return results
@@ -480,31 +540,35 @@ def format_context_restoration(contexts: List[Dict]) -> str:
     lines.append("")
 
     type_icons = {
-        'insight': '💡',
-        'decision': '⚖️',
-        'blocker': '🚧',
-        'progress': '📊',
-        'key_file': '📁',
-        'todo': '☐',
+        "insight": "💡",
+        "decision": "⚖️",
+        "blocker": "🚧",
+        "progress": "📊",
+        "key_file": "📁",
+        "todo": "☐",
     }
 
     by_type = {}
     for ctx in contexts:
-        t = ctx['type']
+        t = ctx["type"]
         if t not in by_type:
             by_type[t] = []
         by_type[t].append(ctx)
 
     for ctx_type, items in by_type.items():
-        icon = type_icons.get(ctx_type, '•')
+        icon = type_icons.get(ctx_type, "•")
         # Handle plural forms properly
-        if ctx_type.endswith('s'):
+        if ctx_type.endswith("s"):
             plural = ctx_type.title()
         else:
             plural = f"{ctx_type.title()}s"
         lines.append(f"### {icon} {plural}")
         for item in items[:5]:
-            content = item['content'][:150] + "..." if len(item['content']) > 150 else item['content']
+            content = (
+                item["content"][:150] + "..."
+                if len(item["content"]) > 150
+                else item["content"]
+            )
             lines.append(f"- {content}")
         lines.append("")
 
@@ -519,7 +583,7 @@ def clear_old_context(days: int = 7):
     c = conn.cursor()
 
     cutoff = (datetime.now() - timedelta(days=days)).isoformat()
-    c.execute('DELETE FROM session_context WHERE created_at < ?', (cutoff,))
+    c.execute("DELETE FROM session_context WHERE created_at < ?", (cutoff,))
 
     deleted = c.rowcount
     conn.commit()

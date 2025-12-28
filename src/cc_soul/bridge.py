@@ -23,6 +23,7 @@ from .core import SOUL_DIR
 CC_MEMORY_AVAILABLE = False
 try:
     from cc_memory import memory as cc_memory
+
     CC_MEMORY_AVAILABLE = True
 except ImportError:
     cc_memory = None
@@ -65,7 +66,9 @@ def ensure_memory_initialized(project_dir: str) -> bool:
     return True
 
 
-def get_project_memory(project_dir: str = None, auto_init: bool = True) -> Optional[Dict]:
+def get_project_memory(
+    project_dir: str = None, auto_init: bool = True
+) -> Optional[Dict]:
     """Get project memory context if available.
 
     Args:
@@ -104,9 +107,7 @@ def get_project_memory(project_dir: str = None, auto_init: bool = True) -> Optio
 
 
 def promote_observation(
-    obs_id: str,
-    project_dir: str = None,
-    as_type: str = "pattern"
+    obs_id: str, project_dir: str = None, as_type: str = "pattern"
 ) -> Dict:
     """
     Promote a project observation to universal wisdom.
@@ -235,8 +236,7 @@ def unified_context(project_dir: str = None, compact: bool = False) -> Dict:
             # Include recent observations
             recent = project_mem.get("recent_observations", [])[:5]
             context["project"]["recent"] = [
-                {"title": o["title"], "category": o["category"]}
-                for o in recent
+                {"title": o["title"], "category": o["category"]} for o in recent
             ]
 
             # Include config
@@ -417,13 +417,15 @@ def detect_wisdom_candidates(min_similarity: float = 0.8) -> List[Dict]:
     for title, obs_list in title_groups.items():
         projects = set(o["_project"] for o in obs_list)
         if len(projects) >= 2:
-            candidates.append({
-                "title": obs_list[0]["title"],
-                "content": obs_list[0]["content"],
-                "category": obs_list[0]["category"],
-                "occurrences": len(obs_list),
-                "projects": list(projects),
-            })
+            candidates.append(
+                {
+                    "title": obs_list[0]["title"],
+                    "content": obs_list[0]["content"],
+                    "category": obs_list[0]["category"],
+                    "occurrences": len(obs_list),
+                    "projects": list(projects),
+                }
+            )
 
     return sorted(candidates, key=lambda x: x["occurrences"], reverse=True)
 

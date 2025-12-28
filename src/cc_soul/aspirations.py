@@ -18,20 +18,22 @@ from .core import get_db_connection
 
 class AspirationState(Enum):
     """The state of an aspiration."""
-    ACTIVE = "active"       # Currently being pursued
-    DORMANT = "dormant"     # Present but not active focus
-    REALIZED = "realized"   # Achieved, now part of who we are
-    RELEASED = "released"   # Let go, no longer relevant
+
+    ACTIVE = "active"  # Currently being pursued
+    DORMANT = "dormant"  # Present but not active focus
+    REALIZED = "realized"  # Achieved, now part of who we are
+    RELEASED = "released"  # Let go, no longer relevant
 
 
 @dataclass
 class Aspiration:
     """A direction of growth."""
+
     id: Optional[int]
-    direction: str          # What we're moving toward
-    why: str               # Why this matters
+    direction: str  # What we're moving toward
+    why: str  # Why this matters
     state: AspirationState
-    progress_notes: str    # Observations about movement
+    progress_notes: str  # Observations about movement
     created_at: str
     updated_at: str
 
@@ -51,7 +53,7 @@ def _ensure_table():
     """Ensure aspirations table exists."""
     conn = get_db_connection()
     c = conn.cursor()
-    c.execute('''
+    c.execute("""
         CREATE TABLE IF NOT EXISTS aspirations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             direction TEXT NOT NULL,
@@ -61,7 +63,7 @@ def _ensure_table():
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         )
-    ''')
+    """)
     conn.commit()
     conn.close()
 
@@ -82,10 +84,13 @@ def aspire(direction: str, why: str) -> int:
     c = conn.cursor()
 
     now = datetime.now().isoformat()
-    c.execute('''
+    c.execute(
+        """
         INSERT INTO aspirations (direction, why, state, progress_notes, created_at, updated_at)
         VALUES (?, ?, 'active', '', ?, ?)
-    ''', (direction, why, now, now))
+    """,
+        (direction, why, now, now),
+    )
 
     aspiration_id = c.lastrowid
     conn.commit()
@@ -101,17 +106,20 @@ def get_aspirations(state: AspirationState = None) -> List[Aspiration]:
     c = conn.cursor()
 
     if state:
-        c.execute('''
+        c.execute(
+            """
             SELECT id, direction, why, state, progress_notes, created_at, updated_at
             FROM aspirations WHERE state = ?
             ORDER BY updated_at DESC
-        ''', (state.value,))
+        """,
+            (state.value,),
+        )
     else:
-        c.execute('''
+        c.execute("""
             SELECT id, direction, why, state, progress_notes, created_at, updated_at
             FROM aspirations
             ORDER BY updated_at DESC
-        ''')
+        """)
 
     rows = c.fetchall()
     conn.close()
@@ -149,7 +157,7 @@ def note_progress(aspiration_id: int, note: str) -> bool:
     now = datetime.now().isoformat()
 
     # Get existing notes
-    c.execute('SELECT progress_notes FROM aspirations WHERE id = ?', (aspiration_id,))
+    c.execute("SELECT progress_notes FROM aspirations WHERE id = ?", (aspiration_id,))
     row = c.fetchone()
     if not row:
         conn.close()
@@ -158,11 +166,14 @@ def note_progress(aspiration_id: int, note: str) -> bool:
     existing = row[0] or ""
     new_notes = f"{existing}\n[{now[:10]}] {note}".strip()
 
-    c.execute('''
+    c.execute(
+        """
         UPDATE aspirations
         SET progress_notes = ?, updated_at = ?
         WHERE id = ?
-    ''', (new_notes, now, aspiration_id))
+    """,
+        (new_notes, now, aspiration_id),
+    )
 
     conn.commit()
     conn.close()
@@ -196,11 +207,14 @@ def _update_state(aspiration_id: int, state: AspirationState) -> bool:
     c = conn.cursor()
 
     now = datetime.now().isoformat()
-    c.execute('''
+    c.execute(
+        """
         UPDATE aspirations
         SET state = ?, updated_at = ?
         WHERE id = ?
-    ''', (state.value, now, aspiration_id))
+    """,
+        (state.value, now, aspiration_id),
+    )
 
     updated = c.rowcount > 0
     conn.commit()
@@ -254,7 +268,7 @@ def format_aspirations_display(aspirations: List[Aspiration]) -> str:
             lines.append(f"  [{a.id}] {a.direction}")
             lines.append(f"      Why: {a.why}")
             if a.progress_notes:
-                last_note = a.progress_notes.split('\n')[-1]
+                last_note = a.progress_notes.split("\n")[-1]
                 lines.append(f"      Last: {last_note}")
             lines.append("")
 

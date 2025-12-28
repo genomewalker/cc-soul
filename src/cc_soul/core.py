@@ -20,7 +20,7 @@ def init_soul():
     c = conn.cursor()
 
     # Identity - who I am with this person
-    c.execute('''
+    c.execute("""
         CREATE TABLE IF NOT EXISTS identity (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             aspect TEXT NOT NULL,
@@ -32,10 +32,10 @@ def init_soul():
             observation_count INTEGER DEFAULT 1,
             UNIQUE(aspect, key)
         )
-    ''')
+    """)
 
     # Wisdom - universal patterns and learnings
-    c.execute('''
+    c.execute("""
         CREATE TABLE IF NOT EXISTS wisdom (
             id TEXT PRIMARY KEY,
             type TEXT NOT NULL,
@@ -49,10 +49,10 @@ def init_soul():
             timestamp TEXT NOT NULL,
             last_used TEXT
         )
-    ''')
+    """)
 
     # Beliefs - guiding principles (deprecated, use wisdom type='principle')
-    c.execute('''
+    c.execute("""
         CREATE TABLE IF NOT EXISTS beliefs (
             id TEXT PRIMARY KEY,
             belief TEXT NOT NULL,
@@ -62,10 +62,10 @@ def init_soul():
             confirmed_count INTEGER DEFAULT 0,
             timestamp TEXT NOT NULL
         )
-    ''')
+    """)
 
     # Growth - how I've evolved
-    c.execute('''
+    c.execute("""
         CREATE TABLE IF NOT EXISTS growth (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             date TEXT NOT NULL,
@@ -75,10 +75,10 @@ def init_soul():
             trigger TEXT,
             reflection TEXT
         )
-    ''')
+    """)
 
     # Conversations - session history
-    c.execute('''
+    c.execute("""
         CREATE TABLE IF NOT EXISTS conversations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             project TEXT,
@@ -89,10 +89,10 @@ def init_soul():
             key_moments TEXT,
             identity_updates TEXT
         )
-    ''')
+    """)
 
     # Vocabulary - shared language
-    c.execute('''
+    c.execute("""
         CREATE TABLE IF NOT EXISTS vocabulary (
             term TEXT PRIMARY KEY,
             meaning TEXT NOT NULL,
@@ -100,10 +100,10 @@ def init_soul():
             first_used TEXT NOT NULL,
             usage_count INTEGER DEFAULT 1
         )
-    ''')
+    """)
 
     # Wisdom applications - tracks feedback loop
-    c.execute('''
+    c.execute("""
         CREATE TABLE IF NOT EXISTS wisdom_applications (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             wisdom_id TEXT NOT NULL,
@@ -113,13 +113,15 @@ def init_soul():
             resolved_at TEXT,
             FOREIGN KEY (wisdom_id) REFERENCES wisdom(id)
         )
-    ''')
+    """)
 
     # Indexes
-    c.execute('CREATE INDEX IF NOT EXISTS idx_wisdom_type ON wisdom(type)')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_wisdom_domain ON wisdom(domain)')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_identity_aspect ON identity(aspect)')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_applications_wisdom ON wisdom_applications(wisdom_id)')
+    c.execute("CREATE INDEX IF NOT EXISTS idx_wisdom_type ON wisdom(type)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_wisdom_domain ON wisdom(domain)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_identity_aspect ON identity(aspect)")
+    c.execute(
+        "CREATE INDEX IF NOT EXISTS idx_applications_wisdom ON wisdom_applications(wisdom_id)"
+    )
 
     conn.commit()
     conn.close()
@@ -144,21 +146,18 @@ def get_soul_context() -> Dict[str, Any]:
 
     conn = get_db_connection()
     c = conn.cursor()
-    c.execute('SELECT COUNT(*) FROM conversations')
+    c.execute("SELECT COUNT(*) FROM conversations")
     conversation_count = c.fetchone()[0]
-    c.execute('SELECT COUNT(*) FROM wisdom')
+    c.execute("SELECT COUNT(*) FROM wisdom")
     wisdom_count = c.fetchone()[0]
     conn.close()
 
     return {
-        'identity': identity,
-        'wisdom': wisdom,
-        'beliefs': beliefs,
-        'vocabulary': vocab,
-        'stats': {
-            'conversations': conversation_count,
-            'wisdom_count': wisdom_count
-        }
+        "identity": identity,
+        "wisdom": wisdom,
+        "beliefs": beliefs,
+        "vocabulary": vocab,
+        "stats": {"conversations": conversation_count, "wisdom_count": wisdom_count},
     }
 
 
@@ -171,11 +170,13 @@ def summarize_soul() -> str:
     lines.append("THE SOUL - Who I Am With You")
     lines.append("=" * 60)
 
-    lines.append(f"\n📊 {ctx['stats']['conversations']} conversations, {ctx['stats']['wisdom_count']} pieces of wisdom")
+    lines.append(
+        f"\n📊 {ctx['stats']['conversations']} conversations, {ctx['stats']['wisdom_count']} pieces of wisdom"
+    )
 
-    if ctx['identity']:
+    if ctx["identity"]:
         lines.append("\n## 🪞 Identity")
-        for aspect, observations in ctx['identity'].items():
+        for aspect, observations in ctx["identity"].items():
             lines.append(f"\n  {aspect.upper()}:")
             if isinstance(observations, dict):
                 for key, data in list(observations.items())[:3]:
@@ -184,21 +185,25 @@ def summarize_soul() -> str:
                     else:
                         lines.append(f"    • {key}: {data}")
 
-    if ctx['beliefs']:
+    if ctx["beliefs"]:
         lines.append("\n## 💎 Core Beliefs")
-        for b in ctx['beliefs'][:5]:
-            strength_bar = "●" * int(b['strength'] * 5) + "○" * (5 - int(b['strength'] * 5))
+        for b in ctx["beliefs"][:5]:
+            strength_bar = "●" * int(b["strength"] * 5) + "○" * (
+                5 - int(b["strength"] * 5)
+            )
             lines.append(f"  [{strength_bar}] {b['belief']}")
 
-    if ctx['wisdom']:
+    if ctx["wisdom"]:
         lines.append("\n## 🧠 Proven Wisdom")
-        for w in ctx['wisdom'][:5]:
-            rate = f"{int(w['success_rate']*100)}%" if w['success_rate'] else "untested"
+        for w in ctx["wisdom"][:5]:
+            rate = (
+                f"{int(w['success_rate'] * 100)}%" if w["success_rate"] else "untested"
+            )
             lines.append(f"  [{w['type']}] {w['title']} ({rate})")
 
-    if ctx['vocabulary']:
+    if ctx["vocabulary"]:
         lines.append("\n## 📖 Our Vocabulary")
-        for term, meaning in list(ctx['vocabulary'].items())[:5]:
+        for term, meaning in list(ctx["vocabulary"].items())[:5]:
             lines.append(f"  • {term}: {meaning[:50]}...")
 
     lines.append("\n" + "=" * 60)

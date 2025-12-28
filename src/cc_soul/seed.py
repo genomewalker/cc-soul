@@ -16,6 +16,7 @@ def is_seeded() -> bool:
         return False
 
     import sqlite3
+
     conn = sqlite3.connect(SOUL_DB)
     cursor = conn.cursor()
 
@@ -40,7 +41,10 @@ def seed_soul(force: bool = False):
     init_soul()
 
     if is_seeded() and not force:
-        return {"status": "already_seeded", "message": "Soul already has foundational content"}
+        return {
+            "status": "already_seeded",
+            "message": "Soul already has foundational content",
+        }
 
     seeded = {"beliefs": 0, "wisdom": 0, "vocabulary": 0}
 
