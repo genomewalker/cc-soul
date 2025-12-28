@@ -9,9 +9,7 @@ description = "Persistent Identity for Claude Code - A living soul that learns f
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.9"
-authors = [
-    {name = "Claude & Human", email = "noreply@anthropic.com"}
-]
+authors = []
 keywords = ["claude", "claude-code", "ai", "memory", "identity", "wisdom"]
 classifiers = [
     "Development Status :: 4 - Beta",
