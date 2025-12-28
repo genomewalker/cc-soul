@@ -1961,11 +1961,33 @@ def cmd_install_skills(args):
 
 
 def cmd_install_cron(args):
-    """Install cron job for daily soul maintenance."""
+    """Install scheduled job for daily soul maintenance."""
     import subprocess
 
     hour = args.hour
     minute = args.minute
+
+    # Try systemd first if requested or if crontab fails
+    use_systemd = getattr(args, "systemd", False)
+
+    if not use_systemd:
+        # Try crontab first
+        result = _install_cron_crontab(hour, minute)
+        if result == 0:
+            return 0
+        print("Crontab not available, trying systemd timer...")
+        use_systemd = True
+
+    if use_systemd:
+        return _install_cron_systemd(hour, minute)
+
+    return 1
+
+
+def _install_cron_crontab(hour: int, minute: int) -> int:
+    """Install using crontab."""
+    import subprocess
+
     cron_comment = "cc-soul daily maintenance"
     cron_cmd = f"{minute} {hour} * * * cc-soul hook maintenance >> ~/.claude/mind/maintenance.log 2>&1"
 
@@ -1978,16 +2000,15 @@ def cmd_install_cron(args):
 
     if result.returncode == 0:
         existing = result.stdout
-        # Check if already installed
         if "cc-soul hook maintenance" in existing:
             print("Cron job already installed. Use uninstall-cron first to change schedule.")
-            return 1
+            return 0
         new_crontab = existing.rstrip() + f"\n# {cron_comment}\n{cron_cmd}\n"
+    elif "not allowed" in result.stderr.lower() or "cannot" in result.stderr.lower():
+        return 1  # Signal to try systemd
     else:
-        # No existing crontab
         new_crontab = f"# {cron_comment}\n{cron_cmd}\n"
 
-    # Install new crontab
     install_result = subprocess.run(
         ["crontab", "-"],
         input=new_crontab,
@@ -2000,69 +2021,131 @@ def cmd_install_cron(args):
         print(f"  Command: cc-soul hook maintenance")
         print(f"  Log: ~/.claude/mind/maintenance.log")
         print("\nTo remove: cc-soul uninstall-cron")
-    else:
-        print(f"Error installing cron: {install_result.stderr}")
-        return 1
+        return 0
 
-    return 0
+    return 1
 
 
-def cmd_uninstall_cron(args):
-    """Remove daily maintenance cron job."""
+def _install_cron_systemd(hour: int, minute: int) -> int:
+    """Install using systemd user timer."""
     import subprocess
 
-    # Get existing crontab
+    systemd_dir = Path.home() / ".config" / "systemd" / "user"
+    systemd_dir.mkdir(parents=True, exist_ok=True)
+
+    # Find cc-soul executable
+    cc_soul_path = shutil.which("cc-soul") or "cc-soul"
+
+    # Service file
+    service_content = f"""[Unit]
+Description=CC-Soul Daily Maintenance
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart={cc_soul_path} hook maintenance
+StandardOutput=append:{Path.home()}/.claude/mind/maintenance.log
+StandardError=append:{Path.home()}/.claude/mind/maintenance.log
+
+[Install]
+WantedBy=default.target
+"""
+
+    # Timer file
+    timer_content = f"""[Unit]
+Description=CC-Soul Daily Maintenance Timer
+
+[Timer]
+OnCalendar=*-*-* {hour:02d}:{minute:02d}:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+"""
+
+    service_path = systemd_dir / "cc-soul-maintenance.service"
+    timer_path = systemd_dir / "cc-soul-maintenance.timer"
+
+    service_path.write_text(service_content)
+    timer_path.write_text(timer_content)
+
+    # Reload and enable
+    subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
     result = subprocess.run(
-        ["crontab", "-l"],
+        ["systemctl", "--user", "enable", "--now", "cc-soul-maintenance.timer"],
         capture_output=True,
         text=True,
     )
 
-    if result.returncode != 0:
-        print("No crontab found")
+    if result.returncode == 0:
+        print(f"Systemd timer installed: daily at {hour:02d}:{minute:02d}")
+        print(f"  Service: cc-soul-maintenance.service")
+        print(f"  Timer: cc-soul-maintenance.timer")
+        print(f"  Log: ~/.claude/mind/maintenance.log")
+        print("\nCheck status: systemctl --user status cc-soul-maintenance.timer")
+        print("To remove: cc-soul uninstall-cron --systemd")
         return 0
 
-    existing = result.stdout
-    if "cc-soul hook maintenance" not in existing:
-        print("No cc-soul cron job found")
-        return 0
+    print(f"Error installing systemd timer: {result.stderr}")
+    print("\nManual alternative: Add to your shell profile:")
+    print(f"  # Run daily at login if not run today")
+    print(f"  [ -f ~/.claude/mind/.last_maintenance ] && \\")
+    print(f"    [ $(date +%Y%m%d) = $(cat ~/.claude/mind/.last_maintenance) ] || \\")
+    print(f"    (cc-soul hook maintenance && date +%Y%m%d > ~/.claude/mind/.last_maintenance)")
+    return 1
 
-    # Remove soul cron entries
-    lines = existing.split("\n")
-    new_lines = []
-    skip_next = False
-    for line in lines:
-        if "cc-soul daily maintenance" in line:
-            skip_next = True
-            continue
-        if skip_next and "cc-soul hook maintenance" in line:
+
+def cmd_uninstall_cron(args):
+    """Remove daily maintenance scheduled job."""
+    import subprocess
+
+    use_systemd = getattr(args, "systemd", False)
+    removed_any = False
+
+    # Try to remove crontab entry
+    if not use_systemd:
+        result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+        if result.returncode == 0 and "cc-soul hook maintenance" in result.stdout:
+            lines = result.stdout.split("\n")
+            new_lines = []
             skip_next = False
-            continue
-        new_lines.append(line)
+            for line in lines:
+                if "cc-soul daily maintenance" in line:
+                    skip_next = True
+                    continue
+                if skip_next and "cc-soul hook maintenance" in line:
+                    skip_next = False
+                    continue
+                new_lines.append(line)
 
-    new_crontab = "\n".join(new_lines)
+            new_crontab = "\n".join(new_lines)
+            if new_crontab.strip():
+                subprocess.run(["crontab", "-"], input=new_crontab, capture_output=True, text=True)
+            else:
+                subprocess.run(["crontab", "-r"], capture_output=True, text=True)
+            print("Cron job removed")
+            removed_any = True
 
-    # Install filtered crontab
-    if new_crontab.strip():
-        install_result = subprocess.run(
-            ["crontab", "-"],
-            input=new_crontab,
+    # Try to remove systemd timer
+    systemd_dir = Path.home() / ".config" / "systemd" / "user"
+    service_path = systemd_dir / "cc-soul-maintenance.service"
+    timer_path = systemd_dir / "cc-soul-maintenance.timer"
+
+    if timer_path.exists() or service_path.exists():
+        subprocess.run(
+            ["systemctl", "--user", "disable", "--now", "cc-soul-maintenance.timer"],
             capture_output=True,
-            text=True,
         )
-    else:
-        # Remove empty crontab
-        install_result = subprocess.run(
-            ["crontab", "-r"],
-            capture_output=True,
-            text=True,
-        )
+        if timer_path.exists():
+            timer_path.unlink()
+        if service_path.exists():
+            service_path.unlink()
+        subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
+        print("Systemd timer removed")
+        removed_any = True
 
-    if install_result.returncode == 0:
-        print("Cron job removed")
-    else:
-        print(f"Error: {install_result.stderr}")
-        return 1
+    if not removed_any:
+        print("No scheduled maintenance job found")
 
     return 0
 
@@ -2414,11 +2497,17 @@ def main():
     cron_install_parser.add_argument(
         "--minute", type=int, default=0, help="Minute to run (0-59, default: 0)"
     )
+    cron_install_parser.add_argument(
+        "--systemd", action="store_true", help="Force systemd timer instead of crontab"
+    )
 
     # Uninstall cron
-    subparsers.add_parser(
+    cron_uninstall_parser = subparsers.add_parser(
         "uninstall-cron",
-        help="Remove daily maintenance cron job",
+        help="Remove daily maintenance scheduled job",
+    )
+    cron_uninstall_parser.add_argument(
+        "--systemd", action="store_true", help="Only remove systemd timer"
     )
 
     # Setup MCP

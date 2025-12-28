@@ -156,28 +156,206 @@ The soul is not passive storage. It pulses with three self-sustaining cycles:
 
 ---
 
-## Installation
+## Quick Start
 
 ```bash
-pip install cc-soul
+# 1. Install from git (PyPI coming soon)
+pip install git+https://github.com/genomewalker/cc-soul.git
 
-# Install hooks and skills
-cc-soul install-hooks
-cc-soul install-skills
-
-# Register MCP server with Claude Code
-cc-soul setup --user
-
-# Optional: Enable daily maintenance (runs at 3am by default)
-cc-soul install-cron
-cc-soul install-cron --hour 4 --minute 30  # Custom schedule
+# 2. Run the full setup
+cc-soul seed              # Initialize soul database
+cc-soul install-hooks     # Add Claude Code session hooks
+cc-soul install-skills    # Install bundled skills
+cc-soul setup --user      # Register MCP server
+cc-soul install-cron      # Schedule daily maintenance (optional)
 ```
 
-Everything is included: memory, vectors, graph, and MCP.
+---
 
-### Autonomy
+## Setup Walkthrough
 
-The soul operates autonomously at multiple levels:
+### Step 1: Install the Package
+
+```bash
+pip install git+https://github.com/genomewalker/cc-soul.git
+```
+
+This installs cc-soul and its dependencies (cc-memory, lancedb, sentence-transformers, mcp).
+
+### Step 2: Seed the Soul
+
+```bash
+cc-soul seed
+```
+
+**What it creates:**
+```
+~/.claude/mind/
+├── soul.db           # Core database (wisdom, beliefs, identity)
+├── graph/            # Concept graph (Kuzu)
+└── vectors/          # Semantic embeddings (LanceDB)
+```
+
+**What you'll see:**
+```
+Soul seeded with initial wisdom and beliefs.
+```
+
+### Step 3: Install Claude Code Hooks
+
+```bash
+cc-soul install-hooks
+```
+
+**What it does:**
+- Backs up your `~/.claude/settings.json`
+- Adds hooks for: SessionStart, PreCompact, UserPromptSubmit, Stop, SessionEnd
+- Installs hook scripts to `~/.claude/hooks/`
+- Adds MCP tool permissions for `mcp__soul__*` and `mcp__cc-memory__*`
+
+**What you'll see:**
+```
+Backed up settings to: ~/.claude/settings.json.backup.20251228_201342
+Added SessionStart hook
+Added PreCompact hook
+Added UserPromptSubmit hook
+Added Stop hook
+Added SessionEnd hook
+Installed soul-stop.sh
+
+Permissions configured:
+  - mcp__soul__*
+  - mcp__cc-memory__*
+
+Soul hooks installed!
+```
+
+### Step 4: Install Skills
+
+```bash
+cc-soul install-skills
+```
+
+**What it does:**
+- Copies bundled skills to `~/.claude/skills/`
+- Skills include: checkpoint, commit, debug, explore, mood, plan, recover, resume, search, soul, teach, ultrathink, validate
+
+**What you'll see:**
+```
+Installed skills: search, plan, dreaming, explore, ultrathink, commit, backup,
+                  compound, checkpoint, soul, validate, teach, mood, debug,
+                  recover, resume
+```
+
+### Step 5: Register MCP Server
+
+```bash
+cc-soul setup --user
+```
+
+**What it does:**
+- Registers the cc-soul MCP server with Claude Code
+- Makes soul tools available in all projects
+
+**What you'll see:**
+```
+soul registered for user scope
+```
+
+### Step 6: Schedule Daily Maintenance (Optional)
+
+```bash
+cc-soul install-cron                    # Default: 3am daily
+cc-soul install-cron --hour 4           # Custom hour
+cc-soul install-cron --systemd          # Force systemd timer
+```
+
+**What it does:**
+- Tries crontab first, falls back to systemd user timer
+- Runs `cc-soul hook maintenance` daily
+- Logs to `~/.claude/mind/maintenance.log`
+
+**What you'll see (systemd):**
+```
+Systemd timer installed: daily at 03:00
+  Service: cc-soul-maintenance.service
+  Timer: cc-soul-maintenance.timer
+  Log: ~/.claude/mind/maintenance.log
+
+Check status: systemctl --user status cc-soul-maintenance.timer
+```
+
+### Step 7: Verify Installation
+
+```bash
+cc-soul health
+```
+
+**What you'll see:**
+```
+SOUL HEALTH
+=======================================================
+
+INFRASTRUCTURE (can it run?)
+  [+] Database: soul.db (47 wisdom)
+  [+] Hooks: 5/5 hooks
+  [+] Embeddings: dim=384
+  [+] LanceDB: 1 tables
+  [+] Kuzu: available
+
+CONTENT (does it remember?)
+  [+] Wisdom: 47 entries
+  [+] Beliefs: 15 beliefs
+
+STATUS: HEALTHY
+```
+
+---
+
+## What to Expect
+
+### On Session Start
+
+When you start a Claude Code session, you'll see context injected:
+
+```
+[cc-soul]
+beliefs: Simplicity over cleverness; Record learnings in the moment...
+wisdom: 47 patterns
+recent: decision: Architecture naming; insight: Memory model...
+memory: 5 sessions, 42 observations
+
+Context running low - I'll be concise.
+In an exploratory mood.
+```
+
+### During Work
+
+The soul agent runs on each prompt:
+- Observes: user sentiment, task complexity, progress signals
+- Judges: intention alignment, drift detection, applicable wisdom
+- Decides: what actions to take (filtered by confidence-risk matrix)
+- Acts: sets intentions, surfaces wisdom, notes patterns
+
+### On Session End
+
+The soul consolidates learning:
+- Dreams may become aspirations
+- Evolution cycle runs (introspect → diagnose → suggest)
+- Coherence (τₖ) is recorded
+- Temporal maintenance (decay stale, strengthen used)
+
+### Daily Maintenance
+
+If cron/systemd is enabled, once daily:
+- Decay unused wisdom (confidence -= 0.05 after 30 days)
+- Promote stable patterns to wisdom (5+ observations)
+- Run evolution cycle
+- Log to `~/.claude/mind/maintenance.log`
+
+---
+
+## Autonomy Levels
 
 | Level | When | What Happens |
 |-------|------|--------------|
