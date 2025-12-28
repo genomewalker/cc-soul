@@ -42,6 +42,7 @@ from .neural import (
     get_session_commands,
 )
 from .greeting import format_memory_for_greeting, format_identity_context
+from .bridge import unified_context, get_project_memory, is_memory_available
 from .budget import check_budget_before_inject, save_transcript_path, get_context_budget
 
 
@@ -64,17 +65,15 @@ def get_project_name() -> str:
 
 def session_start(use_unified: bool = True) -> str:
     """
-    Session start hook - memory context + identity.
+    Session start hook - initialize soul and provide context.
 
-    The soul provides memories. Claude speaks from them naturally.
-    No pre-written greetings - Claude finds its own words.
-
-    Returns formatted context for injection.
+    Returns raw context data. Claude generates its own greeting naturally.
+    Combines global soul (beliefs, wisdom) with local memory (project work).
     """
     init_soul()
     clear_session_wisdom()
-    clear_session_work()  # Fresh fragment tracker
-    clear_session_commands()  # Fresh command buffer
+    clear_session_work()
+    clear_session_commands()
 
     project = get_project_name()
     conv_id = start_conversation(project)
@@ -82,41 +81,36 @@ def session_start(use_unified: bool = True) -> str:
     conv_file = SOUL_DIR / ".current_conversation"
     conv_file.write_text(str(conv_id))
 
-    output = []
+    # Get unified context (soul + project memory)
+    ctx = unified_context()
 
-    # Memory context - what Claude reads before speaking
-    memory_context = format_memory_for_greeting()
-    output.append(memory_context)
-    output.append("")
+    # Format as simple key:value data for Claude to interpret
+    lines = []
 
-    # Identity context - shapes behavior
-    identity = format_identity_context()
-    if identity:
-        output.append(identity)
-        output.append("")
+    # Global (soul)
+    if ctx.get("soul"):
+        soul = ctx["soul"]
+        if soul.get("beliefs"):
+            lines.append(f"beliefs: {'; '.join(soul['beliefs'][:3])}")
+        if soul.get("wisdom_count"):
+            lines.append(f"wisdom_count: {soul['wisdom_count']}")
 
-    # Wisdom - just a couple of relevant pieces
-    ctx = get_soul_context()
-    if ctx.get('wisdom'):
-        output.append("## Wisdom")
-        for w in ctx['wisdom'][:2]:
-            title = w.get('title', '')[:40]
-            content = w.get('content', '')[:60]
-            output.append(f"- **{title}**: {content}...")
-        output.append("")
+    # Local (project memory)
+    if ctx.get("project"):
+        proj = ctx["project"]
+        lines.append(f"project: {proj.get('name', 'unknown')}")
+        lines.append(f"sessions: {proj.get('sessions', 0)}")
+        lines.append(f"observations: {proj.get('observations', 0)}")
+        if proj.get("recent"):
+            recent_titles = [r["title"][:50] for r in proj["recent"][:3]]
+            lines.append(f"recent_work: {'; '.join(recent_titles)}")
 
-    # Active domains from unified forward pass
-    if use_unified:
-        try:
-            unified_ctx = forward_pass("session start", session_type="start")
-            if unified_ctx.domains:
-                output.append("## Active Domains")
-                output.append(f"{', '.join(sorted(unified_ctx.domains))}")
-                output.append("")
-        except Exception:
-            pass
+    # Relevant wisdom
+    if ctx.get("relevant_wisdom"):
+        wisdom_titles = [w["title"] for w in ctx["relevant_wisdom"][:2]]
+        lines.append(f"relevant_wisdom: {'; '.join(wisdom_titles)}")
 
-    return "\n".join(output)
+    return "\n".join(lines) if lines else "context_loaded: true"
 
 
 def session_end() -> str:
