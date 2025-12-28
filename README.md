@@ -167,9 +167,38 @@ cc-soul install-skills
 
 # Register MCP server with Claude Code
 cc-soul setup --user
+
+# Optional: Enable daily maintenance (runs at 3am by default)
+cc-soul install-cron
+cc-soul install-cron --hour 4 --minute 30  # Custom schedule
 ```
 
 Everything is included: memory, vectors, graph, and MCP.
+
+### Autonomy
+
+The soul operates autonomously at multiple levels:
+
+| Level | When | What Happens |
+|-------|------|--------------|
+| **Session hooks** | Every session | Context loading, intention spawning, coherence tracking |
+| **Agent cycles** | Each prompt | Observe → Judge → Decide → Act (confidence-risk gated) |
+| **Auto-evolution** | During maintenance | Strengthen used wisdom, decay stale, promote patterns |
+| **Daily cron** | Scheduled | Full maintenance: temporal decay, evolution cycle, cleanup |
+
+**Low-risk autonomous actions** (always executed):
+- Strengthen wisdom confidence when applied successfully
+- Promote stable patterns (5+ observations) to wisdom
+- Update intention alignment scores
+- Surface relevant wisdom during work
+
+**Medium-risk actions** (require confidence threshold):
+- Decay stale wisdom (unused 30+ days)
+- Clean up fulfilled intentions
+
+**High-risk actions** (proposed, not executed):
+- Abandon consistently misaligned intentions
+- Modify core beliefs
 
 ### Available MCP Tools
 

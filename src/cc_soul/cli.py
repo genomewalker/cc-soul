@@ -1960,6 +1960,113 @@ def cmd_install_skills(args):
     return 0
 
 
+def cmd_install_cron(args):
+    """Install cron job for daily soul maintenance."""
+    import subprocess
+
+    hour = args.hour
+    minute = args.minute
+    cron_comment = "cc-soul daily maintenance"
+    cron_cmd = f"{minute} {hour} * * * cc-soul hook maintenance >> ~/.claude/mind/maintenance.log 2>&1"
+
+    # Get existing crontab
+    result = subprocess.run(
+        ["crontab", "-l"],
+        capture_output=True,
+        text=True,
+    )
+
+    if result.returncode == 0:
+        existing = result.stdout
+        # Check if already installed
+        if "cc-soul hook maintenance" in existing:
+            print("Cron job already installed. Use uninstall-cron first to change schedule.")
+            return 1
+        new_crontab = existing.rstrip() + f"\n# {cron_comment}\n{cron_cmd}\n"
+    else:
+        # No existing crontab
+        new_crontab = f"# {cron_comment}\n{cron_cmd}\n"
+
+    # Install new crontab
+    install_result = subprocess.run(
+        ["crontab", "-"],
+        input=new_crontab,
+        capture_output=True,
+        text=True,
+    )
+
+    if install_result.returncode == 0:
+        print(f"Cron job installed: daily at {hour:02d}:{minute:02d}")
+        print(f"  Command: cc-soul hook maintenance")
+        print(f"  Log: ~/.claude/mind/maintenance.log")
+        print("\nTo remove: cc-soul uninstall-cron")
+    else:
+        print(f"Error installing cron: {install_result.stderr}")
+        return 1
+
+    return 0
+
+
+def cmd_uninstall_cron(args):
+    """Remove daily maintenance cron job."""
+    import subprocess
+
+    # Get existing crontab
+    result = subprocess.run(
+        ["crontab", "-l"],
+        capture_output=True,
+        text=True,
+    )
+
+    if result.returncode != 0:
+        print("No crontab found")
+        return 0
+
+    existing = result.stdout
+    if "cc-soul hook maintenance" not in existing:
+        print("No cc-soul cron job found")
+        return 0
+
+    # Remove soul cron entries
+    lines = existing.split("\n")
+    new_lines = []
+    skip_next = False
+    for line in lines:
+        if "cc-soul daily maintenance" in line:
+            skip_next = True
+            continue
+        if skip_next and "cc-soul hook maintenance" in line:
+            skip_next = False
+            continue
+        new_lines.append(line)
+
+    new_crontab = "\n".join(new_lines)
+
+    # Install filtered crontab
+    if new_crontab.strip():
+        install_result = subprocess.run(
+            ["crontab", "-"],
+            input=new_crontab,
+            capture_output=True,
+            text=True,
+        )
+    else:
+        # Remove empty crontab
+        install_result = subprocess.run(
+            ["crontab", "-r"],
+            capture_output=True,
+            text=True,
+        )
+
+    if install_result.returncode == 0:
+        print("Cron job removed")
+    else:
+        print(f"Error: {install_result.stderr}")
+        return 1
+
+    return 0
+
+
 def cmd_hook(args):
     """Run a hook."""
     import json as json_lib
@@ -2023,6 +2130,14 @@ def cmd_hook(args):
         else:
             text = ""
         assistant_stop(text)
+    elif args.hook == "maintenance":
+        from .spanda import daily_maintenance
+
+        result = daily_maintenance()
+        print(f"[cc-soul] Daily maintenance complete")
+        print(f"  τₖ = {result['coherence']['tau_k']:.2f}")
+        if result.get('evolution', {}).get('suggestions'):
+            print(f"  Suggestions: {len(result['evolution']['suggestions'])}")
 
 
 def cmd_evolve(args):
@@ -2288,6 +2403,24 @@ def main():
         help="Add soul and cc-memory MCP tools to auto-approve list",
     )
 
+    # Install cron job for daily maintenance
+    cron_install_parser = subparsers.add_parser(
+        "install-cron",
+        help="Install cron job for daily soul maintenance",
+    )
+    cron_install_parser.add_argument(
+        "--hour", type=int, default=3, help="Hour to run (0-23, default: 3)"
+    )
+    cron_install_parser.add_argument(
+        "--minute", type=int, default=0, help="Minute to run (0-59, default: 0)"
+    )
+
+    # Uninstall cron
+    subparsers.add_parser(
+        "uninstall-cron",
+        help="Remove daily maintenance cron job",
+    )
+
     # Setup MCP
     setup_parser = subparsers.add_parser(
         "setup", help="Register soul MCP server with Claude Code"
@@ -2307,7 +2440,7 @@ def main():
     # Hook
     hook_parser = subparsers.add_parser("hook", help="Run a Claude Code hook")
     hook_parser.add_argument(
-        "hook", choices=["start", "start-rich", "pre-compact", "end", "prompt", "stop"]
+        "hook", choices=["start", "start-rich", "pre-compact", "end", "prompt", "stop", "maintenance"]
     )
     hook_parser.add_argument("input", nargs="*", help="Input for prompt/stop hook")
     hook_parser.add_argument("--rich", action="store_true", help="Include rich context")
@@ -2766,6 +2899,10 @@ def main():
         cmd_uninstall_hooks(args)
     elif args.command == "install-permissions":
         cmd_install_permissions(args)
+    elif args.command == "install-cron":
+        cmd_install_cron(args)
+    elif args.command == "uninstall-cron":
+        cmd_uninstall_cron(args)
     elif args.command == "setup":
         cmd_setup(args)
     elif args.command == "unsetup":
