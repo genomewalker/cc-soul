@@ -16,7 +16,6 @@ from typing import Optional, Dict, List
 from datetime import datetime
 
 
-
 # Try to import cc-memory
 CC_MEMORY_AVAILABLE = False
 try:

@@ -264,7 +264,6 @@ def cmd_health(args):
         return "OK", f"{count} entries"
 
     def check_beliefs():
-
         beliefs = get_beliefs()
         if not beliefs:
             return "WARN", "No beliefs defined"

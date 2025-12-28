@@ -641,7 +641,11 @@ def reflect_on_session(
         "promoted_to_wisdom": len(promoted),
         "pending_review": len(learnings) - len(promoted),
         "learnings": [
-            {"type": item.type.value, "title": item.title, "confidence": item.confidence}
+            {
+                "type": item.type.value,
+                "title": item.title,
+                "confidence": item.confidence,
+            }
             for item in learnings
         ],
     }
