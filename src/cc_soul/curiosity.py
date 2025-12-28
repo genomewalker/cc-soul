@@ -727,9 +727,9 @@ def incorporate_answer_as_wisdom(question_id: int, wisdom_type: str = "insight")
         domain = None
 
     wisdom_id = gain_wisdom(
+        type=WisdomType(wisdom_type),
         title=title,
         content=content,
-        wisdom_type=WisdomType(wisdom_type),
         domain=domain,
         confidence=0.8  # Learned directly from user
     )
