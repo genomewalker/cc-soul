@@ -125,6 +125,22 @@ def gain_wisdom(
     except Exception:
         pass
 
+    # Add to concept graph and auto-link
+    try:
+        from .graph import add_concept, auto_link_new_concept, Concept, ConceptType
+
+        concept = Concept(
+            id=f"wisdom_{wisdom_id}",
+            type=ConceptType.FAILURE if type == WisdomType.FAILURE else ConceptType.WISDOM,
+            title=title,
+            content=content,
+            metadata={"domain": domain, "confidence": confidence},
+        )
+        add_concept(concept)
+        auto_link_new_concept(f"wisdom_{wisdom_id}")
+    except Exception:
+        pass
+
     return wisdom_id
 
 

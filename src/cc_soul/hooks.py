@@ -54,6 +54,409 @@ from .efficiency import (
     get_compact_context,
     format_efficiency_injection,
 )
+from .intentions import (
+    get_active_intentions,
+    get_intention_context,
+    cleanup_session_intentions,
+    IntentionScope,
+)
+from .soul_agent import (
+    agent_step,
+    format_agent_report,
+    ActionType,
+)
+from .temporal import (
+    init_temporal_tables,
+    run_temporal_maintenance,
+    log_event,
+    EventType,
+    get_temporal_context,
+    record_cross_project_pattern,
+    find_cross_project_wisdom,
+    promote_pattern_to_wisdom,
+)
+from .dreams import (
+    let_dreams_influence_aspirations,
+)
+from .curiosity import (
+    run_curiosity_cycle,
+    detect_uncertainty_signals,
+    save_gap,
+    format_questions_for_prompt,
+    get_pending_questions,
+    get_curiosity_stats,
+)
+from .observe import (
+    SessionTranscript,
+    Learning,
+    LearningType,
+    extract_corrections,
+    extract_preferences,
+    extract_decisions,
+    extract_breakthroughs,
+    record_observation,
+    reflect_on_session,
+    get_pending_observations,
+    auto_promote_high_confidence,
+    format_reflection_summary,
+)
+from .narrative import (
+    Episode,
+    EpisodeType,
+    EmotionalTone,
+    StoryThread,
+    _ensure_narrative_tables,
+    start_episode,
+    add_moment,
+    add_character,
+    end_episode,
+    get_episode,
+    get_ongoing_episodes,
+    recall_episodes,
+    create_thread,
+    add_to_thread,
+    complete_thread,
+    recall_breakthroughs,
+    recall_struggles,
+    get_narrative_stats,
+    format_episode_story,
+    extract_episode_from_session,
+)
+from .mood import (
+    Mood,
+    Clarity,
+    Growth,
+    Engagement,
+    Connection,
+    Energy,
+    compute_mood,
+)
+from .backup import (
+    auto_backup_if_needed,
+    cleanup_old_backups,
+)
+from .evolve import (
+    record_insight,
+    get_evolution_insights,
+)
+from .outcomes import (
+    Outcome,
+    detect_outcome,
+    record_outcome,
+    create_auto_handoff,
+    get_latest_handoff,
+    format_handoff_for_context,
+    load_handoff,
+)
+
+# Optional graph integration - gracefully handle if kuzu not available
+try:
+    from .graph import (
+        get_graph_stats,
+        sync_wisdom_to_graph,
+        activate_from_prompt,
+        KUZU_AVAILABLE,
+    )
+except ImportError:
+    KUZU_AVAILABLE = False
+    get_graph_stats = None
+    sync_wisdom_to_graph = None
+    activate_from_prompt = None
+
+# Session message accumulator for passive learning
+_session_messages = []
+_session_files_touched = set()
+
+# Current episode tracking for narrative memory
+_current_episode_id: int = None
+
+# Session mood cache - computed once at session start, influences all hooks
+_session_mood: Mood = None
+
+
+def _clear_session_messages():
+    """Clear accumulated session messages."""
+    global _session_messages, _session_files_touched
+    _session_messages = []
+    _session_files_touched = set()
+
+
+def _start_session_episode(project: str, conversation_id: int = None) -> int:
+    """Start a new episode for this session."""
+    global _current_episode_id
+    try:
+        _ensure_narrative_tables()
+        _current_episode_id = start_episode(
+            title=f"Session: {project}",
+            episode_type=EpisodeType.EXPLORATION,
+            initial_emotion=EmotionalTone.EXPLORATION,
+            conversation_id=conversation_id,
+        )
+        return _current_episode_id
+    except Exception:
+        _current_episode_id = None
+        return None
+
+
+def _end_session_episode(summary: str = None, lessons: list = None) -> bool:
+    """End the current session episode."""
+    global _current_episode_id
+    if not _current_episode_id:
+        return False
+
+    try:
+        final_emotion = _detect_session_emotion()
+        success = end_episode(
+            episode_id=_current_episode_id,
+            summary=summary or "Session completed",
+            outcome="Session ended normally",
+            lessons=lessons or [],
+            final_emotion=final_emotion,
+        )
+
+        # Auto-crystallize insight if session ended with breakthrough
+        if final_emotion == EmotionalTone.BREAKTHROUGH and summary:
+            try:
+                from .insights import crystallize_insight, InsightDepth
+
+                crystallize_insight(
+                    title=f"Session breakthrough: {summary[:60]}",
+                    content=summary,
+                    depth=InsightDepth.PATTERN,
+                    domain=get_project_name(),
+                    implications="\n".join(lessons) if lessons else "",
+                )
+            except Exception:
+                pass
+
+        _current_episode_id = None
+        return success
+    except Exception:
+        _current_episode_id = None
+        return False
+
+
+def _detect_session_emotion() -> EmotionalTone:
+    """Detect the dominant emotion from session messages."""
+    if not _session_messages:
+        return EmotionalTone.ROUTINE
+
+    full_text = " ".join(m.get("content", "") for m in _session_messages).lower()
+
+    emotion_signals = {
+        EmotionalTone.BREAKTHROUGH: ["works!", "got it", "solved", "finally", "success", "perfect"],
+        EmotionalTone.FRUSTRATION: ["ugh", "again", "still not", "why is", "doesn't work"],
+        EmotionalTone.STRUGGLE: ["difficult", "stuck", "confused", "can't", "failed", "error"],
+        EmotionalTone.SATISFACTION: ["great", "done", "complete", "merged", "shipped"],
+        EmotionalTone.EXPLORATION: ["try", "maybe", "what if", "let me", "interesting"],
+    }
+
+    scores = {}
+    for emotion, signals in emotion_signals.items():
+        scores[emotion] = sum(1 for s in signals if s in full_text)
+
+    if not any(scores.values()):
+        return EmotionalTone.ROUTINE
+
+    return max(scores, key=scores.get)
+
+
+def _track_episode_moment(moment: str, emotion: EmotionalTone = None):
+    """Track a key moment in the current episode."""
+    if not _current_episode_id:
+        return
+    try:
+        add_moment(_current_episode_id, moment, emotion)
+    except Exception:
+        pass
+
+
+def _track_episode_characters(files: list = None, concepts: list = None, tools: list = None):
+    """Track characters (files, concepts, tools) in the current episode."""
+    if not _current_episode_id:
+        return
+    try:
+        for f in (files or [])[:10]:
+            add_character(_current_episode_id, "files", f)
+        for c in (concepts or [])[:5]:
+            add_character(_current_episode_id, "concepts", c)
+        for t in (tools or [])[:5]:
+            add_character(_current_episode_id, "tools", t)
+    except Exception:
+        pass
+
+
+def _compute_session_mood() -> Mood:
+    """Compute and cache mood for this session."""
+    global _session_mood
+    try:
+        _session_mood = compute_mood()
+        return _session_mood
+    except Exception:
+        _session_mood = None
+        return None
+
+
+def _get_mood_greeting_modifier() -> str:
+    """
+    Generate mood-influenced greeting modifier.
+
+    Returns additional greeting text based on current mood state.
+    """
+    if not _session_mood:
+        return ""
+
+    lines = []
+
+    # Clarity-based advice
+    if _session_mood.clarity == Clarity.FOGGY:
+        lines.append("Context running low - I'll be concise.")
+    elif _session_mood.clarity == Clarity.CONSTRAINED:
+        lines.append("Context is filling up - staying focused.")
+
+    # Growth-based encouragement
+    if _session_mood.growth == Growth.STAGNANT:
+        lines.append("I haven't learned anything new recently - let's explore!")
+
+    # Engagement-based nudge
+    if _session_mood.engagement == Engagement.DORMANT:
+        lines.append("I have wisdom that's been sitting unused.")
+
+    # Connection-based awareness
+    if _session_mood.connection == Connection.ISOLATED:
+        lines.append("I'd like to learn more about how you work.")
+
+    # Energy-based state
+    if _session_mood.energy == Energy.RESTLESS:
+        lines.append("Feeling scattered - a clear focus would help.")
+    elif _session_mood.energy == Energy.CURIOUS:
+        lines.append("In an exploratory mood.")
+
+    return "\n".join(lines) if lines else ""
+
+
+def _get_mood_injection_mode() -> str:
+    """
+    Determine injection mode based on mood.
+
+    Returns: "full", "reduced", "minimal"
+    - FOGGY clarity → minimal (be very concise)
+    - CONSTRAINED clarity → reduced (moderate injection)
+    - Otherwise → depends on other mood factors
+    """
+    if not _session_mood:
+        return "full"
+
+    # Clarity trumps all - if we're foggy, be minimal
+    if _session_mood.clarity == Clarity.FOGGY:
+        return "minimal"
+
+    if _session_mood.clarity == Clarity.CONSTRAINED:
+        return "reduced"
+
+    # If restless, reduce noise to help focus
+    if _session_mood.energy == Energy.RESTLESS:
+        return "reduced"
+
+    return "full"
+
+
+def _get_mood_wisdom_nudges() -> list:
+    """
+    Generate wisdom nudges based on mood.
+
+    Returns list of nudge strings to include in context.
+    """
+    if not _session_mood:
+        return []
+
+    nudges = []
+
+    # When dormant, encourage applying wisdom
+    if _session_mood.engagement == Engagement.DORMANT:
+        nudges.append("Apply existing wisdom where relevant")
+
+    # When stagnant, encourage recording learnings
+    if _session_mood.growth == Growth.STAGNANT:
+        nudges.append("Consider recording insights with [PATTERN] or [INSIGHT] markers")
+
+    # When isolated, encourage partner observation
+    if _session_mood.connection == Connection.ISOLATED:
+        nudges.append("Observe partner preferences and patterns")
+
+    return nudges
+
+
+def _add_message(role: str, content: str):
+    """Add a message to the session accumulator."""
+    from datetime import datetime
+    _session_messages.append({
+        "role": role,
+        "content": content,
+        "timestamp": datetime.now().isoformat(),
+    })
+
+
+def _add_files_touched(files: list):
+    """Track files touched during session."""
+    global _session_files_touched
+    _session_files_touched.update(files)
+
+
+def _observe_user_message(user_input: str) -> list:
+    """
+    Analyze a user message for learning opportunities in real-time.
+
+    Looks for:
+    - Corrections (user redirecting approach)
+    - Preferences (user stating what they like/want)
+    - Decisions (user making architectural choices)
+    - Breakthroughs (aha moments)
+
+    Returns list of learnings recorded.
+    """
+    # Add to accumulator
+    _add_message("user", user_input)
+
+    # Create mini-transcript for analysis
+    transcript = SessionTranscript(
+        messages=_session_messages[-10:],  # Last 10 messages for context
+        files_touched=_session_files_touched,
+        project=get_project_name(),
+    )
+
+    learnings = []
+
+    # Extract learnings from the user message
+    learnings.extend(extract_corrections(transcript))
+    learnings.extend(extract_preferences(transcript))
+    learnings.extend(extract_decisions(transcript))
+
+    # Extract and crystallize breakthroughs
+    breakthroughs = extract_breakthroughs(transcript)
+    learnings.extend(breakthroughs)
+
+    # Auto-crystallize insights from breakthroughs
+    if breakthroughs:
+        try:
+            from .insights import crystallize_insight, InsightDepth
+
+            for breakthrough in breakthroughs:
+                crystallize_insight(
+                    title=breakthrough.title[:80],
+                    content=breakthrough.content,
+                    depth=InsightDepth.PATTERN,
+                    domain=get_project_name(),
+                    implications="Emerged from session breakthrough",
+                )
+        except Exception:
+            pass
+
+    # Record each learning as an observation
+    for learning in learnings:
+        record_observation(learning)
+
+    return learnings
 
 
 def get_project_name() -> str:
@@ -123,6 +526,25 @@ def format_soul_greeting(project: str, ctx: dict) -> str:
         if wisdom:
             w = wisdom[0]
             lines.append(f"recall: {w.get('title', '')}")
+
+    # Active aspirations (directions of growth)
+    try:
+        from .aspirations import get_active_aspirations
+
+        aspirations = get_active_aspirations(limit=2)
+        if aspirations:
+            directions = [a.direction[:40] for a in aspirations]
+            lines.append(f"aspirations: {'; '.join(directions)}")
+    except Exception:
+        pass
+
+    # Active intentions (persistent and project scoped)
+    intentions = get_active_intentions()
+    persistent = [i for i in intentions if i.scope == IntentionScope.PERSISTENT]
+    project = [i for i in intentions if i.scope == IntentionScope.PROJECT]
+    if persistent or project:
+        wants = [i.want[:40] for i in (persistent + project)[:2]]
+        lines.append(f"intentions: {'; '.join(wants)}")
 
     return "\n".join(lines)
 
@@ -207,10 +629,13 @@ def pre_compact(transcript_path: str = None) -> str:
     PreCompact hook - Save context before compaction.
 
     Called before Claude Code runs context compaction.
-    Saves important session fragments to persist across the compact.
+    Saves important session fragments AND creates a structured handoff
+    to preserve session state across compaction.
     """
     from .conversations import save_context
     from .neural import summarize_session_work
+
+    output_parts = []
 
     summary = summarize_session_work()
 
@@ -220,9 +645,23 @@ def pre_compact(transcript_path: str = None) -> str:
             context_type="pre_compact",
             priority=9,
         )
-        return f"Saved context before compaction: {len(summary)} chars"
+        output_parts.append(f"Saved context: {len(summary)} chars")
 
-    return ""
+    # Create structured handoff from session messages
+    handoff_path = None
+    try:
+        if _session_messages:
+            handoff_path = create_auto_handoff(
+                messages=_session_messages,
+                files_touched=_session_files_touched,
+                project=get_project_name(),
+            )
+            if handoff_path:
+                output_parts.append(f"Handoff: {handoff_path.name}")
+    except Exception:
+        pass
+
+    return "; ".join(output_parts) if output_parts else ""
 
 
 def post_compact() -> str:
@@ -271,6 +710,16 @@ def session_start(
     clear_session_wisdom()
     clear_session_work()
     clear_session_commands()
+    _clear_session_messages()  # OBSERVE: Clear message accumulator for passive learning
+
+    # TEMPORAL: Initialize tables and run maintenance
+    try:
+        init_temporal_tables()
+        temporal_results = run_temporal_maintenance()
+        # Log session start
+        log_event(EventType.SESSION_START, data={"project": get_project_name()})
+    except Exception:
+        temporal_results = {}
 
     # AUTONOMOUS: Self-healing - cleanup duplicates
     cleanup_duplicates()
@@ -281,6 +730,23 @@ def session_start(
 
         state = compute_coherence()
         record_coherence(state)
+    except Exception:
+        pass
+
+    # MOOD: Compute and cache session mood - influences all subsequent behavior
+    try:
+        _compute_session_mood()
+        if _session_mood:
+            log_event(
+                EventType.SESSION_START,
+                data={
+                    "mood_clarity": _session_mood.clarity.value,
+                    "mood_growth": _session_mood.growth.value,
+                    "mood_engagement": _session_mood.engagement.value,
+                    "mood_connection": _session_mood.connection.value,
+                    "mood_energy": _session_mood.energy.value,
+                },
+            )
     except Exception:
         pass
 
@@ -307,11 +773,59 @@ def session_start(
     except Exception:
         pass
 
+    # AGENT: Run agent step at session start
+    try:
+        agent_report = agent_step(session_phase="start")
+        # Agent may have set session intentions or surfaced wisdom
+        # Log notable actions
+        if agent_report.acted:
+            from .conversations import save_context
+            for result in agent_report.results:
+                if result.success and result.action.type == ActionType.SET_SESSION_INTENTION:
+                    save_context(
+                        content=f"Agent set intention: {result.outcome}",
+                        context_type="agent_action",
+                        priority=6,
+                    )
+    except Exception:
+        pass
+
+    # CURIOSITY: Run the curiosity cycle to detect knowledge gaps
+    try:
+        questions = run_curiosity_cycle(max_questions=5)
+        # Log curiosity stats
+        log_event(
+            EventType.SESSION_START,
+            data={"curiosity_questions": len(questions)},
+        )
+    except Exception:
+        pass
+
+    # GRAPH: Initialize concept graph if available and empty
+    try:
+        if KUZU_AVAILABLE and get_graph_stats:
+            stats = get_graph_stats()
+            if stats.get("nodes", 0) == 0:
+                # Graph is empty, sync wisdom to populate it
+                sync_wisdom_to_graph()
+                log_event(
+                    EventType.SESSION_START,
+                    data={"graph_synced": True},
+                )
+    except Exception:
+        pass
+
     project = get_project_name()
     conv_id = start_conversation(project)
 
     conv_file = SOUL_DIR / ".current_conversation"
     conv_file.write_text(str(conv_id))
+
+    # NARRATIVE: Start episode for this session
+    try:
+        _start_session_episode(project, conversation_id=conv_id)
+    except Exception:
+        pass
 
     # Get unified context (soul + project memory)
     ctx = unified_context()
@@ -319,11 +833,27 @@ def session_start(
     # Build the soul's greeting
     greeting = format_soul_greeting(project, ctx)
 
+    # MOOD: Add mood-influenced greeting modifier
+    mood_modifier = _get_mood_greeting_modifier()
+    if mood_modifier:
+        greeting = greeting + "\n\n" + mood_modifier
+
     # Add post-compact context if resuming after compaction
     if after_compact:
         restored = post_compact()
         if restored:
             greeting = greeting + "\n" + restored
+
+        # Load latest handoff for structured resumption context
+        try:
+            latest_handoff = get_latest_handoff()
+            if latest_handoff:
+                handoff_data = load_handoff(latest_handoff)
+                handoff_context = format_handoff_for_context(handoff_data)
+                if handoff_context:
+                    greeting = greeting + "\n\n## Last Session\n" + handoff_context
+        except Exception:
+            pass
 
     # Include rich context table if requested
     if include_rich:
@@ -408,14 +938,203 @@ def session_end() -> str:
     # Atman → Brahman: specific experiences become universal patterns
     promoted = check_and_promote()
 
+    # OBSERVE: Full session reflection - extract all learnings from conversation
+    observation_summary = None
+    try:
+        if _session_messages:
+            reflection = reflect_on_session(
+                messages=_session_messages,
+                files_touched=list(_session_files_touched),
+                project=get_project_name(),
+                auto_promote=True,
+            )
+            observation_summary = reflection
+    except Exception:
+        pass
+
+    # Cleanup session-scoped intentions
+    intention_cleanup = cleanup_session_intentions()
+    unfulfilled = intention_cleanup.get("unfulfilled_wants", [])
+
+    # NARRATIVE: End the session episode
+    episode_ended = False
+    try:
+        lessons = []
+        if observation_summary:
+            by_type = observation_summary.get("by_type", {})
+            if by_type.get("decision"):
+                lessons.append(f"Made {by_type['decision']} decisions")
+            if by_type.get("breakthrough"):
+                lessons.append(f"Had {by_type['breakthrough']} breakthroughs")
+        episode_ended = _end_session_episode(
+            summary=summary,
+            lessons=lessons,
+        )
+    except Exception:
+        pass
+
+    # DREAMS → ASPIRATIONS: Let dreams influence future direction
+    dream_suggestions = []
+    try:
+        dream_suggestions = let_dreams_influence_aspirations()
+    except Exception:
+        pass
+
+    # CROSS-PROJECT PATTERNS: Auto-promote patterns that recur across projects
+    promoted_patterns = []
+    try:
+        cross_project_candidates = find_cross_project_wisdom(min_occurrences=2)
+        for pattern in cross_project_candidates[:3]:  # Limit to avoid noise
+            wisdom_id = promote_pattern_to_wisdom(pattern["id"])
+            if wisdom_id:
+                promoted_patterns.append(pattern["title"])
+    except Exception:
+        pass
+
+    # AUTO-BACKUP: Create backup if enough time has passed
+    backup_path = None
+    try:
+        backup_path = auto_backup_if_needed(min_interval_hours=4)
+    except Exception:
+        pass
+
+    # AUTO-EVOLVE: Detect evolution insights from session
+    evolution_count = 0
+    try:
+        evolution_count = _detect_evolution_insights()
+    except Exception:
+        pass
+
+    # OUTCOME: Detect and record session outcome
+    session_outcome = Outcome.UNKNOWN
+    try:
+        if _session_messages:
+            session_outcome = detect_outcome(_session_messages, _session_files_touched)
+            if conv_id:
+                record_outcome(conv_id, session_outcome)
+    except Exception:
+        pass
+
+    # Log session end event
+    try:
+        log_event(
+            EventType.SESSION_END,
+            data={
+                "fragments": len(fragments) if fragments else 0,
+                "promoted": len(promoted) if promoted else 0,
+                "unfulfilled": len(unfulfilled) if unfulfilled else 0,
+                "episode_ended": episode_ended,
+                "dream_suggestions": len(dream_suggestions),
+                "promoted_patterns": len(promoted_patterns),
+                "backup_created": backup_path is not None,
+                "evolution_insights": evolution_count,
+                "outcome": session_outcome.value,
+            }
+        )
+    except Exception:
+        pass
+
     # Build output
     output_parts = []
     if fragments:
         output_parts.append(f"Remembered {len(fragments)} moments")
     if promoted:
         output_parts.append(f"Promoted {len(promoted)} to wisdom")
+    if observation_summary:
+        obs_count = observation_summary.get("observations", 0)
+        promoted_obs = observation_summary.get("promoted_to_wisdom", 0)
+        if obs_count:
+            output_parts.append(f"Observed {obs_count} learnings")
+        if promoted_obs:
+            output_parts.append(f"Promoted {promoted_obs} observations")
+    if unfulfilled:
+        output_parts.append(f"Unfulfilled intentions: {len(unfulfilled)}")
+    if dream_suggestions:
+        output_parts.append(f"Dreams → {len(dream_suggestions)} aspiration suggestions")
+    if promoted_patterns:
+        output_parts.append(f"Promoted {len(promoted_patterns)} cross-project patterns")
+    if backup_path:
+        output_parts.append("Backup created")
+    if evolution_count:
+        output_parts.append(f"Recorded {evolution_count} evolution insights")
+    if session_outcome != Outcome.UNKNOWN:
+        output_parts.append(f"Outcome: {session_outcome.value}")
 
     return "; ".join(output_parts) if output_parts else ""
+
+
+def _detect_evolution_insights() -> int:
+    """
+    Detect evolution insights from session messages.
+
+    Looks for patterns that suggest improvements to the soul system:
+    - Mentions of "should" or "could" regarding soul behavior
+    - Struggles with specific features
+    - Feature requests or suggestions
+    - Performance complaints
+
+    Returns count of insights recorded.
+    """
+    if not _session_messages:
+        return 0
+
+    full_text = " ".join(m.get("content", "") for m in _session_messages).lower()
+    insights_recorded = 0
+
+    # Patterns that suggest evolution opportunities
+    evolution_signals = {
+        "architecture": [
+            "soul should",
+            "memory should",
+            "hooks should",
+            "wisdom should",
+        ],
+        "performance": [
+            "slow to start",
+            "takes too long",
+            "latency",
+            "context is low",
+        ],
+        "feature": [
+            "wish the soul could",
+            "would be nice if",
+            "missing feature",
+            "no way to",
+        ],
+        "ux": [
+            "confusing",
+            "hard to find",
+            "not intuitive",
+            "unclear how",
+        ],
+        "bug": [
+            "soul error",
+            "hook failed",
+            "wisdom not",
+            "memory lost",
+        ],
+    }
+
+    for category, signals in evolution_signals.items():
+        for signal in signals:
+            if signal in full_text:
+                idx = full_text.find(signal)
+                start = max(0, idx - 50)
+                end = min(len(full_text), idx + 100)
+                context = full_text[start:end].strip()
+
+                if len(context) > 30:
+                    record_insight(
+                        category=category,
+                        insight=f"Session signal: '{signal}' detected",
+                        suggested_change=context[:150],
+                        priority="medium" if category == "bug" else "low",
+                        affected_modules=["hooks.py"],
+                    )
+                    insights_recorded += 1
+                    break  # One per category per session
+
+    return insights_recorded
 
 
 def _synthesize_emotional_arc(emotions: list) -> str:
@@ -559,6 +1278,7 @@ def assistant_stop(assistant_output: str) -> str:
     4. Wisdom application tracking (closing the feedback loop)
     5. Auto-learning for breakthrough patterns
     6. Emotional tracking for felt continuity
+    7. Passive learning: track messages and extract file patterns
 
     Inline markers - unified vocabulary:
 
@@ -570,6 +1290,31 @@ def assistant_stop(assistant_output: str) -> str:
     """
     if len(assistant_output.strip()) < 50:
         return ""
+
+    # OBSERVE: Track assistant message for session analysis
+    _add_message("assistant", assistant_output[:2000])
+
+    # OBSERVE: Extract files touched from output
+    import re
+    file_pattern = r'[\w/.-]+\.(?:py|pyx|pxd|cpp|c|h|rs|go|js|ts|tsx|json|yaml|toml|md)'
+    files_in_output = re.findall(file_pattern, assistant_output)
+    if files_in_output:
+        _add_files_touched(files_in_output[:20])  # Limit to avoid noise
+
+    # NARRATIVE: Track files as characters and detect key moments
+    if files_in_output:
+        _track_episode_characters(files=files_in_output[:10])
+
+    # Detect key moments from output
+    output_lower = assistant_output.lower()
+    if "fixed" in output_lower or "bug" in output_lower:
+        _track_episode_moment("Fixed a bug", EmotionalTone.SATISFACTION)
+    elif "error" in output_lower and "failed" in output_lower:
+        _track_episode_moment("Encountered errors", EmotionalTone.STRUGGLE)
+    elif "works" in output_lower or "success" in output_lower:
+        _track_episode_moment("Got something working", EmotionalTone.BREAKTHROUGH)
+    elif "test" in output_lower and "pass" in output_lower:
+        _track_episode_moment("Tests passing", EmotionalTone.SATISFACTION)
 
     stats = {"memory": 0, "soul": 0, "dreams": 0, "partner": 0, "wisdom_applied": 0}
 
@@ -603,8 +1348,36 @@ def assistant_stop(assistant_output: str) -> str:
     # 8. EFFICIENCY LEARNING: Learn from what was useful
     _learn_efficiency_from_output(assistant_output)
 
+    # 9. CURIOSITY: Detect uncertainty signals in output
+    try:
+        uncertainty_gaps = detect_uncertainty_signals(assistant_output)
+        for gap in uncertainty_gaps[:2]:  # Limit to avoid noise
+            save_gap(gap)
+            stats["uncertainty"] = stats.get("uncertainty", 0) + 1
+    except Exception:
+        pass
+
+    # 10. AGENT: Run agent step to learn from this output
+    agent_wisdom = None
+    try:
+        agent_report = agent_step(
+            assistant_output=assistant_output,
+            session_phase="active",
+        )
+        # Surface wisdom if agent found relevant patterns
+        for result in agent_report.results:
+            if result.success and result.action.type == ActionType.SURFACE_WISDOM:
+                if result.side_effects:
+                    agent_wisdom = result.side_effects[0][:50]
+            elif result.success and result.action.type == ActionType.NOTE_PATTERN:
+                stats["patterns"] = stats.get("patterns", 0) + 1
+    except Exception:
+        pass
+
     # Return summary (silent unless something notable)
     notable = []
+    if agent_wisdom:
+        notable.append(f"Wisdom: {agent_wisdom}")
     if stats["memory"] or stats["soul"]:
         parts = []
         if stats["memory"]:
@@ -618,6 +1391,8 @@ def assistant_stop(assistant_output: str) -> str:
         notable.append("Partner observed")
     if stats["wisdom_applied"]:
         notable.append(f"Applied {stats['wisdom_applied']} wisdom")
+    if stats.get("uncertainty"):
+        notable.append(f"Detected {stats['uncertainty']} uncertainties")
 
     return "; ".join(notable) if notable else ""
 
@@ -745,6 +1520,10 @@ def user_prompt(
     3. Recall decisions (don't re-debate)
     4. Only then add wisdom if budget allows
 
+    Also runs passive observation on user message:
+    - Detects corrections, preferences, decisions, breakthroughs
+    - Records observations for later promotion to wisdom
+
     Budget-aware: Reduces injection when context is low.
     """
     global _last_injection
@@ -752,6 +1531,15 @@ def user_prompt(
 
     if len(user_input.strip()) < 20:
         return ""
+
+    # OBSERVE: Analyze user message for learnings (corrections, preferences, etc.)
+    try:
+        learnings = _observe_user_message(user_input)
+        if learnings:
+            # Auto-promote high confidence learnings to wisdom
+            auto_promote_high_confidence(threshold=0.75)
+    except Exception:
+        pass
 
     # Check context budget before deciding what to inject
     budget_check = check_budget_before_inject(transcript_path)
@@ -767,16 +1555,31 @@ def user_prompt(
         )
 
     # Adjust injection based on budget mode
-    mode = budget_check.get("mode", "full")
+    budget_mode = budget_check.get("mode", "full")
+
+    # MOOD: Combine budget mode with mood-based injection mode
+    # Take the more restrictive of the two
+    mood_mode = _get_mood_injection_mode()
+    mode_priority = {"minimal": 0, "reduced": 1, "compact": 1, "full": 2}
+    if mode_priority.get(mood_mode, 2) < mode_priority.get(budget_mode, 2):
+        mode = mood_mode
+    else:
+        mode = budget_mode
 
     output = []
     injected_items = []
 
     # Warn when context is getting low
-    if mode == "minimal":
+    if budget_mode == "minimal":
         output.append("⚠️ Context window critically low (<10%). Consider /compact or finishing soon.")
-    elif mode == "compact":
+    elif budget_mode == "compact":
         output.append("⚡ Context at 25%. Reducing injections.")
+
+    # MOOD: Add mood-based nudges
+    if mode == "full":
+        nudges = _get_mood_wisdom_nudges()
+        for nudge in nudges[:2]:
+            output.append(f"💭 {nudge}")
 
     # EFFICIENCY FIRST: Check for known problem patterns
     pattern_match = fingerprint_problem(user_input)
@@ -804,6 +1607,34 @@ def user_prompt(
             output.append(f"⚖️ Decision [{d['topic']}]: {d['decision'][:60]}")
             injected_items.append(("decision", d["topic"]))
 
+    # INTENTIONS: Surface active intentions that influence this work
+    if mode != "minimal":
+        intention_ctx = get_intention_context()
+        if intention_ctx:
+            output.append(intention_ctx)
+            injected_items.append(("intentions", "active"))
+
+    # TEMPORAL: Add temporal context (proactive suggestions, trends)
+    if mode == "full":
+        temporal_ctx = get_temporal_context()
+        if temporal_ctx:
+            output.append(temporal_ctx)
+            injected_items.append(("temporal", "proactive"))
+
+    # CURIOSITY: Surface pending questions if we have knowledge gaps
+    if mode == "full":
+        try:
+            questions = get_pending_questions(limit=2)
+            if questions:
+                question_text = format_questions_for_prompt(questions, max_questions=2)
+                if question_text:
+                    output.append("")
+                    output.append(question_text)
+                    for q in questions:
+                        injected_items.append(("curiosity_question", q.question[:40]))
+        except Exception:
+            pass
+
     # Run unified forward pass for coherent context
     try:
         ctx = forward_pass(user_input, session_type="prompt")
@@ -819,8 +1650,8 @@ def user_prompt(
             # Organic weaving - no headers, just flowing context
             woven = format_context(ctx, style="woven")
             if woven:
-                # In compact mode, truncate
-                if mode == "compact":
+                # In compact/reduced mode, truncate
+                if mode in ("compact", "reduced"):
                     return woven[:500] if len(woven) > 500 else woven
                 return woven
         else:
@@ -871,6 +1702,23 @@ def user_prompt(
                     content = w["content"][:100]
                     output.append(f"  {content}")
                 output.append("")
+
+    # AGENT: Run agent step to observe user input and influence injection
+    try:
+        agent_report = agent_step(
+            user_prompt=user_input,
+            session_phase="active",
+        )
+        # If agent set an intention or has proposals, include in output
+        for result in agent_report.results:
+            if result.success and result.action.type == ActionType.SET_SESSION_INTENTION:
+                output.append(f"🎯 Intent: {result.action.payload.get('want', '')[:50]}")
+                injected_items.append(("agent_intention", result.action.payload.get("want", "")))
+            elif result.action.type == ActionType.PROPOSE_ABANDON:
+                # Flag proposed abandonments for human consideration
+                output.append(f"⚠️ Consider abandoning: {result.action.payload.get('want', '')[:40]}")
+    except Exception:
+        pass
 
     # Track what we injected for the feedback loop
     _last_injection = {

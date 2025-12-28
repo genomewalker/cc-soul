@@ -216,6 +216,149 @@ from .narrative import (
     StoryThread,
 )
 
+# Agency Layer - the soul's will
+from .aspirations import (
+    aspire,
+    get_aspirations,
+    get_active_aspirations,
+    note_progress,
+    realize_aspiration,
+    release_aspiration,
+    get_aspiration_summary,
+    format_aspirations_display,
+    AspirationState,
+    Aspiration,
+)
+
+from .intentions import (
+    intend,
+    get_intentions,
+    get_active_intentions,
+    check_intention,
+    check_all_intentions,
+    fulfill_intention,
+    abandon_intention,
+    block_intention,
+    unblock_intention,
+    find_tension,
+    get_intention_context,
+    format_intentions_display,
+    cleanup_session_intentions,
+    IntentionScope,
+    IntentionState,
+    Intention,
+)
+
+from .soul_agent import (
+    agent_step,
+    format_agent_report,
+    SoulAgent,
+    AgentReport,
+    Observation as AgentObservation,
+    Judgment,
+    Action,
+    ActionResult,
+    ActionType,
+    RiskLevel,
+)
+
+# Dreams - visions that spark evolution
+from .dreams import (
+    dream,
+    harvest_dreams,
+    spark_aspiration_from_dream,
+    spark_insight_from_dream,
+    find_resonant_dreams,
+    let_dreams_influence_aspirations,
+    get_dream_summary,
+    format_dreams_display,
+    Dream,
+)
+
+# State Layer - the soul's current being
+from .mood import (
+    compute_mood,
+    get_mood_reflection,
+    format_mood_display,
+    Mood,
+    Clarity,
+    Growth,
+    Engagement,
+    Connection,
+    Energy,
+)
+
+from .coherence import (
+    compute_coherence,
+    get_coherence_history,
+    record_coherence,
+    format_coherence_display,
+    CoherenceState,
+)
+
+from .insights import (
+    crystallize_insight,
+    get_insights,
+    get_revelations,
+    format_insights_display,
+    InsightDepth,
+    Insight,
+)
+
+# Temporal - time shapes the soul
+from .temporal import (
+    EventType,
+    TemporalConfig,
+    init_temporal_tables,
+    log_event,
+    get_events,
+    get_temporal_context,
+    run_temporal_maintenance,
+    get_proactive_items,
+    record_cross_project_pattern,
+)
+
+# Unified Processing - the forward pass
+from .unified import (
+    forward_pass,
+    format_context,
+    format_session_start,
+    format_prompt_context,
+    process_session_start,
+    process_prompt,
+    record_moment,
+    SoulContext,
+)
+
+# Outcomes - session results
+from .outcomes import (
+    Outcome,
+    detect_outcome,
+    record_outcome,
+    create_auto_handoff,
+    get_latest_handoff,
+    load_handoff,
+    format_handoff_for_context,
+    list_handoffs,
+    cleanup_old_handoffs,
+)
+
+# Spanda - divine pulsation (the soul's perpetual creative vibration)
+from .spanda import (
+    learning_cycle,
+    confirm_and_strengthen,
+    agency_cycle,
+    spawn_intention_from_aspiration,
+    dreams_to_aspirations,
+    evolution_cycle,
+    coherence_feedback,
+    coherence_weighted_recall,
+    session_start_circle,
+    session_end_circle,
+    prompt_circle,
+    daily_maintenance,
+)
+
 __all__ = [
     # Core
     "init_soul",
@@ -390,4 +533,118 @@ __all__ = [
     "EpisodeType",
     "Episode",
     "StoryThread",
+    # Aspirations (directions of growth)
+    "aspire",
+    "get_aspirations",
+    "get_active_aspirations",
+    "note_progress",
+    "realize_aspiration",
+    "release_aspiration",
+    "get_aspiration_summary",
+    "format_aspirations_display",
+    "AspirationState",
+    "Aspiration",
+    # Intentions (concrete wants)
+    "intend",
+    "get_intentions",
+    "get_active_intentions",
+    "check_intention",
+    "check_all_intentions",
+    "fulfill_intention",
+    "abandon_intention",
+    "block_intention",
+    "unblock_intention",
+    "find_tension",
+    "get_intention_context",
+    "format_intentions_display",
+    "cleanup_session_intentions",
+    "IntentionScope",
+    "IntentionState",
+    "Intention",
+    # Soul Agent (autonomous agency)
+    "agent_step",
+    "format_agent_report",
+    "SoulAgent",
+    "AgentReport",
+    "AgentObservation",
+    "Judgment",
+    "Action",
+    "ActionResult",
+    "ActionType",
+    "RiskLevel",
+    # Dreams (visions that spark evolution)
+    "dream",
+    "harvest_dreams",
+    "spark_aspiration_from_dream",
+    "spark_insight_from_dream",
+    "find_resonant_dreams",
+    "let_dreams_influence_aspirations",
+    "get_dream_summary",
+    "format_dreams_display",
+    "Dream",
+    # Mood (soul's current state)
+    "compute_mood",
+    "get_mood_reflection",
+    "format_mood_display",
+    "Mood",
+    "Clarity",
+    "Growth",
+    "Engagement",
+    "Connection",
+    "Energy",
+    # Coherence (τₖ - integration measure)
+    "compute_coherence",
+    "get_coherence_history",
+    "record_coherence",
+    "format_coherence_display",
+    "CoherenceState",
+    # Insights (crystallized breakthroughs)
+    "crystallize_insight",
+    "get_insights",
+    "get_revelations",
+    "format_insights_display",
+    "InsightDepth",
+    "Insight",
+    # Temporal (time shapes the soul)
+    "EventType",
+    "TemporalConfig",
+    "init_temporal_tables",
+    "log_event",
+    "get_events",
+    "get_temporal_context",
+    "run_temporal_maintenance",
+    "get_proactive_items",
+    "record_cross_project_pattern",
+    # Unified Processing (forward pass)
+    "forward_pass",
+    "format_context",
+    "format_session_start",
+    "format_prompt_context",
+    "process_session_start",
+    "process_prompt",
+    "record_moment",
+    "SoulContext",
+    # Outcomes (session results)
+    "Outcome",
+    "detect_outcome",
+    "record_outcome",
+    "create_auto_handoff",
+    "get_latest_handoff",
+    "load_handoff",
+    "format_handoff_for_context",
+    "list_handoffs",
+    "cleanup_old_handoffs",
+    # Spanda (divine pulsation - the soul's perpetual creative vibration)
+    "learning_cycle",
+    "confirm_and_strengthen",
+    "agency_cycle",
+    "spawn_intention_from_aspiration",
+    "dreams_to_aspirations",
+    "evolution_cycle",
+    "coherence_feedback",
+    "coherence_weighted_recall",
+    "session_start_circle",
+    "session_end_circle",
+    "prompt_circle",
+    "daily_maintenance",
 ]

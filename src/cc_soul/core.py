@@ -114,6 +114,24 @@ def init_soul():
         )
     """)
 
+    # Intentions - concrete wants that influence decisions
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS intentions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            want TEXT NOT NULL,
+            why TEXT NOT NULL,
+            scope TEXT DEFAULT 'session',
+            strength REAL DEFAULT 0.8,
+            state TEXT DEFAULT 'active',
+            context TEXT DEFAULT '',
+            blocker TEXT,
+            created_at TEXT NOT NULL,
+            last_checked_at TEXT NOT NULL,
+            check_count INTEGER DEFAULT 0,
+            alignment_score REAL DEFAULT 1.0
+        )
+    """)
+
     # Indexes
     c.execute("CREATE INDEX IF NOT EXISTS idx_wisdom_type ON wisdom(type)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_wisdom_domain ON wisdom(domain)")
@@ -121,6 +139,8 @@ def init_soul():
     c.execute(
         "CREATE INDEX IF NOT EXISTS idx_applications_wisdom ON wisdom_applications(wisdom_id)"
     )
+    c.execute("CREATE INDEX IF NOT EXISTS idx_intentions_state ON intentions(state)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_intentions_scope ON intentions(scope)")
 
     conn.commit()
     conn.close()

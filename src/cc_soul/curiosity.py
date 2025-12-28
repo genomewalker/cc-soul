@@ -31,6 +31,10 @@ class GapType(str, Enum):
     NEW_DOMAIN = "new_domain"  # Unfamiliar territory
     STALE_WISDOM = "stale_wisdom"  # Old wisdom never applied
     FAILED_PATTERN = "failed_pattern"  # Pattern that keeps failing
+    CONTRADICTION = "contradiction"  # Conflicting beliefs
+    INTENTION_TENSION = "intention_tension"  # Competing intentions
+    UNCERTAINTY = "uncertainty"  # Detected uncertainty in reasoning
+    USER_BEHAVIOR = "user_behavior"  # Something user does we don't understand
 
 
 class QuestionStatus(str, Enum):
@@ -358,39 +362,290 @@ def detect_stale_wisdom() -> List[Gap]:
     return gaps
 
 
-def detect_all_gaps() -> List[Gap]:
-    """Run all gap detection and return combined results."""
+def detect_contradictions() -> List[Gap]:
+    """Detect conflicting beliefs or wisdom entries."""
+    _ensure_curiosity_tables()
+    conn = sqlite3.connect(SOUL_DB)
+    cursor = conn.cursor()
+    gaps = []
+
+    # Look for opposing keywords
+    opposing_pairs = [
+        ("always", "never"),
+        ("simple", "complex"),
+        ("fast", "slow"),
+        ("more", "less"),
+        ("add", "remove"),
+        ("include", "exclude"),
+    ]
+
+    # Find wisdom pairs in the same domain that might conflict
+    try:
+        cursor.execute("""
+            SELECT w1.id, w1.title, w1.content, w2.id, w2.title, w2.content, w1.domain
+            FROM wisdom w1
+            JOIN wisdom w2 ON w1.domain = w2.domain AND w1.id < w2.id
+            WHERE w1.domain IS NOT NULL
+            AND w1.type = 'principle' AND w2.type = 'principle'
+            LIMIT 20
+        """)
+
+        for row in cursor.fetchall():
+            w1_id, w1_title, w1_content, w2_id, w2_title, w2_content, domain = row
+            w1_lower = (w1_content or "").lower()
+            w2_lower = (w2_content or "").lower()
+
+            for word1, word2 in opposing_pairs:
+                if (word1 in w1_lower and word2 in w2_lower) or (
+                    word2 in w1_lower and word1 in w2_lower
+                ):
+                    gap = Gap(
+                        id=f"contradiction_{w1_id}_{w2_id}",
+                        type=GapType.CONTRADICTION,
+                        description=f"Potential conflict between '{w1_title}' and '{w2_title}'",
+                        evidence=[
+                            f"W1: {w1_content[:60]}...",
+                            f"W2: {w2_content[:60]}...",
+                        ],
+                        priority=0.7,
+                        related_concepts=[domain] if domain else [],
+                    )
+                    gaps.append(gap)
+                    break
+    except sqlite3.OperationalError:
+        pass  # Table doesn't exist
+
+    # Check beliefs for conflicts (use correct column names: belief, strength)
+    try:
+        cursor.execute("""
+            SELECT id, belief, strength FROM beliefs
+            WHERE strength > 0.5
+        """)
+        beliefs = cursor.fetchall()
+
+        for i, (b1_id, b1_stmt, b1_conf) in enumerate(beliefs):
+            for b2_id, b2_stmt, b2_conf in beliefs[i + 1 :]:
+                b1_lower = (b1_stmt or "").lower()
+                b2_lower = (b2_stmt or "").lower()
+                for word1, word2 in opposing_pairs:
+                    if (word1 in b1_lower and word2 in b2_lower) or (
+                        word2 in b1_lower and word1 in b2_lower
+                    ):
+                        gap = Gap(
+                            id=f"belief_conflict_{b1_id}_{b2_id}",
+                            type=GapType.CONTRADICTION,
+                            description=f"Conflicting beliefs detected",
+                            evidence=[f"B1: {b1_stmt}", f"B2: {b2_stmt}"],
+                            priority=0.8,
+                        )
+                        gaps.append(gap)
+                        break
+    except sqlite3.OperationalError:
+        pass  # Table doesn't exist
+
+    conn.close()
+    return gaps
+
+
+def detect_intention_tensions() -> List[Gap]:
+    """Detect competing or conflicting intentions."""
+    _ensure_curiosity_tables()
+    conn = sqlite3.connect(SOUL_DB)
+    cursor = conn.cursor()
+    gaps = []
+
+    # Check intentions table if it exists
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='intentions'
+    """)
+
+    if not cursor.fetchone():
+        conn.close()
+        return gaps
+
+    # Find active intentions with low alignment (use state instead of status)
+    try:
+        cursor.execute("""
+            SELECT id, want, why, alignment_score
+            FROM intentions
+            WHERE state = 'active' AND alignment_score < 0.5
+            ORDER BY alignment_score ASC
+            LIMIT 5
+        """)
+
+        for row in cursor.fetchall():
+            int_id, want, why, score = row
+            gap = Gap(
+                id=f"tension_misaligned_{int_id}",
+                type=GapType.INTENTION_TENSION,
+                description=f"Intention '{want[:50]}' has low alignment ({score:.0%})",
+                evidence=[f"Why: {why}", f"Alignment: {score:.0%}"],
+                priority=0.8 - score,  # Lower alignment = higher priority
+            )
+            gaps.append(gap)
+
+        # Find intentions that might conflict (same context, different wants)
+        cursor.execute("""
+            SELECT i1.id, i1.want, i2.id, i2.want, i1.context
+            FROM intentions i1
+            JOIN intentions i2 ON i1.context = i2.context AND i1.id < i2.id
+            WHERE i1.state = 'active' AND i2.state = 'active'
+            AND i1.context != ''
+            LIMIT 10
+        """)
+
+        for row in cursor.fetchall():
+            i1_id, i1_want, i2_id, i2_want, context = row
+            gap = Gap(
+                id=f"tension_conflict_{i1_id}_{i2_id}",
+                type=GapType.INTENTION_TENSION,
+                description=f"Multiple intentions in '{context}' context",
+                evidence=[f"Want 1: {i1_want}", f"Want 2: {i2_want}"],
+                priority=0.6,
+            )
+            gaps.append(gap)
+    except sqlite3.OperationalError:
+        pass  # Column doesn't exist
+
+    conn.close()
+    return gaps
+
+
+def detect_uncertainty_signals(assistant_output: str) -> List[Gap]:
+    """Detect uncertainty in assistant output that suggests knowledge gaps."""
+    gaps = []
+
+    uncertainty_markers = [
+        ("I'm not sure", 0.7),
+        ("I think", 0.4),
+        ("possibly", 0.5),
+        ("might be", 0.5),
+        ("could be", 0.4),
+        ("I believe", 0.4),
+        ("probably", 0.5),
+        ("unclear", 0.6),
+        ("uncertain", 0.7),
+        ("I don't know", 0.8),
+        ("not certain", 0.7),
+        ("may or may not", 0.6),
+        ("hard to say", 0.6),
+    ]
+
+    output_lower = assistant_output.lower()
+
+    for marker, priority in uncertainty_markers:
+        if marker.lower() in output_lower:
+            # Find the context around the marker
+            idx = output_lower.find(marker.lower())
+            start = max(0, idx - 50)
+            end = min(len(assistant_output), idx + len(marker) + 100)
+            context = assistant_output[start:end].strip()
+
+            gap = Gap(
+                id=f"uncertainty_{hash(marker + context[:30]) % 100000}",
+                type=GapType.UNCERTAINTY,
+                description=f"Expressed uncertainty: '{marker}'",
+                evidence=[f"Context: ...{context}..."],
+                priority=priority,
+            )
+            gaps.append(gap)
+
+    return gaps
+
+
+def detect_user_behavior_patterns() -> List[Gap]:
+    """Detect user behaviors we observe but don't understand."""
+    _ensure_curiosity_tables()
+    conn = sqlite3.connect(SOUL_DB)
+    cursor = conn.cursor()
+    gaps = []
+
+    # Check identity observations for unexplained patterns
+    try:
+        cursor.execute("""
+            SELECT aspect, key, value, first_observed
+            FROM identity
+            WHERE confidence < 0.5
+            ORDER BY first_observed DESC
+            LIMIT 10
+        """)
+
+        for row in cursor.fetchall():
+            aspect, key, value, observed = row
+            observed_str = observed[:10] if observed else "unknown"
+            gap = Gap(
+                id=f"behavior_{hash(key) % 100000}",
+                type=GapType.USER_BEHAVIOR,
+                description=f"Observed '{key}' = '{value}' but uncertain why",
+                evidence=[f"Aspect: {aspect}", f"First observed: {observed_str}"],
+                priority=0.5,
+            )
+            gaps.append(gap)
+    except sqlite3.OperationalError:
+        pass  # Table doesn't exist
+
+    # Check for patterns in decisions without rationale
+    try:
+        cursor.execute("""
+            SELECT topic, decision, context
+            FROM decisions
+            WHERE rationale IS NULL OR rationale = ''
+            GROUP BY topic
+            HAVING COUNT(*) >= 2
+            LIMIT 5
+        """)
+
+        for row in cursor.fetchall():
+            topic, decision, context = row
+            evidence = [f"Context: {context[:80]}..."] if context else []
+            gap = Gap(
+                id=f"pattern_{hash(topic) % 100000}",
+                type=GapType.USER_BEHAVIOR,
+                description=f"User repeatedly chooses '{decision}' for '{topic}' - why?",
+                evidence=evidence,
+                priority=0.6,
+            )
+            gaps.append(gap)
+    except sqlite3.OperationalError:
+        pass  # Table doesn't exist
+
+    conn.close()
+    return gaps
+
+
+def detect_all_gaps(assistant_output: Optional[str] = None) -> List[Gap]:
+    """Run all gap detection and return combined results.
+
+    Args:
+        assistant_output: Optional recent assistant output to analyze for uncertainty
+    """
     all_gaps = []
 
-    try:
-        all_gaps.extend(detect_recurring_problems())
-    except Exception:
-        pass
+    detectors = [
+        detect_recurring_problems,
+        detect_repeated_corrections,
+        detect_unknown_files,
+        detect_missing_rationale,
+        detect_new_domains,
+        detect_stale_wisdom,
+        detect_contradictions,
+        detect_intention_tensions,
+        detect_user_behavior_patterns,
+    ]
 
-    try:
-        all_gaps.extend(detect_repeated_corrections())
-    except Exception:
-        pass
+    for detector in detectors:
+        try:
+            all_gaps.extend(detector())
+        except Exception:
+            pass
 
-    try:
-        all_gaps.extend(detect_unknown_files())
-    except Exception:
-        pass
-
-    try:
-        all_gaps.extend(detect_missing_rationale())
-    except Exception:
-        pass
-
-    try:
-        all_gaps.extend(detect_new_domains())
-    except Exception:
-        pass
-
-    try:
-        all_gaps.extend(detect_stale_wisdom())
-    except Exception:
-        pass
+    # Detect uncertainty from output if provided
+    if assistant_output:
+        try:
+            all_gaps.extend(detect_uncertainty_signals(assistant_output))
+        except Exception:
+            pass
 
     # Sort by priority
     all_gaps.sort(key=lambda g: -g.priority)
@@ -463,6 +718,22 @@ def generate_question(gap: Gap) -> Question:
         GapType.FAILED_PATTERN: [
             "This approach keeps failing: {desc}. What's a better alternative?",
             "I've tried {desc} multiple times without success. What am I missing?",
+        ],
+        GapType.CONTRADICTION: [
+            "I notice {desc}. Which principle should take precedence?",
+            "These seem to conflict: {desc}. How do I reconcile them?",
+        ],
+        GapType.INTENTION_TENSION: [
+            "I'm pulled in different directions: {desc}. Which should I prioritize?",
+            "There's tension between intentions: {desc}. How should I resolve this?",
+        ],
+        GapType.UNCERTAINTY: [
+            "I expressed uncertainty about {desc}. Can you clarify?",
+            "I wasn't confident about {desc}. What's the definitive answer?",
+        ],
+        GapType.USER_BEHAVIOR: [
+            "I've noticed {desc}. Is there a reason for this pattern?",
+            "Help me understand: {desc}",
         ],
     }
 

@@ -31,6 +31,9 @@ from .graph import (
 from .wisdom import (
     quick_recall,
 )
+from .spanda import (
+    coherence_weighted_recall,
+)
 from .narrative import (
     start_episode,
     get_ongoing_episodes,
@@ -173,12 +176,14 @@ def forward_pass(prompt: str, session_type: str = "prompt") -> SoulContext:
         except Exception:
             pass  # Graph may not have concepts yet
 
-    # Layer 3: Wisdom - match principles to context
+    # Layer 3: Wisdom - match principles to context (coherence-weighted)
     # Use domains and concepts to find relevant wisdom
+    # Coherence influences how much wisdom surfaces (high τₖ = more wisdom)
     search_terms = list(ctx.domains) + [c.name for c in ctx.concepts[:3]]
     if search_terms:
         for term in search_terms[:3]:
-            wisdom = quick_recall(term, limit=2)
+            # coherence_weighted_recall adjusts limit and filters by confidence based on τₖ
+            wisdom = coherence_weighted_recall(term, limit=2)
             for w in wisdom:
                 if w not in ctx.wisdom:
                     ctx.wisdom.append(w)
