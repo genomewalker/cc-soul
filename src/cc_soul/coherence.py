@@ -415,7 +415,13 @@ def record_coherence(state: CoherenceState) -> None:
 
     import json
 
-    signals_json = json.dumps(state.to_dict()["signals"])
+    # Combine all signal groups into one for storage
+    all_signals = {
+        **state.to_dict()["instantaneous"],
+        **state.to_dict()["developmental"],
+        **state.to_dict()["meta"],
+    }
+    signals_json = json.dumps(all_signals)
 
     c.execute(
         """
