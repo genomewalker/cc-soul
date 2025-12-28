@@ -374,6 +374,75 @@ def get_unified_context(compact: bool = False) -> str:
 
 
 @mcp.tool()
+def soul_greeting(include_rich: bool = False) -> str:
+    """Get the soul's session greeting combining universal wisdom and project memory.
+
+    Similar to claude-mem's startup greeting but from cc-soul.
+
+    Args:
+        include_rich: If True, include detailed observation table
+    """
+    from .bridge import unified_context
+    from .hooks import format_soul_greeting, format_rich_context, get_project_name
+
+    project = get_project_name()
+    ctx = unified_context()
+
+    greeting = format_soul_greeting(project, ctx)
+
+    if include_rich:
+        rich = format_rich_context(project, ctx)
+        return greeting + "\n\n" + rich
+
+    return greeting
+
+
+@mcp.tool()
+def soul_rich_context() -> str:
+    """Get detailed observation context table for session start.
+
+    Returns a formatted table of recent observations with categories,
+    timestamps, and memory statistics.
+    """
+    from .bridge import unified_context
+    from .hooks import format_rich_context, get_project_name
+
+    project = get_project_name()
+    ctx = unified_context()
+
+    return format_rich_context(project, ctx)
+
+
+@mcp.tool()
+def pre_compact_save(transcript_path: str = None) -> str:
+    """Save context before compaction.
+
+    Call this in a PreCompact hook to persist important session
+    fragments that should survive context compaction.
+
+    Args:
+        transcript_path: Optional path to the transcript file
+    """
+    from .hooks import pre_compact
+
+    result = pre_compact(transcript_path=transcript_path)
+    return result if result else "No context to save"
+
+
+@mcp.tool()
+def post_compact_restore() -> str:
+    """Restore context after compaction.
+
+    Call this after compaction to retrieve previously saved context
+    and maintain session continuity.
+    """
+    from .hooks import post_compact
+
+    result = post_compact()
+    return result if result else "No context to restore"
+
+
+@mcp.tool()
 def promote_to_wisdom(observation_id: str, wisdom_type: str = "pattern") -> str:
     """Promote a project observation to universal soul wisdom.
 

@@ -216,7 +216,13 @@ def cmd_health(args):
         with open(settings_path) as f:
             settings = json.load(f)
         hooks = settings.get("hooks", {})
-        required = ["SessionStart", "SessionEnd", "UserPromptSubmit", "Stop"]
+        required = [
+            "SessionStart",
+            "SessionEnd",
+            "UserPromptSubmit",
+            "Stop",
+            "PreCompact",
+        ]
         installed = [h for h in required if h in hooks]
         if len(installed) == 0:
             return "FAIL", "No hooks installed"
@@ -1557,12 +1563,24 @@ def cmd_install_hooks(args):
         "SessionStart": [
             {
                 "matcher": "startup",
-                "hooks": [{"type": "command", "command": "soul hook start"}],
+                "hooks": [{"type": "command", "command": "soul hook start --rich"}],
             },
             {
                 "matcher": "resume",
                 "hooks": [{"type": "command", "command": "soul hook start"}],
             },
+            {
+                "matcher": "compact",
+                "hooks": [
+                    {"type": "command", "command": "soul hook start --after-compact"}
+                ],
+            },
+        ],
+        "PreCompact": [
+            {
+                "matcher": "",
+                "hooks": [{"type": "command", "command": "soul hook pre-compact"}],
+            }
         ],
         "UserPromptSubmit": [
             {
@@ -1644,7 +1662,13 @@ def cmd_uninstall_hooks(args):
 
         if "hooks" in settings:
             removed = []
-            for hook_name in ["SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"]:
+            for hook_name in [
+                "SessionStart",
+                "UserPromptSubmit",
+                "Stop",
+                "SessionEnd",
+                "PreCompact",
+            ]:
                 if hook_name in settings["hooks"]:
                     del settings["hooks"][hook_name]
                     removed.append(hook_name)
@@ -1743,8 +1767,26 @@ def cmd_hook(args):
             stdin_data = {"prompt": raw_input}
 
     if args.hook == "start":
-        # session_start doesn't need transcript_path but we saved it above
-        print(session_start())
+        # session_start with optional flags
+        after_compact = getattr(args, "after_compact", False)
+        include_rich = getattr(args, "rich", False)
+        print(session_start(after_compact=after_compact, include_rich=include_rich))
+    elif args.hook == "start-rich":
+        # session_start returning both greeting and additional context
+        from .hooks import session_start_rich
+
+        greeting, rich = session_start_rich()
+        print(greeting)
+        print("---ADDITIONAL_CONTEXT---")
+        print(rich)
+    elif args.hook == "pre-compact":
+        # PreCompact hook - save context before compaction
+        from .hooks import pre_compact
+
+        transcript_path = stdin_data.get("transcript_path") if stdin_data else None
+        output = pre_compact(transcript_path=transcript_path)
+        if output:
+            print(output)
     elif args.hook == "end":
         print(session_end())
     elif args.hook == "prompt":
@@ -2027,8 +2069,14 @@ def main():
 
     # Hook
     hook_parser = subparsers.add_parser("hook", help="Run a Claude Code hook")
-    hook_parser.add_argument("hook", choices=["start", "end", "prompt", "stop"])
+    hook_parser.add_argument(
+        "hook", choices=["start", "start-rich", "pre-compact", "end", "prompt", "stop"]
+    )
     hook_parser.add_argument("input", nargs="*", help="Input for prompt/stop hook")
+    hook_parser.add_argument("--rich", action="store_true", help="Include rich context")
+    hook_parser.add_argument(
+        "--after-compact", action="store_true", help="After compaction resume"
+    )
 
     # Evolve
     evolve_parser = subparsers.add_parser("evolve", help="Manage evolution insights")
