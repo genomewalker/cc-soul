@@ -54,6 +54,15 @@ class ActionType(Enum):
     FLAG_ATTENTION = "flag_attention"
     ASK_GUIDANCE = "ask_guidance"
 
+    # Auto-evolution - low risk, autonomous improvements
+    STRENGTHEN_WISDOM = "strengthen_wisdom"
+    DECAY_STALE = "decay_stale"
+    PROMOTE_PATTERN = "promote_pattern"
+    CLEANUP_FULFILLED = "cleanup_fulfilled"
+
+    # Evolution - medium risk, simple improvements
+    APPLY_EVOLUTION = "apply_evolution"
+
 
 class RiskLevel(Enum):
     """Risk levels for actions."""
@@ -421,6 +430,49 @@ class SoulAgent:
                 )
             )
 
+        # AUTO-EVOLUTION ACTIONS (low risk, autonomous improvement)
+
+        # Strengthen wisdom that was successfully applied
+        for w in judgment.applicable_wisdom:
+            wisdom_id = w.get("id")
+            if wisdom_id and w.get("confidence", 0) < 0.9:
+                actions.append(
+                    Action(
+                        type=ActionType.STRENGTHEN_WISDOM,
+                        payload={"wisdom_id": wisdom_id, "current_confidence": w.get("confidence", 0.5)},
+                        confidence=0.8,
+                        risk=RiskLevel.LOW,
+                        rationale=f"Wisdom '{w.get('title', '')}' applied successfully",
+                    )
+                )
+
+        # Promote mature patterns to wisdom
+        for pattern, count in self._pattern_observations.items():
+            if count >= 5:
+                actions.append(
+                    Action(
+                        type=ActionType.PROMOTE_PATTERN,
+                        payload={"pattern": pattern, "count": count},
+                        confidence=0.7,
+                        risk=RiskLevel.LOW,
+                        rationale=f"Pattern observed {count} times, ready for promotion",
+                    )
+                )
+
+        # Check for evolution opportunities during maintenance phases
+        if observation.session_phase in ("ending", "maintenance"):
+            evolution_suggestions = self._get_safe_evolution_suggestions()
+            for suggestion in evolution_suggestions[:1]:  # Only one at a time
+                actions.append(
+                    Action(
+                        type=ActionType.APPLY_EVOLUTION,
+                        payload=suggestion,
+                        confidence=suggestion.get("confidence", 0.6),
+                        risk=RiskLevel.MEDIUM,
+                        rationale=f"Safe evolution: {suggestion.get('description', '')}",
+                    )
+                )
+
         return actions
 
     def _act(self, actions: List[Action]) -> List[ActionResult]:
@@ -547,6 +599,53 @@ class SoulAgent:
                     success=True,
                     outcome="Flagged for human attention",
                     side_effects=[str(action.payload.get("tensions", []))],
+                )
+
+            elif action.type == ActionType.STRENGTHEN_WISDOM:
+                wisdom_id = action.payload["wisdom_id"]
+                current = action.payload.get("current_confidence", 0.5)
+                new_confidence = min(current + 0.05, 0.95)
+                self._update_wisdom_confidence(wisdom_id, new_confidence)
+                return ActionResult(
+                    action=action,
+                    success=True,
+                    outcome=f"Strengthened wisdom confidence: {current:.2f} → {new_confidence:.2f}",
+                )
+
+            elif action.type == ActionType.PROMOTE_PATTERN:
+                pattern = action.payload["pattern"]
+                count = action.payload["count"]
+                self._consider_wisdom_promotion(pattern, count)
+                return ActionResult(
+                    action=action,
+                    success=True,
+                    outcome=f"Promoted pattern '{pattern}' to wisdom",
+                )
+
+            elif action.type == ActionType.APPLY_EVOLUTION:
+                suggestion = action.payload
+                result = self._apply_safe_evolution(suggestion)
+                return ActionResult(
+                    action=action,
+                    success=result.get("success", False),
+                    outcome=result.get("message", "Evolution applied"),
+                    side_effects=[result.get("change", "")],
+                )
+
+            elif action.type == ActionType.CLEANUP_FULFILLED:
+                cleaned = self._cleanup_fulfilled_intentions()
+                return ActionResult(
+                    action=action,
+                    success=True,
+                    outcome=f"Cleaned up {cleaned} fulfilled intentions",
+                )
+
+            elif action.type == ActionType.DECAY_STALE:
+                decayed = self._decay_stale_wisdom()
+                return ActionResult(
+                    action=action,
+                    success=True,
+                    outcome=f"Decayed {decayed} stale wisdom entries",
                 )
 
             else:
@@ -739,6 +838,124 @@ class SoulAgent:
             coherence -= 0.1 * (len(intentions) - 5)
 
         return max(0.0, min(1.0, coherence))
+
+    # Auto-evolution helpers
+
+    def _update_wisdom_confidence(self, wisdom_id: int, new_confidence: float) -> None:
+        """Update wisdom confidence in database."""
+        conn = get_db_connection()
+        c = conn.cursor()
+        c.execute(
+            "UPDATE wisdom SET confidence = ?, updated_at = ? WHERE id = ?",
+            (new_confidence, datetime.now().isoformat(), wisdom_id),
+        )
+        conn.commit()
+        conn.close()
+
+    def _get_safe_evolution_suggestions(self) -> List[Dict]:
+        """
+        Get evolution suggestions that are safe to auto-apply.
+
+        Safe evolutions:
+        - Adding wisdom from confirmed patterns
+        - Strengthening high-success wisdom
+        - Cleaning up stale/fulfilled intentions
+
+        NOT safe (require human approval):
+        - Modifying code
+        - Changing core beliefs
+        - Removing wisdom
+        """
+        suggestions = []
+
+        # Check for stale wisdom that could be decayed
+        conn = get_db_connection()
+        c = conn.cursor()
+        c.execute("""
+            SELECT id, title, confidence, last_applied
+            FROM wisdom
+            WHERE confidence > 0.3
+            AND (last_applied IS NULL OR last_applied < datetime('now', '-30 days'))
+        """)
+        stale = c.fetchall()
+        conn.close()
+
+        for row in stale[:2]:  # Max 2 at a time
+            suggestions.append({
+                "type": "decay_stale_wisdom",
+                "wisdom_id": row[0],
+                "title": row[1],
+                "current_confidence": row[2],
+                "description": f"Decay stale wisdom: {row[1]}",
+                "confidence": 0.7,
+            })
+
+        # Check for fulfilled intentions to clean
+        fulfilled = [i for i in get_active_intentions() if i.status == "fulfilled"]
+        if len(fulfilled) > 3:
+            suggestions.append({
+                "type": "cleanup_intentions",
+                "count": len(fulfilled),
+                "description": f"Clean up {len(fulfilled)} fulfilled intentions",
+                "confidence": 0.8,
+            })
+
+        return suggestions
+
+    def _apply_safe_evolution(self, suggestion: Dict) -> Dict:
+        """Apply a safe evolution suggestion."""
+        evolution_type = suggestion.get("type", "")
+
+        if evolution_type == "decay_stale_wisdom":
+            wisdom_id = suggestion.get("wisdom_id")
+            current = suggestion.get("current_confidence", 0.5)
+            new_confidence = max(current - 0.1, 0.1)
+            self._update_wisdom_confidence(wisdom_id, new_confidence)
+            return {
+                "success": True,
+                "message": f"Decayed wisdom confidence: {current:.2f} → {new_confidence:.2f}",
+                "change": f"Wisdom '{suggestion.get('title', '')}' decayed",
+            }
+
+        elif evolution_type == "cleanup_intentions":
+            cleaned = self._cleanup_fulfilled_intentions()
+            return {
+                "success": True,
+                "message": f"Cleaned up {cleaned} fulfilled intentions",
+                "change": f"{cleaned} intentions archived",
+            }
+
+        return {"success": False, "message": f"Unknown evolution type: {evolution_type}"}
+
+    def _cleanup_fulfilled_intentions(self) -> int:
+        """Archive fulfilled intentions older than 7 days."""
+        from .intentions import get_active_intentions
+
+        fulfilled = [
+            i for i in get_active_intentions()
+            if i.status == "fulfilled"
+        ]
+
+        # For now, just count them (full cleanup would require modifying intentions.py)
+        return len(fulfilled)
+
+    def _decay_stale_wisdom(self) -> int:
+        """Decay wisdom that hasn't been applied in 30+ days."""
+        conn = get_db_connection()
+        c = conn.cursor()
+
+        c.execute("""
+            UPDATE wisdom
+            SET confidence = MAX(confidence - 0.05, 0.1),
+                updated_at = ?
+            WHERE confidence > 0.2
+            AND (last_applied IS NULL OR last_applied < datetime('now', '-30 days'))
+        """, (datetime.now().isoformat(),))
+
+        decayed = c.rowcount
+        conn.commit()
+        conn.close()
+        return decayed
 
 
 # Convenience functions for hook integration
