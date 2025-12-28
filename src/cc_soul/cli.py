@@ -75,6 +75,13 @@ from .observe import (
     auto_promote_high_confidence,
     format_reflection_summary,
 )
+from .backup import (
+    dump_soul,
+    restore_soul,
+    create_timestamped_backup,
+    list_backups,
+    format_backup_list,
+)
 
 # Graph is optional (requires kuzu)
 try:
@@ -1401,6 +1408,51 @@ def cmd_neural(args):
                 print()
 
 
+def cmd_backup(args):
+    """Backup and restore the soul."""
+    init_soul()
+
+    if args.subcommand == 'create':
+        path = create_timestamped_backup()
+        print(f"Backup created: {path}")
+
+    elif args.subcommand == 'dump':
+        from pathlib import Path
+        output = Path(args.output) if args.output else None
+        result = dump_soul(output)
+
+        if "error" in result:
+            print(f"Error: {result['error']}")
+            return
+
+        if output:
+            print(f"Soul exported to: {output}")
+        else:
+            import json
+            print(json.dumps(result, indent=2, default=str))
+
+        print(f"\nExported: {len(result.get('wisdom', []))} wisdom, "
+              f"{len(result.get('beliefs', []))} beliefs, "
+              f"{len(result.get('insights', []))} insights")
+
+    elif args.subcommand == 'load':
+        from pathlib import Path
+        result = restore_soul(Path(args.input), merge=args.merge)
+
+        if "error" in result:
+            print(f"Error: {result['error']}")
+            return
+
+        print(f"Soul restored from: {args.input}")
+        print(f"Mode: {'merge' if args.merge else 'replace'}")
+        for k, v in result.get('counts', {}).items():
+            print(f"  {k}: {v}")
+
+    elif args.subcommand == 'list':
+        backups = list_backups()
+        print(format_backup_list(backups))
+
+
 def cmd_reindex(args):
     """Reindex wisdom vectors."""
     init_soul()
@@ -2087,6 +2139,21 @@ def main():
     neural_emotions.add_argument('--domain', help='Filter by domain')
     neural_emotions.add_argument('--limit', type=int, default=10, help='Max results')
 
+    # Backup (soul preservation)
+    backup_parser = subparsers.add_parser('backup', help='Backup and restore soul')
+    backup_subs = backup_parser.add_subparsers(dest='subcommand')
+
+    backup_subs.add_parser('create', help='Create timestamped backup')
+
+    dump_parser = backup_subs.add_parser('dump', help='Export soul to JSON file')
+    dump_parser.add_argument('output', nargs='?', help='Output file path')
+
+    load_parser = backup_subs.add_parser('load', help='Restore soul from backup')
+    load_parser.add_argument('input', help='Backup file path')
+    load_parser.add_argument('--merge', action='store_true', help='Merge with existing instead of replacing')
+
+    backup_subs.add_parser('list', help='List available backups')
+
     args = parser.parse_args()
 
     if args.command is None or args.command == 'summary':
@@ -2188,6 +2255,11 @@ def main():
             cmd_neural(args)
         else:
             cmd_neural(argparse.Namespace(subcommand='stats'))
+    elif args.command == 'backup':
+        if args.subcommand:
+            cmd_backup(args)
+        else:
+            cmd_backup(argparse.Namespace(subcommand='list'))
 
 
 if __name__ == '__main__':
