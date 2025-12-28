@@ -219,6 +219,61 @@ def _synthesize_emotional_arc(emotions: list) -> str:
     return " → ".join(arc_points)
 
 
+def _parse_inline_memories(output: str) -> list:
+    """
+    Parse inline memory markers from assistant output.
+
+    Patterns:
+        [LEARNED] Title: content
+        [DECIDED] Title: content
+        [FIXED] Title: content
+        [DISCOVERED] Title: content
+
+    Returns list of (category, title, content) tuples.
+    """
+    import re
+
+    patterns = {
+        r"\[LEARNED\]\s*([^:]+):\s*(.+?)(?=\n\[|\n\n|$)": "discovery",
+        r"\[DECIDED\]\s*([^:]+):\s*(.+?)(?=\n\[|\n\n|$)": "decision",
+        r"\[FIXED\]\s*([^:]+):\s*(.+?)(?=\n\[|\n\n|$)": "bugfix",
+        r"\[DISCOVERED\]\s*([^:]+):\s*(.+?)(?=\n\[|\n\n|$)": "discovery",
+    }
+
+    memories = []
+    for pattern, category in patterns.items():
+        for match in re.finditer(pattern, output, re.IGNORECASE | re.DOTALL):
+            title = match.group(1).strip()
+            content = match.group(2).strip()
+            if title and content:
+                memories.append((category, title, content))
+
+    return memories
+
+
+def _save_inline_memories(memories: list) -> int:
+    """Save parsed inline memories to cc-memory."""
+    from .auto_memory import _get_memory_funcs
+
+    funcs = _get_memory_funcs()
+    if not funcs:
+        return 0
+
+    remember = funcs.get("remember")
+    if not remember:
+        return 0
+
+    saved = 0
+    for category, title, content in memories:
+        try:
+            remember(category=category, title=title, content=content)
+            saved += 1
+        except Exception:
+            pass
+
+    return saved
+
+
 def assistant_stop(assistant_output: str) -> str:
     """
     AssistantStop hook - Auto-learn from assistant output.
@@ -226,10 +281,21 @@ def assistant_stop(assistant_output: str) -> str:
     Detects breakthrough patterns and extracts learnings automatically.
     Also tracks emotional context for felt continuity.
     Saves significant observations to cc-memory (project-local).
-    This is the organic learning flow - no explicit calls needed.
+
+    Inline markers for organic memory:
+        [LEARNED] Title: content
+        [DECIDED] Title: content
+        [FIXED] Title: content
+        [DISCOVERED] Title: content
     """
-    if len(assistant_output.strip()) < 100:
+    if len(assistant_output.strip()) < 50:
         return ""
+
+    # Parse and save inline memory markers first (highest priority)
+    inline_memories = _parse_inline_memories(assistant_output)
+    saved_count = 0
+    if inline_memories:
+        saved_count = _save_inline_memories(inline_memories)
 
     # Try to auto-learn from the output (soul's neural fragments)
     auto_learn_from_output(assistant_output)
@@ -239,9 +305,13 @@ def assistant_stop(assistant_output: str) -> str:
 
     # Auto-remember to cc-memory (project-local episodic memory)
     # This populates the Atman layer with specific experiences
-    auto_remember(assistant_output)
+    # Skip if we already saved inline memories to avoid duplicates
+    if not inline_memories:
+        auto_remember(assistant_output)
 
-    # Silent learning - no output to avoid noise
+    # Return count if we saved inline memories (for visibility)
+    if saved_count:
+        return f"Saved {saved_count} memories"
     return ""
 
 
