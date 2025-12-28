@@ -6,7 +6,7 @@ import json
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Any
 
-from .core import get_db_connection, init_soul
+from .core import get_db_connection
 
 
 def _ensure_schema():

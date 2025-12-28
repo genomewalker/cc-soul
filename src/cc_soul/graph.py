@@ -10,14 +10,12 @@ Install: pip install cc-soul[graph]
 """
 
 import json
-import math
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import Enum
-from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple, Any
+from typing import Dict, List, Optional, Set, Tuple
 
-from .core import SOUL_DIR, init_soul
+from .core import SOUL_DIR
 
 # Kuzu is optional
 try:

@@ -22,11 +22,10 @@ The final τₖ emerges from all three dimensions.
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Optional, Dict, List
+from typing import Dict, List
 
 from .mood import compute_mood, Mood, Clarity, Growth, Engagement, Connection
-from .aspirations import get_active_aspirations, Aspiration
-from .wisdom import quick_recall
+from .aspirations import get_active_aspirations
 from .beliefs import get_beliefs
 from .core import get_db_connection
 

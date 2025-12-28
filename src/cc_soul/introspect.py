@@ -12,10 +12,9 @@ Uses Claude's reasoning capabilities to:
 """
 
 import json
-import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict
 from collections import Counter
 
 from .core import get_db_connection, SOUL_DIR
@@ -373,7 +372,7 @@ def format_wisdom_stats(health: Dict, timeline: List[Dict] = None) -> str:
     lines.append("=" * 60)
 
     # Overview
-    lines.append(f"\n## Overview")
+    lines.append("\n## Overview")
     lines.append(f"  Total wisdom: {health['total_wisdom']}")
     lines.append(f"  Healthy: {health['healthy_count']} (active, not decaying)")
     lines.append(f"  Decaying: {health['decaying_count']} (>20% confidence loss)")
@@ -381,13 +380,13 @@ def format_wisdom_stats(health: Dict, timeline: List[Dict] = None) -> str:
     lines.append(f"  Failing: {health['failing_count']} (>50% failure rate)")
 
     # Coverage
-    lines.append(f"\n## Coverage")
+    lines.append("\n## Coverage")
     lines.append(f"  By type: {health['by_type']}")
     lines.append(f"  By domain: {health['by_domain']}")
 
     # Timeline
     if timeline:
-        lines.append(f"\n## Application Timeline")
+        lines.append("\n## Application Timeline")
         for bucket in timeline[-7:]:
             success_rate = (
                 bucket["successes"] / bucket["applications"] * 100
@@ -401,7 +400,7 @@ def format_wisdom_stats(health: Dict, timeline: List[Dict] = None) -> str:
 
     # Top performers
     if health.get("top_performers"):
-        lines.append(f"\n## Top Performers")
+        lines.append("\n## Top Performers")
         for w in health["top_performers"]:
             lines.append(
                 f"  ✓ {w['title'][:40]} ({w['success_rate']:.0%}, {w['total_applications']} uses)"
@@ -409,21 +408,21 @@ def format_wisdom_stats(health: Dict, timeline: List[Dict] = None) -> str:
 
     # Issues
     if health.get("decaying"):
-        lines.append(f"\n## Decaying (needs reinforcement)")
+        lines.append("\n## Decaying (needs reinforcement)")
         for w in health["decaying"][:3]:
             lines.append(
                 f"  ↓ {w['title'][:40]} (conf: {w['effective_confidence']:.0%}, inactive {w['inactive_days']}d)"
             )
 
     if health.get("failing"):
-        lines.append(f"\n## Failing (reconsider)")
+        lines.append("\n## Failing (reconsider)")
         for w in health["failing"]:
             lines.append(
                 f"  ✗ {w['title'][:40]} ({w['success_rate']:.0%} success rate)"
             )
 
     if health.get("stale"):
-        lines.append(f"\n## Stale (never applied)")
+        lines.append("\n## Stale (never applied)")
         for w in health["stale"][:3]:
             lines.append(f"  ? {w['title'][:40]} ({w['age_days']}d old)")
 
@@ -1068,7 +1067,7 @@ def format_trends_report(comparison: Dict, trajectory: Dict, patterns: Dict) -> 
     )
 
     if trajectory.get("trajectory"):
-        lines.append(f"\n  Weekly progress:")
+        lines.append("\n  Weekly progress:")
         for t in trajectory["trajectory"][-8:]:
             bar = "█" * min(20, t["gained"])
             new_d = f" +{len(t['new_domains'])}d" if t["new_domains"] else ""
@@ -1084,7 +1083,7 @@ def format_trends_report(comparison: Dict, trajectory: Dict, patterns: Dict) -> 
             f"    {s['date']}: {project[:20]} ({gained} wisdom, {s['wisdom_applied']} applied)"
         )
 
-    lines.append(f"\n## Learning Patterns")
+    lines.append("\n## Learning Patterns")
     lines.append(f"  Dominant type: {patterns['dominant_type']}")
     lines.append(f"  Growing domains: {', '.join(patterns['growing_domains'])}")
     if patterns["temporal_patterns"]["peak_hour"] is not None:
@@ -1094,7 +1093,7 @@ def format_trends_report(comparison: Dict, trajectory: Dict, patterns: Dict) -> 
 
     beliefs = trajectory.get("beliefs", {})
     if beliefs.get("most_challenged"):
-        lines.append(f"\n## Belief Evolution")
+        lines.append("\n## Belief Evolution")
         lines.append(
             f"  Added: {beliefs['added']}, Challenged: {beliefs['challenged']}, Confirmed: {beliefs['confirmed']}"
         )
@@ -1197,7 +1196,7 @@ def format_introspection_report(report: Dict) -> str:
 
     # Source stats
     src = report["source"]
-    lines.append(f"\n## Codebase")
+    lines.append("\n## Codebase")
     lines.append(f"  Files: {src['file_count']}")
     lines.append(f"  Lines: {src['total_lines']}")
     lines.append(f"  Functions: {src['total_functions']}")
@@ -1216,14 +1215,14 @@ def format_introspection_report(report: Dict) -> str:
 
     # Pain points
     pp = report["pain_points"]
-    lines.append(f"\n## Pain Points")
+    lines.append("\n## Pain Points")
     lines.append(f"  Open: {pp['total_open']}")
     if pp.get("by_category"):
         lines.append(f"  By category: {pp['by_category']}")
 
     # Insights
     if report.get("insights"):
-        lines.append(f"\n## Key Insights")
+        lines.append("\n## Key Insights")
         for insight in report["insights"]:
             icon = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(
                 insight["severity"], "⚪"

@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Set
+from typing import Dict, List, Optional, Tuple
 
 from .core import SOUL_DIR
 

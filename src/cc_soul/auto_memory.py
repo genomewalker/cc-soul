@@ -11,8 +11,6 @@ Categories flow from experience to wisdom:
 
 import re
 from dataclasses import dataclass
-from datetime import datetime
-from pathlib import Path
 from typing import Optional, List, Tuple
 
 from .bridge import is_memory_available, find_project_dir

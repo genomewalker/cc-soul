@@ -12,10 +12,10 @@ not just inform it. The soul becomes a thinking partner that:
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional
 from enum import Enum
 
-from .core import get_db_connection, init_soul
+from .core import init_soul
 from .wisdom import semantic_recall, recall_wisdom, gain_wisdom, WisdomType
 from .beliefs import get_beliefs
 from .vocabulary import get_vocabulary

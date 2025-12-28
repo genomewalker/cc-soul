@@ -3,7 +3,6 @@ Command-line interface for cc-soul.
 """
 
 import sys
-import os
 import shutil
 import argparse
 from pathlib import Path
@@ -17,7 +16,7 @@ from .wisdom import (
     WisdomType,
 )
 from .beliefs import get_beliefs, hold_belief
-from .vocabulary import get_vocabulary, learn_term
+from .vocabulary import learn_term
 from .identity import observe_identity, IdentityAspect
 from .hooks import session_start, session_end, user_prompt, assistant_stop
 from .conversations import (
@@ -32,7 +31,7 @@ from .evolve import (
     get_evolution_summary,
     seed_evolution_insights,
 )
-from .seed import seed_soul, is_seeded
+from .seed import seed_soul
 from .mood import compute_mood, format_mood_display, get_mood_reflection
 from .bridge import (
     is_memory_available,
@@ -46,7 +45,6 @@ from .bridge import (
 from .introspect import (
     generate_introspection_report,
     format_introspection_report,
-    get_pain_points,
     analyze_pain_points,
     get_wisdom_timeline,
     get_wisdom_health,
@@ -61,10 +59,8 @@ from .introspect import (
 from .improve import (
     diagnose,
     suggest_improvements,
-    format_improvement_prompt,
     get_proposals,
     get_improvement_stats,
-    ImprovementStatus,
 )
 from .ultrathink import (
     enter_ultrathink,
@@ -74,10 +70,8 @@ from .ultrathink import (
     commit_session_learnings,
 )
 from .efficiency import (
-    fingerprint_problem,
     learn_problem_pattern,
     add_file_hint,
-    get_file_hints,
     record_decision,
     recall_decisions,
     get_compact_context,
@@ -88,7 +82,6 @@ from .observe import (
     get_pending_observations,
     promote_observation_to_wisdom,
     auto_promote_high_confidence,
-    format_reflection_summary,
 )
 from .backup import (
     dump_soul,
@@ -123,7 +116,6 @@ from .curiosity import (
     dismiss_question,
     incorporate_answer_as_wisdom,
     format_questions_for_prompt,
-    GapType,
 )
 
 from .narrative import (
@@ -137,19 +129,16 @@ from .narrative import (
     format_episode_story,
     get_narrative_stats,
     EpisodeType,
-    EmotionalTone,
 )
 
 from .neural import (
     create_trigger,
     find_triggers,
-    activate,
     activate_with_bridges,
     create_bridge,
     get_trigger_stats,
     sync_wisdom_to_triggers,
     format_neural_context,
-    reinforce_trigger,
     save_growth_vector,
     get_growth_vectors,
     auto_learn_from_output,
@@ -254,7 +243,7 @@ def cmd_health(args):
 
     def check_kuzu():
         try:
-            import kuzu
+            import kuzu  # noqa: F401
 
             return "OK", "available"
         except ImportError:
@@ -275,7 +264,6 @@ def cmd_health(args):
         return "OK", f"{count} entries"
 
     def check_beliefs():
-        from .beliefs import get_beliefs
 
         beliefs = get_beliefs()
         if not beliefs:
@@ -467,7 +455,7 @@ def cmd_bridge(args):
 
         result = promote_observation(args.observation_id, as_type=args.type)
         if result.get("promoted"):
-            print(f"Promoted observation to wisdom!")
+            print("Promoted observation to wisdom!")
             print(f"  Observation: {result['observation_id']}")
             print(f"  Wisdom ID: {result['wisdom_id']}")
             print(f"  Type: {result['wisdom_type']}")
@@ -1184,7 +1172,7 @@ def cmd_curious(args):
             print("\nGaps by type:")
             for t, count in stats["gaps_by_type"].items():
                 print(f"  {t}: {count}")
-        print(f"\nQuestions:")
+        print("\nQuestions:")
         print(f"  Pending: {stats['questions']['pending']}")
         print(f"  Answered: {stats['questions']['answered']}")
         print(f"  Incorporated: {stats['questions']['incorporated']}")
@@ -1637,7 +1625,6 @@ def cmd_install_hooks(args):
 def cmd_uninstall_hooks(args):
     """Uninstall Claude Code hooks and restore settings backup."""
     import json
-    from datetime import datetime
 
     claude_dir = Path.home() / ".claude"
     settings_path = claude_dir / "settings.json"
@@ -1858,7 +1845,7 @@ def cmd_improve(args):
             print(f"\n{'=' * 60}")
             print(f"Suggestion {i}: {s['target']['description'][:60]}...")
             print(f"Type: {s['target']['type']}, Priority: {s['target']['priority']}")
-            print(f"\nPrompt for Claude:")
+            print("\nPrompt for Claude:")
             print(s["prompt"])
 
     elif args.subcommand == "proposals":

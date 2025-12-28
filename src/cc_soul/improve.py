@@ -21,18 +21,17 @@ import json
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional
 from dataclasses import dataclass, asdict
 from enum import Enum
 
-from .core import get_db_connection, SOUL_DIR
+from .core import SOUL_DIR
 from .introspect import (
     generate_introspection_report,
     get_pain_points,
-    record_pain_point,
     record_metric,
 )
-from .evolve import get_evolution_insights, mark_implemented, record_insight
+from .evolve import get_evolution_insights, mark_implemented
 
 # Where improvement data lives
 IMPROVE_DIR = SOUL_DIR / "improvements"

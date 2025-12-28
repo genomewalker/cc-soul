@@ -315,6 +315,13 @@ __all__ = [
     "get_compact_context",
     "format_efficiency_injection",
     "get_token_stats",
+    # Budget
+    "get_context_budget",
+    "check_budget_before_inject",
+    "save_transcript_path",
+    "get_injection_budget",
+    "format_budget_status",
+    "ContextBudget",
     # Passive Observation
     "observe_session",
     "reflect_on_session",

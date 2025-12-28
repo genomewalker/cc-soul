@@ -11,12 +11,10 @@ The bridge enables:
 - Mood enhancement with project signals
 """
 
-import os
 from pathlib import Path
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List
 from datetime import datetime
 
-from .core import SOUL_DIR
 
 
 # Try to import cc-memory

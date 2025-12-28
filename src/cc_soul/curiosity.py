@@ -15,9 +15,9 @@ Gap detection sources:
 import json
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional
 from collections import Counter
 
 from .core import SOUL_DB, init_soul
@@ -120,7 +120,6 @@ def _ensure_curiosity_tables():
 
 def detect_recurring_problems() -> List[Gap]:
     """Detect problems that keep occurring without learned patterns."""
-    from .efficiency import get_token_stats
 
     _ensure_curiosity_tables()
     conn = sqlite3.connect(SOUL_DB)
@@ -157,7 +156,6 @@ def detect_recurring_problems() -> List[Gap]:
 
 def detect_repeated_corrections() -> List[Gap]:
     """Detect areas where user keeps correcting the same mistakes."""
-    from .observe import get_pending_observations
 
     _ensure_curiosity_tables()
 
@@ -270,8 +268,6 @@ def detect_missing_rationale() -> List[Gap]:
 
 def detect_new_domains() -> List[Gap]:
     """Detect domains encountered without vocabulary or wisdom."""
-    from .wisdom import recall_wisdom
-    from .vocabulary import get_vocabulary
 
     _ensure_curiosity_tables()
     conn = sqlite3.connect(SOUL_DB)
@@ -329,7 +325,6 @@ def detect_new_domains() -> List[Gap]:
 
 def detect_stale_wisdom() -> List[Gap]:
     """Detect wisdom that was never applied or is decaying."""
-    from .wisdom import recall_wisdom
 
     _ensure_curiosity_tables()
     conn = sqlite3.connect(SOUL_DB)

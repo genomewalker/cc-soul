@@ -10,11 +10,10 @@ This module helps Claude use fewer tokens while maintaining effectiveness by:
 
 import hashlib
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Optional, Tuple
-from collections import Counter
 
-from .core import get_db_connection, init_soul, SOUL_DIR
+from .core import get_db_connection, init_soul
 
 
 def _ensure_efficiency_tables():

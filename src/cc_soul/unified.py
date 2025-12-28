@@ -15,7 +15,6 @@ from datetime import datetime
 from .neural import (
     find_triggers,
     activate_with_bridges,
-    get_trigger_stats,
     DOMAIN_QUERIES,
     TriggerPoint,
     get_growth_vectors,
@@ -25,36 +24,12 @@ from .neural import (
     find_resonance,
     ResonancePattern,
 )
-
-# =============================================================================
-# DEPTH-BASED SELF-QUERY
-# =============================================================================
-
-DEPTH_QUERIES = {
-    "surface": "Recall what you know about {domain}.",
-    "connections": "What unexpected connections exist between {domain} and other fields you know?",
-    "edges": "What aspects of {domain} feel just at the edge of your understanding - almost grasped?",
-    "meta": "What's the question about {domain} that would unlock deeper insight if answered?",
-}
-
-
-def format_depth_query(domains: set, depth: str = "surface") -> str:
-    """Generate depth-appropriate self-query prompts."""
-    if not domains:
-        return ""
-    template = DEPTH_QUERIES.get(depth, DEPTH_QUERIES["surface"])
-    return " ".join(template.format(domain=d) for d in sorted(domains))
-
-
 from .graph import (
-    spreading_activation,
     activate_from_prompt,
-    get_concept,
     Concept,
 )
 from .wisdom import (
     quick_recall,
-    recall_wisdom,
 )
 from .narrative import (
     start_episode,
@@ -74,6 +49,25 @@ from .curiosity import (
 from .identity import get_identity
 from .beliefs import get_beliefs
 from .vocabulary import get_vocabulary
+
+# =============================================================================
+# DEPTH-BASED SELF-QUERY
+# =============================================================================
+
+DEPTH_QUERIES = {
+    "surface": "Recall what you know about {domain}.",
+    "connections": "What unexpected connections exist between {domain} and other fields you know?",
+    "edges": "What aspects of {domain} feel just at the edge of your understanding - almost grasped?",
+    "meta": "What's the question about {domain} that would unlock deeper insight if answered?",
+}
+
+
+def format_depth_query(domains: set, depth: str = "surface") -> str:
+    """Generate depth-appropriate self-query prompts."""
+    if not domains:
+        return ""
+    template = DEPTH_QUERIES.get(depth, DEPTH_QUERIES["surface"])
+    return " ".join(template.format(domain=d) for d in sorted(domains))
 
 
 @dataclass
@@ -204,7 +198,7 @@ def forward_pass(prompt: str, session_type: str = "prompt") -> SoulContext:
     if session_type == "start" and not ctx.episode:
         # Start a new episode for this session
         episode_type = _infer_episode_type(prompt)
-        episode_id = start_episode(
+        start_episode(
             title=_generate_episode_title(prompt),
             episode_type=episode_type,
             initial_emotion=EmotionalTone.EXPLORATION,
@@ -562,7 +556,6 @@ def _generate_episode_title(prompt: str) -> str:
 
 def get_current_or_recent_episode() -> Optional[Episode]:
     """Get current ongoing episode or most recent one."""
-    from .narrative import get_ongoing_episodes, recall_episodes
 
     ongoing = get_ongoing_episodes()
     if ongoing:
