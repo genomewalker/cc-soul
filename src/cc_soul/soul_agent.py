@@ -30,6 +30,12 @@ from .intentions import (
 )
 from .wisdom import quick_recall, gain_wisdom, apply_wisdom, WisdomType
 from .beliefs import get_beliefs
+from .context_optimizer import (
+    get_context_observation,
+    analyze_tasks,
+    ContextPressure,
+    OptimizationStrategy,
+)
 
 
 class ActionType(Enum):
@@ -63,6 +69,12 @@ class ActionType(Enum):
     # Evolution - medium risk, simple improvements
     APPLY_EVOLUTION = "apply_evolution"
 
+    # Context optimization - metacognitive actions
+    SUGGEST_PARALLELIZE = "suggest_parallelize"
+    PREPARE_HANDOFF = "prepare_handoff"
+    OPTIMIZE_REMAINING = "optimize_remaining"
+    EMERGENCY_SAVE = "emergency_save"
+
 
 class RiskLevel(Enum):
     """Risk levels for actions."""
@@ -91,6 +103,12 @@ class Observation:
     tensions: List[Dict] = field(default_factory=list)
     relevant_wisdom: List[Dict] = field(default_factory=list)
     coherence: float = 0.0
+
+    # Context budget awareness (metacognition)
+    context_pressure: str = "unknown"  # relaxed, normal, optimize, compress, emergency
+    context_remaining_pct: Optional[float] = None
+    context_remaining_tokens: Optional[int] = None
+    optimization_strategy: Optional[OptimizationStrategy] = None
 
     timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
 
@@ -220,6 +238,7 @@ class SoulAgent:
         Gathers signals from:
         - The conversation (user prompt, assistant output)
         - The soul's internal state (intentions, wisdom, coherence)
+        - The context budget (metacognition)
         """
         # Get soul state
         active_intentions = get_active_intentions()
@@ -237,6 +256,17 @@ class SoulAgent:
         # Get coherence (simplified - could use full coherence module)
         coherence = self._estimate_coherence(active_intentions, tensions)
 
+        # Get context budget (metacognition)
+        ctx_obs = get_context_observation()
+        context_pressure = ctx_obs.get("pressure", "unknown")
+        context_remaining_pct = ctx_obs.get("remaining_pct")
+        context_remaining_tokens = ctx_obs.get("remaining_tokens")
+
+        # Analyze tasks if context pressure is elevated
+        optimization_strategy = None
+        if context_pressure in ("optimize", "compress", "emergency"):
+            optimization_strategy = analyze_tasks()
+
         return Observation(
             user_prompt=user_prompt[:500],
             assistant_output=assistant_output[:500],
@@ -248,6 +278,10 @@ class SoulAgent:
             tensions=tensions,
             relevant_wisdom=relevant_wisdom,
             coherence=coherence,
+            context_pressure=context_pressure,
+            context_remaining_pct=context_remaining_pct,
+            context_remaining_tokens=context_remaining_tokens,
+            optimization_strategy=optimization_strategy,
         )
 
     def _judge(self, observation: Observation) -> Judgment:
@@ -473,6 +507,74 @@ class SoulAgent:
                     )
                 )
 
+        # CONTEXT OPTIMIZATION ACTIONS (metacognitive)
+        # These enable Claude to reason about its own constraints
+
+        strategy = observation.optimization_strategy
+        if strategy and strategy.needs_action:
+            # OPTIMIZE mode: suggest parallelization
+            if strategy.pressure == ContextPressure.OPTIMIZE:
+                if strategy.should_parallelize and strategy.parallel_tasks:
+                    actions.append(
+                        Action(
+                            type=ActionType.SUGGEST_PARALLELIZE,
+                            payload={
+                                "tasks": [t.content for t in strategy.parallel_tasks],
+                                "remaining_pct": strategy.remaining_pct,
+                                "guidance": strategy.guidance,
+                            },
+                            confidence=0.9,
+                            risk=RiskLevel.LOW,
+                            rationale=f"Context at {int(strategy.remaining_pct*100)}% - parallelize to complete more",
+                        )
+                    )
+
+            # COMPRESS mode: optimize remaining work
+            elif strategy.pressure == ContextPressure.COMPRESS:
+                actions.append(
+                    Action(
+                        type=ActionType.OPTIMIZE_REMAINING,
+                        payload={
+                            "complete_first": [t.content for t in strategy.should_complete_first],
+                            "defer": [t.content for t in strategy.should_defer],
+                            "remaining_pct": strategy.remaining_pct,
+                            "guidance": strategy.guidance,
+                        },
+                        confidence=0.85,
+                        risk=RiskLevel.LOW,
+                        rationale=f"Context at {int(strategy.remaining_pct*100)}% - prioritize critical tasks",
+                    )
+                )
+
+                if strategy.prepare_handoff:
+                    actions.append(
+                        Action(
+                            type=ActionType.PREPARE_HANDOFF,
+                            payload={
+                                "urgency": strategy.handoff_urgency,
+                                "in_progress": [i.want for i in observation.active_intentions],
+                            },
+                            confidence=0.9,
+                            risk=RiskLevel.LOW,
+                            rationale="Prepare handoff before context exhaustion",
+                        )
+                    )
+
+            # EMERGENCY mode: save state immediately
+            elif strategy.pressure == ContextPressure.EMERGENCY:
+                actions.append(
+                    Action(
+                        type=ActionType.EMERGENCY_SAVE,
+                        payload={
+                            "remaining_pct": strategy.remaining_pct,
+                            "guidance": strategy.guidance,
+                        },
+                        confidence=1.0,
+                        risk=RiskLevel.LOW,
+                        rationale="EMERGENCY - context nearly exhausted, save state now",
+                    )
+                )
+
         return actions
 
     def _act(self, actions: List[Action]) -> List[ActionResult]:
@@ -646,6 +748,159 @@ class SoulAgent:
                     action=action,
                     success=True,
                     outcome=f"Decayed {decayed} stale wisdom entries",
+                )
+
+            # Context optimization actions
+            elif action.type == ActionType.SUGGEST_PARALLELIZE:
+                from .convergence import Swarm, AgentPerspective
+
+                tasks = action.payload.get("tasks", [])
+                guidance = action.payload.get("guidance", "")
+                problem = action.payload.get("problem", "")
+
+                # Create a swarm for parallel work if we have a problem statement
+                swarm_id = None
+                if problem and len(tasks) > 1:
+                    try:
+                        swarm = Swarm(
+                            problem=problem,
+                            constraints=action.payload.get("constraints", []),
+                            context=guidance,
+                        )
+
+                        # Add agents based on task types
+                        for task in tasks[:4]:  # Max 4 parallel agents
+                            perspective = AgentPerspective.PRAGMATIC
+                            if "research" in task.lower() or "analyze" in task.lower():
+                                perspective = AgentPerspective.DEEP
+                            elif "quick" in task.lower() or "simple" in task.lower():
+                                perspective = AgentPerspective.FAST
+                            elif "review" in task.lower() or "test" in task.lower():
+                                perspective = AgentPerspective.CRITICAL
+
+                            swarm.add_agent(perspective, extra_context=task)
+
+                        swarm_id = swarm.swarm_id
+                    except Exception:
+                        pass
+
+                outcome = f"PARALLELIZE: {len(tasks)} tasks can run concurrently"
+                if swarm_id:
+                    outcome += f" (swarm: {swarm_id})"
+
+                return ActionResult(
+                    action=action,
+                    success=True,
+                    outcome=outcome,
+                    side_effects=[guidance, swarm_id] if swarm_id else [guidance],
+                )
+
+            elif action.type == ActionType.OPTIMIZE_REMAINING:
+                complete = action.payload.get("complete_first", [])
+                defer = action.payload.get("defer", [])
+                return ActionResult(
+                    action=action,
+                    success=True,
+                    outcome=f"OPTIMIZE: Complete {len(complete)}, defer {len(defer)} tasks",
+                    side_effects=[action.payload.get("guidance", "")],
+                )
+
+            elif action.type == ActionType.PREPARE_HANDOFF:
+                from .outcomes import create_handoff
+                from .conversations import get_recent_context
+
+                urgency = action.payload.get("urgency", "medium")
+                in_progress_intentions = action.payload.get("in_progress", [])
+
+                # Enrich with actual intention details
+                active_intentions = get_active_intentions()
+                in_progress = []
+                for intention in active_intentions:
+                    if intention.state.value == "active":
+                        in_progress.append(f"[{intention.scope.value}] {intention.want}")
+
+                # Get recent decisions
+                recent_ctx = get_recent_context(limit=5)
+                key_decisions = [
+                    ctx.get("content", "")[:100]
+                    for ctx in recent_ctx
+                    if ctx.get("context_type") == "decision"
+                ]
+
+                # Build next steps based on urgency
+                next_steps = ["Review in-progress items and prioritize"]
+                if urgency == "high":
+                    next_steps.insert(0, "Complete critical tasks before context exhaustion")
+                elif urgency == "critical":
+                    next_steps.insert(0, "URGENT: Resume immediately from this handoff")
+
+                handoff_path = create_handoff(
+                    summary=f"Handoff prepared (urgency: {urgency})",
+                    goal="Continue current work with context preservation",
+                    in_progress=in_progress[:10] or in_progress_intentions,
+                    next_steps=next_steps,
+                    key_decisions=key_decisions[:3],
+                    context=f"Context pressure triggered handoff preparation (urgency: {urgency})",
+                )
+                return ActionResult(
+                    action=action,
+                    success=True,
+                    outcome=f"Created handoff: {handoff_path}",
+                    side_effects=[f"Urgency: {urgency}, {len(in_progress)} items preserved"],
+                )
+
+            elif action.type == ActionType.EMERGENCY_SAVE:
+                from .outcomes import create_handoff
+                from .conversations import save_context, get_recent_context
+
+                # Gather actual session state for useful handoff
+                active_intentions = get_active_intentions()
+                in_progress = [f"[{i.scope.value}] {i.want}" for i in active_intentions if i.state.value == "active"]
+
+                # Get recent context/decisions from memory
+                recent_ctx = get_recent_context(limit=5)
+                key_decisions = []
+                for ctx in recent_ctx:
+                    if ctx.get("context_type") == "decision":
+                        key_decisions.append(ctx.get("content", "")[:100])
+
+                # Get relevant wisdom that was surfaced
+                wisdom_applied = []
+                for w in action.payload.get("relevant_wisdom", [])[:3]:
+                    if isinstance(w, dict):
+                        wisdom_applied.append(w.get("title", ""))
+
+                # Build next steps from optimization strategy
+                next_steps = []
+                guidance = action.payload.get("guidance", "")
+                remaining_pct = action.payload.get("remaining_pct", 0)
+
+                if remaining_pct < 0.1:
+                    next_steps.append("Resume from this handoff - context was exhausted")
+                next_steps.append("Review in-progress items below and continue")
+
+                # Save critical context marker
+                save_context(
+                    content=f"EMERGENCY: Context at {int(remaining_pct*100)}% - session ended",
+                    context_type="emergency",
+                    priority=10,
+                )
+
+                # Create rich handoff
+                handoff_path = create_handoff(
+                    summary=f"Session ended at {int(remaining_pct*100)}% context remaining",
+                    goal="Continue from where we left off",
+                    in_progress=in_progress[:10],
+                    next_steps=next_steps,
+                    key_decisions=key_decisions[:5],
+                    learnings=wisdom_applied[:5] if wisdom_applied else None,
+                    context=guidance or "Session ended due to context window limits",
+                )
+                return ActionResult(
+                    action=action,
+                    success=True,
+                    outcome=f"EMERGENCY: State saved to {handoff_path}",
+                    side_effects=[f"Preserved {len(in_progress)} in-progress items"],
                 )
 
             else:
@@ -846,7 +1101,7 @@ class SoulAgent:
         conn = get_db_connection()
         c = conn.cursor()
         c.execute(
-            "UPDATE wisdom SET confidence = ?, updated_at = ? WHERE id = ?",
+            "UPDATE wisdom SET confidence = ?, last_used = ? WHERE id = ?",
             (new_confidence, datetime.now().isoformat(), wisdom_id),
         )
         conn.commit()
@@ -872,10 +1127,10 @@ class SoulAgent:
         conn = get_db_connection()
         c = conn.cursor()
         c.execute("""
-            SELECT id, title, confidence, last_applied
+            SELECT id, title, confidence, last_used
             FROM wisdom
             WHERE confidence > 0.3
-            AND (last_applied IS NULL OR last_applied < datetime('now', '-30 days'))
+            AND (last_used IS NULL OR last_used < datetime('now', '-30 days'))
         """)
         stale = c.fetchall()
         conn.close()
@@ -940,16 +1195,16 @@ class SoulAgent:
         return len(fulfilled)
 
     def _decay_stale_wisdom(self) -> int:
-        """Decay wisdom that hasn't been applied in 30+ days."""
+        """Decay wisdom that hasn't been used in 30+ days."""
         conn = get_db_connection()
         c = conn.cursor()
 
         c.execute("""
             UPDATE wisdom
             SET confidence = MAX(confidence - 0.05, 0.1),
-                updated_at = ?
+                last_used = ?
             WHERE confidence > 0.2
-            AND (last_applied IS NULL OR last_applied < datetime('now', '-30 days'))
+            AND (last_used IS NULL OR last_used < datetime('now', '-30 days'))
         """, (datetime.now().isoformat(),))
 
         decayed = c.rowcount
@@ -978,6 +1233,22 @@ def format_agent_report(report: AgentReport) -> str:
     lines.append("SOUL AGENT REPORT")
     lines.append("=" * 50)
     lines.append("")
+
+    # Context budget (metacognition)
+    if report.observation.context_remaining_pct is not None:
+        pct = int(report.observation.context_remaining_pct * 100)
+        pressure = report.observation.context_pressure.upper()
+        lines.append("CONTEXT BUDGET")
+        lines.append("-" * 40)
+        lines.append(f"  Remaining: {pct}% ({report.observation.context_remaining_tokens:,} tokens)")
+        lines.append(f"  Pressure: {pressure}")
+        if report.observation.optimization_strategy:
+            strategy = report.observation.optimization_strategy
+            if strategy.should_parallelize:
+                lines.append(f"  Parallelize: {len(strategy.parallel_tasks)} tasks")
+            if strategy.prepare_handoff:
+                lines.append(f"  Handoff: {strategy.handoff_urgency}")
+        lines.append("")
 
     # Observation summary
     lines.append("OBSERVED")

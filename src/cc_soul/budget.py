@@ -12,7 +12,7 @@ calculate remaining context capacity from this.
 import json
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 from datetime import datetime
 
 from .core import SOUL_DIR
@@ -208,6 +208,19 @@ def check_budget_before_inject(transcript_path: str = None) -> Dict:
         - budget: int - max tokens to inject
         - save_first: bool - whether to save context urgently
     """
+    import os
+
+    # Swarm agents have fresh context - minimal injection for focused task
+    if os.environ.get("CC_SOUL_SWARM_AGENT") == "1":
+        return {
+            "inject": True,
+            "mode": "minimal",
+            "budget": 200,
+            "save_first": False,
+            "pct": 0.0,
+            "swarm_agent": True,
+        }
+
     budget = get_context_budget(transcript_path)
 
     if budget is None:
@@ -240,3 +253,149 @@ def check_budget_before_inject(transcript_path: str = None) -> Dict:
             "budget": 2000,
             "save_first": False,
         }
+
+
+# Multi-instance budget tracking via cc-memory
+
+
+def get_session_id() -> str:
+    """Get unique identifier for this Claude session."""
+    import os
+
+    # Use transcript path hash or process ID
+    current_file = SOUL_DIR / ".current_transcript"
+    if current_file.exists():
+        path = current_file.read_text().strip()
+        # Use last part of path as session ID
+        return Path(path).stem[:12]
+
+    # Fallback to process ID
+    return f"pid_{os.getpid()}"
+
+
+def log_budget_to_memory(
+    budget: ContextBudget = None,
+    transcript_path: str = None,
+) -> Optional[str]:
+    """
+    Log current budget status to cc-memory for cross-instance awareness.
+
+    Returns observation ID if logged, None if cc-memory unavailable.
+    """
+    try:
+        from .bridge import is_memory_available
+
+        if not is_memory_available():
+            return None
+
+        from cc_memory import memory as cc_memory
+        from .bridge import find_project_dir
+
+        if budget is None:
+            budget = get_context_budget(transcript_path)
+
+        if budget is None:
+            return None
+
+        session_id = get_session_id()
+        pct = int(budget.remaining_pct * 100)
+
+        # Determine pressure level
+        if budget.should_urgent_save:
+            pressure = "EMERGENCY"
+        elif budget.should_compact:
+            pressure = "COMPACT"
+        elif budget.remaining_pct < 0.40:
+            pressure = "NORMAL"
+        else:
+            pressure = "RELAXED"
+
+        # Log to cc-memory with budget tag
+        content = f"""Session {session_id}: {pct}% remaining ({budget.remaining:,} tokens)
+Pressure: {pressure}
+Messages: {budget.message_count}
+Timestamp: {budget.timestamp}"""
+
+        project_dir = find_project_dir()
+        obs_id = cc_memory.remember(
+            category="budget",
+            title=f"Budget: {pct}% ({pressure})",
+            content=content,
+            tags=["budget", f"session:{session_id}", pressure.lower()],
+            project_dir=project_dir,
+        )
+
+        return obs_id
+
+    except Exception:
+        return None
+
+
+def get_all_session_budgets() -> List[Dict]:
+    """
+    Get budget status of all active sessions via cc-memory.
+
+    Enables cross-instance awareness for swarm coordination.
+    """
+    try:
+        from .bridge import is_memory_available
+
+        if not is_memory_available():
+            return []
+
+        from cc_memory import memory as cc_memory
+        from .bridge import find_project_dir
+
+        project_dir = find_project_dir()
+
+        # Query recent budget observations
+        results = cc_memory.recall(
+            query="budget remaining tokens pressure",
+            category="budget",
+            limit=10,
+            project_dir=project_dir,
+        )
+
+        # Parse budget info from observations
+        sessions = []
+        for obs in results:
+            content = obs.get("content", "")
+            title = obs.get("title", "")
+
+            # Extract percentage from title
+            import re
+            match = re.search(r"(\d+)%", title)
+            if match:
+                pct = int(match.group(1))
+                sessions.append({
+                    "session_id": obs.get("tags", ["?"])[0] if "session:" in str(obs.get("tags")) else "unknown",
+                    "remaining_pct": pct / 100,
+                    "pressure": "EMERGENCY" if pct < 10 else "COMPACT" if pct < 25 else "NORMAL",
+                    "timestamp": obs.get("timestamp", ""),
+                })
+
+        return sessions
+
+    except Exception:
+        return []
+
+
+def get_budget_warning() -> Optional[str]:
+    """
+    Get a warning message if any session is running low on context.
+
+    Used by hooks to surface cross-instance budget awareness.
+    """
+    sessions = get_all_session_budgets()
+
+    warnings = []
+    for session in sessions:
+        pct = session.get("remaining_pct", 1.0)
+        if pct < 0.10:
+            warnings.append(f"⚠️ Session {session['session_id']}: EMERGENCY ({int(pct*100)}%)")
+        elif pct < 0.25:
+            warnings.append(f"📊 Session {session['session_id']}: COMPACT ({int(pct*100)}%)")
+
+    if warnings:
+        return "\n".join(warnings)
+    return None
