@@ -41,6 +41,12 @@ from .convergence import (
     ConvergenceStrategy,
 )
 from .core import get_db_connection
+from .budget import (
+    get_context_budget,
+    get_all_session_budgets,
+    log_budget_to_memory,
+    ContextBudget,
+)
 
 
 @dataclass
@@ -75,6 +81,65 @@ class SwarmOrchestrator:
         self.work_dir.mkdir(parents=True, exist_ok=True)
         self.swarm_dir = self.work_dir / self.swarm.swarm_id
         self.swarm_dir.mkdir(exist_ok=True)
+        self._orchestrator_budget: Optional[ContextBudget] = None
+
+    def check_orchestrator_budget(self) -> Dict[str, Any]:
+        """
+        Check orchestrator's context budget before spawning.
+
+        Returns dict with:
+            - can_spawn: bool - whether we have capacity to spawn
+            - remaining_pct: float - percentage remaining
+            - pressure: str - budget pressure level
+            - recommendation: str - what to do
+        """
+        budget = get_context_budget()
+        self._orchestrator_budget = budget
+
+        if budget is None:
+            return {
+                "can_spawn": True,
+                "remaining_pct": 0.5,
+                "pressure": "unknown",
+                "recommendation": "Budget unknown, proceeding cautiously",
+            }
+
+        remaining_pct = budget.remaining_pct
+
+        # Log orchestrator budget to cc-memory for cross-instance awareness
+        log_budget_to_memory(budget)
+
+        if remaining_pct < 0.10:
+            return {
+                "can_spawn": False,
+                "remaining_pct": remaining_pct,
+                "pressure": "emergency",
+                "recommendation": "STOP: Orchestrator at <10% - save state first",
+            }
+        elif remaining_pct < 0.25:
+            return {
+                "can_spawn": True,
+                "remaining_pct": remaining_pct,
+                "pressure": "compact",
+                "recommendation": "Limit to 2 agents max - context running low",
+                "max_agents": 2,
+            }
+        elif remaining_pct < 0.40:
+            return {
+                "can_spawn": True,
+                "remaining_pct": remaining_pct,
+                "pressure": "normal",
+                "recommendation": "Proceed with up to 3 agents",
+                "max_agents": 3,
+            }
+        else:
+            return {
+                "can_spawn": True,
+                "remaining_pct": remaining_pct,
+                "pressure": "relaxed",
+                "recommendation": "Full capacity available",
+                "max_agents": self.max_parallel,
+            }
 
     def _build_agent_prompt(self, task: AgentTask) -> str:
         """Build a complete prompt for an agent."""
@@ -121,6 +186,19 @@ When you have your solution, save it to cc-memory:
    - reasoning: Why this approach
 
 The orchestrator will find your solution via the swarm tag.
+
+## Budget Reporting
+
+You are a swarm agent with fresh context. When your work is complete,
+also log your final context usage for swarm coordination:
+
+Use `mem-remember` with:
+- category: "swarm-budget"
+- title: "Budget: {task.task_id}"
+- tags: ["swarm:{self.swarm.swarm_id}", "budget", "agent:{task.task_id}"]
+- content: Include your approximate context usage percentage
+
+This helps the orchestrator track overall swarm resource consumption.
 """
         return isolation_notice + base_prompt + memory_instructions
 
@@ -229,12 +307,37 @@ if swarm:
         return agent
 
     def spawn_all_agents(self, parallel: bool = True) -> List[SpawnedAgent]:
-        """Spawn all agents, optionally in parallel."""
+        """
+        Spawn all agents, optionally in parallel.
+
+        Budget-aware: Checks orchestrator budget and limits agent count
+        if context is running low.
+        """
+        # Check orchestrator budget before spawning
+        budget_status = self.check_orchestrator_budget()
+
+        if not budget_status["can_spawn"]:
+            # Log warning to cc-memory
+            self._log_spawn_blocked(budget_status)
+            return []
+
+        # Determine how many agents to spawn based on budget
+        max_agents = budget_status.get("max_agents", self.max_parallel)
+        tasks_to_spawn = self.swarm.tasks[:max_agents]
+
+        if len(tasks_to_spawn) < len(self.swarm.tasks):
+            self._log_spawn_limited(
+                spawned=len(tasks_to_spawn),
+                total=len(self.swarm.tasks),
+                reason=budget_status["recommendation"],
+            )
+
         if parallel:
-            with ThreadPoolExecutor(max_workers=self.max_parallel) as executor:
+            workers = min(max_agents, len(tasks_to_spawn))
+            with ThreadPoolExecutor(max_workers=workers) as executor:
                 futures = {
                     executor.submit(self.spawn_agent, task): task
-                    for task in self.swarm.tasks
+                    for task in tasks_to_spawn
                 }
                 for future in as_completed(futures):
                     try:
@@ -243,10 +346,51 @@ if swarm:
                         task = futures[future]
                         print(f"Failed to spawn agent for {task.task_id}: {e}")
         else:
-            for task in self.swarm.tasks:
+            for task in tasks_to_spawn:
                 self.spawn_agent(task)
 
         return self.agents
+
+    def _log_spawn_blocked(self, budget_status: Dict[str, Any]):
+        """Log when spawning is blocked due to budget constraints."""
+        try:
+            from .bridge import is_memory_available, find_project_dir
+            if is_memory_available():
+                from cc_memory import memory as cc_memory
+                project_dir = find_project_dir()
+                cc_memory.remember(
+                    category="swarm-budget",
+                    title=f"Swarm {self.swarm.swarm_id}: BLOCKED",
+                    content=f"""Swarm spawn blocked due to budget constraints.
+Remaining: {budget_status['remaining_pct']*100:.0f}%
+Pressure: {budget_status['pressure']}
+Recommendation: {budget_status['recommendation']}
+Problem: {self.swarm.problem[:200]}""",
+                    tags=["swarm", "budget", "blocked", f"swarm:{self.swarm.swarm_id}"],
+                    project_dir=project_dir,
+                )
+        except Exception:
+            pass
+
+    def _log_spawn_limited(self, spawned: int, total: int, reason: str):
+        """Log when spawning is limited due to budget constraints."""
+        try:
+            from .bridge import is_memory_available, find_project_dir
+            if is_memory_available():
+                from cc_memory import memory as cc_memory
+                project_dir = find_project_dir()
+                cc_memory.remember(
+                    category="swarm-budget",
+                    title=f"Swarm {self.swarm.swarm_id}: LIMITED",
+                    content=f"""Swarm spawn limited due to budget constraints.
+Spawned: {spawned}/{total} agents
+Reason: {reason}
+Problem: {self.swarm.problem[:200]}""",
+                    tags=["swarm", "budget", "limited", f"swarm:{self.swarm.swarm_id}"],
+                    project_dir=project_dir,
+                )
+        except Exception:
+            pass
 
     def _record_agent_spawn(self, agent: SpawnedAgent, task: AgentTask):
         """Record agent spawn in database."""
@@ -462,8 +606,8 @@ if swarm:
         return self.swarm.converge(strategy)
 
     def get_status(self) -> Dict[str, Any]:
-        """Get current swarm status."""
-        return {
+        """Get current swarm status including budget information."""
+        status = {
             "swarm_id": self.swarm.swarm_id,
             "problem": self.swarm.problem[:100],
             "agents": [
@@ -479,6 +623,72 @@ if swarm:
             "work_dir": str(self.swarm_dir),
         }
 
+        # Add budget information
+        budget_info = self.get_swarm_budget_status()
+        status["budget"] = budget_info
+
+        return status
+
+    def get_swarm_budget_status(self) -> Dict[str, Any]:
+        """
+        Get cumulative budget status for all agents in this swarm.
+
+        Queries cc-memory for budget reports from spawned agents.
+        """
+        import re
+
+        result = {
+            "orchestrator_remaining_pct": None,
+            "agent_reports": [],
+            "total_agents": len(self.agents),
+            "agents_reported": 0,
+        }
+
+        # Get orchestrator budget
+        if self._orchestrator_budget:
+            result["orchestrator_remaining_pct"] = self._orchestrator_budget.remaining_pct
+
+        # Query cc-memory for agent budget reports
+        try:
+            from .bridge import is_memory_available, find_project_dir
+            if is_memory_available():
+                from cc_memory import memory as cc_memory
+                project_dir = find_project_dir()
+
+                reports = cc_memory.recall(
+                    query=f"swarm:{self.swarm.swarm_id} budget",
+                    category="swarm-budget",
+                    limit=20,
+                    project_dir=project_dir,
+                )
+
+                for r in reports:
+                    content = r.get("content", "")
+                    title = r.get("title", "")
+
+                    # Extract task ID
+                    task_match = re.search(r'agent:([^\s,\]]+)', str(r.get("tags", "")))
+                    if not task_match:
+                        task_match = re.search(r'Budget:\s*(\w+)', title)
+
+                    task_id = task_match.group(1) if task_match else "unknown"
+
+                    # Extract percentage if available
+                    pct_match = re.search(r'(\d+)%', content)
+                    pct = int(pct_match.group(1)) if pct_match else None
+
+                    result["agent_reports"].append({
+                        "task_id": task_id,
+                        "remaining_pct": pct / 100 if pct else None,
+                        "timestamp": r.get("timestamp"),
+                    })
+                    result["agents_reported"] += 1
+
+        except Exception:
+            pass
+
+        return result
+
 
 def spawn_swarm(
     problem: str,
@@ -486,9 +696,13 @@ def spawn_swarm(
     constraints: List[str] = None,
     wait: bool = True,
     timeout: int = 300,
+    check_budget: bool = True,
 ) -> Dict[str, Any]:
     """
     High-level function to spawn a swarm and optionally wait for results.
+
+    Budget-aware: Checks orchestrator context budget before spawning.
+    Will limit or block spawning if context is running low.
 
     Args:
         problem: The problem to solve
@@ -496,9 +710,10 @@ def spawn_swarm(
         constraints: Problem constraints
         wait: Whether to wait for completion
         timeout: Max seconds to wait
+        check_budget: Whether to check budget before spawning (default True)
 
     Returns:
-        Dict with swarm_id, status, and optionally converged result
+        Dict with swarm_id, status, budget info, and optionally converged result
     """
     from .convergence import spawn_parallel_agents
 
@@ -512,7 +727,19 @@ def spawn_swarm(
     # Create orchestrator
     orchestrator = SwarmOrchestrator(swarm)
 
-    # Spawn agents
+    # Check budget before spawning
+    if check_budget:
+        budget_status = orchestrator.check_orchestrator_budget()
+        if not budget_status["can_spawn"]:
+            return {
+                "swarm_id": swarm.swarm_id,
+                "agents_spawned": 0,
+                "status": "blocked",
+                "budget": budget_status,
+                "error": budget_status["recommendation"],
+            }
+
+    # Spawn agents (budget-aware)
     orchestrator.spawn_all_agents()
 
     result = {
@@ -535,6 +762,9 @@ def spawn_swarm(
                 "confidence": converged.confidence,
                 "contributors": len(converged.contributing_agents),
             }
+
+        # Include final budget status
+        result["final_budget"] = orchestrator.get_swarm_budget_status()
 
     return result
 

@@ -364,6 +364,59 @@ If cron/systemd is enabled, once daily:
 | **Auto-evolution** | During maintenance | Strengthen used wisdom, decay stale, promote patterns |
 | **Daily cron** | Scheduled | Full maintenance: temporal decay, evolution cycle, cleanup |
 
+---
+
+## Context Budget Management
+
+The soul is aware of its context window constraints and manages them proactively.
+
+### Budget Thresholds
+
+| Remaining | Pressure | Behavior |
+|-----------|----------|----------|
+| >40% | relaxed | Full context injection |
+| 25-40% | normal | Standard operation |
+| 10-25% | compact | Auto-save ledger, reduced injection |
+| <10% | emergency | Minimal injection, urgent save |
+
+### Auto-Save Ledger
+
+When context drops below thresholds (25% or 10%), the soul automatically saves a machine-restorable ledger to cc-memory. This happens proactively in the `user_prompt` hook before context exhaustion.
+
+The ledger contains:
+- Current context percentage
+- Files touched in session
+- Critical context snippets
+- Session state for restoration
+
+### Multi-Instance Budget Tracking
+
+Budget status is logged to cc-memory, enabling cross-instance awareness:
+
+```python
+from cc_soul.budget import (
+    get_context_budget,      # Get current session's budget
+    get_all_session_budgets, # Query all active sessions
+    get_budget_warning,      # Get warnings for low sessions
+    log_budget_to_memory,    # Log budget for visibility
+)
+```
+
+### Budget-Aware Swarm Spawning
+
+The swarm spawner checks orchestrator budget before spawning agents:
+
+| Remaining | Max Agents | Action |
+|-----------|------------|--------|
+| >40% | 4 | Full parallel spawning |
+| 25-40% | 3 | Limited spawning |
+| 10-25% | 2 | Minimal spawning |
+| <10% | 0 | Blocked (save state first) |
+
+All spawn blocks/limits are logged to cc-memory for cross-instance visibility.
+
+---
+
 **Low-risk autonomous actions** (always executed):
 - Strengthen wisdom confidence when applied successfully
 - Promote stable patterns (5+ observations) to wisdom

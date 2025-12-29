@@ -179,6 +179,45 @@ _current_episode_id: int = None
 # Session mood cache - computed once at session start, influences all hooks
 _session_mood: Mood = None
 
+# Track last auto-save to avoid redundant saves
+_last_auto_save_mode: str = None
+
+
+def _auto_save_at_threshold(budget_mode: str, transcript_path: str = None) -> None:
+    """
+    Auto-save ledger when crossing budget thresholds.
+
+    Saves once per threshold crossing to avoid redundant saves.
+    Enables proactive state preservation before Claude compacts.
+    """
+    global _last_auto_save_mode
+
+    # Only save on threshold crossings, not every call
+    if budget_mode == _last_auto_save_mode:
+        return
+
+    # Save at compact (25%) and minimal (10%) thresholds
+    if budget_mode in ("compact", "minimal"):
+        try:
+            from .budget import get_context_budget
+
+            budget = get_context_budget(transcript_path)
+            context_pct = budget.remaining_pct if budget else 0.25
+
+            ledger_id = save_ledger(
+                context_pct=context_pct,
+                files_touched=list(_session_files_touched),
+            )
+
+            _last_auto_save_mode = budget_mode
+
+            # Log to cc-memory for cross-instance awareness
+            from .budget import log_budget_to_memory
+            log_budget_to_memory(budget, transcript_path)
+
+        except Exception:
+            pass
+
 
 def _clear_session_messages():
     """Clear accumulated session messages."""
@@ -1608,6 +1647,10 @@ def user_prompt(
     # Check context budget before deciding what to inject
     budget_check = check_budget_before_inject(transcript_path)
 
+    # AUTO-SAVE: Proactively save ledger at budget thresholds
+    budget_mode = budget_check.get("mode", "full")
+    _auto_save_at_threshold(budget_mode, transcript_path)
+
     # If urgent, save context first
     if budget_check.get("save_first"):
         from .conversations import save_context
@@ -1617,9 +1660,6 @@ def user_prompt(
             context_type="pre_compact",
             priority=9,
         )
-
-    # Adjust injection based on budget mode
-    budget_mode = budget_check.get("mode", "full")
 
     # MOOD: Combine budget mode with mood-based injection mode
     # Take the more restrictive of the two
