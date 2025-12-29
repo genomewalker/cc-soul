@@ -368,6 +368,69 @@ from .unified_search import (
     format_search_results,
 )
 
+# Context Optimizer - metacognition for context window management
+from .context_optimizer import (
+    ContextPressure,
+    TaskItem,
+    TaskGraph,
+    OptimizationStrategy,
+    get_pressure_level,
+    parse_todo_list,
+    load_progress_file,
+    save_progress_file,
+    analyze_tasks,
+    get_optimization_signal,
+    get_context_observation,
+    update_progress_with_session,
+    format_strategy_for_injection,
+)
+
+# Session Ledger - state preservation using cc-memory backend
+from .ledger import (
+    SessionLedger,
+    SoulState,
+    WorkState,
+    Continuation,
+    save_ledger,
+    load_latest_ledger,
+    restore_from_ledger,
+    format_ledger_for_context,
+    capture_soul_state,
+    capture_work_state,
+)
+
+# Multi-Agent Convergence (Antahkarana) - the inner instrument with multiple voices
+from .convergence import (
+    # Primary names (Upanishadic)
+    Antahkarana,
+    InnerVoice,
+    VoiceTask,
+    VoiceSolution,
+    SamvadaResult,
+    awaken_antahkarana,
+    get_antahkarana,
+    list_active_antahkaranas,
+    # Backward compatibility aliases
+    Swarm,
+    AgentTask,
+    AgentSolution,
+    AgentPerspective,
+    ConvergenceStrategy,
+    ConvergenceResult,
+    spawn_parallel_agents,
+    get_swarm,
+    list_active_swarms,
+)
+
+# Swarm Spawner - real Claude agent orchestration
+from .swarm_spawner import (
+    SpawnedAgent,
+    SwarmOrchestrator,
+    spawn_swarm,
+    get_orchestrator,
+    get_swarm_solutions,
+)
+
 __all__ = [
     # Core
     "init_soul",
@@ -662,4 +725,55 @@ __all__ = [
     "search_soul_wisdom",
     "quick_unified_recall",
     "format_search_results",
+    # Context Optimizer (metacognition)
+    "ContextPressure",
+    "TaskItem",
+    "TaskGraph",
+    "OptimizationStrategy",
+    "get_pressure_level",
+    "parse_todo_list",
+    "load_progress_file",
+    "save_progress_file",
+    "analyze_tasks",
+    "get_optimization_signal",
+    "get_context_observation",
+    "update_progress_with_session",
+    "format_strategy_for_injection",
+    # Session Ledger (state preservation via cc-memory)
+    "SessionLedger",
+    "SoulState",
+    "WorkState",
+    "Continuation",
+    "save_ledger",
+    "load_latest_ledger",
+    "restore_from_ledger",
+    "format_ledger_for_context",
+    "capture_soul_state",
+    "capture_work_state",
+    # Multi-Agent Convergence (Antahkarana - the inner instrument)
+    # Primary names (Upanishadic)
+    "Antahkarana",
+    "InnerVoice",
+    "VoiceTask",
+    "VoiceSolution",
+    "SamvadaResult",
+    "awaken_antahkarana",
+    "get_antahkarana",
+    "list_active_antahkaranas",
+    # Backward compatibility aliases
+    "Swarm",
+    "AgentTask",
+    "AgentSolution",
+    "AgentPerspective",
+    "ConvergenceStrategy",
+    "ConvergenceResult",
+    "spawn_parallel_agents",
+    "get_swarm",
+    "list_active_swarms",
+    # Swarm Spawner (real agent orchestration)
+    "SpawnedAgent",
+    "SwarmOrchestrator",
+    "spawn_swarm",
+    "get_orchestrator",
+    "get_swarm_solutions",
 ]
