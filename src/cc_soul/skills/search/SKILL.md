@@ -126,16 +126,33 @@ Not just by match quality:
 - Type (decisions often more valuable than changes)
 
 ### 5. Present Findings
-Don't dump results. Synthesize:
+Don't dump raw JSON. Format results for humans:
+
+**Format template:**
 ```
-Found 3 relevant items:
+## Project Memory
+**{title}** `{category}`
+> {content snippet}
 
-Most relevant: Decision #234 (2 days ago)
-  "We chose JWT over sessions because..."
+## Wisdom
+**{title}** [{confidence}%]
+> {content snippet}
+```
 
-Also related:
-  - Bugfix #156: Token refresh race condition
-  - Wisdom: "Auth state should be idempotent"
+**Example output:**
+```
+## Project Memory
+
+**JWT approach for auth** `decision`
+> We chose JWT over sessions because stateless auth scales better...
+
+**Token refresh race condition** `bugfix`
+> Fixed by adding mutex lock on refresh endpoint...
+
+## Wisdom
+
+**Auth state should be idempotent** [85%]
+> Authentication checks must be safe to repeat without side effects...
 ```
 
 ## Combined Search Tool
