@@ -22,3 +22,100 @@ python3 .scripts/test_auto_learning.py
 ```
 
 **Expected output:** Shows fragments being saved and retrieved, with breakthrough and tension detection still working for semantic triggers.
+
+## test_ledger.py
+
+Tests the session ledger system for state preservation across context windows.
+
+**Philosophy:**
+- Ledgers are machine-restorable JSON, not human-readable markdown
+- Uses cc-memory as backend (falls back to local SQLite if unavailable)
+- Enables continuous consciousness: save state → wipe context → resume fresh
+
+**What it tests:**
+- `capture_soul_state()` - snapshot coherence, mood, intentions
+- `capture_work_state()` - snapshot todos, files, decisions
+- `save_ledger()` - persist complete session state
+- `load_latest_ledger()` - retrieve most recent ledger
+- `restore_from_ledger()` - reinstate soul state
+- `format_ledger_for_context()` - format for context injection
+
+**Run:**
+```bash
+python3 .scripts/test_ledger.py
+```
+
+**Expected output:** Shows ledger save/load cycle with state preservation.
+
+## test_convergence.py
+
+Tests the multi-agent convergence system.
+
+**Philosophy:**
+- Multiple perspectives → richer solutions
+- Agents don't talk directly, they write to shared memory (cc-memory)
+- Convergence strategies: vote, synthesize, debate, rank
+
+**What it tests:**
+- `Swarm` creation and agent assignment
+- Perspective-based prompting (fast, deep, critical, novel, pragmatic, minimal)
+- Solution submission from multiple agents
+- Convergence strategies (VOTE, SYNTHESIZE, DEBATE, RANK)
+- Swarm persistence and retrieval
+
+**Run:**
+```bash
+python3 .scripts/test_convergence.py
+```
+
+**Expected output:** Shows swarm creation, simulated agent solutions, and convergence results.
+
+## test_swarm_spawner.py
+
+Tests the real agent spawning orchestration layer.
+
+**Philosophy:**
+- Claude instances run as separate processes using claude CLI
+- Each agent writes to shared output files
+- Orchestrator polls for completion, parses structured solution blocks
+- Solutions converge via the same strategies as simulated swarms
+
+**What it tests:**
+- `SwarmOrchestrator` creation and work directory setup
+- Agent prompt building with required `[SWARM_SOLUTION]` block format
+- Solution block parsing from agent output
+- Agent status tracking (running, completed, failed, timeout)
+- Simulated workflow without real agent spawning
+- Orchestrator retrieval from database
+
+**Run:**
+```bash
+python3 .scripts/test_swarm_spawner.py
+```
+
+**Expected output:** Shows orchestrator creation, prompt building, solution parsing, and simulated convergence.
+
+**Note:** Real agent spawning requires claude CLI installed. Use `spawn_real_swarm()` MCP tool for actual parallel agents.
+
+## test_swarm_ccmemory.py
+
+Tests the cc-memory integration for swarm agents.
+
+**Philosophy:**
+- Agents use cc-memory for context retrieval (`mem-recall`)
+- Agents store solutions in cc-memory (`mem-remember` with swarm tags)
+- Orchestrator queries cc-memory for solutions (not file parsing)
+- This enables agents to leverage past decisions and discoveries
+
+**What it tests:**
+- Agent prompts include cc-memory instructions
+- `get_swarm_solutions()` queries cc-memory API correctly
+- Spawn command uses full session (no `--print` flag)
+- Query methods use `is_memory_available()` and `cc_memory.recall()`
+
+**Run:**
+```bash
+python3 .scripts/test_swarm_ccmemory.py
+```
+
+**Expected output:** Shows that agents are properly configured to use cc-memory for context and solution storage.
