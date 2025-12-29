@@ -12,10 +12,24 @@ soul's aspects are with each other:
 High coherence: The soul acts as one. Past, present, and future flow.
 Low coherence: Fragmentation. Dissonance. The soul is divided.
 
+τₖ measures INTEGRATION, not ACTIVITY. The difference:
+- Activity: "How many wisdom entries exist? Were they used?"
+- Integration: "Does old wisdom still inform new decisions? Do behaviors
+  match stated beliefs? Are aspirations coherent, not conflicting?"
+
 τₖ has three dimensions:
 1. Instantaneous - Current alignment of all aspects
+   - Direction: Are aspirations coherent with progress, not just present?
+   - Alignment: Does behavior match beliefs (via intention checks)?
+   - Tensions: Are there conflicting intentions?
+
 2. Developmental - Trajectory and stability over time
+   - Is coherence trending up, down, or stable?
+   - How close to peak coherence?
+
 3. Meta-awareness - Self-knowledge and integration depth
+   - Self-knowledge: Quality of identity (fresh, multi-dimensional)?
+   - Wisdom depth: Does OLD wisdom still inform present (temporal continuity)?
 
 The final τₖ emerges from all three dimensions.
 """
@@ -165,24 +179,61 @@ def compute_coherence(mood: Mood = None) -> CoherenceState:
     }
     connection_signal = connection_map.get(mood.connection, 0.5)
 
-    # Direction signal (from aspirations)
+    # Direction signal (aspirations coherent, not conflicting)
+    # Coherence means aspirations pull together, not against each other
     aspirations = get_active_aspirations()
-    if len(aspirations) >= 2:
-        direction_signal = 1.0
-    elif len(aspirations) == 1:
-        direction_signal = 0.7
-    else:
+    if len(aspirations) == 0:
         direction_signal = 0.3  # No direction
-
-    # Alignment signal (beliefs exist and are being applied)
-    beliefs = get_beliefs()
-    applications = mood.applications_7d
-    if beliefs and applications > 0:
-        alignment_signal = min(1.0, 0.5 + (applications / 10))
-    elif beliefs:
-        alignment_signal = 0.5  # Beliefs exist but unused
     else:
-        alignment_signal = 0.3  # No beliefs
+        # Check for progress notes - indicates active movement
+        has_progress = any(a.progress_notes for a in aspirations)
+        # Check if aspirations have been realized (shows follow-through)
+        from .aspirations import get_aspirations, AspirationState
+        all_aspirations = get_aspirations()
+        realized = [a for a in all_aspirations if a.state == AspirationState.REALIZED]
+
+        if len(realized) > 0 and has_progress:
+            direction_signal = 1.0  # Proven direction with follow-through
+        elif has_progress:
+            direction_signal = 0.8  # Active movement toward aspirations
+        elif len(aspirations) >= 2:
+            direction_signal = 0.6  # Multiple aspirations, but passive
+        else:
+            direction_signal = 0.5  # Single aspiration, no progress
+
+    # Alignment signal (actual behavior matches stated beliefs)
+    # Not just "was wisdom applied?" but "did behavior align with principles?"
+    beliefs = get_beliefs()
+
+    # Use intention alignment scores as proxy for behavioral alignment
+    from .intentions import get_active_intentions, find_tension
+    active_intentions = get_active_intentions()
+
+    if active_intentions:
+        # Average alignment score of checked intentions
+        checked_intentions = [i for i in active_intentions if i.check_count > 0]
+        if checked_intentions:
+            avg_alignment = sum(i.alignment_score for i in checked_intentions) / len(checked_intentions)
+            alignment_signal = avg_alignment
+        else:
+            alignment_signal = 0.5  # Intentions exist but unchecked
+    elif beliefs:
+        # Fall back to wisdom success rate if no intentions
+        from .wisdom import recall_wisdom
+        all_wisdom = recall_wisdom(limit=50)
+        wisdom_with_outcomes = [w for w in all_wisdom if w.get("success_rate") is not None]
+        if wisdom_with_outcomes:
+            avg_success = sum(w["success_rate"] for w in wisdom_with_outcomes) / len(wisdom_with_outcomes)
+            alignment_signal = avg_success
+        else:
+            alignment_signal = 0.5  # Beliefs exist but untested
+    else:
+        alignment_signal = 0.3  # No beliefs to align with
+
+    # Penalize detected tensions (conflicting intentions)
+    tensions = find_tension()
+    if tensions:
+        alignment_signal = max(0.2, alignment_signal - 0.1 * len(tensions))
 
     # Compute instantaneous coherence
     instant_signals = [
@@ -242,29 +293,78 @@ def compute_coherence(mood: Mood = None) -> CoherenceState:
     # META-AWARENESS SIGNALS
     # =========================================================================
 
-    # Self-knowledge: Does the soul have observations about itself?
+    # Self-knowledge: Quality and consistency of self-perception
+    # Not just "do observations exist?" but "are they coherent?"
     from .identity import get_identity
 
     identity = get_identity()
     identity_count = sum(
         len(v) if isinstance(v, list) else 1 for v in identity.values() if v
     )
-    if identity_count >= 5:
-        self_knowledge = 1.0
+
+    # Check for stale aspects (not confirmed recently)
+    try:
+        from .mcp_tools.temporal import get_stale_aspects
+        stale_result = get_stale_aspects()
+        stale_count = stale_result.count("aspect:") if stale_result else 0
+    except Exception:
+        stale_count = 0
+
+    # Check if identity spans multiple aspects (not one-dimensional)
+    aspects_with_content = sum(1 for v in identity.values() if v)
+
+    if identity_count >= 3 and stale_count == 0 and aspects_with_content >= 2:
+        self_knowledge = 1.0  # Rich, confirmed, multi-dimensional
+    elif identity_count >= 3 and stale_count <= 2:
+        self_knowledge = 0.8  # Good identity, mostly fresh
     elif identity_count >= 2:
-        self_knowledge = 0.7
+        # Penalize staleness
+        freshness_factor = max(0.3, 1.0 - (stale_count * 0.15))
+        self_knowledge = 0.6 * freshness_factor
     else:
         self_knowledge = 0.3
 
-    # Wisdom depth: How old is the oldest recently-applied wisdom?
-    wisdom_count = mood.wisdom_7d
-    if wisdom_count > 10:
-        wisdom_depth = 1.0  # Deep active wisdom
-    elif wisdom_count > 5:
-        wisdom_depth = 0.7
-    elif wisdom_count > 0:
-        wisdom_depth = 0.5
+    # Wisdom depth: Temporal continuity of wisdom
+    # Not "how much was applied?" but "does old wisdom still inform present?"
+    conn = get_db_connection()
+    c = conn.cursor()
+
+    # Find the age of oldest wisdom that was applied in last 30 days
+    c.execute("""
+        SELECT MIN(w.timestamp) as oldest_wisdom
+        FROM wisdom w
+        INNER JOIN wisdom_applications wa ON w.id = wa.wisdom_id
+        WHERE wa.applied_at > datetime('now', '-30 days')
+    """)
+    oldest_row = c.fetchone()
+
+    # Also check: is wisdom being confirmed (success/failure recorded)?
+    c.execute("""
+        SELECT COUNT(*) FROM wisdom_applications
+        WHERE outcome IS NOT NULL
+        AND applied_at > datetime('now', '-30 days')
+    """)
+    confirmed_count = c.fetchone()[0]
+
+    conn.close()
+
+    if oldest_row and oldest_row[0]:
+        try:
+            oldest_date = datetime.fromisoformat(oldest_row[0])
+            wisdom_age_days = (datetime.now() - oldest_date).days
+
+            if wisdom_age_days > 60 and confirmed_count > 3:
+                wisdom_depth = 1.0  # Old wisdom still active with feedback loop
+            elif wisdom_age_days > 30 or confirmed_count > 2:
+                wisdom_depth = 0.8  # Good temporal depth
+            elif wisdom_age_days > 7 or confirmed_count > 0:
+                wisdom_depth = 0.6  # Recent wisdom with some feedback
+            else:
+                wisdom_depth = 0.4  # Very recent wisdom only
+        except (ValueError, TypeError):
+            wisdom_depth = 0.4
     else:
+        # No applications in last 30 days
         wisdom_depth = 0.2
 
     # Integration active: Recent insights crystallized?
