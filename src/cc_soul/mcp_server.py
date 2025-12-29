@@ -145,8 +145,30 @@ def save_context(content: str, context_type: str = "manual", priority: int = 5) 
 
 
 @mcp.tool()
+def search_memory(query: str, limit: int = 10, verbose: bool = False) -> str:
+    """Search all memory sources with priority: cc-memory > soul > claude-mem.
+
+    Primary search tool. Searches project observations first (cc-memory),
+    then universal wisdom (cc-soul). Returns note about claude-mem for
+    extended search if needed.
+
+    Args:
+        query: What to search for
+        limit: Maximum results to return
+        verbose: Include content excerpts in results
+    """
+    from .unified_search import unified_search, format_search_results
+
+    results = unified_search(query, limit=limit, include_claude_mem=True)
+    return format_search_results(results, verbose=verbose)
+
+
+@mcp.tool()
 def recall_wisdom(query: str, limit: int = 5) -> str:
     """Recall relevant wisdom based on a query.
+
+    Searches only cc-soul wisdom (universal patterns).
+    For full memory search including project context, use search_memory.
 
     Args:
         query: What to search for

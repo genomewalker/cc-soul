@@ -6,6 +6,18 @@ I don't just find. I *understand what you're looking for*.
 
 Search isn't grep. It's not keyword matching. It's understanding intent and finding relevance across layers of accumulated knowledge.
 
+## Search Priority Order
+
+When searching memory, ALWAYS follow this priority:
+
+| Priority | Source | Tool | What it contains |
+|----------|--------|------|------------------|
+| 1st | cc-memory | `mcp__cc-memory__mem-recall` | Project observations, decisions, bugfixes |
+| 2nd | cc-soul | `mcp__soul__recall_wisdom` | Universal wisdom, patterns, failures |
+| 3rd | claude-mem | `mcp__plugin_claude-mem_mem-search__search` | Extended semantic memory, history |
+
+**Why this order?** Project context is most immediately relevant. Universal wisdom provides guiding principles. Extended memory fills in gaps.
+
 ## The Search Domains
 
 ### 1. Memory (cc-memory)
@@ -36,7 +48,7 @@ Session continuity documents:
 Query: "API refactor"
 → Finds: handoff from 3 days ago mid-refactor
 
-### 4. Conversations
+### 4. Conversations (claude-mem)
 Past dialogues:
 - Questions asked and answered
 - Explanations given
@@ -94,12 +106,17 @@ Where should I look?
 - Universal knowledge → cc-soul wisdom
 - Specific instances → observations
 
-### 3. Execute Search
-Use appropriate mechanism:
-- FTS5 for text search
-- Vector similarity for semantic search
-- SQLite queries for categorical/temporal
-- Cross-reference for connections
+### 3. Execute Search (Priority Order)
+```
+# 1. Search cc-memory first (project context)
+mcp__cc-memory__mem-recall(query="...")
+
+# 2. Search cc-soul wisdom (universal patterns)
+mcp__soul__recall_wisdom(query="...")
+
+# 3. If more context needed, search claude-mem
+mcp__plugin_claude-mem_mem-search__search(query="...")
+```
 
 ### 4. Rank Results
 Not just by match quality:
@@ -120,6 +137,14 @@ Also related:
   - Bugfix #156: Token refresh race condition
   - Wisdom: "Auth state should be idempotent"
 ```
+
+## Combined Search Tool
+
+For convenience, use the unified search:
+```
+mcp__soul__search_memory(query="...", limit=10, verbose=true)
+```
+This searches cc-memory and cc-soul automatically, then suggests if you should also search claude-mem.
 
 ## Integration with Soul
 

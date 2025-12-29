@@ -359,6 +359,15 @@ from .spanda import (
     daily_maintenance,
 )
 
+# Unified Search - prioritized memory access (cc-memory > soul > claude-mem)
+from .unified_search import (
+    unified_search,
+    search_cc_memory,
+    search_soul_wisdom,
+    quick_unified_recall,
+    format_search_results,
+)
+
 __all__ = [
     # Core
     "init_soul",
@@ -647,4 +656,10 @@ __all__ = [
     "session_end_circle",
     "prompt_circle",
     "daily_maintenance",
+    # Unified Search (cc-memory > soul > claude-mem)
+    "unified_search",
+    "search_cc_memory",
+    "search_soul_wisdom",
+    "quick_unified_recall",
+    "format_search_results",
 ]
