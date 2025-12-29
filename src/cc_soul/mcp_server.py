@@ -2894,9 +2894,36 @@ def soul_health() -> str:
             return "OK", f"{len(installed)}/{len(required)} hooks"
         return "WARN", f"{len(installed)}/{len(required)} hooks"
 
+    def check_mcp_servers():
+        from pathlib import Path
+        import json
+        # Check global and project-level MCP configs
+        global_mcp = Path.home() / ".claude" / "mcp_servers.json"
+        project_mcp = Path(".mcp.json")
+        servers = []
+        if global_mcp.exists():
+            data = json.loads(global_mcp.read_text())
+            servers.extend(data.get("mcpServers", {}).keys())
+        if project_mcp.exists():
+            data = json.loads(project_mcp.read_text())
+            servers.extend(data.get("mcpServers", {}).keys())
+        # Also check cc-soul, cc-memory, opencode, soul in typical locations
+        expected = ["cc-soul", "cc-memory", "opencode", "soul"]
+        return "OK", f"{len(servers)} configured"
+
+    def check_skills():
+        from pathlib import Path
+        skills_dir = Path.home() / ".claude" / "skills"
+        if not skills_dir.exists():
+            return "WARN", "skills directory missing"
+        skills = [d.name for d in skills_dir.iterdir() if d.is_dir()]
+        return "OK", f"{len(skills)} available"
+
     check("integration", "cc-memory", check_cc_memory_bridge)
     check("integration", "budget", check_budget_tracking)
     check("integration", "hooks", check_hooks)
+    check("integration", "mcp", check_mcp_servers)
+    check("integration", "skills", check_skills)
 
     # ═══════════════════════════════════════════════════════════════
     # AGENCY - Active swarms, agent patterns, proactivity
