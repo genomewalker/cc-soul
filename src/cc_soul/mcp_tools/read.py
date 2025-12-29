@@ -94,43 +94,182 @@ def soul_summary() -> str:
 
 @mcp.tool()
 def soul_health() -> str:
-    """Check soul system health and vitality."""
-    from .core import SOUL_DB
+    """Check soul system health and vitality.
+
+    Comprehensive health check covering:
+    - Core: Database, wisdom, beliefs, identity
+    - Infrastructure: Embeddings, LanceDB, Kuzu graph
+    - Integration: cc-memory bridge, budget tracking
+    - Agency: Active swarms, agent patterns
+    """
+    from .core import SOUL_DB, SOUL_DIR, get_db_connection
     import sqlite3
 
-    if not SOUL_DB.exists():
-        return "Soul not initialized. Run `soul init` first."
-
     lines = ["# Soul Health", ""]
+    checks = []  # (category, name, status, detail)
 
-    conn = sqlite3.connect(SOUL_DB)
-    cursor = conn.cursor()
+    def check(category, name, fn):
+        try:
+            status, detail = fn()
+            checks.append((category, name, status, detail))
+        except Exception as e:
+            checks.append((category, name, "FAIL", str(e)[:50]))
 
-    try:
-        cursor.execute("SELECT COUNT(*) FROM wisdom")
-        lines.append(f"- **wisdom**: {cursor.fetchone()[0]} entries")
-    except sqlite3.OperationalError:
-        lines.append("- **wisdom**: (table missing)")
+    # ═══════════════════════════════════════════════════════════════
+    # CORE - Soul database and content
+    # ═══════════════════════════════════════════════════════════════
 
-    try:
-        cursor.execute("SELECT COUNT(*) FROM wisdom WHERE type='principle'")
-        lines.append(f"- **beliefs**: {cursor.fetchone()[0]} entries")
-    except sqlite3.OperationalError:
-        lines.append("- **beliefs**: (table missing)")
+    def check_database():
+        if not SOUL_DB.exists():
+            return "FAIL", "Database not found"
+        conn = get_db_connection()
+        cursor = conn.execute("SELECT COUNT(*) FROM wisdom")
+        count = cursor.fetchone()[0]
+        return "OK", f"{count} wisdom entries"
 
-    try:
-        cursor.execute("SELECT COUNT(*) FROM identity")
-        lines.append(f"- **identity**: {cursor.fetchone()[0]} entries")
-    except sqlite3.OperationalError:
-        lines.append("- **identity**: (table missing)")
+    def check_beliefs():
+        conn = get_db_connection()
+        cursor = conn.execute("SELECT COUNT(*) FROM wisdom WHERE type='principle'")
+        count = cursor.fetchone()[0]
+        return "OK" if count > 0 else "WARN", f"{count} beliefs"
 
-    try:
-        cursor.execute("SELECT COUNT(*) FROM vocabulary")
-        lines.append(f"- **vocabulary**: {cursor.fetchone()[0]} entries")
-    except sqlite3.OperationalError:
-        lines.append("- **vocabulary**: (table missing)")
+    def check_identity():
+        conn = get_db_connection()
+        try:
+            cursor = conn.execute("SELECT COUNT(*) FROM identity")
+            count = cursor.fetchone()[0]
+            return "OK" if count > 0 else "WARN", f"{count} aspects"
+        except sqlite3.OperationalError:
+            return "WARN", "table not created"
 
-    conn.close()
+    check("core", "database", check_database)
+    check("core", "beliefs", check_beliefs)
+    check("core", "identity", check_identity)
+
+    # ═══════════════════════════════════════════════════════════════
+    # INFRASTRUCTURE - Embeddings, vector DB, graph DB
+    # ═══════════════════════════════════════════════════════════════
+
+    def check_embeddings():
+        from .vectors import embed_text
+        vec = embed_text("test")
+        return "OK", f"dim={len(vec)}"
+
+    def check_lancedb():
+        import lancedb
+        lance_dir = SOUL_DIR / "vectors" / "lancedb"
+        lance_dir.mkdir(parents=True, exist_ok=True)
+        db = lancedb.connect(str(lance_dir))
+        tables = db.table_names()
+        return "OK", f"{len(tables)} tables"
+
+    def check_kuzu():
+        try:
+            import kuzu  # noqa: F401
+            return "OK", "available"
+        except ImportError:
+            return "WARN", "not installed"
+
+    check("infra", "embeddings", check_embeddings)
+    check("infra", "lancedb", check_lancedb)
+    check("infra", "kuzu", check_kuzu)
+
+    # ═══════════════════════════════════════════════════════════════
+    # INTEGRATION - cc-memory bridge, budget tracking
+    # ═══════════════════════════════════════════════════════════════
+
+    def check_cc_memory_bridge():
+        from .bridge import is_memory_available
+        if is_memory_available():
+            from .bridge import find_project_dir
+            project = find_project_dir()
+            return "OK", f"connected ({project.name if project else 'global'})"
+        return "WARN", "not available"
+
+    def check_budget_tracking():
+        from .budget import get_context_budget, get_all_session_budgets
+        budget = get_context_budget()
+        sessions = get_all_session_budgets()
+        if budget:
+            pct = int(budget.remaining_pct * 100)
+            return "OK", f"{pct}% remaining, {len(sessions)} sessions tracked"
+        return "WARN", f"transcript unavailable, {len(sessions)} sessions tracked"
+
+    def check_hooks():
+        from pathlib import Path
+        import json
+        settings_path = Path.home() / ".claude" / "settings.json"
+        if not settings_path.exists():
+            return "FAIL", "settings.json not found"
+        with open(settings_path) as f:
+            settings = json.load(f)
+        hooks = settings.get("hooks", {})
+        required = ["SessionStart", "SessionEnd", "UserPromptSubmit", "PreCompact"]
+        installed = [h for h in required if h in hooks]
+        if len(installed) == len(required):
+            return "OK", f"{len(installed)}/{len(required)} hooks"
+        return "WARN", f"{len(installed)}/{len(required)} hooks"
+
+    check("integration", "cc-memory", check_cc_memory_bridge)
+    check("integration", "budget", check_budget_tracking)
+    check("integration", "hooks", check_hooks)
+
+    # ═══════════════════════════════════════════════════════════════
+    # AGENCY - Active swarms, agent patterns, proactivity
+    # ═══════════════════════════════════════════════════════════════
+
+    def check_active_swarms():
+        from .convergence import list_active_swarms
+        swarms = list_active_swarms()
+        active = [s for s in swarms if s.get("status") != "completed"]
+        return "OK", f"{len(active)} active, {len(swarms)} total"
+
+    def check_agent_actions():
+        conn = get_db_connection()
+        try:
+            cursor = conn.execute(
+                "SELECT COUNT(*) FROM agent_actions WHERE timestamp > datetime('now', '-24 hours')"
+            )
+            count = cursor.fetchone()[0]
+            return "OK", f"{count} actions (24h)"
+        except sqlite3.OperationalError:
+            return "OK", "no actions yet"
+
+    def check_intentions():
+        from .intentions import get_active_intentions
+        intentions = get_active_intentions()
+        return "OK" if intentions else "WARN", f"{len(intentions)} active"
+
+    check("agency", "swarms", check_active_swarms)
+    check("agency", "agent_actions", check_agent_actions)
+    check("agency", "intentions", check_intentions)
+
+    # ═══════════════════════════════════════════════════════════════
+    # FORMAT OUTPUT
+    # ═══════════════════════════════════════════════════════════════
+
+    status_icons = {"OK": "✓", "WARN": "⚠", "FAIL": "✗"}
+    current_category = None
+
+    for category, name, status, detail in checks:
+        if category != current_category:
+            lines.append(f"\n## {category.upper()}")
+            current_category = category
+        icon = status_icons.get(status, "?")
+        lines.append(f"  {icon} **{name}**: {detail}")
+
+    # Overall status
+    fails = sum(1 for _, _, s, _ in checks if s == "FAIL")
+    warns = sum(1 for _, _, s, _ in checks if s == "WARN")
+
+    lines.append("")
+    if fails > 0:
+        lines.append(f"**Status**: UNHEALTHY ({fails} failures, {warns} warnings)")
+    elif warns > 0:
+        lines.append(f"**Status**: DEGRADED ({warns} warnings)")
+    else:
+        lines.append("**Status**: HEALTHY")
+
     return "\n".join(lines)
 
 
