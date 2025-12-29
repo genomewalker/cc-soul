@@ -148,6 +148,12 @@ from .outcomes import (
     format_handoff_for_context,
     load_handoff,
 )
+from .ledger import (
+    save_ledger,
+    load_latest_ledger,
+    restore_from_ledger,
+    format_ledger_for_context,
+)
 
 # Optional graph integration - gracefully handle if kuzu not available
 try:
@@ -629,11 +635,12 @@ def pre_compact(transcript_path: str = None) -> str:
     PreCompact hook - Save context before compaction.
 
     Called before Claude Code runs context compaction.
-    Saves important session fragments AND creates a structured handoff
-    to preserve session state across compaction.
+    Saves important session fragments, creates a structured handoff,
+    AND saves a machine-restorable ledger to cc-memory.
     """
     from .conversations import save_context
     from .neural import summarize_session_work
+    from .budget import check_budget_before_inject
 
     output_parts = []
 
@@ -658,6 +665,21 @@ def pre_compact(transcript_path: str = None) -> str:
             )
             if handoff_path:
                 output_parts.append(f"Handoff: {handoff_path.name}")
+    except Exception:
+        pass
+
+    # Save machine-restorable ledger to cc-memory
+    try:
+        budget = check_budget_before_inject(transcript_path)
+        context_pct = budget.get("pct", 0.5)
+
+        ledger = save_ledger(
+            context_pct=context_pct,
+            files_touched=list(_session_files_touched),
+            immediate_next="Resume work after compaction",
+            critical_context=summary[:500] if summary else "",
+        )
+        output_parts.append(f"Ledger: {ledger.ledger_id}")
     except Exception:
         pass
 
@@ -706,6 +728,21 @@ def session_start(
         after_compact: True when resuming after compaction
         include_rich: Include rich context table in output
     """
+    import os
+
+    # Swarm agent detection - use minimal context to avoid parent session bleed
+    if os.environ.get("CC_SOUL_SWARM_AGENT") == "1":
+        swarm_id = os.environ.get("CC_SOUL_SWARM_ID", "unknown")
+        task_id = os.environ.get("CC_SOUL_TASK_ID", "unknown")
+        perspective = os.environ.get("CC_SOUL_PERSPECTIVE", "unknown")
+        return f"""[cc-soul] Swarm Agent Mode
+swarm: {swarm_id}
+task: {task_id}
+perspective: {perspective}
+
+Context: Fresh instance (0% used)
+Focus: Complete assigned task with your perspective."""
+
     init_soul()
     clear_session_wisdom()
     clear_session_work()
@@ -844,16 +881,43 @@ def session_start(
         if restored:
             greeting = greeting + "\n" + restored
 
-        # Load latest handoff for structured resumption context
+        # Try machine-restorable ledger first (from cc-memory)
+        ledger_restored = False
         try:
-            latest_handoff = get_latest_handoff()
-            if latest_handoff:
-                handoff_data = load_handoff(latest_handoff)
-                handoff_context = format_handoff_for_context(handoff_data)
-                if handoff_context:
-                    greeting = greeting + "\n\n## Last Session\n" + handoff_context
+            latest_ledger = load_latest_ledger()
+            if latest_ledger:
+                # Restore soul state (intentions, etc.)
+                restore_result = restore_from_ledger(latest_ledger)
+
+                # Format ledger context for greeting
+                ledger_context = format_ledger_for_context(latest_ledger)
+                if ledger_context:
+                    greeting = greeting + "\n\n" + ledger_context
+                    ledger_restored = True
+
+                # Log what was restored
+                log_event(
+                    EventType.SESSION_START,
+                    data={
+                        "ledger_restored": True,
+                        "ledger_id": latest_ledger.ledger_id,
+                        "restored_intentions": restore_result.get("intentions", 0),
+                    }
+                )
         except Exception:
             pass
+
+        # Fallback to markdown handoff if ledger didn't work
+        if not ledger_restored:
+            try:
+                latest_handoff = get_latest_handoff()
+                if latest_handoff:
+                    handoff_data = load_handoff(latest_handoff)
+                    handoff_context = format_handoff_for_context(handoff_data)
+                    if handoff_context:
+                        greeting = greeting + "\n\n## Last Session\n" + handoff_context
+            except Exception:
+                pass
 
     # Include rich context table if requested
     if include_rich:
@@ -1569,11 +1633,25 @@ def user_prompt(
     output = []
     injected_items = []
 
+    # Log budget to cc-memory for cross-instance tracking
+    from .budget import log_budget_to_memory, get_budget_warning
+
+    log_budget_to_memory(transcript_path=transcript_path)
+
     # Warn when context is getting low
     if budget_mode == "minimal":
-        output.append("⚠️ Context window critically low (<10%). Consider /compact or finishing soon.")
+        output.append("🔴 **CONTEXT CRITICAL** (<10%). Save state now or finish soon.")
+        output.append("")
     elif budget_mode == "compact":
-        output.append("⚡ Context at 25%. Reducing injections.")
+        output.append("🟡 **CONTEXT: 25% remaining** - Reducing injections.")
+        output.append("")
+
+    # Cross-instance budget warnings
+    cross_instance_warning = get_budget_warning()
+    if cross_instance_warning:
+        output.append("📊 **Other Sessions:**")
+        output.append(cross_instance_warning)
+        output.append("")
 
     # MOOD: Add mood-based nudges
     if mode == "full":
@@ -1717,6 +1795,30 @@ def user_prompt(
             elif result.action.type == ActionType.PROPOSE_ABANDON:
                 # Flag proposed abandonments for human consideration
                 output.append(f"⚠️ Consider abandoning: {result.action.payload.get('want', '')[:40]}")
+            # CONTEXT OPTIMIZATION: Surface parallelization/handoff signals
+            elif result.success and result.action.type == ActionType.SUGGEST_PARALLELIZE:
+                guidance = result.action.payload.get("guidance", "")
+                tasks = result.action.payload.get("tasks", [])
+                output.append("")
+                output.append("⚡ **CONTEXT OPTIMIZATION - PARALLELIZE**")
+                output.append(guidance)
+                injected_items.append(("parallelize", len(tasks)))
+            elif result.success and result.action.type == ActionType.OPTIMIZE_REMAINING:
+                guidance = result.action.payload.get("guidance", "")
+                output.append("")
+                output.append("🔶 **CONTEXT OPTIMIZATION - COMPRESS**")
+                output.append(guidance)
+                injected_items.append(("compress", "active"))
+            elif result.success and result.action.type == ActionType.PREPARE_HANDOFF:
+                urgency = result.action.payload.get("urgency", "medium")
+                output.append("")
+                output.append(f"📋 **HANDOFF PREPARATION** (urgency: {urgency.upper()})")
+                output.append("Create handoff document now to preserve context.")
+                injected_items.append(("handoff", urgency))
+            elif result.success and result.action.type == ActionType.EMERGENCY_SAVE:
+                output.insert(0, "")  # Add at start for visibility
+                output.insert(0, "🔴 **EMERGENCY** - Save state immediately, context nearly exhausted!")
+                injected_items.append(("emergency", "true"))
     except Exception:
         pass
 

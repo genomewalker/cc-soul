@@ -134,6 +134,10 @@ from .budget import (
     get_injection_budget,
     format_budget_status,
     ContextBudget,
+    log_budget_to_memory,
+    get_all_session_budgets,
+    get_budget_warning,
+    get_session_id,
 )
 
 from .observe import (
@@ -537,6 +541,10 @@ __all__ = [
     "get_injection_budget",
     "format_budget_status",
     "ContextBudget",
+    "log_budget_to_memory",
+    "get_all_session_budgets",
+    "get_budget_warning",
+    "get_session_id",
     # Passive Observation
     "observe_session",
     "reflect_on_session",
