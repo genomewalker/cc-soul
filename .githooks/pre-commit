@@ -1,0 +1,9 @@
+#!/bin/bash
+# Auto-regenerate mcp_server.py from mcp_tools/ before commit
+
+# Check if any mcp_tools files are staged
+if git diff --cached --name-only | grep -q "src/cc_soul/mcp_tools/"; then
+    echo "mcp_tools changed - regenerating mcp_server.py..."
+    python -m cc_soul.mcp_tools._mcp_builder
+    git add src/cc_soul/mcp_server.py
+fi
