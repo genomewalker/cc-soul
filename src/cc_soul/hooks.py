@@ -1757,12 +1757,15 @@ def user_prompt(
     try:
         ctx = forward_pass(user_input, session_type="prompt")
 
+        # Budget warnings ALWAYS get prepended (critical for user awareness)
+        budget_prefix = "\n".join(output) + "\n" if output else ""
+
         if mode == "minimal":
             # Minimal mode: just one key wisdom if highly relevant
             if ctx.wisdom and ctx.wisdom[0].get("combined_score", 0) > 0.5:
                 w = ctx.wisdom[0]
-                return f"Remember: {w.get('title', '')}"
-            return ""
+                return f"{budget_prefix}Remember: {w.get('title', '')}"
+            return budget_prefix.strip() if budget_prefix else ""
 
         if use_woven:
             # Organic weaving - no headers, just flowing context
@@ -1770,8 +1773,9 @@ def user_prompt(
             if woven:
                 # In compact/reduced mode, truncate
                 if mode in ("compact", "reduced"):
-                    return woven[:500] if len(woven) > 500 else woven
-                return woven
+                    truncated = woven[:500] if len(woven) > 500 else woven
+                    return f"{budget_prefix}{truncated}"
+                return f"{budget_prefix}{woven}"
         else:
             # Structured format for clarity (current default)
             # Check vocabulary for matching terms
