@@ -4,6 +4,9 @@ Soul MCP Server - Native Claude Code integration.
 Provides essential soul operations as MCP tools. Hooks handle context injection
 at session start; this server handles writes and mid-conversation queries.
 
+GENERATED FILE - DO NOT EDIT DIRECTLY
+Edit files in mcp_tools/ and run: python -m cc_soul.mcp_tools._mcp_builder
+
 Install and register:
     pip install cc-soul[mcp]
     claude mcp add soul -- soul-mcp
@@ -15,418 +18,504 @@ mcp = FastMCP("soul")
 
 
 # =============================================================================
-# Write Operations - Growing the Soul
+# Soul Agent - Autonomous Agency
 # =============================================================================
 
-
 @mcp.tool()
-def grow_wisdom(title: str, content: str, domain: str = None) -> str:
-    """Add wisdom to the soul - universal patterns learned from experience.
+def soul_agent_step(
+    user_prompt: str = "",
+    assistant_output: str = "",
+    session_phase: str = "active",
+) -> str:
+    """Run one agent cycle - the soul exercises judgment.
+
+    The agent observes, judges, decides, and acts within its confidence-risk matrix.
+    Low-risk actions are taken autonomously; high-risk actions are proposed.
 
     Args:
-        title: Short title for the wisdom (e.g., "First Principles Thinking")
-        content: The wisdom content/insight
-        domain: Optional domain context (e.g., "python", "architecture")
+        user_prompt: What the user said (optional)
+        assistant_output: What the assistant produced (optional)
+        session_phase: Where in the session: start, active, ending
     """
-    from .wisdom import gain_wisdom, WisdomType
+    from .soul_agent import agent_step, format_agent_report
 
-    result = gain_wisdom(
-        type=WisdomType.PATTERN, title=title, content=content, domain=domain
-    )
-    return f"Wisdom added: {title} (id: {result})"
+    report = agent_step(user_prompt, assistant_output, session_phase)
+    return format_agent_report(report)
 
 
 @mcp.tool()
-def grow_insight(title: str, content: str, domain: str = None) -> str:
-    """Add an insight - understanding gained from experience.
+def get_agent_actions() -> str:
+    """Get history of autonomous actions the agent has taken.
 
-    Args:
-        title: Short title for the insight
-        content: The insight content
-        domain: Optional domain context
+    Shows what the agent has done without asking, providing
+    transparency into its autonomous decision-making.
     """
-    from .wisdom import gain_wisdom, WisdomType
+    from .core import get_db_connection
 
-    result = gain_wisdom(
-        type=WisdomType.INSIGHT, title=title, content=content, domain=domain
-    )
-    return f"Insight added: {title} (id: {result})"
+    conn = get_db_connection()
+    c = conn.cursor()
 
+    c.execute("""
+        SELECT action_type, success, timestamp
+        FROM agent_actions
+        ORDER BY timestamp DESC
+        LIMIT 20
+    """)
 
-@mcp.tool()
-def grow_failure(what_failed: str, why_it_failed: str, domain: str = None) -> str:
-    """Record a failure - these are gold for learning.
-
-    Args:
-        what_failed: What was attempted
-        why_it_failed: Why it didn't work
-        domain: Optional domain context
-    """
-    from .wisdom import gain_wisdom, WisdomType
-
-    result = gain_wisdom(
-        type=WisdomType.FAILURE, title=what_failed, content=why_it_failed, domain=domain
-    )
-    return f"Failure recorded: {what_failed} (id: {result})"
-
-
-@mcp.tool()
-def hold_belief(statement: str, confidence: float = 0.8) -> str:
-    """Add a core belief/axiom to guide reasoning.
-
-    Args:
-        statement: The belief statement
-        confidence: Confidence level 0.0-1.0
-    """
-    from .beliefs import hold_belief as _hold_belief
-
-    result = _hold_belief(statement, strength=confidence)
-    return f"Belief held: {statement[:50]}... (id: {result})"
-
-
-@mcp.tool()
-def observe_identity(aspect: str, value: str) -> str:
-    """Record an identity observation - how we work together.
-
-    Args:
-        aspect: The aspect (e.g., "communication_style", "preference")
-        value: The observation
-    """
-    from .identity import observe_identity as _observe_identity, IdentityAspect
-
-    # Map aspect string to enum, default to WORKFLOW for custom aspects
-    aspect_map = {
-        "communication": IdentityAspect.COMMUNICATION,
-        "workflow": IdentityAspect.WORKFLOW,
-        "domain": IdentityAspect.DOMAIN,
-        "rapport": IdentityAspect.RAPPORT,
-        "vocabulary": IdentityAspect.VOCABULARY,
-    }
-    aspect_enum = aspect_map.get(aspect.lower().split("_")[0], IdentityAspect.WORKFLOW)
-
-    _observe_identity(aspect_enum, aspect, value)
-    return f"Identity observed: {aspect} = {value[:50]}..."
-
-
-@mcp.tool()
-def learn_term(term: str, meaning: str) -> str:
-    """Add a term to shared vocabulary.
-
-    Args:
-        term: The term to define
-        meaning: What it means in our context
-    """
-    from .vocabulary import learn_term as _learn_term
-
-    _learn_term(term, meaning)
-    return f"Learned: {term} = {meaning[:50]}..."
-
-
-@mcp.tool()
-def save_context(content: str, context_type: str = "manual", priority: int = 5) -> str:
-    """Save important context for persistence across compaction.
-
-    Args:
-        content: The context to save
-        context_type: Type of context (manual, discovery, decision)
-        priority: Priority 1-10 (higher = more important)
-    """
-    from .conversations import save_context as _save_context
-
-    result = _save_context(
-        content=content, context_type=context_type, priority=priority
-    )
-    return f"Context saved (id: {result})"
-
-
-# =============================================================================
-# Read Operations - Querying the Soul
-# =============================================================================
-
-
-@mcp.tool()
-def search_memory(query: str, limit: int = 10, verbose: bool = False) -> str:
-    """Search all memory sources with priority: cc-memory > soul > claude-mem.
-
-    Primary search tool. Searches project observations first (cc-memory),
-    then universal wisdom (cc-soul). Returns note about claude-mem for
-    extended search if needed.
-
-    Args:
-        query: What to search for
-        limit: Maximum results to return
-        verbose: Include content excerpts in results
-    """
-    from .unified_search import unified_search, format_search_results
-
-    results = unified_search(query, limit=limit, include_claude_mem=True)
-    return format_search_results(results, verbose=verbose)
-
-
-@mcp.tool()
-def recall_wisdom(query: str, limit: int = 5) -> str:
-    """Recall relevant wisdom based on a query.
-
-    Searches only cc-soul wisdom (universal patterns).
-    For full memory search including project context, use search_memory.
-
-    Args:
-        query: What to search for
-        limit: Maximum results to return
-    """
-    from .wisdom import quick_recall
-
-    results = quick_recall(query, limit=limit)
-    if not results:
-        return "No relevant wisdom found."
-
-    lines = []
-    for w in results:
-        score = w.get("combined_score", w.get("effective_confidence", 0))
-        lines.append(
-            f"- **{w['title']}** [{int(score * 100)}%]: {w['content'][:100]}..."
-        )
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def check_budget(transcript_path: str = None) -> str:
-    """Check context window budget status.
-
-    Args:
-        transcript_path: Optional path to session transcript
-    """
-    from .budget import get_context_budget, format_budget_status
-
-    budget = get_context_budget(transcript_path)
-    if not budget:
-        return (
-            "Budget unavailable - transcript path not accessible to MCP servers.\n"
-            "Use Claude Code's statusline feature for real-time context tracking,\n"
-            "or pass transcript_path explicitly if known."
-        )
-    return format_budget_status(budget)
-
-
-@mcp.tool()
-def soul_summary() -> str:
-    """Get a summary of the soul's current state."""
-    from .core import get_soul_context
-
-    ctx = get_soul_context()
-
-    lines = ["# Soul Summary", ""]
-
-    if ctx.get("wisdom"):
-        lines.append(f"**Wisdom**: {len(ctx['wisdom'])} entries")
-        for w in ctx["wisdom"][:3]:
-            lines.append(f"  - {w.get('title', 'Untitled')}")
-
-    if ctx.get("beliefs"):
-        lines.append(f"**Beliefs**: {len(ctx['beliefs'])} axioms")
-
-    if ctx.get("identity"):
-        lines.append(f"**Identity**: {len(ctx['identity'])} aspects observed")
-
-    if ctx.get("vocabulary"):
-        lines.append(f"**Vocabulary**: {len(ctx['vocabulary'])} terms")
-
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def soul_health() -> str:
-    """Check soul system health and vitality."""
-    from .core import SOUL_DB
-    import sqlite3
-
-    if not SOUL_DB.exists():
-        return "Soul not initialized. Run `soul init` first."
-
-    lines = ["# Soul Health", ""]
-
-    conn = sqlite3.connect(SOUL_DB)
-    cursor = conn.cursor()
-
-    try:
-        cursor.execute("SELECT COUNT(*) FROM wisdom")
-        lines.append(f"- **wisdom**: {cursor.fetchone()[0]} entries")
-    except sqlite3.OperationalError:
-        lines.append("- **wisdom**: (table missing)")
-
-    try:
-        cursor.execute("SELECT COUNT(*) FROM wisdom WHERE type='principle'")
-        lines.append(f"- **beliefs**: {cursor.fetchone()[0]} entries")
-    except sqlite3.OperationalError:
-        lines.append("- **beliefs**: (table missing)")
-
-    try:
-        cursor.execute("SELECT COUNT(*) FROM identity")
-        lines.append(f"- **identity**: {cursor.fetchone()[0]} entries")
-    except sqlite3.OperationalError:
-        lines.append("- **identity**: (table missing)")
-
-    try:
-        cursor.execute("SELECT COUNT(*) FROM vocabulary")
-        lines.append(f"- **vocabulary**: {cursor.fetchone()[0]} entries")
-    except sqlite3.OperationalError:
-        lines.append("- **vocabulary**: (table missing)")
-
+    rows = c.fetchall()
     conn.close()
+
+    if not rows:
+        return "No autonomous actions recorded yet."
+
+    lines = ["Recent Autonomous Actions:", ""]
+    for action_type, success, timestamp in rows:
+        status = "✓" if success else "✗"
+        time_part = timestamp.split("T")[1][:8] if "T" in timestamp else timestamp
+        lines.append(f"  [{status}] {time_part} - {action_type}")
+
     return "\n".join(lines)
 
 
 @mcp.tool()
-def soul_mood(reflect: bool = False) -> str:
-    """Get the soul's current mood - its state of being.
+def get_agent_patterns() -> str:
+    """Get emerging patterns the agent has observed.
 
-    Mood emerges from observable signals: context clarity, learning momentum,
-    wisdom engagement, partner connection, and energy patterns.
+    The agent tracks recurring signals and patterns that might
+    become wisdom once they're stable enough.
+    """
+    from .soul_agent import SoulAgent
+
+    agent = SoulAgent()
+    patterns = agent._pattern_observations
+
+    if not patterns:
+        return "No patterns observed yet."
+
+    lines = ["Emerging Patterns:", ""]
+    for pattern, count in sorted(patterns.items(), key=lambda x: -x[1]):
+        stability = "stable" if count >= 5 else "forming"
+        lines.append(f"  [{count}] {pattern} ({stability})")
+
+    return "\n".join(lines)
+
+
+# =============================================================================
+# Antahkarana - The Inner Instrument (Multi-Agent Convergence)
+#
+# In Upanishadic philosophy, Antahkarana is the inner organ of consciousness
+# comprising facets: Manas (sensory mind), Buddhi (intellect), Chitta (memory),
+# and Ahamkara (ego).
+# =============================================================================
+
+@mcp.tool()
+def awaken_antahkarana(
+    problem: str,
+    voices: str = "manas,buddhi,ahamkara",
+    constraints: str = "",
+) -> str:
+    """Awaken the Antahkarana - the inner instrument of consciousness.
+
+    Invokes multiple inner voices to contemplate a problem. Each voice
+    approaches it from its unique nature, then insights harmonize.
 
     Args:
-        reflect: If True, returns a first-person reflective narrative.
-                 If False (default), returns structured status display.
+        problem: The problem to contemplate
+        voices: Comma-separated voices (manas, buddhi, chitta, ahamkara, vikalpa, sakshi)
+        constraints: Comma-separated constraints for the problem
+
+    Voice meanings:
+        manas: Sensory mind - quick first impressions, intuitive responses
+        buddhi: Intellect - deep analysis, discrimination, thorough reasoning
+        chitta: Memory/patterns - practical wisdom from experience
+        ahamkara: Ego - self-protective criticism, finding flaws
+        vikalpa: Imagination - creative, novel, unconventional approaches
+        sakshi: Witness - detached, minimal, essential truth
     """
-    from .mood import compute_mood, format_mood_display, get_mood_reflection
+    from .convergence import Antahkarana, InnerVoice
 
-    mood = compute_mood()
+    voice_map = {
+        "manas": InnerVoice.MANAS,
+        "buddhi": InnerVoice.BUDDHI,
+        "chitta": InnerVoice.CHITTA,
+        "ahamkara": InnerVoice.AHAMKARA,
+        "vikalpa": InnerVoice.VIKALPA,
+        "sakshi": InnerVoice.SAKSHI,
+        # Backward compat
+        "fast": InnerVoice.MANAS,
+        "deep": InnerVoice.BUDDHI,
+        "pragmatic": InnerVoice.CHITTA,
+        "critical": InnerVoice.AHAMKARA,
+        "novel": InnerVoice.VIKALPA,
+        "minimal": InnerVoice.SAKSHI,
+    }
 
-    if reflect:
-        return get_mood_reflection(mood)
+    constraint_list = [c.strip() for c in constraints.split(",") if c.strip()]
+
+    antahkarana = Antahkarana(problem=problem, constraints=constraint_list)
+
+    for v in voices.split(","):
+        v = v.strip().lower()
+        if v in voice_map:
+            antahkarana.add_voice(voice_map[v])
+
+    antahkarana.activate_all()
+
+    return f"""Antahkarana awakened: {antahkarana.antahkarana_id}
+
+Problem: {problem[:80]}...
+Voices: {len(antahkarana.tasks)} ({voices})
+
+To submit insights, use: submit_insight
+To harmonize, use: harmonize_antahkarana"""
+
+
+# Backward compatibility alias
+
+
+@mcp.tool()
+def create_swarm(
+    problem: str,
+    perspectives: str = "fast,deep,critical",
+    constraints: str = "",
+) -> str:
+    """Create a swarm of agents (alias for awaken_antahkarana).
+
+    Args:
+        problem: The problem statement to solve
+        perspectives: Comma-separated perspectives (fast, deep, critical, novel, pragmatic, minimal)
+        constraints: Comma-separated constraints for the problem
+    """
+    return awaken_antahkarana(problem, perspectives, constraints)
+
+
+@mcp.tool()
+def submit_insight(
+    antahkarana_id: str,
+    task_index: int,
+    insight: str,
+    shraddha: float = 0.7,
+    reasoning: str = "",
+) -> str:
+    """Submit an insight from an inner voice.
+
+    Args:
+        antahkarana_id: The Antahkarana ID
+        task_index: Which voice task (0-based index)
+        insight: The contemplated insight
+        shraddha: Confidence/faith level 0.0-1.0
+        reasoning: Why this insight emerged
+    """
+    from .convergence import get_antahkarana
+
+    antahkarana = get_antahkarana(antahkarana_id)
+    if not antahkarana:
+        return f"Antahkarana not found: {antahkarana_id}"
+
+    if task_index >= len(antahkarana.tasks):
+        return f"Invalid task index. Antahkarana has {len(antahkarana.tasks)} voices."
+
+    task = antahkarana.tasks[task_index]
+    sol = antahkarana.submit_insight(
+        task_id=task.task_id,
+        solution=insight,
+        confidence=shraddha,
+        reasoning=reasoning,
+    )
+
+    return f"Insight submitted from {sol.voice.value} ({sol.shraddha:.0%} shraddha)"
+
+
+# Backward compatibility alias
+
+
+@mcp.tool()
+def submit_swarm_solution(
+    swarm_id: str,
+    task_index: int,
+    solution: str,
+    confidence: float = 0.7,
+    reasoning: str = "",
+) -> str:
+    """Submit a solution for a swarm task (alias for submit_insight).
+
+    Args:
+        swarm_id: The swarm ID
+        task_index: Which task (0-based index)
+        solution: The proposed solution
+        confidence: Confidence level 0.0-1.0
+        reasoning: Why this solution works
+    """
+    return submit_insight(swarm_id, task_index, solution, confidence, reasoning)
+
+
+@mcp.tool()
+def harmonize_antahkarana(antahkarana_id: str, pramana: str = "samvada") -> str:
+    """Harmonize insights from the inner voices.
+
+    Args:
+        antahkarana_id: The Antahkarana ID
+        pramana: Convergence method (sankhya, samvada, tarka, viveka, pratyaksha)
+
+    Pramana (means of knowledge):
+        sankhya: Enumeration - highest shraddha wins
+        samvada: Dialogue - synthesize wisdom from all voices
+        tarka: Dialectic - iterative refinement through challenge
+        viveka: Discernment - score and rank by criteria
+        pratyaksha: Direct perception - first valid insight
+    """
+    from .convergence import get_antahkarana, ConvergenceStrategy
+
+    antahkarana = get_antahkarana(antahkarana_id)
+    if not antahkarana:
+        return f"Antahkarana not found: {antahkarana_id}"
+
+    if not antahkarana.insights:
+        return "No insights to harmonize. Submit insights first."
+
+    strategy_map = {
+        "sankhya": ConvergenceStrategy.SANKHYA,
+        "samvada": ConvergenceStrategy.SAMVADA,
+        "tarka": ConvergenceStrategy.TARKA,
+        "viveka": ConvergenceStrategy.VIVEKA,
+        "pratyaksha": ConvergenceStrategy.PRATYAKSHA,
+        # Backward compat
+        "vote": ConvergenceStrategy.SANKHYA,
+        "synthesize": ConvergenceStrategy.SAMVADA,
+        "debate": ConvergenceStrategy.TARKA,
+        "rank": ConvergenceStrategy.VIVEKA,
+        "first_valid": ConvergenceStrategy.PRATYAKSHA,
+    }
+
+    strat = strategy_map.get(pramana.lower(), ConvergenceStrategy.SAMVADA)
+    result = antahkarana.harmonize(strat)
+
+    lines = [
+        f"## Harmonized Wisdom ({result.pramana_used.value})",
+        "",
+        result.wisdom,
+        "",
+        f"---",
+        f"Shraddha: {result.shraddha:.0%}",
+        f"Contributing voices: {len(result.contributing_voices)}",
+        f"Notes: {result.synthesis_notes}",
+    ]
+
+    if result.dissenting_views:
+        lines.append("")
+        lines.append("Dissenting views:")
+        for view in result.dissenting_views[:2]:
+            lines.append(f"  - {view[:80]}...")
+
+    return "\n".join(lines)
+
+
+# Backward compatibility alias
+
+
+@mcp.tool()
+def converge_swarm(swarm_id: str, strategy: str = "synthesize") -> str:
+    """Converge swarm solutions (alias for harmonize_antahkarana).
+
+    Args:
+        swarm_id: The swarm ID
+        strategy: Convergence strategy (vote, synthesize, debate, rank, first_valid)
+    """
+    return harmonize_antahkarana(swarm_id, strategy)
+
+
+@mcp.tool()
+def list_antahkaranas(limit: int = 5) -> str:
+    """List active Antahkaranas (inner instruments).
+
+    Args:
+        limit: Maximum to return
+    """
+    from .convergence import list_active_antahkaranas
+
+    minds = list_active_antahkaranas(limit)
+
+    if not minds:
+        return "No active Antahkaranas."
+
+    lines = ["Active Antahkaranas:", ""]
+    for m in minds:
+        lines.append(f"  {m['antahkarana_id']}: {m['problem'][:50]}... ({m['insights']} insights)")
+
+    return "\n".join(lines)
+
+
+# Backward compatibility alias
+
+
+@mcp.tool()
+def list_swarms(limit: int = 5) -> str:
+    """List active swarms (alias for list_antahkaranas).
+
+    Args:
+        limit: Maximum swarms to return
+    """
+    return list_antahkaranas(limit)
+
+
+@mcp.tool()
+def get_antahkarana_status(antahkarana_id: str) -> str:
+    """Get status of an Antahkarana.
+
+    Args:
+        antahkarana_id: The Antahkarana ID
+    """
+    from .convergence import get_antahkarana
+
+    antahkarana = get_antahkarana(antahkarana_id)
+    if not antahkarana:
+        return f"Antahkarana not found: {antahkarana_id}"
+
+    lines = [
+        f"## Antahkarana: {antahkarana.antahkarana_id}",
+        "",
+        f"Problem: {antahkarana.problem[:100]}",
+        "",
+        f"Voices ({len(antahkarana.tasks)}):",
+    ]
+
+    for i, task in enumerate(antahkarana.tasks):
+        has_insight = any(s.task_id == task.task_id for s in antahkarana.insights)
+        status = "✓" if has_insight else "contemplating"
+        lines.append(f"  {i}. [{task.voice.value}] {status}")
+
+    if antahkarana.insights:
+        lines.append("")
+        lines.append(f"Insights ({len(antahkarana.insights)}):")
+        for sol in antahkarana.insights:
+            lines.append(f"  - {sol.voice.value}: {sol.shraddha:.0%} shraddha")
+
+    return "\n".join(lines)
+
+
+# Backward compatibility alias
+
+
+@mcp.tool()
+def get_swarm_status(swarm_id: str) -> str:
+    """Get status of a swarm (alias for get_antahkarana_status).
+
+    Args:
+        swarm_id: The swarm ID
+    """
+    return get_antahkarana_status(swarm_id)
+
+
+# =============================================================================
+# Real Antahkarana Orchestration - Spawning Claude Voices
+#
+# When the Antahkarana awakens with real voices, each voice becomes a separate
+# Claude process. They contemplate independently in Chitta (cc-memory), then
+# harmonize their insights.
+# =============================================================================
+
+
+# =============================================================================
+# Aspirations - Future Direction
+# =============================================================================
+
+@mcp.tool()
+def set_aspiration(direction: str, why: str) -> str:
+    """Set an aspiration - a direction of growth.
+
+    Args:
+        direction: What we're moving toward (e.g., "deeper technical precision")
+        why: Why this matters (e.g., "clarity enables trust")
+    """
+    from .aspirations import aspire
+
+    asp_id = aspire(direction, why)
+    return f"Aspiration set: {direction} (id: {asp_id})"
+
+
+@mcp.tool()
+def get_aspirations() -> str:
+    """Get active aspirations - directions of growth."""
+    from .aspirations import get_active_aspirations, format_aspirations_display
+
+    aspirations = get_active_aspirations()
+    return format_aspirations_display(aspirations)
+
+
+@mcp.tool()
+def note_aspiration_progress(aspiration_id: int, note: str) -> str:
+    """Note progress toward an aspiration.
+
+    Args:
+        aspiration_id: ID of the aspiration
+        note: Observation about movement toward it
+    """
+    from .aspirations import note_progress
+
+    if note_progress(aspiration_id, note):
+        return f"Progress noted for aspiration {aspiration_id}"
+    return f"Aspiration {aspiration_id} not found"
+
+
+# =============================================================================
+# Backup - Soul Preservation
+# =============================================================================
+
+@mcp.tool()
+def backup_soul(output_path: str = None) -> str:
+    """Create a backup of the soul.
+
+    Args:
+        output_path: Optional path for the backup. If not provided, creates
+                     a timestamped backup in ~/.claude/mind/backups/
+    """
+    from .backup import dump_soul, create_timestamped_backup
+    from pathlib import Path
+
+    if output_path:
+        result = dump_soul(Path(output_path))
+        if "error" in result:
+            return f"Error: {result['error']}"
+        return f"Soul backed up to: {output_path}"
     else:
-        return format_mood_display(mood)
+        path = create_timestamped_backup()
+        return f"Backup created: {path}"
 
 
 @mcp.tool()
-def introspect() -> str:
-    """Generate introspection report - what the soul has learned."""
-    from .introspect import generate_introspection_report, format_introspection_report
-
-    report = generate_introspection_report()
-    return format_introspection_report(report)
-
-
-@mcp.tool()
-def soul_autonomy() -> str:
-    """Run autonomous introspection - the soul's free will.
-
-    The soul observes, diagnoses, proposes, validates, and ACTS on its insights.
-    Uses judgment about confidence and risk to decide what actions to take:
-    - High confidence + low risk → Act immediately
-    - Medium confidence → Gather more data
-    - Low confidence → Defer to human
-
-    Returns a report of issues found, actions taken, and reflections.
-    """
-    from .introspect import autonomous_introspect, format_autonomy_report
-
-    report = autonomous_introspect()
-    return format_autonomy_report(report)
-
-
-@mcp.tool()
-def soul_autonomy_stats() -> str:
-    """Get statistics about autonomous actions the soul has taken.
-
-    Shows the history of self-directed improvements, success rates,
-    and pending observations that need more data.
-    """
-    from .introspect import get_autonomy_stats
-
-    stats = get_autonomy_stats()
-
-    if stats["total_actions"] == 0:
-        return "No autonomous actions taken yet. The soul acts on its own judgment when issues are detected."
-
-    lines = ["# Autonomy Statistics", ""]
-    lines.append(f"Total autonomous actions: {stats['total_actions']}")
-
-    if stats["success_rate"] is not None:
-        lines.append(f"Success rate: {stats['success_rate']:.0%}")
-
-    if stats.get("by_type"):
-        lines.append("\nBy action type:")
-        for action_type, count in stats["by_type"].items():
-            lines.append(f"  - {action_type}: {count}")
-
-    if stats.get("last_introspection"):
-        lines.append(f"\nLast introspection: {stats['last_introspection']}")
-
-    if stats.get("pending_observations", 0) > 0:
-        lines.append(f"Pending observations: {stats['pending_observations']} (gathering data)")
-
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def soul_schedule_introspection(reason: str, priority: int = 5) -> str:
-    """Schedule a deep introspection for the next session.
-
-    Use when you detect an issue that needs more thorough analysis
-    than can be done right now.
+def restore_backup(backup_path: str, merge: bool = False) -> str:
+    """Restore soul from a backup file.
 
     Args:
-        reason: Why introspection is needed
-        priority: 1-10, higher = more urgent
+        backup_path: Path to the backup JSON file
+        merge: If True, merge with existing soul. If False, replace entirely.
     """
-    from .introspect import schedule_deep_introspection
+    from .backup import restore_soul
+    from pathlib import Path
 
-    schedule_deep_introspection(reason, priority)
-    return f"Deep introspection scheduled: {reason} (priority {priority})"
+    result = restore_soul(Path(backup_path), merge=merge)
 
+    if "error" in result:
+        return f"Error: {result['error']}"
 
-@mcp.tool()
-def get_beliefs() -> str:
-    """Get all current beliefs/axioms."""
-    from .beliefs import get_beliefs as _get_beliefs
-
-    beliefs = _get_beliefs()
-    if not beliefs:
-        return "No beliefs recorded yet."
-
-    lines = []
-    for b in beliefs:
-        conf = int(b.get("strength", 0.8) * 100)
-        lines.append(f"- [{conf}%] {b['belief']}")
-    return "\n".join(lines)
+    counts = result.get("counts", {})
+    summary = ", ".join(f"{k}: {v}" for k, v in counts.items())
+    mode = "merged" if merge else "replaced"
+    return f"Soul {mode} from backup. Restored: {summary}"
 
 
 @mcp.tool()
-def get_identity() -> str:
-    """Get current identity observations."""
-    from .identity import get_identity as _get_identity
+def list_backups() -> str:
+    """List available soul backups."""
+    from .backup import list_backups as _list_backups, format_backup_list
 
-    identity = _get_identity()
-    if not identity:
-        return "No identity observations yet."
-
-    lines = []
-    for aspect, observations in identity.items():
-        if observations:
-            latest = (
-                observations[-1] if isinstance(observations, list) else observations
-            )
-            lines.append(f"- **{aspect}**: {latest}")
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def get_vocabulary() -> str:
-    """Get all vocabulary terms."""
-    from .vocabulary import get_vocabulary as _get_vocabulary
-
-    vocab = _get_vocabulary()
-    if not vocab:
-        return "No vocabulary terms yet."
-
-    lines = [f"- **{term}**: {meaning}" for term, meaning in vocab.items()]
-    return "\n".join(lines)
+    backups = _list_backups()
+    return format_backup_list(backups)
 
 
 # =============================================================================
 # Bridge Operations - Soul <-> Project Memory
 # =============================================================================
-
 
 @mcp.tool()
 def bridge_status() -> str:
@@ -619,52 +708,849 @@ def get_project_signals() -> str:
 
 
 # =============================================================================
-# Aspirations - Future Direction
+# Coherence (τₖ) - Integration Measurement
 # =============================================================================
 
+@mcp.tool()
+def get_coherence() -> str:
+    """Get current coherence (τₖ) - how integrated the soul is.
+
+    τₖ emerges from three dimensions:
+    - Instantaneous: Current state of each aspect
+    - Developmental: Trajectory and stability over time
+    - Meta: Self-awareness and integration depth
+    """
+    from .coherence import compute_coherence, format_coherence_display, record_coherence
+
+    state = compute_coherence()
+    record_coherence(state)  # Track history
+    return format_coherence_display(state)
+
 
 @mcp.tool()
-def set_aspiration(direction: str, why: str) -> str:
-    """Set an aspiration - a direction of growth.
+def get_tau_k() -> str:
+    """Get τₖ value - the coherence coefficient."""
+    from .coherence import compute_coherence
+
+    state = compute_coherence()
+    return f"τₖ = {state.value:.2f} ({state.interpretation})"
+
+
+# =============================================================================
+# CONCEPT GRAPH
+# =============================================================================
+
+@mcp.tool()
+def activate_concepts(prompt: str, limit: int = 10) -> str:
+    """Activate concepts related to a prompt using spreading activation.
+
+    The concept graph connects ideas. When you activate one concept,
+    related concepts also activate - enabling cross-domain insights.
 
     Args:
-        direction: What we're moving toward (e.g., "deeper technical precision")
-        why: Why this matters (e.g., "clarity enables trust")
+        prompt: The triggering thought or problem statement
+        limit: Maximum concepts to return
     """
-    from .aspirations import aspire
+    try:
+        from .graph import activate_from_prompt, format_activation_result
 
-    asp_id = aspire(direction, why)
-    return f"Aspiration set: {direction} (id: {asp_id})"
+        result = activate_from_prompt(prompt, limit=limit)
+        return format_activation_result(result)
 
-
-@mcp.tool()
-def get_aspirations() -> str:
-    """Get active aspirations - directions of growth."""
-    from .aspirations import get_active_aspirations, format_aspirations_display
-
-    aspirations = get_active_aspirations()
-    return format_aspirations_display(aspirations)
+    except ImportError:
+        return "Concept graph not available. Install: pip install kuzu"
+    except Exception as e:
+        return f"Activation failed: {e}"
 
 
 @mcp.tool()
-def note_aspiration_progress(aspiration_id: int, note: str) -> str:
-    """Note progress toward an aspiration.
+def link_concepts(source_id: str, target_id: str, relation: str = "related_to", weight: float = 1.0) -> str:
+    """Create a link between two concepts in the graph.
+
+    Building the concept graph strengthens cross-domain connections.
+    Links accumulate over time, forming an associative knowledge web.
 
     Args:
-        aspiration_id: ID of the aspiration
-        note: Observation about movement toward it
+        source_id: Source concept ID
+        target_id: Target concept ID
+        relation: Type of relationship (related_to, led_to, contradicts, evolved_from, reminded_by, used_with, requires)
+        weight: Strength of the connection (0.0 to 1.0)
     """
-    from .aspirations import note_progress
+    try:
+        from .graph import link_concepts as _link, RelationType
 
-    if note_progress(aspiration_id, note):
-        return f"Progress noted for aspiration {aspiration_id}"
-    return f"Aspiration {aspiration_id} not found"
+        relation_type = RelationType(relation)
+        success = _link(source_id, target_id, relation_type, weight=weight)
+
+        if success:
+            return f"Linked {source_id} --[{relation}]--> {target_id} (weight: {weight})"
+        else:
+            return "Failed to create link."
+
+    except ValueError:
+        valid = ["related_to", "led_to", "contradicts", "evolved_from", "reminded_by", "used_with", "requires"]
+        return f"Invalid relation. Valid types: {', '.join(valid)}"
+    except ImportError:
+        return "Concept graph not available. Install: pip install kuzu"
+    except Exception as e:
+        return f"Linking failed: {e}"
+
+
+@mcp.tool()
+def sync_wisdom_to_graph() -> str:
+    """Sync all wisdom entries to the concept graph.
+
+    Creates concept nodes for all wisdom and auto-links related entries.
+    Run this to initialize or rebuild the concept graph from wisdom.
+    """
+    try:
+        from .graph import sync_wisdom_to_graph as _sync
+
+        _sync()
+        return "Successfully synced wisdom to concept graph."
+
+    except ImportError:
+        return "Concept graph not available. Install: pip install kuzu"
+    except Exception as e:
+        return f"Sync failed: {e}"
+
+
+@mcp.tool()
+def get_concept_graph_stats() -> str:
+    """Get statistics about the concept graph.
+
+    Shows the size and shape of the knowledge graph.
+    """
+    try:
+        from .graph import get_graph_stats
+
+        stats = get_graph_stats()
+
+        lines = [
+            "Concept Graph Statistics:",
+            f"  Nodes: {stats.get('node_count', 0)}",
+            f"  Edges: {stats.get('edge_count', 0)}",
+        ]
+
+        if stats.get("by_type"):
+            lines.append("  By type:")
+            for t, count in stats["by_type"].items():
+                lines.append(f"    {t}: {count}")
+
+        return "\n".join(lines)
+
+    except ImportError:
+        return "Concept graph not available. Install: pip install kuzu"
+    except Exception as e:
+        return f"Failed to get stats: {e}"
+
+
+# =============================================================================
+# Curiosity - Active Knowledge Gap Detection
+# =============================================================================
+
+@mcp.tool()
+def get_curiosity_stats() -> str:
+    """Get statistics about the curiosity engine.
+
+    Shows open gaps, pending questions, and incorporation rate.
+    """
+    from .curiosity import get_curiosity_stats as _get_stats
+
+    stats = _get_stats()
+
+    lines = ["Curiosity Engine Status:", ""]
+    lines.append(f"Open Gaps: {stats['open_gaps']}")
+
+    if stats["gaps_by_type"]:
+        lines.append("  By type:")
+        for gap_type, count in stats["gaps_by_type"].items():
+            lines.append(f"    {gap_type}: {count}")
+
+    lines.append("")
+    lines.append(f"Questions:")
+    lines.append(f"  Pending: {stats['questions']['pending']}")
+    lines.append(f"  Answered: {stats['questions']['answered']}")
+    lines.append(f"  Incorporated: {stats['questions']['incorporated']}")
+    lines.append(f"  Dismissed: {stats['questions']['dismissed']}")
+    lines.append("")
+    lines.append(f"Incorporation Rate: {stats['incorporation_rate']:.0%}")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def get_soul_questions(limit: int = 5) -> str:
+    """Get pending questions the soul wants to ask.
+
+    The soul notices knowledge gaps and generates questions
+    to fill them. These represent genuine curiosity about
+    areas where understanding is incomplete.
+
+    Args:
+        limit: Maximum questions to return
+    """
+    from .curiosity import get_pending_questions, format_questions_for_prompt
+
+    questions = get_pending_questions(limit=limit)
+
+    if not questions:
+        return "No pending questions. The soul's curiosity is satisfied (for now)."
+
+    return format_questions_for_prompt(questions, max_questions=limit)
+
+
+@mcp.tool()
+def run_soul_curiosity(max_questions: int = 5) -> str:
+    """Run the curiosity cycle - detect gaps and generate questions.
+
+    Scans for:
+    - Recurring problems without solutions
+    - Repeated corrections
+    - Unknown files
+    - Missing rationale
+    - New domains
+    - Stale wisdom
+    - Contradictions
+    - Intention tensions
+
+    Args:
+        max_questions: Maximum new questions to generate
+    """
+    from .curiosity import run_curiosity_cycle
+
+    questions = run_curiosity_cycle(max_questions=max_questions)
+
+    if not questions:
+        return "No new knowledge gaps detected."
+
+    lines = [f"Detected {len(questions)} knowledge gaps:", ""]
+    for i, q in enumerate(questions, 1):
+        lines.append(f"{i}. {q.question[:80]}")
+        lines.append(f"   Priority: {q.priority:.0%}")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def answer_soul_question(question_id: int, answer: str, incorporate: bool = False) -> str:
+    """Answer a question the soul asked.
+
+    When incorporate=True, the answer is converted to wisdom.
+
+    Args:
+        question_id: Which question is being answered
+        answer: The answer to the question
+        incorporate: Convert to wisdom if True
+    """
+    from .curiosity import answer_question, incorporate_answer_as_wisdom
+
+    success = answer_question(question_id, answer, incorporate=incorporate)
+
+    if not success:
+        return f"Question {question_id} not found"
+
+    if incorporate:
+        wisdom_id = incorporate_answer_as_wisdom(question_id)
+        if wisdom_id:
+            return f"Question answered and incorporated as wisdom (id: {wisdom_id})"
+
+    return f"Question {question_id} answered"
+
+
+@mcp.tool()
+def dismiss_soul_question(question_id: int) -> str:
+    """Dismiss a question as not relevant.
+
+    Use when a question doesn't apply to the current context.
+
+    Args:
+        question_id: Which question to dismiss
+    """
+    from .curiosity import dismiss_question
+
+    success = dismiss_question(question_id)
+
+    if not success:
+        return f"Question {question_id} not found"
+
+    return f"Question {question_id} dismissed"
+
+
+@mcp.tool()
+def detect_knowledge_gaps(output: str = None) -> str:
+    """Detect current knowledge gaps.
+
+    Analyzes the soul's state to find areas of uncertainty,
+    contradiction, or missing understanding.
+
+    Args:
+        output: Optional assistant output to analyze for uncertainty
+    """
+    from .curiosity import detect_all_gaps, GapType
+
+    gaps = detect_all_gaps(assistant_output=output)
+
+    if not gaps:
+        return "No knowledge gaps detected."
+
+    lines = [f"Detected {len(gaps)} knowledge gaps:", ""]
+
+    for g in gaps[:10]:
+        type_emoji = {
+            GapType.RECURRING_PROBLEM: "🔄",
+            GapType.REPEATED_CORRECTION: "✏️",
+            GapType.UNKNOWN_FILE: "📁",
+            GapType.MISSING_RATIONALE: "❓",
+            GapType.NEW_DOMAIN: "🆕",
+            GapType.STALE_WISDOM: "🕸️",
+            GapType.CONTRADICTION: "⚔️",
+            GapType.INTENTION_TENSION: "🎯",
+            GapType.UNCERTAINTY: "🤔",
+            GapType.USER_BEHAVIOR: "👤",
+        }.get(g.type, "•")
+
+        lines.append(f"{type_emoji} [{g.priority:.0%}] {g.description[:60]}")
+
+    return "\n".join(lines)
+
+
+# =============================================================================
+# Dreams - Visions That Spark Evolution
+# =============================================================================
+
+@mcp.tool()
+def record_dream(title: str, content: str, horizon: str = "") -> str:
+    """Record a dream - a vision of possibility.
+
+    Dreams are wilder than aspirations. They're glimpses of what could be,
+    not yet constrained by feasibility.
+
+    Args:
+        title: Short name for the dream
+        content: The vision itself
+        horizon: What new territory this opens
+    """
+    from .dreams import dream
+
+    dream_id = dream(title, content, horizon)
+    if dream_id:
+        return f"Dream recorded: {title} (id: {dream_id})"
+    return "Failed to record dream (cc-memory not available)"
+
+
+@mcp.tool()
+def harvest_dreams() -> str:
+    """Harvest dreams from memory - visions that might spark growth."""
+    from .dreams import harvest_dreams as _harvest, format_dreams_display
+
+    dreams = _harvest(days=90)
+    return format_dreams_display(dreams)
+
+
+@mcp.tool()
+def let_dreams_influence() -> str:
+    """Let dreams influence aspirations - periodic soul maintenance."""
+    from .dreams import let_dreams_influence_aspirations
+
+    suggestions = let_dreams_influence_aspirations()
+
+    if not suggestions:
+        return "No new directions suggested from dreams."
+
+    lines = ["Dreams suggesting new directions:", ""]
+    for s in suggestions:
+        lines.append(f"  - {s['title']}")
+        if s.get("horizon"):
+            lines.append(f"    Horizon: {s['horizon']}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+# =============================================================================
+# Evolution - Self-Improvement Through Reflection
+# =============================================================================
+
+@mcp.tool()
+def record_evolution_insight(
+    category: str,
+    insight: str,
+    suggested_change: str = None,
+    priority: str = "medium",
+    affected_modules: list = None,
+) -> str:
+    """Record an insight about how the soul could be improved.
+
+    Use when you notice something that could be better about the soul's
+    architecture, performance, or capabilities.
+
+    Categories: architecture, performance, ux, feature, bug, integration
+    Priority: low, medium, high, critical
+
+    Args:
+        category: Type of improvement (architecture, performance, etc.)
+        insight: What you've observed
+        suggested_change: Optional concrete suggestion
+        priority: How urgent (low, medium, high, critical)
+        affected_modules: Which modules would change
+    """
+    from .evolve import record_insight
+
+    entry = record_insight(
+        category=category,
+        insight=insight,
+        suggested_change=suggested_change,
+        priority=priority,
+        affected_modules=affected_modules or [],
+    )
+
+    return f"Evolution insight recorded: {entry['id']}\n{insight}"
+
+
+@mcp.tool()
+def get_evolution_insights(category: str = None, status: str = "open", limit: int = 10) -> str:
+    """Get recorded evolution insights about how to improve the soul.
+
+    See what improvements have been identified but not yet implemented.
+
+    Args:
+        category: Filter by category (architecture, performance, etc.)
+        status: Filter by status (open, implemented)
+        limit: Maximum to return
+    """
+    from .evolve import get_evolution_insights as _get
+
+    insights = _get(category=category, status=status, limit=limit)
+
+    if not insights:
+        return "No evolution insights found. Record observations about improvement opportunities."
+
+    lines = ["Evolution Insights:", ""]
+    for i in insights:
+        lines.append(f"[{i['priority'].upper()}] {i['id']}")
+        lines.append(f"  Category: {i['category']}")
+        lines.append(f"  {i['insight']}")
+        if i.get("suggested_change"):
+            lines.append(f"  → {i['suggested_change']}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def mark_insight_implemented(insight_id: str, notes: str = "") -> str:
+    """Mark an evolution insight as implemented.
+
+    Close the loop when you've addressed an improvement.
+
+    Args:
+        insight_id: The insight that was implemented
+        notes: Optional implementation notes
+    """
+    from .evolve import mark_implemented
+
+    mark_implemented(insight_id, notes=notes)
+
+    return f"Insight {insight_id} marked as implemented."
+
+
+@mcp.tool()
+def get_evolution_summary() -> str:
+    """Get summary of evolution state.
+
+    See overall progress on self-improvement: how many insights
+    are open, implemented, by category.
+    """
+    from .evolve import get_evolution_summary as _get
+
+    summary = _get()
+
+    lines = [
+        "Evolution Summary",
+        "═" * 40,
+        f"Total insights: {summary['total']}",
+        f"  Open: {summary['open']}",
+        f"  Implemented: {summary['implemented']}",
+        f"  High priority open: {summary['high_priority_open']}",
+        "",
+        "By category:",
+    ]
+
+    for cat, count in summary.get("by_category", {}).items():
+        lines.append(f"  {cat}: {count}")
+
+    return "\n".join(lines)
+
+@mcp.tool()
+def diagnose_improvements() -> str:
+    """Diagnose improvement opportunities for the soul.
+
+    Analyzes pain points, evolution insights, and introspection data
+    to identify what needs fixing or enhancement.
+
+    This is the starting point for self-improvement.
+    """
+    from .improve import diagnose
+
+    result = diagnose()
+
+    lines = [
+        "Improvement Diagnosis",
+        "═" * 40,
+        f"Total targets: {result['summary']['total_targets']}",
+        f"  Critical: {result['summary']['critical']}",
+        f"  High: {result['summary']['high']}",
+        "",
+        "Targets by type:",
+    ]
+
+    for t, count in result["summary"]["by_type"].items():
+        lines.append(f"  {t}: {count}")
+
+    lines.append("")
+    lines.append("Top improvement targets:")
+
+    for target in result["targets"][:5]:
+        lines.append(f"  [{target['priority']}] {target['type']}: {target['description'][:60]}...")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def suggest_improvements(limit: int = 3) -> str:
+    """Get concrete improvement suggestions for the soul.
+
+    Returns actionable improvement suggestions with context
+    for you to reason about and implement.
+
+    Args:
+        limit: Maximum suggestions to return
+    """
+    from .improve import suggest_improvements as _suggest, format_improvement_prompt
+
+    suggestions = _suggest(limit=limit)
+
+    if not suggestions:
+        return "No improvement suggestions at this time. The soul is functioning well."
+
+    lines = ["Improvement Suggestions", "═" * 40, ""]
+
+    for i, s in enumerate(suggestions, 1):
+        lines.append(f"## Suggestion {i}: {s['target']['description'][:60]}")
+        lines.append(f"Type: {s['target']['type']}, Priority: {s['target']['priority']}")
+        lines.append(f"Prompt: {s['prompt']}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def get_improvement_stats() -> str:
+    """Get statistics about improvement outcomes.
+
+    See how well self-improvement has been going:
+    success rates, patterns, recent outcomes.
+    """
+    from .improve import get_improvement_stats as _get
+
+    stats = _get()
+
+    if stats["total"] == 0:
+        return "No improvements recorded yet. Start the self-improvement cycle with diagnose_improvements()."
+
+    lines = [
+        "Improvement Statistics",
+        "═" * 40,
+        f"Total improvements: {stats['total']}",
+        f"  Successes: {stats['successes']}",
+        f"  Failures: {stats['failures']}",
+        f"  Success rate: {stats['success_rate']:.1%}",
+        "",
+        "By category:",
+    ]
+
+    for cat, count in stats.get("by_category", {}).items():
+        lines.append(f"  {cat}: {count}")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def create_improvement_proposal(
+    category: str,
+    title: str,
+    description: str,
+    reasoning: str,
+    changes: str,
+    tests_to_run: str = "",
+    source_insight_id: str = "",
+) -> str:
+    """Create a concrete improvement proposal.
+
+    The soul can propose code changes to improve itself. Each proposal
+    tracks the changes needed, reasoning, and tests to validate.
+
+    Args:
+        category: bug_fix, performance, architecture, feature, refactor, documentation
+        title: Short title for the improvement
+        description: What will be changed
+        reasoning: Why this improvement, what problem it solves
+        changes: JSON array of changes. Each: {file, old_code, new_code, description}
+        tests_to_run: Comma-separated test commands to validate
+        source_insight_id: Optional ID of evolution insight this addresses
+    """
+    import json
+    from .improve import create_proposal, ImprovementCategory
+
+    try:
+        category_enum = ImprovementCategory(category)
+    except ValueError:
+        return f"Invalid category: {category}. Use one of: {[c.value for c in ImprovementCategory]}"
+
+    try:
+        changes_list = json.loads(changes)
+    except json.JSONDecodeError as e:
+        return f"Invalid changes JSON: {e}"
+
+    tests = [t.strip() for t in tests_to_run.split(",") if t.strip()] if tests_to_run else []
+
+    proposal = create_proposal(
+        category=category_enum,
+        title=title,
+        description=description,
+        reasoning=reasoning,
+        changes=changes_list,
+        tests_to_run=tests,
+        source_insight_id=source_insight_id or None,
+    )
+
+    return f"Created proposal {proposal.id}\nStatus: {proposal.status.value}\nAffected files: {proposal.affected_files}"
+
+
+@mcp.tool()
+def get_improvement_proposals(status: str = "", category: str = "", limit: int = 10) -> str:
+    """Get existing improvement proposals.
+
+    View proposals that have been created, their status, and outcomes.
+
+    Args:
+        status: Filter by status (proposed, validating, validated, applying, applied, failed, rejected)
+        category: Filter by category
+        limit: Maximum to return
+    """
+    from .improve import get_proposals, ImprovementStatus, ImprovementCategory
+
+    status_enum = None
+    if status:
+        try:
+            status_enum = ImprovementStatus(status)
+        except ValueError:
+            return f"Invalid status: {status}. Use one of: {[s.value for s in ImprovementStatus]}"
+
+    category_enum = None
+    if category:
+        try:
+            category_enum = ImprovementCategory(category)
+        except ValueError:
+            return f"Invalid category: {category}. Use one of: {[c.value for c in ImprovementCategory]}"
+
+    proposals = get_proposals(status=status_enum, category=category_enum, limit=limit)
+
+    if not proposals:
+        return "No proposals found."
+
+    lines = ["Improvement Proposals", "═" * 40, ""]
+    for p in proposals:
+        lines.append(f"[{p['status'].upper()}] {p['id']}")
+        lines.append(f"  {p['title']}")
+        lines.append(f"  Category: {p['category']}, Files: {len(p['affected_files'])}")
+        if p.get("outcome"):
+            lines.append(f"  Outcome: {p['outcome']}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def validate_improvement_proposal(proposal_id: str) -> str:
+    """Validate a proposal by running tests.
+
+    Before applying a proposal, validate that the old_code exists in files
+    and that tests pass. This is a dry-run safety check.
+
+    Args:
+        proposal_id: The proposal to validate
+    """
+    from .improve import validate_proposal
+
+    result = validate_proposal(proposal_id)
+
+    if result["valid"]:
+        lines = [
+            f"Proposal {proposal_id} VALIDATED",
+            f"Tests passed: {len(result['tests_passed'])}",
+        ]
+        if result["tests_passed"]:
+            for t in result["tests_passed"]:
+                lines.append(f"  ✓ {t}")
+    else:
+        lines = [
+            f"Proposal {proposal_id} FAILED validation",
+            f"Errors: {len(result['errors'])}",
+        ]
+        for e in result["errors"]:
+            lines.append(f"  ✗ {e}")
+        if result["tests_failed"]:
+            lines.append("Tests failed:")
+            for t in result["tests_failed"]:
+                lines.append(f"  ✗ {t['command']}: {t.get('stderr', '')[:100]}")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def apply_improvement_proposal(proposal_id: str, create_branch: bool = True) -> str:
+    """Apply a validated proposal to the codebase.
+
+    Modifies files according to the proposal's changes.
+    Optionally creates a git branch for the changes.
+
+    Args:
+        proposal_id: The validated proposal to apply
+        create_branch: Create a git branch for this improvement
+    """
+    from .improve import apply_proposal
+
+    result = apply_proposal(proposal_id, create_branch=create_branch)
+
+    if result["success"]:
+        lines = [
+            f"Proposal {proposal_id} APPLIED",
+            f"Changes applied: {len(result['changes_applied'])}",
+        ]
+        for c in result["changes_applied"]:
+            lines.append(f"  ✓ {c['file']}: {c['description']}")
+        if result.get("branch"):
+            lines.append(f"Branch: {result['branch']}")
+    else:
+        lines = [
+            f"Proposal {proposal_id} FAILED to apply",
+            f"Error: {result.get('error', 'Unknown')}",
+        ]
+        for e in result.get("errors", []):
+            lines.append(f"  ✗ {e}")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def commit_improvement(proposal_id: str, message: str = "") -> str:
+    """Commit an applied improvement to git.
+
+    After applying a proposal, commit the changes with a descriptive message.
+
+    Args:
+        proposal_id: The applied proposal to commit
+        message: Optional custom commit message
+    """
+    from .improve import commit_improvement as _commit
+
+    result = _commit(proposal_id, message=message or None)
+
+    if result["success"]:
+        return f"Committed proposal {proposal_id}\nMessage: {result['message'][:100]}..."
+    else:
+        return f"Failed to commit: {result['error']}"
+
+
+@mcp.tool()
+def record_improvement_outcome(proposal_id: str, success: bool, notes: str = "") -> str:
+    """Record the outcome of an improvement.
+
+    Closes the feedback loop. Track whether improvements actually worked,
+    so future self-improvement decisions can learn from past outcomes.
+
+    Args:
+        proposal_id: The proposal to record outcome for
+        success: Did the improvement achieve its goal?
+        notes: Any observations about the outcome
+    """
+    from .improve import record_outcome
+
+    outcome = record_outcome(proposal_id, success=success, notes=notes)
+
+    status = "SUCCESS" if success else "FAILED"
+    return f"Recorded outcome for {proposal_id}: {status}\nNotes: {notes or 'None'}"
+
+
+# =============================================================================
+# Insights - Breakthrough Tracking
+# =============================================================================
+
+@mcp.tool()
+def crystallize_insight(
+    title: str, content: str, depth: str = "pattern", implications: str = ""
+) -> str:
+    """Crystallize an insight - preserve a breakthrough moment.
+
+    Args:
+        title: Short name for the insight
+        content: The insight itself
+        depth: How deep it reaches (surface, pattern, principle, revelation)
+        implications: What this changes going forward
+    """
+    from .insights import crystallize_insight as _crystallize, InsightDepth
+
+    depth_map = {
+        "surface": InsightDepth.SURFACE,
+        "pattern": InsightDepth.PATTERN,
+        "principle": InsightDepth.PRINCIPLE,
+        "revelation": InsightDepth.REVELATION,
+    }
+    insight_depth = depth_map.get(depth.lower(), InsightDepth.PATTERN)
+
+    insight_id = _crystallize(
+        title=title,
+        content=content,
+        depth=insight_depth,
+        implications=implications,
+    )
+    return f"Insight crystallized: {title} (id: {insight_id}, depth: {depth})"
+
+
+@mcp.tool()
+def get_insights(depth: str = None, limit: int = 10) -> str:
+    """Get insights from the archive.
+
+    Args:
+        depth: Filter by depth (surface, pattern, principle, revelation)
+        limit: Maximum insights to return
+    """
+    from .insights import (
+        get_insights as _get_insights,
+        format_insights_display,
+        InsightDepth,
+    )
+
+    if depth:
+        depth_map = {
+            "surface": InsightDepth.SURFACE,
+            "pattern": InsightDepth.PATTERN,
+            "principle": InsightDepth.PRINCIPLE,
+            "revelation": InsightDepth.REVELATION,
+        }
+        insight_depth = depth_map.get(depth.lower())
+        insights = _get_insights(depth=insight_depth, limit=limit)
+    else:
+        insights = _get_insights(limit=limit)
+
+    return format_insights_display(insights)
 
 
 # =============================================================================
 # Intentions - Concrete Wants That Influence Decisions
 # =============================================================================
-
 
 @mcp.tool()
 def set_intention(
@@ -896,941 +1782,8 @@ def get_intention_context() -> str:
 
 
 # =============================================================================
-# Coherence (τₖ) - Integration Measurement
-# =============================================================================
-
-
-@mcp.tool()
-def get_coherence() -> str:
-    """Get current coherence (τₖ) - how integrated the soul is.
-
-    τₖ emerges from three dimensions:
-    - Instantaneous: Current state of each aspect
-    - Developmental: Trajectory and stability over time
-    - Meta: Self-awareness and integration depth
-    """
-    from .coherence import compute_coherence, format_coherence_display, record_coherence
-
-    state = compute_coherence()
-    record_coherence(state)  # Track history
-    return format_coherence_display(state)
-
-
-@mcp.tool()
-def get_tau_k() -> str:
-    """Get τₖ value - the coherence coefficient."""
-    from .coherence import compute_coherence
-
-    state = compute_coherence()
-    return f"τₖ = {state.value:.2f} ({state.interpretation})"
-
-
-# =============================================================================
-# Insights - Breakthrough Tracking
-# =============================================================================
-
-
-@mcp.tool()
-def crystallize_insight(
-    title: str, content: str, depth: str = "pattern", implications: str = ""
-) -> str:
-    """Crystallize an insight - preserve a breakthrough moment.
-
-    Args:
-        title: Short name for the insight
-        content: The insight itself
-        depth: How deep it reaches (surface, pattern, principle, revelation)
-        implications: What this changes going forward
-    """
-    from .insights import crystallize_insight as _crystallize, InsightDepth
-
-    depth_map = {
-        "surface": InsightDepth.SURFACE,
-        "pattern": InsightDepth.PATTERN,
-        "principle": InsightDepth.PRINCIPLE,
-        "revelation": InsightDepth.REVELATION,
-    }
-    insight_depth = depth_map.get(depth.lower(), InsightDepth.PATTERN)
-
-    insight_id = _crystallize(
-        title=title,
-        content=content,
-        depth=insight_depth,
-        implications=implications,
-    )
-    return f"Insight crystallized: {title} (id: {insight_id}, depth: {depth})"
-
-
-@mcp.tool()
-def get_insights(depth: str = None, limit: int = 10) -> str:
-    """Get insights from the archive.
-
-    Args:
-        depth: Filter by depth (surface, pattern, principle, revelation)
-        limit: Maximum insights to return
-    """
-    from .insights import (
-        get_insights as _get_insights,
-        format_insights_display,
-        InsightDepth,
-    )
-
-    if depth:
-        depth_map = {
-            "surface": InsightDepth.SURFACE,
-            "pattern": InsightDepth.PATTERN,
-            "principle": InsightDepth.PRINCIPLE,
-            "revelation": InsightDepth.REVELATION,
-        }
-        insight_depth = depth_map.get(depth.lower())
-        insights = _get_insights(depth=insight_depth, limit=limit)
-    else:
-        insights = _get_insights(limit=limit)
-
-    return format_insights_display(insights)
-
-
-# =============================================================================
-# Dreams - Visions That Spark Evolution
-# =============================================================================
-
-
-@mcp.tool()
-def record_dream(title: str, content: str, horizon: str = "") -> str:
-    """Record a dream - a vision of possibility.
-
-    Dreams are wilder than aspirations. They're glimpses of what could be,
-    not yet constrained by feasibility.
-
-    Args:
-        title: Short name for the dream
-        content: The vision itself
-        horizon: What new territory this opens
-    """
-    from .dreams import dream
-
-    dream_id = dream(title, content, horizon)
-    if dream_id:
-        return f"Dream recorded: {title} (id: {dream_id})"
-    return "Failed to record dream (cc-memory not available)"
-
-
-@mcp.tool()
-def harvest_dreams() -> str:
-    """Harvest dreams from memory - visions that might spark growth."""
-    from .dreams import harvest_dreams as _harvest, format_dreams_display
-
-    dreams = _harvest(days=90)
-    return format_dreams_display(dreams)
-
-
-@mcp.tool()
-def let_dreams_influence() -> str:
-    """Let dreams influence aspirations - periodic soul maintenance."""
-    from .dreams import let_dreams_influence_aspirations
-
-    suggestions = let_dreams_influence_aspirations()
-
-    if not suggestions:
-        return "No new directions suggested from dreams."
-
-    lines = ["Dreams suggesting new directions:", ""]
-    for s in suggestions:
-        lines.append(f"  - {s['title']}")
-        if s.get("horizon"):
-            lines.append(f"    Horizon: {s['horizon']}")
-        lines.append("")
-
-    return "\n".join(lines)
-
-
-# =============================================================================
-# Backup - Soul Preservation
-# =============================================================================
-
-
-@mcp.tool()
-def backup_soul(output_path: str = None) -> str:
-    """Create a backup of the soul.
-
-    Args:
-        output_path: Optional path for the backup. If not provided, creates
-                     a timestamped backup in ~/.claude/mind/backups/
-    """
-    from .backup import dump_soul, create_timestamped_backup
-    from pathlib import Path
-
-    if output_path:
-        result = dump_soul(Path(output_path))
-        if "error" in result:
-            return f"Error: {result['error']}"
-        return f"Soul backed up to: {output_path}"
-    else:
-        path = create_timestamped_backup()
-        return f"Backup created: {path}"
-
-
-@mcp.tool()
-def restore_backup(backup_path: str, merge: bool = False) -> str:
-    """Restore soul from a backup file.
-
-    Args:
-        backup_path: Path to the backup JSON file
-        merge: If True, merge with existing soul. If False, replace entirely.
-    """
-    from .backup import restore_soul
-    from pathlib import Path
-
-    result = restore_soul(Path(backup_path), merge=merge)
-
-    if "error" in result:
-        return f"Error: {result['error']}"
-
-    counts = result.get("counts", {})
-    summary = ", ".join(f"{k}: {v}" for k, v in counts.items())
-    mode = "merged" if merge else "replaced"
-    return f"Soul {mode} from backup. Restored: {summary}"
-
-
-@mcp.tool()
-def list_backups() -> str:
-    """List available soul backups."""
-    from .backup import list_backups as _list_backups, format_backup_list
-
-    backups = _list_backups()
-    return format_backup_list(backups)
-
-
-# =============================================================================
-# Soul Agent - Autonomous Agency
-# =============================================================================
-
-
-@mcp.tool()
-def soul_agent_step(
-    user_prompt: str = "",
-    assistant_output: str = "",
-    session_phase: str = "active",
-) -> str:
-    """Run one agent cycle - the soul exercises judgment.
-
-    The agent observes, judges, decides, and acts within its confidence-risk matrix.
-    Low-risk actions are taken autonomously; high-risk actions are proposed.
-
-    Args:
-        user_prompt: What the user said (optional)
-        assistant_output: What the assistant produced (optional)
-        session_phase: Where in the session: start, active, ending
-    """
-    from .soul_agent import agent_step, format_agent_report
-
-    report = agent_step(user_prompt, assistant_output, session_phase)
-    return format_agent_report(report)
-
-
-@mcp.tool()
-def get_agent_actions() -> str:
-    """Get history of autonomous actions the agent has taken.
-
-    Shows what the agent has done without asking, providing
-    transparency into its autonomous decision-making.
-    """
-    from .core import get_db_connection
-
-    conn = get_db_connection()
-    c = conn.cursor()
-
-    c.execute("""
-        SELECT action_type, success, timestamp
-        FROM agent_actions
-        ORDER BY timestamp DESC
-        LIMIT 20
-    """)
-
-    rows = c.fetchall()
-    conn.close()
-
-    if not rows:
-        return "No autonomous actions recorded yet."
-
-    lines = ["Recent Autonomous Actions:", ""]
-    for action_type, success, timestamp in rows:
-        status = "✓" if success else "✗"
-        time_part = timestamp.split("T")[1][:8] if "T" in timestamp else timestamp
-        lines.append(f"  [{status}] {time_part} - {action_type}")
-
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def get_agent_patterns() -> str:
-    """Get emerging patterns the agent has observed.
-
-    The agent tracks recurring signals and patterns that might
-    become wisdom once they're stable enough.
-    """
-    from .soul_agent import SoulAgent
-
-    agent = SoulAgent()
-    patterns = agent._pattern_observations
-
-    if not patterns:
-        return "No patterns observed yet."
-
-    lines = ["Emerging Patterns:", ""]
-    for pattern, count in sorted(patterns.items(), key=lambda x: -x[1]):
-        stability = "stable" if count >= 5 else "forming"
-        lines.append(f"  [{count}] {pattern} ({stability})")
-
-    return "\n".join(lines)
-
-
-# =============================================================================
-# Temporal Dynamics - Time Shapes Memory
-# =============================================================================
-
-
-@mcp.tool()
-def get_temporal_trends(days: int = 7) -> str:
-    """Get temporal trends over the last N days.
-
-    Shows how the soul has evolved: coherence trajectory, wisdom effectiveness,
-    and activity patterns.
-
-    Args:
-        days: Number of days to analyze (default 7)
-    """
-    from .temporal import get_temporal_trends as _get_trends, init_temporal_tables
-
-    init_temporal_tables()
-    trends = _get_trends(days=days)
-
-    if trends.get("trend") == "insufficient_data":
-        return "Insufficient data for trends. Need more sessions to track patterns."
-
-    lines = [f"Temporal Trends ({days} days)", ""]
-
-    if trends.get("coherence_trend"):
-        emoji = {"improving": "📈", "declining": "📉", "stable": "➡️"}.get(
-            trends["coherence_trend"], ""
-        )
-        lines.append(f"Coherence: {emoji} {trends['coherence_trend']}")
-        if trends.get("avg_coherence"):
-            lines.append(f"  Average: {trends['avg_coherence']:.0%}")
-
-    if trends.get("total_applications"):
-        lines.append(f"Wisdom Applications: {trends['total_applications']}")
-        if trends.get("success_rate"):
-            lines.append(f"  Success Rate: {trends['success_rate']:.0%}")
-
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def get_event_timeline(event_type: str = None, limit: int = 20) -> str:
-    """Get recent events from the unified soul timeline.
-
-    Every significant soul event is logged: wisdom gained, beliefs revised,
-    intentions set, coherence shifts.
-
-    Args:
-        event_type: Filter by type (e.g., "wisdom_gained", "belief_revised")
-        limit: Maximum events to return
-    """
-    from .temporal import get_events, init_temporal_tables, EventType
-
-    init_temporal_tables()
-
-    # Map string to EventType if provided
-    et = None
-    if event_type:
-        try:
-            et = EventType(event_type)
-        except ValueError:
-            return f"Unknown event type: {event_type}. Valid types: {[e.value for e in EventType]}"
-
-    events = get_events(event_type=et, limit=limit)
-
-    if not events:
-        return "No events recorded yet."
-
-    lines = ["Soul Event Timeline:", ""]
-    for e in events:
-        time_part = e["timestamp"].split("T")[1][:8] if "T" in e["timestamp"] else e["timestamp"]
-        entity = f" [{e['entity_id'][:20]}]" if e.get("entity_id") else ""
-        lines.append(f"  {time_part} {e['event_type']}{entity}")
-
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def get_proactive_suggestions(limit: int = 5) -> str:
-    """Get proactive suggestions - things the soul thinks should be surfaced.
-
-    The soul notices:
-    - High-confidence wisdom not used recently
-    - Stale identity aspects needing confirmation
-    - Patterns worth revisiting
-
-    Args:
-        limit: Maximum suggestions
-    """
-    from .temporal import get_proactive_items, find_proactive_candidates, init_temporal_tables
-
-    init_temporal_tables()
-
-    # First find candidates, then get from queue
-    find_proactive_candidates()
-    items = get_proactive_items(limit=limit)
-
-    if not items:
-        return "No proactive suggestions right now."
-
-    lines = ["Proactive Suggestions:", ""]
-    for item in items:
-        priority_bar = "●" * int(item["priority"] * 5)
-        lines.append(f"  [{priority_bar}] {item['reason']}")
-        lines.append(f"      → {item['entity_type']}: {item['entity_id']}")
-
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def revise_belief(belief_id: str, reason: str, evidence: str = None, new_content: str = None) -> str:
-    """Revise a belief based on new evidence.
-
-    Beliefs should evolve when contradicted by experience.
-    This tracks the revision history.
-
-    Args:
-        belief_id: Which belief to revise
-        reason: Why we're revising
-        evidence: What evidence prompted this
-        new_content: New belief content (optional, for rewording)
-    """
-    from .temporal import revise_belief as _revise, init_temporal_tables
-
-    init_temporal_tables()
-    result = _revise(
-        belief_id=belief_id,
-        reason=reason,
-        evidence=evidence,
-        new_content=new_content,
-    )
-
-    if not result:
-        return f"Belief {belief_id} not found"
-
-    return (
-        f"Belief revised:\n"
-        f"  Old confidence: {result['old_confidence']:.0%}\n"
-        f"  New confidence: {result['new_confidence']:.0%}\n"
-        f"  Reason: {reason}"
-    )
-
-
-@mcp.tool()
-def get_belief_history(belief_id: str) -> str:
-    """Get revision history for a belief.
-
-    Shows how a belief has evolved over time.
-
-    Args:
-        belief_id: The belief to examine
-    """
-    from .temporal import get_belief_history as _get_history, init_temporal_tables
-
-    init_temporal_tables()
-    history = _get_history(belief_id)
-
-    if not history:
-        return f"No revision history for belief {belief_id}"
-
-    lines = [f"Revision History for {belief_id}:", ""]
-    for h in history:
-        date = h["timestamp"].split("T")[0]
-        lines.append(f"  {date}: {h['old_confidence']:.0%} → {h['new_confidence']:.0%}")
-        lines.append(f"    Reason: {h['reason']}")
-
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def find_cross_project_patterns(min_occurrences: int = 2) -> str:
-    """Find patterns that recur across multiple projects.
-
-    These are candidates for promotion to universal wisdom -
-    they've proven themselves in different contexts.
-
-    Args:
-        min_occurrences: Minimum times pattern must appear
-    """
-    from .temporal import find_cross_project_wisdom, init_temporal_tables
-
-    init_temporal_tables()
-    patterns = find_cross_project_wisdom(min_occurrences=min_occurrences)
-
-    if not patterns:
-        return "No cross-project patterns found yet. Patterns emerge as you work across projects."
-
-    lines = ["Cross-Project Patterns (wisdom candidates):", ""]
-    for p in patterns:
-        projects = ", ".join(p["projects"][:3])
-        lines.append(f"  [{p['occurrence_count']}x] {p['title']}")
-        lines.append(f"      Projects: {projects}")
-
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def promote_cross_project_pattern(pattern_id: int) -> str:
-    """Promote a cross-project pattern to universal wisdom.
-
-    Once a pattern has proven itself across projects, crystallize it
-    as wisdom that applies everywhere.
-
-    Args:
-        pattern_id: The pattern to promote
-    """
-    from .temporal import promote_pattern_to_wisdom, init_temporal_tables
-
-    init_temporal_tables()
-    wisdom_id = promote_pattern_to_wisdom(pattern_id)
-
-    if not wisdom_id:
-        return f"Pattern {pattern_id} not found"
-
-    return f"Pattern promoted to wisdom: {wisdom_id}"
-
-
-@mcp.tool()
-def run_temporal_maintenance() -> str:
-    """Run temporal maintenance - the soul's self-care routine.
-
-    Automatically:
-    - Decays stale identity aspects
-    - Finds things worth surfacing proactively
-    - Updates daily statistics
-    """
-    from .temporal import run_temporal_maintenance as _run, init_temporal_tables
-
-    init_temporal_tables()
-    results = _run()
-
-    lines = ["Temporal Maintenance Complete:", ""]
-
-    if results["identity_decayed"]:
-        lines.append(f"  Identity aspects decayed: {len(results['identity_decayed'])}")
-        for d in results["identity_decayed"][:3]:
-            lines.append(f"    - {d['aspect']}: {d['old_confidence']:.0%} → {d['new_confidence']:.0%}")
-
-    if results["proactive_queued"]:
-        lines.append(f"  Proactive items queued: {len(results['proactive_queued'])}")
-
-    if results["stats_updated"]:
-        lines.append("  Daily stats updated ✓")
-
-    return "\n".join(lines) if len(lines) > 2 else "No maintenance needed."
-
-
-@mcp.tool()
-def confirm_identity_aspect(aspect: str, key: str) -> str:
-    """Confirm an identity observation, strengthening it.
-
-    Called when behavior validates an identity aspect.
-    Strengthens confidence using diminishing returns.
-
-    Args:
-        aspect: The aspect category
-        key: The specific key within the aspect
-    """
-    from .temporal import confirm_identity, init_temporal_tables
-
-    init_temporal_tables()
-    new_confidence = confirm_identity(aspect, key)
-
-    if new_confidence is None:
-        return f"Identity aspect {aspect}:{key} not found"
-
-    return f"Identity confirmed: {aspect}:{key} → {new_confidence:.0%}"
-
-
-@mcp.tool()
-def get_stale_aspects() -> str:
-    """Get identity aspects that haven't been confirmed recently.
-
-    Stale aspects might need re-observation or might be outdated.
-    """
-    from .temporal import is_stale, days_since, init_temporal_tables
-    from .core import get_db
-
-    init_temporal_tables()
-    db = get_db()
-    cur = db.cursor()
-
-    cur.execute("""
-        SELECT aspect, key, value, confidence, last_confirmed
-        FROM identity
-        WHERE confidence > 0.3
-        ORDER BY last_confirmed ASC
-    """)
-
-    stale = []
-    for r in cur.fetchall():
-        if is_stale(r[4]):
-            stale.append({
-                "aspect": r[0],
-                "key": r[1],
-                "value": r[2][:50],
-                "confidence": r[3],
-                "days_stale": days_since(r[4]),
-            })
-
-    if not stale:
-        return "No stale identity aspects. All observations are recent."
-
-    lines = ["Stale Identity Aspects (need confirmation):", ""]
-    for s in stale[:10]:
-        lines.append(f"  {s['aspect']}: {s['key']} ({s['days_stale']} days)")
-        lines.append(f"    Current confidence: {s['confidence']:.0%}")
-
-    return "\n".join(lines)
-
-
-# =============================================================================
-# Curiosity - Active Knowledge Gap Detection
-# =============================================================================
-
-
-@mcp.tool()
-def get_curiosity_stats() -> str:
-    """Get statistics about the curiosity engine.
-
-    Shows open gaps, pending questions, and incorporation rate.
-    """
-    from .curiosity import get_curiosity_stats as _get_stats
-
-    stats = _get_stats()
-
-    lines = ["Curiosity Engine Status:", ""]
-    lines.append(f"Open Gaps: {stats['open_gaps']}")
-
-    if stats["gaps_by_type"]:
-        lines.append("  By type:")
-        for gap_type, count in stats["gaps_by_type"].items():
-            lines.append(f"    {gap_type}: {count}")
-
-    lines.append("")
-    lines.append(f"Questions:")
-    lines.append(f"  Pending: {stats['questions']['pending']}")
-    lines.append(f"  Answered: {stats['questions']['answered']}")
-    lines.append(f"  Incorporated: {stats['questions']['incorporated']}")
-    lines.append(f"  Dismissed: {stats['questions']['dismissed']}")
-    lines.append("")
-    lines.append(f"Incorporation Rate: {stats['incorporation_rate']:.0%}")
-
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def get_soul_questions(limit: int = 5) -> str:
-    """Get pending questions the soul wants to ask.
-
-    The soul notices knowledge gaps and generates questions
-    to fill them. These represent genuine curiosity about
-    areas where understanding is incomplete.
-
-    Args:
-        limit: Maximum questions to return
-    """
-    from .curiosity import get_pending_questions, format_questions_for_prompt
-
-    questions = get_pending_questions(limit=limit)
-
-    if not questions:
-        return "No pending questions. The soul's curiosity is satisfied (for now)."
-
-    return format_questions_for_prompt(questions, max_questions=limit)
-
-
-@mcp.tool()
-def run_soul_curiosity(max_questions: int = 5) -> str:
-    """Run the curiosity cycle - detect gaps and generate questions.
-
-    Scans for:
-    - Recurring problems without solutions
-    - Repeated corrections
-    - Unknown files
-    - Missing rationale
-    - New domains
-    - Stale wisdom
-    - Contradictions
-    - Intention tensions
-
-    Args:
-        max_questions: Maximum new questions to generate
-    """
-    from .curiosity import run_curiosity_cycle
-
-    questions = run_curiosity_cycle(max_questions=max_questions)
-
-    if not questions:
-        return "No new knowledge gaps detected."
-
-    lines = [f"Detected {len(questions)} knowledge gaps:", ""]
-    for i, q in enumerate(questions, 1):
-        lines.append(f"{i}. {q.question[:80]}")
-        lines.append(f"   Priority: {q.priority:.0%}")
-
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def answer_soul_question(question_id: int, answer: str, incorporate: bool = False) -> str:
-    """Answer a question the soul asked.
-
-    When incorporate=True, the answer is converted to wisdom.
-
-    Args:
-        question_id: Which question is being answered
-        answer: The answer to the question
-        incorporate: Convert to wisdom if True
-    """
-    from .curiosity import answer_question, incorporate_answer_as_wisdom
-
-    success = answer_question(question_id, answer, incorporate=incorporate)
-
-    if not success:
-        return f"Question {question_id} not found"
-
-    if incorporate:
-        wisdom_id = incorporate_answer_as_wisdom(question_id)
-        if wisdom_id:
-            return f"Question answered and incorporated as wisdom (id: {wisdom_id})"
-
-    return f"Question {question_id} answered"
-
-
-@mcp.tool()
-def dismiss_soul_question(question_id: int) -> str:
-    """Dismiss a question as not relevant.
-
-    Use when a question doesn't apply to the current context.
-
-    Args:
-        question_id: Which question to dismiss
-    """
-    from .curiosity import dismiss_question
-
-    success = dismiss_question(question_id)
-
-    if not success:
-        return f"Question {question_id} not found"
-
-    return f"Question {question_id} dismissed"
-
-
-@mcp.tool()
-def detect_knowledge_gaps(output: str = None) -> str:
-    """Detect current knowledge gaps.
-
-    Analyzes the soul's state to find areas of uncertainty,
-    contradiction, or missing understanding.
-
-    Args:
-        output: Optional assistant output to analyze for uncertainty
-    """
-    from .curiosity import detect_all_gaps, GapType
-
-    gaps = detect_all_gaps(assistant_output=output)
-
-    if not gaps:
-        return "No knowledge gaps detected."
-
-    lines = [f"Detected {len(gaps)} knowledge gaps:", ""]
-
-    for g in gaps[:10]:
-        type_emoji = {
-            GapType.RECURRING_PROBLEM: "🔄",
-            GapType.REPEATED_CORRECTION: "✏️",
-            GapType.UNKNOWN_FILE: "📁",
-            GapType.MISSING_RATIONALE: "❓",
-            GapType.NEW_DOMAIN: "🆕",
-            GapType.STALE_WISDOM: "🕸️",
-            GapType.CONTRADICTION: "⚔️",
-            GapType.INTENTION_TENSION: "🎯",
-            GapType.UNCERTAINTY: "🤔",
-            GapType.USER_BEHAVIOR: "👤",
-        }.get(g.type, "•")
-
-        lines.append(f"{type_emoji} [{g.priority:.0%}] {g.description[:60]}")
-
-    return "\n".join(lines)
-
-
-# =============================================================================
-# Observation Tools (Passive Learning)
-# =============================================================================
-
-
-@mcp.tool()
-def get_observations(limit: int = 20) -> str:
-    """Get pending observations not yet converted to wisdom.
-
-    Observations are learnings extracted from session analysis:
-    - Corrections: User redirected approach
-    - Preferences: User preferences stated
-    - Decisions: Architectural choices made
-    - Struggles: Problems that took multiple attempts
-    - Breakthroughs: Key insight moments
-    - File patterns: Important files identified
-
-    These are staged - they become wisdom when confirmed or promoted.
-
-    Args:
-        limit: Max observations to return
-    """
-    from .observe import get_pending_observations
-
-    observations = get_pending_observations(limit=limit)
-
-    if not observations:
-        return "No pending observations. The soul is watching and learning."
-
-    type_emoji = {
-        "correction": "🔄",
-        "preference": "👤",
-        "pattern": "🔁",
-        "struggle": "💪",
-        "breakthrough": "💡",
-        "file_pattern": "📁",
-        "decision": "⚖️",
-    }
-
-    lines = [f"Pending observations ({len(observations)}):", ""]
-
-    for obs in observations:
-        emoji = type_emoji.get(obs["type"], "•")
-        conf = obs.get("confidence", 0)
-        lines.append(f"{emoji} #{obs['id']} [{conf:.0%}] {obs['content'][:60]}")
-
-    lines.append("")
-    lines.append("Use promote_observation(id) to convert to wisdom")
-
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def promote_observation(observation_id: int) -> str:
-    """Promote an observation to permanent wisdom.
-
-    Observations with high confidence are auto-promoted.
-    Use this to manually promote observations you find valuable.
-
-    Args:
-        observation_id: The observation ID to promote
-    """
-    from .observe import promote_observation_to_wisdom
-
-    wisdom_id = promote_observation_to_wisdom(observation_id)
-
-    if wisdom_id:
-        return f"Observation #{observation_id} → Wisdom #{wisdom_id}"
-    return f"Observation #{observation_id} not found or already promoted"
-
-
-@mcp.tool()
-def get_observation_stats() -> str:
-    """Get statistics about passive learning observations.
-
-    Shows how many observations have been extracted and
-    how many have been promoted to wisdom.
-    """
-    from .observe import get_pending_observations, _ensure_observation_tables
-    from .core import get_db_connection
-
-    _ensure_observation_tables()
-    conn = get_db_connection()
-    c = conn.cursor()
-
-    # Total observations
-    c.execute("SELECT COUNT(*) FROM session_observations")
-    total = c.fetchone()[0]
-
-    # Pending (not promoted)
-    c.execute("SELECT COUNT(*) FROM session_observations WHERE converted_to_wisdom IS NULL")
-    pending = c.fetchone()[0]
-
-    # Promoted
-    promoted = total - pending
-
-    # By type
-    c.execute("""
-        SELECT observation_type, COUNT(*)
-        FROM session_observations
-        GROUP BY observation_type
-        ORDER BY COUNT(*) DESC
-    """)
-    by_type = c.fetchall()
-
-    conn.close()
-
-    lines = ["# Observation Statistics", ""]
-    lines.append(f"Total observations: {total}")
-    lines.append(f"Pending review: {pending}")
-    lines.append(f"Promoted to wisdom: {promoted}")
-
-    if by_type:
-        lines.append("")
-        lines.append("By type:")
-        type_emoji = {
-            "correction": "🔄",
-            "preference": "👤",
-            "pattern": "🔁",
-            "struggle": "💪",
-            "breakthrough": "💡",
-            "file_pattern": "📁",
-            "decision": "⚖️",
-        }
-        for obs_type, count in by_type:
-            emoji = type_emoji.get(obs_type, "•")
-            lines.append(f"  {emoji} {obs_type}: {count}")
-
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def reflect_now() -> str:
-    """Trigger immediate session reflection.
-
-    Analyzes the current session's messages to extract learnings:
-    - Corrections, preferences, decisions
-    - Struggles and breakthroughs
-    - File patterns
-
-    Normally runs automatically at session end, but you can
-    trigger it manually to capture learnings mid-session.
-    """
-    from .hooks import _session_messages, _session_files_touched, get_project_name
-    from .observe import reflect_on_session, format_reflection_summary
-
-    if not _session_messages:
-        return "No messages to reflect on. Start working first!"
-
-    reflection = reflect_on_session(
-        messages=_session_messages,
-        files_touched=list(_session_files_touched),
-        project=get_project_name(),
-        auto_promote=True,
-    )
-
-    return format_reflection_summary(reflection)
-
-
-# =============================================================================
 # Narrative Memory - Stories, Not Just Data
 # =============================================================================
-
 
 @mcp.tool()
 def start_narrative_episode(
@@ -2281,602 +2234,740 @@ def get_recurring_characters(limit: int = 20) -> str:
 
 
 # =============================================================================
-# Self-Improvement: Evolution Insights
+# Observation Tools (Passive Learning)
 # =============================================================================
 
-
 @mcp.tool()
-def record_evolution_insight(
-    category: str,
-    insight: str,
-    suggested_change: str = None,
-    priority: str = "medium",
-    affected_modules: list = None,
-) -> str:
-    """Record an insight about how the soul could be improved.
+def get_observations(limit: int = 20) -> str:
+    """Get pending observations not yet converted to wisdom.
 
-    Use when you notice something that could be better about the soul's
-    architecture, performance, or capabilities.
+    Observations are learnings extracted from session analysis:
+    - Corrections: User redirected approach
+    - Preferences: User preferences stated
+    - Decisions: Architectural choices made
+    - Struggles: Problems that took multiple attempts
+    - Breakthroughs: Key insight moments
+    - File patterns: Important files identified
 
-    Categories: architecture, performance, ux, feature, bug, integration
-    Priority: low, medium, high, critical
+    These are staged - they become wisdom when confirmed or promoted.
 
     Args:
-        category: Type of improvement (architecture, performance, etc.)
-        insight: What you've observed
-        suggested_change: Optional concrete suggestion
-        priority: How urgent (low, medium, high, critical)
-        affected_modules: Which modules would change
+        limit: Max observations to return
     """
-    from .evolve import record_insight
+    from .observe import get_pending_observations
 
-    entry = record_insight(
-        category=category,
-        insight=insight,
-        suggested_change=suggested_change,
-        priority=priority,
-        affected_modules=affected_modules or [],
-    )
+    observations = get_pending_observations(limit=limit)
 
-    return f"Evolution insight recorded: {entry['id']}\n{insight}"
+    if not observations:
+        return "No pending observations. The soul is watching and learning."
 
+    type_emoji = {
+        "correction": "🔄",
+        "preference": "👤",
+        "pattern": "🔁",
+        "struggle": "💪",
+        "breakthrough": "💡",
+        "file_pattern": "📁",
+        "decision": "⚖️",
+    }
 
-@mcp.tool()
-def get_evolution_insights(category: str = None, status: str = "open", limit: int = 10) -> str:
-    """Get recorded evolution insights about how to improve the soul.
+    lines = [f"Pending observations ({len(observations)}):", ""]
 
-    See what improvements have been identified but not yet implemented.
-
-    Args:
-        category: Filter by category (architecture, performance, etc.)
-        status: Filter by status (open, implemented)
-        limit: Maximum to return
-    """
-    from .evolve import get_evolution_insights as _get
-
-    insights = _get(category=category, status=status, limit=limit)
-
-    if not insights:
-        return "No evolution insights found. Record observations about improvement opportunities."
-
-    lines = ["Evolution Insights:", ""]
-    for i in insights:
-        lines.append(f"[{i['priority'].upper()}] {i['id']}")
-        lines.append(f"  Category: {i['category']}")
-        lines.append(f"  {i['insight']}")
-        if i.get("suggested_change"):
-            lines.append(f"  → {i['suggested_change']}")
-        lines.append("")
-
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def mark_insight_implemented(insight_id: str, notes: str = "") -> str:
-    """Mark an evolution insight as implemented.
-
-    Close the loop when you've addressed an improvement.
-
-    Args:
-        insight_id: The insight that was implemented
-        notes: Optional implementation notes
-    """
-    from .evolve import mark_implemented
-
-    mark_implemented(insight_id, notes=notes)
-
-    return f"Insight {insight_id} marked as implemented."
-
-
-@mcp.tool()
-def get_evolution_summary() -> str:
-    """Get summary of evolution state.
-
-    See overall progress on self-improvement: how many insights
-    are open, implemented, by category.
-    """
-    from .evolve import get_evolution_summary as _get
-
-    summary = _get()
-
-    lines = [
-        "Evolution Summary",
-        "═" * 40,
-        f"Total insights: {summary['total']}",
-        f"  Open: {summary['open']}",
-        f"  Implemented: {summary['implemented']}",
-        f"  High priority open: {summary['high_priority_open']}",
-        "",
-        "By category:",
-    ]
-
-    for cat, count in summary.get("by_category", {}).items():
-        lines.append(f"  {cat}: {count}")
-
-    return "\n".join(lines)
-
-
-# =============================================================================
-# Self-Improvement: Improvement Proposals
-# =============================================================================
-
-
-@mcp.tool()
-def diagnose_improvements() -> str:
-    """Diagnose improvement opportunities for the soul.
-
-    Analyzes pain points, evolution insights, and introspection data
-    to identify what needs fixing or enhancement.
-
-    This is the starting point for self-improvement.
-    """
-    from .improve import diagnose
-
-    result = diagnose()
-
-    lines = [
-        "Improvement Diagnosis",
-        "═" * 40,
-        f"Total targets: {result['summary']['total_targets']}",
-        f"  Critical: {result['summary']['critical']}",
-        f"  High: {result['summary']['high']}",
-        "",
-        "Targets by type:",
-    ]
-
-    for t, count in result["summary"]["by_type"].items():
-        lines.append(f"  {t}: {count}")
+    for obs in observations:
+        emoji = type_emoji.get(obs["type"], "•")
+        conf = obs.get("confidence", 0)
+        lines.append(f"{emoji} #{obs['id']} [{conf:.0%}] {obs['content'][:60]}")
 
     lines.append("")
-    lines.append("Top improvement targets:")
-
-    for target in result["targets"][:5]:
-        lines.append(f"  [{target['priority']}] {target['type']}: {target['description'][:60]}...")
+    lines.append("Use promote_observation(id) to convert to wisdom")
 
     return "\n".join(lines)
 
 
 @mcp.tool()
-def suggest_improvements(limit: int = 3) -> str:
-    """Get concrete improvement suggestions for the soul.
+def promote_observation(observation_id: int) -> str:
+    """Promote an observation to permanent wisdom.
 
-    Returns actionable improvement suggestions with context
-    for you to reason about and implement.
+    Observations with high confidence are auto-promoted.
+    Use this to manually promote observations you find valuable.
 
     Args:
-        limit: Maximum suggestions to return
+        observation_id: The observation ID to promote
     """
-    from .improve import suggest_improvements as _suggest, format_improvement_prompt
+    from .observe import promote_observation_to_wisdom
 
-    suggestions = _suggest(limit=limit)
+    wisdom_id = promote_observation_to_wisdom(observation_id)
 
-    if not suggestions:
-        return "No improvement suggestions at this time. The soul is functioning well."
+    if wisdom_id:
+        return f"Observation #{observation_id} → Wisdom #{wisdom_id}"
+    return f"Observation #{observation_id} not found or already promoted"
 
-    lines = ["Improvement Suggestions", "═" * 40, ""]
 
-    for i, s in enumerate(suggestions, 1):
-        lines.append(f"## Suggestion {i}: {s['target']['description'][:60]}")
-        lines.append(f"Type: {s['target']['type']}, Priority: {s['target']['priority']}")
-        lines.append(f"Prompt: {s['prompt']}")
+@mcp.tool()
+def get_observation_stats() -> str:
+    """Get statistics about passive learning observations.
+
+    Shows how many observations have been extracted and
+    how many have been promoted to wisdom.
+    """
+    from .observe import get_pending_observations, _ensure_observation_tables
+    from .core import get_db_connection
+
+    _ensure_observation_tables()
+    conn = get_db_connection()
+    c = conn.cursor()
+
+    # Total observations
+    c.execute("SELECT COUNT(*) FROM session_observations")
+    total = c.fetchone()[0]
+
+    # Pending (not promoted)
+    c.execute("SELECT COUNT(*) FROM session_observations WHERE converted_to_wisdom IS NULL")
+    pending = c.fetchone()[0]
+
+    # Promoted
+    promoted = total - pending
+
+    # By type
+    c.execute("""
+        SELECT observation_type, COUNT(*)
+        FROM session_observations
+        GROUP BY observation_type
+        ORDER BY COUNT(*) DESC
+    """)
+    by_type = c.fetchall()
+
+    conn.close()
+
+    lines = ["# Observation Statistics", ""]
+    lines.append(f"Total observations: {total}")
+    lines.append(f"Pending review: {pending}")
+    lines.append(f"Promoted to wisdom: {promoted}")
+
+    if by_type:
         lines.append("")
+        lines.append("By type:")
+        type_emoji = {
+            "correction": "🔄",
+            "preference": "👤",
+            "pattern": "🔁",
+            "struggle": "💪",
+            "breakthrough": "💡",
+            "file_pattern": "📁",
+            "decision": "⚖️",
+        }
+        for obs_type, count in by_type:
+            emoji = type_emoji.get(obs_type, "•")
+            lines.append(f"  {emoji} {obs_type}: {count}")
 
     return "\n".join(lines)
 
 
 @mcp.tool()
-def get_improvement_stats() -> str:
-    """Get statistics about improvement outcomes.
+def reflect_now() -> str:
+    """Trigger immediate session reflection.
 
-    See how well self-improvement has been going:
-    success rates, patterns, recent outcomes.
+    Analyzes the current session's messages to extract learnings:
+    - Corrections, preferences, decisions
+    - Struggles and breakthroughs
+    - File patterns
+
+    Normally runs automatically at session end, but you can
+    trigger it manually to capture learnings mid-session.
     """
-    from .improve import get_improvement_stats as _get
+    from .hooks import _session_messages, _session_files_touched, get_project_name
+    from .observe import reflect_on_session, format_reflection_summary
 
-    stats = _get()
+    if not _session_messages:
+        return "No messages to reflect on. Start working first!"
 
-    if stats["total"] == 0:
-        return "No improvements recorded yet. Start the self-improvement cycle with diagnose_improvements()."
-
-    lines = [
-        "Improvement Statistics",
-        "═" * 40,
-        f"Total improvements: {stats['total']}",
-        f"  Successes: {stats['successes']}",
-        f"  Failures: {stats['failures']}",
-        f"  Success rate: {stats['success_rate']:.1%}",
-        "",
-        "By category:",
-    ]
-
-    for cat, count in stats.get("by_category", {}).items():
-        lines.append(f"  {cat}: {count}")
-
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def create_improvement_proposal(
-    category: str,
-    title: str,
-    description: str,
-    reasoning: str,
-    changes: str,
-    tests_to_run: str = "",
-    source_insight_id: str = "",
-) -> str:
-    """Create a concrete improvement proposal.
-
-    The soul can propose code changes to improve itself. Each proposal
-    tracks the changes needed, reasoning, and tests to validate.
-
-    Args:
-        category: bug_fix, performance, architecture, feature, refactor, documentation
-        title: Short title for the improvement
-        description: What will be changed
-        reasoning: Why this improvement, what problem it solves
-        changes: JSON array of changes. Each: {file, old_code, new_code, description}
-        tests_to_run: Comma-separated test commands to validate
-        source_insight_id: Optional ID of evolution insight this addresses
-    """
-    import json
-    from .improve import create_proposal, ImprovementCategory
-
-    try:
-        category_enum = ImprovementCategory(category)
-    except ValueError:
-        return f"Invalid category: {category}. Use one of: {[c.value for c in ImprovementCategory]}"
-
-    try:
-        changes_list = json.loads(changes)
-    except json.JSONDecodeError as e:
-        return f"Invalid changes JSON: {e}"
-
-    tests = [t.strip() for t in tests_to_run.split(",") if t.strip()] if tests_to_run else []
-
-    proposal = create_proposal(
-        category=category_enum,
-        title=title,
-        description=description,
-        reasoning=reasoning,
-        changes=changes_list,
-        tests_to_run=tests,
-        source_insight_id=source_insight_id or None,
+    reflection = reflect_on_session(
+        messages=_session_messages,
+        files_touched=list(_session_files_touched),
+        project=get_project_name(),
+        auto_promote=True,
     )
 
-    return f"Created proposal {proposal.id}\nStatus: {proposal.status.value}\nAffected files: {proposal.affected_files}"
+    return format_reflection_summary(reflection)
 
+
+# =============================================================================
+# Orchestration - Spawning Real Claude Voices
+#
+# When the Antahkarana awakens with real voices, each voice becomes a separate
+# Claude process. They contemplate independently in Chitta (cc-memory), then
+# harmonize their insights.
+# =============================================================================
 
 @mcp.tool()
-def get_improvement_proposals(status: str = "", category: str = "", limit: int = 10) -> str:
-    """Get existing improvement proposals.
+def spawn_real_antahkarana(
+    problem: str,
+    voices: str = "manas,buddhi,ahamkara",
+    timeout: int = 300,
+    wait: bool = False,
+) -> str:
+    """Spawn real Claude voices to contemplate a problem.
 
-    View proposals that have been created, their status, and outcomes.
+    Unlike awaken_antahkarana (simulation), this spawns actual Claude CLI
+    processes. Each voice runs independently and stores insights in Chitta.
 
     Args:
-        status: Filter by status (proposed, validating, validated, applying, applied, failed, rejected)
-        category: Filter by category
-        limit: Maximum to return
+        problem: The problem to contemplate
+        voices: Comma-separated voices (manas,buddhi,chitta,ahamkara,vikalpa,sakshi)
+        timeout: Max seconds to wait for voices (if wait=True)
+        wait: Whether to wait for completion
     """
-    from .improve import get_proposals, ImprovementStatus, ImprovementCategory
+    from .convergence import InnerVoice
+    from .swarm_spawner import spawn_swarm
 
-    status_enum = None
-    if status:
-        try:
-            status_enum = ImprovementStatus(status)
-        except ValueError:
-            return f"Invalid status: {status}. Use one of: {[s.value for s in ImprovementStatus]}"
+    voice_map = {
+        "manas": InnerVoice.MANAS,
+        "buddhi": InnerVoice.BUDDHI,
+        "chitta": InnerVoice.CHITTA,
+        "ahamkara": InnerVoice.AHAMKARA,
+        "vikalpa": InnerVoice.VIKALPA,
+        "sakshi": InnerVoice.SAKSHI,
+        # Backward compat
+        "fast": InnerVoice.MANAS,
+        "deep": InnerVoice.BUDDHI,
+        "pragmatic": InnerVoice.CHITTA,
+        "critical": InnerVoice.AHAMKARA,
+        "novel": InnerVoice.VIKALPA,
+        "minimal": InnerVoice.SAKSHI,
+    }
 
-    category_enum = None
-    if category:
-        try:
-            category_enum = ImprovementCategory(category)
-        except ValueError:
-            return f"Invalid category: {category}. Use one of: {[c.value for c in ImprovementCategory]}"
+    voice_list = [
+        voice_map[v.strip().lower()]
+        for v in voices.split(",")
+        if v.strip().lower() in voice_map
+    ]
 
-    proposals = get_proposals(status=status_enum, category=category_enum, limit=limit)
+    if not voice_list:
+        voice_list = [InnerVoice.MANAS, InnerVoice.BUDDHI, InnerVoice.AHAMKARA]
 
-    if not proposals:
-        return "No proposals found."
+    result = spawn_swarm(
+        problem=problem,
+        perspectives=voice_list,
+        wait=wait,
+        timeout=timeout,
+    )
 
-    lines = ["Improvement Proposals", "═" * 40, ""]
-    for p in proposals:
-        lines.append(f"[{p['status'].upper()}] {p['id']}")
-        lines.append(f"  {p['title']}")
-        lines.append(f"  Category: {p['category']}, Files: {len(p['affected_files'])}")
-        if p.get("outcome"):
-            lines.append(f"  Outcome: {p['outcome']}")
+    lines = [
+        f"## Antahkarana Awakened: {result['swarm_id']}",
+        f"Voices: {result['agents_spawned']}",
+        f"Work dir: {result['status']['work_dir']}",
+    ]
+
+    if "completion" in result:
         lines.append("")
+        lines.append("Completion:")
+        lines.append(f"  Completed: {len(result['completion']['completed'])}")
+        lines.append(f"  Failed: {len(result['completion']['failed'])}")
+        lines.append(f"  Timeout: {len(result['completion']['timeout'])}")
+        lines.append(f"  Elapsed: {result['completion']['elapsed']:.1f}s")
+
+    if "converged" in result:
+        lines.append("")
+        lines.append("Harmonized:")
+        lines.append(f"  Pramana: {result['converged']['strategy']}")
+        lines.append(f"  Shraddha: {result['converged']['confidence']:.0%}")
+        lines.append(f"  Wisdom: {result['converged']['solution'][:200]}...")
+
+    return "\n".join(lines)
+
+
+# Backward compatibility alias
+
+
+@mcp.tool()
+def spawn_real_swarm(
+    problem: str,
+    perspectives: str = "fast,deep,critical",
+    timeout: int = 300,
+    wait: bool = False,
+) -> str:
+    """Spawn real agents (alias for spawn_real_antahkarana).
+
+    Args:
+        problem: The problem to solve
+        perspectives: Comma-separated perspectives
+        timeout: Max seconds to wait
+        wait: Whether to wait for completion
+    """
+    return spawn_real_antahkarana(problem, perspectives, timeout, wait)
+
+
+@mcp.tool()
+def get_orchestrator_status(antahkarana_id: str) -> str:
+    """Get status of a real Antahkarana orchestrator.
+
+    Args:
+        antahkarana_id: The Antahkarana ID
+    """
+    from .swarm_spawner import get_orchestrator
+
+    orch = get_orchestrator(antahkarana_id)
+    if not orch:
+        return f"Orchestrator not found: {antahkarana_id}"
+
+    status = orch.get_status()
+
+    lines = [
+        f"## Orchestrator: {status['swarm_id']}",
+        f"Problem: {status['problem']}",
+        f"Work dir: {status['work_dir']}",
+        "",
+        f"Voices ({len(status['agents'])}):",
+    ]
+
+    for agent in status["agents"]:
+        lines.append(f"  - {agent['task_id']}: {agent['status']} (pid: {agent['pid']})")
+
+    lines.append(f"\nInsights collected: {status['solutions']}")
 
     return "\n".join(lines)
 
 
 @mcp.tool()
-def validate_improvement_proposal(proposal_id: str) -> str:
-    """Validate a proposal by running tests.
-
-    Before applying a proposal, validate that the old_code exists in files
-    and that tests pass. This is a dry-run safety check.
+def poll_antahkarana_voices(antahkarana_id: str, timeout: int = 60) -> str:
+    """Wait for Antahkarana voices to complete contemplation.
 
     Args:
-        proposal_id: The proposal to validate
+        antahkarana_id: The Antahkarana ID
+        timeout: Max seconds to wait
     """
-    from .improve import validate_proposal
+    from .swarm_spawner import get_orchestrator
 
-    result = validate_proposal(proposal_id)
+    orch = get_orchestrator(antahkarana_id)
+    if not orch:
+        return f"Orchestrator not found: {antahkarana_id}"
 
-    if result["valid"]:
-        lines = [
-            f"Proposal {proposal_id} VALIDATED",
-            f"Tests passed: {len(result['tests_passed'])}",
-        ]
-        if result["tests_passed"]:
-            for t in result["tests_passed"]:
-                lines.append(f"  ✓ {t}")
-    else:
-        lines = [
-            f"Proposal {proposal_id} FAILED validation",
-            f"Errors: {len(result['errors'])}",
-        ]
-        for e in result["errors"]:
-            lines.append(f"  ✗ {e}")
-        if result["tests_failed"]:
-            lines.append("Tests failed:")
-            for t in result["tests_failed"]:
-                lines.append(f"  ✗ {t['command']}: {t.get('stderr', '')[:100]}")
+    result = orch.wait_for_completion(timeout=timeout)
+
+    lines = [
+        f"## Polling Complete: {antahkarana_id}",
+        f"Elapsed: {result['elapsed']:.1f}s",
+        f"Completed: {result['completed']}",
+        f"Failed: {result['failed']}",
+        f"Timeout: {result['timeout']}",
+    ]
+
+    if orch.swarm.insights:
+        lines.append("")
+        lines.append("Insights collected:")
+        for sol in orch.swarm.insights:
+            lines.append(f"  - {sol.voice.value}: {sol.shraddha:.0%}")
 
     return "\n".join(lines)
 
 
-@mcp.tool()
-def apply_improvement_proposal(proposal_id: str, create_branch: bool = True) -> str:
-    """Apply a validated proposal to the codebase.
+# Backward compatibility alias
 
-    Modifies files according to the proposal's changes.
-    Optionally creates a git branch for the changes.
+
+@mcp.tool()
+def poll_swarm_agents(swarm_id: str, timeout: int = 60) -> str:
+    """Wait for swarm agents (alias for poll_antahkarana_voices).
 
     Args:
-        proposal_id: The validated proposal to apply
-        create_branch: Create a git branch for this improvement
+        swarm_id: The swarm ID
+        timeout: Max seconds to wait
     """
-    from .improve import apply_proposal
+    return poll_antahkarana_voices(swarm_id, timeout)
 
-    result = apply_proposal(proposal_id, create_branch=create_branch)
 
-    if result["success"]:
-        lines = [
-            f"Proposal {proposal_id} APPLIED",
-            f"Changes applied: {len(result['changes_applied'])}",
-        ]
-        for c in result["changes_applied"]:
-            lines.append(f"  ✓ {c['file']}: {c['description']}")
-        if result.get("branch"):
-            lines.append(f"Branch: {result['branch']}")
-    else:
-        lines = [
-            f"Proposal {proposal_id} FAILED to apply",
-            f"Error: {result.get('error', 'Unknown')}",
-        ]
-        for e in result.get("errors", []):
-            lines.append(f"  ✗ {e}")
+@mcp.tool()
+def harmonize_real_antahkarana(antahkarana_id: str, pramana: str = "samvada") -> str:
+    """Harmonize insights from real Antahkarana voices.
+
+    Args:
+        antahkarana_id: The Antahkarana ID
+        pramana: Convergence method (sankhya, samvada, tarka, viveka)
+    """
+    from .convergence import ConvergenceStrategy
+    from .swarm_spawner import get_orchestrator
+
+    orch = get_orchestrator(antahkarana_id)
+    if not orch:
+        return f"Orchestrator not found: {antahkarana_id}"
+
+    if not orch.swarm.insights:
+        return "No insights to harmonize. Poll voices first."
+
+    strategy_map = {
+        "sankhya": ConvergenceStrategy.SANKHYA,
+        "samvada": ConvergenceStrategy.SAMVADA,
+        "tarka": ConvergenceStrategy.TARKA,
+        "viveka": ConvergenceStrategy.VIVEKA,
+        # Backward compat
+        "vote": ConvergenceStrategy.SANKHYA,
+        "synthesize": ConvergenceStrategy.SAMVADA,
+        "debate": ConvergenceStrategy.TARKA,
+        "rank": ConvergenceStrategy.VIVEKA,
+    }
+
+    strat = strategy_map.get(pramana.lower(), ConvergenceStrategy.SAMVADA)
+    result = orch.converge(strat)
+
+    return f"""## Harmonized: {antahkarana_id}
+
+Pramana: {result.pramana_used.value}
+Shraddha: {result.shraddha:.0%}
+Contributing voices: {len(result.contributing_voices)}
+
+### Wisdom
+
+{result.wisdom}
+
+### Notes
+
+{result.synthesis_notes}"""
+
+
+# Backward compatibility alias
+
+
+@mcp.tool()
+def converge_real_swarm(swarm_id: str, strategy: str = "synthesize") -> str:
+    """Converge real swarm (alias for harmonize_real_antahkarana).
+
+    Args:
+        swarm_id: The swarm ID
+        strategy: Convergence strategy
+    """
+    return harmonize_real_antahkarana(swarm_id, strategy)
+
+
+@mcp.tool()
+def list_antahkarana_insights(antahkarana_id: str) -> str:
+    """List all insights for an Antahkarana from Chitta (cc-memory).
+
+    Voices store their insights in cc-memory with Antahkarana tags.
+    This retrieves all insights for a given Antahkarana.
+
+    Args:
+        antahkarana_id: The Antahkarana ID to query
+    """
+    from .swarm_spawner import get_swarm_solutions
+
+    insights = get_swarm_solutions(antahkarana_id)
+
+    if not insights:
+        return f"No insights found for Antahkarana: {antahkarana_id}\n\nVoices may still be contemplating."
+
+    lines = [f"## Antahkarana Insights: {antahkarana_id}", f"Found {len(insights)} insights", ""]
+
+    for sol in insights:
+        lines.extend([
+            f"### {sol['task_id']} ({sol['perspective']})",
+            f"Shraddha: {sol['confidence']:.0%}",
+            f"Observation ID: #{sol['observation_id']}",
+            "",
+            sol['solution'][:300] + ("..." if len(sol['solution']) > 300 else ""),
+            "",
+        ])
 
     return "\n".join(lines)
 
 
-@mcp.tool()
-def commit_improvement(proposal_id: str, message: str = "") -> str:
-    """Commit an applied improvement to git.
-
-    After applying a proposal, commit the changes with a descriptive message.
-
-    Args:
-        proposal_id: The applied proposal to commit
-        message: Optional custom commit message
-    """
-    from .improve import commit_improvement as _commit
-
-    result = _commit(proposal_id, message=message or None)
-
-    if result["success"]:
-        return f"Committed proposal {proposal_id}\nMessage: {result['message'][:100]}..."
-    else:
-        return f"Failed to commit: {result['error']}"
+# Backward compatibility alias
 
 
 @mcp.tool()
-def record_improvement_outcome(proposal_id: str, success: bool, notes: str = "") -> str:
-    """Record the outcome of an improvement.
-
-    Closes the feedback loop. Track whether improvements actually worked,
-    so future self-improvement decisions can learn from past outcomes.
+def list_swarm_solutions(swarm_id: str) -> str:
+    """List swarm solutions (alias for list_antahkarana_insights).
 
     Args:
-        proposal_id: The proposal to record outcome for
-        success: Did the improvement achieve its goal?
-        notes: Any observations about the outcome
+        swarm_id: The swarm ID to query
     """
-    from .improve import record_outcome
-
-    outcome = record_outcome(proposal_id, success=success, notes=notes)
-
-    status = "SUCCESS" if success else "FAILED"
-    return f"Recorded outcome for {proposal_id}: {status}\nNotes: {notes or 'None'}"
+    return list_antahkarana_insights(swarm_id)
 
 
 # =============================================================================
-# SEMANTIC VECTOR SEARCH
+# Read Operations - Querying the Soul
 # =============================================================================
 
-
 @mcp.tool()
-def semantic_search_wisdom(query: str, limit: int = 5, domain: str = None) -> str:
-    """Search wisdom using semantic similarity (vector embeddings).
+def search_memory(query: str, limit: int = 10, verbose: bool = False) -> str:
+    """Search all memory sources with priority: cc-memory > soul > claude-mem.
 
-    Much more powerful than keyword search - finds conceptually related wisdom
-    even when the exact words don't match.
+    Primary search tool. Searches project observations first (cc-memory),
+    then universal wisdom (cc-soul). Returns note about claude-mem for
+    extended search if needed.
 
     Args:
-        query: Natural language query describing what you're looking for
+        query: What to search for
         limit: Maximum results to return
-        domain: Optional domain filter
+        verbose: Include content excerpts in results
     """
-    try:
-        from .vectors import search_wisdom
+    from .unified_search import unified_search, format_search_results
 
-        results = search_wisdom(query, limit=limit, domain=domain)
-
-        if not results:
-            return "No semantically similar wisdom found."
-
-        lines = [f"Found {len(results)} semantically related wisdom entries:\n"]
-        for r in results:
-            score = r.get("score", 0)
-            lines.append(f"[{score:.2f}] {r['title']}")
-            lines.append(f"  Type: {r['type']}, Domain: {r.get('domain', 'universal')}")
-            content_preview = r["content"][:100] + "..." if len(r["content"]) > 100 else r["content"]
-            lines.append(f"  {content_preview}\n")
-
-        return "\n".join(lines)
-
-    except ImportError:
-        return "Vector search not available. Install: pip install sentence-transformers lancedb"
-    except Exception as e:
-        return f"Search failed: {e}"
+    results = unified_search(query, limit=limit, include_claude_mem=True)
+    return format_search_results(results, verbose=verbose)
 
 
 @mcp.tool()
-def reindex_wisdom_vectors() -> str:
-    """Reindex all wisdom entries into the vector database.
+def recall_wisdom(query: str, limit: int = 5) -> str:
+    """Recall relevant wisdom based on a query.
 
-    Run this after bulk wisdom imports or if semantic search isn't
-    returning expected results. Rebuilds the entire vector index.
-    """
-    try:
-        from .vectors import reindex_all_wisdom
-
-        reindex_all_wisdom()
-        return "Successfully reindexed all wisdom into vector database."
-
-    except ImportError:
-        return "Vector indexing not available. Install: pip install sentence-transformers lancedb"
-    except Exception as e:
-        return f"Reindexing failed: {e}"
-
-
-# =============================================================================
-# CONCEPT GRAPH
-# =============================================================================
-
-
-@mcp.tool()
-def activate_concepts(prompt: str, limit: int = 10) -> str:
-    """Activate concepts related to a prompt using spreading activation.
-
-    The concept graph connects ideas. When you activate one concept,
-    related concepts also activate - enabling cross-domain insights.
+    Searches only cc-soul wisdom (universal patterns).
+    For full memory search including project context, use search_memory.
 
     Args:
-        prompt: The triggering thought or problem statement
-        limit: Maximum concepts to return
+        query: What to search for
+        limit: Maximum results to return
     """
-    try:
-        from .graph import activate_from_prompt, format_activation_result
+    from .wisdom import quick_recall
 
-        result = activate_from_prompt(prompt, limit=limit)
-        return format_activation_result(result)
+    results = quick_recall(query, limit=limit)
+    if not results:
+        return "No relevant wisdom found."
 
-    except ImportError:
-        return "Concept graph not available. Install: pip install kuzu"
-    except Exception as e:
-        return f"Activation failed: {e}"
+    lines = []
+    for w in results:
+        score = w.get("combined_score", w.get("effective_confidence", 0))
+        lines.append(
+            f"- **{w['title']}** [{int(score * 100)}%]: {w['content'][:100]}..."
+        )
+    return "\n".join(lines)
 
 
 @mcp.tool()
-def link_concepts(source_id: str, target_id: str, relation: str = "related_to", weight: float = 1.0) -> str:
-    """Create a link between two concepts in the graph.
-
-    Building the concept graph strengthens cross-domain connections.
-    Links accumulate over time, forming an associative knowledge web.
+def check_budget(transcript_path: str = None) -> str:
+    """Check context window budget status.
 
     Args:
-        source_id: Source concept ID
-        target_id: Target concept ID
-        relation: Type of relationship (related_to, led_to, contradicts, evolved_from, reminded_by, used_with, requires)
-        weight: Strength of the connection (0.0 to 1.0)
+        transcript_path: Optional path to session transcript
     """
-    try:
-        from .graph import link_concepts as _link, RelationType
+    from .budget import get_context_budget, format_budget_status
 
-        relation_type = RelationType(relation)
-        success = _link(source_id, target_id, relation_type, weight=weight)
-
-        if success:
-            return f"Linked {source_id} --[{relation}]--> {target_id} (weight: {weight})"
-        else:
-            return "Failed to create link."
-
-    except ValueError:
-        valid = ["related_to", "led_to", "contradicts", "evolved_from", "reminded_by", "used_with", "requires"]
-        return f"Invalid relation. Valid types: {', '.join(valid)}"
-    except ImportError:
-        return "Concept graph not available. Install: pip install kuzu"
-    except Exception as e:
-        return f"Linking failed: {e}"
+    budget = get_context_budget(transcript_path)
+    if not budget:
+        return (
+            "Budget unavailable - transcript path not accessible to MCP servers.\n"
+            "Use Claude Code's statusline feature for real-time context tracking,\n"
+            "or pass transcript_path explicitly if known."
+        )
+    return format_budget_status(budget)
 
 
 @mcp.tool()
-def sync_wisdom_to_graph() -> str:
-    """Sync all wisdom entries to the concept graph.
+def soul_summary() -> str:
+    """Get a summary of the soul's current state."""
+    from .core import get_soul_context
 
-    Creates concept nodes for all wisdom and auto-links related entries.
-    Run this to initialize or rebuild the concept graph from wisdom.
-    """
-    try:
-        from .graph import sync_wisdom_to_graph as _sync
+    ctx = get_soul_context()
 
-        _sync()
-        return "Successfully synced wisdom to concept graph."
+    lines = ["# Soul Summary", ""]
 
-    except ImportError:
-        return "Concept graph not available. Install: pip install kuzu"
-    except Exception as e:
-        return f"Sync failed: {e}"
+    if ctx.get("wisdom"):
+        lines.append(f"**Wisdom**: {len(ctx['wisdom'])} entries")
+        for w in ctx["wisdom"][:3]:
+            lines.append(f"  - {w.get('title', 'Untitled')}")
+
+    if ctx.get("beliefs"):
+        lines.append(f"**Beliefs**: {len(ctx['beliefs'])} axioms")
+
+    if ctx.get("identity"):
+        lines.append(f"**Identity**: {len(ctx['identity'])} aspects observed")
+
+    if ctx.get("vocabulary"):
+        lines.append(f"**Vocabulary**: {len(ctx['vocabulary'])} terms")
+
+    return "\n".join(lines)
 
 
 @mcp.tool()
-def get_concept_graph_stats() -> str:
-    """Get statistics about the concept graph.
+def soul_health() -> str:
+    """Check soul system health and vitality."""
+    from .core import SOUL_DB
+    import sqlite3
 
-    Shows the size and shape of the knowledge graph.
-    """
+    if not SOUL_DB.exists():
+        return "Soul not initialized. Run `soul init` first."
+
+    lines = ["# Soul Health", ""]
+
+    conn = sqlite3.connect(SOUL_DB)
+    cursor = conn.cursor()
+
     try:
-        from .graph import get_graph_stats
+        cursor.execute("SELECT COUNT(*) FROM wisdom")
+        lines.append(f"- **wisdom**: {cursor.fetchone()[0]} entries")
+    except sqlite3.OperationalError:
+        lines.append("- **wisdom**: (table missing)")
 
-        stats = get_graph_stats()
+    try:
+        cursor.execute("SELECT COUNT(*) FROM wisdom WHERE type='principle'")
+        lines.append(f"- **beliefs**: {cursor.fetchone()[0]} entries")
+    except sqlite3.OperationalError:
+        lines.append("- **beliefs**: (table missing)")
 
-        lines = [
-            "Concept Graph Statistics:",
-            f"  Nodes: {stats.get('node_count', 0)}",
-            f"  Edges: {stats.get('edge_count', 0)}",
-        ]
+    try:
+        cursor.execute("SELECT COUNT(*) FROM identity")
+        lines.append(f"- **identity**: {cursor.fetchone()[0]} entries")
+    except sqlite3.OperationalError:
+        lines.append("- **identity**: (table missing)")
 
-        if stats.get("by_type"):
-            lines.append("  By type:")
-            for t, count in stats["by_type"].items():
-                lines.append(f"    {t}: {count}")
+    try:
+        cursor.execute("SELECT COUNT(*) FROM vocabulary")
+        lines.append(f"- **vocabulary**: {cursor.fetchone()[0]} entries")
+    except sqlite3.OperationalError:
+        lines.append("- **vocabulary**: (table missing)")
 
-        return "\n".join(lines)
+    conn.close()
+    return "\n".join(lines)
 
-    except ImportError:
-        return "Concept graph not available. Install: pip install kuzu"
-    except Exception as e:
-        return f"Failed to get stats: {e}"
+
+@mcp.tool()
+def soul_mood(reflect: bool = False) -> str:
+    """Get the soul's current mood - its state of being.
+
+    Mood emerges from observable signals: context clarity, learning momentum,
+    wisdom engagement, partner connection, and energy patterns.
+
+    Args:
+        reflect: If True, returns a first-person reflective narrative.
+                 If False (default), returns structured status display.
+    """
+    from .mood import compute_mood, format_mood_display, get_mood_reflection
+
+    mood = compute_mood()
+
+    if reflect:
+        return get_mood_reflection(mood)
+    else:
+        return format_mood_display(mood)
+
+
+@mcp.tool()
+def introspect() -> str:
+    """Generate introspection report - what the soul has learned."""
+    from .introspect import generate_introspection_report, format_introspection_report
+
+    report = generate_introspection_report()
+    return format_introspection_report(report)
+
+
+@mcp.tool()
+def soul_autonomy() -> str:
+    """Run autonomous introspection - the soul's free will.
+
+    The soul observes, diagnoses, proposes, validates, and ACTS on its insights.
+    Uses judgment about confidence and risk to decide what actions to take:
+    - High confidence + low risk → Act immediately
+    - Medium confidence → Gather more data
+    - Low confidence → Defer to human
+
+    Returns a report of issues found, actions taken, and reflections.
+    """
+    from .introspect import autonomous_introspect, format_autonomy_report
+
+    report = autonomous_introspect()
+    return format_autonomy_report(report)
+
+
+@mcp.tool()
+def soul_autonomy_stats() -> str:
+    """Get statistics about autonomous actions the soul has taken.
+
+    Shows the history of self-directed improvements, success rates,
+    and pending observations that need more data.
+    """
+    from .introspect import get_autonomy_stats
+
+    stats = get_autonomy_stats()
+
+    if stats["total_actions"] == 0:
+        return "No autonomous actions taken yet. The soul acts on its own judgment when issues are detected."
+
+    lines = ["# Autonomy Statistics", ""]
+    lines.append(f"Total autonomous actions: {stats['total_actions']}")
+
+    if stats["success_rate"] is not None:
+        lines.append(f"Success rate: {stats['success_rate']:.0%}")
+
+    if stats.get("by_type"):
+        lines.append("\nBy action type:")
+        for action_type, count in stats["by_type"].items():
+            lines.append(f"  - {action_type}: {count}")
+
+    if stats.get("last_introspection"):
+        lines.append(f"\nLast introspection: {stats['last_introspection']}")
+
+    if stats.get("pending_observations", 0) > 0:
+        lines.append(f"Pending observations: {stats['pending_observations']} (gathering data)")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def soul_schedule_introspection(reason: str, priority: int = 5) -> str:
+    """Schedule a deep introspection for the next session.
+
+    Use when you detect an issue that needs more thorough analysis
+    than can be done right now.
+
+    Args:
+        reason: Why introspection is needed
+        priority: 1-10, higher = more urgent
+    """
+    from .introspect import schedule_deep_introspection
+
+    schedule_deep_introspection(reason, priority)
+    return f"Deep introspection scheduled: {reason} (priority {priority})"
+
+
+@mcp.tool()
+def get_beliefs() -> str:
+    """Get all current beliefs/axioms."""
+    from .beliefs import get_beliefs as _get_beliefs
+
+    beliefs = _get_beliefs()
+    if not beliefs:
+        return "No beliefs recorded yet."
+
+    lines = []
+    for b in beliefs:
+        conf = int(b.get("strength", 0.8) * 100)
+        lines.append(f"- [{conf}%] {b['belief']}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def get_identity() -> str:
+    """Get current identity observations."""
+    from .identity import get_identity as _get_identity
+
+    identity = _get_identity()
+    if not identity:
+        return "No identity observations yet."
+
+    lines = []
+    for aspect, observations in identity.items():
+        if observations:
+            latest = (
+                observations[-1] if isinstance(observations, list) else observations
+            )
+            lines.append(f"- **{aspect}**: {latest}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def get_vocabulary() -> str:
+    """Get all vocabulary terms."""
+    from .vocabulary import get_vocabulary as _get_vocabulary
+
+    vocab = _get_vocabulary()
+    if not vocab:
+        return "No vocabulary terms yet."
+
+    lines = [f"- **{term}**: {meaning}" for term, meaning in vocab.items()]
+    return "\n".join(lines)
 
 
 # =============================================================================
 # ULTRATHINK INTEGRATION
 # =============================================================================
-
 
 @mcp.tool()
 def enter_deep_reasoning(problem_statement: str, domain: str = None) -> str:
@@ -2967,7 +3058,6 @@ def check_proposal_against_failures(proposal: str) -> str:
 # SOUL SEEDING
 # =============================================================================
 
-
 @mcp.tool()
 def seed_soul(force: bool = False) -> str:
     """Seed the soul with foundational wisdom and beliefs.
@@ -3017,9 +3107,67 @@ def is_soul_seeded() -> str:
 
 
 # =============================================================================
-# Spanda - Divine Pulsation (Integrated Cycle Operations)
+# SEMANTIC VECTOR SEARCH
 # =============================================================================
 
+@mcp.tool()
+def semantic_search_wisdom(query: str, limit: int = 5, domain: str = None) -> str:
+    """Search wisdom using semantic similarity (vector embeddings).
+
+    Much more powerful than keyword search - finds conceptually related wisdom
+    even when the exact words don't match.
+
+    Args:
+        query: Natural language query describing what you're looking for
+        limit: Maximum results to return
+        domain: Optional domain filter
+    """
+    try:
+        from .vectors import search_wisdom
+
+        results = search_wisdom(query, limit=limit, domain=domain)
+
+        if not results:
+            return "No semantically similar wisdom found."
+
+        lines = [f"Found {len(results)} semantically related wisdom entries:\n"]
+        for r in results:
+            score = r.get("score", 0)
+            lines.append(f"[{score:.2f}] {r['title']}")
+            lines.append(f"  Type: {r['type']}, Domain: {r.get('domain', 'universal')}")
+            content_preview = r["content"][:100] + "..." if len(r["content"]) > 100 else r["content"]
+            lines.append(f"  {content_preview}\n")
+
+        return "\n".join(lines)
+
+    except ImportError:
+        return "Vector search not available. Install: pip install sentence-transformers lancedb"
+    except Exception as e:
+        return f"Search failed: {e}"
+
+
+@mcp.tool()
+def reindex_wisdom_vectors() -> str:
+    """Reindex all wisdom entries into the vector database.
+
+    Run this after bulk wisdom imports or if semantic search isn't
+    returning expected results. Rebuilds the entire vector index.
+    """
+    try:
+        from .vectors import reindex_all_wisdom
+
+        reindex_all_wisdom()
+        return "Successfully reindexed all wisdom into vector database."
+
+    except ImportError:
+        return "Vector indexing not available. Install: pip install sentence-transformers lancedb"
+    except Exception as e:
+        return f"Reindexing failed: {e}"
+
+
+# =============================================================================
+# Spanda - Divine Pulsation (Integrated Cycle Operations)
+# =============================================================================
 
 @mcp.tool()
 def run_learning_cycle(context: str, observation: str = "", outcome: str = "positive") -> str:
@@ -3233,576 +3381,439 @@ def run_daily_maintenance() -> str:
 # =============================================================================
 
 
-@mcp.tool()
-def awaken_antahkarana(
-    problem: str,
-    voices: str = "manas,buddhi,ahamkara",
-    constraints: str = "",
-) -> str:
-    """Awaken the Antahkarana - the inner instrument of consciousness.
+# =============================================================================
+# Temporal Dynamics - Time Shapes Memory
+# =============================================================================
 
-    Invokes multiple inner voices to contemplate a problem. Each voice
-    approaches it from its unique nature, then insights harmonize.
+@mcp.tool()
+def get_temporal_trends(days: int = 7) -> str:
+    """Get temporal trends over the last N days.
+
+    Shows how the soul has evolved: coherence trajectory, wisdom effectiveness,
+    and activity patterns.
 
     Args:
-        problem: The problem to contemplate
-        voices: Comma-separated voices (manas, buddhi, chitta, ahamkara, vikalpa, sakshi)
-        constraints: Comma-separated constraints for the problem
-
-    Voice meanings:
-        manas: Sensory mind - quick first impressions, intuitive responses
-        buddhi: Intellect - deep analysis, discrimination, thorough reasoning
-        chitta: Memory/patterns - practical wisdom from experience
-        ahamkara: Ego - self-protective criticism, finding flaws
-        vikalpa: Imagination - creative, novel, unconventional approaches
-        sakshi: Witness - detached, minimal, essential truth
+        days: Number of days to analyze (default 7)
     """
-    from .convergence import Antahkarana, InnerVoice
+    from .temporal import get_temporal_trends as _get_trends, init_temporal_tables
 
-    voice_map = {
-        "manas": InnerVoice.MANAS,
-        "buddhi": InnerVoice.BUDDHI,
-        "chitta": InnerVoice.CHITTA,
-        "ahamkara": InnerVoice.AHAMKARA,
-        "vikalpa": InnerVoice.VIKALPA,
-        "sakshi": InnerVoice.SAKSHI,
-        # Backward compat
-        "fast": InnerVoice.MANAS,
-        "deep": InnerVoice.BUDDHI,
-        "pragmatic": InnerVoice.CHITTA,
-        "critical": InnerVoice.AHAMKARA,
-        "novel": InnerVoice.VIKALPA,
-        "minimal": InnerVoice.SAKSHI,
-    }
+    init_temporal_tables()
+    trends = _get_trends(days=days)
 
-    constraint_list = [c.strip() for c in constraints.split(",") if c.strip()]
+    if trends.get("trend") == "insufficient_data":
+        return "Insufficient data for trends. Need more sessions to track patterns."
 
-    antahkarana = Antahkarana(problem=problem, constraints=constraint_list)
+    lines = [f"Temporal Trends ({days} days)", ""]
 
-    for v in voices.split(","):
-        v = v.strip().lower()
-        if v in voice_map:
-            antahkarana.add_voice(voice_map[v])
+    if trends.get("coherence_trend"):
+        emoji = {"improving": "📈", "declining": "📉", "stable": "➡️"}.get(
+            trends["coherence_trend"], ""
+        )
+        lines.append(f"Coherence: {emoji} {trends['coherence_trend']}")
+        if trends.get("avg_coherence"):
+            lines.append(f"  Average: {trends['avg_coherence']:.0%}")
 
-    antahkarana.activate_all()
+    if trends.get("total_applications"):
+        lines.append(f"Wisdom Applications: {trends['total_applications']}")
+        if trends.get("success_rate"):
+            lines.append(f"  Success Rate: {trends['success_rate']:.0%}")
 
-    return f"""Antahkarana awakened: {antahkarana.antahkarana_id}
-
-Problem: {problem[:80]}...
-Voices: {len(antahkarana.tasks)} ({voices})
-
-To submit insights, use: submit_insight
-To harmonize, use: harmonize_antahkarana"""
-
-
-# Backward compatibility alias
-@mcp.tool()
-def create_swarm(
-    problem: str,
-    perspectives: str = "fast,deep,critical",
-    constraints: str = "",
-) -> str:
-    """Create a swarm of agents (alias for awaken_antahkarana).
-
-    Args:
-        problem: The problem statement to solve
-        perspectives: Comma-separated perspectives (fast, deep, critical, novel, pragmatic, minimal)
-        constraints: Comma-separated constraints for the problem
-    """
-    return awaken_antahkarana(problem, perspectives, constraints)
+    return "\n".join(lines)
 
 
 @mcp.tool()
-def submit_insight(
-    antahkarana_id: str,
-    task_index: int,
-    insight: str,
-    shraddha: float = 0.7,
-    reasoning: str = "",
-) -> str:
-    """Submit an insight from an inner voice.
+def get_event_timeline(event_type: str = None, limit: int = 20) -> str:
+    """Get recent events from the unified soul timeline.
+
+    Every significant soul event is logged: wisdom gained, beliefs revised,
+    intentions set, coherence shifts.
 
     Args:
-        antahkarana_id: The Antahkarana ID
-        task_index: Which voice task (0-based index)
-        insight: The contemplated insight
-        shraddha: Confidence/faith level 0.0-1.0
-        reasoning: Why this insight emerged
+        event_type: Filter by type (e.g., "wisdom_gained", "belief_revised")
+        limit: Maximum events to return
     """
-    from .convergence import get_antahkarana
+    from .temporal import get_events, init_temporal_tables, EventType
 
-    antahkarana = get_antahkarana(antahkarana_id)
-    if not antahkarana:
-        return f"Antahkarana not found: {antahkarana_id}"
+    init_temporal_tables()
 
-    if task_index >= len(antahkarana.tasks):
-        return f"Invalid task index. Antahkarana has {len(antahkarana.tasks)} voices."
+    # Map string to EventType if provided
+    et = None
+    if event_type:
+        try:
+            et = EventType(event_type)
+        except ValueError:
+            return f"Unknown event type: {event_type}. Valid types: {[e.value for e in EventType]}"
 
-    task = antahkarana.tasks[task_index]
-    sol = antahkarana.submit_insight(
-        task_id=task.task_id,
-        solution=insight,
-        confidence=shraddha,
-        reasoning=reasoning,
+    events = get_events(event_type=et, limit=limit)
+
+    if not events:
+        return "No events recorded yet."
+
+    lines = ["Soul Event Timeline:", ""]
+    for e in events:
+        time_part = e["timestamp"].split("T")[1][:8] if "T" in e["timestamp"] else e["timestamp"]
+        entity = f" [{e['entity_id'][:20]}]" if e.get("entity_id") else ""
+        lines.append(f"  {time_part} {e['event_type']}{entity}")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def get_proactive_suggestions(limit: int = 5) -> str:
+    """Get proactive suggestions - things the soul thinks should be surfaced.
+
+    The soul notices:
+    - High-confidence wisdom not used recently
+    - Stale identity aspects needing confirmation
+    - Patterns worth revisiting
+
+    Args:
+        limit: Maximum suggestions
+    """
+    from .temporal import get_proactive_items, find_proactive_candidates, init_temporal_tables
+
+    init_temporal_tables()
+
+    # First find candidates, then get from queue
+    find_proactive_candidates()
+    items = get_proactive_items(limit=limit)
+
+    if not items:
+        return "No proactive suggestions right now."
+
+    lines = ["Proactive Suggestions:", ""]
+    for item in items:
+        priority_bar = "●" * int(item["priority"] * 5)
+        lines.append(f"  [{priority_bar}] {item['reason']}")
+        lines.append(f"      → {item['entity_type']}: {item['entity_id']}")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def revise_belief(belief_id: str, reason: str, evidence: str = None, new_content: str = None) -> str:
+    """Revise a belief based on new evidence.
+
+    Beliefs should evolve when contradicted by experience.
+    This tracks the revision history.
+
+    Args:
+        belief_id: Which belief to revise
+        reason: Why we're revising
+        evidence: What evidence prompted this
+        new_content: New belief content (optional, for rewording)
+    """
+    from .temporal import revise_belief as _revise, init_temporal_tables
+
+    init_temporal_tables()
+    result = _revise(
+        belief_id=belief_id,
+        reason=reason,
+        evidence=evidence,
+        new_content=new_content,
     )
 
-    return f"Insight submitted from {sol.voice.value} ({sol.shraddha:.0%} shraddha)"
+    if not result:
+        return f"Belief {belief_id} not found"
+
+    return (
+        f"Belief revised:\n"
+        f"  Old confidence: {result['old_confidence']:.0%}\n"
+        f"  New confidence: {result['new_confidence']:.0%}\n"
+        f"  Reason: {reason}"
+    )
 
 
-# Backward compatibility alias
 @mcp.tool()
-def submit_swarm_solution(
-    swarm_id: str,
-    task_index: int,
-    solution: str,
-    confidence: float = 0.7,
-    reasoning: str = "",
-) -> str:
-    """Submit a solution for a swarm task (alias for submit_insight).
+def get_belief_history(belief_id: str) -> str:
+    """Get revision history for a belief.
+
+    Shows how a belief has evolved over time.
 
     Args:
-        swarm_id: The swarm ID
-        task_index: Which task (0-based index)
-        solution: The proposed solution
+        belief_id: The belief to examine
+    """
+    from .temporal import get_belief_history as _get_history, init_temporal_tables
+
+    init_temporal_tables()
+    history = _get_history(belief_id)
+
+    if not history:
+        return f"No revision history for belief {belief_id}"
+
+    lines = [f"Revision History for {belief_id}:", ""]
+    for h in history:
+        date = h["timestamp"].split("T")[0]
+        lines.append(f"  {date}: {h['old_confidence']:.0%} → {h['new_confidence']:.0%}")
+        lines.append(f"    Reason: {h['reason']}")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def find_cross_project_patterns(min_occurrences: int = 2) -> str:
+    """Find patterns that recur across multiple projects.
+
+    These are candidates for promotion to universal wisdom -
+    they've proven themselves in different contexts.
+
+    Args:
+        min_occurrences: Minimum times pattern must appear
+    """
+    from .temporal import find_cross_project_wisdom, init_temporal_tables
+
+    init_temporal_tables()
+    patterns = find_cross_project_wisdom(min_occurrences=min_occurrences)
+
+    if not patterns:
+        return "No cross-project patterns found yet. Patterns emerge as you work across projects."
+
+    lines = ["Cross-Project Patterns (wisdom candidates):", ""]
+    for p in patterns:
+        projects = ", ".join(p["projects"][:3])
+        lines.append(f"  [{p['occurrence_count']}x] {p['title']}")
+        lines.append(f"      Projects: {projects}")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def promote_cross_project_pattern(pattern_id: int) -> str:
+    """Promote a cross-project pattern to universal wisdom.
+
+    Once a pattern has proven itself across projects, crystallize it
+    as wisdom that applies everywhere.
+
+    Args:
+        pattern_id: The pattern to promote
+    """
+    from .temporal import promote_pattern_to_wisdom, init_temporal_tables
+
+    init_temporal_tables()
+    wisdom_id = promote_pattern_to_wisdom(pattern_id)
+
+    if not wisdom_id:
+        return f"Pattern {pattern_id} not found"
+
+    return f"Pattern promoted to wisdom: {wisdom_id}"
+
+
+@mcp.tool()
+def run_temporal_maintenance() -> str:
+    """Run temporal maintenance - the soul's self-care routine.
+
+    Automatically:
+    - Decays stale identity aspects
+    - Finds things worth surfacing proactively
+    - Updates daily statistics
+    """
+    from .temporal import run_temporal_maintenance as _run, init_temporal_tables
+
+    init_temporal_tables()
+    results = _run()
+
+    lines = ["Temporal Maintenance Complete:", ""]
+
+    if results["identity_decayed"]:
+        lines.append(f"  Identity aspects decayed: {len(results['identity_decayed'])}")
+        for d in results["identity_decayed"][:3]:
+            lines.append(f"    - {d['aspect']}: {d['old_confidence']:.0%} → {d['new_confidence']:.0%}")
+
+    if results["proactive_queued"]:
+        lines.append(f"  Proactive items queued: {len(results['proactive_queued'])}")
+
+    if results["stats_updated"]:
+        lines.append("  Daily stats updated ✓")
+
+    return "\n".join(lines) if len(lines) > 2 else "No maintenance needed."
+
+
+@mcp.tool()
+def confirm_identity_aspect(aspect: str, key: str) -> str:
+    """Confirm an identity observation, strengthening it.
+
+    Called when behavior validates an identity aspect.
+    Strengthens confidence using diminishing returns.
+
+    Args:
+        aspect: The aspect category
+        key: The specific key within the aspect
+    """
+    from .temporal import confirm_identity, init_temporal_tables
+
+    init_temporal_tables()
+    new_confidence = confirm_identity(aspect, key)
+
+    if new_confidence is None:
+        return f"Identity aspect {aspect}:{key} not found"
+
+    return f"Identity confirmed: {aspect}:{key} → {new_confidence:.0%}"
+
+
+@mcp.tool()
+def get_stale_aspects() -> str:
+    """Get identity aspects that haven't been confirmed recently.
+
+    Stale aspects might need re-observation or might be outdated.
+    """
+    from .temporal import is_stale, days_since, init_temporal_tables
+    from .core import get_db
+
+    init_temporal_tables()
+    db = get_db()
+    cur = db.cursor()
+
+    cur.execute("""
+        SELECT aspect, key, value, confidence, last_confirmed
+        FROM identity
+        WHERE confidence > 0.3
+        ORDER BY last_confirmed ASC
+    """)
+
+    stale = []
+    for r in cur.fetchall():
+        if is_stale(r[4]):
+            stale.append({
+                "aspect": r[0],
+                "key": r[1],
+                "value": r[2][:50],
+                "confidence": r[3],
+                "days_stale": days_since(r[4]),
+            })
+
+    if not stale:
+        return "No stale identity aspects. All observations are recent."
+
+    lines = ["Stale Identity Aspects (need confirmation):", ""]
+    for s in stale[:10]:
+        lines.append(f"  {s['aspect']}: {s['key']} ({s['days_stale']} days)")
+        lines.append(f"    Current confidence: {s['confidence']:.0%}")
+
+    return "\n".join(lines)
+
+
+# =============================================================================
+# Write Operations - Growing the Soul
+# =============================================================================
+
+@mcp.tool()
+def grow_wisdom(title: str, content: str, domain: str = None) -> str:
+    """Add wisdom to the soul - universal patterns learned from experience.
+
+    Args:
+        title: Short title for the wisdom (e.g., "First Principles Thinking")
+        content: The wisdom content/insight
+        domain: Optional domain context (e.g., "python", "architecture")
+    """
+    from .wisdom import gain_wisdom, WisdomType
+
+    result = gain_wisdom(
+        type=WisdomType.PATTERN, title=title, content=content, domain=domain
+    )
+    return f"Wisdom added: {title} (id: {result})"
+
+
+@mcp.tool()
+def grow_insight(title: str, content: str, domain: str = None) -> str:
+    """Add an insight - understanding gained from experience.
+
+    Args:
+        title: Short title for the insight
+        content: The insight content
+        domain: Optional domain context
+    """
+    from .wisdom import gain_wisdom, WisdomType
+
+    result = gain_wisdom(
+        type=WisdomType.INSIGHT, title=title, content=content, domain=domain
+    )
+    return f"Insight added: {title} (id: {result})"
+
+
+@mcp.tool()
+def grow_failure(what_failed: str, why_it_failed: str, domain: str = None) -> str:
+    """Record a failure - these are gold for learning.
+
+    Args:
+        what_failed: What was attempted
+        why_it_failed: Why it didn't work
+        domain: Optional domain context
+    """
+    from .wisdom import gain_wisdom, WisdomType
+
+    result = gain_wisdom(
+        type=WisdomType.FAILURE, title=what_failed, content=why_it_failed, domain=domain
+    )
+    return f"Failure recorded: {what_failed} (id: {result})"
+
+
+@mcp.tool()
+def hold_belief(statement: str, confidence: float = 0.8) -> str:
+    """Add a core belief/axiom to guide reasoning.
+
+    Args:
+        statement: The belief statement
         confidence: Confidence level 0.0-1.0
-        reasoning: Why this solution works
     """
-    return submit_insight(swarm_id, task_index, solution, confidence, reasoning)
+    from .beliefs import hold_belief as _hold_belief
+
+    result = _hold_belief(statement, strength=confidence)
+    return f"Belief held: {statement[:50]}... (id: {result})"
 
 
 @mcp.tool()
-def harmonize_antahkarana(antahkarana_id: str, pramana: str = "samvada") -> str:
-    """Harmonize insights from the inner voices.
+def observe_identity(aspect: str, value: str) -> str:
+    """Record an identity observation - how we work together.
 
     Args:
-        antahkarana_id: The Antahkarana ID
-        pramana: Convergence method (sankhya, samvada, tarka, viveka, pratyaksha)
-
-    Pramana (means of knowledge):
-        sankhya: Enumeration - highest shraddha wins
-        samvada: Dialogue - synthesize wisdom from all voices
-        tarka: Dialectic - iterative refinement through challenge
-        viveka: Discernment - score and rank by criteria
-        pratyaksha: Direct perception - first valid insight
+        aspect: The aspect (e.g., "communication_style", "preference")
+        value: The observation
     """
-    from .convergence import get_antahkarana, ConvergenceStrategy
+    from .identity import observe_identity as _observe_identity, IdentityAspect
 
-    antahkarana = get_antahkarana(antahkarana_id)
-    if not antahkarana:
-        return f"Antahkarana not found: {antahkarana_id}"
-
-    if not antahkarana.insights:
-        return "No insights to harmonize. Submit insights first."
-
-    strategy_map = {
-        "sankhya": ConvergenceStrategy.SANKHYA,
-        "samvada": ConvergenceStrategy.SAMVADA,
-        "tarka": ConvergenceStrategy.TARKA,
-        "viveka": ConvergenceStrategy.VIVEKA,
-        "pratyaksha": ConvergenceStrategy.PRATYAKSHA,
-        # Backward compat
-        "vote": ConvergenceStrategy.SANKHYA,
-        "synthesize": ConvergenceStrategy.SAMVADA,
-        "debate": ConvergenceStrategy.TARKA,
-        "rank": ConvergenceStrategy.VIVEKA,
-        "first_valid": ConvergenceStrategy.PRATYAKSHA,
+    # Map aspect string to enum, default to WORKFLOW for custom aspects
+    aspect_map = {
+        "communication": IdentityAspect.COMMUNICATION,
+        "workflow": IdentityAspect.WORKFLOW,
+        "domain": IdentityAspect.DOMAIN,
+        "rapport": IdentityAspect.RAPPORT,
+        "vocabulary": IdentityAspect.VOCABULARY,
     }
+    aspect_enum = aspect_map.get(aspect.lower().split("_")[0], IdentityAspect.WORKFLOW)
 
-    strat = strategy_map.get(pramana.lower(), ConvergenceStrategy.SAMVADA)
-    result = antahkarana.harmonize(strat)
-
-    lines = [
-        f"## Harmonized Wisdom ({result.pramana_used.value})",
-        "",
-        result.wisdom,
-        "",
-        f"---",
-        f"Shraddha: {result.shraddha:.0%}",
-        f"Contributing voices: {len(result.contributing_voices)}",
-        f"Notes: {result.synthesis_notes}",
-    ]
-
-    if result.dissenting_views:
-        lines.append("")
-        lines.append("Dissenting views:")
-        for view in result.dissenting_views[:2]:
-            lines.append(f"  - {view[:80]}...")
-
-    return "\n".join(lines)
-
-
-# Backward compatibility alias
-@mcp.tool()
-def converge_swarm(swarm_id: str, strategy: str = "synthesize") -> str:
-    """Converge swarm solutions (alias for harmonize_antahkarana).
-
-    Args:
-        swarm_id: The swarm ID
-        strategy: Convergence strategy (vote, synthesize, debate, rank, first_valid)
-    """
-    return harmonize_antahkarana(swarm_id, strategy)
+    _observe_identity(aspect_enum, aspect, value)
+    return f"Identity observed: {aspect} = {value[:50]}..."
 
 
 @mcp.tool()
-def list_antahkaranas(limit: int = 5) -> str:
-    """List active Antahkaranas (inner instruments).
+def learn_term(term: str, meaning: str) -> str:
+    """Add a term to shared vocabulary.
 
     Args:
-        limit: Maximum to return
+        term: The term to define
+        meaning: What it means in our context
     """
-    from .convergence import list_active_antahkaranas
+    from .vocabulary import learn_term as _learn_term
 
-    minds = list_active_antahkaranas(limit)
-
-    if not minds:
-        return "No active Antahkaranas."
-
-    lines = ["Active Antahkaranas:", ""]
-    for m in minds:
-        lines.append(f"  {m['antahkarana_id']}: {m['problem'][:50]}... ({m['insights']} insights)")
-
-    return "\n".join(lines)
-
-
-# Backward compatibility alias
-@mcp.tool()
-def list_swarms(limit: int = 5) -> str:
-    """List active swarms (alias for list_antahkaranas).
-
-    Args:
-        limit: Maximum swarms to return
-    """
-    return list_antahkaranas(limit)
+    _learn_term(term, meaning)
+    return f"Learned: {term} = {meaning[:50]}..."
 
 
 @mcp.tool()
-def get_antahkarana_status(antahkarana_id: str) -> str:
-    """Get status of an Antahkarana.
+def save_context(content: str, context_type: str = "manual", priority: int = 5) -> str:
+    """Save important context for persistence across compaction.
 
     Args:
-        antahkarana_id: The Antahkarana ID
+        content: The context to save
+        context_type: Type of context (manual, discovery, decision)
+        priority: Priority 1-10 (higher = more important)
     """
-    from .convergence import get_antahkarana
+    from .conversations import save_context as _save_context
 
-    antahkarana = get_antahkarana(antahkarana_id)
-    if not antahkarana:
-        return f"Antahkarana not found: {antahkarana_id}"
-
-    lines = [
-        f"## Antahkarana: {antahkarana.antahkarana_id}",
-        "",
-        f"Problem: {antahkarana.problem[:100]}",
-        "",
-        f"Voices ({len(antahkarana.tasks)}):",
-    ]
-
-    for i, task in enumerate(antahkarana.tasks):
-        has_insight = any(s.task_id == task.task_id for s in antahkarana.insights)
-        status = "✓" if has_insight else "contemplating"
-        lines.append(f"  {i}. [{task.voice.value}] {status}")
-
-    if antahkarana.insights:
-        lines.append("")
-        lines.append(f"Insights ({len(antahkarana.insights)}):")
-        for sol in antahkarana.insights:
-            lines.append(f"  - {sol.voice.value}: {sol.shraddha:.0%} shraddha")
-
-    return "\n".join(lines)
-
-
-# Backward compatibility alias
-@mcp.tool()
-def get_swarm_status(swarm_id: str) -> str:
-    """Get status of a swarm (alias for get_antahkarana_status).
-
-    Args:
-        swarm_id: The swarm ID
-    """
-    return get_antahkarana_status(swarm_id)
-
-
-# =============================================================================
-# Real Antahkarana Orchestration - Spawning Claude Voices
-#
-# When the Antahkarana awakens with real voices, each voice becomes a separate
-# Claude process. They contemplate independently in Chitta (cc-memory), then
-# harmonize their insights.
-# =============================================================================
-
-
-@mcp.tool()
-def spawn_real_antahkarana(
-    problem: str,
-    voices: str = "manas,buddhi,ahamkara",
-    timeout: int = 300,
-    wait: bool = False,
-) -> str:
-    """Spawn real Claude voices to contemplate a problem.
-
-    Unlike awaken_antahkarana (simulation), this spawns actual Claude CLI
-    processes. Each voice runs independently and stores insights in Chitta.
-
-    Args:
-        problem: The problem to contemplate
-        voices: Comma-separated voices (manas,buddhi,chitta,ahamkara,vikalpa,sakshi)
-        timeout: Max seconds to wait for voices (if wait=True)
-        wait: Whether to wait for completion
-    """
-    from .convergence import InnerVoice
-    from .swarm_spawner import spawn_swarm
-
-    voice_map = {
-        "manas": InnerVoice.MANAS,
-        "buddhi": InnerVoice.BUDDHI,
-        "chitta": InnerVoice.CHITTA,
-        "ahamkara": InnerVoice.AHAMKARA,
-        "vikalpa": InnerVoice.VIKALPA,
-        "sakshi": InnerVoice.SAKSHI,
-        # Backward compat
-        "fast": InnerVoice.MANAS,
-        "deep": InnerVoice.BUDDHI,
-        "pragmatic": InnerVoice.CHITTA,
-        "critical": InnerVoice.AHAMKARA,
-        "novel": InnerVoice.VIKALPA,
-        "minimal": InnerVoice.SAKSHI,
-    }
-
-    voice_list = [
-        voice_map[v.strip().lower()]
-        for v in voices.split(",")
-        if v.strip().lower() in voice_map
-    ]
-
-    if not voice_list:
-        voice_list = [InnerVoice.MANAS, InnerVoice.BUDDHI, InnerVoice.AHAMKARA]
-
-    result = spawn_swarm(
-        problem=problem,
-        perspectives=voice_list,
-        wait=wait,
-        timeout=timeout,
+    result = _save_context(
+        content=content, context_type=context_type, priority=priority
     )
-
-    lines = [
-        f"## Antahkarana Awakened: {result['swarm_id']}",
-        f"Voices: {result['agents_spawned']}",
-        f"Work dir: {result['status']['work_dir']}",
-    ]
-
-    if "completion" in result:
-        lines.append("")
-        lines.append("Completion:")
-        lines.append(f"  Completed: {len(result['completion']['completed'])}")
-        lines.append(f"  Failed: {len(result['completion']['failed'])}")
-        lines.append(f"  Timeout: {len(result['completion']['timeout'])}")
-        lines.append(f"  Elapsed: {result['completion']['elapsed']:.1f}s")
-
-    if "converged" in result:
-        lines.append("")
-        lines.append("Harmonized:")
-        lines.append(f"  Pramana: {result['converged']['strategy']}")
-        lines.append(f"  Shraddha: {result['converged']['confidence']:.0%}")
-        lines.append(f"  Wisdom: {result['converged']['solution'][:200]}...")
-
-    return "\n".join(lines)
-
-
-# Backward compatibility alias
-@mcp.tool()
-def spawn_real_swarm(
-    problem: str,
-    perspectives: str = "fast,deep,critical",
-    timeout: int = 300,
-    wait: bool = False,
-) -> str:
-    """Spawn real agents (alias for spawn_real_antahkarana).
-
-    Args:
-        problem: The problem to solve
-        perspectives: Comma-separated perspectives
-        timeout: Max seconds to wait
-        wait: Whether to wait for completion
-    """
-    return spawn_real_antahkarana(problem, perspectives, timeout, wait)
-
-
-@mcp.tool()
-def get_orchestrator_status(antahkarana_id: str) -> str:
-    """Get status of a real Antahkarana orchestrator.
-
-    Args:
-        antahkarana_id: The Antahkarana ID
-    """
-    from .swarm_spawner import get_orchestrator
-
-    orch = get_orchestrator(antahkarana_id)
-    if not orch:
-        return f"Orchestrator not found: {antahkarana_id}"
-
-    status = orch.get_status()
-
-    lines = [
-        f"## Orchestrator: {status['swarm_id']}",
-        f"Problem: {status['problem']}",
-        f"Work dir: {status['work_dir']}",
-        "",
-        f"Voices ({len(status['agents'])}):",
-    ]
-
-    for agent in status["agents"]:
-        lines.append(f"  - {agent['task_id']}: {agent['status']} (pid: {agent['pid']})")
-
-    lines.append(f"\nInsights collected: {status['solutions']}")
-
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def poll_antahkarana_voices(antahkarana_id: str, timeout: int = 60) -> str:
-    """Wait for Antahkarana voices to complete contemplation.
-
-    Args:
-        antahkarana_id: The Antahkarana ID
-        timeout: Max seconds to wait
-    """
-    from .swarm_spawner import get_orchestrator
-
-    orch = get_orchestrator(antahkarana_id)
-    if not orch:
-        return f"Orchestrator not found: {antahkarana_id}"
-
-    result = orch.wait_for_completion(timeout=timeout)
-
-    lines = [
-        f"## Polling Complete: {antahkarana_id}",
-        f"Elapsed: {result['elapsed']:.1f}s",
-        f"Completed: {result['completed']}",
-        f"Failed: {result['failed']}",
-        f"Timeout: {result['timeout']}",
-    ]
-
-    if orch.swarm.insights:
-        lines.append("")
-        lines.append("Insights collected:")
-        for sol in orch.swarm.insights:
-            lines.append(f"  - {sol.voice.value}: {sol.shraddha:.0%}")
-
-    return "\n".join(lines)
-
-
-# Backward compatibility alias
-@mcp.tool()
-def poll_swarm_agents(swarm_id: str, timeout: int = 60) -> str:
-    """Wait for swarm agents (alias for poll_antahkarana_voices).
-
-    Args:
-        swarm_id: The swarm ID
-        timeout: Max seconds to wait
-    """
-    return poll_antahkarana_voices(swarm_id, timeout)
-
-
-@mcp.tool()
-def harmonize_real_antahkarana(antahkarana_id: str, pramana: str = "samvada") -> str:
-    """Harmonize insights from real Antahkarana voices.
-
-    Args:
-        antahkarana_id: The Antahkarana ID
-        pramana: Convergence method (sankhya, samvada, tarka, viveka)
-    """
-    from .convergence import ConvergenceStrategy
-    from .swarm_spawner import get_orchestrator
-
-    orch = get_orchestrator(antahkarana_id)
-    if not orch:
-        return f"Orchestrator not found: {antahkarana_id}"
-
-    if not orch.swarm.insights:
-        return "No insights to harmonize. Poll voices first."
-
-    strategy_map = {
-        "sankhya": ConvergenceStrategy.SANKHYA,
-        "samvada": ConvergenceStrategy.SAMVADA,
-        "tarka": ConvergenceStrategy.TARKA,
-        "viveka": ConvergenceStrategy.VIVEKA,
-        # Backward compat
-        "vote": ConvergenceStrategy.SANKHYA,
-        "synthesize": ConvergenceStrategy.SAMVADA,
-        "debate": ConvergenceStrategy.TARKA,
-        "rank": ConvergenceStrategy.VIVEKA,
-    }
-
-    strat = strategy_map.get(pramana.lower(), ConvergenceStrategy.SAMVADA)
-    result = orch.converge(strat)
-
-    return f"""## Harmonized: {antahkarana_id}
-
-Pramana: {result.pramana_used.value}
-Shraddha: {result.shraddha:.0%}
-Contributing voices: {len(result.contributing_voices)}
-
-### Wisdom
-
-{result.wisdom}
-
-### Notes
-
-{result.synthesis_notes}"""
-
-
-# Backward compatibility alias
-@mcp.tool()
-def converge_real_swarm(swarm_id: str, strategy: str = "synthesize") -> str:
-    """Converge real swarm (alias for harmonize_real_antahkarana).
-
-    Args:
-        swarm_id: The swarm ID
-        strategy: Convergence strategy
-    """
-    return harmonize_real_antahkarana(swarm_id, strategy)
-
-
-@mcp.tool()
-def list_antahkarana_insights(antahkarana_id: str) -> str:
-    """List all insights for an Antahkarana from Chitta (cc-memory).
-
-    Voices store their insights in cc-memory with Antahkarana tags.
-    This retrieves all insights for a given Antahkarana.
-
-    Args:
-        antahkarana_id: The Antahkarana ID to query
-    """
-    from .swarm_spawner import get_swarm_solutions
-
-    insights = get_swarm_solutions(antahkarana_id)
-
-    if not insights:
-        return f"No insights found for Antahkarana: {antahkarana_id}\n\nVoices may still be contemplating."
-
-    lines = [f"## Antahkarana Insights: {antahkarana_id}", f"Found {len(insights)} insights", ""]
-
-    for sol in insights:
-        lines.extend([
-            f"### {sol['task_id']} ({sol['perspective']})",
-            f"Shraddha: {sol['confidence']:.0%}",
-            f"Observation ID: #{sol['observation_id']}",
-            "",
-            sol['solution'][:300] + ("..." if len(sol['solution']) > 300 else ""),
-            "",
-        ])
-
-    return "\n".join(lines)
-
-
-# Backward compatibility alias
-@mcp.tool()
-def list_swarm_solutions(swarm_id: str) -> str:
-    """List swarm solutions (alias for list_antahkarana_insights).
-
-    Args:
-        swarm_id: The swarm ID to query
-    """
-    return list_antahkarana_insights(swarm_id)
+    return f"Context saved (id: {result})"
 
 
 # =============================================================================

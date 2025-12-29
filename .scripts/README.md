@@ -119,3 +119,34 @@ python3 .scripts/test_swarm_ccmemory.py
 ```
 
 **Expected output:** Shows that agents are properly configured to use cc-memory for context and solution storage.
+
+## test-mcp-builder.sh
+
+Tests the code generation approach (Vikalpa's pattern) for modularizing mcp_server.py.
+The builder concatenates tool modules from `mcp_tools/` into a single mcp_server.py.
+
+```bash
+# Test mode (writes to _mcp_server_generated.py, preserves original)
+python -m cc_soul.mcp_tools._mcp_builder --test
+
+# Production mode (overwrites mcp_server.py)
+python -m cc_soul.mcp_tools._mcp_builder
+```
+
+**Current status:** Prototype with 2 sample modules (backup.py, dreams.py = 6 tools).
+Full migration requires extracting all ~130 tools from current mcp_server.py.
+
+## extract_mcp_tools.py
+
+Initial extraction of tool sections from mcp_server.py into mcp_tools/.
+Used once to bootstrap the modular structure.
+
+## reorganize_mcp_tools.py
+
+Reorganizes extracted files into optimal semantic structure:
+- Renames long filenames to short ones (e.g., `write_operations_growing_the_soul.py` -> `write.py`)
+- Splits large files (spanda -> spanda.py, antahkarana.py, orchestration.py)
+- Merges related files (self_improvement_* -> evolution.py)
+
+**Final structure:**
+22 modules, 140 tools, alphabetically ordered.
