@@ -367,8 +367,14 @@ def get_all_session_budgets() -> List[Dict]:
             match = re.search(r"(\d+)%", title)
             if match:
                 pct = int(match.group(1))
+                # Extract session ID from tags like "session:abc123"
+                session_id = "unknown"
+                for tag in obs.get("tags", []):
+                    if tag.startswith("session:"):
+                        session_id = tag.replace("session:", "")
+                        break
                 sessions.append({
-                    "session_id": obs.get("tags", ["?"])[0] if "session:" in str(obs.get("tags")) else "unknown",
+                    "session_id": session_id,
                     "remaining_pct": pct / 100,
                     "pressure": "EMERGENCY" if pct < 10 else "COMPACT" if pct < 25 else "NORMAL",
                     "timestamp": obs.get("timestamp", ""),
