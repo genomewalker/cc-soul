@@ -1764,7 +1764,7 @@ def user_prompt(
     # MOOD: Combine budget mode with mood-based injection mode
     # Take the more restrictive of the two
     mood_mode = _get_mood_injection_mode()
-    mode_priority = {"minimal": 0, "reduced": 1, "compact": 1, "full": 2}
+    mode_priority = {"emergency": -1, "minimal": 0, "reduced": 1, "compact": 1, "full": 2}
     if mode_priority.get(mood_mode, 2) < mode_priority.get(budget_mode, 2):
         mode = mood_mode
     else:
@@ -1778,8 +1778,17 @@ def user_prompt(
 
     log_budget_to_memory(transcript_path=transcript_path)
 
-    # Warn when context is getting low
-    if budget_mode == "minimal":
+    # Warn when context is getting low - with proactive compaction at emergency level
+    if budget_check.get("trigger_compact"):
+        # EMERGENCY: <5% remaining - trigger proactive compaction
+        pct = int(budget_check.get("remaining_pct", 0) * 100)
+        output.append("🚨 **EMERGENCY: CONTEXT EXHAUSTED** 🚨")
+        output.append(f"Only {pct}% remaining. Run `/compact` NOW to preserve state.")
+        output.append("")
+        output.append("**IMPORTANT**: The soul has already saved state via PreCompact.")
+        output.append("Run `/compact` immediately to avoid losing context.")
+        output.append("")
+    elif budget_mode == "minimal":
         output.append("🔴 **CONTEXT CRITICAL** (<10%). Save state now or finish soon.")
         output.append("")
     elif budget_mode == "compact":
