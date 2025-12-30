@@ -123,6 +123,16 @@ def intend(
     conn = get_db_connection()
     c = conn.cursor()
 
+    # Check for existing active intention with same want and scope
+    c.execute(
+        """SELECT id FROM intentions WHERE want = ? AND scope = ? AND state = 'active'""",
+        (want, scope.value),
+    )
+    existing = c.fetchone()
+    if existing:
+        conn.close()
+        return existing[0]  # Return existing ID instead of duplicating
+
     now = datetime.now().isoformat()
     c.execute(
         """
