@@ -435,6 +435,40 @@ from .swarm_spawner import (
     get_swarm_solutions,
 )
 
+# Ātma-Dhāraṇā (आत्म-धारणा) — Soul Retention Architecture
+# Smṛti (स्मृति) - Intelligent Recall
+from .smṛti import (
+    smṛti_recall,
+    smriti_recall,  # ASCII alias
+    format_smṛti_context,
+    format_smriti_context,  # ASCII alias
+    quick_recall as smṛti_quick_recall,
+    full_recall as smṛti_full_recall,
+    detect_domain,
+    RecallMode,
+    ContextBundle,
+)
+
+# Pratyabhijñā (प्रत्यभिज्ञा) - Recognition
+from .pratyabhijñā import (
+    pratyabhijñā,
+    pratyabhijna,  # ASCII alias
+    format_recognition,
+    recognize_and_format,
+    RecognitionSignals,
+    RecognitionResult,
+)
+
+# Antahkarana Assessment - Multi-voice compaction assessment
+from .antahkarana_assessment import (
+    assess_with_voices,
+    quick_assessment,
+    format_assessment_for_ledger,
+    SessionContext as AssessmentContext,
+    CompactionPlan,
+    PreservationPriority,
+)
+
 __all__ = [
     # Core
     "init_soul",
@@ -784,4 +818,29 @@ __all__ = [
     "spawn_swarm",
     "get_orchestrator",
     "get_swarm_solutions",
+    # Ātma-Dhāraṇā (आत्म-धारणा) — Soul Retention
+    # Smṛti (स्मृति) - Intelligent Recall
+    "smṛti_recall",
+    "smriti_recall",
+    "format_smṛti_context",
+    "format_smriti_context",
+    "smṛti_quick_recall",
+    "smṛti_full_recall",
+    "detect_domain",
+    "RecallMode",
+    "ContextBundle",
+    # Pratyabhijñā (प्रत्यभिज्ञा) - Recognition
+    "pratyabhijñā",
+    "pratyabhijna",
+    "format_recognition",
+    "recognize_and_format",
+    "RecognitionSignals",
+    "RecognitionResult",
+    # Antahkarana Assessment - Multi-voice compaction
+    "assess_with_voices",
+    "quick_assessment",
+    "format_assessment_for_ledger",
+    "AssessmentContext",
+    "CompactionPlan",
+    "PreservationPriority",
 ]
