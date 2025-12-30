@@ -830,7 +830,7 @@ Focus: Complete assigned task with your perspective."""
     # The soul observes, diagnoses, proposes, validates, and ACTS on its insights
     # No permission needed - just judgment about confidence and risk
     try:
-        from .introspect import _should_introspect, autonomous_introspect
+        from .svadhyaya import should_vichara as _should_introspect, vichara as autonomous_introspect
 
         if _should_introspect():
             # Run the full autonomous loop

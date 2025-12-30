@@ -324,7 +324,7 @@ def soul_mood(reflect: bool = False) -> str:
 @mcp.tool()
 def introspect() -> str:
     """Generate introspection report - what the soul has learned."""
-    from .introspect import generate_introspection_report, format_introspection_report
+    from ..svadhyaya import generate_introspection_report, format_introspection_report
 
     report = generate_introspection_report()
     return format_introspection_report(report)
@@ -342,7 +342,7 @@ def soul_autonomy() -> str:
 
     Returns a report of issues found, actions taken, and reflections.
     """
-    from .introspect import autonomous_introspect, format_autonomy_report
+    from ..svadhyaya import vichara as autonomous_introspect, format_vichara as format_autonomy_report
 
     report = autonomous_introspect()
     return format_autonomy_report(report)
@@ -355,7 +355,7 @@ def soul_autonomy_stats() -> str:
     Shows the history of self-directed improvements, success rates,
     and pending observations that need more data.
     """
-    from .introspect import get_autonomy_stats
+    from ..svadhyaya import get_autonomy_stats
 
     stats = get_autonomy_stats()
 
@@ -393,7 +393,7 @@ def soul_schedule_introspection(reason: str, priority: int = 5) -> str:
         reason: Why introspection is needed
         priority: 1-10, higher = more urgent
     """
-    from .introspect import schedule_deep_introspection
+    from ..svadhyaya import schedule_vichara as schedule_deep_introspection
 
     schedule_deep_introspection(reason, priority)
     return f"Deep introspection scheduled: {reason} (priority {priority})"
