@@ -1755,10 +1755,6 @@ def cmd_install_hooks(args):
     print()
     cmd_install_permissions(args)
 
-    # Update CLAUDE.md with memory tool preferences
-    print()
-    _update_claude_md_memory_prefs(claude_dir)
-
     print()
     print("Soul hooks installed!")
     print("To uninstall: cc-soul uninstall-hooks")
@@ -1998,6 +1994,12 @@ def cmd_install_skills(args):
         )
     if not installed and not skipped:
         print("No skills found in package")
+
+    # Update CLAUDE.md with memory tool preferences (tied to /search skill)
+    if installed or skipped:
+        claude_dir = Path.home() / ".claude"
+        print()
+        _update_claude_md_memory_prefs(claude_dir)
 
     return 0
 
