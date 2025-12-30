@@ -155,6 +155,22 @@ from .ledger import (
     format_ledger_for_context,
 )
 
+# Ātma-Dhāraṇā (आत्म-धारणा) — Soul Retention Architecture
+from .smṛti import (
+    smṛti_recall,
+    format_smṛti_context,
+    RecallMode,
+)
+from .pratyabhijñā import (
+    pratyabhijñā,
+    format_recognition,
+)
+from .antahkarana_assessment import (
+    assess_with_voices,
+    format_assessment_for_ledger,
+    SessionContext as AssessmentContext,
+)
+
 # Optional graph integration - gracefully handle if kuzu not available
 try:
     from .graph import (
@@ -674,8 +690,14 @@ def pre_compact(transcript_path: str = None) -> str:
     PreCompact hook - Save context before compaction.
 
     Called before Claude Code runs context compaction.
-    Saves important session fragments, creates a structured handoff,
-    AND saves a machine-restorable ledger to cc-memory.
+    Uses Antahkarana (multi-voice assessment) to evaluate what matters,
+    then saves important session fragments and machine-restorable ledger.
+
+    The four voices contribute:
+    - Manas (मनस्): Quick emotional read on significance
+    - Buddhi (बुद्धि): Deep analysis of critical decisions
+    - Chitta (चित्त): Pattern matching with past important work
+    - Ahamkara (अहंकार): Self-preservation, what threatens progress
     """
     from .conversations import save_context
     from .neural import summarize_session_work
@@ -684,6 +706,43 @@ def pre_compact(transcript_path: str = None) -> str:
     output_parts = []
 
     summary = summarize_session_work()
+
+    # Antahkarana Assessment - multi-voice evaluation of what matters
+    assessment_context = None
+    compaction_plan = None
+    try:
+        # Get current todos from session work
+        work = get_session_work()
+        todos = work.get("todos", [])
+
+        # Get active intentions
+        intentions = get_active_intentions()
+        intention_dicts = [
+            {"want": i.want, "why": i.why, "scope": i.scope.value}
+            for i in intentions
+        ]
+
+        # Build assessment context
+        assessment_context = AssessmentContext(
+            todos=todos,
+            files_touched=list(_session_files_touched),
+            errors=[],  # Could extract from summary
+            last_message=summary[:500] if summary else "",
+            key_decisions=[],  # Could extract from summary
+            active_intentions=intention_dicts,
+        )
+
+        # Multi-voice assessment (simulation for speed)
+        compaction_plan = assess_with_voices(
+            context=assessment_context,
+            voices=["manas", "buddhi", "chitta", "ahamkara"],
+            use_simulation=True,
+        )
+
+        if compaction_plan:
+            output_parts.append(f"Antahkarana: {compaction_plan.confidence:.0%} confidence")
+    except Exception:
+        pass
 
     if summary:
         save_context(
@@ -712,11 +771,23 @@ def pre_compact(transcript_path: str = None) -> str:
         budget = check_budget_before_inject(transcript_path)
         context_pct = budget.get("pct", 0.5)
 
+        # Use Antahkarana continuation hint if available
+        continuation = "Resume work after compaction"
+        critical = summary[:500] if summary else ""
+
+        if compaction_plan:
+            if compaction_plan.continuation_hint:
+                continuation = compaction_plan.continuation_hint
+            # Add voice insights to critical context
+            if compaction_plan.voice_insights:
+                assessment_summary = format_assessment_for_ledger(compaction_plan)
+                critical = f"{critical}\n\n{assessment_summary}"[:1500]
+
         ledger = save_ledger(
             context_pct=context_pct,
             files_touched=list(_session_files_touched),
-            immediate_next="Resume work after compaction",
-            critical_context=summary[:500] if summary else "",
+            immediate_next=continuation,
+            critical_context=critical,
         )
         output_parts.append(f"Ledger: {ledger.ledger_id}")
     except Exception:
@@ -729,24 +800,67 @@ def post_compact() -> str:
     """
     Post-compact handler - Restore context after compaction.
 
-    Called via session_start when resuming after compaction.
-    Returns context that should be injected to restore continuity.
+    Uses Pratyabhijñā (प्रत्यभिज्ञा) — Recognition — to restore continuity.
+    Rather than just loading state, we RECOGNIZE where we are through
+    semantic similarity to past work.
+
+    Pratyabhijñā: prati (back) + abhi (towards) + jñā (to know)
     """
     from .conversations import get_saved_context
 
-    saved = get_saved_context(
-        limit=3, context_types=["pre_compact", "session_fragments"]
-    )
+    lines = ["# Pratyabhijñā: Session Restored", ""]
 
-    if not saved:
-        return ""
+    # 1. Load the ledger we saved before compaction
+    ledger = None
+    try:
+        ledger = load_latest_ledger()
+        if ledger:
+            # Restore state from ledger
+            restore_from_ledger(ledger)
+            lines.append(f"**Ledger:** {ledger.ledger_id}")
+            if ledger.continuation and ledger.continuation.immediate_next:
+                lines.append(f"**Continue:** {ledger.continuation.immediate_next}")
+            lines.append("")
+    except Exception:
+        pass
 
-    lines = ["# Restored Context (post-compaction)", ""]
-    for ctx in saved:
-        content = ctx.get("content", "")[:200]
-        lines.append(f"- {content}")
+    # 2. Pratyabhijñā Recognition - recognize context through semantic similarity
+    recognition = None
+    context_for_recognition = ""
+    files_for_recognition = []
 
-    return "\n".join(lines)
+    # Build context from ledger if available
+    if ledger:
+        context_for_recognition = ledger.continuation.critical_context if ledger.continuation else ""
+        files_for_recognition = ledger.work_state.files_touched if ledger.work_state else []
+
+    try:
+        recognition = pratyabhijñā(
+            current_context=context_for_recognition,
+            files=files_for_recognition,
+            include_episodes=True,
+            include_guards=True,
+        )
+
+        if recognition and recognition.confidence > 0:
+            # Format recognition for injection
+            recognition_text = format_recognition(recognition, verbose=False, max_chars=1500)
+            lines.append(recognition_text)
+    except Exception:
+        pass
+
+    # 3. Fallback to saved context if no ledger/recognition
+    if not ledger and not recognition:
+        saved = get_saved_context(
+            limit=3, context_types=["pre_compact", "session_fragments"]
+        )
+        if saved:
+            lines.append("**Saved Context:**")
+            for ctx in saved:
+                content = ctx.get("content", "")[:200]
+                lines.append(f"- {content}")
+
+    return "\n".join(lines) if len(lines) > 2 else ""
 
 
 def session_start(
@@ -915,39 +1029,25 @@ Focus: Complete assigned task with your perspective."""
         greeting = greeting + "\n\n" + mood_modifier
 
     # Add post-compact context if resuming after compaction
+    # Uses Pratyabhijñā (recognition) for semantic continuity
     if after_compact:
         restored = post_compact()
         if restored:
             greeting = greeting + "\n" + restored
 
-        # Try machine-restorable ledger first (from cc-memory)
-        ledger_restored = False
-        try:
-            latest_ledger = load_latest_ledger()
-            if latest_ledger:
-                # Restore soul state (intentions, etc.)
-                restore_result = restore_from_ledger(latest_ledger)
-
-                # Format ledger context for greeting
-                ledger_context = format_ledger_for_context(latest_ledger)
-                if ledger_context:
-                    greeting = greeting + "\n\n" + ledger_context
-                    ledger_restored = True
-
-                # Log what was restored
+            # Log restoration via Pratyabhijñā
+            try:
                 log_event(
                     EventType.SESSION_START,
                     data={
-                        "ledger_restored": True,
-                        "ledger_id": latest_ledger.ledger_id,
-                        "restored_intentions": restore_result.get("intentions", 0),
+                        "pratyabhijna": True,
+                        "after_compact": True,
                     }
                 )
-        except Exception:
-            pass
-
-        # Fallback to markdown handoff if ledger didn't work
-        if not ledger_restored:
+            except Exception:
+                pass
+        else:
+            # Fallback to markdown handoff if Pratyabhijñā didn't find anything
             try:
                 latest_handoff = get_latest_handoff()
                 if latest_handoff:
