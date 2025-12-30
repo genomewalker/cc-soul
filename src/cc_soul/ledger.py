@@ -254,7 +254,7 @@ def capture_soul_state() -> SoulState:
     # Get coherence
     try:
         coherence_state = compute_coherence()
-        coherence = coherence_state.tau_k if coherence_state else 0.0
+        coherence = coherence_state.value if coherence_state else 0.0
     except Exception:
         coherence = 0.0
 
