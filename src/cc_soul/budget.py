@@ -27,6 +27,7 @@ USABLE_FRACTION = 0.61
 # Thresholds for action
 COMPACT_THRESHOLD = 0.25  # Switch to compact mode at 25% remaining
 URGENT_THRESHOLD = 0.10  # Trigger urgent save at 10% remaining
+EMERGENCY_THRESHOLD = 0.05  # Trigger proactive compaction at 5% remaining
 
 
 @dataclass
@@ -43,6 +44,7 @@ class ContextBudget:
     remaining_pct: float
     should_compact: bool
     should_urgent_save: bool
+    should_emergency_compact: bool
     message_count: int
     timestamp: str
 
@@ -143,6 +145,7 @@ def _parse_transcript(path: str) -> ContextBudget:
         remaining_pct=remaining_pct,
         should_compact=remaining_pct < COMPACT_THRESHOLD,
         should_urgent_save=remaining_pct < URGENT_THRESHOLD,
+        should_emergency_compact=remaining_pct < EMERGENCY_THRESHOLD,
         message_count=message_count,
         timestamp=datetime.now().isoformat(),
     )
@@ -204,9 +207,11 @@ def check_budget_before_inject(transcript_path: str = None) -> Dict:
 
     Returns dict with:
         - inject: bool - whether to inject at all
-        - mode: str - 'full', 'compact', or 'minimal'
+        - mode: str - 'full', 'compact', 'minimal', or 'emergency'
         - budget: int - max tokens to inject
         - save_first: bool - whether to save context urgently
+        - trigger_compact: bool - whether to trigger proactive /compact
+        - remaining_pct: float - percentage remaining (0-1)
     """
     import os
 
@@ -217,7 +222,8 @@ def check_budget_before_inject(transcript_path: str = None) -> Dict:
             "mode": "minimal",
             "budget": 200,
             "save_first": False,
-            "pct": 0.0,
+            "trigger_compact": False,
+            "remaining_pct": 1.0,
             "swarm_agent": True,
         }
 
@@ -230,14 +236,28 @@ def check_budget_before_inject(transcript_path: str = None) -> Dict:
             "mode": "compact",
             "budget": 500,
             "save_first": False,
+            "trigger_compact": False,
+            "remaining_pct": 0.5,
         }
 
-    if budget.should_urgent_save:
+    if budget.should_emergency_compact:
+        # EMERGENCY: <5% remaining - trigger proactive compaction
+        return {
+            "inject": True,
+            "mode": "emergency",
+            "budget": 50,
+            "save_first": True,
+            "trigger_compact": True,
+            "remaining_pct": budget.remaining_pct,
+        }
+    elif budget.should_urgent_save:
         return {
             "inject": True,
             "mode": "minimal",
             "budget": 100,
             "save_first": True,
+            "trigger_compact": False,
+            "remaining_pct": budget.remaining_pct,
         }
     elif budget.should_compact:
         return {
@@ -245,6 +265,8 @@ def check_budget_before_inject(transcript_path: str = None) -> Dict:
             "mode": "compact",
             "budget": 500,
             "save_first": False,
+            "trigger_compact": False,
+            "remaining_pct": budget.remaining_pct,
         }
     else:
         return {
@@ -252,6 +274,8 @@ def check_budget_before_inject(transcript_path: str = None) -> Dict:
             "mode": "full",
             "budget": 2000,
             "save_first": False,
+            "trigger_compact": False,
+            "remaining_pct": budget.remaining_pct,
         }
 
 
