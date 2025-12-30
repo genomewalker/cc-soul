@@ -43,16 +43,16 @@ from .bridge import (
     get_project_signals,
     detect_wisdom_candidates,
 )
-from .introspect import (
+from .svadhyaya import (
     generate_introspection_report,
     format_introspection_report,
-    analyze_pain_points,
+    analyze_vedana as analyze_pain_points,
     get_wisdom_timeline,
-    get_wisdom_health,
-    format_wisdom_stats,
-    get_session_comparison,
-    get_growth_trajectory,
-    get_learning_patterns,
+    jnana as get_wisdom_health,
+    format_jnana as format_wisdom_stats,
+    prajna_sessions as get_session_comparison,
+    prajna_trajectory as get_growth_trajectory,
+    prajna_patterns as get_learning_patterns,
     format_trends_report,
     get_decay_visualization,
     format_decay_chart,

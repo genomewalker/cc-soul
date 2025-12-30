@@ -26,9 +26,9 @@ from dataclasses import dataclass, asdict
 from enum import Enum
 
 from .core import SOUL_DIR
-from .introspect import (
+from .svadhyaya import (
     generate_introspection_report,
-    get_pain_points,
+    get_vedana as get_pain_points,
     record_metric,
 )
 from .evolve import get_evolution_insights, mark_implemented

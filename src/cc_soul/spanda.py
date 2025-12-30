@@ -54,7 +54,7 @@ from .mood import compute_mood, Mood
 from .coherence import compute_coherence, record_coherence, CoherenceState
 from .temporal import log_event, EventType, run_temporal_maintenance
 from .wisdom import quick_recall, gain_wisdom, confirm_outcome, WisdomType
-from .introspect import generate_introspection_report
+from .svadhyaya import generate_introspection_report
 from .improve import diagnose, suggest_improvements
 
 
