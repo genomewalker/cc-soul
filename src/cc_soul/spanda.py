@@ -369,6 +369,15 @@ def session_start_circle() -> Dict:
         "circles": {},
     }
 
+    # 0. Auto-register current project for cross-project access
+    try:
+        from .project_registry import auto_register_current_project
+        reg = auto_register_current_project()
+        if reg:
+            result["circles"]["project"] = {"name": reg["name"], "observations": reg["observations"]}
+    except Exception:
+        pass
+
     # 1. Coherence first - understand current state
     result["circles"]["coherence"] = coherence_feedback()
 
