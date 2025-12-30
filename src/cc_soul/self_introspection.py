@@ -309,25 +309,23 @@ class BeliefChecker:
     """Check code against soul beliefs."""
 
     def __init__(self):
-        from .wisdom import get_all_wisdom, WisdomType
-        self.beliefs = []
-        for w in get_all_wisdom():
-            if w.wisdom_type == WisdomType.BELIEF:
-                self.beliefs.append(w)
+        from .beliefs import get_beliefs
+        self.beliefs = get_beliefs(min_strength=0.3)
 
     def check_violations(self, scanner: CodeScanner) -> List[CodeIssue]:
         """Check for belief violations in the issues found."""
         violations = []
 
-        # Map beliefs to issue patterns
-        belief_patterns = {
-            "Simplicity over cleverness": [
-                "High complexity",
-                "Too many arguments",
-            ],
-            "Question every assumption": [],
-            "Record learnings in the moment": [],
-        }
+        # Build pattern map from actual beliefs
+        belief_patterns = {}
+        for b in self.beliefs:
+            belief_text = b.get("belief", "")
+            if "simplicity" in belief_text.lower():
+                belief_patterns[belief_text] = ["High complexity", "Too many arguments"]
+            elif "assumption" in belief_text.lower():
+                belief_patterns[belief_text] = []
+            elif "learning" in belief_text.lower():
+                belief_patterns[belief_text] = []
 
         for issue in scanner.issues:
             for belief, patterns in belief_patterns.items():
