@@ -232,6 +232,9 @@ This helps the orchestrator track overall swarm resource consumption.
             agent_env["CC_SOUL_SWARM_ID"] = self.swarm.swarm_id
             agent_env["CC_SOUL_TASK_ID"] = task.task_id
             agent_env["CC_SOUL_PERSPECTIVE"] = task.perspective.value
+            # Track parent session for budget family grouping
+            from .budget import get_session_id
+            agent_env["CC_SOUL_PARENT_SESSION"] = get_session_id()
 
             # Spawn as background process
             process = subprocess.Popen(
