@@ -273,6 +273,12 @@ def get_session_id() -> str:
     return f"pid_{os.getpid()}"
 
 
+def get_parent_session_id() -> Optional[str]:
+    """Get parent session ID if this is a spawned child session."""
+    import os
+    return os.environ.get("CC_SOUL_PARENT_SESSION")
+
+
 def log_budget_to_memory(
     budget: ContextBudget = None,
     transcript_path: str = None,
@@ -298,6 +304,7 @@ def log_budget_to_memory(
             return None
 
         session_id = get_session_id()
+        parent_id = get_parent_session_id()
         pct = int(budget.remaining_pct * 100)
 
         # Determine pressure level
@@ -311,10 +318,11 @@ def log_budget_to_memory(
             pressure = "RELAXED"
 
         # Log to cc-memory with budget tag
+        parent_line = f"\nParent: {parent_id}" if parent_id else ""
         content = f"""Session {session_id}: {pct}% remaining ({budget.remaining:,} tokens)
 Pressure: {pressure}
 Messages: {budget.message_count}
-Timestamp: {budget.timestamp}"""
+Timestamp: {budget.timestamp}{parent_line}"""
 
         project_dir = find_project_dir()
         obs_id = cc_memory.remember(
@@ -379,8 +387,14 @@ def get_all_session_budgets() -> List[Dict]:
                     content_match = re.search(r"Session ([^:]+):", content)
                     if content_match:
                         session_id = content_match.group(1).strip()
+                # Extract parent session if present
+                parent_id = None
+                parent_match = re.search(r"Parent: (\S+)", content)
+                if parent_match:
+                    parent_id = parent_match.group(1)
                 sessions.append({
                     "session_id": session_id,
+                    "parent_id": parent_id,
                     "remaining_pct": pct / 100,
                     "pressure": "EMERGENCY" if pct < 10 else "COMPACT" if pct < 25 else "NORMAL",
                     "timestamp": obs.get("timestamp", ""),
@@ -394,19 +408,45 @@ def get_all_session_budgets() -> List[Dict]:
 
 def get_budget_warning() -> Optional[str]:
     """
-    Get a warning message if any session is running low on context.
+    Get a warning message for the current session family (self + children).
 
-    Used by hooks to surface cross-instance budget awareness.
+    Only shows:
+    - Current session's status
+    - Child sessions (spawned voices/agents with this session as parent)
     """
+    current_session = get_session_id()
     sessions = get_all_session_budgets()
 
-    warnings = []
+    # Deduplicate: keep only most recent per session_id
+    latest_by_session = {}
     for session in sessions:
+        sid = session.get("session_id", "unknown")
+        ts = session.get("timestamp", "")
+        if sid not in latest_by_session or ts > latest_by_session[sid]["timestamp"]:
+            latest_by_session[sid] = session
+
+    # Filter: only current session or its children
+    warnings = []
+    for session in latest_by_session.values():
+        sid = session.get("session_id", "")
+        parent = session.get("parent_id")
         pct = session.get("remaining_pct", 1.0)
+
+        # Only show current session family
+        is_self = sid == current_session
+        is_child = parent == current_session
+        if not (is_self or is_child):
+            continue
+
+        # Skip healthy or exhausted sessions
+        if pct >= 0.25 or pct == 0:
+            continue
+
+        label = "self" if is_self else "child"
         if pct < 0.10:
-            warnings.append(f"⚠️ Session {session['session_id']}: EMERGENCY ({int(pct*100)}%)")
-        elif pct < 0.25:
-            warnings.append(f"📊 Session {session['session_id']}: COMPACT ({int(pct*100)}%)")
+            warnings.append(f"⚠️ {label} ({sid[:8]}): EMERGENCY ({int(pct*100)}%)")
+        else:
+            warnings.append(f"📊 {label} ({sid[:8]}): COMPACT ({int(pct*100)}%)")
 
     if warnings:
         return "\n".join(warnings)
