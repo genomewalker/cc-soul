@@ -1773,14 +1773,19 @@ def _update_claude_md_memory_prefs(claude_dir: Path):
     memory_prefs = """
 ## Memory Search (cc-soul)
 
-Use cc-soul's unified memory tools instead of plugin:claude-mem:
-- `mcp__cc-memory__mem-recall` - Search project memory
-- `mcp__cc-memory__mem-remember` - Store observations
-- `mcp__soul__search_memory` - Unified search (project + soul)
-- `mcp__soul__recall_wisdom` - Search universal wisdom
+Use `/search` skill or cc-soul's unified memory tools instead of plugin:claude-mem.
 
-These tools provide unified search across project observations and soul wisdom.
-Do NOT use `plugin:claude-mem:mem-search` - it's superseded by cc-soul.
+**Unified search (recommended):**
+```
+mcp__soul__search_memory(query="...", limit=10, verbose=true)
+```
+
+**Priority order when searching manually:**
+1. `mcp__cc-memory__mem-recall` - Project observations
+2. `mcp__soul__recall_wisdom` - Universal wisdom
+3. `mcp__plugin_claude-mem_mem-search__search` - Extended history (last resort)
+
+Do NOT use `plugin:claude-mem:mem-search` as primary - it's superseded by cc-soul.
 """
 
     marker = "## Memory Search (cc-soul)"
