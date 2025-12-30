@@ -693,12 +693,16 @@ def find_proactive_candidates() -> list:
     """, (threshold,))
 
     for r in cur.fetchall():
-        days = days_since(r[3]) if r[3] else 999
+        if r[3]:
+            days = days_since(r[3])
+            reason = f"High-confidence ({r[2]:.0%}) wisdom unused for {days} days"
+        else:
+            reason = f"High-confidence ({r[2]:.0%}) wisdom never used"
         candidates.append({
             "entity_type": "wisdom",
             "entity_id": r[0],
             "title": r[1],
-            "reason": f"High-confidence ({r[2]:.0%}) wisdom unused for {days} days",
+            "reason": reason,
             "priority": r[2] * 0.8,  # Scale by confidence
         })
 
