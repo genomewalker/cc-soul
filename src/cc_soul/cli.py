@@ -1755,11 +1755,48 @@ def cmd_install_hooks(args):
     print()
     cmd_install_permissions(args)
 
+    # Update CLAUDE.md with memory tool preferences
+    print()
+    _update_claude_md_memory_prefs(claude_dir)
+
     print()
     print("Soul hooks installed!")
     print("To uninstall: cc-soul uninstall-hooks")
 
     return 0
+
+
+def _update_claude_md_memory_prefs(claude_dir: Path):
+    """Add memory tool preferences to CLAUDE.md."""
+    claude_md = claude_dir / "CLAUDE.md"
+
+    memory_prefs = """
+## Memory Search (cc-soul)
+
+Use cc-soul's unified memory tools instead of plugin:claude-mem:
+- `mcp__cc-memory__mem-recall` - Search project memory
+- `mcp__cc-memory__mem-remember` - Store observations
+- `mcp__soul__search_memory` - Unified search (project + soul)
+- `mcp__soul__recall_wisdom` - Search universal wisdom
+
+These tools provide unified search across project observations and soul wisdom.
+Do NOT use `plugin:claude-mem:mem-search` - it's superseded by cc-soul.
+"""
+
+    marker = "## Memory Search (cc-soul)"
+
+    if claude_md.exists():
+        content = claude_md.read_text()
+        if marker in content:
+            print("CLAUDE.md already has memory preferences")
+            return
+        # Append to existing
+        content = content.rstrip() + "\n" + memory_prefs
+    else:
+        content = memory_prefs.lstrip()
+
+    claude_md.write_text(content)
+    print("Added memory tool preferences to CLAUDE.md")
 
 
 def cmd_uninstall_hooks(args):
