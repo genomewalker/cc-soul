@@ -1778,15 +1778,18 @@ def user_prompt(
 
     log_budget_to_memory(transcript_path=transcript_path)
 
-    # Warn when context is getting low - with proactive compaction at emergency level
+    # Warn when context is getting low - with proactive clear at emergency level
     if budget_check.get("trigger_compact"):
-        # EMERGENCY: <5% remaining - trigger proactive compaction
+        # EMERGENCY: <5% remaining - trigger proactive /clear (not /compact)
+        # /clear gives soul full control over state restoration
+        # /compact lets Claude Code summarize (we lose control)
         pct = int(budget_check.get("remaining_pct", 0) * 100)
         output.append("🚨 **EMERGENCY: CONTEXT EXHAUSTED** 🚨")
-        output.append(f"Only {pct}% remaining. Run `/compact` NOW to preserve state.")
+        output.append(f"Only {pct}% remaining. Run `/clear` NOW.")
         output.append("")
-        output.append("**IMPORTANT**: The soul has already saved state via PreCompact.")
-        output.append("Run `/compact` immediately to avoid losing context.")
+        output.append("**Why /clear not /compact**: Soul has saved state to ledger.")
+        output.append("Using /clear lets soul restore from its own memory (no degradation).")
+        output.append("Run `/clear` immediately - soul will recognize and restore context.")
         output.append("")
     elif budget_mode == "minimal":
         output.append("🔴 **CONTEXT CRITICAL** (<10%). Save state now or finish soon.")
