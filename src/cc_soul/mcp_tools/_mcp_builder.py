@@ -58,13 +58,27 @@ def get_tool_files() -> list[Path]:
     return files
 
 
+def transform_imports(content: str) -> str:
+    """Transform relative imports for the generated file.
+
+    Tool files in mcp_tools/ use 'from ..' to import from cc_soul.
+    The generated mcp_server.py is in cc_soul/, so these become 'from .'.
+    """
+    # Transform 'from ..' to 'from .' (double dot to single dot)
+    # This handles imports like 'from ..svadhyaya' -> 'from .svadhyaya'
+    content = re.sub(r'from \.\.([a-zA-Z_])', r'from .\1', content)
+    return content
+
+
 def extract_tool_content(path: Path) -> str:
     """Extract tool definitions from a module file.
 
     Strips any module-level imports that would conflict with the
     generated file's structure (tool functions use inline imports).
+    Also transforms relative imports for the generated file's location.
     """
     content = path.read_text()
+    content = transform_imports(content)
     return content.strip()
 
 

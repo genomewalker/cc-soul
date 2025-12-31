@@ -247,10 +247,10 @@ def get_stale_aspects() -> str:
     Stale aspects might need re-observation or might be outdated.
     """
     from .temporal import is_stale, days_since, init_temporal_tables
-    from .core import get_db
+    from .core import get_db_connection
 
     init_temporal_tables()
-    db = get_db()
+    db = get_db_connection()
     cur = db.cursor()
 
     cur.execute("""
