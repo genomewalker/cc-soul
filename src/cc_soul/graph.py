@@ -99,18 +99,18 @@ def _ensure_graph_db():
     db = kuzu.Database(db_path)
     conn = kuzu.Connection(db)
 
-    # Create schema if not exists
+    # Create schema if not exists - MINIMAL SCHEMA (no content duplication)
+    # Content lives in wisdom table (source of truth)
+    # Graph stores topology only for spreading activation
     try:
         conn.execute("""
             CREATE NODE TABLE IF NOT EXISTS Concept(
                 id STRING PRIMARY KEY,
                 type STRING,
                 title STRING,
-                content STRING,
-                created_at STRING,
+                domain STRING,
                 last_activated STRING,
-                activation_count INT64,
-                metadata STRING
+                activation_count INT64
             )
         """)
 
@@ -145,51 +145,54 @@ def get_graph_connection():
 
 
 def add_concept(concept: Concept) -> str:
-    """Add a concept node to the graph."""
+    """Add a concept node to the graph.
+
+    MINIMAL SCHEMA: Only stores topology (id, type, title, domain).
+    Content is NOT stored - fetch from wisdom table on demand.
+    """
     db, conn = _ensure_graph_db()
+
+    # Extract domain from metadata if available
+    domain = concept.metadata.get("domain", "") if concept.metadata else ""
 
     # Check if exists
     result = conn.execute(f"MATCH (c:Concept {{id: '{concept.id}'}}) RETURN c.id")
     if result.has_next():
-        # Update existing
+        # Update existing - just bump activation
         conn.execute(
             f"""
             MATCH (c:Concept {{id: '{concept.id}'}})
             SET c.title = $title,
-                c.content = $content,
+                c.domain = $domain,
                 c.last_activated = $last_activated,
                 c.activation_count = c.activation_count + 1
         """,
             {
-                "title": concept.title,
-                "content": concept.content,
+                "title": concept.title[:100],  # Truncate title
+                "domain": domain,
                 "last_activated": datetime.now().isoformat(),
             },
         )
     else:
-        # Insert new
+        # Insert new - minimal data only
         conn.execute(
             """
             CREATE (c:Concept {
                 id: $id,
                 type: $type,
                 title: $title,
-                content: $content,
-                created_at: $created_at,
+                domain: $domain,
                 last_activated: $last_activated,
-                activation_count: $activation_count,
-                metadata: $metadata
+                activation_count: $activation_count
             })
         """,
             {
                 "id": concept.id,
                 "type": concept.type.value,
-                "title": concept.title,
-                "content": concept.content,
-                "created_at": concept.created_at,
-                "last_activated": concept.last_activated or concept.created_at,
+                "title": concept.title[:100],  # Truncate title
+                "domain": domain,
+                "last_activated": concept.last_activated or datetime.now().isoformat(),
                 "activation_count": concept.activation_count,
-                "metadata": json.dumps(concept.metadata),
             },
         )
 
@@ -618,8 +621,8 @@ def sync_wisdom_to_graph():
     """
     Sync existing wisdom entries to the concept graph.
 
-    Creates concept nodes for each wisdom entry and infers
-    relationships based on domain and keyword overlap.
+    MINIMAL SCHEMA: Only stores id, type, title, domain.
+    Content is NOT duplicated - fetch from wisdom table on demand.
     """
     from .wisdom import recall_wisdom
     from .vocabulary import get_vocabulary
@@ -627,15 +630,15 @@ def sync_wisdom_to_graph():
 
     db, conn = _ensure_graph_db()
 
-    # Sync wisdom
+    # Sync wisdom - minimal data only
     wisdom_entries = recall_wisdom(limit=1000)
     for w in wisdom_entries:
         concept = Concept(
             id=f"wisdom_{w['id']}",
             type=ConceptType.WISDOM if w["type"] != "failure" else ConceptType.FAILURE,
             title=w["title"],
-            content=w["content"],
-            metadata={"domain": w.get("domain"), "confidence": w.get("confidence")},
+            content="",  # NOT stored in graph
+            metadata={"domain": w.get("domain", "")},
         )
         add_concept(concept)
 
@@ -643,7 +646,10 @@ def sync_wisdom_to_graph():
     vocab = get_vocabulary()
     for term, meaning in vocab.items():
         concept = Concept(
-            id=f"term_{term}", type=ConceptType.TERM, title=term, content=meaning
+            id=f"term_{term}",
+            type=ConceptType.TERM,
+            title=term,
+            content="",  # NOT stored in graph
         )
         add_concept(concept)
 
@@ -653,80 +659,257 @@ def sync_wisdom_to_graph():
         concept = Concept(
             id=f"belief_{b['id']}",
             type=ConceptType.BELIEF,
-            title=b["belief"][:50],
-            content=b["belief"],
+            title=b["belief"][:100],
+            content="",  # NOT stored in graph
         )
         add_concept(concept)
 
-    # Get fresh connection for inference (original may be stale after add_concept calls)
+    # Infer relationships based on title similarity (no content)
     _, fresh_conn = _ensure_graph_db()
     _infer_relationships(fresh_conn)
 
     return get_graph_stats()
 
 
+def rebuild_graph_atomic():
+    """
+    Atomic graph rebuild - eliminates lock conflicts.
+
+    1. Build new graph in temp location
+    2. Swap atomically with old graph
+    3. Delete old graph
+
+    Safe to call even when MCP server holds the main graph.
+    """
+    import shutil
+
+    from .wisdom import recall_wisdom
+    from .vocabulary import get_vocabulary
+    from .beliefs import get_beliefs
+
+    temp_path = GRAPH_DIR / "concepts_new"
+    final_path = GRAPH_DIR / "concepts"
+    backup_path = GRAPH_DIR / "concepts_old"
+
+    # Clean up any leftover temp/backup
+    if temp_path.exists():
+        shutil.rmtree(temp_path)
+    if backup_path.exists():
+        shutil.rmtree(backup_path)
+
+    # Build in temp location
+    GRAPH_DIR.mkdir(parents=True, exist_ok=True)
+    db = kuzu.Database(str(temp_path))
+    conn = kuzu.Connection(db)
+
+    # Create minimal schema
+    conn.execute("""
+        CREATE NODE TABLE Concept(
+            id STRING PRIMARY KEY,
+            type STRING,
+            title STRING,
+            domain STRING,
+            last_activated STRING,
+            activation_count INT64
+        )
+    """)
+    conn.execute("""
+        CREATE REL TABLE RELATES(
+            FROM Concept TO Concept,
+            relation STRING,
+            weight DOUBLE,
+            created_at STRING,
+            last_activated STRING,
+            evidence STRING
+        )
+    """)
+
+    # Populate from wisdom
+    wisdom_entries = recall_wisdom(limit=10000)
+    for w in wisdom_entries:
+        conn.execute(
+            """
+            CREATE (c:Concept {
+                id: $id,
+                type: $type,
+                title: $title,
+                domain: $domain,
+                last_activated: $last_activated,
+                activation_count: 0
+            })
+        """,
+            {
+                "id": f"wisdom_{w['id']}",
+                "type": "wisdom" if w["type"] != "failure" else "failure",
+                "title": w["title"][:100],
+                "domain": w.get("domain", ""),
+                "last_activated": datetime.now().isoformat(),
+            },
+        )
+
+    # Populate from vocabulary
+    vocab = get_vocabulary()
+    for term, _meaning in vocab.items():
+        conn.execute(
+            """
+            CREATE (c:Concept {
+                id: $id,
+                type: 'term',
+                title: $title,
+                domain: '',
+                last_activated: $last_activated,
+                activation_count: 0
+            })
+        """,
+            {
+                "id": f"term_{term}",
+                "title": term[:100],
+                "last_activated": datetime.now().isoformat(),
+            },
+        )
+
+    # Populate from beliefs
+    beliefs = get_beliefs()
+    for b in beliefs:
+        conn.execute(
+            """
+            CREATE (c:Concept {
+                id: $id,
+                type: 'belief',
+                title: $title,
+                domain: '',
+                last_activated: $last_activated,
+                activation_count: 0
+            })
+        """,
+            {
+                "id": f"belief_{b['id']}",
+                "title": b["belief"][:100],
+                "last_activated": datetime.now().isoformat(),
+            },
+        )
+
+    # Infer relationships
+    _infer_relationships(conn)
+
+    # Close connection before swap
+    del conn
+    del db
+
+    # Atomic swap
+    if final_path.exists():
+        shutil.move(str(final_path), str(backup_path))
+    shutil.move(str(temp_path), str(final_path))
+    if backup_path.exists():
+        shutil.rmtree(backup_path)
+
+    return {"status": "rebuilt", "path": str(final_path)}
+
+
+def get_concept_content(concept_id: str) -> str:
+    """
+    Fetch content from authoritative source (wisdom table), not graph.
+
+    The graph stores topology only - content lives in the wisdom table.
+    """
+    from .wisdom import get_wisdom_by_id
+
+    if concept_id.startswith("wisdom_"):
+        wisdom_id = concept_id[7:]
+        wisdom = get_wisdom_by_id(wisdom_id)
+        return wisdom.get("content", "") if wisdom else ""
+    elif concept_id.startswith("belief_"):
+        from .beliefs import get_belief_by_id
+
+        belief_id = concept_id[7:]
+        belief = get_belief_by_id(belief_id)
+        return belief.get("belief", "") if belief else ""
+    elif concept_id.startswith("term_"):
+        from .vocabulary import get_vocabulary
+
+        term = concept_id[5:]
+        vocab = get_vocabulary()
+        return vocab.get(term, "")
+
+    return ""
+
+
 def _infer_relationships(conn):
-    """Infer relationships between concepts based on content similarity."""
-    # Get all concepts
+    """Infer relationships between concepts based on title/domain similarity.
+
+    MINIMAL SCHEMA: Uses title and domain only (no content in graph).
+    For deeper matching, fetch content on-demand from wisdom table.
+    """
+    # Get all concepts - minimal schema (no content)
     result = conn.execute("""
         MATCH (c:Concept)
-        RETURN c.id, c.title, c.content, c.type
+        RETURN c.id, c.title, c.type, c.domain
     """)
 
     concepts = []
     while result.has_next():
         row = result.get_next()
+        title = row[1] or ""
+        domain = row[3] or ""
         concepts.append(
             {
                 "id": row[0],
-                "title": row[1],
-                "content": row[2],
-                "type": row[3],
-                "words": set((row[1] + " " + row[2]).lower().split()),
+                "title": title,
+                "type": row[2],
+                "domain": domain,
+                "words": set((title + " " + domain).lower().split()),
             }
         )
 
-    # Find overlaps
+    # Find overlaps based on title/domain words
     for i, c1 in enumerate(concepts):
         for c2 in concepts[i + 1 :]:
+            # Same domain gets a boost
+            domain_match = c1["domain"] and c1["domain"] == c2["domain"]
+
             overlap = len(c1["words"] & c2["words"])
             union = len(c1["words"] | c2["words"])
 
             if union > 0:
                 jaccard = overlap / union
-                if jaccard > 0.2:  # >20% word overlap
+                if domain_match:
+                    jaccard += 0.2  # Boost for same domain
+
+                if jaccard > 0.15:  # Lower threshold since no content
                     link_concepts(
                         c1["id"],
                         c2["id"],
                         RelationType.RELATED_TO,
-                        weight=jaccard,
-                        evidence=f"Keyword overlap: {jaccard:.0%}",
+                        weight=min(jaccard, 1.0),
+                        evidence=f"Title/domain overlap: {jaccard:.0%}",
                     )
 
 
 def auto_link_new_concept(concept_id: str):
-    """Automatically link a new concept to related existing ones."""
+    """Automatically link a new concept to related existing ones.
+
+    MINIMAL SCHEMA: Uses title only for matching.
+    """
     concept = get_concept(concept_id)
     if not concept:
         return
 
-    words = set((concept.title + " " + concept.content).lower().split())
+    # Use title only (no content in graph)
+    words = set(concept.title.lower().split())
 
-    # Search for related concepts
+    # Search for related concepts by title words
     for word in list(words)[:10]:  # Limit to avoid too many searches
         if len(word) > 4:
             matches = search_concepts(word, limit=5)
             for match in matches:
                 if match.id != concept_id:
-                    # Calculate similarity
-                    match_words = set(
-                        (match.title + " " + match.content).lower().split()
-                    )
+                    # Calculate similarity using title only
+                    match_words = set(match.title.lower().split())
                     overlap = len(words & match_words)
                     if overlap >= 2:
                         link_concepts(
                             concept_id,
                             match.id,
                             RelationType.RELATED_TO,
-                            weight=min(overlap * 0.1, 1.0),
+                            weight=min(overlap * 0.15, 1.0),
                         )
