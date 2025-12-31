@@ -1900,7 +1900,12 @@ def cmd_install_permissions(args):
 
 
 def cmd_setup(args):
-    """Register soul as MCP server with Claude Code."""
+    """Register soul as MCP server with Claude Code.
+
+    By default, installs for all projects (user scope).
+    Use --local to install only for the current project.
+    Use --force to remove existing registration first.
+    """
     claude_path = shutil.which("claude")
     if not claude_path:
         print("Error: 'claude' CLI not found in PATH")
@@ -1913,36 +1918,52 @@ def cmd_setup(args):
         print("Reinstall with: pip install cc-soul")
         sys.exit(1)
 
-    scope = "--scope user" if args.user else ""
-    cmd = f"claude mcp add soul {scope} -- {mcp_path}"
+    # Default to user scope (global), use local only if explicitly requested
+    target_scope = "local" if args.local else "user"
+    scope_desc = "current project only" if args.local else "all projects"
 
+    # If force, remove from both scopes first
+    if args.force:
+        for scope in ["local", "user"]:
+            subprocess.run(
+                f"claude mcp remove soul --scope {scope}",
+                shell=True, capture_output=True
+            )
+
+    cmd = f"claude mcp add soul --scope {target_scope} -- {mcp_path}"
     result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
 
     if result.returncode == 0:
-        print("soul registered as MCP server")
+        print(f"soul registered as MCP server ({scope_desc})")
         print("Restart Claude Code to activate")
     else:
         if "already exists" in result.stderr.lower():
-            print("soul already registered")
+            print("soul already registered (use --force to reinstall)")
         else:
             print(f"Error: {result.stderr}")
             sys.exit(1)
 
 
 def cmd_unsetup(args):
-    """Remove soul MCP server from Claude Code."""
+    """Remove soul MCP server from Claude Code.
+
+    By default, removes from user scope (global).
+    Use --local to remove only from current project.
+    """
     claude_path = shutil.which("claude")
     if not claude_path:
         print("Error: 'claude' CLI not found")
         sys.exit(1)
 
-    scope = "--scope user" if args.user else ""
+    # Default to user scope, use local only if explicitly requested
+    scope = "--scope local" if args.local else "--scope user"
+    scope_desc = "current project" if args.local else "all projects"
     cmd = f"claude mcp remove soul {scope}"
 
     result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
 
     if result.returncode == 0:
-        print("soul removed from Claude Code")
+        print(f"soul removed from Claude Code ({scope_desc})")
     else:
         print(f"Error: {result.stderr}")
 
@@ -2559,7 +2580,10 @@ def main():
         "setup", help="Register soul MCP server with Claude Code"
     )
     setup_parser.add_argument(
-        "--user", action="store_true", help="Install for user (all projects)"
+        "--local", action="store_true", help="Install for current project only (default: all projects)"
+    )
+    setup_parser.add_argument(
+        "--force", action="store_true", help="Remove existing registration first"
     )
 
     # Unsetup MCP
@@ -2567,7 +2591,7 @@ def main():
         "unsetup", help="Remove soul MCP server from Claude Code"
     )
     unsetup_parser.add_argument(
-        "--user", action="store_true", help="Remove from user scope"
+        "--local", action="store_true", help="Remove from local/project scope only"
     )
 
     # Hook
