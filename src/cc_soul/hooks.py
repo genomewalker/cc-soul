@@ -650,6 +650,77 @@ def _auto_generate_session_intention(user_input: str) -> int:
     return intention_id
 
 
+def _detect_decision_point(user_input: str) -> list:
+    """
+    Detect if user is at a decision point and surface relevant wisdom.
+
+    Decision signals:
+    - Questions about choices ("should I use X or Y?", "which approach?")
+    - Explicit decision language ("deciding between", "choosing")
+    - Trade-off discussions ("pros and cons", "vs", "alternatives")
+
+    Returns list of relevant wisdom entries if decision detected, else empty list.
+    """
+    import re
+
+    input_lower = user_input.lower()
+
+    decision_patterns = [
+        r"should (?:i|we) (?:use|choose|pick|go with)",
+        r"which (?:approach|method|way|option|solution)",
+        r"deciding between",
+        r"choosing between",
+        r"trade.?off",
+        r"pros and cons",
+        r"\bvs\b|\bversus\b",
+        r"alternatives? to",
+        r"better approach",
+        r"best (?:way|practice|approach)",
+        r"how should (?:i|we)",
+        r"what(?:'s| is) the (?:right|best|proper)",
+    ]
+
+    is_decision = any(re.search(p, input_lower) for p in decision_patterns)
+    if not is_decision:
+        return []
+
+    # Decision detected - recall decision-relevant wisdom
+    from .wisdom import quick_recall
+    from .coherence import get_beliefs
+
+    relevant = []
+
+    # Get beliefs (core decision principles)
+    try:
+        beliefs = get_beliefs()
+        if beliefs:
+            relevant.extend(
+                [{"title": "Core belief", "content": b["statement"], "type": "belief"}
+                 for b in beliefs[:2] if b.get("confidence", 0) > 0.7]
+            )
+    except Exception:
+        pass
+
+    # Search for decision-relevant wisdom
+    decision_terms = ["simplicity", "approach", "pattern", "architecture", "design"]
+    for term in decision_terms:
+        if term in input_lower:
+            try:
+                results = quick_recall(term, limit=2)
+                for r in results:
+                    if r.get("combined_score", 0) > 0.4:
+                        relevant.append({
+                            "title": r.get("title", ""),
+                            "content": r.get("content", ""),
+                            "type": "wisdom",
+                        })
+            except Exception:
+                pass
+            break
+
+    return relevant[:3]
+
+
 def get_project_name() -> str:
     """Try to detect current project name from git or directory."""
     cwd = Path.cwd()
@@ -2011,6 +2082,13 @@ def user_prompt(
     except Exception:
         pass
 
+    # DECISION: Detect decision points and prepare wisdom to surface
+    decision_wisdom = []
+    try:
+        decision_wisdom = _detect_decision_point(user_input)
+    except Exception:
+        pass
+
     # Check context budget before deciding what to inject
     budget_check = check_budget_before_inject(transcript_path)
 
@@ -2077,6 +2155,21 @@ def user_prompt(
         nudges = _get_mood_wisdom_nudges()
         for nudge in nudges[:2]:
             output.append(f"💭 {nudge}")
+
+    # DECISION POINT: Surface relevant wisdom when making decisions
+    if decision_wisdom and mode in ("full", "reduced"):
+        output.append("")
+        output.append("⚖️ **Decision Guidance:**")
+        for dw in decision_wisdom[:2]:
+            dw_type = dw.get("type", "wisdom")
+            dw_title = dw.get("title", "")[:40]
+            dw_content = dw.get("content", "")[:80]
+            if dw_type == "belief":
+                output.append(f"  📐 **{dw_content}**")
+            else:
+                output.append(f"  💡 **{dw_title}**: {dw_content}...")
+            injected_items.append(("decision_wisdom", dw_title))
+        output.append("")
 
     # PROACTIVE WISDOM: Surface dormant wisdom when engagement is low
     # This closes the knowing-doing gap by actively injecting underused wisdom
