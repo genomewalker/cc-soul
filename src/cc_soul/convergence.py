@@ -70,16 +70,6 @@ class InnerVoice(Enum):
     SAKSHI = "sakshi"       # Witness - minimal, detached
 
 
-# Backward compatibility aliases
-AgentPerspective = InnerVoice
-AgentPerspective.FAST = InnerVoice.MANAS
-AgentPerspective.DEEP = InnerVoice.BUDDHI
-AgentPerspective.CRITICAL = InnerVoice.AHAMKARA
-AgentPerspective.PRAGMATIC = InnerVoice.CHITTA
-AgentPerspective.NOVEL = InnerVoice.VIKALPA
-AgentPerspective.MINIMAL = InnerVoice.SAKSHI
-
-
 class ConvergenceStrategy(Enum):
     """
     How the voices of Antahkarana harmonize into truth.
@@ -96,14 +86,6 @@ class ConvergenceStrategy(Enum):
     TARKA = "tarka"           # Dialectic - iterative refinement
     VIVEKA = "viveka"         # Discernment - score and rank
     PRATYAKSHA = "pratyaksha" # Direct perception - first valid
-
-
-# Backward compatibility aliases
-ConvergenceStrategy.VOTE = ConvergenceStrategy.SANKHYA
-ConvergenceStrategy.SYNTHESIZE = ConvergenceStrategy.SAMVADA
-ConvergenceStrategy.DEBATE = ConvergenceStrategy.TARKA
-ConvergenceStrategy.RANK = ConvergenceStrategy.VIVEKA
-ConvergenceStrategy.FIRST_VALID = ConvergenceStrategy.PRATYAKSHA
 
 
 @dataclass
@@ -175,10 +157,6 @@ class VoiceTask:
         return "\n".join(lines)
 
 
-# Backward compatibility
-AgentTask = VoiceTask
-
-
 @dataclass
 class VoiceSolution:
     """A solution from one voice of the Antahkarana."""
@@ -190,10 +168,6 @@ class VoiceSolution:
     reasoning: str
     timestamp: str
     metadata: Dict[str, Any] = field(default_factory=dict)
-
-
-# Backward compatibility
-AgentSolution = VoiceSolution
 
 
 @dataclass
@@ -214,22 +188,9 @@ class SamvadaResult:
     dialogue_rounds: int = 0  # For Tarka (debate)
     dissenting_views: List[str] = field(default_factory=list)
 
-    # Backward compatibility
-    @property
-    def contributing_agents(self) -> List[str]:
-        return self.contributing_voices
-
-    @property
-    def debate_rounds(self) -> int:
-        return self.dialogue_rounds
-
-
-# Backward compatibility
-ConvergenceResult = SamvadaResult
-
 
 def _ensure_convergence_tables():
-    """Create tables for tracking swarm work."""
+    """Create tables for tracking Antahkarana work."""
     conn = get_db_connection()
     c = conn.cursor()
 
@@ -295,7 +256,7 @@ class Antahkarana:
 
         # Activate voices and collect insights
         mind.activate_all()
-        insights = mind.collect()
+        insights = mind.gather_insights()
 
         # Harmonize through Samvada (dialogue)
         result = mind.harmonize(ConvergenceStrategy.SAMVADA)
@@ -306,10 +267,9 @@ class Antahkarana:
         problem: str,
         constraints: List[str] = None,
         context: str = "",
-        swarm_id: str = None,  # Backward compat alias
         antahkarana_id: str = None,
     ):
-        self.antahkarana_id = antahkarana_id or swarm_id or str(uuid.uuid4())[:8]
+        self.antahkarana_id = antahkarana_id or str(uuid.uuid4())[:8]
         self.problem = problem
         self.constraints = constraints or []
         self.context = context
@@ -321,13 +281,8 @@ class Antahkarana:
         _ensure_convergence_tables()
 
     @property
-    def swarm_id(self) -> str:
-        """Backward compatibility alias for antahkarana_id."""
-        return self.antahkarana_id
-
-    @property
     def insights(self) -> List["VoiceSolution"]:
-        """Upanishadic alias for solutions."""
+        """Alias for solutions."""
         return self.solutions
 
     def add_voice(
@@ -337,7 +292,7 @@ class Antahkarana:
         extra_context: str = "",
     ) -> str:
         """Add a voice to the Antahkarana. Returns task_id."""
-        task_id = f"{self.swarm_id}-{len(self.tasks)}"
+        task_id = f"{self.antahkarana_id}-{len(self.tasks)}"
 
         task = VoiceTask(
             task_id=task_id,
@@ -357,7 +312,7 @@ class Antahkarana:
                (swarm_id, task_id, problem, perspective, constraints, context, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (
-                self.swarm_id,
+                self.antahkarana_id,
                 task_id,
                 self.problem,
                 voice.value,
@@ -371,19 +326,11 @@ class Antahkarana:
 
         return task_id
 
-    # Backward compatibility
-    def add_agent(self, perspective, extra_constraints=None, extra_context=""):
-        return self.add_voice(perspective, extra_constraints, extra_context)
-
     def add_core_voices(self):
         """Add the four core facets of Antahkarana for balanced analysis."""
         self.add_voice(InnerVoice.MANAS)     # Quick intuition
         self.add_voice(InnerVoice.BUDDHI)    # Deep analysis
         self.add_voice(InnerVoice.AHAMKARA)  # Critical examination
-
-    # Backward compatibility
-    def add_standard_perspectives(self):
-        self.add_core_voices()
 
     def add_creative_voices(self):
         """Add voices for creative problem-solving."""
@@ -391,16 +338,12 @@ class Antahkarana:
         self.add_voice(InnerVoice.SAKSHI)   # Detached witness
         self.add_voice(InnerVoice.CHITTA)   # Pattern-based wisdom
 
-    # Backward compatibility
-    def add_creative_perspectives(self):
-        self.add_creative_voices()
-
     def activate_all(self, parallel: bool = True) -> List[str]:
         """
         Activate all voices to contemplate the problem.
 
         In real implementation, this would use Claude Code's Task tool
-        with run_in_background=True. For now, we simulate with subprocess.
+        with run_in_background=True.
 
         Returns list of voice_ids.
         """
@@ -413,10 +356,6 @@ class Antahkarana:
         self._activated = True
         return voice_ids
 
-    # Backward compatibility
-    def spawn_all(self, parallel: bool = True) -> List[str]:
-        return self.activate_all(parallel)
-
     def _activate_voice(self, task: VoiceTask) -> str:
         """
         Activate a single voice.
@@ -426,7 +365,7 @@ class Antahkarana:
         """
         voice_id = f"voice-{task.task_id}"
 
-        # For now, record that we need this voice's contemplation
+        # Record that we need this voice's contemplation
         conn = get_db_connection()
         c = conn.cursor()
         c.execute(
@@ -437,10 +376,6 @@ class Antahkarana:
         conn.close()
 
         return voice_id
-
-    # Backward compatibility
-    def _spawn_agent(self, task):
-        return self._activate_voice(task)
 
     def submit_insight(
         self,
@@ -479,7 +414,7 @@ class Antahkarana:
                (swarm_id, task_id, agent_id, perspective, solution, confidence, reasoning, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                self.swarm_id,
+                self.antahkarana_id,
                 task_id,
                 voice_id,
                 task.perspective.value,
@@ -501,10 +436,6 @@ class Antahkarana:
 
         return sol
 
-    # Backward compatibility
-    def submit_solution(self, task_id, solution, confidence=0.7, reasoning=""):
-        return self.submit_insight(task_id, solution, confidence, reasoning)
-
     def _write_to_chitta(self, solution: VoiceSolution):
         """Write insight to cc-memory (Chitta - shared memory)."""
         try:
@@ -513,20 +444,16 @@ class Antahkarana:
                 category="voice_insight",
                 title=f"[{solution.perspective.value}] {self.problem[:50]}",
                 content=json.dumps({
-                    "antahkarana_id": self.swarm_id,
+                    "antahkarana_id": self.antahkarana_id,
                     "task_id": solution.task_id,
                     "insight": solution.solution,
                     "shraddha": solution.confidence,  # Faith/confidence
                     "reasoning": solution.reasoning,
                 }),
-                tags=["antahkarana", self.swarm_id, solution.perspective.value],
+                tags=["antahkarana", self.antahkarana_id, solution.perspective.value],
             )
         except Exception:
             pass
-
-    # Backward compatibility
-    def _write_to_memory(self, solution):
-        self._write_to_chitta(solution)
 
     def gather_insights(self, timeout_seconds: int = 300) -> List[VoiceSolution]:
         """
@@ -535,10 +462,6 @@ class Antahkarana:
         In real implementation, this would poll TaskOutput until all complete.
         """
         return self.solutions
-
-    # Backward compatibility
-    def collect(self, timeout_seconds: int = 300):
-        return self.gather_insights(timeout_seconds)
 
     def harmonize(
         self,
@@ -571,10 +494,6 @@ class Antahkarana:
         else:
             return self._samvada()
 
-    # Backward compatibility
-    def converge(self, strategy=ConvergenceStrategy.SAMVADA, validator=None):
-        return self.harmonize(strategy, validator)
-
     def _sankhya(self) -> SamvadaResult:
         """Sankhya (enumeration) - highest shraddha (confidence) wins."""
         ranked = sorted(self.solutions, key=lambda s: s.confidence, reverse=True)
@@ -588,10 +507,6 @@ class Antahkarana:
             confidence=winner.confidence,
             dissenting_views=[s.solution[:100] for s in ranked[1:3]],
         )
-
-    # Backward compatibility
-    def _converge_vote(self):
-        return self._sankhya()
 
     def _samvada(self) -> SamvadaResult:
         """Samvada (harmonious dialogue) - synthesize wisdom from all voices."""
@@ -650,10 +565,6 @@ class Antahkarana:
             confidence=avg_shraddha,
         )
 
-    # Backward compatibility
-    def _converge_synthesize(self):
-        return self._samvada()
-
     def _tarka(self, max_rounds: int = 3) -> SamvadaResult:
         """
         Tarka (dialectical reasoning) - iterative refinement through opposition.
@@ -682,10 +593,6 @@ class Antahkarana:
             harmony.dissenting_views = challenges[:3]
 
         return harmony
-
-    # Backward compatibility
-    def _converge_debate(self, max_rounds=3):
-        return self._tarka(max_rounds)
 
     def _viveka(self) -> SamvadaResult:
         """Viveka (discrimination/discernment) - score by criteria, select wisest."""
@@ -719,10 +626,6 @@ class Antahkarana:
             dissenting_views=[s[0].solution[:100] for s in scored[1:3]],
         )
 
-    # Backward compatibility
-    def _converge_rank(self):
-        return self._viveka()
-
     def _pratyaksha(self, validator: Callable[[str], bool]) -> SamvadaResult:
         """Pratyaksha (direct perception) - first insight that passes validation."""
         if not validator:
@@ -740,14 +643,6 @@ class Antahkarana:
 
         # None valid - fall back to Sankhya (enumeration)
         return self._sankhya()
-
-    # Backward compatibility
-    def _converge_first_valid(self, validator):
-        return self._pratyaksha(validator)
-
-
-# Backward compatibility alias
-Swarm = Antahkarana
 
 
 def awaken_antahkarana(
@@ -780,19 +675,14 @@ def awaken_antahkarana(
     return mind
 
 
-# Backward compatibility
-def spawn_parallel_agents(problem, perspectives=None, constraints=None, context=""):
-    return awaken_antahkarana(problem, perspectives, constraints, context)
-
-
-def get_antahkarana(swarm_id: str) -> Optional[Antahkarana]:
+def get_antahkarana(antahkarana_id: str) -> Optional[Antahkarana]:
     """Retrieve an existing Antahkarana (inner instrument) by ID."""
     conn = get_db_connection()
     c = conn.cursor()
 
     c.execute(
         "SELECT problem, constraints, context FROM swarm_tasks WHERE swarm_id = ? LIMIT 1",
-        (swarm_id,)
+        (antahkarana_id,)
     )
     row = c.fetchone()
 
@@ -807,13 +697,13 @@ def get_antahkarana(swarm_id: str) -> Optional[Antahkarana]:
         problem=problem,
         constraints=constraints,
         context=context or "",
-        swarm_id=swarm_id,
+        antahkarana_id=antahkarana_id,
     )
 
     # Load voice tasks
     c.execute(
         "SELECT task_id, perspective FROM swarm_tasks WHERE swarm_id = ?",
-        (swarm_id,)
+        (antahkarana_id,)
     )
     for task_id, perspective in c.fetchall():
         # Handle both old (fast/deep/critical) and new (manas/buddhi/ahamkara) values
@@ -839,7 +729,7 @@ def get_antahkarana(swarm_id: str) -> Optional[Antahkarana]:
     c.execute(
         """SELECT task_id, agent_id, perspective, solution, confidence, reasoning, created_at
            FROM swarm_solutions WHERE swarm_id = ?""",
-        (swarm_id,)
+        (antahkarana_id,)
     )
     for row in c.fetchall():
         # Handle both old and new perspective values
@@ -866,11 +756,6 @@ def get_antahkarana(swarm_id: str) -> Optional[Antahkarana]:
     return mind
 
 
-# Backward compatibility
-def get_swarm(swarm_id):
-    return get_antahkarana(swarm_id)
-
-
 def list_active_antahkaranas(limit: int = 10) -> List[Dict]:
     """List recently active inner instruments."""
     conn = get_db_connection()
@@ -895,8 +780,3 @@ def list_active_antahkaranas(limit: int = 10) -> List[Dict]:
 
     conn.close()
     return minds
-
-
-# Backward compatibility
-def list_active_swarms(limit=10):
-    return list_active_antahkaranas(limit)
