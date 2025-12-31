@@ -525,7 +525,6 @@ Problem: {self.swarm.problem[:200]}""",
         """Query cc-memory for a swarm solution by task_id."""
         import re
 
-        # Try cc-memory first
         try:
             from .bridge import is_memory_available, find_project_dir
 
@@ -533,24 +532,20 @@ Problem: {self.swarm.problem[:200]}""",
                 from cc_memory import memory as cc_memory
 
                 project_dir = find_project_dir()
-                results = cc_memory.recall(project_dir, f"task:{task_id}", limit=5)
+                # Use exact tag lookup
+                results = cc_memory.recall_by_tag(project_dir, f"task:{task_id}", limit=5)
 
                 for r in results:
                     content = r.get("content", "")
-                    title = r.get("title", "")
-                    tags = r.get("tags", "")
+                    confidence_match = re.search(r'\*?\*?[Cc]onfidence:?\*?\*?\s*([\d.]+)', content)
+                    confidence = float(confidence_match.group(1)) if confidence_match else 0.7
 
-                    # Check if this matches our task
-                    if f"task:{task_id}" in (tags + title + content):
-                        confidence_match = re.search(r'confidence:\s*([\d.]+)', content)
-                        confidence = float(confidence_match.group(1)) if confidence_match else 0.7
-
-                        return {
-                            "content": content,
-                            "confidence": confidence,
-                            "solution": content,
-                            "reasoning": "",
-                        }
+                    return {
+                        "content": content,
+                        "confidence": confidence,
+                        "solution": content,
+                        "reasoning": "",
+                    }
         except Exception:
             pass
 
@@ -794,34 +789,36 @@ def get_swarm_solutions(swarm_id: str) -> List[Dict[str, Any]]:
 
             project_dir = find_project_dir()
 
-            # Search for swarm solutions using semantic search
-            results = cc_memory.recall(project_dir, f"swarm:{swarm_id}", limit=20)
+            # Use exact tag lookup - semantic search can't find IDs
+            results = cc_memory.recall_by_tag(project_dir, f"swarm:{swarm_id}", limit=50)
 
             for r in results:
-                content = r.get("content", "")
-                title = r.get("title", "")
-                tags = r.get("tags", "")
-
-                # Check if this is actually a swarm solution
-                if f"swarm:{swarm_id}" not in (tags + title + content):
+                # Only include actual solutions, not budget records
+                if r.get("category") != "swarm-solution":
                     continue
 
-                # Extract task_id
-                task_match = re.search(r'task:([^\s,\]]+)', tags + title)
-                task_id = task_match.group(1) if task_match else title.split(':')[0] if ':' in title else 'unknown'
+                content = r.get("content", "")
+                title = r.get("title", "")
+                obs_id = r.get("id", "")
+                tags = r.get("tags", [])
+                tags_str = " ".join(tags) if isinstance(tags, list) else str(tags)
 
-                # Extract perspective
-                perspective_match = re.search(r'perspective:(\w+)', tags + title)
+                # Extract task_id from title (format: "{swarm_id}-N: description")
+                task_id = title.split(':')[0].strip() if ':' in title else 'unknown'
+
+                # Extract perspective from tags
+                perspective_match = re.search(r'perspective:(\w+)', tags_str)
                 perspective = perspective_match.group(1) if perspective_match else 'unknown'
 
-                # Extract confidence
-                confidence_match = re.search(r'confidence:\s*([\d.]+)', content)
+                # Extract confidence from content
+                confidence_match = re.search(r'\*?\*?[Cc]onfidence:?\*?\*?\s*([\d.]+)', content)
                 confidence = float(confidence_match.group(1)) if confidence_match else 0.7
 
                 solutions.append({
-                    "observation_id": r.get("id"),
+                    "observation_id": obs_id,
                     "task_id": task_id,
                     "perspective": perspective,
+                    "solution": content,
                     "content": content,
                     "confidence": confidence,
                     "created_at": r.get("timestamp"),
