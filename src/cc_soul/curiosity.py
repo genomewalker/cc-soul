@@ -134,7 +134,7 @@ def detect_recurring_problems() -> List[Gap]:
     # Look for problem fingerprints that matched but had no solution
     cursor.execute("""
         SELECT fingerprint, COUNT(*) as count, problem_type
-        FROM problem_patterns
+        FROM problem_fingerprints
         WHERE solution_pattern IS NULL OR solution_pattern = ''
         GROUP BY fingerprint
         HAVING count > 2
@@ -204,7 +204,7 @@ def detect_unknown_files() -> List[Gap]:
 
     # Get files from decisions/patterns that don't have hints
     cursor.execute("""
-        SELECT file_hints FROM problem_patterns WHERE file_hints IS NOT NULL
+        SELECT file_hints FROM problem_fingerprints WHERE file_hints IS NOT NULL
     """)
 
     file_counts = Counter()
