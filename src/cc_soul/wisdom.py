@@ -549,3 +549,80 @@ def semantic_recall(query: str, limit: int = 5, domain: str = None) -> List[Dict
         pass
 
     return recall_wisdom(query=query, limit=limit, domain=domain)
+
+
+def get_dormant_wisdom(limit: int = 3, min_confidence: float = 0.6) -> List[Dict]:
+    """
+    Get high-confidence wisdom that hasn't been applied recently.
+
+    Surfaces wisdom that's been sitting unused - closes the knowing-doing gap.
+    Prioritizes by confidence (proven wisdom) and staleness (needs application).
+
+    Args:
+        limit: Maximum entries to return
+        min_confidence: Minimum confidence threshold (default 0.6)
+
+    Returns:
+        List of wisdom entries sorted by application priority
+    """
+    conn = get_db_connection()
+    c = conn.cursor()
+
+    c.execute(
+        """
+        SELECT id, type, title, content, domain, confidence, last_used,
+               success_count, failure_count, timestamp
+        FROM wisdom
+        WHERE confidence >= ?
+        ORDER BY
+            CASE
+                WHEN last_used IS NULL THEN 0
+                ELSE julianday('now') - julianday(last_used)
+            END DESC,
+            success_count ASC,
+            confidence DESC
+        LIMIT ?
+    """,
+        (min_confidence, limit * 2),
+    )
+
+    results = []
+    for row in c.fetchall():
+        effective_conf = _calculate_decay(row[6], row[5])
+        total = row[7] + row[8]
+
+        # Calculate staleness score (0-1, higher = more stale)
+        if row[6] is None:
+            staleness = 1.0  # Never used
+        else:
+            from datetime import datetime
+
+            try:
+                last_used = datetime.fromisoformat(row[6].replace("Z", "+00:00"))
+                days_since = (datetime.now(last_used.tzinfo) - last_used).days
+                staleness = min(1.0, days_since / 30.0)  # Max staleness at 30 days
+            except (ValueError, TypeError):
+                staleness = 0.5
+
+        # Priority score: balance confidence with staleness
+        priority = (row[5] * 0.4) + (staleness * 0.6)
+
+        results.append(
+            {
+                "id": row[0],
+                "type": row[1],
+                "title": row[2],
+                "content": row[3],
+                "domain": row[4],
+                "confidence": row[5],
+                "effective_confidence": effective_conf,
+                "success_rate": row[7] / total if total > 0 else None,
+                "success_count": row[7],
+                "staleness": staleness,
+                "priority": priority,
+            }
+        )
+
+    conn.close()
+    results.sort(key=lambda x: x["priority"], reverse=True)
+    return results[:limit]

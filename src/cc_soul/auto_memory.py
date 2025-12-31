@@ -257,9 +257,12 @@ def track_wisdom_application(text: str) -> int:
     Detect when wisdom is being applied and track it.
 
     Looks for patterns that match stored wisdom titles/content
-    and records when they're being used. Returns count of applications tracked.
+    and records when they're being used. Auto-confirms success to
+    close the feedback loop and increment success_count.
+
+    Returns count of applications tracked.
     """
-    from .wisdom import quick_recall, apply_wisdom
+    from .wisdom import quick_recall, apply_wisdom, confirm_outcome
 
     # Get relevant wisdom for this text
     matches = quick_recall(text, limit=5)
@@ -281,7 +284,11 @@ def track_wisdom_application(text: str) -> int:
 
         if title_lower in text_lower or overlap >= 3:
             try:
-                apply_wisdom(wisdom["id"], context=text[:200])
+                app_id = apply_wisdom(wisdom["id"], context=text[:200])
+                # Auto-confirm success since we detected wisdom in output
+                # This closes the feedback loop and increments success_count
+                if app_id:
+                    confirm_outcome(app_id, success=True)
                 applications += 1
             except Exception:
                 pass
