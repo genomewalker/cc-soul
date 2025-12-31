@@ -2460,6 +2460,119 @@ def list_antahkaranas(limit: int = 5) -> str:
     return "\n".join(lines)
 
 
+@mcp.tool()
+def delegate_thinking(
+    prompt: str,
+    task_id: str = "",
+    model: str = "sonnet",
+    timeout: int = 180,
+    wait: bool = True,
+) -> str:
+    """Delegate a heavy task to a sub-Claude instance for context preservation.
+
+    Sub-Claude does full work, stores complete output in cc-memory,
+    and returns a distilled summary. Main Claude's context is preserved.
+
+    This is the Upanishadic model: Chitta (memory) stores everything,
+    only distilled wisdom flows to active consciousness.
+
+    Args:
+        prompt: The task/question for sub-Claude
+        task_id: Optional ID (generated if not provided)
+        model: Model to use (sonnet for speed, opus for depth)
+        timeout: Max seconds to wait (if wait=True)
+        wait: If True, wait for completion. If False, return immediately.
+    """
+    from .swarm_spawner import delegate_task
+
+    result = delegate_task(
+        prompt=prompt,
+        task_id=task_id if task_id else None,
+        model=model,
+        timeout=timeout,
+        wait=wait,
+    )
+
+    if result.get("status") == "running":
+        return f"Task {result['task_id']} delegated. Check status with get_delegation_result()."
+
+    if result.get("error"):
+        return f"Delegation failed: {result['error']}"
+
+    lines = [
+        f"## Delegated Task: {result['task_id']}",
+        f"Status: {result['status']}",
+        f"Elapsed: {result.get('elapsed', 0):.1f}s",
+        "",
+        "## Summary",
+        result.get('summary', '(no summary)'),
+    ]
+
+    if result.get('full_result_id'):
+        lines.extend([
+            "",
+            f"Full result stored in cc-memory: {result['full_result_id']}",
+            "Use get_delegation_full_result() to retrieve full content.",
+        ])
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def get_delegation_result(task_id: str) -> str:
+    """Get the result of a delegated task.
+
+    Args:
+        task_id: The task ID to check
+    """
+    from .swarm_spawner import get_delegated_result
+
+    result = get_delegated_result(task_id)
+
+    if result.get("status") == "not_found":
+        return f"Task {task_id} not found."
+
+    lines = [
+        f"## Task: {task_id}",
+        f"Status: {result['status']}",
+    ]
+
+    if result.get('started_at'):
+        lines.append(f"Started: {result['started_at']}")
+    if result.get('completed_at'):
+        lines.append(f"Completed: {result['completed_at']}")
+
+    if result.get('summary'):
+        lines.extend(["", "## Summary", result['summary']])
+
+    if result.get('full_result_id'):
+        lines.extend([
+            "",
+            f"Full result ID: {result['full_result_id']}",
+        ])
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def get_delegation_full_result(task_id: str) -> str:
+    """Get the full result content from cc-memory for a delegated task.
+
+    Use when the summary isn't enough and you need full details.
+
+    Args:
+        task_id: The task ID
+    """
+    from .swarm_spawner import get_full_result
+
+    content = get_full_result(task_id)
+
+    if content:
+        return f"## Full Result for {task_id}\n\n{content}"
+    else:
+        return f"No full result found for {task_id}. Task may not have stored to cc-memory yet."
+
+
 # =============================================================================
 # Phenomenological Dimensions - Appreciation and Restraint
 # =============================================================================

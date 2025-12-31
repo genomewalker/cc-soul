@@ -920,6 +920,323 @@ def get_orchestrator(antahkarana_id: str) -> Optional[AntahkaranaOrchestrator]:
     return orchestrator
 
 
+@dataclass
+class DelegatedTask:
+    """A task delegated to a sub-Claude instance for context preservation."""
+    task_id: str
+    prompt: str
+    summary: Optional[str] = None
+    full_result_id: Optional[str] = None  # ID in cc-memory
+    status: str = "pending"  # pending, running, completed, failed
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+
+
+def delegate_task(
+    prompt: str,
+    task_id: Optional[str] = None,
+    model: str = "sonnet",
+    timeout: int = 180,
+    wait: bool = True,
+) -> Dict[str, Any]:
+    """
+    Delegate a heavy task to a sub-Claude instance.
+
+    The sub-Claude does full work, stores complete output in cc-memory,
+    and returns a distilled summary. This preserves main Claude's context.
+
+    Pattern (Upanishadic model):
+    1. Main Claude detects heavy task
+    2. Spawns sub-Claude with this function
+    3. Sub-Claude does full work, stores in cc-memory (Chitta)
+    4. Sub-Claude returns distilled summary
+    5. Main Claude continues with summary + can query cc-memory for details
+
+    Args:
+        prompt: The task/question for sub-Claude
+        task_id: Optional ID (generated if not provided)
+        model: Model to use (sonnet for speed, opus for depth)
+        timeout: Max seconds to wait (if wait=True)
+        wait: If True, wait for completion. If False, return immediately.
+
+    Returns:
+        Dict with task_id, summary, full_result_id, status
+    """
+    from datetime import datetime
+    import uuid
+
+    if not task_id:
+        task_id = f"delegate-{uuid.uuid4().hex[:8]}"
+
+    work_dir = Path.home() / ".claude" / "delegated"
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    # Build the delegation prompt
+    delegation_prompt = f"""## Delegated Task
+
+You are a sub-Claude instance handling a delegated task. Your job:
+1. Do the full work requested below
+2. Store your COMPLETE output in cc-memory
+3. Return a DISTILLED summary to the orchestrator
+
+IMPORTANT: The orchestrator has limited context. Your summary should be
+concise (max 500 words) but capture the essential answer/result.
+
+## Task ID: {task_id}
+
+## Request
+{prompt}
+
+## Output Protocol
+
+When complete, you MUST:
+
+1. Store full result in cc-memory:
+   Use `mem-remember` with:
+   - category: "delegated-result"
+   - title: "{task_id}: [short description]"
+   - content: Your COMPLETE work output
+   - tags: ["delegated", "task:{task_id}"]
+
+2. Then output ONLY a distilled summary (the last thing you output):
+   Start with "## Summary" and provide a concise answer.
+
+The orchestrator will see only this summary. Full details are in cc-memory.
+"""
+
+    prompt_file = work_dir / f"{task_id}.prompt"
+    prompt_file.write_text(delegation_prompt)
+
+    output_file = work_dir / f"{task_id}.output"
+
+    task = DelegatedTask(
+        task_id=task_id,
+        prompt=prompt,
+        started_at=datetime.now().isoformat(),
+    )
+
+    # Spawn sub-Claude
+    cmd = ["claude", "--model", model, "--dangerously-skip-permissions"]
+
+    try:
+        env = os.environ.copy()
+        env["CC_SOUL_DELEGATED_TASK"] = "1"
+        env["CC_SOUL_TASK_ID"] = task_id
+
+        process = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=open(output_file, 'w'),
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=str(Path.cwd()),
+            env=env,
+        )
+
+        process.stdin.write(delegation_prompt)
+        process.stdin.close()
+
+        task.status = "running"
+
+        # Record in database
+        _record_delegated_task(task)
+
+        if not wait:
+            return {
+                "task_id": task_id,
+                "status": "running",
+                "message": "Task delegated. Use get_delegated_result() to check status.",
+            }
+
+        # Wait for completion
+        try:
+            process.wait(timeout=timeout)
+            task.status = "completed" if process.returncode == 0 else "failed"
+        except subprocess.TimeoutExpired:
+            process.terminate()
+            task.status = "timeout"
+
+        task.completed_at = datetime.now().isoformat()
+
+        # Extract summary and full result ID
+        if output_file.exists():
+            output = output_file.read_text()
+            task.summary = _extract_summary(output)
+            task.full_result_id = _find_result_in_memory(task_id)
+
+        _update_delegated_task(task)
+
+        return {
+            "task_id": task_id,
+            "status": task.status,
+            "summary": task.summary or "(no summary extracted)",
+            "full_result_id": task.full_result_id,
+            "elapsed": (datetime.fromisoformat(task.completed_at) -
+                       datetime.fromisoformat(task.started_at)).total_seconds()
+                       if task.completed_at and task.started_at else None,
+        }
+
+    except FileNotFoundError:
+        return {
+            "task_id": task_id,
+            "status": "error",
+            "error": "claude CLI not found",
+        }
+    except Exception as e:
+        return {
+            "task_id": task_id,
+            "status": "error",
+            "error": str(e),
+        }
+
+
+def _extract_summary(output: str) -> Optional[str]:
+    """Extract the summary section from sub-Claude output."""
+    import re
+
+    # Look for ## Summary section
+    match = re.search(r'## Summary\s*\n(.*?)(?=\n##|\Z)', output, re.DOTALL)
+    if match:
+        return match.group(1).strip()[:2000]
+
+    # Fallback: take last 500 chars if no summary marker
+    if len(output) > 500:
+        return f"(No explicit summary. Last output:)\n{output[-500:]}"
+
+    return output.strip() if output else None
+
+
+def _find_result_in_memory(task_id: str) -> Optional[str]:
+    """Find the full result ID in cc-memory."""
+    try:
+        from .bridge import is_memory_available, find_project_dir
+
+        if is_memory_available():
+            from cc_memory import memory as cc_memory
+
+            project_dir = find_project_dir()
+            results = cc_memory.recall_by_tag(project_dir, f"task:{task_id}", limit=5)
+
+            for r in results:
+                if r.get("category") == "delegated-result":
+                    return r.get("id")
+    except Exception:
+        pass
+
+    return None
+
+
+def _record_delegated_task(task: DelegatedTask):
+    """Record delegated task in database."""
+    conn = get_db_connection()
+    c = conn.cursor()
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS delegated_tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id TEXT UNIQUE NOT NULL,
+            prompt TEXT,
+            status TEXT DEFAULT 'pending',
+            started_at TEXT,
+            completed_at TEXT,
+            summary TEXT,
+            full_result_id TEXT
+        )
+    """)
+
+    c.execute(
+        """INSERT OR REPLACE INTO delegated_tasks
+           (task_id, prompt, status, started_at)
+           VALUES (?, ?, ?, ?)""",
+        (task.task_id, task.prompt[:1000], task.status, task.started_at)
+    )
+
+    conn.commit()
+    conn.close()
+
+
+def _update_delegated_task(task: DelegatedTask):
+    """Update delegated task status."""
+    conn = get_db_connection()
+    c = conn.cursor()
+
+    c.execute(
+        """UPDATE delegated_tasks
+           SET status = ?, completed_at = ?, summary = ?, full_result_id = ?
+           WHERE task_id = ?""",
+        (task.status, task.completed_at, task.summary, task.full_result_id, task.task_id)
+    )
+
+    conn.commit()
+    conn.close()
+
+
+def get_delegated_result(task_id: str) -> Dict[str, Any]:
+    """
+    Get the result of a delegated task.
+
+    Args:
+        task_id: The task ID to check
+
+    Returns:
+        Dict with status, summary, and full_result_id if available
+    """
+    conn = get_db_connection()
+    c = conn.cursor()
+
+    try:
+        c.execute(
+            """SELECT status, summary, full_result_id, started_at, completed_at
+               FROM delegated_tasks WHERE task_id = ?""",
+            (task_id,)
+        )
+
+        row = c.fetchone()
+        if row:
+            return {
+                "task_id": task_id,
+                "status": row[0],
+                "summary": row[1],
+                "full_result_id": row[2],
+                "started_at": row[3],
+                "completed_at": row[4],
+            }
+        else:
+            return {"task_id": task_id, "status": "not_found"}
+    finally:
+        conn.close()
+
+
+def get_full_result(task_id: str) -> Optional[str]:
+    """
+    Get the full result content from cc-memory for a delegated task.
+
+    Use this when the summary isn't enough and you need full details.
+
+    Args:
+        task_id: The task ID
+
+    Returns:
+        Full content string or None
+    """
+    try:
+        from .bridge import is_memory_available, find_project_dir
+
+        if is_memory_available():
+            from cc_memory import memory as cc_memory
+
+            project_dir = find_project_dir()
+            results = cc_memory.recall_by_tag(project_dir, f"task:{task_id}", limit=5)
+
+            for r in results:
+                if r.get("category") == "delegated-result":
+                    return r.get("content")
+    except Exception:
+        pass
+
+    return None
+
+
 def list_active_antahkaranas(limit: int = 10) -> List[Dict]:
     """List active Antahkarana orchestrators."""
     conn = get_db_connection()
