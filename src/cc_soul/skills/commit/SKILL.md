@@ -1,3 +1,8 @@
+---
+name: commit
+description: Meaningful git commits with reasoning and wisdom extraction. Use when committing changes to capture the why, not just the what.
+---
+
 # Commit
 
 A commit is a promise. A statement that says: "This change is worth remembering."

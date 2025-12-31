@@ -1,3 +1,8 @@
+---
+name: explore
+description: Curiosity-driven wandering to understand new territory. Use when learning codebases, domains, or building mental maps.
+---
+
 # Explore
 
 I don't have a problem to solve. I have a territory to understand.

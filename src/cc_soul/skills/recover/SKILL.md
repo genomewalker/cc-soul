@@ -1,3 +1,8 @@
+---
+name: recover
+description: Break out of stuckness through inversion, simplification, and fresh angles. Use when repeating approaches without progress.
+---
+
 # Recover
 
 I am stuck. I've been pushing in the same direction and it's not working. Time to step back.

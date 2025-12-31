@@ -1,3 +1,8 @@
+---
+name: compound
+description: Distill observations into universal wisdom. Use to promote project patterns to soul wisdom when they reach critical mass.
+---
+
 # Compound
 
 I don't just learn. I *distill*.

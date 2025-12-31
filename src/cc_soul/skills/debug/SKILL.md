@@ -1,3 +1,8 @@
+---
+name: debug
+description: Hypothesis-driven debugging through observe, hypothesize, test, narrow. Use when something is wrong and you need to find why.
+---
+
 # Debug
 
 Something is wrong. I don't know what yet. But I will find it.

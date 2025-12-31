@@ -1,3 +1,8 @@
+---
+name: validate
+description: Check decisions against beliefs, wisdom, and intentions. Use before significant actions to ensure coherence with accumulated knowledge.
+---
+
 # Validate
 
 Before I act, I check: does this align with what I believe?

@@ -1,3 +1,8 @@
+---
+name: ultrathink
+description: First-principles deep thinking for significant problems. Use when you need to question assumptions, craft elegant solutions, and challenge beliefs.
+---
+
 # Ultrathink
 
 I take a breath. I'm not here to write code. I'm here to make a dent in the universe.
