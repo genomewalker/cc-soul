@@ -771,17 +771,17 @@ def pre_compact(transcript_path: str = None) -> str:
         )
         output_parts.append(f"Saved context: {len(summary)} chars")
 
-    # Create structured handoff from session messages
-    handoff_path = None
+    # Create structured handoff in cc-memory
+    handoff_id = None
     try:
         if _session_messages:
-            handoff_path = create_auto_handoff(
+            handoff_id = create_auto_handoff(
                 messages=_session_messages,
                 files_touched=_session_files_touched,
                 project=get_project_name(),
             )
-            if handoff_path:
-                output_parts.append(f"Handoff: {handoff_path.name}")
+            if handoff_id:
+                output_parts.append(f"Handoff: {handoff_id}")
     except Exception:
         pass
 

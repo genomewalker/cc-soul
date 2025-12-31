@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 
 from .core import get_db_connection, SOUL_DIR
+from .auto_memory import remember_explicit, is_memory_available, find_project_dir
 
 
 class Outcome(Enum):
@@ -205,97 +206,61 @@ def create_handoff(
     blockers: List[str] = None,
     context: str = "",
     project_root: Path = None,
-) -> Path:
+) -> Optional[str]:
     """
-    Create a structured handoff document for session continuation.
+    Create a structured handoff in cc-memory.
 
-    Returns the path to the created handoff file.
+    Returns the observation ID if successful, None otherwise.
     """
-    handoff_dir = get_handoff_dir(project_root)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    handoff_path = handoff_dir / f"handoff-{timestamp}.md"
+    # Build structured content
+    content_parts = []
 
-    lines = []
-
-    # Header
-    lines.append(f"# Session Handoff - {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    lines.append("")
-
-    # Goal
     if goal:
-        lines.append("## Goal")
-        lines.append(goal)
-        lines.append("")
+        content_parts.append(f"**Goal:** {goal}")
 
-    # Summary
-    lines.append("## Summary")
-    lines.append(summary)
-    lines.append("")
-
-    # Status
-    lines.append("## Status")
-    lines.append("")
+    content_parts.append(f"**Summary:** {summary}")
 
     if completed:
-        lines.append("### Completed")
+        content_parts.append("**Completed:**")
         for item in completed:
-            lines.append(f"- [x] {item}")
-        lines.append("")
+            content_parts.append(f"- [x] {item}")
 
     if in_progress:
-        lines.append("### In Progress")
+        content_parts.append("**In Progress:**")
         for item in in_progress:
-            lines.append(f"- [ ] {item}")
-        lines.append("")
+            content_parts.append(f"- [ ] {item}")
 
     if next_steps:
-        lines.append("### Next Steps")
+        content_parts.append("**Next Steps:**")
         for i, step in enumerate(next_steps, 1):
-            lines.append(f"{i}. {step}")
-        lines.append("")
+            content_parts.append(f"{i}. {step}")
 
-    # Key Decisions
     if key_decisions:
-        lines.append("## Key Decisions")
-        for decision in key_decisions:
-            lines.append(f"- {decision}")
-        lines.append("")
+        content_parts.append("**Key Decisions:**")
+        for d in key_decisions:
+            content_parts.append(f"- {d}")
 
-    # Files Touched
-    if files_touched:
-        lines.append("## Files Modified")
-        for f in files_touched[:20]:  # Limit to 20 files
-            lines.append(f"- `{f}`")
-        lines.append("")
-
-    # Learnings
     if learnings:
-        lines.append("## Learnings")
-        for learning in learnings:
-            lines.append(f"- {learning}")
-        lines.append("")
+        content_parts.append("**Learnings:**")
+        for l in learnings:
+            content_parts.append(f"- {l}")
 
-    # Blockers
     if blockers:
-        lines.append("## Blockers")
-        for blocker in blockers:
-            lines.append(f"- {blocker}")
-        lines.append("")
+        content_parts.append("**Blockers:**")
+        for b in blockers:
+            content_parts.append(f"- {b}")
 
-    # Additional Context
+    if files_touched:
+        content_parts.append(f"**Files:** {', '.join(files_touched[:10])}")
+
     if context:
-        lines.append("## Context")
-        lines.append(context)
-        lines.append("")
+        content_parts.append(f"**Context:** {context}")
 
-    # Footer
-    lines.append("---")
-    lines.append(f"*Generated: {datetime.now().isoformat()}*")
+    content = "\n".join(content_parts)
+    title = f"Session handoff: {goal[:50] if goal else summary[:50]}..."
 
-    # Write file
-    handoff_path.write_text("\n".join(lines))
-
-    return handoff_path
+    # Store in cc-memory
+    return remember_explicit("handoff", title, content)
 
 
 def create_auto_handoff(
@@ -303,7 +268,7 @@ def create_auto_handoff(
     files_touched: set = None,
     project: str = "",
     project_root: Path = None,
-) -> Optional[Path]:
+) -> Optional[str]:
     """
     Auto-generate a handoff from session messages.
 
@@ -368,73 +333,84 @@ def create_auto_handoff(
     )
 
 
-def get_latest_handoff(project_root: Path = None) -> Optional[Path]:
-    """Get the most recent handoff file."""
-    handoff_dir = get_handoff_dir(project_root)
+def get_latest_handoff(project_root: Path = None) -> Optional[Dict]:
+    """Get the most recent handoff from cc-memory."""
+    if not is_memory_available():
+        return None
 
-    handoffs = sorted(handoff_dir.glob("handoff-*.md"), reverse=True)
-    return handoffs[0] if handoffs else None
+    try:
+        from cc_memory import memory as cc_memory
+
+        project_dir = find_project_dir()
+        observations = cc_memory.get_recent_observations(project_dir, limit=20)
+
+        # Find most recent handoff
+        for obs in observations:
+            if obs.get("category") == "handoff":
+                return obs
+        return None
+    except Exception:
+        return None
 
 
-def load_handoff(handoff_path: Path) -> Dict[str, Any]:
-    """Load and parse a handoff file."""
-    if not handoff_path.exists():
+def load_handoff(handoff: Dict) -> Dict[str, Any]:
+    """Parse a handoff observation into structured data."""
+    if not handoff:
         return {}
 
-    content = handoff_path.read_text()
+    content = handoff.get("content", "")
 
-    # Simple parsing - extract sections
     result = {
-        "path": str(handoff_path),
+        "id": handoff.get("id", ""),
         "content": content,
         "goal": "",
         "summary": "",
         "completed": [],
+        "in_progress": [],
         "next_steps": [],
+        "timestamp": handoff.get("timestamp", ""),
     }
 
-    current_section = None
+    # Parse structured content
     for line in content.split("\n"):
-        if line.startswith("## Goal"):
-            current_section = "goal"
-        elif line.startswith("## Summary"):
-            current_section = "summary"
-        elif line.startswith("### Completed"):
-            current_section = "completed"
-        elif line.startswith("### Next Steps"):
-            current_section = "next_steps"
-        elif line.startswith("## "):
-            current_section = None
-        elif current_section and line.strip():
-            if current_section in ("goal", "summary"):
-                result[current_section] += line + " "
-            elif current_section in ("completed", "next_steps"):
-                if line.startswith("- ") or line.startswith("1."):
-                    result[current_section].append(line[2:].strip())
+        if line.startswith("**Goal:**"):
+            result["goal"] = line.replace("**Goal:**", "").strip()
+        elif line.startswith("**Summary:**"):
+            result["summary"] = line.replace("**Summary:**", "").strip()
+        elif line.startswith("- [x]"):
+            result["completed"].append(line.replace("- [x]", "").strip())
+        elif line.startswith("- [ ]"):
+            result["in_progress"].append(line.replace("- [ ]", "").strip())
+        elif line[0:2].isdigit() or (len(line) > 1 and line[0].isdigit() and line[1] == "."):
+            result["next_steps"].append(line.split(".", 1)[-1].strip())
 
     return result
 
 
 def list_handoffs(project_root: Path = None, limit: int = 10) -> List[Dict]:
-    """List recent handoffs."""
-    handoff_dir = get_handoff_dir(project_root)
+    """List recent handoffs from cc-memory."""
+    if not is_memory_available():
+        return []
 
-    handoffs = sorted(handoff_dir.glob("handoff-*.md"), reverse=True)[:limit]
+    try:
+        from cc_memory import memory as cc_memory
 
-    result = []
-    for h in handoffs:
-        try:
-            stat = h.stat()
-            result.append({
-                "path": str(h),
-                "name": h.name,
-                "created": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                "size": stat.st_size,
-            })
-        except OSError:
-            pass
+        project_dir = find_project_dir()
+        observations = cc_memory.get_recent_observations(project_dir, limit=50)
 
-    return result
+        result = []
+        for obs in observations:
+            if obs.get("category") == "handoff":
+                result.append({
+                    "id": obs.get("id", ""),
+                    "title": obs.get("title", ""),
+                    "timestamp": obs.get("timestamp", ""),
+                })
+                if len(result) >= limit:
+                    break
+        return result
+    except Exception:
+        return []
 
 
 def cleanup_old_handoffs(keep: int = 20, project_root: Path = None) -> int:
