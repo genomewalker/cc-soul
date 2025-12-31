@@ -927,9 +927,10 @@ def list_active_antahkaranas(limit: int = 10) -> List[Dict]:
 
     try:
         c.execute("""
-            SELECT DISTINCT swarm_id, problem, created_at,
+            SELECT swarm_id, problem, MAX(created_at) as created_at,
                    (SELECT COUNT(*) FROM swarm_solutions WHERE swarm_solutions.swarm_id = swarm_tasks.swarm_id) as insight_count
             FROM swarm_tasks
+            GROUP BY swarm_id
             ORDER BY created_at DESC
             LIMIT ?
         """, (limit,))
