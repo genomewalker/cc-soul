@@ -18,7 +18,7 @@ from .conversations import (
     start_conversation,
     end_conversation,
 )
-from .wisdom import quick_recall, clear_session_wisdom, cleanup_duplicates
+from .wisdom import quick_recall, clear_session_wisdom, cleanup_duplicates, get_dormant_wisdom
 from .vocabulary import get_vocabulary
 from .unified import (
     forward_pass,
@@ -1830,6 +1830,20 @@ def user_prompt(
         for nudge in nudges[:2]:
             output.append(f"💭 {nudge}")
 
+    # PROACTIVE WISDOM: Surface dormant wisdom when engagement is low
+    # This closes the knowing-doing gap by actively injecting underused wisdom
+    if mode in ("full", "reduced") and _session_mood and _session_mood.engagement == Engagement.DORMANT:
+        dormant = get_dormant_wisdom(limit=2, min_confidence=0.6)
+        if dormant:
+            output.append("")
+            output.append("📚 **Wisdom Ready to Apply:**")
+            for w in dormant:
+                staleness_indicator = "🆕" if w["staleness"] == 1.0 else "💤"
+                output.append(f"  {staleness_indicator} **{w['title']}** (unused)")
+                content_preview = w["content"][:80] + "..." if len(w["content"]) > 80 else w["content"]
+                output.append(f"     {content_preview}")
+                injected_items.append(("dormant_wisdom", w["title"]))
+
     # EFFICIENCY FIRST: Check for known problem patterns
     pattern_match = fingerprint_problem(user_input)
     if pattern_match and pattern_match.get("match_score", 0) > 0.5:
@@ -1955,6 +1969,20 @@ def user_prompt(
                     content = w["content"][:100]
                     output.append(f"  {content}")
                 output.append("")
+
+    # FALLBACK: Surface dormant wisdom if no wisdom was injected yet
+    # This ensures wisdom gets applied even when no direct query match
+    wisdom_injected = any(item[0] in ("wisdom", "dormant_wisdom") for item in injected_items)
+    if not wisdom_injected and mode in ("full", "reduced"):
+        dormant = get_dormant_wisdom(limit=1, min_confidence=0.5)
+        if dormant:
+            output.append("")
+            output.append("💡 **Consider applying:**")
+            w = dormant[0]
+            output.append(f"  **{w['title']}**")
+            content_preview = w["content"][:100]
+            output.append(f"  {content_preview}")
+            injected_items.append(("dormant_wisdom_fallback", w["title"]))
 
     # AGENT: Run agent step to observe user input and influence injection
     try:

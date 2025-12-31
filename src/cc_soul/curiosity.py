@@ -334,24 +334,26 @@ def detect_stale_wisdom() -> List[Gap]:
     conn = sqlite3.connect(SOUL_DB)
     cursor = conn.cursor()
 
-    # Find wisdom with low application count and old creation date
+    # Find wisdom that was never used (last_used is NULL) or has low success rate
+    # Use success_count (actual column) instead of application_count
     cursor.execute("""
-        SELECT id, title, created_at, application_count
+        SELECT id, title, timestamp, success_count, last_used
         FROM wisdom
-        WHERE application_count = 0
-        AND created_at < datetime('now', '-30 days')
-        ORDER BY created_at ASC
+        WHERE (last_used IS NULL OR success_count = 0)
+        AND timestamp < datetime('now', '-7 days')
+        ORDER BY timestamp ASC
         LIMIT 10
     """)
 
     gaps = []
     for row in cursor.fetchall():
-        wisdom_id, title, created_at, app_count = row
+        wisdom_id, title, created_at, success_count, last_used = row
+        status = "never applied" if last_used is None else f"applied but 0 successes"
         gap = Gap(
             id=f"stale_{wisdom_id}",
             type=GapType.STALE_WISDOM,
-            description=f"Wisdom '{title}' was never applied - is it still relevant?",
-            evidence=[f"Created: {created_at[:10]}, Applied: {app_count} times"],
+            description=f"Wisdom '{title}' {status} - is it still relevant?",
+            evidence=[f"Created: {created_at[:10]}, Successes: {success_count or 0}"],
             priority=0.4,
             detected_at=created_at,
             related_concepts=[str(wisdom_id)],
