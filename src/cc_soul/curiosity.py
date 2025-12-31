@@ -163,14 +163,14 @@ def detect_repeated_corrections() -> List[Gap]:
 
     _ensure_curiosity_tables()
 
-    # Get correction observations
+    # Get correction observations from session_observations table
     conn = sqlite3.connect(SOUL_DB)
     cursor = conn.cursor()
 
     cursor.execute("""
         SELECT content, COUNT(*) as count
-        FROM observations
-        WHERE type = 'correction'
+        FROM session_observations
+        WHERE observation_type = 'correction'
         GROUP BY content
         HAVING count >= 2
         ORDER BY count DESC
