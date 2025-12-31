@@ -306,9 +306,10 @@ class Antahkarana:
         problem: str,
         constraints: List[str] = None,
         context: str = "",
-        swarm_id: str = None,  # Keep for backward compat
+        swarm_id: str = None,  # Backward compat alias
+        antahkarana_id: str = None,
     ):
-        self.swarm_id = swarm_id or str(uuid.uuid4())[:8]
+        self.antahkarana_id = antahkarana_id or swarm_id or str(uuid.uuid4())[:8]
         self.problem = problem
         self.constraints = constraints or []
         self.context = context
@@ -318,6 +319,16 @@ class Antahkarana:
 
         init_soul()
         _ensure_convergence_tables()
+
+    @property
+    def swarm_id(self) -> str:
+        """Backward compatibility alias for antahkarana_id."""
+        return self.antahkarana_id
+
+    @property
+    def insights(self) -> List["VoiceSolution"]:
+        """Upanishadic alias for solutions."""
+        return self.solutions
 
     def add_voice(
         self,

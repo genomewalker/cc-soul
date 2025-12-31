@@ -695,9 +695,9 @@ def find_proactive_candidates() -> list:
     for r in cur.fetchall():
         if r[3]:
             days = days_since(r[3])
-            reason = f"High-confidence ({r[2]:.0%}) wisdom unused for {days} days"
+            reason = f"unused {days}d ({r[2]:.0%})"
         else:
-            reason = f"High-confidence ({r[2]:.0%}) wisdom never used"
+            reason = f"never applied ({r[2]:.0%})"
         candidates.append({
             "entity_type": "wisdom",
             "entity_id": r[0],
@@ -1025,7 +1025,9 @@ def get_temporal_context() -> str:
     # Proactive items
     proactive = get_proactive_items(limit=2)
     for p in proactive:
-        lines.append(f"⏰ {p['reason']}")
+        # Look up title from entity if available
+        title = p.get('title') or p.get('entity_id', 'item')
+        lines.append(f"⏰ {title}: {p['reason']}")
 
     # Trends
     trends = get_temporal_trends(days=7)
