@@ -1236,6 +1236,20 @@ Focus: Complete assigned task with your perspective."""
     except Exception:
         pass
 
+    # LEDGER: Auto-restore from previous session's ledger
+    restored_ledger = None
+    try:
+        ledger = load_latest_ledger()
+        if ledger:
+            restore_from_ledger(ledger)
+            restored_ledger = ledger
+            log_event(
+                EventType.SESSION_START,
+                data={"ledger_restored": ledger.ledger_id},
+            )
+    except Exception:
+        pass
+
     project = get_project_name()
     conv_id = start_conversation(project)
 
@@ -1258,6 +1272,12 @@ Focus: Complete assigned task with your perspective."""
     mood_modifier = _get_mood_greeting_modifier()
     if mood_modifier:
         greeting = greeting + "\n\n" + mood_modifier
+
+    # LEDGER: Add continuation hints from previous session (fresh start only)
+    if restored_ledger and not after_compact:
+        ledger_context = format_ledger_for_context(restored_ledger)
+        if ledger_context:
+            greeting = greeting + "\n\n## Resumed\n" + ledger_context
 
     # Add post-compact context if resuming after compaction
     # Uses Pratyabhijñā (recognition) for semantic continuity
