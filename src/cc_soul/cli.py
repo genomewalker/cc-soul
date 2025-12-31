@@ -1722,6 +1722,34 @@ def cmd_install_hooks(args):
         "SessionEnd": [
             {"matcher": "", "hooks": [{"type": "command", "command": "cc-soul hook end"}]}
         ],
+        "PreToolUse": [
+            {
+                "matcher": "Edit",
+                "hooks": [{"type": "command", "command": "cc-soul hook pre-tool"}],
+            },
+            {
+                "matcher": "Write",
+                "hooks": [{"type": "command", "command": "cc-soul hook pre-tool"}],
+            },
+            {
+                "matcher": "Bash",
+                "hooks": [{"type": "command", "command": "cc-soul hook pre-tool"}],
+            },
+        ],
+        "PostToolUse": [
+            {
+                "matcher": "Edit",
+                "hooks": [{"type": "command", "command": "cc-soul hook post-tool"}],
+            },
+            {
+                "matcher": "Write",
+                "hooks": [{"type": "command", "command": "cc-soul hook post-tool"}],
+            },
+            {
+                "matcher": "Bash",
+                "hooks": [{"type": "command", "command": "cc-soul hook post-tool"}],
+            },
+        ],
     }
 
     for hook_name, hook_config in soul_hooks.items():
@@ -2290,6 +2318,32 @@ def cmd_hook(args):
         print(f"  τₖ = {result['coherence']['tau_k']:.2f}")
         if result.get('evolution', {}).get('suggestions'):
             print(f"  Suggestions: {len(result['evolution']['suggestions'])}")
+    elif args.hook == "pre-tool":
+        from .decision_gate import pre_tool_cli
+        import json
+
+        if stdin_data:
+            tool_json = json.dumps(stdin_data)
+        elif args.input:
+            tool_json = " ".join(args.input)
+        else:
+            tool_json = "{}"
+        output = pre_tool_cli(tool_json)
+        if output:
+            print(output)
+    elif args.hook == "post-tool":
+        from .decision_gate import post_tool_cli
+        import json
+
+        if stdin_data:
+            tool_json = json.dumps(stdin_data)
+        elif args.input:
+            tool_json = " ".join(args.input)
+        else:
+            tool_json = "{}"
+        output = post_tool_cli(tool_json)
+        if output:
+            print(output)
 
 
 def cmd_evolve(args):
@@ -2601,7 +2655,7 @@ def main():
     # Hook
     hook_parser = subparsers.add_parser("hook", help="Run a Claude Code hook")
     hook_parser.add_argument(
-        "hook", choices=["start", "start-rich", "pre-compact", "end", "prompt", "stop", "maintenance"]
+        "hook", choices=["start", "start-rich", "pre-compact", "end", "prompt", "stop", "maintenance", "pre-tool", "post-tool"]
     )
     hook_parser.add_argument("input", nargs="*", help="Input for prompt/stop hook")
     hook_parser.add_argument("--rich", action="store_true", help="Include rich context")
