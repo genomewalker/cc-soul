@@ -217,13 +217,13 @@ def harmonize_real_antahkarana(antahkarana_id: str, pramana: str = "samvada") ->
 
     return f"""## Harmonized: {antahkarana_id}
 
-Pramana: {result.pramana_used.value}
-Shraddha: {result.shraddha:.0%}
+Pramana: {result.strategy_used.value}
+Shraddha: {result.confidence:.0%}
 Contributing voices: {len(result.contributing_voices)}
 
 ### Wisdom
 
-{result.wisdom}
+{result.final_solution}
 
 ### Notes
 

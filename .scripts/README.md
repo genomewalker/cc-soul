@@ -136,6 +136,23 @@ python -m cc_soul.mcp_tools._mcp_builder
 **Current status:** Prototype with 2 sample modules (backup.py, dreams.py = 6 tools).
 Full migration requires extracting all ~130 tools from current mcp_server.py.
 
+## test_antahkarana_convergence.py
+
+Tests the Antahkarana convergence system with correct attribute names.
+
+**What it tests:**
+- `VoiceTask` uses `perspective` (not deprecated `voice`)
+- `VoiceSolution` uses `perspective` and `confidence` (not `voice`/`shraddha`)
+- `SamvadaResult` uses `strategy_used`, `final_solution`, `confidence` (not deprecated names)
+- Full flow: awaken → submit insights → harmonize → retrieve
+
+**Run:**
+```bash
+python3 .scripts/test_antahkarana_convergence.py
+```
+
+**Expected output:** All attribute checks pass, full convergence flow works.
+
 ## extract_mcp_tools.py
 
 Initial extraction of tool sections from mcp_server.py into mcp_tools/.
