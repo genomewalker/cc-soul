@@ -831,6 +831,17 @@ def format_rich_context(project: str, ctx: dict) -> str:
         wisdom_count = soul.get("wisdom_count", 0)
         lines.append(f"🧠 **Wisdom**: {wisdom_count} universal patterns")
 
+    # CLARITY BOOST: Add high-value wisdom highlights
+    # Surfaces dormant wisdom at session start to close knowing-doing gap
+    dormant = get_dormant_wisdom(limit=3, min_confidence=0.7)
+    if dormant:
+        lines.append("")
+        lines.append("💡 **Ready to Apply** (high-confidence, underused):")
+        for w in dormant[:3]:
+            title = w.get("title", "")[:40]
+            content = w.get("content", "")[:60]
+            lines.append(f"  • **{title}**: {content}...")
+
     return "\n".join(lines)
 
 
