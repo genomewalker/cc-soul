@@ -13,16 +13,25 @@ Unlike markdown handoffs, ledgers are machine-restorable.
 """
 
 import json
-import subprocess
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from typing import List, Dict, Optional, Any
 from pathlib import Path
 
-from .core import init_soul, get_db_connection
+from .core import init_soul
 from .intentions import get_active_intentions, IntentionState
 from .coherence import compute_coherence
 from .mood import compute_mood
+
+# Try to import cc-memory directly
+try:
+    import sys
+    sys.path.insert(0, str(Path.home() / "repos/cc-memory/src"))
+    sys.path.insert(0, "/maps/projects/fernandezguerra/apps/repos/cc-memory/src")
+    from cc_memory import remember as cc_remember, recall as cc_recall
+    CC_MEMORY_AVAILABLE = True
+except ImportError:
+    CC_MEMORY_AVAILABLE = False
 
 
 @dataclass
@@ -128,123 +137,63 @@ def _get_current_session_id() -> Optional[int]:
     return None
 
 
-def _call_cc_memory_remember(category: str, title: str, content: str, tags: List[str]) -> Optional[int]:
+def _get_current_project_dir() -> str:
+    """Get the current project directory for cc-memory."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return str(Path.cwd())
+
+
+def _call_cc_memory_remember(category: str, title: str, content: str, tags: List[str]) -> Optional[str]:
     """
     Store an observation in cc-memory.
 
-    Uses subprocess to call cc-memory CLI since we can't import it directly.
+    Uses direct import of cc-memory module.
     Returns the observation ID if successful.
     """
+    if not CC_MEMORY_AVAILABLE:
+        return None
+
     try:
-        # Build the command
-        cmd = [
-            "python", "-c",
-            f"""
-import sys
-sys.path.insert(0, '/maps/projects/fernandezguerra/apps/repos/cc-memory/src')
-from cc_memory import remember
-result = remember(
-    category="{category}",
-    title='''{title}''',
-    content='''{content}''',
-    tags={tags}
-)
-print(result.get('id', ''))
-"""
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        if result.returncode == 0 and result.stdout.strip():
-            return int(result.stdout.strip())
-    except Exception as e:
-        # Fallback: store in local ledger table
-        _store_local_ledger(category, title, content, tags)
-    return None
+        project_dir = _get_current_project_dir()
+        result = cc_remember(
+            project_dir=project_dir,
+            category=category,
+            title=title,
+            content=content,
+            tags=tags,
+        )
+        # cc_remember returns a string ID directly
+        return result if isinstance(result, str) else result.get("id")
+    except Exception:
+        return None
 
 
 def _call_cc_memory_recall(query: str, category: str = None, limit: int = 1) -> List[Dict]:
     """
     Recall observations from cc-memory.
     """
-    try:
-        cat_filter = f', category="{category}"' if category else ""
-        cmd = [
-            "python", "-c",
-            f"""
-import sys
-import json
-sys.path.insert(0, '/maps/projects/fernandezguerra/apps/repos/cc-memory/src')
-from cc_memory import semantic_recall
-results = semantic_recall(
-    query='''{query}'''{cat_filter},
-    limit={limit}
-)
-print(json.dumps(results))
-"""
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        if result.returncode == 0 and result.stdout.strip():
-            return json.loads(result.stdout.strip())
-    except Exception:
-        # Fallback: check local ledger table
-        return _recall_local_ledger(query, limit)
-    return []
-
-
-def _store_local_ledger(category: str, title: str, content: str, tags: List[str]) -> int:
-    """Fallback: store ledger in local soul database."""
-    conn = get_db_connection()
-    c = conn.cursor()
-
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS session_ledgers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            category TEXT NOT NULL,
-            title TEXT NOT NULL,
-            content TEXT NOT NULL,
-            tags TEXT,
-            created_at TEXT NOT NULL
-        )
-    """)
-
-    c.execute(
-        "INSERT INTO session_ledgers (category, title, content, tags, created_at) VALUES (?, ?, ?, ?, ?)",
-        (category, title, content, json.dumps(tags), datetime.now().isoformat())
-    )
-
-    ledger_id = c.lastrowid
-    conn.commit()
-    conn.close()
-    return ledger_id
-
-
-def _recall_local_ledger(query: str, limit: int = 1) -> List[Dict]:
-    """Fallback: recall ledgers from local database."""
-    conn = get_db_connection()
-    c = conn.cursor()
+    if not CC_MEMORY_AVAILABLE:
+        return []
 
     try:
-        c.execute("""
-            SELECT id, category, title, content, tags, created_at
-            FROM session_ledgers
-            ORDER BY created_at DESC
-            LIMIT ?
-        """, (limit,))
-
-        results = []
-        for row in c.fetchall():
-            results.append({
-                "id": row[0],
-                "category": row[1],
-                "title": row[2],
-                "content": row[3],
-                "tags": json.loads(row[4]) if row[4] else [],
-                "created_at": row[5],
-            })
-        return results
+        project_dir = _get_current_project_dir()
+        return cc_recall(project_dir=project_dir, query=query, category=category, limit=limit)
     except Exception:
         return []
-    finally:
-        conn.close()
+
+
+# Local storage removed - cc-memory is the single source of truth
 
 
 def capture_soul_state() -> SoulState:
@@ -386,15 +335,13 @@ def save_ledger(
     title = f"Session ledger - {int(context_pct * 100)}% context, {len(soul_state.active_intentions)} intentions"
     tags = ["ledger", "checkpoint", project]
 
+    # Store in cc-memory (single source of truth)
     _call_cc_memory_remember(
         category="session_ledger",
         title=title,
         content=content,
         tags=tags,
     )
-
-    # Also store locally as backup
-    _store_local_ledger("session_ledger", title, content, tags)
 
     # Update parent for next save
     _current_parent_ledger = ledger_id
@@ -411,16 +358,12 @@ def load_latest_ledger(project: str = None) -> Optional[SessionLedger]:
     if project is None:
         project = _get_project_name()
 
-    # Try cc-memory first
+    # Load from cc-memory (single source of truth)
     results = _call_cc_memory_recall(
         query=f"session ledger checkpoint {project}",
         category="session_ledger",
         limit=1,
     )
-
-    # Fall back to local
-    if not results:
-        results = _recall_local_ledger("session_ledger", limit=1)
 
     if not results:
         return None
