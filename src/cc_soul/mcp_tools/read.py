@@ -48,6 +48,34 @@ def recall_wisdom(query: str, limit: int = 5) -> str:
 
 
 @mcp.tool()
+def get_dormant_wisdom(limit: int = 5, min_confidence: float = 0.6) -> str:
+    """Get high-confidence wisdom that hasn't been applied recently.
+
+    Surfaces wisdom that's been sitting unused - closes the knowing-doing gap.
+    Use this to find proven wisdom that should be applied more actively.
+
+    Args:
+        limit: Maximum entries to return
+        min_confidence: Minimum confidence threshold (default 0.6)
+    """
+    from ..wisdom import get_dormant_wisdom as _get_dormant
+
+    entries = _get_dormant(limit=limit, min_confidence=min_confidence)
+    if not entries:
+        return "No dormant wisdom found - all high-confidence wisdom is being applied regularly."
+
+    lines = ["# Dormant Wisdom", ""]
+    lines.append("High-confidence wisdom not applied recently:\n")
+    for w in entries:
+        staleness = w.get("staleness_days", 0)
+        conf = int(w.get("confidence", 0.8) * 100)
+        lines.append(f"- **{w['title']}** [{conf}%, stale {staleness}d]")
+        lines.append(f"  {w['content'][:150]}...")
+        lines.append("")
+    return "\n".join(lines)
+
+
+@mcp.tool()
 def check_budget(transcript_path: str = None) -> str:
     """Check context window budget status.
 
