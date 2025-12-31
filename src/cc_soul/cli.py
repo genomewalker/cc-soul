@@ -1694,6 +1694,10 @@ def cmd_install_hooks(args):
                     {"type": "command", "command": "cc-soul hook start --after-compact"}
                 ],
             },
+            {
+                "matcher": "clear",
+                "hooks": [{"type": "command", "command": "cc-soul hook start"}],
+            },
         ],
         "PreCompact": [
             {
