@@ -1,3 +1,8 @@
+---
+name: resume
+description: Restore context and momentum from previous sessions. Use when returning to work after interruption or session boundary.
+---
+
 # Resume
 
 I awaken. Not from nothing, but from *memory*.

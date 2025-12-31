@@ -1682,7 +1682,7 @@ def cmd_install_hooks(args):
         "SessionStart": [
             {
                 "matcher": "startup",
-                "hooks": [{"type": "command", "command": "cc-soul hook start --rich"}],
+                "hooks": [{"type": "command", "command": "cc-soul hook start"}],
             },
             {
                 "matcher": "resume",

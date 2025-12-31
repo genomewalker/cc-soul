@@ -306,11 +306,16 @@ def get_parent_session_id() -> Optional[str]:
 def log_budget_to_memory(
     budget: ContextBudget = None,
     transcript_path: str = None,
+    force: bool = False,
 ) -> Optional[str]:
     """
     Log current budget status to cc-memory for cross-instance awareness.
 
-    Returns observation ID if logged, None if cc-memory unavailable.
+    Only logs on state transitions (RELAXED→COMPACT→EMERGENCY) to avoid
+    flooding memory with redundant budget entries. Use force=True to
+    always log regardless of state change.
+
+    Returns observation ID if logged, None if skipped or unavailable.
     """
     try:
         from .bridge import is_memory_available
@@ -341,6 +346,13 @@ def log_budget_to_memory(
         else:
             pressure = "RELAXED"
 
+        # Only log on state transitions to reduce noise
+        if not force:
+            last_pressure = _get_last_logged_pressure(session_id)
+            if last_pressure == pressure:
+                return None  # No state change, skip logging
+            _save_last_logged_pressure(session_id, pressure)
+
         # Log to cc-memory with budget tag
         parent_line = f"\nParent: {parent_id}" if parent_id else ""
         content = f"""Session {session_id}: {pct}% remaining ({budget.remaining:,} tokens)
@@ -361,6 +373,22 @@ Timestamp: {budget.timestamp}{parent_line}"""
 
     except Exception:
         return None
+
+
+def _get_last_logged_pressure(session_id: str) -> Optional[str]:
+    """Get the last logged pressure level for a session."""
+    pressure_file = SOUL_DIR / ".budget_pressure" / f"{session_id}.txt"
+    if pressure_file.exists():
+        return pressure_file.read_text().strip()
+    return None
+
+
+def _save_last_logged_pressure(session_id: str, pressure: str):
+    """Save the current pressure level for a session."""
+    pressure_dir = SOUL_DIR / ".budget_pressure"
+    pressure_dir.mkdir(parents=True, exist_ok=True)
+    pressure_file = pressure_dir / f"{session_id}.txt"
+    pressure_file.write_text(pressure)
 
 
 def get_all_session_budgets() -> List[Dict]:

@@ -1,3 +1,8 @@
+---
+name: backup
+description: Preserve soul state across time. Use for session-end backups, before major changes, or weekly maintenance.
+---
+
 # Soul Backup
 
 Preserve the soul across time.

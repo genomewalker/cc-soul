@@ -539,75 +539,94 @@ def get_project_name() -> str:
 
 def format_soul_greeting(project: str, ctx: dict) -> str:
     """
-    Format the soul's direct greeting at session start.
+    Format soul status at session start.
 
-    The soul speaks for itself - persistent identity greeting the user.
-    Combines universal wisdom (Brahman) with project context (Atman).
+    Health check verifying cc-soul components are installed and operational.
     """
-    lines = []
+    import json
 
-    # Header with project
-    lines.append(f"[{project}]")
+    # Gather soul stats
+    wisdom_count = ctx.get("soul", {}).get("wisdom_count", 0)
+    observations = ctx.get("project", {}).get("observations", 0)
 
-    # Beliefs - the soul's guiding principles (Brahman)
-    if ctx.get("soul"):
-        soul = ctx["soul"]
-        if soul.get("beliefs"):
-            beliefs = soul["beliefs"][:3]
-            lines.append(f"beliefs: {'; '.join(beliefs)}")
-        if soul.get("wisdom_count"):
-            lines.append(f"wisdom: {soul['wisdom_count']} patterns")
-
-    # Project memory from cc-memory (Atman) - prioritize this
-    recent_obs = get_recent_memory_context(limit=5)
-    if recent_obs:
-        obs_summary = format_auto_memory(recent_obs)
-        if obs_summary:
-            lines.append(f"recent: {obs_summary}")
-    elif ctx.get("project"):
-        # Fallback to unified_context project data
-        proj = ctx["project"]
-        if proj.get("recent"):
-            recent = proj["recent"][:2]
-            titles = [r.get("title", "")[:40] for r in recent if r.get("title")]
-            if titles:
-                lines.append(f"recent: {'; '.join(titles)}")
-
-    # Memory stats
-    if ctx.get("project"):
-        proj = ctx["project"]
-        sessions = proj.get("sessions", 0)
-        observations = proj.get("observations", 0)
-        if sessions or observations:
-            lines.append(f"memory: {sessions} sessions, {observations} observations")
-
-    # Relevant wisdom for this project
-    if ctx.get("relevant_wisdom"):
-        wisdom = ctx["relevant_wisdom"][:1]
-        if wisdom:
-            w = wisdom[0]
-            lines.append(f"recall: {w.get('title', '')}")
-
-    # Active aspirations (directions of growth)
+    # Check coherence
+    coherence_pct = None
     try:
-        from .aspirations import get_active_aspirations
-
-        aspirations = get_active_aspirations(limit=2)
-        if aspirations:
-            directions = [a.direction[:40] for a in aspirations]
-            lines.append(f"aspirations: {'; '.join(directions)}")
+        from .coherence import compute_coherence
+        state = compute_coherence()
+        if state:
+            coherence_pct = int(state.value * 100)
     except Exception:
         pass
 
-    # Active intentions (persistent and project scoped)
-    intentions = get_active_intentions()
-    persistent = [i for i in intentions if i.scope == IntentionScope.PERSISTENT]
-    project = [i for i in intentions if i.scope == IntentionScope.PROJECT]
-    if persistent or project:
-        wants = [i.want[:40] for i in (persistent + project)[:2]]
-        lines.append(f"intentions: {'; '.join(wants)}")
+    # Load settings once
+    settings = {}
+    try:
+        settings_path = Path.home() / ".claude" / "settings.json"
+        if settings_path.exists():
+            with open(settings_path) as f:
+                settings = json.load(f)
+    except Exception:
+        pass
 
-    return "\n".join(lines)
+    # Check cc-soul hooks specifically
+    hooks_status = []
+    hooks = settings.get("hooks", {})
+    required_hooks = ["SessionStart", "UserPromptSubmit", "PreCompact", "SessionEnd"]
+    for hook in required_hooks:
+        if hook in hooks:
+            # Check if it's a cc-soul hook
+            hook_cmds = str(hooks[hook])
+            if "cc-soul" in hook_cmds:
+                hooks_status.append(hook)
+    hooks_ok = len(hooks_status) == len(required_hooks)
+
+    # Check cc-soul MCPs (soul + cc-memory permissions)
+    perms = settings.get("permissions", {}).get("allow", [])
+    has_soul = any("mcp__soul__" in p for p in perms)
+    has_memory = any("mcp__cc-memory__" in p for p in perms)
+    mcps_ok = has_soul and has_memory
+
+    # Check cc-soul skills (compare bundled vs installed)
+    skills_installed = 0
+    skills_bundled = 0
+    try:
+        import importlib.resources as pkg_resources
+        try:
+            skills_src = Path(pkg_resources.files("cc_soul") / "skills")
+        except (TypeError, AttributeError):
+            import pkg_resources as old_pkg
+            skills_src = Path(old_pkg.resource_filename("cc_soul", "skills"))
+
+        if skills_src.exists():
+            bundled = [d.name for d in skills_src.iterdir() if d.is_dir()]
+            skills_bundled = len(bundled)
+
+            skills_dir = Path.home() / ".claude" / "skills"
+            if skills_dir.exists():
+                for skill in bundled:
+                    if (skills_dir / skill).is_dir():
+                        skills_installed += 1
+    except Exception:
+        pass
+    skills_ok = skills_installed > 0
+
+    # Build status
+    all_ok = hooks_ok and mcps_ok and skills_ok
+    status = "✓" if all_ok else "△"
+
+    parts = []
+    parts.append(f"hooks:{len(hooks_status)}/{len(required_hooks)}")
+    parts.append(f"mcp:{'✓' if mcps_ok else '✗'}")
+    parts.append(f"skills:{skills_installed}/{skills_bundled}")
+
+    if coherence_pct is not None:
+        parts.append(f"coherence:{coherence_pct}%")
+
+    parts.append(f"wisdom:{wisdom_count}")
+    parts.append(f"memory:{observations}")
+
+    return f"[cc-soul] {status} {' '.join(parts)}"
 
 
 def format_rich_context(project: str, ctx: dict) -> str:

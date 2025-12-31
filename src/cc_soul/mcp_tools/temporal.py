@@ -168,33 +168,6 @@ def get_belief_history(belief_id: str) -> str:
 
 
 @mcp.tool()
-def find_cross_project_patterns(min_occurrences: int = 2) -> str:
-    """Find patterns that recur across multiple projects.
-
-    These are candidates for promotion to universal wisdom -
-    they've proven themselves in different contexts.
-
-    Args:
-        min_occurrences: Minimum times pattern must appear
-    """
-    from .temporal import find_cross_project_wisdom, init_temporal_tables
-
-    init_temporal_tables()
-    patterns = find_cross_project_wisdom(min_occurrences=min_occurrences)
-
-    if not patterns:
-        return "No cross-project patterns found yet. Patterns emerge as you work across projects."
-
-    lines = ["Cross-Project Patterns (wisdom candidates):", ""]
-    for p in patterns:
-        projects = ", ".join(p["projects"][:3])
-        lines.append(f"  [{p['occurrence_count']}x] {p['title']}")
-        lines.append(f"      Projects: {projects}")
-
-    return "\n".join(lines)
-
-
-@mcp.tool()
 def promote_cross_project_pattern(pattern_id: int) -> str:
     """Promote a cross-project pattern to universal wisdom.
 

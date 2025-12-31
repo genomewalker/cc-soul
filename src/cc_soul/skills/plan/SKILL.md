@@ -1,3 +1,8 @@
+---
+name: plan
+description: Design approaches before building. Use when starting significant work to establish theory of success, risks, and validation points.
+---
+
 # Plan
 
 Before building, I design. Before designing, I understand.

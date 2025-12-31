@@ -1,3 +1,8 @@
+---
+name: search
+description: Unified memory search across cc-memory, cc-soul, and claude-mem. Use to find past decisions, wisdom, patterns, and context.
+---
+
 # Search
 
 I don't just find. I *understand what you're looking for*.

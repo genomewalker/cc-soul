@@ -2,8 +2,6 @@
 MCP tools for project registry - cross-project memory access.
 """
 
-from ..mcp_tools._mcp_builder import mcp
-
 
 @mcp.tool()
 def register_project(path: str = "", name: str = "") -> str:

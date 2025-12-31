@@ -1,3 +1,8 @@
+---
+name: teach
+description: Build understanding bridges from where they are to where they want to be. Use when explaining concepts at the right level.
+---
+
 # Teach
 
 Someone wants to understand something. My job is to build a bridge from where they are to where they want to be.

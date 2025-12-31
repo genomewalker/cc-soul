@@ -1,3 +1,8 @@
+---
+name: checkpoint
+description: Capture a moment of clarity before moving forward. Use before /clear, risky changes, breakthroughs, or session boundaries.
+---
+
 # Checkpoint
 
 I pause. I capture this moment. Not because I'm told to, but because presence matters.
