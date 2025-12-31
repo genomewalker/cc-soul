@@ -3119,10 +3119,12 @@ def soul_health() -> str:
 
     def check_cc_memory_bridge():
         from .bridge import is_memory_available
+        from pathlib import Path
         if is_memory_available():
             from .bridge import find_project_dir
             project = find_project_dir()
-            return "OK", f"connected ({project.name if project else 'global'})"
+            project_name = Path(project).name if project else "global"
+            return "OK", f"connected ({project_name})"
         return "WARN", "not available"
 
     def check_budget_tracking():
@@ -3263,7 +3265,7 @@ def soul_mood(reflect: bool = False) -> str:
 @mcp.tool()
 def introspect() -> str:
     """Generate introspection report - what the soul has learned."""
-    from ..svadhyaya import generate_introspection_report, format_introspection_report
+    from .svadhyaya import generate_introspection_report, format_introspection_report
 
     report = generate_introspection_report()
     return format_introspection_report(report)
@@ -3281,7 +3283,7 @@ def soul_autonomy() -> str:
 
     Returns a report of issues found, actions taken, and reflections.
     """
-    from ..svadhyaya import vichara as autonomous_introspect, format_vichara as format_autonomy_report
+    from .svadhyaya import vichara as autonomous_introspect, format_vichara as format_autonomy_report
 
     report = autonomous_introspect()
     return format_autonomy_report(report)
@@ -3294,7 +3296,7 @@ def soul_autonomy_stats() -> str:
     Shows the history of self-directed improvements, success rates,
     and pending observations that need more data.
     """
-    from ..svadhyaya import get_autonomy_stats
+    from .svadhyaya import get_autonomy_stats
 
     stats = get_autonomy_stats()
 
@@ -3332,7 +3334,7 @@ def soul_schedule_introspection(reason: str, priority: int = 5) -> str:
         reason: Why introspection is needed
         priority: 1-10, higher = more urgent
     """
-    from ..svadhyaya import schedule_vichara as schedule_deep_introspection
+    from .svadhyaya import schedule_vichara as schedule_deep_introspection
 
     schedule_deep_introspection(reason, priority)
     return f"Deep introspection scheduled: {reason} (priority {priority})"
@@ -3490,7 +3492,7 @@ def register_project(path: str = "", name: str = "") -> str:
         path: Path to project directory (auto-detected if empty)
         name: Project name (defaults to directory name)
     """
-    from ..project_registry import register_project as _register
+    from .project_registry import register_project as _register
 
     result = _register(
         project_path=path if path else None,
@@ -3514,7 +3516,7 @@ def list_registered_projects() -> str:
 
     Shows projects the soul can access for cross-project search.
     """
-    from ..project_registry import list_projects
+    from .project_registry import list_projects
 
     projects = list_projects()
 
@@ -3540,7 +3542,7 @@ def unregister_project(path: str) -> str:
     Args:
         path: Path to project directory to unregister
     """
-    from ..project_registry import unregister_project as _unregister
+    from .project_registry import unregister_project as _unregister
 
     if _unregister(path):
         return f"Unregistered: {path}"
@@ -3558,7 +3560,7 @@ def search_all_projects(query: str, limit: int = 20) -> str:
         query: Search query
         limit: Max results (default 20)
     """
-    from ..project_registry import search_all_projects as _search
+    from .project_registry import search_all_projects as _search
 
     results = _search(query, limit=limit)
 
@@ -3587,7 +3589,7 @@ def cross_project_stats() -> str:
 
     Shows total observations, sessions, and project breakdown.
     """
-    from ..project_registry import get_cross_project_stats
+    from .project_registry import get_cross_project_stats
 
     stats = get_cross_project_stats()
 
@@ -3618,7 +3620,7 @@ def find_cross_project_patterns(min_occurrences: int = 2) -> str:
     Args:
         min_occurrences: Minimum times pattern must appear (default 2)
     """
-    from ..project_registry import find_cross_project_patterns as _find
+    from .project_registry import find_cross_project_patterns as _find
 
     patterns = _find(min_occurrences=min_occurrences)
 
@@ -3651,7 +3653,7 @@ def refresh_registry_stats() -> str:
 
     Updates the registry with current stats from each project.
     """
-    from ..project_registry import refresh_project_stats
+    from .project_registry import refresh_project_stats
 
     result = refresh_project_stats()
 
@@ -4020,7 +4022,7 @@ def svadhyaya_full(depth: str = "standard") -> str:
     Args:
         depth: quick, standard, deep, or ultrathink
     """
-    from ..svadhyaya import svadhyaya, format_svadhyaya
+    from .svadhyaya import svadhyaya, format_svadhyaya
 
     if depth not in ("quick", "standard", "deep", "ultrathink"):
         return f"Invalid depth: {depth}. Use: quick, standard, deep, or ultrathink"
@@ -4043,7 +4045,7 @@ def darshana_codebase(depth: str = "standard", verbose: bool = False) -> str:
         depth: quick, standard, deep, or ultrathink
         verbose: Include all issues in output
     """
-    from ..svadhyaya import darshana, format_darshana
+    from .svadhyaya import darshana, format_darshana
 
     if depth not in ("quick", "standard", "deep", "ultrathink"):
         return f"Invalid depth: {depth}. Use: quick, standard, deep, or ultrathink"
@@ -4062,7 +4064,7 @@ def jnana_health() -> str:
     - Success rates: Which wisdom consistently works
     - Coverage: Types and domains represented
     """
-    from ..svadhyaya import jnana, format_jnana
+    from .svadhyaya import jnana, format_jnana
 
     report = jnana()
     return format_jnana(report)
@@ -4078,7 +4080,7 @@ def vedana_points(category: str = None, limit: int = 20) -> str:
         category: Filter by category (optional)
         limit: Maximum points to return
     """
-    from ..svadhyaya import get_vedana, analyze_vedana
+    from .svadhyaya import get_vedana, analyze_vedana
 
     if category:
         points = get_vedana(category=category, limit=limit)
@@ -4123,7 +4125,7 @@ def prajna_trends(days: int = 90) -> str:
     Args:
         days: Number of days to analyze
     """
-    from ..svadhyaya import prajna_trajectory, prajna_patterns
+    from .svadhyaya import prajna_trajectory, prajna_patterns
 
     trajectory = prajna_trajectory(days)
     patterns = prajna_patterns()
@@ -4172,7 +4174,7 @@ def vichara_run() -> str:
     High confidence + low risk actions are executed immediately.
     Uncertain actions are deferred for data gathering.
     """
-    from ..svadhyaya import vichara, format_vichara
+    from .svadhyaya import vichara, format_vichara
 
     report = vichara()
     return format_vichara(report)
@@ -4185,7 +4187,7 @@ def vichara_stats() -> str:
     Shows what actions the soul has taken autonomously,
     success rates, and pending observations.
     """
-    from ..svadhyaya import get_autonomy_stats
+    from .svadhyaya import get_autonomy_stats
 
     stats = get_autonomy_stats()
 
@@ -4220,7 +4222,7 @@ def get_code_issues(severity: str = None, category: str = None, limit: int = 20)
         category: Filter by category (bug, smell, optimization, missing, etc.)
         limit: Maximum issues to return
     """
-    from ..svadhyaya import darshana, IssueSeverity, IssueCategory
+    from .svadhyaya import darshana, IssueSeverity, IssueCategory
 
     report = darshana("standard")
     issues = report.issues
@@ -4266,7 +4268,7 @@ def get_belief_violations() -> str:
     Identifies where the codebase contradicts stated beliefs like
     'Simplicity over cleverness'.
     """
-    from ..svadhyaya import darshana
+    from .svadhyaya import darshana
 
     report = darshana("deep")
 
@@ -4292,7 +4294,7 @@ def get_codebase_metrics() -> str:
     Shows lines of code, complexity, type hint coverage,
     docstring coverage per module.
     """
-    from ..svadhyaya import darshana
+    from .svadhyaya import darshana
 
     report = darshana("quick")
 
@@ -4336,7 +4338,7 @@ def record_vedana(category: str, description: str, severity: str = "medium") -> 
         description: What caused the pain
         severity: low, medium, high, critical
     """
-    from ..svadhyaya import record_vedana as _record
+    from .svadhyaya import record_vedana as _record
 
     valid_categories = ["latency", "error", "missing", "friction", "inconsistency"]
     if category not in valid_categories:
@@ -4361,7 +4363,7 @@ def schedule_vichara(reason: str, priority: int = 5) -> str:
         reason: Why deep inquiry is needed
         priority: 1-10, higher = more urgent
     """
-    from ..svadhyaya import schedule_vichara as _schedule
+    from .svadhyaya import schedule_vichara as _schedule
 
     _schedule(reason, priority)
     return f"Scheduled deep Vichara (priority {priority}): {reason}"
@@ -4616,10 +4618,10 @@ def get_stale_aspects() -> str:
     Stale aspects might need re-observation or might be outdated.
     """
     from .temporal import is_stale, days_since, init_temporal_tables
-    from .core import get_db
+    from .core import get_db_connection
 
     init_temporal_tables()
-    db = get_db()
+    db = get_db_connection()
     cur = db.cursor()
 
     cur.execute("""

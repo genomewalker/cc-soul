@@ -180,10 +180,12 @@ def soul_health() -> str:
 
     def check_cc_memory_bridge():
         from .bridge import is_memory_available
+        from pathlib import Path
         if is_memory_available():
             from .bridge import find_project_dir
             project = find_project_dir()
-            return "OK", f"connected ({project.name if project else 'global'})"
+            project_name = Path(project).name if project else "global"
+            return "OK", f"connected ({project_name})"
         return "WARN", "not available"
 
     def check_budget_tracking():
