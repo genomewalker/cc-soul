@@ -59,6 +59,7 @@ from .intentions import (
     get_active_intentions,
     get_intention_context,
     cleanup_session_intentions,
+    intend,
     IntentionScope,
 )
 from .soul_agent import (
@@ -519,6 +520,134 @@ def _observe_user_message(user_input: str) -> list:
         record_observation(learning)
 
     return learnings
+
+
+def _extract_session_intention(user_input: str) -> dict:
+    """
+    Parse user request for task goals to auto-generate session intentions.
+
+    Looks for action-oriented requests that indicate concrete goals:
+    - Fix/debug/resolve → "fix this issue"
+    - Add/implement/create → "add this feature"
+    - Refactor/clean/improve → "improve this code"
+    - Understand/explain/find → "understand this system"
+
+    Returns dict with 'want' and 'why' if a task goal is detected, else None.
+    """
+    import re
+
+    input_lower = user_input.lower()
+
+    # Skip non-task messages
+    skip_patterns = [
+        r"^(hi|hello|hey|thanks|thank you|ok|yes|no|sure|please)\s*[!.,]?\s*$",
+        r"^(continue|go ahead|sounds good|perfect|great)\s*[!.,]?\s*$",
+        r"^\s*$",
+        r"^[/\\]",  # Commands
+    ]
+    for pattern in skip_patterns:
+        if re.match(pattern, input_lower.strip()):
+            return None
+
+    # Minimum length for task extraction
+    if len(user_input.strip()) < 15:
+        return None
+
+    # Task patterns: (action pattern, want template, why template)
+    task_patterns = [
+        (
+            r"(fix|debug|resolve|solve)\s+(the\s+)?(.{10,80})",
+            "fix: {match}",
+            "Resolving this issue improves reliability",
+        ),
+        (
+            r"(add|implement|create|build|make)\s+(a\s+|the\s+)?(.{10,80})",
+            "implement: {match}",
+            "Adding this feature extends capability",
+        ),
+        (
+            r"(refactor|clean|improve|optimize)\s+(the\s+)?(.{10,80})",
+            "improve: {match}",
+            "Improving this code increases maintainability",
+        ),
+        (
+            r"(find|search|look for|locate)\s+(the\s+)?(.{10,60})",
+            "find: {match}",
+            "Finding this enables targeted action",
+        ),
+        (
+            r"(understand|explain|analyze|investigate)\s+(the\s+)?(.{10,80})",
+            "understand: {match}",
+            "Understanding this enables better decisions",
+        ),
+        (
+            r"(test|verify|check|validate)\s+(the\s+)?(.{10,60})",
+            "verify: {match}",
+            "Verification ensures correctness",
+        ),
+        (
+            r"(update|change|modify|edit)\s+(the\s+)?(.{10,80})",
+            "update: {match}",
+            "This update addresses a need",
+        ),
+        (
+            r"(remove|delete|clean up)\s+(the\s+)?(.{10,60})",
+            "remove: {match}",
+            "Removal simplifies the codebase",
+        ),
+    ]
+
+    for pattern, want_template, why in task_patterns:
+        match = re.search(pattern, input_lower)
+        if match:
+            task_text = match.group(3).strip()
+            task_text = re.sub(r"\s+", " ", task_text)
+            task_text = task_text[:80]
+            want = want_template.format(match=task_text)
+            return {"want": want, "why": why}
+
+    # Fallback: Look for any substantive request
+    if len(input_lower) > 40 and any(
+        verb in input_lower for verb in ["help", "need", "want", "can you", "please"]
+    ):
+        task_summary = user_input[:100].strip()
+        if len(task_summary) > 30:
+            return {
+                "want": f"complete: {task_summary[:60]}...",
+                "why": "User requested this task",
+            }
+
+    return None
+
+
+def _auto_generate_session_intention(user_input: str) -> int:
+    """
+    Auto-generate a session intention from user request.
+
+    Only generates if:
+    1. A task goal is detected in the input
+    2. No similar active session intention exists
+
+    Returns intention ID if created, None otherwise.
+    """
+    goal = _extract_session_intention(user_input)
+    if not goal:
+        return None
+
+    # Check if similar intention already exists
+    active = get_active_intentions(scope=IntentionScope.SESSION)
+    for existing in active:
+        if goal["want"][:20].lower() in existing.want.lower():
+            return None
+
+    intention_id = intend(
+        want=goal["want"],
+        why=goal["why"],
+        scope=IntentionScope.SESSION,
+        context=get_project_name(),
+        strength=0.7,
+    )
+    return intention_id
 
 
 def get_project_name() -> str:
@@ -1862,6 +1991,12 @@ def user_prompt(
         if learnings:
             # Auto-promote high confidence learnings to wisdom
             auto_promote_high_confidence(threshold=0.75)
+    except Exception:
+        pass
+
+    # INTEND: Auto-generate session intention from user request
+    try:
+        _auto_generate_session_intention(user_input)
     except Exception:
         pass
 
