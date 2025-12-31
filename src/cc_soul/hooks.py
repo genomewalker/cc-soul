@@ -51,6 +51,7 @@ from .efficiency import (
     get_file_hints,
     add_file_hint,
     recall_decisions,
+    record_decision,
     get_compact_context,
     format_efficiency_injection,
 )
@@ -1174,6 +1175,14 @@ def session_end() -> str:
     except Exception:
         pass
 
+    # EFFICIENCY: Populate efficiency tables from observations
+    # This feeds the curiosity engine with problem patterns and decisions
+    efficiency_data = {"decisions": 0, "patterns": 0}
+    try:
+        efficiency_data = _populate_efficiency_data()
+    except Exception:
+        pass
+
     # Cleanup session-scoped intentions
     intention_cleanup = cleanup_session_intentions()
     unfulfilled = intention_cleanup.get("unfulfilled_wants", [])
@@ -1281,8 +1290,101 @@ def session_end() -> str:
         output_parts.append(f"Recorded {evolution_count} evolution insights")
     if session_outcome != Outcome.UNKNOWN:
         output_parts.append(f"Outcome: {session_outcome.value}")
+    if efficiency_data.get("decisions") or efficiency_data.get("patterns"):
+        parts = []
+        if efficiency_data.get("decisions"):
+            parts.append(f"{efficiency_data['decisions']} decisions")
+        if efficiency_data.get("patterns"):
+            parts.append(f"{efficiency_data['patterns']} patterns")
+        output_parts.append(f"Efficiency: {', '.join(parts)}")
 
     return "; ".join(output_parts) if output_parts else ""
+
+
+def _populate_efficiency_data() -> dict:
+    """
+    Populate efficiency tables from session observations.
+
+    Extracts decisions and problem patterns from session_observations
+    to feed the curiosity engine and efficiency system.
+
+    Returns dict with counts of items populated.
+    """
+    from .core import get_db_connection
+
+    populated = {"decisions": 0, "patterns": 0}
+
+    try:
+        conn = get_db_connection()
+        c = conn.cursor()
+
+        # Get decision observations not yet recorded
+        c.execute("""
+            SELECT id, content, evidence, created_at
+            FROM session_observations
+            WHERE observation_type = 'decision'
+            AND converted_to_wisdom IS NULL
+            ORDER BY created_at DESC
+            LIMIT 10
+        """)
+
+        for row in c.fetchall():
+            obs_id, content, evidence, created_at = row
+            # Extract topic and decision from content
+            # Format: "Decision made: <content>"
+            if ":" in content:
+                _, decision_text = content.split(":", 1)
+                decision_text = decision_text.strip()
+            else:
+                decision_text = content
+
+            # Use first 30 chars as topic
+            topic = decision_text[:30].strip()
+            if topic:
+                record_decision(
+                    topic=topic,
+                    decision=decision_text[:200],
+                    rationale="Extracted from session observation",
+                    context=get_project_name(),
+                )
+                populated["decisions"] += 1
+
+        # Get breakthrough observations → problem patterns with solutions
+        c.execute("""
+            SELECT content, evidence
+            FROM session_observations
+            WHERE observation_type IN ('breakthrough', 'struggle')
+            ORDER BY created_at DESC
+            LIMIT 10
+        """)
+
+        for row in c.fetchall():
+            content, evidence = row
+            if ":" in content:
+                _, pattern_text = content.split(":", 1)
+            else:
+                pattern_text = content
+
+            # Extract files from content if mentioned
+            import re
+            file_pattern = r'[\w/.-]+\.(?:py|ts|js|tsx|jsx|rs|go|java|cpp|c|h)'
+            files_mentioned = re.findall(file_pattern, pattern_text)
+
+            if len(pattern_text) > 20:
+                problem_type = "breakthrough" if "breakthrough" in content.lower() else "struggle"
+                learn_problem_pattern(
+                    prompt=pattern_text[:100],
+                    problem_type=problem_type,
+                    solution_pattern=pattern_text[:150],
+                    file_hints=files_mentioned[:3],
+                )
+                populated["patterns"] += 1
+
+        conn.close()
+    except Exception:
+        pass
+
+    return populated
 
 
 def _detect_evolution_insights() -> int:
