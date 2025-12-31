@@ -2682,7 +2682,7 @@ def poll_antahkarana_voices(antahkarana_id: str, timeout: int = 60) -> str:
         lines.append("")
         lines.append("Insights collected:")
         for sol in orch.swarm.insights:
-            lines.append(f"  - {sol.voice.value}: {sol.shraddha:.0%}")
+            lines.append(f"  - {sol.perspective.value}: {sol.confidence:.0%}")
 
     return "\n".join(lines)
 
@@ -2783,14 +2783,12 @@ def list_antahkarana_insights(antahkarana_id: str) -> str:
     lines = [f"## Antahkarana Insights: {antahkarana_id}", f"Found {len(insights)} insights", ""]
 
     for sol in insights:
-        # Handle both 'content' (from get_swarm_solutions) and 'solution' (legacy)
-        insight_text = sol.get('content') or sol.get('solution', '')
         lines.extend([
             f"### {sol['task_id']} ({sol['perspective']})",
             f"Shraddha: {sol['confidence']:.0%}",
             f"Observation ID: #{sol['observation_id']}",
             "",
-            insight_text[:300] + ("..." if len(insight_text) > 300 else ""),
+            sol['solution'][:300] + ("..." if len(sol['solution']) > 300 else ""),
             "",
         ])
 

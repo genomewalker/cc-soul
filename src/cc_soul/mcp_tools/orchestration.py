@@ -163,7 +163,7 @@ def poll_antahkarana_voices(antahkarana_id: str, timeout: int = 60) -> str:
         lines.append("")
         lines.append("Insights collected:")
         for sol in orch.swarm.insights:
-            lines.append(f"  - {sol.voice.value}: {sol.shraddha:.0%}")
+            lines.append(f"  - {sol.perspective.value}: {sol.confidence:.0%}")
 
     return "\n".join(lines)
 
