@@ -16,6 +16,26 @@ from typing import Dict, List, Optional, Tuple
 from .core import get_db_connection, init_soul
 
 
+# Patterns that indicate garbage data (agent/swarm context markers)
+_GARBAGE_PATTERNS = [
+    "Agent Context Notice",
+    "You are a swarm",
+    "You are a specialized",
+    "[cc-soul] Swarm Agent",
+    "## Swarm",
+]
+
+
+def _is_garbage_content(content: str) -> bool:
+    """Check if content contains agent/swarm garbage markers."""
+    if not content:
+        return True
+    for pattern in _GARBAGE_PATTERNS:
+        if pattern in content:
+            return True
+    return False
+
+
 def _ensure_efficiency_tables():
     """Ensure efficiency-related tables exist."""
     conn = get_db_connection()
@@ -323,6 +343,10 @@ def learn_problem_pattern(
         solution_pattern: Brief description of solution approach
         file_hints: Files that were relevant
     """
+    # Filter out garbage content (agent/swarm markers)
+    if _is_garbage_content(prompt) or _is_garbage_content(solution_pattern):
+        return
+
     _ensure_efficiency_tables()
 
     # Extract keywords
@@ -491,6 +515,28 @@ def get_file_hints(prompt: str, limit: int = 5) -> List[Dict]:
     conn.close()
 
     return sorted(scored, key=lambda x: -x["relevance"])[:limit]
+
+
+def get_all_file_hints() -> Dict[str, str]:
+    """
+    Get all file hints as a dict of file_path -> purpose.
+
+    Used by curiosity engine to know which files have hints.
+    """
+    _ensure_efficiency_tables()
+
+    conn = get_db_connection()
+    c = conn.cursor()
+
+    c.execute("SELECT file_path, purpose FROM file_hints")
+
+    result = {}
+    for row in c.fetchall():
+        file_path, purpose = row
+        result[file_path] = purpose or ""
+
+    conn.close()
+    return result
 
 
 # =============================================================================

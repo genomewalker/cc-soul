@@ -25,6 +25,28 @@ from .core import get_db_connection
 from .wisdom import gain_wisdom, WisdomType
 
 
+# Patterns that indicate garbage data (agent/swarm context markers)
+_GARBAGE_PATTERNS = [
+    "Agent Context Notice",
+    "You are a swarm",
+    "You are a specialized",
+    "[cc-soul] Swarm Agent",
+    "## Swarm",
+    "swarm: ",
+    "perspective:",
+]
+
+
+def _is_garbage_content(content: str) -> bool:
+    """Check if content contains agent/swarm garbage markers."""
+    if not content:
+        return True
+    for pattern in _GARBAGE_PATTERNS:
+        if pattern in content:
+            return True
+    return False
+
+
 class LearningType(str, Enum):
     CORRECTION = "correction"  # User redirected approach
     STRUGGLE = "struggle"  # Multiple attempts needed
@@ -445,6 +467,11 @@ def record_observation(learning: Learning, session_id: int = None):
 
     Observations are staged - they become wisdom if confirmed or seen multiple times.
     """
+    # Filter out garbage content (agent/swarm markers)
+    content = f"{learning.title}: {learning.content}"
+    if _is_garbage_content(content):
+        return
+
     _ensure_observation_tables()
 
     conn = get_db_connection()
@@ -459,7 +486,7 @@ def record_observation(learning: Learning, session_id: int = None):
         (
             session_id,
             learning.type.value,
-            f"{learning.title}: {learning.content}",
+            content,
             learning.confidence,
             json.dumps(learning.evidence),
             datetime.now().isoformat(),

@@ -196,7 +196,7 @@ def detect_repeated_corrections() -> List[Gap]:
 
 def detect_unknown_files() -> List[Gap]:
     """Detect files that are frequently accessed but have no hints."""
-    from .efficiency import get_file_hints
+    from .efficiency import get_all_file_hints
 
     _ensure_curiosity_tables()
     conn = sqlite3.connect(SOUL_DB)
@@ -218,7 +218,7 @@ def detect_unknown_files() -> List[Gap]:
                 pass
 
     # Check which have hints
-    existing_hints = get_file_hints()
+    existing_hints = get_all_file_hints()
     hinted_files = set(existing_hints.keys())
 
     gaps = []
