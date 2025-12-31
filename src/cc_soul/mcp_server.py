@@ -223,7 +223,7 @@ def submit_insight(
         reasoning=reasoning,
     )
 
-    return f"Insight submitted from {sol.voice.value} ({sol.shraddha:.0%} shraddha)"
+    return f"Insight submitted from {sol.perspective.value} ({sol.confidence:.0%} shraddha)"
 
 
 # Backward compatibility alias
@@ -291,12 +291,12 @@ def harmonize_antahkarana(antahkarana_id: str, pramana: str = "samvada") -> str:
     result = antahkarana.harmonize(strat)
 
     lines = [
-        f"## Harmonized Wisdom ({result.pramana_used.value})",
+        f"## Harmonized Wisdom ({result.strategy_used.value})",
         "",
-        result.wisdom,
+        result.final_solution,
         "",
         f"---",
-        f"Shraddha: {result.shraddha:.0%}",
+        f"Shraddha: {result.confidence:.0%}",
         f"Contributing voices: {len(result.contributing_voices)}",
         f"Notes: {result.synthesis_notes}",
     ]
@@ -382,13 +382,13 @@ def get_antahkarana_status(antahkarana_id: str) -> str:
     for i, task in enumerate(antahkarana.tasks):
         has_insight = any(s.task_id == task.task_id for s in antahkarana.insights)
         status = "✓" if has_insight else "contemplating"
-        lines.append(f"  {i}. [{task.voice.value}] {status}")
+        lines.append(f"  {i}. [{task.perspective.value}] {status}")
 
     if antahkarana.insights:
         lines.append("")
         lines.append(f"Insights ({len(antahkarana.insights)}):")
         for sol in antahkarana.insights:
-            lines.append(f"  - {sol.voice.value}: {sol.shraddha:.0%} shraddha")
+            lines.append(f"  - {sol.perspective.value}: {sol.confidence:.0%} shraddha")
 
     return "\n".join(lines)
 
@@ -2736,13 +2736,13 @@ def harmonize_real_antahkarana(antahkarana_id: str, pramana: str = "samvada") ->
 
     return f"""## Harmonized: {antahkarana_id}
 
-Pramana: {result.pramana_used.value}
-Shraddha: {result.shraddha:.0%}
+Pramana: {result.strategy_used.value}
+Shraddha: {result.confidence:.0%}
 Contributing voices: {len(result.contributing_voices)}
 
 ### Wisdom
 
-{result.wisdom}
+{result.final_solution}
 
 ### Notes
 
