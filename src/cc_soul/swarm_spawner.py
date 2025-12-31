@@ -1,24 +1,26 @@
 """
-Swarm Spawner - Spawn real Claude agents for parallel problem solving.
+Antahkarana Spawner - Spawn real Claude voices for parallel problem solving.
 
-Uses the claude CLI to spawn actual Claude instances that work on different
-perspectives of a problem simultaneously. Results are collected via cc-memory.
+Uses the claude CLI to spawn actual Claude instances that contemplate different
+facets of a problem simultaneously. Insights are collected via cc-memory (Chitta).
 
 Architecture:
-    1. Orchestrator creates tasks with specific prompts
-    2. Each task is executed as a separate claude process
-    3. Agents write solutions to cc-memory with swarm tags
+    1. Orchestrator awakens voices with specific prompts
+    2. Each voice is executed as a separate claude process
+    3. Voices write insights to cc-memory with antahkarana tags
     4. Orchestrator polls cc-memory for completion
-    5. Solutions are converged
+    5. Insights are harmonized
 
-This enables true parallel reasoning:
-    - FAST agent: Quick intuition, first principles
-    - DEEP agent: Thorough analysis, edge cases
-    - CRITICAL agent: Find flaws, devil's advocate
-    - NOVEL agent: Creative, unconventional approaches
+This enables true parallel reasoning through the Antahkarana facets:
+    - MANAS: Quick intuition, first impressions
+    - BUDDHI: Thorough analysis, discrimination
+    - AHAMKARA: Critical examination, finding flaws
+    - CHITTA: Pattern-based wisdom from experience
+    - VIKALPA: Creative imagination, novel approaches
+    - SAKSHI: Detached witness, minimal essence
 
 Context Injection:
-    Agents can receive:
+    Voices can receive:
     - File contents: Actual code they're analyzing
     - Memory context: Relevant past decisions/discoveries from cc-memory
 """
@@ -34,10 +36,10 @@ from typing import List, Dict, Optional, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .convergence import (
-    Swarm,
-    AgentTask,
-    AgentSolution,
-    AgentPerspective,
+    Antahkarana,
+    VoiceTask,
+    VoiceSolution,
+    InnerVoice,
     ConvergenceStrategy,
 )
 from .core import get_db_connection
@@ -50,8 +52,8 @@ from .budget import (
 
 
 @dataclass
-class SpawnedAgent:
-    """A spawned Claude agent."""
+class SpawnedVoice:
+    """A spawned Claude voice."""
     task_id: str
     process: Optional[subprocess.Popen]
     pid: int
@@ -61,26 +63,26 @@ class SpawnedAgent:
 
 
 @dataclass
-class SwarmOrchestrator:
+class AntahkaranaOrchestrator:
     """
-    Orchestrates parallel Claude agents.
+    Orchestrates parallel Claude voices.
 
     Usage:
-        orchestrator = SwarmOrchestrator(swarm)
-        orchestrator.spawn_all_agents()
+        orchestrator = AntahkaranaOrchestrator(antahkarana)
+        orchestrator.spawn_all_voices()
         orchestrator.wait_for_completion(timeout=300)
         result = orchestrator.converge()
     """
-    swarm: Swarm
-    agents: List[SpawnedAgent] = field(default_factory=list)
-    work_dir: Path = field(default_factory=lambda: Path.home() / ".claude" / "swarms")
+    antahkarana: Antahkarana
+    voices: List[SpawnedVoice] = field(default_factory=list)
+    work_dir: Path = field(default_factory=lambda: Path.home() / ".claude" / "antahkarana")
     max_parallel: int = 4
-    model: str = "sonnet"  # Use faster model for agents
+    model: str = "opus"  # Use opus for deep contemplation
 
     def __post_init__(self):
         self.work_dir.mkdir(parents=True, exist_ok=True)
-        self.swarm_dir = self.work_dir / self.swarm.swarm_id
-        self.swarm_dir.mkdir(exist_ok=True)
+        self.antahkarana_dir = self.work_dir / self.antahkarana.antahkarana_id
+        self.antahkarana_dir.mkdir(exist_ok=True)
         self._orchestrator_budget: Optional[ContextBudget] = None
 
     def check_orchestrator_budget(self) -> Dict[str, Any]:
@@ -121,16 +123,16 @@ class SwarmOrchestrator:
                 "can_spawn": True,
                 "remaining_pct": remaining_pct,
                 "pressure": "compact",
-                "recommendation": "Limit to 2 agents max - context running low",
-                "max_agents": 2,
+                "recommendation": "Limit to 2 voices max - context running low",
+                "max_voices": 2,
             }
         elif remaining_pct < 0.40:
             return {
                 "can_spawn": True,
                 "remaining_pct": remaining_pct,
                 "pressure": "normal",
-                "recommendation": "Proceed with up to 3 agents",
-                "max_agents": 3,
+                "recommendation": "Proceed with up to 3 voices",
+                "max_voices": 3,
             }
         else:
             return {
@@ -138,29 +140,29 @@ class SwarmOrchestrator:
                 "remaining_pct": remaining_pct,
                 "pressure": "relaxed",
                 "recommendation": "Full capacity available",
-                "max_agents": self.max_parallel,
+                "max_voices": self.max_parallel,
             }
 
-    def _build_agent_prompt(self, task: AgentTask) -> str:
-        """Build a complete prompt for an agent."""
-        # Context isolation notice - agent knows it's a fresh instance
-        isolation_notice = f"""## Agent Context Notice
+    def _build_voice_prompt(self, task: VoiceTask) -> str:
+        """Build a complete prompt for a voice."""
+        # Context isolation notice - voice knows it's a fresh instance
+        isolation_notice = f"""## Voice Context Notice
 
-You are a swarm agent: {task.task_id}
+You are an Antahkarana voice: {task.task_id}
 Perspective: {task.perspective.value}
-Swarm: {self.swarm.swarm_id}
+Antahkarana: {self.antahkarana.antahkarana_id}
 
 IMPORTANT: You are a fresh Claude instance with your own context window.
 - Your context starts at ~0%, not the parent session's context
 - Ignore any cc-soul context budget from other sessions
 - You have full context available for this task
-- Work independently - do not try to coordinate with other agents
+- Work independently - do not try to coordinate with other voices
 
 """
         # Base prompt with perspective guidance
         base_prompt = task.to_prompt()
 
-        # Instructions to use cc-memory for context and solution storage
+        # Instructions to use cc-memory for context and insight storage
         memory_instructions = f"""
 
 ## Context Retrieval
@@ -168,54 +170,54 @@ IMPORTANT: You are a fresh Claude instance with your own context window.
 You have access to cc-memory. Use it to get relevant context:
 1. Run `mem-recall` with queries related to the problem
 2. Check for past decisions, patterns, or relevant observations
-3. Use this context to inform your solution
+3. Use this context to inform your insight
 
 ## Output Instructions
 
-When you have your solution, save it to cc-memory:
+When you have your insight, save it to cc-memory:
 
 1. Use the `mem-remember` tool with:
-   - category: "swarm-solution"
+   - category: "antahkarana-insight"
    - title: "{task.task_id}: [your short title]"
-   - content: Your complete solution with reasoning
-   - tags: ["swarm:{self.swarm.swarm_id}", "task:{task.task_id}", "perspective:{task.perspective.value}"]
+   - content: Your complete insight with reasoning
+   - tags: ["antahkarana:{self.antahkarana.antahkarana_id}", "task:{task.task_id}", "voice:{task.perspective.value}"]
 
 2. Include in your content:
    - confidence: 0.0-1.0
-   - solution: Your complete solution
+   - insight: Your complete insight
    - reasoning: Why this approach
 
-The orchestrator will find your solution via the swarm tag.
+The orchestrator will find your insight via the antahkarana tag.
 
 ## Budget Reporting
 
-You are a swarm agent with fresh context. When your work is complete,
-also log your final context usage for swarm coordination:
+You are an Antahkarana voice with fresh context. When your work is complete,
+also log your final context usage for coordination:
 
 Use `mem-remember` with:
-- category: "swarm-budget"
+- category: "antahkarana-budget"
 - title: "Budget: {task.task_id}"
-- tags: ["swarm:{self.swarm.swarm_id}", "budget", "agent:{task.task_id}"]
+- tags: ["antahkarana:{self.antahkarana.antahkarana_id}", "budget", "voice:{task.task_id}"]
 - content: Include your approximate context usage percentage
 
-This helps the orchestrator track overall swarm resource consumption.
+This helps the orchestrator track overall resource consumption.
 """
         return isolation_notice + base_prompt + memory_instructions
 
-    def _create_agent_script(self, task: AgentTask) -> Path:
-        """Create a script file for the agent to execute."""
-        script_path = self.swarm_dir / f"{task.task_id}.prompt"
-        prompt = self._build_agent_prompt(task)
+    def _create_voice_script(self, task: VoiceTask) -> Path:
+        """Create a script file for the voice to execute."""
+        script_path = self.antahkarana_dir / f"{task.task_id}.prompt"
+        prompt = self._build_voice_prompt(task)
         script_path.write_text(prompt)
         return script_path
 
-    def spawn_agent(self, task: AgentTask) -> SpawnedAgent:
-        """Spawn a single Claude agent for a task."""
-        prompt_file = self._create_agent_script(task)
-        output_file = self.swarm_dir / f"{task.task_id}.output"
+    def spawn_voice(self, task: VoiceTask) -> SpawnedVoice:
+        """Spawn a single Claude voice for a task."""
+        prompt_file = self._create_voice_script(task)
+        output_file = self.antahkarana_dir / f"{task.task_id}.output"
 
         # Build claude command
-        # Full session with MCP tools - agents can use cc-memory
+        # Full session with MCP tools - voices can use cc-memory
         cmd = [
             "claude",
             "--model", self.model,
@@ -226,15 +228,15 @@ This helps the orchestrator track overall swarm resource consumption.
         prompt = prompt_file.read_text()
 
         try:
-            # Agent-isolated environment - prevent parent session context bleed
-            agent_env = os.environ.copy()
-            agent_env["CC_SOUL_SWARM_AGENT"] = "1"
-            agent_env["CC_SOUL_SWARM_ID"] = self.swarm.swarm_id
-            agent_env["CC_SOUL_TASK_ID"] = task.task_id
-            agent_env["CC_SOUL_PERSPECTIVE"] = task.perspective.value
+            # Voice-isolated environment - prevent parent session context bleed
+            voice_env = os.environ.copy()
+            voice_env["CC_SOUL_ANTAHKARANA_VOICE"] = "1"
+            voice_env["CC_SOUL_ANTAHKARANA_ID"] = self.antahkarana.antahkarana_id
+            voice_env["CC_SOUL_TASK_ID"] = task.task_id
+            voice_env["CC_SOUL_PERSPECTIVE"] = task.perspective.value
             # Track parent session for budget family grouping
             from .budget import get_session_id
-            agent_env["CC_SOUL_PARENT_SESSION"] = get_session_id()
+            voice_env["CC_SOUL_PARENT_SESSION"] = get_session_id()
 
             # Spawn as background process
             process = subprocess.Popen(
@@ -244,14 +246,14 @@ This helps the orchestrator track overall swarm resource consumption.
                 stderr=subprocess.PIPE,
                 text=True,
                 cwd=str(Path.cwd()),
-                env=agent_env,
+                env=voice_env,
             )
 
             # Send prompt
             process.stdin.write(prompt)
             process.stdin.close()
 
-            agent = SpawnedAgent(
+            voice = SpawnedVoice(
                 task_id=task.task_id,
                 process=process,
                 pid=process.pid,
@@ -259,61 +261,61 @@ This helps the orchestrator track overall swarm resource consumption.
                 output_file=output_file,
             )
 
-            self.agents.append(agent)
+            self.voices.append(voice)
 
             # Record in database
-            self._record_agent_spawn(agent, task)
+            self._record_voice_spawn(voice, task)
 
-            return agent
+            return voice
 
         except FileNotFoundError:
             # claude CLI not found - try alternative approach
             return self._spawn_via_script(task, output_file)
 
-    def _spawn_via_script(self, task: AgentTask, output_file: Path) -> SpawnedAgent:
+    def _spawn_via_script(self, task: VoiceTask, output_file: Path) -> SpawnedVoice:
         """Fallback: spawn via Python script that uses the API directly."""
         script_content = f'''#!/usr/bin/env python3
-"""Agent worker for swarm task {task.task_id}"""
+"""Voice worker for Antahkarana task {task.task_id}"""
 import sys
 sys.path.insert(0, '/maps/projects/fernandezguerra/apps/repos/cc-soul/src')
 
-from cc_soul.convergence import get_swarm
+from cc_soul.convergence import get_antahkarana
 
-# This agent would normally use Claude API directly
+# This voice would normally use Claude API directly
 # For now, we'll create a placeholder that the orchestrator can detect
 
-swarm = get_swarm("{self.swarm.swarm_id}")
-if swarm:
-    # Mark task as needing manual solution
-    print("Agent spawned for task: {task.task_id}")
+antahkarana = get_antahkarana("{self.antahkarana.antahkarana_id}")
+if antahkarana:
+    # Mark task as needing manual insight
+    print("Voice spawned for task: {task.task_id}")
     print("Perspective: {task.perspective.value}")
-    print("Awaiting solution submission...")
+    print("Awaiting insight submission...")
 '''
 
-        script_path = self.swarm_dir / f"{task.task_id}.worker.py"
+        script_path = self.antahkarana_dir / f"{task.task_id}.worker.py"
         script_path.write_text(script_content)
         script_path.chmod(0o755)
 
-        # For now, just record that we need this agent's work
-        agent = SpawnedAgent(
+        # For now, just record that we need this voice's work
+        voice = SpawnedVoice(
             task_id=task.task_id,
             process=None,
             pid=0,
             started_at=datetime.now().isoformat(),
-            status="awaiting",  # Needs manual or API-based solution
+            status="awaiting",  # Needs manual or API-based insight
             output_file=output_file,
         )
 
-        self.agents.append(agent)
-        self._record_agent_spawn(agent, task)
+        self.voices.append(voice)
+        self._record_voice_spawn(voice, task)
 
-        return agent
+        return voice
 
-    def spawn_all_agents(self, parallel: bool = True) -> List[SpawnedAgent]:
+    def spawn_all_voices(self, parallel: bool = True) -> List[SpawnedVoice]:
         """
-        Spawn all agents, optionally in parallel.
+        Spawn all voices, optionally in parallel.
 
-        Budget-aware: Checks orchestrator budget and limits agent count
+        Budget-aware: Checks orchestrator budget and limits voice count
         if context is running low.
         """
         # Check orchestrator budget before spawning
@@ -324,22 +326,22 @@ if swarm:
             self._log_spawn_blocked(budget_status)
             return []
 
-        # Determine how many agents to spawn based on budget
-        max_agents = budget_status.get("max_agents", self.max_parallel)
-        tasks_to_spawn = self.swarm.tasks[:max_agents]
+        # Determine how many voices to spawn based on budget
+        max_voices = budget_status.get("max_voices", self.max_parallel)
+        tasks_to_spawn = self.antahkarana.tasks[:max_voices]
 
-        if len(tasks_to_spawn) < len(self.swarm.tasks):
+        if len(tasks_to_spawn) < len(self.antahkarana.tasks):
             self._log_spawn_limited(
                 spawned=len(tasks_to_spawn),
-                total=len(self.swarm.tasks),
+                total=len(self.antahkarana.tasks),
                 reason=budget_status["recommendation"],
             )
 
         if parallel:
-            workers = min(max_agents, len(tasks_to_spawn))
+            workers = min(max_voices, len(tasks_to_spawn))
             with ThreadPoolExecutor(max_workers=workers) as executor:
                 futures = {
-                    executor.submit(self.spawn_agent, task): task
+                    executor.submit(self.spawn_voice, task): task
                     for task in tasks_to_spawn
                 }
                 for future in as_completed(futures):
@@ -347,12 +349,12 @@ if swarm:
                         future.result()
                     except Exception as e:
                         task = futures[future]
-                        print(f"Failed to spawn agent for {task.task_id}: {e}")
+                        print(f"Failed to spawn voice for {task.task_id}: {e}")
         else:
             for task in tasks_to_spawn:
-                self.spawn_agent(task)
+                self.spawn_voice(task)
 
-        return self.agents
+        return self.voices
 
     def _log_spawn_blocked(self, budget_status: Dict[str, Any]):
         """Log when spawning is blocked due to budget constraints."""
@@ -362,14 +364,14 @@ if swarm:
                 from cc_memory import memory as cc_memory
                 project_dir = find_project_dir()
                 cc_memory.remember(
-                    category="swarm-budget",
-                    title=f"Swarm {self.swarm.swarm_id}: BLOCKED",
-                    content=f"""Swarm spawn blocked due to budget constraints.
+                    category="antahkarana-budget",
+                    title=f"Antahkarana {self.antahkarana.antahkarana_id}: BLOCKED",
+                    content=f"""Antahkarana spawn blocked due to budget constraints.
 Remaining: {budget_status['remaining_pct']*100:.0f}%
 Pressure: {budget_status['pressure']}
 Recommendation: {budget_status['recommendation']}
-Problem: {self.swarm.problem[:200]}""",
-                    tags=["swarm", "budget", "blocked", f"swarm:{self.swarm.swarm_id}"],
+Problem: {self.antahkarana.problem[:200]}""",
+                    tags=["antahkarana", "budget", "blocked", f"antahkarana:{self.antahkarana.antahkarana_id}"],
                     project_dir=project_dir,
                 )
         except Exception:
@@ -383,27 +385,27 @@ Problem: {self.swarm.problem[:200]}""",
                 from cc_memory import memory as cc_memory
                 project_dir = find_project_dir()
                 cc_memory.remember(
-                    category="swarm-budget",
-                    title=f"Swarm {self.swarm.swarm_id}: LIMITED",
-                    content=f"""Swarm spawn limited due to budget constraints.
-Spawned: {spawned}/{total} agents
+                    category="antahkarana-budget",
+                    title=f"Antahkarana {self.antahkarana.antahkarana_id}: LIMITED",
+                    content=f"""Antahkarana spawn limited due to budget constraints.
+Spawned: {spawned}/{total} voices
 Reason: {reason}
-Problem: {self.swarm.problem[:200]}""",
-                    tags=["swarm", "budget", "limited", f"swarm:{self.swarm.swarm_id}"],
+Problem: {self.antahkarana.problem[:200]}""",
+                    tags=["antahkarana", "budget", "limited", f"antahkarana:{self.antahkarana.antahkarana_id}"],
                     project_dir=project_dir,
                 )
         except Exception:
             pass
 
-    def _record_agent_spawn(self, agent: SpawnedAgent, task: AgentTask):
-        """Record agent spawn in database."""
+    def _record_voice_spawn(self, voice: SpawnedVoice, task: VoiceTask):
+        """Record voice spawn in database."""
         conn = get_db_connection()
         c = conn.cursor()
 
         c.execute("""
-            CREATE TABLE IF NOT EXISTS swarm_agents (
+            CREATE TABLE IF NOT EXISTS antahkarana_voices (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                swarm_id TEXT NOT NULL,
+                antahkarana_id TEXT NOT NULL,
                 task_id TEXT NOT NULL,
                 pid INTEGER,
                 status TEXT DEFAULT 'running',
@@ -414,31 +416,31 @@ Problem: {self.swarm.problem[:200]}""",
         """)
 
         c.execute(
-            """INSERT INTO swarm_agents
-               (swarm_id, task_id, pid, status, started_at, output_file)
+            """INSERT INTO antahkarana_voices
+               (antahkarana_id, task_id, pid, status, started_at, output_file)
                VALUES (?, ?, ?, ?, ?, ?)""",
             (
-                self.swarm.swarm_id,
-                agent.task_id,
-                agent.pid,
-                agent.status,
-                agent.started_at,
-                str(agent.output_file) if agent.output_file else None,
+                self.antahkarana.antahkarana_id,
+                voice.task_id,
+                voice.pid,
+                voice.status,
+                voice.started_at,
+                str(voice.output_file) if voice.output_file else None,
             )
         )
 
         conn.commit()
         conn.close()
 
-    def check_agent_status(self, agent: SpawnedAgent) -> str:
-        """Check if an agent has completed."""
-        # First check if solution exists in cc-memory
-        if self._query_cc_memory_for_solution(agent.task_id):
+    def check_voice_status(self, voice: SpawnedVoice) -> str:
+        """Check if a voice has completed."""
+        # First check if insight exists in cc-memory
+        if self._query_cc_memory_for_insight(voice.task_id):
             return "completed"
 
-        if agent.process:
+        if voice.process:
             # Check if process is still running
-            poll = agent.process.poll()
+            poll = voice.process.poll()
             if poll is None:
                 return "running"
             elif poll == 0:
@@ -446,18 +448,18 @@ Problem: {self.swarm.problem[:200]}""",
             else:
                 return "failed"
         else:
-            # No process - check if solution exists in swarm
-            for sol in self.swarm.solutions:
-                if sol.task_id == agent.task_id:
+            # No process - check if insight exists in antahkarana
+            for sol in self.antahkarana.solutions:
+                if sol.task_id == voice.task_id:
                     return "completed"
-            return agent.status
+            return voice.status
 
     def wait_for_completion(
         self,
         timeout: int = 300,
         poll_interval: int = 5,
     ) -> Dict[str, Any]:
-        """Wait for all agents to complete."""
+        """Wait for all voices to complete."""
         start_time = time.time()
         completed = []
         failed = []
@@ -465,64 +467,64 @@ Problem: {self.swarm.problem[:200]}""",
         while time.time() - start_time < timeout:
             all_done = True
 
-            for agent in self.agents:
-                if agent.status in ("completed", "failed"):
+            for voice in self.voices:
+                if voice.status in ("completed", "failed"):
                     continue
 
-                status = self.check_agent_status(agent)
-                agent.status = status
+                status = self.check_voice_status(voice)
+                voice.status = status
 
                 if status == "running":
                     all_done = False
                 elif status == "completed":
-                    completed.append(agent.task_id)
-                    self._collect_agent_result(agent)
+                    completed.append(voice.task_id)
+                    self._collect_voice_result(voice)
                 elif status == "failed":
-                    failed.append(agent.task_id)
+                    failed.append(voice.task_id)
 
             if all_done:
                 break
 
             time.sleep(poll_interval)
 
-        # Timeout remaining agents
-        for agent in self.agents:
-            if agent.status == "running":
-                agent.status = "timeout"
-                if agent.process:
-                    agent.process.terminate()
+        # Timeout remaining voices
+        for voice in self.voices:
+            if voice.status == "running":
+                voice.status = "timeout"
+                if voice.process:
+                    voice.process.terminate()
 
         return {
             "completed": completed,
             "failed": failed,
-            "timeout": [a.task_id for a in self.agents if a.status == "timeout"],
+            "timeout": [v.task_id for v in self.voices if v.status == "timeout"],
             "elapsed": time.time() - start_time,
         }
 
-    def _collect_agent_result(self, agent: SpawnedAgent):
-        """Collect result from cc-memory (agent stored solution there)."""
-        solution_data = self._query_cc_memory_for_solution(agent.task_id)
-        if solution_data:
-            self.swarm.submit_solution(
-                task_id=agent.task_id,
-                solution=solution_data.get("solution", solution_data.get("content", "")),
-                confidence=float(solution_data.get("confidence", 0.7)),
-                reasoning=solution_data.get("reasoning", ""),
+    def _collect_voice_result(self, voice: SpawnedVoice):
+        """Collect result from cc-memory (voice stored insight there)."""
+        insight_data = self._query_cc_memory_for_insight(voice.task_id)
+        if insight_data:
+            self.antahkarana.submit_insight(
+                task_id=voice.task_id,
+                solution=insight_data.get("insight", insight_data.get("content", "")),
+                confidence=float(insight_data.get("confidence", 0.7)),
+                reasoning=insight_data.get("reasoning", ""),
             )
-        elif agent.output_file and agent.output_file.exists():
-            # Fallback: check output file for SWARM_SOLUTION block
-            output = agent.output_file.read_text()
-            solution_data = self._parse_solution_block(output)
-            if solution_data:
-                self.swarm.submit_solution(
-                    task_id=agent.task_id,
-                    solution=solution_data.get("solution", ""),
-                    confidence=float(solution_data.get("confidence", 0.7)),
-                    reasoning=solution_data.get("reasoning", ""),
+        elif voice.output_file and voice.output_file.exists():
+            # Fallback: check output file for ANTAHKARANA_INSIGHT block
+            output = voice.output_file.read_text()
+            insight_data = self._parse_insight_block(output)
+            if insight_data:
+                self.antahkarana.submit_insight(
+                    task_id=voice.task_id,
+                    solution=insight_data.get("insight", ""),
+                    confidence=float(insight_data.get("confidence", 0.7)),
+                    reasoning=insight_data.get("reasoning", ""),
                 )
 
-    def _query_cc_memory_for_solution(self, task_id: str) -> Optional[Dict]:
-        """Query cc-memory for a swarm solution by task_id."""
+    def _query_cc_memory_for_insight(self, task_id: str) -> Optional[Dict]:
+        """Query cc-memory for an antahkarana insight by task_id."""
         import re
 
         try:
@@ -543,7 +545,7 @@ Problem: {self.swarm.problem[:200]}""",
                     return {
                         "content": content,
                         "confidence": confidence,
-                        "solution": content,
+                        "insight": content,
                         "reasoning": "",
                     }
         except Exception:
@@ -551,11 +553,11 @@ Problem: {self.swarm.problem[:200]}""",
 
         return None
 
-    def _parse_solution_block(self, output: str) -> Optional[Dict]:
-        """Parse [SWARM_SOLUTION] block from agent output."""
+    def _parse_insight_block(self, output: str) -> Optional[Dict]:
+        """Parse [ANTAHKARANA_INSIGHT] block from voice output."""
         import re
 
-        pattern = r'\[SWARM_SOLUTION\](.*?)\[/SWARM_SOLUTION\]'
+        pattern = r'\[ANTAHKARANA_INSIGHT\](.*?)\[/ANTAHKARANA_INSIGHT\]'
         match = re.search(pattern, output, re.DOTALL)
 
         if not match:
@@ -598,55 +600,55 @@ Problem: {self.swarm.problem[:200]}""",
 
     def converge(
         self,
-        strategy: ConvergenceStrategy = ConvergenceStrategy.SYNTHESIZE,
+        strategy: ConvergenceStrategy = ConvergenceStrategy.SAMVADA,
     ):
-        """Converge all collected solutions."""
-        return self.swarm.converge(strategy)
+        """Converge all collected insights."""
+        return self.antahkarana.harmonize(strategy)
 
     def get_status(self) -> Dict[str, Any]:
-        """Get current swarm status including budget information."""
+        """Get current Antahkarana status including budget information."""
         status = {
-            "swarm_id": self.swarm.swarm_id,
-            "problem": self.swarm.problem[:100],
-            "agents": [
+            "antahkarana_id": self.antahkarana.antahkarana_id,
+            "problem": self.antahkarana.problem[:100],
+            "voices": [
                 {
-                    "task_id": a.task_id,
-                    "pid": a.pid,
-                    "status": a.status,
-                    "started_at": a.started_at,
+                    "task_id": v.task_id,
+                    "pid": v.pid,
+                    "status": v.status,
+                    "started_at": v.started_at,
                 }
-                for a in self.agents
+                for v in self.voices
             ],
-            "solutions": len(self.swarm.solutions),
-            "work_dir": str(self.swarm_dir),
+            "insights": len(self.antahkarana.solutions),
+            "work_dir": str(self.antahkarana_dir),
         }
 
         # Add budget information
-        budget_info = self.get_swarm_budget_status()
+        budget_info = self.get_antahkarana_budget_status()
         status["budget"] = budget_info
 
         return status
 
-    def get_swarm_budget_status(self) -> Dict[str, Any]:
+    def get_antahkarana_budget_status(self) -> Dict[str, Any]:
         """
-        Get cumulative budget status for all agents in this swarm.
+        Get cumulative budget status for all voices in this Antahkarana.
 
-        Queries cc-memory for budget reports from spawned agents.
+        Queries cc-memory for budget reports from spawned voices.
         """
         import re
 
         result = {
             "orchestrator_remaining_pct": None,
-            "agent_reports": [],
-            "total_agents": len(self.agents),
-            "agents_reported": 0,
+            "voice_reports": [],
+            "total_voices": len(self.voices),
+            "voices_reported": 0,
         }
 
         # Get orchestrator budget
         if self._orchestrator_budget:
             result["orchestrator_remaining_pct"] = self._orchestrator_budget.remaining_pct
 
-        # Query cc-memory for agent budget reports
+        # Query cc-memory for voice budget reports
         try:
             from .bridge import is_memory_available, find_project_dir
             if is_memory_available():
@@ -654,8 +656,8 @@ Problem: {self.swarm.problem[:200]}""",
                 project_dir = find_project_dir()
 
                 reports = cc_memory.recall(
-                    query=f"swarm:{self.swarm.swarm_id} budget",
-                    category="swarm-budget",
+                    query=f"antahkarana:{self.antahkarana.antahkarana_id} budget",
+                    category="antahkarana-budget",
                     limit=20,
                     project_dir=project_dir,
                 )
@@ -665,7 +667,7 @@ Problem: {self.swarm.problem[:200]}""",
                     title = r.get("title", "")
 
                     # Extract task ID
-                    task_match = re.search(r'agent:([^\s,\]]+)', str(r.get("tags", "")))
+                    task_match = re.search(r'voice:([^\s,\]]+)', str(r.get("tags", "")))
                     if not task_match:
                         task_match = re.search(r'Budget:\s*(\w+)', title)
 
@@ -675,12 +677,12 @@ Problem: {self.swarm.problem[:200]}""",
                     pct_match = re.search(r'(\d+)%', content)
                     pct = int(pct_match.group(1)) if pct_match else None
 
-                    result["agent_reports"].append({
+                    result["voice_reports"].append({
                         "task_id": task_id,
                         "remaining_pct": pct / 100 if pct else None,
                         "timestamp": r.get("timestamp"),
                     })
-                    result["agents_reported"] += 1
+                    result["voices_reported"] += 1
 
         except Exception:
             pass
@@ -688,61 +690,61 @@ Problem: {self.swarm.problem[:200]}""",
         return result
 
 
-def spawn_swarm(
+def spawn_antahkarana(
     problem: str,
-    perspectives: List[AgentPerspective] = None,
+    voices: List[InnerVoice] = None,
     constraints: List[str] = None,
     wait: bool = True,
     timeout: int = 300,
     check_budget: bool = True,
 ) -> Dict[str, Any]:
     """
-    High-level function to spawn a swarm and optionally wait for results.
+    High-level function to spawn an Antahkarana and optionally wait for results.
 
     Budget-aware: Checks orchestrator context budget before spawning.
     Will limit or block spawning if context is running low.
 
     Args:
         problem: The problem to solve
-        perspectives: List of perspectives to include
+        voices: List of inner voices to include
         constraints: Problem constraints
         wait: Whether to wait for completion
         timeout: Max seconds to wait
         check_budget: Whether to check budget before spawning (default True)
 
     Returns:
-        Dict with swarm_id, status, budget info, and optionally converged result
+        Dict with antahkarana_id, status, budget info, and optionally converged result
     """
-    from .convergence import spawn_parallel_agents
+    from .convergence import awaken_antahkarana as create_antahkarana
 
-    # Create swarm
-    swarm = spawn_parallel_agents(
+    # Create antahkarana
+    antahkarana = create_antahkarana(
         problem=problem,
-        perspectives=perspectives,
+        voices=voices,
         constraints=constraints,
     )
 
     # Create orchestrator
-    orchestrator = SwarmOrchestrator(swarm)
+    orchestrator = AntahkaranaOrchestrator(antahkarana)
 
     # Check budget before spawning
     if check_budget:
         budget_status = orchestrator.check_orchestrator_budget()
         if not budget_status["can_spawn"]:
             return {
-                "swarm_id": swarm.swarm_id,
-                "agents_spawned": 0,
+                "antahkarana_id": antahkarana.antahkarana_id,
+                "voices_spawned": 0,
                 "status": "blocked",
                 "budget": budget_status,
                 "error": budget_status["recommendation"],
             }
 
-    # Spawn agents (budget-aware)
-    orchestrator.spawn_all_agents()
+    # Spawn voices (budget-aware)
+    orchestrator.spawn_all_voices()
 
     result = {
-        "swarm_id": swarm.swarm_id,
-        "agents_spawned": len(orchestrator.agents),
+        "antahkarana_id": antahkarana.antahkarana_id,
+        "voices_spawned": len(orchestrator.voices),
         "status": orchestrator.get_status(),
     }
 
@@ -751,34 +753,34 @@ def spawn_swarm(
         completion = orchestrator.wait_for_completion(timeout=timeout)
         result["completion"] = completion
 
-        # Converge if we have solutions
-        if swarm.solutions:
+        # Converge if we have insights
+        if antahkarana.solutions:
             converged = orchestrator.converge()
             result["converged"] = {
                 "strategy": converged.strategy_used.value,
                 "solution": converged.final_solution,
                 "confidence": converged.confidence,
-                "contributors": len(converged.contributing_agents),
+                "contributors": len(converged.contributing_voices),
             }
 
         # Include final budget status
-        result["final_budget"] = orchestrator.get_swarm_budget_status()
+        result["final_budget"] = orchestrator.get_antahkarana_budget_status()
 
     return result
 
 
-def get_swarm_solutions(swarm_id: str) -> List[Dict[str, Any]]:
+def get_antahkarana_insights(antahkarana_id: str) -> List[Dict[str, Any]]:
     """
-    Get all solutions for a swarm from cc-memory.
+    Get all insights for an Antahkarana from cc-memory.
 
     Args:
-        swarm_id: The swarm ID to query
+        antahkarana_id: The Antahkarana ID to query
 
     Returns:
-        List of solution dicts with task_id, content, confidence
+        List of insight dicts with task_id, content, confidence
     """
     import re
-    solutions = []
+    insights = []
 
     # Try cc-memory first (project-local observations)
     try:
@@ -790,11 +792,11 @@ def get_swarm_solutions(swarm_id: str) -> List[Dict[str, Any]]:
             project_dir = find_project_dir()
 
             # Use exact tag lookup - semantic search can't find IDs
-            results = cc_memory.recall_by_tag(project_dir, f"swarm:{swarm_id}", limit=50)
+            results = cc_memory.recall_by_tag(project_dir, f"antahkarana:{antahkarana_id}", limit=50)
 
             for r in results:
-                # Only include actual solutions, not budget records
-                if r.get("category") != "swarm-solution":
+                # Only include actual insights, not budget records
+                if r.get("category") not in ("antahkarana-insight", "swarm-solution", "voice_insight"):
                     continue
 
                 content = r.get("content", "")
@@ -803,22 +805,22 @@ def get_swarm_solutions(swarm_id: str) -> List[Dict[str, Any]]:
                 tags = r.get("tags", [])
                 tags_str = " ".join(tags) if isinstance(tags, list) else str(tags)
 
-                # Extract task_id from title (format: "{swarm_id}-N: description")
+                # Extract task_id from title (format: "{antahkarana_id}-N: description")
                 task_id = title.split(':')[0].strip() if ':' in title else 'unknown'
 
                 # Extract perspective from tags
-                perspective_match = re.search(r'perspective:(\w+)', tags_str)
+                perspective_match = re.search(r'(?:voice|perspective):(\w+)', tags_str)
                 perspective = perspective_match.group(1) if perspective_match else 'unknown'
 
                 # Extract confidence from content
                 confidence_match = re.search(r'\*?\*?[Cc]onfidence:?\*?\*?\s*([\d.]+)', content)
                 confidence = float(confidence_match.group(1)) if confidence_match else 0.7
 
-                solutions.append({
+                insights.append({
                     "observation_id": obs_id,
                     "task_id": task_id,
                     "perspective": perspective,
-                    "solution": content,
+                    "insight": content,
                     "content": content,
                     "confidence": confidence,
                     "created_at": r.get("timestamp"),
@@ -826,18 +828,18 @@ def get_swarm_solutions(swarm_id: str) -> List[Dict[str, Any]]:
     except Exception:
         pass
 
-    # Fallback: check soul database (for simulated swarms)
-    if not solutions:
+    # Fallback: check soul database
+    if not insights:
         try:
             conn = get_db_connection()
             c = conn.cursor()
 
             c.execute("""
                 SELECT id, title, content, created_at FROM wisdom
-                WHERE type = 'swarm_solution'
+                WHERE type = 'voice_insight'
                 AND content LIKE ?
                 ORDER BY created_at DESC
-            """, (f'%swarm:{swarm_id}%',))
+            """, (f'%antahkarana:{antahkarana_id}%',))
 
             for row in c.fetchall():
                 obs_id, title, content, created_at = row
@@ -845,13 +847,13 @@ def get_swarm_solutions(swarm_id: str) -> List[Dict[str, Any]]:
                 task_match = re.search(r'task:([^\s,\]]+)', content)
                 task_id = task_match.group(1) if task_match else 'unknown'
 
-                perspective_match = re.search(r'perspective:(\w+)', content)
+                perspective_match = re.search(r'(?:voice|perspective):(\w+)', content)
                 perspective = perspective_match.group(1) if perspective_match else 'unknown'
 
                 confidence_match = re.search(r'confidence:\s*([\d.]+)', content)
                 confidence = float(confidence_match.group(1)) if confidence_match else 0.7
 
-                solutions.append({
+                insights.append({
                     "observation_id": obs_id,
                     "task_id": task_id,
                     "perspective": perspective,
@@ -864,32 +866,43 @@ def get_swarm_solutions(swarm_id: str) -> List[Dict[str, Any]]:
         except Exception:
             pass
 
-    return solutions
+    return insights
 
 
-def get_orchestrator(swarm_id: str) -> Optional[SwarmOrchestrator]:
-    """Get an existing orchestrator by swarm ID."""
-    from .convergence import get_swarm
+def get_orchestrator(antahkarana_id: str) -> Optional[AntahkaranaOrchestrator]:
+    """Get an existing orchestrator by Antahkarana ID."""
+    from .convergence import get_antahkarana
 
-    swarm = get_swarm(swarm_id)
-    if not swarm:
+    antahkarana = get_antahkarana(antahkarana_id)
+    if not antahkarana:
         return None
 
-    orchestrator = SwarmOrchestrator(swarm)
+    orchestrator = AntahkaranaOrchestrator(antahkarana)
 
-    # Load agents from database
+    # Load voices from database
     conn = get_db_connection()
     c = conn.cursor()
 
     try:
+        # Try new table first
         c.execute(
             """SELECT task_id, pid, status, started_at, output_file
-               FROM swarm_agents WHERE swarm_id = ?""",
-            (swarm_id,)
+               FROM antahkarana_voices WHERE antahkarana_id = ?""",
+            (antahkarana_id,)
         )
 
-        for row in c.fetchall():
-            agent = SpawnedAgent(
+        rows = c.fetchall()
+        if not rows:
+            # Fallback to old table
+            c.execute(
+                """SELECT task_id, pid, status, started_at, output_file
+                   FROM swarm_agents WHERE swarm_id = ?""",
+                (antahkarana_id,)
+            )
+            rows = c.fetchall()
+
+        for row in rows:
+            voice = SpawnedVoice(
                 task_id=row[0],
                 process=None,  # Can't recover process handle
                 pid=row[1],
@@ -897,7 +910,7 @@ def get_orchestrator(swarm_id: str) -> Optional[SwarmOrchestrator]:
                 started_at=row[3],
                 output_file=Path(row[4]) if row[4] else None,
             )
-            orchestrator.agents.append(agent)
+            orchestrator.voices.append(voice)
 
     except Exception:
         pass
@@ -905,3 +918,33 @@ def get_orchestrator(swarm_id: str) -> Optional[SwarmOrchestrator]:
         conn.close()
 
     return orchestrator
+
+
+def list_active_antahkaranas(limit: int = 10) -> List[Dict]:
+    """List active Antahkarana orchestrators."""
+    conn = get_db_connection()
+    c = conn.cursor()
+
+    try:
+        c.execute("""
+            SELECT DISTINCT swarm_id, problem, created_at,
+                   (SELECT COUNT(*) FROM swarm_solutions WHERE swarm_solutions.swarm_id = swarm_tasks.swarm_id) as insight_count
+            FROM swarm_tasks
+            ORDER BY created_at DESC
+            LIMIT ?
+        """, (limit,))
+
+        antahkaranas = []
+        for row in c.fetchall():
+            antahkaranas.append({
+                "antahkarana_id": row[0],
+                "problem": row[1][:80] if row[1] else "",
+                "created_at": row[2],
+                "voices": row[3],
+            })
+
+        return antahkaranas
+    except Exception:
+        return []
+    finally:
+        conn.close()

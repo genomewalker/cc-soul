@@ -405,34 +405,24 @@ from .ledger import (
 
 # Multi-Agent Convergence (Antahkarana) - the inner instrument with multiple voices
 from .convergence import (
-    # Primary names (Upanishadic)
     Antahkarana,
     InnerVoice,
     VoiceTask,
     VoiceSolution,
     SamvadaResult,
+    ConvergenceStrategy,
     awaken_antahkarana,
     get_antahkarana,
     list_active_antahkaranas,
-    # Backward compatibility aliases
-    Swarm,
-    AgentTask,
-    AgentSolution,
-    AgentPerspective,
-    ConvergenceStrategy,
-    ConvergenceResult,
-    spawn_parallel_agents,
-    get_swarm,
-    list_active_swarms,
 )
 
-# Swarm Spawner - real Claude agent orchestration
+# Antahkarana Spawner - real Claude voice orchestration
 from .swarm_spawner import (
-    SpawnedAgent,
-    SwarmOrchestrator,
-    spawn_swarm,
+    SpawnedVoice,
+    AntahkaranaOrchestrator,
+    spawn_antahkarana as spawn_real_antahkarana,
     get_orchestrator,
-    get_swarm_solutions,
+    get_antahkarana_insights,
 )
 
 # Ātma-Dhāraṇā (आत्म-धारणा) — Soul Retention Architecture
@@ -793,31 +783,21 @@ __all__ = [
     "capture_soul_state",
     "capture_work_state",
     # Multi-Agent Convergence (Antahkarana - the inner instrument)
-    # Primary names (Upanishadic)
     "Antahkarana",
     "InnerVoice",
     "VoiceTask",
     "VoiceSolution",
     "SamvadaResult",
+    "ConvergenceStrategy",
     "awaken_antahkarana",
     "get_antahkarana",
     "list_active_antahkaranas",
-    # Backward compatibility aliases
-    "Swarm",
-    "AgentTask",
-    "AgentSolution",
-    "AgentPerspective",
-    "ConvergenceStrategy",
-    "ConvergenceResult",
-    "spawn_parallel_agents",
-    "get_swarm",
-    "list_active_swarms",
-    # Swarm Spawner (real agent orchestration)
-    "SpawnedAgent",
-    "SwarmOrchestrator",
-    "spawn_swarm",
+    # Antahkarana Spawner (real voice orchestration)
+    "SpawnedVoice",
+    "AntahkaranaOrchestrator",
+    "spawn_real_antahkarana",
     "get_orchestrator",
-    "get_swarm_solutions",
+    "get_antahkarana_insights",
     # Ātma-Dhāraṇā (आत्म-धारणा) — Soul Retention
     # Smṛti (स्मृति) - Intelligent Recall
     "smṛti_recall",

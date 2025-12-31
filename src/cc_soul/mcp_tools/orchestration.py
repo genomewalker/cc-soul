@@ -1,31 +1,40 @@
 # =============================================================================
-# Orchestration - Spawning Real Claude Voices
+# Antahkarana - The Inner Instrument (Multi-Agent Convergence)
 #
-# When the Antahkarana awakens with real voices, each voice becomes a separate
-# Claude process. They contemplate independently in Chitta (cc-memory), then
-# harmonize their insights.
+# In Upanishadic philosophy, Antahkarana is the inner organ of consciousness
+# comprising facets: Manas (sensory mind), Buddhi (intellect), Chitta (memory),
+# and Ahamkara (ego). Here we spawn real Claude agents as these voices.
 # =============================================================================
 
 @mcp.tool()
-def spawn_real_antahkarana(
+def awaken_antahkarana(
     problem: str,
     voices: str = "manas,buddhi,ahamkara",
     timeout: int = 300,
     wait: bool = False,
 ) -> str:
-    """Spawn real Claude voices to contemplate a problem.
+    """Awaken the Antahkarana - spawn Claude voices to contemplate a problem.
 
-    Unlike awaken_antahkarana (simulation), this spawns actual Claude CLI
-    processes. Each voice runs independently and stores insights in Chitta.
+    Each voice becomes a separate Claude process that runs independently
+    and stores insights in Chitta (cc-memory). After all voices complete,
+    harmonize their insights into unified wisdom.
 
     Args:
         problem: The problem to contemplate
         voices: Comma-separated voices (manas,buddhi,chitta,ahamkara,vikalpa,sakshi)
         timeout: Max seconds to wait for voices (if wait=True)
         wait: Whether to wait for completion
+
+    Voice meanings:
+        manas: Sensory mind - quick first impressions, intuitive responses
+        buddhi: Intellect - deep analysis, discrimination, thorough reasoning
+        chitta: Memory/patterns - practical wisdom from experience
+        ahamkara: Ego - self-protective criticism, finding flaws
+        vikalpa: Imagination - creative, novel, unconventional approaches
+        sakshi: Witness - detached, minimal, essential truth
     """
     from .convergence import InnerVoice
-    from .swarm_spawner import spawn_swarm
+    from .swarm_spawner import spawn_antahkarana
 
     voice_map = {
         "manas": InnerVoice.MANAS,
@@ -34,13 +43,6 @@ def spawn_real_antahkarana(
         "ahamkara": InnerVoice.AHAMKARA,
         "vikalpa": InnerVoice.VIKALPA,
         "sakshi": InnerVoice.SAKSHI,
-        # Backward compat
-        "fast": InnerVoice.MANAS,
-        "deep": InnerVoice.BUDDHI,
-        "pragmatic": InnerVoice.CHITTA,
-        "critical": InnerVoice.AHAMKARA,
-        "novel": InnerVoice.VIKALPA,
-        "minimal": InnerVoice.SAKSHI,
     }
 
     voice_list = [
@@ -52,16 +54,16 @@ def spawn_real_antahkarana(
     if not voice_list:
         voice_list = [InnerVoice.MANAS, InnerVoice.BUDDHI, InnerVoice.AHAMKARA]
 
-    result = spawn_swarm(
+    result = spawn_antahkarana(
         problem=problem,
-        perspectives=voice_list,
+        voices=voice_list,
         wait=wait,
         timeout=timeout,
     )
 
     lines = [
-        f"## Antahkarana Awakened: {result['swarm_id']}",
-        f"Voices: {result['agents_spawned']}",
+        f"## Antahkarana Awakened: {result['antahkarana_id']}",
+        f"Voices: {result['voices_spawned']}",
         f"Work dir: {result['status']['work_dir']}",
     ]
 
@@ -83,30 +85,9 @@ def spawn_real_antahkarana(
     return "\n".join(lines)
 
 
-# Backward compatibility alias
-
-
 @mcp.tool()
-def spawn_real_swarm(
-    problem: str,
-    perspectives: str = "fast,deep,critical",
-    timeout: int = 300,
-    wait: bool = False,
-) -> str:
-    """Spawn real agents (alias for spawn_real_antahkarana).
-
-    Args:
-        problem: The problem to solve
-        perspectives: Comma-separated perspectives
-        timeout: Max seconds to wait
-        wait: Whether to wait for completion
-    """
-    return spawn_real_antahkarana(problem, perspectives, timeout, wait)
-
-
-@mcp.tool()
-def get_orchestrator_status(antahkarana_id: str) -> str:
-    """Get status of a real Antahkarana orchestrator.
+def get_antahkarana_status(antahkarana_id: str) -> str:
+    """Get status of an Antahkarana.
 
     Args:
         antahkarana_id: The Antahkarana ID
@@ -115,22 +96,22 @@ def get_orchestrator_status(antahkarana_id: str) -> str:
 
     orch = get_orchestrator(antahkarana_id)
     if not orch:
-        return f"Orchestrator not found: {antahkarana_id}"
+        return f"Antahkarana not found: {antahkarana_id}"
 
     status = orch.get_status()
 
     lines = [
-        f"## Orchestrator: {status['swarm_id']}",
+        f"## Antahkarana: {status['antahkarana_id']}",
         f"Problem: {status['problem']}",
         f"Work dir: {status['work_dir']}",
         "",
-        f"Voices ({len(status['agents'])}):",
+        f"Voices ({len(status['voices'])}):",
     ]
 
-    for agent in status["agents"]:
-        lines.append(f"  - {agent['task_id']}: {agent['status']} (pid: {agent['pid']})")
+    for voice in status["voices"]:
+        lines.append(f"  - {voice['task_id']}: {voice['status']} (pid: {voice['pid']})")
 
-    lines.append(f"\nInsights collected: {status['solutions']}")
+    lines.append(f"\nInsights collected: {status['insights']}")
 
     return "\n".join(lines)
 
@@ -147,7 +128,7 @@ def poll_antahkarana_voices(antahkarana_id: str, timeout: int = 60) -> str:
 
     orch = get_orchestrator(antahkarana_id)
     if not orch:
-        return f"Orchestrator not found: {antahkarana_id}"
+        return f"Antahkarana not found: {antahkarana_id}"
 
     result = orch.wait_for_completion(timeout=timeout)
 
@@ -159,45 +140,41 @@ def poll_antahkarana_voices(antahkarana_id: str, timeout: int = 60) -> str:
         f"Timeout: {result['timeout']}",
     ]
 
-    if orch.swarm.insights:
+    if orch.antahkarana.insights:
         lines.append("")
         lines.append("Insights collected:")
-        for sol in orch.swarm.insights:
+        for sol in orch.antahkarana.insights:
             lines.append(f"  - {sol.perspective.value}: {sol.confidence:.0%}")
 
     return "\n".join(lines)
 
 
-# Backward compatibility alias
-
-
 @mcp.tool()
-def poll_swarm_agents(swarm_id: str, timeout: int = 60) -> str:
-    """Wait for swarm agents (alias for poll_antahkarana_voices).
+def harmonize_antahkarana(antahkarana_id: str, pramana: str = "samvada") -> str:
+    """Harmonize insights from the inner voices.
 
-    Args:
-        swarm_id: The swarm ID
-        timeout: Max seconds to wait
-    """
-    return poll_antahkarana_voices(swarm_id, timeout)
-
-
-@mcp.tool()
-def harmonize_real_antahkarana(antahkarana_id: str, pramana: str = "samvada") -> str:
-    """Harmonize insights from real Antahkarana voices.
+    After voices complete contemplation, harmonize their insights into
+    unified wisdom using a convergence method (pramana).
 
     Args:
         antahkarana_id: The Antahkarana ID
-        pramana: Convergence method (sankhya, samvada, tarka, viveka)
+        pramana: Convergence method (sankhya, samvada, tarka, viveka, pratyaksha)
+
+    Pramana (means of knowledge):
+        sankhya: Enumeration - highest shraddha wins
+        samvada: Dialogue - synthesize wisdom from all voices
+        tarka: Dialectic - iterative refinement through challenge
+        viveka: Discernment - score and rank by criteria
+        pratyaksha: Direct perception - first valid insight
     """
     from .convergence import ConvergenceStrategy
     from .swarm_spawner import get_orchestrator
 
     orch = get_orchestrator(antahkarana_id)
     if not orch:
-        return f"Orchestrator not found: {antahkarana_id}"
+        return f"Antahkarana not found: {antahkarana_id}"
 
-    if not orch.swarm.insights:
+    if not orch.antahkarana.insights:
         return "No insights to harmonize. Poll voices first."
 
     strategy_map = {
@@ -205,11 +182,7 @@ def harmonize_real_antahkarana(antahkarana_id: str, pramana: str = "samvada") ->
         "samvada": ConvergenceStrategy.SAMVADA,
         "tarka": ConvergenceStrategy.TARKA,
         "viveka": ConvergenceStrategy.VIVEKA,
-        # Backward compat
-        "vote": ConvergenceStrategy.SANKHYA,
-        "synthesize": ConvergenceStrategy.SAMVADA,
-        "debate": ConvergenceStrategy.TARKA,
-        "rank": ConvergenceStrategy.VIVEKA,
+        "pratyaksha": ConvergenceStrategy.PRATYAKSHA,
     }
 
     strat = strategy_map.get(pramana.lower(), ConvergenceStrategy.SAMVADA)
@@ -230,20 +203,6 @@ Contributing voices: {len(result.contributing_voices)}
 {result.synthesis_notes}"""
 
 
-# Backward compatibility alias
-
-
-@mcp.tool()
-def converge_real_swarm(swarm_id: str, strategy: str = "synthesize") -> str:
-    """Converge real swarm (alias for harmonize_real_antahkarana).
-
-    Args:
-        swarm_id: The swarm ID
-        strategy: Convergence strategy
-    """
-    return harmonize_real_antahkarana(swarm_id, strategy)
-
-
 @mcp.tool()
 def list_antahkarana_insights(antahkarana_id: str) -> str:
     """List all insights for an Antahkarana from Chitta (cc-memory).
@@ -254,9 +213,9 @@ def list_antahkarana_insights(antahkarana_id: str) -> str:
     Args:
         antahkarana_id: The Antahkarana ID to query
     """
-    from .swarm_spawner import get_swarm_solutions
+    from .swarm_spawner import get_antahkarana_insights
 
-    insights = get_swarm_solutions(antahkarana_id)
+    insights = get_antahkarana_insights(antahkarana_id)
 
     if not insights:
         return f"No insights found for Antahkarana: {antahkarana_id}\n\nVoices may still be contemplating."
@@ -269,21 +228,29 @@ def list_antahkarana_insights(antahkarana_id: str) -> str:
             f"Shraddha: {sol['confidence']:.0%}",
             f"Observation ID: #{sol['observation_id']}",
             "",
-            sol['solution'][:300] + ("..." if len(sol['solution']) > 300 else ""),
+            sol['insight'][:300] + ("..." if len(sol['insight']) > 300 else ""),
             "",
         ])
 
     return "\n".join(lines)
 
 
-# Backward compatibility alias
-
-
 @mcp.tool()
-def list_swarm_solutions(swarm_id: str) -> str:
-    """List swarm solutions (alias for list_antahkarana_insights).
+def list_antahkaranas(limit: int = 5) -> str:
+    """List active Antahkaranas (inner instruments).
 
     Args:
-        swarm_id: The swarm ID to query
+        limit: Maximum to return
     """
-    return list_antahkarana_insights(swarm_id)
+    from .swarm_spawner import list_active_antahkaranas
+
+    antahkaranas = list_active_antahkaranas(limit)
+
+    if not antahkaranas:
+        return "No active Antahkaranas."
+
+    lines = ["Active Antahkaranas:", ""]
+    for a in antahkaranas:
+        lines.append(f"  {a['antahkarana_id']}: {a['problem'][:50]}... ({a['voices']} voices)")
+
+    return "\n".join(lines)
