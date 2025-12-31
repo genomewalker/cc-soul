@@ -179,6 +179,7 @@ try:
         get_graph_stats,
         sync_wisdom_to_graph,
         activate_from_prompt,
+        get_concept_content,
         KUZU_AVAILABLE,
     )
 except ImportError:
@@ -186,6 +187,7 @@ except ImportError:
     get_graph_stats = None
     sync_wisdom_to_graph = None
     activate_from_prompt = None
+    get_concept_content = None
 
 # Session message accumulator for passive learning
 _session_messages = []
@@ -916,6 +918,132 @@ def format_rich_context(project: str, ctx: dict) -> str:
     return "\n".join(lines)
 
 
+def format_minimal_startup_context(project: str, ctx: dict) -> str:
+    """
+    Brain-like minimal startup context.
+
+    Instead of dumping all observations (~16k tokens), provides:
+    1. Ledger continuation hint (~50 tokens)
+    2. Active intentions (1-3) (~100 tokens)
+    3. Coherence/mood state (~30 tokens)
+    4. Graph affordances - what CAN be recalled (~200 tokens)
+
+    Total: ~400 tokens (97% reduction from 16k)
+
+    Continuity is preserved via ledger + intentions.
+    Relevance is achieved via on-demand activation in user_prompt hook.
+    """
+    from datetime import datetime
+
+    lines = []
+    lines.append(f"# [{project}] Session Context (Minimal)")
+    lines.append("")
+
+    # 1. Ledger continuation (highest priority for continuity)
+    continuation = ctx.get("continuation", {})
+    if continuation.get("immediate_next"):
+        lines.append(f"**Continue:** {continuation['immediate_next']}")
+        if continuation.get("critical_context"):
+            # Only first 200 chars of critical context
+            lines.append(f"*Context:* {continuation['critical_context'][:200]}")
+        lines.append("")
+
+    # 2. Active intentions (persistent wants)
+    intentions = get_active_intentions()
+    persistent = [i for i in intentions if i.scope.value in ("project", "persistent")]
+    if persistent:
+        lines.append("**Active Intentions:**")
+        for i in persistent[:3]:  # Max 3
+            lines.append(f"- [{i.scope.value}] {i.want}")
+        lines.append("")
+
+    # 3. Coherence/mood (state awareness)
+    soul_state = ctx.get("soul", {})
+    coherence = soul_state.get("coherence", 0)
+    if coherence:
+        lines.append(f"**Coherence:** {coherence:.0%}")
+
+    # 4. Graph affordances - what's available (not content)
+    # Shows topics that CAN be recalled, not their content
+    try:
+        if KUZU_AVAILABLE and get_graph_stats:
+            stats = get_graph_stats()
+            node_count = stats.get("nodes", 0)
+            if node_count > 0:
+                lines.append("")
+                lines.append(f"**Memory Graph:** {node_count} concepts available")
+                lines.append("*Use mem-recall for on-demand retrieval*")
+    except Exception:
+        pass
+
+    # 5. Session count (light continuity signal)
+    project_stats = ctx.get("project", {})
+    if project_stats:
+        sessions = project_stats.get("sessions", 0)
+        observations = project_stats.get("observations", 0)
+        if sessions or observations:
+            lines.append("")
+            lines.append(f"📊 {observations} observations over {sessions} sessions")
+
+    # Explicit hint about on-demand memory
+    lines.append("")
+    lines.append("*Context is minimal. Use `mem-recall('query')` for detailed memory.*")
+
+    return "\n".join(lines)
+
+
+def activate_context_for_prompt(prompt: str, limit: int = 5) -> str:
+    """
+    Activate relevant context based on user prompt.
+
+    Uses spreading activation through the concept graph to find
+    related wisdom/observations, then fetches content on-demand.
+
+    Called from user_prompt hook to inject relevant context AFTER
+    seeing what the user actually wants.
+
+    Args:
+        prompt: The user's prompt
+        limit: Max concepts to activate
+
+    Returns:
+        Formatted context string (~1-2k tokens max)
+    """
+    lines = []
+
+    # 1. Try graph-based activation
+    try:
+        if KUZU_AVAILABLE and activate_from_prompt:
+            activation = activate_from_prompt(prompt)
+            if activation and activation.spread:
+                lines.append("**Activated Context:**")
+                for concept, score in activation.spread[:limit]:
+                    if score > 0.3:  # Threshold
+                        # Fetch content on-demand
+                        content = get_concept_content(concept.id)
+                        title = concept.title[:50]
+                        if content:
+                            lines.append(f"- **{title}** ({score:.0%}): {content[:100]}...")
+                        else:
+                            lines.append(f"- **{title}** ({score:.0%})")
+                if lines:
+                    lines.append("")
+    except Exception:
+        pass
+
+    # 2. Fallback: quick semantic recall from wisdom
+    if not lines:
+        try:
+            recalled = quick_recall(prompt)
+            if recalled:
+                lines.append("**Related Wisdom:**")
+                lines.append(recalled[:500])  # Limit size
+        except Exception:
+            pass
+
+    return "\n".join(lines) if lines else ""
+
+
 def pre_compact(transcript_path: str = None) -> str:
     """
     PreCompact hook - Save context before compaction.
@@ -1222,16 +1350,17 @@ Focus: Complete assigned task with your perspective."""
     except Exception:
         pass
 
-    # GRAPH: Initialize concept graph if available and empty
+    # GRAPH: Check graph status but DO NOT auto-sync
+    # Auto-sync causes lock conflicts with MCP server.
+    # Use CLI command `soul graph rebuild` instead.
     try:
         if KUZU_AVAILABLE and get_graph_stats:
             stats = get_graph_stats()
             if stats.get("nodes", 0) == 0:
-                # Graph is empty, sync wisdom to populate it
-                sync_wisdom_to_graph()
+                # Graph is empty - log but don't auto-sync
                 log_event(
                     EventType.SESSION_START,
-                    data={"graph_synced": True},
+                    data={"graph_empty": True, "hint": "Run: soul graph rebuild"},
                 )
     except Exception:
         pass
@@ -1309,10 +1438,13 @@ Focus: Complete assigned task with your perspective."""
             except Exception:
                 pass
 
-    # Include rich context table if requested
+    # Include context if requested
+    # BRAIN-LIKE: Use minimal startup context (97% reduction from 16k to ~400 tokens)
+    # On-demand retrieval happens in user_prompt hook via activate_context_for_prompt
     if include_rich:
-        rich = format_rich_context(project, ctx)
-        greeting = greeting + "\n\n" + rich
+        # Use minimal startup context instead of full dump
+        minimal = format_minimal_startup_context(project, ctx)
+        greeting = greeting + "\n\n" + minimal
 
     return greeting
 
@@ -1337,9 +1469,10 @@ def session_start_rich() -> tuple:
     ctx = unified_context()
 
     greeting = format_soul_greeting(project, ctx)
-    rich_context = format_rich_context(project, ctx)
+    # BRAIN-LIKE: Use minimal startup context instead of full dump
+    minimal_context = format_minimal_startup_context(project, ctx)
 
-    return greeting, rich_context
+    return greeting, minimal_context
 
 
 def session_end() -> str:
@@ -2259,77 +2392,91 @@ def user_prompt(
         except Exception:
             pass
 
-    # Run unified forward pass for coherent context
+    # BRAIN-LIKE: On-demand activation via concept graph
+    # Uses spreading activation to find related wisdom, then fetches content on-demand
+    # Falls back to semantic search if graph not available
+    graph_activated = False
     try:
-        ctx = forward_pass(user_input, session_type="prompt")
-
-        # Budget warnings ALWAYS get prepended (critical for user awareness)
-        budget_prefix = "\n".join(output) + "\n" if output else ""
-
-        if mode == "minimal":
-            # Minimal mode: just one key wisdom if highly relevant
-            if ctx.wisdom and ctx.wisdom[0].get("combined_score", 0) > 0.5:
-                w = ctx.wisdom[0]
-                return f"{budget_prefix}Remember: {w.get('title', '')}"
-            return budget_prefix.strip() if budget_prefix else ""
-
-        if use_woven:
-            # Organic weaving - no headers, just flowing context
-            woven = format_context(ctx, style="woven")
-            if woven:
-                # In compact/reduced mode, truncate
-                if mode in ("compact", "reduced"):
-                    truncated = woven[:500] if len(woven) > 500 else woven
-                    return f"{budget_prefix}{truncated}"
-                return f"{budget_prefix}{woven}"
-        else:
-            # Structured format for clarity (current default)
-            # Check vocabulary for matching terms
-            vocab = get_vocabulary()
-            input_lower = user_input.lower()
-            matching_terms = {
-                term: meaning
-                for term, meaning in vocab.items()
-                if term.lower() in input_lower
-            }
-
-            if matching_terms:
-                output.append("## 📖 Vocabulary")
-                for term, meaning in list(matching_terms.items())[:3]:
-                    output.append(f"- **{term}:** {meaning[:80]}")
-                output.append("")
-
-            # Wisdom from forward pass
-            if ctx.wisdom:
-                output.append("## 💡 Relevant Wisdom")
-                output.append("")
-                for w in ctx.wisdom[:2]:
-                    title = w.get("title", "")
-                    conf = w.get("confidence", 0)
-                    output.append(f"- **{title}** [{conf}%]")
-                    injected_items.append(("wisdom", title))
-                    content = w.get("content", "")[:100]
-                    if content:
-                        output.append(f"  {content}")
-                output.append("")
-
+        activated_context = activate_context_for_prompt(user_input, limit=5)
+        if activated_context and mode not in ("minimal", "emergency"):
+            output.append(activated_context)
+            injected_items.append(("graph_activation", "spreading"))
+            graph_activated = True
     except Exception:
-        # Fallback to simple quick recall
-        results = quick_recall(user_input, limit=3)
-        if results:
-            relevant = [
-                r
-                for r in results
-                if r.get("combined_score", r.get("effective_confidence", 0)) > 0.3
-            ]
-            if relevant:
-                output.append("## 💡 Relevant Wisdom")
-                for w in relevant[:2]:
-                    output.append(f"- **{w['title']}**")
-                    injected_items.append(("wisdom", w["title"]))
-                    content = w["content"][:100]
-                    output.append(f"  {content}")
-                output.append("")
+        pass
+
+    # Fallback: Run unified forward pass if graph activation didn't yield results
+    if not graph_activated:
+        try:
+            ctx = forward_pass(user_input, session_type="prompt")
+
+            # Budget warnings ALWAYS get prepended (critical for user awareness)
+            budget_prefix = "\n".join(output) + "\n" if output else ""
+
+            if mode == "minimal":
+                # Minimal mode: just one key wisdom if highly relevant
+                if ctx.wisdom and ctx.wisdom[0].get("combined_score", 0) > 0.5:
+                    w = ctx.wisdom[0]
+                    return f"{budget_prefix}Remember: {w.get('title', '')}"
+                return budget_prefix.strip() if budget_prefix else ""
+
+            if use_woven:
+                # Organic weaving - no headers, just flowing context
+                woven = format_context(ctx, style="woven")
+                if woven:
+                    # In compact/reduced mode, truncate
+                    if mode in ("compact", "reduced"):
+                        truncated = woven[:500] if len(woven) > 500 else woven
+                        return f"{budget_prefix}{truncated}"
+                    return f"{budget_prefix}{woven}"
+            else:
+                # Structured format for clarity (current default)
+                # Check vocabulary for matching terms
+                vocab = get_vocabulary()
+                input_lower = user_input.lower()
+                matching_terms = {
+                    term: meaning
+                    for term, meaning in vocab.items()
+                    if term.lower() in input_lower
+                }
+
+                if matching_terms:
+                    output.append("## 📖 Vocabulary")
+                    for term, meaning in list(matching_terms.items())[:3]:
+                        output.append(f"- **{term}:** {meaning[:80]}")
+                    output.append("")
+
+                # Wisdom from forward pass
+                if ctx.wisdom:
+                    output.append("## 💡 Relevant Wisdom")
+                    output.append("")
+                    for w in ctx.wisdom[:2]:
+                        title = w.get("title", "")
+                        conf = w.get("confidence", 0)
+                        output.append(f"- **{title}** [{conf}%]")
+                        injected_items.append(("wisdom", title))
+                        content = w.get("content", "")[:100]
+                        if content:
+                            output.append(f"  {content}")
+                    output.append("")
+
+        except Exception:
+            # Fallback to simple quick recall
+            results = quick_recall(user_input, limit=3)
+            if results:
+                relevant = [
+                    r
+                    for r in results
+                    if r.get("combined_score", r.get("effective_confidence", 0)) > 0.3
+                ]
+                if relevant:
+                    output.append("## 💡 Relevant Wisdom")
+                    for w in relevant[:2]:
+                        output.append(f"- **{w['title']}**")
+                        injected_items.append(("wisdom", w["title"]))
+                        content = w["content"][:100]
+                        output.append(f"  {content}")
+                    output.append("")
 
     # FALLBACK: Surface dormant wisdom if no wisdom was injected yet
     # This ensures wisdom gets applied even when no direct query match

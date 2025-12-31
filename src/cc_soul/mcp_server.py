@@ -513,8 +513,8 @@ def get_concept_graph_stats() -> str:
 
         lines = [
             "Concept Graph Statistics:",
-            f"  Nodes: {stats.get('node_count', 0)}",
-            f"  Edges: {stats.get('edge_count', 0)}",
+            f"  Nodes: {stats.get('nodes', 0)}",
+            f"  Edges: {stats.get('edges', 0)}",
         ]
 
         if stats.get("by_type"):
