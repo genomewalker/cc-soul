@@ -218,3 +218,40 @@ python .scripts/validate_signals.py
 ## validate_minimal_context.py
 
 Tests the minimal startup context for lean mode.
+
+## migrate_claude_mem.py
+
+Migrates observations from claude-mem to cc-memory/cc-soul.
+
+**Source:**
+- `~/.claude-mem/claude-mem.db` - SQLite observations
+- `~/.claude-mem/vector-db/chroma.sqlite3` - Chroma embeddings
+
+**Target:**
+- `.cc-memory/memory.db` - Project-local observations
+- `~/.claude/mind/soul.db` - Universal wisdom (decisions/discoveries)
+- `~/.claude/mind/vectors/lancedb/` - LanceDB embeddings
+
+**Usage:**
+```bash
+# View statistics
+python .scripts/migrate_claude_mem.py --stats
+
+# Dry run for specific project
+python .scripts/migrate_claude_mem.py --project cc-soul --target-dir . --index-vectors --promote-wisdom
+
+# Execute migration
+python .scripts/migrate_claude_mem.py --project cc-soul --target-dir . --index-vectors --promote-wisdom --execute
+
+# Export to JSON for inspection
+python .scripts/migrate_claude_mem.py --project cc-soul --export-json obs.json
+```
+
+**Options:**
+- `--stats` - Show observation counts by project and type
+- `--project NAME` - Filter to specific project
+- `--target-dir PATH` - Project directory for cc-memory import
+- `--index-vectors` - Create LanceDB embeddings (requires sentence-transformers)
+- `--promote-wisdom` - Promote decisions/discoveries to soul wisdom
+- `--execute` - Actually perform migration (default is dry-run)
+- `--limit N` - Limit number of observations to process
