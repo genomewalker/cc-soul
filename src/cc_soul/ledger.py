@@ -358,26 +358,27 @@ def load_latest_ledger(project: str = None) -> Optional[SessionLedger]:
     if project is None:
         project = _get_project_name()
 
-    # Load from cc-memory (single source of truth)
-    results = _call_cc_memory_recall(
-        query=f"session ledger checkpoint {project}",
-        category="session_ledger",
-        limit=1,
-    )
-
-    if not results:
+    # Load from cc-memory using recent observations (timestamp-ordered, not semantic)
+    if not CC_MEMORY_AVAILABLE:
         return None
 
-    # Parse the content
     try:
-        content = results[0].get("content", "{}")
-        data = json.loads(content) if isinstance(content, str) else content
-        ledger = SessionLedger.from_dict(data)
+        from cc_memory import memory as cc_memory
+        project_dir = _get_current_project_dir()
+        observations = cc_memory.get_recent_observations(project_dir, limit=20)
 
-        # Set as parent for continuity
-        _current_parent_ledger = ledger.ledger_id
+        # Find most recent ledger for this project
+        for obs in observations:
+            if obs.get("category") == "session_ledger":
+                content = obs.get("content", "{}")
+                data = json.loads(content) if isinstance(content, str) else content
+                ledger = SessionLedger.from_dict(data)
 
-        return ledger
+                # Set as parent for continuity
+                _current_parent_ledger = ledger.ledger_id
+
+                return ledger
+        return None
     except Exception:
         return None
 
