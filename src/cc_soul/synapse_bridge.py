@@ -99,6 +99,20 @@ class SoulGraph:
         """Add an immutable belief."""
         return self._soul.hold_belief(statement, strength)
 
+    def set_intention(
+        self,
+        want: str,
+        why: str,
+        scope: str = "session",
+        strength: float = 0.8,
+    ) -> str:
+        """Set an intention (concrete want)."""
+        return self._soul.set_intention(want, why, scope, strength)
+
+    def get_intentions(self) -> List[Dict]:
+        """Get active intentions."""
+        return self._soul.get_intentions()
+
     def add_failure(
         self,
         what_failed: str,
@@ -107,6 +121,33 @@ class SoulGraph:
     ) -> str:
         """Record a failure (gold for learning)."""
         return self._soul.record_failure(what_failed, why_it_failed, domain)
+
+    def observe(
+        self,
+        category: str,
+        title: str,
+        content: str,
+        project: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+    ) -> str:
+        """
+        Record an observation (episode).
+
+        Replaces cc-memory's mem-remember. Categories:
+        - bugfix, decision: slow decay (2%/day)
+        - discovery, feature: medium decay (5%/day)
+        - session_ledger, signal: fast decay (15%/day)
+        """
+        return self._soul.observe(category, title, content, project, tags)
+
+    def get_episodes(
+        self,
+        category: Optional[str] = None,
+        project: Optional[str] = None,
+        limit: int = 50,
+    ) -> List[Dict]:
+        """Get episodes, optionally filtered."""
+        return self._soul.get_episodes(category, project, limit)
 
     def search(
         self,
