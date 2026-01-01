@@ -487,23 +487,23 @@ def detect_intention_tensions() -> List[Gap]:
             )
             gaps.append(gap)
 
-        # Find intentions that might conflict (same context, different wants)
+        # Find intentions that might conflict (3+ strong intentions in same context)
+        # Only flag when there's genuine competition, not just related work
         cursor.execute("""
-            SELECT i1.id, i1.want, i2.id, i2.want, i1.context
-            FROM intentions i1
-            JOIN intentions i2 ON i1.context = i2.context AND i1.id < i2.id
-            WHERE i1.state = 'active' AND i2.state = 'active'
-            AND i1.context != ''
-            LIMIT 10
+            SELECT context, COUNT(*) as cnt
+            FROM intentions
+            WHERE state = 'active' AND context != '' AND strength > 0.7
+            GROUP BY context
+            HAVING cnt >= 3
         """)
 
         for row in cursor.fetchall():
-            i1_id, i1_want, i2_id, i2_want, context = row
+            context, count = row
             gap = Gap(
-                id=f"tension_conflict_{i1_id}_{i2_id}",
+                id=f"tension_context_{context}",
                 type=GapType.INTENTION_TENSION,
-                description=f"Multiple intentions in '{context}' context",
-                evidence=[f"Want 1: {i1_want}", f"Want 2: {i2_want}"],
+                description=f"{count} strong intentions competing in '{context}' context",
+                evidence=[f"Context: {context}", f"Count: {count}"],
                 priority=0.6,
             )
             gaps.append(gap)
