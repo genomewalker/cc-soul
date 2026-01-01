@@ -2261,7 +2261,7 @@ def user_prompt_lean(user_input: str, transcript_path: str = None) -> str:
     - mcp__soul__activate_concepts() - related concepts
     - mcp__cc-memory__mem-recall() - project observations
     """
-    if len(user_input.strip()) < 20:
+    if len(user_input.strip()) < 3:
         return ""
 
     output = []
@@ -2378,7 +2378,7 @@ def user_prompt(
     global _last_injection
     from datetime import datetime
 
-    if len(user_input.strip()) < 20:
+    if len(user_input.strip()) < 3:
         return ""
 
     # OBSERVE: Analyze user message for learnings (corrections, preferences, etc.)
