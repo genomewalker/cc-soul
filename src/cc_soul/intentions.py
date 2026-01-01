@@ -573,3 +573,62 @@ def cleanup_session_intentions():
         "cleaned": len(unfulfilled),
         "unfulfilled_wants": [u[0] for u in unfulfilled],
     }
+
+
+def prune_intentions(keep_persistent: bool = True, keep_fulfilled: int = 10) -> Dict:
+    """
+    Delete old/stale intentions to reduce noise.
+
+    Args:
+        keep_persistent: If True, never delete persistent scope intentions
+        keep_fulfilled: Keep this many most recent fulfilled intentions
+
+    Returns count of deleted intentions by category.
+    """
+    _ensure_table()
+    conn = get_db_connection()
+    c = conn.cursor()
+
+    deleted = {"abandoned": 0, "fulfilled": 0, "total": 0}
+
+    # Delete all abandoned session intentions (they're just noise)
+    c.execute(
+        """
+        DELETE FROM intentions
+        WHERE scope = 'session' AND state = 'abandoned'
+    """
+    )
+    deleted["abandoned"] = c.rowcount
+
+    # Delete old fulfilled session intentions, keeping most recent
+    c.execute(
+        """
+        DELETE FROM intentions
+        WHERE scope = 'session' AND state = 'fulfilled'
+        AND id NOT IN (
+            SELECT id FROM intentions
+            WHERE scope = 'session' AND state = 'fulfilled'
+            ORDER BY last_checked_at DESC
+            LIMIT ?
+        )
+    """,
+        (keep_fulfilled,),
+    )
+    deleted["fulfilled"] = c.rowcount
+
+    # Optionally prune project-scope abandoned intentions older than 7 days
+    c.execute(
+        """
+        DELETE FROM intentions
+        WHERE scope = 'project' AND state = 'abandoned'
+        AND last_checked_at < datetime('now', '-7 days')
+    """
+    )
+    deleted["abandoned"] += c.rowcount
+
+    deleted["total"] = deleted["abandoned"] + deleted["fulfilled"]
+
+    conn.commit()
+    conn.close()
+
+    return deleted
