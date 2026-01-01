@@ -59,6 +59,7 @@ from .intentions import (
     get_active_intentions,
     get_intention_context,
     cleanup_session_intentions,
+    prune_intentions,
     intend,
     IntentionScope,
 )
@@ -1581,6 +1582,9 @@ def session_end() -> str:
     # Cleanup session-scoped intentions
     intention_cleanup = cleanup_session_intentions()
     unfulfilled = intention_cleanup.get("unfulfilled_wants", [])
+
+    # Prune stale intentions to prevent accumulation
+    prune_intentions()
 
     # NARRATIVE: End the session episode
     episode_ended = False
