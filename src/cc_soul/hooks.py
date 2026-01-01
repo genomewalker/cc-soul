@@ -574,8 +574,8 @@ def _extract_session_intention(user_input: str) -> dict:
         if re.match(pattern, input_lower.strip()):
             return None
 
-    # Minimum length for task extraction
-    if len(user_input.strip()) < 15:
+    # Minimum length for task extraction (short prompts are conversational, not tasks)
+    if len(user_input.strip()) < 40:
         return None
 
     # Task patterns: (action pattern, want template, why template)
