@@ -191,8 +191,28 @@ def get_intentions(scope: str = None, active_only: bool = True) -> str:
         scope: Filter by scope (session, project, persistent)
         active_only: If True, only show active intentions
     """
-    from .intentions import get_intentions as _get
-    return _get(scope=scope, active_only=active_only)
+    from .intentions import (
+        get_intentions as _get_intentions,
+        get_active_intentions,
+        format_intentions_display,
+        IntentionScope,
+    )
+
+    scope_filter = None
+    if scope:
+        scope_map = {
+            "session": IntentionScope.SESSION,
+            "project": IntentionScope.PROJECT,
+            "persistent": IntentionScope.PERSISTENT,
+        }
+        scope_filter = scope_map.get(scope.lower())
+
+    if active_only:
+        intentions = get_active_intentions(scope=scope_filter)
+    else:
+        intentions = _get_intentions(scope=scope_filter)
+
+    return format_intentions_display(intentions)
 
 
 # =============================================================================
