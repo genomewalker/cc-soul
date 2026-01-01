@@ -173,21 +173,43 @@ from .antahkarana_assessment import (
     SessionContext as AssessmentContext,
 )
 
-# Optional graph integration - gracefully handle if kuzu not available
+# Brain module for graph-based memory
+# Uses scipy sparse matrices for spreading activation
 try:
-    from .graph import (
-        get_graph_stats,
-        sync_wisdom_to_graph,
-        activate_from_prompt,
-        get_concept_content,
-        KUZU_AVAILABLE,
-    )
+    from .brain import Brain, get_concept_content
+
+    _brain = None
+
+    def get_brain():
+        """Lazy-load the brain singleton."""
+        global _brain
+        if _brain is None:
+            _brain = Brain()
+        return _brain
+
+    def get_graph_stats():
+        """Get brain statistics for context display."""
+        return get_brain().stats()
+
+    def sync_wisdom_to_graph():
+        """Sync wisdom entries into the brain."""
+        return get_brain().sync_from_wisdom()
+
+    def activate_from_prompt_wrapper(prompt: str, limit: int = 10):
+        """Wrapper matching old graph API."""
+        return get_brain().activate_from_prompt(prompt, limit=limit)
+
+    activate_from_prompt = activate_from_prompt_wrapper
+    BRAIN_AVAILABLE = True
 except ImportError:
-    KUZU_AVAILABLE = False
+    BRAIN_AVAILABLE = False
     get_graph_stats = None
     sync_wisdom_to_graph = None
     activate_from_prompt = None
     get_concept_content = None
+
+# Alias for backwards compatibility
+KUZU_AVAILABLE = BRAIN_AVAILABLE if 'BRAIN_AVAILABLE' in dir() else False
 
 # Session message accumulator for passive learning
 _session_messages = []
@@ -963,15 +985,16 @@ def format_minimal_startup_context(project: str, ctx: dict) -> str:
     if coherence:
         lines.append(f"**Coherence:** {coherence:.0%}")
 
-    # 4. Graph affordances - what's available (not content)
-    # Shows topics that CAN be recalled, not their content
+    # 4. Brain affordances - what's available (not content)
+    # Shows concepts that CAN be recalled, not their content
     try:
-        if KUZU_AVAILABLE and get_graph_stats:
+        if BRAIN_AVAILABLE and get_graph_stats:
             stats = get_graph_stats()
-            node_count = stats.get("nodes", 0)
-            if node_count > 0:
+            concept_count = stats.get("concepts", 0)
+            edge_count = stats.get("edges", 0)
+            if concept_count > 0:
                 lines.append("")
-                lines.append(f"**Memory Graph:** {node_count} concepts available")
+                lines.append(f"**Memory Brain:** {concept_count} concepts, {edge_count} connections")
                 lines.append("*Use mem-recall for on-demand retrieval*")
     except Exception:
         pass
@@ -996,7 +1019,7 @@ def activate_context_for_prompt(prompt: str, limit: int = 5) -> str:
     """
     Activate relevant context based on user prompt.
 
-    Uses spreading activation through the concept graph to find
+    Uses spreading activation through the brain's concept graph to find
     related wisdom/observations, then fetches content on-demand.
 
     Called from user_prompt hook to inject relevant context AFTER
@@ -1011,13 +1034,13 @@ def activate_context_for_prompt(prompt: str, limit: int = 5) -> str:
     """
     lines = []
 
-    # 1. Try graph-based activation
+    # 1. Try brain-based spreading activation
     try:
-        if KUZU_AVAILABLE and activate_from_prompt:
-            activation = activate_from_prompt(prompt)
-            if activation and activation.spread:
+        if BRAIN_AVAILABLE and activate_from_prompt:
+            result = activate_from_prompt(prompt, limit=limit)
+            if result and result.activated:
                 lines.append("**Activated Context:**")
-                for concept, score in activation.spread[:limit]:
+                for concept, score in result.activated[:limit]:
                     if score > 0.3:  # Threshold
                         # Fetch content on-demand
                         content = get_concept_content(concept.id)
@@ -1026,6 +1049,14 @@ def activate_context_for_prompt(prompt: str, limit: int = 5) -> str:
                             lines.append(f"- **{title}** ({score:.0%}): {content[:100]}...")
                         else:
                             lines.append(f"- **{title}** ({score:.0%})")
+
+                # Show resonance gaps if any (discovery opportunities)
+                if result.gaps:
+                    lines.append("")
+                    lines.append("**Resonance Gaps** (unexplained co-activation):")
+                    for a, b, strength in result.gaps[:3]:
+                        lines.append(f"- {a} ↔ {b} ({strength:.0%})")
+
                 if lines:
                     lines.append("")
     except Exception:
@@ -1350,17 +1381,17 @@ Focus: Complete assigned task with your perspective."""
     except Exception:
         pass
 
-    # GRAPH: Check graph status but DO NOT auto-sync
-    # Auto-sync causes lock conflicts with MCP server.
-    # Use CLI command `soul graph rebuild` instead.
+    # BRAIN: Check brain status and auto-sync if empty
+    # Unlike Kuzu, the brain is lightweight and doesn't have lock conflicts
     try:
-        if KUZU_AVAILABLE and get_graph_stats:
+        if BRAIN_AVAILABLE and get_graph_stats:
             stats = get_graph_stats()
-            if stats.get("nodes", 0) == 0:
-                # Graph is empty - log but don't auto-sync
+            if stats.get("concepts", 0) == 0:
+                # Brain is empty - sync wisdom
+                sync_wisdom_to_graph()
                 log_event(
                     EventType.SESSION_START,
-                    data={"graph_empty": True, "hint": "Run: soul graph rebuild"},
+                    data={"brain_synced": True},
                 )
     except Exception:
         pass
