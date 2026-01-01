@@ -1631,6 +1631,21 @@ def session_end() -> str:
     except Exception:
         pass
 
+    # SIGNALS: Generate signals from session observations (Manas scan)
+    signals_generated = 0
+    try:
+        from .signals import manas_scan, sakshi_prune
+        import cc_memory
+        project_dir = str(Path.cwd())
+        recent_obs = cc_memory.get_recent_observations(project_dir, limit=20)
+        if recent_obs:
+            signals = manas_scan(recent_obs)
+            signals_generated = len(signals)
+        # Prune weak signals (Sakshi maintenance)
+        sakshi_prune()
+    except Exception:
+        pass
+
     # OUTCOME: Detect and record session outcome
     session_outcome = Outcome.UNKNOWN
     try:
@@ -1654,6 +1669,7 @@ def session_end() -> str:
                 "promoted_patterns": len(promoted_patterns),
                 "backup_created": backup_path is not None,
                 "evolution_insights": evolution_count,
+                "signals_generated": signals_generated,
                 "outcome": session_outcome.value,
             }
         )
@@ -2227,11 +2243,121 @@ def _learn_efficiency_from_output(output: str) -> int:
     return learnings
 
 
+def user_prompt_lean(user_input: str, transcript_path: str = None) -> str:
+    """
+    Ultra-lean prompt injection. Signals only, Claude pulls content via MCP.
+
+    Philosophy: Push minimal signals, let Claude pull what it needs.
+    Target: <100 tokens per prompt vs 500-1000 in full mode.
+
+    What we DO:
+    - Budget warnings (critical)
+    - Compact signal line (intentions, dormant wisdom, concepts)
+    - Passive observation (no output)
+
+    What Claude can PULL on-demand:
+    - mcp__soul__get_intentions() - full intention details
+    - mcp__soul__recall_wisdom() - wisdom content
+    - mcp__soul__activate_concepts() - related concepts
+    - mcp__cc-memory__mem-recall() - project observations
+    """
+    if len(user_input.strip()) < 20:
+        return ""
+
+    output = []
+
+    # 1. CRITICAL: Budget warnings (always)
+    budget = check_budget_before_inject(transcript_path)
+    if budget.get("trigger_compact"):
+        output.append("🚨 CONTEXT EXHAUSTED - /clear NOW")
+    elif budget.get("mode") == "minimal":
+        output.append("🔴 <10% context")
+    elif budget.get("mode") == "compact":
+        output.append("🟡 25% context")
+
+    # 2. SIGNALS: Compact one-liners Claude can expand via MCP
+    signals = []
+
+    # Active intentions (count only)
+    try:
+        from .mcp_tools.agency import get_intentions
+        intentions = get_intentions(active_only=True).get("intentions", [])
+        persistent = [i for i in intentions if i.get("scope") == "persistent"]
+        session = [i for i in intentions if i.get("scope") == "session"]
+        if persistent:
+            signals.append(f"🌍 {persistent[0].get('want', '')[:50]}")
+        if session:
+            signals.append(f"🔹 {session[0].get('want', '')[:50]}")
+    except Exception:
+        pass
+
+    # Dormant wisdom (title only - never-applied high-confidence)
+    try:
+        dormant = get_dormant_wisdom(limit=2, min_confidence=0.9)
+        for d in dormant[:2]:
+            title = d.get("title", "")[:40]
+            signals.append(f"⏰ {title}: never applied ({int(d.get('confidence', 0)*100)}%)")
+    except Exception:
+        pass
+
+    # Soul questions (ultra-compact - just signal)
+    try:
+        questions = get_pending_questions(limit=2)
+        if questions:
+            signals.append(f"❓ {len(questions)} soul questions pending")
+    except Exception:
+        pass
+
+    # BRAIN: Spreading activation - find related concepts
+    try:
+        if BRAIN_AVAILABLE and activate_from_prompt:
+            activated = activate_from_prompt(user_input, limit=5)
+            if activated and activated.activated:
+                # activated.activated is list of (Concept, activation_score) tuples
+                strong = [(c, score) for c, score in activated.activated if score > 0.3]
+                if strong:
+                    # Just show count and top concept title
+                    top_concept, top_score = strong[0]
+                    top_title = getattr(top_concept, 'title', str(top_concept)[:30])
+                    signals.append(f"🧠 {len(strong)} concepts ({top_title[:25]})")
+    except Exception:
+        pass
+
+    if signals:
+        output.append(" ".join(signals))
+
+    # 3. PASSIVE: Observe without output (learning in background)
+    try:
+        _observe_user_message(user_input)
+    except Exception:
+        pass
+
+    try:
+        _auto_generate_session_intention(user_input)
+    except Exception:
+        pass
+
+    # 4. ONE wisdom reminder (compact)
+    try:
+        from .wisdom import recall_wisdom
+        wisdom = recall_wisdom(user_input, limit=1)
+        if wisdom and wisdom[0].get("confidence", 0) > 0.8:
+            title = wisdom[0].get("title", "")[:40]
+            output.append(f"Remember: {title}")
+    except Exception:
+        pass
+
+    return "\n".join(output) if output else ""
+
+
 def user_prompt(
     user_input: str, use_woven: bool = True, transcript_path: str = None
 ) -> str:
     """
     UserPromptSubmit hook - Inject soul context organically.
+
+    NOTE: This is the FULL mode. For lean mode, use user_prompt_lean().
+    Set CC_SOUL_LEAN=1 env var or call hook with --lean flag.
 
     Efficiency-first approach:
     1. Check for known problem patterns (skip exploration)
@@ -2245,6 +2371,10 @@ def user_prompt(
 
     Budget-aware: Reduces injection when context is low.
     """
+    # Check for lean mode
+    import os
+    if os.environ.get("CC_SOUL_LEAN", "").lower() in ("1", "true", "yes"):
+        return user_prompt_lean(user_input, transcript_path)
     global _last_injection
     from datetime import datetime
 

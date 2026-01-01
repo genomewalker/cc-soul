@@ -19,7 +19,7 @@ from .wisdom import (
 from .beliefs import get_beliefs, hold_belief
 from .vocabulary import learn_term
 from .identity import observe_identity, IdentityAspect
-from .hooks import session_start, session_end, user_prompt, assistant_stop
+from .hooks import session_start, session_end, user_prompt, user_prompt_lean, assistant_stop
 from .conversations import (
     save_context,
     get_saved_context,
@@ -2299,7 +2299,13 @@ def cmd_hook(args):
         else:
             text = ""
         transcript_path = stdin_data.get("transcript_path") if stdin_data else None
-        output = user_prompt(text, transcript_path=transcript_path)
+        # Use lean mode if --lean flag or CC_SOUL_LEAN env var
+        import os
+        use_lean = getattr(args, "lean", False) or os.environ.get("CC_SOUL_LEAN", "").lower() in ("1", "true", "yes")
+        if use_lean:
+            output = user_prompt_lean(text, transcript_path=transcript_path)
+        else:
+            output = user_prompt(text, transcript_path=transcript_path)
         if output:
             print(output)
     elif args.hook == "stop":
@@ -2659,6 +2665,7 @@ def main():
     )
     hook_parser.add_argument("input", nargs="*", help="Input for prompt/stop hook")
     hook_parser.add_argument("--rich", action="store_true", help="Include rich context")
+    hook_parser.add_argument("--lean", action="store_true", help="Use lean mode (minimal tokens)")
     hook_parser.add_argument(
         "--after-compact", action="store_true", help="After compaction resume"
     )
