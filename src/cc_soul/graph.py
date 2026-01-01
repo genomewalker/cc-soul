@@ -259,15 +259,15 @@ def link_concepts(
 
 
 def get_concept(concept_id: str) -> Optional[Concept]:
-    """Get a concept by ID."""
+    """Get a concept by ID (minimal schema - no content)."""
     db, conn = get_graph_connection()
     if not conn:
         return None
 
     result = conn.execute(f"""
         MATCH (c:Concept {{id: '{concept_id}'}})
-        RETURN c.id, c.type, c.title, c.content, c.created_at,
-               c.last_activated, c.activation_count, c.metadata
+        RETURN c.id, c.type, c.title, c.domain,
+               c.last_activated, c.activation_count
     """)
 
     if result.has_next():
@@ -276,11 +276,11 @@ def get_concept(concept_id: str) -> Optional[Concept]:
             id=row[0],
             type=ConceptType(row[1]),
             title=row[2],
-            content=row[3],
-            created_at=row[4],
-            last_activated=row[5],
-            activation_count=row[6],
-            metadata=json.loads(row[7]) if row[7] else {},
+            content="",  # Fetch via get_concept_content() on demand
+            created_at="",
+            last_activated=row[4],
+            activation_count=row[5] or 0,
+            metadata={"domain": row[3]} if row[3] else {},
         )
     return None
 
@@ -291,7 +291,7 @@ def get_neighbors(
     direction: str = "both",
     limit: int = 20,
 ) -> List[Tuple[Concept, Edge]]:
-    """Get concepts connected to this one."""
+    """Get concepts connected to this one (minimal schema)."""
     db, conn = get_graph_connection()
     if not conn:
         return []
@@ -305,9 +305,9 @@ def get_neighbors(
         query = f"""
             MATCH (a:Concept {{id: '{concept_id}'}})-[r:RELATES]->(b:Concept)
             WHERE 1=1 {relation_filter}
-            RETURN b.id, b.type, b.title, b.content, b.created_at,
-                   b.last_activated, b.activation_count, b.metadata,
-                   r.relation, r.weight, r.created_at, r.last_activated, r.evidence
+            RETURN b.id, b.type, b.title, b.domain,
+                   b.last_activated, b.activation_count,
+                   r.relation, r.weight, r.created_at, r.last_activated
             ORDER BY r.weight DESC
             LIMIT {limit}
         """
@@ -318,20 +318,20 @@ def get_neighbors(
                 id=row[0],
                 type=ConceptType(row[1]),
                 title=row[2],
-                content=row[3],
-                created_at=row[4],
-                last_activated=row[5],
-                activation_count=row[6],
-                metadata=json.loads(row[7]) if row[7] else {},
+                content="",  # Fetch on demand
+                created_at="",
+                last_activated=row[4],
+                activation_count=row[5] or 0,
+                metadata={"domain": row[3]} if row[3] else {},
             )
             edge = Edge(
                 source_id=concept_id,
                 target_id=row[0],
-                relation=RelationType(row[8]),
-                weight=row[9],
-                created_at=row[10],
-                last_activated=row[11],
-                evidence=row[12] or "",
+                relation=RelationType(row[6]),
+                weight=row[7] or 1.0,
+                created_at=row[8] or "",
+                last_activated=row[9],
+                evidence="",
             )
             results.append((concept, edge))
 
@@ -340,9 +340,9 @@ def get_neighbors(
         query = f"""
             MATCH (a:Concept)-[r:RELATES]->(b:Concept {{id: '{concept_id}'}})
             WHERE 1=1 {relation_filter}
-            RETURN a.id, a.type, a.title, a.content, a.created_at,
-                   a.last_activated, a.activation_count, a.metadata,
-                   r.relation, r.weight, r.created_at, r.last_activated, r.evidence
+            RETURN a.id, a.type, a.title, a.domain,
+                   a.last_activated, a.activation_count,
+                   r.relation, r.weight, r.created_at, r.last_activated
             ORDER BY r.weight DESC
             LIMIT {limit}
         """
@@ -353,20 +353,20 @@ def get_neighbors(
                 id=row[0],
                 type=ConceptType(row[1]),
                 title=row[2],
-                content=row[3],
-                created_at=row[4],
-                last_activated=row[5],
-                activation_count=row[6],
-                metadata=json.loads(row[7]) if row[7] else {},
+                content="",  # Fetch on demand
+                created_at="",
+                last_activated=row[4],
+                activation_count=row[5] or 0,
+                metadata={"domain": row[3]} if row[3] else {},
             )
             edge = Edge(
                 source_id=row[0],
                 target_id=concept_id,
-                relation=RelationType(row[8]),
-                weight=row[9],
-                created_at=row[10],
-                last_activated=row[11],
-                evidence=row[12] or "",
+                relation=RelationType(row[6]),
+                weight=row[7] or 1.0,
+                created_at=row[8] or "",
+                last_activated=row[9],
+                evidence="",
             )
             results.append((concept, edge))
 

@@ -153,6 +153,29 @@ python3 .scripts/test_antahkarana_convergence.py
 
 **Expected output:** All attribute checks pass, full convergence flow works.
 
+## validate_brain.py
+
+Tests the cc-brain spreading activation system.
+
+**Philosophy:**
+- Content-addressed concepts: same title = same concept (deduplication)
+- Types become tags: a concept can be wisdom AND belief AND term
+- Dual-path spreading: semantic (embeddings) + Hebbian (co-activation)
+- Hebbian edges are learned through use, not auto-linked
+
+**What it tests:**
+- Content-addressed ID generation (normalized titles)
+- Concept deduplication (same title → merged types)
+- Dual-path spreading (semantic + Hebbian paths)
+- Hebbian learning (edge creation from co-activation)
+
+**Run:**
+```bash
+python .scripts/validate_brain.py
+```
+
+**Expected output:** All 4 tests pass, shows brain stats with concepts and edges.
+
 ## extract_mcp_tools.py
 
 Initial extraction of tool sections from mcp_server.py into mcp_tools/.
@@ -167,3 +190,31 @@ Reorganizes extracted files into optimal semantic structure:
 
 **Final structure:**
 22 modules, 140 tools, alphabetically ordered.
+
+## validate_signals.py
+
+Tests the cc-soul signal system for background voice distillation.
+
+**Philosophy:**
+- Signals are distilled insights from background voice processing (Manas, Buddhi, etc.)
+- Unlike concepts (static knowledge), signals represent dynamic relevance
+- Signals have activation weights that decay without reinforcement (Hebbian)
+- Main instance reads top-K signals; can elaborate via delegation
+
+**What it tests:**
+- Signal creation and storage in cc-memory
+- Signal retrieval with weight filtering
+- Signal context generation for hooks
+- Manas scan for pattern detection from observations
+- Brain integration (signals as additional seeds)
+
+**Run:**
+```bash
+python .scripts/validate_signals.py
+```
+
+**Expected output:** All 6 tests pass, shows signal creation and retrieval.
+
+## validate_minimal_context.py
+
+Tests the minimal startup context for lean mode.
