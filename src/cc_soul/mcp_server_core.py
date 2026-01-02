@@ -24,7 +24,9 @@ mcp = FastMCP("soul")
 
 @mcp.tool()
 def search_memory(query: str, limit: int = 10, verbose: bool = False) -> str:
-    """Search all memory sources with priority: cc-memory > soul > claude-mem.
+    """Search synapse for wisdom and episodes.
+
+    Semantic search across all soul data: wisdom, beliefs, episodes, intentions.
 
     Args:
         query: What to search for
@@ -32,7 +34,7 @@ def search_memory(query: str, limit: int = 10, verbose: bool = False) -> str:
         verbose: Include content excerpts in results
     """
     from .unified_search import unified_search, format_search_results
-    results = unified_search(query, limit=limit, include_claude_mem=True)
+    results = unified_search(query, limit=limit)
     return format_search_results(results, verbose=verbose)
 
 

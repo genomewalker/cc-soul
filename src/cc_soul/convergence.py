@@ -8,44 +8,42 @@ entities but aspects of one consciousness.
 
 This module embodies that insight: multiple voices (InnerVoice) are not
 separate agents but facets of one problem-solving consciousness. They
-don't debate as opponents—they contribute as aspects of a unified mind.
+don't debate as opponents--they contribute as aspects of a unified mind.
 
 Architecture:
-    ┌─────────────┐
-    │   Atman     │ (witness/orchestrator)
-    └──────┬──────┘
-           │ activates
-    ┌──────┴──────┐
-    │ Antahkarana │ (inner instrument)
-    │  ┌───┬───┐  │
-    │  │M  │B  │  │ Manas, Buddhi
-    │  ├───┼───┤  │
-    │  │C  │A  │  │ Chitta, Ahamkara
-    │  └───┴───┘  │
-    └──────┬──────┘
-           │ writes to
-    ┌──────┴──────┐
-    │   Chitta    │ (shared memory/cc-memory)
-    └──────┬──────┘
-           │ samvada (dialogue)
-    ┌──────┴──────┐
-    │   Viveka    │ (discerned truth)
-    └─────────────┘
+    +-------------+
+    |   Atman     | (witness/orchestrator)
+    +------+------+
+           | activates
+    +------+------+
+    | Antahkarana | (inner instrument)
+    |  +---+---+  |
+    |  |M  |B  |  | Manas, Buddhi
+    |  +---+---+  |
+    |  |C  |A  |  | Chitta, Ahamkara
+    |  +---+---+  |
+    +------+------+
+           | writes to
+    +------+------+
+    |   Chitta    | (shared memory/synapse)
+    +------+------+
+           | samvada (dialogue)
+    +------+------+
+    |   Viveka    | (discerned truth)
+    +-------------+
 
-Communication: Voices write to shared Chitta (memory). The Atman
+Communication: Voices write to shared Chitta (synapse). The Atman
 (witness-self) reads and synthesizes through Samvada (harmonious dialogue).
 """
 
 import json
-import subprocess
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import List, Dict, Optional, Any, Callable
-from pathlib import Path
 
-from .core import get_db_connection, init_soul
+from .core import get_synapse_graph, save_synapse, init_soul
 
 
 class InnerVoice(Enum):
@@ -107,11 +105,10 @@ class VoiceTask:
             f"## Your Voice: {self.perspective.value.upper()}",
         ]
 
-        # Guidance rooted in Upanishadic psychology
         perspective_guidance = {
             InnerVoice.MANAS: (
                 "You are Manas, the sensory mind. Trust your first impression. "
-                "Be quick and direct. Don't overthink—give your immediate, intuitive response."
+                "Be quick and direct. Don't overthink--give your immediate, intuitive response."
             ),
             InnerVoice.BUDDHI: (
                 "You are Buddhi, the discriminating intellect. Analyze thoroughly. "
@@ -182,7 +179,7 @@ class SamvadaResult:
     """
     final_solution: str
     strategy_used: ConvergenceStrategy
-    contributing_voices: List[str]  # Which voices participated
+    contributing_voices: List[str]
     synthesis_notes: str
     confidence: float  # Shraddha - overall confidence
     dialogue_rounds: int = 0  # For Tarka (debate)
@@ -190,53 +187,8 @@ class SamvadaResult:
 
 
 def _ensure_convergence_tables():
-    """Create tables for tracking Antahkarana work."""
-    conn = get_db_connection()
-    c = conn.cursor()
-
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS swarm_tasks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            swarm_id TEXT NOT NULL,
-            task_id TEXT NOT NULL,
-            problem TEXT NOT NULL,
-            perspective TEXT NOT NULL,
-            constraints TEXT,
-            context TEXT,
-            status TEXT DEFAULT 'pending',
-            created_at TEXT NOT NULL
-        )
-    """)
-
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS swarm_solutions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            swarm_id TEXT NOT NULL,
-            task_id TEXT NOT NULL,
-            agent_id TEXT NOT NULL,
-            perspective TEXT NOT NULL,
-            solution TEXT NOT NULL,
-            confidence REAL DEFAULT 0.5,
-            reasoning TEXT,
-            created_at TEXT NOT NULL
-        )
-    """)
-
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS swarm_convergence (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            swarm_id TEXT NOT NULL,
-            strategy TEXT NOT NULL,
-            final_solution TEXT NOT NULL,
-            synthesis_notes TEXT,
-            confidence REAL,
-            debate_rounds INTEGER DEFAULT 0,
-            created_at TEXT NOT NULL
-        )
-    """)
-
-    conn.commit()
-    conn.close()
+    """Ensure synapse graph is initialized (tables are implicit)."""
+    get_synapse_graph()
 
 
 class Antahkarana:
@@ -304,25 +256,23 @@ class Antahkarana:
 
         self.tasks.append(task)
 
-        # Record in database
-        conn = get_db_connection()
-        c = conn.cursor()
-        c.execute(
-            """INSERT INTO swarm_tasks
-               (swarm_id, task_id, problem, perspective, constraints, context, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (
-                self.antahkarana_id,
-                task_id,
-                self.problem,
-                voice.value,
-                json.dumps(task.constraints),
-                task.context,
-                datetime.now().isoformat(),
-            )
+        graph = get_synapse_graph()
+        graph.observe(
+            category="swarm_task",
+            title=f"{self.antahkarana_id}:{task_id}",
+            content=json.dumps({
+                "swarm_id": self.antahkarana_id,
+                "task_id": task_id,
+                "problem": self.problem,
+                "perspective": voice.value,
+                "constraints": task.constraints,
+                "context": task.context,
+                "status": "pending",
+                "created_at": datetime.now().isoformat(),
+            }),
+            tags=["swarm_task", f"swarm:{self.antahkarana_id}", f"task:{task_id}", voice.value],
         )
-        conn.commit()
-        conn.close()
+        save_synapse()
 
         return task_id
 
@@ -365,15 +315,25 @@ class Antahkarana:
         """
         voice_id = f"voice-{task.task_id}"
 
-        # Record that we need this voice's contemplation
-        conn = get_db_connection()
-        c = conn.cursor()
-        c.execute(
-            "UPDATE swarm_tasks SET status = 'activated' WHERE task_id = ?",
-            (task.task_id,)
-        )
-        conn.commit()
-        conn.close()
+        graph = get_synapse_graph()
+
+        episodes = graph.get_episodes(category="swarm_task", limit=100)
+        for ep in episodes:
+            try:
+                data = json.loads(ep.get("content", "{}"))
+            except (json.JSONDecodeError, TypeError):
+                continue
+
+            if data.get("task_id") == task.task_id:
+                data["status"] = "activated"
+                graph.observe(
+                    category="swarm_task",
+                    title=f"{self.antahkarana_id}:{task.task_id}",
+                    content=json.dumps(data),
+                    tags=["swarm_task", f"swarm:{self.antahkarana_id}", f"task:{task.task_id}", "activated"],
+                )
+                save_synapse()
+                break
 
         return voice_id
 
@@ -387,7 +347,6 @@ class Antahkarana:
         """
         Submit an insight from a voice (called by voice or simulated).
         """
-        # Find the task
         task = next((t for t in self.tasks if t.task_id == task_id), None)
         if not task:
             raise ValueError(f"Unknown task_id: {task_id}")
@@ -406,41 +365,52 @@ class Antahkarana:
 
         self.solutions.append(sol)
 
-        # Store in database
-        conn = get_db_connection()
-        c = conn.cursor()
-        c.execute(
-            """INSERT INTO swarm_solutions
-               (swarm_id, task_id, agent_id, perspective, solution, confidence, reasoning, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                self.antahkarana_id,
-                task_id,
-                voice_id,
-                task.perspective.value,
-                solution,
-                confidence,
-                reasoning,
-                sol.timestamp,
-            )
-        )
-        c.execute(
-            "UPDATE swarm_tasks SET status = 'completed' WHERE task_id = ?",
-            (task_id,)
-        )
-        conn.commit()
-        conn.close()
+        graph = get_synapse_graph()
 
-        # Write to cc-memory (Chitta) for cross-session visibility
+        graph.observe(
+            category="swarm_solution",
+            title=f"{self.antahkarana_id}:{task_id}",
+            content=json.dumps({
+                "swarm_id": self.antahkarana_id,
+                "task_id": task_id,
+                "agent_id": voice_id,
+                "perspective": task.perspective.value,
+                "solution": solution,
+                "confidence": confidence,
+                "reasoning": reasoning,
+                "created_at": sol.timestamp,
+            }),
+            tags=["swarm_solution", f"swarm:{self.antahkarana_id}", f"task:{task_id}", task.perspective.value],
+        )
+
+        episodes = graph.get_episodes(category="swarm_task", limit=100)
+        for ep in episodes:
+            try:
+                data = json.loads(ep.get("content", "{}"))
+            except (json.JSONDecodeError, TypeError):
+                continue
+
+            if data.get("task_id") == task_id:
+                data["status"] = "completed"
+                graph.observe(
+                    category="swarm_task",
+                    title=f"{self.antahkarana_id}:{task_id}",
+                    content=json.dumps(data),
+                    tags=["swarm_task", f"swarm:{self.antahkarana_id}", f"task:{task_id}", "completed"],
+                )
+                break
+
+        save_synapse()
+
         self._write_to_chitta(sol)
 
         return sol
 
     def _write_to_chitta(self, solution: VoiceSolution):
-        """Write insight to cc-memory (Chitta - shared memory)."""
+        """Write insight to synapse (Chitta - shared memory)."""
         try:
-            from .ledger import _call_cc_memory_remember
-            _call_cc_memory_remember(
+            graph = get_synapse_graph()
+            graph.observe(
                 category="voice_insight",
                 title=f"[{solution.perspective.value}] {self.problem[:50]}",
                 content=json.dumps({
@@ -452,6 +422,7 @@ class Antahkarana:
                 }),
                 tags=["antahkarana", self.antahkarana_id, solution.perspective.value],
             )
+            save_synapse()
         except Exception:
             pass
 
@@ -510,45 +481,38 @@ class Antahkarana:
 
     def _samvada(self) -> SamvadaResult:
         """Samvada (harmonious dialogue) - synthesize wisdom from all voices."""
-        # Group by voice type
         by_voice = {}
         for sol in self.solutions:
             by_voice[sol.perspective.value] = sol
 
-        # Build harmonized understanding
         harmony_parts = []
         contributing = []
         total_shraddha = 0.0
 
-        # Start with Buddhi's discrimination (deep analysis)
         if "buddhi" in by_voice:
             sol = by_voice["buddhi"]
             harmony_parts.append(f"## Buddhi's Discrimination\n{sol.solution}")
             contributing.append(sol.agent_id)
             total_shraddha += sol.confidence
 
-        # Add Chitta's patterns (practical wisdom)
         if "chitta" in by_voice:
             sol = by_voice["chitta"]
             harmony_parts.append(f"## Chitta's Patterns\n{sol.solution}")
             contributing.append(sol.agent_id)
             total_shraddha += sol.confidence
 
-        # Add Ahamkara's caution (critical examination)
         if "ahamkara" in by_voice:
             sol = by_voice["ahamkara"]
             harmony_parts.append(f"## Ahamkara's Caution\n{sol.solution}")
             contributing.append(sol.agent_id)
             total_shraddha += sol.confidence
 
-        # Add Vikalpa's imagination (novel ideas)
         if "vikalpa" in by_voice:
             sol = by_voice["vikalpa"]
             harmony_parts.append(f"## Vikalpa's Vision\n{sol.solution}")
             contributing.append(sol.agent_id)
             total_shraddha += sol.confidence
 
-        # If nothing specific matched, harmonize all voices
         if not harmony_parts:
             for sol in self.solutions:
                 harmony_parts.append(f"## {sol.perspective.value.title()}'s Voice\n{sol.solution}")
@@ -573,19 +537,12 @@ class Antahkarana:
         where propositions are tested against their consequences. Here,
         Ahamkara (critic) challenges the synthesis until stability emerges.
         """
-        # Start with Samvada (harmonious synthesis)
         harmony = self._samvada()
 
-        # Extract challenges from Ahamkara (self-protective critic)
         challenges = []
         for sol in self.solutions:
             if sol.perspective == InnerVoice.AHAMKARA:
                 challenges.append(sol.solution)
-
-        # Note: Full implementation would spawn new voices to:
-        # 1. Challenge the harmony
-        # 2. Propose refinements
-        # 3. Reach Nirvikalpaka (non-conceptual consensus)
 
         harmony.dialogue_rounds = 1
         harmony.synthesis_notes += f"\n\nTarka challenges: {len(challenges)}"
@@ -600,15 +557,12 @@ class Antahkarana:
         for sol in self.solutions:
             score = sol.confidence
 
-            # Buddhi (intellect) bonus for deep discrimination
             if sol.perspective == InnerVoice.BUDDHI:
                 score += 0.1
 
-            # Chitta (memory) bonus for pattern-based wisdom
             if sol.perspective == InnerVoice.CHITTA:
                 score += 0.05
 
-            # Depth of insight bonus
             length_score = min(len(sol.solution) / 1000, 0.1)
             score += length_score
 
@@ -641,7 +595,6 @@ class Antahkarana:
                     confidence=sol.confidence,
                 )
 
-        # None valid - fall back to Sankhya (enumeration)
         return self._sankhya()
 
 
@@ -669,7 +622,6 @@ def awaken_antahkarana(
         for v in voices:
             mind.add_voice(v)
     else:
-        # Default: core facets of Antahkarana
         mind.add_core_voices()
 
     return mind
@@ -677,107 +629,138 @@ def awaken_antahkarana(
 
 def get_antahkarana(antahkarana_id: str) -> Optional[Antahkarana]:
     """Retrieve an existing Antahkarana (inner instrument) by ID."""
-    conn = get_db_connection()
-    c = conn.cursor()
+    graph = get_synapse_graph()
 
-    c.execute(
-        "SELECT problem, constraints, context FROM swarm_tasks WHERE swarm_id = ? LIMIT 1",
-        (antahkarana_id,)
-    )
-    row = c.fetchone()
+    episodes = graph.get_episodes(category="swarm_task", limit=200)
 
-    if not row:
-        conn.close()
+    problem = None
+    constraints = []
+    context = ""
+
+    for ep in episodes:
+        try:
+            data = json.loads(ep.get("content", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        if data.get("swarm_id") == antahkarana_id:
+            problem = data.get("problem")
+            constraints = data.get("constraints", [])
+            context = data.get("context", "")
+            break
+
+    if not problem:
         return None
-
-    problem, constraints_json, context = row
-    constraints = json.loads(constraints_json) if constraints_json else []
 
     mind = Antahkarana(
         problem=problem,
         constraints=constraints,
-        context=context or "",
+        context=context,
         antahkarana_id=antahkarana_id,
     )
 
-    # Load voice tasks
-    c.execute(
-        "SELECT task_id, perspective FROM swarm_tasks WHERE swarm_id = ?",
-        (antahkarana_id,)
-    )
-    for task_id, perspective in c.fetchall():
-        # Handle both old (fast/deep/critical) and new (manas/buddhi/ahamkara) values
+    for ep in episodes:
         try:
-            voice = InnerVoice(perspective)
-        except ValueError:
-            # Map old values to new
+            data = json.loads(ep.get("content", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        if data.get("swarm_id") == antahkarana_id:
+            task_id = data.get("task_id")
+            perspective = data.get("perspective")
+
             old_to_new = {
                 "fast": "manas", "deep": "buddhi", "critical": "ahamkara",
                 "pragmatic": "chitta", "novel": "vikalpa", "minimal": "sakshi"
             }
-            voice = InnerVoice(old_to_new.get(perspective, perspective))
+            try:
+                voice = InnerVoice(perspective)
+            except ValueError:
+                voice = InnerVoice(old_to_new.get(perspective, perspective))
 
-        mind.tasks.append(VoiceTask(
-            task_id=task_id,
-            problem=problem,
-            perspective=voice,
-            constraints=constraints,
-            context=context or "",
-        ))
+            mind.tasks.append(VoiceTask(
+                task_id=task_id,
+                problem=problem,
+                perspective=voice,
+                constraints=constraints,
+                context=context,
+            ))
 
-    # Load insights (solutions)
-    c.execute(
-        """SELECT task_id, agent_id, perspective, solution, confidence, reasoning, created_at
-           FROM swarm_solutions WHERE swarm_id = ?""",
-        (antahkarana_id,)
-    )
-    for row in c.fetchall():
-        # Handle both old and new perspective values
+    solution_episodes = graph.get_episodes(category="swarm_solution", limit=200)
+    for ep in solution_episodes:
         try:
-            voice = InnerVoice(row[2])
-        except ValueError:
+            data = json.loads(ep.get("content", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        if data.get("swarm_id") == antahkarana_id:
+            perspective = data.get("perspective")
+
             old_to_new = {
                 "fast": "manas", "deep": "buddhi", "critical": "ahamkara",
                 "pragmatic": "chitta", "novel": "vikalpa", "minimal": "sakshi"
             }
-            voice = InnerVoice(old_to_new.get(row[2], row[2]))
+            try:
+                voice = InnerVoice(perspective)
+            except ValueError:
+                voice = InnerVoice(old_to_new.get(perspective, perspective))
 
-        mind.solutions.append(VoiceSolution(
-            task_id=row[0],
-            agent_id=row[1],
-            perspective=voice,
-            solution=row[3],
-            confidence=row[4],
-            reasoning=row[5] or "",
-            timestamp=row[6],
-        ))
+            mind.solutions.append(VoiceSolution(
+                task_id=data.get("task_id"),
+                agent_id=data.get("agent_id"),
+                perspective=voice,
+                solution=data.get("solution", ""),
+                confidence=data.get("confidence", 0.5),
+                reasoning=data.get("reasoning", ""),
+                timestamp=data.get("created_at", ""),
+            ))
 
-    conn.close()
     return mind
 
 
 def list_active_antahkaranas(limit: int = 10) -> List[Dict]:
     """List recently active inner instruments."""
-    conn = get_db_connection()
-    c = conn.cursor()
+    graph = get_synapse_graph()
 
-    c.execute("""
-        SELECT swarm_id, problem, MAX(created_at) as created_at,
-               (SELECT COUNT(*) FROM swarm_solutions WHERE swarm_solutions.swarm_id = swarm_tasks.swarm_id) as solution_count
-        FROM swarm_tasks
-        GROUP BY swarm_id
-        ORDER BY created_at DESC
-        LIMIT ?
-    """, (limit,))
+    episodes = graph.get_episodes(category="swarm_task", limit=limit * 10)
+
+    swarm_data = {}
+    for ep in episodes:
+        try:
+            data = json.loads(ep.get("content", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        swarm_id = data.get("swarm_id")
+        if swarm_id:
+            if swarm_id not in swarm_data:
+                swarm_data[swarm_id] = {
+                    "problem": data.get("problem", ""),
+                    "created_at": data.get("created_at", ""),
+                    "task_count": 0,
+                }
+            swarm_data[swarm_id]["task_count"] += 1
+
+    solution_episodes = graph.get_episodes(category="swarm_solution", limit=limit * 10)
+    solution_counts = {}
+    for ep in solution_episodes:
+        try:
+            data = json.loads(ep.get("content", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        swarm_id = data.get("swarm_id")
+        if swarm_id:
+            solution_counts[swarm_id] = solution_counts.get(swarm_id, 0) + 1
 
     minds = []
-    for row in c.fetchall():
+    for swarm_id, info in swarm_data.items():
         minds.append({
-            "antahkarana_id": row[0],
-            "problem": row[1][:80],
-            "created_at": row[2],
-            "insights": row[3],
+            "antahkarana_id": swarm_id,
+            "problem": info["problem"][:80],
+            "created_at": info["created_at"],
+            "insights": solution_counts.get(swarm_id, 0),
         })
 
-    conn.close()
-    return minds
+    minds.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    return minds[:limit]

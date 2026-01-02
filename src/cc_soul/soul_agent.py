@@ -6,7 +6,7 @@ The agent observes, judges, decides, and acts - exercising judgment
 within the confidence-risk matrix.
 
 The core loop:
-    observe → judge → decide → act → learn → repeat
+    observe -> judge -> decide -> act -> learn -> repeat
 
 Agency comes not from complexity but from the ability to choose
 based on internal state. This is the soul's thermostat.
@@ -17,7 +17,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 from enum import Enum
 
-from .core import get_db_connection, init_soul
+from .core import get_synapse_graph, save_synapse, init_soul, SOUL_DIR
 from .intentions import (
     intend,
     get_active_intentions,
@@ -205,7 +205,7 @@ class SoulAgent:
         """
         One complete agent cycle.
 
-        This is the core loop: observe → judge → decide → act → learn
+        This is the core loop: observe -> judge -> decide -> act -> learn
         """
         # 1. Observe
         observation = self._observe(user_prompt, assistant_output, session_phase)
@@ -362,9 +362,9 @@ class SoulAgent:
         Decide what actions to take.
 
         Uses the confidence-risk matrix:
-        - High confidence + low risk → Act autonomously
-        - High confidence + high risk → Propose to human
-        - Low confidence → Observe / Defer
+        - High confidence + low risk -> Act autonomously
+        - High confidence + high risk -> Propose to human
+        - Low confidence -> Observe / Defer
         """
         actions = []
 
@@ -609,10 +609,10 @@ class SoulAgent:
         """
         Decide if action should be executed based on confidence-risk matrix.
 
-        High confidence + Low risk    → Execute
-        High confidence + High risk   → Log proposal only
-        Low confidence + Low risk     → Execute (gather data)
-        Low confidence + High risk    → Defer
+        High confidence + Low risk    -> Execute
+        High confidence + High risk   -> Log proposal only
+        Low confidence + Low risk     -> Execute (gather data)
+        Low confidence + High risk    -> Defer
         """
         if action.risk == RiskLevel.LOW:
             return True  # Low risk always OK
@@ -705,13 +705,13 @@ class SoulAgent:
 
             elif action.type == ActionType.STRENGTHEN_WISDOM:
                 wisdom_id = action.payload["wisdom_id"]
-                current = action.payload.get("current_confidence", 0.5)
-                new_confidence = min(current + 0.05, 0.95)
-                self._update_wisdom_confidence(wisdom_id, new_confidence)
+                graph = get_synapse_graph()
+                graph.strengthen(wisdom_id)
+                save_synapse()
                 return ActionResult(
                     action=action,
                     success=True,
-                    outcome=f"Strengthened wisdom confidence: {current:.2f} → {new_confidence:.2f}",
+                    outcome=f"Strengthened wisdom: {wisdom_id}",
                 )
 
             elif action.type == ActionType.PROMOTE_PATTERN:
@@ -940,60 +940,44 @@ class SoulAgent:
 
     def _record_autonomous_action(self, action_type: str, success: bool) -> None:
         """Record an autonomous action for later analysis."""
-        conn = get_db_connection()
-        c = conn.cursor()
-
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS agent_actions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                action_type TEXT NOT NULL,
-                success INTEGER NOT NULL,
-                timestamp TEXT NOT NULL
-            )
-        """)
-
-        c.execute(
-            "INSERT INTO agent_actions (action_type, success, timestamp) VALUES (?, ?, ?)",
-            (action_type, 1 if success else 0, datetime.now().isoformat()),
+        graph = get_synapse_graph()
+        graph.observe(
+            category="agent_action",
+            title=f"Autonomous action: {action_type}",
+            content=f"success:{success}",
+            tags=["agent", action_type],
         )
-
-        conn.commit()
-        conn.close()
+        save_synapse()
 
     def _load_pattern_observations(self) -> Dict[str, int]:
-        """Load pattern observations from the database."""
-        conn = get_db_connection()
-        c = conn.cursor()
+        """Load pattern observations from synapse."""
+        graph = get_synapse_graph()
+        episodes = graph.get_episodes(category="agent_pattern", limit=100)
 
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS agent_patterns (
-                pattern TEXT PRIMARY KEY,
-                count INTEGER NOT NULL DEFAULT 1,
-                last_seen TEXT NOT NULL
-            )
-        """)
-        conn.commit()
-
-        c.execute("SELECT pattern, count FROM agent_patterns")
-        patterns = {row[0]: row[1] for row in c.fetchall()}
-        conn.close()
+        patterns = {}
+        for ep in episodes:
+            title = ep.get("title", "")
+            if title.startswith("Pattern: "):
+                pattern = title[9:]
+                content = ep.get("content", "")
+                if "count:" in content:
+                    try:
+                        count = int(content.split("count:")[1].split()[0])
+                        patterns[pattern] = max(patterns.get(pattern, 0), count)
+                    except (ValueError, IndexError):
+                        pass
         return patterns
 
     def _save_pattern_observation(self, pattern: str, count: int) -> None:
-        """Save a pattern observation to the database."""
-        conn = get_db_connection()
-        c = conn.cursor()
-
-        c.execute("""
-            INSERT INTO agent_patterns (pattern, count, last_seen)
-            VALUES (?, ?, ?)
-            ON CONFLICT(pattern) DO UPDATE SET
-                count = excluded.count,
-                last_seen = excluded.last_seen
-        """, (pattern, count, datetime.now().isoformat()))
-
-        conn.commit()
-        conn.close()
+        """Save a pattern observation to synapse."""
+        graph = get_synapse_graph()
+        graph.observe(
+            category="agent_pattern",
+            title=f"Pattern: {pattern}",
+            content=f"count:{count}",
+            tags=["pattern", pattern.replace(" ", "_")],
+        )
+        save_synapse()
 
     def _consider_wisdom_promotion(self, pattern: str, count: int) -> None:
         """Consider promoting a stable pattern to wisdom."""
@@ -1096,17 +1080,6 @@ class SoulAgent:
 
     # Auto-evolution helpers
 
-    def _update_wisdom_confidence(self, wisdom_id: int, new_confidence: float) -> None:
-        """Update wisdom confidence in database."""
-        conn = get_db_connection()
-        c = conn.cursor()
-        c.execute(
-            "UPDATE wisdom SET confidence = ?, last_used = ? WHERE id = ?",
-            (new_confidence, datetime.now().isoformat(), wisdom_id),
-        )
-        conn.commit()
-        conn.close()
-
     def _get_safe_evolution_suggestions(self) -> List[Dict]:
         """
         Get evolution suggestions that are safe to auto-apply.
@@ -1122,31 +1095,26 @@ class SoulAgent:
         - Removing wisdom
         """
         suggestions = []
+        graph = get_synapse_graph()
 
-        # Check for stale wisdom that could be decayed
-        conn = get_db_connection()
-        c = conn.cursor()
-        c.execute("""
-            SELECT id, title, confidence, last_used
-            FROM wisdom
-            WHERE confidence > 0.3
-            AND (last_used IS NULL OR last_used < datetime('now', '-30 days'))
-        """)
-        stale = c.fetchall()
-        conn.close()
-
-        for row in stale[:2]:  # Max 2 at a time
-            suggestions.append({
-                "type": "decay_stale_wisdom",
-                "wisdom_id": row[0],
-                "title": row[1],
-                "current_confidence": row[2],
-                "description": f"Decay stale wisdom: {row[1]}",
-                "confidence": 0.7,
-            })
+        # Check for stale wisdom via search
+        stale_results = graph.search("stale unused old wisdom", limit=5, threshold=0.2)
+        for concept, score in stale_results[:2]:
+            if hasattr(concept, 'metadata'):
+                confidence = concept.metadata.get('confidence', 0.5)
+                if confidence > 0.3:
+                    suggestions.append({
+                        "type": "decay_stale_wisdom",
+                        "wisdom_id": concept.id,
+                        "title": concept.title,
+                        "current_confidence": confidence,
+                        "description": f"Decay stale wisdom: {concept.title}",
+                        "confidence": 0.7,
+                    })
 
         # Check for fulfilled intentions to clean
-        fulfilled = [i for i in get_active_intentions() if i.status == "fulfilled"]
+        from .intentions import get_intentions, IntentionState
+        fulfilled = [i for i in get_intentions() if i.state == IntentionState.FULFILLED]
         if len(fulfilled) > 3:
             suggestions.append({
                 "type": "cleanup_intentions",
@@ -1160,15 +1128,15 @@ class SoulAgent:
     def _apply_safe_evolution(self, suggestion: Dict) -> Dict:
         """Apply a safe evolution suggestion."""
         evolution_type = suggestion.get("type", "")
+        graph = get_synapse_graph()
 
         if evolution_type == "decay_stale_wisdom":
             wisdom_id = suggestion.get("wisdom_id")
-            current = suggestion.get("current_confidence", 0.5)
-            new_confidence = max(current - 0.1, 0.1)
-            self._update_wisdom_confidence(wisdom_id, new_confidence)
+            graph.weaken(wisdom_id)
+            save_synapse()
             return {
                 "success": True,
-                "message": f"Decayed wisdom confidence: {current:.2f} → {new_confidence:.2f}",
+                "message": f"Weakened stale wisdom",
                 "change": f"Wisdom '{suggestion.get('title', '')}' decayed",
             }
 
@@ -1184,33 +1152,23 @@ class SoulAgent:
 
     def _cleanup_fulfilled_intentions(self) -> int:
         """Archive fulfilled intentions older than 7 days."""
-        from .intentions import get_active_intentions
+        from .intentions import get_intentions, IntentionState
 
         fulfilled = [
-            i for i in get_active_intentions()
-            if i.status == "fulfilled"
+            i for i in get_intentions()
+            if i.state == IntentionState.FULFILLED
         ]
 
-        # For now, just count them (full cleanup would require modifying intentions.py)
+        # For now, just count them (full cleanup happens via graph.cycle())
         return len(fulfilled)
 
     def _decay_stale_wisdom(self) -> int:
         """Decay wisdom that hasn't been used in 30+ days."""
-        conn = get_db_connection()
-        c = conn.cursor()
-
-        c.execute("""
-            UPDATE wisdom
-            SET confidence = MAX(confidence - 0.05, 0.1),
-                last_used = ?
-            WHERE confidence > 0.2
-            AND (last_used IS NULL OR last_used < datetime('now', '-30 days'))
-        """, (datetime.now().isoformat(),))
-
-        decayed = c.rowcount
-        conn.commit()
-        conn.close()
-        return decayed
+        graph = get_synapse_graph()
+        # Run maintenance cycle which handles decay
+        pruned, coherence = graph.cycle()
+        save_synapse()
+        return pruned
 
 
 # Convenience functions for hook integration
@@ -1279,8 +1237,8 @@ def format_agent_report(report: AgentReport) -> str:
     lines.append("-" * 40)
     if report.actions:
         for action in report.actions:
-            risk_icon = {"low": "🟢", "medium": "🟡", "high": "🔴"}.get(
-                action.risk.value, "⚪"
+            risk_icon = {"low": "[L]", "medium": "[M]", "high": "[H]"}.get(
+                action.risk.value, "[?]"
             )
             lines.append(f"  {risk_icon} {action.type.value}")
             lines.append(f"      {action.rationale}")
@@ -1293,8 +1251,8 @@ def format_agent_report(report: AgentReport) -> str:
     lines.append("-" * 40)
     if report.results:
         for result in report.results:
-            status = "✓" if result.success else "✗"
-            lines.append(f"  [{status}] {result.outcome}")
+            status = "[+]" if result.success else "[X]"
+            lines.append(f"  {status} {result.outcome}")
     else:
         lines.append("  (no results)")
 

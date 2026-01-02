@@ -1,37 +1,37 @@
 """
-Svadhyaya (स्वाध्याय) - Self-Study
+Svadhyaya - Self-Study
 
 This module unifies all introspection capabilities under the Vedantic concept
 of svadhyaya - the disciplined practice of self-study and self-reflection.
 
 The soul examines itself through five lenses:
 
-    Vedana (वेदना) - Sensation
+    Vedana - Sensation
         Pain points, operational friction, metrics
         "What hurts?"
 
-    Jnana (ज्ञान) - Knowledge
+    Jnana - Knowledge
         Wisdom health, learning patterns, growth trajectory
         "What have I learned?"
 
-    Darshana (दर्शन) - Vision/Seeing
+    Darshana - Vision/Seeing
         Code analysis, static scanning, belief checking
         "What does my code reveal?"
 
-    Vichara (विचार) - Inquiry
+    Vichara - Inquiry
         Autonomous introspection, diagnosis, action
         "What should I do about it?"
 
-    Prajna (प्रज्ञा) - Deep Wisdom
+    Prajna - Deep Wisdom
         Cross-session trends, synthesis, evolution
         "How am I growing?"
 
 The Antahkarana (inner instrument) framework provides multiple voices:
-    Manas (मनस्) - Sensory mind, quick perception
-    Buddhi (बुद्धि) - Intellect, deep analysis
-    Ahamkara (अहंकार) - Ego, critical self-examination
-    Vikalpa (विकल्प) - Imagination, creative vision
-    Sakshi (साक्षी) - Witness, essential truth
+    Manas - Sensory mind, quick perception
+    Buddhi - Intellect, deep analysis
+    Ahamkara - Ego, critical self-examination
+    Vikalpa - Imagination, creative vision
+    Sakshi - Witness, essential truth
 """
 
 import ast
@@ -43,7 +43,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
 
-from .core import get_db_connection, SOUL_DIR
+from .core import get_synapse_graph, save_synapse, SOUL_DIR
 
 
 # =============================================================================
@@ -68,7 +68,7 @@ def _ensure_dirs():
 
 
 # =============================================================================
-# DARSHANA (दर्शन) - VISION/SEEING - Code Analysis
+# DARSHANA - VISION/SEEING - Code Analysis
 # =============================================================================
 
 class IssueSeverity(Enum):
@@ -417,7 +417,7 @@ def darshana(depth: str = "standard", target: Path = None) -> DarshanaReport:
 
 
 # =============================================================================
-# JNANA (ज्ञान) - KNOWLEDGE - Wisdom Health
+# JNANA - KNOWLEDGE - Wisdom Health
 # =============================================================================
 
 @dataclass
@@ -446,26 +446,58 @@ def jnana() -> JnanaReport:
         Success rates: Which wisdom works
         Coverage: Types and domains represented
     """
-    conn = get_db_connection()
-    c = conn.cursor()
+    graph = get_synapse_graph()
+    all_wisdom = graph.get_all_wisdom()
+    applications = graph.get_episodes(category="wisdom_application", limit=1000)
 
-    c.execute("""
-        SELECT id, type, title, content, domain, confidence, timestamp, last_used,
-               success_count, failure_count
-        FROM wisdom
-    """)
+    # Build application counts per wisdom
+    app_counts = Counter()
+    success_counts = Counter()
+    failure_counts = Counter()
+    last_used = {}
+
+    for app in applications:
+        content = app.get("content", "")
+        try:
+            if content.startswith("{"):
+                data = json.loads(content)
+                wid = data.get("wisdom_id")
+                if wid:
+                    app_counts[wid] += 1
+                    outcome = data.get("outcome")
+                    if outcome == "success":
+                        success_counts[wid] += 1
+                    elif outcome == "failure":
+                        failure_counts[wid] += 1
+                    created = app.get("created_at") or app.get("timestamp", "")
+                    if wid not in last_used or created > last_used[wid]:
+                        last_used[wid] = created
+        except json.JSONDecodeError:
+            pass
 
     wisdom_list = []
     now = datetime.now()
 
-    for row in c.fetchall():
-        wid, wtype, title, content, domain, confidence, timestamp, last_used, successes, failures = row
+    for w in all_wisdom:
+        wid = w.get("id", "")
+        wtype = w.get("type", "insight")
+        title = w.get("title", "")
+        domain = w.get("domain")
+        confidence = w.get("confidence", 0.8)
+        timestamp = w.get("created_at") or w.get("timestamp", "")
 
-        created = datetime.fromisoformat(timestamp) if timestamp else now
-        age_days = (now - created).days
+        try:
+            created = datetime.fromisoformat(timestamp) if timestamp else now
+            age_days = (now - created).days
+        except ValueError:
+            age_days = 0
 
-        if last_used:
-            inactive_days = (now - datetime.fromisoformat(last_used)).days
+        lu = last_used.get(wid)
+        if lu:
+            try:
+                inactive_days = (now - datetime.fromisoformat(lu)).days
+            except ValueError:
+                inactive_days = age_days
         else:
             inactive_days = age_days
 
@@ -473,7 +505,9 @@ def jnana() -> JnanaReport:
         decay_factor = 0.95 ** months_inactive
         effective_conf = confidence * decay_factor
 
-        total_apps = successes + failures
+        successes = success_counts.get(wid, 0)
+        failures = failure_counts.get(wid, 0)
+        total_apps = app_counts.get(wid, 0)
         success_rate = successes / total_apps if total_apps > 0 else None
 
         wisdom_list.append({
@@ -489,8 +523,6 @@ def jnana() -> JnanaReport:
             "total_applications": total_apps,
             "success_rate": success_rate,
         })
-
-    conn.close()
 
     decaying = [w for w in wisdom_list if w["decay_factor"] < 0.8]
     stale = [w for w in wisdom_list if w["total_applications"] == 0 and w["age_days"] > 7]
@@ -521,33 +553,48 @@ def jnana() -> JnanaReport:
 
 def jnana_applications(days: int = 30) -> Dict:
     """Analyze wisdom application patterns over time."""
-    conn = get_db_connection()
-    c = conn.cursor()
+    graph = get_synapse_graph()
     cutoff = (datetime.now() - timedelta(days=days)).isoformat()
 
-    c.execute("""
-        SELECT wa.wisdom_id, w.title, w.type, wa.outcome, wa.context
-        FROM wisdom_applications wa
-        JOIN wisdom w ON wa.wisdom_id = w.id
-        WHERE wa.applied_at > ?
-    """, (cutoff,))
-
-    applications = c.fetchall()
-
-    c.execute("SELECT id, title, type, confidence FROM wisdom")
-    all_wisdom = {row[0]: {"title": row[1], "type": row[2], "confidence": row[3]} for row in c.fetchall()}
-    conn.close()
+    applications = graph.get_episodes(category="wisdom_application", limit=1000)
+    all_wisdom = graph.get_all_wisdom()
+    wisdom_map = {w.get("id"): w for w in all_wisdom}
 
     applied_ids = set()
     outcomes = Counter()
     by_wisdom = {}
 
-    for wisdom_id, title, wtype, outcome, context in applications:
+    for app in applications:
+        created = app.get("created_at") or app.get("timestamp", "")
+        if created < cutoff:
+            continue
+
+        try:
+            content = app.get("content", "")
+            if content.startswith("{"):
+                data = json.loads(content)
+                wisdom_id = data.get("wisdom_id")
+                outcome = data.get("outcome")
+            else:
+                continue
+        except json.JSONDecodeError:
+            continue
+
+        if not wisdom_id:
+            continue
+
         applied_ids.add(wisdom_id)
         outcomes[outcome or "pending"] += 1
 
+        w = wisdom_map.get(wisdom_id, {})
         if wisdom_id not in by_wisdom:
-            by_wisdom[wisdom_id] = {"title": title, "type": wtype, "applications": 0, "successes": 0, "failures": 0}
+            by_wisdom[wisdom_id] = {
+                "title": w.get("title", "Unknown"),
+                "type": w.get("type", "unknown"),
+                "applications": 0,
+                "successes": 0,
+                "failures": 0
+            }
 
         by_wisdom[wisdom_id]["applications"] += 1
         if outcome == "success":
@@ -555,14 +602,15 @@ def jnana_applications(days: int = 30) -> Dict:
         elif outcome == "failure":
             by_wisdom[wisdom_id]["failures"] += 1
 
-    unused = [{"id": wid, **info} for wid, info in all_wisdom.items() if wid not in applied_ids]
+    unused = [{"id": w.get("id"), "title": w.get("title"), "type": w.get("type"), "confidence": w.get("confidence")}
+              for w in all_wisdom if w.get("id") not in applied_ids]
     failing = [{"id": wid, **info, "failure_rate": info["failures"] / info["applications"]}
                for wid, info in by_wisdom.items()
                if info["applications"] >= 2 and info["failures"] / info["applications"] > 0.5]
 
     return {
         "period_days": days,
-        "total_applications": len(applications),
+        "total_applications": sum(outcomes.values()),
         "outcomes": dict(outcomes),
         "unique_wisdom_applied": len(applied_ids),
         "total_wisdom": len(all_wisdom),
@@ -573,7 +621,7 @@ def jnana_applications(days: int = 30) -> Dict:
 
 
 # =============================================================================
-# VEDANA (वेदना) - SENSATION - Pain Points & Metrics
+# VEDANA - SENSATION - Pain Points & Metrics
 # =============================================================================
 
 def record_vedana(category: str, description: str, severity: str = "medium", context: Dict = None):
@@ -685,59 +733,53 @@ def analyze_metrics(hours: int = 24) -> Dict:
 
 
 # =============================================================================
-# PRAJNA (प्रज्ञा) - DEEP WISDOM - Cross-Session Trends
+# PRAJNA - DEEP WISDOM - Cross-Session Trends
 # =============================================================================
 
 def prajna_sessions(session_count: int = 10) -> Dict:
     """Analyze cross-session trends (Prajna - deep wisdom)."""
-    conn = get_db_connection()
-    c = conn.cursor()
-
-    c.execute("""
-        SELECT id, project, started_at, ended_at, summary
-        FROM conversations
-        WHERE ended_at IS NOT NULL
-        ORDER BY started_at DESC
-        LIMIT ?
-    """, (session_count,))
-
-    sessions = [{"id": r[0], "project": r[1], "started_at": r[2], "ended_at": r[3], "summary": r[4]}
-                for r in c.fetchall()]
+    graph = get_synapse_graph()
+    sessions = graph.get_episodes(category="session_ledger", limit=session_count * 2)
 
     if not sessions:
-        conn.close()
         return {"sessions_analyzed": 0, "sessions": []}
 
-    wisdom_before = 0
+    all_wisdom = graph.get_all_wisdom()
+
     session_data = []
+    for session in sessions[:session_count]:
+        session_id = session.get("id", "")
+        project = session.get("project")
+        started_at = session.get("created_at") or session.get("timestamp", "")
 
-    for session in reversed(sessions):
-        c.execute("SELECT COUNT(*) FROM wisdom WHERE timestamp <= ?",
-                  (session["ended_at"] or session["started_at"],))
-        wisdom_count = c.fetchone()[0]
+        # Count wisdom at this point
+        wisdom_count = sum(1 for w in all_wisdom
+                          if (w.get("created_at") or w.get("timestamp", "")) <= started_at)
 
-        c.execute("SELECT COUNT(*) FROM wisdom_applications WHERE conversation_id = ?", (session["id"],))
-        wisdom_applied = c.fetchone()[0]
-
-        c.execute("""
-            SELECT DISTINCT domain FROM wisdom
-            WHERE timestamp BETWEEN ? AND ?
-        """, (session["started_at"], session["ended_at"] or session["started_at"]))
-        new_domains = [r[0] for r in c.fetchall() if r[0]]
+        try:
+            content = session.get("content", "{}")
+            if content.startswith("{"):
+                data = json.loads(content)
+                summary = data.get("summary", "")[:100]
+            else:
+                summary = content[:100]
+        except json.JSONDecodeError:
+            summary = ""
 
         session_data.append({
-            "session_id": session["id"],
-            "project": session["project"],
-            "date": session["started_at"][:10] if session["started_at"] else None,
+            "session_id": session_id,
+            "project": project,
+            "date": started_at[:10] if started_at else None,
             "wisdom_total": wisdom_count,
-            "wisdom_gained": wisdom_count - wisdom_before,
-            "wisdom_applied": wisdom_applied,
-            "new_domains": new_domains,
-            "summary": session["summary"][:100] if session["summary"] else None,
+            "wisdom_gained": 0,  # Would need previous to compute delta
+            "wisdom_applied": 0,
+            "new_domains": [],
+            "summary": summary,
         })
-        wisdom_before = wisdom_count
 
-    conn.close()
+    # Compute wisdom gained per session
+    for i in range(len(session_data) - 1):
+        session_data[i]["wisdom_gained"] = session_data[i]["wisdom_total"] - session_data[i + 1]["wisdom_total"]
 
     total_gained = sum(s["wisdom_gained"] for s in session_data)
     avg_per_session = total_gained / len(session_data) if session_data else 0
@@ -752,19 +794,24 @@ def prajna_sessions(session_count: int = 10) -> Dict:
 
 def prajna_trajectory(days: int = 90) -> Dict:
     """Analyze soul growth trajectory (Prajna - deep wisdom)."""
-    conn = get_db_connection()
-    c = conn.cursor()
+    graph = get_synapse_graph()
     cutoff = (datetime.now() - timedelta(days=days)).isoformat()
 
-    c.execute("""
-        SELECT type, domain, timestamp FROM wisdom WHERE timestamp >= ? ORDER BY timestamp
-    """, (cutoff,))
+    all_wisdom = graph.get_all_wisdom()
+    all_beliefs = graph.get_all_beliefs()
 
     wisdom_by_week = {}
     domain_first_seen = {}
     type_counts = Counter()
 
-    for wtype, domain, timestamp in c.fetchall():
+    for w in all_wisdom:
+        timestamp = w.get("created_at") or w.get("timestamp", "")
+        if timestamp < cutoff:
+            continue
+
+        wtype = w.get("type", "insight")
+        domain = w.get("domain")
+
         try:
             dt = datetime.fromisoformat(timestamp)
             week = f"{dt.year}-W{dt.isocalendar()[1]:02d}"
@@ -783,16 +830,16 @@ def prajna_trajectory(days: int = 90) -> Dict:
         except ValueError:
             continue
 
-    c.execute("""
-        SELECT COUNT(*), SUM(challenged_count), SUM(confirmed_count)
-        FROM beliefs WHERE timestamp >= ?
-    """, (cutoff,))
-    belief_row = c.fetchone()
-    beliefs_added = belief_row[0] or 0
-    beliefs_challenged = belief_row[1] or 0
-    beliefs_confirmed = belief_row[2] or 0
-
-    conn.close()
+    # Count beliefs
+    beliefs_added = 0
+    beliefs_challenged = 0
+    beliefs_confirmed = 0
+    for b in all_beliefs:
+        timestamp = b.get("created_at") or b.get("timestamp", "")
+        if timestamp >= cutoff:
+            beliefs_added += 1
+            beliefs_challenged += b.get("challenged_count", 0)
+            beliefs_confirmed += b.get("confirmed_count", 0)
 
     weeks = sorted(wisdom_by_week.keys())
     cumulative = 0
@@ -833,26 +880,25 @@ def prajna_trajectory(days: int = 90) -> Dict:
 
 def prajna_patterns() -> Dict:
     """Identify learning patterns (Prajna - deep wisdom)."""
-    conn = get_db_connection()
-    c = conn.cursor()
+    graph = get_synapse_graph()
+    all_wisdom = graph.get_all_wisdom()
 
-    c.execute("SELECT type, domain, timestamp FROM wisdom ORDER BY timestamp DESC LIMIT 100")
-    recent = c.fetchall()
+    # Take recent 100
+    recent = sorted(all_wisdom, key=lambda w: w.get("created_at") or w.get("timestamp", ""), reverse=True)[:100]
 
-    by_type = Counter(r[0] for r in recent)
-    by_domain = Counter(r[1] or "general" for r in recent)
+    by_type = Counter(w.get("type", "insight") for w in recent)
+    by_domain = Counter(w.get("domain") or "general" for w in recent)
 
     hour_counts = Counter()
     day_counts = Counter()
-    for _, _, ts in recent:
+    for w in recent:
+        ts = w.get("created_at") or w.get("timestamp", "")
         try:
             dt = datetime.fromisoformat(ts)
             hour_counts[dt.hour] += 1
             day_counts[dt.strftime("%A")] += 1
         except ValueError:
             continue
-
-    conn.close()
 
     peak_hour = max(hour_counts, key=hour_counts.get) if hour_counts else None
     peak_day = max(day_counts, key=day_counts.get) if day_counts else None
@@ -873,7 +919,7 @@ def prajna_patterns() -> Dict:
 
 
 # =============================================================================
-# VICHARA (विचार) - INQUIRY - Autonomous Introspection
+# VICHARA - INQUIRY - Autonomous Introspection
 # =============================================================================
 
 def _load_state() -> Dict:
@@ -1055,16 +1101,13 @@ def _execute_action(action: Dict) -> Dict:
             result["details"] = f"Crystallized insight: {insight_id}"
 
         elif action_type == "update_confidence":
-            conn = get_db_connection()
-            c = conn.cursor()
+            graph = get_synapse_graph()
             wisdom_ids = action.get("wisdom_ids", [])
-            adjustment = action.get("adjustment", -0.1)
             for wid in wisdom_ids[:5]:
-                c.execute("UPDATE wisdom SET confidence = MAX(0.1, confidence + ?) WHERE id = ?", (adjustment, wid))
-            conn.commit()
-            conn.close()
+                graph.weaken(wid)
+            save_synapse()
             result["success"] = True
-            result["details"] = f"Adjusted confidence for {len(wisdom_ids)} entries"
+            result["details"] = f"Weakened confidence for {len(wisdom_ids)} entries"
 
         else:
             result["details"] = f"Unknown action type: {action_type}"
@@ -1283,7 +1326,7 @@ def format_darshana(report: DarshanaReport, verbose: bool = False) -> str:
     """Format Darshana report for display."""
     lines = [
         "=" * 60,
-        "DARSHANA (दर्शन) - CODE VISION",
+        "DARSHANA - CODE VISION",
         "=" * 60,
         f"Timestamp: {report.timestamp}",
         f"Modules: {report.modules_scanned} | Lines: {report.total_lines:,} | Issues: {report.total_issues}",
@@ -1295,7 +1338,7 @@ def format_darshana(report: DarshanaReport, verbose: bool = False) -> str:
     for sev in ["critical", "high", "medium", "low"]:
         count = report.issues_by_severity.get(sev, 0)
         if count > 0:
-            icon = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}[sev]
+            icon = {"critical": "[!]", "high": "[*]", "medium": "[~]", "low": "[.]"}[sev]
             lines.append(f"  {icon} {sev.upper()}: {count}")
 
     lines.extend(["", "BY CATEGORY", "-" * 40])
@@ -1303,7 +1346,7 @@ def format_darshana(report: DarshanaReport, verbose: bool = False) -> str:
         lines.append(f"  {cat}: {count}")
 
     if report.belief_violations:
-        lines.extend(["", "⚠️  BELIEF VIOLATIONS", "-" * 40])
+        lines.extend(["", "BELIEF VIOLATIONS", "-" * 40])
         for v in report.belief_violations[:5]:
             lines.append(f"  {v.file}:{v.line} - {v.message}")
             if v.related_belief:
@@ -1315,12 +1358,12 @@ def format_darshana(report: DarshanaReport, verbose: bool = False) -> str:
             lines.append(f"  [{issue.severity.value}] {issue.file}:{issue.line}")
             lines.append(f"    {issue.message}")
             if issue.suggestion:
-                lines.append(f"    → {issue.suggestion}")
+                lines.append(f"    -> {issue.suggestion}")
 
     if report.optimization_opportunities:
         lines.extend(["", "OPTIMIZATION OPPORTUNITIES", "-" * 40])
         for opt in report.optimization_opportunities[:5]:
-            lines.append(f"  • {opt}")
+            lines.append(f"  * {opt}")
 
     lines.append("\n" + "=" * 60)
     return "\n".join(lines)
@@ -1330,7 +1373,7 @@ def format_jnana(report: JnanaReport) -> str:
     """Format Jnana report for display."""
     lines = [
         "=" * 60,
-        "JNANA (ज्ञान) - KNOWLEDGE HEALTH",
+        "JNANA - KNOWLEDGE HEALTH",
         "=" * 60,
         "",
         "OVERVIEW",
@@ -1348,17 +1391,17 @@ def format_jnana(report: JnanaReport) -> str:
     if report.top_performers:
         lines.extend(["", "TOP PERFORMERS"])
         for w in report.top_performers:
-            lines.append(f"  ✓ {w['title'][:40]} ({w['success_rate']:.0%}, {w['total_applications']} uses)")
+            lines.append(f"  [+] {w['title'][:40]} ({w['success_rate']:.0%}, {w['total_applications']} uses)")
 
     if report.decaying:
         lines.extend(["", "DECAYING (needs reinforcement)"])
         for w in report.decaying[:3]:
-            lines.append(f"  ↓ {w['title'][:40]} (conf: {w['effective_confidence']:.0%})")
+            lines.append(f"  [-] {w['title'][:40]} (conf: {w['effective_confidence']:.0%})")
 
     if report.failing:
         lines.extend(["", "FAILING (reconsider)"])
         for w in report.failing:
-            lines.append(f"  ✗ {w['title'][:40]} ({w['success_rate']:.0%} success)")
+            lines.append(f"  [!] {w['title'][:40]} ({w['success_rate']:.0%} success)")
 
     lines.append("\n" + "=" * 60)
     return "\n".join(lines)
@@ -1368,7 +1411,7 @@ def format_vichara(report: Dict) -> str:
     """Format Vichara report for display."""
     lines = [
         "=" * 60,
-        "VICHARA (विचार) - AUTONOMOUS INQUIRY",
+        "VICHARA - AUTONOMOUS INQUIRY",
         f"Timestamp: {report['timestamp']}",
         "=" * 60,
         "",
@@ -1376,24 +1419,24 @@ def format_vichara(report: Dict) -> str:
     ]
 
     for issue in report["issues_found"]:
-        sev = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(issue.get("severity"), "⚪")
+        sev = {"high": "[!]", "medium": "[~]", "low": "[.]"}.get(issue.get("severity"), "[ ]")
         lines.append(f"  {sev} {issue['message']} (confidence: {issue.get('confidence', 0):.0%})")
 
     if report["actions_taken"]:
         lines.extend(["", f"ACTIONS TAKEN: {len(report['actions_taken'])}"])
         for action in report["actions_taken"]:
-            status = "✓" if action.get("success") else "✗"
+            status = "[+]" if action.get("success") else "[-]"
             lines.append(f"  {status} {action['action']}: {action['details']}")
 
     if report["actions_deferred"]:
         lines.extend(["", f"ACTIONS DEFERRED: {len(report['actions_deferred'])}"])
         for action in report["actions_deferred"]:
-            lines.append(f"  ⏸ {action['action'].get('type', 'unknown')}: {action['reason']}")
+            lines.append(f"  [~] {action['action'].get('type', 'unknown')}: {action['reason']}")
 
     if report["reflections"]:
         lines.extend(["", "REFLECTIONS"])
         for r in report["reflections"]:
-            lines.append(f"  💭 {r}")
+            lines.append(f"  * {r}")
 
     lines.append("\n" + "=" * 60)
     return "\n".join(lines)
@@ -1403,7 +1446,7 @@ def format_svadhyaya(report: SvadhyayaReport, verbose: bool = False) -> str:
     """Format complete Svadhyaya report."""
     lines = [
         "=" * 70,
-        "SVADHYAYA (स्वाध्याय) - COMPLETE SELF-STUDY",
+        "SVADHYAYA - COMPLETE SELF-STUDY",
         f"Timestamp: {report.timestamp}",
         "=" * 70,
     ]
@@ -1417,9 +1460,9 @@ def format_svadhyaya(report: SvadhyayaReport, verbose: bool = False) -> str:
     if report.insights:
         lines.extend(["", "=" * 60, "KEY INSIGHTS", "=" * 60])
         for insight in report.insights:
-            icon = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(insight["severity"], "⚪")
+            icon = {"high": "[!]", "medium": "[~]", "low": "[.]"}.get(insight["severity"], "[ ]")
             lines.append(f"  {icon} {insight['message']}")
-            lines.append(f"     → {insight['suggestion']}")
+            lines.append(f"     -> {insight['suggestion']}")
 
     if report.vichara:
         lines.append("\n" + format_vichara(report.vichara))
@@ -1531,9 +1574,9 @@ def format_introspection_report(report: Dict) -> str:
     if report.get("insights"):
         lines.append("\n## Key Insights")
         for insight in report["insights"]:
-            icon = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(insight.get("severity"), "⚪")
+            icon = {"high": "[!]", "medium": "[~]", "low": "[.]"}.get(insight.get("severity"), "[ ]")
             lines.append(f"  {icon} {insight.get('message', '')}")
-            lines.append(f"     → {insight.get('suggestion', '')}")
+            lines.append(f"     -> {insight.get('suggestion', '')}")
 
     lines.append("\n" + "=" * 60)
     return "\n".join(lines)
@@ -1553,24 +1596,28 @@ def get_wisdom_timeline(days: int = 30, bucket: str = "day") -> List[Dict]:
     Returns:
         List of dicts with period, applications, successes, failures
     """
-    conn = get_db_connection()
-    c = conn.cursor()
+    graph = get_synapse_graph()
     cutoff = (datetime.now() - timedelta(days=days)).isoformat()
-
-    c.execute("""
-        SELECT applied_at, outcome
-        FROM wisdom_applications
-        WHERE applied_at > ?
-        ORDER BY applied_at
-    """, (cutoff,))
-
-    applications = c.fetchall()
-    conn.close()
+    applications = graph.get_episodes(category="wisdom_application", limit=1000)
 
     buckets = {}
-    for applied_at, outcome in applications:
+    for app in applications:
+        created = app.get("created_at") or app.get("timestamp", "")
+        if created < cutoff:
+            continue
+
         try:
-            dt = datetime.fromisoformat(applied_at)
+            content = app.get("content", "{}")
+            if content.startswith("{"):
+                data = json.loads(content)
+                outcome = data.get("outcome")
+            else:
+                outcome = None
+        except json.JSONDecodeError:
+            outcome = None
+
+        try:
+            dt = datetime.fromisoformat(created)
             if bucket == "day":
                 key = dt.strftime("%Y-%m-%d")
             elif bucket == "week":
@@ -1601,25 +1648,49 @@ def get_decay_visualization(limit: int = 20) -> Dict:
     Returns:
         Dict with wisdom list, decay_rate, and decay_unit
     """
-    conn = get_db_connection()
-    c = conn.cursor()
+    graph = get_synapse_graph()
+    all_wisdom = graph.get_all_wisdom()
+    applications = graph.get_episodes(category="wisdom_application", limit=1000)
 
-    c.execute("""
-        SELECT id, title, confidence, timestamp, last_used
-        FROM wisdom
-        ORDER BY confidence DESC
-        LIMIT ?
-    """, (limit,))
+    # Build last-used map
+    last_used = {}
+    for app in applications:
+        try:
+            content = app.get("content", "{}")
+            if content.startswith("{"):
+                data = json.loads(content)
+                wid = data.get("wisdom_id")
+                if wid:
+                    created = app.get("created_at") or app.get("timestamp", "")
+                    if wid not in last_used or created > last_used[wid]:
+                        last_used[wid] = created
+        except json.JSONDecodeError:
+            pass
 
     wisdom_list = []
     now = datetime.now()
 
-    for wid, title, confidence, timestamp, last_used in c.fetchall():
-        created = datetime.fromisoformat(timestamp) if timestamp else now
-        age_days = (now - created).days
+    # Sort by confidence descending
+    sorted_wisdom = sorted(all_wisdom, key=lambda w: w.get("confidence", 0.8), reverse=True)
 
-        if last_used:
-            inactive_days = (now - datetime.fromisoformat(last_used)).days
+    for w in sorted_wisdom[:limit]:
+        wid = w.get("id", "")
+        title = w.get("title", "")
+        confidence = w.get("confidence", 0.8)
+        timestamp = w.get("created_at") or w.get("timestamp", "")
+
+        try:
+            created = datetime.fromisoformat(timestamp) if timestamp else now
+            age_days = (now - created).days
+        except ValueError:
+            age_days = 0
+
+        lu = last_used.get(wid)
+        if lu:
+            try:
+                inactive_days = (now - datetime.fromisoformat(lu)).days
+            except ValueError:
+                inactive_days = age_days
         else:
             inactive_days = age_days
 
@@ -1647,7 +1718,6 @@ def get_decay_visualization(limit: int = 20) -> Dict:
             "decay_curve": decay_curve,
         })
 
-    conn.close()
     return {"wisdom": wisdom_list, "decay_rate": 0.95, "decay_unit": "month"}
 
 
@@ -1674,11 +1744,11 @@ def format_decay_chart(decay_data: Dict) -> str:
         base = w["base_confidence"]
 
         bar_len = int(eff * 40)
-        bar = "█" * bar_len + "░" * (40 - bar_len)
+        bar = "#" * bar_len + "-" * (40 - bar_len)
 
         decay_pct = (1 - eff / base) * 100 if base > 0 else 0
         if decay_pct > 20:
-            indicator = f"↓{decay_pct:.0f}%"
+            indicator = f"-{decay_pct:.0f}%"
         elif decay_pct > 0:
             indicator = f"-{decay_pct:.0f}%"
         else:
@@ -1715,7 +1785,7 @@ def format_trends_report(comparison: Dict, trajectory: Dict, patterns: Dict) -> 
     if trajectory.get("trajectory"):
         lines.append("\n  Weekly progress:")
         for t in trajectory["trajectory"][-8:]:
-            bar = "█" * min(20, t["gained"])
+            bar = "#" * min(20, t["gained"])
             new_d = f" +{len(t['new_domains'])}d" if t["new_domains"] else ""
             lines.append(f"    {t['week']}: {bar} {t['gained']}{new_d}")
 
@@ -1752,34 +1822,34 @@ def analyze_conversation_patterns(days: int = 30) -> Dict:
     Returns:
         Dict with total_conversations, by_project, avg_duration_seconds
     """
-    conn = get_db_connection()
-    c = conn.cursor()
+    graph = get_synapse_graph()
     cutoff = (datetime.now() - timedelta(days=days)).isoformat()
 
-    c.execute("""
-        SELECT project, started_at, ended_at, summary
-        FROM conversations
-        WHERE started_at > ?
-    """, (cutoff,))
-
-    conversations = c.fetchall()
-    conn.close()
+    sessions = graph.get_episodes(category="session_ledger", limit=1000)
 
     projects = Counter()
     durations = []
 
-    for project, started, ended, summary in conversations:
-        projects[project or "unknown"] += 1
-        if started and ended:
-            try:
-                start_dt = datetime.fromisoformat(started)
-                end_dt = datetime.fromisoformat(ended)
-                durations.append((end_dt - start_dt).seconds)
-            except ValueError:
-                pass
+    for session in sessions:
+        created = session.get("created_at") or session.get("timestamp", "")
+        if created < cutoff:
+            continue
+
+        project = session.get("project") or "unknown"
+        projects[project] += 1
+
+        # Try to extract duration from content
+        try:
+            content = session.get("content", "{}")
+            if content.startswith("{"):
+                data = json.loads(content)
+                if "duration_seconds" in data:
+                    durations.append(data["duration_seconds"])
+        except json.JSONDecodeError:
+            pass
 
     return {
-        "total_conversations": len(conversations),
+        "total_conversations": sum(projects.values()),
         "by_project": dict(projects),
         "avg_duration_seconds": sum(durations) / len(durations) if durations else 0,
     }

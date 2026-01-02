@@ -26,22 +26,22 @@ def get_observations(limit: int = 20) -> str:
     if not observations:
         return "No pending observations. The soul is watching and learning."
 
-    type_emoji = {
-        "correction": "🔄",
-        "preference": "👤",
-        "pattern": "🔁",
-        "struggle": "💪",
-        "breakthrough": "💡",
-        "file_pattern": "📁",
-        "decision": "⚖️",
+    type_markers = {
+        "correction": "[C]",
+        "preference": "[P]",
+        "pattern": "[R]",
+        "struggle": "[S]",
+        "breakthrough": "[B]",
+        "file_pattern": "[F]",
+        "decision": "[D]",
     }
 
     lines = [f"Pending observations ({len(observations)}):", ""]
 
     for obs in observations:
-        emoji = type_emoji.get(obs["type"], "•")
+        marker = type_markers.get(obs["type"], "*")
         conf = obs.get("confidence", 0)
-        lines.append(f"{emoji} #{obs['id']} [{conf:.0%}] {obs['content'][:60]}")
+        lines.append(f"{marker} #{obs['id'][:8]} [{conf:.0%}] {obs['content'][:60]}")
 
     lines.append("")
     lines.append("Use promote_observation(id) to convert to wisdom")
@@ -50,7 +50,7 @@ def get_observations(limit: int = 20) -> str:
 
 
 @mcp.tool()
-def promote_observation(observation_id: int) -> str:
+def promote_observation(observation_id: str) -> str:
     """Promote an observation to permanent wisdom.
 
     Observations with high confidence are auto-promoted.
@@ -64,8 +64,8 @@ def promote_observation(observation_id: int) -> str:
     wisdom_id = promote_observation_to_wisdom(observation_id)
 
     if wisdom_id:
-        return f"Observation #{observation_id} → Wisdom #{wisdom_id}"
-    return f"Observation #{observation_id} not found or already promoted"
+        return f"Observation #{observation_id[:8]} -> Wisdom #{wisdom_id[:8]}"
+    return f"Observation #{observation_id[:8]} not found or already promoted"
 
 
 @mcp.tool()
@@ -75,34 +75,28 @@ def get_observation_stats() -> str:
     Shows how many observations have been extracted and
     how many have been promoted to wisdom.
     """
-    from .observe import get_pending_observations, _ensure_observation_tables
-    from .core import get_db_connection
+    from ..core import get_synapse_graph
+    import json
+    from collections import Counter
 
-    _ensure_observation_tables()
-    conn = get_db_connection()
-    c = conn.cursor()
+    graph = get_synapse_graph()
+    episodes = graph.get_episodes(category="observation", limit=500)
 
-    # Total observations
-    c.execute("SELECT COUNT(*) FROM session_observations")
-    total = c.fetchone()[0]
+    total = len(episodes)
 
-    # Pending (not promoted)
-    c.execute("SELECT COUNT(*) FROM session_observations WHERE converted_to_wisdom IS NULL")
-    pending = c.fetchone()[0]
+    by_type = Counter()
+    for ep in episodes:
+        try:
+            data = json.loads(ep.get("content", "{}"))
+            obs_type = data.get("type", "unknown")
+        except (json.JSONDecodeError, TypeError):
+            obs_type = "unknown"
+        by_type[obs_type] += 1
 
-    # Promoted
-    promoted = total - pending
+    promoted_episodes = graph.get_episodes(category="promoted_observation", limit=500)
+    promoted = len(promoted_episodes)
 
-    # By type
-    c.execute("""
-        SELECT observation_type, COUNT(*)
-        FROM session_observations
-        GROUP BY observation_type
-        ORDER BY COUNT(*) DESC
-    """)
-    by_type = c.fetchall()
-
-    conn.close()
+    pending = total
 
     lines = ["# Observation Statistics", ""]
     lines.append(f"Total observations: {total}")
@@ -112,18 +106,18 @@ def get_observation_stats() -> str:
     if by_type:
         lines.append("")
         lines.append("By type:")
-        type_emoji = {
-            "correction": "🔄",
-            "preference": "👤",
-            "pattern": "🔁",
-            "struggle": "💪",
-            "breakthrough": "💡",
-            "file_pattern": "📁",
-            "decision": "⚖️",
+        type_markers = {
+            "correction": "[C]",
+            "preference": "[P]",
+            "pattern": "[R]",
+            "struggle": "[S]",
+            "breakthrough": "[B]",
+            "file_pattern": "[F]",
+            "decision": "[D]",
         }
-        for obs_type, count in by_type:
-            emoji = type_emoji.get(obs_type, "•")
-            lines.append(f"  {emoji} {obs_type}: {count}")
+        for obs_type, count in by_type.most_common():
+            marker = type_markers.get(obs_type, "*")
+            lines.append(f"  {marker} {obs_type}: {count}")
 
     return "\n".join(lines)
 

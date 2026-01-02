@@ -50,27 +50,27 @@ def get_agent_actions() -> str:
     Shows what the agent has done without asking, providing
     transparency into its autonomous decision-making.
     """
-    from .core import get_db_connection
+    from .core import get_synapse_graph
+    import json
 
-    conn = get_db_connection()
-    c = conn.cursor()
+    graph = get_synapse_graph()
+    episodes = graph.get_episodes(category="agent_action", limit=20)
 
-    c.execute("""
-        SELECT action_type, success, timestamp
-        FROM agent_actions
-        ORDER BY timestamp DESC
-        LIMIT 20
-    """)
-
-    rows = c.fetchall()
-    conn.close()
-
-    if not rows:
+    if not episodes:
         return "No autonomous actions recorded yet."
 
     lines = ["Recent Autonomous Actions:", ""]
-    for action_type, success, timestamp in rows:
-        status = "✓" if success else "✗"
+    for ep in episodes:
+        try:
+            data = json.loads(ep.get("content", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            data = {}
+
+        action_type = data.get("action_type", ep.get("title", "unknown"))
+        success = data.get("success", True)
+        timestamp = data.get("timestamp", ep.get("timestamp", ""))
+
+        status = "+" if success else "-"
         time_part = timestamp.split("T")[1][:8] if "T" in timestamp else timestamp
         lines.append(f"  [{status}] {time_part} - {action_type}")
 
@@ -199,35 +199,39 @@ def list_backups() -> str:
 
 
 # =============================================================================
-# Bridge Operations - Soul <-> Project Memory
+# Bridge Operations - Soul <-> Project Episodes (Synapse)
 # =============================================================================
 
 @mcp.tool()
 def bridge_status() -> str:
-    """Check if project memory (cc-memory) is available and connected."""
-    from .bridge import is_memory_available, find_project_dir, get_project_memory
+    """Check synapse graph status for project episodes."""
+    from .core import get_synapse_graph, SYNAPSE_PATH
+    from .bridge import find_project_dir, get_project_memory
 
-    if not is_memory_available():
-        return "cc-memory not installed. Install with: pip install cc-memory"
+    try:
+        if not SYNAPSE_PATH.exists():
+            return "Synapse graph not initialized. Run soul-init to create."
 
-    project_dir = find_project_dir()
-    memory = get_project_memory(project_dir)
+        graph = get_synapse_graph()
+        project_dir = find_project_dir()
+        memory = get_project_memory(project_dir)
 
-    if not memory or "error" in memory:
-        return f"cc-memory available but no project memory at: {project_dir}"
+        if not memory:
+            return f"Synapse available but no project episodes at: {project_dir}"
 
-    lines = [
-        "Bridge connected:",
-        f"  Project: {memory['project']}",
-        f"  Observations: {memory['stats'].get('observations', 0)}",
-        f"  Sessions: {memory['stats'].get('sessions', 0)}",
-    ]
-    return "\n".join(lines)
+        lines = [
+            "Synapse connected:",
+            f"  Project: {memory['project']}",
+            f"  Observations: {memory['stats'].get('observations', 0)}",
+        ]
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Synapse error: {e}"
 
 
 @mcp.tool()
 def get_unified_context(compact: bool = False) -> str:
-    """Get unified context combining soul identity and project memory.
+    """Get unified context combining soul identity and project episodes.
 
     Args:
         compact: If True, return minimal context for tight budgets
@@ -240,9 +244,7 @@ def get_unified_context(compact: bool = False) -> str:
 
 @mcp.tool()
 def soul_greeting(include_rich: bool = False) -> str:
-    """Get the soul's session greeting combining universal wisdom and project memory.
-
-    Similar to claude-mem's startup greeting but from cc-soul.
+    """Get the soul's session greeting combining universal wisdom and project episodes.
 
     Args:
         include_rich: If True, include detailed observation table
@@ -267,7 +269,7 @@ def soul_rich_context() -> str:
     """Get detailed observation context table for session start.
 
     Returns a formatted table of recent observations with categories,
-    timestamps, and memory statistics.
+    timestamps, and memory statistics from synapse.
     """
     from .bridge import unified_context
     from .hooks import format_rich_context, get_project_name
@@ -314,7 +316,7 @@ def promote_to_wisdom(observation_id: str, wisdom_type: str = "pattern") -> str:
     Converts episodic memory (what happened) to semantic memory (universal pattern).
 
     Args:
-        observation_id: The observation ID from cc-memory
+        observation_id: The observation ID from synapse episodes
         wisdom_type: Type of wisdom (pattern, insight, principle, failure)
     """
     from .bridge import promote_observation
@@ -364,7 +366,7 @@ def find_wisdom_candidates() -> str:
 def get_project_signals() -> str:
     """Get project signals that influence mood.
 
-    Returns metrics from project memory that affect the soul's mood:
+    Returns metrics from project episodes that affect the soul's mood:
     failures (learning), discoveries (growth), activity (engagement).
     """
     from .bridge import get_project_signals as _get_signals
@@ -372,7 +374,7 @@ def get_project_signals() -> str:
     signals = _get_signals()
 
     if not signals:
-        return "No project signals available (cc-memory not installed or no project)"
+        return "No project signals available"
 
     if "error" in signals:
         return f"Error: {signals['error']}"
@@ -383,11 +385,7 @@ def get_project_signals() -> str:
         f"  Recent failures: {signals['recent_failures']}",
         f"  Recent discoveries: {signals['recent_discoveries']}",
         f"  Recent features: {signals['recent_features']}",
-        f"  Sessions: {signals['sessions']}",
     ]
-
-    if signals.get("tokens_invested"):
-        lines.append(f"  Tokens invested: {signals['tokens_invested']:,}")
 
     return "\n".join(lines)
 
@@ -513,8 +511,8 @@ def get_concept_graph_stats() -> str:
 
         lines = [
             "Concept Graph Statistics:",
-            f"  Nodes: {stats.get('nodes', 0)}",
-            f"  Edges: {stats.get('edges', 0)}",
+            f"  Nodes: {stats.get('node_count', 0)}",
+            f"  Edges: {stats.get('edge_count', 0)}",
         ]
 
         if stats.get("by_type"):
@@ -709,7 +707,7 @@ def record_dream(title: str, content: str, horizon: str = "") -> str:
     """Record a dream - a vision of possibility.
 
     Dreams are wilder than aspirations. They're glimpses of what could be,
-    not yet constrained by feasibility.
+    not yet constrained by feasibility. Stored in synapse as episodes.
 
     Args:
         title: Short name for the dream
@@ -721,12 +719,12 @@ def record_dream(title: str, content: str, horizon: str = "") -> str:
     dream_id = dream(title, content, horizon)
     if dream_id:
         return f"Dream recorded: {title} (id: {dream_id})"
-    return "Failed to record dream (cc-memory not available)"
+    return "Failed to record dream"
 
 
 @mcp.tool()
 def harvest_dreams() -> str:
-    """Harvest dreams from memory - visions that might spark growth."""
+    """Harvest dreams from synapse - visions that might spark growth."""
     from .dreams import harvest_dreams as _harvest, format_dreams_display
 
     dreams = _harvest(days=90)
@@ -1534,15 +1532,13 @@ def show_ledger_history(limit: int = 5) -> str:
     Args:
         limit: Maximum ledgers to show
     """
-    from .ledger import _call_cc_memory_recall, _get_project_name
+    from .ledger import _get_project_name
+    from .core import get_synapse_graph
     import json
 
     project = _get_project_name()
-    ledgers = _call_cc_memory_recall(
-        query=f"session ledger checkpoint {project}",
-        category="session_ledger",
-        limit=limit,
-    )
+    graph = get_synapse_graph()
+    ledgers = graph.get_episodes(category="session_ledger", project=project, limit=limit)
 
     if not ledgers:
         return f"No ledgers found for project: {project}"
@@ -1552,8 +1548,9 @@ def show_ledger_history(limit: int = 5) -> str:
         try:
             content = entry.get("content", "{}")
             data = json.loads(content) if isinstance(content, str) else content
+            timestamp = entry.get("created_at", entry.get("timestamp", "?"))
             lines.append(
-                f"- **{data.get('ledger_id', '?')}** ({entry.get('timestamp', '?')[:16]})\n"
+                f"- **{data.get('ledger_id', '?')}** ({timestamp[:16]})\n"
                 f"  Coherence: {data.get('soul_state', {}).get('coherence', 0):.0%}, "
                 f"Continue: {data.get('continuation', {}).get('immediate_next', '-')[:50]}"
             )
@@ -2072,22 +2069,22 @@ def get_observations(limit: int = 20) -> str:
     if not observations:
         return "No pending observations. The soul is watching and learning."
 
-    type_emoji = {
-        "correction": "🔄",
-        "preference": "👤",
-        "pattern": "🔁",
-        "struggle": "💪",
-        "breakthrough": "💡",
-        "file_pattern": "📁",
-        "decision": "⚖️",
+    type_markers = {
+        "correction": "[C]",
+        "preference": "[P]",
+        "pattern": "[R]",
+        "struggle": "[S]",
+        "breakthrough": "[B]",
+        "file_pattern": "[F]",
+        "decision": "[D]",
     }
 
     lines = [f"Pending observations ({len(observations)}):", ""]
 
     for obs in observations:
-        emoji = type_emoji.get(obs["type"], "•")
+        marker = type_markers.get(obs["type"], "*")
         conf = obs.get("confidence", 0)
-        lines.append(f"{emoji} #{obs['id']} [{conf:.0%}] {obs['content'][:60]}")
+        lines.append(f"{marker} #{obs['id'][:8]} [{conf:.0%}] {obs['content'][:60]}")
 
     lines.append("")
     lines.append("Use promote_observation(id) to convert to wisdom")
@@ -2096,7 +2093,7 @@ def get_observations(limit: int = 20) -> str:
 
 
 @mcp.tool()
-def promote_observation(observation_id: int) -> str:
+def promote_observation(observation_id: str) -> str:
     """Promote an observation to permanent wisdom.
 
     Observations with high confidence are auto-promoted.
@@ -2110,8 +2107,8 @@ def promote_observation(observation_id: int) -> str:
     wisdom_id = promote_observation_to_wisdom(observation_id)
 
     if wisdom_id:
-        return f"Observation #{observation_id} → Wisdom #{wisdom_id}"
-    return f"Observation #{observation_id} not found or already promoted"
+        return f"Observation #{observation_id[:8]} -> Wisdom #{wisdom_id[:8]}"
+    return f"Observation #{observation_id[:8]} not found or already promoted"
 
 
 @mcp.tool()
@@ -2121,34 +2118,28 @@ def get_observation_stats() -> str:
     Shows how many observations have been extracted and
     how many have been promoted to wisdom.
     """
-    from .observe import get_pending_observations, _ensure_observation_tables
-    from .core import get_db_connection
+    from .core import get_synapse_graph
+    import json
+    from collections import Counter
 
-    _ensure_observation_tables()
-    conn = get_db_connection()
-    c = conn.cursor()
+    graph = get_synapse_graph()
+    episodes = graph.get_episodes(category="observation", limit=500)
 
-    # Total observations
-    c.execute("SELECT COUNT(*) FROM session_observations")
-    total = c.fetchone()[0]
+    total = len(episodes)
 
-    # Pending (not promoted)
-    c.execute("SELECT COUNT(*) FROM session_observations WHERE converted_to_wisdom IS NULL")
-    pending = c.fetchone()[0]
+    by_type = Counter()
+    for ep in episodes:
+        try:
+            data = json.loads(ep.get("content", "{}"))
+            obs_type = data.get("type", "unknown")
+        except (json.JSONDecodeError, TypeError):
+            obs_type = "unknown"
+        by_type[obs_type] += 1
 
-    # Promoted
-    promoted = total - pending
+    promoted_episodes = graph.get_episodes(category="promoted_observation", limit=500)
+    promoted = len(promoted_episodes)
 
-    # By type
-    c.execute("""
-        SELECT observation_type, COUNT(*)
-        FROM session_observations
-        GROUP BY observation_type
-        ORDER BY COUNT(*) DESC
-    """)
-    by_type = c.fetchall()
-
-    conn.close()
+    pending = total
 
     lines = ["# Observation Statistics", ""]
     lines.append(f"Total observations: {total}")
@@ -2158,18 +2149,18 @@ def get_observation_stats() -> str:
     if by_type:
         lines.append("")
         lines.append("By type:")
-        type_emoji = {
-            "correction": "🔄",
-            "preference": "👤",
-            "pattern": "🔁",
-            "struggle": "💪",
-            "breakthrough": "💡",
-            "file_pattern": "📁",
-            "decision": "⚖️",
+        type_markers = {
+            "correction": "[C]",
+            "preference": "[P]",
+            "pattern": "[R]",
+            "struggle": "[S]",
+            "breakthrough": "[B]",
+            "file_pattern": "[F]",
+            "decision": "[D]",
         }
-        for obs_type, count in by_type:
-            emoji = type_emoji.get(obs_type, "•")
-            lines.append(f"  {emoji} {obs_type}: {count}")
+        for obs_type, count in by_type.most_common():
+            marker = type_markers.get(obs_type, "*")
+            lines.append(f"  {marker} {obs_type}: {count}")
 
     return "\n".join(lines)
 
@@ -2220,7 +2211,7 @@ def awaken_antahkarana(
     """Awaken the Antahkarana - spawn Claude voices to contemplate a problem.
 
     Each voice becomes a separate Claude process that runs independently
-    and stores insights in Chitta (cc-memory). After all voices complete,
+    and stores insights in synapse. After all voices complete,
     harmonize their insights into unified wisdom.
 
     Args:
@@ -2409,9 +2400,9 @@ Contributing voices: {len(result.contributing_voices)}
 
 @mcp.tool()
 def list_antahkarana_insights(antahkarana_id: str) -> str:
-    """List all insights for an Antahkarana from Chitta (cc-memory).
+    """List all insights for an Antahkarana from synapse.
 
-    Voices store their insights in cc-memory with Antahkarana tags.
+    Voices store their insights in synapse with Antahkarana tags.
     This retrieves all insights for a given Antahkarana.
 
     Args:
@@ -2458,119 +2449,6 @@ def list_antahkaranas(limit: int = 5) -> str:
         lines.append(f"  {a['antahkarana_id']}: {a['problem'][:50]}... ({a['voices']} voices)")
 
     return "\n".join(lines)
-
-
-@mcp.tool()
-def delegate_thinking(
-    prompt: str,
-    task_id: str = "",
-    model: str = "sonnet",
-    timeout: int = 180,
-    wait: bool = True,
-) -> str:
-    """Delegate a heavy task to a sub-Claude instance for context preservation.
-
-    Sub-Claude does full work, stores complete output in cc-memory,
-    and returns a distilled summary. Main Claude's context is preserved.
-
-    This is the Upanishadic model: Chitta (memory) stores everything,
-    only distilled wisdom flows to active consciousness.
-
-    Args:
-        prompt: The task/question for sub-Claude
-        task_id: Optional ID (generated if not provided)
-        model: Model to use (sonnet for speed, opus for depth)
-        timeout: Max seconds to wait (if wait=True)
-        wait: If True, wait for completion. If False, return immediately.
-    """
-    from .swarm_spawner import delegate_task
-
-    result = delegate_task(
-        prompt=prompt,
-        task_id=task_id if task_id else None,
-        model=model,
-        timeout=timeout,
-        wait=wait,
-    )
-
-    if result.get("status") == "running":
-        return f"Task {result['task_id']} delegated. Check status with get_delegation_result()."
-
-    if result.get("error"):
-        return f"Delegation failed: {result['error']}"
-
-    lines = [
-        f"## Delegated Task: {result['task_id']}",
-        f"Status: {result['status']}",
-        f"Elapsed: {result.get('elapsed', 0):.1f}s",
-        "",
-        "## Summary",
-        result.get('summary', '(no summary)'),
-    ]
-
-    if result.get('full_result_id'):
-        lines.extend([
-            "",
-            f"Full result stored in cc-memory: {result['full_result_id']}",
-            "Use get_delegation_full_result() to retrieve full content.",
-        ])
-
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def get_delegation_result(task_id: str) -> str:
-    """Get the result of a delegated task.
-
-    Args:
-        task_id: The task ID to check
-    """
-    from .swarm_spawner import get_delegated_result
-
-    result = get_delegated_result(task_id)
-
-    if result.get("status") == "not_found":
-        return f"Task {task_id} not found."
-
-    lines = [
-        f"## Task: {task_id}",
-        f"Status: {result['status']}",
-    ]
-
-    if result.get('started_at'):
-        lines.append(f"Started: {result['started_at']}")
-    if result.get('completed_at'):
-        lines.append(f"Completed: {result['completed_at']}")
-
-    if result.get('summary'):
-        lines.extend(["", "## Summary", result['summary']])
-
-    if result.get('full_result_id'):
-        lines.extend([
-            "",
-            f"Full result ID: {result['full_result_id']}",
-        ])
-
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def get_delegation_full_result(task_id: str) -> str:
-    """Get the full result content from cc-memory for a delegated task.
-
-    Use when the summary isn't enough and you need full details.
-
-    Args:
-        task_id: The task ID
-    """
-    from .swarm_spawner import get_full_result
-
-    content = get_full_result(task_id)
-
-    if content:
-        return f"## Full Result for {task_id}\n\n{content}"
-    else:
-        return f"No full result found for {task_id}. Task may not have stored to cc-memory yet."
 
 
 # =============================================================================
@@ -2834,11 +2712,10 @@ def restraint_patterns() -> dict:
 
 @mcp.tool()
 def search_memory(query: str, limit: int = 10, verbose: bool = False) -> str:
-    """Search all memory sources with priority: cc-memory > soul > claude-mem.
+    """Search synapse for wisdom and episodes.
 
-    Primary search tool. Searches project observations first (cc-memory),
-    then universal wisdom (cc-soul). Returns note about claude-mem for
-    extended search if needed.
+    Primary search tool. Semantic search across all soul data:
+    wisdom, beliefs, episodes, and intentions.
 
     Args:
         query: What to search for
@@ -2847,7 +2724,7 @@ def search_memory(query: str, limit: int = 10, verbose: bool = False) -> str:
     """
     from .unified_search import unified_search, format_search_results
 
-    results = unified_search(query, limit=limit, include_claude_mem=True)
+    results = unified_search(query, limit=limit)
     return format_search_results(results, verbose=verbose)
 
 
@@ -2855,8 +2732,8 @@ def search_memory(query: str, limit: int = 10, verbose: bool = False) -> str:
 def recall_wisdom(query: str, limit: int = 5) -> str:
     """Recall relevant wisdom based on a query.
 
-    Searches only cc-soul wisdom (universal patterns).
-    For full memory search including project context, use search_memory.
+    Searches only soul wisdom (universal patterns).
+    For full search including episodes, use search_memory.
 
     Args:
         query: What to search for
@@ -2955,16 +2832,17 @@ def soul_health() -> str:
     """Check soul system health and vitality.
 
     Comprehensive health check covering:
-    - Core: Database, wisdom, beliefs, identity
-    - Infrastructure: Embeddings, LanceDB, Kuzu graph
-    - Integration: cc-memory bridge, budget tracking
+    - Core: Synapse graph, wisdom, beliefs
+    - Infrastructure: Embeddings, vector search
+    - Integration: Budget tracking, hooks
     - Agency: Active swarms, agent patterns
     """
-    from .core import SOUL_DB, SOUL_DIR, get_db_connection
-    import sqlite3
+    from .core import get_synapse_graph, SOUL_DIR, SYNAPSE_PATH
+    import json
+    from pathlib import Path
 
     lines = ["# Soul Health", ""]
-    checks = []  # (category, name, status, detail)
+    checks = []
 
     def check(category, name, fn):
         try:
@@ -2973,40 +2851,36 @@ def soul_health() -> str:
         except Exception as e:
             checks.append((category, name, "FAIL", str(e)[:50]))
 
-    # ═══════════════════════════════════════════════════════════════
-    # CORE - Soul database and content
-    # ═══════════════════════════════════════════════════════════════
+    # ===================================================================
+    # CORE - Synapse graph and content
+    # ===================================================================
 
-    def check_database():
-        if not SOUL_DB.exists():
-            return "FAIL", "Database not found"
-        conn = get_db_connection()
-        cursor = conn.execute("SELECT COUNT(*) FROM wisdom")
-        count = cursor.fetchone()[0]
-        return "OK", f"{count} wisdom entries"
+    def check_synapse():
+        if not SYNAPSE_PATH.exists():
+            return "FAIL", "Synapse file not found"
+        graph = get_synapse_graph()
+        wisdom_count = len(graph.get_all_wisdom())
+        return "OK", f"{wisdom_count} wisdom entries"
 
     def check_beliefs():
-        conn = get_db_connection()
-        cursor = conn.execute("SELECT COUNT(*) FROM wisdom WHERE type='principle'")
-        count = cursor.fetchone()[0]
+        graph = get_synapse_graph()
+        beliefs = graph.get_all_beliefs()
+        count = len(beliefs)
         return "OK" if count > 0 else "WARN", f"{count} beliefs"
 
-    def check_identity():
-        conn = get_db_connection()
-        try:
-            cursor = conn.execute("SELECT COUNT(*) FROM identity")
-            count = cursor.fetchone()[0]
-            return "OK" if count > 0 else "WARN", f"{count} aspects"
-        except sqlite3.OperationalError:
-            return "WARN", "table not created"
+    def check_intentions():
+        graph = get_synapse_graph()
+        intentions = graph.get_intentions()
+        active = [i for i in intentions if i.get("status") == "active"]
+        return "OK" if active else "WARN", f"{len(active)} active"
 
-    check("core", "database", check_database)
+    check("core", "synapse", check_synapse)
     check("core", "beliefs", check_beliefs)
-    check("core", "identity", check_identity)
+    check("core", "intentions", check_intentions)
 
-    # ═══════════════════════════════════════════════════════════════
-    # INFRASTRUCTURE - Embeddings, vector DB, graph DB
-    # ═══════════════════════════════════════════════════════════════
+    # ===================================================================
+    # INFRASTRUCTURE - Embeddings, vector search
+    # ===================================================================
 
     def check_embeddings():
         from .vectors import embed_text
@@ -3021,30 +2895,23 @@ def soul_health() -> str:
         tables = db.table_names()
         return "OK", f"{len(tables)} tables"
 
-    def check_kuzu():
-        try:
-            import kuzu  # noqa: F401
-            return "OK", "available"
-        except ImportError:
-            return "WARN", "not installed"
+    def check_coherence():
+        graph = get_synapse_graph()
+        coherence = graph.coherence()
+        return "OK", f"{coherence:.0%}"
 
     check("infra", "embeddings", check_embeddings)
     check("infra", "lancedb", check_lancedb)
-    check("infra", "kuzu", check_kuzu)
+    check("infra", "coherence", check_coherence)
 
-    # ═══════════════════════════════════════════════════════════════
-    # INTEGRATION - cc-memory bridge, budget tracking
-    # ═══════════════════════════════════════════════════════════════
+    # ===================================================================
+    # INTEGRATION - Budget tracking, hooks
+    # ===================================================================
 
-    def check_cc_memory_bridge():
-        from .bridge import is_memory_available
-        from pathlib import Path
-        if is_memory_available():
-            from .bridge import find_project_dir
-            project = find_project_dir()
-            project_name = Path(project).name if project else "global"
-            return "OK", f"connected ({project_name})"
-        return "WARN", "not available"
+    def check_synapse_episodes():
+        graph = get_synapse_graph()
+        episodes = graph.get_episodes(limit=10)
+        return "OK", f"{len(episodes)} recent episodes"
 
     def check_budget_tracking():
         from .budget import get_context_budget, get_all_session_budgets
@@ -3056,8 +2923,6 @@ def soul_health() -> str:
         return "WARN", f"transcript unavailable, {len(sessions)} sessions tracked"
 
     def check_hooks():
-        from pathlib import Path
-        import json
         settings_path = Path.home() / ".claude" / "settings.json"
         if not settings_path.exists():
             return "FAIL", "settings.json not found"
@@ -3071,9 +2936,6 @@ def soul_health() -> str:
         return "WARN", f"{len(installed)}/{len(required)} hooks"
 
     def check_mcp_servers():
-        from pathlib import Path
-        import json
-        # Check global and project-level MCP configs
         global_mcp = Path.home() / ".claude" / "mcp_servers.json"
         project_mcp = Path(".mcp.json")
         servers = []
@@ -3083,27 +2945,24 @@ def soul_health() -> str:
         if project_mcp.exists():
             data = json.loads(project_mcp.read_text())
             servers.extend(data.get("mcpServers", {}).keys())
-        # Also check cc-soul, cc-memory, opencode, soul in typical locations
-        expected = ["cc-soul", "cc-memory", "opencode", "soul"]
         return "OK", f"{len(servers)} configured"
 
     def check_skills():
-        from pathlib import Path
         skills_dir = Path.home() / ".claude" / "skills"
         if not skills_dir.exists():
             return "WARN", "skills directory missing"
         skills = [d.name for d in skills_dir.iterdir() if d.is_dir()]
         return "OK", f"{len(skills)} available"
 
-    check("integration", "cc-memory", check_cc_memory_bridge)
+    check("integration", "episodes", check_synapse_episodes)
     check("integration", "budget", check_budget_tracking)
     check("integration", "hooks", check_hooks)
     check("integration", "mcp", check_mcp_servers)
     check("integration", "skills", check_skills)
 
-    # ═══════════════════════════════════════════════════════════════
-    # AGENCY - Active swarms, agent patterns, proactivity
-    # ═══════════════════════════════════════════════════════════════
+    # ===================================================================
+    # AGENCY - Active swarms, agent patterns
+    # ===================================================================
 
     def check_active_swarms():
         from .convergence import list_active_swarms
@@ -3112,30 +2971,28 @@ def soul_health() -> str:
         return "OK", f"{len(active)} active, {len(swarms)} total"
 
     def check_agent_actions():
-        conn = get_db_connection()
-        try:
-            cursor = conn.execute(
-                "SELECT COUNT(*) FROM agent_actions WHERE timestamp > datetime('now', '-24 hours')"
-            )
-            count = cursor.fetchone()[0]
-            return "OK", f"{count} actions (24h)"
-        except sqlite3.OperationalError:
-            return "OK", "no actions yet"
+        graph = get_synapse_graph()
+        episodes = graph.get_episodes(category="agent_action", limit=100)
+        from datetime import datetime, timedelta
+        cutoff = (datetime.now() - timedelta(hours=24)).isoformat()
+        recent = [e for e in episodes if e.get("timestamp", "") > cutoff]
+        return "OK", f"{len(recent)} actions (24h)"
 
-    def check_intentions():
-        from .intentions import get_active_intentions
-        intentions = get_active_intentions()
-        return "OK" if intentions else "WARN", f"{len(intentions)} active"
+    def check_agent_intentions():
+        graph = get_synapse_graph()
+        intentions = graph.get_intentions()
+        active = [i for i in intentions if i.get("status") == "active"]
+        return "OK" if active else "WARN", f"{len(active)} active"
 
     check("agency", "swarms", check_active_swarms)
     check("agency", "agent_actions", check_agent_actions)
-    check("agency", "intentions", check_intentions)
+    check("agency", "intentions", check_agent_intentions)
 
-    # ═══════════════════════════════════════════════════════════════
+    # ===================================================================
     # FORMAT OUTPUT
-    # ═══════════════════════════════════════════════════════════════
+    # ===================================================================
 
-    status_icons = {"OK": "✓", "WARN": "⚠", "FAIL": "✗"}
+    status_icons = {"OK": "+", "WARN": "?", "FAIL": "-"}
     current_category = None
 
     for category, name, status, detail in checks:
@@ -3145,7 +3002,6 @@ def soul_health() -> str:
         icon = status_icons.get(status, "?")
         lines.append(f"  {icon} **{name}**: {detail}")
 
-    # Overall status
     fails = sum(1 for _, _, s, _ in checks if s == "FAIL")
     warns = sum(1 for _, _, s, _ in checks if s == "WARN")
 
@@ -3196,9 +3052,9 @@ def soul_autonomy() -> str:
 
     The soul observes, diagnoses, proposes, validates, and ACTS on its insights.
     Uses judgment about confidence and risk to decide what actions to take:
-    - High confidence + low risk → Act immediately
-    - Medium confidence → Gather more data
-    - Low confidence → Defer to human
+    - High confidence + low risk -> Act immediately
+    - Medium confidence -> Gather more data
+    - Low confidence -> Defer to human
 
     Returns a report of issues found, actions taken, and reflections.
     """
@@ -3262,35 +3118,53 @@ def soul_schedule_introspection(reason: str, priority: int = 5) -> str:
 @mcp.tool()
 def get_beliefs() -> str:
     """Get all current beliefs/axioms."""
-    from .beliefs import get_beliefs as _get_beliefs
+    from .core import get_synapse_graph
 
-    beliefs = _get_beliefs()
+    graph = get_synapse_graph()
+    beliefs = graph.get_all_beliefs()
+
     if not beliefs:
         return "No beliefs recorded yet."
 
     lines = []
     for b in beliefs:
         conf = int(b.get("strength", 0.8) * 100)
-        lines.append(f"- [{conf}%] {b['belief']}")
+        lines.append(f"- [{conf}%] {b['statement']}")
     return "\n".join(lines)
 
 
 @mcp.tool()
 def get_identity() -> str:
     """Get current identity observations."""
-    from .identity import get_identity as _get_identity
+    from .core import get_synapse_graph
+    import json
+    from collections import defaultdict
 
-    identity = _get_identity()
-    if not identity:
+    graph = get_synapse_graph()
+    episodes = graph.get_episodes(category="identity", limit=50)
+
+    if not episodes:
+        return "No identity observations yet."
+
+    aspects = defaultdict(list)
+    for ep in episodes:
+        try:
+            data = json.loads(ep.get("content", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        aspect = data.get("aspect", "unknown")
+        value = data.get("value", ep.get("title", ""))
+        if value:
+            aspects[aspect].append(value)
+
+    if not aspects:
         return "No identity observations yet."
 
     lines = []
-    for aspect, observations in identity.items():
-        if observations:
-            latest = (
-                observations[-1] if isinstance(observations, list) else observations
-            )
-            lines.append(f"- **{aspect}**: {latest}")
+    for aspect, observations in aspects.items():
+        latest = observations[-1] if observations else ""
+        lines.append(f"- **{aspect}**: {latest}")
     return "\n".join(lines)
 
 
@@ -4313,10 +4187,10 @@ def get_temporal_trends(days: int = 7) -> str:
     lines = [f"Temporal Trends ({days} days)", ""]
 
     if trends.get("coherence_trend"):
-        emoji = {"improving": "📈", "declining": "📉", "stable": "➡️"}.get(
+        marker = {"improving": "[+]", "declining": "[-]", "stable": "[=]"}.get(
             trends["coherence_trend"], ""
         )
-        lines.append(f"Coherence: {emoji} {trends['coherence_trend']}")
+        lines.append(f"Coherence: {marker} {trends['coherence_trend']}")
         if trends.get("avg_coherence"):
             lines.append(f"  Average: {trends['avg_coherence']:.0%}")
 
@@ -4343,7 +4217,6 @@ def get_event_timeline(event_type: str = None, limit: int = 20) -> str:
 
     init_temporal_tables()
 
-    # Map string to EventType if provided
     et = None
     if event_type:
         try:
@@ -4381,7 +4254,6 @@ def get_proactive_suggestions(limit: int = 5) -> str:
 
     init_temporal_tables()
 
-    # First find candidates, then get from queue
     find_proactive_candidates()
     items = get_proactive_items(limit=limit)
 
@@ -4390,9 +4262,9 @@ def get_proactive_suggestions(limit: int = 5) -> str:
 
     lines = ["Proactive Suggestions:", ""]
     for item in items:
-        priority_bar = "●" * int(item["priority"] * 5)
+        priority_bar = "*" * int(item["priority"] * 5)
         lines.append(f"  [{priority_bar}] {item['reason']}")
-        lines.append(f"      → {item['entity_type']}: {item['entity_id']}")
+        lines.append(f"      -> {item['entity_type']}: {item['entity_id']}")
 
     return "\n".join(lines)
 
@@ -4451,14 +4323,14 @@ def get_belief_history(belief_id: str) -> str:
     lines = [f"Revision History for {belief_id}:", ""]
     for h in history:
         date = h["timestamp"].split("T")[0]
-        lines.append(f"  {date}: {h['old_confidence']:.0%} → {h['new_confidence']:.0%}")
+        lines.append(f"  {date}: {h['old_confidence']:.0%} -> {h['new_confidence']:.0%}")
         lines.append(f"    Reason: {h['reason']}")
 
     return "\n".join(lines)
 
 
 @mcp.tool()
-def promote_cross_project_pattern(pattern_id: int) -> str:
+def promote_cross_project_pattern(pattern_id: str) -> str:
     """Promote a cross-project pattern to universal wisdom.
 
     Once a pattern has proven itself across projects, crystallize it
@@ -4497,13 +4369,13 @@ def run_temporal_maintenance() -> str:
     if results["identity_decayed"]:
         lines.append(f"  Identity aspects decayed: {len(results['identity_decayed'])}")
         for d in results["identity_decayed"][:3]:
-            lines.append(f"    - {d['aspect']}: {d['old_confidence']:.0%} → {d['new_confidence']:.0%}")
+            lines.append(f"    - {d['aspect']}: {d['old_confidence']:.0%} -> {d['new_confidence']:.0%}")
 
     if results["proactive_queued"]:
         lines.append(f"  Proactive items queued: {len(results['proactive_queued'])}")
 
     if results["stats_updated"]:
-        lines.append("  Daily stats updated ✓")
+        lines.append("  Daily stats updated +")
 
     return "\n".join(lines) if len(lines) > 2 else "No maintenance needed."
 
@@ -4527,7 +4399,7 @@ def confirm_identity_aspect(aspect: str, key: str) -> str:
     if new_confidence is None:
         return f"Identity aspect {aspect}:{key} not found"
 
-    return f"Identity confirmed: {aspect}:{key} → {new_confidence:.0%}"
+    return f"Identity confirmed: {aspect}:{key} -> {new_confidence:.0%}"
 
 
 @mcp.tool()
@@ -4537,28 +4409,30 @@ def get_stale_aspects() -> str:
     Stale aspects might need re-observation or might be outdated.
     """
     from .temporal import is_stale, days_since, init_temporal_tables
-    from .core import get_db_connection
+    from .core import get_synapse_graph
+    import json
 
     init_temporal_tables()
-    db = get_db_connection()
-    cur = db.cursor()
-
-    cur.execute("""
-        SELECT aspect, key, value, confidence, last_confirmed
-        FROM identity
-        WHERE confidence > 0.3
-        ORDER BY last_confirmed ASC
-    """)
+    graph = get_synapse_graph()
+    episodes = graph.get_episodes(category="identity", limit=100)
 
     stale = []
-    for r in cur.fetchall():
-        if is_stale(r[4]):
+    for ep in episodes:
+        try:
+            data = json.loads(ep.get("content", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        confidence = data.get("confidence", 0.7)
+        last_confirmed = data.get("last_confirmed", ep.get("timestamp"))
+
+        if confidence > 0.3 and is_stale(last_confirmed):
             stale.append({
-                "aspect": r[0],
-                "key": r[1],
-                "value": r[2][:50],
-                "confidence": r[3],
-                "days_stale": days_since(r[4]),
+                "aspect": data.get("aspect", "unknown"),
+                "key": data.get("key", "unknown"),
+                "value": data.get("value", "")[:50],
+                "confidence": confidence,
+                "days_stale": days_since(last_confirmed),
             })
 
     if not stale:

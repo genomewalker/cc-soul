@@ -1,7 +1,8 @@
 """
-Core soul infrastructure - Synapse backend.
+Core soul infrastructure - Synapse backend only.
 
 All soul data stored in cc-synapse (Rust graph via PyO3).
+No SQLite. No legacy. Clean.
 """
 
 from pathlib import Path
@@ -16,7 +17,7 @@ _synapse_graph = None
 
 
 def get_synapse_graph():
-    """Get synapse graph (singleton). Required."""
+    """Get synapse graph (singleton)."""
     global _synapse_graph
     if _synapse_graph is not None:
         return _synapse_graph
@@ -34,29 +35,17 @@ def save_synapse():
 
 
 def init_soul():
-    """Initialize soul - just ensures synapse graph exists."""
+    """Initialize soul - ensures synapse graph exists."""
     get_synapse_graph()
 
 
-def get_soul_context() -> Dict[str, Any]:
+def get_soul_context(query: str = None) -> Dict[str, Any]:
     """Get soul context from synapse."""
     graph = get_synapse_graph()
-    return graph.get_context()
+    return graph.get_context(query)
 
 
 def summarize_soul() -> str:
     """Generate a human-readable summary of the soul."""
     graph = get_synapse_graph()
     return graph.format_context()
-
-
-# Legacy compatibility - deprecated
-SOUL_DB = SOUL_DIR / "soul.db"  # For imports that still reference it
-
-
-def get_db_connection():
-    """DEPRECATED: Use get_synapse_graph() instead."""
-    import sqlite3
-    import warnings
-    warnings.warn("get_db_connection() is deprecated. Use get_synapse_graph().", DeprecationWarning)
-    return sqlite3.connect(SOUL_DB)

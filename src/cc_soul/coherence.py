@@ -1,5 +1,5 @@
 """
-Coherence (τₖ) - The integration of the soul.
+Coherence (tau_k) - The integration of the soul.
 
 Coherence is not a metric imposed from outside. It's how aligned the
 soul's aspects are with each other:
@@ -12,12 +12,12 @@ soul's aspects are with each other:
 High coherence: The soul acts as one. Past, present, and future flow.
 Low coherence: Fragmentation. Dissonance. The soul is divided.
 
-τₖ measures INTEGRATION, not ACTIVITY. The difference:
+tau_k measures INTEGRATION, not ACTIVITY. The difference:
 - Activity: "How many wisdom entries exist? Were they used?"
 - Integration: "Does old wisdom still inform new decisions? Do behaviors
   match stated beliefs? Are aspirations coherent, not conflicting?"
 
-τₖ has three dimensions:
+tau_k has three dimensions:
 1. Instantaneous - Current alignment of all aspects
    - Direction: Are aspirations coherent with progress, not just present?
    - Alignment: Does behavior match beliefs (via intention checks)?
@@ -31,9 +31,10 @@ Low coherence: Fragmentation. Dissonance. The soul is divided.
    - Self-knowledge: Quality of identity (fresh, multi-dimensional)?
    - Wisdom depth: Does OLD wisdom still inform present (temporal continuity)?
 
-The final τₖ emerges from all three dimensions.
+The final tau_k emerges from all three dimensions.
 """
 
+import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Dict, List
@@ -41,13 +42,13 @@ from typing import Dict, List
 from .mood import compute_mood, Mood, Clarity, Growth, Engagement, Connection
 from .aspirations import get_active_aspirations
 from .beliefs import get_beliefs
-from .core import get_db_connection
+from .core import get_synapse_graph, save_synapse, SOUL_DIR
 
 
 @dataclass
 class CoherenceState:
     """
-    The soul's coherence (τₖ) at a moment in time.
+    The soul's coherence (tau_k) at a moment in time.
 
     Three dimensions:
     - Instantaneous: Current state of each aspect
@@ -79,6 +80,18 @@ class CoherenceState:
     # Interpretation
     interpretation: str
     timestamp: str
+
+    # Dimension accessors for compatibility
+    @property
+    def dimensions(self) -> Dict[str, float]:
+        return {
+            "clarity": self.clarity_signal,
+            "growth": self.growth_signal,
+            "engagement": self.engagement_signal,
+            "connection": self.connection_signal,
+            "direction": self.direction_signal,
+            "alignment": self.alignment_signal,
+        }
 
     def is_high(self) -> bool:
         """Coherence above 0.7 is considered high."""
@@ -116,9 +129,9 @@ class CoherenceState:
 
 def compute_coherence(mood: Mood = None) -> CoherenceState:
     """
-    Compute the soul's coherence (τₖ).
+    Compute the soul's coherence (tau_k).
 
-    τₖ emerges from three dimensions:
+    tau_k emerges from three dimensions:
 
     1. INSTANTANEOUS - Current alignment of aspects:
        - Clarity (can the soul think clearly?)
@@ -138,7 +151,7 @@ def compute_coherence(mood: Mood = None) -> CoherenceState:
        - How deep does active wisdom reach?
        - Is synthesis happening?
 
-    Final τₖ = 0.5 × instant + 0.25 × developmental + 0.25 × meta
+    Final tau_k = 0.5 * instant + 0.25 * developmental + 0.25 * meta
     """
     if mood is None:
         mood = compute_mood()
@@ -326,31 +339,40 @@ def compute_coherence(mood: Mood = None) -> CoherenceState:
 
     # Wisdom depth: Temporal continuity of wisdom
     # Not "how much was applied?" but "does old wisdom still inform present?"
-    conn = get_db_connection()
-    c = conn.cursor()
+    graph = get_synapse_graph()
+    all_wisdom = graph.get_all_wisdom()
+    applications = graph.get_episodes(category="wisdom_application", limit=100)
 
-    # Find the age of oldest wisdom that was applied in last 30 days
-    c.execute("""
-        SELECT MIN(w.timestamp) as oldest_wisdom
-        FROM wisdom w
-        INNER JOIN wisdom_applications wa ON w.id = wa.wisdom_id
-        WHERE wa.applied_at > datetime('now', '-30 days')
-    """)
-    oldest_row = c.fetchone()
+    # Find oldest wisdom that was applied in last 30 days
+    cutoff_30d = (datetime.now() - timedelta(days=30)).isoformat()
+    recent_app_wisdom_ids = set()
+    for app in applications:
+        created = app.get("created_at") or app.get("timestamp", "")
+        if created > cutoff_30d:
+            # Extract wisdom_id from content if stored
+            content = app.get("content", "")
+            if "wisdom_id" in content:
+                try:
+                    data = json.loads(content)
+                    recent_app_wisdom_ids.add(data.get("wisdom_id"))
+                except json.JSONDecodeError:
+                    pass
 
-    # Also check: is wisdom being confirmed (success/failure recorded)?
-    c.execute("""
-        SELECT COUNT(*) FROM wisdom_applications
-        WHERE outcome IS NOT NULL
-        AND applied_at > datetime('now', '-30 days')
-    """)
-    confirmed_count = c.fetchone()[0]
+    # Find oldest wisdom entry
+    oldest_wisdom_date = None
+    confirmed_count = 0
+    for w in all_wisdom:
+        wid = w.get("id")
+        created = w.get("created_at") or w.get("timestamp", "")
+        if wid in recent_app_wisdom_ids:
+            if oldest_wisdom_date is None or created < oldest_wisdom_date:
+                oldest_wisdom_date = created
+            if w.get("confirmed"):
+                confirmed_count += 1
 
-    conn.close()
-
-    if oldest_row and oldest_row[0]:
+    if oldest_wisdom_date:
         try:
-            oldest_date = datetime.fromisoformat(oldest_row[0])
+            oldest_date = datetime.fromisoformat(oldest_wisdom_date)
             wisdom_age_days = (datetime.now() - oldest_date).days
 
             if wisdom_age_days > 60 and confirmed_count > 3:
@@ -386,10 +408,10 @@ def compute_coherence(mood: Mood = None) -> CoherenceState:
     meta_coherence = (self_knowledge + wisdom_depth + integration_active) / 3
 
     # =========================================================================
-    # FINAL τₖ COMPUTATION
+    # FINAL tau_k COMPUTATION
     # =========================================================================
 
-    # τₖ = 50% instantaneous + 25% developmental + 25% meta
+    # tau_k = 50% instantaneous + 25% developmental + 25% meta
     tau_k = (
         (0.5 * instant_coherence)
         + (0.25 * developmental_coherence)
@@ -476,44 +498,41 @@ def _interpret_coherence(
 
 def get_coherence_history(days: int = 7) -> List[Dict]:
     """Get coherence measurements from history."""
-    _ensure_history_table()
-    conn = get_db_connection()
-    c = conn.cursor()
-
+    graph = get_synapse_graph()
     cutoff = (datetime.now() - timedelta(days=days)).isoformat()
-    c.execute(
-        """
-        SELECT coherence, signals, interpretation, timestamp
-        FROM coherence_history
-        WHERE timestamp > ?
-        ORDER BY timestamp DESC
-    """,
-        (cutoff,),
-    )
 
-    rows = c.fetchall()
-    conn.close()
+    episodes = graph.get_episodes(category="coherence_history", limit=1000)
 
-    import json
+    history = []
+    for ep in episodes:
+        created = ep.get("created_at") or ep.get("timestamp", "")
+        if created < cutoff:
+            continue
 
-    return [
-        {
-            "coherence": row[0],
-            "signals": json.loads(row[1]) if row[1] else {},
-            "interpretation": row[2],
-            "timestamp": row[3],
-        }
-        for row in rows
-    ]
+        try:
+            content = ep.get("content", "{}")
+            if content.startswith("{"):
+                data = json.loads(content)
+            else:
+                data = {}
+
+            history.append({
+                "coherence": data.get("coherence", 0.5),
+                "signals": data.get("signals", {}),
+                "interpretation": data.get("interpretation", ""),
+                "timestamp": created,
+            })
+        except json.JSONDecodeError:
+            continue
+
+    # Sort by timestamp descending
+    history.sort(key=lambda x: x["timestamp"], reverse=True)
+    return history
 
 
 def record_coherence(state: CoherenceState) -> None:
     """Record coherence state to history."""
-    _ensure_history_table()
-    conn = get_db_connection()
-    c = conn.cursor()
-
-    import json
+    graph = get_synapse_graph()
 
     # Combine all signal groups into one for storage
     all_signals = {
@@ -521,51 +540,37 @@ def record_coherence(state: CoherenceState) -> None:
         **state.to_dict()["developmental"],
         **state.to_dict()["meta"],
     }
-    signals_json = json.dumps(all_signals)
 
-    c.execute(
-        """
-        INSERT INTO coherence_history (coherence, signals, interpretation, timestamp)
-        VALUES (?, ?, ?, ?)
-    """,
-        (state.value, signals_json, state.interpretation, state.timestamp),
+    content = json.dumps({
+        "coherence": state.value,
+        "signals": all_signals,
+        "interpretation": state.interpretation,
+    })
+
+    graph.observe(
+        category="coherence_history",
+        title=f"tau_k={state.value:.2f}",
+        content=content,
+        tags=[f"coherence:{int(state.value * 100)}"],
     )
 
-    conn.commit()
-    conn.close()
-
-
-def _ensure_history_table():
-    """Ensure coherence history table exists."""
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS coherence_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            coherence REAL NOT NULL,
-            signals TEXT,
-            interpretation TEXT,
-            timestamp TEXT NOT NULL
-        )
-    """)
-    conn.commit()
-    conn.close()
+    save_synapse()
 
 
 def format_coherence_display(state: CoherenceState) -> str:
-    """Format coherence (τₖ) for terminal display."""
+    """Format coherence (tau_k) for terminal display."""
     lines = []
     lines.append("=" * 50)
-    lines.append("τₖ COHERENCE")
+    lines.append("tau_k COHERENCE")
     lines.append("=" * 50)
     lines.append("")
 
     # Main coherence value with visual bar
     bar_length = 20
     filled = int(state.value * bar_length)
-    bar = "█" * filled + "░" * (bar_length - filled)
+    bar = "#" * filled + "-" * (bar_length - filled)
     pct = int(state.value * 100)
-    lines.append(f"  τₖ = {state.value:.2f}  [{bar}] {pct}%")
+    lines.append(f"  tau_k = {state.value:.2f}  [{bar}] {pct}%")
     lines.append("")
 
     # Interpretation

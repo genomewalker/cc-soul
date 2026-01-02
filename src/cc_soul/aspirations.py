@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Optional, List, Dict
 from enum import Enum
 
-from .core import get_db_connection
+from .core import get_synapse_graph, save_synapse, SOUL_DIR
 
 
 class AspirationState(Enum):
@@ -29,7 +29,7 @@ class AspirationState(Enum):
 class Aspiration:
     """A direction of growth."""
 
-    id: Optional[int]
+    id: Optional[str]
     direction: str  # What we're moving toward
     why: str  # Why this matters
     state: AspirationState
@@ -49,26 +49,7 @@ class Aspiration:
         }
 
 
-def _ensure_table():
-    """Ensure aspirations table exists."""
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS aspirations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            direction TEXT NOT NULL,
-            why TEXT NOT NULL,
-            state TEXT DEFAULT 'active',
-            progress_notes TEXT DEFAULT '',
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        )
-    """)
-    conn.commit()
-    conn.close()
-
-
-def aspire(direction: str, why: str) -> int:
+def aspire(direction: str, why: str) -> str:
     """
     Set an aspiration - a direction of growth.
 
@@ -79,63 +60,90 @@ def aspire(direction: str, why: str) -> int:
     Returns:
         Aspiration ID
     """
-    _ensure_table()
-    conn = get_db_connection()
-    c = conn.cursor()
+    graph = get_synapse_graph()
 
     now = datetime.now().isoformat()
-    c.execute(
-        """
-        INSERT INTO aspirations (direction, why, state, progress_notes, created_at, updated_at)
-        VALUES (?, ?, 'active', '', ?, ?)
-    """,
-        (direction, why, now, now),
+    aspiration_id = graph.observe(
+        category="aspiration",
+        title=direction,
+        content=f"why:{why} state:active created:{now}",
+        tags=["aspiration", "active"],
     )
 
-    aspiration_id = c.lastrowid
-    conn.commit()
-    conn.close()
-
+    save_synapse()
     return aspiration_id
 
 
 def get_aspirations(state: AspirationState = None) -> List[Aspiration]:
     """Get aspirations, optionally filtered by state."""
-    _ensure_table()
-    conn = get_db_connection()
-    c = conn.cursor()
+    graph = get_synapse_graph()
 
-    if state:
-        c.execute(
-            """
-            SELECT id, direction, why, state, progress_notes, created_at, updated_at
-            FROM aspirations WHERE state = ?
-            ORDER BY updated_at DESC
-        """,
-            (state.value,),
-        )
-    else:
-        c.execute("""
-            SELECT id, direction, why, state, progress_notes, created_at, updated_at
-            FROM aspirations
-            ORDER BY updated_at DESC
-        """)
+    episodes = graph.get_episodes(category="aspiration", limit=100)
 
-    rows = c.fetchall()
-    conn.close()
+    # Get state updates
+    state_updates = {}
+    state_episodes = graph.get_episodes(category="aspiration_state", limit=200)
+    for ep in state_episodes:
+        asp_id = ep.get("tags", [None])[0] if ep.get("tags") else None
+        if asp_id:
+            content = ep.get("content", "")
+            if "state:realized" in content:
+                state_updates[asp_id] = "realized"
+            elif "state:released" in content:
+                state_updates[asp_id] = "released"
+            elif "state:dormant" in content:
+                state_updates[asp_id] = "dormant"
+            elif "state:active" in content:
+                state_updates[asp_id] = "active"
 
-    return [
-        Aspiration(
-            id=row[0],
-            direction=row[1],
-            why=row[2],
-            state=AspirationState(row[3]),
-            progress_notes=row[4],
-            created_at=row[5],
-            updated_at=row[6],
-        )
-        for row in rows
-    ]
+    # Get progress notes
+    progress_notes = {}
+    progress_episodes = graph.get_episodes(category="aspiration_progress", limit=500)
+    for ep in progress_episodes:
+        asp_id = ep.get("tags", [None])[0] if ep.get("tags") else None
+        if asp_id:
+            if asp_id not in progress_notes:
+                progress_notes[asp_id] = []
+            note = ep.get("content", "")
+            timestamp = ep.get("created_at", "")[:10]
+            progress_notes[asp_id].append(f"[{timestamp}] {note}")
+
+    aspirations = []
+    for ep in episodes:
+        asp_id = ep.get("id")
+        direction = ep.get("title", "")
+        content = ep.get("content", "")
+
+        # Parse why from content
+        why = ""
+        if "why:" in content:
+            why_start = content.index("why:") + 4
+            why_end = content.find(" state:", why_start)
+            if why_end == -1:
+                why_end = len(content)
+            why = content[why_start:why_end].strip()
+
+        # Determine current state
+        current_state = state_updates.get(asp_id, "active")
+        if state and current_state != state.value:
+            continue
+
+        # Combine progress notes
+        notes = "\n".join(progress_notes.get(asp_id, []))
+
+        aspirations.append(Aspiration(
+            id=asp_id,
+            direction=direction,
+            why=why,
+            state=AspirationState(current_state),
+            progress_notes=notes,
+            created_at=ep.get("created_at", ""),
+            updated_at=ep.get("created_at", ""),
+        ))
+
+    # Sort by most recent
+    aspirations.sort(key=lambda a: a.created_at, reverse=True)
+    return aspirations
 
 
 def get_active_aspirations() -> List[Aspiration]:
@@ -143,44 +151,30 @@ def get_active_aspirations() -> List[Aspiration]:
     return get_aspirations(AspirationState.ACTIVE)
 
 
-def note_progress(aspiration_id: int, note: str) -> bool:
+def note_progress(aspiration_id: str, note: str) -> bool:
     """
     Note progress toward an aspiration.
 
     Progress isn't measured - it's observed. We notice movement
     without quantifying it.
     """
-    _ensure_table()
-    conn = get_db_connection()
-    c = conn.cursor()
+    graph = get_synapse_graph()
 
-    now = datetime.now().isoformat()
-
-    # Get existing notes
-    c.execute("SELECT progress_notes FROM aspirations WHERE id = ?", (aspiration_id,))
-    row = c.fetchone()
-    if not row:
-        conn.close()
-        return False
-
-    existing = row[0] or ""
-    new_notes = f"{existing}\n[{now[:10]}] {note}".strip()
-
-    c.execute(
-        """
-        UPDATE aspirations
-        SET progress_notes = ?, updated_at = ?
-        WHERE id = ?
-    """,
-        (new_notes, now, aspiration_id),
+    graph.observe(
+        category="aspiration_progress",
+        title="Progress noted",
+        content=note,
+        tags=[aspiration_id],
     )
 
-    conn.commit()
-    conn.close()
+    # Strengthen the aspiration
+    graph.strengthen(aspiration_id)
+
+    save_synapse()
     return True
 
 
-def realize_aspiration(aspiration_id: int) -> bool:
+def realize_aspiration(aspiration_id: str) -> bool:
     """
     Mark an aspiration as realized.
 
@@ -190,7 +184,7 @@ def realize_aspiration(aspiration_id: int) -> bool:
     return _update_state(aspiration_id, AspirationState.REALIZED)
 
 
-def release_aspiration(aspiration_id: int) -> bool:
+def release_aspiration(aspiration_id: str) -> bool:
     """
     Release an aspiration.
 
@@ -200,26 +194,19 @@ def release_aspiration(aspiration_id: int) -> bool:
     return _update_state(aspiration_id, AspirationState.RELEASED)
 
 
-def _update_state(aspiration_id: int, state: AspirationState) -> bool:
+def _update_state(aspiration_id: str, state: AspirationState) -> bool:
     """Update aspiration state."""
-    _ensure_table()
-    conn = get_db_connection()
-    c = conn.cursor()
+    graph = get_synapse_graph()
 
-    now = datetime.now().isoformat()
-    c.execute(
-        """
-        UPDATE aspirations
-        SET state = ?, updated_at = ?
-        WHERE id = ?
-    """,
-        (state.value, now, aspiration_id),
+    graph.observe(
+        category="aspiration_state",
+        title=f"Aspiration {state.value}",
+        content=f"state:{state.value}",
+        tags=[aspiration_id],
     )
 
-    updated = c.rowcount > 0
-    conn.commit()
-    conn.close()
-    return updated
+    save_synapse()
+    return True
 
 
 def get_aspiration_summary() -> Dict:
@@ -265,7 +252,7 @@ def format_aspirations_display(aspirations: List[Aspiration]) -> str:
         lines.append("ACTIVE DIRECTIONS")
         lines.append("-" * 40)
         for a in active:
-            lines.append(f"  [{a.id}] {a.direction}")
+            lines.append(f"  [{a.id[:8] if a.id else '?'}] {a.direction}")
             lines.append(f"      Why: {a.why}")
             if a.progress_notes:
                 last_note = a.progress_notes.split("\n")[-1]

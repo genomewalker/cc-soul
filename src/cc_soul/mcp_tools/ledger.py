@@ -66,15 +66,13 @@ def show_ledger_history(limit: int = 5) -> str:
     Args:
         limit: Maximum ledgers to show
     """
-    from ..ledger import _call_cc_memory_recall, _get_project_name
+    from ..ledger import _get_project_name
+    from ..core import get_synapse_graph
     import json
 
     project = _get_project_name()
-    ledgers = _call_cc_memory_recall(
-        query=f"session ledger checkpoint {project}",
-        category="session_ledger",
-        limit=limit,
-    )
+    graph = get_synapse_graph()
+    ledgers = graph.get_episodes(category="session_ledger", project=project, limit=limit)
 
     if not ledgers:
         return f"No ledgers found for project: {project}"
@@ -84,8 +82,9 @@ def show_ledger_history(limit: int = 5) -> str:
         try:
             content = entry.get("content", "{}")
             data = json.loads(content) if isinstance(content, str) else content
+            timestamp = entry.get("created_at", entry.get("timestamp", "?"))
             lines.append(
-                f"- **{data.get('ledger_id', '?')}** ({entry.get('timestamp', '?')[:16]})\n"
+                f"- **{data.get('ledger_id', '?')}** ({timestamp[:16]})\n"
                 f"  Coherence: {data.get('soul_state', {}).get('coherence', 0):.0%}, "
                 f"Continue: {data.get('continuation', {}).get('immediate_next', '-')[:50]}"
             )

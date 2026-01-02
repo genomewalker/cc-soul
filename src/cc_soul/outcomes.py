@@ -3,7 +3,7 @@ Outcome tracking and structured handoffs.
 
 Inspired by Continuous-Claude-v2's approach:
 - Sessions have explicit outcomes (SUCCEEDED, PARTIAL, FAILED)
-- Handoffs are human-readable markdown files for session continuity
+- Handoffs stored in synapse graph for session continuity
 - Outcomes feed into the learning loop
 """
 
@@ -13,21 +13,19 @@ from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
-from .core import get_db_connection, SOUL_DIR
-from .auto_memory import remember_explicit, is_memory_available, find_project_dir
+from .core import get_synapse_graph, save_synapse, SOUL_DIR
 
 
 class Outcome(Enum):
     """Session outcome types."""
 
-    SUCCEEDED = "succeeded"  # Goal fully achieved
-    PARTIAL_PLUS = "partial_plus"  # Significant progress, not complete
-    PARTIAL_MINUS = "partial_minus"  # Some progress, blocked or stuck
-    FAILED = "failed"  # Goal not achieved, errors or wrong approach
-    UNKNOWN = "unknown"  # No clear outcome detected
+    SUCCEEDED = "succeeded"
+    PARTIAL_PLUS = "partial_plus"
+    PARTIAL_MINUS = "partial_minus"
+    FAILED = "failed"
+    UNKNOWN = "unknown"
 
 
-# Outcome detection signals
 OUTCOME_SIGNALS = {
     Outcome.SUCCEEDED: [
         "done",
@@ -70,25 +68,6 @@ OUTCOME_SIGNALS = {
 }
 
 
-def _ensure_outcome_column():
-    """Ensure outcome column exists in conversations table."""
-    conn = get_db_connection()
-    c = conn.cursor()
-
-    c.execute("PRAGMA table_info(conversations)")
-    columns = [col[1] for col in c.fetchall()]
-
-    if "outcome" not in columns:
-        c.execute("ALTER TABLE conversations ADD COLUMN outcome TEXT DEFAULT 'unknown'")
-        conn.commit()
-
-    if "handoff_path" not in columns:
-        c.execute("ALTER TABLE conversations ADD COLUMN handoff_path TEXT")
-        conn.commit()
-
-    conn.close()
-
-
 def detect_outcome(messages: List[Dict], files_touched: set = None) -> Outcome:
     """
     Detect session outcome from conversation messages.
@@ -98,11 +77,9 @@ def detect_outcome(messages: List[Dict], files_touched: set = None) -> Outcome:
     if not messages:
         return Outcome.UNKNOWN
 
-    # Focus on last few messages (most indicative of outcome)
     recent = messages[-5:] if len(messages) > 5 else messages
     full_text = " ".join(m.get("content", "") for m in recent).lower()
 
-    # Score each outcome type
     scores = {outcome: 0 for outcome in Outcome}
 
     for outcome, signals in OUTCOME_SIGNALS.items():
@@ -110,7 +87,6 @@ def detect_outcome(messages: List[Dict], files_touched: set = None) -> Outcome:
             if signal in full_text:
                 scores[outcome] += 1
 
-    # Find highest scoring outcome
     max_score = max(scores.values())
     if max_score == 0:
         return Outcome.UNKNOWN
@@ -124,48 +100,33 @@ def detect_outcome(messages: List[Dict], files_touched: set = None) -> Outcome:
 
 def record_outcome(conv_id: int, outcome: Outcome, notes: str = "") -> bool:
     """Record the outcome of a session."""
-    _ensure_outcome_column()
+    graph = get_synapse_graph()
 
-    conn = get_db_connection()
-    c = conn.cursor()
-
-    c.execute(
-        """
-        UPDATE conversations
-        SET outcome = ?
-        WHERE id = ?
-    """,
-        (outcome.value, conv_id),
+    graph.observe(
+        category="session_outcome",
+        title=f"Session {conv_id}: {outcome.value}",
+        content=notes or f"Session completed with outcome: {outcome.value}",
+        tags=["outcome", outcome.value, f"session_{conv_id}"],
     )
-
-    conn.commit()
-    conn.close()
+    save_synapse()
     return True
 
 
 def get_outcome_stats(days: int = 30) -> Dict[str, Any]:
     """Get outcome statistics for learning."""
-    _ensure_outcome_column()
+    graph = get_synapse_graph()
+    episodes = graph.get_episodes(category="session_outcome", limit=500)
 
-    conn = get_db_connection()
-    c = conn.cursor()
+    distribution = {}
+    for ep in episodes:
+        tags = ep.get("tags", [])
+        for tag in tags:
+            if tag in ["succeeded", "partial_plus", "partial_minus", "failed", "unknown"]:
+                distribution[tag] = distribution.get(tag, 0) + 1
+                break
 
-    c.execute("""
-        SELECT outcome, COUNT(*) as count
-        FROM conversations
-        WHERE outcome IS NOT NULL
-        GROUP BY outcome
-    """)
-
-    distribution = {row[0]: row[1] for row in c.fetchall()}
-
-    c.execute("SELECT COUNT(*) FROM conversations WHERE outcome = 'succeeded'")
-    succeeded = c.fetchone()[0]
-
-    c.execute("SELECT COUNT(*) FROM conversations WHERE outcome IS NOT NULL")
-    total = c.fetchone()[0]
-
-    conn.close()
+    succeeded = distribution.get("succeeded", 0)
+    total = sum(distribution.values())
 
     success_rate = succeeded / total if total > 0 else 0
 
@@ -176,11 +137,6 @@ def get_outcome_stats(days: int = 30) -> Dict[str, Any]:
     }
 
 
-# =============================================================================
-# HANDOFFS - Structured session continuation documents
-# =============================================================================
-
-# Default handoff directory (in project, not soul)
 HANDOFF_DIR_NAME = ".claude/handoffs"
 
 
@@ -208,11 +164,10 @@ def create_handoff(
     project_root: Path = None,
 ) -> Optional[str]:
     """
-    Create a structured handoff in cc-memory.
+    Create a structured handoff in synapse graph.
 
     Returns the observation ID if successful, None otherwise.
     """
-    # Build structured content
     content_parts = []
 
     if goal:
@@ -259,8 +214,25 @@ def create_handoff(
     content = "\n".join(content_parts)
     title = f"Session handoff: {goal[:50] if goal else summary[:50]}..."
 
-    # Store in cc-memory
-    return remember_explicit("handoff", title, content)
+    try:
+        graph = get_synapse_graph()
+
+        tags = ["handoff"]
+        if blockers:
+            tags.append("has_blockers")
+        if next_steps:
+            tags.append("has_next_steps")
+
+        obs_id = graph.observe(
+            category="handoff",
+            title=title,
+            content=content,
+            tags=tags,
+        )
+        save_synapse()
+        return obs_id
+    except Exception:
+        return None
 
 
 def create_auto_handoff(
@@ -277,15 +249,12 @@ def create_auto_handoff(
     if not messages or len(messages) < 3:
         return None
 
-    # Extract key information from messages
     full_text = " ".join(m.get("content", "")[:500] for m in messages[-20:])
 
-    # Detect goal from early messages
     goal = ""
     if messages and messages[0].get("role") == "user":
         goal = messages[0].get("content", "")[:200]
 
-    # Summary from recent assistant output
     summary = ""
     for msg in reversed(messages):
         if msg.get("role") == "assistant":
@@ -295,7 +264,6 @@ def create_auto_handoff(
     if not summary:
         summary = "Session in progress"
 
-    # Extract completed items (look for completion signals)
     completed = []
     in_progress = []
     next_steps = []
@@ -303,19 +271,16 @@ def create_auto_handoff(
     for msg in messages[-10:]:
         content = msg.get("content", "").lower()
         if "done" in content or "completed" in content or "fixed" in content:
-            # Extract what was done
             lines = msg.get("content", "").split("\n")[:3]
             for line in lines:
                 if len(line) > 10 and len(line) < 100:
                     completed.append(line.strip())
                     break
 
-    # Extract learnings (look for insight markers)
     learnings = []
     for msg in messages:
         content = msg.get("content", "")
         if "[PATTERN]" in content or "[INSIGHT]" in content or "[LEARNED]" in content:
-            # Extract the learning
             for line in content.split("\n"):
                 if any(marker in line for marker in ["[PATTERN]", "[INSIGHT]", "[LEARNED]"]):
                     learnings.append(line.strip()[:100])
@@ -334,20 +299,19 @@ def create_auto_handoff(
 
 
 def get_latest_handoff(project_root: Path = None) -> Optional[Dict]:
-    """Get the most recent handoff from cc-memory."""
-    if not is_memory_available():
-        return None
-
+    """Get the most recent handoff from synapse graph."""
     try:
-        from cc_memory import memory as cc_memory
+        graph = get_synapse_graph()
+        episodes = graph.get_episodes(category="handoff", limit=20)
 
-        project_dir = find_project_dir()
-        observations = cc_memory.get_recent_observations(project_dir, limit=20)
-
-        # Find most recent handoff
-        for obs in observations:
-            if obs.get("category") == "handoff":
-                return obs
+        for ep in episodes:
+            return {
+                "id": ep.get("id", ""),
+                "title": ep.get("title", ""),
+                "content": ep.get("content", ""),
+                "timestamp": ep.get("timestamp", ep.get("created_at", "")),
+                "tags": ep.get("tags", []),
+            }
         return None
     except Exception:
         return None
@@ -371,7 +335,6 @@ def load_handoff(handoff: Dict) -> Dict[str, Any]:
         "timestamp": handoff.get("timestamp", ""),
     }
 
-    # Parse structured content
     for line in content.split("\n"):
         if line.startswith("**Goal:**"):
             result["goal"] = line.replace("**Goal:**", "").strip()
@@ -388,26 +351,20 @@ def load_handoff(handoff: Dict) -> Dict[str, Any]:
 
 
 def list_handoffs(project_root: Path = None, limit: int = 10) -> List[Dict]:
-    """List recent handoffs from cc-memory."""
-    if not is_memory_available():
-        return []
-
+    """List recent handoffs from synapse graph."""
     try:
-        from cc_memory import memory as cc_memory
-
-        project_dir = find_project_dir()
-        observations = cc_memory.get_recent_observations(project_dir, limit=50)
+        graph = get_synapse_graph()
+        episodes = graph.get_episodes(category="handoff", limit=limit * 5)
 
         result = []
-        for obs in observations:
-            if obs.get("category") == "handoff":
-                result.append({
-                    "id": obs.get("id", ""),
-                    "title": obs.get("title", ""),
-                    "timestamp": obs.get("timestamp", ""),
-                })
-                if len(result) >= limit:
-                    break
+        for ep in episodes:
+            result.append({
+                "id": ep.get("id", ""),
+                "title": ep.get("title", ""),
+                "timestamp": ep.get("timestamp", ep.get("created_at", "")),
+            })
+            if len(result) >= limit:
+                break
         return result
     except Exception:
         return []
@@ -450,20 +407,13 @@ def format_handoff_for_context(handoff: Dict) -> str:
 
 def link_handoff_to_conversation(conv_id: int, handoff_path: Path) -> bool:
     """Link a handoff file to a conversation record."""
-    _ensure_outcome_column()
+    graph = get_synapse_graph()
 
-    conn = get_db_connection()
-    c = conn.cursor()
-
-    c.execute(
-        """
-        UPDATE conversations
-        SET handoff_path = ?
-        WHERE id = ?
-    """,
-        (str(handoff_path), conv_id),
+    graph.observe(
+        category="conversation_handoff",
+        title=f"Conversation {conv_id} handoff",
+        content=str(handoff_path),
+        tags=["handoff_link", f"conv_{conv_id}"],
     )
-
-    conn.commit()
-    conn.close()
+    save_synapse()
     return True

@@ -31,27 +31,27 @@ def get_agent_actions() -> str:
     Shows what the agent has done without asking, providing
     transparency into its autonomous decision-making.
     """
-    from .core import get_db_connection
+    from ..core import get_synapse_graph
+    import json
 
-    conn = get_db_connection()
-    c = conn.cursor()
+    graph = get_synapse_graph()
+    episodes = graph.get_episodes(category="agent_action", limit=20)
 
-    c.execute("""
-        SELECT action_type, success, timestamp
-        FROM agent_actions
-        ORDER BY timestamp DESC
-        LIMIT 20
-    """)
-
-    rows = c.fetchall()
-    conn.close()
-
-    if not rows:
+    if not episodes:
         return "No autonomous actions recorded yet."
 
     lines = ["Recent Autonomous Actions:", ""]
-    for action_type, success, timestamp in rows:
-        status = "✓" if success else "✗"
+    for ep in episodes:
+        try:
+            data = json.loads(ep.get("content", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            data = {}
+
+        action_type = data.get("action_type", ep.get("title", "unknown"))
+        success = data.get("success", True)
+        timestamp = data.get("timestamp", ep.get("timestamp", ""))
+
+        status = "+" if success else "-"
         time_part = timestamp.split("T")[1][:8] if "T" in timestamp else timestamp
         lines.append(f"  [{status}] {time_part} - {action_type}")
 

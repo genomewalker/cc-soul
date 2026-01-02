@@ -2,11 +2,10 @@
 Identity operations: observe and retrieve how we work together.
 """
 
-from datetime import datetime
 from enum import Enum
 from typing import Dict, Any
 
-from .core import get_db_connection
+from .core import get_synapse_graph, save_synapse
 
 
 class IdentityAspect(Enum):
@@ -25,63 +24,43 @@ def observe_identity(
     """
     Record an observation about identity.
 
-    Called when we notice something about how we work with this person.
-    Repeated observations increase confidence.
+    Stored as an episode in synapse.
     """
-    conn = get_db_connection()
-    c = conn.cursor()
-    now = datetime.now().isoformat()
-
-    c.execute(
-        """
-        INSERT INTO identity (aspect, key, value, confidence, first_observed, last_confirmed, observation_count)
-        VALUES (?, ?, ?, ?, ?, ?, 1)
-        ON CONFLICT(aspect, key) DO UPDATE SET
-            value = excluded.value,
-            confidence = MIN(1.0, confidence + 0.1),
-            last_confirmed = excluded.last_confirmed,
-            observation_count = observation_count + 1
-    """,
-        (aspect.value, key, value, confidence, now, now),
+    graph = get_synapse_graph()
+    graph.observe(
+        category="identity",
+        title=f"{aspect.value}:{key}",
+        content=value,
+        tags=["identity", aspect.value, key],
     )
-
-    conn.commit()
-    conn.close()
+    save_synapse()
 
 
 def get_identity(aspect: IdentityAspect = None) -> Dict[str, Any]:
     """Get identity observations, optionally filtered by aspect."""
-    conn = get_db_connection()
-    c = conn.cursor()
-
-    if aspect:
-        c.execute(
-            """
-            SELECT key, value, confidence, observation_count
-            FROM identity WHERE aspect = ?
-            ORDER BY confidence DESC
-        """,
-            (aspect.value,),
-        )
-    else:
-        c.execute("""
-            SELECT aspect, key, value, confidence
-            FROM identity
-            ORDER BY aspect, confidence DESC
-        """)
+    graph = get_synapse_graph()
+    episodes = graph.get_episodes(category="identity", limit=100)
 
     result = {}
-    for row in c.fetchall():
-        if aspect:
-            result[row[0]] = {
-                "value": row[1],
-                "confidence": row[2],
-                "observations": row[3],
-            }
-        else:
-            if row[0] not in result:
-                result[row[0]] = {}
-            result[row[0]][row[1]] = {"value": row[2], "confidence": row[3]}
+    for ep in episodes:
+        title = ep.get("title", "")
+        if ":" in title:
+            ep_aspect, key = title.split(":", 1)
+            if aspect and ep_aspect != aspect.value:
+                continue
 
-    conn.close()
+            if aspect:
+                result[key] = {
+                    "value": ep.get("content", ""),
+                    "confidence": 0.8,
+                    "observations": 1,
+                }
+            else:
+                if ep_aspect not in result:
+                    result[ep_aspect] = {}
+                result[ep_aspect][key] = {
+                    "value": ep.get("content", ""),
+                    "confidence": 0.8,
+                }
+
     return result

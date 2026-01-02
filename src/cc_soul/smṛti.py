@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Any
 from enum import Enum, auto
 
-from .core import init_soul, get_db_connection
+from .core import init_soul, get_synapse_graph, save_synapse, SOUL_DIR
 from .ledger import (
     SessionLedger,
     load_latest_ledger,
@@ -26,45 +26,36 @@ from .efficiency import fingerprint_problem, recall_decisions
 
 
 def _semantic_search_wisdom(query: str, domain: str = None, limit: int = 5) -> List[Dict]:
-    """Semantic search wrapper - tries vectors, falls back to keyword."""
+    """Semantic search wrapper - uses synapse vector search."""
     try:
         from .vectors import search_wisdom
         return search_wisdom(query, limit=limit, domain=domain)
     except ImportError:
-        # Vectors not available, fall back to keyword search
         return _get_domain_wisdom(domain, limit) if domain else []
 
 
 def _get_domain_wisdom(domain: str, limit: int = 5) -> List[Dict]:
     """Get wisdom entries filtered by domain (non-semantic)."""
-    init_soul()
-    conn = get_db_connection()
-    c = conn.cursor()
+    graph = get_synapse_graph()
+    all_wisdom = graph.get_all_wisdom()
 
-    try:
-        c.execute("""
-            SELECT id, type, title, content, domain, confidence
-            FROM wisdom
-            WHERE domain = ? OR domain = 'universal'
-            ORDER BY confidence DESC, used_count DESC
-            LIMIT ?
-        """, (domain, limit))
-
-        results = []
-        for row in c.fetchall():
+    results = []
+    for w in all_wisdom:
+        w_domain = w.get("domain", "")
+        if w_domain == domain or w_domain == "universal":
             results.append({
-                "id": row[0],
-                "type": row[1],
-                "title": row[2],
-                "content": row[3],
-                "domain": row[4],
-                "confidence": row[5],
+                "id": w.get("id", ""),
+                "type": "wisdom",
+                "title": w.get("title", ""),
+                "content": w.get("content", ""),
+                "domain": w_domain,
+                "confidence": w.get("confidence", 0.8),
             })
-        return results
-    except Exception:
-        return []
-    finally:
-        conn.close()
+            if len(results) >= limit:
+                break
+
+    results.sort(key=lambda x: x.get("confidence", 0), reverse=True)
+    return results[:limit]
 
 
 class RecallMode(Enum):
@@ -141,46 +132,25 @@ def _activate_concepts(context: str, limit: int = 10) -> List[str]:
 
 
 def _search_failures(domain: Optional[str] = None, limit: int = 5) -> List[Dict]:
-    """
-    Search for failure patterns (guards) in the given domain.
-    """
-    init_soul()
-    conn = get_db_connection()
-    c = conn.cursor()
+    """Search for failure patterns (guards) in the given domain."""
+    graph = get_synapse_graph()
+    all_failures = graph.get_all_failures()
 
-    try:
-        if domain:
-            c.execute("""
-                SELECT id, title, content, domain, confidence, created_at
-                FROM wisdom
-                WHERE type = 'failure' AND domain = ?
-                ORDER BY confidence DESC, created_at DESC
-                LIMIT ?
-            """, (domain, limit))
-        else:
-            c.execute("""
-                SELECT id, title, content, domain, confidence, created_at
-                FROM wisdom
-                WHERE type = 'failure'
-                ORDER BY confidence DESC, created_at DESC
-                LIMIT ?
-            """, (limit,))
-
-        failures = []
-        for row in c.fetchall():
-            failures.append({
-                "id": row[0],
-                "title": row[1],
-                "content": row[2],
-                "domain": row[3],
-                "confidence": row[4],
-                "created_at": row[5],
+    results = []
+    for f in all_failures:
+        f_domain = f.get("domain", "")
+        if domain is None or f_domain == domain:
+            results.append({
+                "id": f.get("id", ""),
+                "title": f.get("what_failed", f.get("title", "")),
+                "content": f.get("why_it_failed", f.get("content", "")),
+                "domain": f_domain,
+                "confidence": f.get("confidence", 0.8),
+                "created_at": f.get("created_at", ""),
             })
-        return failures
-    except Exception:
-        return []
-    finally:
-        conn.close()
+
+    results.sort(key=lambda x: (x.get("confidence", 0), x.get("created_at", "")), reverse=True)
+    return results[:limit]
 
 
 def smṛti_recall(
@@ -218,7 +188,6 @@ def smṛti_recall(
     # 3. Semantic search on wisdom (unless minimal startup)
     if mode != RecallMode.STARTUP or context:
         try:
-            # Use semantic search if available, else keyword
             wisdom_results = _semantic_search_wisdom(
                 query=context if context else "general patterns",
                 domain=domain,
@@ -226,7 +195,6 @@ def smṛti_recall(
             )
             bundle.wisdom = wisdom_results
         except Exception:
-            # Fallback to domain wisdom
             if domain:
                 bundle.wisdom = _get_domain_wisdom(domain, limit=5)
 
@@ -349,7 +317,7 @@ def format_smṛti_context(
     if bundle.guards:
         lines.append("**Failure Guards:**")
         for g in bundle.guards[:2]:
-            lines.append(f"- ⚠️ {g.get('title', '')}")
+            lines.append(f"- {g.get('title', '')}")
         lines.append("")
 
     # Decisions

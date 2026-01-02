@@ -10,12 +10,14 @@ calculate remaining context capacity from this.
 """
 
 import json
+import os
+import re
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional, Dict, List
 from datetime import datetime
 
-from .core import SOUL_DIR
+from .core import SOUL_DIR, get_synapse_graph, save_synapse
 
 
 # Default context window size (Claude's typical limit)
@@ -74,7 +76,6 @@ def get_context_budget(transcript_path: str = None) -> Optional[ContextBudget]:
 
 def _find_current_transcript() -> Optional[str]:
     """Try to find the current session's transcript."""
-    # Check if we have a stored transcript path
     current_file = SOUL_DIR / ".current_transcript"
     if current_file.exists():
         path = current_file.read_text().strip()
@@ -171,15 +172,14 @@ def get_injection_budget(budget: ContextBudget = None) -> int:
         budget = get_context_budget()
 
     if budget is None:
-        # Can't read budget, be conservative
         return 500
 
     if budget.should_urgent_save:
-        return 100  # Bare minimum
+        return 100
     elif budget.should_compact:
-        return 500  # Compact essentials
+        return 500
     else:
-        return 2000  # Full context
+        return 2000
 
 
 def format_budget_status(budget: ContextBudget) -> str:
@@ -187,7 +187,7 @@ def format_budget_status(budget: ContextBudget) -> str:
     pct = int(budget.remaining_pct * 100)
     bar_width = 20
     filled = int(pct * bar_width / 100)
-    bar = "█" * filled + "░" * (bar_width - filled)
+    bar = "=" * filled + "-" * (bar_width - filled)
 
     status = "OK"
     if budget.should_urgent_save:
@@ -213,8 +213,6 @@ def check_budget_before_inject(transcript_path: str = None) -> Dict:
         - trigger_compact: bool - whether to trigger proactive /compact
         - remaining_pct: float - percentage remaining (0-1)
     """
-    import os
-
     # Swarm agents have fresh context - minimal injection for focused task
     if os.environ.get("CC_SOUL_SWARM_AGENT") == "1":
         return {
@@ -230,7 +228,6 @@ def check_budget_before_inject(transcript_path: str = None) -> Dict:
     budget = get_context_budget(transcript_path)
 
     if budget is None:
-        # Can't read, be conservative
         return {
             "inject": True,
             "mode": "compact",
@@ -241,7 +238,6 @@ def check_budget_before_inject(transcript_path: str = None) -> Dict:
         }
 
     if budget.should_emergency_compact:
-        # EMERGENCY: <5% remaining - trigger proactive compaction
         return {
             "inject": True,
             "mode": "emergency",
@@ -279,53 +275,38 @@ def check_budget_before_inject(transcript_path: str = None) -> Dict:
         }
 
 
-# Multi-instance budget tracking via cc-memory
+# Multi-instance budget tracking via synapse
 
 
 def get_session_id() -> str:
     """Get unique identifier for this Claude session."""
-    import os
-
-    # Use transcript path hash or process ID
     current_file = SOUL_DIR / ".current_transcript"
     if current_file.exists():
         path = current_file.read_text().strip()
-        # Use last part of path as session ID
         return Path(path).stem[:12]
 
-    # Fallback to process ID
     return f"pid_{os.getpid()}"
 
 
 def get_parent_session_id() -> Optional[str]:
     """Get parent session ID if this is a spawned child session."""
-    import os
     return os.environ.get("CC_SOUL_PARENT_SESSION")
 
 
-def log_budget_to_memory(
+def log_budget_to_synapse(
     budget: ContextBudget = None,
     transcript_path: str = None,
     force: bool = False,
 ) -> Optional[str]:
     """
-    Log current budget status to cc-memory for cross-instance awareness.
+    Log current budget status to synapse for cross-instance awareness.
 
-    Only logs on state transitions (RELAXED→COMPACT→EMERGENCY) to avoid
-    flooding memory with redundant budget entries. Use force=True to
-    always log regardless of state change.
+    Only logs on state transitions (RELAXED->COMPACT->EMERGENCY) to avoid
+    flooding with redundant entries. Use force=True to always log.
 
-    Returns observation ID if logged, None if skipped or unavailable.
+    Returns episode ID if logged, None if skipped.
     """
     try:
-        from .bridge import is_memory_available
-
-        if not is_memory_available():
-            return None
-
-        from cc_memory import memory as cc_memory
-        from .bridge import find_project_dir
-
         if budget is None:
             budget = get_context_budget(transcript_path)
 
@@ -350,26 +331,25 @@ def log_budget_to_memory(
         if not force:
             last_pressure = _get_last_logged_pressure(session_id)
             if last_pressure == pressure:
-                return None  # No state change, skip logging
+                return None
             _save_last_logged_pressure(session_id, pressure)
 
-        # Log to cc-memory with budget tag
         parent_line = f"\nParent: {parent_id}" if parent_id else ""
         content = f"""Session {session_id}: {pct}% remaining ({budget.remaining:,} tokens)
 Pressure: {pressure}
 Messages: {budget.message_count}
 Timestamp: {budget.timestamp}{parent_line}"""
 
-        project_dir = find_project_dir()
-        obs_id = cc_memory.remember(
+        graph = get_synapse_graph()
+        episode_id = graph.observe(
             category="budget",
             title=f"Budget: {pct}% ({pressure})",
             content=content,
             tags=["budget", f"session:{session_id}", pressure.lower()],
-            project_dir=project_dir,
         )
+        save_synapse()
 
-        return obs_id
+        return episode_id
 
     except Exception:
         return None
@@ -393,63 +373,44 @@ def _save_last_logged_pressure(session_id: str, pressure: str):
 
 def get_all_session_budgets() -> List[Dict]:
     """
-    Get budget status of all active sessions via cc-memory.
+    Get budget status of all active sessions via synapse.
 
     Enables cross-instance awareness for swarm coordination.
     """
     try:
-        from .bridge import is_memory_available
+        graph = get_synapse_graph()
+        episodes = graph.get_episodes(category="budget", limit=10)
 
-        if not is_memory_available():
-            return []
-
-        from cc_memory import memory as cc_memory
-        from .bridge import find_project_dir
-
-        project_dir = find_project_dir()
-
-        # Query recent budget observations
-        results = cc_memory.recall(
-            query="budget remaining tokens pressure",
-            category="budget",
-            limit=10,
-            project_dir=project_dir,
-        )
-
-        # Parse budget info from observations
         sessions = []
-        for obs in results:
-            content = obs.get("content", "")
-            title = obs.get("title", "")
+        for ep in episodes:
+            content = ep.get("content", "")
+            title = ep.get("title", "")
 
-            # Extract percentage from title
-            import re
             match = re.search(r"(\d+)%", title)
             if match:
                 pct = int(match.group(1))
-                # Extract session ID from tags or content
                 session_id = "unknown"
-                tags = obs.get("tags") or []
+                tags = ep.get("tags") or []
                 for tag in tags:
                     if isinstance(tag, str) and tag.startswith("session:"):
                         session_id = tag.replace("session:", "")
                         break
-                # Fallback: extract from content "Session {id}: ..."
                 if session_id == "unknown":
                     content_match = re.search(r"Session ([^:]+):", content)
                     if content_match:
                         session_id = content_match.group(1).strip()
-                # Extract parent session if present
+
                 parent_id = None
                 parent_match = re.search(r"Parent: (\S+)", content)
                 if parent_match:
                     parent_id = parent_match.group(1)
+
                 sessions.append({
                     "session_id": session_id,
                     "parent_id": parent_id,
                     "remaining_pct": pct / 100,
                     "pressure": "EMERGENCY" if pct < 10 else "COMPACT" if pct < 25 else "NORMAL",
-                    "timestamp": obs.get("timestamp", ""),
+                    "timestamp": ep.get("timestamp", ""),
                 })
 
         return sessions
@@ -484,7 +445,6 @@ def get_budget_warning() -> Optional[str]:
         parent = session.get("parent_id")
         pct = session.get("remaining_pct", 1.0)
 
-        # Only show current session family
         is_self = sid == current_session
         is_child = parent == current_session
         if not (is_self or is_child):
@@ -496,9 +456,9 @@ def get_budget_warning() -> Optional[str]:
 
         label = "self" if is_self else "child"
         if pct < 0.10:
-            warnings.append(f"⚠️ {label} ({sid[:8]}): EMERGENCY ({int(pct*100)}%)")
+            warnings.append(f"[!] {label} ({sid[:8]}): EMERGENCY ({int(pct*100)}%)")
         else:
-            warnings.append(f"📊 {label} ({sid[:8]}): COMPACT ({int(pct*100)}%)")
+            warnings.append(f"[*] {label} ({sid[:8]}): COMPACT ({int(pct*100)}%)")
 
     if warnings:
         return "\n".join(warnings)

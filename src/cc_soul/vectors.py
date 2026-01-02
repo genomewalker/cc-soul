@@ -8,7 +8,7 @@ enabling queries like "find wisdom relevant to this problem".
 from typing import List, Dict
 import numpy as np
 
-from .core import SOUL_DIR, get_db_connection
+from .core import SOUL_DIR, get_synapse_graph, save_synapse
 
 LANCE_DIR = SOUL_DIR / "vectors" / "lancedb"
 MODEL_NAME = "all-MiniLM-L6-v2"
@@ -141,15 +141,11 @@ def search_wisdom(
 
 
 def reindex_all_wisdom():
-    """Reindex all wisdom from SQLite into LanceDB."""
-    conn = get_db_connection()
-    c = conn.cursor()
+    """Reindex all wisdom from synapse into LanceDB."""
+    graph = get_synapse_graph()
+    wisdom_entries = graph.get_all_wisdom()
 
-    c.execute("SELECT id, type, title, content, domain FROM wisdom")
-    rows = c.fetchall()
-    conn.close()
-
-    if not rows:
+    if not wisdom_entries:
         print("No wisdom to index")
         return
 
@@ -173,19 +169,19 @@ def reindex_all_wisdom():
     )
     table = db.create_table("wisdom", schema=schema)
 
-    texts = [f"{row[2]}: {row[3]}" for row in rows]
+    texts = [f"{w.get('title', '')}: {w.get('content', '')}" for w in wisdom_entries]
     vectors = embed_texts(texts)
 
     data = [
         {
-            "id": row[0],
-            "title": row[2],
-            "content": row[3],
-            "type": row[1],
-            "domain": row[4] or "",
+            "id": w.get("id", ""),
+            "title": w.get("title", ""),
+            "content": w.get("content", ""),
+            "type": w.get("type", "wisdom"),
+            "domain": w.get("domain", ""),
             "vector": vectors[i].tolist(),
         }
-        for i, row in enumerate(rows)
+        for i, w in enumerate(wisdom_entries)
     ]
 
     table.add(data)

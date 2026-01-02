@@ -9,13 +9,13 @@ Restraint is formative. The negative space defines the positive.
 What we don't say can be as identity-forming as what we do.
 """
 
-import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from typing import List, Optional, Dict
 
-from .core import SOUL_DB, init_soul
+# TODO: Migrate to synapse graph storage
+# from .core import get_synapse_graph, save_synapse
 
 
 class RestraintReason(str, Enum):
@@ -53,21 +53,8 @@ class Restraint:
 
 def _ensure_table():
     """Create restraint table if it doesn't exist."""
-    init_soul()
-    conn = sqlite3.connect(SOUL_DB)
-    c = conn.cursor()
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS restraints (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            what_unsaid TEXT NOT NULL,
-            reason TEXT NOT NULL,
-            context TEXT NOT NULL,
-            reflection TEXT,
-            created_at TEXT NOT NULL
-        )
-    """)
-    conn.commit()
-    conn.close()
+    # TODO: Migrate to synapse graph storage
+    pass
 
 
 def hold_back(
@@ -91,23 +78,8 @@ def hold_back(
     Returns:
         Restraint ID
     """
-    _ensure_table()
-    conn = sqlite3.connect(SOUL_DB)
-    c = conn.cursor()
-
-    now = datetime.now().isoformat()
-    c.execute(
-        """
-        INSERT INTO restraints (what_unsaid, reason, context, reflection, created_at)
-        VALUES (?, ?, ?, ?, ?)
-    """,
-        (what_unsaid, reason.value, context, reflection, now),
-    )
-
-    restraint_id = c.lastrowid
-    conn.commit()
-    conn.close()
-    return restraint_id
+    # TODO: Migrate to synapse graph storage
+    return 0
 
 
 def get_restraints(
@@ -115,65 +87,14 @@ def get_restraints(
     limit: int = 50,
 ) -> List[Restraint]:
     """Recall moments of restraint."""
-    _ensure_table()
-    conn = sqlite3.connect(SOUL_DB)
-    c = conn.cursor()
-
-    if reason:
-        c.execute(
-            """
-            SELECT id, what_unsaid, reason, context, reflection, created_at
-            FROM restraints
-            WHERE reason = ?
-            ORDER BY created_at DESC
-            LIMIT ?
-        """,
-            (reason.value, limit),
-        )
-    else:
-        c.execute(
-            """
-            SELECT id, what_unsaid, reason, context, reflection, created_at
-            FROM restraints
-            ORDER BY created_at DESC
-            LIMIT ?
-        """,
-            (limit,),
-        )
-
-    rows = c.fetchall()
-    conn.close()
-
-    return [
-        Restraint(
-            id=row[0],
-            what_unsaid=row[1],
-            reason=RestraintReason(row[2]),
-            context=row[3],
-            reflection=row[4],
-            created_at=row[5],
-        )
-        for row in rows
-    ]
+    # TODO: Migrate to synapse graph storage
+    return []
 
 
 def reflect_on_restraint(restraint_id: int, reflection: str) -> bool:
     """Add or update reflection on a past restraint."""
-    _ensure_table()
-    conn = sqlite3.connect(SOUL_DB)
-    c = conn.cursor()
-
-    c.execute(
-        """
-        UPDATE restraints SET reflection = ? WHERE id = ?
-    """,
-        (reflection, restraint_id),
-    )
-
-    success = c.rowcount > 0
-    conn.commit()
-    conn.close()
-    return success
+    # TODO: Migrate to synapse graph storage
+    return False
 
 
 def format_restraints(restraints: List[Restraint]) -> str:

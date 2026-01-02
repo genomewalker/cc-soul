@@ -21,11 +21,10 @@ from typing import List, Dict, Optional, Set
 from collections import Counter
 from enum import Enum
 
-from .core import get_db_connection
+from .core import get_synapse_graph, save_synapse, SOUL_DIR
 from .wisdom import gain_wisdom, WisdomType
 
 
-# Patterns that indicate garbage data (agent/swarm context markers)
 _GARBAGE_PATTERNS = [
     "Agent Context Notice",
     "You are a swarm",
@@ -48,13 +47,13 @@ def _is_garbage_content(content: str) -> bool:
 
 
 class LearningType(str, Enum):
-    CORRECTION = "correction"  # User redirected approach
-    STRUGGLE = "struggle"  # Multiple attempts needed
-    PATTERN = "pattern"  # Recurring action/solution
-    PREFERENCE = "preference"  # User chose A over B
-    BREAKTHROUGH = "breakthrough"  # Success after difficulty
-    FILE_PATTERN = "file_pattern"  # Important file identified
-    DECISION = "decision"  # Architectural choice made
+    CORRECTION = "correction"
+    STRUGGLE = "struggle"
+    PATTERN = "pattern"
+    PREFERENCE = "preference"
+    BREAKTHROUGH = "breakthrough"
+    FILE_PATTERN = "file_pattern"
+    DECISION = "decision"
 
 
 @dataclass
@@ -64,7 +63,7 @@ class Learning:
     type: LearningType
     title: str
     content: str
-    confidence: float = 0.6  # Lower than explicit wisdom
+    confidence: float = 0.6
     evidence: List[str] = field(default_factory=list)
     domain: Optional[str] = None
 
@@ -73,45 +72,11 @@ class Learning:
 class SessionTranscript:
     """Simplified representation of a session for analysis."""
 
-    messages: List[Dict]  # {role: str, content: str, timestamp: str}
+    messages: List[Dict]
     files_touched: Set[str] = field(default_factory=set)
     tools_used: List[str] = field(default_factory=list)
     duration_minutes: float = 0.0
     project: Optional[str] = None
-
-
-def _ensure_observation_tables():
-    """Ensure tables for tracking observations exist."""
-    conn = get_db_connection()
-    c = conn.cursor()
-
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS session_observations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_id INTEGER,
-            observation_type TEXT NOT NULL,
-            content TEXT NOT NULL,
-            confidence REAL DEFAULT 0.5,
-            evidence TEXT,
-            created_at TEXT NOT NULL,
-            converted_to_wisdom INTEGER,
-            FOREIGN KEY (session_id) REFERENCES conversations(id)
-        )
-    """)
-
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS correction_patterns (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            original_approach TEXT NOT NULL,
-            corrected_to TEXT NOT NULL,
-            context TEXT,
-            times_seen INTEGER DEFAULT 1,
-            last_seen TEXT NOT NULL
-        )
-    """)
-
-    conn.commit()
-    conn.close()
 
 
 def extract_corrections(transcript: SessionTranscript) -> List[Learning]:
@@ -143,7 +108,6 @@ def extract_corrections(transcript: SessionTranscript) -> List[Learning]:
 
         for pattern in correction_phrases:
             if re.search(pattern, content, re.IGNORECASE):
-                # Found a correction - extract context
                 prev_claude = None
                 for j in range(i - 1, -1, -1):
                     if messages[j].get("role") == "assistant":
@@ -201,13 +165,13 @@ def extract_preferences(transcript: SessionTranscript) -> List[Learning]:
                 else:
                     pref_content = match
 
-                if len(pref_content) > 10:  # Skip trivial matches
+                if len(pref_content) > 10:
                     learnings.append(
                         Learning(
                             type=LearningType.PREFERENCE,
                             title=f"User preference: {pref_type}",
                             content=pref_content[:200],
-                            confidence=0.8,  # Explicit preferences are high confidence
+                            confidence=0.8,
                             evidence=[f"From: {content[:100]}..."],
                             domain=transcript.project,
                         )
@@ -227,22 +191,18 @@ def extract_file_patterns(transcript: SessionTranscript) -> List[Learning]:
     """
     learnings = []
 
-    # Count file mentions in messages
     file_pattern = r"[\w/.-]+\.(py|pyx|pxd|cpp|c|h|rs|go|js|ts|tsx|json|yaml|toml|md)"
     file_counts = Counter()
 
     for msg in transcript.messages:
         content = msg.get("content", "")
         re.findall(file_pattern, content)
-        # Reconstruct full matches
         for match in re.finditer(file_pattern, content):
             file_counts[match.group()] += 1
 
-    # Add explicitly touched files
     for f in transcript.files_touched:
-        file_counts[f] += 2  # Weight actual edits higher
+        file_counts[f] += 2
 
-    # Files mentioned 3+ times are significant
     for filepath, count in file_counts.most_common(5):
         if count >= 3:
             learnings.append(
@@ -270,7 +230,6 @@ def extract_struggles(transcript: SessionTranscript) -> List[Learning]:
     """
     learnings = []
 
-    # Look for error → fix → success patterns
     error_indicators = [
         r"error[:\s]",
         r"failed",
@@ -291,7 +250,6 @@ def extract_struggles(transcript: SessionTranscript) -> List[Learning]:
         r"done",
     ]
 
-    # Track potential struggles
     in_struggle = False
     struggle_start = None
     struggle_topic = None
@@ -299,7 +257,6 @@ def extract_struggles(transcript: SessionTranscript) -> List[Learning]:
     for i, msg in enumerate(transcript.messages):
         content = msg.get("content", "").lower()
 
-        # Check for error start
         if not in_struggle:
             for pattern in error_indicators:
                 if re.search(pattern, content):
@@ -308,12 +265,11 @@ def extract_struggles(transcript: SessionTranscript) -> List[Learning]:
                     struggle_topic = content[:100]
                     break
 
-        # Check for resolution
         if in_struggle:
             for pattern in success_indicators:
                 if re.search(pattern, content):
                     struggle_length = i - struggle_start
-                    if struggle_length >= 3:  # At least 3 messages = real struggle
+                    if struggle_length >= 3:
                         learnings.append(
                             Learning(
                                 type=LearningType.STRUGGLE,
@@ -359,7 +315,6 @@ def extract_breakthroughs(transcript: SessionTranscript) -> List[Learning]:
 
         for pattern in breakthrough_phrases:
             if re.search(pattern, content, re.IGNORECASE):
-                # Extract the insight
                 learnings.append(
                     Learning(
                         type=LearningType.BREAKTHROUGH,
@@ -425,11 +380,8 @@ def observe_session(transcript: SessionTranscript) -> List[Learning]:
 
     Returns a list of Learning objects ready to be converted to wisdom.
     """
-    _ensure_observation_tables()
-
     all_learnings = []
 
-    # Run all extractors
     all_learnings.extend(extract_corrections(transcript))
     all_learnings.extend(extract_preferences(transcript))
     all_learnings.extend(extract_file_patterns(transcript))
@@ -437,7 +389,6 @@ def observe_session(transcript: SessionTranscript) -> List[Learning]:
     all_learnings.extend(extract_breakthroughs(transcript))
     all_learnings.extend(extract_decisions(transcript))
 
-    # Deduplicate similar learnings
     unique_learnings = _deduplicate_learnings(all_learnings)
 
     return unique_learnings
@@ -452,7 +403,6 @@ def _deduplicate_learnings(learnings: List[Learning]) -> List[Learning]:
     seen_content = set()
 
     for learning in learnings:
-        # Simple dedup on content prefix
         content_key = learning.content[:50].lower()
         if content_key not in seen_content:
             seen_content.add(content_key)
@@ -467,61 +417,56 @@ def record_observation(learning: Learning, session_id: int = None):
 
     Observations are staged - they become wisdom if confirmed or seen multiple times.
     """
-    # Filter out garbage content (agent/swarm markers)
     content = f"{learning.title}: {learning.content}"
     if _is_garbage_content(content):
         return
 
-    _ensure_observation_tables()
+    graph = get_synapse_graph()
 
-    conn = get_db_connection()
-    c = conn.cursor()
-
-    c.execute(
-        """
-        INSERT INTO session_observations
-        (session_id, observation_type, content, confidence, evidence, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """,
-        (
-            session_id,
-            learning.type.value,
-            content,
-            learning.confidence,
-            json.dumps(learning.evidence),
-            datetime.now().isoformat(),
-        ),
+    graph.observe(
+        category="observation",
+        title=learning.title,
+        content=json.dumps({
+            "type": learning.type.value,
+            "content": learning.content,
+            "confidence": learning.confidence,
+            "evidence": learning.evidence,
+            "domain": learning.domain,
+        }),
+        project=learning.domain,
+        tags=["observation", learning.type.value],
     )
-
-    conn.commit()
-    conn.close()
+    save_synapse()
 
 
-def promote_observation_to_wisdom(observation_id: int) -> int:
+def promote_observation_to_wisdom(observation_id: str) -> Optional[str]:
     """
     Convert an observation to permanent wisdom.
 
     Returns the new wisdom ID.
     """
-    conn = get_db_connection()
-    c = conn.cursor()
+    graph = get_synapse_graph()
+    episodes = graph.get_episodes(category="observation", limit=500)
 
-    c.execute(
-        """
-        SELECT observation_type, content, confidence FROM session_observations
-        WHERE id = ?
-    """,
-        (observation_id,),
-    )
+    obs = None
+    for ep in episodes:
+        if ep.get("id") == observation_id:
+            obs = ep
+            break
 
-    row = c.fetchone()
-    if not row:
-        conn.close()
+    if not obs:
         return None
 
-    obs_type, content, confidence = row
+    content_str = obs.get("content", "{}")
+    try:
+        data = json.loads(content_str)
+    except json.JSONDecodeError:
+        data = {"content": content_str, "type": "insight", "confidence": 0.6}
 
-    # Map observation type to wisdom type
+    obs_type = data.get("type", "insight")
+    content = data.get("content", "")
+    confidence = data.get("confidence", 0.6)
+
     type_map = {
         "correction": WisdomType.PREFERENCE,
         "preference": WisdomType.PREFERENCE,
@@ -534,11 +479,10 @@ def promote_observation_to_wisdom(observation_id: int) -> int:
 
     wisdom_type = type_map.get(obs_type, WisdomType.INSIGHT)
 
-    # Split content into title and body
+    title = obs.get("title", "")
     if ":" in content:
-        title, body = content.split(":", 1)
+        body = content.split(":", 1)[1].strip()
     else:
-        title = content[:50]
         body = content
 
     wisdom_id = gain_wisdom(
@@ -548,84 +492,59 @@ def promote_observation_to_wisdom(observation_id: int) -> int:
         confidence=confidence,
     )
 
-    # Mark observation as converted
-    c.execute(
-        """
-        UPDATE session_observations
-        SET converted_to_wisdom = ?
-        WHERE id = ?
-    """,
-        (wisdom_id, observation_id),
-    )
-
-    conn.commit()
-    conn.close()
-
     return wisdom_id
 
 
 def get_pending_observations(limit: int = 20) -> List[Dict]:
     """Get observations not yet converted to wisdom."""
-    _ensure_observation_tables()
-
-    conn = get_db_connection()
-    c = conn.cursor()
-
-    c.execute(
-        """
-        SELECT id, observation_type, content, confidence, evidence, created_at
-        FROM session_observations
-        WHERE converted_to_wisdom IS NULL
-        ORDER BY confidence DESC, created_at DESC
-        LIMIT ?
-    """,
-        (limit,),
-    )
+    graph = get_synapse_graph()
+    episodes = graph.get_episodes(category="observation", limit=limit)
 
     results = []
-    for row in c.fetchall():
-        results.append(
-            {
-                "id": row[0],
-                "type": row[1],
-                "content": row[2],
-                "confidence": row[3],
-                "evidence": json.loads(row[4]) if row[4] else [],
-                "created_at": row[5],
-            }
-        )
+    for ep in episodes:
+        content_str = ep.get("content", "{}")
+        try:
+            data = json.loads(content_str)
+        except json.JSONDecodeError:
+            data = {"content": content_str, "type": "unknown", "confidence": 0.5}
 
-    conn.close()
-    return results
+        results.append({
+            "id": ep.get("id", ""),
+            "type": data.get("type", "unknown"),
+            "content": f"{ep.get('title', '')}: {data.get('content', '')}",
+            "confidence": data.get("confidence", 0.5),
+            "evidence": data.get("evidence", []),
+            "created_at": ep.get("timestamp", ""),
+        })
+
+    results.sort(key=lambda x: (-x["confidence"], x["created_at"]), reverse=False)
+    return results[:limit]
 
 
-def auto_promote_high_confidence(threshold: float = 0.75) -> List[int]:
+def auto_promote_high_confidence(threshold: float = 0.75) -> List[str]:
     """
     Automatically promote high-confidence observations to wisdom.
 
     Returns list of promoted wisdom IDs.
     """
-    _ensure_observation_tables()
-
-    conn = get_db_connection()
-    c = conn.cursor()
-
-    c.execute(
-        """
-        SELECT id FROM session_observations
-        WHERE converted_to_wisdom IS NULL AND confidence >= ?
-    """,
-        (threshold,),
-    )
+    graph = get_synapse_graph()
+    episodes = graph.get_episodes(category="observation", limit=100)
 
     promoted = []
-    for row in c.fetchall():
-        obs_id = row[0]
-        wisdom_id = promote_observation_to_wisdom(obs_id)
-        if wisdom_id:
-            promoted.append(wisdom_id)
+    for ep in episodes:
+        content_str = ep.get("content", "{}")
+        try:
+            data = json.loads(content_str)
+        except json.JSONDecodeError:
+            continue
 
-    conn.close()
+        confidence = data.get("confidence", 0.5)
+        if confidence >= threshold:
+            obs_id = ep.get("id", "")
+            wisdom_id = promote_observation_to_wisdom(obs_id)
+            if wisdom_id:
+                promoted.append(wisdom_id)
+
     return promoted
 
 
@@ -653,11 +572,9 @@ def reflect_on_session(
 
     learnings = observe_session(transcript)
 
-    # Record all observations
     for learning in learnings:
         record_observation(learning)
 
-    # Auto-promote high confidence ones
     promoted = []
     if auto_promote:
         promoted = auto_promote_high_confidence(threshold=0.75)
@@ -692,24 +609,24 @@ def format_reflection_summary(reflection: Dict) -> str:
     lines.append("")
 
     type_icons = {
-        "correction": "🔄",
-        "preference": "👤",
-        "pattern": "🔁",
-        "struggle": "💪",
-        "breakthrough": "💡",
-        "file_pattern": "📁",
-        "decision": "⚖️",
+        "correction": "[C]",
+        "preference": "[P]",
+        "pattern": "[R]",
+        "struggle": "[S]",
+        "breakthrough": "[B]",
+        "file_pattern": "[F]",
+        "decision": "[D]",
     }
 
     for ltype, count in reflection["by_type"].items():
-        icon = type_icons.get(ltype, "•")
+        icon = type_icons.get(ltype, "*")
         lines.append(f"  {icon} {ltype}: {count}")
 
     lines.append("")
 
     if reflection["promoted_to_wisdom"] > 0:
         lines.append(
-            f"✓ **{reflection['promoted_to_wisdom']}** auto-promoted to wisdom (high confidence)"
+            f"+ **{reflection['promoted_to_wisdom']}** auto-promoted to wisdom (high confidence)"
         )
 
     if reflection["pending_review"] > 0:

@@ -1,19 +1,38 @@
 """
-Automatic memory population for cc-memory.
+Automatic memory population via synapse.
 
 The soul observes work and remembers significant moments automatically.
 This bridges the gap between doing and understanding - Atman becoming Brahman.
 
 Categories flow from experience to wisdom:
-  DOING → UNDERSTANDING → BECOMING
-  discovery → insight → dream → aspiration → wisdom
+  DOING -> UNDERSTANDING -> BECOMING
+  discovery -> insight -> dream -> aspiration -> wisdom
 """
 
 import re
 from dataclasses import dataclass
 from typing import Optional, List, Tuple
+from pathlib import Path
 
-from .bridge import is_memory_available, find_project_dir
+from .core import get_synapse_graph, save_synapse
+
+
+def get_project_name() -> str:
+    """Detect project name from git or cwd."""
+    cwd = Path.cwd()
+    git_dir = cwd / ".git"
+    if git_dir.exists():
+        config = git_dir / "config"
+        if config.exists():
+            try:
+                with open(config) as f:
+                    for line in f:
+                        if "url = " in line:
+                            url = line.split("=")[1].strip()
+                            return url.split("/")[-1].replace(".git", "")
+            except Exception:
+                pass
+    return cwd.name
 
 
 # =============================================================================
@@ -415,7 +434,7 @@ def extract_observation(text: str, category: str) -> Tuple[str, str]:
 
 
 # =============================================================================
-# AUTO-REMEMBER
+# AUTO-REMEMBER (Synapse-backed)
 # =============================================================================
 
 
@@ -424,20 +443,11 @@ def auto_remember(output: str, min_length: int = 200) -> List[str]:
     Automatically detect and remember significant observations.
 
     Called from assistant_stop() hook.
+    Uses synapse graph.observe() instead of cc-memory.
 
     Returns list of categories that were remembered.
     """
     if len(output) < min_length:
-        return []
-
-    if not is_memory_available():
-        return []
-
-    try:
-        from cc_memory import memory as cc_memory
-
-        project_dir = find_project_dir()
-    except ImportError:
         return []
 
     # Detect categories
@@ -446,18 +456,22 @@ def auto_remember(output: str, min_length: int = 200) -> List[str]:
         return []
 
     remembered = []
+    project = get_project_name()
 
     # Remember the highest priority category (avoid duplicates)
     category = categories[0]
     title, content = extract_observation(output, category)
 
     try:
-        cc_memory.remember(
-            project_dir,
-            category,
-            title,
-            content,
+        graph = get_synapse_graph()
+        graph.observe(
+            category=category,
+            title=title,
+            content=content,
+            project=project,
+            tags=[],
         )
+        save_synapse()
         remembered.append(category)
     except Exception:
         pass
@@ -474,21 +488,20 @@ def remember_explicit(
     Explicitly remember an observation.
 
     Use for categories without auto-detection (reference, session).
+    Uses synapse graph.observe() instead of cc-memory.
     """
-    if not is_memory_available():
-        return None
+    project = get_project_name()
 
     try:
-        from cc_memory import memory as cc_memory
-
-        project_dir = find_project_dir()
-
-        obs_id = cc_memory.remember(
-            project_dir,
-            category,
-            title,
-            content,
+        graph = get_synapse_graph()
+        obs_id = graph.observe(
+            category=category,
+            title=title,
+            content=content,
+            project=project,
+            tags=[],
         )
+        save_synapse()
         return obs_id
     except Exception:
         return None
@@ -523,12 +536,12 @@ def summarize_session(fragments: List[str]) -> str:
 
 
 def remember_session(summary: str) -> Optional[str]:
-    """Remember session summary to cc-memory."""
+    """Remember session summary to synapse."""
     return remember_explicit("session", "Session Summary", summary)
 
 
 # =============================================================================
-# PROMOTION (Atman → Brahman)
+# PROMOTION (Atman -> Brahman)
 # =============================================================================
 
 
@@ -564,7 +577,7 @@ def promote_observation(observation: dict) -> Optional[int]:
     """
     Promote an observation to soul wisdom.
 
-    Episodic → Semantic: specific experience becomes universal pattern.
+    Episodic -> Semantic: specific experience becomes universal pattern.
     """
     from .wisdom import gain_wisdom, WisdomType
 
@@ -595,21 +608,22 @@ def check_and_promote() -> List[int]:
     """
     Check recent observations and promote worthy ones to wisdom.
 
-    Called at session_end().
+    Called at session_end(). Uses synapse graph.get_episodes().
     """
-    if not is_memory_available():
-        return []
-
     try:
-        from cc_memory import memory as cc_memory
+        graph = get_synapse_graph()
 
-        project_dir = find_project_dir()
-
-        # Get recent observations
-        observations = cc_memory.get_recent_observations(project_dir, limit=20)
+        # Get recent episodes from synapse
+        episodes = graph.get_episodes(limit=20)
 
         promoted = []
-        for obs in observations:
+        for ep in episodes:
+            # Convert episode to observation format for should_promote
+            obs = {
+                "category": ep.get("category", ""),
+                "title": ep.get("title", ""),
+                "content": ep.get("content", ""),
+            }
             if should_promote(obs):
                 wisdom_id = promote_observation(obs)
                 if wisdom_id:
@@ -627,25 +641,20 @@ def check_and_promote() -> List[int]:
 
 def get_recent_memory_context(limit: int = 5) -> List[dict]:
     """
-    Get recent observations from cc-memory for greeting context.
+    Get recent observations from synapse for greeting context.
 
     Prioritizes high-value categories (failures, insights, decisions).
     """
-    if not is_memory_available():
-        return []
-
     try:
-        from cc_memory import memory as cc_memory
+        graph = get_synapse_graph()
 
-        project_dir = find_project_dir()
-
-        observations = cc_memory.get_recent_observations(project_dir, limit=20)
+        episodes = graph.get_episodes(limit=20)
 
         # Filter out system/init observations
         meaningful = [
-            o
-            for o in observations
-            if o.get("category") != "system" and o.get("id") != "init"
+            e
+            for e in episodes
+            if e.get("category") != "system" and e.get("id") != "init"
         ]
 
         # Sort by priority
@@ -672,3 +681,33 @@ def format_memory_for_greeting(observations: List[dict]) -> str:
         lines.append(f"{category}: {title}")
 
     return "; ".join(lines)
+
+
+# =============================================================================
+# HELPER FOR INLINE MEMORY SAVING
+# =============================================================================
+
+
+def _get_memory_funcs() -> Optional[dict]:
+    """
+    Get synapse-backed memory functions.
+
+    Returns dict with 'remember' function that uses graph.observe().
+    """
+    try:
+        graph = get_synapse_graph()
+        project = get_project_name()
+
+        def remember(category: str, title: str, content: str, tags: list = None):
+            graph.observe(
+                category=category,
+                title=title,
+                content=content,
+                project=project,
+                tags=tags or [],
+            )
+            save_synapse()
+
+        return {"remember": remember}
+    except Exception:
+        return None

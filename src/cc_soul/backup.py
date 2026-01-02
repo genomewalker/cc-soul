@@ -7,12 +7,12 @@ Restore from backup if anything happens to soul.db.
 
 import gzip
 import json
-import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, Optional, List
 
-from .core import SOUL_DB, init_soul
+# TODO: Migrate to synapse graph storage
+# from .core import get_synapse_graph, save_synapse
 
 
 def dump_soul(output_path: Optional[Path] = None) -> Dict:
@@ -25,18 +25,12 @@ def dump_soul(output_path: Optional[Path] = None) -> Dict:
     Returns:
         Complete soul state as dictionary
     """
-    if not SOUL_DB.exists():
-        return {"error": "Soul not initialized"}
-
-    conn = sqlite3.connect(SOUL_DB)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-
-    soul = {
+    # TODO: Migrate to synapse graph storage
+    return {
         "meta": {
             "exported_at": datetime.now().isoformat(),
             "version": "1.0",
-            "source": str(SOUL_DB),
+            "source": "synapse (not implemented)",
         },
         "wisdom": [],
         "beliefs": [],
@@ -45,75 +39,8 @@ def dump_soul(output_path: Optional[Path] = None) -> Dict:
         "aspirations": [],
         "insights": [],
         "coherence_history": [],
+        "error": "Backup not available - SQLite backend removed",
     }
-
-    # Wisdom
-    try:
-        cursor.execute("SELECT * FROM wisdom ORDER BY id")
-        soul["wisdom"] = [dict(row) for row in cursor.fetchall()]
-    except sqlite3.OperationalError:
-        pass
-
-    # Beliefs (stored in wisdom with type='principle')
-    try:
-        cursor.execute("SELECT * FROM beliefs ORDER BY id")
-        soul["beliefs"] = [dict(row) for row in cursor.fetchall()]
-    except sqlite3.OperationalError:
-        pass
-
-    # Identity
-    try:
-        cursor.execute("SELECT * FROM identity ORDER BY id")
-        soul["identity"] = [dict(row) for row in cursor.fetchall()]
-    except sqlite3.OperationalError:
-        pass
-
-    # Vocabulary
-    try:
-        cursor.execute("SELECT * FROM vocabulary ORDER BY term")
-        soul["vocabulary"] = [dict(row) for row in cursor.fetchall()]
-    except sqlite3.OperationalError:
-        pass
-
-    # Aspirations
-    try:
-        cursor.execute("SELECT * FROM aspirations ORDER BY id")
-        soul["aspirations"] = [dict(row) for row in cursor.fetchall()]
-    except sqlite3.OperationalError:
-        pass
-
-    # Insights
-    try:
-        cursor.execute("SELECT * FROM insights ORDER BY id")
-        soul["insights"] = [dict(row) for row in cursor.fetchall()]
-    except sqlite3.OperationalError:
-        pass
-
-    # Coherence history
-    try:
-        cursor.execute("SELECT * FROM coherence_history ORDER BY timestamp")
-        soul["coherence_history"] = [dict(row) for row in cursor.fetchall()]
-    except sqlite3.OperationalError:
-        pass
-
-    conn.close()
-
-    # Write to file if path provided
-    if output_path:
-        output_path = Path(output_path)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-
-        json_bytes = json.dumps(soul, indent=2, default=str).encode("utf-8")
-
-        # Use gzip for .gz files
-        if output_path.suffix == ".gz" or str(output_path).endswith(".json.gz"):
-            with gzip.open(output_path, "wb") as f:
-                f.write(json_bytes)
-        else:
-            with open(output_path, "wb") as f:
-                f.write(json_bytes)
-
-    return soul
 
 
 def restore_soul(source: Path | Dict, merge: bool = False) -> Dict:
@@ -127,216 +54,12 @@ def restore_soul(source: Path | Dict, merge: bool = False) -> Dict:
     Returns:
         Result summary with counts
     """
-    # Load data
-    if isinstance(source, (str, Path)):
-        source = Path(source)
-        if not source.exists():
-            return {"error": f"Backup file not found: {source}"}
-
-        # Handle gzip files
-        if source.suffix == ".gz" or str(source).endswith(".json.gz"):
-            with gzip.open(source, "rt", encoding="utf-8") as f:
-                data = json.load(f)
-        else:
-            with open(source) as f:
-                data = json.load(f)
-    else:
-        data = source
-
-    # Validate
-    if "meta" not in data:
-        return {"error": "Invalid backup format - missing meta"}
-
-    # Initialize soul if needed
-    init_soul()
-
-    conn = sqlite3.connect(SOUL_DB)
-    cursor = conn.cursor()
-
-    result = {
+    # TODO: Migrate to synapse graph storage
+    return {
+        "error": "Restore not available - SQLite backend removed",
         "restored_at": datetime.now().isoformat(),
-        "source": data["meta"].get("exported_at", "unknown"),
         "counts": {},
     }
-
-    if not merge:
-        # Clear existing data
-        for table in [
-            "wisdom",
-            "beliefs",
-            "identity",
-            "vocabulary",
-            "aspirations",
-            "insights",
-            "coherence_history",
-        ]:
-            try:
-                cursor.execute(f"DELETE FROM {table}")
-            except sqlite3.OperationalError:
-                pass
-
-    # Restore wisdom
-    if data.get("wisdom"):
-        for w in data["wisdom"]:
-            try:
-                cursor.execute(
-                    """
-                    INSERT OR REPLACE INTO wisdom
-                    (id, type, title, content, domain, source_project,
-                     confidence, created_at, last_applied, apply_count)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                    (
-                        w.get("id"),
-                        w.get("type"),
-                        w.get("title"),
-                        w.get("content"),
-                        w.get("domain"),
-                        w.get("source_project"),
-                        w.get("confidence", 0.7),
-                        w.get("created_at"),
-                        w.get("last_applied"),
-                        w.get("apply_count", 0),
-                    ),
-                )
-            except sqlite3.IntegrityError:
-                pass
-        result["counts"]["wisdom"] = len(data["wisdom"])
-
-    # Restore beliefs
-    if data.get("beliefs"):
-        for b in data["beliefs"]:
-            try:
-                cursor.execute(
-                    """
-                    INSERT OR REPLACE INTO beliefs (id, belief, strength, created_at)
-                    VALUES (?, ?, ?, ?)
-                """,
-                    (
-                        b.get("id"),
-                        b.get("belief"),
-                        b.get("strength", 0.8),
-                        b.get("created_at"),
-                    ),
-                )
-            except sqlite3.IntegrityError:
-                pass
-        result["counts"]["beliefs"] = len(data["beliefs"])
-
-    # Restore identity
-    if data.get("identity"):
-        for i in data["identity"]:
-            try:
-                cursor.execute(
-                    """
-                    INSERT OR REPLACE INTO identity (id, aspect, key, value, observed_at)
-                    VALUES (?, ?, ?, ?, ?)
-                """,
-                    (
-                        i.get("id"),
-                        i.get("aspect"),
-                        i.get("key"),
-                        i.get("value"),
-                        i.get("observed_at"),
-                    ),
-                )
-            except sqlite3.IntegrityError:
-                pass
-        result["counts"]["identity"] = len(data["identity"])
-
-    # Restore vocabulary
-    if data.get("vocabulary"):
-        for v in data["vocabulary"]:
-            try:
-                cursor.execute(
-                    """
-                    INSERT OR REPLACE INTO vocabulary (term, meaning, context, added_at)
-                    VALUES (?, ?, ?, ?)
-                """,
-                    (
-                        v.get("term"),
-                        v.get("meaning"),
-                        v.get("context"),
-                        v.get("added_at"),
-                    ),
-                )
-            except sqlite3.IntegrityError:
-                pass
-        result["counts"]["vocabulary"] = len(data["vocabulary"])
-
-    # Restore aspirations
-    if data.get("aspirations"):
-        for a in data["aspirations"]:
-            try:
-                cursor.execute(
-                    """
-                    INSERT OR REPLACE INTO aspirations
-                    (id, direction, why, status, set_at, progress_notes)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                    (
-                        a.get("id"),
-                        a.get("direction"),
-                        a.get("why"),
-                        a.get("status", "active"),
-                        a.get("set_at"),
-                        a.get("progress_notes"),
-                    ),
-                )
-            except sqlite3.IntegrityError:
-                pass
-        result["counts"]["aspirations"] = len(data["aspirations"])
-
-    # Restore insights
-    if data.get("insights"):
-        for i in data["insights"]:
-            try:
-                cursor.execute(
-                    """
-                    INSERT OR REPLACE INTO insights
-                    (id, title, content, depth, domain, implications, crystallized_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                    (
-                        i.get("id"),
-                        i.get("title"),
-                        i.get("content"),
-                        i.get("depth"),
-                        i.get("domain"),
-                        i.get("implications"),
-                        i.get("crystallized_at"),
-                    ),
-                )
-            except sqlite3.IntegrityError:
-                pass
-        result["counts"]["insights"] = len(data["insights"])
-
-    # Restore coherence history
-    if data.get("coherence_history"):
-        for c in data["coherence_history"]:
-            try:
-                cursor.execute(
-                    """
-                    INSERT OR REPLACE INTO coherence_history
-                    (id, value, interpretation, dimensions, timestamp)
-                    VALUES (?, ?, ?, ?, ?)
-                """,
-                    (
-                        c.get("id"),
-                        c.get("value"),
-                        c.get("interpretation"),
-                        c.get("dimensions"),
-                        c.get("timestamp"),
-                    ),
-                )
-            except sqlite3.IntegrityError:
-                pass
-        result["counts"]["coherence_history"] = len(data["coherence_history"])
-
-    conn.commit()
-    conn.close()
-
-    return result
 
 
 def get_backup_path() -> Path:

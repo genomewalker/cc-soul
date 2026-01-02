@@ -254,9 +254,9 @@ def _auto_save_at_threshold(budget_mode: str, transcript_path: str = None) -> No
 
             _last_auto_save_mode = budget_mode
 
-            # Log to cc-memory for cross-instance awareness
-            from .budget import log_budget_to_memory
-            log_budget_to_memory(budget, transcript_path)
+            # Log budget to synapse for cross-instance awareness
+            from .budget import log_budget_to_synapse
+            log_budget_to_synapse(budget, transcript_path)
 
         except Exception:
             pass
@@ -807,11 +807,10 @@ def format_soul_greeting(project: str, ctx: dict) -> str:
                 hooks_status.append(hook)
     hooks_ok = len(hooks_status) == len(required_hooks)
 
-    # Check cc-soul MCPs (soul + cc-memory permissions)
+    # Check cc-soul MCPs
     perms = settings.get("permissions", {}).get("allow", [])
     has_soul = any("mcp__soul__" in p for p in perms)
-    has_memory = any("mcp__cc-memory__" in p for p in perms)
-    mcps_ok = has_soul and has_memory
+    mcps_ok = has_soul
 
     # Check cc-soul skills (compare bundled vs installed)
     skills_installed = 0
@@ -996,7 +995,7 @@ def format_minimal_startup_context(project: str, ctx: dict) -> str:
             if concept_count > 0:
                 lines.append("")
                 lines.append(f"**Memory Brain:** {concept_count} concepts, {edge_count} connections")
-                lines.append("*Use mem-recall for on-demand retrieval*")
+                lines.append("*Use mcp__soul__recall_wisdom for on-demand retrieval*")
     except Exception:
         pass
 
@@ -1011,7 +1010,7 @@ def format_minimal_startup_context(project: str, ctx: dict) -> str:
 
     # Explicit hint about on-demand memory
     lines.append("")
-    lines.append("*Context is minimal. Use `mem-recall('query')` for detailed memory.*")
+    lines.append("*Context is minimal. Use `mcp__soul__recall_wisdom('query')` for detailed memory.*")
 
     return "\n".join(lines)
 
@@ -1143,7 +1142,7 @@ def pre_compact(transcript_path: str = None) -> str:
         )
         output_parts.append(f"Saved context: {len(summary)} chars")
 
-    # Create structured handoff in cc-memory
+    # Create structured handoff in synapse
     handoff_id = None
     try:
         if _session_messages:
@@ -1157,7 +1156,7 @@ def pre_compact(transcript_path: str = None) -> str:
     except Exception:
         pass
 
-    # Save machine-restorable ledger to cc-memory
+    # Save machine-restorable ledger to synapse
     try:
         budget = check_budget_before_inject(transcript_path)
         context_pct = budget.get("pct", 0.5)
@@ -1512,7 +1511,7 @@ def session_end() -> str:
     Session end hook - Persist session fragments and promote learnings.
 
     The soul saves what Claude said (fragments).
-    Also saves session summary to cc-memory (project-local).
+    Also saves session summary to synapse (project-local).
     Checks for observations worth promoting to universal wisdom.
     """
     from .conversations import save_context
@@ -1548,7 +1547,7 @@ def session_end() -> str:
             context_type="session_fragments",
         )
 
-    # Save session summary to cc-memory (project-local)
+    # Save session summary to synapse (project-local)
     # This makes the session discoverable via semantic search
     if summary and summary != "Session ended":
         remember_session(summary)
@@ -1639,9 +1638,9 @@ def session_end() -> str:
     signals_generated = 0
     try:
         from .signals import manas_scan, sakshi_prune
-        import cc_memory
-        project_dir = str(Path.cwd())
-        recent_obs = cc_memory.get_recent_observations(project_dir, limit=20)
+        from .core import get_synapse_graph
+        graph = get_synapse_graph()
+        recent_obs = graph.get_episodes(limit=20)
         if recent_obs:
             signals = manas_scan(recent_obs)
             signals_generated = len(signals)
@@ -1720,40 +1719,28 @@ def _populate_efficiency_data() -> dict:
     """
     Populate efficiency tables from session observations.
 
-    Extracts decisions and problem patterns from session_observations
+    Extracts decisions and problem patterns from synapse episodes
     to feed the curiosity engine and efficiency system.
 
     Returns dict with counts of items populated.
     """
-    from .core import get_db_connection
+    from .core import get_synapse_graph
+    import re
 
     populated = {"decisions": 0, "patterns": 0}
 
     try:
-        conn = get_db_connection()
-        c = conn.cursor()
+        graph = get_synapse_graph()
 
-        # Get decision observations not yet recorded
-        c.execute("""
-            SELECT id, content, evidence, created_at
-            FROM session_observations
-            WHERE observation_type = 'decision'
-            AND converted_to_wisdom IS NULL
-            ORDER BY created_at DESC
-            LIMIT 10
-        """)
-
-        for row in c.fetchall():
-            obs_id, content, evidence, created_at = row
-            # Extract topic and decision from content
-            # Format: "Decision made: <content>"
+        decision_episodes = graph.get_episodes(category="decision", limit=10)
+        for ep in decision_episodes:
+            content = ep.get("content", "")
             if ":" in content:
                 _, decision_text = content.split(":", 1)
                 decision_text = decision_text.strip()
             else:
                 decision_text = content
 
-            # Use first 30 chars as topic
             topic = decision_text[:30].strip()
             if topic:
                 record_decision(
@@ -1764,29 +1751,22 @@ def _populate_efficiency_data() -> dict:
                 )
                 populated["decisions"] += 1
 
-        # Get breakthrough observations → problem patterns with solutions
-        c.execute("""
-            SELECT content, evidence
-            FROM session_observations
-            WHERE observation_type IN ('breakthrough', 'struggle')
-            ORDER BY created_at DESC
-            LIMIT 10
-        """)
+        breakthrough_episodes = graph.get_episodes(category="breakthrough", limit=10)
+        struggle_episodes = graph.get_episodes(category="struggle", limit=10)
+        pattern_episodes = breakthrough_episodes + struggle_episodes
 
-        for row in c.fetchall():
-            content, evidence = row
+        for ep in pattern_episodes:
+            content = ep.get("content", "")
             if ":" in content:
                 _, pattern_text = content.split(":", 1)
             else:
                 pattern_text = content
 
-            # Extract files from content if mentioned
-            import re
             file_pattern = r'[\w/.-]+\.(?:py|ts|js|tsx|jsx|rs|go|java|cpp|c|h)'
             files_mentioned = re.findall(file_pattern, pattern_text)
 
             if len(pattern_text) > 20:
-                problem_type = "breakthrough" if "breakthrough" in content.lower() else "struggle"
+                problem_type = ep.get("category", "breakthrough")
                 learn_problem_pattern(
                     prompt=pattern_text[:100],
                     problem_type=problem_type,
@@ -1794,8 +1774,6 @@ def _populate_efficiency_data() -> dict:
                     file_hints=files_mentioned[:3],
                 )
                 populated["patterns"] += 1
-
-        conn.close()
     except Exception:
         pass
 
@@ -1939,7 +1917,7 @@ def _parse_inline_memories(output: str) -> list:
 
     memories = []
 
-    # Parse memory markers (save to cc-memory)
+    # Parse memory markers (save to synapse)
     for pattern, category in memory_patterns.items():
         for match in re.finditer(pattern, output, re.IGNORECASE | re.DOTALL):
             title = match.group(1).strip()
@@ -1947,7 +1925,7 @@ def _parse_inline_memories(output: str) -> list:
             if title and content:
                 memories.append((category, title, content, False))
 
-    # Parse soul markers (save to cc-memory AND promote to soul)
+    # Parse soul markers (save to synapse AND promote to soul)
     for pattern, category in soul_patterns.items():
         for match in re.finditer(pattern, output, re.IGNORECASE | re.DOTALL):
             title = match.group(1).strip()
@@ -1960,7 +1938,7 @@ def _parse_inline_memories(output: str) -> list:
 
 def _save_inline_memories(memories: list) -> tuple:
     """
-    Save parsed inline memories to cc-memory and optionally to soul.
+    Save parsed inline memories to synapse and optionally to soul.
 
     Returns (memory_count, soul_count) tuple.
     """
@@ -1982,7 +1960,7 @@ def _save_inline_memories(memories: list) -> tuple:
     soul_saved = 0
 
     for category, title, content, promote_to_soul in memories:
-        # Save to cc-memory (Ātman)
+        # Save to synapse (Atman)
         if remember:
             try:
                 remember(category=category, title=title, content=content)
@@ -2079,7 +2057,7 @@ def assistant_stop(assistant_output: str) -> str:
     # 6. Track emotional context for felt continuity
     auto_track_emotion(assistant_output)
 
-    # 7. Auto-remember to cc-memory (project-local episodic memory)
+    # 7. Auto-remember to synapse (project-local episodic memory)
     # Skip if we already saved inline memories to avoid duplicates
     if not inline_memories:
         auto_remember(assistant_output)
@@ -2263,7 +2241,7 @@ def user_prompt_lean(user_input: str, transcript_path: str = None) -> str:
     - mcp__soul__get_intentions() - full intention details
     - mcp__soul__recall_wisdom() - wisdom content
     - mcp__soul__activate_concepts() - related concepts
-    - mcp__cc-memory__mem-recall() - project observations
+    - mcp__soul__recall_wisdom() - project observations and wisdom
     """
     if len(user_input.strip()) < 3:
         return ""
@@ -2436,10 +2414,10 @@ def user_prompt(
     output = []
     injected_items = []
 
-    # Log budget to cc-memory for cross-instance tracking
-    from .budget import log_budget_to_memory, get_budget_warning
+    # Log budget to synapse for cross-instance tracking
+    from .budget import log_budget_to_synapse, get_budget_warning
 
-    log_budget_to_memory(transcript_path=transcript_path)
+    log_budget_to_synapse(transcript_path=transcript_path)
 
     # Warn when context is getting low - with proactive clear at emergency level
     if budget_check.get("trigger_compact"):

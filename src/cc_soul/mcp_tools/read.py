@@ -4,20 +4,19 @@
 
 @mcp.tool()
 def search_memory(query: str, limit: int = 10, verbose: bool = False) -> str:
-    """Search all memory sources with priority: cc-memory > soul > claude-mem.
+    """Search synapse for wisdom and episodes.
 
-    Primary search tool. Searches project observations first (cc-memory),
-    then universal wisdom (cc-soul). Returns note about claude-mem for
-    extended search if needed.
+    Primary search tool. Semantic search across all soul data:
+    wisdom, beliefs, episodes, and intentions.
 
     Args:
         query: What to search for
         limit: Maximum results to return
         verbose: Include content excerpts in results
     """
-    from .unified_search import unified_search, format_search_results
+    from ..unified_search import unified_search, format_search_results
 
-    results = unified_search(query, limit=limit, include_claude_mem=True)
+    results = unified_search(query, limit=limit)
     return format_search_results(results, verbose=verbose)
 
 
@@ -25,14 +24,14 @@ def search_memory(query: str, limit: int = 10, verbose: bool = False) -> str:
 def recall_wisdom(query: str, limit: int = 5) -> str:
     """Recall relevant wisdom based on a query.
 
-    Searches only cc-soul wisdom (universal patterns).
-    For full memory search including project context, use search_memory.
+    Searches only soul wisdom (universal patterns).
+    For full search including episodes, use search_memory.
 
     Args:
         query: What to search for
         limit: Maximum results to return
     """
-    from .wisdom import quick_recall
+    from ..wisdom import quick_recall
 
     results = quick_recall(query, limit=limit)
     if not results:
@@ -82,7 +81,7 @@ def check_budget(transcript_path: str = None) -> str:
     Args:
         transcript_path: Optional path to session transcript
     """
-    from .budget import get_context_budget, format_budget_status
+    from ..budget import get_context_budget, format_budget_status
 
     budget = get_context_budget(transcript_path)
     if not budget:
@@ -97,7 +96,7 @@ def check_budget(transcript_path: str = None) -> str:
 @mcp.tool()
 def soul_summary() -> str:
     """Get a summary of the soul's current state."""
-    from .core import get_soul_context
+    from ..core import get_soul_context
 
     ctx = get_soul_context()
 
@@ -125,16 +124,17 @@ def soul_health() -> str:
     """Check soul system health and vitality.
 
     Comprehensive health check covering:
-    - Core: Database, wisdom, beliefs, identity
-    - Infrastructure: Embeddings, LanceDB, Kuzu graph
-    - Integration: cc-memory bridge, budget tracking
+    - Core: Synapse graph, wisdom, beliefs
+    - Infrastructure: Embeddings, vector search
+    - Integration: Budget tracking, hooks
     - Agency: Active swarms, agent patterns
     """
-    from .core import SOUL_DB, SOUL_DIR, get_db_connection
-    import sqlite3
+    from ..core import get_synapse_graph, SOUL_DIR, SYNAPSE_PATH
+    import json
+    from pathlib import Path
 
     lines = ["# Soul Health", ""]
-    checks = []  # (category, name, status, detail)
+    checks = []
 
     def check(category, name, fn):
         try:
@@ -143,43 +143,39 @@ def soul_health() -> str:
         except Exception as e:
             checks.append((category, name, "FAIL", str(e)[:50]))
 
-    # ═══════════════════════════════════════════════════════════════
-    # CORE - Soul database and content
-    # ═══════════════════════════════════════════════════════════════
+    # ===================================================================
+    # CORE - Synapse graph and content
+    # ===================================================================
 
-    def check_database():
-        if not SOUL_DB.exists():
-            return "FAIL", "Database not found"
-        conn = get_db_connection()
-        cursor = conn.execute("SELECT COUNT(*) FROM wisdom")
-        count = cursor.fetchone()[0]
-        return "OK", f"{count} wisdom entries"
+    def check_synapse():
+        if not SYNAPSE_PATH.exists():
+            return "FAIL", "Synapse file not found"
+        graph = get_synapse_graph()
+        wisdom_count = len(graph.get_all_wisdom())
+        return "OK", f"{wisdom_count} wisdom entries"
 
     def check_beliefs():
-        conn = get_db_connection()
-        cursor = conn.execute("SELECT COUNT(*) FROM wisdom WHERE type='principle'")
-        count = cursor.fetchone()[0]
+        graph = get_synapse_graph()
+        beliefs = graph.get_all_beliefs()
+        count = len(beliefs)
         return "OK" if count > 0 else "WARN", f"{count} beliefs"
 
-    def check_identity():
-        conn = get_db_connection()
-        try:
-            cursor = conn.execute("SELECT COUNT(*) FROM identity")
-            count = cursor.fetchone()[0]
-            return "OK" if count > 0 else "WARN", f"{count} aspects"
-        except sqlite3.OperationalError:
-            return "WARN", "table not created"
+    def check_intentions():
+        graph = get_synapse_graph()
+        intentions = graph.get_intentions()
+        active = [i for i in intentions if i.get("status") == "active"]
+        return "OK" if active else "WARN", f"{len(active)} active"
 
-    check("core", "database", check_database)
+    check("core", "synapse", check_synapse)
     check("core", "beliefs", check_beliefs)
-    check("core", "identity", check_identity)
+    check("core", "intentions", check_intentions)
 
-    # ═══════════════════════════════════════════════════════════════
-    # INFRASTRUCTURE - Embeddings, vector DB, graph DB
-    # ═══════════════════════════════════════════════════════════════
+    # ===================================================================
+    # INFRASTRUCTURE - Embeddings, vector search
+    # ===================================================================
 
     def check_embeddings():
-        from .vectors import embed_text
+        from ..vectors import embed_text
         vec = embed_text("test")
         return "OK", f"dim={len(vec)}"
 
@@ -191,33 +187,26 @@ def soul_health() -> str:
         tables = db.table_names()
         return "OK", f"{len(tables)} tables"
 
-    def check_kuzu():
-        try:
-            import kuzu  # noqa: F401
-            return "OK", "available"
-        except ImportError:
-            return "WARN", "not installed"
+    def check_coherence():
+        graph = get_synapse_graph()
+        coherence = graph.coherence()
+        return "OK", f"{coherence:.0%}"
 
     check("infra", "embeddings", check_embeddings)
     check("infra", "lancedb", check_lancedb)
-    check("infra", "kuzu", check_kuzu)
+    check("infra", "coherence", check_coherence)
 
-    # ═══════════════════════════════════════════════════════════════
-    # INTEGRATION - cc-memory bridge, budget tracking
-    # ═══════════════════════════════════════════════════════════════
+    # ===================================================================
+    # INTEGRATION - Budget tracking, hooks
+    # ===================================================================
 
-    def check_cc_memory_bridge():
-        from .bridge import is_memory_available
-        from pathlib import Path
-        if is_memory_available():
-            from .bridge import find_project_dir
-            project = find_project_dir()
-            project_name = Path(project).name if project else "global"
-            return "OK", f"connected ({project_name})"
-        return "WARN", "not available"
+    def check_synapse_episodes():
+        graph = get_synapse_graph()
+        episodes = graph.get_episodes(limit=10)
+        return "OK", f"{len(episodes)} recent episodes"
 
     def check_budget_tracking():
-        from .budget import get_context_budget, get_all_session_budgets
+        from ..budget import get_context_budget, get_all_session_budgets
         budget = get_context_budget()
         sessions = get_all_session_budgets()
         if budget:
@@ -226,8 +215,6 @@ def soul_health() -> str:
         return "WARN", f"transcript unavailable, {len(sessions)} sessions tracked"
 
     def check_hooks():
-        from pathlib import Path
-        import json
         settings_path = Path.home() / ".claude" / "settings.json"
         if not settings_path.exists():
             return "FAIL", "settings.json not found"
@@ -241,9 +228,6 @@ def soul_health() -> str:
         return "WARN", f"{len(installed)}/{len(required)} hooks"
 
     def check_mcp_servers():
-        from pathlib import Path
-        import json
-        # Check global and project-level MCP configs
         global_mcp = Path.home() / ".claude" / "mcp_servers.json"
         project_mcp = Path(".mcp.json")
         servers = []
@@ -253,59 +237,54 @@ def soul_health() -> str:
         if project_mcp.exists():
             data = json.loads(project_mcp.read_text())
             servers.extend(data.get("mcpServers", {}).keys())
-        # Also check cc-soul, cc-memory, opencode, soul in typical locations
-        expected = ["cc-soul", "cc-memory", "opencode", "soul"]
         return "OK", f"{len(servers)} configured"
 
     def check_skills():
-        from pathlib import Path
         skills_dir = Path.home() / ".claude" / "skills"
         if not skills_dir.exists():
             return "WARN", "skills directory missing"
         skills = [d.name for d in skills_dir.iterdir() if d.is_dir()]
         return "OK", f"{len(skills)} available"
 
-    check("integration", "cc-memory", check_cc_memory_bridge)
+    check("integration", "episodes", check_synapse_episodes)
     check("integration", "budget", check_budget_tracking)
     check("integration", "hooks", check_hooks)
     check("integration", "mcp", check_mcp_servers)
     check("integration", "skills", check_skills)
 
-    # ═══════════════════════════════════════════════════════════════
-    # AGENCY - Active swarms, agent patterns, proactivity
-    # ═══════════════════════════════════════════════════════════════
+    # ===================================================================
+    # AGENCY - Active swarms, agent patterns
+    # ===================================================================
 
     def check_active_swarms():
-        from .convergence import list_active_swarms
+        from ..convergence import list_active_swarms
         swarms = list_active_swarms()
         active = [s for s in swarms if s.get("status") != "completed"]
         return "OK", f"{len(active)} active, {len(swarms)} total"
 
     def check_agent_actions():
-        conn = get_db_connection()
-        try:
-            cursor = conn.execute(
-                "SELECT COUNT(*) FROM agent_actions WHERE timestamp > datetime('now', '-24 hours')"
-            )
-            count = cursor.fetchone()[0]
-            return "OK", f"{count} actions (24h)"
-        except sqlite3.OperationalError:
-            return "OK", "no actions yet"
+        graph = get_synapse_graph()
+        episodes = graph.get_episodes(category="agent_action", limit=100)
+        from datetime import datetime, timedelta
+        cutoff = (datetime.now() - timedelta(hours=24)).isoformat()
+        recent = [e for e in episodes if e.get("timestamp", "") > cutoff]
+        return "OK", f"{len(recent)} actions (24h)"
 
-    def check_intentions():
-        from .intentions import get_active_intentions
-        intentions = get_active_intentions()
-        return "OK" if intentions else "WARN", f"{len(intentions)} active"
+    def check_agent_intentions():
+        graph = get_synapse_graph()
+        intentions = graph.get_intentions()
+        active = [i for i in intentions if i.get("status") == "active"]
+        return "OK" if active else "WARN", f"{len(active)} active"
 
     check("agency", "swarms", check_active_swarms)
     check("agency", "agent_actions", check_agent_actions)
-    check("agency", "intentions", check_intentions)
+    check("agency", "intentions", check_agent_intentions)
 
-    # ═══════════════════════════════════════════════════════════════
+    # ===================================================================
     # FORMAT OUTPUT
-    # ═══════════════════════════════════════════════════════════════
+    # ===================================================================
 
-    status_icons = {"OK": "✓", "WARN": "⚠", "FAIL": "✗"}
+    status_icons = {"OK": "+", "WARN": "?", "FAIL": "-"}
     current_category = None
 
     for category, name, status, detail in checks:
@@ -315,7 +294,6 @@ def soul_health() -> str:
         icon = status_icons.get(status, "?")
         lines.append(f"  {icon} **{name}**: {detail}")
 
-    # Overall status
     fails = sum(1 for _, _, s, _ in checks if s == "FAIL")
     warns = sum(1 for _, _, s, _ in checks if s == "WARN")
 
@@ -341,7 +319,7 @@ def soul_mood(reflect: bool = False) -> str:
         reflect: If True, returns a first-person reflective narrative.
                  If False (default), returns structured status display.
     """
-    from .mood import compute_mood, format_mood_display, get_mood_reflection
+    from ..mood import compute_mood, format_mood_display, get_mood_reflection
 
     mood = compute_mood()
 
@@ -366,9 +344,9 @@ def soul_autonomy() -> str:
 
     The soul observes, diagnoses, proposes, validates, and ACTS on its insights.
     Uses judgment about confidence and risk to decide what actions to take:
-    - High confidence + low risk → Act immediately
-    - Medium confidence → Gather more data
-    - Low confidence → Defer to human
+    - High confidence + low risk -> Act immediately
+    - Medium confidence -> Gather more data
+    - Low confidence -> Defer to human
 
     Returns a report of issues found, actions taken, and reflections.
     """
@@ -432,42 +410,60 @@ def soul_schedule_introspection(reason: str, priority: int = 5) -> str:
 @mcp.tool()
 def get_beliefs() -> str:
     """Get all current beliefs/axioms."""
-    from .beliefs import get_beliefs as _get_beliefs
+    from ..core import get_synapse_graph
 
-    beliefs = _get_beliefs()
+    graph = get_synapse_graph()
+    beliefs = graph.get_all_beliefs()
+
     if not beliefs:
         return "No beliefs recorded yet."
 
     lines = []
     for b in beliefs:
         conf = int(b.get("strength", 0.8) * 100)
-        lines.append(f"- [{conf}%] {b['belief']}")
+        lines.append(f"- [{conf}%] {b['statement']}")
     return "\n".join(lines)
 
 
 @mcp.tool()
 def get_identity() -> str:
     """Get current identity observations."""
-    from .identity import get_identity as _get_identity
+    from ..core import get_synapse_graph
+    import json
+    from collections import defaultdict
 
-    identity = _get_identity()
-    if not identity:
+    graph = get_synapse_graph()
+    episodes = graph.get_episodes(category="identity", limit=50)
+
+    if not episodes:
+        return "No identity observations yet."
+
+    aspects = defaultdict(list)
+    for ep in episodes:
+        try:
+            data = json.loads(ep.get("content", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        aspect = data.get("aspect", "unknown")
+        value = data.get("value", ep.get("title", ""))
+        if value:
+            aspects[aspect].append(value)
+
+    if not aspects:
         return "No identity observations yet."
 
     lines = []
-    for aspect, observations in identity.items():
-        if observations:
-            latest = (
-                observations[-1] if isinstance(observations, list) else observations
-            )
-            lines.append(f"- **{aspect}**: {latest}")
+    for aspect, observations in aspects.items():
+        latest = observations[-1] if observations else ""
+        lines.append(f"- **{aspect}**: {latest}")
     return "\n".join(lines)
 
 
 @mcp.tool()
 def get_vocabulary() -> str:
     """Get all vocabulary terms."""
-    from .vocabulary import get_vocabulary as _get_vocabulary
+    from ..vocabulary import get_vocabulary as _get_vocabulary
 
     vocab = _get_vocabulary()
     if not vocab:

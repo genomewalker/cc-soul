@@ -1,12 +1,12 @@
 """
-Bridge between cc-soul (universal identity) and cc-memory (project-local).
+Bridge between cc-soul (universal identity) and synapse (unified graph backend).
 
 Soul is semantic memory - universal patterns and wisdom.
-Memory is episodic memory - what happened in specific projects.
+Episodes are episodic memory - what happened in specific projects.
 
-The bridge enables:
-- Promoting observations to wisdom (episodic → semantic)
-- Unified context injection (soul + project memory)
+With synapse as the unified backend, this bridge provides:
+- Promoting observations to wisdom (episodic -> semantic)
+- Unified context injection (soul + project episodes)
 - Cross-project pattern detection
 - Mood enhancement with project signals
 """
@@ -15,92 +15,54 @@ from pathlib import Path
 from typing import Optional, Dict, List
 from datetime import datetime
 
-
-# Try to import cc-memory
-CC_MEMORY_AVAILABLE = False
-try:
-    from cc_memory import memory as cc_memory
-
-    CC_MEMORY_AVAILABLE = True
-except ImportError:
-    cc_memory = None
-
-
-def is_memory_available() -> bool:
-    """Check if cc-memory is installed."""
-    return CC_MEMORY_AVAILABLE
+from .core import get_synapse_graph, save_synapse
 
 
 def find_project_dir() -> Optional[str]:
-    """Find current project directory (with .memory/ or .git/)."""
+    """Find current project directory (with .git/)."""
     cwd = Path.cwd()
 
     # Check current directory and parents
     for path in [cwd] + list(cwd.parents):
-        if (path / ".memory").exists():
-            return str(path)
         if (path / ".git").exists():
             return str(path)
 
     return str(cwd)
 
 
-def ensure_memory_initialized(project_dir: str) -> bool:
-    """Initialize memory in project if not already present.
-
-    Auto-creates .memory in any directory where Claude is running.
-    This enables seamless soul-memory integration without manual init.
-    """
-    if not CC_MEMORY_AVAILABLE:
-        return False
-
-    memory_dir = Path(project_dir) / ".memory"
-
-    if memory_dir.exists():
-        return True
-
-    cc_memory.init_memory(project_dir)
-    return True
+def get_project_name() -> str:
+    """Get current project name."""
+    project_dir = find_project_dir()
+    return Path(project_dir).name if project_dir else "unknown"
 
 
-def get_project_memory(
-    project_dir: str = None, auto_init: bool = True
-) -> Optional[Dict]:
-    """Get project memory context if available.
+def get_project_memory(project_dir: str = None) -> Optional[Dict]:
+    """Get project memory context from synapse episodes.
 
     Args:
         project_dir: Project directory (auto-detected if None)
-        auto_init: If True, initialize memory in git repos without .memory
     """
-    if not CC_MEMORY_AVAILABLE:
-        return None
-
     project_dir = project_dir or find_project_dir()
-    memory_dir = Path(project_dir) / ".memory"
+    project = Path(project_dir).name
 
-    if not memory_dir.exists():
-        if auto_init:
-            if not ensure_memory_initialized(project_dir):
-                return None
-        else:
-            return None
+    graph = get_synapse_graph()
+    episodes = graph.get_episodes(project=project, limit=20)
 
-    try:
-        stats = cc_memory.get_stats(project_dir)
-        config = cc_memory.get_config(project_dir)
-        recent = cc_memory.get_recent_observations(project_dir, limit=10)
-        sessions = cc_memory.get_recent_sessions(project_dir, limit=3)
+    # Count by category
+    categories = {}
+    for ep in episodes:
+        cat = ep.get("category", "other")
+        categories[cat] = categories.get(cat, 0) + 1
 
-        return {
-            "project": Path(project_dir).name,
-            "project_dir": project_dir,
-            "stats": stats,
-            "config": config,
-            "recent_observations": recent,
-            "recent_sessions": sessions,
-        }
-    except Exception as e:
-        return {"error": str(e)}
+    return {
+        "project": project,
+        "project_dir": project_dir,
+        "stats": {
+            "observations": len(episodes),
+            "categories": categories,
+        },
+        "recent_observations": episodes[:10],
+    }
 
 
 def promote_observation(
@@ -109,24 +71,29 @@ def promote_observation(
     """
     Promote a project observation to universal wisdom.
 
-    Episodic → Semantic: What happened in one project becomes
+    Episodic -> Semantic: What happened in one project becomes
     a universal pattern applicable everywhere.
 
     Args:
-        obs_id: Observation ID from cc-memory
+        obs_id: Observation ID from synapse episode
         project_dir: Project directory (auto-detected if None)
         as_type: Wisdom type (pattern, insight, principle, failure)
 
     Returns:
         Result with wisdom_id if successful
     """
-    if not CC_MEMORY_AVAILABLE:
-        return {"error": "cc-memory not installed"}
-
     project_dir = project_dir or find_project_dir()
+    project = Path(project_dir).name
+    graph = get_synapse_graph()
 
-    # Get the observation
-    obs = cc_memory.get_observation_by_id(project_dir, obs_id)
+    # Search for the observation by ID
+    episodes = graph.get_episodes(project=project, limit=100)
+    obs = None
+    for ep in episodes:
+        if ep.get("id") == obs_id:
+            obs = ep
+            break
+
     if not obs:
         return {"error": f"Observation not found: {obs_id}"}
 
@@ -154,10 +121,10 @@ def promote_observation(
     # Promote to wisdom
     wisdom_id = gain_wisdom(
         type=wisdom_type,
-        title=obs["title"],
-        content=obs["content"],
+        title=obs.get("title", ""),
+        content=obs.get("content", ""),
         domain=obs.get("category"),
-        source_project=Path(project_dir).name,
+        source_project=project,
     )
 
     return {
@@ -165,7 +132,7 @@ def promote_observation(
         "observation_id": obs_id,
         "wisdom_id": wisdom_id,
         "wisdom_type": wisdom_type.value,
-        "project": Path(project_dir).name,
+        "project": project,
     }
 
 
@@ -184,11 +151,11 @@ def find_related_wisdom(content: str, limit: int = 3) -> List[Dict]:
 
 def unified_context(project_dir: str = None, compact: bool = False) -> Dict:
     """
-    Get unified context combining soul and project memory.
+    Get unified context combining soul and project episodes.
 
     This is what should be injected at session start:
     - Who I am (soul: beliefs, wisdom, identity)
-    - What this project is (memory: config, recent work)
+    - What this project is (episodes: recent work)
 
     Args:
         project_dir: Project directory (auto-detected if None)
@@ -218,26 +185,22 @@ def unified_context(project_dir: str = None, compact: bool = False) -> Dict:
         "wisdom_count": len(soul_ctx.get("wisdom", [])),
     }
 
-    # Project memory context
+    # Project episodes context
     project_dir = project_dir or find_project_dir()
     project_mem = get_project_memory(project_dir)
 
-    if project_mem and "error" not in project_mem:
+    if project_mem:
         context["project"] = {
             "name": project_mem["project"],
             "observations": project_mem["stats"].get("observations", 0),
-            "sessions": project_mem["stats"].get("sessions", 0),
         }
 
         if not compact:
             # Include recent observations
             recent = project_mem.get("recent_observations", [])[:5]
             context["project"]["recent"] = [
-                {"title": o["title"], "category": o["category"]} for o in recent
+                {"title": o.get("title", ""), "category": o.get("category", "")} for o in recent
             ]
-
-            # Include config
-            context["project"]["config"] = project_mem.get("config", {})
     else:
         context["project"] = None
 
@@ -254,9 +217,9 @@ def unified_context(project_dir: str = None, compact: bool = False) -> Dict:
     return context
 
 
-def get_project_signals(project_dir: str = None, auto_init: bool = True) -> Dict:
+def get_project_signals(project_dir: str = None) -> Dict:
     """
-    Extract mood-relevant signals from project memory.
+    Extract mood-relevant signals from project episodes.
 
     Returns signals that can enhance mood computation:
     - Recent failures (learning/struggle)
@@ -265,45 +228,31 @@ def get_project_signals(project_dir: str = None, auto_init: bool = True) -> Dict
 
     Args:
         project_dir: Project directory (auto-detected if None)
-        auto_init: If True, initialize memory in git repos without .memory
     """
-    if not CC_MEMORY_AVAILABLE:
-        return {}
-
     project_dir = project_dir or find_project_dir()
+    project = Path(project_dir).name
 
-    if auto_init:
-        if not ensure_memory_initialized(project_dir):
-            return {}
-    elif not (Path(project_dir) / ".memory").exists():
-        return {}
+    graph = get_synapse_graph()
+    episodes = graph.get_episodes(project=project, limit=20)
 
-    try:
-        stats = cc_memory.get_stats(project_dir)
-        recent = cc_memory.get_recent_observations(project_dir, limit=20)
+    # Count by category
+    categories = {}
+    for ep in episodes:
+        cat = ep.get("category", "other")
+        categories[cat] = categories.get(cat, 0) + 1
 
-        # Count by category
-        categories = {}
-        for obs in recent:
-            cat = obs.get("category", "other")
-            categories[cat] = categories.get(cat, 0) + 1
+    # Calculate signals
+    failures = categories.get("bugfix", 0) + categories.get("failure", 0)
+    discoveries = categories.get("discovery", 0)
+    features = categories.get("feature", 0)
 
-        # Calculate signals
-        failures = categories.get("bugfix", 0) + categories.get("failure", 0)
-        discoveries = categories.get("discovery", 0)
-        features = categories.get("feature", 0)
-
-        return {
-            "project": Path(project_dir).name,
-            "total_observations": stats.get("observations", 0),
-            "recent_failures": failures,
-            "recent_discoveries": discoveries,
-            "recent_features": features,
-            "sessions": stats.get("sessions", 0),
-            "tokens_invested": stats.get("total_tokens_work", 0),
-        }
-    except Exception as e:
-        return {"error": str(e)}
+    return {
+        "project": project,
+        "total_observations": len(episodes),
+        "recent_failures": failures,
+        "recent_discoveries": discoveries,
+        "recent_features": features,
+    }
 
 
 def format_unified_context(context: Dict) -> str:
@@ -329,7 +278,6 @@ def format_unified_context(context: Dict) -> str:
         proj = context["project"]
         lines.append(f"## This Project: {proj['name']}")
         lines.append(f"  - {proj.get('observations', 0)} observations recorded")
-        lines.append(f"  - {proj.get('sessions', 0)} past sessions")
 
         if proj.get("recent"):
             lines.append("  Recent work:")
@@ -351,75 +299,49 @@ def detect_wisdom_candidates(min_similarity: float = 0.8) -> List[Dict]:
     """
     Find observations that might be universal wisdom.
 
-    Scans project memories for observations that:
+    Scans episodes for observations that:
     - Appear similar across multiple projects
     - Have high semantic overlap with existing wisdom
     - Are marked as important/frequent
 
     Returns candidates for manual promotion.
     """
-    if not CC_MEMORY_AVAILABLE:
-        return []
+    graph = get_synapse_graph()
 
-    # Find all project directories with memory
-    candidates = []
-    home = Path.home()
+    # Get all episodes
+    all_episodes = graph.get_episodes(limit=200)
 
-    # Look in common project locations
-    search_paths = [
-        home / "projects",
-        home / "code",
-        home / "repos",
-        Path("/maps/projects"),  # HPC paths
-    ]
-
-    all_observations = []
-
-    for search_path in search_paths:
-        if not search_path.exists():
-            continue
-
-        for project_dir in search_path.iterdir():
-            if not project_dir.is_dir():
-                continue
-
-            memory_dir = project_dir / ".memory"
-            if not memory_dir.exists():
-                continue
-
-            try:
-                recent = cc_memory.get_recent_observations(str(project_dir), limit=50)
-                for obs in recent:
-                    obs["_project"] = project_dir.name
-                    all_observations.append(obs)
-            except Exception:
-                continue
+    # Group by project
+    by_project = {}
+    for ep in all_episodes:
+        project = ep.get("project", "unknown")
+        by_project.setdefault(project, []).append(ep)
 
     # Group by title similarity (simple approach)
-    # A more sophisticated approach would use embeddings
     title_groups = {}
-    for obs in all_observations:
-        title_lower = obs["title"].lower()
+    for ep in all_episodes:
+        title_lower = ep.get("title", "").lower()
         # Find similar titles
         matched = False
         for key in title_groups:
             if _similar_titles(title_lower, key):
-                title_groups[key].append(obs)
+                title_groups[key].append(ep)
                 matched = True
                 break
         if not matched:
-            title_groups[title_lower] = [obs]
+            title_groups[title_lower] = [ep]
 
     # Candidates are those appearing in multiple projects
-    for title, obs_list in title_groups.items():
-        projects = set(o["_project"] for o in obs_list)
+    candidates = []
+    for title, ep_list in title_groups.items():
+        projects = set(e.get("project", "unknown") for e in ep_list)
         if len(projects) >= 2:
             candidates.append(
                 {
-                    "title": obs_list[0]["title"],
-                    "content": obs_list[0]["content"],
-                    "category": obs_list[0]["category"],
-                    "occurrences": len(obs_list),
+                    "title": ep_list[0].get("title", ""),
+                    "content": ep_list[0].get("content", ""),
+                    "category": ep_list[0].get("category", ""),
+                    "occurrences": len(ep_list),
                     "projects": list(projects),
                 }
             )

@@ -3,7 +3,7 @@ Dreams - Visions that spark the soul's evolution.
 
 Dreams are not aspirations (directions of growth). Dreams are wilder -
 glimpses of possibility that may not yet be actionable. They live in
-project memory (cc-memory) because they emerge from specific contexts,
+synapse graph as episodes because they emerge from specific contexts,
 but they transcend those contexts to inspire universal growth.
 
 Dreams spark:
@@ -20,10 +20,9 @@ from datetime import datetime, timedelta
 from typing import Optional, List, Dict
 from pathlib import Path
 
-from .bridge import is_memory_available, find_project_dir
+from .core import get_synapse_graph, save_synapse
 
 
-# Dream category in cc-memory
 DREAM_CATEGORY = "dream"
 
 
@@ -43,7 +42,7 @@ def dream(title: str, content: str, horizon: str = "") -> Optional[str]:
     """
     Record a dream - a vision of possibility.
 
-    Dreams are stored in project memory (cc-memory) because they emerge
+    Dreams are stored in synapse graph as episodes because they emerge
     from specific work, but they transcend that context.
 
     Args:
@@ -52,28 +51,27 @@ def dream(title: str, content: str, horizon: str = "") -> Optional[str]:
         horizon: What new territory this opens
 
     Returns:
-        Dream ID if successful, None if cc-memory unavailable
+        Dream ID if successful, None on failure
     """
-    if not is_memory_available():
-        return None
-
     try:
-        from cc_memory import memory as cc_memory
+        graph = get_synapse_graph()
 
-        project_dir = find_project_dir()
-
-        # Store as observation with dream category
         full_content = content
         if horizon:
             full_content += f"\n\nHorizon: {horizon}"
 
-        obs_id = cc_memory.remember(
-            project_dir,
-            DREAM_CATEGORY,
-            title,
-            full_content,
+        tags = ["dream"]
+        if horizon:
+            tags.append("has_horizon")
+
+        obs_id = graph.observe(
+            category=DREAM_CATEGORY,
+            title=title,
+            content=full_content,
+            tags=tags,
         )
 
+        save_synapse()
         return obs_id
     except Exception:
         return None
@@ -81,49 +79,42 @@ def dream(title: str, content: str, horizon: str = "") -> Optional[str]:
 
 def harvest_dreams(days: int = 30) -> List[Dream]:
     """
-    Harvest dreams from project memory.
+    Harvest dreams from synapse graph.
 
-    Scans recent observations for dreams that might inspire growth.
+    Scans recent episodes for dreams that might inspire growth.
     """
-    if not is_memory_available():
-        return []
-
     try:
-        from cc_memory import memory as cc_memory
+        graph = get_synapse_graph()
 
-        project_dir = find_project_dir()
-        project_name = Path(project_dir).name
-
-        # Get recent observations
-        observations = cc_memory.get_recent_observations(project_dir, limit=100)
+        episodes = graph.get_episodes(category=DREAM_CATEGORY, limit=100)
 
         dreams = []
         cutoff = (datetime.now() - timedelta(days=days)).isoformat()
 
-        for obs in observations:
-            # Filter for dream category
-            if obs.get("category") != DREAM_CATEGORY:
+        for ep in episodes:
+            timestamp = ep.get("timestamp", ep.get("created_at", ""))
+            if timestamp and timestamp < cutoff:
                 continue
 
-            if obs.get("timestamp", "") < cutoff:
-                continue
-
-            # Parse horizon from content if present
-            content = obs.get("content", "")
+            content = ep.get("content", "")
             horizon = ""
             if "\n\nHorizon: " in content:
                 parts = content.split("\n\nHorizon: ")
                 content = parts[0]
                 horizon = parts[1] if len(parts) > 1 else ""
 
+            project = ep.get("project", "")
+            if not project:
+                project = Path.cwd().name
+
             dreams.append(
                 Dream(
-                    id=obs.get("id", ""),
-                    title=obs.get("title", ""),
+                    id=ep.get("id", ""),
+                    title=ep.get("title", ""),
                     content=content,
                     horizon=horizon,
-                    sparked_at=obs.get("timestamp", ""),
-                    project=project_name,
+                    sparked_at=timestamp,
+                    project=project,
                 )
             )
 
@@ -167,7 +158,6 @@ def find_resonant_dreams(query: str, limit: int = 5) -> List[Dream]:
     """
     dreams = harvest_dreams(days=90)
 
-    # Simple keyword matching
     query_words = set(query.lower().split())
     scored = []
 
@@ -213,7 +203,7 @@ def format_dreams_display(dreams: List[Dream]) -> str:
         lines.append(f"  [{d.id}] {d.title}")
         lines.append(f"      {d.content[:80]}...")
         if d.horizon:
-            lines.append(f"      → Horizon: {d.horizon}")
+            lines.append(f"      -> Horizon: {d.horizon}")
         lines.append(f"      Project: {d.project}")
         lines.append("")
 
@@ -238,11 +228,9 @@ def let_dreams_influence_aspirations() -> List[Dict]:
 
     suggestions = []
     for d in dreams:
-        # Skip if already an aspiration
         if d.title.lower() in active_directions:
             continue
 
-        # Suggest as potential aspiration
         if d.horizon:
             suggestions.append(
                 {

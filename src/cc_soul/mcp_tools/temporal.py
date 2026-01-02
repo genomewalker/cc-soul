@@ -23,10 +23,10 @@ def get_temporal_trends(days: int = 7) -> str:
     lines = [f"Temporal Trends ({days} days)", ""]
 
     if trends.get("coherence_trend"):
-        emoji = {"improving": "📈", "declining": "📉", "stable": "➡️"}.get(
+        marker = {"improving": "[+]", "declining": "[-]", "stable": "[=]"}.get(
             trends["coherence_trend"], ""
         )
-        lines.append(f"Coherence: {emoji} {trends['coherence_trend']}")
+        lines.append(f"Coherence: {marker} {trends['coherence_trend']}")
         if trends.get("avg_coherence"):
             lines.append(f"  Average: {trends['avg_coherence']:.0%}")
 
@@ -53,7 +53,6 @@ def get_event_timeline(event_type: str = None, limit: int = 20) -> str:
 
     init_temporal_tables()
 
-    # Map string to EventType if provided
     et = None
     if event_type:
         try:
@@ -91,7 +90,6 @@ def get_proactive_suggestions(limit: int = 5) -> str:
 
     init_temporal_tables()
 
-    # First find candidates, then get from queue
     find_proactive_candidates()
     items = get_proactive_items(limit=limit)
 
@@ -100,9 +98,9 @@ def get_proactive_suggestions(limit: int = 5) -> str:
 
     lines = ["Proactive Suggestions:", ""]
     for item in items:
-        priority_bar = "●" * int(item["priority"] * 5)
+        priority_bar = "*" * int(item["priority"] * 5)
         lines.append(f"  [{priority_bar}] {item['reason']}")
-        lines.append(f"      → {item['entity_type']}: {item['entity_id']}")
+        lines.append(f"      -> {item['entity_type']}: {item['entity_id']}")
 
     return "\n".join(lines)
 
@@ -161,14 +159,14 @@ def get_belief_history(belief_id: str) -> str:
     lines = [f"Revision History for {belief_id}:", ""]
     for h in history:
         date = h["timestamp"].split("T")[0]
-        lines.append(f"  {date}: {h['old_confidence']:.0%} → {h['new_confidence']:.0%}")
+        lines.append(f"  {date}: {h['old_confidence']:.0%} -> {h['new_confidence']:.0%}")
         lines.append(f"    Reason: {h['reason']}")
 
     return "\n".join(lines)
 
 
 @mcp.tool()
-def promote_cross_project_pattern(pattern_id: int) -> str:
+def promote_cross_project_pattern(pattern_id: str) -> str:
     """Promote a cross-project pattern to universal wisdom.
 
     Once a pattern has proven itself across projects, crystallize it
@@ -207,13 +205,13 @@ def run_temporal_maintenance() -> str:
     if results["identity_decayed"]:
         lines.append(f"  Identity aspects decayed: {len(results['identity_decayed'])}")
         for d in results["identity_decayed"][:3]:
-            lines.append(f"    - {d['aspect']}: {d['old_confidence']:.0%} → {d['new_confidence']:.0%}")
+            lines.append(f"    - {d['aspect']}: {d['old_confidence']:.0%} -> {d['new_confidence']:.0%}")
 
     if results["proactive_queued"]:
         lines.append(f"  Proactive items queued: {len(results['proactive_queued'])}")
 
     if results["stats_updated"]:
-        lines.append("  Daily stats updated ✓")
+        lines.append("  Daily stats updated +")
 
     return "\n".join(lines) if len(lines) > 2 else "No maintenance needed."
 
@@ -237,7 +235,7 @@ def confirm_identity_aspect(aspect: str, key: str) -> str:
     if new_confidence is None:
         return f"Identity aspect {aspect}:{key} not found"
 
-    return f"Identity confirmed: {aspect}:{key} → {new_confidence:.0%}"
+    return f"Identity confirmed: {aspect}:{key} -> {new_confidence:.0%}"
 
 
 @mcp.tool()
@@ -247,28 +245,30 @@ def get_stale_aspects() -> str:
     Stale aspects might need re-observation or might be outdated.
     """
     from .temporal import is_stale, days_since, init_temporal_tables
-    from .core import get_db_connection
+    from ..core import get_synapse_graph
+    import json
 
     init_temporal_tables()
-    db = get_db_connection()
-    cur = db.cursor()
-
-    cur.execute("""
-        SELECT aspect, key, value, confidence, last_confirmed
-        FROM identity
-        WHERE confidence > 0.3
-        ORDER BY last_confirmed ASC
-    """)
+    graph = get_synapse_graph()
+    episodes = graph.get_episodes(category="identity", limit=100)
 
     stale = []
-    for r in cur.fetchall():
-        if is_stale(r[4]):
+    for ep in episodes:
+        try:
+            data = json.loads(ep.get("content", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        confidence = data.get("confidence", 0.7)
+        last_confirmed = data.get("last_confirmed", ep.get("timestamp"))
+
+        if confidence > 0.3 and is_stale(last_confirmed):
             stale.append({
-                "aspect": r[0],
-                "key": r[1],
-                "value": r[2][:50],
-                "confidence": r[3],
-                "days_stale": days_since(r[4]),
+                "aspect": data.get("aspect", "unknown"),
+                "key": data.get("key", "unknown"),
+                "value": data.get("value", "")[:50],
+                "confidence": confidence,
+                "days_stale": days_since(last_confirmed),
             })
 
     if not stale:

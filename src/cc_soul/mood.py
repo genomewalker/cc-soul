@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict
 from enum import Enum
 
-from .core import get_db_connection
+from .core import get_synapse_graph, SOUL_DIR
 from .budget import get_context_budget, ContextBudget
 
 
@@ -78,7 +78,7 @@ class Mood:
     partner_observations: int
     sessions_today: int
 
-    # Project signals (from cc-memory if available)
+    # Project signals (from synapse if available)
     project_name: Optional[str] = None
     project_observations: int = 0
     project_failures: int = 0
@@ -140,89 +140,67 @@ class Mood:
 
 def _count_recent_wisdom(days: int = 7) -> int:
     """Count wisdom entries from the last N days."""
-    conn = get_db_connection()
-    c = conn.cursor()
-
+    graph = get_synapse_graph()
     cutoff = (datetime.now() - timedelta(days=days)).isoformat()
-    c.execute(
-        """
-        SELECT COUNT(*) FROM wisdom
-        WHERE timestamp > ? AND type != 'failure'
-    """,
-        (cutoff,),
-    )
-    count = c.fetchone()[0]
-    conn.close()
+
+    all_wisdom = graph.get_all_wisdom()
+    count = 0
+    for w in all_wisdom:
+        created = w.get("created_at") or w.get("timestamp", "")
+        if created > cutoff:
+            count += 1
     return count
 
 
 def _count_recent_failures(days: int = 7) -> int:
     """Count failure records from the last N days."""
-    conn = get_db_connection()
-    c = conn.cursor()
-
+    graph = get_synapse_graph()
     cutoff = (datetime.now() - timedelta(days=days)).isoformat()
-    c.execute(
-        """
-        SELECT COUNT(*) FROM wisdom
-        WHERE timestamp > ? AND type = 'failure'
-    """,
-        (cutoff,),
-    )
-    count = c.fetchone()[0]
-    conn.close()
+
+    all_failures = graph.get_all_failures()
+    count = 0
+    for f in all_failures:
+        created = f.get("created_at") or f.get("timestamp", "")
+        if created > cutoff:
+            count += 1
     return count
 
 
 def _count_recent_applications(days: int = 7) -> int:
     """Count wisdom applications from the last N days."""
-    conn = get_db_connection()
-    c = conn.cursor()
-
+    graph = get_synapse_graph()
     cutoff = (datetime.now() - timedelta(days=days)).isoformat()
-    c.execute(
-        """
-        SELECT COUNT(*) FROM wisdom_applications
-        WHERE applied_at > ?
-    """,
-        (cutoff,),
-    )
-    count = c.fetchone()[0]
-    conn.close()
+
+    episodes = graph.get_episodes(category="wisdom_application", limit=1000)
+    count = 0
+    for ep in episodes:
+        created = ep.get("created_at") or ep.get("timestamp", "")
+        if created > cutoff:
+            count += 1
     return count
 
 
 def _count_partner_observations() -> int:
     """Count identity observations about the partner (RAPPORT aspect)."""
-    conn = get_db_connection()
-    c = conn.cursor()
-
-    c.execute("""
-        SELECT COUNT(*) FROM identity
-        WHERE aspect = 'rapport'
-    """)
-    count = c.fetchone()[0]
-    conn.close()
-    return count
+    graph = get_synapse_graph()
+    episodes = graph.get_episodes(category="rapport", limit=1000)
+    return len(episodes)
 
 
 def _count_sessions_today() -> int:
-    """Estimate sessions today based on transcript or activity."""
-    # For now, check if we have recent wisdom activity as proxy
-    conn = get_db_connection()
-    c = conn.cursor()
-
+    """Estimate sessions today based on activity."""
+    graph = get_synapse_graph()
     today_start = datetime.now().replace(hour=0, minute=0, second=0).isoformat()
-    c.execute(
-        """
-        SELECT COUNT(DISTINCT substr(timestamp, 1, 13)) FROM wisdom
-        WHERE timestamp > ?
-    """,
-        (today_start,),
-    )
-    count = c.fetchone()[0]
-    conn.close()
-    return max(1, count)
+
+    # Count distinct hours with activity
+    episodes = graph.get_episodes(category="session_ledger", limit=100)
+    hours = set()
+    for ep in episodes:
+        created = ep.get("created_at") or ep.get("timestamp", "")
+        if created > today_start:
+            hours.add(created[:13])  # YYYY-MM-DDTHH
+
+    return max(1, len(hours))
 
 
 def _synthesize_summary(mood: Dict) -> str:
@@ -274,7 +252,7 @@ def compute_mood(budget: ContextBudget = None, include_project: bool = True) -> 
     - Wisdom applications (engagement)
     - Partner observations (connection)
     - Activity patterns (energy)
-    - Project signals (if cc-memory available)
+    - Project signals (if synapse available)
     """
     # Gather soul-level signals
     if budget is None:
@@ -344,7 +322,7 @@ def compute_mood(budget: ContextBudget = None, include_project: bool = True) -> 
         connection = Connection.ISOLATED
 
     # Compute energy from activity patterns
-    # Project failures might indicate struggle → focused work
+    # Project failures might indicate struggle -> focused work
     if project_failures > 3:
         # Lots of debugging - focused on problem
         energy = Energy.FOCUSED
@@ -507,7 +485,7 @@ def format_mood_display(mood: Mood) -> str:
     lines.append(f"  Applications: {mood.applications_7d} (7d)")
     lines.append(f"  Partner observations: {mood.partner_observations}")
 
-    # Project signals (if cc-memory available)
+    # Project signals (if synapse available)
     if mood.project_name:
         lines.append("")
         lines.append(f"PROJECT: {mood.project_name}")

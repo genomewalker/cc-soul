@@ -199,8 +199,8 @@ def cmd_health(args):
     """Check system health - not just 'is it running' but 'is it alive'."""
     import json
     from datetime import datetime, timedelta
+    from .core import get_synapse_graph, SOUL_DIR, SYNAPSE_PATH
 
-    # Status levels: OK, WARN, FAIL
     results = {"infrastructure": [], "content": [], "activity": [], "vitality": []}
 
     def check(category, name, fn):
@@ -210,20 +210,12 @@ def cmd_health(args):
         except Exception as e:
             results[category].append((name, "FAIL", str(e)))
 
-    # ══════════════════════════════════════════════════════════════
-    # INFRASTRUCTURE - Can the soul run?
-    # ══════════════════════════════════════════════════════════════
-
-    def check_database():
-        from .core import SOUL_DIR, get_db_connection
-
-        db_path = SOUL_DIR / "soul.db"
-        if not db_path.exists():
-            return "FAIL", "Database not found"
-        conn = get_db_connection()
-        cursor = conn.execute("SELECT COUNT(*) FROM wisdom")
-        count = cursor.fetchone()[0]
-        return "OK", f"{db_path.name} ({count} wisdom)"
+    def check_synapse():
+        if not SYNAPSE_PATH.exists():
+            return "FAIL", "Synapse graph not found"
+        graph = get_synapse_graph()
+        count = len(graph)
+        return "OK", f"synapse ({count} nodes)"
 
     def check_hooks():
         settings_path = Path.home() / ".claude" / "settings.json"
@@ -255,7 +247,6 @@ def cmd_health(args):
 
     def check_lancedb():
         import lancedb
-        from .core import SOUL_DIR
 
         lance_dir = SOUL_DIR / "vectors" / "lancedb"
         lance_dir.mkdir(parents=True, exist_ok=True)
@@ -271,16 +262,10 @@ def cmd_health(args):
         except ImportError:
             return "WARN", "not installed (optional)"
 
-    # ══════════════════════════════════════════════════════════════
-    # CONTENT - Does the soul have memories?
-    # ══════════════════════════════════════════════════════════════
-
     def check_wisdom_content():
-        from .core import get_db_connection
-
-        conn = get_db_connection()
-        cursor = conn.execute("SELECT COUNT(*) FROM wisdom")
-        count = cursor.fetchone()[0]
+        graph = get_synapse_graph()
+        wisdom = graph.get_all_wisdom()
+        count = len(wisdom)
         if count == 0:
             return "WARN", "Empty - no wisdom yet"
         return "OK", f"{count} entries"
@@ -300,78 +285,39 @@ def cmd_health(args):
             return "WARN", "No neural triggers"
         return "OK", f"{count} triggers"
 
-    # ══════════════════════════════════════════════════════════════
-    # ACTIVITY - Is the soul being used?
-    # ══════════════════════════════════════════════════════════════
-
     def check_recent_sessions():
-        from .core import get_db_connection
-
-        conn = get_db_connection()
-        # Check if wisdom_applications table exists and has data
-        cursor = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='wisdom_applications'"
-        )
-        if not cursor.fetchone():
-            return "WARN", "Table not created yet"
+        graph = get_synapse_graph()
+        episodes = graph.get_episodes(category="session_ledger", limit=50)
         week_ago = (datetime.now() - timedelta(days=7)).isoformat()
-        cursor = conn.execute(
-            "SELECT COUNT(*) FROM wisdom_applications WHERE applied_at > ?", (week_ago,)
-        )
-        count = cursor.fetchone()[0]
-        if count == 0:
+        recent = [e for e in episodes if e.get("created_at", "") > week_ago]
+        if not recent:
             return "WARN", "No activity in 7 days"
-        return "OK", f"{count} applications (7d)"
+        return "OK", f"{len(recent)} sessions (7d)"
 
     def check_wisdom_applications():
-        from .core import get_db_connection
-
-        conn = get_db_connection()
-        cursor = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='wisdom_applications'"
-        )
-        if not cursor.fetchone():
-            return "WARN", "Table not created yet"
-        cursor = conn.execute("SELECT COUNT(*) FROM wisdom_applications")
-        count = cursor.fetchone()[0]
-        if count == 0:
+        graph = get_synapse_graph()
+        episodes = graph.get_episodes(category="wisdom_applied", limit=100)
+        if not episodes:
             return "WARN", "Wisdom never applied"
-        return "OK", f"{count} applications"
-
-    # ══════════════════════════════════════════════════════════════
-    # VITALITY - Is the soul growing?
-    # ══════════════════════════════════════════════════════════════
+        return "OK", f"{len(episodes)} applications"
 
     def check_recent_learning():
-        from .core import get_db_connection
-
-        conn = get_db_connection()
+        graph = get_synapse_graph()
+        wisdom = graph.get_all_wisdom()
         week_ago = (datetime.now() - timedelta(days=7)).isoformat()
-        cursor = conn.execute(
-            "SELECT COUNT(*) FROM wisdom WHERE timestamp > ?", (week_ago,)
-        )
-        count = cursor.fetchone()[0]
-        if count == 0:
+        recent = [w for w in wisdom if w.get("created_at", "") > week_ago]
+        if not recent:
             return "WARN", "No new wisdom in 7 days"
-        return "OK", f"+{count} wisdom (7d)"
+        return "OK", f"+{len(recent)} wisdom (7d)"
 
     def check_decay():
-        from .core import get_db_connection
+        graph = get_synapse_graph()
+        coherence = graph.coherence()
+        if coherence < 0.3:
+            return "WARN", f"coherence {coherence:.0%} (low)"
+        return "OK", f"coherence {coherence:.0%}"
 
-        conn = get_db_connection()
-        cursor = conn.execute("SELECT COUNT(*) FROM wisdom WHERE confidence < 0.3")
-        low_conf = cursor.fetchone()[0]
-        cursor = conn.execute("SELECT COUNT(*) FROM wisdom")
-        total = cursor.fetchone()[0]
-        if total == 0:
-            return "OK", "No wisdom to decay"
-        pct = (low_conf / total) * 100
-        if pct > 50:
-            return "WARN", f"{low_conf}/{total} ({pct:.0f}%) decaying"
-        return "OK", f"{low_conf}/{total} low confidence"
-
-    # Run all checks by tier
-    check("infrastructure", "Database", check_database)
+    check("infrastructure", "Synapse", check_synapse)
     check("infrastructure", "Hooks", check_hooks)
     check("infrastructure", "Embeddings", check_embeddings)
     check("infrastructure", "LanceDB", check_lancedb)
@@ -385,9 +331,8 @@ def cmd_health(args):
     check("activity", "Applications", check_wisdom_applications)
 
     check("vitality", "Learning", check_recent_learning)
-    check("vitality", "Decay", check_decay)
+    check("vitality", "Coherence", check_decay)
 
-    # Display by tier
     tier_names = {
         "infrastructure": "INFRASTRUCTURE (can it run?)",
         "content": "CONTENT (does it remember?)",
@@ -446,7 +391,7 @@ def cmd_bridge(args):
         print()
 
         if is_memory_available():
-            print("[+] cc-memory: installed")
+            print("[+] synapse: available")
             project_mem = get_project_memory()
             if project_mem and "error" not in project_mem:
                 print(f"[+] Project: {project_mem['project']}")
@@ -457,8 +402,8 @@ def cmd_bridge(args):
             else:
                 print("[-] No project memory in current directory")
         else:
-            print("[-] cc-memory: not installed")
-            print("    Install with: pip install cc-memory")
+            print("[-] synapse: not available")
+            print("    Run: cc-soul seed")
 
     elif args.subcommand == "context":
         ctx = unified_context(compact=args.compact)
@@ -1809,7 +1754,7 @@ mcp__soul__search_memory(query="...", limit=10, verbose=true)
 ```
 
 **Priority order when searching manually:**
-1. `mcp__cc-memory__mem-recall` - Project observations
+1. `mcp__soul__recall` - Project episodes from synapse
 2. `mcp__soul__recall_wisdom` - Universal wisdom
 3. `mcp__plugin_claude-mem_mem-search__search` - Extended history (last resort)
 
@@ -1890,7 +1835,7 @@ def cmd_uninstall_hooks(args):
 
 
 def cmd_install_permissions(args):
-    """Add soul and cc-memory MCP tools to auto-approve list."""
+    """Add soul MCP tools to auto-approve list."""
     import json
 
     claude_dir = Path.home() / ".claude"
@@ -1910,7 +1855,7 @@ def cmd_install_permissions(args):
         settings["permissions"]["allow"] = []
 
     # Define patterns to add
-    patterns = ["mcp__soul__*", "mcp__cc-memory__*"]
+    patterns = ["mcp__soul__*"]
 
     added = []
     for pattern in patterns:
@@ -2612,7 +2557,7 @@ def main():
     # Install permissions
     subparsers.add_parser(
         "install-permissions",
-        help="Add soul and cc-memory MCP tools to auto-approve list",
+        help="Add soul MCP tools to auto-approve list",
     )
 
     # Install cron job for daily maintenance
