@@ -109,7 +109,7 @@ def intend(
     """
     Set an intention - a concrete want.
 
-    Uses synapse if available, falls back to SQLite.
+    Stored in synapse graph.
 
     Args:
         want: What I want to accomplish
@@ -119,97 +119,47 @@ def intend(
         strength: How strongly held (0-1)
 
     Returns:
-        Intention ID (string for synapse, int for SQLite)
+        Intention ID
     """
-    from .core import get_synapse_graph
+    from .core import get_synapse_graph, save_synapse
 
-    # Try synapse first
     graph = get_synapse_graph()
-    if graph:
-        intention_id = graph.set_intention(want, why, scope.value, strength)
-        graph.save()
-        return intention_id
-
-    # Fallback to SQLite
-    _ensure_table()
-    conn = get_db_connection()
-    c = conn.cursor()
-
-    # Check for existing active intention with same want and scope
-    c.execute(
-        """SELECT id FROM intentions WHERE want = ? AND scope = ? AND state = 'active'""",
-        (want, scope.value),
-    )
-    existing = c.fetchone()
-    if existing:
-        conn.close()
-        return existing[0]
-
-    now = datetime.now().isoformat()
-    c.execute(
-        """
-        INSERT INTO intentions
-        (want, why, scope, strength, state, context, created_at, last_checked_at)
-        VALUES (?, ?, ?, ?, 'active', ?, ?, ?)
-    """,
-        (want, why, scope.value, strength, context, now, now),
-    )
-
-    intention_id = c.lastrowid
-    conn.commit()
-    conn.close()
-
+    intention_id = graph.set_intention(want, why, scope.value, strength)
+    save_synapse()
     return intention_id
 
 
 def get_intentions(
     scope: IntentionScope = None, state: IntentionState = None
 ) -> List[Intention]:
-    """Get intentions, optionally filtered."""
-    _ensure_table()
-    conn = get_db_connection()
-    c = conn.cursor()
+    """Get intentions from synapse, optionally filtered."""
+    from .core import get_synapse_graph
 
-    query = """
-        SELECT id, want, why, scope, strength, state, context, blocker,
-               created_at, last_checked_at, check_count, alignment_score
-        FROM intentions
-    """
-    conditions = []
-    params = []
+    graph = get_synapse_graph()
+    raw_intentions = graph.get_intentions()
 
-    if scope:
-        conditions.append("scope = ?")
-        params.append(scope.value)
-    if state:
-        conditions.append("state = ?")
-        params.append(state.value)
+    intentions = []
+    for data in raw_intentions:
+        intent_scope = data.get("scope", "session")
+        if scope and intent_scope != scope.value:
+            continue
 
-    if conditions:
-        query += " WHERE " + " AND ".join(conditions)
-    query += " ORDER BY strength DESC, created_at DESC"
+        intentions.append(Intention(
+            id=data.get("id"),
+            want=data.get("want", ""),
+            why=data.get("why", ""),
+            scope=IntentionScope(intent_scope),
+            strength=data.get("strength", 0.8),
+            state=IntentionState.ACTIVE,  # Synapse only stores active
+            context=data.get("context", ""),
+            blocker=None,
+            created_at=data.get("created_at", ""),
+            last_checked_at=data.get("created_at", ""),
+            check_count=0,
+            alignment_score=data.get("confidence", 1.0),
+        ))
 
-    c.execute(query, params)
-    rows = c.fetchall()
-    conn.close()
-
-    return [
-        Intention(
-            id=row[0],
-            want=row[1],
-            why=row[2],
-            scope=IntentionScope(row[3]),
-            strength=row[4],
-            state=IntentionState(row[5]),
-            context=row[6],
-            blocker=row[7],
-            created_at=row[8],
-            last_checked_at=row[9],
-            check_count=row[10],
-            alignment_score=row[11],
-        )
-        for row in rows
-    ]
+    return intentions
 
 
 def get_active_intentions(scope: IntentionScope = None) -> List[Intention]:

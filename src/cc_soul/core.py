@@ -1,46 +1,37 @@
 """
-Core soul infrastructure: database, paths, initialization.
+Core soul infrastructure - Synapse backend.
 
-Supports two backends:
-- SQLite (legacy): soul.db
-- Synapse (preferred): soul.synapse (Rust graph via PyO3)
-
-Set USE_SYNAPSE=1 env var or check synapse availability automatically.
+All soul data stored in cc-synapse (Rust graph via PyO3).
+SQLite is deprecated - synapse is the single source of truth.
 """
 
-import os
-import sqlite3
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
-# Soul data lives at user level, not with the package
+# Soul data lives at user level
 SOUL_DIR = Path.home() / ".claude" / "mind"
-SOUL_DB = SOUL_DIR / "soul.db"
 SYNAPSE_PATH = SOUL_DIR / "soul.synapse"
 
-# Check for synapse availability
+# Singleton graph instance
 _synapse_graph = None
-USE_SYNAPSE = os.environ.get("USE_SYNAPSE", "1") == "1"
 
 
 def get_synapse_graph():
-    """Get synapse graph (singleton). Returns None if unavailable."""
+    """Get synapse graph (singleton). Required - raises if unavailable."""
     global _synapse_graph
-    if not USE_SYNAPSE:
-        return None
     if _synapse_graph is not None:
         return _synapse_graph
-    try:
-        from .synapse_bridge import SoulGraph
-        _synapse_graph = SoulGraph.load(SYNAPSE_PATH)
-        return _synapse_graph
-    except (ImportError, Exception):
-        return None
+
+    from .synapse_bridge import SoulGraph
+    SOUL_DIR.mkdir(parents=True, exist_ok=True)
+    _synapse_graph = SoulGraph.load(SYNAPSE_PATH)
+    return _synapse_graph
 
 
-def synapse_available() -> bool:
-    """Check if synapse backend is available."""
-    return get_synapse_graph() is not None
+def save_synapse():
+    """Save synapse graph to disk."""
+    graph = get_synapse_graph()
+    graph.save()
 
 
 def init_soul():
