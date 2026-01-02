@@ -220,6 +220,56 @@ class SoulGraph:
         """Get all failures."""
         return self._soul.get_failures()
 
+    # --- Antahkarana Voices (Rust implementation) ---
+
+    def consult_voice(
+        self,
+        voice_name: str,
+        query: str,
+        limit: int = 10,
+    ) -> List[Tuple[str, float, Dict]]:
+        """
+        Consult a specific Antahkarana voice.
+
+        Voices: manas, buddhi, ahamkara, chitta, vikalpa, sakshi
+        Each voice sees the graph differently based on attention weights.
+        """
+        return self._soul.consult_voice(voice_name, query, limit)
+
+    def chorus_query(
+        self,
+        query: str,
+        limit: int = 10,
+    ) -> List[Tuple[str, float, List[str], Dict]]:
+        """Query through all voices and harmonize results."""
+        return self._soul.chorus_query(query, limit)
+
+    def harmonize(self) -> Dict:
+        """Get harmony report from all voices."""
+        return self._soul.harmonize()
+
+    def get_voices(self) -> List[Dict]:
+        """Get descriptions of the six Antahkarana voices."""
+        return self._soul.get_voices()
+
+    # --- Dynamics (Rust implementation) ---
+
+    def tick_dynamics(self) -> Dict:
+        """Tick the dynamics engine (decay, triggers)."""
+        return self._soul.tick_dynamics()
+
+    def learning_feedback(self, node_id: str, success: bool) -> bool:
+        """Provide learning feedback (strengthen/weaken based on outcome)."""
+        return self._soul.learning_feedback(node_id, success)
+
+    def snapshot(self) -> int:
+        """Create snapshot for rollback."""
+        return self._soul.snapshot()
+
+    def rollback(self, snapshot_id: int) -> bool:
+        """Rollback to snapshot."""
+        return self._soul.rollback(snapshot_id)
+
 
 # Convenience functions (match graph_sqlite.py API)
 def activate_concepts(prompt: str, limit: int = 10) -> List[Tuple[Concept, float]]:
