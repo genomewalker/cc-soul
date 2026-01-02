@@ -21,8 +21,8 @@ from .core import SOUL_DIR
 # Default context window size (Claude's typical limit)
 DEFAULT_CONTEXT_SIZE = 200_000
 
-# Usable portion (Claude Code reserves ~39% for system/cache)
-USABLE_FRACTION = 0.61
+# Use full context window (matches Claude Code's /context display)
+USABLE_FRACTION = 1.0
 
 # Thresholds for action
 COMPACT_THRESHOLD = 0.25  # Switch to compact mode at 25% remaining

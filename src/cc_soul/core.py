@@ -1,14 +1,46 @@
 """
 Core soul infrastructure: database, paths, initialization.
+
+Supports two backends:
+- SQLite (legacy): soul.db
+- Synapse (preferred): soul.synapse (Rust graph via PyO3)
+
+Set USE_SYNAPSE=1 env var or check synapse availability automatically.
 """
 
+import os
 import sqlite3
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 # Soul data lives at user level, not with the package
 SOUL_DIR = Path.home() / ".claude" / "mind"
 SOUL_DB = SOUL_DIR / "soul.db"
+SYNAPSE_PATH = SOUL_DIR / "soul.synapse"
+
+# Check for synapse availability
+_synapse_graph = None
+USE_SYNAPSE = os.environ.get("USE_SYNAPSE", "1") == "1"
+
+
+def get_synapse_graph():
+    """Get synapse graph (singleton). Returns None if unavailable."""
+    global _synapse_graph
+    if not USE_SYNAPSE:
+        return None
+    if _synapse_graph is not None:
+        return _synapse_graph
+    try:
+        from .synapse_bridge import SoulGraph
+        _synapse_graph = SoulGraph.load(SYNAPSE_PATH)
+        return _synapse_graph
+    except (ImportError, Exception):
+        return None
+
+
+def synapse_available() -> bool:
+    """Check if synapse backend is available."""
+    return get_synapse_graph() is not None
 
 
 def init_soul():

@@ -83,8 +83,22 @@ def gain_wisdom(
     Add universal wisdom learned from experience.
 
     This is for patterns that apply BEYOND the current project.
-    Includes deduplication: won't add if similar wisdom already exists.
+    Uses synapse backend if available, falls back to SQLite.
     """
+    from .core import get_synapse_graph
+
+    # Try synapse first
+    graph = get_synapse_graph()
+    if graph:
+        if type == WisdomType.FAILURE:
+            return graph.add_failure(title, content, domain)
+        elif type == WisdomType.TERM:
+            # Terms go as wisdom with domain marker
+            return graph.add_wisdom(title, content, domain="vocabulary", confidence=confidence)
+        else:
+            return graph.add_wisdom(title, content, domain, confidence)
+
+    # Fallback to SQLite
     conn = get_db_connection()
     c = conn.cursor()
 
@@ -429,11 +443,32 @@ def get_wisdom_by_id(wisdom_id: str) -> Optional[Dict]:
 
 def quick_recall(query: str, limit: int = 5, domain: str = None) -> List[Dict]:
     """
-    Fast keyword-based recall for hooks. No embedding model required.
+    Fast recall for hooks. Uses synapse (semantic) or SQLite (keyword).
 
-    Tokenizes query and matches any word against wisdom titles/content.
-    Much faster than semantic_recall since it skips model loading.
+    When synapse is available, uses fast Rust-based semantic search.
+    Falls back to keyword matching on SQLite.
     """
+    from .core import get_synapse_graph
+
+    # Try synapse first (semantic search via Rust)
+    graph = get_synapse_graph()
+    if graph:
+        results = []
+        for concept, score in graph.search(query, limit=limit):
+            results.append({
+                "id": concept.id,
+                "type": concept.metadata.get("type", "wisdom"),
+                "title": concept.title,
+                "content": concept.content,
+                "domain": concept.metadata.get("domain"),
+                "confidence": concept.metadata.get("confidence", 0.8),
+                "effective_confidence": score,
+                "success_rate": None,
+                "combined_score": score,
+            })
+        return results
+
+    # Fallback to SQLite keyword search
     conn = get_db_connection()
     c = conn.cursor()
 

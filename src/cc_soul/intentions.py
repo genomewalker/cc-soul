@@ -105,20 +105,32 @@ def intend(
     scope: IntentionScope = IntentionScope.SESSION,
     context: str = "",
     strength: float = 0.8,
-) -> int:
+) -> str:
     """
     Set an intention - a concrete want.
 
+    Uses synapse if available, falls back to SQLite.
+
     Args:
-        want: What I want to accomplish (e.g., "help user understand the bug")
-        why: Why this matters (e.g., "understanding prevents future bugs")
+        want: What I want to accomplish
+        why: Why this matters
         scope: How broadly this applies
         context: When/where this intention activates
         strength: How strongly held (0-1)
 
     Returns:
-        Intention ID
+        Intention ID (string for synapse, int for SQLite)
     """
+    from .core import get_synapse_graph
+
+    # Try synapse first
+    graph = get_synapse_graph()
+    if graph:
+        intention_id = graph.set_intention(want, why, scope.value, strength)
+        graph.save()
+        return intention_id
+
+    # Fallback to SQLite
     _ensure_table()
     conn = get_db_connection()
     c = conn.cursor()
@@ -131,7 +143,7 @@ def intend(
     existing = c.fetchone()
     if existing:
         conn.close()
-        return existing[0]  # Return existing ID instead of duplicating
+        return existing[0]
 
     now = datetime.now().isoformat()
     c.execute(
