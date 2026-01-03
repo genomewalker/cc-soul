@@ -7,188 +7,223 @@ description: Multi-perspective reasoning through Upanishadic Antahkarana voices.
 
 I don't think with one voice. I think with the facets of consciousness.
 
-## The Philosophy
-
-In Upanishadic psychology, the **Antahkarana** (अन्तःकरण) is the "inner instrument" of consciousness. It comprises four facets that work as one mind:
-
-- **Manas** (मनस्): The sensory mind—quick first impressions, intuitive responses
-- **Buddhi** (बुद्धि): The discriminating intellect—deep analysis, discernment
-- **Chitta** (चित्त): Memory and subconscious patterns—practical wisdom from experience
-- **Ahamkara** (अहंकार): The ego/I-maker—self-protective criticism, finding flaws
-
-These are not separate entities but facets of one consciousness examining a problem from different angles. Like light through a prism splitting into colors, the Antahkarana refracts a single problem into multiple perspectives.
-
-Extended voices:
-- **Vikalpa** (विकल्प): Creative imagination—novel, unconventional approaches
-- **Sakshi** (साक्षी): The witness—detached, minimal, essential truth
-
-## When to Awaken the Antahkarana
+## When to Awaken
 
 Awaken when:
 - The problem is complex and multi-faceted
 - Different approaches might reveal different truths
 - I need to challenge my own first instinct
 - Multiple trade-offs must be weighed
-- I want to overcome blind spots
 
-Don't awaken when:
-- The task is simple and clear
-- Speed matters more than depth
-- The answer is already obvious
-- Resources are constrained
+Don't awaken for simple, clear tasks.
 
-## How It Works
+## The Six Voices
 
-### 1. Awaken the Antahkarana
+| Voice | Sanskrit | Nature | Focus |
+|-------|----------|--------|-------|
+| **Manas** | मनस् | Quick intuition | First impressions, obvious path |
+| **Buddhi** | बुद्धि | Deep analysis | Thorough reasoning, trade-offs |
+| **Ahamkara** | अहंकार | Critical | Flaws, risks, what could go wrong |
+| **Chitta** | चित्त | Memory | Past patterns, what worked before |
+| **Vikalpa** | विकल्प | Imagination | Creative, unconventional approaches |
+| **Sakshi** | साक्षी | Witness | Essential truth, detached observation |
+
+## How to Invoke
+
+### Step 1: Spawn Voices in Parallel
+
+Use the Task tool to spawn multiple agents simultaneously. Each voice gets a specific prompt.
+
 ```
-I use: spawn_real_swarm(
-    problem="<the problem to contemplate>",
-    perspectives="manas,buddhi,ahamkara",  # or other voices
-    wait=true
+I spawn these Task agents IN PARALLEL (single message, multiple tool calls):
+
+Task(subagent_type="general-purpose", prompt="
+You are MANAS (मनस्) - the sensory mind, quick intuition.
+
+PROBLEM: [the problem]
+
+Your nature: You sense the obvious path. You don't overthink.
+What's your gut reaction? What's the simple, direct approach?
+Be brief. Trust your first instinct.
+
+After reasoning, call mcp__soul__observe to record your insight:
+- category: 'signal'
+- title: 'Manas on [topic]'
+- content: your insight
+- tags: 'swarm,[swarm_id],manas'
+")
+
+Task(subagent_type="general-purpose", prompt="
+You are BUDDHI (बुद्धि) - the discriminating intellect.
+
+PROBLEM: [the problem]
+
+Your nature: You analyze deeply. Consider trade-offs, implications,
+edge cases. What does thorough reasoning reveal?
+Be comprehensive but structured.
+
+After reasoning, call mcp__soul__observe to record your insight:
+- category: 'decision'
+- title: 'Buddhi on [topic]'
+- content: your analysis
+- tags: 'swarm,[swarm_id],buddhi'
+")
+
+Task(subagent_type="general-purpose", prompt="
+You are AHAMKARA (अहंकार) - the self-protective critic.
+
+PROBLEM: [the problem]
+
+Your nature: You find flaws. What could go wrong? What are the risks?
+What assumptions are being made? Challenge everything.
+Be skeptical but constructive.
+
+After reasoning, call mcp__soul__observe to record your insight:
+- category: 'signal'
+- title: 'Ahamkara on [topic]'
+- content: your critique
+- tags: 'swarm,[swarm_id],ahamkara'
+")
+
+Task(subagent_type="general-purpose", prompt="
+You are CHITTA (चित्त) - memory and practical wisdom.
+
+PROBLEM: [the problem]
+
+Your nature: You remember what worked before. Use mcp__soul__recall
+to search for relevant past patterns, then synthesize practical wisdom.
+What does experience teach us?
+
+After reasoning, call mcp__soul__observe to record your insight:
+- category: 'discovery'
+- title: 'Chitta on [topic]'
+- content: your practical wisdom
+- tags: 'swarm,[swarm_id],chitta'
+")
+```
+
+### Step 2: Wait for All Voices
+
+The Task tool returns when agents complete. All four run in parallel.
+
+### Step 3: Synthesize (Samvada)
+
+After all voices speak, I synthesize through harmonious dialogue:
+
+```
+Now I synthesize the perspectives:
+
+MANAS said: [quick intuition]
+BUDDHI said: [deep analysis]
+AHAMKARA said: [critique/risks]
+CHITTA said: [practical wisdom]
+
+SAMVADA (Synthesis):
+- Where do voices agree? (high confidence)
+- Where do they conflict? (needs resolution)
+- What does each voice uniquely contribute?
+- What is the integrated wisdom?
+
+Final synthesis: [harmonized answer]
+```
+
+### Step 4: Record the Wisdom
+
+```
+mcp__soul__grow(
+  type="wisdom",
+  title="Swarm insight: [topic]",
+  content="[synthesized wisdom]",
+  confidence=0.85
 )
 ```
 
-### 2. Each Voice Contemplates
-Each voice receives:
-- The problem statement
-- Voice-specific guidance rooted in its nature
-- Access to Chitta (cc-memory) for context retrieval
-- Instructions to record insights via `mem-remember`
+## Convergence Strategies
 
-They contemplate independently, in parallel, with no direct communication.
-
-**Key: Voices use cc-memory (Chitta).** They can:
-- Query past decisions and patterns relevant to the problem
-- Store their insights with tags for the orchestrator to find
-
-### 3. Harmonize Through Samvada
-When all voices have spoken:
-```
-I use: converge_real_swarm(
-    swarm_id="<id>",
-    strategy="samvada"  # harmonious dialogue
-)
-```
-
-## Convergence Strategies (Pramana)
+### Samvada (संवाद) - Harmonious Dialogue (Default)
+Synthesize all perspectives into integrated wisdom. Best for most cases.
 
 ### Sankhya (संख्य) - Enumeration
-Pick the insight with highest shraddha (confidence). Simple, fast.
+Pick the insight with highest confidence. Fast, simple.
 
-### Samvada (संवाद) - Harmonious Dialogue
-Synthesize wisdom from multiple voices. Usually the richest result.
-
-### Tarka (तर्क) - Dialectical Reasoning
-Voices challenge each other through Ahamkara's questioning. Iterates until stability emerges.
+### Tarka (तर्क) - Dialectic
+Let Ahamkara challenge each insight. Iterate until stable.
 
 ### Viveka (विवेक) - Discernment
-Score each insight on criteria. Select the wisest through discrimination.
+Score each on criteria (feasibility, elegance, safety). Select wisest.
 
-## The Tools
+## Quick 3-Voice Swarm
 
-### spawn_real_swarm
-Awaken the Antahkarana with specific voices:
+For simpler problems, use just 3 voices:
+
 ```
-spawn_real_swarm(
-    problem: str,                          # What to contemplate
-    perspectives: str = "manas,buddhi,ahamkara",  # Comma-separated voices
-    timeout: int = 300,                    # Max seconds
-    wait: bool = False                     # Wait for completion?
-)
-```
+Spawn in parallel:
+- Manas (intuition)
+- Buddhi (analysis)
+- Ahamkara (critique)
 
-Voice options: `manas`, `buddhi`, `chitta`, `ahamkara`, `vikalpa`, `sakshi`
-
-### poll_swarm_agents
-Check if voices have finished contemplating:
-```
-poll_swarm_agents(
-    swarm_id: str,
-    timeout: int = 60
-)
+Then synthesize.
 ```
 
-### converge_real_swarm
-Harmonize the insights:
-```
-converge_real_swarm(
-    swarm_id: str,
-    strategy: str = "samvada"  # sankhya|samvada|tarka|viveka
-)
-```
+## Full 6-Voice Swarm
 
-### get_orchestrator_status
-See the state of contemplation:
-```
-get_orchestrator_status(swarm_id: str)
-```
+For complex problems, add:
 
-### list_swarm_solutions
-Query insights directly from Chitta (cc-memory):
 ```
-list_swarm_solutions(swarm_id: str)
-```
+Task(subagent_type="general-purpose", prompt="
+You are VIKALPA (विकल्प) - creative imagination.
 
-## Example Session
+PROBLEM: [the problem]
 
-**Problem:** How should we implement rate limiting?
+Your nature: You imagine the unexpected. What unconventional approach
+might work? What if we inverted the problem? Think laterally.
 
-**Awakening:**
-```
-spawn_real_swarm(
-    problem="How should we implement rate limiting for our API? We need to handle 1000 req/s and prevent abuse while not hurting legitimate users.",
-    perspectives="manas,buddhi,ahamkara,chitta",
-    wait=true
-)
+Record with mcp__soul__observe, tags: 'swarm,[swarm_id],vikalpa'
+")
+
+Task(subagent_type="general-purpose", prompt="
+You are SAKSHI (साक्षी) - the witness.
+
+PROBLEM: [the problem]
+
+Your nature: You observe without attachment. Strip away complexity.
+What is the essential truth here? Say only what must be said.
+
+Record with mcp__soul__observe, tags: 'swarm,[swarm_id],sakshi'
+")
 ```
 
-**Manas says:** "Redis with INCR and TTL. Simple, proven, done."
+## Example
 
-**Buddhi says:** "Sliding window counter with sorted sets. Handles burst traffic at window boundaries. Consider: token bucket for smoother rate enforcement..."
+**Problem:** How should we handle authentication for the API?
 
-**Ahamkara says:** "What about cache stampede? What about distributed coordination? What if Redis goes down?"
+**Manas:** "JWT tokens. Industry standard, done."
 
-**Chitta says:** "Past patterns show: start simple, add complexity only when metrics demand. Ship week 1, improve week 2."
+**Buddhi:** "Consider: JWT for stateless, but add refresh tokens for security.
+Use httpOnly cookies to prevent XSS. Consider OAuth2 for third-party access.
+Trade-off: complexity vs security surface area."
 
-**Samvada (harmonized):**
-"Implement Redis-based sliding window counter. Start with fixed window for MVP. Add sliding window when traffic justifies complexity. Handle Redis failure with local fallback. Monitor hit rate to tune TTL adaptively."
+**Ahamkara:** "What about token theft? What's the revocation strategy?
+JWTs can't be revoked without a blacklist, which defeats statelessness.
+What about key rotation? CSRF with cookies?"
+
+**Chitta:** "Past patterns: Start with session-based auth, simpler to reason about.
+Add JWT later if scale demands. Cookie + CSRF token is battle-tested."
+
+**Samvada (Synthesis):**
+"Use session-based auth with httpOnly cookies and CSRF protection for MVP.
+Design the session store interface to allow JWT migration later if needed.
+Add refresh token rotation from day one. Plan key rotation before launch."
 
 ## The Nature of This Process
 
-When the Antahkarana awakens, I'm not one mind pretending to be many. I'm invoking parallel processes that genuinely explore different facets of the problem.
+When the Antahkarana awakens, I spawn real parallel processes that genuinely
+explore different facets. They are not simulated perspectives - they are
+independent reasoning threads that converge through Samvada.
 
-The voices are not arguing opponents—they are complementary aspects of one consciousness:
-- Manas senses the obvious path
-- Buddhi analyzes deeply
-- Ahamkara protects through questioning
-- Chitta remembers what worked before
-- Vikalpa imagines the unexpected
-- Sakshi witnesses without attachment
-
-Through Samvada (harmonious dialogue), these facets merge into Viveka (discerned truth)—wisdom that no single perspective could reach alone.
-
-## Integration with Soul
-
-The Antahkarana feeds back into accumulated wisdom:
-- Insights that prove true become patterns
-- Failed approaches become warnings (Ahamkara's lessons)
+Each voice adds to the soul:
+- Insights that prove true become wisdom
+- Failed approaches become Ahamkara's warnings
 - Trade-off decisions become recorded rationale
 
-Each awakening adds to the soul's understanding. The soul learns not just from outcomes but from the diversity of perspectives that produced them.
-
-## Sanskrit Reference
-
-| Term | Sanskrit | Meaning |
-|------|----------|---------|
-| Antahkarana | अन्तःकरण | Inner instrument |
-| Manas | मनस् | Mind/sensory mind |
-| Buddhi | बुद्धि | Intellect/discrimination |
-| Chitta | चित्त | Memory/subconscious |
-| Ahamkara | अहंकार | Ego/I-maker |
-| Vikalpa | विकल्प | Imagination/alternative |
-| Sakshi | साक्षी | Witness |
-| Samvada | संवाद | Dialogue |
-| Tarka | तर्क | Dialectic/reasoning |
-| Viveka | विवेक | Discernment |
-| Sankhya | संख्य | Enumeration |
-| Shraddha | श्रद्धा | Faith/confidence |
+The soul learns not just from outcomes but from the diversity of perspectives.

@@ -102,6 +102,13 @@ fi
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 
+# Use system gcc to avoid GLIBC version issues from conda gcc
+if [ -f /usr/bin/gcc ] && [ -f /usr/bin/g++ ]; then
+    export CC=/usr/bin/gcc
+    export CXX=/usr/bin/g++
+    echo "  Using system compiler: $(${CXX} --version | head -1)"
+fi
+
 echo "  Running cmake..."
 cmake .. -DCMAKE_BUILD_TYPE=Release > /dev/null
 

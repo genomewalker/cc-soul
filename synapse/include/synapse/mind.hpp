@@ -376,6 +376,29 @@ public:
     size_t warm_size() const { return storage_.warm_size(); }
     size_t cold_size() const { return storage_.cold_size(); }
 
+    // Embed text to vector (for voice queries)
+    std::optional<Vector> embed(const std::string& text) {
+        if (!yantra_ || !yantra_->ready()) return std::nullopt;
+        Artha artha = yantra_->transform(text);
+        return artha.nu;
+    }
+
+    // Access graph for read-only operations (for voice queries)
+    const Graph& graph() const {
+        return graph_;
+    }
+
+    // Query by node type (from storage)
+    std::vector<Node> query_by_type(NodeType type) const {
+        std::vector<Node> results;
+        storage_.for_each_hot([&](const NodeId& id, const Node& node) {
+            if (node.node_type == type) {
+                results.push_back(node);
+            }
+        });
+        return results;
+    }
+
     // ═══════════════════════════════════════════════════════════════════
     // Autonomous dynamics (daemon)
     // ═══════════════════════════════════════════════════════════════════

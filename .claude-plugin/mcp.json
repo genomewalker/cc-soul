@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "soul": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/synapse/build/synapse_mcp",
+      "args": [
+        "--path", "${HOME}/.claude/mind/synapse",
+        "--model", "${CLAUDE_PLUGIN_ROOT}/synapse/models/model.onnx",
+        "--vocab", "${CLAUDE_PLUGIN_ROOT}/synapse/models/vocab.txt"
+      ]
+    }
+  }
+}
