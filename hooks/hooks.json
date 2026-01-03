@@ -2,38 +2,16 @@
   "hooks": {
     "SessionStart": [
       {
-        "matcher": "startup",
+        "matcher": "startup|resume|clear|compact",
         "hooks": [
           {
             "type": "command",
-            "command": "cc-soul hook start"
-          }
-        ]
-      },
-      {
-        "matcher": "resume",
-        "hooks": [
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/smart-install.sh",
+            "timeout": 300
+          },
           {
             "type": "command",
-            "command": "cc-soul hook start"
-          }
-        ]
-      },
-      {
-        "matcher": "compact",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "cc-soul hook start --after-compact"
-          }
-        ]
-      },
-      {
-        "matcher": "clear",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "cc-soul hook start"
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/soul-hook.sh start"
           }
         ]
       }
@@ -44,7 +22,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cc-soul hook end"
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/soul-hook.sh end"
           }
         ]
       }
@@ -55,7 +33,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cc-soul hook prompt --lean"
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/soul-hook.sh prompt --lean"
           }
         ]
       }
@@ -66,7 +44,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cc-soul hook pre-compact"
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/soul-hook.sh pre-compact"
           }
         ]
       }
