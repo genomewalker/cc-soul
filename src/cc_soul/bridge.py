@@ -18,6 +18,15 @@ from datetime import datetime
 from .core import get_synapse_graph, save_synapse
 
 
+def is_memory_available() -> bool:
+    """Check if synapse backend is available."""
+    try:
+        graph = get_synapse_graph()
+        return graph is not None
+    except Exception:
+        return False
+
+
 def find_project_dir() -> Optional[str]:
     """Find current project directory (with .git/)."""
     cwd = Path.cwd()

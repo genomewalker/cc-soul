@@ -1,17 +1,16 @@
 """
-Synapse Bridge: Connects cc-soul to cc-synapse Rust graph.
+Synapse Bridge: Connects cc-soul to C++ synapse graph.
 
-This module provides the same interface as graph_sqlite.py but uses
-the synapse Rust library for graph operations. This gives us:
+Uses the C++ MCP backend for graph operations:
 - 10x faster vector search
-- Real semantic embeddings (sentence-transformers)
-- Binary persistence instead of SQLite
-- Unified graph for all soul operations
+- Real semantic embeddings (sentence-transformers via ONNX)
+- Binary persistence
+- 5-tool architecture: soul_context, grow, observe, recall, cycle
 
 Usage:
     from cc_soul.synapse_bridge import SoulGraph
 
-    graph = SoulGraph.load()  # Loads from ~/.claude/mind/soul.synapse
+    graph = SoulGraph.load()
     graph.add_wisdom("title", "content", domain="python")
     results = graph.search("query")
 """
@@ -22,11 +21,16 @@ from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+# C++ MCP client - the only backend
 try:
-    from synapse import Soul
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "cc-synapse" / "synapse" / "python"))
+    from synapse_mcp import Soul
     SYNAPSE_AVAILABLE = True
+    SYNAPSE_BACKEND = "cpp-mcp"
 except ImportError:
     SYNAPSE_AVAILABLE = False
+    SYNAPSE_BACKEND = None
     Soul = None
 
 from .core import SOUL_DIR
@@ -56,23 +60,36 @@ class Concept:
     metadata: Dict = field(default_factory=dict)
 
 
-SYNAPSE_PATH = SOUL_DIR / "soul.synapse"
+# Path for synapse data
+SYNAPSE_PATH = SOUL_DIR / "synapse"
 
 
 class SoulGraph:
     """
     Synapse-backed soul graph.
 
-    Drop-in replacement for graph_sqlite operations, backed by Rust.
+    Uses C++ MCP backend with 5-tool architecture:
+    - soul_context: Get state for hook injection
+    - grow: Add wisdom, beliefs, failures, aspirations, dreams, terms
+    - observe: Record episodes (replaces cc-memory)
+    - recall: Semantic search
+    - cycle: Maintenance (decay, prune, coherence, save)
     """
 
-    def __init__(self, path: Optional[Path] = None):
-        self._path = path or SYNAPSE_PATH
+    def __init__(self, path: Optional[Path] = None, use_project: bool = False):
         if not SYNAPSE_AVAILABLE:
             raise ImportError(
-                "synapse not installed. Run: cd cc-synapse/synapse-py && maturin develop"
+                "synapse not installed. Build synapse (cc-synapse/synapse) first."
             )
-        self._soul = Soul(str(self._path))
+
+        if path:
+            self._path = path
+            self._soul = Soul(str(self._path))
+        else:
+            self._soul = Soul(use_project=use_project)
+            self._path = self._soul._path
+
+        self._backend = SYNAPSE_BACKEND
 
     @classmethod
     def load(cls, path: Optional[Path] = None) -> "SoulGraph":
@@ -83,7 +100,7 @@ class SoulGraph:
         """Save to disk."""
         self._soul.save(str(self._path))
 
-    # --- Graph operations ---
+    # --- Graph operations (grow) ---
 
     def add_wisdom(
         self,
@@ -99,20 +116,6 @@ class SoulGraph:
         """Add an immutable belief."""
         return self._soul.hold_belief(statement, strength)
 
-    def set_intention(
-        self,
-        want: str,
-        why: str,
-        scope: str = "session",
-        strength: float = 0.8,
-    ) -> str:
-        """Set an intention (concrete want)."""
-        return self._soul.set_intention(want, why, scope, strength)
-
-    def get_intentions(self) -> List[Dict]:
-        """Get active intentions."""
-        return self._soul.get_intentions()
-
     def add_failure(
         self,
         what_failed: str,
@@ -121,6 +124,37 @@ class SoulGraph:
     ) -> str:
         """Record a failure (gold for learning)."""
         return self._soul.record_failure(what_failed, why_it_failed, domain)
+
+    def add_aspiration(
+        self,
+        direction: str,
+        why: str,
+        timeframe: Optional[str] = None,
+        confidence: float = 0.7,
+    ) -> str:
+        """Add an aspiration (direction of growth)."""
+        return self._soul.aspire(direction, why, timeframe, confidence)
+
+    def add_dream(
+        self,
+        vision: str,
+        inspiration: Optional[str] = None,
+        confidence: float = 0.6,
+    ) -> str:
+        """Add a dream (exploratory vision)."""
+        return self._soul.dream(vision, inspiration, confidence)
+
+    def add_term(
+        self,
+        term: str,
+        definition: str,
+        domain: Optional[str] = None,
+        examples: Optional[List[str]] = None,
+    ) -> str:
+        """Add a vocabulary term."""
+        return self._soul.learn_term(term, definition, domain, examples)
+
+    # --- Observe (record episodes) ---
 
     def observe(
         self,
@@ -140,14 +174,7 @@ class SoulGraph:
         """
         return self._soul.observe(category, title, content, project, tags)
 
-    def get_episodes(
-        self,
-        category: Optional[str] = None,
-        project: Optional[str] = None,
-        limit: int = 50,
-    ) -> List[Dict]:
-        """Get episodes, optionally filtered."""
-        return self._soul.get_episodes(category, project, limit)
+    # --- Search (recall) ---
 
     def search(
         self,
@@ -173,11 +200,13 @@ class SoulGraph:
             concepts.append((concept, score))
         return concepts
 
+    # --- Context (soul_context) ---
+
     def get_context(self, query: Optional[str] = None) -> Dict:
         """
         Get context for hook injection.
 
-        Returns dict with beliefs, intentions, wisdom, failures, coherence.
+        Returns dict with coherence, statistics, relevant wisdom.
         """
         return self._soul.get_context(query)
 
@@ -185,7 +214,7 @@ class SoulGraph:
         """Format context as string for hook injection."""
         return self._soul.format_context(query)
 
-    # --- Maintenance ---
+    # --- Maintenance (cycle) ---
 
     def cycle(self) -> Tuple[int, float]:
         """Run maintenance cycle (decay + prune + coherence)."""
@@ -195,80 +224,13 @@ class SoulGraph:
         """Get current coherence (τₖ)."""
         return self._soul.coherence()
 
-    def strengthen(self, node_id: str) -> bool:
-        """Positive feedback on a node."""
-        return self._soul.strengthen(node_id)
-
-    def weaken(self, node_id: str) -> bool:
-        """Negative feedback on a node."""
-        return self._soul.weaken(node_id)
-
-    # --- Statistics ---
-
-    def __len__(self) -> int:
-        return len(self._soul)
-
-    def get_all_wisdom(self) -> List[Dict]:
-        """Get all wisdom entries."""
-        return self._soul.get_wisdom()
-
-    def get_all_beliefs(self) -> List[Dict]:
-        """Get all beliefs."""
-        return self._soul.get_beliefs()
-
-    def get_all_failures(self) -> List[Dict]:
-        """Get all failures."""
-        return self._soul.get_failures()
-
-    # --- Antahkarana Voices (Rust implementation) ---
-
-    def consult_voice(
-        self,
-        voice_name: str,
-        query: str,
-        limit: int = 10,
-    ) -> List[Tuple[str, float, Dict]]:
-        """
-        Consult a specific Antahkarana voice.
-
-        Voices: manas, buddhi, ahamkara, chitta, vikalpa, sakshi
-        Each voice sees the graph differently based on attention weights.
-        """
-        return self._soul.consult_voice(voice_name, query, limit)
-
-    def chorus_query(
-        self,
-        query: str,
-        limit: int = 10,
-    ) -> List[Tuple[str, float, List[str], Dict]]:
-        """Query through all voices and harmonize results."""
-        return self._soul.chorus_query(query, limit)
-
-    def harmonize(self) -> Dict:
-        """Get harmony report from all voices."""
-        return self._soul.harmonize()
-
-    def get_voices(self) -> List[Dict]:
-        """Get descriptions of the six Antahkarana voices."""
-        return self._soul.get_voices()
-
-    # --- Dynamics (Rust implementation) ---
-
     def tick_dynamics(self) -> Dict:
         """Tick the dynamics engine (decay, triggers)."""
         return self._soul.tick_dynamics()
 
-    def learning_feedback(self, node_id: str, success: bool) -> bool:
-        """Provide learning feedback (strengthen/weaken based on outcome)."""
-        return self._soul.learning_feedback(node_id, success)
-
     def snapshot(self) -> int:
         """Create snapshot for rollback."""
         return self._soul.snapshot()
-
-    def rollback(self, snapshot_id: int) -> bool:
-        """Rollback to snapshot."""
-        return self._soul.rollback(snapshot_id)
 
 
 # Convenience functions (match graph_sqlite.py API)
