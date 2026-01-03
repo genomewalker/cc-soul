@@ -45,3 +45,27 @@ vectors/
 
 # Project memory (cc-memory local episodic memory)
 .memory/
+
+# ML models and binaries
+*.onnx
+*.pt
+*.pth
+*.safetensors
+synapse/models/
+
+# Build artifacts
+synapse/build/
+*.o
+*.a
+*.dylib
+
+# Runtime data
+.claude/swarm/
+cache/
+.cc-memory/
+
+# Old commands (replaced by skills)
+commands/
+
+# Test scripts
+.scripts/
