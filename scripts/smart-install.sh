@@ -57,8 +57,8 @@ if [[ ! -f "$MODELS_DIR/model.onnx" || ! -f "$MODELS_DIR/vocab.txt" ]]; then
     fi
 fi
 
-# Build chitta if missing or outdated
-if [[ ! -x "$BUILD_DIR/chitta_mcp" ]]; then
+# Build chitta if missing or version changed
+if [[ ! -x "$BUILD_DIR/chitta_mcp" || "$current_version" != "$installed_version" ]]; then
     echo "[cc-soul] Building chitta..."
     mkdir -p "$BUILD_DIR"
     cd "$BUILD_DIR"
