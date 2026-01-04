@@ -6,12 +6,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/smart-install.sh",
+            "command": "${CLAUDE_PLUGIN_ROOT}/../scripts/smart-install.sh",
             "timeout": 300
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/soul-hook.sh start"
+            "command": "${CLAUDE_PLUGIN_ROOT}/../scripts/soul-hook.sh start"
           }
         ]
       }
@@ -22,7 +22,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/soul-hook.sh end"
+            "command": "${CLAUDE_PLUGIN_ROOT}/../scripts/soul-hook.sh end"
           }
         ]
       }
@@ -33,7 +33,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/soul-hook.sh prompt --lean"
+            "command": "${CLAUDE_PLUGIN_ROOT}/../scripts/soul-hook.sh prompt --lean"
           }
         ]
       }
@@ -44,7 +44,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/soul-hook.sh pre-compact"
+            "command": "${CLAUDE_PLUGIN_ROOT}/../scripts/soul-hook.sh pre-compact"
           }
         ]
       }
