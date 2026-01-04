@@ -13,6 +13,7 @@
 #include <iostream>
 #include <string>
 #include <cstring>
+#include <cstdlib>
 
 void print_usage(const char* prog) {
     std::cerr << "Usage: " << prog << " [options]\n"
@@ -31,6 +32,11 @@ int main(int argc, char* argv[]) {
     std::string mind_path = "./mind";
     std::string model_path;
     std::string vocab_path;
+
+    // Honor CHITTA_DB_PATH env var (can be overridden by --path arg)
+    if (const char* env_path = std::getenv("CHITTA_DB_PATH")) {
+        mind_path = env_path;
+    }
 
     // Parse arguments
     for (int i = 1; i < argc; ++i) {
