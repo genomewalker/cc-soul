@@ -8,9 +8,5 @@
   },
   "repository": "https://github.com/genomewalker/cc-soul",
   "license": "MIT",
-  "keywords": ["memory", "identity", "wisdom", "continuity", "soul"],
-  "commands": "../commands/",
-  "skills": "../skills/",
-  "hooks": "../hooks/hooks.json",
-  "mcpServers": "./mcp.json"
+  "keywords": ["memory", "identity", "wisdom", "continuity", "soul"]
 }
