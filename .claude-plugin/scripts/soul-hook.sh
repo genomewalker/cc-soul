@@ -13,7 +13,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
 
 # Paths
-CHITTA_BIN="$PLUGIN_DIR/chitta/build/chitta_mcp"
+CHITTA_BIN="$PLUGIN_DIR/bin/chitta_mcp"
 MIND_PATH="${HOME}/.claude/mind/chitta"
 MODEL_PATH="$PLUGIN_DIR/chitta/models/model.onnx"
 VOCAB_PATH="$PLUGIN_DIR/chitta/models/vocab.txt"

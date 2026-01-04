@@ -55,9 +55,16 @@ synapse/models/
 
 # Build artifacts
 synapse/build/
+.claude-plugin/bin/
+.claude-plugin/chitta/build/
+.install-complete
 *.o
 *.a
 *.dylib
+
+# Test files
+mind.cold
+mind.hot
 
 # Runtime data
 .claude/swarm/

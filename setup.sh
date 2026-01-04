@@ -10,8 +10,10 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CHITTA_DIR="$SCRIPT_DIR/chitta"
+PLUGIN_DIR="$SCRIPT_DIR/.claude-plugin"
+CHITTA_DIR="$PLUGIN_DIR/chitta"
 BUILD_DIR="$CHITTA_DIR/build"
+BIN_DIR="$PLUGIN_DIR/bin"
 MODELS_DIR="$CHITTA_DIR/models"
 
 # Colors
@@ -96,15 +98,8 @@ if [ ! -d "$CHITTA_DIR/src" ]; then
     exit 1
 fi
 
-mkdir -p "$BUILD_DIR"
+mkdir -p "$BUILD_DIR" "$BIN_DIR"
 cd "$BUILD_DIR"
-
-# Use system gcc to avoid GLIBC version issues from conda gcc
-if [ -f /usr/bin/gcc ] && [ -f /usr/bin/g++ ]; then
-    export CC=/usr/bin/gcc
-    export CXX=/usr/bin/g++
-    echo "  Using system compiler: $(${CXX} --version | head -1)"
-fi
 
 echo "  Running cmake..."
 cmake .. -DCMAKE_BUILD_TYPE=Release > /dev/null
@@ -112,7 +107,7 @@ cmake .. -DCMAKE_BUILD_TYPE=Release > /dev/null
 echo "  Building..."
 make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4) > /dev/null
 
-if [ -f "$BUILD_DIR/chitta_mcp" ]; then
+if [ -f "$BIN_DIR/chitta_mcp" ]; then
     echo -e "  ${GREEN}✓ chitta_mcp built${NC}"
 else
     echo -e "${RED}  ✗ Build failed${NC}"

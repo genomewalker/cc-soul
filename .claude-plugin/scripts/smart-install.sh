@@ -10,14 +10,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
 CHITTA_DIR="$PLUGIN_DIR/chitta"
 BUILD_DIR="$CHITTA_DIR/build"
+BIN_DIR="$PLUGIN_DIR/bin"
 MODELS_DIR="$CHITTA_DIR/models"
 MARKER="$PLUGIN_DIR/.install-complete"
 
 # Check if already installed
-current_version=$(cat "$PLUGIN_DIR/.claude-plugin/plugin.json" 2>/dev/null | grep '"version"' | cut -d'"' -f4 || echo "0.0.0")
+current_version=$(cat "$PLUGIN_DIR/plugin.json" 2>/dev/null | grep '"version"' | cut -d'"' -f4 || echo "0.0.0")
 installed_version=$(cat "$MARKER" 2>/dev/null || echo "")
 
-if [[ "$current_version" == "$installed_version" && -x "$BUILD_DIR/chitta_mcp" && -f "$MODELS_DIR/model.onnx" ]]; then
+if [[ "$current_version" == "$installed_version" && -x "$BIN_DIR/chitta_mcp" && -f "$MODELS_DIR/model.onnx" ]]; then
     exit 0  # Already installed
 fi
 
@@ -58,9 +59,9 @@ if [[ ! -f "$MODELS_DIR/model.onnx" || ! -f "$MODELS_DIR/vocab.txt" ]]; then
 fi
 
 # Build chitta if missing or version changed
-if [[ ! -x "$BUILD_DIR/chitta_mcp" || "$current_version" != "$installed_version" ]]; then
+if [[ ! -x "$BIN_DIR/chitta_mcp" || "$current_version" != "$installed_version" ]]; then
     echo "[cc-soul] Building chitta..."
-    mkdir -p "$BUILD_DIR"
+    mkdir -p "$BUILD_DIR" "$BIN_DIR"
     cd "$BUILD_DIR"
 
     cmake .. -DCMAKE_BUILD_TYPE=Release 2>/dev/null || {
