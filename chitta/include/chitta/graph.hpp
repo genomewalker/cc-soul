@@ -182,11 +182,13 @@ public:
         float local = compute_local_coherence();
         float global = compute_global_coherence();
         float temporal = compute_temporal_coherence();
+        float structural = compute_structural_coherence();
 
         Coherence c;
         c.local = local;
         c.global = global;
         c.temporal = temporal;
+        c.structural = structural;
         c.tau = now();
 
         coherence_ = c;
@@ -234,12 +236,31 @@ public:
     }
 
 private:
+    // Node type weights for importance-weighted calculations
+    static float node_weight(NodeType type) {
+        switch (type) {
+            case NodeType::Invariant: return 2.0f;  // Core identity - highest
+            case NodeType::Belief: return 1.5f;     // Guiding principles
+            case NodeType::Wisdom: return 1.2f;     // Accumulated patterns
+            case NodeType::Failure: return 1.0f;    // Lessons learned
+            case NodeType::Intention: return 0.8f;  // Active goals
+            case NodeType::Episode: return 0.5f;    // Observations
+            case NodeType::Term: return 0.3f;       // Vocabulary
+            default: return 0.5f;
+        }
+    }
+
+    // Local coherence: explicit contradictions + semantic tension
     float compute_local_coherence() const {
         if (nodes_.empty()) return 1.0f;
 
         size_t contradictions = 0;
         size_t total_edges = 0;
+        size_t semantic_tensions = 0;
+        size_t belief_wisdom_pairs = 0;
 
+        // Collect beliefs and wisdom for semantic tension check
+        std::vector<const Node*> beliefs, wisdom;
         for (const auto& [_, node] : nodes_) {
             for (const auto& edge : node.edges) {
                 total_edges++;
@@ -247,52 +268,154 @@ private:
                     contradictions++;
                 }
             }
+            if (node.node_type == NodeType::Belief) beliefs.push_back(&node);
+            if (node.node_type == NodeType::Wisdom) wisdom.push_back(&node);
         }
 
-        if (total_edges == 0) return 1.0f;
-        return 1.0f - static_cast<float>(contradictions) / static_cast<float>(total_edges);
+        // Check for semantic tension: similar embeddings without support edges
+        // (Sample to avoid O(n²) for large graphs)
+        size_t max_checks = std::min(beliefs.size() * wisdom.size(), size_t(100));
+        for (size_t i = 0; i < std::min(beliefs.size(), size_t(10)); ++i) {
+            for (size_t j = 0; j < std::min(wisdom.size(), size_t(10)); ++j) {
+                belief_wisdom_pairs++;
+                float sim = beliefs[i]->nu.cosine(wisdom[j]->nu);
+                // High similarity but no explicit connection = potential tension
+                if (sim > 0.7f) {
+                    bool has_support = false;
+                    for (const auto& edge : beliefs[i]->edges) {
+                        if (edge.target == wisdom[j]->id &&
+                            (edge.type == EdgeType::Supports || edge.type == EdgeType::Similar)) {
+                            has_support = true;
+                            break;
+                        }
+                    }
+                    if (!has_support) semantic_tensions++;
+                }
+            }
+        }
+
+        float contradiction_ratio = total_edges > 0
+            ? static_cast<float>(contradictions) / static_cast<float>(total_edges)
+            : 0.0f;
+
+        float tension_ratio = belief_wisdom_pairs > 0
+            ? static_cast<float>(semantic_tensions) / static_cast<float>(belief_wisdom_pairs)
+            : 0.0f;
+
+        // Contradictions matter more than semantic tension
+        return std::max(0.0f, 1.0f - contradiction_ratio - 0.3f * tension_ratio);
     }
 
+    // Global coherence: importance-weighted confidence with variance penalty
     float compute_global_coherence() const {
         if (nodes_.empty()) return 1.0f;
 
-        float sum = 0.0f;
-        for (const auto& [_, node] : nodes_) {
-            sum += node.kappa.effective();
-        }
-        float avg = sum / static_cast<float>(nodes_.size());
+        float weighted_sum = 0.0f;
+        float weight_total = 0.0f;
+        float important_sum = 0.0f;
+        float important_count = 0.0f;
 
+        for (const auto& [_, node] : nodes_) {
+            float w = node_weight(node.node_type);
+            float eff = node.kappa.effective();
+            weighted_sum += eff * w;
+            weight_total += w;
+
+            // Track variance only for important nodes
+            if (w >= 1.0f) {
+                important_sum += eff;
+                important_count += 1.0f;
+            }
+        }
+
+        if (weight_total == 0.0f) return 1.0f;
+        float weighted_avg = weighted_sum / weight_total;
+
+        // Variance among important nodes only
         float variance = 0.0f;
-        for (const auto& [_, node] : nodes_) {
-            float diff = node.kappa.effective() - avg;
-            variance += diff * diff;
+        if (important_count > 1.0f) {
+            float important_avg = important_sum / important_count;
+            for (const auto& [_, node] : nodes_) {
+                if (node_weight(node.node_type) >= 1.0f) {
+                    float diff = node.kappa.effective() - important_avg;
+                    variance += diff * diff;
+                }
+            }
+            variance /= important_count;
         }
-        variance /= static_cast<float>(nodes_.size());
 
-        return avg * (1.0f - std::sqrt(variance));
+        // Penalize variance but not too harshly
+        return weighted_avg * (1.0f - 0.5f * std::sqrt(variance));
     }
 
+    // Temporal coherence: activity + maturity balance
     float compute_temporal_coherence() const {
-        if (nodes_.empty()) return 1.0f;
+        if (nodes_.empty()) return 0.5f;
 
         Timestamp current = now();
-        size_t recent = 0;
-        size_t old = 0;
+        float activity_score = 0.0f;
+        float maturity_score = 0.0f;
+        float maturity_count = 0.0f;
 
         for (const auto& [_, node] : nodes_) {
-            float age_days = static_cast<float>(current - node.tau_accessed) / 86400000.0f;
-            if (age_days < 7.0f) {
-                recent++;
-            } else if (age_days > 30.0f) {
-                old++;
+            float access_age_days = static_cast<float>(current - node.tau_accessed) / 86400000.0f;
+            float creation_age_days = static_cast<float>(current - node.tau_created) / 86400000.0f;
+
+            // Activity: recently accessed nodes
+            if (access_age_days < 7.0f) {
+                activity_score += 1.0f;
+            } else if (access_age_days < 30.0f) {
+                activity_score += 0.5f;
+            }
+
+            // Maturity: wisdom/beliefs that have survived are valuable
+            if ((node.node_type == NodeType::Wisdom || node.node_type == NodeType::Belief) &&
+                creation_age_days > 7.0f) {
+                maturity_score += node.kappa.effective();
+                maturity_count += 1.0f;
             }
         }
 
         float total = static_cast<float>(nodes_.size());
-        float recent_ratio = static_cast<float>(recent) / total;
-        float old_ratio = static_cast<float>(old) / total;
+        float activity_ratio = activity_score / total;
+        float maturity_ratio = maturity_count > 0.0f
+            ? maturity_score / maturity_count
+            : 0.5f;  // Neutral if no mature wisdom yet
 
-        return 0.5f + 0.3f * recent_ratio - 0.2f * old_ratio;
+        // Balance: active AND mature is best
+        // Range: 0.3 (dead graph) to 1.0 (active + mature wisdom)
+        return std::clamp(0.3f + 0.4f * activity_ratio + 0.3f * maturity_ratio, 0.0f, 1.0f);
+    }
+
+    // Structural coherence: connectivity health
+    float compute_structural_coherence() const {
+        if (nodes_.empty()) return 1.0f;
+
+        size_t connected_nodes = 0;
+        size_t orphan_nodes = 0;
+        size_t total_edges = 0;
+
+        for (const auto& [_, node] : nodes_) {
+            if (node.edges.empty()) {
+                orphan_nodes++;
+            } else {
+                connected_nodes++;
+                total_edges += node.edges.size();
+            }
+        }
+
+        float total = static_cast<float>(nodes_.size());
+
+        // Orphan penalty: isolated knowledge is less coherent
+        float orphan_ratio = static_cast<float>(orphan_nodes) / total;
+
+        // Edge density: more connections = more integrated
+        // Use log scale to avoid penalizing large graphs
+        float expected_edges = total * std::log2(std::max(total, 2.0f));
+        float edge_density = std::min(static_cast<float>(total_edges) / expected_edges, 1.0f);
+
+        // Structural score: penalize orphans, reward connectivity
+        return std::clamp((1.0f - 0.5f * orphan_ratio) * (0.5f + 0.5f * edge_density), 0.0f, 1.0f);
     }
 
     mutable std::shared_mutex mutex_;

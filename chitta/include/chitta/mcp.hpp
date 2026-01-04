@@ -607,6 +607,7 @@ private:
                 {"local", coherence.local},
                 {"global", coherence.global},
                 {"temporal", coherence.temporal},
+                {"structural", coherence.structural},
                 {"tau_k", coherence.tau_k()}
             }},
             {"statistics", {
@@ -637,7 +638,11 @@ private:
         if (format == "text") {
             std::ostringstream ss;
             ss << "Soul State:\n";
-            ss << "  Coherence: " << (coherence.tau_k() * 100) << "%\n";
+            ss << "  Coherence: " << int(coherence.tau_k() * 100) << "% ";
+            ss << "(L:" << int(coherence.local * 100);
+            ss << " G:" << int(coherence.global * 100);
+            ss << " T:" << int(coherence.temporal * 100);
+            ss << " S:" << int(coherence.structural * 100) << ")\n";
             ss << "  Nodes: " << state.total_nodes << " total (";
             ss << state.hot_nodes << " hot, ";
             ss << state.warm_nodes << " warm, ";

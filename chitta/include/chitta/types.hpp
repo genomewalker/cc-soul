@@ -302,21 +302,36 @@ struct Node {
 
 // Coherence measurement across dimensions
 struct Coherence {
-    float local = 0.7f;     // Local: nearby nodes agree
-    float global = 0.6f;    // Global: whole graph coheres
-    float temporal = 0.8f;  // Temporal: past ↔ present consistent
-    Timestamp tau;          // Computed timestamp
+    float local = 1.0f;      // Local: nodes don't contradict (explicit + semantic)
+    float global = 1.0f;     // Global: weighted confidence by node importance
+    float temporal = 0.5f;   // Temporal: activity + maturity balance
+    float structural = 1.0f; // Structural: connectivity health
+    Timestamp tau;           // Computed timestamp
 
     Coherence() : tau(now()) {}
 
-    // τₖ: the coherence coefficient
+    // τₖ: the coherence coefficient (geometric mean for stricter coherence)
     float tau_k() const {
-        return 0.5f * local + 0.3f * global + 0.2f * temporal;
+        // Geometric mean: all dimensions must be healthy
+        // A single failing dimension tanks the score
+        float product = local * global * temporal * structural;
+        return std::pow(product, 0.25f);
+    }
+
+    // Alternative: weighted average (more forgiving)
+    float tau_k_weighted() const {
+        return 0.30f * local + 0.30f * global + 0.20f * temporal + 0.20f * structural;
     }
 
     bool needs_attention() const {
         return tau_k() < 0.5f;
     }
+
+    // Individual dimension health checks
+    bool local_healthy() const { return local > 0.7f; }
+    bool global_healthy() const { return global > 0.5f; }
+    bool temporal_healthy() const { return temporal > 0.4f; }
+    bool structural_healthy() const { return structural > 0.3f; }
 };
 
 } // namespace chitta
