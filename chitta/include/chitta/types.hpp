@@ -13,7 +13,7 @@
 #include <vector>
 #include <random>
 
-namespace synapse {
+namespace chitta {
 
 // Embedding dimension (all-MiniLM-L6-v2 compatible)
 constexpr size_t EMBED_DIM = 384;
@@ -319,4 +319,4 @@ struct Coherence {
     }
 };
 
-} // namespace synapse
+} // namespace chitta

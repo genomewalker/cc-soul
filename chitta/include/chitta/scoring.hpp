@@ -12,7 +12,7 @@
 #include <algorithm>
 #include <cctype>
 
-namespace synapse {
+namespace chitta {
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 1. Soul-Aware Scoring
@@ -319,4 +319,4 @@ public:
     }
 };
 
-} // namespace synapse
+} // namespace chitta

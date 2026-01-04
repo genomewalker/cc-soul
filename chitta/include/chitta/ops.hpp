@@ -9,7 +9,7 @@
 #include <variant>
 #include <memory>
 
-namespace synapse {
+namespace chitta {
 
 // Forward declarations
 class Graph;
@@ -23,7 +23,7 @@ struct OpResult {
     std::vector<std::pair<NodeId, float>> nodes;
     NodeId node_id;
     uint64_t snapshot_id = 0;
-    synapse::Coherence coherence;
+    chitta::Coherence coherence;
     size_t count = 0;
     std::vector<OpResult> seq;
 
@@ -44,7 +44,7 @@ struct OpResult {
         r.snapshot_id = id;
         return r;
     }
-    static OpResult with_coherence(synapse::Coherence c) {
+    static OpResult with_coherence(chitta::Coherence c) {
         OpResult r{Type::Coherence};
         r.coherence = c;
         return r;
@@ -367,4 +367,4 @@ inline OpResult Op::execute(Graph& graph) const {
     return OpResult::ok();
 }
 
-} // namespace synapse
+} // namespace chitta

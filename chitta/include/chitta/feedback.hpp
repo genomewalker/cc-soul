@@ -10,7 +10,7 @@
 #include <deque>
 #include <mutex>
 
-namespace synapse {
+namespace chitta {
 
 // Feedback types
 enum class FeedbackType {
@@ -190,4 +190,4 @@ private:
     std::unordered_map<NodeId, NodeStats, NodeIdHash> node_stats_;
 };
 
-} // namespace synapse
+} // namespace chitta

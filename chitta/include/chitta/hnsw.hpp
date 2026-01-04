@@ -12,7 +12,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
-namespace synapse {
+namespace chitta {
 
 // Forward declare NodeIdHash from graph.hpp
 struct NodeIdHash {
@@ -374,4 +374,4 @@ private:
     mutable std::mt19937 rng_;
 };
 
-} // namespace synapse
+} // namespace chitta

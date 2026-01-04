@@ -17,7 +17,7 @@
 #include <codecvt>
 #include <locale>
 
-namespace synapse {
+namespace chitta {
 
 // Pooling strategies for sentence embeddings
 enum class PoolingStrategy {
@@ -322,10 +322,10 @@ public:
         int num_threads = 0;          // 0 = auto
     };
 
-    AntahkaranaYantra() : env_(ORT_LOGGING_LEVEL_WARNING, "synapse") {}
+    AntahkaranaYantra() : env_(ORT_LOGGING_LEVEL_WARNING, "chitta") {}
 
     explicit AntahkaranaYantra(Config config)
-        : env_(ORT_LOGGING_LEVEL_WARNING, "synapse"), config_(config) {}
+        : env_(ORT_LOGGING_LEVEL_WARNING, "chitta"), config_(config) {}
 
     // Initialize the yantra
     bool awaken(const std::string& model_path, const std::string& vocab_path) {
@@ -686,4 +686,4 @@ inline std::shared_ptr<VakYantra> create_yantra(
     return std::make_shared<SmritiYantra>(inner, cache_size);
 }
 
-} // namespace synapse
+} // namespace chitta

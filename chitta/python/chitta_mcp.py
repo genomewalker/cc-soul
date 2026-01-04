@@ -1,11 +1,11 @@
 """
-Synapse MCP Client: Python interface to synapse via MCP protocol.
+Chitta MCP Client: Python interface to chitta via MCP protocol.
 
-Uses a subprocess-based MCP client to communicate with the C++ synapse server.
+Uses a subprocess-based MCP client to communicate with the C++ chitta server.
 Avoids glibc version issues on RHEL8 and similar systems.
 
 Usage:
-    from synapse_mcp import Soul, SynapseGraph
+    from chitta_mcp import Soul, ChittaGraph
 
     soul = Soul()
     soul.grow_wisdom("title", "content")
@@ -20,17 +20,17 @@ from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
 
 
-def _find_synapse_mcp() -> Path:
-    """Find the synapse_mcp binary."""
+def _find_chitta_mcp() -> Path:
+    """Find the chitta_mcp binary."""
     # Check common locations
     candidates = [
-        Path(__file__).parent.parent / "build" / "synapse_mcp",
-        Path.home() / ".local" / "bin" / "synapse_mcp",
-        Path("/usr/local/bin/synapse_mcp"),
+        Path(__file__).parent.parent / "build" / "chitta_mcp",
+        Path.home() / ".local" / "bin" / "chitta_mcp",
+        Path("/usr/local/bin/chitta_mcp"),
     ]
 
-    # Check SYNAPSE_MCP_PATH env var
-    env_path = os.environ.get("SYNAPSE_MCP_PATH")
+    # Check CHITTA_MCP_PATH env var
+    env_path = os.environ.get("CHITTA_MCP_PATH")
     if env_path:
         candidates.insert(0, Path(env_path))
 
@@ -39,15 +39,15 @@ def _find_synapse_mcp() -> Path:
             return path
 
     raise RuntimeError(
-        "synapse_mcp not found. Set SYNAPSE_MCP_PATH or install to ~/.local/bin/"
+        "chitta_mcp not found. Set CHITTA_MCP_PATH or install to ~/.local/bin/"
     )
 
 
 def _find_project_root() -> Optional[Path]:
-    """Find project root by looking for .git or .synapse directory."""
+    """Find project root by looking for .git or .chitta directory."""
     cwd = Path.cwd()
     for parent in [cwd] + list(cwd.parents):
-        if (parent / ".git").exists() or (parent / ".synapse").exists():
+        if (parent / ".git").exists() or (parent / ".chitta").exists():
             return parent
         # Stop at home directory
         if parent == Path.home():
@@ -60,24 +60,24 @@ def get_project_mind_path(project_root: Optional[Path] = None) -> Optional[Path]
     if project_root is None:
         project_root = _find_project_root()
     if project_root:
-        return project_root / ".synapse" / "mind"
+        return project_root / ".chitta" / "mind"
     return None
 
 
 def get_global_mind_path() -> Path:
     """Get global mind path."""
-    return Path.home() / ".claude" / "mind" / "synapse"
+    return Path.home() / ".claude" / "mind" / "chitta"
 
 
 def _find_model_files() -> Tuple[Optional[Path], Optional[Path]]:
     """Find ONNX model and vocab files."""
     candidates = [
         Path(__file__).parent.parent / "models",
-        Path.home() / ".local" / "share" / "synapse" / "models",
-        Path("/usr/local/share/synapse/models"),
+        Path.home() / ".local" / "share" / "chitta" / "models",
+        Path("/usr/local/share/chitta/models"),
     ]
 
-    env_path = os.environ.get("SYNAPSE_MODELS_PATH")
+    env_path = os.environ.get("CHITTA_MODELS_PATH")
     if env_path:
         candidates.insert(0, Path(env_path))
 
@@ -111,7 +111,7 @@ class MCPResponse:
 
 
 class MCPClient:
-    """Low-level MCP client for synapse_mcp server."""
+    """Low-level MCP client for chitta_mcp server."""
 
     def __init__(
         self,
@@ -119,8 +119,8 @@ class MCPClient:
         model_path: Optional[Path] = None,
         vocab_path: Optional[Path] = None,
     ):
-        self._mcp_bin = _find_synapse_mcp()
-        self._path = path or Path.home() / ".claude" / "mind" / "synapse"
+        self._mcp_bin = _find_chitta_mcp()
+        self._path = path or Path.home() / ".claude" / "mind" / "chitta"
 
         if model_path is None or vocab_path is None:
             model_path, vocab_path = _find_model_files()
@@ -204,7 +204,7 @@ class Soul:
     Path resolution:
     - If path is provided, use it directly
     - If use_project=True and in a project, use project-specific path
-    - Otherwise use global path (~/.claude/mind/synapse)
+    - Otherwise use global path (~/.claude/mind/chitta)
     """
 
     def __init__(
@@ -485,7 +485,7 @@ class Soul:
 
 
 # Alias for compatibility
-SynapseGraph = Soul
+ChittaGraph = Soul
 
 
 # Module-level convenience for testing

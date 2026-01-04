@@ -14,7 +14,7 @@
 #include <optional>
 #include <functional>
 
-namespace synapse {
+namespace chitta {
 
 // A point-in-time snapshot
 struct Snapshot {
@@ -303,4 +303,4 @@ private:
     std::vector<Snapshot> snapshots_;
 };
 
-} // namespace synapse
+} // namespace chitta

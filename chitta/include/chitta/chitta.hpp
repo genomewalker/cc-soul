@@ -1,5 +1,5 @@
 #pragma once
-// Synapse: The soul graph engine
+// Chitta: The soul graph engine
 //
 // A semantic memory system with:
 // - Types: Nodes, Vectors, Confidence, Coherence
@@ -18,7 +18,7 @@
 #include "dynamics.hpp"
 #include "storage.hpp"
 #include "vak.hpp"
-#ifdef SYNAPSE_WITH_ONNX
+#ifdef CHITTA_WITH_ONNX
 #include "vak_onnx.hpp"
 #endif
 #include "mind.hpp"

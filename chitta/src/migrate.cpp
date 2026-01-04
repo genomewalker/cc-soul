@@ -1,6 +1,6 @@
-// synapse-migrate: Import soul from cc-soul SQLite database
+// chitta-migrate: Import soul from cc-soul SQLite database
 //
-// Usage: synapse_migrate [OPTIONS]
+// Usage: chitta_migrate [OPTIONS]
 //
 // Options:
 //   --soul-db PATH    Path to soul.db (default: ~/.claude/mind/soul.db)
@@ -10,9 +10,9 @@
 //   --dry-run         Show what would be migrated
 //   --verbose         Show detailed progress
 
-#include <synapse/mind.hpp>
-#ifdef SYNAPSE_WITH_ONNX
-#include <synapse/vak_onnx.hpp>
+#include <chitta/mind.hpp>
+#ifdef CHITTA_WITH_ONNX
+#include <chitta/vak_onnx.hpp>
 #endif
 #include <sqlite3.h>
 #include <iostream>
@@ -20,7 +20,7 @@
 #include <cstring>
 #include <unordered_map>
 
-using namespace synapse;
+using namespace chitta;
 
 struct MigrationStats {
     size_t wisdom = 0;
@@ -39,7 +39,7 @@ void print_usage(const char* prog) {
               << "Options:\n"
               << "  --soul-db PATH    Path to soul.db (default: ~/.claude/mind/soul.db)\n"
               << "  --output PATH     Path to output mind storage (default: ./mind)\n"
-#ifdef SYNAPSE_WITH_ONNX
+#ifdef CHITTA_WITH_ONNX
               << "  --model PATH      Path to ONNX model for embeddings\n"
               << "  --vocab PATH      Path to vocabulary file\n"
 #endif
@@ -288,7 +288,7 @@ int main(int argc, char* argv[]) {
     }
 
     std::cout << "┌─────────────────────────────────────────┐\n";
-    std::cout << "│       synapse-migrate                   │\n";
+    std::cout << "│       chitta-migrate                   │\n";
     std::cout << "│   Import soul from cc-soul/cc-memory    │\n";
     std::cout << "└─────────────────────────────────────────┘\n\n";
     std::cout << "Source:  " << soul_db_path << "\n";
@@ -311,7 +311,7 @@ int main(int argc, char* argv[]) {
     Mind mind(config);
 
     // Attach ONNX yantra if available
-#ifdef SYNAPSE_WITH_ONNX
+#ifdef CHITTA_WITH_ONNX
     if (!model_path.empty() && !vocab_path.empty()) {
         AntahkaranaYantra::Config yantra_config;
         yantra_config.pooling = PoolingStrategy::Mean;

@@ -15,7 +15,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-namespace synapse {
+namespace chitta {
 
 // File format magic and version
 constexpr uint32_t STORAGE_MAGIC = 0x53594E41;  // "SYNA"
@@ -738,4 +738,4 @@ private:
     ColdStorage cold_;
 };
 
-} // namespace synapse
+} // namespace chitta

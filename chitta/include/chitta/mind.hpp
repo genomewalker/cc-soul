@@ -20,7 +20,7 @@
 #include <mutex>
 #include <atomic>
 
-namespace synapse {
+namespace chitta {
 
 // Mind configuration
 struct MindConfig {
@@ -583,4 +583,4 @@ private:
     FeedbackTracker feedback_;
 };
 
-} // namespace synapse
+} // namespace chitta

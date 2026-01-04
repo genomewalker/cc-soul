@@ -12,7 +12,7 @@
 #include <functional>
 #include <chrono>
 
-namespace synapse {
+namespace chitta {
 
 // Daemon configuration
 struct DaemonConfig {
@@ -252,4 +252,4 @@ private:
     Stats stats_;
 };
 
-} // namespace synapse
+} // namespace chitta

@@ -9,7 +9,7 @@
 #include "ops.hpp"
 #include <optional>
 
-namespace synapse {
+namespace chitta {
 
 // Report from a dynamics tick
 struct DynamicsReport {
@@ -231,4 +231,4 @@ public:
 
 } // namespace cycles
 
-} // namespace synapse
+} // namespace chitta

@@ -1,9 +1,9 @@
-#include <synapse/synapse.hpp>
+#include <chitta/chitta.hpp>
 #include <iostream>
 #include <cassert>
 #include <cmath>
 
-using namespace synapse;
+using namespace chitta;
 
 Vector test_vector(float seed) {
     Vector v;
@@ -267,7 +267,7 @@ void test_tiered_storage() {
     std::cout << "Testing TieredStorage..." << std::endl;
 
     TieredStorage::Config config;
-    config.base_path = "/tmp/synapse_test";
+    config.base_path = "/tmp/chitta_test";
     config.hot_max_nodes = 10;
 
     TieredStorage storage(config);
@@ -302,10 +302,10 @@ void test_mind() {
     std::cout << "Testing Mind..." << std::endl;
 
     // Clean up any previous test data
-    std::system("rm -f /tmp/synapse_mind_test.*");
+    std::system("rm -f /tmp/chitta_mind_test.*");
 
     MindConfig config;
-    config.path = "/tmp/synapse_mind_test";
+    config.path = "/tmp/chitta_mind_test";
 
     Mind mind(config);
     assert(mind.open());
@@ -340,7 +340,7 @@ void test_mind() {
 void test_persistence() {
     std::cout << "Testing Persistence..." << std::endl;
 
-    const std::string path = "/tmp/synapse_persist_test";
+    const std::string path = "/tmp/chitta_persist_test";
     NodeId saved_id;
     float saved_mu;
 
@@ -404,7 +404,7 @@ void test_persistence() {
     std::cout << "  PASS" << std::endl;
 }
 
-#ifdef SYNAPSE_WITH_ONNX
+#ifdef CHITTA_WITH_ONNX
 void test_vak_onnx() {
     std::cout << "Testing VakYantra (ONNX)..." << std::endl;
 
@@ -485,7 +485,7 @@ void test_mind_with_text() {
     std::cout << "Testing Mind with text..." << std::endl;
 
     // Clean up any previous test data
-    std::system("rm -f /tmp/synapse_mind_text_test.*");
+    std::system("rm -f /tmp/chitta_mind_text_test.*");
 
     const char* model_path = "../models/model.onnx";
     const char* vocab_path = "../models/vocab.txt";
@@ -505,7 +505,7 @@ void test_mind_with_text() {
 
     // Create mind with yantra
     MindConfig config;
-    config.path = "/tmp/synapse_mind_text_test";
+    config.path = "/tmp/chitta_mind_text_test";
 
     Mind mind(config);
     mind.attach_yantra(yantra);
@@ -540,7 +540,7 @@ void test_mind_with_text() {
 #endif
 
 int main() {
-    std::cout << "=== Synapse C++ Tests ===" << std::endl;
+    std::cout << "=== Chitta C++ Tests ===" << std::endl;
     std::cout << "EMBED_DIM = " << EMBED_DIM << std::endl;
     std::cout << std::endl;
 
@@ -561,7 +561,7 @@ int main() {
     test_mind();
     test_persistence();
 
-#ifdef SYNAPSE_WITH_ONNX
+#ifdef CHITTA_WITH_ONNX
     std::cout << std::endl;
     std::cout << "=== ONNX Embedding Tests ===" << std::endl;
     test_vak_onnx();

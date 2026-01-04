@@ -6,7 +6,7 @@
 #include <cstring>
 #include <limits>
 
-namespace synapse {
+namespace chitta {
 
 // Quantized 384-dim vector: 392 bytes vs 1536 bytes (74% savings)
 struct QuantizedVector {
@@ -105,4 +105,4 @@ struct NodeMeta {
     uint16_t flags;               // 2 bytes
 };
 
-} // namespace synapse
+} // namespace chitta

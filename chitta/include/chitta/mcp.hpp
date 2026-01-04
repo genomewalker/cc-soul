@@ -13,7 +13,7 @@
 #include <functional>
 #include <atomic>
 
-namespace synapse {
+namespace chitta {
 
 using json = nlohmann::json;
 
@@ -89,7 +89,7 @@ struct ToolResult {
 // MCP Server implementation
 class MCPServer {
 public:
-    explicit MCPServer(std::shared_ptr<Mind> mind, std::string server_name = "synapse")
+    explicit MCPServer(std::shared_ptr<Mind> mind, std::string server_name = "chitta")
         : mind_(std::move(mind))
         , server_name_(std::move(server_name))
         , running_(false)
@@ -1319,4 +1319,4 @@ private:
     }
 };
 
-} // namespace synapse
+} // namespace chitta

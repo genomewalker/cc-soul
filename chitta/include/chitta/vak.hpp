@@ -21,7 +21,7 @@
 #include <algorithm>
 #include <cctype>
 
-namespace synapse {
+namespace chitta {
 
 // Forward declarations
 class VakYantra;
@@ -385,4 +385,4 @@ private:
     SmritiKosha kosha_;
 };
 
-} // namespace synapse
+} // namespace chitta

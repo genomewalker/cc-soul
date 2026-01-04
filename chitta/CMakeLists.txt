@@ -90,6 +90,10 @@ endif()
 if(CHITTA_BUILD_MCP)
     add_executable(chitta_mcp src/mcp_server.cpp)
     target_link_libraries(chitta_mcp PRIVATE chitta)
+    # Static link to avoid glibc version issues
+    if(NOT APPLE)
+        target_link_options(chitta_mcp PRIVATE -static-libgcc -static-libstdc++)
+    endif()
 endif()
 
 # Migration tool

@@ -8,7 +8,7 @@
 #include "graph.hpp"
 #include <unordered_map>
 
-namespace synapse {
+namespace chitta {
 
 // Hash for NodeType and EdgeType
 struct NodeTypeHash {
@@ -258,4 +258,4 @@ private:
     std::vector<Voice> voices_;
 };
 
-} // namespace synapse
+} // namespace chitta
