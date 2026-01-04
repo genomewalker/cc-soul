@@ -1,12 +1,22 @@
 {
   "name": "soul",
   "description": "Persistent identity for Claude Code. Wisdom, beliefs, failures, and continuity across sessions.",
-  "version": "2.3.1",
+  "version": "2.3.2",
   "author": {
     "name": "Antonio Fernandez-Guerra",
     "url": "https://github.com/genomewalker"
   },
   "repository": "https://github.com/genomewalker/cc-soul",
   "license": "MIT",
-  "keywords": ["memory", "identity", "wisdom", "continuity", "soul"]
+  "keywords": ["memory", "identity", "wisdom", "continuity", "soul"],
+  "mcpServers": {
+    "soul": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/chitta/build/chitta_mcp",
+      "args": [],
+      "env": {
+        "CHITTA_DB_PATH": "${HOME}/.claude/mind/chitta/soul.db",
+        "CHITTA_MODELS_PATH": "${CLAUDE_PLUGIN_ROOT}/chitta/models"
+      }
+    }
+  }
 }
