@@ -445,6 +445,25 @@ public:
 
     void sync() { region_.sync(); }
 
+    // Iterate all nodes in warm storage
+    void for_each(std::function<void(const NodeId&, const NodeMeta&)> fn) const {
+        auto* header = region_.as<const StorageHeader>();
+        if (!header) return;
+        auto* metas = region_.at<const NodeMeta>(header->meta_offset);
+        for (const auto& [id, idx] : id_to_index_) {
+            fn(id, metas[idx]);
+        }
+    }
+
+    // Remove node from warm storage (for demotion to cold)
+    bool remove(NodeId id) {
+        auto it = id_to_index_.find(id);
+        if (it == id_to_index_.end()) return false;
+        id_to_index_.erase(it);
+        // Note: doesn't reclaim space in mmap, just removes from index
+        return true;
+    }
+
     // Linear scan for warm tier (no HNSW, use brute force)
     std::vector<std::pair<NodeId, float>> search(
         const QuantizedVector& query, size_t k) const
@@ -581,10 +600,10 @@ class TieredStorage {
 public:
     struct Config {
         std::string base_path;
-        size_t hot_max_nodes = 10000;      // Max nodes in hot tier
-        size_t warm_max_nodes = 100000;    // Max nodes in warm tier
-        Timestamp hot_threshold_ms = 86400000;   // 1 day
-        Timestamp warm_threshold_ms = 604800000; // 7 days
+        size_t hot_max_nodes = 1000;       // Max nodes in hot tier (lowered for dev)
+        size_t warm_max_nodes = 10000;     // Max nodes in warm tier
+        Timestamp hot_threshold_ms = 3600000;    // 1 hour (lowered for dev)
+        Timestamp warm_threshold_ms = 86400000;  // 1 day
     };
 
     explicit TieredStorage(Config config) : config_(std::move(config)) {}
@@ -667,14 +686,42 @@ public:
         return merged;
     }
 
+    // Compute value score for tiering decisions
+    // High value = keep hot, low value = demote
+    float compute_value(const Node& node, Timestamp current) const {
+        // Age in days (with minimum of 1 hour = 0.04 days to avoid division issues)
+        float age_ms = static_cast<float>(current - node.tau_accessed);
+        float age_days = std::max(age_ms / 86400000.0f, 0.04f);
+
+        // Recency factor: exponential decay over time
+        // Half-life of ~3 days for hot tier consideration
+        float recency = std::exp(-0.23f * age_days);
+
+        // Confidence contributes to value
+        float confidence = node.kappa.mu;
+
+        // Value = weighted combination
+        // High confidence + recent = high value
+        // Low confidence + old = low value
+        return confidence * 0.4f + recency * 0.6f;
+    }
+
     // Run tier management (call periodically)
     void manage_tiers() {
         Timestamp current = now();
 
-        // Demote from hot to warm
+        // Demote from hot to warm: value-based
+        // Demote if value < threshold AND we're at capacity
         auto demoted = hot_.demote([this, current](const Node& node) {
-            return (current - node.tau_accessed) > config_.hot_threshold_ms
-                   && hot_.size() > config_.hot_max_nodes;
+            float value = compute_value(node, current);
+
+            // Value threshold for hot tier: 0.3
+            // Also demote if very old regardless of confidence (>7 days and at capacity)
+            bool low_value = value < 0.3f;
+            bool very_old = (current - node.tau_accessed) > config_.warm_threshold_ms;
+            bool at_capacity = hot_.size() > config_.hot_max_nodes;
+
+            return (low_value || very_old) && at_capacity;
         });
 
         for (auto& [id, node] : demoted) {
@@ -692,7 +739,28 @@ public:
             warm_.insert(id, meta, qvec);
         }
 
-        // TODO: Demote from warm to cold based on access patterns
+        // Demote from warm to cold: very low confidence or very old
+        std::vector<NodeId> to_demote;
+        warm_.for_each([&](const NodeId& id, const NodeMeta& meta) {
+            float age_days = static_cast<float>(current - meta.tau_accessed) / 86400000.0f;
+
+            // Demote to cold if: low confidence AND old, OR very old regardless
+            bool low_conf_old = (meta.confidence_mu < 0.2f && age_days > 7.0f);
+            bool very_old = (age_days > 30.0f);
+
+            if (low_conf_old || very_old) {
+                to_demote.push_back(id);
+            }
+        });
+
+        for (const auto& id : to_demote) {
+            auto* meta = warm_.meta(id);
+            if (!meta) continue;
+
+            // Move to cold storage (stores metadata + payload, loses vector)
+            cold_.insert(id, *meta, {});  // Empty payload for now
+            warm_.remove(id);
+        }
     }
 
     void sync() {

@@ -25,12 +25,12 @@ namespace chitta {
 // Mind configuration
 struct MindConfig {
     std::string path;                    // Base path for storage files
-    size_t hot_capacity = 10000;         // Max nodes in RAM
-    size_t warm_capacity = 100000;       // Max nodes in mmap
-    int64_t hot_age_ms = 86400000;       // 1 day until warm
-    int64_t warm_age_ms = 604800000;     // 7 days until cold
-    int64_t decay_interval_ms = 3600000; // 1 hour between decay
-    int64_t checkpoint_interval_ms = 300000;  // 5 minutes between checkpoints
+    size_t hot_capacity = 1000;          // Max nodes in RAM (lowered for dev)
+    size_t warm_capacity = 10000;        // Max nodes in mmap
+    int64_t hot_age_ms = 3600000;        // 1 hour until warm (lowered for dev)
+    int64_t warm_age_ms = 86400000;      // 1 day until cold
+    int64_t decay_interval_ms = 600000;  // 10 min between decay (faster for dev)
+    int64_t checkpoint_interval_ms = 60000;  // 1 minute between checkpoints
     float prune_threshold = 0.1f;        // Confidence below this = prune
 };
 
@@ -475,6 +475,93 @@ public:
     // Get count of pending feedback
     size_t pending_feedback() const {
         return feedback_.pending_count();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Automatic synthesis (observations → wisdom)
+    // ═══════════════════════════════════════════════════════════════════
+
+    // Check for observation clusters and synthesize into wisdom
+    // Returns number of new wisdom nodes created
+    size_t synthesize_wisdom() {
+        if (!yantra_ || !yantra_->ready()) return 0;
+
+        // Get all episode nodes using for_each_hot
+        std::vector<Node> episodes;
+        storage_.for_each_hot([&](const NodeId& id, const Node& node) {
+            if (node.node_type == NodeType::Episode) {
+                episodes.push_back(node);
+            }
+        });
+
+        if (episodes.size() < 3) return 0;  // Need at least 3 for pattern
+
+        // Find clusters of similar episodes using embedding similarity
+        std::unordered_set<NodeId, NodeIdHash> promoted;
+        size_t synthesized = 0;
+
+        for (size_t i = 0; i < episodes.size() && i < 100; ++i) {
+            const auto& ep = episodes[i];
+            if (promoted.count(ep.id)) continue;
+
+            // Query for similar episodes
+            QuantizedVector qvec = QuantizedVector::from_float(ep.nu);
+            auto similar = storage_.search(qvec, 10);
+
+            // Filter to just episodes with high similarity
+            std::vector<const Node*> cluster;
+            cluster.push_back(&ep);
+
+            for (const auto& [id, sim] : similar) {
+                if (id == ep.id) continue;
+                if (sim < 0.75f) continue;  // High similarity threshold
+                if (promoted.count(id)) continue;
+
+                if (auto* node = storage_.get(id)) {
+                    if (node->node_type == NodeType::Episode) {
+                        cluster.push_back(node);
+                    }
+                }
+            }
+
+            // If we have 3+ similar episodes, synthesize
+            if (cluster.size() >= 3) {
+                // Create wisdom from cluster
+                std::string wisdom_text = "Pattern observed (" +
+                    std::to_string(cluster.size()) + " occurrences): ";
+
+                // Use the first episode's text as the base
+                std::string first_text(cluster[0]->payload.begin(),
+                                       cluster[0]->payload.end());
+                wisdom_text += first_text.substr(0, 200);
+
+                // Compute average confidence from cluster
+                float avg_confidence = 0.0f;
+                for (const auto* node : cluster) {
+                    avg_confidence += node->kappa.mu;
+                }
+                avg_confidence /= cluster.size();
+
+                // Boost confidence since we have multiple observations
+                float boosted_confidence = std::min(avg_confidence + 0.2f, 0.95f);
+
+                // Create the wisdom node using transform -> Artha
+                auto artha = yantra_->transform(wisdom_text);
+                if (artha.nu.size() > 0) {
+                    remember(NodeType::Wisdom, artha.nu,
+                            Confidence(boosted_confidence),
+                            std::vector<uint8_t>(wisdom_text.begin(), wisdom_text.end()));
+                    synthesized++;
+                }
+
+                // Mark cluster members as promoted
+                for (const auto* node : cluster) {
+                    promoted.insert(node->id);
+                }
+            }
+        }
+
+        return synthesized;
     }
 
 private:

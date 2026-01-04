@@ -96,7 +96,7 @@ if(CHITTA_BUILD_MCP)
     endif()
 endif()
 
-# Migration tool
+# Migration tool (from SQLite soul.db)
 find_package(SQLite3)
 if(SQLite3_FOUND)
     add_executable(chitta_migrate src/migrate.cpp)
@@ -105,6 +105,10 @@ if(SQLite3_FOUND)
 else()
     message(STATUS "SQLite3 not found, migration tool disabled")
 endif()
+
+# Import tool (from chitta files - incremental merge)
+add_executable(chitta_import src/import.cpp)
+target_link_libraries(chitta_import PRIVATE chitta)
 
 # Install
 install(DIRECTORY include/ DESTINATION include)

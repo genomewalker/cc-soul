@@ -771,6 +771,9 @@ private:
         ss << "Found " << recalls.size() << " results:\n";
 
         for (const auto& r : recalls) {
+            // Auto-trigger feedback: this memory was used
+            mind_->feedback_used(r.id);
+
             results_array.push_back({
                 {"id", r.id.to_string()},
                 {"text", r.text},
@@ -793,6 +796,12 @@ private:
 
         DynamicsReport report = mind_->tick();
 
+        // Apply pending feedback (learning from usage)
+        size_t feedback_applied = mind_->apply_feedback();
+
+        // Attempt automatic synthesis (observations → wisdom)
+        size_t synthesized = mind_->synthesize_wisdom();
+
         if (save) {
             mind_->snapshot();
         }
@@ -803,13 +812,18 @@ private:
             {"coherence", coherence.tau_k()},
             {"decay_applied", report.decay_applied},
             {"triggers_fired", report.triggers_fired.size()},
+            {"feedback_applied", feedback_applied},
+            {"wisdom_synthesized", synthesized},
             {"saved", save}
         };
 
         std::ostringstream ss;
         ss << "Cycle complete: coherence=" << (coherence.tau_k() * 100) << "%, ";
         ss << "decay=" << (report.decay_applied ? "yes" : "no");
-        ss << ", triggers=" << report.triggers_fired.size();
+        ss << ", feedback=" << feedback_applied;
+        if (synthesized > 0) {
+            ss << ", synthesized=" << synthesized << " wisdom";
+        }
 
         return {false, ss.str(), result};
     }
@@ -859,6 +873,10 @@ private:
             size_t count = 0;
             for (const auto& [id, text, score, type] : weighted) {
                 if (count >= limit) break;
+
+                // Auto-trigger feedback: this memory was surfaced via voice
+                NodeId node_id = NodeId::from_string(id);
+                mind_->feedback_used(node_id);
 
                 voice_array.push_back({
                     {"id", id},
