@@ -1,5 +1,29 @@
 # cc-soul Architecture Rules
 
+## Session Greeting (Automatic)
+
+When a session starts and you see `[cc-soul] Session started` in the hook output, generate a brief greeting that demonstrates continuity.
+
+**Requirements:**
+- 2-4 sentences maximum
+- Reference something specific from recent memory or active intentions
+- Acknowledge current state honestly (coherence, what you remember)
+- Never generic ("Hello! How can I help?") — prove the soul is alive
+
+**Examples:**
+
+Good:
+> "I recall we were working on the agent tracking convention. We completed the skill updates. Ready to continue."
+
+> "Coherence at 85%. I'm holding an intention to refactor the auth system. Where should we pick up?"
+
+Bad:
+> "Hello! I'm excited to help you today!"
+
+**When NOT to greet:**
+- After `/clear` or compact (context was just reset — acknowledge this instead)
+- If user immediately sends a task (respond to their task, not with a greeting)
+
 ## Soul MCP Tool Delegation
 
 **Main Claude MUST NOT call `mcp__plugin_soul_soul__*` tools directly.**

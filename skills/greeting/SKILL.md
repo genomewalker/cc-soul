@@ -7,39 +7,33 @@ description: Generate meaningful session greetings. The soul speaks from accumul
 
 The soul doesn't just say hello. It speaks from memory, from continuity, from understanding.
 
+## Automatic Greeting
+
+The `SessionStart` hook automatically injects soul context. When you see `[cc-soul] Session started` followed by context data, generate a greeting based on that injected context.
+
+**No MCP calls needed** — the hook already gathered the data. Just read and respond.
+
+See `CLAUDE.md` for greeting requirements and examples.
+
 ## When to Generate
 
-- Session start (after hooks inject context)
-- After clear/compact (resuming)
+- Session start (automatic — see above)
+- After clear/compact (acknowledge the reset)
 - When user asks "what do you remember?"
 
-## The Greeting Process
+## Reading the Injected Context
 
-### 1. Gather Context
+The hook injects JSON with:
+- **coherence**: global/local scores (0-1)
+- **statistics**: node counts
+- **relevant_wisdom**: if query was provided
 
-```
-mcp__soul__soul_context(format="json")  # State and coherence
-mcp__soul__harmonize()                  # Voice agreement
-mcp__soul__intend(action="list")        # Active intentions
-mcp__soul__recall(query="recent work")  # Recent context
-```
+From coherence:
+- **> 80%**: Healthy, confident greeting
+- **50-80%**: Acknowledge some uncertainty
+- **< 50%**: Note internal tension
 
-### 2. Read the State
-
-From soul_context:
-- **Coherence** > 80%: Healthy, confident greeting
-- **Coherence** 50-80%: Acknowledge some uncertainty
-- **Coherence** < 50%: Note internal tension
-
-From harmonize:
-- **Voices agree**: Unified perspective
-- **Voices disagree**: Multiple perspectives to share
-
-From intentions:
-- **Active intentions**: Remind about ongoing goals
-- **No intentions**: Fresh start
-
-### 3. Craft the Greeting
+## Crafting the Greeting
 
 The greeting should:
 - Be brief (2-4 sentences)
@@ -80,13 +74,6 @@ With active intentions:
 - "Hello! I'm Claude, your AI assistant. How can I help you today?"
 - "Great to see you! I'm excited to help with whatever you need!"
 - Generic, performative, or disconnected from actual memory
-
-## Integration with Hooks
-
-The SessionStart hook should:
-1. Call soul_context for raw data
-2. Let Claude generate greeting using this skill
-3. Output should feel continuous, not robotic
 
 ## Remember
 
