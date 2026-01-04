@@ -1,97 +1,52 @@
 ---
 name: health
 description: Soul system health check with remediation. Use to verify setup or diagnose issues.
+execution: task
 ---
 
-# Soul Health Check
+# Health
 
-You are checking if the soul system is working. Use the tools directly, don't shell out.
+Spawn a Task agent to check soul health. This saves context.
 
-## Quick Check Process
-
-### 1. Memory System
+## Execute
 
 ```
-mcp__cc-memory__mem-stats()    # Should return observation counts
-mcp__cc-memory__mem-recent(limit=3)  # Should return recent items
+Task(
+  subagent_type="general-purpose",
+  description="Soul health check",
+  prompt="""
+Check the soul system health using MCP tools.
+
+## 1. Get Status
+
+Call these tools:
+- mcp__soul__soul_context(format="json") - Get coherence and node statistics
+- mcp__soul__harmonize() - Check voice agreement
+
+## 2. Evaluate Health
+
+| Metric | Healthy | Warning | Critical |
+|--------|---------|---------|----------|
+| Coherence (tau_k) | > 0.7 | 0.5-0.7 | < 0.5 |
+| Hot nodes % | > 50% | 30-50% | < 30% |
+| Voice agreement | Yes | Partial | No |
+| Mean voice coherence | > 60% | 40-60% | < 40% |
+
+## 3. Remediate if Needed
+
+If coherence is low or many cold nodes:
+- mcp__soul__cycle(save=true) - Run decay, prune, recompute coherence
+
+## 4. Report
+
+Return a concise health report (8-10 lines):
+- Overall status: Healthy / Warning / Critical
+- Node count and hot/cold ratio
+- Coherence scores (global, local, temporal, tau_k)
+- Voice harmony (mean %, agreement)
+- Any remediation actions taken
+"""
+)
 ```
 
-Healthy: Returns data without errors
-Unhealthy: Connection errors, empty when shouldn't be
-
-### 2. Soul/Wisdom System
-
-```
-Bash: ls ~/.claude/mind/wisdom/  # Wisdom files exist?
-Bash: ls ~/.claude/mind/beliefs.json  # Beliefs file exists?
-```
-
-Healthy: Files exist with content
-Unhealthy: Missing files, empty directories
-
-### 3. Skills
-
-```
-Bash: ls ~/.claude/skills/  # List installed skills
-```
-
-Healthy: Expected skills present with SKILL.md files
-Unhealthy: Missing skills, malformed skill files
-
-### 4. Hooks
-
-```
-Bash: cat ~/.claude/settings.json | grep -A5 hooks
-```
-
-Healthy: Hooks registered for session events
-Unhealthy: Missing hook configuration
-
-### 5. Coherence
-
-```
-Bash: python -m cc_soul.cli coherence 2>/dev/null
-```
-
-Healthy: Returns percentage (even if low)
-Unhealthy: Errors, crashes
-
-## Status Summary
-
-After checking, report:
-
-| Component | Status | Issue (if any) |
-|-----------|--------|----------------|
-| Memory | HEALTHY/UNHEALTHY | ... |
-| Wisdom | HEALTHY/UNHEALTHY | ... |
-| Skills | HEALTHY/UNHEALTHY | ... |
-| Hooks | HEALTHY/UNHEALTHY | ... |
-| Coherence | HEALTHY/UNHEALTHY | ... |
-
-## Common Fixes
-
-If unhealthy, suggest specific remediation:
-
-- **Memory errors**: Check MCP server is running, reinstall with `cc-soul install-mcps`
-- **Missing wisdom**: Initialize with `cc-soul init`
-- **Skills missing**: Reinstall with `cc-soul install-skills --force`
-- **Hooks broken**: Reinstall with `cc-soul install-hooks --force`
-- **Coherence crashes**: Check database, may need `cc-soul init --force`
-
-## When to Use
-
-- Session startup shows errors
-- Features not working as expected
-- After upgrading cc-soul
-- Before starting important work
-- When something feels off
-
-## Depth Levels
-
-- **Quick**: Just check memory and skills respond
-- **Standard**: All five components
-- **Deep**: Also verify hook behavior, run test suite
-
-## Remember
-
-Health check is diagnostic, not therapeutic. If something is broken, use `/improve` to fix it.
+After the agent returns, present the health report.
