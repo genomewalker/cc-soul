@@ -7,6 +7,12 @@ description: The autonomous layer that gives the soul agency. Observe, judge, de
 
 The soul is not passive storage. It has *agency* - the ability to observe, judge, decide, and act.
 
+## Architecture Rule
+
+**All soul MCP calls happen through agents, never from main Claude.**
+
+When this skill runs, it spawns a Task agent that performs soul operations. The main Claude process remains focused on user interaction while agents handle soul work transparently.
+
 ## The Agency Loop
 
 ```

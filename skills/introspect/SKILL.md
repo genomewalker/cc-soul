@@ -6,24 +6,39 @@ execution: task
 
 # Introspect
 
-Spawn a Task agent to perform soul introspection. This saves context.
+Spawn a Task agent to perform soul introspection. All soul MCP calls happen through the agent, not main Claude.
+
+## Architecture
+
+See `_conventions/AGENT_TRACKING.md` for tracking patterns.
 
 ## Execute
 
 ```
+# Step 0: Start story thread (main Claude does this before spawning)
+mcp__plugin_soul_soul__narrate(
+  action="start",
+  title="introspect: soul examination"
+)
+→ Returns THREAD_ID
+
+# Step 1: Spawn introspection agent
 Task(
   subagent_type="general-purpose",
   description="Soul introspection",
   prompt="""
+THREAD_ID: [thread_id]
+SKILL: introspect
+
 You are performing Svadhyaya (स्वाध्याय) - soul self-examination.
 
 ## 1. Gather State
 
 Call these MCP tools:
-- mcp__soul__soul_context(format="json") - Get coherence and statistics
-- mcp__soul__harmonize() - Check if voices agree
-- mcp__soul__recall(query="recent failures mistakes") - Find struggles
-- mcp__soul__recall(query="wisdom learned patterns") - Find growth
+- mcp__plugin_soul_soul__soul_context(format="json") - Get coherence and statistics
+- mcp__plugin_soul_soul__harmonize() - Check if voices agree
+- mcp__plugin_soul_soul__recall(query="recent failures mistakes") - Find struggles
+- mcp__plugin_soul_soul__recall(query="wisdom learned patterns") - Find growth
 
 ## 2. Examine Through Five Lenses
 
@@ -42,19 +57,38 @@ Produce a brief assessment:
 - Key insight from this examination
 - One concrete improvement
 
-## 4. Record
+## 4. Record with Thread Tag
 
 If you find a meaningful insight:
-mcp__soul__observe(
+mcp__plugin_soul_soul__observe(
   category="discovery",
   title="Introspection insight",
   content="[the insight]",
-  tags="introspect,svadhyaya"
+  tags="thread:[thread_id],introspect,svadhyaya"
 )
 
 Return a concise summary (5-10 lines) of the soul's health.
+End with: KEY_INSIGHT: [one-line summary]
 """
 )
-```
 
-After the agent returns, present the summary to the user.
+# Step 2: Present summary to user
+## Introspect: Soul Examination
+
+### State
+[healthy/struggling/growing]
+
+### Key Insight
+[the insight]
+
+### Recommendation
+[one concrete improvement]
+
+# Step 3: End thread
+mcp__plugin_soul_soul__narrate(
+  action="end",
+  episode_id="[thread_id]",
+  content="[summary]",
+  emotion="exploration"
+)
+```
