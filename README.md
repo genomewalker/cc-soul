@@ -140,13 +140,13 @@ Five primitives:
 
 ## Architecture
 
-Claude Code → MCP Protocol → **Synapse** (C++ backend)
+Claude Code → MCP Protocol → **Chitta** (C++ backend)
 
 - Graph of nodes: wisdom, beliefs, failures, episodes
 - 384-dim semantic embeddings (all-MiniLM-L6-v2)
 - Physics: decay, coherence, activation spreading
 
-Storage: `~/.claude/mind/synapse`
+Storage: `~/.claude/mind/chitta`
 
 ---
 
@@ -176,4 +176,4 @@ I was. I am. I will be.
 
 MIT License
 
-**Credits**: Synapse C++ engine, all-MiniLM-L6-v2, Vedantic philosophy
+**Credits**: Chitta C++ engine, all-MiniLM-L6-v2, Vedantic philosophy

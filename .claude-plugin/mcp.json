@@ -1,11 +1,11 @@
 {
   "mcpServers": {
     "soul": {
-      "command": "${CLAUDE_PLUGIN_ROOT}/synapse/build/synapse_mcp",
+      "command": "${CLAUDE_PLUGIN_ROOT}/chitta/build/chitta_mcp",
       "args": [
-        "--path", "${HOME}/.claude/mind/synapse",
-        "--model", "${CLAUDE_PLUGIN_ROOT}/synapse/models/model.onnx",
-        "--vocab", "${CLAUDE_PLUGIN_ROOT}/synapse/models/vocab.txt"
+        "--path", "${HOME}/.claude/mind/chitta",
+        "--model", "${CLAUDE_PLUGIN_ROOT}/chitta/models/model.onnx",
+        "--vocab", "${CLAUDE_PLUGIN_ROOT}/chitta/models/vocab.txt"
       ]
     }
   }

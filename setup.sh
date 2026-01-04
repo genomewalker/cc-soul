@@ -1,7 +1,7 @@
 #!/bin/bash
 # cc-soul plugin setup
 #
-# Builds synapse (C++ backend), downloads ONNX models, installs Python CLI.
+# Builds chitta (C++ backend), downloads ONNX models.
 #
 # Usage:
 #   ./setup.sh           # Full setup
@@ -10,9 +10,9 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SYNAPSE_DIR="$SCRIPT_DIR/synapse"
-BUILD_DIR="$SYNAPSE_DIR/build"
-MODELS_DIR="$SYNAPSE_DIR/models"
+CHITTA_DIR="$SCRIPT_DIR/chitta"
+BUILD_DIR="$CHITTA_DIR/build"
+MODELS_DIR="$CHITTA_DIR/models"
 
 # Colors
 RED='\033[0;31m'
@@ -36,7 +36,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Step 1: Check dependencies
-echo -e "${YELLOW}[1/4] Checking dependencies...${NC}"
+echo -e "${YELLOW}[1/3] Checking dependencies...${NC}"
 
 check_cmd() {
     if ! command -v "$1" &> /dev/null; then
@@ -50,8 +50,6 @@ check_cmd() {
 DEPS_OK=true
 check_cmd cmake || DEPS_OK=false
 check_cmd make || DEPS_OK=false
-check_cmd python3 || DEPS_OK=false
-check_cmd pip || DEPS_OK=false
 
 if ! command -v g++ &> /dev/null && ! command -v clang++ &> /dev/null; then
     echo -e "${RED}  ✗ C++ compiler not found${NC}"
@@ -67,7 +65,7 @@ fi
 echo ""
 
 # Step 2: Download ONNX models
-echo -e "${YELLOW}[2/4] Downloading ONNX models...${NC}"
+echo -e "${YELLOW}[2/3] Downloading ONNX models...${NC}"
 
 mkdir -p "$MODELS_DIR"
 
@@ -90,12 +88,11 @@ fi
 
 echo ""
 
-# Step 3: Build synapse
-echo -e "${YELLOW}[3/4] Building synapse (C++)...${NC}"
+# Step 3: Build chitta
+echo -e "${YELLOW}[3/3] Building chitta (C++)...${NC}"
 
-if [ ! -d "$SYNAPSE_DIR/src" ]; then
-    echo -e "${RED}  Synapse source not found at $SYNAPSE_DIR${NC}"
-    echo "  Copy synapse C++ source from cc-synapse repo"
+if [ ! -d "$CHITTA_DIR/src" ]; then
+    echo -e "${RED}  Chitta source not found at $CHITTA_DIR${NC}"
     exit 1
 fi
 
@@ -115,8 +112,8 @@ cmake .. -DCMAKE_BUILD_TYPE=Release > /dev/null
 echo "  Building..."
 make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4) > /dev/null
 
-if [ -f "$BUILD_DIR/synapse_mcp" ]; then
-    echo -e "  ${GREEN}✓ synapse_mcp built${NC}"
+if [ -f "$BUILD_DIR/chitta_mcp" ]; then
+    echo -e "  ${GREEN}✓ chitta_mcp built${NC}"
 else
     echo -e "${RED}  ✗ Build failed${NC}"
     exit 1
@@ -125,18 +122,8 @@ fi
 cd "$SCRIPT_DIR"
 echo ""
 
-# Step 4: Install Python CLI
-echo -e "${YELLOW}[4/4] Installing Python CLI...${NC}"
-
-pip install -e "$SCRIPT_DIR" --quiet
-
-if command -v cc-soul &> /dev/null; then
-    echo -e "  ${GREEN}✓ cc-soul CLI installed${NC}"
-else
-    echo -e "${YELLOW}  Warning: cc-soul not in PATH. Add ~/.local/bin to PATH.${NC}"
-fi
-
-echo ""
+# Create mind directory
+mkdir -p "${HOME}/.claude/mind/chitta"
 
 # Done
 echo -e "${GREEN}╔══════════════════════════════════════╗${NC}"
@@ -149,9 +136,3 @@ echo "  claude --plugin-dir $SCRIPT_DIR"
 echo ""
 echo "Or add to ~/.claude/settings.json permanently."
 echo ""
-echo "Available commands:"
-echo "  /soul:grow      Add wisdom, beliefs, failures"
-echo "  /soul:recall    Search the soul"
-echo "  /soul:observe   Record observations"
-echo "  /soul:context   View current state"
-echo "  /soul:cycle     Run maintenance"

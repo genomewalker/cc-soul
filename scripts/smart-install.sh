@@ -1,23 +1,23 @@
 #!/bin/bash
 # Smart Install Script for cc-soul
 #
-# Ensures synapse binary is compiled and ONNX models are downloaded.
+# Ensures chitta binary is compiled and ONNX models are downloaded.
 # Runs as first hook on SessionStart.
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
-SYNAPSE_DIR="$PLUGIN_DIR/synapse"
-BUILD_DIR="$SYNAPSE_DIR/build"
-MODELS_DIR="$SYNAPSE_DIR/models"
+CHITTA_DIR="$PLUGIN_DIR/chitta"
+BUILD_DIR="$CHITTA_DIR/build"
+MODELS_DIR="$CHITTA_DIR/models"
 MARKER="$PLUGIN_DIR/.install-complete"
 
 # Check if already installed
 current_version=$(cat "$PLUGIN_DIR/.claude-plugin/plugin.json" 2>/dev/null | grep '"version"' | cut -d'"' -f4 || echo "0.0.0")
 installed_version=$(cat "$MARKER" 2>/dev/null || echo "")
 
-if [[ "$current_version" == "$installed_version" && -x "$BUILD_DIR/synapse_mcp" && -f "$MODELS_DIR/model.onnx" ]]; then
+if [[ "$current_version" == "$installed_version" && -x "$BUILD_DIR/chitta_mcp" && -f "$MODELS_DIR/model.onnx" ]]; then
     exit 0  # Already installed
 fi
 
@@ -57,9 +57,9 @@ if [[ ! -f "$MODELS_DIR/model.onnx" || ! -f "$MODELS_DIR/vocab.txt" ]]; then
     fi
 fi
 
-# Build synapse if missing or outdated
-if [[ ! -x "$BUILD_DIR/synapse_mcp" ]]; then
-    echo "[cc-soul] Building synapse..."
+# Build chitta if missing or outdated
+if [[ ! -x "$BUILD_DIR/chitta_mcp" ]]; then
+    echo "[cc-soul] Building chitta..."
     mkdir -p "$BUILD_DIR"
     cd "$BUILD_DIR"
 
@@ -68,7 +68,7 @@ if [[ ! -x "$BUILD_DIR/synapse_mcp" ]]; then
         exit 1
     }
 
-    make -j$(nproc 2>/dev/null || echo 4) synapse_mcp 2>/dev/null || {
+    make -j$(nproc 2>/dev/null || echo 4) chitta_mcp 2>/dev/null || {
         echo "[cc-soul] ERROR: build failed" >&2
         exit 1
     }
@@ -77,7 +77,7 @@ if [[ ! -x "$BUILD_DIR/synapse_mcp" ]]; then
 fi
 
 # Create mind directory
-mkdir -p "${HOME}/.claude/mind/synapse"
+mkdir -p "${HOME}/.claude/mind/chitta"
 
 # Mark as installed
 echo "$current_version" > "$MARKER"

@@ -4,7 +4,7 @@
 # Usage: soul-hook.sh <hook-type> [options]
 #   hook-type: start, end, prompt, pre-compact
 #
-# Requires: synapse_mcp binary built, ONNX models downloaded
+# Requires: chitta_mcp binary built, ONNX models downloaded
 
 set -e
 
@@ -13,14 +13,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
 
 # Paths
-SYNAPSE_BIN="$PLUGIN_DIR/synapse/build/synapse_mcp"
-MIND_PATH="${HOME}/.claude/mind/synapse"
-MODEL_PATH="$PLUGIN_DIR/synapse/models/model.onnx"
-VOCAB_PATH="$PLUGIN_DIR/synapse/models/vocab.txt"
+CHITTA_BIN="$PLUGIN_DIR/chitta/build/chitta_mcp"
+MIND_PATH="${HOME}/.claude/mind/chitta"
+MODEL_PATH="$PLUGIN_DIR/chitta/models/model.onnx"
+VOCAB_PATH="$PLUGIN_DIR/chitta/models/vocab.txt"
 
 # Check binary exists
-if [[ ! -x "$SYNAPSE_BIN" ]]; then
-    echo "[cc-soul] synapse_mcp not found. Run setup.sh" >&2
+if [[ ! -x "$CHITTA_BIN" ]]; then
+    echo "[cc-soul] chitta_mcp not found. Run setup.sh" >&2
     exit 0  # Don't fail hooks
 fi
 
@@ -29,7 +29,7 @@ call_mcp() {
     local method="$1"
     local params="$2"
     local request="{\"jsonrpc\":\"2.0\",\"method\":\"tools/call\",\"params\":{\"name\":\"$method\",\"arguments\":$params},\"id\":1}"
-    echo "$request" | "$SYNAPSE_BIN" --path "$MIND_PATH" --model "$MODEL_PATH" --vocab "$VOCAB_PATH" 2>/dev/null | grep -v '^\[synapse' | jq -r '.result.content[0].text' 2>/dev/null || true
+    echo "$request" | "$CHITTA_BIN" --path "$MIND_PATH" --model "$MODEL_PATH" --vocab "$VOCAB_PATH" 2>/dev/null | grep -v '^\[chitta' | jq -r '.result.content[0].text' 2>/dev/null || true
 }
 
 # Hook handlers

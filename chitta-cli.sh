@@ -2,16 +2,16 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SYNAPSE_BIN="$SCRIPT_DIR/synapse/build/synapse_mcp"
-MIGRATE_BIN="$SCRIPT_DIR/synapse/build/synapse_migrate"
-MIND_PATH="${HOME}/.claude/mind/synapse"
+CHITTA_BIN="$SCRIPT_DIR/chitta/build/chitta_mcp"
+MIGRATE_BIN="$SCRIPT_DIR/chitta/build/chitta_migrate"
+MIND_PATH="${HOME}/.claude/mind/chitta"
 SOUL_DB="${HOME}/.claude/mind/soul.db"
 
 usage() {
-    echo "Usage: synapse-cli <command> [options]"
+    echo "Usage: chitta-cli <command> [options]"
     echo ""
     echo "Commands:"
-    echo "  import     Import data from soul.db to synapse"
+    echo "  import     Import data from soul.db to chitta"
     echo "  test       Test MCP server connectivity"
     echo "  stats      Show soul statistics"
     echo "  recall     Semantic search"
@@ -34,7 +34,7 @@ cmd_import() {
     done
 
     if [[ ! -f "$MIGRATE_BIN" ]]; then
-        echo "Error: synapse_migrate not found. Run ./setup.sh first"
+        echo "Error: chitta_migrate not found. Run ./setup.sh first"
         exit 1
     fi
 
@@ -50,24 +50,24 @@ cmd_import() {
 }
 
 cmd_test() {
-    if [[ ! -f "$SYNAPSE_BIN" ]]; then
-        echo "Error: synapse_mcp not found. Run ./setup.sh first"
+    if [[ ! -f "$CHITTA_BIN" ]]; then
+        echo "Error: chitta_mcp not found. Run ./setup.sh first"
         exit 1
     fi
 
     echo "Testing MCP server..."
     echo '{"jsonrpc":"2.0","method":"tools/list","id":1}' | \
-        "$SYNAPSE_BIN" --path "$MIND_PATH" 2>&1 | grep -v '^\[synapse'
+        "$CHITTA_BIN" --path "$MIND_PATH" 2>&1 | grep -v '^\[chitta'
 }
 
 cmd_stats() {
-    if [[ ! -f "$SYNAPSE_BIN" ]]; then
-        echo "Error: synapse_mcp not found. Run ./setup.sh first"
+    if [[ ! -f "$CHITTA_BIN" ]]; then
+        echo "Error: chitta_mcp not found. Run ./setup.sh first"
         exit 1
     fi
 
     echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"soul_context","arguments":{"format":"json"}},"id":1}' | \
-        "$SYNAPSE_BIN" --path "$MIND_PATH" 2>&1 | grep -v '^\[synapse'
+        "$CHITTA_BIN" --path "$MIND_PATH" 2>&1 | grep -v '^\[chitta'
 }
 
 cmd_recall() {
@@ -75,12 +75,12 @@ cmd_recall() {
     local limit="${2:-5}"
 
     if [[ -z "$query" ]]; then
-        echo "Usage: synapse-cli recall <query> [limit]"
+        echo "Usage: chitta-cli recall <query> [limit]"
         exit 1
     fi
 
     echo "{\"jsonrpc\":\"2.0\",\"method\":\"tools/call\",\"params\":{\"name\":\"recall\",\"arguments\":{\"query\":\"$query\",\"limit\":$limit}},\"id\":1}" | \
-        "$SYNAPSE_BIN" --path "$MIND_PATH" 2>&1 | grep -v '^\[synapse'
+        "$CHITTA_BIN" --path "$MIND_PATH" 2>&1 | grep -v '^\[chitta'
 }
 
 case "${1:-help}" in
