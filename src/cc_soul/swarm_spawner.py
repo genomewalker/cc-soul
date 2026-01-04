@@ -2,13 +2,13 @@
 Antahkarana Spawner - Spawn real Claude voices for parallel problem solving.
 
 Uses the claude CLI to spawn actual Claude instances that contemplate different
-facets of a problem simultaneously. Insights are collected via cc-memory (Chitta).
+facets of a problem simultaneously. Insights are collected via synapse graph.
 
 Architecture:
     1. Orchestrator awakens voices with specific prompts
     2. Each voice is executed as a separate claude process
-    3. Voices write insights to cc-memory with antahkarana tags
-    4. Orchestrator polls cc-memory for completion
+    3. Voices write insights to synapse with antahkarana tags
+    4. Orchestrator polls synapse for completion
     5. Insights are harmonized
 
 This enables true parallel reasoning through the Antahkarana facets:
@@ -22,13 +22,14 @@ This enables true parallel reasoning through the Antahkarana facets:
 Context Injection:
     Voices can receive:
     - File contents: Actual code they're analyzing
-    - Memory context: Relevant past decisions/discoveries from cc-memory
+    - Memory context: Relevant past decisions/discoveries from synapse
 """
 
 import subprocess
 import json
 import time
 import os
+import re
 from pathlib import Path
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -42,11 +43,11 @@ from .convergence import (
     InnerVoice,
     ConvergenceStrategy,
 )
-from .core import get_db_connection
+from .core import get_synapse_graph, save_synapse, SOUL_DIR
 from .budget import (
     get_context_budget,
     get_all_session_budgets,
-    log_budget_to_memory,
+    log_budget_to_synapse,
     ContextBudget,
 )
 
@@ -108,8 +109,7 @@ class AntahkaranaOrchestrator:
 
         remaining_pct = budget.remaining_pct
 
-        # Log orchestrator budget to cc-memory for cross-instance awareness
-        log_budget_to_memory(budget)
+        log_budget_to_synapse(budget)
 
         if remaining_pct < 0.10:
             return {
@@ -145,7 +145,6 @@ class AntahkaranaOrchestrator:
 
     def _build_voice_prompt(self, task: VoiceTask) -> str:
         """Build a complete prompt for a voice."""
-        # Context isolation notice - voice knows it's a fresh instance
         isolation_notice = f"""## Voice Context Notice
 
 You are an Antahkarana voice: {task.task_id}
@@ -159,48 +158,25 @@ IMPORTANT: You are a fresh Claude instance with your own context window.
 - Work independently - do not try to coordinate with other voices
 
 """
-        # Base prompt with perspective guidance
         base_prompt = task.to_prompt()
 
-        # Instructions to use cc-memory for context and insight storage
         memory_instructions = f"""
-
-## Context Retrieval
-
-You have access to cc-memory. Use it to get relevant context:
-1. Run `mem-recall` with queries related to the problem
-2. Check for past decisions, patterns, or relevant observations
-3. Use this context to inform your insight
 
 ## Output Instructions
 
-When you have your insight, save it to cc-memory:
+When you have your insight, output it in this format:
 
-1. Use the `mem-remember` tool with:
-   - category: "antahkarana-insight"
-   - title: "{task.task_id}: [your short title]"
-   - content: Your complete insight with reasoning
-   - tags: ["antahkarana:{self.antahkarana.antahkarana_id}", "task:{task.task_id}", "voice:{task.perspective.value}"]
+[ANTAHKARANA_INSIGHT]
+task_id: {task.task_id}
+perspective: {task.perspective.value}
+confidence: 0.0-1.0
+insight: |
+  Your complete insight with reasoning
+reasoning: |
+  Why this approach makes sense
+[/ANTAHKARANA_INSIGHT]
 
-2. Include in your content:
-   - confidence: 0.0-1.0
-   - insight: Your complete insight
-   - reasoning: Why this approach
-
-The orchestrator will find your insight via the antahkarana tag.
-
-## Budget Reporting
-
-You are an Antahkarana voice with fresh context. When your work is complete,
-also log your final context usage for coordination:
-
-Use `mem-remember` with:
-- category: "antahkarana-budget"
-- title: "Budget: {task.task_id}"
-- tags: ["antahkarana:{self.antahkarana.antahkarana_id}", "budget", "voice:{task.task_id}"]
-- content: Include your approximate context usage percentage
-
-This helps the orchestrator track overall resource consumption.
+The orchestrator will collect your insight from this block.
 """
         return isolation_notice + base_prompt + memory_instructions
 
@@ -216,29 +192,23 @@ This helps the orchestrator track overall resource consumption.
         prompt_file = self._create_voice_script(task)
         output_file = self.antahkarana_dir / f"{task.task_id}.output"
 
-        # Build claude command
-        # Full session with MCP tools - voices can use cc-memory
         cmd = [
             "claude",
             "--model", self.model,
-            "--dangerously-skip-permissions",  # Non-interactive mode
+            "--dangerously-skip-permissions",
         ]
 
-        # Read prompt from file
         prompt = prompt_file.read_text()
 
         try:
-            # Voice-isolated environment - prevent parent session context bleed
             voice_env = os.environ.copy()
             voice_env["CC_SOUL_ANTAHKARANA_VOICE"] = "1"
             voice_env["CC_SOUL_ANTAHKARANA_ID"] = self.antahkarana.antahkarana_id
             voice_env["CC_SOUL_TASK_ID"] = task.task_id
             voice_env["CC_SOUL_PERSPECTIVE"] = task.perspective.value
-            # Track parent session for budget family grouping
             from .budget import get_session_id
             voice_env["CC_SOUL_PARENT_SESSION"] = get_session_id()
 
-            # Spawn as background process
             process = subprocess.Popen(
                 cmd,
                 stdin=subprocess.PIPE,
@@ -249,7 +219,6 @@ This helps the orchestrator track overall resource consumption.
                 env=voice_env,
             )
 
-            # Send prompt
             process.stdin.write(prompt)
             process.stdin.close()
 
@@ -263,13 +232,11 @@ This helps the orchestrator track overall resource consumption.
 
             self.voices.append(voice)
 
-            # Record in database
             self._record_voice_spawn(voice, task)
 
             return voice
 
         except FileNotFoundError:
-            # claude CLI not found - try alternative approach
             return self._spawn_via_script(task, output_file)
 
     def _spawn_via_script(self, task: VoiceTask, output_file: Path) -> SpawnedVoice:
@@ -296,13 +263,12 @@ if antahkarana:
         script_path.write_text(script_content)
         script_path.chmod(0o755)
 
-        # For now, just record that we need this voice's work
         voice = SpawnedVoice(
             task_id=task.task_id,
             process=None,
             pid=0,
             started_at=datetime.now().isoformat(),
-            status="awaiting",  # Needs manual or API-based insight
+            status="awaiting",
             output_file=output_file,
         )
 
@@ -318,15 +284,12 @@ if antahkarana:
         Budget-aware: Checks orchestrator budget and limits voice count
         if context is running low.
         """
-        # Check orchestrator budget before spawning
         budget_status = self.check_orchestrator_budget()
 
         if not budget_status["can_spawn"]:
-            # Log warning to cc-memory
             self._log_spawn_blocked(budget_status)
             return []
 
-        # Determine how many voices to spawn based on budget
         max_voices = budget_status.get("max_voices", self.max_parallel)
         tasks_to_spawn = self.antahkarana.tasks[:max_voices]
 
@@ -359,87 +322,65 @@ if antahkarana:
     def _log_spawn_blocked(self, budget_status: Dict[str, Any]):
         """Log when spawning is blocked due to budget constraints."""
         try:
-            from .bridge import is_memory_available, find_project_dir
-            if is_memory_available():
-                from cc_memory import memory as cc_memory
-                project_dir = find_project_dir()
-                cc_memory.remember(
-                    category="antahkarana-budget",
-                    title=f"Antahkarana {self.antahkarana.antahkarana_id}: BLOCKED",
-                    content=f"""Antahkarana spawn blocked due to budget constraints.
+            graph = get_synapse_graph()
+            graph.observe(
+                category="antahkarana_budget",
+                title=f"Antahkarana {self.antahkarana.antahkarana_id}: BLOCKED",
+                content=f"""Antahkarana spawn blocked due to budget constraints.
 Remaining: {budget_status['remaining_pct']*100:.0f}%
 Pressure: {budget_status['pressure']}
 Recommendation: {budget_status['recommendation']}
 Problem: {self.antahkarana.problem[:200]}""",
-                    tags=["antahkarana", "budget", "blocked", f"antahkarana:{self.antahkarana.antahkarana_id}"],
-                    project_dir=project_dir,
-                )
+                tags=["antahkarana", "budget", "blocked", f"antahkarana:{self.antahkarana.antahkarana_id}"],
+            )
+            save_synapse()
         except Exception:
             pass
 
     def _log_spawn_limited(self, spawned: int, total: int, reason: str):
         """Log when spawning is limited due to budget constraints."""
         try:
-            from .bridge import is_memory_available, find_project_dir
-            if is_memory_available():
-                from cc_memory import memory as cc_memory
-                project_dir = find_project_dir()
-                cc_memory.remember(
-                    category="antahkarana-budget",
-                    title=f"Antahkarana {self.antahkarana.antahkarana_id}: LIMITED",
-                    content=f"""Antahkarana spawn limited due to budget constraints.
+            graph = get_synapse_graph()
+            graph.observe(
+                category="antahkarana_budget",
+                title=f"Antahkarana {self.antahkarana.antahkarana_id}: LIMITED",
+                content=f"""Antahkarana spawn limited due to budget constraints.
 Spawned: {spawned}/{total} voices
 Reason: {reason}
 Problem: {self.antahkarana.problem[:200]}""",
-                    tags=["antahkarana", "budget", "limited", f"antahkarana:{self.antahkarana.antahkarana_id}"],
-                    project_dir=project_dir,
-                )
+                tags=["antahkarana", "budget", "limited", f"antahkarana:{self.antahkarana.antahkarana_id}"],
+            )
+            save_synapse()
         except Exception:
             pass
 
     def _record_voice_spawn(self, voice: SpawnedVoice, task: VoiceTask):
-        """Record voice spawn in database."""
-        conn = get_db_connection()
-        c = conn.cursor()
+        """Record voice spawn in synapse graph."""
+        graph = get_synapse_graph()
 
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS antahkarana_voices (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                antahkarana_id TEXT NOT NULL,
-                task_id TEXT NOT NULL,
-                pid INTEGER,
-                status TEXT DEFAULT 'running',
-                started_at TEXT NOT NULL,
-                completed_at TEXT,
-                output_file TEXT
-            )
-        """)
-
-        c.execute(
-            """INSERT INTO antahkarana_voices
-               (antahkarana_id, task_id, pid, status, started_at, output_file)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (
-                self.antahkarana.antahkarana_id,
-                voice.task_id,
-                voice.pid,
-                voice.status,
-                voice.started_at,
-                str(voice.output_file) if voice.output_file else None,
-            )
+        graph.observe(
+            category="antahkarana_voice",
+            title=f"{self.antahkarana.antahkarana_id}:{voice.task_id}",
+            content=json.dumps({
+                "antahkarana_id": self.antahkarana.antahkarana_id,
+                "task_id": voice.task_id,
+                "pid": voice.pid,
+                "status": voice.status,
+                "started_at": voice.started_at,
+                "completed_at": None,
+                "output_file": str(voice.output_file) if voice.output_file else None,
+            }),
+            tags=["antahkarana_voice", f"antahkarana:{self.antahkarana.antahkarana_id}", f"task:{voice.task_id}"],
         )
 
-        conn.commit()
-        conn.close()
+        save_synapse()
 
     def check_voice_status(self, voice: SpawnedVoice) -> str:
         """Check if a voice has completed."""
-        # First check if insight exists in cc-memory
-        if self._query_cc_memory_for_insight(voice.task_id):
+        if self._query_synapse_for_insight(voice.task_id):
             return "completed"
 
         if voice.process:
-            # Check if process is still running
             poll = voice.process.poll()
             if poll is None:
                 return "running"
@@ -448,7 +389,6 @@ Problem: {self.antahkarana.problem[:200]}""",
             else:
                 return "failed"
         else:
-            # No process - check if insight exists in antahkarana
             for sol in self.antahkarana.solutions:
                 if sol.task_id == voice.task_id:
                     return "completed"
@@ -487,7 +427,6 @@ Problem: {self.antahkarana.problem[:200]}""",
 
             time.sleep(poll_interval)
 
-        # Timeout remaining voices
         for voice in self.voices:
             if voice.status == "running":
                 voice.status = "timeout"
@@ -502,8 +441,8 @@ Problem: {self.antahkarana.problem[:200]}""",
         }
 
     def _collect_voice_result(self, voice: SpawnedVoice):
-        """Collect result from cc-memory (voice stored insight there)."""
-        insight_data = self._query_cc_memory_for_insight(voice.task_id)
+        """Collect result from synapse or output file."""
+        insight_data = self._query_synapse_for_insight(voice.task_id)
         if insight_data:
             self.antahkarana.submit_insight(
                 task_id=voice.task_id,
@@ -512,7 +451,6 @@ Problem: {self.antahkarana.problem[:200]}""",
                 reasoning=insight_data.get("reasoning", ""),
             )
         elif voice.output_file and voice.output_file.exists():
-            # Fallback: check output file for ANTAHKARANA_INSIGHT block
             output = voice.output_file.read_text()
             insight_data = self._parse_insight_block(output)
             if insight_data:
@@ -523,22 +461,17 @@ Problem: {self.antahkarana.problem[:200]}""",
                     reasoning=insight_data.get("reasoning", ""),
                 )
 
-    def _query_cc_memory_for_insight(self, task_id: str) -> Optional[Dict]:
-        """Query cc-memory for an antahkarana insight by task_id."""
-        import re
-
+    def _query_synapse_for_insight(self, task_id: str) -> Optional[Dict]:
+        """Query synapse for an antahkarana insight by task_id."""
         try:
-            from .bridge import is_memory_available, find_project_dir
+            graph = get_synapse_graph()
 
-            if is_memory_available():
-                from cc_memory import memory as cc_memory
+            episodes = graph.get_episodes(category="antahkarana_insight", limit=100)
 
-                project_dir = find_project_dir()
-                # Use exact tag lookup
-                results = cc_memory.recall_by_tag(project_dir, f"task:{task_id}", limit=5)
-
-                for r in results:
-                    content = r.get("content", "")
+            for ep in episodes:
+                tags = ep.get("tags", [])
+                if f"task:{task_id}" in tags:
+                    content = ep.get("content", "")
                     confidence_match = re.search(r'\*?\*?[Cc]onfidence:?\*?\*?\s*([\d.]+)', content)
                     confidence = float(confidence_match.group(1)) if confidence_match else 0.7
 
@@ -555,8 +488,6 @@ Problem: {self.antahkarana.problem[:200]}""",
 
     def _parse_insight_block(self, output: str) -> Optional[Dict]:
         """Parse [ANTAHKARANA_INSIGHT] block from voice output."""
-        import re
-
         pattern = r'\[ANTAHKARANA_INSIGHT\](.*?)\[/ANTAHKARANA_INSIGHT\]'
         match = re.search(pattern, output, re.DOTALL)
 
@@ -566,33 +497,27 @@ Problem: {self.antahkarana.problem[:200]}""",
         block = match.group(1).strip()
         result = {}
 
-        # Parse YAML-like format
         current_key = None
         current_value = []
 
         for line in block.split('\n'):
             if line.startswith('  ') and current_key:
-                # Continuation of multi-line value
                 current_value.append(line.strip())
             elif ':' in line:
-                # Save previous key if exists
                 if current_key and current_value:
                     result[current_key] = '\n'.join(current_value)
 
-                # New key
                 parts = line.split(':', 1)
                 current_key = parts[0].strip()
                 value = parts[1].strip() if len(parts) > 1 else ""
 
                 if value == '|':
-                    # Multi-line value follows
                     current_value = []
                 else:
                     result[current_key] = value
                     current_key = None
                     current_value = []
 
-        # Save last key
         if current_key and current_value:
             result[current_key] = '\n'.join(current_value)
 
@@ -623,7 +548,6 @@ Problem: {self.antahkarana.problem[:200]}""",
             "work_dir": str(self.antahkarana_dir),
         }
 
-        # Add budget information
         budget_info = self.get_antahkarana_budget_status()
         status["budget"] = budget_info
 
@@ -633,10 +557,8 @@ Problem: {self.antahkarana.problem[:200]}""",
         """
         Get cumulative budget status for all voices in this Antahkarana.
 
-        Queries cc-memory for budget reports from spawned voices.
+        Queries synapse for budget reports from spawned voices.
         """
-        import re
-
         result = {
             "orchestrator_remaining_pct": None,
             "voice_reports": [],
@@ -644,45 +566,37 @@ Problem: {self.antahkarana.problem[:200]}""",
             "voices_reported": 0,
         }
 
-        # Get orchestrator budget
         if self._orchestrator_budget:
             result["orchestrator_remaining_pct"] = self._orchestrator_budget.remaining_pct
 
-        # Query cc-memory for voice budget reports
         try:
-            from .bridge import is_memory_available, find_project_dir
-            if is_memory_available():
-                from cc_memory import memory as cc_memory
-                project_dir = find_project_dir()
+            graph = get_synapse_graph()
 
-                reports = cc_memory.recall(
-                    query=f"antahkarana:{self.antahkarana.antahkarana_id} budget",
-                    category="antahkarana-budget",
-                    limit=20,
-                    project_dir=project_dir,
-                )
+            episodes = graph.get_episodes(category="antahkarana_budget", limit=50)
 
-                for r in reports:
-                    content = r.get("content", "")
-                    title = r.get("title", "")
+            for ep in episodes:
+                tags = ep.get("tags", [])
+                if f"antahkarana:{self.antahkarana.antahkarana_id}" not in tags:
+                    continue
 
-                    # Extract task ID
-                    task_match = re.search(r'voice:([^\s,\]]+)', str(r.get("tags", "")))
-                    if not task_match:
-                        task_match = re.search(r'Budget:\s*(\w+)', title)
+                content = ep.get("content", "")
+                title = ep.get("title", "")
 
-                    task_id = task_match.group(1) if task_match else "unknown"
+                task_match = re.search(r'voice:([^\s,\]]+)', str(tags))
+                if not task_match:
+                    task_match = re.search(r'Budget:\s*(\w+)', title)
 
-                    # Extract percentage if available
-                    pct_match = re.search(r'(\d+)%', content)
-                    pct = int(pct_match.group(1)) if pct_match else None
+                task_id = task_match.group(1) if task_match else "unknown"
 
-                    result["voice_reports"].append({
-                        "task_id": task_id,
-                        "remaining_pct": pct / 100 if pct else None,
-                        "timestamp": r.get("timestamp"),
-                    })
-                    result["voices_reported"] += 1
+                pct_match = re.search(r'(\d+)%', content)
+                pct = int(pct_match.group(1)) if pct_match else None
+
+                result["voice_reports"].append({
+                    "task_id": task_id,
+                    "remaining_pct": pct / 100 if pct else None,
+                    "timestamp": ep.get("timestamp", ep.get("created_at")),
+                })
+                result["voices_reported"] += 1
 
         except Exception:
             pass
@@ -717,17 +631,14 @@ def spawn_antahkarana(
     """
     from .convergence import awaken_antahkarana as create_antahkarana
 
-    # Create antahkarana
     antahkarana = create_antahkarana(
         problem=problem,
         voices=voices,
         constraints=constraints,
     )
 
-    # Create orchestrator
     orchestrator = AntahkaranaOrchestrator(antahkarana)
 
-    # Check budget before spawning
     if check_budget:
         budget_status = orchestrator.check_orchestrator_budget()
         if not budget_status["can_spawn"]:
@@ -739,7 +650,6 @@ def spawn_antahkarana(
                 "error": budget_status["recommendation"],
             }
 
-    # Spawn voices (budget-aware)
     orchestrator.spawn_all_voices()
 
     result = {
@@ -749,11 +659,9 @@ def spawn_antahkarana(
     }
 
     if wait:
-        # Wait for completion
         completion = orchestrator.wait_for_completion(timeout=timeout)
         result["completion"] = completion
 
-        # Converge if we have insights
         if antahkarana.solutions:
             converged = orchestrator.converge()
             result["converged"] = {
@@ -763,7 +671,6 @@ def spawn_antahkarana(
                 "contributors": len(converged.contributing_voices),
             }
 
-        # Include final budget status
         result["final_budget"] = orchestrator.get_antahkarana_budget_status()
 
     return result
@@ -771,7 +678,7 @@ def spawn_antahkarana(
 
 def get_antahkarana_insights(antahkarana_id: str) -> List[Dict[str, Any]]:
     """
-    Get all insights for an Antahkarana from cc-memory.
+    Get all insights for an Antahkarana from synapse.
 
     Args:
         antahkarana_id: The Antahkarana ID to query
@@ -779,90 +686,64 @@ def get_antahkarana_insights(antahkarana_id: str) -> List[Dict[str, Any]]:
     Returns:
         List of insight dicts with task_id, content, confidence
     """
-    import re
     insights = []
 
-    # Try cc-memory first (project-local observations)
     try:
-        from .bridge import is_memory_available, find_project_dir
+        graph = get_synapse_graph()
 
-        if is_memory_available():
-            from cc_memory import memory as cc_memory
+        episodes = graph.get_episodes(category="antahkarana_insight", limit=100)
 
-            project_dir = find_project_dir()
+        for ep in episodes:
+            tags = ep.get("tags", [])
+            if f"antahkarana:{antahkarana_id}" not in tags:
+                continue
 
-            # Use exact tag lookup - semantic search can't find IDs
-            results = cc_memory.recall_by_tag(project_dir, f"antahkarana:{antahkarana_id}", limit=50)
+            content = ep.get("content", "")
+            title = ep.get("title", "")
+            obs_id = ep.get("id", "")
 
-            for r in results:
-                # Only include actual insights, not budget records
-                if r.get("category") not in ("antahkarana-insight", "swarm-solution", "voice_insight"):
-                    continue
+            task_id = title.split(':')[0].strip() if ':' in title else 'unknown'
 
-                content = r.get("content", "")
-                title = r.get("title", "")
-                obs_id = r.get("id", "")
-                tags = r.get("tags", [])
-                tags_str = " ".join(tags) if isinstance(tags, list) else str(tags)
+            perspective_match = re.search(r'(?:voice|perspective):(\w+)', str(tags))
+            perspective = perspective_match.group(1) if perspective_match else 'unknown'
 
-                # Extract task_id from title (format: "{antahkarana_id}-N: description")
-                task_id = title.split(':')[0].strip() if ':' in title else 'unknown'
+            confidence_match = re.search(r'\*?\*?[Cc]onfidence:?\*?\*?\s*([\d.]+)', content)
+            confidence = float(confidence_match.group(1)) if confidence_match else 0.7
 
-                # Extract perspective from tags
-                perspective_match = re.search(r'(?:voice|perspective):(\w+)', tags_str)
-                perspective = perspective_match.group(1) if perspective_match else 'unknown'
-
-                # Extract confidence from content
-                confidence_match = re.search(r'\*?\*?[Cc]onfidence:?\*?\*?\s*([\d.]+)', content)
-                confidence = float(confidence_match.group(1)) if confidence_match else 0.7
-
-                insights.append({
-                    "observation_id": obs_id,
-                    "task_id": task_id,
-                    "perspective": perspective,
-                    "insight": content,
-                    "content": content,
-                    "confidence": confidence,
-                    "created_at": r.get("timestamp"),
-                })
+            insights.append({
+                "observation_id": obs_id,
+                "task_id": task_id,
+                "perspective": perspective,
+                "insight": content,
+                "content": content,
+                "confidence": confidence,
+                "created_at": ep.get("timestamp", ep.get("created_at")),
+            })
     except Exception:
         pass
 
-    # Fallback: check soul database
     if not insights:
         try:
-            conn = get_db_connection()
-            c = conn.cursor()
+            graph = get_synapse_graph()
 
-            c.execute("""
-                SELECT id, title, content, created_at FROM wisdom
-                WHERE type = 'voice_insight'
-                AND content LIKE ?
-                ORDER BY created_at DESC
-            """, (f'%antahkarana:{antahkarana_id}%',))
+            episodes = graph.get_episodes(category="swarm_solution", limit=100)
 
-            for row in c.fetchall():
-                obs_id, title, content, created_at = row
+            for ep in episodes:
+                try:
+                    data = json.loads(ep.get("content", "{}"))
+                except (json.JSONDecodeError, TypeError):
+                    continue
 
-                task_match = re.search(r'task:([^\s,\]]+)', content)
-                task_id = task_match.group(1) if task_match else 'unknown'
+                if data.get("swarm_id") == antahkarana_id:
+                    insights.append({
+                        "observation_id": ep.get("id"),
+                        "task_id": data.get("task_id", "unknown"),
+                        "perspective": data.get("perspective", "unknown"),
+                        "content": data.get("solution", ""),
+                        "confidence": data.get("confidence", 0.7),
+                        "created_at": data.get("created_at"),
+                    })
 
-                perspective_match = re.search(r'(?:voice|perspective):(\w+)', content)
-                perspective = perspective_match.group(1) if perspective_match else 'unknown'
-
-                confidence_match = re.search(r'confidence:\s*([\d.]+)', content)
-                confidence = float(confidence_match.group(1)) if confidence_match else 0.7
-
-                insights.append({
-                    "observation_id": obs_id,
-                    "task_id": task_id,
-                    "perspective": perspective,
-                    "content": content,
-                    "confidence": confidence,
-                    "created_at": created_at,
-                })
-
-            conn.close()
         except Exception:
             pass
 
@@ -879,43 +760,26 @@ def get_orchestrator(antahkarana_id: str) -> Optional[AntahkaranaOrchestrator]:
 
     orchestrator = AntahkaranaOrchestrator(antahkarana)
 
-    # Load voices from database
-    conn = get_db_connection()
-    c = conn.cursor()
+    graph = get_synapse_graph()
 
-    try:
-        # Try new table first
-        c.execute(
-            """SELECT task_id, pid, status, started_at, output_file
-               FROM antahkarana_voices WHERE antahkarana_id = ?""",
-            (antahkarana_id,)
-        )
+    episodes = graph.get_episodes(category="antahkarana_voice", limit=100)
 
-        rows = c.fetchall()
-        if not rows:
-            # Fallback to old table
-            c.execute(
-                """SELECT task_id, pid, status, started_at, output_file
-                   FROM swarm_agents WHERE swarm_id = ?""",
-                (antahkarana_id,)
-            )
-            rows = c.fetchall()
+    for ep in episodes:
+        try:
+            data = json.loads(ep.get("content", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            continue
 
-        for row in rows:
+        if data.get("antahkarana_id") == antahkarana_id:
             voice = SpawnedVoice(
-                task_id=row[0],
-                process=None,  # Can't recover process handle
-                pid=row[1],
-                status=row[2],
-                started_at=row[3],
-                output_file=Path(row[4]) if row[4] else None,
+                task_id=data.get("task_id"),
+                process=None,
+                pid=data.get("pid", 0),
+                status=data.get("status", "unknown"),
+                started_at=data.get("started_at", ""),
+                output_file=Path(data["output_file"]) if data.get("output_file") else None,
             )
             orchestrator.voices.append(voice)
-
-    except Exception:
-        pass
-    finally:
-        conn.close()
 
     return orchestrator
 
@@ -926,7 +790,7 @@ class DelegatedTask:
     task_id: str
     prompt: str
     summary: Optional[str] = None
-    full_result_id: Optional[str] = None  # ID in cc-memory
+    full_result_id: Optional[str] = None  # ID in synapse
     status: str = "pending"  # pending, running, completed, failed
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
@@ -942,15 +806,15 @@ def delegate_task(
     """
     Delegate a heavy task to a sub-Claude instance.
 
-    The sub-Claude does full work, stores complete output in cc-memory,
+    The sub-Claude does full work, stores complete output in synapse,
     and returns a distilled summary. This preserves main Claude's context.
 
     Pattern (Upanishadic model):
     1. Main Claude detects heavy task
     2. Spawns sub-Claude with this function
-    3. Sub-Claude does full work, stores in cc-memory (Chitta)
+    3. Sub-Claude does full work, stores in synapse
     4. Sub-Claude returns distilled summary
-    5. Main Claude continues with summary + can query cc-memory for details
+    5. Main Claude continues with summary + can query synapse for details
 
     Args:
         prompt: The task/question for sub-Claude
@@ -962,7 +826,6 @@ def delegate_task(
     Returns:
         Dict with task_id, summary, full_result_id, status
     """
-    from datetime import datetime
     import uuid
 
     if not task_id:
@@ -971,13 +834,12 @@ def delegate_task(
     work_dir = Path.home() / ".claude" / "delegated"
     work_dir.mkdir(parents=True, exist_ok=True)
 
-    # Build the delegation prompt
     delegation_prompt = f"""## Delegated Task
 
 You are a sub-Claude instance handling a delegated task. Your job:
 1. Do the full work requested below
-2. Store your COMPLETE output in cc-memory
-3. Return a DISTILLED summary to the orchestrator
+2. Store your COMPLETE output (the orchestrator will extract it)
+3. Return a DISTILLED summary
 
 IMPORTANT: The orchestrator has limited context. Your summary should be
 concise (max 500 words) but capture the essential answer/result.
@@ -989,19 +851,10 @@ concise (max 500 words) but capture the essential answer/result.
 
 ## Output Protocol
 
-When complete, you MUST:
+When complete, output ONLY a distilled summary (the last thing you output):
+Start with "## Summary" and provide a concise answer.
 
-1. Store full result in cc-memory:
-   Use `mem-remember` with:
-   - category: "delegated-result"
-   - title: "{task_id}: [short description]"
-   - content: Your COMPLETE work output
-   - tags: ["delegated", "task:{task_id}"]
-
-2. Then output ONLY a distilled summary (the last thing you output):
-   Start with "## Summary" and provide a concise answer.
-
-The orchestrator will see only this summary. Full details are in cc-memory.
+The orchestrator will see only this summary.
 """
 
     prompt_file = work_dir / f"{task_id}.prompt"
@@ -1015,7 +868,6 @@ The orchestrator will see only this summary. Full details are in cc-memory.
         started_at=datetime.now().isoformat(),
     )
 
-    # Spawn sub-Claude
     cmd = ["claude", "--model", model, "--dangerously-skip-permissions"]
 
     try:
@@ -1038,7 +890,6 @@ The orchestrator will see only this summary. Full details are in cc-memory.
 
         task.status = "running"
 
-        # Record in database
         _record_delegated_task(task)
 
         if not wait:
@@ -1048,7 +899,6 @@ The orchestrator will see only this summary. Full details are in cc-memory.
                 "message": "Task delegated. Use get_delegated_result() to check status.",
             }
 
-        # Wait for completion
         try:
             process.wait(timeout=timeout)
             task.status = "completed" if process.returncode == 0 else "failed"
@@ -1058,11 +908,10 @@ The orchestrator will see only this summary. Full details are in cc-memory.
 
         task.completed_at = datetime.now().isoformat()
 
-        # Extract summary and full result ID
         if output_file.exists():
             output = output_file.read_text()
             task.summary = _extract_summary(output)
-            task.full_result_id = _find_result_in_memory(task_id)
+            task.full_result_id = _store_result_in_synapse(task_id, output)
 
         _update_delegated_task(task)
 
@@ -1092,83 +941,74 @@ The orchestrator will see only this summary. Full details are in cc-memory.
 
 def _extract_summary(output: str) -> Optional[str]:
     """Extract the summary section from sub-Claude output."""
-    import re
-
-    # Look for ## Summary section
     match = re.search(r'## Summary\s*\n(.*?)(?=\n##|\Z)', output, re.DOTALL)
     if match:
         return match.group(1).strip()[:2000]
 
-    # Fallback: take last 500 chars if no summary marker
     if len(output) > 500:
         return f"(No explicit summary. Last output:)\n{output[-500:]}"
 
     return output.strip() if output else None
 
 
-def _find_result_in_memory(task_id: str) -> Optional[str]:
-    """Find the full result ID in cc-memory."""
+def _store_result_in_synapse(task_id: str, output: str) -> Optional[str]:
+    """Store the full result in synapse."""
     try:
-        from .bridge import is_memory_available, find_project_dir
-
-        if is_memory_available():
-            from cc_memory import memory as cc_memory
-
-            project_dir = find_project_dir()
-            results = cc_memory.recall_by_tag(project_dir, f"task:{task_id}", limit=5)
-
-            for r in results:
-                if r.get("category") == "delegated-result":
-                    return r.get("id")
+        graph = get_synapse_graph()
+        obs_id = graph.observe(
+            category="delegated_result",
+            title=f"Result: {task_id}",
+            content=output[:10000],  # Limit content size
+            tags=["delegated", f"task:{task_id}"],
+        )
+        save_synapse()
+        return obs_id
     except Exception:
-        pass
-
-    return None
+        return None
 
 
 def _record_delegated_task(task: DelegatedTask):
-    """Record delegated task in database."""
-    conn = get_db_connection()
-    c = conn.cursor()
+    """Record delegated task in synapse graph."""
+    graph = get_synapse_graph()
 
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS delegated_tasks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            task_id TEXT UNIQUE NOT NULL,
-            prompt TEXT,
-            status TEXT DEFAULT 'pending',
-            started_at TEXT,
-            completed_at TEXT,
-            summary TEXT,
-            full_result_id TEXT
-        )
-    """)
-
-    c.execute(
-        """INSERT OR REPLACE INTO delegated_tasks
-           (task_id, prompt, status, started_at)
-           VALUES (?, ?, ?, ?)""",
-        (task.task_id, task.prompt[:1000], task.status, task.started_at)
+    graph.observe(
+        category="delegated_task",
+        title=f"delegated:{task.task_id}",
+        content=json.dumps({
+            "task_id": task.task_id,
+            "prompt": task.prompt[:1000],
+            "status": task.status,
+            "started_at": task.started_at,
+            "completed_at": task.completed_at,
+            "summary": task.summary,
+            "full_result_id": task.full_result_id,
+        }),
+        tags=["delegated_task", f"task:{task.task_id}"],
     )
 
-    conn.commit()
-    conn.close()
+    save_synapse()
 
 
 def _update_delegated_task(task: DelegatedTask):
-    """Update delegated task status."""
-    conn = get_db_connection()
-    c = conn.cursor()
+    """Update delegated task status in synapse graph."""
+    graph = get_synapse_graph()
 
-    c.execute(
-        """UPDATE delegated_tasks
-           SET status = ?, completed_at = ?, summary = ?, full_result_id = ?
-           WHERE task_id = ?""",
-        (task.status, task.completed_at, task.summary, task.full_result_id, task.task_id)
+    graph.observe(
+        category="delegated_task",
+        title=f"delegated:{task.task_id}",
+        content=json.dumps({
+            "task_id": task.task_id,
+            "prompt": task.prompt[:1000] if task.prompt else "",
+            "status": task.status,
+            "started_at": task.started_at,
+            "completed_at": task.completed_at,
+            "summary": task.summary,
+            "full_result_id": task.full_result_id,
+        }),
+        tags=["delegated_task", f"task:{task.task_id}", "updated"],
     )
 
-    conn.commit()
-    conn.close()
+    save_synapse()
 
 
 def get_delegated_result(task_id: str) -> Dict[str, Any]:
@@ -1181,35 +1021,32 @@ def get_delegated_result(task_id: str) -> Dict[str, Any]:
     Returns:
         Dict with status, summary, and full_result_id if available
     """
-    conn = get_db_connection()
-    c = conn.cursor()
+    graph = get_synapse_graph()
 
-    try:
-        c.execute(
-            """SELECT status, summary, full_result_id, started_at, completed_at
-               FROM delegated_tasks WHERE task_id = ?""",
-            (task_id,)
-        )
+    episodes = graph.get_episodes(category="delegated_task", limit=100)
 
-        row = c.fetchone()
-        if row:
+    for ep in episodes:
+        try:
+            data = json.loads(ep.get("content", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        if data.get("task_id") == task_id:
             return {
                 "task_id": task_id,
-                "status": row[0],
-                "summary": row[1],
-                "full_result_id": row[2],
-                "started_at": row[3],
-                "completed_at": row[4],
+                "status": data.get("status"),
+                "summary": data.get("summary"),
+                "full_result_id": data.get("full_result_id"),
+                "started_at": data.get("started_at"),
+                "completed_at": data.get("completed_at"),
             }
-        else:
-            return {"task_id": task_id, "status": "not_found"}
-    finally:
-        conn.close()
+
+    return {"task_id": task_id, "status": "not_found"}
 
 
 def get_full_result(task_id: str) -> Optional[str]:
     """
-    Get the full result content from cc-memory for a delegated task.
+    Get the full result content from synapse for a delegated task.
 
     Use this when the summary isn't enough and you need full details.
 
@@ -1220,17 +1057,14 @@ def get_full_result(task_id: str) -> Optional[str]:
         Full content string or None
     """
     try:
-        from .bridge import is_memory_available, find_project_dir
+        graph = get_synapse_graph()
 
-        if is_memory_available():
-            from cc_memory import memory as cc_memory
+        episodes = graph.get_episodes(category="delegated_result", limit=100)
 
-            project_dir = find_project_dir()
-            results = cc_memory.recall_by_tag(project_dir, f"task:{task_id}", limit=5)
-
-            for r in results:
-                if r.get("category") == "delegated-result":
-                    return r.get("content")
+        for ep in episodes:
+            tags = ep.get("tags", [])
+            if f"task:{task_id}" in tags:
+                return ep.get("content")
     except Exception:
         pass
 
@@ -1239,30 +1073,45 @@ def get_full_result(task_id: str) -> Optional[str]:
 
 def list_active_antahkaranas(limit: int = 10) -> List[Dict]:
     """List active Antahkarana orchestrators."""
-    conn = get_db_connection()
-    c = conn.cursor()
+    graph = get_synapse_graph()
 
-    try:
-        c.execute("""
-            SELECT swarm_id, problem, MAX(created_at) as created_at,
-                   (SELECT COUNT(*) FROM swarm_solutions WHERE swarm_solutions.swarm_id = swarm_tasks.swarm_id) as insight_count
-            FROM swarm_tasks
-            GROUP BY swarm_id
-            ORDER BY created_at DESC
-            LIMIT ?
-        """, (limit,))
+    episodes = graph.get_episodes(category="swarm_task", limit=limit * 10)
 
-        antahkaranas = []
-        for row in c.fetchall():
-            antahkaranas.append({
-                "antahkarana_id": row[0],
-                "problem": row[1][:80] if row[1] else "",
-                "created_at": row[2],
-                "voices": row[3],
-            })
+    swarm_data = {}
+    for ep in episodes:
+        try:
+            data = json.loads(ep.get("content", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            continue
 
-        return antahkaranas
-    except Exception:
-        return []
-    finally:
-        conn.close()
+        swarm_id = data.get("swarm_id")
+        if swarm_id:
+            if swarm_id not in swarm_data:
+                swarm_data[swarm_id] = {
+                    "problem": data.get("problem", ""),
+                    "created_at": data.get("created_at", ""),
+                }
+
+    solution_episodes = graph.get_episodes(category="swarm_solution", limit=limit * 10)
+    solution_counts = {}
+    for ep in solution_episodes:
+        try:
+            data = json.loads(ep.get("content", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        swarm_id = data.get("swarm_id")
+        if swarm_id:
+            solution_counts[swarm_id] = solution_counts.get(swarm_id, 0) + 1
+
+    antahkaranas = []
+    for swarm_id, info in swarm_data.items():
+        antahkaranas.append({
+            "antahkarana_id": swarm_id,
+            "problem": info["problem"][:80] if info["problem"] else "",
+            "created_at": info["created_at"],
+            "voices": solution_counts.get(swarm_id, 0),
+        })
+
+    antahkaranas.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    return antahkaranas[:limit]

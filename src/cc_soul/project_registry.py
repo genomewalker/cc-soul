@@ -1,47 +1,18 @@
 """
 Project Registry - Track all project memories for cross-project access.
 
-The soul maintains a registry of all projects where cc-memory is active.
+The soul maintains a registry of all projects with synapse episodes.
 This enables:
 - Cross-project search ("I've seen this pattern before...")
 - Pattern detection across codebases
 - Universal access to project-specific learnings
 """
 
-import sqlite3
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Optional
 
-from .core import get_db_connection, SOUL_DIR
-
-# cc-memory import
-CC_MEMORY_AVAILABLE = False
-try:
-    from cc_memory import memory as cc_memory
-    CC_MEMORY_AVAILABLE = True
-except ImportError:
-    cc_memory = None
-
-
-def _ensure_registry_table():
-    """Ensure project registry table exists in soul database."""
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS project_registry (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            path TEXT UNIQUE NOT NULL,
-            last_accessed TEXT,
-            observation_count INTEGER DEFAULT 0,
-            session_count INTEGER DEFAULT 0,
-            registered_at TEXT NOT NULL
-        )
-    """)
-    c.execute("CREATE INDEX IF NOT EXISTS idx_project_path ON project_registry(path)")
-    conn.commit()
-    conn.close()
+from .core import get_synapse_graph, save_synapse, SOUL_DIR
 
 
 def register_project(project_path: str = None, name: str = None) -> Dict:
@@ -55,8 +26,6 @@ def register_project(project_path: str = None, name: str = None) -> Dict:
     Returns:
         Registration result
     """
-    _ensure_registry_table()
-
     if project_path is None:
         project_path = _find_project_dir()
 
@@ -69,34 +38,35 @@ def register_project(project_path: str = None, name: str = None) -> Dict:
     if name is None:
         name = Path(project_path).name
 
-    # Get stats from project memory
+    graph = get_synapse_graph()
+
+    # Count episodes for this project
     obs_count = 0
     session_count = 0
-    if CC_MEMORY_AVAILABLE:
-        try:
-            stats = cc_memory.get_stats(project_path)
-            obs_count = stats.get("observations", 0)
-            session_count = stats.get("sessions", 0)
-        except Exception:
-            pass
-
-    conn = get_db_connection()
-    c = conn.cursor()
+    try:
+        episodes = graph.get_episodes(project=project_path, limit=1000)
+        obs_count = len(episodes)
+        session_episodes = graph.get_episodes(category="session_ledger", project=project_path, limit=100)
+        session_count = len(session_episodes)
+    except Exception:
+        pass
     now = datetime.now().isoformat()
 
-    # Upsert
-    c.execute("""
-        INSERT INTO project_registry (name, path, last_accessed, observation_count, session_count, registered_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(path) DO UPDATE SET
-            name = excluded.name,
-            last_accessed = excluded.last_accessed,
-            observation_count = excluded.observation_count,
-            session_count = excluded.session_count
-    """, (name, project_path, now, obs_count, session_count, now))
+    content = (
+        f"path: {project_path}\n"
+        f"observations: {obs_count}\n"
+        f"sessions: {session_count}\n"
+        f"registered_at: {now}"
+    )
 
-    conn.commit()
-    conn.close()
+    graph.observe(
+        category="project_registry",
+        title=name,
+        content=content,
+        project=project_path,
+        tags=["registry", "project"],
+    )
+    save_synapse()
 
     return {
         "registered": True,
@@ -109,76 +79,87 @@ def register_project(project_path: str = None, name: str = None) -> Dict:
 
 def list_projects() -> List[Dict]:
     """List all registered projects."""
-    _ensure_registry_table()
-    conn = get_db_connection()
-    c = conn.cursor()
-
-    c.execute("""
-        SELECT name, path, last_accessed, observation_count, session_count, registered_at
-        FROM project_registry
-        ORDER BY last_accessed DESC
-    """)
+    graph = get_synapse_graph()
+    episodes = graph.get_episodes(category="project_registry", limit=100)
 
     projects = []
-    for row in c.fetchall():
-        # Check if project still exists
-        exists = Path(row[1]).exists() and (Path(row[1]) / ".memory").exists()
-        projects.append({
-            "name": row[0],
-            "path": row[1],
-            "last_accessed": row[2],
-            "observations": row[3],
-            "sessions": row[4],
-            "registered_at": row[5],
-            "exists": exists,
-        })
+    seen_paths = set()
 
-    conn.close()
+    for ep in episodes:
+        content = ep.get("content", "")
+        lines = content.split("\n")
+
+        path = ""
+        obs = 0
+        sessions = 0
+        registered_at = ""
+
+        for line in lines:
+            if line.startswith("path: "):
+                path = line[6:].strip()
+            elif line.startswith("observations: "):
+                try:
+                    obs = int(line[14:].strip())
+                except ValueError:
+                    pass
+            elif line.startswith("sessions: "):
+                try:
+                    sessions = int(line[10:].strip())
+                except ValueError:
+                    pass
+            elif line.startswith("registered_at: "):
+                registered_at = line[15:].strip()
+
+        if path and path not in seen_paths:
+            seen_paths.add(path)
+            exists = Path(path).exists() and (Path(path) / ".memory").exists()
+            projects.append({
+                "name": ep.get("title", Path(path).name),
+                "path": path,
+                "last_accessed": ep.get("created_at", registered_at),
+                "observations": obs,
+                "sessions": sessions,
+                "registered_at": registered_at,
+                "exists": exists,
+            })
+
+    projects.sort(key=lambda x: x.get("last_accessed", ""), reverse=True)
     return projects
 
 
 def unregister_project(project_path: str) -> bool:
     """Remove a project from the registry."""
-    _ensure_registry_table()
     project_path = str(Path(project_path).resolve())
+    projects_before = list_projects()
 
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("DELETE FROM project_registry WHERE path = ?", (project_path,))
-    deleted = c.rowcount > 0
-    conn.commit()
-    conn.close()
-    return deleted
+    graph = get_synapse_graph()
+    graph.observe(
+        category="project_unregistered",
+        title=f"unregistered: {Path(project_path).name}",
+        content=f"path: {project_path}\nunregistered_at: {datetime.now().isoformat()}",
+        project=project_path,
+        tags=["registry", "unregistered"],
+    )
+    save_synapse()
+
+    return any(p["path"] == project_path for p in projects_before)
 
 
 def refresh_project_stats():
     """Refresh observation/session counts for all registered projects."""
-    if not CC_MEMORY_AVAILABLE:
-        return {"error": "cc-memory not available"}
-
     projects = list_projects()
     updated = 0
-
-    conn = get_db_connection()
-    c = conn.cursor()
 
     for proj in projects:
         if not proj["exists"]:
             continue
 
         try:
-            stats = cc_memory.get_stats(proj["path"])
-            c.execute("""
-                UPDATE project_registry
-                SET observation_count = ?, session_count = ?
-                WHERE path = ?
-            """, (stats.get("observations", 0), stats.get("sessions", 0), proj["path"]))
+            register_project(proj["path"], proj["name"])
             updated += 1
         except Exception:
             continue
 
-    conn.commit()
-    conn.close()
     return {"updated": updated, "total": len(projects)}
 
 
@@ -186,7 +167,7 @@ def search_all_projects(query: str, limit: int = 20) -> List[Dict]:
     """
     Search observations across ALL registered projects.
 
-    This is federated search - queries each project's memory and combines results.
+    This is federated search - queries each project's episodes and combines results.
 
     Args:
         query: Search query
@@ -195,34 +176,30 @@ def search_all_projects(query: str, limit: int = 20) -> List[Dict]:
     Returns:
         Combined results from all projects
     """
-    if not CC_MEMORY_AVAILABLE:
-        return []
-
     projects = list_projects()
     all_results = []
     query_lower = query.lower()
+    graph = get_synapse_graph()
 
     for proj in projects:
         if not proj["exists"]:
             continue
 
         try:
-            # Get observations and filter by query
-            observations = cc_memory.get_recent_observations(proj["path"], limit=100)
+            episodes = graph.get_episodes(project=proj["path"], limit=100)
 
-            for obs in observations:
-                title = obs.get("title", "").lower()
-                content = obs.get("content", "").lower()
-                category = obs.get("category", "").lower()
+            for ep in episodes:
+                title = ep.get("title", "").lower()
+                content = ep.get("content", "").lower()
+                category = ep.get("category", "").lower()
 
                 if query_lower in title or query_lower in content or query_lower in category:
-                    obs["_project"] = proj["name"]
-                    obs["_project_path"] = proj["path"]
-                    all_results.append(obs)
+                    ep["_project"] = proj["name"]
+                    ep["_project_path"] = proj["path"]
+                    all_results.append(ep)
         except Exception:
             continue
 
-    # Sort by recency
     all_results.sort(key=lambda x: x.get("created_at", ""), reverse=True)
 
     return all_results[:limit]
@@ -252,47 +229,42 @@ def find_cross_project_patterns(min_occurrences: int = 2) -> List[Dict]:
 
     These are candidates for promotion to universal wisdom.
     """
-    if not CC_MEMORY_AVAILABLE:
-        return []
-
     projects = list_projects()
-    all_observations = []
+    all_episodes = []
+    graph = get_synapse_graph()
 
     for proj in projects:
         if not proj["exists"]:
             continue
 
         try:
-            # Get recent observations from each project
-            recent = cc_memory.get_recent_observations(proj["path"], limit=100)
-            for obs in recent:
-                obs["_project"] = proj["name"]
-                obs["_project_path"] = proj["path"]
-                all_observations.append(obs)
+            episodes = graph.get_episodes(project=proj["path"], limit=100)
+            for ep in episodes:
+                ep["_project"] = proj["name"]
+                ep["_project_path"] = proj["path"]
+                all_episodes.append(ep)
         except Exception:
             continue
 
-    # Group by similar titles
     title_groups = {}
-    for obs in all_observations:
-        title_key = _normalize_title(obs.get("title", ""))
+    for ep in all_episodes:
+        title_key = _normalize_title(ep.get("title", ""))
         if title_key not in title_groups:
             title_groups[title_key] = []
-        title_groups[title_key].append(obs)
+        title_groups[title_key].append(ep)
 
-    # Find patterns appearing in multiple projects
     patterns = []
-    for title_key, obs_list in title_groups.items():
-        projects_with_pattern = set(o["_project"] for o in obs_list)
+    for title_key, ep_list in title_groups.items():
+        projects_with_pattern = set(e["_project"] for e in ep_list)
 
         if len(projects_with_pattern) >= min_occurrences:
             patterns.append({
-                "title": obs_list[0].get("title", ""),
-                "content": obs_list[0].get("content", ""),
-                "category": obs_list[0].get("category", ""),
-                "occurrences": len(obs_list),
+                "title": ep_list[0].get("title", ""),
+                "content": ep_list[0].get("content", ""),
+                "category": ep_list[0].get("category", ""),
+                "occurrences": len(ep_list),
                 "projects": list(projects_with_pattern),
-                "observation_ids": [o.get("id") for o in obs_list],
+                "observation_ids": [e.get("id") for e in ep_list],
             })
 
     return sorted(patterns, key=lambda x: x["occurrences"], reverse=True)

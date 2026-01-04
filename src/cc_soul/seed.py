@@ -4,7 +4,8 @@ Seed the soul with foundational wisdom and beliefs.
 Run once after installation to give Claude an initial identity.
 """
 
-from .core import init_soul, SOUL_DB
+# TODO: Migrate to synapse graph storage
+# from .core import get_synapse_graph, save_synapse
 from .beliefs import hold_belief
 from .wisdom import gain_wisdom, WisdomType
 from .vocabulary import learn_term
@@ -12,23 +13,8 @@ from .vocabulary import learn_term
 
 def is_seeded() -> bool:
     """Check if soul has already been seeded."""
-    if not SOUL_DB.exists():
-        return False
-
-    import sqlite3
-
-    conn = sqlite3.connect(SOUL_DB)
-    cursor = conn.cursor()
-
-    # Check for seed marker
-    try:
-        cursor.execute("SELECT COUNT(*) FROM wisdom WHERE domain = 'seed'")
-        count = cursor.fetchone()[0]
-        conn.close()
-        return count > 0
-    except sqlite3.OperationalError:
-        conn.close()
-        return False
+    # TODO: Migrate to synapse graph storage
+    return False
 
 
 def seed_soul(force: bool = False):
@@ -38,7 +24,7 @@ def seed_soul(force: bool = False):
     Args:
         force: If True, seed even if already seeded
     """
-    init_soul()
+    # TODO: Migrate to synapse graph storage - init_soul() removed
 
     if is_seeded() and not force:
         return {

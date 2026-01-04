@@ -352,9 +352,9 @@ def get_context_observation(transcript_path: str = None) -> Dict[str, Any]:
     Get context-aware observation for soul agent.
 
     Adds context budget awareness to the agent's observation.
-    Also logs budget to cc-memory for cross-instance awareness.
+    Also logs budget to synapse for cross-instance awareness.
     """
-    from .budget import log_budget_to_memory
+    from .budget import log_budget_to_synapse
 
     budget = get_context_budget(transcript_path)
 
@@ -368,8 +368,8 @@ def get_context_observation(transcript_path: str = None) -> Dict[str, Any]:
 
     pressure = get_pressure_level(budget)
 
-    # Log to cc-memory for cross-instance tracking
-    log_budget_to_memory(budget, transcript_path)
+    # Log to synapse for cross-instance tracking
+    log_budget_to_synapse(budget, transcript_path)
 
     return {
         "context_known": True,

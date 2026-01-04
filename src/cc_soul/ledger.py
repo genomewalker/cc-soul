@@ -1,8 +1,8 @@
 """
-Session Ledger - State preservation using cc-memory as backend.
+Session Ledger - State preservation using synapse as backend.
 
 Enables continuous consciousness across context windows by saving
-complete soul state to cc-memory observations with category="session_ledger".
+complete soul state to synapse observations with category="session_ledger".
 
 The ledger captures:
 - Soul state (coherence, intentions, mood)
@@ -13,25 +13,16 @@ Unlike markdown handoffs, ledgers are machine-restorable.
 """
 
 import json
+import subprocess
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from typing import List, Dict, Optional, Any
 from pathlib import Path
 
-from .core import init_soul
+from .core import init_soul, get_synapse_graph, save_synapse, SOUL_DIR
 from .intentions import get_active_intentions, IntentionState
 from .coherence import compute_coherence
 from .mood import compute_mood
-
-# Try to import cc-memory directly
-try:
-    import sys
-    sys.path.insert(0, str(Path.home() / "repos/cc-memory/src"))
-    sys.path.insert(0, "/maps/projects/fernandezguerra/apps/repos/cc-memory/src")
-    from cc_memory import remember as cc_remember, recall as cc_recall
-    CC_MEMORY_AVAILABLE = True
-except ImportError:
-    CC_MEMORY_AVAILABLE = False
 
 
 @dataclass
@@ -127,7 +118,6 @@ def _get_project_name() -> str:
 
 def _get_current_session_id() -> Optional[int]:
     """Get current conversation ID if available."""
-    from .core import SOUL_DIR
     conv_file = SOUL_DIR / ".current_conversation"
     if conv_file.exists():
         try:
@@ -135,65 +125,6 @@ def _get_current_session_id() -> Optional[int]:
         except (ValueError, OSError):
             pass
     return None
-
-
-def _get_current_project_dir() -> str:
-    """Get the current project directory for cc-memory."""
-    import subprocess
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0:
-            return result.stdout.strip()
-    except Exception:
-        pass
-    return str(Path.cwd())
-
-
-def _call_cc_memory_remember(category: str, title: str, content: str, tags: List[str]) -> Optional[str]:
-    """
-    Store an observation in cc-memory.
-
-    Uses direct import of cc-memory module.
-    Returns the observation ID if successful.
-    """
-    if not CC_MEMORY_AVAILABLE:
-        return None
-
-    try:
-        project_dir = _get_current_project_dir()
-        result = cc_remember(
-            project_dir=project_dir,
-            category=category,
-            title=title,
-            content=content,
-            tags=tags,
-        )
-        # cc_remember returns a string ID directly
-        return result if isinstance(result, str) else result.get("id")
-    except Exception:
-        return None
-
-
-def _call_cc_memory_recall(query: str, category: str = None, limit: int = 1) -> List[Dict]:
-    """
-    Recall observations from cc-memory.
-    """
-    if not CC_MEMORY_AVAILABLE:
-        return []
-
-    try:
-        project_dir = _get_current_project_dir()
-        return cc_recall(project_dir=project_dir, query=query, category=category, limit=limit)
-    except Exception:
-        return []
-
-
-# Local storage removed - cc-memory is the single source of truth
 
 
 def capture_soul_state() -> SoulState:
@@ -297,8 +228,7 @@ def save_ledger(
     """
     Save complete session state as a ledger.
 
-    Stores in cc-memory with category="session_ledger" for searchability.
-    Falls back to local database if cc-memory unavailable.
+    Stores in synapse with category="session_ledger" for searchability.
     """
     global _current_parent_ledger
 
@@ -330,18 +260,20 @@ def save_ledger(
         continuation=continuation,
     )
 
-    # Serialize and store
+    # Serialize and store in synapse
     content = json.dumps(ledger.to_dict(), indent=2)
     title = f"Session ledger - {int(context_pct * 100)}% context, {len(soul_state.active_intentions)} intentions"
     tags = ["ledger", "checkpoint", project]
 
-    # Store in cc-memory (single source of truth)
-    _call_cc_memory_remember(
+    graph = get_synapse_graph()
+    graph.observe(
         category="session_ledger",
         title=title,
         content=content,
+        project=project,
         tags=tags,
     )
+    save_synapse()
 
     # Update parent for next save
     _current_parent_ledger = ledger_id
@@ -358,29 +290,23 @@ def load_latest_ledger(project: str = None) -> Optional[SessionLedger]:
     if project is None:
         project = _get_project_name()
 
-    # Load from cc-memory using recent observations (timestamp-ordered, not semantic)
-    if not CC_MEMORY_AVAILABLE:
-        return None
+    graph = get_synapse_graph()
+    episodes = graph.get_episodes(category="session_ledger", project=project, limit=20)
 
-    try:
-        from cc_memory import memory as cc_memory
-        project_dir = _get_current_project_dir()
-        observations = cc_memory.get_recent_observations(project_dir, limit=20)
+    for ep in episodes:
+        try:
+            content = ep.get("content", "{}")
+            data = json.loads(content) if isinstance(content, str) else content
+            ledger = SessionLedger.from_dict(data)
 
-        # Find most recent ledger for this project
-        for obs in observations:
-            if obs.get("category") == "session_ledger":
-                content = obs.get("content", "{}")
-                data = json.loads(content) if isinstance(content, str) else content
-                ledger = SessionLedger.from_dict(data)
+            # Set as parent for continuity
+            _current_parent_ledger = ledger.ledger_id
 
-                # Set as parent for continuity
-                _current_parent_ledger = ledger.ledger_id
+            return ledger
+        except (json.JSONDecodeError, KeyError):
+            continue
 
-                return ledger
-        return None
-    except Exception:
-        return None
+    return None
 
 
 def restore_from_ledger(ledger: SessionLedger) -> Dict[str, Any]:

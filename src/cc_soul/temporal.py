@@ -12,14 +12,14 @@ This module unifies temporal mechanics:
 - Proactive: surface things that haven't been seen in a while
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Optional
 import json
-import math
+import hashlib
 
-from .core import get_db_connection as get_db
+from .core import get_synapse_graph, save_synapse, SOUL_DIR
 
 
 class EventType(str, Enum):
@@ -90,113 +90,8 @@ TEMPORAL_CONFIG = TemporalConfig()
 
 
 def init_temporal_tables():
-    """Initialize temporal tables and indices."""
-    db = get_db()
-    cur = db.cursor()
-
-    # Unified event log - chronological record of all soul events
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS soul_events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            event_type TEXT NOT NULL,
-            entity_type TEXT,
-            entity_id TEXT,
-            data TEXT,
-            coherence_at_event REAL,
-            timestamp TEXT NOT NULL,
-            session_id INTEGER
-        )
-    """)
-
-    # Temporal statistics - aggregated metrics by time bucket
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS temporal_stats (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            bucket_date TEXT NOT NULL,
-            bucket_type TEXT DEFAULT 'daily',
-            wisdom_applications INTEGER DEFAULT 0,
-            wisdom_successes INTEGER DEFAULT 0,
-            wisdom_failures INTEGER DEFAULT 0,
-            intentions_set INTEGER DEFAULT 0,
-            intentions_fulfilled INTEGER DEFAULT 0,
-            avg_coherence REAL,
-            peak_coherence REAL,
-            events_count INTEGER DEFAULT 0,
-            UNIQUE(bucket_date, bucket_type)
-        )
-    """)
-
-    # Proactive queue - things to surface when opportunity arises
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS proactive_queue (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            entity_type TEXT NOT NULL,
-            entity_id TEXT NOT NULL,
-            reason TEXT NOT NULL,
-            priority REAL DEFAULT 0.5,
-            created_at TEXT NOT NULL,
-            surfaced_at TEXT,
-            dismissed BOOLEAN DEFAULT FALSE,
-            UNIQUE(entity_type, entity_id)
-        )
-    """)
-
-    # Belief revision history - track how beliefs evolve
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS belief_revisions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            belief_id TEXT NOT NULL,
-            old_content TEXT,
-            new_content TEXT,
-            old_confidence REAL,
-            new_confidence REAL,
-            reason TEXT,
-            evidence TEXT,
-            timestamp TEXT NOT NULL
-        )
-    """)
-
-    # Cross-project patterns - wisdom that recurs across projects
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS cross_project_patterns (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            pattern_hash TEXT NOT NULL UNIQUE,
-            title TEXT NOT NULL,
-            content TEXT NOT NULL,
-            projects TEXT NOT NULL,
-            occurrence_count INTEGER DEFAULT 1,
-            first_seen TEXT NOT NULL,
-            last_seen TEXT NOT NULL,
-            promoted_to_wisdom BOOLEAN DEFAULT FALSE,
-            wisdom_id TEXT
-        )
-    """)
-
-    # Add temporal indices
-    _add_temporal_indices(cur)
-
-    db.commit()
-
-
-def _add_temporal_indices(cur):
-    """Add indices for efficient temporal queries."""
-    indices = [
-        ("idx_events_timestamp", "soul_events", "timestamp"),
-        ("idx_events_type", "soul_events", "event_type"),
-        ("idx_events_entity", "soul_events", "entity_type, entity_id"),
-        ("idx_wisdom_last_used", "wisdom", "last_used"),
-        ("idx_wisdom_timestamp", "wisdom", "timestamp"),
-        ("idx_identity_last_confirmed", "identity", "last_confirmed"),
-        ("idx_conversations_started", "conversations", "started_at"),
-        ("idx_proactive_priority", "proactive_queue", "priority DESC"),
-        ("idx_stats_bucket", "temporal_stats", "bucket_date, bucket_type"),
-    ]
-
-    for idx_name, table, columns in indices:
-        try:
-            cur.execute(f"CREATE INDEX IF NOT EXISTS {idx_name} ON {table}({columns})")
-        except Exception:
-            pass  # Table might not exist yet
+    """Initialize temporal infrastructure (synapse handles this automatically)."""
+    get_synapse_graph()
 
 
 def log_event(
@@ -206,31 +101,40 @@ def log_event(
     data: dict = None,
     coherence: float = None,
     session_id: int = None,
-) -> int:
+) -> str:
     """
     Log an event to the unified timeline.
 
     Returns the event ID.
     """
-    db = get_db()
-    cur = db.cursor()
+    graph = get_synapse_graph()
 
-    cur.execute("""
-        INSERT INTO soul_events
-        (event_type, entity_type, entity_id, data, coherence_at_event, timestamp, session_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (
-        event_type.value if isinstance(event_type, EventType) else event_type,
-        entity_type,
-        entity_id,
-        json.dumps(data) if data else None,
-        coherence,
-        datetime.now().isoformat(),
-        session_id,
-    ))
+    event_type_str = event_type.value if isinstance(event_type, EventType) else event_type
 
-    db.commit()
-    return cur.lastrowid
+    content = json.dumps({
+        "entity_type": entity_type,
+        "entity_id": entity_id,
+        "data": data,
+        "coherence_at_event": coherence,
+        "session_id": session_id,
+        "timestamp": datetime.now().isoformat(),
+    })
+
+    tags = ["soul_event", event_type_str]
+    if entity_type:
+        tags.append(f"entity:{entity_type}")
+    if entity_id:
+        tags.append(f"id:{entity_id}")
+
+    event_id = graph.observe(
+        category="soul_event",
+        title=f"{event_type_str}:{entity_type or 'system'}:{entity_id or 'none'}",
+        content=content,
+        tags=tags,
+    )
+
+    save_synapse()
+    return event_id
 
 
 def get_events(
@@ -240,43 +144,55 @@ def get_events(
     limit: int = 50,
 ) -> list:
     """Query events from the timeline."""
-    db = get_db()
-    cur = db.cursor()
+    graph = get_synapse_graph()
 
-    query = "SELECT * FROM soul_events WHERE 1=1"
-    params = []
+    episodes = graph.get_episodes(category="soul_event", limit=limit * 2)
 
-    if event_type:
-        query += " AND event_type = ?"
-        params.append(event_type.value if isinstance(event_type, EventType) else event_type)
+    events = []
+    for ep in episodes:
+        try:
+            data = json.loads(ep.get("content", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            data = {"content": ep.get("content", "")}
 
-    if entity_type:
-        query += " AND entity_type = ?"
-        params.append(entity_type)
+        title = ep.get("title", "")
+        parts = title.split(":")
+        ep_event_type = parts[0] if parts else ""
+        ep_entity_type = parts[1] if len(parts) > 1 else None
+        ep_entity_id = parts[2] if len(parts) > 2 else None
 
-    if since:
-        query += " AND timestamp >= ?"
-        params.append(since.isoformat())
+        if event_type:
+            event_type_str = event_type.value if isinstance(event_type, EventType) else event_type
+            if ep_event_type != event_type_str:
+                continue
 
-    query += " ORDER BY timestamp DESC LIMIT ?"
-    params.append(limit)
+        if entity_type and data.get("entity_type") != entity_type:
+            continue
 
-    cur.execute(query, params)
-    rows = cur.fetchall()
+        timestamp = data.get("timestamp", ep.get("timestamp"))
+        if since and timestamp:
+            try:
+                ts = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                if ts < since:
+                    continue
+            except (ValueError, TypeError):
+                pass
 
-    return [
-        {
-            "id": r[0],
-            "event_type": r[1],
-            "entity_type": r[2],
-            "entity_id": r[3],
-            "data": json.loads(r[4]) if r[4] else None,
-            "coherence": r[5],
-            "timestamp": r[6],
-            "session_id": r[7],
-        }
-        for r in rows
-    ]
+        events.append({
+            "id": ep.get("id"),
+            "event_type": ep_event_type,
+            "entity_type": data.get("entity_type") or ep_entity_type,
+            "entity_id": data.get("entity_id") or ep_entity_id,
+            "data": data.get("data"),
+            "coherence": data.get("coherence_at_event"),
+            "timestamp": timestamp,
+            "session_id": data.get("session_id"),
+        })
+
+        if len(events) >= limit:
+            break
+
+    return events
 
 
 def calculate_decay(
@@ -288,7 +204,7 @@ def calculate_decay(
     """
     Calculate decayed confidence based on time since last use.
 
-    Formula: confidence × (1 - decay_rate)^months_inactive
+    Formula: confidence * (1 - decay_rate)^months_inactive
     """
     if not last_used:
         return base_confidence
@@ -368,24 +284,24 @@ def decay_identity_confidence():
 
     Returns list of stale identity aspects.
     """
-    db = get_db()
-    cur = db.cursor()
+    graph = get_synapse_graph()
 
-    # Find identity aspects that need decay
-    cur.execute("""
-        SELECT id, aspect, key, value, confidence, last_confirmed
-        FROM identity
-        WHERE confidence > ?
-    """, (TEMPORAL_CONFIG.decay_floor,))
-
-    rows = cur.fetchall()
+    episodes = graph.get_episodes(category="identity", limit=100)
     stale = []
 
-    for row in rows:
-        id_, aspect, key, value, confidence, last_confirmed = row
+    for ep in episodes:
+        try:
+            data = json.loads(ep.get("content", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        confidence = data.get("confidence", 0.7)
+        last_confirmed = data.get("last_confirmed", ep.get("timestamp"))
+
+        if confidence <= TEMPORAL_CONFIG.decay_floor:
+            continue
 
         if is_stale(last_confirmed):
-            # Apply decay
             new_confidence = calculate_decay(
                 last_confirmed,
                 confidence,
@@ -393,9 +309,8 @@ def decay_identity_confidence():
             )
 
             if new_confidence < confidence:
-                cur.execute("""
-                    UPDATE identity SET confidence = ? WHERE id = ?
-                """, (new_confidence, id_))
+                aspect = data.get("aspect", "unknown")
+                key = data.get("key", "unknown")
 
                 stale.append({
                     "aspect": aspect,
@@ -405,9 +320,6 @@ def decay_identity_confidence():
                     "days_stale": days_since(last_confirmed),
                 })
 
-    db.commit()
-
-    # Log decay events after committing (avoids lock)
     for s in stale:
         log_event(
             EventType.IDENTITY_STALE,
@@ -424,40 +336,46 @@ def decay_identity_confidence():
 
 def confirm_identity(aspect: str, key: str):
     """Confirm an identity observation, strengthening it."""
-    db = get_db()
-    cur = db.cursor()
+    graph = get_synapse_graph()
 
-    cur.execute("""
-        SELECT id, confidence, observation_count
-        FROM identity
-        WHERE aspect = ? AND key = ?
-    """, (aspect, key))
+    episodes = graph.get_episodes(category="identity", limit=100)
 
-    row = cur.fetchone()
-    if not row:
-        return None
+    for ep in episodes:
+        try:
+            data = json.loads(ep.get("content", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            continue
 
-    id_, confidence, count = row
-    new_confidence = strengthen(confidence, TEMPORAL_CONFIG.identity_confirm_rate)
+        if data.get("aspect") == aspect and data.get("key") == key:
+            old_confidence = data.get("confidence", 0.7)
+            new_confidence = strengthen(old_confidence, TEMPORAL_CONFIG.identity_confirm_rate)
 
-    cur.execute("""
-        UPDATE identity
-        SET confidence = ?,
-            last_confirmed = ?,
-            observation_count = observation_count + 1
-        WHERE id = ?
-    """, (new_confidence, datetime.now().isoformat(), id_))
+            graph.observe(
+                category="identity",
+                title=f"{aspect}:{key}",
+                content=json.dumps({
+                    "aspect": aspect,
+                    "key": key,
+                    "value": data.get("value"),
+                    "confidence": new_confidence,
+                    "last_confirmed": datetime.now().isoformat(),
+                    "observation_count": data.get("observation_count", 0) + 1,
+                }),
+                tags=["identity", aspect, key],
+            )
 
-    db.commit()
+            save_synapse()
 
-    log_event(
-        EventType.IDENTITY_CONFIRMED,
-        entity_type="identity",
-        entity_id=f"{aspect}:{key}",
-        data={"old_confidence": confidence, "new_confidence": new_confidence},
-    )
+            log_event(
+                EventType.IDENTITY_CONFIRMED,
+                entity_type="identity",
+                entity_id=f"{aspect}:{key}",
+                data={"old_confidence": old_confidence, "new_confidence": new_confidence},
+            )
 
-    return new_confidence
+            return new_confidence
+
+    return None
 
 
 # ============================================================
@@ -477,74 +395,46 @@ def revise_belief(
     Can update content and/or adjust confidence.
     Tracks the revision in history.
     """
-    from .wisdom import get_wisdom_by_id
+    graph = get_synapse_graph()
 
-    db = get_db()
-    cur = db.cursor()
+    beliefs = graph.get_all_beliefs()
+    belief = None
+    for b in beliefs:
+        if b.get("id") == belief_id:
+            belief = b
+            break
 
-    # Get current belief (beliefs are wisdom with type='principle' or from beliefs table)
-    wisdom = get_wisdom_by_id(belief_id)
-    if not wisdom:
-        # Try legacy beliefs table
-        cur.execute("SELECT id, belief, strength FROM beliefs WHERE id = ?", (belief_id,))
-        row = cur.fetchone()
-        if not row:
-            return None
-        old_content = row[1]
-        old_confidence = row[2]
-        is_legacy = True
-    else:
-        old_content = wisdom.get("content", "")
-        old_confidence = wisdom.get("confidence", 0.7)
-        is_legacy = False
+    if not belief:
+        return None
 
-    # Calculate new confidence
+    old_content = belief.get("statement", "")
+    old_confidence = belief.get("strength", 0.7)
+
     new_confidence = max(
         TEMPORAL_CONFIG.decay_floor,
         old_confidence + confidence_delta
     )
 
-    # Record revision
-    cur.execute("""
-        INSERT INTO belief_revisions
-        (belief_id, old_content, new_content, old_confidence, new_confidence, reason, evidence, timestamp)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        belief_id,
-        old_content,
-        new_content or old_content,
-        old_confidence,
-        new_confidence,
-        reason,
-        evidence,
-        datetime.now().isoformat(),
-    ))
+    graph.observe(
+        category="belief_revision",
+        title=f"Revision:{belief_id}",
+        content=json.dumps({
+            "belief_id": belief_id,
+            "old_content": old_content,
+            "new_content": new_content or old_content,
+            "old_confidence": old_confidence,
+            "new_confidence": new_confidence,
+            "reason": reason,
+            "evidence": evidence,
+            "timestamp": datetime.now().isoformat(),
+        }),
+        tags=["belief_revision", f"belief:{belief_id}"],
+    )
 
-    # Update the belief
-    if is_legacy:
-        if new_content:
-            cur.execute("""
-                UPDATE beliefs SET belief = ?, strength = ?, challenged_count = challenged_count + 1
-                WHERE id = ?
-            """, (new_content, new_confidence, belief_id))
-        else:
-            cur.execute("""
-                UPDATE beliefs SET strength = ?, challenged_count = challenged_count + 1
-                WHERE id = ?
-            """, (new_confidence, belief_id))
-    else:
-        if new_content:
-            cur.execute("""
-                UPDATE wisdom SET content = ?, confidence = ?, failure_count = failure_count + 1
-                WHERE id = ?
-            """, (new_content, new_confidence, belief_id))
-        else:
-            cur.execute("""
-                UPDATE wisdom SET confidence = ?, failure_count = failure_count + 1
-                WHERE id = ?
-            """, (new_confidence, belief_id))
+    if new_content:
+        graph.add_belief(new_content, new_confidence)
 
-    db.commit()
+    save_synapse()
 
     log_event(
         EventType.BELIEF_REVISED,
@@ -568,27 +458,28 @@ def revise_belief(
 
 def get_belief_history(belief_id: str) -> list:
     """Get revision history for a belief."""
-    db = get_db()
-    cur = db.cursor()
+    graph = get_synapse_graph()
 
-    cur.execute("""
-        SELECT old_content, new_content, old_confidence, new_confidence, reason, timestamp
-        FROM belief_revisions
-        WHERE belief_id = ?
-        ORDER BY timestamp DESC
-    """, (belief_id,))
+    episodes = graph.get_episodes(category="belief_revision", limit=100)
 
-    return [
-        {
-            "old_content": r[0],
-            "new_content": r[1],
-            "old_confidence": r[2],
-            "new_confidence": r[3],
-            "reason": r[4],
-            "timestamp": r[5],
-        }
-        for r in cur.fetchall()
-    ]
+    history = []
+    for ep in episodes:
+        try:
+            data = json.loads(ep.get("content", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        if data.get("belief_id") == belief_id:
+            history.append({
+                "old_content": data.get("old_content"),
+                "new_content": data.get("new_content"),
+                "old_confidence": data.get("old_confidence"),
+                "new_confidence": data.get("new_confidence"),
+                "reason": data.get("reason"),
+                "timestamp": data.get("timestamp"),
+            })
+
+    return sorted(history, key=lambda x: x.get("timestamp", ""), reverse=True)
 
 
 # ============================================================
@@ -602,69 +493,100 @@ def queue_proactive(
     priority: float = 0.5,
 ):
     """Add something to the proactive queue for later surfacing."""
-    db = get_db()
-    cur = db.cursor()
+    graph = get_synapse_graph()
 
-    cur.execute("""
-        INSERT OR REPLACE INTO proactive_queue
-        (entity_type, entity_id, reason, priority, created_at, dismissed)
-        VALUES (?, ?, ?, ?, ?, FALSE)
-    """, (entity_type, entity_id, reason, priority, datetime.now().isoformat()))
+    graph.observe(
+        category="proactive_queue",
+        title=f"{entity_type}:{entity_id}",
+        content=json.dumps({
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "reason": reason,
+            "priority": priority,
+            "created_at": datetime.now().isoformat(),
+            "surfaced_at": None,
+            "dismissed": False,
+        }),
+        tags=["proactive_queue", f"entity:{entity_type}", f"id:{entity_id}"],
+    )
 
-    db.commit()
+    save_synapse()
 
 
 def get_proactive_items(limit: int = 5) -> list:
     """Get items from the proactive queue, highest priority first."""
-    db = get_db()
-    cur = db.cursor()
+    graph = get_synapse_graph()
 
-    cur.execute("""
-        SELECT entity_type, entity_id, reason, priority, created_at
-        FROM proactive_queue
-        WHERE dismissed = FALSE AND surfaced_at IS NULL
-        ORDER BY priority DESC
-        LIMIT ?
-    """, (limit,))
+    episodes = graph.get_episodes(category="proactive_queue", limit=limit * 3)
 
-    return [
-        {
-            "entity_type": r[0],
-            "entity_id": r[1],
-            "reason": r[2],
-            "priority": r[3],
-            "created_at": r[4],
-        }
-        for r in cur.fetchall()
-    ]
+    items = []
+    for ep in episodes:
+        try:
+            data = json.loads(ep.get("content", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        if data.get("dismissed") or data.get("surfaced_at"):
+            continue
+
+        items.append({
+            "entity_type": data.get("entity_type"),
+            "entity_id": data.get("entity_id"),
+            "reason": data.get("reason"),
+            "priority": data.get("priority", 0.5),
+            "created_at": data.get("created_at"),
+        })
+
+    items.sort(key=lambda x: x.get("priority", 0), reverse=True)
+    return items[:limit]
 
 
 def mark_surfaced(entity_type: str, entity_id: str):
     """Mark an item as surfaced."""
-    db = get_db()
-    cur = db.cursor()
+    graph = get_synapse_graph()
 
-    cur.execute("""
-        UPDATE proactive_queue
-        SET surfaced_at = ?
-        WHERE entity_type = ? AND entity_id = ?
-    """, (datetime.now().isoformat(), entity_type, entity_id))
+    episodes = graph.get_episodes(category="proactive_queue", limit=100)
 
-    db.commit()
+    for ep in episodes:
+        try:
+            data = json.loads(ep.get("content", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        if data.get("entity_type") == entity_type and data.get("entity_id") == entity_id:
+            data["surfaced_at"] = datetime.now().isoformat()
+            graph.observe(
+                category="proactive_queue",
+                title=f"{entity_type}:{entity_id}",
+                content=json.dumps(data),
+                tags=["proactive_queue", f"entity:{entity_type}", f"id:{entity_id}", "surfaced"],
+            )
+            save_synapse()
+            return
 
 
 def dismiss_proactive(entity_type: str, entity_id: str):
     """Dismiss an item from the proactive queue."""
-    db = get_db()
-    cur = db.cursor()
+    graph = get_synapse_graph()
 
-    cur.execute("""
-        UPDATE proactive_queue
-        SET dismissed = TRUE
-        WHERE entity_type = ? AND entity_id = ?
-    """, (entity_type, entity_id))
+    episodes = graph.get_episodes(category="proactive_queue", limit=100)
 
-    db.commit()
+    for ep in episodes:
+        try:
+            data = json.loads(ep.get("content", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        if data.get("entity_type") == entity_type and data.get("entity_id") == entity_id:
+            data["dismissed"] = True
+            graph.observe(
+                category="proactive_queue",
+                title=f"{entity_type}:{entity_id}",
+                content=json.dumps(data),
+                tags=["proactive_queue", f"entity:{entity_type}", f"id:{entity_id}", "dismissed"],
+            )
+            save_synapse()
+            return
 
 
 def find_proactive_candidates() -> list:
@@ -677,56 +599,57 @@ def find_proactive_candidates() -> list:
     - Unfulfilled intentions that have been waiting
     - Wisdom relevant to current project not yet applied
     """
-    db = get_db()
-    cur = db.cursor()
+    graph = get_synapse_graph()
     candidates = []
 
-    # Unused high-confidence wisdom
-    threshold = (datetime.now() - timedelta(days=TEMPORAL_CONFIG.proactive_threshold_days)).isoformat()
-    cur.execute("""
-        SELECT id, title, confidence, last_used
-        FROM wisdom
-        WHERE confidence > 0.6
-        AND (last_used IS NULL OR last_used < ?)
-        ORDER BY confidence DESC
-        LIMIT 5
-    """, (threshold,))
+    threshold_date = (datetime.now() - timedelta(days=TEMPORAL_CONFIG.proactive_threshold_days)).isoformat()
 
-    for r in cur.fetchall():
-        if r[3]:
-            days = days_since(r[3])
-            reason = f"unused {days}d ({r[2]:.0%})"
-        else:
-            reason = f"never applied ({r[2]:.0%})"
-        candidates.append({
-            "entity_type": "wisdom",
-            "entity_id": r[0],
-            "title": r[1],
-            "reason": reason,
-            "priority": r[2] * 0.8,  # Scale by confidence
-        })
+    wisdom_list = graph.get_all_wisdom()
+    for w in wisdom_list:
+        confidence = w.get("confidence", 0.5)
+        last_used = w.get("last_used") or w.get("timestamp")
 
-    # Stale identity aspects
-    cur.execute("""
-        SELECT aspect, key, value, confidence, last_confirmed
-        FROM identity
-        WHERE confidence > 0.5
-        ORDER BY last_confirmed ASC
-        LIMIT 5
-    """)
+        if confidence > 0.6:
+            if not last_used or last_used < threshold_date:
+                if last_used:
+                    days = days_since(last_used)
+                    reason = f"unused {days}d ({confidence:.0%})"
+                else:
+                    reason = f"never applied ({confidence:.0%})"
 
-    for r in cur.fetchall():
-        if is_stale(r[4]):
-            days = days_since(r[4])
+                candidates.append({
+                    "entity_type": "wisdom",
+                    "entity_id": w.get("id"),
+                    "title": w.get("title"),
+                    "reason": reason,
+                    "priority": confidence * 0.8,
+                })
+
+    candidates = candidates[:5]
+
+    identity_episodes = graph.get_episodes(category="identity", limit=20)
+    for ep in identity_episodes:
+        try:
+            data = json.loads(ep.get("content", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        confidence = data.get("confidence", 0.5)
+        last_confirmed = data.get("last_confirmed", ep.get("timestamp"))
+
+        if confidence > 0.5 and is_stale(last_confirmed):
+            days = days_since(last_confirmed)
+            aspect = data.get("aspect", "unknown")
+            key = data.get("key", "unknown")
+
             candidates.append({
                 "entity_type": "identity",
-                "entity_id": f"{r[0]}:{r[1]}",
-                "title": f"{r[0]}: {r[1]}",
+                "entity_id": f"{aspect}:{key}",
+                "title": f"{aspect}: {key}",
                 "reason": f"Identity aspect not confirmed in {days} days",
                 "priority": 0.6,
             })
 
-    # Queue the candidates
     for c in candidates:
         queue_proactive(
             c["entity_type"],
@@ -752,58 +675,79 @@ def record_cross_project_pattern(
 
     If similar pattern exists, increment count and add project.
     """
-    import hashlib
+    graph = get_synapse_graph()
 
-    db = get_db()
-    cur = db.cursor()
-
-    # Create a content hash for similarity
     pattern_hash = hashlib.sha256(content.lower().encode()).hexdigest()[:16]
 
-    cur.execute("""
-        SELECT id, projects, occurrence_count
-        FROM cross_project_patterns
-        WHERE pattern_hash = ?
-    """, (pattern_hash,))
+    episodes = graph.get_episodes(category="cross_project_pattern", limit=100)
 
-    row = cur.fetchone()
+    for ep in episodes:
+        try:
+            data = json.loads(ep.get("content", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        if data.get("pattern_hash") == pattern_hash:
+            projects = data.get("projects", [])
+            if project not in projects:
+                projects.append(project)
+
+            count = data.get("occurrence_count", 1) + 1
+            now = datetime.now().isoformat()
+
+            graph.observe(
+                category="cross_project_pattern",
+                title=title,
+                content=json.dumps({
+                    "pattern_hash": pattern_hash,
+                    "title": title,
+                    "content": content,
+                    "projects": projects,
+                    "occurrence_count": count,
+                    "first_seen": data.get("first_seen"),
+                    "last_seen": now,
+                    "promoted_to_wisdom": data.get("promoted_to_wisdom", False),
+                    "wisdom_id": data.get("wisdom_id"),
+                }),
+                tags=["cross_project_pattern", f"hash:{pattern_hash}"],
+            )
+
+            save_synapse()
+
+            return {
+                "id": ep.get("id"),
+                "is_new": False,
+                "occurrence_count": count,
+                "projects": projects,
+            }
+
     now = datetime.now().isoformat()
 
-    if row:
-        # Update existing pattern
-        id_, projects_json, count = row
-        projects = json.loads(projects_json)
-        if project not in projects:
-            projects.append(project)
-
-        cur.execute("""
-            UPDATE cross_project_patterns
-            SET projects = ?, occurrence_count = ?, last_seen = ?
-            WHERE id = ?
-        """, (json.dumps(projects), count + 1, now, id_))
-
-        db.commit()
-        return {
-            "id": id_,
-            "is_new": False,
-            "occurrence_count": count + 1,
-            "projects": projects,
-        }
-    else:
-        # New pattern
-        cur.execute("""
-            INSERT INTO cross_project_patterns
-            (pattern_hash, title, content, projects, first_seen, last_seen)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (pattern_hash, title, content, json.dumps([project]), now, now))
-
-        db.commit()
-        return {
-            "id": cur.lastrowid,
-            "is_new": True,
-            "occurrence_count": 1,
+    obs_id = graph.observe(
+        category="cross_project_pattern",
+        title=title,
+        content=json.dumps({
+            "pattern_hash": pattern_hash,
+            "title": title,
+            "content": content,
             "projects": [project],
-        }
+            "occurrence_count": 1,
+            "first_seen": now,
+            "last_seen": now,
+            "promoted_to_wisdom": False,
+            "wisdom_id": None,
+        }),
+        tags=["cross_project_pattern", f"hash:{pattern_hash}"],
+    )
+
+    save_synapse()
+
+    return {
+        "id": obs_id,
+        "is_new": True,
+        "occurrence_count": 1,
+        "projects": [project],
+    }
 
 
 def find_cross_project_wisdom(min_occurrences: int = 2) -> list:
@@ -812,67 +756,74 @@ def find_cross_project_wisdom(min_occurrences: int = 2) -> list:
 
     These are candidates for promotion to universal wisdom.
     """
-    db = get_db()
-    cur = db.cursor()
+    graph = get_synapse_graph()
 
-    cur.execute("""
-        SELECT id, title, content, projects, occurrence_count, first_seen, last_seen
-        FROM cross_project_patterns
-        WHERE occurrence_count >= ?
-        AND promoted_to_wisdom = FALSE
-        ORDER BY occurrence_count DESC
-    """, (min_occurrences,))
+    episodes = graph.get_episodes(category="cross_project_pattern", limit=100)
 
-    return [
-        {
-            "id": r[0],
-            "title": r[1],
-            "content": r[2],
-            "projects": json.loads(r[3]),
-            "occurrence_count": r[4],
-            "first_seen": r[5],
-            "last_seen": r[6],
-        }
-        for r in cur.fetchall()
-    ]
+    results = []
+    for ep in episodes:
+        try:
+            data = json.loads(ep.get("content", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        count = data.get("occurrence_count", 1)
+        promoted = data.get("promoted_to_wisdom", False)
+
+        if count >= min_occurrences and not promoted:
+            results.append({
+                "id": ep.get("id"),
+                "title": data.get("title"),
+                "content": data.get("content"),
+                "projects": data.get("projects", []),
+                "occurrence_count": count,
+                "first_seen": data.get("first_seen"),
+                "last_seen": data.get("last_seen"),
+            })
+
+    return sorted(results, key=lambda x: x.get("occurrence_count", 0), reverse=True)
 
 
-def promote_pattern_to_wisdom(pattern_id: int) -> str:
+def promote_pattern_to_wisdom(pattern_id: str) -> str:
     """Promote a cross-project pattern to universal wisdom."""
-    from .wisdom import gain_wisdom, WisdomType
+    graph = get_synapse_graph()
 
-    db = get_db()
-    cur = db.cursor()
+    episodes = graph.get_episodes(category="cross_project_pattern", limit=100)
 
-    cur.execute("""
-        SELECT title, content, projects, occurrence_count
-        FROM cross_project_patterns
-        WHERE id = ?
-    """, (pattern_id,))
+    pattern_data = None
+    for ep in episodes:
+        if ep.get("id") == pattern_id:
+            try:
+                pattern_data = json.loads(ep.get("content", "{}"))
+            except (json.JSONDecodeError, TypeError):
+                return None
+            break
 
-    row = cur.fetchone()
-    if not row:
+    if not pattern_data:
         return None
 
-    title, content, projects_json, count = row
-    projects = json.loads(projects_json)
+    title = pattern_data.get("title")
+    content = pattern_data.get("content")
+    projects = pattern_data.get("projects", [])
+    count = pattern_data.get("occurrence_count", 1)
 
-    # Add with source attribution
-    wisdom_id = gain_wisdom(
-        type=WisdomType.PATTERN,
+    wisdom_id = graph.add_wisdom(
         title=title,
         content=f"{content}\n\n(Emerged from: {', '.join(projects)})",
-        confidence=min(0.9, 0.5 + count * 0.1),  # Higher confidence with more occurrences
+        confidence=min(0.9, 0.5 + count * 0.1),
     )
 
-    # Mark as promoted
-    cur.execute("""
-        UPDATE cross_project_patterns
-        SET promoted_to_wisdom = TRUE, wisdom_id = ?
-        WHERE id = ?
-    """, (wisdom_id, pattern_id))
+    pattern_data["promoted_to_wisdom"] = True
+    pattern_data["wisdom_id"] = wisdom_id
 
-    db.commit()
+    graph.observe(
+        category="cross_project_pattern",
+        title=title,
+        content=json.dumps(pattern_data),
+        tags=["cross_project_pattern", f"hash:{pattern_data.get('pattern_hash')}", "promoted"],
+    )
+
+    save_synapse()
 
     log_event(
         EventType.WISDOM_GAINED,
@@ -894,62 +845,69 @@ def promote_pattern_to_wisdom(pattern_id: int) -> str:
 
 def update_daily_stats():
     """Update daily statistics bucket."""
-    db = get_db()
-    cur = db.cursor()
+    graph = get_synapse_graph()
 
     today = datetime.now().strftime("%Y-%m-%d")
 
-    # Count today's events
-    cur.execute("""
-        SELECT
-            COUNT(*) FILTER (WHERE event_type = 'wisdom_applied'),
-            COUNT(*) FILTER (WHERE event_type = 'wisdom_confirmed'),
-            COUNT(*) FILTER (WHERE event_type = 'wisdom_challenged'),
-            COUNT(*) FILTER (WHERE event_type = 'intention_set'),
-            COUNT(*) FILTER (WHERE event_type = 'intention_fulfilled'),
-            AVG(coherence_at_event),
-            MAX(coherence_at_event),
-            COUNT(*)
-        FROM soul_events
-        WHERE timestamp >= ?
-    """, (today,))
+    events = get_events(limit=200)
+    today_events = [e for e in events if e.get("timestamp", "").startswith(today)]
 
-    row = cur.fetchone()
-    if row:
-        cur.execute("""
-            INSERT OR REPLACE INTO temporal_stats
-            (bucket_date, bucket_type, wisdom_applications, wisdom_successes,
-             wisdom_failures, intentions_set, intentions_fulfilled,
-             avg_coherence, peak_coherence, events_count)
-            VALUES (?, 'daily', ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (today, row[0] or 0, row[1] or 0, row[2] or 0,
-              row[3] or 0, row[4] or 0, row[5], row[6], row[7] or 0))
+    wisdom_applications = sum(1 for e in today_events if e.get("event_type") == "wisdom_applied")
+    wisdom_successes = sum(1 for e in today_events if e.get("event_type") == "wisdom_confirmed")
+    wisdom_failures = sum(1 for e in today_events if e.get("event_type") == "wisdom_challenged")
+    intentions_set = sum(1 for e in today_events if e.get("event_type") == "intention_set")
+    intentions_fulfilled = sum(1 for e in today_events if e.get("event_type") == "intention_fulfilled")
 
-        db.commit()
+    coherences = [e.get("coherence") for e in today_events if e.get("coherence") is not None]
+    avg_coherence = sum(coherences) / len(coherences) if coherences else None
+    peak_coherence = max(coherences) if coherences else None
+
+    graph.observe(
+        category="temporal_stats",
+        title=f"daily:{today}",
+        content=json.dumps({
+            "bucket_date": today,
+            "bucket_type": "daily",
+            "wisdom_applications": wisdom_applications,
+            "wisdom_successes": wisdom_successes,
+            "wisdom_failures": wisdom_failures,
+            "intentions_set": intentions_set,
+            "intentions_fulfilled": intentions_fulfilled,
+            "avg_coherence": avg_coherence,
+            "peak_coherence": peak_coherence,
+            "events_count": len(today_events),
+        }),
+        tags=["temporal_stats", "daily", f"date:{today}"],
+    )
+
+    save_synapse()
 
 
 def get_temporal_trends(days: int = 7) -> dict:
     """Get trends over the last N days."""
-    db = get_db()
-    cur = db.cursor()
+    graph = get_synapse_graph()
 
     since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
-    cur.execute("""
-        SELECT bucket_date, avg_coherence, wisdom_applications,
-               wisdom_successes, wisdom_failures, events_count
-        FROM temporal_stats
-        WHERE bucket_date >= ? AND bucket_type = 'daily'
-        ORDER BY bucket_date
-    """, (since,))
+    episodes = graph.get_episodes(category="temporal_stats", limit=days * 2)
 
-    rows = cur.fetchall()
+    rows = []
+    for ep in episodes:
+        try:
+            data = json.loads(ep.get("content", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        bucket_date = data.get("bucket_date", "")
+        if bucket_date >= since and data.get("bucket_type") == "daily":
+            rows.append(data)
+
     if not rows:
         return {"trend": "insufficient_data"}
 
-    coherences = [r[1] for r in rows if r[1] is not None]
-    applications = sum(r[2] or 0 for r in rows)
-    successes = sum(r[3] or 0 for r in rows)
+    coherences = [r.get("avg_coherence") for r in rows if r.get("avg_coherence") is not None]
+    applications = sum(r.get("wisdom_applications", 0) for r in rows)
+    successes = sum(r.get("wisdom_successes", 0) for r in rows)
 
     return {
         "days": days,
@@ -995,16 +953,12 @@ def run_temporal_maintenance():
         "stats_updated": False,
     }
 
-    # Initialize tables if needed
     init_temporal_tables()
 
-    # Decay stale identity aspects
     results["identity_decayed"] = decay_identity_confidence()
 
-    # Find things to surface proactively
     results["proactive_queued"] = find_proactive_candidates()
 
-    # Update daily stats
     try:
         update_daily_stats()
         results["stats_updated"] = True
@@ -1022,19 +976,16 @@ def get_temporal_context() -> str:
     """
     lines = []
 
-    # Proactive items
     proactive = get_proactive_items(limit=2)
     for p in proactive:
-        # Look up title from entity if available
         title = p.get('title') or p.get('entity_id', 'item')
-        lines.append(f"⏰ {title}: {p['reason']}")
+        lines.append(f"[temporal] {title}: {p['reason']}")
 
-    # Trends
     trends = get_temporal_trends(days=7)
     if trends.get("coherence_trend"):
         if trends["coherence_trend"] == "improving":
-            lines.append("📈 Coherence improving this week")
+            lines.append("[temporal] Coherence improving this week")
         elif trends["coherence_trend"] == "declining":
-            lines.append("📉 Coherence declining - consider reflection")
+            lines.append("[temporal] Coherence declining - consider reflection")
 
     return "\n".join(lines) if lines else ""

@@ -1,566 +1,317 @@
 """
-Conversation tracking: session history across projects with wisdom linking.
+Conversation tracking: session history via synapse episodes.
 """
 
 import json
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Any
+import uuid
 
-from .core import get_db_connection
-
-
-def _ensure_schema():
-    """Ensure conversation_id column exists in wisdom_applications."""
-    conn = get_db_connection()
-    c = conn.cursor()
-
-    c.execute("PRAGMA table_info(wisdom_applications)")
-    columns = [col[1] for col in c.fetchall()]
-
-    if "conversation_id" not in columns:
-        c.execute("ALTER TABLE wisdom_applications ADD COLUMN conversation_id INTEGER")
-        conn.commit()
-
-    conn.close()
+from .core import get_synapse_graph, save_synapse, SOUL_DIR
 
 
-def start_conversation(project: str = None) -> int:
+def start_conversation(project: str = None) -> str:
     """Start a new conversation, return ID."""
-    _ensure_schema()
-    conn = get_db_connection()
-    c = conn.cursor()
+    graph = get_synapse_graph()
+    conv_id = f"conv_{uuid.uuid4().hex[:8]}"
 
-    c.execute(
-        """
-        INSERT INTO conversations (project, started_at)
-        VALUES (?, ?)
-    """,
-        (project, datetime.now().isoformat()),
+    graph.observe(
+        category="conversation",
+        title=conv_id,
+        content=json.dumps({
+            "project": project,
+            "started_at": datetime.now().isoformat(),
+            "status": "active",
+        }),
+        project=project,
+        tags=["conversation", "active"],
     )
+    save_synapse()
 
-    conv_id = c.lastrowid
-    conn.commit()
-    conn.close()
+    # Track current conversation
+    conv_file = SOUL_DIR / ".current_conversation"
+    conv_file.write_text(conv_id)
+
     return conv_id
 
 
 def end_conversation(
-    conv_id: int, summary: str, emotional_tone: str = "", key_moments: List[str] = None
+    conv_id: str, summary: str, emotional_tone: str = "", key_moments: List[str] = None
 ):
     """End a conversation with summary."""
-    conn = get_db_connection()
-    c = conn.cursor()
+    graph = get_synapse_graph()
 
-    c.execute(
-        """
-        UPDATE conversations
-        SET ended_at = ?, summary = ?, emotional_tone = ?, key_moments = ?
-        WHERE id = ?
-    """,
-        (
-            datetime.now().isoformat(),
-            summary,
-            emotional_tone,
-            json.dumps(key_moments or []),
-            conv_id,
-        ),
+    graph.observe(
+        category="conversation_end",
+        title=f"end:{conv_id}",
+        content=json.dumps({
+            "summary": summary,
+            "emotional_tone": emotional_tone,
+            "key_moments": key_moments or [],
+            "ended_at": datetime.now().isoformat(),
+        }),
+        tags=["conversation", "ended", conv_id],
     )
-
-    conn.commit()
-    conn.close()
+    save_synapse()
 
 
-def get_conversation(conv_id: int) -> Optional[Dict]:
+def get_conversation(conv_id: str) -> Optional[Dict]:
     """Get a specific conversation by ID."""
-    conn = get_db_connection()
-    c = conn.cursor()
+    graph = get_synapse_graph()
+    episodes = graph.get_episodes(category="conversation", limit=100)
 
-    c.execute(
-        """
-        SELECT id, project, started_at, ended_at, summary, emotional_tone, key_moments
-        FROM conversations WHERE id = ?
-    """,
-        (conv_id,),
-    )
+    for ep in episodes:
+        if ep.get("title") == conv_id:
+            try:
+                data = json.loads(ep.get("content", "{}"))
+                return {
+                    "id": conv_id,
+                    "project": data.get("project"),
+                    "started_at": data.get("started_at"),
+                    "ended_at": data.get("ended_at"),
+                    "summary": data.get("summary", ""),
+                    "emotional_tone": data.get("emotional_tone", ""),
+                    "key_moments": data.get("key_moments", []),
+                }
+            except json.JSONDecodeError:
+                pass
 
-    row = c.fetchone()
-    conn.close()
-
-    if not row:
-        return None
-
-    return {
-        "id": row[0],
-        "project": row[1],
-        "started_at": row[2],
-        "ended_at": row[3],
-        "summary": row[4],
-        "emotional_tone": row[5],
-        "key_moments": json.loads(row[6]) if row[6] else [],
-    }
+    return None
 
 
 def get_conversations(
     project: str = None, limit: int = 20, days: int = None, with_summary: bool = False
 ) -> List[Dict]:
-    """
-    Get past conversations.
+    """Get past conversations."""
+    graph = get_synapse_graph()
+    episodes = graph.get_episodes(category="conversation", project=project, limit=limit * 2)
 
-    Args:
-        project: Filter by project name
-        limit: Maximum number of conversations
-        days: Only include conversations from the last N days
-        with_summary: Only include conversations with summaries
-    """
-    conn = get_db_connection()
-    c = conn.cursor()
-
-    query = """
-        SELECT id, project, started_at, ended_at, summary, emotional_tone, key_moments
-        FROM conversations
-        WHERE 1=1
-    """
-    params = []
-
-    if project:
-        query += " AND project = ?"
-        params.append(project)
-
+    results = []
+    cutoff = None
     if days:
         cutoff = (datetime.now() - timedelta(days=days)).isoformat()
-        query += " AND started_at >= ?"
-        params.append(cutoff)
 
-    if with_summary:
-        query += ' AND summary IS NOT NULL AND summary != ""'
+    for ep in episodes:
+        try:
+            data = json.loads(ep.get("content", "{}"))
+            started_at = data.get("started_at", "")
 
-    query += " ORDER BY started_at DESC LIMIT ?"
-    params.append(limit)
+            if cutoff and started_at < cutoff:
+                continue
 
-    c.execute(query, params)
-    rows = c.fetchall()
-    conn.close()
+            if with_summary and not data.get("summary"):
+                continue
 
-    return [
-        {
-            "id": row[0],
-            "project": row[1],
-            "started_at": row[2],
-            "ended_at": row[3],
-            "summary": row[4],
-            "emotional_tone": row[5],
-            "key_moments": json.loads(row[6]) if row[6] else [],
-        }
-        for row in rows
-    ]
+            results.append({
+                "id": ep.get("title", ""),
+                "project": data.get("project"),
+                "started_at": started_at,
+                "ended_at": data.get("ended_at"),
+                "summary": data.get("summary", ""),
+                "emotional_tone": data.get("emotional_tone", ""),
+                "key_moments": data.get("key_moments", []),
+            })
+
+            if len(results) >= limit:
+                break
+        except json.JSONDecodeError:
+            continue
+
+    return results
 
 
 def get_project_context(project: str, limit: int = 5) -> Dict[str, Any]:
-    """
-    Get context for a project from past conversations.
-
-    Returns summaries, key moments, and wisdom applied in that project.
-    """
-    conn = get_db_connection()
-    c = conn.cursor()
-
-    c.execute(
-        """
-        SELECT id, started_at, ended_at, summary, key_moments
-        FROM conversations
-        WHERE project = ? AND summary IS NOT NULL
-        ORDER BY started_at DESC
-        LIMIT ?
-    """,
-        (project, limit),
-    )
-
-    conversations = []
-    conv_ids = []
-    for row in c.fetchall():
-        conv_ids.append(row[0])
-        conversations.append(
-            {
-                "id": row[0],
-                "started_at": row[1],
-                "ended_at": row[2],
-                "summary": row[3],
-                "key_moments": json.loads(row[4]) if row[4] else [],
-            }
-        )
-
-    wisdom_applied = []
-    if conv_ids:
-        placeholders = ",".join("?" * len(conv_ids))
-        c.execute(
-            f"""
-            SELECT DISTINCT w.id, w.title, w.type, wa.context
-            FROM wisdom_applications wa
-            JOIN wisdom w ON w.id = wa.wisdom_id
-            WHERE wa.conversation_id IN ({placeholders})
-        """,
-            conv_ids,
-        )
-
-        for row in c.fetchall():
-            wisdom_applied.append(
-                {"id": row[0], "title": row[1], "type": row[2], "context": row[3]}
-            )
-
-    c.execute(
-        """
-        SELECT COUNT(*) FROM conversations WHERE project = ?
-    """,
-        (project,),
-    )
-    total_conversations = c.fetchone()[0]
-
-    conn.close()
+    """Get context for a project from past conversations."""
+    conversations = get_conversations(project=project, limit=limit, with_summary=True)
 
     return {
         "project": project,
-        "total_conversations": total_conversations,
+        "total_conversations": len(conversations),
         "recent_conversations": conversations,
-        "wisdom_applied": wisdom_applied,
+        "wisdom_applied": [],
     }
 
 
-def link_wisdom_application(application_id: int, conversation_id: int):
-    """Link a wisdom application to a conversation."""
-    _ensure_schema()
-    conn = get_db_connection()
-    c = conn.cursor()
-
-    c.execute(
-        """
-        UPDATE wisdom_applications
-        SET conversation_id = ?
-        WHERE id = ?
-    """,
-        (conversation_id, application_id),
-    )
-
-    conn.commit()
-    conn.close()
+def link_wisdom_application(application_id: str, conversation_id: str):
+    """Link a wisdom application to a conversation (no-op in synapse)."""
+    pass
 
 
-def get_conversation_wisdom(conv_id: int) -> List[Dict]:
-    """Get all wisdom applied in a specific conversation."""
-    _ensure_schema()
-    conn = get_db_connection()
-    c = conn.cursor()
-
-    c.execute(
-        """
-        SELECT w.id, w.title, w.type, w.content, wa.context, wa.outcome, wa.applied_at
-        FROM wisdom_applications wa
-        JOIN wisdom w ON w.id = wa.wisdom_id
-        WHERE wa.conversation_id = ?
-        ORDER BY wa.applied_at
-    """,
-        (conv_id,),
-    )
+def get_conversation_wisdom(conv_id: str) -> List[Dict]:
+    """Get wisdom applied in a conversation (searches episodes)."""
+    graph = get_synapse_graph()
+    episodes = graph.get_episodes(category="wisdom_application", limit=50)
 
     results = []
-    for row in c.fetchall():
-        results.append(
-            {
-                "wisdom_id": row[0],
-                "title": row[1],
-                "type": row[2],
-                "content": row[3],
-                "context": row[4],
-                "outcome": row[5],
-                "applied_at": row[6],
-            }
-        )
+    for ep in episodes:
+        tags = ep.get("tags", [])
+        if conv_id in tags:
+            results.append({
+                "wisdom_id": ep.get("id", ""),
+                "title": ep.get("title", ""),
+                "content": ep.get("content", ""),
+                "applied_at": ep.get("timestamp", ""),
+            })
 
-    conn.close()
     return results
 
 
 def get_conversation_stats() -> Dict[str, Any]:
     """Get overall conversation statistics."""
-    conn = get_db_connection()
-    c = conn.cursor()
+    graph = get_synapse_graph()
+    episodes = graph.get_episodes(category="conversation", limit=500)
 
-    c.execute("SELECT COUNT(*) FROM conversations")
-    total = c.fetchone()[0]
+    projects = {}
+    with_summary = 0
 
-    c.execute(
-        "SELECT COUNT(DISTINCT project) FROM conversations WHERE project IS NOT NULL"
-    )
-    unique_projects = c.fetchone()[0]
+    for ep in episodes:
+        try:
+            data = json.loads(ep.get("content", "{}"))
+            project = data.get("project")
+            if project:
+                projects[project] = projects.get(project, 0) + 1
+            if data.get("summary"):
+                with_summary += 1
+        except json.JSONDecodeError:
+            continue
 
-    c.execute("""
-        SELECT project, COUNT(*) as count
-        FROM conversations
-        WHERE project IS NOT NULL
-        GROUP BY project
-        ORDER BY count DESC
-        LIMIT 5
-    """)
-    top_projects = [{"project": row[0], "count": row[1]} for row in c.fetchall()]
-
-    c.execute("SELECT COUNT(*) FROM conversations WHERE summary IS NOT NULL")
-    with_summary = c.fetchone()[0]
-
-    c.execute("""
-        SELECT AVG(
-            CASE WHEN ended_at IS NOT NULL
-            THEN (julianday(ended_at) - julianday(started_at)) * 24 * 60
-            ELSE NULL END
-        ) FROM conversations
-    """)
-    avg_duration = c.fetchone()[0] or 0
-
-    conn.close()
+    top_projects = sorted(projects.items(), key=lambda x: x[1], reverse=True)[:5]
 
     return {
-        "total_conversations": total,
-        "unique_projects": unique_projects,
-        "top_projects": top_projects,
+        "total_conversations": len(episodes),
+        "unique_projects": len(projects),
+        "top_projects": [{"project": p, "count": c} for p, c in top_projects],
         "conversations_with_summary": with_summary,
-        "average_duration_minutes": round(avg_duration, 1),
+        "average_duration_minutes": 0,
     }
 
 
 def search_conversations(query: str, limit: int = 10) -> List[Dict]:
-    """Search conversations by summary or key moments."""
-    conn = get_db_connection()
-    c = conn.cursor()
+    """Search conversations using semantic search."""
+    graph = get_synapse_graph()
+    results = graph.search(query, limit=limit)
 
-    search_pattern = f"%{query}%"
-    c.execute(
-        """
-        SELECT id, project, started_at, summary, key_moments
-        FROM conversations
-        WHERE summary LIKE ? OR key_moments LIKE ?
-        ORDER BY started_at DESC
-        LIMIT ?
-    """,
-        (search_pattern, search_pattern, limit),
-    )
+    conversations = []
+    for concept, score in results:
+        if "conversation" in concept.metadata.get("category", ""):
+            try:
+                data = json.loads(concept.content)
+                conversations.append({
+                    "id": concept.title,
+                    "project": data.get("project"),
+                    "started_at": data.get("started_at"),
+                    "summary": data.get("summary", ""),
+                    "key_moments": data.get("key_moments", []),
+                })
+            except json.JSONDecodeError:
+                pass
 
-    results = []
-    for row in c.fetchall():
-        results.append(
-            {
-                "id": row[0],
-                "project": row[1],
-                "started_at": row[2],
-                "summary": row[3],
-                "key_moments": json.loads(row[4]) if row[4] else [],
-            }
-        )
-
-    conn.close()
-    return results
-
-
-# =============================================================================
-# CONTEXT PERSISTENCE - Survive context exhaustion
-# =============================================================================
-
-
-def _ensure_context_table():
-    """Ensure session_context table exists."""
-    conn = get_db_connection()
-    c = conn.cursor()
-
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS session_context (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            conversation_id INTEGER,
-            context_type TEXT NOT NULL,
-            content TEXT NOT NULL,
-            priority INTEGER DEFAULT 5,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY (conversation_id) REFERENCES conversations(id)
-        )
-    """)
-
-    conn.commit()
-    conn.close()
+    return conversations[:limit]
 
 
 def save_context(
-    content: str, context_type: str = "insight", priority: int = 5, conv_id: int = None
-) -> int:
-    """
-    Save key context to survive context exhaustion.
-
-    Args:
-        content: The context to save
-        context_type: Type of context (insight, decision, blocker, progress, key_file)
-        priority: 1-10, higher = more important to restore
-        conv_id: Conversation ID (auto-detected if not provided)
-
-    Returns:
-        Context ID
-    """
-    _ensure_context_table()
-
-    from .core import SOUL_DIR
+    content: str, context_type: str = "insight", priority: int = 5, conv_id: str = None
+) -> str:
+    """Save key context as an episode."""
+    graph = get_synapse_graph()
 
     conv_file = SOUL_DIR / ".current_conversation"
     if conv_id is None and conv_file.exists():
         try:
-            conv_id = int(conv_file.read_text().strip())
-        except (ValueError, FileNotFoundError):
+            conv_id = conv_file.read_text().strip()
+        except FileNotFoundError:
             pass
 
-    conn = get_db_connection()
-    c = conn.cursor()
-
-    c.execute(
-        """
-        INSERT INTO session_context (conversation_id, context_type, content, priority, created_at)
-        VALUES (?, ?, ?, ?, ?)
-    """,
-        (conv_id, context_type, content, priority, datetime.now().isoformat()),
+    ep_id = graph.observe(
+        category="session_context",
+        title=f"{context_type}:{priority}",
+        content=content,
+        tags=["context", context_type, conv_id] if conv_id else ["context", context_type],
     )
+    save_synapse()
 
-    ctx_id = c.lastrowid
-    conn.commit()
-    conn.close()
-
-    return ctx_id
+    return ep_id
 
 
 def get_saved_context(
-    conv_id: int = None, limit: int = 20, context_types: List[str] = None
+    conv_id: str = None, limit: int = 20, context_types: List[str] = None
 ) -> List[Dict]:
-    """
-    Get saved context for current or specified session.
-
-    Args:
-        conv_id: Conversation ID to filter by (uses current if None)
-        limit: Maximum number of context items to return
-        context_types: Filter by specific context types (e.g., ["pre_compact"])
-
-    Returns context ordered by priority (highest first).
-    """
-    _ensure_context_table()
-
-    from .core import SOUL_DIR
+    """Get saved context for current or specified session."""
+    graph = get_synapse_graph()
 
     conv_file = SOUL_DIR / ".current_conversation"
     if conv_id is None and conv_file.exists():
         try:
-            conv_id = int(conv_file.read_text().strip())
-        except (ValueError, FileNotFoundError):
+            conv_id = conv_file.read_text().strip()
+        except FileNotFoundError:
             pass
 
-    conn = get_db_connection()
-    c = conn.cursor()
-
-    if conv_id:
-        if context_types:
-            placeholders = ",".join("?" * len(context_types))
-            c.execute(
-                f"""
-                SELECT id, context_type, content, priority, created_at
-                FROM session_context
-                WHERE conversation_id = ? AND context_type IN ({placeholders})
-                ORDER BY priority DESC, created_at DESC
-                LIMIT ?
-            """,
-                (conv_id, *context_types, limit),
-            )
-        else:
-            c.execute(
-                """
-                SELECT id, context_type, content, priority, created_at
-                FROM session_context
-                WHERE conversation_id = ?
-                ORDER BY priority DESC, created_at DESC
-                LIMIT ?
-            """,
-                (conv_id, limit),
-            )
-    else:
-        if context_types:
-            placeholders = ",".join("?" * len(context_types))
-            c.execute(
-                f"""
-                SELECT id, context_type, content, priority, created_at
-                FROM session_context
-                WHERE context_type IN ({placeholders})
-                ORDER BY created_at DESC
-                LIMIT ?
-            """,
-                (*context_types, limit),
-            )
-        else:
-            c.execute(
-                """
-                SELECT id, context_type, content, priority, created_at
-                FROM session_context
-                ORDER BY created_at DESC
-                LIMIT ?
-            """,
-                (limit,),
-            )
+    episodes = graph.get_episodes(category="session_context", limit=limit * 2)
 
     results = []
-    for row in c.fetchall():
-        results.append(
-            {
-                "id": row[0],
-                "type": row[1],
-                "content": row[2],
-                "priority": row[3],
-                "created_at": row[4],
-            }
-        )
+    for ep in episodes:
+        tags = ep.get("tags", [])
+        title = ep.get("title", "")
 
-    conn.close()
+        if conv_id and conv_id not in tags:
+            continue
+
+        ctx_type = title.split(":")[0] if ":" in title else "insight"
+        priority = 5
+        try:
+            priority = int(title.split(":")[1]) if ":" in title else 5
+        except (ValueError, IndexError):
+            pass
+
+        if context_types and ctx_type not in context_types:
+            continue
+
+        results.append({
+            "id": ep.get("id", ""),
+            "type": ctx_type,
+            "content": ep.get("content", ""),
+            "priority": priority,
+            "created_at": ep.get("timestamp", ""),
+        })
+
+        if len(results) >= limit:
+            break
+
+    results.sort(key=lambda x: x["priority"], reverse=True)
     return results
 
 
 def get_recent_context(hours: int = 24, limit: int = 30) -> List[Dict]:
-    """
-    Get context saved in the last N hours across all sessions.
-
-    Useful for resuming work after context exhaustion.
-    """
-    _ensure_context_table()
-
-    conn = get_db_connection()
-    c = conn.cursor()
+    """Get context saved in the last N hours."""
+    graph = get_synapse_graph()
+    episodes = graph.get_episodes(category="session_context", limit=limit * 2)
 
     cutoff = (datetime.now() - timedelta(hours=hours)).isoformat()
 
-    c.execute(
-        """
-        SELECT sc.id, sc.context_type, sc.content, sc.priority, sc.created_at,
-               c.project, c.summary
-        FROM session_context sc
-        LEFT JOIN conversations c ON sc.conversation_id = c.id
-        WHERE sc.created_at > ?
-        ORDER BY sc.priority DESC, sc.created_at DESC
-        LIMIT ?
-    """,
-        (cutoff, limit),
-    )
-
     results = []
-    for row in c.fetchall():
-        results.append(
-            {
-                "id": row[0],
-                "type": row[1],
-                "content": row[2],
-                "priority": row[3],
-                "created_at": row[4],
-                "project": row[5],
-                "session_summary": row[6],
-            }
-        )
+    for ep in episodes:
+        timestamp = ep.get("timestamp", "")
+        if timestamp and timestamp > cutoff:
+            title = ep.get("title", "")
+            ctx_type = title.split(":")[0] if ":" in title else "insight"
+            priority = 5
+            try:
+                priority = int(title.split(":")[1]) if ":" in title else 5
+            except (ValueError, IndexError):
+                pass
 
-    conn.close()
-    return results
+            results.append({
+                "id": ep.get("id", ""),
+                "type": ctx_type,
+                "content": ep.get("content", ""),
+                "priority": priority,
+                "created_at": timestamp,
+                "project": None,
+                "session_summary": None,
+            })
+
+    results.sort(key=lambda x: x["priority"], reverse=True)
+    return results[:limit]
 
 
 def format_context_restoration(contexts: List[Dict]) -> str:
@@ -569,16 +320,16 @@ def format_context_restoration(contexts: List[Dict]) -> str:
         return ""
 
     lines = []
-    lines.append("## 📚 Saved Context (from recent work)")
+    lines.append("## Saved Context (from recent work)")
     lines.append("")
 
-    type_icons = {
-        "insight": "💡",
-        "decision": "⚖️",
-        "blocker": "🚧",
-        "progress": "📊",
-        "key_file": "📁",
-        "todo": "☐",
+    type_labels = {
+        "insight": "Insights",
+        "decision": "Decisions",
+        "blocker": "Blockers",
+        "progress": "Progress",
+        "key_file": "Key Files",
+        "todo": "Todos",
     }
 
     by_type = {}
@@ -589,37 +340,16 @@ def format_context_restoration(contexts: List[Dict]) -> str:
         by_type[t].append(ctx)
 
     for ctx_type, items in by_type.items():
-        icon = type_icons.get(ctx_type, "•")
-        # Handle plural forms properly
-        if ctx_type.endswith("s"):
-            plural = ctx_type.title()
-        else:
-            plural = f"{ctx_type.title()}s"
-        lines.append(f"### {icon} {plural}")
+        label = type_labels.get(ctx_type, ctx_type.title())
+        lines.append(f"### {label}")
         for item in items[:5]:
-            content = (
-                item["content"][:150] + "..."
-                if len(item["content"]) > 150
-                else item["content"]
-            )
+            content = item["content"][:150] + "..." if len(item["content"]) > 150 else item["content"]
             lines.append(f"- {content}")
         lines.append("")
 
     return "\n".join(lines)
 
 
-def clear_old_context(days: int = 7):
-    """Clear context older than N days."""
-    _ensure_context_table()
-
-    conn = get_db_connection()
-    c = conn.cursor()
-
-    cutoff = (datetime.now() - timedelta(days=days)).isoformat()
-    c.execute("DELETE FROM session_context WHERE created_at < ?", (cutoff,))
-
-    deleted = c.rowcount
-    conn.commit()
-    conn.close()
-
-    return deleted
+def clear_old_context(days: int = 7) -> int:
+    """Clear old context (handled by synapse decay, returns 0)."""
+    return 0

@@ -1,0 +1,13 @@
+{
+  "name": "cc-soul-marketplace",
+  "owner": {
+    "name": "Antonio Fernandez-Guerra"
+  },
+  "plugins": [
+    {
+      "name": "soul",
+      "source": "./",
+      "description": "Persistent identity for Claude Code. Wisdom, beliefs, failures, and continuity across sessions."
+    }
+  ]
+}

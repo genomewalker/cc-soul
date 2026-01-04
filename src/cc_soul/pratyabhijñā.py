@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Any, Tuple
 from enum import Enum, auto
 
-from .core import init_soul, get_db_connection
+from .core import init_soul, get_synapse_graph, save_synapse, SOUL_DIR
 from .efficiency import fingerprint_problem
 from .narrative import (
     recall_episodes,
@@ -86,79 +86,54 @@ def _search_observations(
     """
     Search observations by semantic similarity.
 
-    Uses cc-memory if available, falls back to local search.
+    Uses synapse graph for search and episode retrieval.
     """
-    # Try cc-memory semantic search
-    try:
-        import subprocess
-        import json
+    graph = get_synapse_graph()
 
-        cat_filter = ""
-        if categories:
-            cat_filter = f", categories={categories}"
+    # Try semantic search first
+    if query:
+        try:
+            results = graph.search(query, limit=limit, threshold=0.3)
+            observations = []
+            for concept, score in results:
+                obs = {
+                    "id": concept.id,
+                    "category": concept.metadata.get("category", "unknown"),
+                    "content": concept.content or concept.title,
+                    "confidence": score,
+                    "created_at": concept.created_at,
+                }
+                if categories is None or obs["category"] in categories:
+                    observations.append(obs)
+            if observations:
+                return observations[:limit]
+        except Exception:
+            pass
 
-        cmd = [
-            "python", "-c",
-            f"""
-import sys
-import json
-sys.path.insert(0, '/maps/projects/fernandezguerra/apps/repos/cc-memory/src')
-from cc_memory import semantic_recall
-results = semantic_recall(
-    query='''{query}''',
-    limit={limit}
-)
-print(json.dumps(results))
-"""
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        if result.returncode == 0 and result.stdout.strip():
-            observations = json.loads(result.stdout.strip())
-            # Filter by category if specified
-            if categories:
-                observations = [o for o in observations if o.get("category") in categories]
-            return observations
-    except Exception:
-        pass
-
-    # Fallback to local observation table
-    init_soul()
-    conn = get_db_connection()
-    c = conn.cursor()
-
+    # Fallback: get episodes and filter
     try:
         if categories:
-            placeholders = ",".join(["?" for _ in categories])
-            c.execute(f"""
-                SELECT id, category, content, confidence, created_at
-                FROM observations
-                WHERE category IN ({placeholders})
-                  AND status = 'promoted'
-                ORDER BY confidence DESC, created_at DESC
-                LIMIT ?
-            """, (*categories, limit))
+            all_episodes = []
+            for cat in categories:
+                eps = graph.get_episodes(category=cat, limit=limit)
+                all_episodes.extend(eps)
         else:
-            c.execute("""
-                SELECT id, category, content, confidence, created_at
-                FROM observations
-                ORDER BY confidence DESC, created_at DESC
-                LIMIT ?
-            """, (limit,))
+            all_episodes = graph.get_episodes(limit=limit)
 
         results = []
-        for row in c.fetchall():
+        for ep in all_episodes:
             results.append({
-                "id": row[0],
-                "category": row[1],
-                "content": row[2],
-                "confidence": row[3],
-                "created_at": row[4],
+                "id": ep.get("id", ""),
+                "category": ep.get("category", "unknown"),
+                "content": ep.get("content", ep.get("title", "")),
+                "confidence": ep.get("strength", 0.8),
+                "created_at": ep.get("created_at", ""),
             })
-        return results
+
+        results.sort(key=lambda x: x.get("confidence", 0), reverse=True)
+        return results[:limit]
     except Exception:
         return []
-    finally:
-        conn.close()
 
 
 def _extract_patterns(observations: List[Dict]) -> List[Dict]:
@@ -377,7 +352,7 @@ def format_recognition(
     if result.guards:
         lines.append("**Failure Guards:**")
         for g in result.guards[:3]:
-            lines.append(f"- ⚠️ {g.get('title', '')}")
+            lines.append(f"- {g.get('title', '')}")
         lines.append("")
 
     output = "\n".join(lines)

@@ -15,23 +15,11 @@ The key insight: Push minimal signals, let Claude pull on demand.
 """
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Optional
 
-# Try to import cc-memory (uses function-level API)
-try:
-    import cc_memory
-    MEMORY_AVAILABLE = True
-except ImportError:
-    cc_memory = None
-    MEMORY_AVAILABLE = False
-
-
-def _get_project_dir() -> str:
-    """Get current project directory for cc-memory calls."""
-    from pathlib import Path
-    return str(Path.cwd())
+from .core import get_synapse_graph, save_synapse
 
 
 @dataclass
@@ -71,9 +59,6 @@ def create_signal(
     Returns:
         Signal object if stored successfully, None otherwise
     """
-    if not MEMORY_AVAILABLE:
-        return None
-
     timestamp = datetime.now().isoformat()
     signal_id = f"signal_{timestamp.replace(':', '').replace('-', '').replace('.', '_')}"
 
@@ -88,23 +73,26 @@ def create_signal(
         "reinforcement_count": 0,
     }
 
-    # Store in cc-memory with category "signal"
-    try:
-        cc_memory.remember(
-            project_dir=_get_project_dir(),
-            category="signal",
-            title=f"[{voice}] {compressed_insight[:60]}...",
-            content=json.dumps(signal_data),
-            tags=[voice, "signal", domain] if domain else [voice, "signal"],
-        )
+    # Store in synapse with category "signal"
+    graph = get_synapse_graph()
+    tags = [voice, "signal"]
+    if domain:
+        tags.append(domain)
 
-        return Signal(
-            id=signal_id,
-            timestamp=timestamp,
-            **signal_data
-        )
-    except Exception:
-        return None
+    graph.observe(
+        category="signal",
+        title=f"[{voice}] {compressed_insight[:60]}...",
+        content=json.dumps(signal_data),
+        project=None,
+        tags=tags,
+    )
+    save_synapse()
+
+    return Signal(
+        id=signal_id,
+        timestamp=timestamp,
+        **signal_data
+    )
 
 
 def get_signals(
@@ -125,46 +113,45 @@ def get_signals(
     Returns:
         List of Signal objects sorted by weight (descending)
     """
-    if not MEMORY_AVAILABLE:
-        return []
+    graph = get_synapse_graph()
 
-    try:
-        # Search for signals
-        query = "signal insight pattern"
-        if voice:
-            query = f"{voice} {query}"
-        if domain:
-            query = f"{domain} {query}"
+    # Get signal episodes
+    episodes = graph.get_episodes(category="signal", limit=limit * 2)
 
-        results = cc_memory.recall(project_dir=_get_project_dir(), query=query, category="signal", limit=limit * 2)
+    signals = []
+    for ep in episodes:
+        try:
+            data = json.loads(ep.get("content", "{}"))
+            weight = data.get("activation_weight", 0)
+            ep_voice = data.get("voice", "unknown")
+            ep_domain = data.get("domain", "")
 
-        signals = []
-        for r in results:
-            try:
-                data = json.loads(r.get("content", "{}"))
-                weight = data.get("activation_weight", 0)
-                if weight >= min_weight:
-                    signals.append(Signal(
-                        id=r.get("id", ""),
-                        compressed_insight=data.get("compressed_insight", ""),
-                        activation_weight=weight,
-                        source_ids=data.get("source_ids", []),
-                        voice=data.get("voice", "unknown"),
-                        timestamp=r.get("timestamp", ""),
-                        elaboration_prompt=data.get("elaboration_prompt", ""),
-                        domain=data.get("domain", ""),
-                        decay_rate=data.get("decay_rate", 0.95),
-                        reinforcement_count=data.get("reinforcement_count", 0),
-                    ))
-            except (json.JSONDecodeError, KeyError):
+            # Apply filters
+            if weight < min_weight:
+                continue
+            if voice and ep_voice != voice:
+                continue
+            if domain and ep_domain != domain:
                 continue
 
-        # Sort by weight descending
-        signals.sort(key=lambda s: s.activation_weight, reverse=True)
-        return signals[:limit]
+            signals.append(Signal(
+                id=ep.get("id", ""),
+                compressed_insight=data.get("compressed_insight", ""),
+                activation_weight=weight,
+                source_ids=data.get("source_ids", []),
+                voice=ep_voice,
+                timestamp=ep.get("timestamp", ""),
+                elaboration_prompt=data.get("elaboration_prompt", ""),
+                domain=ep_domain,
+                decay_rate=data.get("decay_rate", 0.95),
+                reinforcement_count=data.get("reinforcement_count", 0),
+            ))
+        except (json.JSONDecodeError, KeyError):
+            continue
 
-    except Exception:
-        return []
+    # Sort by weight descending
+    signals.sort(key=lambda s: s.activation_weight, reverse=True)
+    return signals[:limit]
 
 
 def reinforce_signal(signal_id: str, outcome: str = "useful") -> bool:
@@ -178,31 +165,12 @@ def reinforce_signal(signal_id: str, outcome: str = "useful") -> bool:
     Returns:
         True if reinforcement applied
     """
-    if not MEMORY_AVAILABLE:
-        return False
+    graph = get_synapse_graph()
 
-    try:
-        # Fetch signal
-        obs = cc_memory.get_observation_by_id(_get_project_dir(), signal_id)
-        if not obs:
-            return False
-
-        data = json.loads(obs.get("content", "{}"))
-
-        # Apply Hebbian reinforcement
-        if outcome == "useful":
-            data["activation_weight"] = min(1.0, data.get("activation_weight", 0.5) * 1.15)
-            data["reinforcement_count"] = data.get("reinforcement_count", 0) + 1
-        else:
-            data["activation_weight"] = max(0.1, data.get("activation_weight", 0.5) * 0.85)
-
-        # Update in memory (delete and recreate with same ID)
-        # Note: cc-memory may not support updates, so we track reinforcement
-        # via the reinforcement_count field for now
-        return True
-
-    except Exception:
-        return False
+    if outcome == "useful":
+        return graph.strengthen(signal_id)
+    else:
+        return graph.weaken(signal_id)
 
 
 def decay_signals(session_boundary: bool = True) -> int:
@@ -215,12 +183,10 @@ def decay_signals(session_boundary: bool = True) -> int:
     Returns:
         Number of signals decayed
     """
-    if not MEMORY_AVAILABLE:
-        return 0
-
-    # Note: Full implementation would iterate and update all signals
-    # For now, we rely on the decay_rate field being checked on retrieval
-    return 0
+    # Synapse handles decay internally via cycle()
+    graph = get_synapse_graph()
+    pruned, _ = graph.cycle()
+    return pruned
 
 
 def get_signal_context(prompt: str, limit: int = 5) -> str:
@@ -240,14 +206,14 @@ def get_signal_context(prompt: str, limit: int = 5) -> str:
         weight_pct = int(sig.activation_weight * 100)
         # Ultra-compact: voice icon + insight + weight
         voice_icon = {
-            "manas": "👁",
-            "buddhi": "🧠",
-            "vikalpa": "💡",
-            "sakshi": "🔮",
-            "ahamkara": "🛡",
-        }.get(sig.voice, "📡")
+            "manas": "M",
+            "buddhi": "B",
+            "vikalpa": "V",
+            "sakshi": "S",
+            "ahamkara": "A",
+        }.get(sig.voice, "?")
 
-        lines.append(f"{voice_icon} {sig.compressed_insight[:60]} ({weight_pct}%)")
+        lines.append(f"[{voice_icon}] {sig.compressed_insight[:60]} ({weight_pct}%)")
 
     return "\n".join(lines)
 
@@ -326,7 +292,7 @@ def vikalpa_gaps(resonance_gaps: List[Dict]) -> List[Signal]:
 
         if strength > 0.4:
             signal = create_signal(
-                compressed_insight=f"Unexpected connection: '{concept_a}' ↔ '{concept_b}'",
+                compressed_insight=f"Unexpected connection: '{concept_a}' <-> '{concept_b}'",
                 voice="vikalpa",
                 source_ids=[],
                 activation_weight=0.5 + strength * 0.3,
@@ -348,16 +314,7 @@ def sakshi_prune() -> int:
     Returns:
         Number of signals pruned
     """
-    if not MEMORY_AVAILABLE:
-        return 0
-
-    # Get all signals including weak ones
-    all_signals = get_signals(min_weight=0.0, limit=100)
-
-    pruned = 0
-    for sig in all_signals:
-        if sig.activation_weight < 0.2 and sig.reinforcement_count == 0:
-            # Note: Would need cc-memory delete support
-            pruned += 1
-
+    # Synapse handles pruning internally via cycle()
+    graph = get_synapse_graph()
+    pruned, _ = graph.cycle()
     return pruned

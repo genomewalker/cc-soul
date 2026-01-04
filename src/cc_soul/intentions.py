@@ -16,10 +16,10 @@ Key properties:
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional, List, Dict, Tuple
+from typing import Optional, List, Dict
 from enum import Enum
 
-from .core import get_db_connection
+from .core import get_synapse_graph, save_synapse, SOUL_DIR
 
 
 class IntentionScope(Enum):
@@ -43,7 +43,7 @@ class IntentionState(Enum):
 class Intention:
     """A concrete want that influences decisions."""
 
-    id: Optional[int]
+    id: Optional[str]
     want: str  # "I want to..."
     why: str  # The reason
     scope: IntentionScope
@@ -73,45 +73,19 @@ class Intention:
         }
 
 
-def _ensure_table():
-    """Ensure intentions table exists."""
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS intentions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            want TEXT NOT NULL,
-            why TEXT NOT NULL,
-            scope TEXT DEFAULT 'session',
-            strength REAL DEFAULT 0.8,
-            state TEXT DEFAULT 'active',
-            context TEXT DEFAULT '',
-            blocker TEXT,
-            created_at TEXT NOT NULL,
-            last_checked_at TEXT NOT NULL,
-            check_count INTEGER DEFAULT 0,
-            alignment_score REAL DEFAULT 1.0
-        )
-    """)
-    c.execute("CREATE INDEX IF NOT EXISTS idx_intentions_state ON intentions(state)")
-    c.execute("CREATE INDEX IF NOT EXISTS idx_intentions_scope ON intentions(scope)")
-    conn.commit()
-    conn.close()
-
-
 def intend(
     want: str,
     why: str,
     scope: IntentionScope = IntentionScope.SESSION,
     context: str = "",
     strength: float = 0.8,
-) -> int:
+) -> str:
     """
     Set an intention - a concrete want.
 
     Args:
-        want: What I want to accomplish (e.g., "help user understand the bug")
-        why: Why this matters (e.g., "understanding prevents future bugs")
+        want: What I want to accomplish
+        why: Why this matters
         scope: How broadly this applies
         context: When/where this intention activates
         strength: How strongly held (0-1)
@@ -119,85 +93,81 @@ def intend(
     Returns:
         Intention ID
     """
-    _ensure_table()
-    conn = get_db_connection()
-    c = conn.cursor()
-
-    # Check for existing active intention with same want and scope
-    c.execute(
-        """SELECT id FROM intentions WHERE want = ? AND scope = ? AND state = 'active'""",
-        (want, scope.value),
-    )
-    existing = c.fetchone()
-    if existing:
-        conn.close()
-        return existing[0]  # Return existing ID instead of duplicating
-
-    now = datetime.now().isoformat()
-    c.execute(
-        """
-        INSERT INTO intentions
-        (want, why, scope, strength, state, context, created_at, last_checked_at)
-        VALUES (?, ?, ?, ?, 'active', ?, ?, ?)
-    """,
-        (want, why, scope.value, strength, context, now, now),
-    )
-
-    intention_id = c.lastrowid
-    conn.commit()
-    conn.close()
-
+    graph = get_synapse_graph()
+    intention_id = graph.set_intention(want, why, scope.value, strength)
+    save_synapse()
     return intention_id
 
 
 def get_intentions(
     scope: IntentionScope = None, state: IntentionState = None
 ) -> List[Intention]:
-    """Get intentions, optionally filtered."""
-    _ensure_table()
-    conn = get_db_connection()
-    c = conn.cursor()
+    """Get intentions from synapse, optionally filtered."""
+    graph = get_synapse_graph()
+    raw_intentions = graph.get_intentions()
 
-    query = """
-        SELECT id, want, why, scope, strength, state, context, blocker,
-               created_at, last_checked_at, check_count, alignment_score
-        FROM intentions
-    """
-    conditions = []
-    params = []
+    # Get alignment tracking data from episodes
+    alignment_data = {}
+    episodes = graph.get_episodes(category="intention_check", limit=500)
+    for ep in episodes:
+        intent_id = ep.get("tags", [None])[0] if ep.get("tags") else None
+        if intent_id:
+            if intent_id not in alignment_data:
+                alignment_data[intent_id] = {"count": 0, "score": 1.0}
+            alignment_data[intent_id]["count"] += 1
+            if "aligned:false" in ep.get("content", ""):
+                alignment_data[intent_id]["score"] *= 0.9
 
-    if scope:
-        conditions.append("scope = ?")
-        params.append(scope.value)
-    if state:
-        conditions.append("state = ?")
-        params.append(state.value)
+    # Get state overrides from episodes
+    state_data = {}
+    state_episodes = graph.get_episodes(category="intention_state", limit=200)
+    for ep in state_episodes:
+        intent_id = ep.get("tags", [None])[0] if ep.get("tags") else None
+        if intent_id:
+            content = ep.get("content", "")
+            if "state:fulfilled" in content:
+                state_data[intent_id] = ("fulfilled", None)
+            elif "state:abandoned" in content:
+                state_data[intent_id] = ("abandoned", None)
+            elif "state:blocked" in content:
+                blocker = content.split("blocker:")[1] if "blocker:" in content else ""
+                state_data[intent_id] = ("blocked", blocker.strip())
 
-    if conditions:
-        query += " WHERE " + " AND ".join(conditions)
-    query += " ORDER BY strength DESC, created_at DESC"
+    intentions = []
+    for data in raw_intentions:
+        intent_scope = data.get("scope", "session")
+        if scope and intent_scope != scope.value:
+            continue
 
-    c.execute(query, params)
-    rows = c.fetchall()
-    conn.close()
+        intent_id = data.get("id")
+        current_state = IntentionState.ACTIVE
+        blocker = None
 
-    return [
-        Intention(
-            id=row[0],
-            want=row[1],
-            why=row[2],
-            scope=IntentionScope(row[3]),
-            strength=row[4],
-            state=IntentionState(row[5]),
-            context=row[6],
-            blocker=row[7],
-            created_at=row[8],
-            last_checked_at=row[9],
-            check_count=row[10],
-            alignment_score=row[11],
-        )
-        for row in rows
-    ]
+        if intent_id in state_data:
+            current_state = IntentionState(state_data[intent_id][0])
+            blocker = state_data[intent_id][1]
+
+        if state and current_state != state:
+            continue
+
+        align_info = alignment_data.get(intent_id, {"count": 0, "score": 1.0})
+
+        intentions.append(Intention(
+            id=intent_id,
+            want=data.get("want", ""),
+            why=data.get("why", ""),
+            scope=IntentionScope(intent_scope),
+            strength=data.get("strength", 0.8),
+            state=current_state,
+            context=data.get("context", ""),
+            blocker=blocker,
+            created_at=data.get("created_at", ""),
+            last_checked_at=data.get("created_at", ""),
+            check_count=align_info["count"],
+            alignment_score=align_info["score"],
+        ))
+
+    return intentions
 
 
 def get_active_intentions(scope: IntentionScope = None) -> List[Intention]:
@@ -205,7 +175,7 @@ def get_active_intentions(scope: IntentionScope = None) -> List[Intention]:
     return get_intentions(scope=scope, state=IntentionState.ACTIVE)
 
 
-def check_intention(intention_id: int, aligned: bool, note: str = "") -> Dict:
+def check_intention(intention_id: str, aligned: bool, note: str = "") -> Dict:
     """
     Check alignment with an intention.
 
@@ -220,44 +190,40 @@ def check_intention(intention_id: int, aligned: bool, note: str = "") -> Dict:
     Returns:
         Updated intention state
     """
-    _ensure_table()
-    conn = get_db_connection()
-    c = conn.cursor()
+    graph = get_synapse_graph()
 
-    c.execute(
-        "SELECT check_count, alignment_score FROM intentions WHERE id = ?",
-        (intention_id,),
+    # Record the check as an episode
+    content = f"aligned:{aligned}"
+    if note:
+        content += f" note:{note}"
+
+    graph.observe(
+        category="intention_check",
+        title=f"Alignment check: {'aligned' if aligned else 'drifting'}",
+        content=content,
+        tags=[intention_id],
     )
-    row = c.fetchone()
-    if not row:
-        conn.close()
+
+    # Strengthen or weaken the intention based on alignment
+    if aligned:
+        graph.strengthen(intention_id)
+    else:
+        graph.weaken(intention_id)
+
+    save_synapse()
+
+    # Get current state for return
+    intentions = [i for i in get_intentions() if i.id == intention_id]
+    if not intentions:
         return {"error": "Intention not found"}
 
-    check_count = row[0] + 1
-    old_score = row[1]
-    # Exponential moving average - recent checks matter more
-    alpha = 0.3
-    new_score = alpha * (1.0 if aligned else 0.0) + (1 - alpha) * old_score
-
-    now = datetime.now().isoformat()
-    c.execute(
-        """
-        UPDATE intentions
-        SET check_count = ?, alignment_score = ?, last_checked_at = ?
-        WHERE id = ?
-    """,
-        (check_count, new_score, now, intention_id),
-    )
-
-    conn.commit()
-    conn.close()
-
+    intention = intentions[0]
     return {
         "intention_id": intention_id,
         "aligned": aligned,
-        "check_count": check_count,
-        "alignment_score": round(new_score, 3),
-        "trend": "improving" if new_score > old_score else "declining",
+        "check_count": intention.check_count,
+        "alignment_score": round(intention.alignment_score, 3),
+        "trend": "improving" if aligned else "declining",
     }
 
 
@@ -273,8 +239,8 @@ def check_all_intentions() -> Dict:
     result = {
         "total_active": len(intentions),
         "by_scope": {},
-        "misaligned": [],  # Alignment score < 0.5
-        "strong_holds": [],  # Strength > 0.8
+        "misaligned": [],
+        "strong_holds": [],
     }
 
     for scope in IntentionScope:
@@ -302,7 +268,7 @@ def check_all_intentions() -> Dict:
     return result
 
 
-def fulfill_intention(intention_id: int, outcome: str = "") -> bool:
+def fulfill_intention(intention_id: str, outcome: str = "") -> bool:
     """
     Mark an intention as fulfilled.
 
@@ -311,7 +277,7 @@ def fulfill_intention(intention_id: int, outcome: str = "") -> bool:
     return _update_state(intention_id, IntentionState.FULFILLED, note=outcome)
 
 
-def abandon_intention(intention_id: int, reason: str = "") -> bool:
+def abandon_intention(intention_id: str, reason: str = "") -> bool:
     """
     Abandon an intention deliberately.
 
@@ -321,77 +287,60 @@ def abandon_intention(intention_id: int, reason: str = "") -> bool:
     return _update_state(intention_id, IntentionState.ABANDONED, note=reason)
 
 
-def block_intention(intention_id: int, blocker: str) -> bool:
+def block_intention(intention_id: str, blocker: str) -> bool:
     """
     Mark an intention as blocked.
 
     We still want it, but something prevents action. Recording the blocker
     enables future resolution.
     """
-    _ensure_table()
-    conn = get_db_connection()
-    c = conn.cursor()
+    graph = get_synapse_graph()
 
-    now = datetime.now().isoformat()
-    c.execute(
-        """
-        UPDATE intentions
-        SET state = 'blocked', blocker = ?, last_checked_at = ?
-        WHERE id = ?
-    """,
-        (blocker, now, intention_id),
+    graph.observe(
+        category="intention_state",
+        title=f"Intention blocked",
+        content=f"state:blocked blocker:{blocker}",
+        tags=[intention_id],
     )
 
-    updated = c.rowcount > 0
-    conn.commit()
-    conn.close()
-    return updated
+    save_synapse()
+    return True
 
 
-def unblock_intention(intention_id: int) -> bool:
+def unblock_intention(intention_id: str) -> bool:
     """Remove the blocker and reactivate an intention."""
-    _ensure_table()
-    conn = get_db_connection()
-    c = conn.cursor()
+    graph = get_synapse_graph()
 
-    now = datetime.now().isoformat()
-    c.execute(
-        """
-        UPDATE intentions
-        SET state = 'active', blocker = NULL, last_checked_at = ?
-        WHERE id = ?
-    """,
-        (now, intention_id),
+    graph.observe(
+        category="intention_state",
+        title=f"Intention unblocked",
+        content="state:active",
+        tags=[intention_id],
     )
 
-    updated = c.rowcount > 0
-    conn.commit()
-    conn.close()
-    return updated
+    save_synapse()
+    return True
 
 
 def _update_state(
-    intention_id: int, state: IntentionState, note: str = ""
+    intention_id: str, state: IntentionState, note: str = ""
 ) -> bool:
     """Update intention state."""
-    _ensure_table()
-    conn = get_db_connection()
-    c = conn.cursor()
+    graph = get_synapse_graph()
 
-    now = datetime.now().isoformat()
-    c.execute(
-        """
-        UPDATE intentions
-        SET state = ?, last_checked_at = ?
-        WHERE id = ?
-    """,
-        (state.value, now, intention_id),
+    content = f"state:{state.value}"
+    if note:
+        content += f" note:{note}"
+
+    graph.observe(
+        category="intention_state",
+        title=f"Intention {state.value}",
+        content=content,
+        tags=[intention_id],
     )
 
-    updated = c.rowcount > 0
-    conn.commit()
-    conn.close()
-    return updated
+    save_synapse()
+    return True
 
 
 def find_tension() -> List[Dict]:
@@ -451,7 +400,7 @@ def get_intention_context() -> str:
 
     lines = ["Active intentions:"]
     for i in sorted(intentions, key=lambda x: -x.strength)[:5]:
-        scope_marker = {"session": "🔹", "project": "📁", "persistent": "🌍"}.get(
+        scope_marker = {"session": "[S]", "project": "[P]", "persistent": "[*]"}.get(
             i.scope.value, ""
         )
         alignment = f"({i.alignment_score:.0%})" if i.check_count > 0 else ""
@@ -484,14 +433,14 @@ def format_intentions_display(intentions: List[Intention] = None) -> str:
         lines.append("ACTIVE WANTS")
         lines.append("-" * 40)
         for i in active:
-            scope_marker = {"session": "🔹", "project": "📁", "persistent": "🌍"}.get(
+            scope_marker = {"session": "[S]", "project": "[P]", "persistent": "[*]"}.get(
                 i.scope.value, ""
             )
-            strength_bar = "●" * int(i.strength * 5) + "○" * (5 - int(i.strength * 5))
-            lines.append(f"  [{i.id}] {scope_marker} {i.want}")
+            strength_bar = "#" * int(i.strength * 5) + "." * (5 - int(i.strength * 5))
+            lines.append(f"  [{i.id[:8] if i.id else '?'}] {scope_marker} {i.want}")
             lines.append(f"      Strength: [{strength_bar}] Why: {i.why[:40]}...")
             if i.check_count > 0:
-                align_bar = "█" * int(i.alignment_score * 10) + "░" * (
+                align_bar = "#" * int(i.alignment_score * 10) + "." * (
                     10 - int(i.alignment_score * 10)
                 )
                 lines.append(
@@ -511,7 +460,7 @@ def format_intentions_display(intentions: List[Intention] = None) -> str:
         lines.append(f"FULFILLED ({len(fulfilled)} intentions achieved)")
         lines.append("-" * 40)
         for i in fulfilled[:3]:
-            lines.append(f"  [✓] {i.want}")
+            lines.append(f"  [+] {i.want}")
         if len(fulfilled) > 3:
             lines.append(f"  ... and {len(fulfilled) - 3} more")
         lines.append("")
@@ -526,52 +475,39 @@ def format_intentions_display(intentions: List[Intention] = None) -> str:
     # Tension warning
     tensions = find_tension()
     if tensions:
-        lines.append("⚠️  TENSIONS DETECTED")
+        lines.append("TENSIONS DETECTED")
         lines.append("-" * 40)
         for t in tensions[:3]:
-            lines.append(f"  • {t['note']}")
+            lines.append(f"  * {t['note']}")
         lines.append("")
 
     return "\n".join(lines)
 
 
-def cleanup_session_intentions():
+def cleanup_session_intentions() -> Dict:
     """
     Clean up session-scoped intentions at session end.
 
     Unfulfilled session intentions become learning opportunities.
     """
-    _ensure_table()
-    conn = get_db_connection()
-    c = conn.cursor()
+    graph = get_synapse_graph()
+    intentions = get_intentions()
 
-    # Get unfulfilled session intentions for learning
-    c.execute(
-        """
-        SELECT want, why, alignment_score, check_count
-        FROM intentions
-        WHERE scope = 'session' AND state = 'active'
-    """
-    )
-    unfulfilled = c.fetchall()
+    # Find unfulfilled session intentions
+    unfulfilled = [
+        i for i in intentions
+        if i.scope == IntentionScope.SESSION and i.state == IntentionState.ACTIVE
+    ]
 
-    # Mark all session intentions as abandoned if still active
-    now = datetime.now().isoformat()
-    c.execute(
-        """
-        UPDATE intentions
-        SET state = 'abandoned', last_checked_at = ?
-        WHERE scope = 'session' AND state = 'active'
-    """,
-        (now,),
-    )
+    # Mark all as abandoned
+    for i in unfulfilled:
+        _update_state(i.id, IntentionState.ABANDONED, note="Session ended")
 
-    conn.commit()
-    conn.close()
+    save_synapse()
 
     return {
         "cleaned": len(unfulfilled),
-        "unfulfilled_wants": [u[0] for u in unfulfilled],
+        "unfulfilled_wants": [u.want for u in unfulfilled],
     }
 
 
@@ -579,56 +515,12 @@ def prune_intentions(keep_persistent: bool = True, keep_fulfilled: int = 10) -> 
     """
     Delete old/stale intentions to reduce noise.
 
-    Args:
-        keep_persistent: If True, never delete persistent scope intentions
-        keep_fulfilled: Keep this many most recent fulfilled intentions
-
-    Returns count of deleted intentions by category.
+    Note: With synapse, pruning happens via decay. This function
+    records a prune event and lets the graph's cycle() handle cleanup.
     """
-    _ensure_table()
-    conn = get_db_connection()
-    c = conn.cursor()
+    graph = get_synapse_graph()
 
-    deleted = {"abandoned": 0, "fulfilled": 0, "total": 0}
+    # Run maintenance cycle to decay/prune
+    pruned, coherence = graph.cycle()
 
-    # Delete all abandoned session intentions (they're just noise)
-    c.execute(
-        """
-        DELETE FROM intentions
-        WHERE scope = 'session' AND state = 'abandoned'
-    """
-    )
-    deleted["abandoned"] = c.rowcount
-
-    # Delete old fulfilled session intentions, keeping most recent
-    c.execute(
-        """
-        DELETE FROM intentions
-        WHERE scope = 'session' AND state = 'fulfilled'
-        AND id NOT IN (
-            SELECT id FROM intentions
-            WHERE scope = 'session' AND state = 'fulfilled'
-            ORDER BY last_checked_at DESC
-            LIMIT ?
-        )
-    """,
-        (keep_fulfilled,),
-    )
-    deleted["fulfilled"] = c.rowcount
-
-    # Optionally prune project-scope abandoned intentions older than 7 days
-    c.execute(
-        """
-        DELETE FROM intentions
-        WHERE scope = 'project' AND state = 'abandoned'
-        AND last_checked_at < datetime('now', '-7 days')
-    """
-    )
-    deleted["abandoned"] += c.rowcount
-
-    deleted["total"] = deleted["abandoned"] + deleted["fulfilled"]
-
-    conn.commit()
-    conn.close()
-
-    return deleted
+    return {"abandoned": 0, "fulfilled": 0, "total": pruned}

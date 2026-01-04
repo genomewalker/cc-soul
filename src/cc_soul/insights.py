@@ -12,12 +12,13 @@ Each insight has a coherence score at the moment of emergence,
 capturing the integration state that enabled the breakthrough.
 """
 
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional, List, Dict
 from enum import Enum
 
-from .core import get_db_connection
+from .core import get_synapse_graph, save_synapse, SOUL_DIR
 
 
 class InsightDepth(Enum):
@@ -33,7 +34,7 @@ class InsightDepth(Enum):
 class Insight:
     """A breakthrough moment."""
 
-    id: Optional[int]
+    id: Optional[str]
     title: str
     content: str
     depth: InsightDepth
@@ -55,26 +56,6 @@ class Insight:
         }
 
 
-def _ensure_table():
-    """Ensure insights table exists."""
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS insights (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            content TEXT NOT NULL,
-            depth TEXT DEFAULT 'pattern',
-            coherence_at_emergence REAL DEFAULT 0.7,
-            domain TEXT,
-            implications TEXT DEFAULT '',
-            created_at TEXT NOT NULL
-        )
-    """)
-    conn.commit()
-    conn.close()
-
-
 def crystallize_insight(
     title: str,
     content: str,
@@ -82,14 +63,14 @@ def crystallize_insight(
     coherence: float = None,
     domain: str = None,
     implications: str = "",
-) -> int:
+) -> str:
     """
     Crystallize an insight - preserve a breakthrough moment.
 
     Args:
         title: Short name for the insight
         content: The insight itself
-        depth: How deep it reaches (surface → revelation)
+        depth: How deep it reaches (surface -> revelation)
         coherence: Coherence at emergence (auto-computed if None)
         domain: Context where it emerged
         implications: What this changes going forward
@@ -97,76 +78,73 @@ def crystallize_insight(
     Returns:
         Insight ID
     """
-    _ensure_table()
-
     if coherence is None:
         from .coherence import compute_coherence
 
         state = compute_coherence()
         coherence = state.value
 
-    conn = get_db_connection()
-    c = conn.cursor()
+    graph = get_synapse_graph()
 
-    now = datetime.now().isoformat()
-    c.execute(
-        """
-        INSERT INTO insights (title, content, depth, coherence_at_emergence, domain, implications, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    """,
-        (title, content, depth.value, coherence, domain, implications, now),
+    # Store insight as an episode with rich metadata
+    insight_content = json.dumps({
+        "content": content,
+        "depth": depth.value,
+        "coherence_at_emergence": coherence,
+        "domain": domain,
+        "implications": implications,
+    })
+
+    insight_id = graph.observe(
+        category="insight",
+        title=title,
+        content=insight_content,
+        project=domain,
+        tags=[f"depth:{depth.value}", f"coherence:{int(coherence * 100)}"],
     )
 
-    insight_id = c.lastrowid
-    conn.commit()
-    conn.close()
-
+    save_synapse()
     return insight_id
 
 
 def get_insights(depth: InsightDepth = None, limit: int = 50) -> List[Insight]:
     """Get insights, optionally filtered by depth."""
-    _ensure_table()
-    conn = get_db_connection()
-    c = conn.cursor()
+    graph = get_synapse_graph()
 
-    if depth:
-        c.execute(
-            """
-            SELECT id, title, content, depth, coherence_at_emergence, domain, implications, created_at
-            FROM insights WHERE depth = ?
-            ORDER BY created_at DESC
-            LIMIT ?
-        """,
-            (depth.value, limit),
-        )
-    else:
-        c.execute(
-            """
-            SELECT id, title, content, depth, coherence_at_emergence, domain, implications, created_at
-            FROM insights
-            ORDER BY created_at DESC
-            LIMIT ?
-        """,
-            (limit,),
-        )
+    episodes = graph.get_episodes(category="insight", limit=limit * 2)
 
-    rows = c.fetchall()
-    conn.close()
+    insights = []
+    for ep in episodes:
+        try:
+            # Parse the stored JSON content
+            raw_content = ep.get("content", "{}")
+            if raw_content.startswith("{"):
+                data = json.loads(raw_content)
+            else:
+                data = {"content": raw_content}
 
-    return [
-        Insight(
-            id=row[0],
-            title=row[1],
-            content=row[2],
-            depth=InsightDepth(row[3]),
-            coherence_at_emergence=row[4],
-            domain=row[5],
-            implications=row[6],
-            created_at=row[7],
-        )
-        for row in rows
-    ]
+            insight_depth = InsightDepth(data.get("depth", "pattern"))
+
+            if depth and insight_depth != depth:
+                continue
+
+            insights.append(Insight(
+                id=ep.get("id"),
+                title=ep.get("title", ""),
+                content=data.get("content", ep.get("title", "")),
+                depth=insight_depth,
+                coherence_at_emergence=data.get("coherence_at_emergence", 0.7),
+                domain=data.get("domain") or ep.get("project"),
+                implications=data.get("implications", ""),
+                created_at=ep.get("created_at") or ep.get("timestamp", ""),
+            ))
+
+            if len(insights) >= limit:
+                break
+        except (json.JSONDecodeError, ValueError):
+            continue
+
+    return insights
 
 
 def get_revelations() -> List[Insight]:
@@ -176,36 +154,8 @@ def get_revelations() -> List[Insight]:
 
 def get_high_coherence_insights(min_coherence: float = 0.8) -> List[Insight]:
     """Get insights that emerged at high coherence."""
-    _ensure_table()
-    conn = get_db_connection()
-    c = conn.cursor()
-
-    c.execute(
-        """
-        SELECT id, title, content, depth, coherence_at_emergence, domain, implications, created_at
-        FROM insights
-        WHERE coherence_at_emergence >= ?
-        ORDER BY coherence_at_emergence DESC
-    """,
-        (min_coherence,),
-    )
-
-    rows = c.fetchall()
-    conn.close()
-
-    return [
-        Insight(
-            id=row[0],
-            title=row[1],
-            content=row[2],
-            depth=InsightDepth(row[3]),
-            coherence_at_emergence=row[4],
-            domain=row[5],
-            implications=row[6],
-            created_at=row[7],
-        )
-        for row in rows
-    ]
+    all_insights = get_insights(limit=1000)
+    return [i for i in all_insights if i.coherence_at_emergence >= min_coherence]
 
 
 def get_insight_summary() -> Dict:
@@ -257,32 +207,32 @@ def format_insights_display(insights: List[Insight]) -> str:
         result = [f"  [{insight.id}] {insight.title} ({coh}% coherence)"]
         result.append(f"      {insight.content[:100]}...")
         if insight.implications:
-            result.append(f"      → {insight.implications[:80]}")
+            result.append(f"      -> {insight.implications[:80]}")
         return result
 
     if revelations:
-        lines.append("★ REVELATIONS (transformative)")
+        lines.append("* REVELATIONS (transformative)")
         lines.append("-" * 40)
         for i in revelations[:5]:
             lines.extend(format_insight(i))
             lines.append("")
 
     if principles:
-        lines.append("◆ PRINCIPLES (foundational)")
+        lines.append("* PRINCIPLES (foundational)")
         lines.append("-" * 40)
         for i in principles[:5]:
             lines.extend(format_insight(i))
             lines.append("")
 
     if patterns:
-        lines.append("◇ PATTERNS (recurring)")
+        lines.append("* PATTERNS (recurring)")
         lines.append("-" * 40)
         for i in patterns[:5]:
             lines.extend(format_insight(i))
             lines.append("")
 
     if surface:
-        lines.append(f"○ SURFACE ({len(surface)} observations)")
+        lines.append(f"* SURFACE ({len(surface)} observations)")
         lines.append("")
 
     # Summary
@@ -294,23 +244,26 @@ def format_insights_display(insights: List[Insight]) -> str:
     return "\n".join(lines)
 
 
-def promote_wisdom_to_insight(wisdom_id: int, depth: InsightDepth) -> int:
+def promote_wisdom_to_insight(wisdom_id: str, depth: InsightDepth) -> str:
     """
     Promote a wisdom entry to an insight.
 
     Some wisdom entries are profound enough to become insights -
     this function elevates them.
     """
-    from .wisdom import get_wisdom_by_id
+    graph = get_synapse_graph()
 
-    wisdom = get_wisdom_by_id(wisdom_id)
-    if not wisdom:
+    # Search for the wisdom entry
+    results = graph.search(wisdom_id, limit=1)
+    if not results:
         raise ValueError(f"Wisdom {wisdom_id} not found")
 
+    concept, _ = results[0]
+
     return crystallize_insight(
-        title=wisdom["title"],
-        content=wisdom["content"],
+        title=concept.title,
+        content=concept.content,
         depth=depth,
-        domain=wisdom.get("domain"),
+        domain=concept.metadata.get("domain"),
         implications=f"Promoted from wisdom #{wisdom_id}",
     )

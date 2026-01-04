@@ -1,38 +1,42 @@
 # =============================================================================
-# Bridge Operations - Soul <-> Project Memory
+# Bridge Operations - Soul <-> Project Episodes (Synapse)
 # =============================================================================
 
 @mcp.tool()
 def bridge_status() -> str:
-    """Check if project memory (cc-memory) is available and connected."""
-    from .bridge import is_memory_available, find_project_dir, get_project_memory
+    """Check synapse graph status for project episodes."""
+    from ..core import get_synapse_graph, SYNAPSE_PATH
+    from ..bridge import find_project_dir, get_project_memory
 
-    if not is_memory_available():
-        return "cc-memory not installed. Install with: pip install cc-memory"
+    try:
+        if not SYNAPSE_PATH.exists():
+            return "Synapse graph not initialized. Run soul-init to create."
 
-    project_dir = find_project_dir()
-    memory = get_project_memory(project_dir)
+        graph = get_synapse_graph()
+        project_dir = find_project_dir()
+        memory = get_project_memory(project_dir)
 
-    if not memory or "error" in memory:
-        return f"cc-memory available but no project memory at: {project_dir}"
+        if not memory:
+            return f"Synapse available but no project episodes at: {project_dir}"
 
-    lines = [
-        "Bridge connected:",
-        f"  Project: {memory['project']}",
-        f"  Observations: {memory['stats'].get('observations', 0)}",
-        f"  Sessions: {memory['stats'].get('sessions', 0)}",
-    ]
-    return "\n".join(lines)
+        lines = [
+            "Synapse connected:",
+            f"  Project: {memory['project']}",
+            f"  Observations: {memory['stats'].get('observations', 0)}",
+        ]
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Synapse error: {e}"
 
 
 @mcp.tool()
 def get_unified_context(compact: bool = False) -> str:
-    """Get unified context combining soul identity and project memory.
+    """Get unified context combining soul identity and project episodes.
 
     Args:
         compact: If True, return minimal context for tight budgets
     """
-    from .bridge import unified_context, format_unified_context
+    from ..bridge import unified_context, format_unified_context
 
     ctx = unified_context(compact=compact)
     return format_unified_context(ctx)
@@ -40,15 +44,13 @@ def get_unified_context(compact: bool = False) -> str:
 
 @mcp.tool()
 def soul_greeting(include_rich: bool = False) -> str:
-    """Get the soul's session greeting combining universal wisdom and project memory.
-
-    Similar to claude-mem's startup greeting but from cc-soul.
+    """Get the soul's session greeting combining universal wisdom and project episodes.
 
     Args:
         include_rich: If True, include detailed observation table
     """
-    from .bridge import unified_context
-    from .hooks import format_soul_greeting, format_rich_context, get_project_name
+    from ..bridge import unified_context
+    from ..hooks import format_soul_greeting, format_rich_context, get_project_name
 
     project = get_project_name()
     ctx = unified_context()
@@ -67,10 +69,10 @@ def soul_rich_context() -> str:
     """Get detailed observation context table for session start.
 
     Returns a formatted table of recent observations with categories,
-    timestamps, and memory statistics.
+    timestamps, and memory statistics from synapse.
     """
-    from .bridge import unified_context
-    from .hooks import format_rich_context, get_project_name
+    from ..bridge import unified_context
+    from ..hooks import format_rich_context, get_project_name
 
     project = get_project_name()
     ctx = unified_context()
@@ -88,7 +90,7 @@ def pre_compact_save(transcript_path: str = None) -> str:
     Args:
         transcript_path: Optional path to the transcript file
     """
-    from .hooks import pre_compact
+    from ..hooks import pre_compact
 
     result = pre_compact(transcript_path=transcript_path)
     return result if result else "No context to save"
@@ -101,7 +103,7 @@ def post_compact_restore() -> str:
     Call this after compaction to retrieve previously saved context
     and maintain session continuity.
     """
-    from .hooks import post_compact
+    from ..hooks import post_compact
 
     result = post_compact()
     return result if result else "No context to restore"
@@ -114,10 +116,10 @@ def promote_to_wisdom(observation_id: str, wisdom_type: str = "pattern") -> str:
     Converts episodic memory (what happened) to semantic memory (universal pattern).
 
     Args:
-        observation_id: The observation ID from cc-memory
+        observation_id: The observation ID from synapse episodes
         wisdom_type: Type of wisdom (pattern, insight, principle, failure)
     """
-    from .bridge import promote_observation
+    from ..bridge import promote_observation
 
     result = promote_observation(observation_id, as_type=wisdom_type)
 
@@ -140,7 +142,7 @@ def find_wisdom_candidates() -> str:
     These are candidates for promotion to universal wisdom - patterns
     that recur across different contexts.
     """
-    from .bridge import detect_wisdom_candidates
+    from ..bridge import detect_wisdom_candidates
 
     candidates = detect_wisdom_candidates()
 
@@ -164,15 +166,15 @@ def find_wisdom_candidates() -> str:
 def get_project_signals() -> str:
     """Get project signals that influence mood.
 
-    Returns metrics from project memory that affect the soul's mood:
+    Returns metrics from project episodes that affect the soul's mood:
     failures (learning), discoveries (growth), activity (engagement).
     """
-    from .bridge import get_project_signals as _get_signals
+    from ..bridge import get_project_signals as _get_signals
 
     signals = _get_signals()
 
     if not signals:
-        return "No project signals available (cc-memory not installed or no project)"
+        return "No project signals available"
 
     if "error" in signals:
         return f"Error: {signals['error']}"
@@ -183,10 +185,6 @@ def get_project_signals() -> str:
         f"  Recent failures: {signals['recent_failures']}",
         f"  Recent discoveries: {signals['recent_discoveries']}",
         f"  Recent features: {signals['recent_features']}",
-        f"  Sessions: {signals['sessions']}",
     ]
-
-    if signals.get("tokens_invested"):
-        lines.append(f"  Tokens invested: {signals['tokens_invested']:,}")
 
     return "\n".join(lines)

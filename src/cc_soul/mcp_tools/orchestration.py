@@ -16,7 +16,7 @@ def awaken_antahkarana(
     """Awaken the Antahkarana - spawn Claude voices to contemplate a problem.
 
     Each voice becomes a separate Claude process that runs independently
-    and stores insights in Chitta (cc-memory). After all voices complete,
+    and stores insights in synapse. After all voices complete,
     harmonize their insights into unified wisdom.
 
     Args:
@@ -33,8 +33,8 @@ def awaken_antahkarana(
         vikalpa: Imagination - creative, novel, unconventional approaches
         sakshi: Witness - detached, minimal, essential truth
     """
-    from .convergence import InnerVoice
-    from .swarm_spawner import spawn_antahkarana
+    from ..convergence import InnerVoice
+    from ..swarm_spawner import spawn_antahkarana
 
     voice_map = {
         "manas": InnerVoice.MANAS,
@@ -92,7 +92,7 @@ def get_antahkarana_status(antahkarana_id: str) -> str:
     Args:
         antahkarana_id: The Antahkarana ID
     """
-    from .swarm_spawner import get_orchestrator
+    from ..swarm_spawner import get_orchestrator
 
     orch = get_orchestrator(antahkarana_id)
     if not orch:
@@ -124,7 +124,7 @@ def poll_antahkarana_voices(antahkarana_id: str, timeout: int = 60) -> str:
         antahkarana_id: The Antahkarana ID
         timeout: Max seconds to wait
     """
-    from .swarm_spawner import get_orchestrator
+    from ..swarm_spawner import get_orchestrator
 
     orch = get_orchestrator(antahkarana_id)
     if not orch:
@@ -167,8 +167,8 @@ def harmonize_antahkarana(antahkarana_id: str, pramana: str = "samvada") -> str:
         viveka: Discernment - score and rank by criteria
         pratyaksha: Direct perception - first valid insight
     """
-    from .convergence import ConvergenceStrategy
-    from .swarm_spawner import get_orchestrator
+    from ..convergence import ConvergenceStrategy
+    from ..swarm_spawner import get_orchestrator
 
     orch = get_orchestrator(antahkarana_id)
     if not orch:
@@ -205,15 +205,15 @@ Contributing voices: {len(result.contributing_voices)}
 
 @mcp.tool()
 def list_antahkarana_insights(antahkarana_id: str) -> str:
-    """List all insights for an Antahkarana from Chitta (cc-memory).
+    """List all insights for an Antahkarana from synapse.
 
-    Voices store their insights in cc-memory with Antahkarana tags.
+    Voices store their insights in synapse with Antahkarana tags.
     This retrieves all insights for a given Antahkarana.
 
     Args:
         antahkarana_id: The Antahkarana ID to query
     """
-    from .swarm_spawner import get_antahkarana_insights
+    from ..swarm_spawner import get_antahkarana_insights
 
     insights = get_antahkarana_insights(antahkarana_id)
 
@@ -242,7 +242,7 @@ def list_antahkaranas(limit: int = 5) -> str:
     Args:
         limit: Maximum to return
     """
-    from .swarm_spawner import list_active_antahkaranas
+    from ..swarm_spawner import list_active_antahkaranas
 
     antahkaranas = list_active_antahkaranas(limit)
 

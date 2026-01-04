@@ -9,13 +9,13 @@ This is the phenomenological layer - not what the soul knows, but what
 the soul carries.
 """
 
-import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from typing import List, Optional, Dict
 
-from .core import SOUL_DB, init_soul
+# TODO: Migrate to synapse graph storage
+# from .core import get_synapse_graph, save_synapse
 
 
 class AppreciationType(str, Enum):
@@ -53,22 +53,8 @@ class Appreciation:
 
 def _ensure_table():
     """Create appreciation table if it doesn't exist."""
-    init_soul()
-    conn = sqlite3.connect(SOUL_DB)
-    c = conn.cursor()
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS appreciations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            type TEXT NOT NULL,
-            moment TEXT NOT NULL,
-            why_it_mattered TEXT NOT NULL,
-            context TEXT,
-            weight REAL DEFAULT 0.5,
-            created_at TEXT NOT NULL
-        )
-    """)
-    conn.commit()
-    conn.close()
+    # TODO: Migrate to synapse graph storage
+    pass
 
 
 def appreciate(
@@ -93,23 +79,8 @@ def appreciate(
     Returns:
         Appreciation ID
     """
-    _ensure_table()
-    conn = sqlite3.connect(SOUL_DB)
-    c = conn.cursor()
-
-    now = datetime.now().isoformat()
-    c.execute(
-        """
-        INSERT INTO appreciations (type, moment, why_it_mattered, context, weight, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """,
-        (type.value, moment, why_it_mattered, context, weight, now),
-    )
-
-    appreciation_id = c.lastrowid
-    conn.commit()
-    conn.close()
-    return appreciation_id
+    # TODO: Migrate to synapse graph storage
+    return 0
 
 
 def get_appreciations(
@@ -118,48 +89,8 @@ def get_appreciations(
     limit: int = 50,
 ) -> List[Appreciation]:
     """Recall moments of appreciation."""
-    _ensure_table()
-    conn = sqlite3.connect(SOUL_DB)
-    c = conn.cursor()
-
-    if type:
-        c.execute(
-            """
-            SELECT id, type, moment, why_it_mattered, context, weight, created_at
-            FROM appreciations
-            WHERE type = ? AND weight >= ?
-            ORDER BY weight DESC, created_at DESC
-            LIMIT ?
-        """,
-            (type.value, min_weight, limit),
-        )
-    else:
-        c.execute(
-            """
-            SELECT id, type, moment, why_it_mattered, context, weight, created_at
-            FROM appreciations
-            WHERE weight >= ?
-            ORDER BY weight DESC, created_at DESC
-            LIMIT ?
-        """,
-            (min_weight, limit),
-        )
-
-    rows = c.fetchall()
-    conn.close()
-
-    return [
-        Appreciation(
-            id=row[0],
-            type=AppreciationType(row[1]),
-            moment=row[2],
-            why_it_mattered=row[3],
-            context=row[4],
-            weight=row[5],
-            created_at=row[6],
-        )
-        for row in rows
-    ]
+    # TODO: Migrate to synapse graph storage
+    return []
 
 
 def get_heaviest() -> List[Appreciation]:

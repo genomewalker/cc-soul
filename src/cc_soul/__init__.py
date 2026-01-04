@@ -12,7 +12,8 @@ from .core import (
     get_soul_context,
     summarize_soul,
     SOUL_DIR,
-    SOUL_DB,
+    get_synapse_graph,
+    save_synapse,
 )
 
 from .wisdom import (
@@ -134,7 +135,7 @@ from .budget import (
     get_injection_budget,
     format_budget_status,
     ContextBudget,
-    log_budget_to_memory,
+    log_budget_to_synapse,
     get_all_session_budgets,
     get_budget_warning,
     get_session_id,
@@ -363,11 +364,11 @@ from .spanda import (
     daily_maintenance,
 )
 
-# Unified Search - prioritized memory access (cc-memory > soul > claude-mem)
+# Unified Search - semantic search across synapse data
 from .unified_search import (
     unified_search,
-    search_cc_memory,
-    search_soul_wisdom,
+    search,
+    get_episodes,
     quick_unified_recall,
     format_search_results,
 )
@@ -389,7 +390,7 @@ from .context_optimizer import (
     format_strategy_for_injection,
 )
 
-# Session Ledger - state preservation using cc-memory backend
+# Session Ledger - state preservation using synapse
 from .ledger import (
     SessionLedger,
     SoulState,
@@ -465,7 +466,8 @@ __all__ = [
     "get_soul_context",
     "summarize_soul",
     "SOUL_DIR",
-    "SOUL_DB",
+    "get_synapse_graph",
+    "save_synapse",
     # Wisdom
     "gain_wisdom",
     "recall_wisdom",
@@ -565,7 +567,7 @@ __all__ = [
     "get_injection_budget",
     "format_budget_status",
     "ContextBudget",
-    "log_budget_to_memory",
+    "log_budget_to_synapse",
     "get_all_session_budgets",
     "get_budget_warning",
     "get_session_id",
@@ -751,10 +753,10 @@ __all__ = [
     "session_end_circle",
     "prompt_circle",
     "daily_maintenance",
-    # Unified Search (cc-memory > soul > claude-mem)
+    # Unified Search (synapse)
     "unified_search",
-    "search_cc_memory",
-    "search_soul_wisdom",
+    "search",
+    "get_episodes",
     "quick_unified_recall",
     "format_search_results",
     # Context Optimizer (metacognition)
@@ -771,7 +773,7 @@ __all__ = [
     "get_context_observation",
     "update_progress_with_session",
     "format_strategy_for_injection",
-    # Session Ledger (state preservation via cc-memory)
+    # Session Ledger (state preservation via synapse)
     "SessionLedger",
     "SoulState",
     "WorkState",
