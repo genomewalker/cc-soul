@@ -120,7 +120,7 @@ jobs:
         shell: bash -l {0}
         run: |
           cd chitta/build
-          ctest --output-on-failure || true
+          DYLD_LIBRARY_PATH=$CONDA_PREFIX/lib:$DYLD_LIBRARY_PATH ctest --output-on-failure || true
 
       - name: Package binaries
         shell: bash -l {0}
