@@ -48,6 +48,7 @@ inline std::string node_type_to_string(NodeType type) {
         case NodeType::Gap: return "gap";
         case NodeType::Question: return "question";
         case NodeType::StoryThread: return "story_thread";
+        case NodeType::Ledger: return "ledger";
         default: return "unknown";
     }
 }
@@ -69,6 +70,7 @@ inline NodeType string_to_node_type(const std::string& s) {
     if (s == "gap") return NodeType::Gap;
     if (s == "question") return NodeType::Question;
     if (s == "story_thread") return NodeType::StoryThread;
+    if (s == "ledger") return NodeType::Ledger;
     return NodeType::Episode;
 }
 
@@ -519,6 +521,45 @@ private:
             }
         });
         handlers_["feedback"] = [this](const json& params) { return tool_feedback(params); };
+
+        // Tool: ledger - Save/load/update session ledger (Atman snapshot)
+        tools_.push_back({
+            "ledger",
+            "Session ledger operations: save/load/update the Atman snapshot. "
+            "Captures soul state, work state, and continuation for session continuity.",
+            {
+                {"type", "object"},
+                {"properties", {
+                    {"action", {
+                        {"type", "string"},
+                        {"enum", {"save", "load", "update", "list"}},
+                        {"description", "Operation: save new ledger, load latest, update existing, list all"}
+                    }},
+                    {"session_id", {
+                        {"type", "string"},
+                        {"description", "Session identifier (optional, for filtering)"}
+                    }},
+                    {"ledger_id", {
+                        {"type", "string"},
+                        {"description", "Ledger ID (for update action)"}
+                    }},
+                    {"soul_state", {
+                        {"type", "object"},
+                        {"description", "Soul state: coherence, mood, intentions"}
+                    }},
+                    {"work_state", {
+                        {"type", "object"},
+                        {"description", "Work state: todos, files, decisions"}
+                    }},
+                    {"continuation", {
+                        {"type", "object"},
+                        {"description", "Continuation: next_steps, deferred, critical"}
+                    }}
+                }},
+                {"required", {"action"}}
+            }
+        });
+        handlers_["ledger"] = [this](const json& params) { return tool_ledger(params); };
     }
 
     json handle_request(const json& request) {
@@ -1415,6 +1456,148 @@ private:
         };
 
         return {false, helpful ? "Memory strengthened" : "Memory weakened", result};
+    }
+
+    ToolResult tool_ledger(const json& params) {
+        std::string action = params.at("action");
+        std::string session_id = params.value("session_id", "");
+
+        if (action == "save") {
+            // Build ledger JSON from provided components
+            json ledger_json = json::object();
+
+            if (params.contains("soul_state")) {
+                ledger_json["soul_state"] = params["soul_state"];
+            } else {
+                // Auto-populate soul state if not provided
+                Coherence c = mind_->coherence();
+                ledger_json["soul_state"] = {
+                    {"coherence", {
+                        {"tau_k", c.tau_k()},
+                        {"local", c.local},
+                        {"global", c.global},
+                        {"temporal", c.temporal},
+                        {"structural", c.structural}
+                    }},
+                    {"timestamp", now()}
+                };
+            }
+
+            if (params.contains("work_state")) {
+                ledger_json["work_state"] = params["work_state"];
+            } else {
+                ledger_json["work_state"] = json::object();
+            }
+
+            if (params.contains("continuation")) {
+                ledger_json["continuation"] = params["continuation"];
+            } else {
+                ledger_json["continuation"] = json::object();
+            }
+
+            NodeId id = mind_->save_ledger(ledger_json.dump(), session_id);
+
+            json result = {
+                {"id", id.to_string()},
+                {"session_id", session_id},
+                {"ledger", ledger_json}
+            };
+
+            return {false, "Ledger saved: " + id.to_string(), result};
+
+        } else if (action == "load") {
+            auto ledger = mind_->load_ledger(session_id);
+
+            if (!ledger) {
+                return {false, "No ledger found" + (session_id.empty() ? "" : " for session: " + session_id), json()};
+            }
+
+            json ledger_json;
+            try {
+                ledger_json = json::parse(ledger->second);
+            } catch (...) {
+                ledger_json = {{"raw", ledger->second}};
+            }
+
+            json result = {
+                {"id", ledger->first.to_string()},
+                {"ledger", ledger_json}
+            };
+
+            std::ostringstream ss;
+            ss << "Loaded ledger: " << ledger->first.to_string();
+
+            return {false, ss.str(), result};
+
+        } else if (action == "update") {
+            std::string ledger_id_str = params.value("ledger_id", "");
+
+            if (ledger_id_str.empty()) {
+                // Load current ledger first
+                auto current = mind_->load_ledger(session_id);
+                if (!current) {
+                    return {true, "No ledger to update", json()};
+                }
+                ledger_id_str = current->first.to_string();
+            }
+
+            NodeId ledger_id = NodeId::from_string(ledger_id_str);
+
+            // Build updated ledger
+            json updated = json::object();
+
+            // Load existing ledger content
+            auto existing = mind_->load_ledger(session_id);
+            if (existing) {
+                try {
+                    updated = json::parse(existing->second);
+                } catch (...) {}
+            }
+
+            // Merge updates
+            if (params.contains("soul_state")) {
+                updated["soul_state"] = params["soul_state"];
+            }
+            if (params.contains("work_state")) {
+                updated["work_state"] = params["work_state"];
+            }
+            if (params.contains("continuation")) {
+                updated["continuation"] = params["continuation"];
+            }
+
+            bool success = mind_->update_ledger(ledger_id, updated.dump());
+
+            if (!success) {
+                return {true, "Failed to update ledger: " + ledger_id_str, json()};
+            }
+
+            json result = {
+                {"id", ledger_id_str},
+                {"ledger", updated}
+            };
+
+            return {false, "Ledger updated: " + ledger_id_str, result};
+
+        } else if (action == "list") {
+            auto ledgers = mind_->list_ledgers(10);
+
+            json list = json::array();
+            std::ostringstream ss;
+            ss << "Ledgers (" << ledgers.size() << "):\n";
+
+            for (const auto& [id, timestamp] : ledgers) {
+                list.push_back({
+                    {"id", id.to_string()},
+                    {"created", timestamp}
+                });
+                ss << "  " << id.to_string() << " (created: " << timestamp << ")\n";
+            }
+
+            return {false, ss.str(), {{"ledgers", list}}};
+
+        } else {
+            return {true, "Unknown action: " + action, json()};
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════

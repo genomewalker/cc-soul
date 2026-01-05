@@ -196,6 +196,7 @@ enum class NodeType : uint8_t {
     Gap = 13,        // Detected knowledge gap (curiosity)
     Question = 14,   // Active wondering (curiosity → question)
     StoryThread = 15, // Connected episode arc (narrative)
+    Ledger = 16,     // Session ledger (Atman snapshot)
 };
 
 // Edge types connecting nodes

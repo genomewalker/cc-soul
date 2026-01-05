@@ -495,6 +495,133 @@ public:
     }
 
     // ═══════════════════════════════════════════════════════════════════
+    // Session Ledger API (Atman snapshots)
+    // ═══════════════════════════════════════════════════════════════════
+
+    // Save a new session ledger snapshot
+    // Ledger structure:
+    // {
+    //   "soul_state": { "coherence": {...}, "mood": {...}, "intentions": [...] },
+    //   "work_state": { "todos": [...], "files": [...], "decisions": [...] },
+    //   "continuation": { "next_steps": [...], "deferred": [...], "critical": [...] }
+    // }
+    NodeId save_ledger(const std::string& ledger_json, const std::string& session_id = "") {
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        // Create embedding from a summary of the ledger for semantic search
+        std::string summary = "Session ledger: " + session_id;
+
+        Node node(NodeType::Ledger, Vector::zeros());
+        node.payload = text_to_payload(ledger_json);
+        node.delta = 0.1f;  // Moderate decay - ledgers are session-specific
+        node.tags = {"ledger", "atman"};
+        if (!session_id.empty()) {
+            node.tags.push_back("session:" + session_id);
+        }
+
+        if (yantra_) {
+            Artha artha = yantra_->transform(summary);
+            node.nu = std::move(artha.nu);
+        }
+
+        NodeId id = node.id;
+        auto tags_copy = node.tags;  // Copy before move
+        storage_.insert(id, std::move(node));
+        graph_.insert_raw(id);
+        tag_index_.add(id, tags_copy);
+        bm25_index_.add(id, ledger_json);
+
+        return id;
+    }
+
+    // Load the most recent session ledger (optionally filtered by session_id)
+    std::optional<std::pair<NodeId, std::string>> load_ledger(const std::string& session_id = "") {
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        // Query by tag
+        std::vector<NodeId> candidates;
+        if (!session_id.empty()) {
+            candidates = tag_index_.find_all({"ledger", "session:" + session_id});
+        } else {
+            candidates = tag_index_.find("ledger");
+        }
+
+        if (candidates.empty()) {
+            return std::nullopt;
+        }
+
+        // Find most recent by creation time
+        NodeId newest_id;
+        Timestamp newest_time = 0;
+
+        for (const auto& id : candidates) {
+            if (Node* node = storage_.get(id)) {
+                if (node->tau_created > newest_time) {
+                    newest_time = node->tau_created;
+                    newest_id = id;
+                }
+            }
+        }
+
+        if (newest_time == 0) {
+            return std::nullopt;
+        }
+
+        if (Node* node = storage_.get(newest_id)) {
+            auto text = payload_to_text(node->payload);
+            if (text) {
+                return std::make_pair(newest_id, *text);
+            }
+        }
+
+        return std::nullopt;
+    }
+
+    // Update an existing ledger (merge updates into current)
+    bool update_ledger(NodeId id, const std::string& updates_json) {
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        Node* node = storage_.get(id);
+        if (!node || node->node_type != NodeType::Ledger) {
+            return false;
+        }
+
+        // Replace payload with updated JSON
+        // (Caller is responsible for merging JSON)
+        node->payload = text_to_payload(updates_json);
+        node->touch();
+
+        // Update BM25 index
+        bm25_index_.add(id, updates_json);
+
+        return true;
+    }
+
+    // Get all ledgers (for history/debugging)
+    std::vector<std::pair<NodeId, Timestamp>> list_ledgers(size_t limit = 10) {
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        auto candidates = tag_index_.find("ledger");
+
+        std::vector<std::pair<NodeId, Timestamp>> result;
+        for (const auto& id : candidates) {
+            if (Node* node = storage_.get(id)) {
+                result.emplace_back(id, node->tau_created);
+            }
+        }
+
+        // Sort by creation time (newest first)
+        std::sort(result.begin(), result.end(),
+            [](const auto& a, const auto& b) { return a.second > b.second; });
+
+        if (result.size() > limit) {
+            result.resize(limit);
+        }
+
+        return result;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
     // Vector-based API (direct embeddings)
     // ═══════════════════════════════════════════════════════════════════
 
