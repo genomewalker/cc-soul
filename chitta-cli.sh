@@ -57,7 +57,7 @@ cmd_test() {
 
     echo "Testing MCP server..."
     echo '{"jsonrpc":"2.0","method":"tools/list","id":1}' | \
-        "$CHITTA_BIN" --path "$MIND_PATH" 2>&1 | grep -v '^\[chitta'
+        "$CHITTA_BIN" --path "$MIND_PATH" 2>&1 | grep -v '^\['
 }
 
 cmd_stats() {
@@ -67,7 +67,7 @@ cmd_stats() {
     fi
 
     echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"soul_context","arguments":{"format":"json"}},"id":1}' | \
-        "$CHITTA_BIN" --path "$MIND_PATH" 2>&1 | grep -v '^\[chitta'
+        "$CHITTA_BIN" --path "$MIND_PATH" 2>&1 | grep -v '^\['
 }
 
 cmd_recall() {
@@ -80,7 +80,7 @@ cmd_recall() {
     fi
 
     echo "{\"jsonrpc\":\"2.0\",\"method\":\"tools/call\",\"params\":{\"name\":\"recall\",\"arguments\":{\"query\":\"$query\",\"limit\":$limit}},\"id\":1}" | \
-        "$CHITTA_BIN" --path "$MIND_PATH" 2>&1 | grep -v '^\[chitta'
+        "$CHITTA_BIN" --path "$MIND_PATH" 2>&1 | grep -v '^\['
 }
 
 case "${1:-help}" in
