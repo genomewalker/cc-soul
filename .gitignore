@@ -55,8 +55,8 @@ synapse/models/
 
 # Build artifacts
 synapse/build/
-.claude-plugin/bin/
-.claude-plugin/chitta/build/
+bin/
+chitta/build/
 .install-complete
 *.o
 *.a

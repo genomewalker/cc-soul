@@ -10,10 +10,9 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PLUGIN_DIR="$SCRIPT_DIR/.claude-plugin"
-CHITTA_DIR="$PLUGIN_DIR/chitta"
+CHITTA_DIR="$SCRIPT_DIR/chitta"
 BUILD_DIR="$CHITTA_DIR/build"
-BIN_DIR="$PLUGIN_DIR/bin"
+BIN_DIR="$SCRIPT_DIR/bin"
 MODELS_DIR="$CHITTA_DIR/models"
 
 # Colors

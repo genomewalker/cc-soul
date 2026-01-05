@@ -5,7 +5,7 @@
   },
   "plugins": [
     {
-      "name": "soul",
+      "name": "cc-soul",
       "source": "./",
       "description": "Persistent identity for Claude Code. Wisdom, beliefs, failures, and continuity across sessions."
     }

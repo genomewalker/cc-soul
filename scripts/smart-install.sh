@@ -15,7 +15,7 @@ MODELS_DIR="$CHITTA_DIR/models"
 MARKER="$PLUGIN_DIR/.install-complete"
 
 # Check if already installed
-current_version=$(cat "$PLUGIN_DIR/plugin.json" 2>/dev/null | grep '"version"' | cut -d'"' -f4 || echo "0.0.0")
+current_version=$(cat "$PLUGIN_DIR/.claude-plugin/plugin.json" 2>/dev/null | grep '"version"' | cut -d'"' -f4 || echo "0.0.0")
 installed_version=$(cat "$MARKER" 2>/dev/null || echo "")
 
 if [[ "$current_version" == "$installed_version" && -x "$BIN_DIR/chitta_mcp" && -f "$MODELS_DIR/model.onnx" ]]; then
