@@ -73,7 +73,7 @@ cache/
 .cc-memory/
 
 # Old commands (replaced by skills)
-commands/
+# commands/  # Re-enabled for namespaced commands like /cc-soul:cc-soul-update
 
 # Test scripts
 .scripts/
