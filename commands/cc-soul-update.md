@@ -22,7 +22,9 @@ Install or update cc-soul binaries. Prefers pre-built binaries, falls back to bu
 ## Implementation
 
 ```bash
-PLUGIN_DIR="$(find ~/.claude/plugins -type d -name 'genomewalker-cc-soul' 2>/dev/null | grep marketplaces | head -1)"
+PLUGIN_DIR=~/.claude/plugins/marketplaces/genomewalker-cc-soul
+rm -rf "$PLUGIN_DIR/bin" 2>/dev/null
 bash "$PLUGIN_DIR/scripts/smart-install.sh"
-"$PLUGIN_DIR/bin/chitta_cli" stats 2>&1 | grep -E "^(Soul|Nodes:|Total:|Yantra:)" | head -5
+"$PLUGIN_DIR/bin/chitta_cli" --version
+"$PLUGIN_DIR/bin/chitta_cli" stats 2>&1 | grep -v "^\["
 ```

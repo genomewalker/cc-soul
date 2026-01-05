@@ -9,6 +9,7 @@
 //   help       Show this help
 
 #include <chitta/mind.hpp>
+#include <chitta/version.hpp>
 #ifdef CHITTA_WITH_ONNX
 #include <chitta/vak_onnx.hpp>
 #endif
@@ -20,7 +21,8 @@
 using namespace chitta;
 
 void print_usage(const char* prog) {
-    std::cerr << "Usage: " << prog << " <command> [options]\n\n"
+    std::cerr << "chitta " << CHITTA_VERSION << "\n\n"
+              << "Usage: " << prog << " <command> [options]\n\n"
               << "Commands:\n"
               << "  stats              Show soul statistics\n"
               << "  recall <query>     Semantic search\n"
@@ -28,6 +30,7 @@ void print_usage(const char* prog) {
               << "  help               Show this help\n\n"
               << "Global options:\n"
               << "  --path PATH        Mind storage path (default: ~/.claude/mind/chitta)\n"
+              << "  -v, --version      Show version\n"
 #ifdef CHITTA_WITH_ONNX
               << "  --model PATH       ONNX model path\n"
               << "  --vocab PATH       Vocabulary file path\n"
@@ -148,6 +151,9 @@ int main(int argc, char* argv[]) {
             limit = std::stoi(argv[++i]);
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             print_usage(argv[0]);
+            return 0;
+        } else if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--version") == 0) {
+            std::cout << "chitta " << CHITTA_VERSION << "\n";
             return 0;
         } else if (argv[i][0] != '-') {
             if (command.empty()) {

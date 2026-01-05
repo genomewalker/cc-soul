@@ -7,6 +7,7 @@
 // Reads JSON-RPC 2.0 requests from stdin, writes responses to stdout.
 
 #include <chitta/mcp.hpp>
+#include <chitta/version.hpp>
 #ifdef CHITTA_WITH_ONNX
 #include <chitta/vak_onnx.hpp>
 #endif

@@ -22,6 +22,8 @@ Build cc-soul binaries from source. Use this when pre-built binaries don't work 
 ## Implementation
 
 ```bash
-PLUGIN_DIR="$(find ~/.claude/plugins -type d -name 'genomewalker-cc-soul' 2>/dev/null | grep marketplaces | head -1)"
+PLUGIN_DIR=~/.claude/plugins/marketplaces/genomewalker-cc-soul
+rm -rf "$PLUGIN_DIR/bin" "$PLUGIN_DIR/chitta/build" 2>/dev/null
 bash "$PLUGIN_DIR/setup.sh"
+"$PLUGIN_DIR/bin/chitta_cli" --version
 ```

@@ -57,6 +57,7 @@ synapse/models/
 synapse/build/
 bin/
 chitta/build/
+chitta/include/chitta/version.hpp
 .install-complete
 *.o
 *.a

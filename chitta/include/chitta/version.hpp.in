@@ -1,0 +1,3 @@
+#pragma once
+
+#define CHITTA_VERSION "@CHITTA_VERSION@"
