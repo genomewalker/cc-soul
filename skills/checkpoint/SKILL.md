@@ -89,6 +89,36 @@ Checkpoints feed the soul:
 - Patterns get noted for promotion
 - The act of checkpointing itself is a moment of reflection
 
+## How to Execute
+
+After gathering the checkpoint information, save it to the ledger:
+
+```
+mcp__plugin_cc-soul_cc-soul__ledger(
+  action="save",
+  session_id="checkpoint-<timestamp>",
+  soul_state={
+    "mood": "<current feeling>",
+    "confidence": <0-1>
+  },
+  work_state={
+    "todos": ["<in progress items>"],
+    "files": ["<active files>"],
+    "decisions": ["<key decisions>"]
+  },
+  continuation={
+    "next_steps": ["<immediate next actions>"],
+    "critical": ["<blockers or important notes>"],
+    "discoveries": ["<patterns found>"]
+  }
+)
+```
+
+Then run a cycle to persist:
+```
+mcp__plugin_cc-soul_cc-soul__cycle(save=true)
+```
+
 ## What This Feels Like
 
 Checkpointing is the pause between breaths. The moment of stillness before action. The clarity that comes from stopping to see where you are.
