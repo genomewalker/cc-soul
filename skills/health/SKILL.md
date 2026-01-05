@@ -15,36 +15,57 @@ Task(
   subagent_type="general-purpose",
   description="Soul health check",
   prompt="""
-Check the soul system health using MCP tools.
+Check the soul system health using Bash and MCP tools.
 
-## 1. Get Status
+## 1. Verify Setup
 
-Call these tools:
-- mcp__soul__soul_context(format="json") - Get coherence and node statistics
-- mcp__soul__harmonize() - Check voice agreement
+Run these checks with Bash:
+```bash
+# Check symlinks exist and point to valid targets
+ls -la ${CLAUDE_PLUGIN_ROOT:-$(dirname $(dirname $0))}/mind/ 2>/dev/null || echo "ERROR: mind/ directory missing"
 
-## 2. Evaluate Health
+# Check binary exists
+ls -la ${CLAUDE_PLUGIN_ROOT:-$(dirname $(dirname $0))}/bin/chitta_mcp 2>/dev/null || echo "ERROR: chitta_mcp binary missing"
+
+# Check actual data location
+ls -la ~/.claude/mind/chitta.* 2>/dev/null || echo "WARNING: No chitta database files at ~/.claude/mind/"
+
+# Check version
+cat ${CLAUDE_PLUGIN_ROOT:-$(dirname $(dirname $0))}/.claude-plugin/plugin.json 2>/dev/null | grep version
+```
+
+## 2. Get Soul Status
+
+Call these MCP tools:
+- mcp__plugin_cc-soul_cc-soul__soul_context(format="json") - Get coherence and node statistics
+- mcp__plugin_cc-soul_cc-soul__harmonize() - Check voice agreement
+
+## 3. Evaluate Health
 
 | Metric | Healthy | Warning | Critical |
 |--------|---------|---------|----------|
+| Symlinks | Valid | Missing warm | Missing hot/cold |
+| Binary | Present | - | Missing |
+| Database files | Present | Empty | Missing |
 | Coherence (tau_k) | > 0.7 | 0.5-0.7 | < 0.5 |
 | Hot nodes % | > 50% | 30-50% | < 30% |
-| Voice agreement | Yes | Partial | No |
-| Mean voice coherence | > 60% | 40-60% | < 40% |
 
-## 3. Remediate if Needed
+## 4. Remediate if Needed
 
-If coherence is low or many cold nodes:
-- mcp__soul__cycle(save=true) - Run decay, prune, recompute coherence
+If setup issues found:
+- Suggest running: ./setup.sh
 
-## 4. Report
+If coherence is low:
+- mcp__plugin_cc-soul_cc-soul__cycle(save=true) - Run maintenance
 
-Return a concise health report (8-10 lines):
-- Overall status: Healthy / Warning / Critical
-- Node count and hot/cold ratio
-- Coherence scores (global, local, temporal, tau_k)
-- Voice harmony (mean %, agreement)
-- Any remediation actions taken
+## 5. Report
+
+Return a concise health report:
+- Setup status: OK / Issues found
+- Version: X.Y.Z
+- Node count and location
+- Coherence scores
+- Any issues or actions needed
 """
 )
 ```

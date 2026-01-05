@@ -124,8 +124,9 @@ mkdir -p "${HOME}/.claude/mind"
 mkdir -p "$SCRIPT_DIR/mind"
 
 # Create symlinks (or update if they exist)
-ln -sfn "${HOME}/.claude/mind/chitta.hot" "$SCRIPT_DIR/mind/chitta.hot"
-ln -sfn "${HOME}/.claude/mind/chitta.cold" "$SCRIPT_DIR/mind/chitta.cold"
+for ext in hot warm cold; do
+    ln -sfn "${HOME}/.claude/mind/chitta.$ext" "$SCRIPT_DIR/mind/chitta.$ext"
+done
 echo -e "  ${GREEN}✓ Database symlinks created${NC}"
 
 # Done

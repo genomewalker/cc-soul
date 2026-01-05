@@ -77,9 +77,23 @@ if [[ ! -x "$BIN_DIR/chitta_mcp" || "$current_version" != "$installed_version" ]
     echo "[cc-soul] Build complete"
 fi
 
-# Create mind directory
-mkdir -p "${HOME}/.claude/mind/chitta"
+# Create mind directory and symlinks
+mkdir -p "${HOME}/.claude/mind"
+mkdir -p "$PLUGIN_DIR/mind"
+
+# Create symlinks (allows ${CLAUDE_PLUGIN_ROOT}/mind/chitta to resolve to ~/.claude/mind/chitta)
+for ext in hot warm cold; do
+    if [[ ! -L "$PLUGIN_DIR/mind/chitta.$ext" ]]; then
+        ln -sfn "${HOME}/.claude/mind/chitta.$ext" "$PLUGIN_DIR/mind/chitta.$ext"
+    fi
+done
+
+# Version change notification
+if [[ -n "$installed_version" && "$installed_version" != "$current_version" ]]; then
+    echo "[cc-soul] ⚠️  Updated: $installed_version → $current_version"
+    echo "[cc-soul] Run /health to verify setup"
+fi
 
 # Mark as installed
 echo "$current_version" > "$MARKER"
-echo "[cc-soul] Installation complete"
+echo "[cc-soul] Installation complete (v$current_version)"

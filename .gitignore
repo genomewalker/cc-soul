@@ -62,9 +62,10 @@ chitta/build/
 *.a
 *.dylib
 
-# Test files
+# Database files and symlinks (machine-specific)
 mind.cold
 mind.hot
+mind/
 
 # Runtime data
 .claude/swarm/
