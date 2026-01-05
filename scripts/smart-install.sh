@@ -95,8 +95,15 @@ download_binaries() {
         mkdir -p "$BIN_DIR"
         if tar -xzf "$tmp_file" -C "$BIN_DIR" 2>/dev/null; then
             rm -f "$tmp_file"
-            echo "[cc-soul] Pre-built binaries installed"
-            return 0
+            # Verify binaries can actually run (check for missing shared libs)
+            if "$BIN_DIR/chitta_cli" --help >/dev/null 2>&1; then
+                echo "[cc-soul] Pre-built binaries installed"
+                return 0
+            else
+                echo "[cc-soul] Pre-built binaries incompatible, will build from source"
+                rm -f "$BIN_DIR"/chitta_*
+                return 1
+            fi
         fi
         rm -f "$tmp_file"
     fi
