@@ -96,9 +96,30 @@ hook_end() {
 
     node_delta=$((end_nodes - start_nodes))
 
+    # Save session ledger (Atman snapshot) before ending
+    local duration_min=$((duration / 60))
+    local session_id="session-$(date +%Y%m%d-%H%M%S)"
+    local ledger_params
+    ledger_params=$(cat <<EOF
+{
+  "action": "save",
+  "session_id": "$session_id",
+  "soul_state": {
+    "coherence": $coherence,
+    "nodes": $end_nodes,
+    "duration_minutes": $duration_min
+  },
+  "continuation": {
+    "reason": "session_end",
+    "node_delta": $node_delta
+  }
+}
+EOF
+)
+    call_mcp "ledger" "$ledger_params" >/dev/null 2>&1 || true
+
     # Record session observation (only if session was meaningful - >1 minute)
     if [[ $duration -gt 60 ]]; then
-        local duration_min=$((duration / 60))
         local title="Session completed (${duration_min}m)"
         local content="Duration: ${duration_min} minutes. Nodes: ${start_nodes} → ${end_nodes} (${node_delta:+$node_delta}). Coherence: ${coherence}."
 
@@ -112,7 +133,7 @@ hook_end() {
     # Run maintenance cycle to save state
     call_mcp "cycle" '{"save":true}' >/dev/null 2>&1 || true
 
-    echo "[cc-soul] Session ended (${duration}s, ${node_delta:+$node_delta} nodes)"
+    echo "[cc-soul] Session ended (${duration}s, ${node_delta:+$node_delta} nodes, ledger saved)"
 }
 
 hook_prompt() {
@@ -138,10 +159,38 @@ hook_prompt() {
 
 hook_pre_compact() {
     # Save state before compact - this is important!
+    # Get current state for ledger
+    local stats
+    stats=$(call_mcp "soul_context" '{"format":"json"}')
+    local nodes
+    nodes=$(echo "$stats" | jq -r '.statistics.total_nodes' 2>/dev/null || echo "0")
+    local coherence
+    coherence=$(echo "$stats" | jq -r '.coherence.tau_k' 2>/dev/null || echo "0.5")
+
+    # Save session ledger (Atman snapshot) before compaction
+    local session_id="pre-compact-$(date +%Y%m%d-%H%M%S)"
+    local ledger_params
+    ledger_params=$(cat <<EOF
+{
+  "action": "save",
+  "session_id": "$session_id",
+  "soul_state": {
+    "coherence": $coherence,
+    "nodes": $nodes
+  },
+  "continuation": {
+    "reason": "context_compaction",
+    "critical": ["Context was compacted - some details may be summarized"]
+  }
+}
+EOF
+)
+    call_mcp "ledger" "$ledger_params" >/dev/null 2>&1 || true
+
     # Record that a compact is happening
-    call_mcp "observe" '{"category":"signal","title":"Pre-compact checkpoint","content":"Context about to be compacted. Saving soul state."}' >/dev/null 2>&1 || true
+    call_mcp "observe" '{"category":"signal","title":"Pre-compact checkpoint","content":"Context about to be compacted. Ledger and soul state saved."}' >/dev/null 2>&1 || true
     call_mcp "cycle" '{"save":true}' >/dev/null 2>&1 || true
-    echo "[cc-soul] State saved before compact"
+    echo "[cc-soul] Ledger and state saved before compact"
 }
 
 # Main dispatch

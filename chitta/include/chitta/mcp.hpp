@@ -135,7 +135,7 @@ private:
         // Tool: soul_context - Get soul state for hook injection
         tools_.push_back({
             "soul_context",
-            "Get soul context including beliefs, active intentions, relevant wisdom, and coherence. "
+            "Get soul context including beliefs, active intentions, relevant wisdom, coherence, and session ledger. "
             "Use format='json' for structured data or 'text' for hook injection.",
             {
                 {"type", "object"},
@@ -149,6 +149,11 @@ private:
                         {"enum", {"text", "json"}},
                         {"default", "text"},
                         {"description", "Output format - 'text' for hook injection or 'json' for structured"}
+                    }},
+                    {"include_ledger", {
+                        {"type", "boolean"},
+                        {"default", true},
+                        {"description", "Include session ledger (Atman snapshot) in context"}
                     }}
                 }},
                 {"required", json::array()}
@@ -667,6 +672,7 @@ private:
     ToolResult tool_soul_context(const json& params) {
         std::string query = params.value("query", "");
         std::string format = params.value("format", "text");
+        bool include_ledger = params.value("include_ledger", true);
 
         MindState state = mind_->state();
         Coherence coherence = mind_->coherence();
@@ -687,6 +693,24 @@ private:
             }},
             {"yantra_ready", state.yantra_ready}
         };
+
+        // Add latest ledger (Atman snapshot) if available
+        if (include_ledger) {
+            auto ledger = mind_->load_ledger();
+            if (ledger) {
+                try {
+                    result["ledger"] = {
+                        {"id", ledger->first.to_string()},
+                        {"content", json::parse(ledger->second)}
+                    };
+                } catch (...) {
+                    result["ledger"] = {
+                        {"id", ledger->first.to_string()},
+                        {"content", {{"raw", ledger->second}}}
+                    };
+                }
+            }
+        }
 
         // Add relevant wisdom if query provided
         if (!query.empty() && mind_->has_yantra()) {
@@ -717,6 +741,32 @@ private:
             ss << state.warm_nodes << " warm, ";
             ss << state.cold_nodes << " cold)\n";
             ss << "  Yantra: " << (state.yantra_ready ? "ready" : "not ready") << "\n";
+
+            // Add ledger summary to text output
+            if (result.contains("ledger") && result["ledger"].contains("content")) {
+                ss << "\nSession Ledger (Atman):\n";
+                auto& content = result["ledger"]["content"];
+                if (content.contains("work_state") && !content["work_state"].empty()) {
+                    ss << "  Work: ";
+                    if (content["work_state"].contains("todos")) {
+                        ss << content["work_state"]["todos"].size() << " todos";
+                    }
+                    ss << "\n";
+                }
+                if (content.contains("continuation") && !content["continuation"].empty()) {
+                    ss << "  Continuation: ";
+                    if (content["continuation"].contains("next_steps")) {
+                        ss << content["continuation"]["next_steps"].size() << " next steps";
+                    }
+                    if (content["continuation"].contains("critical")) {
+                        auto& critical = content["continuation"]["critical"];
+                        if (!critical.empty()) {
+                            ss << ", " << critical.size() << " critical";
+                        }
+                    }
+                    ss << "\n";
+                }
+            }
 
             if (result.contains("relevant_wisdom")) {
                 ss << "\nRelevant Wisdom:\n";
