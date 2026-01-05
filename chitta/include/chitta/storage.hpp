@@ -228,9 +228,27 @@ public:
         return demoted;
     }
 
-    // Storage format version
+    // Storage format version (must match migrations.hpp)
     static constexpr uint32_t STORAGE_MAGIC = 0x43485454;  // "CHTT"
     static constexpr uint32_t STORAGE_VERSION = 2;          // v2 adds tags
+
+    // Check if file needs upgrade before loading
+    static uint32_t detect_version(const std::string& path) {
+        std::ifstream in(path, std::ios::binary);
+        if (!in) return 0;
+
+        uint32_t magic = 0;
+        in.read(reinterpret_cast<char*>(&magic), sizeof(magic));
+
+        if (magic == STORAGE_MAGIC) {
+            uint32_t version = 0;
+            in.read(reinterpret_cast<char*>(&version), sizeof(version));
+            return version;
+        }
+
+        // No magic = v1 format (pre-versioning)
+        return 1;
+    }
 
     // Save hot tier to file
     bool save(const std::string& path) const {
@@ -301,6 +319,8 @@ public:
     }
 
     // Load hot tier from file
+    // Returns false if file doesn't exist, is corrupt, or needs upgrade
+    // Use detect_version() first to check if upgrade is needed
     bool load(const std::string& path) {
         std::ifstream in(path, std::ios::binary);
         if (!in) return false;
@@ -308,21 +328,32 @@ public:
         nodes_.clear();
         vectors_.clear();
 
-        // Check for version header (v2+)
+        // Require version header - no auto-upgrade
         uint32_t magic = 0;
-        uint32_t version = 1;  // Default to v1 (no header)
         in.read(reinterpret_cast<char*>(&magic), sizeof(magic));
 
-        if (magic == STORAGE_MAGIC) {
-            // New format with version header
-            in.read(reinterpret_cast<char*>(&version), sizeof(version));
-        } else {
-            // Old format (v1) - magic is actually node count, seek back
-            in.seekg(0, std::ios::beg);
-            version = 1;
+        if (magic != STORAGE_MAGIC) {
+            std::cerr << "[HotStorage] Database needs upgrade (v1 detected). "
+                      << "Run 'chitta_cli upgrade " << path << "'\n";
+            return false;
         }
 
-        bool has_tags = (version >= 2);
+        uint32_t version = 0;
+        in.read(reinterpret_cast<char*>(&version), sizeof(version));
+
+        if (version < STORAGE_VERSION) {
+            std::cerr << "[HotStorage] Database version " << version
+                      << " is older than required " << STORAGE_VERSION
+                      << ". Run 'chitta_cli upgrade " << path << "'\n";
+            return false;
+        }
+
+        if (version > STORAGE_VERSION) {
+            std::cerr << "[HotStorage] Database version " << version
+                      << " is newer than supported " << STORAGE_VERSION
+                      << ". Update chitta to read this database.\n";
+            return false;
+        }
 
         // Read node count
         size_t count;
@@ -370,18 +401,16 @@ public:
                 node.edges.push_back(edge);
             }
 
-            // Tags (v2+ only)
-            if (has_tags) {
-                size_t tag_count = 0;
-                in.read(reinterpret_cast<char*>(&tag_count), sizeof(tag_count));
-                node.tags.reserve(tag_count);
-                for (size_t t = 0; t < tag_count; ++t) {
-                    size_t tag_len;
-                    in.read(reinterpret_cast<char*>(&tag_len), sizeof(tag_len));
-                    std::string tag(tag_len, '\0');
-                    in.read(&tag[0], tag_len);
-                    node.tags.push_back(std::move(tag));
-                }
+            // Tags (always present in v2+)
+            size_t tag_count = 0;
+            in.read(reinterpret_cast<char*>(&tag_count), sizeof(tag_count));
+            node.tags.reserve(tag_count);
+            for (size_t t = 0; t < tag_count; ++t) {
+                size_t tag_len;
+                in.read(reinterpret_cast<char*>(&tag_len), sizeof(tag_len));
+                std::string tag(tag_len, '\0');
+                in.read(&tag[0], tag_len);
+                node.tags.push_back(std::move(tag));
             }
 
             // Store node and quantized vector
@@ -662,6 +691,19 @@ public:
         std::string cold_path = config_.base_path + ".cold";
 
         std::cerr << "[TieredStorage] Loading from: " << hot_path << "\n";
+
+        // Check if database exists and needs upgrade
+        std::ifstream check(hot_path, std::ios::binary);
+        if (check.good()) {
+            check.close();
+            uint32_t version = HotStorage::detect_version(hot_path);
+            if (version > 0 && version < HotStorage::STORAGE_VERSION) {
+                std::cerr << "[TieredStorage] Database needs upgrade (v" << version
+                          << " → v" << HotStorage::STORAGE_VERSION << "). "
+                          << "Run 'chitta_cli upgrade'\n";
+                return false;  // Fail initialization
+            }
+        }
 
         // Try to load existing hot tier
         loaded_successfully_ = hot_.load(hot_path);

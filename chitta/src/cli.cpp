@@ -6,9 +6,11 @@
 //   stats      Show soul statistics
 //   recall     Semantic search
 //   cycle      Run maintenance cycle
+//   upgrade    Upgrade database to current version
 //   help       Show this help
 
 #include <chitta/mind.hpp>
+#include <chitta/migrations.hpp>
 #include <chitta/version.hpp>
 #ifdef CHITTA_WITH_ONNX
 #include <chitta/vak_onnx.hpp>
@@ -27,6 +29,7 @@ void print_usage(const char* prog) {
               << "  stats              Show soul statistics\n"
               << "  recall <query>     Semantic search\n"
               << "  cycle              Run maintenance cycle\n"
+              << "  upgrade            Upgrade database to current version\n"
               << "  help               Show this help\n\n"
               << "Global options:\n"
               << "  --path PATH        Mind storage path (default: ~/.claude/mind/chitta)\n"
@@ -150,6 +153,50 @@ int cmd_cycle(Mind& mind) {
     return 0;
 }
 
+int cmd_upgrade(const std::string& db_path) {
+    std::string hot_path = db_path + ".hot";
+
+    // Check current version
+    uint32_t version = migrations::detect_version(hot_path);
+
+    if (version == 0) {
+        std::cerr << "No database found at: " << hot_path << "\n";
+        return 1;
+    }
+
+    std::cout << "Database: " << hot_path << "\n";
+    std::cout << "Current version: " << version << "\n";
+    std::cout << "Target version: " << migrations::CURRENT_VERSION << "\n";
+
+    if (version == migrations::CURRENT_VERSION) {
+        std::cout << "Already at current version. No upgrade needed.\n";
+        return 0;
+    }
+
+    if (version > migrations::CURRENT_VERSION) {
+        std::cerr << "Database version " << version
+                  << " is newer than supported " << migrations::CURRENT_VERSION << "\n";
+        std::cerr << "Update chitta to read this database.\n";
+        return 1;
+    }
+
+    std::cout << "\nUpgrading...\n";
+
+    auto result = migrations::upgrade(hot_path);
+
+    if (result.success) {
+        std::cout << "Upgrade complete: v" << result.from_version
+                  << " → v" << result.to_version << "\n";
+        if (!result.backup_path.empty()) {
+            std::cout << "Backup saved: " << result.backup_path << "\n";
+        }
+        return 0;
+    } else {
+        std::cerr << "Upgrade failed: " << result.error << "\n";
+        return 1;
+    }
+}
+
 int main(int argc, char* argv[]) {
     std::string mind_path = default_mind_path();
     std::string model_path;
@@ -193,6 +240,11 @@ int main(int argc, char* argv[]) {
     if (command.empty() || command == "help") {
         print_usage(argv[0]);
         return 0;
+    }
+
+    // Handle upgrade command separately (doesn't need mind.open())
+    if (command == "upgrade") {
+        return cmd_upgrade(mind_path);
     }
 
     // Create and open mind
