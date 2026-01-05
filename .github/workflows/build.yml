@@ -51,6 +51,8 @@ jobs:
           cd chitta/build
           cmake .. \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_RPATH="\$ORIGIN" \
+            -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
             -DONNXRUNTIME_INCLUDE_DIR=$CONDA_PREFIX/include \
             -DONNXRUNTIME_LIB_DIR=$CONDA_PREFIX/lib
           make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
@@ -69,10 +71,18 @@ jobs:
           ctest --output-on-failure || true
 
       - name: Package binaries
+        shell: bash -l {0}
         run: |
           mkdir -p dist
+          # Copy ONNX Runtime library to bin/ for bundling
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            cp $CONDA_PREFIX/lib/libonnxruntime*.dylib bin/
+          else
+            cp $CONDA_PREFIX/lib/libonnxruntime.so* bin/
+          fi
+          # Package everything
           tar -czvf dist/chitta-${{ matrix.platform }}.tar.gz \
-            -C bin chitta_mcp chitta_cli chitta_migrate chitta_import chitta_test
+            -C bin .
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

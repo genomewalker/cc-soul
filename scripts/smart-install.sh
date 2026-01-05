@@ -96,7 +96,8 @@ download_binaries() {
         if tar -xzf "$tmp_file" -C "$BIN_DIR" 2>/dev/null; then
             rm -f "$tmp_file"
             # Verify binaries can actually run (check for missing shared libs)
-            if "$BIN_DIR/chitta_cli" --help >/dev/null 2>&1; then
+            # The bundled libonnxruntime should be found via RPATH=$ORIGIN
+            if LD_LIBRARY_PATH="$BIN_DIR:$LD_LIBRARY_PATH" "$BIN_DIR/chitta_cli" --help >/dev/null 2>&1; then
                 echo "[cc-soul] Pre-built binaries installed"
                 return 0
             else
