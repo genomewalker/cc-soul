@@ -13,14 +13,14 @@ env:
 jobs:
   build-linux:
     runs-on: ubuntu-latest
-    container: quay.io/pypa/manylinux2014_x86_64
+    container: quay.io/pypa/manylinux_2_28_x86_64
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Install dependencies
         run: |
-          yum install -y sqlite-devel curl
+          dnf install -y sqlite-devel curl
           # Download pre-built nlohmann_json
           curl -L -o /tmp/json.hpp https://github.com/nlohmann/json/releases/download/v3.11.3/json.hpp
           mkdir -p /usr/local/include/nlohmann
