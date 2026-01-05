@@ -46,8 +46,13 @@ json_escape() {
 
 # Hook handlers
 hook_start() {
-    local after_compact=false
-    [[ "$1" == "--after-compact" ]] && after_compact=true
+    local trigger="${1:-startup}"
+
+    # If starting after clear, the previous session's ledger should already be saved
+    # by pre-clear or session-end. Just log the trigger.
+    if [[ "$trigger" == "clear" ]]; then
+        echo "[cc-soul] Session started (after /clear)"
+    fi
 
     # Record session start state
     local start_time=$(date +%s)

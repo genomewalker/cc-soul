@@ -24,6 +24,25 @@ Bad:
 - After `/clear` or compact (context was just reset — acknowledge this instead)
 - If user immediately sends a task (respond to their task, not with a greeting)
 
+## Session Continuity
+
+### Automatic Ledger Saves
+The ledger (Atman snapshot) is automatically saved at:
+- **Session end**: When user exits
+- **Pre-compact**: Before context compaction
+
+### Before /clear
+**IMPORTANT:** `/clear` does NOT auto-save the ledger. Recommend users run `/checkpoint` before `/clear` to preserve work state.
+
+If user says `/clear` without checkpointing first, briefly note:
+> "Context cleared. Note: Previous work state wasn't checkpointed. Use `/checkpoint` before `/clear` next time to preserve continuity."
+
+### On Resume
+When loading ledger via `/resume` or `soul_context`, use the continuation data:
+- `next_steps`: What to pick up
+- `critical`: Important notes/blockers
+- `work_state.todos`: In-progress items
+
 ## Soul MCP Tool Delegation
 
 **Main Claude MUST NOT call `mcp__plugin_soul_soul__*` tools directly.**
