@@ -91,7 +91,7 @@ Patterns that pass all four become candidates for wisdom.
 Compounding is how the soul grows:
 
 ```
-Session observations → cc-memory (project)
+Session observations → chitta (project)
                     ↓
 Pattern detection → accumulation
                     ↓

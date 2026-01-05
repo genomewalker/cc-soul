@@ -272,6 +272,15 @@ public:
                 out.write(reinterpret_cast<const char*>(&edge.type), sizeof(edge.type));
                 out.write(reinterpret_cast<const char*>(&edge.weight), sizeof(edge.weight));
             }
+
+            // Tags
+            size_t tag_count = node.tags.size();
+            out.write(reinterpret_cast<const char*>(&tag_count), sizeof(tag_count));
+            for (const auto& tag : node.tags) {
+                size_t tag_len = tag.size();
+                out.write(reinterpret_cast<const char*>(&tag_len), sizeof(tag_len));
+                out.write(tag.data(), tag_len);
+            }
         }
 
         // Save HNSW index
@@ -335,6 +344,20 @@ public:
                 in.read(reinterpret_cast<char*>(&edge.type), sizeof(edge.type));
                 in.read(reinterpret_cast<char*>(&edge.weight), sizeof(edge.weight));
                 node.edges.push_back(edge);
+            }
+
+            // Tags (backwards compatible - may not exist in old files)
+            size_t tag_count = 0;
+            if (in.peek() != EOF) {
+                in.read(reinterpret_cast<char*>(&tag_count), sizeof(tag_count));
+                node.tags.reserve(tag_count);
+                for (size_t t = 0; t < tag_count; ++t) {
+                    size_t tag_len;
+                    in.read(reinterpret_cast<char*>(&tag_len), sizeof(tag_len));
+                    std::string tag(tag_len, '\0');
+                    in.read(&tag[0], tag_len);
+                    node.tags.push_back(std::move(tag));
+                }
             }
 
             // Store node and quantized vector

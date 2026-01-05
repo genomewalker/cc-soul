@@ -228,16 +228,20 @@ private:
         });
         handlers_["observe"] = [this](const json& params) { return tool_observe(params); };
 
-        // Tool: recall - Semantic search in soul
+        // Tool: recall - Semantic search in soul with optional tag filtering
         tools_.push_back({
             "recall",
-            "Recall relevant wisdom and episodes through semantic search.",
+            "Recall relevant wisdom and episodes. Use 'tag' parameter for exact thread matching (inter-agent communication).",
             {
                 {"type", "object"},
                 {"properties", {
                     {"query", {
                         {"type", "string"},
-                        {"description", "What to search for"}
+                        {"description", "What to search for (semantic)"}
+                    }},
+                    {"tag", {
+                        {"type", "string"},
+                        {"description", "Filter by exact tag match (e.g., 'thread:abc123'). When set, only nodes with this tag are searched."}
                     }},
                     {"limit", {
                         {"type", "integer"},
@@ -258,6 +262,30 @@ private:
             }
         });
         handlers_["recall"] = [this](const json& params) { return tool_recall(params); };
+
+        // Tool: recall_by_tag - Pure tag-based lookup (no semantic search)
+        tools_.push_back({
+            "recall_by_tag",
+            "Recall all nodes with a specific tag, sorted by creation time. Use for exact thread lookups without semantic ranking.",
+            {
+                {"type", "object"},
+                {"properties", {
+                    {"tag", {
+                        {"type", "string"},
+                        {"description", "Tag to search for (e.g., 'thread:abc123', 'yajña', 'hotṛ')"}
+                    }},
+                    {"limit", {
+                        {"type", "integer"},
+                        {"minimum", 1},
+                        {"maximum", 100},
+                        {"default", 50},
+                        {"description", "Maximum results"}
+                    }}
+                }},
+                {"required", {"tag"}}
+            }
+        });
+        handlers_["recall_by_tag"] = [this](const json& params) { return tool_recall_by_tag(params); };
 
         // Tool: cycle - Run maintenance cycle
         tools_.push_back({
@@ -713,7 +741,7 @@ private:
         std::string title = params.at("title");
         std::string content = params.at("content");
         std::string project = params.value("project", "");
-        std::string tags = params.value("tags", "");
+        std::string tags_str = params.value("tags", "");
 
         // Determine decay rate based on category
         float decay = 0.05f;  // default
@@ -723,18 +751,38 @@ private:
             decay = 0.15f;  // fast decay
         }
 
-        // Create full observation text
+        // Parse tags into vector for exact-match indexing
+        std::vector<std::string> tags_vec;
+        if (!tags_str.empty()) {
+            std::stringstream ss(tags_str);
+            std::string tag;
+            while (std::getline(ss, tag, ',')) {
+                // Trim whitespace
+                size_t start = tag.find_first_not_of(" \t");
+                size_t end = tag.find_last_not_of(" \t");
+                if (start != std::string::npos) {
+                    tags_vec.push_back(tag.substr(start, end - start + 1));
+                }
+            }
+        }
+
+        // Create full observation text (tags also in text for semantic search)
         std::string full_text = title + "\n" + content;
         if (!project.empty()) {
             full_text = "[" + project + "] " + full_text;
         }
-        if (!tags.empty()) {
-            full_text += "\nTags: " + tags;
+        if (!tags_str.empty()) {
+            full_text += "\nTags: " + tags_str;
         }
 
         NodeId id;
         if (mind_->has_yantra()) {
-            id = mind_->remember(full_text, NodeType::Episode);
+            // Use tag-aware remember for exact-match filtering
+            if (!tags_vec.empty()) {
+                id = mind_->remember(full_text, NodeType::Episode, tags_vec);
+            } else {
+                id = mind_->remember(full_text, NodeType::Episode);
+            }
         } else {
             id = mind_->remember(NodeType::Episode, Vector::zeros(),
                                  std::vector<uint8_t>(full_text.begin(), full_text.end()));
@@ -749,7 +797,8 @@ private:
             {"id", id.to_string()},
             {"category", category},
             {"title", title},
-            {"decay_rate", decay}
+            {"decay_rate", decay},
+            {"tags", tags_vec}
         };
 
         return {false, "Observed: " + title, result};
@@ -759,20 +808,37 @@ private:
         std::string query = params.at("query");
         size_t limit = params.value("limit", 5);
         float threshold = params.value("threshold", 0.0f);
+        std::string tag = params.value("tag", "");  // Optional tag filter
 
         if (!mind_->has_yantra()) {
             return {true, "Yantra not ready - cannot perform semantic search", json()};
         }
 
-        auto recalls = mind_->recall(query, limit, threshold);
+        std::vector<Recall> recalls;
+
+        if (!tag.empty()) {
+            // Tag-filtered recall: exact match on tag, then semantic ranking
+            recalls = mind_->recall_with_tag_filter(query, tag, limit, threshold);
+        } else {
+            // Standard semantic recall
+            recalls = mind_->recall(query, limit, threshold);
+        }
 
         json results_array = json::array();
         std::ostringstream ss;
-        ss << "Found " << recalls.size() << " results:\n";
+
+        if (!tag.empty()) {
+            ss << "Found " << recalls.size() << " results with tag '" << tag << "':\n";
+        } else {
+            ss << "Found " << recalls.size() << " results:\n";
+        }
 
         for (const auto& r : recalls) {
             // Auto-trigger feedback: this memory was used
             mind_->feedback_used(r.id);
+
+            // Get tags for this result
+            auto result_tags = mind_->get_tags(r.id);
 
             results_array.push_back({
                 {"id", r.id.to_string()},
@@ -780,11 +846,44 @@ private:
                 {"similarity", r.similarity},
                 {"relevance", r.relevance},
                 {"type", node_type_to_string(r.type)},
-                {"confidence", r.confidence.mu}
+                {"confidence", r.confidence.mu},
+                {"tags", result_tags}
             });
 
             // Show relevance score (soul-aware) instead of raw similarity
             ss << "\n[" << (r.relevance * 100) << "%] " << r.text.substr(0, 100);
+            if (r.text.length() > 100) ss << "...";
+        }
+
+        return {false, ss.str(), {{"results", results_array}}};
+    }
+
+    // Recall by tag only (no semantic search) - for exact thread lookup
+    ToolResult tool_recall_by_tag(const json& params) {
+        std::string tag = params.at("tag");
+        size_t limit = params.value("limit", 50);
+
+        auto recalls = mind_->recall_by_tag(tag, limit);
+
+        json results_array = json::array();
+        std::ostringstream ss;
+        ss << "Found " << recalls.size() << " results with tag '" << tag << "':\n";
+
+        for (const auto& r : recalls) {
+            mind_->feedback_used(r.id);
+
+            auto result_tags = mind_->get_tags(r.id);
+
+            results_array.push_back({
+                {"id", r.id.to_string()},
+                {"text", r.text},
+                {"created", r.created},
+                {"type", node_type_to_string(r.type)},
+                {"confidence", r.confidence.mu},
+                {"tags", result_tags}
+            });
+
+            ss << "\n[" << node_type_to_string(r.type) << "] " << r.text.substr(0, 100);
             if (r.text.length() > 100) ss << "...";
         }
 

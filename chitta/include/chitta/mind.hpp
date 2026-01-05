@@ -19,6 +19,9 @@
 #include "feedback.hpp"
 #include <mutex>
 #include <atomic>
+#include <set>
+#include <algorithm>
+#include <unordered_map>
 
 namespace chitta {
 
@@ -52,6 +55,111 @@ enum class SearchMode {
     Dense,      // Semantic only (fast)
     Sparse,     // BM25 only (keyword)
     Hybrid      // Dense + Sparse with RRF fusion
+};
+
+// Tag index for exact-match filtering
+// Enables reliable inter-agent communication via thread tags
+class TagIndex {
+public:
+    // Add node with tags
+    void add(NodeId id, const std::vector<std::string>& tags) {
+        for (const auto& tag : tags) {
+            index_[tag].insert(id);
+        }
+        node_tags_[id] = tags;
+    }
+
+    // Remove node from index
+    void remove(NodeId id) {
+        auto it = node_tags_.find(id);
+        if (it != node_tags_.end()) {
+            for (const auto& tag : it->second) {
+                auto idx_it = index_.find(tag);
+                if (idx_it != index_.end()) {
+                    idx_it->second.erase(id);
+                    if (idx_it->second.empty()) {
+                        index_.erase(idx_it);
+                    }
+                }
+            }
+            node_tags_.erase(it);
+        }
+    }
+
+    // Find all nodes with a specific tag
+    std::vector<NodeId> find(const std::string& tag) const {
+        auto it = index_.find(tag);
+        if (it != index_.end()) {
+            return std::vector<NodeId>(it->second.begin(), it->second.end());
+        }
+        return {};
+    }
+
+    // Find nodes matching ALL given tags (AND)
+    std::vector<NodeId> find_all(const std::vector<std::string>& tags) const {
+        if (tags.empty()) return {};
+
+        std::set<NodeId> result;
+        bool first = true;
+
+        for (const auto& tag : tags) {
+            auto it = index_.find(tag);
+            if (it == index_.end()) {
+                return {};  // Tag not found, no matches
+            }
+
+            if (first) {
+                result = it->second;
+                first = false;
+            } else {
+                std::set<NodeId> intersection;
+                std::set_intersection(
+                    result.begin(), result.end(),
+                    it->second.begin(), it->second.end(),
+                    std::inserter(intersection, intersection.begin())
+                );
+                result = std::move(intersection);
+            }
+        }
+
+        return std::vector<NodeId>(result.begin(), result.end());
+    }
+
+    // Find nodes matching ANY of the given tags (OR)
+    std::vector<NodeId> find_any(const std::vector<std::string>& tags) const {
+        std::set<NodeId> result;
+        for (const auto& tag : tags) {
+            auto it = index_.find(tag);
+            if (it != index_.end()) {
+                result.insert(it->second.begin(), it->second.end());
+            }
+        }
+        return std::vector<NodeId>(result.begin(), result.end());
+    }
+
+    // Get tags for a node
+    std::vector<std::string> tags_for(NodeId id) const {
+        auto it = node_tags_.find(id);
+        return it != node_tags_.end() ? it->second : std::vector<std::string>{};
+    }
+
+    // Get all unique tags
+    std::vector<std::string> all_tags() const {
+        std::vector<std::string> result;
+        result.reserve(index_.size());
+        for (const auto& [tag, _] : index_) {
+            result.push_back(tag);
+        }
+        return result;
+    }
+
+    // Stats
+    size_t tag_count() const { return index_.size(); }
+    size_t node_count() const { return node_tags_.size(); }
+
+private:
+    std::unordered_map<std::string, std::set<NodeId>> index_;
+    std::unordered_map<NodeId, std::vector<std::string>, NodeIdHash> node_tags_;
 };
 
 // Mind state for persistence
@@ -170,6 +278,55 @@ public:
         return id;
     }
 
+    // Remember with tags for exact-match filtering (inter-agent communication)
+    NodeId remember(const std::string& text, NodeType type,
+                    const std::vector<std::string>& tags) {
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        Artha artha = yantra_->transform(text);
+
+        Node node(type, std::move(artha.nu));
+        node.payload = text_to_payload(text);
+        node.tags = tags;
+        NodeId id = node.id;
+
+        storage_.insert(id, std::move(node));
+        graph_.insert_raw(id);
+
+        // Add to BM25 index for hybrid search
+        bm25_index_.add(id, text);
+
+        // Add to tag index for exact-match filtering
+        tag_index_.add(id, tags);
+
+        return id;
+    }
+
+    // Remember with confidence and tags
+    NodeId remember(const std::string& text, NodeType type, Confidence confidence,
+                    const std::vector<std::string>& tags) {
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        Artha artha = yantra_->transform(text);
+
+        Node node(type, std::move(artha.nu));
+        node.kappa = confidence;
+        node.payload = text_to_payload(text);
+        node.tags = tags;
+        NodeId id = node.id;
+
+        storage_.insert(id, std::move(node));
+        graph_.insert_raw(id);
+
+        // Add to BM25 index for hybrid search
+        bm25_index_.add(id, text);
+
+        // Add to tag index for exact-match filtering
+        tag_index_.add(id, tags);
+
+        return id;
+    }
+
     // Recall by text query with soul-aware scoring
     std::vector<Recall> recall(const std::string& query, size_t k,
                                float threshold = 0.0f,
@@ -178,6 +335,137 @@ public:
 
         Artha artha = yantra_->transform(query);
         return recall_impl(artha.nu, query, k, threshold, mode);
+    }
+
+    // Recall by exact tag match (for inter-agent communication)
+    // Returns all nodes with the given tag, sorted by recency
+    std::vector<Recall> recall_by_tag(const std::string& tag, size_t k = 50) {
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        auto node_ids = tag_index_.find(tag);
+
+        std::vector<Recall> results;
+        for (const auto& id : node_ids) {
+            if (Node* node = storage_.get(id)) {
+                Recall r;
+                r.id = id;
+                r.similarity = 1.0f;  // Exact match
+                r.relevance = node->kappa.effective();
+                r.type = node->node_type;
+                r.confidence = node->kappa;
+                r.created = node->tau_created;
+                r.accessed = node->tau_accessed;
+                r.payload = node->payload;
+                r.text = payload_to_text(node->payload).value_or("");
+                results.push_back(std::move(r));
+            }
+        }
+
+        // Sort by creation time (most recent first)
+        std::sort(results.begin(), results.end(),
+            [](const Recall& a, const Recall& b) {
+                return a.created > b.created;
+            });
+
+        if (results.size() > k) {
+            results.resize(k);
+        }
+
+        return results;
+    }
+
+    // Recall by multiple tags (AND - all must match)
+    std::vector<Recall> recall_by_tags(const std::vector<std::string>& tags, size_t k = 50) {
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        auto node_ids = tag_index_.find_all(tags);
+
+        std::vector<Recall> results;
+        for (const auto& id : node_ids) {
+            if (Node* node = storage_.get(id)) {
+                Recall r;
+                r.id = id;
+                r.similarity = 1.0f;  // Exact match
+                r.relevance = node->kappa.effective();
+                r.type = node->node_type;
+                r.confidence = node->kappa;
+                r.created = node->tau_created;
+                r.accessed = node->tau_accessed;
+                r.payload = node->payload;
+                r.text = payload_to_text(node->payload).value_or("");
+                results.push_back(std::move(r));
+            }
+        }
+
+        // Sort by creation time (most recent first)
+        std::sort(results.begin(), results.end(),
+            [](const Recall& a, const Recall& b) {
+                return a.created > b.created;
+            });
+
+        if (results.size() > k) {
+            results.resize(k);
+        }
+
+        return results;
+    }
+
+    // Recall with semantic search filtered by tag
+    // First filters by tag, then re-ranks by semantic relevance
+    std::vector<Recall> recall_with_tag_filter(const std::string& query,
+                                                const std::string& tag,
+                                                size_t k,
+                                                float threshold = 0.0f) {
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        // Get all nodes with the tag
+        auto node_ids = tag_index_.find(tag);
+        if (node_ids.empty()) return {};
+
+        // Transform query for semantic scoring
+        Artha artha = yantra_->transform(query);
+        Timestamp current = now();
+
+        std::vector<Recall> results;
+        for (const auto& id : node_ids) {
+            if (Node* node = storage_.get(id)) {
+                // Compute semantic similarity
+                float similarity = node->nu.cosine(artha.nu);
+                if (similarity < threshold) continue;
+
+                // Soul-aware relevance scoring
+                float relevance = soul_relevance(similarity, *node, current, scoring_config_);
+
+                Recall r;
+                r.id = id;
+                r.similarity = similarity;
+                r.relevance = relevance;
+                r.type = node->node_type;
+                r.confidence = node->kappa;
+                r.created = node->tau_created;
+                r.accessed = node->tau_accessed;
+                r.payload = node->payload;
+                r.text = payload_to_text(node->payload).value_or("");
+                results.push_back(std::move(r));
+            }
+        }
+
+        // Sort by relevance
+        std::sort(results.begin(), results.end(),
+            [](const Recall& a, const Recall& b) {
+                return a.relevance > b.relevance;
+            });
+
+        if (results.size() > k) {
+            results.resize(k);
+        }
+
+        return results;
+    }
+
+    // Get tags for a node
+    std::vector<std::string> get_tags(NodeId id) const {
+        return tag_index_.tags_for(id);
     }
 
     // Remember batch (more efficient)
@@ -664,6 +952,9 @@ private:
     ScoringConfig scoring_config_;
     BM25Index bm25_index_;
     CrossEncoder cross_encoder_;
+
+    // Tag index for exact-match filtering (inter-agent communication)
+    TagIndex tag_index_;
 
     // Autonomous dynamics and learning
     Daemon daemon_;

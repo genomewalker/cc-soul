@@ -29,7 +29,7 @@ Be concrete: "The coherence calculation is wrong" not "things could be better"
 
 ```
 Read the relevant code files directly
-mcp__cc-memory__mem-recall(query="related past fixes")
+mcp__plugin_soul_soul__recall(query="related past fixes")
 ```
 
 Ask: Why does it work this way? What was the original intent?
@@ -55,7 +55,7 @@ Make the actual changes using Edit/Write tools. Keep changes minimal and focused
 ### 6. Record the Learning
 
 ```
-mcp__cc-memory__mem-remember(
+mcp__plugin_soul_soul__observe(
     category="bugfix" | "refactor" | "feature",
     title="What was fixed",
     content="Root cause, solution, and why it works"

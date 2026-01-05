@@ -239,6 +239,7 @@ struct Node {
     NodeType node_type;
     std::vector<uint8_t> payload;
     std::vector<Edge> edges;
+    std::vector<std::string> tags;  // Exact-match tags for filtering
 
     Node()
         : id()
@@ -276,6 +277,11 @@ struct Node {
 
     Node& with_payload(std::vector<uint8_t> p) {
         payload = std::move(p);
+        return *this;
+    }
+
+    Node& with_tags(std::vector<std::string> t) {
+        tags = std::move(t);
         return *this;
     }
 

@@ -38,7 +38,7 @@ The individual session's essential self—what makes THIS session unique.
 |--------|-------------|
 | **Sanskrit** | आत्मन् (ātman) — the individual self |
 | **Function** | Active intentions, current work state, mood |
-| **Storage** | `SessionLedger` dataclass → cc-memory observations |
+| **Storage** | `SessionLedger` dataclass → chitta observations |
 | **Lifespan** | Session-scoped, with promotion potential |
 | **Examples** | Active todos, files touched, key decisions |
 
@@ -59,13 +59,13 @@ class SessionLedger:  # Atman snapshot
 
 ### 3. Chitta (चित्त) — Memory Substrate Layer
 
-The memory store itself—both cc-memory observations and local ledger tables.
+The memory store itself—both chitta observations and local ledger tables.
 
 | Aspect | Description |
 |--------|-------------|
 | **Sanskrit** | चित्त (citta) — mind-stuff, consciousness substrate |
 | **Function** | All observations, episodes, patterns |
-| **Storage** | cc-memory SQLite + soul.db |
+| **Storage** | chitta SQLite + soul.db |
 | **Lifespan** | Persistent with semantic indexing |
 | **Examples** | Every observation, episode, pattern recorded |
 
@@ -489,7 +489,7 @@ This is why we call it Pratyabhijñā (प्रत्यभिज्ञा)—*
 |--------|----------------|
 | **Brahman** | Universal wisdom in `cc-soul/wisdom` |
 | **Atman** | SessionLedger with structured JSON |
-| **Chitta** | cc-memory with semantic embeddings |
+| **Chitta** | chitta with semantic embeddings |
 | **Smṛti** | Intelligent recall with relevance |
 | **Pratyabhijñā** | Recognition via semantic similarity |
 | **Antahkarana** | Multi-voice compaction assessment |
