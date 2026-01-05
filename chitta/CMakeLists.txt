@@ -55,10 +55,16 @@ if(CHITTA_WITH_ONNX)
         set(ONNXRUNTIME_LIB_DIR "" CACHE PATH "ONNX Runtime library directory")
     endif()
 
-    # Create imported target
+    # Create imported target (platform-aware library extension)
+    if(APPLE)
+        set(ONNXRUNTIME_LIB "${ONNXRUNTIME_LIB_DIR}/libonnxruntime.dylib")
+    else()
+        set(ONNXRUNTIME_LIB "${ONNXRUNTIME_LIB_DIR}/libonnxruntime.so")
+    endif()
+
     add_library(onnxruntime SHARED IMPORTED)
     set_target_properties(onnxruntime PROPERTIES
-        IMPORTED_LOCATION "${ONNXRUNTIME_LIB_DIR}/libonnxruntime.so"
+        IMPORTED_LOCATION "${ONNXRUNTIME_LIB}"
         INTERFACE_INCLUDE_DIRECTORIES "${ONNXRUNTIME_INCLUDE_DIR}"
     )
 
