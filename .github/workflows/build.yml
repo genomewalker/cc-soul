@@ -29,6 +29,9 @@ jobs:
           curl -L -o /tmp/onnx.tgz https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ONNX_VERSION }}/onnxruntime-linux-x64-${{ env.ONNX_VERSION }}.tgz
           tar -xzf /tmp/onnx.tgz -C /opt
           mv /opt/onnxruntime-* /opt/onnxruntime
+          # Create conda-forge compatible include structure
+          mkdir -p /opt/onnxruntime/include/onnxruntime/core/session
+          cp /opt/onnxruntime/include/*.h /opt/onnxruntime/include/onnxruntime/core/session/
 
       - name: Build chitta
         run: |
