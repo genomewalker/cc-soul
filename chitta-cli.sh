@@ -2,9 +2,8 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PLUGIN_DIR="$SCRIPT_DIR/.claude-plugin"
-CHITTA_BIN="$PLUGIN_DIR/bin/chitta_mcp"
-MIGRATE_BIN="$PLUGIN_DIR/bin/chitta_migrate"
+CHITTA_BIN="$SCRIPT_DIR/bin/chitta_mcp"
+MIGRATE_BIN="$SCRIPT_DIR/bin/chitta_migrate"
 MIND_PATH="${HOME}/.claude/mind/chitta"
 SOUL_DB="${HOME}/.claude/mind/soul.db"
 
