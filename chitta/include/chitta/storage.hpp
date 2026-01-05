@@ -228,10 +228,18 @@ public:
         return demoted;
     }
 
+    // Storage format version
+    static constexpr uint32_t STORAGE_MAGIC = 0x43485454;  // "CHTT"
+    static constexpr uint32_t STORAGE_VERSION = 2;          // v2 adds tags
+
     // Save hot tier to file
     bool save(const std::string& path) const {
         std::ofstream out(path, std::ios::binary);
         if (!out) return false;
+
+        // Write magic and version header (v2+)
+        out.write(reinterpret_cast<const char*>(&STORAGE_MAGIC), sizeof(STORAGE_MAGIC));
+        out.write(reinterpret_cast<const char*>(&STORAGE_VERSION), sizeof(STORAGE_VERSION));
 
         // Write node count
         size_t count = nodes_.size();
@@ -300,6 +308,22 @@ public:
         nodes_.clear();
         vectors_.clear();
 
+        // Check for version header (v2+)
+        uint32_t magic = 0;
+        uint32_t version = 1;  // Default to v1 (no header)
+        in.read(reinterpret_cast<char*>(&magic), sizeof(magic));
+
+        if (magic == STORAGE_MAGIC) {
+            // New format with version header
+            in.read(reinterpret_cast<char*>(&version), sizeof(version));
+        } else {
+            // Old format (v1) - magic is actually node count, seek back
+            in.seekg(0, std::ios::beg);
+            version = 1;
+        }
+
+        bool has_tags = (version >= 2);
+
         // Read node count
         size_t count;
         in.read(reinterpret_cast<char*>(&count), sizeof(count));
@@ -346,9 +370,9 @@ public:
                 node.edges.push_back(edge);
             }
 
-            // Tags (backwards compatible - may not exist in old files)
-            size_t tag_count = 0;
-            if (in.peek() != EOF) {
+            // Tags (v2+ only)
+            if (has_tags) {
+                size_t tag_count = 0;
                 in.read(reinterpret_cast<char*>(&tag_count), sizeof(tag_count));
                 node.tags.reserve(tag_count);
                 for (size_t t = 0; t < tag_count; ++t) {
