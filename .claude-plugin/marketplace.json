@@ -1,5 +1,6 @@
 {
   "name": "genomewalker-cc-soul",
+  "description": "Persistent identity and memory for Claude Code",
   "owner": {
     "name": "Antonio Fernandez-Guerra"
   },
