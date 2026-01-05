@@ -212,8 +212,9 @@ public:
         if (!storage_.initialize()) return false;
         running_ = true;
 
-        // Rebuild BM25 index from existing data
+        // Rebuild indices from existing data
         rebuild_bm25_index();
+        rebuild_tag_index();
 
         return true;
     }
@@ -224,6 +225,15 @@ public:
             auto text = payload_to_text(node.payload);
             if (text) {
                 bm25_index_.add(id, *text);
+            }
+        });
+    }
+
+    // Rebuild tag index from storage (call after loading data)
+    void rebuild_tag_index() {
+        storage_.for_each_hot([this](const NodeId& id, const Node& node) {
+            if (!node.tags.empty()) {
+                tag_index_.add(id, node.tags);
             }
         });
     }
