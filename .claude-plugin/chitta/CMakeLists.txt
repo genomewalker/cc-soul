@@ -12,7 +12,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../bin)
 option(CHITTA_BUILD_TESTS "Build tests" ON)
 option(CHITTA_BUILD_PYTHON "Build Python bindings" OFF)
 option(CHITTA_BUILD_MCP "Build MCP server executable" ON)
-option(CHITTA_WITH_ONNX "Enable ONNX Runtime embeddings" OFF)
+option(CHITTA_WITH_ONNX "Enable ONNX Runtime embeddings" ON)
 
 # Header-only library
 add_library(chitta INTERFACE)
