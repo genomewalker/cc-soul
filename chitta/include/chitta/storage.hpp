@@ -9,6 +9,7 @@
 #include "quantized.hpp"
 #include "hnsw.hpp"
 #include <fstream>
+#include <iostream>
 #include <memory>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -606,15 +607,19 @@ public:
         Timestamp warm_threshold_ms = 86400000;  // 1 day
     };
 
-    explicit TieredStorage(Config config) : config_(std::move(config)) {}
+    explicit TieredStorage(Config config) : config_(std::move(config)), loaded_successfully_(false) {}
 
     bool initialize() {
         std::string hot_path = config_.base_path + ".hot";
         std::string warm_path = config_.base_path + ".warm";
         std::string cold_path = config_.base_path + ".cold";
 
+        std::cerr << "[TieredStorage] Loading from: " << hot_path << "\n";
+
         // Try to load existing hot tier
-        hot_.load(hot_path);
+        loaded_successfully_ = hot_.load(hot_path);
+        std::cerr << "[TieredStorage] Load result: " << (loaded_successfully_ ? "success" : "failed")
+                  << ", nodes: " << hot_.size() << "\n";
 
         // Try to open existing warm/cold files
         warm_.open(warm_path);
@@ -764,9 +769,19 @@ public:
     }
 
     void sync() {
-        hot_.save(config_.base_path + ".hot");
+        std::cerr << "[TieredStorage] sync() called: hot_size=" << hot_.size()
+                  << ", loaded_successfully=" << loaded_successfully_ << "\n";
+        // Only save if we have data (prevents overwriting on failed load)
+        if (hot_.size() > 0 || loaded_successfully_) {
+            std::cerr << "[TieredStorage] Saving hot tier\n";
+            hot_.save(config_.base_path + ".hot");
+        } else {
+            std::cerr << "[TieredStorage] SKIPPING save (no data, load failed)\n";
+        }
         warm_.sync();
-        cold_.save(config_.base_path + ".cold");
+        if (cold_.size() > 0 || loaded_successfully_) {
+            cold_.save(config_.base_path + ".cold");
+        }
     }
 
     size_t hot_size() const { return hot_.size(); }
@@ -804,6 +819,7 @@ private:
     HotStorage hot_;
     WarmStorage warm_;
     ColdStorage cold_;
+    bool loaded_successfully_;
 };
 
 } // namespace chitta
