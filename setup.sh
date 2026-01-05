@@ -116,8 +116,17 @@ fi
 cd "$SCRIPT_DIR"
 echo ""
 
-# Create mind directory
-mkdir -p "${HOME}/.claude/mind/chitta"
+# Create mind directory and symlinks
+# The database lives at ~/.claude/mind/chitta.{hot,cold}
+# We symlink into plugin root so ${CLAUDE_PLUGIN_ROOT} can be used in plugin.json
+# (workaround for Claude Code not expanding ${HOME} in env vars)
+mkdir -p "${HOME}/.claude/mind"
+mkdir -p "$SCRIPT_DIR/mind"
+
+# Create symlinks (or update if they exist)
+ln -sfn "${HOME}/.claude/mind/chitta.hot" "$SCRIPT_DIR/mind/chitta.hot"
+ln -sfn "${HOME}/.claude/mind/chitta.cold" "$SCRIPT_DIR/mind/chitta.cold"
+echo -e "  ${GREEN}✓ Database symlinks created${NC}"
 
 # Done
 echo -e "${GREEN}╔══════════════════════════════════════╗${NC}"
