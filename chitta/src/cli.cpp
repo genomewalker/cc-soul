@@ -30,6 +30,7 @@ void print_usage(const char* prog) {
               << "  help               Show this help\n\n"
               << "Global options:\n"
               << "  --path PATH        Mind storage path (default: ~/.claude/mind/chitta)\n"
+              << "  --json             Output as JSON\n"
               << "  -v, --version      Show version\n"
 #ifdef CHITTA_WITH_ONNX
               << "  --model PATH       ONNX model path\n"
@@ -66,23 +67,41 @@ std::string default_vocab_path() {
     return std::string(home) + "/.claude/mind/vocab.txt";
 }
 
-int cmd_stats(Mind& mind) {
+int cmd_stats(Mind& mind, bool json_output) {
     auto coherence = mind.coherence();
 
-    std::cout << "Soul Statistics\n";
-    std::cout << "═══════════════════════════════\n";
-    std::cout << "Nodes:\n";
-    std::cout << "  Hot:    " << mind.hot_size() << "\n";
-    std::cout << "  Warm:   " << mind.warm_size() << "\n";
-    std::cout << "  Cold:   " << mind.cold_size() << "\n";
-    std::cout << "  Total:  " << mind.size() << "\n";
-    std::cout << "\nCoherence:\n";
-    std::cout << "  Global:     " << coherence.global << "\n";
-    std::cout << "  Local:      " << coherence.local << "\n";
-    std::cout << "  Structural: " << coherence.structural << "\n";
-    std::cout << "  Temporal:   " << coherence.temporal << "\n";
-    std::cout << "  Tau-k:      " << coherence.tau_k() << "\n";
-    std::cout << "\nYantra: " << (mind.has_yantra() ? "ready" : "not attached") << "\n";
+    if (json_output) {
+        std::cout << "{"
+                  << "\"version\":\"" << CHITTA_VERSION << "\","
+                  << "\"hot\":" << mind.hot_size() << ","
+                  << "\"warm\":" << mind.warm_size() << ","
+                  << "\"cold\":" << mind.cold_size() << ","
+                  << "\"total\":" << mind.size() << ","
+                  << "\"coherence\":{"
+                  << "\"global\":" << coherence.global << ","
+                  << "\"local\":" << coherence.local << ","
+                  << "\"structural\":" << coherence.structural << ","
+                  << "\"temporal\":" << coherence.temporal << ","
+                  << "\"tau\":" << coherence.tau_k()
+                  << "},"
+                  << "\"yantra\":" << (mind.has_yantra() ? "true" : "false")
+                  << "}\n";
+    } else {
+        std::cout << "Soul Statistics\n";
+        std::cout << "═══════════════════════════════\n";
+        std::cout << "Nodes:\n";
+        std::cout << "  Hot:    " << mind.hot_size() << "\n";
+        std::cout << "  Warm:   " << mind.warm_size() << "\n";
+        std::cout << "  Cold:   " << mind.cold_size() << "\n";
+        std::cout << "  Total:  " << mind.size() << "\n";
+        std::cout << "\nCoherence:\n";
+        std::cout << "  Global:     " << coherence.global << "\n";
+        std::cout << "  Local:      " << coherence.local << "\n";
+        std::cout << "  Structural: " << coherence.structural << "\n";
+        std::cout << "  Temporal:   " << coherence.temporal << "\n";
+        std::cout << "  Tau-k:      " << coherence.tau_k() << "\n";
+        std::cout << "\nYantra: " << (mind.has_yantra() ? "ready" : "not attached") << "\n";
+    }
 
     return 0;
 }
@@ -138,6 +157,7 @@ int main(int argc, char* argv[]) {
     std::string command;
     std::string query;
     int limit = 5;
+    bool json_output = false;
 
     // Parse arguments
     for (int i = 1; i < argc; ++i) {
@@ -149,6 +169,8 @@ int main(int argc, char* argv[]) {
             vocab_path = argv[++i];
         } else if (strcmp(argv[i], "--limit") == 0 && i + 1 < argc) {
             limit = std::stoi(argv[++i]);
+        } else if (strcmp(argv[i], "--json") == 0) {
+            json_output = true;
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             print_usage(argv[0]);
             return 0;
@@ -201,7 +223,7 @@ int main(int argc, char* argv[]) {
     // Execute command
     int result = 0;
     if (command == "stats") {
-        result = cmd_stats(mind);
+        result = cmd_stats(mind, json_output);
     } else if (command == "recall") {
         if (query.empty()) {
             std::cerr << "Usage: chitta_cli recall <query>\n";
