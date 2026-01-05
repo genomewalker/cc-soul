@@ -3,9 +3,7 @@
 #
 # Builds chitta (C++ backend), downloads ONNX models.
 #
-# Usage:
-#   ./setup.sh           # Full setup
-#   ./setup.sh --quick   # Skip tests
+# Usage: ./setup.sh
 
 set -e
 
@@ -26,15 +24,6 @@ echo -e "${BLUE}╔════════════════════�
 echo -e "${BLUE}║        cc-soul Plugin Setup          ║${NC}"
 echo -e "${BLUE}╚══════════════════════════════════════╝${NC}"
 echo ""
-
-# Parse args
-QUICK=false
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --quick) QUICK=true; shift ;;
-        *) echo "Unknown option: $1"; exit 1 ;;
-    esac
-done
 
 # Step 1: Check dependencies
 echo -e "${YELLOW}[1/3] Checking dependencies...${NC}"
@@ -106,10 +95,20 @@ cmake .. -DCMAKE_BUILD_TYPE=Release > /dev/null
 echo "  Building..."
 make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4) > /dev/null
 
-if [ -f "$BIN_DIR/chitta_mcp" ]; then
-    echo -e "  ${GREEN}✓ chitta_mcp built${NC}"
-else
-    echo -e "${RED}  ✗ Build failed${NC}"
+# Verify all binaries
+BINARIES="chitta_mcp chitta_cli chitta_migrate chitta_import chitta_test"
+BUILD_OK=true
+for bin in $BINARIES; do
+    if [ -f "$BIN_DIR/$bin" ]; then
+        echo -e "  ${GREEN}✓ $bin${NC}"
+    else
+        echo -e "${RED}  ✗ $bin failed${NC}"
+        BUILD_OK=false
+    fi
+done
+
+if [ "$BUILD_OK" = false ]; then
+    echo -e "${RED}Build failed${NC}"
     exit 1
 fi
 

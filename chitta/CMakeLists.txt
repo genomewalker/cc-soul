@@ -10,7 +10,6 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../bin)
 
 # Options
 option(CHITTA_BUILD_TESTS "Build tests" ON)
-option(CHITTA_BUILD_PYTHON "Build Python bindings" OFF)
 option(CHITTA_BUILD_MCP "Build MCP server executable" ON)
 option(CHITTA_WITH_ONNX "Enable ONNX Runtime embeddings" ON)
 
@@ -80,20 +79,15 @@ if(CHITTA_BUILD_TESTS)
     add_test(NAME chitta_test COMMAND chitta_test)
 endif()
 
-# Python bindings (optional)
-if(CHITTA_BUILD_PYTHON)
-    find_package(pybind11 CONFIG)
-    if(pybind11_FOUND)
-        pybind11_add_module(_chitta src/python.cpp)
-        target_link_libraries(_chitta PRIVATE chitta)
-    endif()
-endif()
-
 # MCP server executable
 if(CHITTA_BUILD_MCP)
     add_executable(chitta_mcp src/mcp_server.cpp)
     target_link_libraries(chitta_mcp PRIVATE chitta)
 endif()
+
+# CLI tool
+add_executable(chitta_cli src/cli.cpp)
+target_link_libraries(chitta_cli PRIVATE chitta)
 
 # Migration tool (from SQLite soul.db)
 find_package(SQLite3)

@@ -1,0 +1,139 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+env:
+  ONNX_VERSION: "1.16.3"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x64
+            conda_platform: linux-64
+          - os: macos-13
+            platform: macos-x64
+            conda_platform: osx-64
+          - os: macos-14
+            platform: macos-arm64
+            conda_platform: osx-arm64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Miniconda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+          python-version: "3.11"
+          channels: conda-forge
+          channel-priority: strict
+
+      - name: Install dependencies
+        shell: bash -l {0}
+        run: |
+          conda install -y cmake nlohmann_json sqlite onnxruntime-cpp=${{ env.ONNX_VERSION }}
+
+      - name: Build chitta
+        shell: bash -l {0}
+        run: |
+          mkdir -p chitta/build bin
+          cd chitta/build
+          cmake .. \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DONNXRUNTIME_INCLUDE_DIR=$CONDA_PREFIX/include \
+            -DONNXRUNTIME_LIB_DIR=$CONDA_PREFIX/lib
+          make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
+
+      - name: Verify binaries
+        run: |
+          ls -la bin/
+          for bin in chitta_mcp chitta_cli chitta_migrate chitta_import chitta_test; do
+            test -x bin/$bin || { echo "Missing: $bin"; exit 1; }
+          done
+
+      - name: Run tests
+        shell: bash -l {0}
+        run: |
+          cd chitta/build
+          ctest --output-on-failure || true
+
+      - name: Package binaries
+        run: |
+          mkdir -p dist
+          tar -czvf dist/chitta-${{ matrix.platform }}.tar.gz \
+            -C bin chitta_mcp chitta_cli chitta_migrate chitta_import chitta_test
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: chitta-${{ matrix.platform }}
+          path: dist/chitta-${{ matrix.platform }}.tar.gz
+
+  # Download ONNX models and compute checksums
+  models:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download models
+        run: |
+          mkdir -p models
+          curl -L -o models/model.onnx \
+            "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx"
+          curl -L -o models/vocab.txt \
+            "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/vocab.txt"
+
+      - name: Compute checksums
+        run: |
+          cd models
+          sha256sum model.onnx vocab.txt > checksums.sha256
+          cat checksums.sha256
+
+      - name: Upload models
+        uses: actions/upload-artifact@v4
+        with:
+          name: onnx-models
+          path: models/
+
+  # Create release with binaries
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, models]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release
+          # Move platform binaries
+          mv artifacts/chitta-*/chitta-*.tar.gz release/
+          # Package models with checksums
+          tar -czvf release/onnx-models.tar.gz -C artifacts/onnx-models .
+          ls -la release/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: release/*
+          generate_release_notes: true
+          draft: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

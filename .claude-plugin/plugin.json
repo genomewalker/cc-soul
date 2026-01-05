@@ -1,7 +1,7 @@
 {
   "name": "cc-soul",
   "description": "Persistent identity for Claude Code. Wisdom, beliefs, failures, and continuity across sessions.",
-  "version": "2.7.6",
+  "version": "2.7.7",
   "author": {
     "name": "Antonio Fernandez-Guerra",
     "url": "https://github.com/genomewalker"
@@ -9,6 +9,8 @@
   "repository": "https://github.com/genomewalker/cc-soul",
   "license": "MIT",
   "keywords": ["memory", "identity", "wisdom", "continuity", "soul"],
+  "hooks": "./hooks/hooks.json",
+  "skills": "./skills/",
   "mcpServers": {
     "cc-soul": {
       "command": "${CLAUDE_PLUGIN_ROOT}/bin/chitta_mcp",

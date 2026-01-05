@@ -25,6 +25,12 @@ if [[ ! -x "$CHITTA_BIN" ]]; then
     exit 0  # Don't fail hooks
 fi
 
+# Check jq exists (required for JSON parsing)
+if ! command -v jq &> /dev/null; then
+    echo "[cc-soul] jq not found. Install jq for full functionality." >&2
+    exit 0
+fi
+
 # Helper: call MCP tool
 call_mcp() {
     local method="$1"
@@ -33,9 +39,9 @@ call_mcp() {
     echo "$request" | "$CHITTA_BIN" --path "$MIND_PATH" --model "$MODEL_PATH" --vocab "$VOCAB_PATH" 2>/dev/null | grep -v '^\[chitta' | jq -r '.result.content[0].text' 2>/dev/null || true
 }
 
-# Helper: escape JSON string
+# Helper: escape JSON string (using jq, already verified above)
 json_escape() {
-    printf '%s' "$1" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))' 2>/dev/null || printf '"%s"' "$1"
+    jq -n --arg s "$1" '$s'
 }
 
 # Hook handlers
