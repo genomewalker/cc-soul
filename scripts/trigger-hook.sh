@@ -128,4 +128,68 @@ if [[ "$PROMPT_LOWER" =~ ^mistake[[:space:]]*:[[:space:]]*(.*) ]] || \
     echo "[cc-soul] Failure recorded: $TITLE" >&2
 fi
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Neural Triggers: Semantic recall for wisdom surfacing
+# ═══════════════════════════════════════════════════════════════════════════
+
+NEURAL_THRESHOLD=0.30
+NEURAL_LIMIT=2
+CLI_BIN="$PLUGIN_DIR/bin/chitta_cli"
+
+# Skip neural triggers for short prompts or commands
+if [[ ${#PROMPT} -lt 15 ]] || [[ "$PROMPT_LOWER" =~ ^(yes|no|ok|thanks|done|help|exit|quit|clear|y|n)$ ]]; then
+    exit 0
+fi
+
+# Skip if CLI not available
+if [[ ! -x "$CLI_BIN" ]]; then
+    exit 0
+fi
+
+# Run semantic recall (use default paths - explicit paths break embedding loading)
+RECALL_OUTPUT=$(timeout 5 "$CLI_BIN" recall "$PROMPT" 2>/dev/null || true)
+
+# Parse results above threshold
+NEURAL_MATCHES=""
+MATCH_COUNT=0
+CURRENT_SCORE=""
+
+while IFS= read -r line; do
+    # Skip loading messages
+    [[ "$line" =~ ^\[TieredStorage\] ]] && continue
+    [[ "$line" =~ ^Results\ for: ]] && continue
+    [[ "$line" =~ ^═ ]] && continue
+
+    # Extract score from lines like "[1] (score: 0.549431)"
+    if [[ "$line" =~ ^\[([0-9]+)\][[:space:]]*\(score:[[:space:]]*([0-9.]+)\) ]]; then
+        CURRENT_SCORE="${BASH_REMATCH[2]}"
+        continue
+    fi
+
+    # If we have a pending score and this line starts with [cc-soul], it's the title
+    if [[ -n "$CURRENT_SCORE" ]] && [[ "$line" =~ ^\[cc-soul\] ]]; then
+        # Compare score to threshold
+        if command -v bc &>/dev/null; then
+            ABOVE=$(echo "$CURRENT_SCORE > $NEURAL_THRESHOLD" | bc -l 2>/dev/null || echo "0")
+        else
+            ABOVE=0
+            [[ "${CURRENT_SCORE:0:3}" > "0.2" ]] && ABOVE=1
+        fi
+
+        if [[ "$ABOVE" == "1" ]] && [[ $MATCH_COUNT -lt $NEURAL_LIMIT ]]; then
+            TITLE="${line#\[cc-soul\] }"
+            TITLE="${TITLE:0:80}"
+            NEURAL_MATCHES="${NEURAL_MATCHES}• ${TITLE}\n"
+            ((MATCH_COUNT++))
+        fi
+        CURRENT_SCORE=""
+    fi
+done <<< "$RECALL_OUTPUT"
+
+# Output neural matches if found
+if [[ $MATCH_COUNT -gt 0 ]]; then
+    echo "[cc-soul] Related wisdom:" >&2
+    printf "%b" "$NEURAL_MATCHES" >&2
+fi
+
 exit 0
