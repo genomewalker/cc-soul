@@ -239,7 +239,8 @@ public:
 
     // Storage format version (must match migrations.hpp)
     static constexpr uint32_t STORAGE_MAGIC = 0x43485454;  // "CHTT"
-    static constexpr uint32_t STORAGE_VERSION = 2;          // v2 adds tags
+    static constexpr uint32_t STORAGE_VERSION = 3;          // v3 adds checksum footer
+    static constexpr uint32_t FOOTER_MAGIC = 0x454E4443;   // "CDNE" (end marker)
 
     // Check if file needs upgrade before loading
     static uint32_t detect_version(const std::string& path) {
@@ -259,94 +260,147 @@ public:
         return 1;
     }
 
-    // Save hot tier to file (with file locking for concurrency safety)
+    // Save hot tier to file with atomic write and checksum
+    // Writes to .tmp file first, then atomically renames on success
     bool save(const std::string& path) const {
         // Acquire exclusive lock on lock file
         std::string lock_path = path + ".lock";
+        std::string tmp_path = path + ".tmp";
         int lock_fd = ::open(lock_path.c_str(), O_CREAT | O_RDWR, 0644);
         if (lock_fd >= 0) {
             flock(lock_fd, LOCK_EX);
         }
 
-        std::ofstream out(path, std::ios::binary);
-        if (!out) {
+        auto release_lock = [&lock_fd]() {
             if (lock_fd >= 0) { flock(lock_fd, LOCK_UN); ::close(lock_fd); }
+        };
+
+        // Write to temporary file first (atomic write pattern)
+        std::ofstream out(tmp_path, std::ios::binary);
+        if (!out) {
+            release_lock();
             return false;
         }
 
-        // Write magic and version header (v2+)
-        out.write(reinterpret_cast<const char*>(&STORAGE_MAGIC), sizeof(STORAGE_MAGIC));
-        out.write(reinterpret_cast<const char*>(&STORAGE_VERSION), sizeof(STORAGE_VERSION));
+        // Collect all data for checksum calculation
+        std::vector<uint8_t> buffer;
+        buffer.reserve(1024 * 1024);  // 1MB initial reserve
+
+        auto write_to_buffer = [&buffer](const void* data, size_t size) {
+            const uint8_t* bytes = static_cast<const uint8_t*>(data);
+            buffer.insert(buffer.end(), bytes, bytes + size);
+        };
+
+        // Write magic and version header (v3+)
+        write_to_buffer(&STORAGE_MAGIC, sizeof(STORAGE_MAGIC));
+        write_to_buffer(&STORAGE_VERSION, sizeof(STORAGE_VERSION));
 
         // Write node count
         size_t count = nodes_.size();
-        out.write(reinterpret_cast<const char*>(&count), sizeof(count));
+        write_to_buffer(&count, sizeof(count));
 
         // Write each node
         for (const auto& [id, node] : nodes_) {
             // Node ID
-            out.write(reinterpret_cast<const char*>(&id.high), sizeof(id.high));
-            out.write(reinterpret_cast<const char*>(&id.low), sizeof(id.low));
+            write_to_buffer(&id.high, sizeof(id.high));
+            write_to_buffer(&id.low, sizeof(id.low));
 
             // Node type and metadata
-            out.write(reinterpret_cast<const char*>(&node.node_type), sizeof(node.node_type));
-            out.write(reinterpret_cast<const char*>(&node.tau_created), sizeof(node.tau_created));
-            out.write(reinterpret_cast<const char*>(&node.tau_accessed), sizeof(node.tau_accessed));
-            out.write(reinterpret_cast<const char*>(&node.delta), sizeof(node.delta));
-            out.write(reinterpret_cast<const char*>(&node.kappa.mu), sizeof(node.kappa.mu));
-            out.write(reinterpret_cast<const char*>(&node.kappa.sigma_sq), sizeof(node.kappa.sigma_sq));
-            out.write(reinterpret_cast<const char*>(&node.kappa.n), sizeof(node.kappa.n));
+            write_to_buffer(&node.node_type, sizeof(node.node_type));
+            write_to_buffer(&node.tau_created, sizeof(node.tau_created));
+            write_to_buffer(&node.tau_accessed, sizeof(node.tau_accessed));
+            write_to_buffer(&node.delta, sizeof(node.delta));
+            write_to_buffer(&node.kappa.mu, sizeof(node.kappa.mu));
+            write_to_buffer(&node.kappa.sigma_sq, sizeof(node.kappa.sigma_sq));
+            write_to_buffer(&node.kappa.n, sizeof(node.kappa.n));
 
             // Vector (full float32)
-            out.write(reinterpret_cast<const char*>(node.nu.data.data()),
-                      node.nu.data.size() * sizeof(float));
+            write_to_buffer(node.nu.data.data(), node.nu.data.size() * sizeof(float));
 
             // Payload
             size_t payload_size = node.payload.size();
-            out.write(reinterpret_cast<const char*>(&payload_size), sizeof(payload_size));
+            write_to_buffer(&payload_size, sizeof(payload_size));
             if (payload_size > 0) {
-                out.write(reinterpret_cast<const char*>(node.payload.data()), payload_size);
+                write_to_buffer(node.payload.data(), payload_size);
             }
 
             // Edges
             size_t edge_count = node.edges.size();
-            out.write(reinterpret_cast<const char*>(&edge_count), sizeof(edge_count));
+            write_to_buffer(&edge_count, sizeof(edge_count));
             for (const auto& edge : node.edges) {
-                out.write(reinterpret_cast<const char*>(&edge.target.high), sizeof(edge.target.high));
-                out.write(reinterpret_cast<const char*>(&edge.target.low), sizeof(edge.target.low));
-                out.write(reinterpret_cast<const char*>(&edge.type), sizeof(edge.type));
-                out.write(reinterpret_cast<const char*>(&edge.weight), sizeof(edge.weight));
+                write_to_buffer(&edge.target.high, sizeof(edge.target.high));
+                write_to_buffer(&edge.target.low, sizeof(edge.target.low));
+                write_to_buffer(&edge.type, sizeof(edge.type));
+                write_to_buffer(&edge.weight, sizeof(edge.weight));
             }
 
             // Tags
             size_t tag_count = node.tags.size();
-            out.write(reinterpret_cast<const char*>(&tag_count), sizeof(tag_count));
+            write_to_buffer(&tag_count, sizeof(tag_count));
             for (const auto& tag : node.tags) {
                 size_t tag_len = tag.size();
-                out.write(reinterpret_cast<const char*>(&tag_len), sizeof(tag_len));
-                out.write(tag.data(), tag_len);
+                write_to_buffer(&tag_len, sizeof(tag_len));
+                write_to_buffer(tag.data(), tag_len);
             }
         }
 
         // Save HNSW index
         auto index_data = index_.serialize();
         size_t index_size = index_data.size();
-        out.write(reinterpret_cast<const char*>(&index_size), sizeof(index_size));
-        out.write(reinterpret_cast<const char*>(index_data.data()), index_size);
+        write_to_buffer(&index_size, sizeof(index_size));
+        write_to_buffer(index_data.data(), index_size);
 
-        bool success = out.good();
-        out.close();
+        // Calculate checksum of all content
+        uint32_t checksum = crc32(buffer.data(), buffer.size());
 
-        // Release lock
-        if (lock_fd >= 0) {
-            flock(lock_fd, LOCK_UN);
-            ::close(lock_fd);
+        // Write content + footer (checksum + magic)
+        out.write(reinterpret_cast<const char*>(buffer.data()), buffer.size());
+        out.write(reinterpret_cast<const char*>(&checksum), sizeof(checksum));
+        out.write(reinterpret_cast<const char*>(&FOOTER_MAGIC), sizeof(FOOTER_MAGIC));
+
+        if (!out.good()) {
+            out.close();
+            ::unlink(tmp_path.c_str());  // Clean up failed write
+            release_lock();
+            return false;
         }
 
-        return success;
+        // Flush to disk before rename
+        out.flush();
+        out.close();
+
+        // Fsync the file to ensure durability
+        int tmp_fd = ::open(tmp_path.c_str(), O_RDONLY);
+        if (tmp_fd >= 0) {
+            fsync(tmp_fd);
+            ::close(tmp_fd);
+        }
+
+        // Atomic rename: this is the commit point
+        // If we crash before this, the old file is intact
+        // If we crash after this, the new file is complete
+        if (::rename(tmp_path.c_str(), path.c_str()) != 0) {
+            std::cerr << "[HotStorage] Failed to rename " << tmp_path << " to " << path << "\n";
+            ::unlink(tmp_path.c_str());
+            release_lock();
+            return false;
+        }
+
+        // Fsync the directory to ensure the rename is durable
+        std::string dir = path.substr(0, path.find_last_of('/'));
+        if (!dir.empty()) {
+            int dir_fd = ::open(dir.c_str(), O_RDONLY | O_DIRECTORY);
+            if (dir_fd >= 0) {
+                fsync(dir_fd);
+                ::close(dir_fd);
+            }
+        }
+
+        release_lock();
+        return true;
     }
 
-    // Load hot tier from file (with file locking for concurrency safety)
+    // Load hot tier from file with checksum verification (v3+)
     // Returns false if file doesn't exist, is corrupt, or needs upgrade
     // Use detect_version() first to check if upgrade is needed
     bool load(const std::string& path) {
@@ -357,25 +411,40 @@ public:
             flock(lock_fd, LOCK_SH);
         }
 
-        std::ifstream in(path, std::ios::binary);
-        if (!in) {
-            if (lock_fd >= 0) { flock(lock_fd, LOCK_UN); ::close(lock_fd); }
-            return false;
-        }
-
-        nodes_.clear();
-        vectors_.clear();
-
-        // Require version header - no auto-upgrade
-        uint32_t magic = 0;
-        in.read(reinterpret_cast<char*>(&magic), sizeof(magic));
-
-        // Helper to release lock on early return
         auto release_lock = [&lock_fd]() {
             if (lock_fd >= 0) { flock(lock_fd, LOCK_UN); ::close(lock_fd); }
         };
 
-        if (magic != STORAGE_MAGIC) {
+        // Read entire file into memory for checksum verification
+        std::ifstream in(path, std::ios::binary | std::ios::ate);
+        if (!in) {
+            release_lock();
+            return false;
+        }
+
+        size_t file_size = in.tellg();
+        if (file_size < sizeof(STORAGE_MAGIC) + sizeof(STORAGE_VERSION)) {
+            std::cerr << "[HotStorage] File too small: " << path << "\n";
+            release_lock();
+            return false;
+        }
+
+        in.seekg(0, std::ios::beg);
+        std::vector<uint8_t> file_data(file_size);
+        in.read(reinterpret_cast<char*>(file_data.data()), file_size);
+        in.close();
+
+        // Parse header
+        size_t offset = 0;
+        auto read_from_buffer = [&file_data, &offset](void* dest, size_t size) -> bool {
+            if (offset + size > file_data.size()) return false;
+            std::memcpy(dest, file_data.data() + offset, size);
+            offset += size;
+            return true;
+        };
+
+        uint32_t magic = 0;
+        if (!read_from_buffer(&magic, sizeof(magic)) || magic != STORAGE_MAGIC) {
             std::cerr << "[HotStorage] Database needs upgrade (v1 detected). "
                       << "Run 'chitta_cli upgrade " << path << "'\n";
             release_lock();
@@ -383,12 +452,51 @@ public:
         }
 
         uint32_t version = 0;
-        in.read(reinterpret_cast<char*>(&version), sizeof(version));
+        read_from_buffer(&version, sizeof(version));
 
-        if (version < STORAGE_VERSION) {
+        // Version 3+ has checksum footer - verify before loading
+        if (version >= 3) {
+            constexpr size_t footer_size = sizeof(uint32_t) + sizeof(uint32_t);  // checksum + magic
+            if (file_size < footer_size + 8) {
+                std::cerr << "[HotStorage] File too small for v3 format: " << path << "\n";
+                release_lock();
+                return false;
+            }
+
+            // Read footer from end of file
+            size_t content_size = file_size - footer_size;
+            uint32_t stored_checksum;
+            uint32_t footer_magic;
+            std::memcpy(&stored_checksum, file_data.data() + content_size, sizeof(stored_checksum));
+            std::memcpy(&footer_magic, file_data.data() + content_size + sizeof(stored_checksum), sizeof(footer_magic));
+
+            if (footer_magic != FOOTER_MAGIC) {
+                std::cerr << "[HotStorage] Invalid footer magic, file may be corrupt: " << path << "\n";
+                release_lock();
+                return false;
+            }
+
+            // Verify checksum of content (everything before footer)
+            uint32_t computed_checksum = crc32(file_data.data(), content_size);
+            if (computed_checksum != stored_checksum) {
+                std::cerr << "[HotStorage] Checksum mismatch! File is corrupt: " << path
+                          << " (stored=" << std::hex << stored_checksum
+                          << ", computed=" << computed_checksum << std::dec << ")\n";
+                release_lock();
+                return false;
+            }
+
+            std::cerr << "[HotStorage] Checksum verified OK for " << path << "\n";
+
+            // Truncate file_data to content only for parsing
+            file_data.resize(content_size);
+        } else if (version == 2) {
+            // v2 is compatible - no checksum to verify, just read as-is
+            // Will be upgraded to v3 on next save
+            std::cerr << "[HotStorage] Reading v2 format (no checksum), will upgrade on save\n";
+        } else if (version < 2) {
             std::cerr << "[HotStorage] Database version " << version
-                      << " is older than required " << STORAGE_VERSION
-                      << ". Run 'chitta_cli upgrade " << path << "'\n";
+                      << " is too old. Run 'chitta_cli upgrade " << path << "'\n";
             release_lock();
             return false;
         }
@@ -401,62 +509,85 @@ public:
             return false;
         }
 
+        nodes_.clear();
+        vectors_.clear();
+
         // Read node count
         size_t count;
-        in.read(reinterpret_cast<char*>(&count), sizeof(count));
+        if (!read_from_buffer(&count, sizeof(count))) {
+            release_lock();
+            return false;
+        }
 
         // Read each node
         for (size_t i = 0; i < count; ++i) {
             NodeId id;
-            in.read(reinterpret_cast<char*>(&id.high), sizeof(id.high));
-            in.read(reinterpret_cast<char*>(&id.low), sizeof(id.low));
+            if (!read_from_buffer(&id.high, sizeof(id.high)) ||
+                !read_from_buffer(&id.low, sizeof(id.low))) {
+                std::cerr << "[HotStorage] Truncated file at node " << i << "\n";
+                release_lock();
+                return false;
+            }
 
             Node node;
             node.id = id;
-            in.read(reinterpret_cast<char*>(&node.node_type), sizeof(node.node_type));
-            in.read(reinterpret_cast<char*>(&node.tau_created), sizeof(node.tau_created));
-            in.read(reinterpret_cast<char*>(&node.tau_accessed), sizeof(node.tau_accessed));
-            in.read(reinterpret_cast<char*>(&node.delta), sizeof(node.delta));
-            in.read(reinterpret_cast<char*>(&node.kappa.mu), sizeof(node.kappa.mu));
-            in.read(reinterpret_cast<char*>(&node.kappa.sigma_sq), sizeof(node.kappa.sigma_sq));
-            in.read(reinterpret_cast<char*>(&node.kappa.n), sizeof(node.kappa.n));
+            read_from_buffer(&node.node_type, sizeof(node.node_type));
+            read_from_buffer(&node.tau_created, sizeof(node.tau_created));
+            read_from_buffer(&node.tau_accessed, sizeof(node.tau_accessed));
+            read_from_buffer(&node.delta, sizeof(node.delta));
+            read_from_buffer(&node.kappa.mu, sizeof(node.kappa.mu));
+            read_from_buffer(&node.kappa.sigma_sq, sizeof(node.kappa.sigma_sq));
+            read_from_buffer(&node.kappa.n, sizeof(node.kappa.n));
 
             // Vector
             node.nu.data.resize(EMBED_DIM);
-            in.read(reinterpret_cast<char*>(node.nu.data.data()),
-                    EMBED_DIM * sizeof(float));
+            if (!read_from_buffer(node.nu.data.data(), EMBED_DIM * sizeof(float))) {
+                std::cerr << "[HotStorage] Truncated file at node " << i << " vector\n";
+                release_lock();
+                return false;
+            }
 
             // Payload
             size_t payload_size;
-            in.read(reinterpret_cast<char*>(&payload_size), sizeof(payload_size));
-            if (payload_size > 0) {
+            read_from_buffer(&payload_size, sizeof(payload_size));
+            if (payload_size > 0 && payload_size < 100 * 1024 * 1024) {  // Sanity: <100MB
                 node.payload.resize(payload_size);
-                in.read(reinterpret_cast<char*>(node.payload.data()), payload_size);
+                if (!read_from_buffer(node.payload.data(), payload_size)) {
+                    std::cerr << "[HotStorage] Truncated file at node " << i << " payload\n";
+                    release_lock();
+                    return false;
+                }
             }
 
             // Edges
             size_t edge_count;
-            in.read(reinterpret_cast<char*>(&edge_count), sizeof(edge_count));
-            node.edges.reserve(edge_count);
-            for (size_t e = 0; e < edge_count; ++e) {
-                Edge edge;
-                in.read(reinterpret_cast<char*>(&edge.target.high), sizeof(edge.target.high));
-                in.read(reinterpret_cast<char*>(&edge.target.low), sizeof(edge.target.low));
-                in.read(reinterpret_cast<char*>(&edge.type), sizeof(edge.type));
-                in.read(reinterpret_cast<char*>(&edge.weight), sizeof(edge.weight));
-                node.edges.push_back(edge);
+            read_from_buffer(&edge_count, sizeof(edge_count));
+            if (edge_count < 100000) {  // Sanity check
+                node.edges.reserve(edge_count);
+                for (size_t e = 0; e < edge_count; ++e) {
+                    Edge edge;
+                    read_from_buffer(&edge.target.high, sizeof(edge.target.high));
+                    read_from_buffer(&edge.target.low, sizeof(edge.target.low));
+                    read_from_buffer(&edge.type, sizeof(edge.type));
+                    read_from_buffer(&edge.weight, sizeof(edge.weight));
+                    node.edges.push_back(edge);
+                }
             }
 
             // Tags (always present in v2+)
             size_t tag_count = 0;
-            in.read(reinterpret_cast<char*>(&tag_count), sizeof(tag_count));
-            node.tags.reserve(tag_count);
-            for (size_t t = 0; t < tag_count; ++t) {
-                size_t tag_len;
-                in.read(reinterpret_cast<char*>(&tag_len), sizeof(tag_len));
-                std::string tag(tag_len, '\0');
-                in.read(&tag[0], tag_len);
-                node.tags.push_back(std::move(tag));
+            read_from_buffer(&tag_count, sizeof(tag_count));
+            if (tag_count < 10000) {  // Sanity check
+                node.tags.reserve(tag_count);
+                for (size_t t = 0; t < tag_count; ++t) {
+                    size_t tag_len;
+                    read_from_buffer(&tag_len, sizeof(tag_len));
+                    if (tag_len < 10000 && offset + tag_len <= file_data.size()) {
+                        std::string tag(reinterpret_cast<const char*>(file_data.data() + offset), tag_len);
+                        offset += tag_len;
+                        node.tags.push_back(std::move(tag));
+                    }
+                }
             }
 
             // Store node and quantized vector
@@ -465,25 +596,15 @@ public:
         }
 
         // Load HNSW index
-        size_t index_size;
-        in.read(reinterpret_cast<char*>(&index_size), sizeof(index_size));
-        std::vector<uint8_t> index_data(index_size);
-        in.read(reinterpret_cast<char*>(index_data.data()), index_size);
-
-        if (in.good() && index_size > 0) {
+        size_t index_size = 0;
+        if (read_from_buffer(&index_size, sizeof(index_size)) && index_size > 0 &&
+            index_size < 100 * 1024 * 1024 && offset + index_size <= file_data.size()) {
+            std::vector<uint8_t> index_data(file_data.data() + offset, file_data.data() + offset + index_size);
             index_ = HNSWIndex::deserialize(index_data);
         }
 
-        bool success = in.good();
-        in.close();
-
-        // Release lock
-        if (lock_fd >= 0) {
-            flock(lock_fd, LOCK_UN);
-            ::close(lock_fd);
-        }
-
-        return success;
+        release_lock();
+        return true;
     }
 
 private:

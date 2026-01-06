@@ -19,7 +19,8 @@ namespace migrations {
 
 // Storage format constants
 constexpr uint32_t STORAGE_MAGIC = 0x43485454;  // "CHTT"
-constexpr uint32_t CURRENT_VERSION = 2;
+constexpr uint32_t FOOTER_MAGIC = 0x454E4443;   // "CDNE" (end marker)
+constexpr uint32_t CURRENT_VERSION = 3;
 
 struct MigrationResult {
     bool success;
@@ -222,6 +223,91 @@ inline MigrationResult migrate_v1_to_v2(const std::string& path) {
     return result;
 }
 
+// Migration: v2 → v3 (add checksum footer for integrity)
+// v2 format: [magic][version][count][nodes+tags...][hnsw_index]
+// v3 format: [magic][version][count][nodes+tags...][hnsw_index][checksum][footer_magic]
+inline MigrationResult migrate_v2_to_v3(const std::string& path) {
+    MigrationResult result{false, 2, 3, "", ""};
+
+    // Read entire v2 file
+    std::ifstream in(path, std::ios::binary | std::ios::ate);
+    if (!in) {
+        result.error = "Cannot open file for reading";
+        return result;
+    }
+
+    size_t file_size = in.tellg();
+    in.seekg(0, std::ios::beg);
+
+    std::vector<uint8_t> data(file_size);
+    in.read(reinterpret_cast<char*>(data.data()), file_size);
+    in.close();
+
+    // Verify it's v2
+    if (file_size < 8) {
+        result.error = "File too small";
+        return result;
+    }
+
+    uint32_t magic, version;
+    std::memcpy(&magic, data.data(), sizeof(magic));
+    std::memcpy(&version, data.data() + 4, sizeof(version));
+
+    if (magic != STORAGE_MAGIC || version != 2) {
+        result.error = "Not a v2 database";
+        return result;
+    }
+
+    // Create backup
+    result.backup_path = create_backup(path, 2);
+
+    // Update version in data
+    uint32_t new_version = 3;
+    std::memcpy(data.data() + 4, &new_version, sizeof(new_version));
+
+    // Calculate checksum of content
+    uint32_t checksum = crc32(data.data(), data.size());
+
+    // Write v3 format (content + checksum footer)
+    std::string tmp_path = path + ".tmp";
+    std::ofstream out(tmp_path, std::ios::binary);
+    if (!out) {
+        result.error = "Cannot open temp file for writing";
+        return result;
+    }
+
+    out.write(reinterpret_cast<const char*>(data.data()), data.size());
+    out.write(reinterpret_cast<const char*>(&checksum), sizeof(checksum));
+    out.write(reinterpret_cast<const char*>(&FOOTER_MAGIC), sizeof(FOOTER_MAGIC));
+
+    if (!out.good()) {
+        out.close();
+        std::filesystem::remove(tmp_path);
+        result.error = "Write failed";
+        return result;
+    }
+
+    out.flush();
+    out.close();
+
+    // Fsync before rename
+    int tmp_fd = ::open(tmp_path.c_str(), O_RDONLY);
+    if (tmp_fd >= 0) {
+        fsync(tmp_fd);
+        ::close(tmp_fd);
+    }
+
+    // Atomic rename
+    if (::rename(tmp_path.c_str(), path.c_str()) != 0) {
+        std::filesystem::remove(tmp_path);
+        result.error = "Rename failed";
+        return result;
+    }
+
+    result.success = true;
+    return result;
+}
+
 // Run all necessary migrations to reach current version
 inline MigrationResult upgrade(const std::string& path) {
     namespace fs = std::filesystem;
@@ -269,8 +355,20 @@ inline MigrationResult upgrade(const std::string& path) {
         std::cerr << "[migrations] v1 → v2 complete. Backup: " << r.backup_path << "\n";
     }
 
-    // Future migrations go here:
-    // if (version == 2) { migrate_v2_to_v3(path); version = 3; }
+    // v2 → v3
+    if (version == 2) {
+        std::cerr << "[migrations] Running v2 → v3 migration (adding checksum)...\n";
+        auto r = migrate_v2_to_v3(path);
+        if (!r.success) {
+            result.error = "v2→v3 migration failed: " + r.error;
+            return result;
+        }
+        if (result.backup_path.empty()) {
+            result.backup_path = r.backup_path;
+        }
+        version = 3;
+        std::cerr << "[migrations] v2 → v3 complete. Backup: " << r.backup_path << "\n";
+    }
 
     // Clear any existing WAL after migration (fresh start)
     // The migrated snapshot is now the source of truth
