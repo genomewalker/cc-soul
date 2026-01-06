@@ -22,7 +22,7 @@ Search the soul's memory for: {ARGUMENTS}
 ## 1. Execute Search
 
 Call:
-- mcp__soul__recall(query="{ARGUMENTS}", limit=10)
+- mcp__plugin_cc-soul_cc-soul__recall(query="{ARGUMENTS}", limit=10)
 
 ## 2. Parse Results
 

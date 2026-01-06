@@ -19,7 +19,7 @@ Skills that spawn Task agents MUST follow this convention to enable activity tra
 Before spawning any agents:
 
 ```
-mcp__plugin_soul_soul__narrate(
+mcp__plugin_cc-soul_cc-soul__narrate(
   action="start",
   title="[skill]: [problem summary]"
 )
@@ -53,7 +53,7 @@ TRACKING REQUIREMENTS:
 Agents record observations with thread linkage:
 
 ```
-mcp__plugin_soul_soul__observe(
+mcp__plugin_cc-soul_cc-soul__observe(
   category="signal",
   title="Manas on [topic]",
   content="[insight]",
@@ -66,7 +66,7 @@ mcp__plugin_soul_soul__observe(
 After agents complete, recall all thread observations:
 
 ```
-mcp__plugin_soul_soul__recall(
+mcp__plugin_cc-soul_cc-soul__recall(
   query="thread:abc123",
   limit=20
 )
@@ -77,7 +77,7 @@ mcp__plugin_soul_soul__recall(
 Close the story thread with a synthesis:
 
 ```
-mcp__plugin_soul_soul__narrate(
+mcp__plugin_cc-soul_cc-soul__narrate(
   action="end",
   episode_id="abc123",
   content="[synthesized outcome]",

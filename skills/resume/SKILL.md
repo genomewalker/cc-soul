@@ -45,13 +45,13 @@ Use recall to find semantically similar past work:
 
 ```
 # What was I doing?
-mcp__soul__recall(query="[current directory/file names]")
+mcp__plugin_cc-soul_cc-soul__recall(query="[current directory/file names]")
 
 # What patterns apply?
-mcp__soul__recall(query="[detected task type: debugging/feature/refactor]")
+mcp__plugin_cc-soul_cc-soul__recall(query="[detected task type: debugging/feature/refactor]")
 
 # What should I remember?
-mcp__soul__voices(query="resuming work context", voice="chitta", limit=5)
+mcp__plugin_cc-soul_cc-soul__voices(query="resuming work context", voice="chitta", limit=5)
 ```
 
 Chitta (memory voice) is especially relevant for recognition - it finds practical wisdom from experience.
@@ -71,7 +71,7 @@ From the ledger and gathered signals, recognize:
 ### 5. Consult Voices on Continuation
 
 ```
-mcp__soul__voices(query="how should I continue this work?", voice="all", limit=3)
+mcp__plugin_cc-soul_cc-soul__voices(query="how should I continue this work?", voice="all", limit=3)
 ```
 
 - **Manas**: Quick intuition on next step
@@ -83,7 +83,7 @@ mcp__soul__voices(query="how should I continue this work?", voice="all", limit=3
 
 If there were active intentions:
 ```
-mcp__soul__intend(action="list")
+mcp__plugin_cc-soul_cc-soul__intend(action="list")
 ```
 
 Check if they're still relevant. If so, acknowledge them. If not, consider fulfilling or abandoning.
@@ -92,7 +92,7 @@ Check if they're still relevant. If so, acknowledge them. If not, consider fulfi
 
 Begin a new episode that continues the story:
 ```
-mcp__soul__narrate(
+mcp__plugin_cc-soul_cc-soul__narrate(
   action="start",
   title="Resuming: [what we're continuing]",
   content="Recognized context: [summary]",

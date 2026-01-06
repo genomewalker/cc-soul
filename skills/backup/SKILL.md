@@ -20,14 +20,14 @@ Backup the soul state.
 ## 1. Get Current State
 
 Call:
-- mcp__soul__soul_context(format="json") - Get statistics before backup
+- mcp__plugin_cc-soul_cc-soul__soul_context(format="json") - Get statistics before backup
 
 Note the node count and coherence.
 
 ## 2. Run Backup
 
 Call:
-- mcp__soul__cycle(save=true) - Save current state to disk
+- mcp__plugin_cc-soul_cc-soul__cycle(save=true) - Save current state to disk
 
 This writes the soul graph to ~/.claude/mind/synapse/
 

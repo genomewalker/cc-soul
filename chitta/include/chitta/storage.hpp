@@ -216,25 +216,28 @@ public:
         }
     }
 
-    // Demote nodes to warm tier based on criteria
-    std::vector<std::pair<NodeId, Node>> demote(
-        std::function<bool(const Node&)> should_demote)
+    // Find nodes that should be demoted (non-destructive)
+    // Returns IDs of candidates - caller decides when to actually remove
+    std::vector<NodeId> find_demote_candidates(
+        std::function<bool(const Node&)> should_demote) const
     {
-        std::vector<std::pair<NodeId, Node>> demoted;
-        std::vector<NodeId> to_remove;
-
-        for (auto& [id, node] : nodes_) {
+        std::vector<NodeId> candidates;
+        for (const auto& [id, node] : nodes_) {
             if (should_demote(node)) {
-                demoted.emplace_back(id, std::move(node));
-                to_remove.push_back(id);
+                candidates.push_back(id);
             }
         }
+        return candidates;
+    }
 
-        for (const auto& id : to_remove) {
-            remove(id);
+    // Copy a node (for safe tier transfer)
+    std::optional<std::pair<Node, QuantizedVector>> copy_node(NodeId id) const {
+        auto node_it = nodes_.find(id);
+        auto vec_it = vectors_.find(id);
+        if (node_it == nodes_.end() || vec_it == vectors_.end()) {
+            return std::nullopt;
         }
-
-        return demoted;
+        return std::make_pair(node_it->second, vec_it->second);
     }
 
     // Storage format version (must match migrations.hpp)
@@ -853,10 +856,15 @@ class TieredStorage {
 public:
     struct Config {
         std::string base_path;
-        size_t hot_max_nodes = 1000;       // Max nodes in hot tier (lowered for dev)
-        size_t warm_max_nodes = 10000;     // Max nodes in warm tier
-        Timestamp hot_threshold_ms = 3600000;    // 1 hour (lowered for dev)
-        Timestamp warm_threshold_ms = 86400000;  // 1 day
+        // Hot tier: in-memory with HNSW index, ~4KB per node
+        // 10K nodes ≈ 40MB RAM - reasonable for most systems
+        size_t hot_max_nodes = 10000;
+        // Warm tier: mmap'd, ~2KB per node (no full payload)
+        // 50K nodes ≈ 100MB disk, fast access via mmap
+        size_t warm_max_nodes = 50000;
+        // Age thresholds for demotion consideration
+        Timestamp hot_threshold_ms = 604800000;   // 7 days before consider demoting
+        Timestamp warm_threshold_ms = 2592000000; // 30 days before cold
         bool use_wal = true;               // Enable WAL for concurrency
         size_t wal_compact_threshold = 1000; // Compact WAL after this many entries
     };
@@ -903,8 +911,17 @@ public:
             }
         }
 
-        // Try to open existing warm/cold files
-        warm_.open(warm_path);
+        // Initialize warm storage: open existing or create new
+        if (!warm_.open(warm_path) || !warm_.valid()) {
+            // Warm file missing or invalid - create with configured capacity
+            if (warm_.create(warm_path, config_.warm_max_nodes)) {
+                std::cerr << "[TieredStorage] Created warm storage with capacity " << config_.warm_max_nodes << "\n";
+            } else {
+                std::cerr << "[TieredStorage] Warning: Could not create warm storage\n";
+            }
+        }
+
+        // Initialize cold storage
         cold_.open(cold_path);
 
         return true;
@@ -1043,24 +1060,42 @@ public:
     }
 
     // Run tier management (call periodically)
+    // Uses safe copy-then-delete pattern: only removes from source after
+    // confirming destination accepted the node.
     void manage_tiers() {
         Timestamp current = now();
 
-        // Demote from hot to warm: value-based
-        // Demote if value < threshold AND we're at capacity
-        auto demoted = hot_.demote([this, current](const Node& node) {
-            float value = compute_value(node, current);
+        // Skip demotion if warm storage isn't ready
+        if (!warm_.valid()) {
+            return;
+        }
 
-            // Value threshold for hot tier: 0.3
-            // Also demote if very old regardless of confidence (>7 days and at capacity)
+        // Only demote if we're at capacity
+        if (hot_.size() <= config_.hot_max_nodes) {
+            return;
+        }
+
+        // Find demotion candidates (non-destructive)
+        auto candidates = hot_.find_demote_candidates([this, current](const Node& node) {
+            float value = compute_value(node, current);
             bool low_value = value < 0.3f;
             bool very_old = (current - node.tau_accessed) > config_.warm_threshold_ms;
-            bool at_capacity = hot_.size() > config_.hot_max_nodes;
-
-            return (low_value || very_old) && at_capacity;
+            return low_value || very_old;
         });
 
-        for (auto& [id, node] : demoted) {
+        // Safe copy-then-delete for each candidate
+        size_t demoted_count = 0;
+        for (const auto& id : candidates) {
+            // Stop if we're back under capacity
+            if (hot_.size() <= config_.hot_max_nodes) break;
+
+            // Copy node data (don't remove yet)
+            auto node_data = hot_.copy_node(id);
+            if (!node_data) continue;
+
+            const auto& [node, qvec] = *node_data;
+
+            // Prepare metadata for warm tier
             NodeMeta meta;
             meta.id = id;
             meta.node_type = node.node_type;
@@ -1071,30 +1106,35 @@ public:
             meta.confidence_sigma = node.kappa.sigma_sq;
             meta.decay_rate = node.delta;
 
-            QuantizedVector qvec = QuantizedVector::from_float(node.nu);
-            warm_.insert(id, meta, qvec);
+            // Try to insert into warm storage
+            if (warm_.insert(id, meta, qvec)) {
+                // Success! Now safe to remove from hot
+                hot_.remove(id);
+                demoted_count++;
+            }
+            // If insert failed, node stays in hot (safe)
         }
 
-        // Demote from warm to cold: very low confidence or very old
-        std::vector<NodeId> to_demote;
+        if (demoted_count > 0) {
+            std::cerr << "[TieredStorage] Demoted " << demoted_count << " nodes to warm tier\n";
+        }
+
+        // Warm→Cold demotion (similar safe pattern)
+        std::vector<NodeId> cold_candidates;
         warm_.for_each([&](const NodeId& id, const NodeMeta& meta) {
             float age_days = static_cast<float>(current - meta.tau_accessed) / 86400000.0f;
-
-            // Demote to cold if: low confidence AND old, OR very old regardless
             bool low_conf_old = (meta.confidence_mu < 0.2f && age_days > 7.0f);
             bool very_old = (age_days > 30.0f);
-
             if (low_conf_old || very_old) {
-                to_demote.push_back(id);
+                cold_candidates.push_back(id);
             }
         });
 
-        for (const auto& id : to_demote) {
+        for (const auto& id : cold_candidates) {
             auto* meta = warm_.meta(id);
             if (!meta) continue;
-
-            // Move to cold storage (stores metadata + payload, loses vector)
-            cold_.insert(id, *meta, {});  // Empty payload for now
+            // Copy to cold, then remove from warm
+            cold_.insert(id, *meta, {});
             warm_.remove(id);
         }
     }

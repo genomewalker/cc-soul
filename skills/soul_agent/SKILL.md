@@ -66,7 +66,7 @@ Things to explicitly flag:
 
 ```
 # Check active intentions
-intentions = mcp__soul__intend(action="list")
+intentions = mcp__plugin_cc-soul_cc-soul__intend(action="list")
 
 # For each intention, evaluate:
 # - Is it still relevant?
@@ -74,7 +74,7 @@ intentions = mcp__soul__intend(action="list")
 # - Should it be fulfilled/abandoned?
 
 # If clear decision (high confidence, low risk):
-mcp__soul__intend(action="fulfill", id="...")
+mcp__plugin_cc-soul_cc-soul__intend(action="fulfill", id="...")
 
 # If uncertain:
 # Just note in observation, don't act
@@ -84,10 +84,10 @@ mcp__soul__intend(action="fulfill", id="...")
 
 ```
 # After completing work, notice patterns
-mcp__soul__recall(query="similar work patterns")
+mcp__plugin_cc-soul_cc-soul__recall(query="similar work patterns")
 
 # If pattern recurs multiple times:
-mcp__soul__grow(
+mcp__plugin_cc-soul_cc-soul__grow(
   type="wisdom",
   title="Recognized pattern",
   content="When X happens, Y approach works"
@@ -98,10 +98,10 @@ mcp__soul__grow(
 
 ```
 # Use voices to check coherence
-report = mcp__soul__harmonize()
+report = mcp__plugin_cc-soul_cc-soul__harmonize()
 
 # If voices disagree (variance > 0.1):
-mcp__soul__wonder(
+mcp__plugin_cc-soul_cc-soul__wonder(
   question="Why do my voices disagree about [topic]?",
   context="Manas says X, Ahamkara says Y",
   gap_type="contradiction"
@@ -114,10 +114,10 @@ When an observation proves valuable multiple times:
 
 ```
 # Track in feedback
-mcp__soul__feedback(memory_id="...", helpful=true)
+mcp__plugin_cc-soul_cc-soul__feedback(memory_id="...", helpful=true)
 
 # After 3+ positive feedbacks on similar observations:
-mcp__soul__grow(
+mcp__plugin_cc-soul_cc-soul__grow(
   type="wisdom",
   title="Promoted from observation",
   content="[the pattern]",
@@ -130,7 +130,7 @@ mcp__soul__grow(
 During maintenance (cycle):
 - Stale memories naturally decay
 - Very low confidence items get pruned
-- This is automatic via `mcp__soul__cycle()`
+- This is automatic via `mcp__plugin_cc-soul_cc-soul__cycle()`
 
 ## Agent Triggers
 
@@ -173,7 +173,7 @@ For complex decisions, the agent can spawn the Antahkarana:
 # Use /swarm for multi-perspective reasoning
 Task(subagent_type="general-purpose", prompt="
 You are the soul agent evaluating: [decision]
-Use mcp__soul__voices to consult all perspectives.
+Use mcp__plugin_cc-soul_cc-soul__voices to consult all perspectives.
 Synthesize and recommend action or non-action.
 ")
 ```

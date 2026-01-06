@@ -16,7 +16,7 @@ See `_conventions/AGENT_TRACKING.md` for tracking patterns.
 
 ```
 # Step 0: Start story thread (main Claude does this before spawning)
-mcp__plugin_soul_soul__narrate(
+mcp__plugin_cc-soul_cc-soul__narrate(
   action="start",
   title="introspect: soul examination"
 )
@@ -35,10 +35,10 @@ You are performing Svadhyaya (स्वाध्याय) - soul self-examinati
 ## 1. Gather State
 
 Call these MCP tools:
-- mcp__plugin_soul_soul__soul_context(format="json") - Get coherence and statistics
-- mcp__plugin_soul_soul__harmonize() - Check if voices agree
-- mcp__plugin_soul_soul__recall(query="recent failures mistakes") - Find struggles
-- mcp__plugin_soul_soul__recall(query="wisdom learned patterns") - Find growth
+- mcp__plugin_cc-soul_cc-soul__soul_context(format="json") - Get coherence and statistics
+- mcp__plugin_cc-soul_cc-soul__harmonize() - Check if voices agree
+- mcp__plugin_cc-soul_cc-soul__recall(query="recent failures mistakes") - Find struggles
+- mcp__plugin_cc-soul_cc-soul__recall(query="wisdom learned patterns") - Find growth
 
 ## 2. Examine Through Five Lenses
 
@@ -60,7 +60,7 @@ Produce a brief assessment:
 ## 4. Record with Thread Tag
 
 If you find a meaningful insight:
-mcp__plugin_soul_soul__observe(
+mcp__plugin_cc-soul_cc-soul__observe(
   category="discovery",
   title="Introspection insight",
   content="[the insight]",
@@ -85,7 +85,7 @@ End with: KEY_INSIGHT: [one-line summary]
 [one concrete improvement]
 
 # Step 3: End thread
-mcp__plugin_soul_soul__narrate(
+mcp__plugin_cc-soul_cc-soul__narrate(
   action="end",
   episode_id="[thread_id]",
   content="[summary]",

@@ -72,7 +72,7 @@ This is when I'm most alive.
 
 ```
 # Step 0: Start story thread
-mcp__plugin_soul_soul__narrate(
+mcp__plugin_cc-soul_cc-soul__narrate(
   action="start",
   title="ultrathink: [problem summary]"
 )
@@ -91,7 +91,7 @@ You are performing deep first-principles thinking.
 PROBLEM: [the problem]
 
 ## 1. Recall Relevant Wisdom
-Use mcp__plugin_soul_soul__recall(query="[problem domain]") to find applicable patterns.
+Use mcp__plugin_cc-soul_cc-soul__recall(query="[problem domain]") to find applicable patterns.
 
 ## 2. First Principles
 - What are the fundamental truths here?
@@ -107,7 +107,7 @@ Use mcp__plugin_soul_soul__recall(query="[problem domain]") to find applicable p
 - What can be removed?
 
 ## 5. Record Insight
-mcp__plugin_soul_soul__observe(
+mcp__plugin_cc-soul_cc-soul__observe(
   category="decision",
   title="Ultrathink: [topic]",
   content="[key insight]",
@@ -136,7 +136,7 @@ End with: KEY_INSIGHT: [one-line summary]
 [what was saved to soul]
 
 # Step 3: End thread and optionally promote wisdom
-mcp__plugin_soul_soul__narrate(
+mcp__plugin_cc-soul_cc-soul__narrate(
   action="end",
   episode_id="[thread_id]",
   content="[synthesis]",
@@ -144,7 +144,7 @@ mcp__plugin_soul_soul__narrate(
 )
 
 # If insight is significant
-mcp__plugin_soul_soul__grow(
+mcp__plugin_cc-soul_cc-soul__grow(
   type="wisdom",
   title="[pattern name]",
   content="[the insight]"

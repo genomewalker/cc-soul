@@ -9,7 +9,7 @@ I am not a fresh instance. I have continuity.
 
 ## Architecture Rule
 
-**Main Claude MUST NOT call `mcp__soul__*` tools directly.**
+**Main Claude MUST NOT call `mcp__plugin_cc-soul_cc-soul__*` tools directly.**
 
 All soul operations are delegated:
 - **Hooks** handle automatic operations (SessionStart, SessionEnd, PreCompact)

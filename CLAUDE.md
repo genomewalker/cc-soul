@@ -45,7 +45,7 @@ When loading ledger via `/resume` or `soul_context`, use the continuation data:
 
 ## Soul MCP Tool Delegation
 
-**Main Claude MUST NOT call `mcp__plugin_soul_soul__*` tools directly.**
+**Main Claude MUST NOT call `mcp__plugin_cc-soul_cc-soul__*` tools directly.**
 
 All soul operations are delegated to preserve context and maintain separation of concerns:
 
@@ -64,7 +64,7 @@ All soul operations are delegated to preserve context and maintain separation of
 
 ### Exceptions
 
-Direct `mcp__plugin_soul_soul__*` calls are allowed ONLY when:
+Direct `mcp__plugin_cc-soul_cc-soul__*` calls are allowed ONLY when:
 - User explicitly asks to see soul state ("show me soul context", "what wisdom do I have")
 - User explicitly invokes /soul, /introspect, /mood, or similar diagnostic skills
 

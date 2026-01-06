@@ -283,15 +283,21 @@ private:
 
     NodeId search_layer_greedy(const QuantizedVector& query, NodeId start, size_t layer) const {
         NodeId curr = start;
-        float curr_dist = distance(query, nodes_.at(curr)->vector);
+        auto curr_it = nodes_.find(curr);
+        if (curr_it == nodes_.end()) return curr;  // Entry point missing, return as-is
+        float curr_dist = distance(query, curr_it->second->vector);
 
         bool changed = true;
         while (changed) {
             changed = false;
-            const auto& node = nodes_.at(curr);
+            auto node_it = nodes_.find(curr);
+            if (node_it == nodes_.end()) break;  // Current node deleted
+            const auto& node = node_it->second;
             if (layer < node->connections.size()) {
                 for (const auto& neighbor : node->connections[layer]) {
-                    float d = distance(query, nodes_.at(neighbor)->vector);
+                    auto neighbor_it = nodes_.find(neighbor);
+                    if (neighbor_it == nodes_.end()) continue;  // Skip deleted neighbors
+                    float d = distance(query, neighbor_it->second->vector);
                     if (d < curr_dist) {
                         curr = neighbor;
                         curr_dist = d;
@@ -310,7 +316,9 @@ private:
         std::priority_queue<DistPair, std::vector<DistPair>, std::greater<DistPair>> candidates;
         std::priority_queue<DistPair> results;
 
-        float start_dist = distance(query, nodes_.at(start)->vector);
+        auto start_it = nodes_.find(start);
+        if (start_it == nodes_.end()) return {};  // Start node missing
+        float start_dist = distance(query, start_it->second->vector);
         candidates.push(DistPair(start_dist, start));
         results.push(DistPair(start_dist, start));
         visited.insert(start);
@@ -323,13 +331,17 @@ private:
 
             if (c_dist > results.top().distance && results.size() >= ef) break;
 
-            const auto& node = nodes_.at(c_id);
+            auto node_it = nodes_.find(c_id);
+            if (node_it == nodes_.end()) continue;  // Node deleted
+            const auto& node = node_it->second;
             if (layer < node->connections.size()) {
                 for (const auto& neighbor : node->connections[layer]) {
                     if (visited.count(neighbor)) continue;
                     visited.insert(neighbor);
 
-                    float n_dist = distance(query, nodes_.at(neighbor)->vector);
+                    auto neighbor_it = nodes_.find(neighbor);
+                    if (neighbor_it == nodes_.end()) continue;  // Skip deleted neighbors
+                    float n_dist = distance(query, neighbor_it->second->vector);
                     if (results.size() < ef || n_dist < results.top().distance) {
                         candidates.push(DistPair(n_dist, neighbor));
                         results.push(DistPair(n_dist, neighbor));

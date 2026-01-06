@@ -85,7 +85,7 @@ A yajña requires a plan. Either:
 ### Step 1: Start the Ritual Thread
 
 ```
-mcp__plugin_soul_soul__narrate(
+mcp__plugin_cc-soul_cc-soul__narrate(
   action="start",
   title="yajña: [goal summary]"
 )
@@ -218,7 +218,7 @@ Outcome: [final result]
 ### Step 5: End the Ritual
 
 ```
-mcp__plugin_soul_soul__narrate(
+mcp__plugin_cc-soul_cc-soul__narrate(
   action="end",
   episode_id="[thread_id]",
   content="[synthesis summary]",

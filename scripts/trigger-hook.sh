@@ -180,7 +180,7 @@ while IFS= read -r line; do
             TITLE="${line#\[cc-soul\] }"
             TITLE="${TITLE:0:80}"
             NEURAL_MATCHES="${NEURAL_MATCHES}• ${TITLE}\n"
-            ((MATCH_COUNT++))
+            MATCH_COUNT=$((MATCH_COUNT + 1))
         fi
         CURRENT_SCORE=""
     fi

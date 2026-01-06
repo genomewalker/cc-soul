@@ -80,12 +80,9 @@ public:
             {Op::snapshot(), Op::prune(0.2f), Op::compute_coherence()}
         ));
 
-        // Periodic pruning trigger
-        add_trigger(Trigger(
-            "prune_dead",
-            Condition::always(),
-            {Op::prune(0.05f)}
-        ));
+        // NOTE: Pruning is now handled by TieredStorage tier management
+        // and explicit cycle() calls, not on every tick. Removing the
+        // always-prune trigger that was deleting too many nodes.
 
         return *this;
     }

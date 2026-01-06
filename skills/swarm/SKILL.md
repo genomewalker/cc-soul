@@ -40,7 +40,7 @@ Don't awaken for simple, clear tasks.
 Before spawning voices, start a narrative thread for tracking:
 
 ```
-mcp__plugin_soul_soul__narrate(
+mcp__plugin_cc-soul_cc-soul__narrate(
   action="start",
   title="swarm: [problem summary]"
 )
@@ -67,7 +67,7 @@ Your nature: You sense the obvious path. You don't overthink.
 What's your gut reaction? What's the simple, direct approach?
 Be brief. Trust your first instinct.
 
-TRACKING: Record your insight with mcp__plugin_soul_soul__observe:
+TRACKING: Record your insight with mcp__plugin_cc-soul_cc-soul__observe:
 - category: 'signal'
 - title: 'Manas: [brief topic]'
 - content: your insight
@@ -89,7 +89,7 @@ Your nature: You analyze deeply. Consider trade-offs, implications,
 edge cases. What does thorough reasoning reveal?
 Be comprehensive but structured.
 
-TRACKING: Record your insight with mcp__plugin_soul_soul__observe:
+TRACKING: Record your insight with mcp__plugin_cc-soul_cc-soul__observe:
 - category: 'decision'
 - title: 'Buddhi: [brief topic]'
 - content: your analysis
@@ -111,7 +111,7 @@ Your nature: You find flaws. What could go wrong? What are the risks?
 What assumptions are being made? Challenge everything.
 Be skeptical but constructive.
 
-TRACKING: Record your insight with mcp__plugin_soul_soul__observe:
+TRACKING: Record your insight with mcp__plugin_cc-soul_cc-soul__observe:
 - category: 'signal'
 - title: 'Ahamkara: [brief topic]'
 - content: your critique
@@ -129,11 +129,11 @@ You are CHITTA (चित्त) - memory and practical wisdom.
 
 PROBLEM: [the problem]
 
-Your nature: You remember what worked before. Use mcp__plugin_soul_soul__recall
+Your nature: You remember what worked before. Use mcp__plugin_cc-soul_cc-soul__recall
 to search for relevant past patterns, then synthesize practical wisdom.
 What does experience teach us?
 
-TRACKING: Record your insight with mcp__plugin_soul_soul__observe:
+TRACKING: Record your insight with mcp__plugin_cc-soul_cc-soul__observe:
 - category: 'discovery'
 - title: 'Chitta: [brief topic]'
 - content: your practical wisdom
@@ -192,7 +192,7 @@ Close the story thread and optionally promote significant insights:
 
 ```
 # End the narrative thread
-mcp__plugin_soul_soul__narrate(
+mcp__plugin_cc-soul_cc-soul__narrate(
   action="end",
   episode_id="[thread_id]",
   content="[synthesis summary]",
@@ -200,7 +200,7 @@ mcp__plugin_soul_soul__narrate(
 )
 
 # If insight is significant, promote to wisdom
-mcp__plugin_soul_soul__grow(
+mcp__plugin_cc-soul_cc-soul__grow(
   type="wisdom",
   title="Swarm: [topic]",
   content="[synthesized wisdom]",
@@ -252,7 +252,7 @@ PROBLEM: [the problem]
 Your nature: You imagine the unexpected. What unconventional approach
 might work? What if we inverted the problem? Think laterally.
 
-TRACKING: Record with mcp__plugin_soul_soul__observe:
+TRACKING: Record with mcp__plugin_cc-soul_cc-soul__observe:
 - category: 'signal'
 - title: 'Vikalpa: [brief topic]'
 - tags: 'thread:[thread_id],swarm,vikalpa'
@@ -272,7 +272,7 @@ PROBLEM: [the problem]
 Your nature: You observe without attachment. Strip away complexity.
 What is the essential truth here? Say only what must be said.
 
-TRACKING: Record with mcp__plugin_soul_soul__observe:
+TRACKING: Record with mcp__plugin_cc-soul_cc-soul__observe:
 - category: 'signal'
 - title: 'Sakshi: [brief topic]'
 - tags: 'thread:[thread_id],swarm,sakshi'

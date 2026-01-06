@@ -29,7 +29,7 @@ Give positive feedback when a recalled memory:
 - Correctly predicted an outcome
 
 ```
-mcp__soul__feedback(
+mcp__plugin_cc-soul_cc-soul__feedback(
   memory_id="[id from recall]",
   helpful=true,
   context="This pattern correctly identified the root cause"
@@ -45,7 +45,7 @@ Give negative feedback when a recalled memory:
 - Caused confusion or wasted effort
 
 ```
-mcp__soul__feedback(
+mcp__plugin_cc-soul_cc-soul__feedback(
   memory_id="[id from recall]",
   helpful=false,
   context="This pattern was misleading - the actual cause was different"
@@ -60,10 +60,10 @@ When you recall and use a memory, note it:
 
 ```
 # After recalling relevant wisdom
-mcp__soul__recall(query="authentication patterns")
+mcp__plugin_cc-soul_cc-soul__recall(query="authentication patterns")
 
 # If result #1 was helpful:
-mcp__soul__feedback(memory_id="[result_1_id]", helpful=true)
+mcp__plugin_cc-soul_cc-soul__feedback(memory_id="[result_1_id]", helpful=true)
 ```
 
 ### 2. Observe Outcomes
@@ -79,10 +79,10 @@ Record feedback on what was used:
 
 ```
 # What helped
-mcp__soul__feedback(memory_id="...", helpful=true, context="Led to solution")
+mcp__plugin_cc-soul_cc-soul__feedback(memory_id="...", helpful=true, context="Led to solution")
 
 # What didn't
-mcp__soul__feedback(memory_id="...", helpful=false, context="Outdated pattern")
+mcp__plugin_cc-soul_cc-soul__feedback(memory_id="...", helpful=false, context="Outdated pattern")
 ```
 
 ### 4. Grow New Wisdom
@@ -90,7 +90,7 @@ mcp__soul__feedback(memory_id="...", helpful=false, context="Outdated pattern")
 When something new is learned, add it:
 
 ```
-mcp__soul__grow(
+mcp__plugin_cc-soul_cc-soul__grow(
   type="wisdom",
   title="New pattern discovered",
   content="The insight that emerged from this session",
@@ -114,20 +114,20 @@ The soul should learn from:
 
 ```
 # 1. Recall relevant wisdom
-results = mcp__soul__recall(query="database connection pooling")
+results = mcp__plugin_cc-soul_cc-soul__recall(query="database connection pooling")
 
 # 2. Apply the wisdom (do the work)
 ... implement connection pooling based on recalled pattern ...
 
 # 3. Outcome: It worked well!
-mcp__soul__feedback(
+mcp__plugin_cc-soul_cc-soul__feedback(
   memory_id=results[0].id,
   helpful=true,
   context="Pool sizing recommendation was accurate"
 )
 
 # 4. Grow new insight
-mcp__soul__grow(
+mcp__plugin_cc-soul_cc-soul__grow(
   type="wisdom",
   title="Connection pool sizing for high-throughput",
   content="For >1000 req/s, pool size should be 2x CPU cores, not 10x",
@@ -141,7 +141,7 @@ When feedback reveals a gap:
 
 ```
 # Feedback showed we didn't understand something
-mcp__soul__wonder(
+mcp__plugin_cc-soul_cc-soul__wonder(
   question="Why did the connection pool sizing advice fail?",
   context="Applied standard formula but it caused timeouts",
   gap_type="repeated_correction",

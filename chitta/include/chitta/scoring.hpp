@@ -159,8 +159,10 @@ public:
         std::vector<std::pair<NodeId, float>> scores;
 
         for (const auto& [id, terms] : doc_terms_) {
+            auto dl_it = doc_lengths_.find(id);
+            if (dl_it == doc_lengths_.end()) continue;  // Skip if length missing
             float score = 0.0f;
-            float dl = static_cast<float>(doc_lengths_.at(id));
+            float dl = static_cast<float>(dl_it->second);
 
             for (const auto& qt : query_tokens) {
                 auto tf_it = terms.find(qt);
