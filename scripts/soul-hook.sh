@@ -48,12 +48,6 @@ json_escape() {
 hook_start() {
     local trigger="${1:-startup}"
 
-    # If starting after clear, the previous session's ledger should already be saved
-    # by pre-clear or session-end. Just log the trigger.
-    if [[ "$trigger" == "clear" ]]; then
-        echo "[cc-soul] Session started (after /clear)"
-    fi
-
     # Record session start state
     local start_time=$(date +%s)
     local stats
@@ -61,18 +55,29 @@ hook_start() {
     local start_nodes
     start_nodes=$(echo "$stats" | jq -r '.statistics.total_nodes' 2>/dev/null || echo "0")
 
-    # Save session state
+    # Save session state for later delta calculation
     echo "{\"start_time\":$start_time,\"start_nodes\":$start_nodes}" > "$SESSION_FILE"
 
-    # Get soul context for injection
+    # Try to load previous session's ledger for continuity
+    local ledger_narrative
+    ledger_narrative=$(call_mcp "ledger" '{"action":"load"}' 2>/dev/null)
+
+    # Get soul context
     local context
     context=$(call_mcp "soul_context" '{"format":"text"}')
 
+    echo "[cc-soul] Session started"
+
+    # Show ledger narrative if available (for resume)
+    if [[ -n "$ledger_narrative" && "$ledger_narrative" != "null" && "$ledger_narrative" != *"No ledger found"* ]]; then
+        echo ""
+        echo "$ledger_narrative"
+    fi
+
+    # Show soul context
     if [[ -n "$context" && "$context" != "null" ]]; then
-        echo "[cc-soul] Session started"
+        echo ""
         echo "$context"
-    else
-        echo "[cc-soul] Session started (empty soul)"
     fi
 }
 
@@ -102,6 +107,7 @@ hook_end() {
     node_delta=$((end_nodes - start_nodes))
 
     # Save session ledger (Atman snapshot) before ending
+    # Let chitta auto-populate work_state with intentions and recent observations
     local duration_min=$((duration / 60))
     local session_id="session-$(date +%Y%m%d-%H%M%S)"
     local ledger_params
@@ -109,18 +115,15 @@ hook_end() {
 {
   "action": "save",
   "session_id": "$session_id",
-  "soul_state": {
-    "coherence": $coherence,
-    "nodes": $end_nodes,
-    "duration_minutes": $duration_min
-  },
   "continuation": {
     "reason": "session_end",
+    "session_duration_min": $duration_min,
     "node_delta": $node_delta
   }
 }
 EOF
 )
+    # soul_state and work_state are auto-populated by chitta with rich data
     call_mcp "ledger" "$ledger_params" >/dev/null 2>&1 || true
 
     # Record session observation (only if session was meaningful - >1 minute)
@@ -164,25 +167,13 @@ hook_prompt() {
 
 hook_pre_compact() {
     # Save state before compact - this is important!
-    # Get current state for ledger
-    local stats
-    stats=$(call_mcp "soul_context" '{"format":"json"}')
-    local nodes
-    nodes=$(echo "$stats" | jq -r '.statistics.total_nodes' 2>/dev/null || echo "0")
-    local coherence
-    coherence=$(echo "$stats" | jq -r '.coherence.tau_k' 2>/dev/null || echo "0.5")
-
-    # Save session ledger (Atman snapshot) before compaction
+    # Let chitta auto-populate soul_state and work_state
     local session_id="pre-compact-$(date +%Y%m%d-%H%M%S)"
     local ledger_params
     ledger_params=$(cat <<EOF
 {
   "action": "save",
   "session_id": "$session_id",
-  "soul_state": {
-    "coherence": $coherence,
-    "nodes": $nodes
-  },
   "continuation": {
     "reason": "context_compaction",
     "critical": ["Context was compacted - some details may be summarized"]
@@ -190,10 +181,11 @@ hook_pre_compact() {
 }
 EOF
 )
+    # soul_state and work_state are auto-populated by chitta
     call_mcp "ledger" "$ledger_params" >/dev/null 2>&1 || true
 
     # Record that a compact is happening
-    call_mcp "observe" '{"category":"signal","title":"Pre-compact checkpoint","content":"Context about to be compacted. Ledger and soul state saved."}' >/dev/null 2>&1 || true
+    call_mcp "observe" '{"category":"signal","title":"Pre-compact checkpoint","content":"Context about to be compacted. Ledger saved with full work state."}' >/dev/null 2>&1 || true
     call_mcp "cycle" '{"save":true}' >/dev/null 2>&1 || true
     echo "[cc-soul] Ledger and state saved before compact"
 }

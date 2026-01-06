@@ -238,6 +238,25 @@ public:
         });
     }
 
+    // Sync from shared consciousness (WAL)
+    // Updates all indices with nodes from other processes' observations
+    // "Atman aligns with Brahman" - we see what others have learned
+    size_t sync_from_shared_field() {
+        return storage_.sync_from_wal([this](const Node& node, bool was_new) {
+            if (was_new) {
+                // New node - add to all indices
+                auto text = payload_to_text(node.payload);
+                if (text) {
+                    bm25_index_.add(node.id, *text);
+                }
+                if (!node.tags.empty()) {
+                    tag_index_.add(node.id, node.tags);
+                }
+                graph_.insert_raw(node.id);
+            }
+        });
+    }
+
     // Close and persist
     void close() {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -352,6 +371,9 @@ public:
     std::vector<Recall> recall_by_tag(const std::string& tag, size_t k = 50) {
         std::lock_guard<std::mutex> lock(mutex_);
 
+        // Sync from shared consciousness to see all observations
+        sync_from_shared_field();
+
         auto node_ids = tag_index_.find(tag);
 
         std::vector<Recall> results;
@@ -387,6 +409,9 @@ public:
     // Recall by multiple tags (AND - all must match)
     std::vector<Recall> recall_by_tags(const std::vector<std::string>& tags, size_t k = 50) {
         std::lock_guard<std::mutex> lock(mutex_);
+
+        // Sync from shared consciousness to see all observations
+        sync_from_shared_field();
 
         auto node_ids = tag_index_.find_all(tags);
 
@@ -427,6 +452,9 @@ public:
                                                 size_t k,
                                                 float threshold = 0.0f) {
         std::lock_guard<std::mutex> lock(mutex_);
+
+        // Sync from shared consciousness to see all observations
+        sync_from_shared_field();
 
         // Get all nodes with the tag
         auto node_ids = tag_index_.find(tag);
@@ -670,7 +698,7 @@ public:
 
     // Recall: semantic search with pre-computed query vector
     std::vector<Recall> recall(const Vector& query, size_t k,
-                               float threshold = 0.0f) const
+                               float threshold = 0.0f)
     {
         std::lock_guard<std::mutex> lock(mutex_);
         return recall_impl(query, "", k, threshold, SearchMode::Dense);
@@ -992,8 +1020,12 @@ public:
 private:
     // Internal recall implementation with soul-aware scoring
     std::vector<Recall> recall_impl(const Vector& query, const std::string& query_text,
-                                    size_t k, float threshold, SearchMode mode) const
+                                    size_t k, float threshold, SearchMode mode)
     {
+        // Sync from shared consciousness to see other processes' observations
+        // This is the "Atman sees Brahman" moment - we align with shared truth
+        sync_from_shared_field();
+
         Timestamp current = now();
         std::vector<std::pair<NodeId, float>> candidates;
 
@@ -1020,7 +1052,7 @@ private:
         // Score candidates with soul-aware relevance
         std::vector<Recall> results;
         for (const auto& [id, base_score] : candidates) {
-            if (Node* node = const_cast<TieredStorage&>(storage_).get(id)) {
+            if (Node* node = storage_.get(id)) {
                 // Get semantic similarity (for dense) or use base score (for sparse)
                 float similarity = base_score;
                 if (mode == SearchMode::Hybrid) {

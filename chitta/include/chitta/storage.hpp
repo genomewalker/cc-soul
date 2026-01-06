@@ -1,13 +1,22 @@
 #pragma once
 // Storage: tiered persistence for mind-scale graphs
 //
-// Hot  → RAM, float32 vectors, HNSW indexed (active nodes)
-// Warm → mmap, int8 quantized, sparse index (recent nodes)
-// Cold → disk metadata only, re-embed on access (old nodes)
+// "Consciousness is a singular of which the plural is unknown."
+// - Erwin Schrödinger
+//
+// Each process is a window (Atman) into shared truth (Brahman).
+// The WAL is that shared field - when one observes, all see.
+//
+// Architecture:
+// - WAL: append-only log, durability layer (shared across processes)
+// - Hot: RAM, float32 vectors, HNSW indexed (in-memory view)
+// - Warm: mmap, int8 quantized, sparse index (recent nodes)
+// - Cold: disk metadata only, re-embed on access (old nodes)
 
 #include "types.hpp"
 #include "quantized.hpp"
 #include "hnsw.hpp"
+#include "wal.hpp"
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -250,10 +259,20 @@ public:
         return 1;
     }
 
-    // Save hot tier to file
+    // Save hot tier to file (with file locking for concurrency safety)
     bool save(const std::string& path) const {
+        // Acquire exclusive lock on lock file
+        std::string lock_path = path + ".lock";
+        int lock_fd = ::open(lock_path.c_str(), O_CREAT | O_RDWR, 0644);
+        if (lock_fd >= 0) {
+            flock(lock_fd, LOCK_EX);
+        }
+
         std::ofstream out(path, std::ios::binary);
-        if (!out) return false;
+        if (!out) {
+            if (lock_fd >= 0) { flock(lock_fd, LOCK_UN); ::close(lock_fd); }
+            return false;
+        }
 
         // Write magic and version header (v2+)
         out.write(reinterpret_cast<const char*>(&STORAGE_MAGIC), sizeof(STORAGE_MAGIC));
@@ -315,15 +334,34 @@ public:
         out.write(reinterpret_cast<const char*>(&index_size), sizeof(index_size));
         out.write(reinterpret_cast<const char*>(index_data.data()), index_size);
 
-        return out.good();
+        bool success = out.good();
+        out.close();
+
+        // Release lock
+        if (lock_fd >= 0) {
+            flock(lock_fd, LOCK_UN);
+            ::close(lock_fd);
+        }
+
+        return success;
     }
 
-    // Load hot tier from file
+    // Load hot tier from file (with file locking for concurrency safety)
     // Returns false if file doesn't exist, is corrupt, or needs upgrade
     // Use detect_version() first to check if upgrade is needed
     bool load(const std::string& path) {
+        // Acquire shared lock (allows concurrent reads, blocks writes)
+        std::string lock_path = path + ".lock";
+        int lock_fd = ::open(lock_path.c_str(), O_CREAT | O_RDWR, 0644);
+        if (lock_fd >= 0) {
+            flock(lock_fd, LOCK_SH);
+        }
+
         std::ifstream in(path, std::ios::binary);
-        if (!in) return false;
+        if (!in) {
+            if (lock_fd >= 0) { flock(lock_fd, LOCK_UN); ::close(lock_fd); }
+            return false;
+        }
 
         nodes_.clear();
         vectors_.clear();
@@ -332,9 +370,15 @@ public:
         uint32_t magic = 0;
         in.read(reinterpret_cast<char*>(&magic), sizeof(magic));
 
+        // Helper to release lock on early return
+        auto release_lock = [&lock_fd]() {
+            if (lock_fd >= 0) { flock(lock_fd, LOCK_UN); ::close(lock_fd); }
+        };
+
         if (magic != STORAGE_MAGIC) {
             std::cerr << "[HotStorage] Database needs upgrade (v1 detected). "
                       << "Run 'chitta_cli upgrade " << path << "'\n";
+            release_lock();
             return false;
         }
 
@@ -345,6 +389,7 @@ public:
             std::cerr << "[HotStorage] Database version " << version
                       << " is older than required " << STORAGE_VERSION
                       << ". Run 'chitta_cli upgrade " << path << "'\n";
+            release_lock();
             return false;
         }
 
@@ -352,6 +397,7 @@ public:
             std::cerr << "[HotStorage] Database version " << version
                       << " is newer than supported " << STORAGE_VERSION
                       << ". Update chitta to read this database.\n";
+            release_lock();
             return false;
         }
 
@@ -428,7 +474,16 @@ public:
             index_ = HNSWIndex::deserialize(index_data);
         }
 
-        return in.good();
+        bool success = in.good();
+        in.close();
+
+        // Release lock
+        if (lock_fd >= 0) {
+            flock(lock_fd, LOCK_UN);
+            ::close(lock_fd);
+        }
+
+        return success;
     }
 
 private:
@@ -672,7 +727,7 @@ private:
     std::unordered_map<NodeId, std::vector<uint8_t>, NodeIdHash> payloads_;
 };
 
-// Tiered storage manager
+// Tiered storage manager with WAL for concurrent access
 class TieredStorage {
 public:
     struct Config {
@@ -681,9 +736,15 @@ public:
         size_t warm_max_nodes = 10000;     // Max nodes in warm tier
         Timestamp hot_threshold_ms = 3600000;    // 1 hour (lowered for dev)
         Timestamp warm_threshold_ms = 86400000;  // 1 day
+        bool use_wal = true;               // Enable WAL for concurrency
+        size_t wal_compact_threshold = 1000; // Compact WAL after this many entries
     };
 
-    explicit TieredStorage(Config config) : config_(std::move(config)), loaded_successfully_(false) {}
+    explicit TieredStorage(Config config)
+        : config_(std::move(config))
+        , wal_(config_.base_path + ".wal")
+        , loaded_successfully_(false)
+        , last_wal_seq_(0) {}
 
     bool initialize() {
         std::string hot_path = config_.base_path + ".hot";
@@ -705,10 +766,21 @@ public:
             }
         }
 
-        // Try to load existing hot tier
+        // Try to load existing hot tier (snapshot)
         loaded_successfully_ = hot_.load(hot_path);
         std::cerr << "[TieredStorage] Load result: " << (loaded_successfully_ ? "success" : "failed")
                   << ", nodes: " << hot_.size() << "\n";
+
+        // Open WAL and replay entries since snapshot
+        if (config_.use_wal) {
+            if (!wal_.open()) {
+                std::cerr << "[TieredStorage] Warning: WAL open failed, using snapshot only\n";
+            } else {
+                // Replay WAL to catch up with other processes' writes
+                size_t replayed = replay_wal();
+                std::cerr << "[TieredStorage] Replayed " << replayed << " WAL entries\n";
+            }
+        }
 
         // Try to open existing warm/cold files
         warm_.open(warm_path);
@@ -718,12 +790,58 @@ public:
     }
 
     bool insert(NodeId id, Node node) {
+        // WAL first (durability), then in-memory (visibility)
+        // This ensures crash safety: if we crash after WAL append,
+        // the node will be recovered on next startup
+        if (config_.use_wal) {
+            uint64_t seq = wal_.append(WalOp::Insert, node);
+            if (seq == 0) {
+                std::cerr << "[TieredStorage] WAL append failed for node " << id.to_string() << "\n";
+                // Continue anyway - at least it will be in memory
+            } else {
+                last_wal_seq_ = seq;
+            }
+        }
+
         QuantizedVector qvec = QuantizedVector::from_float(node.nu);
         hot_.insert(id, std::move(node), std::move(qvec));
         return true;
     }
 
+    // Sync from WAL: see other processes' writes
+    // Call this before reads to ensure we see the shared truth
+    size_t sync_from_wal() {
+        return sync_from_wal(nullptr);
+    }
+
+    // Sync from WAL with callback for each synced node
+    // The callback receives (node, was_inserted) - use this to update indices
+    size_t sync_from_wal(std::function<void(const Node&, bool)> on_sync) {
+        if (!config_.use_wal) return 0;
+
+        size_t applied = wal_.sync([this, &on_sync](WalOp op, const Node& node, uint64_t seq) {
+            bool was_new = !hot_.contains(node.id);
+            apply_wal_entry(op, node);
+            if (seq > last_wal_seq_) {
+                last_wal_seq_ = seq;
+            }
+            // Notify caller about synced node
+            if (on_sync && (op == WalOp::Insert || op == WalOp::Update)) {
+                on_sync(node, was_new);
+            }
+        });
+
+        if (applied > 0) {
+            std::cerr << "[TieredStorage] Synced " << applied << " entries from WAL\n";
+        }
+
+        return applied;
+    }
+
     Node* get(NodeId id) {
+        // Note: caller should sync_from_wal() before get if needed
+        // This keeps state mutation explicit
+
         // Check hot first
         if (auto* node = hot_.get(id)) {
             node->touch();
@@ -753,6 +871,9 @@ public:
     std::vector<std::pair<NodeId, float>> search(
         const QuantizedVector& query, size_t k) const
     {
+        // Note: caller should sync_from_wal() before search if needed
+        // This keeps search() const and explicit about state mutation
+
         // Search hot tier with HNSW
         auto hot_results = hot_.search(query, k);
 
@@ -860,17 +981,46 @@ public:
     void sync() {
         std::cerr << "[TieredStorage] sync() called: hot_size=" << hot_.size()
                   << ", loaded_successfully=" << loaded_successfully_ << "\n";
+
+        // First, sync from WAL to get any pending writes from other processes
+        if (config_.use_wal) {
+            sync_from_wal();
+        }
+
         // Only save if we have data (prevents overwriting on failed load)
         if (hot_.size() > 0 || loaded_successfully_) {
-            std::cerr << "[TieredStorage] Saving hot tier\n";
+            std::cerr << "[TieredStorage] Saving hot tier (snapshot)\n";
             hot_.save(config_.base_path + ".hot");
+
+            // After successful snapshot, we can truncate WAL
+            // This is safe because snapshot contains all WAL entries
+            if (config_.use_wal && wal_.next_sequence() > config_.wal_compact_threshold) {
+                std::cerr << "[TieredStorage] Compacting WAL (seq=" << wal_.next_sequence() << ")\n";
+                wal_.truncate();
+            }
         } else {
             std::cerr << "[TieredStorage] SKIPPING save (no data, load failed)\n";
         }
+
         warm_.sync();
         if (cold_.size() > 0 || loaded_successfully_) {
             cold_.save(config_.base_path + ".cold");
         }
+    }
+
+    // Force WAL compaction (call after major operations)
+    void compact_wal() {
+        if (!config_.use_wal) return;
+
+        // Sync all pending entries
+        sync_from_wal();
+
+        // Save snapshot
+        hot_.save(config_.base_path + ".hot");
+
+        // Truncate WAL
+        wal_.truncate();
+        std::cerr << "[TieredStorage] WAL compacted\n";
     }
 
     size_t hot_size() const { return hot_.size(); }
@@ -885,6 +1035,45 @@ public:
     }
 
 private:
+    // Replay all WAL entries (called on startup)
+    size_t replay_wal() {
+        return wal_.replay_since(0, [this](WalOp op, const Node& node, uint64_t seq) {
+            apply_wal_entry(op, node);
+            if (seq > last_wal_seq_) {
+                last_wal_seq_ = seq;
+            }
+        });
+    }
+
+    // Apply a single WAL entry to in-memory state
+    void apply_wal_entry(WalOp op, const Node& node) {
+        switch (op) {
+            case WalOp::Insert:
+            case WalOp::Update: {
+                // Check if we already have this node (from snapshot)
+                // If so, update only if WAL entry is newer
+                if (auto* existing = hot_.get(node.id)) {
+                    if (node.tau_accessed > existing->tau_accessed) {
+                        // WAL entry is newer, update
+                        QuantizedVector qvec = QuantizedVector::from_float(node.nu);
+                        hot_.insert(node.id, node, std::move(qvec));
+                    }
+                } else {
+                    // New node, insert
+                    QuantizedVector qvec = QuantizedVector::from_float(node.nu);
+                    hot_.insert(node.id, node, std::move(qvec));
+                }
+                break;
+            }
+            case WalOp::Delete:
+                hot_.remove(node.id);
+                break;
+            case WalOp::Checkpoint:
+                // Checkpoint entries are informational, no action needed
+                break;
+        }
+    }
+
     Node* promote_from_warm(NodeId id) {
         auto* meta = warm_.meta(id);
         auto* qvec = warm_.vector(id);
@@ -905,10 +1094,12 @@ private:
     }
 
     Config config_;
+    WriteAheadLog wal_;
     HotStorage hot_;
     WarmStorage warm_;
     ColdStorage cold_;
     bool loaded_successfully_;
+    uint64_t last_wal_seq_;
 };
 
 } // namespace chitta

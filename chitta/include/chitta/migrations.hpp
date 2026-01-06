@@ -272,6 +272,19 @@ inline MigrationResult upgrade(const std::string& path) {
     // Future migrations go here:
     // if (version == 2) { migrate_v2_to_v3(path); version = 3; }
 
+    // Clear any existing WAL after migration (fresh start)
+    // The migrated snapshot is now the source of truth
+    std::string wal_path = path;
+    // Remove .hot suffix if present to get base path
+    if (wal_path.size() > 4 && wal_path.substr(wal_path.size() - 4) == ".hot") {
+        wal_path = wal_path.substr(0, wal_path.size() - 4);
+    }
+    wal_path += ".wal";
+    if (fs::exists(wal_path)) {
+        std::cerr << "[migrations] Clearing WAL after migration: " << wal_path << "\n";
+        fs::remove(wal_path);
+    }
+
     result.success = (version == CURRENT_VERSION);
     return result;
 }

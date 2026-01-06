@@ -10,6 +10,7 @@
 #include <nlohmann/json.hpp>
 #include <iostream>
 #include <sstream>
+#include <iomanip>
 #include <functional>
 #include <atomic>
 
@@ -655,10 +656,17 @@ private:
                 {"text", result.content}
             });
 
-            return make_result(id, {
+            json response = {
                 {"content", content},
                 {"isError", result.is_error}
-            });
+            };
+
+            // Include structured data if present
+            if (!result.structured.is_null()) {
+                response["structured"] = result.structured;
+            }
+
+            return make_result(id, response);
         } catch (const std::exception& e) {
             return make_error(id, rpc_error::TOOL_EXECUTION_ERROR,
                               std::string("Tool execution failed: ") + e.what());
@@ -1514,12 +1522,13 @@ private:
 
         if (action == "save") {
             // Build ledger JSON from provided components
+            // Auto-populate with rich state when not provided
             json ledger_json = json::object();
 
+            // Soul state: coherence + statistics
             if (params.contains("soul_state")) {
                 ledger_json["soul_state"] = params["soul_state"];
             } else {
-                // Auto-populate soul state if not provided
                 Coherence c = mind_->coherence();
                 ledger_json["soul_state"] = {
                     {"coherence", {
@@ -1529,16 +1538,61 @@ private:
                         {"temporal", c.temporal},
                         {"structural", c.structural}
                     }},
+                    {"statistics", {
+                        {"total_nodes", mind_->size()},
+                        {"hot_nodes", mind_->hot_size()},
+                        {"warm_nodes", mind_->warm_size()},
+                        {"cold_nodes", mind_->cold_size()}
+                    }},
                     {"timestamp", now()}
                 };
             }
 
+            // Work state: active intentions + recent activity
             if (params.contains("work_state")) {
                 ledger_json["work_state"] = params["work_state"];
             } else {
-                ledger_json["work_state"] = json::object();
+                // Auto-populate with active intentions and recent work
+                json work = json::object();
+
+                // Get active intentions by recalling Intention nodes
+                auto intents = mind_->recall("intention want goal", 10, 0.3f);
+                json active_intents = json::array();
+                for (const auto& r : intents) {
+                    if (r.type == NodeType::Intention && r.confidence.mu > 0.5f) {
+                        std::string text = r.text;
+                        if (text.length() > 150) {
+                            text = text.substr(0, 150) + "...";
+                        }
+                        active_intents.push_back(text);
+                    }
+                }
+                if (!active_intents.empty()) {
+                    work["active_intentions"] = active_intents;
+                }
+
+                // Get recent observations (last 5)
+                auto recent = mind_->recall("session work progress observation", 5, 0.25f);
+                if (!recent.empty()) {
+                    json recent_obs = json::array();
+                    for (const auto& r : recent) {
+                        if (r.type != NodeType::Intention && r.type != NodeType::Ledger) {
+                            std::string text = r.text;
+                            if (text.length() > 120) {
+                                text = text.substr(0, 120) + "...";
+                            }
+                            recent_obs.push_back(text);
+                        }
+                    }
+                    if (!recent_obs.empty()) {
+                        work["recent_observations"] = recent_obs;
+                    }
+                }
+
+                ledger_json["work_state"] = work;
             }
 
+            // Continuation: what to resume with
             if (params.contains("continuation")) {
                 ledger_json["continuation"] = params["continuation"];
             } else {
@@ -1574,10 +1628,96 @@ private:
                 {"ledger", ledger_json}
             };
 
-            std::ostringstream ss;
-            ss << "Loaded ledger: " << ledger->first.to_string();
+            // Build narrative summary for resumption
+            std::ostringstream narrative;
+            narrative << "=== Session Ledger ===\n\n";
 
-            return {false, ss.str(), result};
+            // Soul state summary
+            if (ledger_json.contains("soul_state")) {
+                auto& ss = ledger_json["soul_state"];
+                narrative << "## Soul State\n";
+                if (ss.contains("coherence")) {
+                    float tau_k = ss["coherence"].value("tau_k", 0.0f);
+                    narrative << "Coherence: " << std::fixed << std::setprecision(2) << tau_k << "\n";
+                }
+                if (ss.contains("statistics")) {
+                    auto& stats = ss["statistics"];
+                    narrative << "Nodes: " << stats.value("total_nodes", 0)
+                              << " (" << stats.value("hot_nodes", 0) << " hot)\n";
+                }
+                narrative << "\n";
+            }
+
+            // Work state - what we were doing
+            if (ledger_json.contains("work_state") && !ledger_json["work_state"].empty()) {
+                auto& ws = ledger_json["work_state"];
+                narrative << "## Where We Were\n";
+
+                if (ws.contains("active_intentions") && !ws["active_intentions"].empty()) {
+                    narrative << "\n### Active Intentions:\n";
+                    for (const auto& intent : ws["active_intentions"]) {
+                        std::string text = intent.is_string() ? intent.get<std::string>() : intent.dump();
+                        narrative << "- " << text << "\n";
+                    }
+                }
+
+                if (ws.contains("recent_observations") && !ws["recent_observations"].empty()) {
+                    narrative << "\n### Recent Work:\n";
+                    for (const auto& obs : ws["recent_observations"]) {
+                        std::string text = obs.is_string() ? obs.get<std::string>() : obs.dump();
+                        narrative << "- " << text << "\n";
+                    }
+                }
+
+                if (ws.contains("todos") && !ws["todos"].empty()) {
+                    narrative << "\n### Pending Todos:\n";
+                    for (const auto& todo : ws["todos"]) {
+                        std::string text = todo.is_string() ? todo.get<std::string>() : todo.dump();
+                        narrative << "- " << text << "\n";
+                    }
+                }
+                narrative << "\n";
+            }
+
+            // Continuation - what to do next
+            if (ledger_json.contains("continuation") && !ledger_json["continuation"].empty()) {
+                auto& cont = ledger_json["continuation"];
+                narrative << "## What To Do Next\n";
+
+                if (cont.contains("reason")) {
+                    narrative << "Last session ended: " << cont["reason"].get<std::string>() << "\n";
+                }
+
+                if (cont.contains("next_steps") && !cont["next_steps"].empty()) {
+                    narrative << "\n### Next Steps:\n";
+                    for (const auto& step : cont["next_steps"]) {
+                        std::string text = step.is_string() ? step.get<std::string>() : step.dump();
+                        narrative << "- " << text << "\n";
+                    }
+                }
+
+                if (cont.contains("critical") && !cont["critical"].empty()) {
+                    narrative << "\n### Critical Notes:\n";
+                    if (cont["critical"].is_array()) {
+                        for (const auto& note : cont["critical"]) {
+                            std::string text = note.is_string() ? note.get<std::string>() : note.dump();
+                            narrative << "⚠️ " << text << "\n";
+                        }
+                    } else {
+                        narrative << "⚠️ " << cont["critical"].get<std::string>() << "\n";
+                    }
+                }
+
+                if (cont.contains("deferred") && !cont["deferred"].empty()) {
+                    narrative << "\n### Deferred:\n";
+                    for (const auto& item : cont["deferred"]) {
+                        std::string text = item.is_string() ? item.get<std::string>() : item.dump();
+                        narrative << "- " << text << "\n";
+                    }
+                }
+            }
+
+            return {false, narrative.str(), result};
 
         } else if (action == "update") {
             std::string ledger_id_str = params.value("ledger_id", "");
