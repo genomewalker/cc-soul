@@ -20,7 +20,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          dnf install -y sqlite-devel curl
+          dnf install -y sqlite-devel curl patchelf
           # Download pre-built nlohmann_json
           curl -L -o /tmp/json.hpp https://github.com/nlohmann/json/releases/download/v3.11.3/json.hpp
           mkdir -p /usr/local/include/nlohmann
@@ -57,6 +57,21 @@ jobs:
         run: |
           mkdir -p dist
           cp /opt/onnxruntime/lib/libonnxruntime.so* bin/
+          # Find and bundle sqlite (may be in /opt/_internal or system paths)
+          # ldd shows the absolute path when it's hardcoded in the binary
+          SQLITE_PATH=$(ldd bin/chitta_migrate | grep -o '/[^ ]*libsqlite3[^ ]*' | head -1)
+          if [ -n "$SQLITE_PATH" ] && [ -f "$SQLITE_PATH" ]; then
+            cp "$SQLITE_PATH" bin/libsqlite3.so
+            # Replace hardcoded absolute path with just library name, then set RPATH
+            patchelf --replace-needed "$SQLITE_PATH" libsqlite3.so bin/chitta_migrate
+            patchelf --set-rpath '$ORIGIN' bin/chitta_migrate
+          fi
+          # Verify all binaries have portable library deps
+          echo "Verifying library dependencies..."
+          for bin in chitta_cli chitta_mcp chitta_migrate chitta_import chitta_test; do
+            echo "=== $bin ==="
+            ldd bin/$bin | grep -E '(not found|/opt/_internal)' && { echo "ERROR: $bin has non-portable deps"; exit 1; } || true
+          done
           tar -czvf dist/chitta-linux-x64.tar.gz -C bin .
 
       - name: Upload artifacts
