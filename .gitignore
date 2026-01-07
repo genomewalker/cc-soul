@@ -57,7 +57,7 @@ synapse/models/
 synapse/build/
 bin/
 chitta/build/
-chitta/include/chitta/version.hpp
+# version.hpp is generated but we track it for reproducibility
 .install-complete
 *.o
 *.a
@@ -66,6 +66,9 @@ chitta/include/chitta/version.hpp
 # Database files and symlinks (machine-specific)
 mind.cold
 mind.hot
+mind.hot.lock
+mind.warm
+mind.wal
 mind/
 
 # Runtime data
