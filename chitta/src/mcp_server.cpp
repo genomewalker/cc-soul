@@ -15,6 +15,22 @@
 #include <string>
 #include <cstring>
 #include <cstdlib>
+#include <csignal>
+#include <atomic>
+
+// Global state for signal handler
+static std::shared_ptr<chitta::Mind> g_mind;
+static std::atomic<bool> g_shutdown_requested{false};
+
+void signal_handler(int sig) {
+    (void)sig;
+    g_shutdown_requested.store(true);
+    if (g_mind) {
+        g_mind->close();
+        std::cerr << "[chitta_mcp] Signal received, state saved\n";
+    }
+    std::_Exit(0);
+}
 
 void print_usage(const char* prog) {
     std::cerr << "Usage: " << prog << " [options]\n"
@@ -92,6 +108,12 @@ int main(int argc, char* argv[]) {
         std::cerr << "[chitta_mcp] Error: Failed to open mind at " << mind_path << "\n";
         return 1;
     }
+
+    // Set up signal handling for graceful shutdown
+    g_mind = mind;
+    std::signal(SIGTERM, signal_handler);
+    std::signal(SIGINT, signal_handler);
+    std::signal(SIGHUP, signal_handler);
 
     std::cerr << "[chitta_mcp] Mind opened: " << mind->size() << " nodes\n";
     std::cerr << "[chitta_mcp] Yantra ready: " << (mind->has_yantra() ? "yes" : "no") << "\n";

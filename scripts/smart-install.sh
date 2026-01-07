@@ -196,7 +196,7 @@ create_symlinks() {
     mkdir -p "${HOME}/.claude/mind"
     mkdir -p "$PLUGIN_DIR/mind"
 
-    for ext in hot warm cold; do
+    for ext in hot warm cold wal; do
         local target="${HOME}/.claude/mind/chitta.$ext"
         local link="$PLUGIN_DIR/mind/chitta.$ext"
 
