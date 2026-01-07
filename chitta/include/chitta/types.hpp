@@ -197,6 +197,7 @@ enum class NodeType : uint8_t {
     Question = 14,   // Active wondering (curiosity → question)
     StoryThread = 15, // Connected episode arc (narrative)
     Ledger = 16,     // Session ledger (Atman snapshot)
+    Entity = 17,     // Named entity (person, concept, codebase, etc.)
 };
 
 // Edge types connecting nodes
@@ -213,6 +214,9 @@ enum class EdgeType : uint8_t {
     Answers = 9,     // Answers a question
     Addresses = 10,  // Addresses a gap
     Continues = 11,  // Continues a story thread
+    Mentions = 12,   // Episode/wisdom mentions entity
+    IsA = 13,        // Entity type hierarchy (pizza IsA food)
+    RelatesTo = 14,  // Generic entity relationship
 };
 
 // Intention scope
@@ -220,6 +224,118 @@ enum class Scope : uint8_t {
     Session = 0,
     Project = 1,
     Persistent = 2,
+};
+
+// Entity classification for structured knowledge
+enum class EntityType : uint8_t {
+    Person = 0,      // Human or AI identity
+    Concept = 1,     // Abstract idea (authentication, rate limiting)
+    Codebase = 2,    // Project or repository
+    Tool = 3,        // Function, command, or utility
+    Decision = 4,    // Named decision that can be referenced
+    Location = 5,    // File, path, or place
+    Unknown = 255,   // Unclassified
+};
+
+// Triplet: structured fact (subject, predicate, object)
+// Enables deterministic O(1) lookup instead of O(N) similarity scan
+struct Triplet {
+    NodeId subject;          // Entity node
+    std::string predicate;   // Relationship verb (likes, uses, depends_on)
+    NodeId object;           // Target entity or value node
+    float weight;            // Confidence/strength of relationship
+    NodeId source;           // Episode/wisdom that stated this fact
+    Timestamp created;       // When this triplet was recorded
+
+    Triplet()
+        : weight(1.0f)
+        , created(now()) {}
+
+    Triplet(NodeId subj, const std::string& pred, NodeId obj, float w = 1.0f)
+        : subject(subj)
+        , predicate(pred)
+        , object(obj)
+        , weight(w)
+        , created(now()) {}
+
+    Triplet& with_source(NodeId src) {
+        source = src;
+        return *this;
+    }
+};
+
+// Entity: named thing that can be referenced across observations
+// Solves the "Antonio problem" - multiple facts anchored to one entity
+struct Entity {
+    NodeId id;
+    std::string canonical_name;       // Normalized: lowercase, trimmed
+    std::vector<std::string> aliases; // Alternative names ["Antonio", "AFG"]
+    EntityType entity_type;
+    Timestamp created;
+    Timestamp last_mentioned;
+    size_t mention_count;
+
+    Entity()
+        : entity_type(EntityType::Unknown)
+        , created(now())
+        , last_mentioned(now())
+        , mention_count(0) {}
+
+    Entity(const std::string& name, EntityType type = EntityType::Unknown)
+        : id(NodeId::generate())
+        , entity_type(type)
+        , created(now())
+        , last_mentioned(now())
+        , mention_count(0) {
+        set_canonical_name(name);
+    }
+
+    // Normalize name: lowercase, trim whitespace
+    void set_canonical_name(const std::string& name) {
+        canonical_name.clear();
+        for (char c : name) {
+            if (c == ' ' && (canonical_name.empty() || canonical_name.back() == ' '))
+                continue;
+            canonical_name += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+        // Trim trailing space
+        while (!canonical_name.empty() && canonical_name.back() == ' ')
+            canonical_name.pop_back();
+        // Store original as first alias if different
+        if (name != canonical_name) {
+            aliases.push_back(name);
+        }
+    }
+
+    void add_alias(const std::string& alias) {
+        // Check if already exists
+        for (const auto& a : aliases) {
+            if (a == alias) return;
+        }
+        aliases.push_back(alias);
+    }
+
+    void touch() {
+        last_mentioned = now();
+        mention_count++;
+    }
+
+    // Check if name matches canonical or any alias (case-insensitive)
+    bool matches(const std::string& name) const {
+        std::string lower_name;
+        for (char c : name) {
+            lower_name += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+        if (canonical_name == lower_name) return true;
+        for (const auto& alias : aliases) {
+            std::string lower_alias;
+            for (char c : alias) {
+                lower_alias += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            }
+            if (lower_alias == lower_name) return true;
+        }
+        return false;
+    }
 };
 
 // Edge: connection to another node

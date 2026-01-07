@@ -424,6 +424,300 @@ private:
     std::vector<std::pair<NodeId, Vector>> vectors_;
     Coherence coherence_;
     std::vector<Snapshot> snapshots_;
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Entity-centric layer: structured knowledge on top of semantic graph
+    // ═══════════════════════════════════════════════════════════════════
+
+    // Entity index: canonical_name → Entity
+    std::unordered_map<std::string, Entity> entities_;
+
+    // Triplet storage: subject_id → list of triplets
+    std::unordered_map<NodeId, std::vector<Triplet>, NodeIdHash> triplets_by_subject_;
+
+    // Reverse index: object_id → subject_ids that reference it
+    std::unordered_map<NodeId, std::vector<NodeId>, NodeIdHash> triplets_by_object_;
+
+    // Mention index: entity_id → episode/wisdom ids that mention it
+    std::unordered_map<NodeId, std::vector<NodeId>, NodeIdHash> mentions_;
+
+public:
+    // ═══════════════════════════════════════════════════════════════════
+    // Entity management
+    // ═══════════════════════════════════════════════════════════════════
+
+    // Find entity by name (case-insensitive)
+    std::optional<Entity> find_entity(const std::string& name) const {
+        std::shared_lock lock(mutex_);
+        // Normalize name for lookup
+        std::string lower_name;
+        for (char c : name) {
+            if (c == ' ' && (lower_name.empty() || lower_name.back() == ' '))
+                continue;
+            lower_name += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+        while (!lower_name.empty() && lower_name.back() == ' ')
+            lower_name.pop_back();
+
+        auto it = entities_.find(lower_name);
+        if (it != entities_.end()) return it->second;
+
+        // Check aliases
+        for (const auto& [_, entity] : entities_) {
+            if (entity.matches(name)) return entity;
+        }
+        return std::nullopt;
+    }
+
+    // Find or create entity
+    Entity& find_or_create_entity(const std::string& name, EntityType type = EntityType::Unknown) {
+        std::unique_lock lock(mutex_);
+        // Normalize name
+        std::string lower_name;
+        for (char c : name) {
+            if (c == ' ' && (lower_name.empty() || lower_name.back() == ' '))
+                continue;
+            lower_name += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+        while (!lower_name.empty() && lower_name.back() == ' ')
+            lower_name.pop_back();
+
+        auto it = entities_.find(lower_name);
+        if (it != entities_.end()) {
+            // Update type if upgrading from Unknown
+            if (it->second.entity_type == EntityType::Unknown && type != EntityType::Unknown) {
+                it->second.entity_type = type;
+            }
+            return it->second;
+        }
+
+        // Create new entity
+        Entity entity(name, type);
+        entities_.emplace(lower_name, entity);
+        return entities_[lower_name];
+    }
+
+    // Add alias to existing entity
+    bool add_entity_alias(const std::string& canonical, const std::string& alias) {
+        std::unique_lock lock(mutex_);
+        std::string lower_name;
+        for (char c : canonical) {
+            lower_name += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+        auto it = entities_.find(lower_name);
+        if (it != entities_.end()) {
+            it->second.add_alias(alias);
+            return true;
+        }
+        return false;
+    }
+
+    // Merge two entities (keep first, absorb second)
+    bool merge_entities(const std::string& keep_name, const std::string& absorb_name) {
+        std::unique_lock lock(mutex_);
+        std::string keep_lower, absorb_lower;
+        for (char c : keep_name) keep_lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        for (char c : absorb_name) absorb_lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+        auto keep_it = entities_.find(keep_lower);
+        auto absorb_it = entities_.find(absorb_lower);
+        if (keep_it == entities_.end() || absorb_it == entities_.end()) return false;
+
+        Entity& keep = keep_it->second;
+        Entity& absorb = absorb_it->second;
+
+        // Transfer aliases
+        keep.add_alias(absorb.canonical_name);
+        for (const auto& alias : absorb.aliases) {
+            keep.add_alias(alias);
+        }
+
+        // Transfer triplets
+        NodeId absorb_id = absorb.id;
+        NodeId keep_id = keep.id;
+
+        // Update triplets where absorb is subject
+        auto subj_it = triplets_by_subject_.find(absorb_id);
+        if (subj_it != triplets_by_subject_.end()) {
+            for (auto& triplet : subj_it->second) {
+                triplet.subject = keep_id;
+                triplets_by_subject_[keep_id].push_back(triplet);
+            }
+            triplets_by_subject_.erase(subj_it);
+        }
+
+        // Update triplets where absorb is object
+        auto obj_it = triplets_by_object_.find(absorb_id);
+        if (obj_it != triplets_by_object_.end()) {
+            for (const auto& subj_id : obj_it->second) {
+                auto& triplets = triplets_by_subject_[subj_id];
+                for (auto& t : triplets) {
+                    if (t.object == absorb_id) t.object = keep_id;
+                }
+                triplets_by_object_[keep_id].push_back(subj_id);
+            }
+            triplets_by_object_.erase(obj_it);
+        }
+
+        // Transfer mentions
+        auto mention_it = mentions_.find(absorb_id);
+        if (mention_it != mentions_.end()) {
+            auto& keep_mentions = mentions_[keep_id];
+            keep_mentions.insert(keep_mentions.end(),
+                                 mention_it->second.begin(), mention_it->second.end());
+            mentions_.erase(mention_it);
+        }
+
+        // Merge counts
+        keep.mention_count += absorb.mention_count;
+        if (absorb.last_mentioned > keep.last_mentioned) {
+            keep.last_mentioned = absorb.last_mentioned;
+        }
+
+        // Remove absorbed entity
+        entities_.erase(absorb_it);
+        return true;
+    }
+
+    // Get all entities
+    std::vector<Entity> all_entities() const {
+        std::shared_lock lock(mutex_);
+        std::vector<Entity> result;
+        result.reserve(entities_.size());
+        for (const auto& [_, entity] : entities_) {
+            result.push_back(entity);
+        }
+        return result;
+    }
+
+    size_t entity_count() const {
+        std::shared_lock lock(mutex_);
+        return entities_.size();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Triplet management
+    // ═══════════════════════════════════════════════════════════════════
+
+    // Add a triplet
+    void add_triplet(const Triplet& triplet) {
+        std::unique_lock lock(mutex_);
+        triplets_by_subject_[triplet.subject].push_back(triplet);
+        triplets_by_object_[triplet.object].push_back(triplet.subject);
+    }
+
+    // Add triplet with source tracking
+    void add_triplet(NodeId subject, const std::string& predicate, NodeId object,
+                     float weight = 1.0f, NodeId source = NodeId{}) {
+        Triplet t(subject, predicate, object, weight);
+        if (source.high != 0 || source.low != 0) {
+            t.source = source;
+        }
+        add_triplet(t);
+    }
+
+    // Query triplets by subject
+    std::vector<Triplet> triplets_for_subject(NodeId subject) const {
+        std::shared_lock lock(mutex_);
+        auto it = triplets_by_subject_.find(subject);
+        if (it != triplets_by_subject_.end()) return it->second;
+        return {};
+    }
+
+    // Query triplets by predicate (scans all, use sparingly)
+    std::vector<Triplet> triplets_by_predicate(const std::string& predicate) const {
+        std::shared_lock lock(mutex_);
+        std::vector<Triplet> results;
+        for (const auto& [_, triplets] : triplets_by_subject_) {
+            for (const auto& t : triplets) {
+                if (t.predicate == predicate) results.push_back(t);
+            }
+        }
+        return results;
+    }
+
+    // Query triplets by object (reverse lookup)
+    std::vector<Triplet> triplets_for_object(NodeId object) const {
+        std::shared_lock lock(mutex_);
+        std::vector<Triplet> results;
+        auto it = triplets_by_object_.find(object);
+        if (it == triplets_by_object_.end()) return results;
+
+        for (const auto& subj_id : it->second) {
+            auto subj_it = triplets_by_subject_.find(subj_id);
+            if (subj_it != triplets_by_subject_.end()) {
+                for (const auto& t : subj_it->second) {
+                    if (t.object == object) results.push_back(t);
+                }
+            }
+        }
+        return results;
+    }
+
+    // Pattern query: (subject?, predicate?, object?)
+    std::vector<Triplet> query_triplets(
+        std::optional<NodeId> subject = std::nullopt,
+        std::optional<std::string> predicate = std::nullopt,
+        std::optional<NodeId> object = std::nullopt) const
+    {
+        std::shared_lock lock(mutex_);
+        std::vector<Triplet> results;
+
+        if (subject) {
+            // Start from subject index
+            auto it = triplets_by_subject_.find(*subject);
+            if (it == triplets_by_subject_.end()) return results;
+            for (const auto& t : it->second) {
+                if (predicate && t.predicate != *predicate) continue;
+                if (object && t.object != *object) continue;
+                results.push_back(t);
+            }
+        } else if (object) {
+            // Start from object index
+            results = triplets_for_object(*object);
+            if (predicate) {
+                results.erase(std::remove_if(results.begin(), results.end(),
+                    [&](const Triplet& t) { return t.predicate != *predicate; }),
+                    results.end());
+            }
+        } else if (predicate) {
+            // Full scan by predicate
+            results = triplets_by_predicate(*predicate);
+        } else {
+            // Return all triplets
+            for (const auto& [_, triplets] : triplets_by_subject_) {
+                results.insert(results.end(), triplets.begin(), triplets.end());
+            }
+        }
+        return results;
+    }
+
+    size_t triplet_count() const {
+        std::shared_lock lock(mutex_);
+        size_t count = 0;
+        for (const auto& [_, triplets] : triplets_by_subject_) {
+            count += triplets.size();
+        }
+        return count;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Mention tracking
+    // ═══════════════════════════════════════════════════════════════════
+
+    // Record that an episode/wisdom mentions an entity
+    void add_mention(NodeId entity_id, NodeId episode_id) {
+        std::unique_lock lock(mutex_);
+        mentions_[entity_id].push_back(episode_id);
+    }
+
+    // Get all episodes that mention an entity
+    std::vector<NodeId> mentions_of(NodeId entity_id) const {
+        std::shared_lock lock(mutex_);
+        auto it = mentions_.find(entity_id);
+        if (it != mentions_.end()) return it->second;
+        return {};
+    }
 };
 
 } // namespace chitta

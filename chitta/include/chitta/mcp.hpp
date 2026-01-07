@@ -50,6 +50,7 @@ inline std::string node_type_to_string(NodeType type) {
         case NodeType::Question: return "question";
         case NodeType::StoryThread: return "story_thread";
         case NodeType::Ledger: return "ledger";
+        case NodeType::Entity: return "entity";
         default: return "unknown";
     }
 }
@@ -72,6 +73,7 @@ inline NodeType string_to_node_type(const std::string& s) {
     if (s == "question") return NodeType::Question;
     if (s == "story_thread") return NodeType::StoryThread;
     if (s == "ledger") return NodeType::Ledger;
+    if (s == "entity") return NodeType::Entity;
     return NodeType::Episode;
 }
 
