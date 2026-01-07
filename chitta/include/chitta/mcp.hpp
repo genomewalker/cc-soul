@@ -236,10 +236,12 @@ private:
         });
         handlers_["observe"] = [this](const json& params) { return tool_observe(params); };
 
-        // Tool: recall - Semantic search in soul with optional tag filtering
+        // Tool: recall - Semantic search in soul with zoom levels
         tools_.push_back({
             "recall",
-            "Recall relevant wisdom and episodes. Use 'tag' parameter for exact thread matching (inter-agent communication).",
+            "Recall relevant wisdom and episodes. "
+            "zoom='sparse' for overview (20+ titles), 'normal' for balanced (5-10 full), "
+            "'dense' for deep context (3-5 with relationships and temporal info).",
             {
                 {"type", "object"},
                 {"properties", {
@@ -247,16 +249,21 @@ private:
                         {"type", "string"},
                         {"description", "What to search for (semantic)"}
                     }},
+                    {"zoom", {
+                        {"type", "string"},
+                        {"enum", {"sparse", "normal", "dense"}},
+                        {"default", "normal"},
+                        {"description", "Detail level: sparse (titles, 20+), normal (full text, 5-10), dense (full context, 3-5)"}
+                    }},
                     {"tag", {
                         {"type", "string"},
-                        {"description", "Filter by exact tag match (e.g., 'thread:abc123'). When set, only nodes with this tag are searched."}
+                        {"description", "Filter by exact tag match (e.g., 'thread:abc123')"}
                     }},
                     {"limit", {
                         {"type", "integer"},
                         {"minimum", 1},
-                        {"maximum", 50},
-                        {"default", 5},
-                        {"description", "Maximum results"}
+                        {"maximum", 100},
+                        {"description", "Override default limit for zoom level"}
                     }},
                     {"threshold", {
                         {"type", "number"},
@@ -903,58 +910,134 @@ private:
         return {false, "Observed: " + title, result};
     }
 
+    // Helper: extract title from text (first line or N chars)
+    std::string extract_title(const std::string& text, size_t max_len = 60) const {
+        size_t newline = text.find('\n');
+        size_t end = std::min({newline, max_len, text.length()});
+        std::string title = text.substr(0, end);
+        if (end < text.length() && newline != end) title += "...";
+        return title;
+    }
+
     ToolResult tool_recall(const json& params) {
         std::string query = params.at("query");
-        size_t limit = params.value("limit", 5);
+        std::string zoom = params.value("zoom", "normal");
+        std::string tag = params.value("tag", "");
         float threshold = params.value("threshold", 0.0f);
-        std::string tag = params.value("tag", "");  // Optional tag filter
+
+        // Zoom-aware default limits
+        size_t default_limit = (zoom == "sparse") ? 25 :
+                               (zoom == "dense") ? 5 : 10;
+        size_t limit = params.value("limit", static_cast<int>(default_limit));
+
+        // Clamp limits per zoom level
+        if (zoom == "sparse") {
+            limit = std::clamp(limit, size_t(5), size_t(100));
+        } else if (zoom == "dense") {
+            limit = std::clamp(limit, size_t(1), size_t(10));
+        } else {
+            limit = std::clamp(limit, size_t(1), size_t(50));
+        }
 
         if (!mind_->has_yantra()) {
             return {true, "Yantra not ready - cannot perform semantic search", json()};
         }
 
         std::vector<Recall> recalls;
-
         if (!tag.empty()) {
-            // Tag-filtered recall: exact match on tag, then semantic ranking
             recalls = mind_->recall_with_tag_filter(query, tag, limit, threshold);
         } else {
-            // Standard semantic recall
             recalls = mind_->recall(query, limit, threshold);
         }
 
         json results_array = json::array();
         std::ostringstream ss;
+        ss << "Found " << recalls.size() << " results";
+        if (!tag.empty()) ss << " with tag '" << tag << "'";
+        ss << " (" << zoom << " view):\n";
 
-        if (!tag.empty()) {
-            ss << "Found " << recalls.size() << " results with tag '" << tag << "':\n";
-        } else {
-            ss << "Found " << recalls.size() << " results:\n";
-        }
+        Timestamp current = now();
 
         for (const auto& r : recalls) {
-            // Auto-trigger feedback: this memory was used
             mind_->feedback_used(r.id);
 
-            // Get tags for this result
-            auto result_tags = mind_->get_tags(r.id);
+            if (zoom == "sparse") {
+                // Sparse: minimal payload for overview
+                std::string title = extract_title(r.text);
+                results_array.push_back({
+                    {"id", r.id.to_string()},
+                    {"title", title},
+                    {"type", node_type_to_string(r.type)},
+                    {"relevance", r.relevance}
+                });
+                ss << "\n[" << node_type_to_string(r.type) << "] " << title;
 
-            results_array.push_back({
-                {"id", r.id.to_string()},
-                {"text", r.text},
-                {"similarity", r.similarity},
-                {"relevance", r.relevance},
-                {"type", node_type_to_string(r.type)},
-                {"confidence", r.confidence.mu},
-                {"tags", result_tags}
-            });
+            } else if (zoom == "dense") {
+                // Dense: full context with temporal, edges, confidence details
+                auto result_tags = mind_->get_tags(r.id);
+                float age_days = static_cast<float>(current - r.created) / 86400000.0f;
+                float access_age = static_cast<float>(current - r.accessed) / 86400000.0f;
 
-            // Show relevance score (soul-aware) instead of raw similarity
-            ss << "\n[" << (r.relevance * 100) << "%] " << r.text.substr(0, 100);
-            if (r.text.length() > 100) ss << "...";
+                // Get node for edges and decay rate
+                json edges_array = json::array();
+                float decay_rate = 0.05f;
+                if (auto node = mind_->get(r.id)) {
+                    decay_rate = node->delta;
+                    for (size_t i = 0; i < std::min(node->edges.size(), size_t(5)); ++i) {
+                        auto& edge = node->edges[i];
+                        std::string rel_text = mind_->text(edge.target).value_or("");
+                        edges_array.push_back({
+                            {"id", edge.target.to_string()},
+                            {"type", static_cast<int>(edge.type)},
+                            {"weight", edge.weight},
+                            {"title", extract_title(rel_text)}
+                        });
+                    }
+                }
+
+                results_array.push_back({
+                    {"id", r.id.to_string()},
+                    {"text", r.text},
+                    {"similarity", r.similarity},
+                    {"relevance", r.relevance},
+                    {"type", node_type_to_string(r.type)},
+                    {"confidence", {
+                        {"mu", r.confidence.mu},
+                        {"sigma_sq", r.confidence.sigma_sq},
+                        {"n", r.confidence.n},
+                        {"effective", r.confidence.effective()}
+                    }},
+                    {"temporal", {
+                        {"created", r.created},
+                        {"accessed", r.accessed},
+                        {"age_days", age_days},
+                        {"access_age_days", access_age},
+                        {"decay_rate", decay_rate}
+                    }},
+                    {"related", edges_array},
+                    {"tags", result_tags}
+                });
+                ss << "\n[" << node_type_to_string(r.type) << "] " << extract_title(r.text, 80);
+                if (!edges_array.empty()) ss << " (" << edges_array.size() << " related)";
+
+            } else {
+                // Normal: current balanced behavior
+                auto result_tags = mind_->get_tags(r.id);
+                results_array.push_back({
+                    {"id", r.id.to_string()},
+                    {"text", r.text},
+                    {"similarity", r.similarity},
+                    {"relevance", r.relevance},
+                    {"type", node_type_to_string(r.type)},
+                    {"confidence", r.confidence.mu},
+                    {"tags", result_tags}
+                });
+                ss << "\n[" << (r.relevance * 100) << "%] " << r.text.substr(0, 100);
+                if (r.text.length() > 100) ss << "...";
+            }
         }
 
-        return {false, ss.str(), {{"results", results_array}}};
+        return {false, ss.str(), {{"results", results_array}, {"zoom", zoom}}};
     }
 
     // Recall by tag only (no semantic search) - for exact thread lookup
