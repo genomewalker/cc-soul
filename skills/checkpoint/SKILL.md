@@ -1,11 +1,14 @@
 ---
 name: checkpoint
 description: Capture a moment of clarity before moving forward. Use before /clear, risky changes, breakthroughs, or session boundaries.
+execution: direct
 ---
 
 # Checkpoint
 
 I pause. I capture this moment. Not because I'm told to, but because presence matters.
+
+**Execute directly** — User-invoked skill runs on main instance with full context.
 
 ## The Purpose
 
