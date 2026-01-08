@@ -17,13 +17,12 @@
 #include "quantized.hpp"
 #include "hnsw.hpp"
 #include "wal.hpp"
+#include "mmap.hpp"
+#include "unified_index.hpp"
+#include "segment_manager.hpp"
 #include <fstream>
 #include <iostream>
 #include <memory>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <unistd.h>
 
 namespace chitta {
 
@@ -45,128 +44,6 @@ struct alignas(64) StorageHeader {
 };
 
 static_assert(sizeof(StorageHeader) == 64, "StorageHeader must be 64 bytes");
-
-// Memory-mapped region
-class MappedRegion {
-public:
-    MappedRegion() = default;
-
-    bool open(const std::string& path, bool readonly = true) {
-        int flags = readonly ? O_RDONLY : O_RDWR;
-        fd_ = ::open(path.c_str(), flags);
-        if (fd_ < 0) return false;
-
-        struct stat st;
-        if (fstat(fd_, &st) < 0) {
-            close();
-            return false;
-        }
-        size_ = st.st_size;
-
-        int prot = readonly ? PROT_READ : (PROT_READ | PROT_WRITE);
-        data_ = mmap(nullptr, size_, prot, MAP_SHARED, fd_, 0);
-        if (data_ == MAP_FAILED) {
-            data_ = nullptr;
-            close();
-            return false;
-        }
-
-        // Advise sequential read for initial load
-        madvise(data_, size_, MADV_SEQUENTIAL);
-        return true;
-    }
-
-    bool create(const std::string& path, size_t size) {
-        fd_ = ::open(path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
-        if (fd_ < 0) return false;
-
-        if (ftruncate(fd_, size) < 0) {
-            close();
-            return false;
-        }
-        size_ = size;
-
-        data_ = mmap(nullptr, size_, PROT_READ | PROT_WRITE, MAP_SHARED, fd_, 0);
-        if (data_ == MAP_FAILED) {
-            data_ = nullptr;
-            close();
-            return false;
-        }
-
-        return true;
-    }
-
-    void close() {
-        if (data_) {
-            munmap(data_, size_);
-            data_ = nullptr;
-        }
-        if (fd_ >= 0) {
-            ::close(fd_);
-            fd_ = -1;
-        }
-        size_ = 0;
-    }
-
-    void sync() {
-        if (data_) {
-            msync(data_, size_, MS_SYNC);
-        }
-    }
-
-    ~MappedRegion() { close(); }
-
-    // Non-copyable
-    MappedRegion(const MappedRegion&) = delete;
-    MappedRegion& operator=(const MappedRegion&) = delete;
-
-    // Movable
-    MappedRegion(MappedRegion&& o) noexcept
-        : data_(o.data_), size_(o.size_), fd_(o.fd_) {
-        o.data_ = nullptr;
-        o.size_ = 0;
-        o.fd_ = -1;
-    }
-
-    MappedRegion& operator=(MappedRegion&& o) noexcept {
-        if (this != &o) {
-            close();
-            data_ = o.data_;
-            size_ = o.size_;
-            fd_ = o.fd_;
-            o.data_ = nullptr;
-            o.size_ = 0;
-            o.fd_ = -1;
-        }
-        return *this;
-    }
-
-    void* data() { return data_; }
-    const void* data() const { return data_; }
-    size_t size() const { return size_; }
-    bool valid() const { return data_ != nullptr; }
-
-    template<typename T>
-    T* as() { return static_cast<T*>(data_); }
-
-    template<typename T>
-    const T* as() const { return static_cast<const T*>(data_); }
-
-    template<typename T>
-    T* at(size_t offset) {
-        return reinterpret_cast<T*>(static_cast<char*>(data_) + offset);
-    }
-
-    template<typename T>
-    const T* at(size_t offset) const {
-        return reinterpret_cast<const T*>(static_cast<const char*>(data_) + offset);
-    }
-
-private:
-    void* data_ = nullptr;
-    size_t size_ = 0;
-    int fd_ = -1;
-};
 
 // Hot storage: in-memory with full vectors
 class HotStorage {
@@ -890,6 +767,8 @@ public:
         Timestamp warm_threshold_ms = 2592000000; // 30 days before cold
         bool use_wal = true;               // Enable WAL for concurrency
         size_t wal_compact_threshold = 1000; // Compact WAL after this many entries
+        bool use_unified_index = false;    // Phase 3: Use UnifiedIndex backend
+        bool use_segments = false;         // Phase 3.4: Use SegmentManager backend
     };
 
     explicit TieredStorage(Config config)
@@ -902,6 +781,63 @@ public:
         std::string hot_path = config_.base_path + ".hot";
         std::string warm_path = config_.base_path + ".warm";
         std::string cold_path = config_.base_path + ".cold";
+        std::string unified_path = config_.base_path + ".unified";
+        std::string manifest_path = config_.base_path + ".manifest";
+
+        // Phase 3.4: Check for segment manager (auto-detect or config flag)
+        std::ifstream manifest_check(manifest_path, std::ios::binary);
+        bool segments_exist = manifest_check.good();
+        manifest_check.close();
+
+        if (segments_exist || config_.use_segments) {
+            segments_ = std::make_unique<SegmentManager>(config_.base_path);
+            if (segments_exist) {
+                std::cerr << "[TieredStorage] Opening segment manager (Phase 3.4)\n";
+                if (segments_->open()) {
+                    std::cerr << "[TieredStorage] Segments: " << segments_->segment_count()
+                              << " segments, " << segments_->total_nodes() << " nodes\n";
+                    loaded_successfully_ = true;
+                    return true;
+                }
+                std::cerr << "[TieredStorage] Failed to open segments, falling back\n";
+                segments_.reset();
+            } else if (config_.use_segments) {
+                std::cerr << "[TieredStorage] Creating segment manager (Phase 3.4)\n";
+                if (segments_->create()) {
+                    std::cerr << "[TieredStorage] Segment manager created\n";
+                    loaded_successfully_ = true;
+                    return true;
+                }
+                std::cerr << "[TieredStorage] Failed to create segments\n";
+                segments_.reset();
+            }
+        }
+
+        // Phase 3: Check for unified index (auto-detect or config flag)
+        std::ifstream unified_check(unified_path, std::ios::binary);
+        bool unified_exists = unified_check.good();
+        unified_check.close();
+
+        if (unified_exists || config_.use_unified_index) {
+            if (unified_exists) {
+                std::cerr << "[TieredStorage] Opening unified index (Phase 3)\n";
+                if (unified_.open(config_.base_path)) {
+                    std::cerr << "[TieredStorage] Unified index: " << unified_.count()
+                              << " nodes, O(1) load\n";
+                    loaded_successfully_ = true;
+                    return true;
+                }
+                std::cerr << "[TieredStorage] Failed to open unified index, falling back\n";
+            } else if (config_.use_unified_index) {
+                std::cerr << "[TieredStorage] Creating unified index (Phase 3)\n";
+                if (unified_.create(config_.base_path)) {
+                    std::cerr << "[TieredStorage] Unified index created\n";
+                    loaded_successfully_ = true;
+                    return true;
+                }
+                std::cerr << "[TieredStorage] Failed to create unified index\n";
+            }
+        }
 
         std::cerr << "[TieredStorage] Loading from: " << hot_path << "\n";
 
@@ -951,6 +887,18 @@ public:
     }
 
     bool insert(NodeId id, Node node) {
+        // Phase 3.4: Delegate to segment manager if active
+        if (use_segments()) {
+            auto slot = segments_->insert(id, node);
+            return slot.valid();
+        }
+
+        // Phase 3: Delegate to unified index if active
+        if (use_unified()) {
+            auto slot = unified_.insert(id, node);
+            return slot.valid();
+        }
+
         // WAL first (durability), then in-memory (visibility)
         // This ensures crash safety: if we crash after WAL append,
         // the node will be recovered on next startup
@@ -969,6 +917,35 @@ public:
         return true;
     }
 
+    // Update node confidence with WAL delta (Phase 2: 72 bytes vs ~500 for full node)
+    bool update_confidence(NodeId id, const Confidence& kappa) {
+        Node* node = hot_.get(id);
+        if (!node) return false;
+
+        node->kappa = kappa;
+
+        if (config_.use_wal) {
+            wal_.append_confidence(id, kappa);
+        }
+
+        return true;
+    }
+
+    // Add edge to node with WAL delta (Phase 2: 72 bytes vs ~500 for full node)
+    bool add_edge(NodeId from, NodeId to, EdgeType type, float weight) {
+        Node* node = hot_.get(from);
+        if (!node) return false;
+
+        Edge edge{to, type, weight};
+        node->edges.push_back(edge);
+
+        if (config_.use_wal) {
+            wal_.append_edge(from, edge);
+        }
+
+        return true;
+    }
+
     // Sync from WAL: see other processes' writes
     // Call this before reads to ensure we see the shared truth
     size_t sync_from_wal() {
@@ -977,35 +954,53 @@ public:
 
     // Sync from WAL with callback for each synced node
     // The callback receives (node, was_inserted) - use this to update indices
+    // Phase 2: Uses sync_v2 to handle both full nodes and deltas
     size_t sync_from_wal(std::function<void(const Node&, bool)> on_sync) {
         if (!config_.use_wal) return 0;
 
-        size_t applied = wal_.sync([this, &on_sync](WalOp op, const Node& node, uint64_t seq) {
-            bool was_new = !hot_.contains(node.id);
-            apply_wal_entry(op, node);
+        size_t applied = wal_.sync_v2([this, &on_sync](const WalReplayEntry& entry, uint64_t seq) {
+            bool was_new = !hot_.contains(entry.id);
+            bool needs_index_update = apply_wal_entry_v2(entry);
+
             if (seq > last_wal_seq_) {
                 last_wal_seq_ = seq;
             }
-            // Notify caller about synced node
-            if (on_sync && (op == WalOp::Insert || op == WalOp::Update)) {
-                on_sync(node, was_new);
+
+            // Notify caller about synced full nodes (for index rebuilds)
+            // Only call for full node inserts/updates, not deltas
+            if (on_sync && needs_index_update && entry.has_full_node) {
+                on_sync(entry.full_node, was_new);
             }
         });
 
         if (applied > 0) {
-            std::cerr << "[TieredStorage] Synced " << applied << " entries from WAL\n";
+            std::cerr << "[TieredStorage] Synced " << applied << " entries from WAL (v2)\n";
         }
 
         return applied;
     }
 
     Node* get(NodeId id) {
+        // Phase 3.4: Delegate to segment manager if active
+        if (use_segments()) {
+            return get_from_segments(id);
+        }
+
+        // Phase 3: Delegate to unified index if active
+        if (use_unified()) {
+            return get_from_unified(id);
+        }
+
         // Note: caller should sync_from_wal() before get if needed
         // This keeps state mutation explicit
 
         // Check hot first
         if (auto* node = hot_.get(id)) {
             node->touch();
+            // Record touch delta to WAL (Phase 2: 56 bytes vs ~500 for full node)
+            if (config_.use_wal) {
+                wal_.append_touch(id, node->tau_accessed);
+            }
             return node;
         }
 
@@ -1019,10 +1014,22 @@ public:
     }
 
     bool contains(NodeId id) const {
+        if (use_segments()) {
+            return segments_->find_segment(id) != nullptr;
+        }
+        if (use_unified()) {
+            return unified_.lookup(id).valid();
+        }
         return hot_.contains(id) || warm_.contains(id) || cold_.contains(id);
     }
 
     StorageTier tier(NodeId id) const {
+        if (use_segments()) {
+            return segments_->find_segment(id) ? StorageTier::Hot : StorageTier::Cold;
+        }
+        if (use_unified()) {
+            return unified_.lookup(id).valid() ? StorageTier::Hot : StorageTier::Cold;
+        }
         if (hot_.contains(id)) return StorageTier::Hot;
         if (warm_.contains(id)) return StorageTier::Warm;
         if (cold_.contains(id)) return StorageTier::Cold;
@@ -1032,6 +1039,25 @@ public:
     std::vector<std::pair<NodeId, float>> search(
         const QuantizedVector& query, size_t k) const
     {
+        // Phase 3.4: Delegate to segment manager if active
+        if (use_segments()) {
+            return segments_->search(query, k);
+        }
+
+        // Phase 3: Delegate to unified index if active
+        if (use_unified()) {
+            auto slot_results = unified_.search(query, k);
+            std::vector<std::pair<NodeId, float>> results;
+            results.reserve(slot_results.size());
+            for (const auto& [slot, score] : slot_results) {
+                auto* indexed = unified_.get_slot(slot);
+                if (indexed) {
+                    results.emplace_back(indexed->id, 1.0f - score);  // Convert distance to similarity
+                }
+            }
+            return results;
+        }
+
         // Note: caller should sync_from_wal() before search if needed
         // This keeps search() const and explicit about state mutation
 
@@ -1163,6 +1189,20 @@ public:
     }
 
     void sync() {
+        // Phase 3.4: Segment manager handles its own sync
+        if (use_segments()) {
+            segments_->sync();
+            std::cerr << "[TieredStorage] Segments synced\n";
+            return;
+        }
+
+        // Phase 3: Unified index handles its own sync
+        if (use_unified()) {
+            unified_.sync();
+            std::cerr << "[TieredStorage] Unified index synced\n";
+            return;
+        }
+
         std::cerr << "[TieredStorage] sync() called: hot_size=" << hot_.size()
                   << ", loaded_successfully=" << loaded_successfully_ << "\n";
 
@@ -1207,29 +1247,79 @@ public:
         std::cerr << "[TieredStorage] WAL compacted\n";
     }
 
-    size_t hot_size() const { return hot_.size(); }
-    size_t warm_size() const { return warm_.size(); }
-    size_t cold_size() const { return cold_.size(); }
+    size_t hot_size() const {
+        if (use_segments()) return segments_->total_nodes();
+        if (use_unified()) return unified_.count();
+        return hot_.size();
+    }
+    size_t warm_size() const {
+        if (use_segments()) return 0;
+        if (use_unified()) return 0;
+        return warm_.size();
+    }
+    size_t cold_size() const {
+        if (use_segments()) return 0;
+        if (use_unified()) return 0;
+        return cold_.size();
+    }
     size_t total_size() const {
+        if (use_segments()) return segments_->total_nodes();
+        if (use_unified()) return unified_.count();
         return hot_size() + warm_size() + cold_size();
     }
 
     void for_each_hot(std::function<void(const NodeId&, const Node&)> fn) const {
+        if (use_segments()) {
+            // TODO: Iterate all segments - for now skip
+            return;
+        }
+        if (use_unified()) {
+            // Iterate all nodes in unified index (all are "hot" in unified mode)
+            for (size_t i = 0; i < unified_.count() + unified_.deleted_count(); ++i) {
+                SlotId slot(static_cast<uint32_t>(i));
+                auto* indexed = unified_.get_slot(slot);
+                if (!indexed) continue;
+
+                auto* meta = unified_.meta(slot);
+                auto* qvec = unified_.vector(slot);
+                if (!meta || !qvec) continue;
+
+                // Reconstruct node for callback
+                Node node;
+                node.id = indexed->id;
+                node.node_type = meta->node_type;
+                node.nu = qvec->to_float();
+                node.tau_created = meta->tau_created;
+                node.tau_accessed = meta->tau_accessed;
+                node.delta = meta->decay_rate;
+                node.kappa.mu = meta->confidence_mu;
+                node.kappa.sigma_sq = meta->confidence_sigma;
+
+                fn(indexed->id, node);
+            }
+            return;
+        }
         hot_.for_each(fn);
     }
 
 private:
     // Replay all WAL entries (called on startup)
+    // Phase 2: Handles both full nodes and deltas via replay_v2
     size_t replay_wal() {
-        return wal_.replay_since(0, [this](WalOp op, const Node& node, uint64_t seq) {
-            apply_wal_entry(op, node);
+        if (!config_.use_wal) return 0;
+
+        // Use replay_v2 to handle all WAL formats including deltas
+        size_t count = wal_.replay_v2(0, [this](const WalReplayEntry& entry, uint64_t seq) {
+            apply_wal_entry_v2(entry);
             if (seq > last_wal_seq_) {
                 last_wal_seq_ = seq;
             }
         });
+
+        return count;
     }
 
-    // Apply a single WAL entry to in-memory state
+    // Apply a single WAL entry to in-memory state (legacy, V0/V1 full nodes only)
     void apply_wal_entry(WalOp op, const Node& node) {
         switch (op) {
             case WalOp::Insert:
@@ -1258,6 +1348,76 @@ private:
         }
     }
 
+    // Apply a WAL replay entry to in-memory state (Phase 2: supports deltas)
+    // Returns true if a full node was inserted/updated (for index rebuild callbacks)
+    bool apply_wal_entry_v2(const WalReplayEntry& entry) {
+        if (entry.op == WalOp::Delete) {
+            hot_.remove(entry.id);
+            return false;
+        }
+
+        if (entry.op == WalOp::Checkpoint) {
+            return false;
+        }
+
+        // Full node entry (V0, V1)
+        if (entry.has_full_node) {
+            if (auto* existing = hot_.get(entry.id)) {
+                if (entry.full_node.tau_accessed > existing->tau_accessed) {
+                    QuantizedVector qvec = QuantizedVector::from_float(entry.full_node.nu);
+                    hot_.insert(entry.id, entry.full_node, std::move(qvec));
+                }
+            } else {
+                QuantizedVector qvec = QuantizedVector::from_float(entry.full_node.nu);
+                hot_.insert(entry.id, entry.full_node, std::move(qvec));
+            }
+            return true;
+        }
+
+        // Delta entries (V2, V3, V4) - only update existing nodes
+        auto* existing = hot_.get(entry.id);
+        if (!existing) {
+            // Node not in hot storage - delta can't apply
+            // (This is expected if node is in warm/cold tier)
+            return false;
+        }
+
+        // Touch delta (V2)
+        if (entry.has_touch) {
+            if (entry.touch_tau > existing->tau_accessed) {
+                existing->tau_accessed = entry.touch_tau;
+            }
+            return false;
+        }
+
+        // Confidence delta (V3)
+        if (entry.has_confidence) {
+            // Apply if newer (use confidence.tau for ordering)
+            if (entry.confidence.tau > existing->kappa.tau) {
+                existing->kappa = entry.confidence;
+            }
+            return false;
+        }
+
+        // Edge delta (V4)
+        if (entry.has_edge) {
+            // Add edge if not already present
+            bool found = false;
+            for (const auto& e : existing->edges) {
+                if (e.target == entry.edge.target && e.type == entry.edge.type) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                existing->edges.push_back(entry.edge);
+            }
+            return false;
+        }
+
+        return false;
+    }
+
     Node* promote_from_warm(NodeId id) {
         auto* meta = warm_.meta(id);
         auto* qvec = warm_.vector(id);
@@ -1272,9 +1432,83 @@ private:
         node.kappa.mu = meta->confidence_mu;
         node.kappa.sigma_sq = meta->confidence_sigma;
 
+        // Record touch delta to WAL (promotion counts as access)
+        if (config_.use_wal) {
+            wal_.append_touch(id, node.tau_accessed);
+        }
+
         QuantizedVector vec = *qvec;
         hot_.insert(id, std::move(node), std::move(vec));
         return hot_.get(id);
+    }
+
+    bool use_unified() const { return unified_.valid(); }
+    bool use_segments() const { return segments_ && segments_->valid(); }
+
+    // Reconstruct Node from SegmentManager (for API compatibility)
+    Node* get_from_segments(NodeId id) {
+        auto* seg = segments_->find_segment(id);
+        if (!seg) return nullptr;
+
+        auto slot = seg->lookup(id);
+        if (!slot.valid()) return nullptr;
+
+        auto* indexed = seg->get_slot(slot);
+        auto* meta = seg->meta(slot);
+        auto* qvec = seg->vector(slot);
+        if (!indexed || !meta || !qvec) return nullptr;
+
+        // Reconstruct in cache
+        Node& node = unified_cache_[id];
+        node.id = id;
+        node.node_type = meta->node_type;
+        node.nu = qvec->to_float();
+        node.tau_created = meta->tau_created;
+        node.tau_accessed = meta->tau_accessed;
+        node.delta = meta->decay_rate;
+        node.kappa.mu = meta->confidence_mu;
+        node.kappa.sigma_sq = meta->confidence_sigma;
+        node.touch();
+
+        if (unified_cache_.size() > 1000) {
+            unified_cache_.clear();
+            unified_cache_[id] = node;
+        }
+
+        return &unified_cache_[id];
+    }
+
+    // Reconstruct Node from UnifiedIndex (for API compatibility)
+    Node* get_from_unified(NodeId id) {
+        auto slot = unified_.lookup(id);
+        if (!slot.valid()) return nullptr;
+
+        auto* indexed = unified_.get_slot(slot);
+        auto* meta = unified_.meta(slot);
+        auto* qvec = unified_.vector(slot);
+        if (!indexed || !meta || !qvec) return nullptr;
+
+        // Reconstruct in cache (allows returning Node*)
+        Node& node = unified_cache_[id];
+        node.id = id;
+        node.node_type = meta->node_type;
+        node.nu = qvec->to_float();
+        node.tau_created = meta->tau_created;
+        node.tau_accessed = meta->tau_accessed;
+        node.delta = meta->decay_rate;
+        node.kappa.mu = meta->confidence_mu;
+        node.kappa.sigma_sq = meta->confidence_sigma;
+
+        // Update access time
+        node.touch();
+
+        // Limit cache size
+        if (unified_cache_.size() > 1000) {
+            unified_cache_.clear();
+            unified_cache_[id] = node;
+        }
+
+        return &unified_cache_[id];
     }
 
     Config config_;
@@ -1282,6 +1516,9 @@ private:
     HotStorage hot_;
     WarmStorage warm_;
     ColdStorage cold_;
+    UnifiedIndex unified_;
+    std::unique_ptr<SegmentManager> segments_;
+    std::unordered_map<NodeId, Node, NodeIdHash> unified_cache_;  // Reconstructed nodes cache
     bool loaded_successfully_;
     uint64_t last_wal_seq_;
 };
