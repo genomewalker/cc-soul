@@ -26,7 +26,7 @@ echo -e "${BLUE}╚════════════════════�
 echo ""
 
 # Step 1: Check dependencies
-echo -e "${YELLOW}[1/3] Checking dependencies...${NC}"
+echo -e "${YELLOW}[1/4] Checking dependencies...${NC}"
 
 check_cmd() {
     if ! command -v "$1" &> /dev/null; then
@@ -55,7 +55,7 @@ fi
 echo ""
 
 # Step 2: Download ONNX models
-echo -e "${YELLOW}[2/3] Downloading ONNX models...${NC}"
+echo -e "${YELLOW}[2/4] Downloading ONNX models...${NC}"
 
 mkdir -p "$MODELS_DIR"
 
@@ -79,7 +79,7 @@ fi
 echo ""
 
 # Step 3: Build chitta
-echo -e "${YELLOW}[3/3] Building chitta (C++)...${NC}"
+echo -e "${YELLOW}[3/4] Building chitta (C++)...${NC}"
 
 if [ ! -d "$CHITTA_DIR/src" ]; then
     echo -e "${RED}  Chitta source not found at $CHITTA_DIR${NC}"
@@ -128,12 +128,22 @@ PLUGIN_MIND_RESOLVED=$(readlink -f "$SCRIPT_DIR/mind" 2>/dev/null || echo "$SCRI
 
 if [[ "$USER_MIND_RESOLVED" != "$PLUGIN_MIND_RESOLVED" ]]; then
     # Create symlinks (or update if they exist)
-    for ext in hot warm cold; do
-        ln -sfn "${HOME}/.claude/mind/chitta.$ext" "$SCRIPT_DIR/mind/chitta.$ext"
+    for ext in hot warm cold wal unified vectors meta connections payloads edges tags; do
+        ln -sfn "${HOME}/.claude/mind/chitta.$ext" "$SCRIPT_DIR/mind/chitta.$ext" 2>/dev/null
     done
     echo -e "  ${GREEN}✓ Database symlinks created${NC}"
 else
     echo -e "  ${GREEN}✓ Storage already linked${NC}"
+fi
+
+# Step 4: Database upgrade/conversion
+echo ""
+echo -e "${YELLOW}[4/4] Checking database...${NC}"
+
+# Upgrade to current version if needed
+if [ -f "${HOME}/.claude/mind/chitta.hot" ]; then
+    echo "  Checking version..."
+    "$BIN_DIR/chitta_cli" upgrade --path "${HOME}/.claude/mind/chitta" 2>&1 | grep -E "^\[migrations\]|Already at" | sed 's/^/  /'
 fi
 
 # Done

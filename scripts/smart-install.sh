@@ -132,7 +132,8 @@ build_from_source() {
     cd "$BUILD_DIR"
 
     # Configure - show errors now for debugging
-    if ! cmake .. -DCMAKE_BUILD_TYPE=Release 2>&1 | tail -5; then
+    # Explicitly clear ASAN flags for release builds
+    if ! cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="" -DCMAKE_C_FLAGS="" 2>&1 | tail -5; then
         echo "[cc-soul] ERROR: cmake configuration failed" >&2
         return 1
     fi
@@ -204,7 +205,7 @@ create_symlinks() {
         return 0
     fi
 
-    for ext in hot warm cold wal; do
+    for ext in hot warm cold wal unified vectors meta connections payloads edges tags; do
         local target="${HOME}/.claude/mind/chitta.$ext"
         local link="$PLUGIN_DIR/mind/chitta.$ext"
 

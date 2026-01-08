@@ -11,9 +11,10 @@ Build cc-soul binaries from source. Use this when pre-built binaries don't work 
 1. Checks build dependencies (cmake, make, C++ compiler)
 2. Downloads ONNX embedding model
 3. Builds chitta binaries from source
-4. Creates database symlinks
+4. Creates database symlinks (including unified storage files)
 5. Auto-detects database version and upgrades if needed
-6. Configures MCP tool permissions in settings.json
+6. Optionally converts to unified storage format (roaring bitmap tags, CoW snapshots)
+7. Configures MCP tool permissions in settings.json
 
 ## Usage
 
@@ -42,3 +43,13 @@ if command -v jq &>/dev/null && [ -f "$SETTINGS" ]; then
   fi
 fi
 ```
+
+## Optional: Convert to Unified Storage
+
+For better performance with tags and CoW snapshots, convert to unified format:
+
+```bash
+"$PLUGIN_DIR/bin/chitta_cli" convert unified --path ~/.claude/mind/chitta 2>&1
+```
+
+This creates `.unified`, `.vectors`, `.meta`, `.connections`, `.payloads`, `.edges`, `.tags` files alongside the existing `.hot` file. A backup is created automatically.

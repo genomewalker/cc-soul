@@ -11,9 +11,10 @@ Install or update cc-soul binaries. Prefers pre-built binaries, falls back to bu
 1. Downloads ONNX embedding model if missing
 2. Tries to download pre-built binaries for your platform
 3. Falls back to building from source if pre-built fails
-4. Creates database symlinks
+4. Creates database symlinks (including unified storage files)
 5. Auto-detects database version and upgrades if needed
-6. Configures MCP tool permissions in settings.json
+6. Optionally converts to unified storage format (roaring bitmap tags, CoW snapshots)
+7. Configures MCP tool permissions in settings.json
 
 ## Usage
 
