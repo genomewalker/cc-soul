@@ -30,6 +30,7 @@ void print_usage(const char* prog) {
               << "  recall <query>     Semantic search\n"
               << "  cycle              Run maintenance cycle\n"
               << "  upgrade            Upgrade database to current version\n"
+              << "  convert <format>   Convert to new storage format (unified|segments)\n"
               << "  help               Show this help\n\n"
               << "Global options:\n"
               << "  --path PATH        Mind storage path (default: ~/.claude/mind/chitta)\n"
@@ -197,12 +198,44 @@ int cmd_upgrade(const std::string& db_path) {
     }
 }
 
+int cmd_convert(const std::string& db_path, const std::string& format) {
+    if (format != "unified" && format != "segments") {
+        std::cerr << "Unknown format: " << format << "\n";
+        std::cerr << "Supported formats: unified, segments\n";
+        return 1;
+    }
+
+    std::cout << "Converting " << db_path << " to " << format << " format...\n\n";
+
+    migrations::ConversionResult result;
+
+    if (format == "unified") {
+        result = migrations::convert_to_unified(db_path);
+    } else {
+        result = migrations::convert_to_segments(db_path);
+    }
+
+    if (result.success) {
+        std::cout << "\nConversion complete!\n";
+        std::cout << "  Nodes converted: " << result.nodes_converted << "\n";
+        if (!result.backup_path.empty()) {
+            std::cout << "  Backup saved: " << result.backup_path << "\n";
+        }
+        std::cout << "\nThe database will now use " << format << " format on next open.\n";
+        return 0;
+    } else {
+        std::cerr << "Conversion failed: " << result.error << "\n";
+        return 1;
+    }
+}
+
 int main(int argc, char* argv[]) {
     std::string mind_path = default_mind_path();
     std::string model_path;
     std::string vocab_path;
     std::string command;
     std::string query;
+    std::string format;  // For convert command
     int limit = 5;
     bool json_output = false;
 
@@ -229,6 +262,8 @@ int main(int argc, char* argv[]) {
                 command = argv[i];
             } else if (command == "recall" && query.empty()) {
                 query = argv[i];
+            } else if (command == "convert" && format.empty()) {
+                format = argv[i];
             }
         } else {
             std::cerr << "Unknown option: " << argv[i] << "\n";
@@ -245,6 +280,16 @@ int main(int argc, char* argv[]) {
     // Handle upgrade command separately (doesn't need mind.open())
     if (command == "upgrade") {
         return cmd_upgrade(mind_path);
+    }
+
+    // Handle convert command (doesn't need mind.open())
+    if (command == "convert") {
+        if (format.empty()) {
+            std::cerr << "Usage: chitta_cli convert <format>\n";
+            std::cerr << "Formats: unified, segments\n";
+            return 1;
+        }
+        return cmd_convert(mind_path, format);
     }
 
     // Create and open mind

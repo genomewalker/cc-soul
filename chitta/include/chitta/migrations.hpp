@@ -10,6 +10,8 @@
 #include "types.hpp"
 #include "quantized.hpp"
 #include "hnsw.hpp"
+#include "unified_index.hpp"
+#include "segment_manager.hpp"
 #include <fstream>
 #include <filesystem>
 #include <iostream>
@@ -390,6 +392,319 @@ inline MigrationResult upgrade(const std::string& path) {
 // Check if upgrade is needed
 inline bool needs_upgrade(const std::string& path) {
     return detect_version(path) < CURRENT_VERSION;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Format conversions: .hot → .unified or .manifest
+// ═══════════════════════════════════════════════════════════════════════════
+
+struct ConversionResult {
+    bool success;
+    size_t nodes_converted;
+    std::string error;
+    std::string backup_path;
+};
+
+// Convert .hot format to UnifiedIndex (.unified)
+// Preserves all node data, creates new HNSW connections
+inline ConversionResult convert_to_unified(const std::string& base_path) {
+    ConversionResult result{false, 0, "", ""};
+
+    std::string hot_path = base_path + ".hot";
+    std::string unified_path = base_path + ".unified";
+
+    // Check source exists
+    if (!std::filesystem::exists(hot_path)) {
+        result.error = "Source not found: " + hot_path;
+        return result;
+    }
+
+    // Check target doesn't exist
+    if (std::filesystem::exists(unified_path)) {
+        result.error = "Target already exists: " + unified_path;
+        return result;
+    }
+
+    // Load hot storage to read nodes
+    std::ifstream in(hot_path, std::ios::binary);
+    if (!in) {
+        result.error = "Cannot open source file";
+        return result;
+    }
+
+    // Read header
+    uint32_t magic, version;
+    size_t count;
+    in.read(reinterpret_cast<char*>(&magic), sizeof(magic));
+    in.read(reinterpret_cast<char*>(&version), sizeof(version));
+    in.read(reinterpret_cast<char*>(&count), sizeof(count));
+
+    if (magic != STORAGE_MAGIC) {
+        result.error = "Invalid source format (bad magic)";
+        return result;
+    }
+
+    if (version < 2) {
+        result.error = "Please upgrade to v3 first: chitta_cli upgrade " + hot_path;
+        return result;
+    }
+
+    std::cerr << "[migrations] Converting " << count << " nodes to unified format...\n";
+
+    // Create unified index with appropriate capacity
+    size_t capacity = std::max(count * 2, size_t(1000));
+
+    // We need UnifiedIndex - include it
+    // Note: This requires unified_index.hpp to be included
+    // For now, we'll use a simpler approach: read nodes and write directly
+
+    // Read all nodes
+    std::vector<Node> nodes;
+    nodes.reserve(count);
+
+    for (size_t i = 0; i < count; ++i) {
+        Node node;
+
+        in.read(reinterpret_cast<char*>(&node.id.high), sizeof(node.id.high));
+        in.read(reinterpret_cast<char*>(&node.id.low), sizeof(node.id.low));
+        in.read(reinterpret_cast<char*>(&node.node_type), sizeof(node.node_type));
+        in.read(reinterpret_cast<char*>(&node.tau_created), sizeof(node.tau_created));
+        in.read(reinterpret_cast<char*>(&node.tau_accessed), sizeof(node.tau_accessed));
+        in.read(reinterpret_cast<char*>(&node.delta), sizeof(node.delta));
+
+        float mu, sigma_sq;
+        uint32_t n;
+        in.read(reinterpret_cast<char*>(&mu), sizeof(mu));
+        in.read(reinterpret_cast<char*>(&sigma_sq), sizeof(sigma_sq));
+        in.read(reinterpret_cast<char*>(&n), sizeof(n));
+        node.kappa = Confidence(mu);
+        node.kappa.sigma_sq = sigma_sq;
+        node.kappa.n = n;
+
+        node.nu.data.resize(EMBED_DIM);
+        in.read(reinterpret_cast<char*>(node.nu.data.data()), EMBED_DIM * sizeof(float));
+
+        // Skip payload
+        size_t payload_size;
+        in.read(reinterpret_cast<char*>(&payload_size), sizeof(payload_size));
+        if (payload_size > 0 && payload_size < 10000000) {
+            in.seekg(payload_size, std::ios::cur);
+        }
+
+        // Read edges
+        size_t edge_count;
+        in.read(reinterpret_cast<char*>(&edge_count), sizeof(edge_count));
+        if (edge_count < 10000) {
+            node.edges.reserve(edge_count);
+            for (size_t e = 0; e < edge_count; ++e) {
+                Edge edge;
+                in.read(reinterpret_cast<char*>(&edge.target.high), sizeof(edge.target.high));
+                in.read(reinterpret_cast<char*>(&edge.target.low), sizeof(edge.target.low));
+                in.read(reinterpret_cast<char*>(&edge.type), sizeof(edge.type));
+                in.read(reinterpret_cast<char*>(&edge.weight), sizeof(edge.weight));
+                node.edges.push_back(edge);
+            }
+        }
+
+        // Read tags (v2+)
+        size_t tag_count;
+        in.read(reinterpret_cast<char*>(&tag_count), sizeof(tag_count));
+        if (tag_count < 1000) {
+            for (size_t t = 0; t < tag_count; ++t) {
+                size_t tag_len;
+                in.read(reinterpret_cast<char*>(&tag_len), sizeof(tag_len));
+                if (tag_len < 1000) {
+                    std::string tag(tag_len, '\0');
+                    in.read(tag.data(), tag_len);
+                    node.tags.push_back(std::move(tag));
+                }
+            }
+        }
+
+        nodes.push_back(std::move(node));
+
+        if ((i + 1) % 1000 == 0) {
+            std::cerr << "[migrations] Read " << (i + 1) << "/" << count << " nodes\n";
+        }
+    }
+
+    in.close();
+
+    // Create backup of .hot file
+    result.backup_path = create_backup(hot_path, version);
+    std::cerr << "[migrations] Backup created: " << result.backup_path << "\n";
+
+    // Now create UnifiedIndex and insert all nodes
+    // This is done by including unified_index.hpp at the top
+    // For compilation, we assume it's available
+    UnifiedIndex unified;
+    if (!unified.create(base_path, capacity)) {
+        result.error = "Failed to create unified index";
+        return result;
+    }
+
+    for (size_t i = 0; i < nodes.size(); ++i) {
+        auto slot = unified.insert(nodes[i].id, nodes[i]);
+        if (!slot.valid()) {
+            result.error = "Failed to insert node " + std::to_string(i);
+            return result;
+        }
+
+        if ((i + 1) % 1000 == 0) {
+            std::cerr << "[migrations] Inserted " << (i + 1) << "/" << nodes.size() << " nodes\n";
+        }
+    }
+
+    unified.sync();
+    unified.close();
+
+    result.success = true;
+    result.nodes_converted = nodes.size();
+    std::cerr << "[migrations] Conversion complete: " << result.nodes_converted << " nodes\n";
+
+    return result;
+}
+
+// Convert .hot format to SegmentManager (.manifest)
+inline ConversionResult convert_to_segments(const std::string& base_path) {
+    ConversionResult result{false, 0, "", ""};
+
+    std::string hot_path = base_path + ".hot";
+    std::string manifest_path = base_path + ".manifest";
+
+    // Check source exists
+    if (!std::filesystem::exists(hot_path)) {
+        result.error = "Source not found: " + hot_path;
+        return result;
+    }
+
+    // Check target doesn't exist
+    if (std::filesystem::exists(manifest_path)) {
+        result.error = "Target already exists: " + manifest_path;
+        return result;
+    }
+
+    // Load hot storage to read nodes (same as above)
+    std::ifstream in(hot_path, std::ios::binary);
+    if (!in) {
+        result.error = "Cannot open source file";
+        return result;
+    }
+
+    uint32_t magic, version;
+    size_t count;
+    in.read(reinterpret_cast<char*>(&magic), sizeof(magic));
+    in.read(reinterpret_cast<char*>(&version), sizeof(version));
+    in.read(reinterpret_cast<char*>(&count), sizeof(count));
+
+    if (magic != STORAGE_MAGIC) {
+        result.error = "Invalid source format (bad magic)";
+        return result;
+    }
+
+    if (version < 2) {
+        result.error = "Please upgrade to v3 first";
+        return result;
+    }
+
+    std::cerr << "[migrations] Converting " << count << " nodes to segment format...\n";
+
+    // Read all nodes (same logic as above)
+    std::vector<Node> nodes;
+    nodes.reserve(count);
+
+    for (size_t i = 0; i < count; ++i) {
+        Node node;
+
+        in.read(reinterpret_cast<char*>(&node.id.high), sizeof(node.id.high));
+        in.read(reinterpret_cast<char*>(&node.id.low), sizeof(node.id.low));
+        in.read(reinterpret_cast<char*>(&node.node_type), sizeof(node.node_type));
+        in.read(reinterpret_cast<char*>(&node.tau_created), sizeof(node.tau_created));
+        in.read(reinterpret_cast<char*>(&node.tau_accessed), sizeof(node.tau_accessed));
+        in.read(reinterpret_cast<char*>(&node.delta), sizeof(node.delta));
+
+        float mu, sigma_sq;
+        uint32_t n;
+        in.read(reinterpret_cast<char*>(&mu), sizeof(mu));
+        in.read(reinterpret_cast<char*>(&sigma_sq), sizeof(sigma_sq));
+        in.read(reinterpret_cast<char*>(&n), sizeof(n));
+        node.kappa = Confidence(mu);
+        node.kappa.sigma_sq = sigma_sq;
+        node.kappa.n = n;
+
+        node.nu.data.resize(EMBED_DIM);
+        in.read(reinterpret_cast<char*>(node.nu.data.data()), EMBED_DIM * sizeof(float));
+
+        size_t payload_size;
+        in.read(reinterpret_cast<char*>(&payload_size), sizeof(payload_size));
+        if (payload_size > 0 && payload_size < 10000000) {
+            in.seekg(payload_size, std::ios::cur);
+        }
+
+        size_t edge_count;
+        in.read(reinterpret_cast<char*>(&edge_count), sizeof(edge_count));
+        if (edge_count < 10000) {
+            node.edges.reserve(edge_count);
+            for (size_t e = 0; e < edge_count; ++e) {
+                Edge edge;
+                in.read(reinterpret_cast<char*>(&edge.target.high), sizeof(edge.target.high));
+                in.read(reinterpret_cast<char*>(&edge.target.low), sizeof(edge.target.low));
+                in.read(reinterpret_cast<char*>(&edge.type), sizeof(edge.type));
+                in.read(reinterpret_cast<char*>(&edge.weight), sizeof(edge.weight));
+                node.edges.push_back(edge);
+            }
+        }
+
+        size_t tag_count;
+        in.read(reinterpret_cast<char*>(&tag_count), sizeof(tag_count));
+        if (tag_count < 1000) {
+            for (size_t t = 0; t < tag_count; ++t) {
+                size_t tag_len;
+                in.read(reinterpret_cast<char*>(&tag_len), sizeof(tag_len));
+                if (tag_len < 1000) {
+                    std::string tag(tag_len, '\0');
+                    in.read(tag.data(), tag_len);
+                    node.tags.push_back(std::move(tag));
+                }
+            }
+        }
+
+        nodes.push_back(std::move(node));
+    }
+
+    in.close();
+
+    // Create backup
+    result.backup_path = create_backup(hot_path, version);
+    std::cerr << "[migrations] Backup created: " << result.backup_path << "\n";
+
+    // Create SegmentManager and insert all nodes
+    SegmentManager segments(base_path);
+    if (!segments.create()) {
+        result.error = "Failed to create segment manager";
+        return result;
+    }
+
+    for (size_t i = 0; i < nodes.size(); ++i) {
+        auto slot = segments.insert(nodes[i].id, nodes[i]);
+        if (!slot.valid()) {
+            result.error = "Failed to insert node " + std::to_string(i);
+            return result;
+        }
+
+        if ((i + 1) % 1000 == 0) {
+            std::cerr << "[migrations] Inserted " << (i + 1) << "/" << nodes.size() << " nodes\n";
+        }
+    }
+
+    segments.sync();
+    segments.close();
+
+    result.success = true;
+    result.nodes_converted = nodes.size();
+    std::cerr << "[migrations] Conversion complete: " << result.nodes_converted << " nodes\n";
+
+    return result;
 }
 
 } // namespace migrations
