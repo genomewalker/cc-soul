@@ -128,6 +128,11 @@ public:
 
     uint32_t id() const { return id_; }
 
+    // Iterate over all nodes in this segment
+    void for_each(std::function<void(const NodeId&, const Node&)> fn) const {
+        index_.for_each(fn);
+    }
+
     // Check if segment should be sealed (e.g., at capacity)
     bool should_seal() const {
         return count() >= capacity() * 0.9;  // 90% full
@@ -386,6 +391,13 @@ public:
             total += seg->count();
         }
         return total;
+    }
+
+    // Iterate over all nodes across all segments
+    void for_each(std::function<void(const NodeId&, const Node&)> fn) const {
+        for (const auto& [seg_id, seg] : segments_) {
+            seg->for_each(fn);
+        }
     }
 
     Segment* active_segment() {

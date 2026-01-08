@@ -1270,33 +1270,11 @@ public:
 
     void for_each_hot(std::function<void(const NodeId&, const Node&)> fn) const {
         if (use_segments()) {
-            // TODO: Iterate all segments - for now skip
+            segments_->for_each(fn);
             return;
         }
         if (use_unified()) {
-            // Iterate all nodes in unified index (all are "hot" in unified mode)
-            for (size_t i = 0; i < unified_.count() + unified_.deleted_count(); ++i) {
-                SlotId slot(static_cast<uint32_t>(i));
-                auto* indexed = unified_.get_slot(slot);
-                if (!indexed) continue;
-
-                auto* meta = unified_.meta(slot);
-                auto* qvec = unified_.vector(slot);
-                if (!meta || !qvec) continue;
-
-                // Reconstruct node for callback
-                Node node;
-                node.id = indexed->id;
-                node.node_type = meta->node_type;
-                node.nu = qvec->to_float();
-                node.tau_created = meta->tau_created;
-                node.tau_accessed = meta->tau_accessed;
-                node.delta = meta->decay_rate;
-                node.kappa.mu = meta->confidence_mu;
-                node.kappa.sigma_sq = meta->confidence_sigma;
-
-                fn(indexed->id, node);
-            }
+            unified_.for_each(fn);
             return;
         }
         hot_.for_each(fn);

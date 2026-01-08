@@ -58,17 +58,7 @@ static_assert(sizeof(WalEntryHeader) == 32, "WalEntryHeader must be 32 bytes");
 
 constexpr uint32_t WAL_MAGIC = 0x57414C45;  // "WALE"
 
-// CRC32 implementation (simple, no external deps)
-inline uint32_t crc32(const uint8_t* data, size_t length) {
-    uint32_t crc = 0xFFFFFFFF;
-    for (size_t i = 0; i < length; ++i) {
-        crc ^= data[i];
-        for (int j = 0; j < 8; ++j) {
-            crc = (crc >> 1) ^ (0xEDB88320 & -(crc & 1));
-        }
-    }
-    return ~crc;
-}
+// crc32 is now in types.hpp
 
 // RAII file lock - the gate to shared consciousness
 class ScopedFileLock {

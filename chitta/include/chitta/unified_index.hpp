@@ -17,6 +17,7 @@
 #include "hilbert.hpp"
 #include "mmap.hpp"  // For MappedRegion
 #include "connection_pool.hpp"
+#include "blob_store.hpp"
 #include "hnsw.hpp"
 #include <cstdint>
 #include <ctime>
@@ -173,6 +174,18 @@ public:
             return false;
         }
 
+        // Create payload store
+        if (!payloads_.create(base_path_ + ".payloads")) {
+            std::cerr << "[UnifiedIndex] Failed to create payload store\n";
+            return false;
+        }
+
+        // Create edge store
+        if (!edges_.create(base_path_ + ".edges")) {
+            std::cerr << "[UnifiedIndex] Failed to create edge store\n";
+            return false;
+        }
+
         // Initialize slot allocation
         next_slot_ = 0;
         capacity_ = initial_capacity;
@@ -216,6 +229,24 @@ public:
             return false;
         }
 
+        // Open payload store (create if missing for backward compatibility)
+        std::string payloads_path = base_path_ + ".payloads";
+        if (!payloads_.open(payloads_path)) {
+            if (!payloads_.create(payloads_path)) {
+                std::cerr << "[UnifiedIndex] Failed to create payload store\n";
+                return false;
+            }
+        }
+
+        // Open edge store (create if missing for backward compatibility)
+        std::string edges_path = base_path_ + ".edges";
+        if (!edges_.open(edges_path)) {
+            if (!edges_.create(edges_path)) {
+                std::cerr << "[UnifiedIndex] Failed to create edge store\n";
+                return false;
+            }
+        }
+
         // Rebuild NodeId -> SlotId lookup
         rebuild_id_index();
 
@@ -233,10 +264,14 @@ public:
         vectors_region_.close();
         meta_region_.close();
         connections_.close();
+        payloads_.close();
+        edges_.close();
     }
 
     void sync() {
         connections_.sync();
+        payloads_.sync();
+        edges_.sync();
         index_region_.sync();
         vectors_region_.sync();
         meta_region_.sync();
@@ -282,6 +317,20 @@ public:
         auto* vectors = vectors_region_.as<QuantizedVector>();
         vectors[slot.value] = qvec;
 
+        // Store payload if present
+        uint32_t payload_offset = 0;
+        uint32_t payload_size = 0;
+        if (!node.payload.empty()) {
+            payload_offset = static_cast<uint32_t>(payloads_.store(node.payload));
+            payload_size = static_cast<uint32_t>(node.payload.size());
+        }
+
+        // Store edges if present
+        uint32_t edge_offset = 0;
+        if (!node.edges.empty()) {
+            edge_offset = static_cast<uint32_t>(store_edges(node.edges));
+        }
+
         // Write metadata
         auto* metas = meta_region_.as<NodeMeta>();
         metas[slot.value] = NodeMeta{
@@ -291,13 +340,13 @@ public:
             node.kappa.mu,
             node.kappa.sigma_sq,
             node.delta,
-            slot.value,  // vector_offset (same as slot for now)
-            0,           // payload_offset (TODO)
-            0,           // payload_size
-            0,           // edge_offset (TODO)
+            slot.value,       // vector_offset (same as slot for now)
+            payload_offset,   // payload_offset
+            payload_size,     // payload_size
+            edge_offset,      // edge_offset
             node.node_type,
             StorageTier::Hot,
-            0            // flags
+            0                 // flags
         };
 
         // Create empty connections (will be populated during HNSW insert)
@@ -462,6 +511,50 @@ public:
     }
 
     // ═══════════════════════════════════════════════════════════════════════
+    // Iteration
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Iterate over all active nodes, reconstructing Node from stored components
+    void for_each(std::function<void(const NodeId&, const Node&)> fn) const {
+        if (!valid()) return;
+
+        std::shared_lock lock(mutex_);
+        auto* header = index_region_.as<const UnifiedIndexHeader>();
+        const auto* nodes = node_array();
+
+        for (size_t i = 0; i < header->node_count + header->deleted_count; ++i) {
+            if (nodes[i].flags & NODE_FLAG_DELETED) continue;
+
+            SlotId slot(static_cast<uint32_t>(i));
+            auto* meta = this->meta(slot);
+            auto* qvec = this->vector(slot);
+            if (!meta || !qvec) continue;
+
+            Node node;
+            node.id = nodes[i].id;
+            node.node_type = meta->node_type;
+            node.nu = qvec->to_float();
+            node.tau_created = meta->tau_created;
+            node.tau_accessed = meta->tau_accessed;
+            node.delta = meta->decay_rate;
+            node.kappa.mu = meta->confidence_mu;
+            node.kappa.sigma_sq = meta->confidence_sigma;
+
+            // Load payload if present
+            if (meta->payload_offset != 0 && meta->payload_size != 0) {
+                node.payload = payloads_.read(meta->payload_offset);
+            }
+
+            // Load edges if present
+            if (meta->edge_offset != 0) {
+                node.edges = load_edges(meta->edge_offset);
+            }
+
+            fn(nodes[i].id, node);
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     // Copy-on-Write Snapshots
     // ═══════════════════════════════════════════════════════════════════════
 
@@ -501,6 +594,8 @@ public:
         success &= copy_file_cow(base_path_ + ".vectors", snapshot_path + ".vectors");
         success &= copy_file_cow(base_path_ + ".meta", snapshot_path + ".meta");
         success &= copy_file_cow(base_path_ + ".connections", snapshot_path + ".connections");
+        success &= copy_file_cow(base_path_ + ".payloads", snapshot_path + ".payloads");
+        success &= copy_file_cow(base_path_ + ".edges", snapshot_path + ".edges");
 
         if (success) {
             std::cerr << "[UnifiedIndex] Snapshot " << snap_id << " created at "
@@ -873,11 +968,78 @@ private:
             neighbor.value, static_cast<uint8_t>(all_connections.size()), all_connections);
     }
 
+    // Serialize edges to blob storage
+    // Format: [count:2][edge1:24][edge2:24]...
+    // Each edge: [target.high:8][target.low:8][type:1][padding:3][weight:4] = 24 bytes
+    uint64_t store_edges(const std::vector<Edge>& edges) {
+        if (edges.empty()) return 0;
+
+        std::vector<uint8_t> data;
+        data.resize(sizeof(uint16_t) + edges.size() * 24);
+
+        uint8_t* ptr = data.data();
+
+        // Write count
+        uint16_t count = static_cast<uint16_t>(edges.size());
+        std::memcpy(ptr, &count, sizeof(count));
+        ptr += sizeof(count);
+
+        // Write each edge
+        for (const auto& edge : edges) {
+            std::memcpy(ptr, &edge.target.high, sizeof(uint64_t));
+            ptr += sizeof(uint64_t);
+            std::memcpy(ptr, &edge.target.low, sizeof(uint64_t));
+            ptr += sizeof(uint64_t);
+            *ptr++ = static_cast<uint8_t>(edge.type);
+            *ptr++ = 0; *ptr++ = 0; *ptr++ = 0;  // padding
+            std::memcpy(ptr, &edge.weight, sizeof(float));
+            ptr += sizeof(float);
+        }
+
+        return edges_.store(data);
+    }
+
+    // Deserialize edges from blob storage
+    std::vector<Edge> load_edges(uint64_t offset) const {
+        if (offset == 0) return {};
+
+        auto data = edges_.read(offset);
+        if (data.size() < sizeof(uint16_t)) return {};
+
+        const uint8_t* ptr = data.data();
+
+        uint16_t count;
+        std::memcpy(&count, ptr, sizeof(count));
+        ptr += sizeof(count);
+
+        if (data.size() < sizeof(uint16_t) + count * 24) return {};
+
+        std::vector<Edge> result;
+        result.reserve(count);
+
+        for (uint16_t i = 0; i < count; ++i) {
+            Edge edge;
+            std::memcpy(&edge.target.high, ptr, sizeof(uint64_t));
+            ptr += sizeof(uint64_t);
+            std::memcpy(&edge.target.low, ptr, sizeof(uint64_t));
+            ptr += sizeof(uint64_t);
+            edge.type = static_cast<EdgeType>(*ptr++);
+            ptr += 3;  // skip padding
+            std::memcpy(&edge.weight, ptr, sizeof(float));
+            ptr += sizeof(float);
+            result.push_back(edge);
+        }
+
+        return result;
+    }
+
     std::string base_path_;
     MappedRegion index_region_;
     MappedRegion vectors_region_;
     MappedRegion meta_region_;
     ConnectionPool connections_;
+    BlobStore payloads_;       // Variable-length payload storage
+    BlobStore edges_;          // Variable-length edge storage
 
     mutable std::shared_mutex mutex_;
     std::unordered_map<NodeId, SlotId, NodeIdHash> id_to_slot_;

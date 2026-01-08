@@ -106,7 +106,7 @@ public:
         header->used_bytes = sizeof(ConnectionPoolHeader);
         header->node_count = 0;
         header->free_list_head = 0;
-        header->checksum = 0;  // TODO: compute
+        header->checksum = compute_header_checksum(header);
 
         write_pos_ = sizeof(ConnectionPoolHeader);
         return true;
@@ -132,6 +132,17 @@ public:
             return false;
         }
 
+        // Verify checksum (skip if zero for backward compatibility)
+        if (header->checksum != 0) {
+            uint64_t computed = compute_header_checksum(header);
+            if (computed != header->checksum) {
+                std::cerr << "[ConnectionPool] Checksum mismatch (stored="
+                          << std::hex << header->checksum
+                          << ", computed=" << computed << std::dec << ")\n";
+                return false;
+            }
+        }
+
         write_pos_ = header->used_bytes;
         return true;
     }
@@ -148,6 +159,7 @@ public:
 
         auto* header = region_.as<ConnectionPoolHeader>();
         header->used_bytes = write_pos_;
+        header->checksum = compute_header_checksum(header);
         region_.sync();
     }
 
@@ -353,46 +365,56 @@ private:
         return offset;
     }
 
-    // Try to allocate from free list
+    // Try to allocate from free list using best-fit strategy
+    // Best-fit reduces fragmentation by finding the smallest block that fits
     uint64_t try_allocate_from_free_list(size_t required) {
         auto* header = region_.as<ConnectionPoolHeader>();
         if (header->free_list_head == 0) return 0;
 
-        // Simple first-fit for now
-        // TODO: Best-fit or segregated free list for better memory efficiency
+        // Best-fit: find smallest block that fits
+        uint64_t best_offset = 0;
+        uint64_t best_prev_offset = 0;
+        size_t best_size = SIZE_MAX;
 
         uint64_t prev_offset = 0;
         uint64_t current_offset = header->free_list_head;
 
         while (current_offset != 0) {
             auto* block = region_.at<FreeBlock>(current_offset);
-            if (block->size >= required) {
-                // Found suitable block
-                // Remove from free list
-                if (prev_offset == 0) {
-                    header->free_list_head = block->next_offset;
-                } else {
-                    auto* prev_block = region_.at<FreeBlock>(prev_offset);
-                    prev_block->next_offset = block->next_offset;
-                }
+            if (block->size >= required && block->size < best_size) {
+                best_offset = current_offset;
+                best_prev_offset = prev_offset;
+                best_size = block->size;
 
-                // If block is much larger, split it
-                if (block->size > required + sizeof(FreeBlock) + 64) {
-                    uint64_t split_offset = current_offset + required;
-                    auto* split_block = region_.at<FreeBlock>(split_offset);
-                    split_block->size = block->size - required;
-                    split_block->next_offset = header->free_list_head;
-                    header->free_list_head = split_offset;
-                }
-
-                return current_offset;
+                // Perfect fit - no need to search further
+                if (block->size == required) break;
             }
 
             prev_offset = current_offset;
             current_offset = block->next_offset;
         }
 
-        return 0;  // No suitable block found
+        if (best_offset == 0) return 0;  // No suitable block found
+
+        // Remove best block from free list
+        auto* best_block = region_.at<FreeBlock>(best_offset);
+        if (best_prev_offset == 0) {
+            header->free_list_head = best_block->next_offset;
+        } else {
+            auto* prev_block = region_.at<FreeBlock>(best_prev_offset);
+            prev_block->next_offset = best_block->next_offset;
+        }
+
+        // If block is much larger, split it
+        if (best_size > required + sizeof(FreeBlock) + 64) {
+            uint64_t split_offset = best_offset + required;
+            auto* split_block = region_.at<FreeBlock>(split_offset);
+            split_block->size = best_size - required;
+            split_block->next_offset = header->free_list_head;
+            header->free_list_head = split_offset;
+        }
+
+        return best_offset;
     }
 
     // Add a freed block to the free list
@@ -444,6 +466,13 @@ private:
 
         std::cerr << "[ConnectionPool] Grew from " << current << " to " << new_size << " bytes\n";
         return true;
+    }
+
+    // Compute checksum of header fields (excluding checksum field itself)
+    static uint64_t compute_header_checksum(const ConnectionPoolHeader* header) {
+        // Checksum covers: magic, version, total_bytes, used_bytes, node_count, free_list_head
+        // (first 40 bytes, excluding checksum and reserved)
+        return crc32(reinterpret_cast<const uint8_t*>(header), 40);
     }
 
     std::string path_;
