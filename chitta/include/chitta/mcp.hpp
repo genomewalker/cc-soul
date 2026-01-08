@@ -1780,8 +1780,15 @@ private:
                 auto& ss = ledger_json["soul_state"];
                 narrative << "## Soul State\n";
                 if (ss.contains("coherence")) {
-                    float tau_k = ss["coherence"].value("tau_k", 0.0f);
-                    narrative << "Coherence: " << std::fixed << std::setprecision(2) << tau_k << "\n";
+                    auto& coh = ss["coherence"];
+                    if (coh.is_string()) {
+                        narrative << "Coherence: " << coh.get<std::string>() << "\n";
+                    } else if (coh.is_object()) {
+                        float tau_k = coh.value("tau_k", 0.0f);
+                        narrative << "Coherence: " << std::fixed << std::setprecision(2) << tau_k << "\n";
+                    } else if (coh.is_number()) {
+                        narrative << "Coherence: " << std::fixed << std::setprecision(2) << coh.get<float>() << "\n";
+                    }
                 }
                 if (ss.contains("statistics")) {
                     auto& stats = ss["statistics"];
@@ -1828,7 +1835,8 @@ private:
                 narrative << "## What To Do Next\n";
 
                 if (cont.contains("reason")) {
-                    narrative << "Last session ended: " << cont["reason"].get<std::string>() << "\n";
+                    auto& reason = cont["reason"];
+                    narrative << "Last session ended: " << (reason.is_string() ? reason.get<std::string>() : reason.dump()) << "\n";
                 }
 
                 if (cont.contains("next_steps") && !cont["next_steps"].empty()) {
@@ -1841,13 +1849,14 @@ private:
 
                 if (cont.contains("critical") && !cont["critical"].empty()) {
                     narrative << "\n### Critical Notes:\n";
-                    if (cont["critical"].is_array()) {
-                        for (const auto& note : cont["critical"]) {
+                    auto& critical = cont["critical"];
+                    if (critical.is_array()) {
+                        for (const auto& note : critical) {
                             std::string text = note.is_string() ? note.get<std::string>() : note.dump();
                             narrative << "⚠️ " << text << "\n";
                         }
                     } else {
-                        narrative << "⚠️ " << cont["critical"].get<std::string>() << "\n";
+                        narrative << "⚠️ " << (critical.is_string() ? critical.get<std::string>() : critical.dump()) << "\n";
                     }
                 }
 
