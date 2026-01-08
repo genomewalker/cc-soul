@@ -161,6 +161,15 @@ public:
             return false;
         }
 
+        // Create binary vectors file (48 bytes each for fast first-pass)
+        std::string bin_path = base_path_ + ".binary";
+        size_t bin_size = initial_capacity * sizeof(BinaryVector);
+        if (!binary_region_.create(bin_path, bin_size)) {
+            std::cerr << "[UnifiedIndex] Failed to create binary vectors file\n";
+            return false;
+        }
+        has_binary_ = true;
+
         // Create metadata file
         std::string meta_path = base_path_ + ".meta";
         size_t meta_size = initial_capacity * sizeof(NodeMeta);
@@ -226,6 +235,19 @@ public:
             return false;
         }
 
+        // Open binary vectors (optional - create if missing for scale optimization)
+        std::string bin_path = base_path_ + ".binary";
+        if (binary_region_.open(bin_path, false)) {
+            has_binary_ = true;
+        } else {
+            // Create binary vectors from existing int8 vectors
+            size_t bin_size = header->capacity * sizeof(BinaryVector);
+            if (binary_region_.create(bin_path, bin_size)) {
+                has_binary_ = true;
+                rebuild_binary_vectors();
+            }
+        }
+
         // Open metadata (with write access)
         if (!meta_region_.open(base_path_ + ".meta", false)) {
             return false;
@@ -283,6 +305,7 @@ public:
         payloads_.close();
         edges_.close();
         tags_.close();
+        binary_region_.close();
     }
 
     void sync() {
@@ -293,6 +316,7 @@ public:
         index_region_.sync();
         vectors_region_.sync();
         meta_region_.sync();
+        if (has_binary_) binary_region_.sync();
     }
 
     bool valid() const {
@@ -334,6 +358,12 @@ public:
         // Write vector
         auto* vectors = vectors_region_.as<QuantizedVector>();
         vectors[slot.value] = qvec;
+
+        // Write binary vector for fast first-pass search
+        if (has_binary_) {
+            auto* binvecs = binary_region_.as<BinaryVector>();
+            binvecs[slot.value] = BinaryVector::from_quantized(qvec);
+        }
 
         // Store payload if present
         uint32_t payload_offset = 0;
@@ -521,6 +551,90 @@ public:
 
         return results;
     }
+
+    // Two-stage search: binary first-pass, int8 rerank
+    // For large scale: binary vectors fit in memory (48 bytes vs 392 bytes)
+    std::vector<std::pair<SlotId, float>> search_two_stage(
+        const QuantizedVector& query, size_t k, size_t first_pass_k = 0) const
+    {
+        if (!has_binary_ || count() < 10000) {
+            // Fall back to regular HNSW for small datasets
+            return search(query, k);
+        }
+
+        std::shared_lock lock(mutex_);
+
+        auto* header = index_region_.as<const UnifiedIndexHeader>();
+        if (header->node_count == 0) return {};
+
+        if (first_pass_k == 0) first_pass_k = std::max(k * 10, size_t(1000));
+
+        // First pass: brute-force binary search (fast due to popcount)
+        BinaryVector bin_query = BinaryVector::from_quantized(query);
+        auto candidates = search_binary_brute(bin_query, first_pass_k);
+
+        // Second pass: rerank with int8 cosine
+        auto* vectors = vectors_region_.as<const QuantizedVector>();
+        for (auto& [slot, score] : candidates) {
+            score = vectors[slot.value].cosine_approx(query);
+        }
+
+        // Sort by reranked score
+        std::sort(candidates.begin(), candidates.end(),
+            [](const auto& a, const auto& b) { return a.second > b.second; });
+
+        // Return top k
+        if (candidates.size() > k) {
+            candidates.resize(k);
+        }
+
+        return candidates;
+    }
+
+    // Binary brute-force search (Hamming distance)
+    std::vector<std::pair<SlotId, float>> search_binary_brute(
+        const BinaryVector& query, size_t k) const
+    {
+        if (!has_binary_) return {};
+
+        auto* header = index_region_.as<const UnifiedIndexHeader>();
+        size_t total = header->node_count + header->deleted_count;
+
+        auto* binvecs = binary_region_.as<const BinaryVector>();
+        const auto* nodes = node_array();
+
+        // Compute all Hamming distances
+        std::vector<std::pair<SlotId, uint32_t>> dists;
+        dists.reserve(total);
+
+        for (size_t i = 0; i < total; ++i) {
+            if (nodes[i].flags & NODE_FLAG_DELETED) continue;
+            uint32_t dist = query.hamming_fast(binvecs[i]);
+            dists.emplace_back(SlotId(i), dist);
+        }
+
+        // Partial sort for top k
+        if (dists.size() > k) {
+            std::partial_sort(dists.begin(), dists.begin() + k, dists.end(),
+                [](const auto& a, const auto& b) { return a.second < b.second; });
+            dists.resize(k);
+        } else {
+            std::sort(dists.begin(), dists.end(),
+                [](const auto& a, const auto& b) { return a.second < b.second; });
+        }
+
+        // Convert to similarity scores
+        std::vector<std::pair<SlotId, float>> results;
+        results.reserve(dists.size());
+        for (const auto& [slot, dist] : dists) {
+            float sim = 1.0f - static_cast<float>(dist) / EMBED_DIM;
+            results.emplace_back(slot, sim);
+        }
+
+        return results;
+    }
+
+    bool has_binary_vectors() const { return has_binary_; }
 
     // ═══════════════════════════════════════════════════════════════════════
     // Statistics
@@ -747,6 +861,27 @@ private:
                 id_to_slot_[nodes[i].id] = SlotId(i);
             }
         }
+    }
+
+    // Rebuild binary vectors from int8 vectors (migration)
+    void rebuild_binary_vectors() {
+        if (!has_binary_ || !vectors_region_.valid()) return;
+
+        auto* header = index_region_.as<const UnifiedIndexHeader>();
+        size_t total = header->node_count + header->deleted_count;
+
+        auto* vectors = vectors_region_.as<const QuantizedVector>();
+        auto* binvecs = binary_region_.as<BinaryVector>();
+        const auto* nodes = node_array();
+
+        for (size_t i = 0; i < total; ++i) {
+            if (!(nodes[i].flags & NODE_FLAG_DELETED)) {
+                binvecs[i] = BinaryVector::from_quantized(vectors[i]);
+            }
+        }
+
+        std::cerr << "[UnifiedIndex] Rebuilt " << header->node_count
+                  << " binary vectors for two-stage search\n";
     }
 
     // Grow capacity
@@ -1082,6 +1217,7 @@ private:
     std::string base_path_;
     MappedRegion index_region_;
     MappedRegion vectors_region_;
+    MappedRegion binary_region_;   // Binary vectors for fast first-pass (48 bytes each)
     MappedRegion meta_region_;
     ConnectionPool connections_;
     BlobStore payloads_;       // Variable-length payload storage
@@ -1092,6 +1228,7 @@ private:
     std::unordered_map<NodeId, SlotId, NodeIdHash> id_to_slot_;
     size_t capacity_ = 0;
     size_t next_slot_ = 0;
+    bool has_binary_ = false;  // Binary vectors available
 };
 
 } // namespace chitta
