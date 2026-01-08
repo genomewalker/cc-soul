@@ -1476,6 +1476,7 @@ private:
         node.delta = meta->decay_rate;
         node.kappa.mu = meta->confidence_mu;
         node.kappa.sigma_sq = meta->confidence_sigma;
+        node.payload = unified_.payload(slot);
 
         // Update access time in cache and persist to unified index
         node.touch();

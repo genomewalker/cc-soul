@@ -464,6 +464,14 @@ public:
         metas[slot.value].tau_accessed = now();
     }
 
+    // Get payload for a slot
+    std::vector<uint8_t> payload(SlotId slot) const {
+        if (!slot.valid()) return {};
+        auto* m = meta(slot);
+        if (!m || m->payload_offset == 0 || m->payload_size == 0) return {};
+        return payloads_.read(m->payload_offset);
+    }
+
     // Lookup slot by NodeId
     SlotId lookup(const NodeId& id) const {
         std::shared_lock lock(mutex_);
