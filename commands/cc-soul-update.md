@@ -23,6 +23,8 @@ Install or update cc-soul binaries. Prefers pre-built binaries, falls back to bu
 
 ## Implementation
 
+Run all commands in a single bash block (variables don't persist across separate calls):
+
 ```bash
 PLUGIN_DIR="$HOME/.claude/plugins/marketplaces/genomewalker-cc-soul"
 SETTINGS="$HOME/.claude/settings.json"
