@@ -225,8 +225,16 @@ public:
     }
 
     // Ensure BM25 index is built (lazy initialization)
+    // Skipped for large datasets (>1M nodes) - use dense search only
+    static constexpr size_t BM25_MAX_NODES = 1000000;
+
     void ensure_bm25_index() {
         if (bm25_built_) return;
+        if (storage_.total_size() > BM25_MAX_NODES) {
+            // Too large for in-memory BM25 - skip and use dense search only
+            bm25_built_ = true;  // Mark as "built" to prevent retry
+            return;
+        }
         rebuild_bm25_index();
         bm25_built_ = true;
     }
@@ -234,7 +242,7 @@ public:
     // Add to BM25 only if already built (otherwise rebuild will include it)
     void maybe_add_bm25(NodeId id, const std::string& text) {
         if (bm25_built_) {
-            maybe_add_bm25(id, text);
+            bm25_index_.add(id, text);
         }
     }
 

@@ -978,6 +978,112 @@ void test_mind_with_text() {
 }
 #endif
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Phase 4: Tag and BM25 Optimization Tests
+// ═══════════════════════════════════════════════════════════════════════════
+
+void test_slot_tag_index() {
+    std::cout << "Testing SlotTagIndex..." << std::endl;
+
+    // Clean up
+    std::system("rm -f /tmp/chitta_tag_test.*");
+
+    SlotTagIndex index;
+    assert(index.create("/tmp/chitta_tag_test"));
+
+    // Add tags for slots
+    index.add(0, std::vector<std::string>{"wisdom", "memory", "core"});
+    index.add(1, std::vector<std::string>{"wisdom", "belief"});
+    index.add(2, std::vector<std::string>{"memory", "session"});
+    index.add(3, std::vector<std::string>{"wisdom", "memory"});
+
+    // Test single tag query
+    auto wisdom_slots = index.slots_with_tag("wisdom");
+    assert(wisdom_slots.size() == 3);  // slots 0, 1, 3
+
+    // Test AND intersection
+    auto wisdom_memory = index.slots_with_all_tags({"wisdom", "memory"});
+    assert(wisdom_memory.size() == 2);  // slots 0, 3
+
+    // Test tags_for_slot
+    auto tags_0 = index.tags_for_slot(0);
+    assert(tags_0.size() == 3);
+
+    // Test persistence
+    index.save();
+    index.close();
+
+    SlotTagIndex index2;
+    assert(index2.open("/tmp/chitta_tag_test"));
+    auto reloaded = index2.slots_with_tag("wisdom");
+    assert(reloaded.size() == 3);
+
+    std::cout << "  PASS" << std::endl;
+}
+
+void test_mmap_empty_file() {
+    std::cout << "Testing MappedRegion empty file rejection..." << std::endl;
+
+    // Create empty file
+    std::system("touch /tmp/chitta_empty_test");
+
+    MappedRegion region;
+    // Should fail to open empty file
+    assert(!region.open("/tmp/chitta_empty_test"));
+
+    std::system("rm -f /tmp/chitta_empty_test");
+
+    std::cout << "  PASS" << std::endl;
+}
+
+void test_unified_tag_queries() {
+    std::cout << "Testing Unified Storage Tag Queries..." << std::endl;
+
+    // Clean up
+    std::system("rm -f /tmp/chitta_unified_tag_test.*");
+
+    TieredStorage::Config config;
+    config.base_path = "/tmp/chitta_unified_tag_test";
+    config.use_unified_index = true;
+
+    // Create and populate
+    {
+        TieredStorage storage(config);
+        assert(storage.initialize());
+
+        Node node1(NodeType::Wisdom, test_vector(1.0f));
+        node1.tags = {"topic:ai", "type:insight"};
+        storage.insert(node1.id, std::move(node1));
+
+        Node node2(NodeType::Wisdom, test_vector(2.0f));
+        node2.tags = {"topic:ai", "type:question"};
+        storage.insert(node2.id, std::move(node2));
+
+        Node node3(NodeType::Wisdom, test_vector(3.0f));
+        node3.tags = {"topic:bio", "type:insight"};
+        storage.insert(node3.id, std::move(node3));
+
+        storage.sync();
+    }
+
+    // Reopen and query
+    {
+        TieredStorage storage(config);
+        assert(storage.initialize());
+        assert(storage.use_unified());
+
+        // Single tag query
+        auto ai_nodes = storage.find_by_tag("topic:ai");
+        assert(ai_nodes.size() == 2);
+
+        // AND query
+        auto ai_insights = storage.find_by_tags({"topic:ai", "type:insight"});
+        assert(ai_insights.size() == 1);
+    }
+
+    std::cout << "  PASS" << std::endl;
+}
+
 int main() {
     std::cout << "=== Chitta C++ Tests ===" << std::endl;
     std::cout << "EMBED_DIM = " << EMBED_DIM << std::endl;
@@ -1011,6 +1117,12 @@ int main() {
 
     test_mind();
     test_persistence();
+
+    std::cout << std::endl;
+    std::cout << "=== Phase 4: Tag Optimization Tests ===" << std::endl;
+    test_slot_tag_index();
+    test_mmap_empty_file();
+    test_unified_tag_queries();
 
 #ifdef CHITTA_WITH_ONNX
     std::cout << std::endl;
