@@ -29,6 +29,12 @@ public:
         }
         size_ = st.st_size;
 
+        // Reject empty files (mmap with size 0 is undefined behavior)
+        if (size_ == 0) {
+            close();
+            return false;
+        }
+
         int prot = readonly ? PROT_READ : (PROT_READ | PROT_WRITE);
         data_ = mmap(nullptr, size_, prot, MAP_SHARED, fd_, 0);
         if (data_ == MAP_FAILED) {
