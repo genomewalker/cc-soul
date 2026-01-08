@@ -592,8 +592,8 @@ public:
                 node.edges = load_edges(meta->edge_offset);
             }
 
-            // Load tags from inverted index
-            node.tags = tags_.tags_for_slot(static_cast<uint32_t>(i));
+            // Tags not loaded - use slot_tag_index().tags_for_slot() if needed
+            // This saves memory during iteration (e.g., BM25 rebuild)
 
             fn(nodes[i].id, node);
         }
