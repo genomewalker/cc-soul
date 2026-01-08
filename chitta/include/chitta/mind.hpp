@@ -726,28 +726,30 @@ public:
         return std::nullopt;
     }
 
-    // Strengthen: increase confidence
+    // Strengthen: increase confidence (uses WAL delta)
     void strengthen(NodeId id, float delta = 0.1f) {
         std::lock_guard<std::mutex> lock(mutex_);
         if (Node* node = storage_.get(id)) {
-            node->kappa.observe(node->kappa.mu + delta);
+            Confidence new_kappa = node->kappa;
+            new_kappa.observe(new_kappa.mu + delta);
+            storage_.update_confidence(id, new_kappa);
         }
     }
 
-    // Weaken: decrease confidence
+    // Weaken: decrease confidence (uses WAL delta)
     void weaken(NodeId id, float delta = 0.1f) {
         std::lock_guard<std::mutex> lock(mutex_);
         if (Node* node = storage_.get(id)) {
-            node->kappa.observe(node->kappa.mu - delta);
+            Confidence new_kappa = node->kappa;
+            new_kappa.observe(new_kappa.mu - delta);
+            storage_.update_confidence(id, new_kappa);
         }
     }
 
-    // Connect: create edge between nodes
+    // Connect: create edge between nodes (uses WAL delta)
     void connect(NodeId from, NodeId to, EdgeType type, float weight = 1.0f) {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (Node* node = storage_.get(from)) {
-            node->connect(to, type, weight);
-        }
+        storage_.add_edge(from, to, type, weight);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -901,7 +903,7 @@ public:
         feedback_.misleading(id, context);
     }
 
-    // Apply pending feedback to node confidences
+    // Apply pending feedback to node confidences (uses WAL delta)
     size_t apply_feedback() {
         std::lock_guard<std::mutex> lock(mutex_);
 
@@ -911,8 +913,10 @@ public:
         for (const auto& [id, delta] : deltas) {
             if (Node* node = storage_.get(id)) {
                 // Apply delta via Bayesian update
-                float new_mu = std::clamp(node->kappa.mu + delta, 0.0f, 1.0f);
-                node->kappa.observe(new_mu);
+                Confidence new_kappa = node->kappa;
+                float new_mu = std::clamp(new_kappa.mu + delta, 0.0f, 1.0f);
+                new_kappa.observe(new_mu);
+                storage_.update_confidence(id, new_kappa);
                 applied++;
             }
         }

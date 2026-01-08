@@ -775,6 +775,95 @@ public:
         return count;
     }
 
+    // Replay entries since a sequence number with delta support (Phase 2)
+    // Callback receives WalReplayEntry which can be full node or delta
+    // Returns number of entries replayed
+    size_t replay_v2(uint64_t since_seq,
+                     std::function<void(const WalReplayEntry&, uint64_t)> callback) {
+        if (fd_ < 0) return 0;
+
+        ScopedFileLock lock(fd_, false);
+
+        lseek(fd_, 0, SEEK_SET);
+
+        size_t count = 0;
+        WalEntryHeader header;
+
+        while (::read(fd_, &header, sizeof(header)) == sizeof(header)) {
+            if (header.magic != WAL_MAGIC) {
+                std::cerr << "[WAL] Invalid magic at offset, stopping replay_v2\n";
+                break;
+            }
+
+            size_t data_size = header.length - sizeof(header);
+            if (data_size > 100 * 1024 * 1024) break;
+
+            std::vector<uint8_t> data(data_size);
+            if (::read(fd_, data.data(), data_size) != static_cast<ssize_t>(data_size)) {
+                break;
+            }
+
+            if (crc32(data.data(), data.size()) != header.checksum) {
+                std::cerr << "[WAL] Checksum mismatch at seq " << header.sequence << "\n";
+                continue;
+            }
+
+            if (header.sequence > since_seq && header.op != WalOp::Checkpoint) {
+                WalReplayEntry entry;
+                entry.op = header.op;
+                entry.format = header.format;
+
+                switch (header.format) {
+                    case WAL_FORMAT_V0:
+                    case WAL_FORMAT_V1: {
+                        entry.full_node = deserialize_node(data.data(), data.size(), header.format);
+                        entry.id = entry.full_node.id;
+                        entry.has_full_node = true;
+                        break;
+                    }
+                    case WAL_FORMAT_V2: {
+                        TouchDelta td = deserialize_touch(data.data(), data.size());
+                        entry.id = td.id;
+                        entry.has_touch = true;
+                        entry.touch_tau = td.tau_accessed;
+                        break;
+                    }
+                    case WAL_FORMAT_V3: {
+                        ConfidenceDelta cd = deserialize_confidence(data.data(), data.size());
+                        entry.id = cd.id;
+                        entry.has_confidence = true;
+                        entry.confidence.mu = cd.mu;
+                        entry.confidence.sigma_sq = cd.sigma_sq;
+                        entry.confidence.n = cd.n;
+                        entry.confidence.tau = cd.tau;
+                        break;
+                    }
+                    case WAL_FORMAT_V4: {
+                        EdgeDelta ed = deserialize_edge(data.data(), data.size());
+                        entry.id = ed.from_id;
+                        entry.has_edge = true;
+                        entry.edge.target = ed.target;
+                        entry.edge.type = ed.type;
+                        entry.edge.weight = ed.weight;
+                        break;
+                    }
+                    default:
+                        continue;
+                }
+
+                callback(entry, header.sequence);
+                count++;
+            }
+
+            if (header.sequence >= next_seq_) {
+                next_seq_ = header.sequence;
+            }
+        }
+
+        last_read_pos_ = lseek(fd_, 0, SEEK_CUR);
+        return count;
+    }
+
     // Sync: read only NEW entries since last sync
     // More efficient than replay_since for frequent syncs
     size_t sync(std::function<void(WalOp, const Node&, uint64_t)> callback) {

@@ -17,6 +17,9 @@
 #include "voice.hpp"
 #include "dynamics.hpp"
 #include "storage.hpp"
+#include "hilbert.hpp"
+#include "connection_pool.hpp"
+#include "unified_index.hpp"
 #include "vak.hpp"
 #ifdef CHITTA_WITH_ONNX
 #include "vak_onnx.hpp"
