@@ -31,7 +31,6 @@ PLUGIN_DIR="$HOME/.claude/plugins/marketplaces/genomewalker-cc-soul"
 SETTINGS="$HOME/.claude/settings.json"
 PERM_RULE="mcp__plugin_cc-soul_cc-soul__*"
 
-rm -rf "$PLUGIN_DIR/bin" 2>/dev/null
 bash "$PLUGIN_DIR/scripts/smart-install.sh"
 "$PLUGIN_DIR/bin/chitta_cli" --version
 "$PLUGIN_DIR/bin/chitta_cli" upgrade 2>&1

@@ -29,6 +29,12 @@ PLUGIN_DIR="$HOME/.claude/plugins/marketplaces/genomewalker-cc-soul"
 SETTINGS="$HOME/.claude/settings.json"
 PERM_RULE="mcp__plugin_cc-soul_cc-soul__*"
 
+# Check cmake before deleting binaries
+if ! command -v cmake &>/dev/null; then
+  echo "[cc-soul] ERROR: cmake required for building from source"
+  echo "[cc-soul] Use /cc-soul-update instead to download pre-built binaries"
+  exit 1
+fi
 rm -rf "$PLUGIN_DIR/bin" "$PLUGIN_DIR/chitta/build" 2>/dev/null
 bash "$PLUGIN_DIR/setup.sh"
 "$PLUGIN_DIR/bin/chitta_cli" --version
