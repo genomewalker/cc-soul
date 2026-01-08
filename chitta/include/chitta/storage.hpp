@@ -616,12 +616,30 @@ private:
     HNSWIndex index_;
 };
 
-// Warm storage: memory-mapped with quantized vectors
+// Warm storage: memory-mapped with quantized vectors and HNSW index
 class WarmStorage {
 public:
     bool open(const std::string& path) {
         path_ = path;
-        return region_.open(path);
+        if (!region_.open(path)) return false;
+
+        // Rebuild id_to_index_ from mmap'd metadata
+        auto* header = region_.as<const StorageHeader>();
+        if (!header || header->magic != STORAGE_MAGIC) {
+            region_.close();
+            return false;
+        }
+
+        auto* metas = region_.at<const NodeMeta>(header->meta_offset);
+        id_to_index_.clear();
+        for (size_t i = 0; i < header->node_count; ++i) {
+            id_to_index_[metas[i].id] = i;
+        }
+        capacity_ = header->node_count;  // Set to current count for existing file
+
+        // Rebuild HNSW index from stored vectors
+        rebuild_index();
+        return true;
     }
 
     bool create(const std::string& path, size_t estimated_nodes) {
@@ -676,6 +694,9 @@ public:
         vectors[index] = vec;
 
         id_to_index_[id] = index;
+
+        // Add to HNSW index for O(log n) search
+        index_.insert(id, vec);
         return true;
     }
 
@@ -716,42 +737,44 @@ public:
         auto it = id_to_index_.find(id);
         if (it == id_to_index_.end()) return false;
         id_to_index_.erase(it);
+        index_.remove(id);
         // Note: doesn't reclaim space in mmap, just removes from index
         return true;
     }
 
-    // Linear scan for warm tier (no HNSW, use brute force)
+    // HNSW-based search for O(log n) performance
     std::vector<std::pair<NodeId, float>> search(
         const QuantizedVector& query, size_t k) const
     {
-        std::vector<std::pair<NodeId, float>> results;
-        results.reserve(id_to_index_.size());
-
-        for (const auto& [id, idx] : id_to_index_) {
-            auto* header = region_.as<const StorageHeader>();
-            auto* vec = region_.at<const QuantizedVector>(header->vector_offset) + idx;
-            float sim = query.cosine_approx(*vec);
-            results.emplace_back(id, sim);
-        }
-
-        // Partial sort for top-k
-        if (results.size() > k) {
-            std::partial_sort(results.begin(), results.begin() + k, results.end(),
-                [](const auto& a, const auto& b) { return a.second > b.second; });
-            results.resize(k);
-        } else {
-            std::sort(results.begin(), results.end(),
-                [](const auto& a, const auto& b) { return a.second > b.second; });
-        }
-
-        return results;
+        // Use HNSW index for efficient approximate nearest neighbor search
+        return index_.search(query, k);
     }
 
 private:
+    // Rebuild HNSW index from mmap'd vectors (called on open)
+    void rebuild_index() {
+        if (!valid()) return;
+
+        auto* header = region_.as<const StorageHeader>();
+        auto* vectors = region_.at<const QuantizedVector>(header->vector_offset);
+
+        // Clear and rebuild
+        index_ = HNSWIndex();
+
+        // Iterate through stored nodes and add to HNSW
+        // Note: id_to_index_ should already be populated from mmap
+        for (const auto& [id, idx] : id_to_index_) {
+            index_.insert(id, vectors[idx]);
+        }
+
+        std::cerr << "[WarmStorage] Rebuilt HNSW index with " << index_.size() << " nodes\n";
+    }
+
     std::string path_;
     MappedRegion region_;
     std::unordered_map<NodeId, size_t, NodeIdHash> id_to_index_;
     size_t capacity_ = 0;
+    HNSWIndex index_;  // HNSW index for O(log n) search
 };
 
 // Cold storage: metadata only, requires re-embedding

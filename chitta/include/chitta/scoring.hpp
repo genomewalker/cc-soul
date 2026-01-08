@@ -100,41 +100,71 @@ struct BM25Config {
     float b = 0.75f;   // Length normalization
 };
 
-// BM25 index for sparse retrieval
+// Posting entry: document ID with pre-computed term frequency
+struct Posting {
+    NodeId doc_id;
+    float tf;  // Term frequency (raw count)
+
+    Posting(NodeId id, float freq) : doc_id(id), tf(freq) {}
+};
+
+// BM25 index with inverted posting lists for O(query_terms × avg_posting_length) search
 class BM25Index {
 public:
     explicit BM25Index(BM25Config config = {}) : config_(config) {}
 
-    // Add a document
+    // Add a document - O(tokens)
     void add(NodeId id, const std::string& text) {
         auto tokens = tokenize(text);
         if (tokens.empty()) return;
+
+        // Remove if already exists (update case)
+        if (doc_lengths_.count(id)) {
+            remove(id);
+        }
 
         doc_lengths_[id] = tokens.size();
         total_length_ += tokens.size();
         doc_count_++;
 
-        // Update term frequencies
+        // Count term frequencies
         std::unordered_map<std::string, size_t> term_freq;
         for (const auto& token : tokens) {
             term_freq[token]++;
         }
 
-        doc_terms_[id] = term_freq;
-
-        // Update document frequencies
+        // Add to inverted index (posting lists)
         for (const auto& [term, freq] : term_freq) {
+            postings_[term].emplace_back(id, static_cast<float>(freq));
             doc_freqs_[term]++;
         }
+
+        // Store terms for this doc (needed for removal)
+        doc_terms_[id] = std::move(term_freq);
+
+        // Invalidate IDF cache
+        idf_dirty_ = true;
     }
 
-    // Remove a document
+    // Remove a document - O(terms in doc)
     void remove(NodeId id) {
         auto it = doc_terms_.find(id);
         if (it == doc_terms_.end()) return;
 
-        // Update doc freqs
+        // Remove from posting lists
         for (const auto& [term, freq] : it->second) {
+            auto pit = postings_.find(term);
+            if (pit != postings_.end()) {
+                auto& list = pit->second;
+                list.erase(
+                    std::remove_if(list.begin(), list.end(),
+                        [&id](const Posting& p) { return p.doc_id == id; }),
+                    list.end());
+                if (list.empty()) {
+                    postings_.erase(pit);
+                }
+            }
+
             if (--doc_freqs_[term] == 0) {
                 doc_freqs_.erase(term);
             }
@@ -145,76 +175,114 @@ public:
 
         doc_terms_.erase(it);
         doc_lengths_.erase(id);
+
+        // Invalidate IDF cache
+        idf_dirty_ = true;
     }
 
-    // Search with BM25 scoring
+    // Search with BM25 scoring - O(query_terms × avg_posting_length)
     std::vector<std::pair<NodeId, float>> search(
         const std::string& query, size_t limit) const
     {
         auto query_tokens = tokenize(query);
         if (query_tokens.empty() || doc_count_ == 0) return {};
 
+        // Refresh IDF cache if needed
+        if (idf_dirty_) {
+            refresh_idf_cache();
+        }
+
         float avg_dl = static_cast<float>(total_length_) / doc_count_;
 
-        std::vector<std::pair<NodeId, float>> scores;
+        // Accumulate scores by document
+        std::unordered_map<NodeId, float, NodeIdHash> scores;
 
-        for (const auto& [id, terms] : doc_terms_) {
-            auto dl_it = doc_lengths_.find(id);
-            if (dl_it == doc_lengths_.end()) continue;  // Skip if length missing
-            float score = 0.0f;
-            float dl = static_cast<float>(dl_it->second);
+        for (const auto& qt : query_tokens) {
+            auto pit = postings_.find(qt);
+            if (pit == postings_.end()) continue;
 
-            for (const auto& qt : query_tokens) {
-                auto tf_it = terms.find(qt);
-                if (tf_it == terms.end()) continue;
+            auto idf_it = idf_cache_.find(qt);
+            if (idf_it == idf_cache_.end()) continue;
+            float idf = idf_it->second;
 
-                float tf = static_cast<float>(tf_it->second);
-
-                auto df_it = doc_freqs_.find(qt);
-                if (df_it == doc_freqs_.end()) continue;
-
-                float df = static_cast<float>(df_it->second);
-
-                // IDF with smoothing
-                float idf = std::log((doc_count_ - df + 0.5f) / (df + 0.5f) + 1.0f);
+            // Iterate only documents containing this term
+            for (const auto& posting : pit->second) {
+                auto dl_it = doc_lengths_.find(posting.doc_id);
+                if (dl_it == doc_lengths_.end()) continue;
+                float dl = static_cast<float>(dl_it->second);
 
                 // BM25 term score
-                float numerator = tf * (config_.k1 + 1.0f);
-                float denominator = tf + config_.k1 * (1.0f - config_.b +
+                float numerator = posting.tf * (config_.k1 + 1.0f);
+                float denominator = posting.tf + config_.k1 * (1.0f - config_.b +
                                     config_.b * dl / avg_dl);
 
-                score += idf * numerator / denominator;
-            }
-
-            if (score > 0.0f) {
-                scores.emplace_back(id, score);
+                scores[posting.doc_id] += idf * numerator / denominator;
             }
         }
 
-        // Sort by score descending
-        std::sort(scores.begin(), scores.end(),
-            [](const auto& a, const auto& b) { return a.second > b.second; });
-
-        if (scores.size() > limit) {
-            scores.resize(limit);
+        // Convert to vector and sort
+        std::vector<std::pair<NodeId, float>> results;
+        results.reserve(scores.size());
+        for (const auto& [id, score] : scores) {
+            results.emplace_back(id, score);
         }
 
-        return scores;
+        // Partial sort for top-k
+        if (results.size() > limit) {
+            std::partial_sort(results.begin(), results.begin() + limit, results.end(),
+                [](const auto& a, const auto& b) { return a.second > b.second; });
+            results.resize(limit);
+        } else {
+            std::sort(results.begin(), results.end(),
+                [](const auto& a, const auto& b) { return a.second > b.second; });
+        }
+
+        return results;
     }
 
     size_t size() const { return doc_count_; }
 
+    // Statistics for debugging
+    size_t vocab_size() const { return postings_.size(); }
+    size_t total_postings() const {
+        size_t total = 0;
+        for (const auto& [_, list] : postings_) {
+            total += list.size();
+        }
+        return total;
+    }
+
 private:
+    // Refresh IDF cache - called lazily before search
+    void refresh_idf_cache() const {
+        idf_cache_.clear();
+        for (const auto& [term, df] : doc_freqs_) {
+            float df_f = static_cast<float>(df);
+            // IDF with BM25 smoothing
+            idf_cache_[term] = std::log((doc_count_ - df_f + 0.5f) / (df_f + 0.5f) + 1.0f);
+        }
+        idf_dirty_ = false;
+    }
+
     BM25Config config_;
     size_t doc_count_ = 0;
     size_t total_length_ = 0;
 
-    // NodeId -> {term -> frequency}
+    // Inverted index: term -> posting list (documents containing term)
+    std::unordered_map<std::string, std::vector<Posting>> postings_;
+
+    // Forward index: doc -> terms (needed for removal)
     std::unordered_map<NodeId, std::unordered_map<std::string, size_t>, NodeIdHash> doc_terms_;
-    // NodeId -> document length
+
+    // Document lengths for BM25 normalization
     std::unordered_map<NodeId, size_t, NodeIdHash> doc_lengths_;
-    // term -> number of documents containing term
+
+    // Document frequencies: term -> count of docs containing term
     std::unordered_map<std::string, size_t> doc_freqs_;
+
+    // Cached IDF values (refreshed lazily)
+    mutable std::unordered_map<std::string, float> idf_cache_;
+    mutable bool idf_dirty_ = true;
 };
 
 

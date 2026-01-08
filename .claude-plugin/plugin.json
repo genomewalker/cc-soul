@@ -20,7 +20,7 @@
         "--vocab", "${CLAUDE_PLUGIN_ROOT}/chitta/models/vocab.txt"
       ],
       "env": {
-        "CHITTA_DB_PATH": "${CLAUDE_PLUGIN_ROOT}/mind/chitta"
+        "CHITTA_DB_PATH": "${HOME}/.claude/mind/chitta"
       }
     }
   }

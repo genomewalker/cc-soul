@@ -23,6 +23,290 @@ struct Snapshot {
     std::unordered_map<NodeId, Node, NodeIdHash> nodes;
 };
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Incremental Coherence Tracker
+// Maintains running statistics for O(1) coherence computation
+// ═══════════════════════════════════════════════════════════════════════════
+
+class CoherenceTracker {
+public:
+    // Node type weights for global coherence
+    static float type_weight(NodeType t) {
+        switch (t) {
+            case NodeType::Invariant: return 2.0f;
+            case NodeType::Belief:    return 1.5f;
+            case NodeType::Wisdom:    return 1.2f;
+            case NodeType::Failure:   return 1.0f;
+            case NodeType::Aspiration:return 0.8f;
+            case NodeType::Dream:     return 0.7f;
+            case NodeType::Term:      return 0.5f;
+            case NodeType::Episode:   return 0.5f;
+            default: return 1.0f;
+        }
+    }
+
+    // Called when a node is inserted
+    void on_insert(const Node& node) {
+        float w = type_weight(node.node_type);
+        float eff = node.kappa.effective();
+
+        // Global coherence stats
+        stats_.weighted_confidence_sum += w * eff;
+        stats_.weight_sum += w;
+        stats_.node_count++;
+
+        if (w >= 1.0f) {
+            stats_.important_confidence_sum += eff;
+            stats_.important_count++;
+        }
+
+        // Structural coherence stats
+        if (node.edges.empty()) {
+            stats_.orphan_count++;
+        } else {
+            stats_.connected_count++;
+            stats_.edge_count += node.edges.size();
+
+            // Track contradiction edges
+            for (const auto& edge : node.edges) {
+                if (edge.type == EdgeType::Contradicts) {
+                    stats_.contradiction_count++;
+                }
+            }
+        }
+
+        // Temporal coherence stats
+        if (node.node_type == NodeType::Belief || node.node_type == NodeType::Wisdom) {
+            stats_.belief_wisdom_count++;
+        }
+
+        // Type-specific counts for semantic tension
+        if (node.node_type == NodeType::Belief) stats_.belief_count++;
+        if (node.node_type == NodeType::Wisdom) stats_.wisdom_count++;
+
+        dirty_ = true;
+    }
+
+    // Called when a node is removed
+    void on_remove(const Node& node) {
+        float w = type_weight(node.node_type);
+        float eff = node.kappa.effective();
+
+        // Global coherence stats
+        stats_.weighted_confidence_sum -= w * eff;
+        stats_.weight_sum -= w;
+        stats_.node_count--;
+
+        if (w >= 1.0f) {
+            stats_.important_confidence_sum -= eff;
+            stats_.important_count--;
+        }
+
+        // Structural coherence stats
+        if (node.edges.empty()) {
+            stats_.orphan_count--;
+        } else {
+            stats_.connected_count--;
+            stats_.edge_count -= node.edges.size();
+
+            for (const auto& edge : node.edges) {
+                if (edge.type == EdgeType::Contradicts) {
+                    stats_.contradiction_count--;
+                }
+            }
+        }
+
+        // Temporal coherence stats
+        if (node.node_type == NodeType::Belief || node.node_type == NodeType::Wisdom) {
+            stats_.belief_wisdom_count--;
+        }
+
+        if (node.node_type == NodeType::Belief) stats_.belief_count--;
+        if (node.node_type == NodeType::Wisdom) stats_.wisdom_count--;
+
+        dirty_ = true;
+    }
+
+    // Called when a node's confidence changes
+    void on_confidence_change(const Node& node, float old_eff, float new_eff) {
+        float w = type_weight(node.node_type);
+        float delta = new_eff - old_eff;
+
+        stats_.weighted_confidence_sum += w * delta;
+
+        if (w >= 1.0f) {
+            stats_.important_confidence_sum += delta;
+        }
+
+        dirty_ = true;
+    }
+
+    // Called when an edge is added
+    void on_edge_add(const Node& from_node, EdgeType edge_type) {
+        // Node was orphan, now connected
+        if (from_node.edges.size() == 1) {
+            stats_.orphan_count--;
+            stats_.connected_count++;
+        }
+
+        stats_.edge_count++;
+
+        if (edge_type == EdgeType::Contradicts) {
+            stats_.contradiction_count++;
+        }
+
+        dirty_ = true;
+    }
+
+    // Called when an edge is removed
+    void on_edge_remove(const Node& from_node, EdgeType edge_type) {
+        stats_.edge_count--;
+
+        if (edge_type == EdgeType::Contradicts) {
+            stats_.contradiction_count--;
+        }
+
+        // Node becomes orphan
+        if (from_node.edges.empty()) {
+            stats_.orphan_count++;
+            stats_.connected_count--;
+        }
+
+        dirty_ = true;
+    }
+
+    // Update temporal stats (call periodically with current time)
+    void update_temporal(const std::unordered_map<NodeId, Node, NodeIdHash>& nodes, Timestamp current) {
+        stats_.recent_access_count = 0;
+        stats_.mature_confidence_sum = 0.0f;
+        stats_.mature_count = 0;
+
+        for (const auto& [_, node] : nodes) {
+            float access_age_days = static_cast<float>(current - node.tau_accessed) / 86400000.0f;
+            float creation_age_days = static_cast<float>(current - node.tau_created) / 86400000.0f;
+
+            // Recent access (last 7 days)
+            if (access_age_days < 7.0f) {
+                stats_.recent_access_count++;
+            } else if (access_age_days < 30.0f) {
+                stats_.recent_access_count += 0.5f;  // Partial credit
+            }
+
+            // Mature wisdom/beliefs
+            if ((node.node_type == NodeType::Wisdom || node.node_type == NodeType::Belief) &&
+                creation_age_days > 7.0f) {
+                stats_.mature_confidence_sum += node.kappa.effective();
+                stats_.mature_count++;
+            }
+        }
+
+        temporal_dirty_ = false;
+    }
+
+    // Compute coherence from stats - O(1) if stats are up to date
+    Coherence compute(Timestamp current = 0) {
+        if (stats_.node_count == 0) {
+            Coherence empty;
+            empty.local = 1.0f;
+            empty.global = 1.0f;
+            empty.temporal = 0.5f;
+            empty.structural = 1.0f;
+            return empty;
+        }
+
+        Coherence c;
+
+        // Local coherence: contradiction ratio
+        // (semantic tension requires sampling, done separately if needed)
+        float total_edges = static_cast<float>(stats_.edge_count);
+        float contradiction_ratio = total_edges > 0
+            ? static_cast<float>(stats_.contradiction_count) / total_edges
+            : 0.0f;
+        c.local = std::max(0.0f, 1.0f - contradiction_ratio);
+
+        // Global coherence: weighted confidence with variance penalty
+        float weighted_avg = stats_.weight_sum > 0
+            ? stats_.weighted_confidence_sum / stats_.weight_sum
+            : 1.0f;
+
+        // Estimate variance using Welford's approximation
+        // For simplicity, use 1 - std_dev_proxy
+        float important_avg = stats_.important_count > 0
+            ? stats_.important_confidence_sum / stats_.important_count
+            : weighted_avg;
+        // Variance penalty estimated from deviation from mean
+        float variance_penalty = std::abs(weighted_avg - important_avg) * 0.5f;
+        c.global = weighted_avg * (1.0f - variance_penalty);
+
+        // Temporal coherence: activity + maturity
+        float total = static_cast<float>(stats_.node_count);
+        float activity_ratio = stats_.recent_access_count / total;
+        float maturity_ratio = stats_.mature_count > 0
+            ? stats_.mature_confidence_sum / stats_.mature_count
+            : 0.5f;
+        c.temporal = std::clamp(0.3f + 0.4f * activity_ratio + 0.3f * maturity_ratio, 0.0f, 1.0f);
+
+        // Structural coherence: orphan penalty + edge density
+        float orphan_ratio = static_cast<float>(stats_.orphan_count) / total;
+        float expected_edges = total * std::log2(std::max(total, 2.0f));
+        float edge_density = std::min(static_cast<float>(stats_.edge_count) / expected_edges, 1.0f);
+        c.structural = std::clamp((1.0f - 0.5f * orphan_ratio) * (0.5f + 0.5f * edge_density), 0.0f, 1.0f);
+
+        dirty_ = false;
+        return c;
+    }
+
+    // Check if recomputation needed
+    bool is_dirty() const { return dirty_; }
+    bool is_temporal_dirty() const { return temporal_dirty_; }
+
+    // Reset all stats (call after major operations like rollback)
+    void reset() {
+        stats_ = {};
+        dirty_ = true;
+        temporal_dirty_ = true;
+    }
+
+    // Rebuild stats from scratch (call after rollback or load)
+    void rebuild(const std::unordered_map<NodeId, Node, NodeIdHash>& nodes) {
+        reset();
+        for (const auto& [_, node] : nodes) {
+            on_insert(node);
+        }
+        dirty_ = false;
+    }
+
+private:
+    struct Stats {
+        // Global coherence
+        float weighted_confidence_sum = 0.0f;
+        float weight_sum = 0.0f;
+        float important_confidence_sum = 0.0f;
+        size_t important_count = 0;
+        size_t node_count = 0;
+
+        // Structural coherence
+        size_t orphan_count = 0;
+        size_t connected_count = 0;
+        size_t edge_count = 0;
+        size_t contradiction_count = 0;
+
+        // Temporal coherence (needs periodic refresh)
+        float recent_access_count = 0.0f;
+        float mature_confidence_sum = 0.0f;
+        size_t mature_count = 0;
+
+        // Type counts for semantic tension
+        size_t belief_count = 0;
+        size_t wisdom_count = 0;
+        size_t belief_wisdom_count = 0;
+    };
+
+    Stats stats_;
+    bool dirty_ = true;
+    bool temporal_dirty_ = true;
+};
+
 // The soul graph
 class Graph {
 public:
@@ -35,6 +319,7 @@ public:
 
         {
             std::unique_lock lock(mutex_);
+            coherence_tracker_.on_insert(node);
             nodes_.emplace(id, std::move(node));
             vectors_.emplace_back(id, std::move(nu));
         }
@@ -104,9 +389,13 @@ public:
 
     // Connect two nodes
     bool connect(NodeId from, NodeId to, EdgeType edge_type, float weight) {
-        return with_node(from, [&](Node& node) {
-            node.connect(to, edge_type, weight);
-        });
+        std::unique_lock lock(mutex_);
+        auto it = nodes_.find(from);
+        if (it == nodes_.end()) return false;
+
+        it->second.connect(to, edge_type, weight);
+        coherence_tracker_.on_edge_add(it->second, edge_type);
+        return true;
     }
 
     // Apply decay to all nodes
@@ -129,6 +418,7 @@ public:
             if (n.node_type != NodeType::Invariant &&
                 n.node_type != NodeType::Belief &&
                 !n.is_alive(threshold)) {
+                coherence_tracker_.on_remove(n);
                 it = nodes_.erase(it);
             } else {
                 ++it;
@@ -169,14 +459,45 @@ public:
                 for (const auto& [id, node] : nodes_) {
                     vectors_.emplace_back(id, node.nu);
                 }
+                // Rebuild coherence tracker
+                coherence_tracker_.rebuild(nodes_);
                 return true;
             }
         }
         return false;
     }
 
-    // Compute coherence of the graph
+    // Compute coherence of the graph - O(1) using incremental tracker
+    // Falls back to full computation for semantic tension if needed
     Coherence compute_coherence() {
+        std::shared_lock lock(mutex_);
+
+        // Update temporal stats periodically (requires full scan)
+        if (coherence_tracker_.is_temporal_dirty()) {
+            coherence_tracker_.update_temporal(nodes_, now());
+        }
+
+        // Get incremental coherence (O(1) for most components)
+        Coherence c = coherence_tracker_.compute(now());
+
+        // Adjust local coherence with semantic tension (sampled, O(100))
+        // Only do this if there are enough beliefs/wisdom nodes
+        float tension_penalty = compute_semantic_tension_sampled();
+        c.local = std::max(0.0f, c.local - 0.3f * tension_penalty);
+
+        c.tau = now();
+        coherence_ = c;
+        return c;
+    }
+
+    // Fast coherence query - uses cached value, O(1)
+    Coherence coherence() const {
+        std::shared_lock lock(mutex_);
+        return coherence_;
+    }
+
+    // Force full coherence recomputation (for accuracy verification)
+    Coherence compute_coherence_full() {
         std::shared_lock lock(mutex_);
 
         float local = compute_local_coherence();
@@ -193,12 +514,6 @@ public:
 
         coherence_ = c;
         return c;
-    }
-
-    // Get current coherence without recomputing
-    Coherence coherence() const {
-        std::shared_lock lock(mutex_);
-        return coherence_;
     }
 
     // Insert just an ID reference (for tiered storage tracking)
@@ -248,6 +563,47 @@ private:
             case NodeType::Term: return 0.3f;       // Vocabulary
             default: return 0.5f;
         }
+    }
+
+    // Sampled semantic tension check - O(100) max
+    // Returns tension ratio for local coherence penalty
+    float compute_semantic_tension_sampled() const {
+        // Collect beliefs and wisdom nodes
+        std::vector<const Node*> beliefs, wisdom;
+        for (const auto& [_, node] : nodes_) {
+            if (node.node_type == NodeType::Belief) beliefs.push_back(&node);
+            if (node.node_type == NodeType::Wisdom) wisdom.push_back(&node);
+        }
+
+        if (beliefs.empty() || wisdom.empty()) return 0.0f;
+
+        size_t semantic_tensions = 0;
+        size_t pairs_checked = 0;
+
+        // Sample up to 10x10 = 100 pairs
+        for (size_t i = 0; i < std::min(beliefs.size(), size_t(10)); ++i) {
+            for (size_t j = 0; j < std::min(wisdom.size(), size_t(10)); ++j) {
+                pairs_checked++;
+                float sim = beliefs[i]->nu.cosine(wisdom[j]->nu);
+
+                // High similarity but no explicit connection = potential tension
+                if (sim > 0.7f) {
+                    bool has_support = false;
+                    for (const auto& edge : beliefs[i]->edges) {
+                        if (edge.target == wisdom[j]->id &&
+                            (edge.type == EdgeType::Supports || edge.type == EdgeType::Similar)) {
+                            has_support = true;
+                            break;
+                        }
+                    }
+                    if (!has_support) semantic_tensions++;
+                }
+            }
+        }
+
+        return pairs_checked > 0
+            ? static_cast<float>(semantic_tensions) / static_cast<float>(pairs_checked)
+            : 0.0f;
     }
 
     // Local coherence: explicit contradictions + semantic tension
@@ -423,6 +779,7 @@ private:
     std::unordered_set<NodeId, NodeIdHash> node_ids_;  // For tiered storage tracking
     std::vector<std::pair<NodeId, Vector>> vectors_;
     Coherence coherence_;
+    mutable CoherenceTracker coherence_tracker_;  // Incremental coherence computation
     std::vector<Snapshot> snapshots_;
 
     // ═══════════════════════════════════════════════════════════════════
