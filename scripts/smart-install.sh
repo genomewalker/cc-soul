@@ -196,6 +196,14 @@ create_symlinks() {
     mkdir -p "${HOME}/.claude/mind"
     mkdir -p "$PLUGIN_DIR/mind"
 
+    # If both directories resolve to the same path, skip file symlinks
+    local user_mind_resolved=$(readlink -f "${HOME}/.claude/mind" 2>/dev/null || echo "${HOME}/.claude/mind")
+    local plugin_mind_resolved=$(readlink -f "$PLUGIN_DIR/mind" 2>/dev/null || echo "$PLUGIN_DIR/mind")
+
+    if [[ "$user_mind_resolved" == "$plugin_mind_resolved" ]]; then
+        return 0
+    fi
+
     for ext in hot warm cold wal; do
         local target="${HOME}/.claude/mind/chitta.$ext"
         local link="$PLUGIN_DIR/mind/chitta.$ext"

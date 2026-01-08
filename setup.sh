@@ -122,11 +122,19 @@ echo ""
 mkdir -p "${HOME}/.claude/mind"
 mkdir -p "$SCRIPT_DIR/mind"
 
-# Create symlinks (or update if they exist)
-for ext in hot warm cold; do
-    ln -sfn "${HOME}/.claude/mind/chitta.$ext" "$SCRIPT_DIR/mind/chitta.$ext"
-done
-echo -e "  ${GREEN}✓ Database symlinks created${NC}"
+# If both directories resolve to the same path, skip file symlinks
+USER_MIND_RESOLVED=$(readlink -f "${HOME}/.claude/mind" 2>/dev/null || echo "${HOME}/.claude/mind")
+PLUGIN_MIND_RESOLVED=$(readlink -f "$SCRIPT_DIR/mind" 2>/dev/null || echo "$SCRIPT_DIR/mind")
+
+if [[ "$USER_MIND_RESOLVED" != "$PLUGIN_MIND_RESOLVED" ]]; then
+    # Create symlinks (or update if they exist)
+    for ext in hot warm cold; do
+        ln -sfn "${HOME}/.claude/mind/chitta.$ext" "$SCRIPT_DIR/mind/chitta.$ext"
+    done
+    echo -e "  ${GREEN}✓ Database symlinks created${NC}"
+else
+    echo -e "  ${GREEN}✓ Storage already linked${NC}"
+fi
 
 # Done
 echo -e "${GREEN}╔══════════════════════════════════════╗${NC}"
