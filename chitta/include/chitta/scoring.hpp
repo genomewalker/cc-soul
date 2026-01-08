@@ -252,6 +252,194 @@ public:
         return total;
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // Persistence
+    // ═══════════════════════════════════════════════════════════════════════
+
+    static constexpr uint32_t BM25_MAGIC = 0x424D3235;  // "BM25"
+    static constexpr uint32_t BM25_VERSION = 1;
+
+    bool save(const std::string& path) const {
+        FILE* f = fopen(path.c_str(), "wb");
+        if (!f) return false;
+
+        // Header
+        uint32_t magic = BM25_MAGIC;
+        uint32_t version = BM25_VERSION;
+        uint64_t vocab_sz = postings_.size();
+
+        fwrite(&magic, sizeof(magic), 1, f);
+        fwrite(&version, sizeof(version), 1, f);
+        fwrite(&doc_count_, sizeof(doc_count_), 1, f);
+        fwrite(&total_length_, sizeof(total_length_), 1, f);
+        fwrite(&vocab_sz, sizeof(vocab_sz), 1, f);
+
+        // Build term -> id mapping for forward index serialization
+        std::unordered_map<std::string, uint32_t> term_to_id;
+        std::vector<std::string> terms;
+        terms.reserve(postings_.size());
+
+        for (const auto& [term, _] : postings_) {
+            term_to_id[term] = static_cast<uint32_t>(terms.size());
+            terms.push_back(term);
+        }
+
+        // String table
+        for (const auto& term : terms) {
+            uint32_t len = static_cast<uint32_t>(term.size());
+            fwrite(&len, sizeof(len), 1, f);
+            fwrite(term.data(), 1, len, f);
+        }
+
+        // Postings: for each term, count + [(doc_id, tf)]
+        for (const auto& term : terms) {
+            const auto& list = postings_.at(term);
+            uint32_t count = static_cast<uint32_t>(list.size());
+            fwrite(&count, sizeof(count), 1, f);
+            for (const auto& p : list) {
+                fwrite(&p.doc_id.high, sizeof(p.doc_id.high), 1, f);
+                fwrite(&p.doc_id.low, sizeof(p.doc_id.low), 1, f);
+                fwrite(&p.tf, sizeof(p.tf), 1, f);
+            }
+        }
+
+        // Doc frequencies
+        for (const auto& term : terms) {
+            uint32_t df = static_cast<uint32_t>(doc_freqs_.at(term));
+            fwrite(&df, sizeof(df), 1, f);
+        }
+
+        // Doc lengths: count + [(doc_id, length)]
+        uint64_t doc_len_count = doc_lengths_.size();
+        fwrite(&doc_len_count, sizeof(doc_len_count), 1, f);
+        for (const auto& [id, len] : doc_lengths_) {
+            fwrite(&id.high, sizeof(id.high), 1, f);
+            fwrite(&id.low, sizeof(id.low), 1, f);
+            uint64_t length = len;
+            fwrite(&length, sizeof(length), 1, f);
+        }
+
+        // Forward index: count + [doc_id, term_count, [(term_id, freq)]]
+        uint64_t fwd_count = doc_terms_.size();
+        fwrite(&fwd_count, sizeof(fwd_count), 1, f);
+        for (const auto& [id, terms_map] : doc_terms_) {
+            fwrite(&id.high, sizeof(id.high), 1, f);
+            fwrite(&id.low, sizeof(id.low), 1, f);
+            uint32_t term_count = static_cast<uint32_t>(terms_map.size());
+            fwrite(&term_count, sizeof(term_count), 1, f);
+            for (const auto& [term, freq] : terms_map) {
+                uint32_t tid = term_to_id.at(term);
+                uint32_t f_u32 = static_cast<uint32_t>(freq);
+                fwrite(&tid, sizeof(tid), 1, f);
+                fwrite(&f_u32, sizeof(f_u32), 1, f);
+            }
+        }
+
+        fclose(f);
+        return true;
+    }
+
+    bool load(const std::string& path) {
+        FILE* f = fopen(path.c_str(), "rb");
+        if (!f) return false;
+
+        // Clear existing data
+        postings_.clear();
+        doc_terms_.clear();
+        doc_lengths_.clear();
+        doc_freqs_.clear();
+        idf_cache_.clear();
+
+        // Header
+        uint32_t magic, version;
+        uint64_t vocab_sz;
+
+        if (fread(&magic, sizeof(magic), 1, f) != 1 || magic != BM25_MAGIC) {
+            fclose(f);
+            return false;
+        }
+        if (fread(&version, sizeof(version), 1, f) != 1 || version != BM25_VERSION) {
+            fclose(f);
+            return false;
+        }
+        fread(&doc_count_, sizeof(doc_count_), 1, f);
+        fread(&total_length_, sizeof(total_length_), 1, f);
+        fread(&vocab_sz, sizeof(vocab_sz), 1, f);
+
+        // String table
+        std::vector<std::string> terms;
+        terms.reserve(vocab_sz);
+        for (uint64_t i = 0; i < vocab_sz; ++i) {
+            uint32_t len;
+            fread(&len, sizeof(len), 1, f);
+            std::string term(len, '\0');
+            fread(&term[0], 1, len, f);
+            terms.push_back(std::move(term));
+        }
+
+        // Postings
+        for (const auto& term : terms) {
+            uint32_t count;
+            fread(&count, sizeof(count), 1, f);
+            std::vector<Posting> list;
+            list.reserve(count);
+            for (uint32_t j = 0; j < count; ++j) {
+                NodeId id;
+                float tf;
+                fread(&id.high, sizeof(id.high), 1, f);
+                fread(&id.low, sizeof(id.low), 1, f);
+                fread(&tf, sizeof(tf), 1, f);
+                list.emplace_back(id, tf);
+            }
+            postings_[term] = std::move(list);
+        }
+
+        // Doc frequencies
+        for (const auto& term : terms) {
+            uint32_t df;
+            fread(&df, sizeof(df), 1, f);
+            doc_freqs_[term] = df;
+        }
+
+        // Doc lengths
+        uint64_t doc_len_count;
+        fread(&doc_len_count, sizeof(doc_len_count), 1, f);
+        for (uint64_t i = 0; i < doc_len_count; ++i) {
+            NodeId id;
+            uint64_t length;
+            fread(&id.high, sizeof(id.high), 1, f);
+            fread(&id.low, sizeof(id.low), 1, f);
+            fread(&length, sizeof(length), 1, f);
+            doc_lengths_[id] = static_cast<size_t>(length);
+        }
+
+        // Forward index
+        uint64_t fwd_count;
+        fread(&fwd_count, sizeof(fwd_count), 1, f);
+        for (uint64_t i = 0; i < fwd_count; ++i) {
+            NodeId id;
+            uint32_t term_count;
+            fread(&id.high, sizeof(id.high), 1, f);
+            fread(&id.low, sizeof(id.low), 1, f);
+            fread(&term_count, sizeof(term_count), 1, f);
+
+            std::unordered_map<std::string, size_t> terms_map;
+            for (uint32_t j = 0; j < term_count; ++j) {
+                uint32_t tid, freq;
+                fread(&tid, sizeof(tid), 1, f);
+                fread(&freq, sizeof(freq), 1, f);
+                if (tid < terms.size()) {
+                    terms_map[terms[tid]] = freq;
+                }
+            }
+            doc_terms_[id] = std::move(terms_map);
+        }
+
+        fclose(f);
+        idf_dirty_ = true;  // Will refresh on first search
+        return true;
+    }
+
 private:
     // Refresh IDF cache - called lazily before search
     void refresh_idf_cache() const {

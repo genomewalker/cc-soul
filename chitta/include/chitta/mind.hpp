@@ -213,8 +213,15 @@ public:
         running_ = true;
 
         // Rebuild indices from existing data
-        // BM25 is built lazily on first search (Phase 4 optimization)
-        bm25_built_ = false;
+        // BM25: try loading from disk, fall back to lazy rebuild on first search
+        bm25_path_ = storage_.base_path() + ".bm25";
+        if (bm25_index_.load(bm25_path_)) {
+            bm25_built_ = true;
+            std::cerr << "[Mind] Loaded BM25 index (" << bm25_index_.size() << " docs)\n";
+        } else {
+            bm25_built_ = false;  // Will rebuild lazily on first search
+        }
+
         if (!storage_.use_unified()) {
             // Only rebuild tag index for non-unified storage
             // For unified, SlotTagIndex is already loaded and authoritative
@@ -289,6 +296,10 @@ public:
     void close() {
         std::lock_guard<std::mutex> lock(mutex_);
         running_ = false;
+        // Save BM25 index if built
+        if (bm25_built_ && !bm25_path_.empty() && bm25_index_.size() > 0) {
+            bm25_index_.save(bm25_path_);
+        }
         storage_.sync();
     }
 
@@ -881,6 +892,10 @@ public:
     // Snapshot for recovery
     uint64_t snapshot() {
         std::lock_guard<std::mutex> lock(mutex_);
+        // Save BM25 index if built
+        if (bm25_built_ && !bm25_path_.empty() && bm25_index_.size() > 0) {
+            bm25_index_.save(bm25_path_);
+        }
         storage_.sync();
         return graph_.snapshot();
     }
@@ -1208,6 +1223,7 @@ private:
     // Soul-aware scoring and hybrid retrieval
     ScoringConfig scoring_config_;
     BM25Index bm25_index_;
+    std::string bm25_path_;  // Path for BM25 persistence
     bool bm25_built_ = false;  // Lazy build on first sparse/hybrid search
     CrossEncoder cross_encoder_;
 

@@ -1268,6 +1268,8 @@ public:
         return hot_size() + warm_size() + cold_size();
     }
 
+    const std::string& base_path() const { return config_.base_path; }
+
     void for_each_hot(std::function<void(const NodeId&, const Node&)> fn) const {
         if (use_segments()) {
             segments_->for_each(fn);
