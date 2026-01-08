@@ -214,7 +214,11 @@ public:
 
         // Rebuild indices from existing data
         rebuild_bm25_index();
-        rebuild_tag_index();
+        if (!storage_.use_unified()) {
+            // Only rebuild tag index for non-unified storage
+            // For unified, SlotTagIndex is already loaded and authoritative
+            rebuild_tag_index();
+        }
 
         return true;
     }
@@ -374,7 +378,10 @@ public:
         // Sync from shared consciousness to see all observations
         sync_from_shared_field();
 
-        auto node_ids = tag_index_.find(tag);
+        // Use SlotTagIndex for unified storage, in-memory TagIndex otherwise
+        auto node_ids = storage_.use_unified()
+            ? storage_.find_by_tag(tag)
+            : tag_index_.find(tag);
 
         std::vector<Recall> results;
         for (const auto& id : node_ids) {
@@ -413,7 +420,9 @@ public:
         // Sync from shared consciousness to see all observations
         sync_from_shared_field();
 
-        auto node_ids = tag_index_.find_all(tags);
+        auto node_ids = storage_.use_unified()
+            ? storage_.find_by_tags(tags)
+            : tag_index_.find_all(tags);
 
         std::vector<Recall> results;
         for (const auto& id : node_ids) {
@@ -457,7 +466,9 @@ public:
         sync_from_shared_field();
 
         // Get all nodes with the tag
-        auto node_ids = tag_index_.find(tag);
+        auto node_ids = storage_.use_unified()
+            ? storage_.find_by_tag(tag)
+            : tag_index_.find(tag);
         if (node_ids.empty()) return {};
 
         // Transform query for semantic scoring
@@ -503,6 +514,9 @@ public:
 
     // Get tags for a node
     std::vector<std::string> get_tags(NodeId id) const {
+        if (storage_.use_unified()) {
+            return storage_.tags_for_node(id);
+        }
         return tag_index_.tags_for(id);
     }
 
@@ -599,12 +613,16 @@ public:
             required_tags.push_back("project:" + project);
         }
 
-        // Query by tags
+        // Query by tags (use SlotTagIndex for unified storage)
         std::vector<NodeId> candidates;
-        if (required_tags.size() > 1) {
-            candidates = tag_index_.find_all(required_tags);
+        if (storage_.use_unified()) {
+            candidates = required_tags.size() > 1
+                ? storage_.find_by_tags(required_tags)
+                : storage_.find_by_tag("ledger");
         } else {
-            candidates = tag_index_.find("ledger");
+            candidates = required_tags.size() > 1
+                ? tag_index_.find_all(required_tags)
+                : tag_index_.find("ledger");
         }
 
         if (candidates.empty()) {
@@ -666,10 +684,14 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
 
         std::vector<NodeId> candidates;
-        if (!project.empty()) {
-            candidates = tag_index_.find_all({"ledger", "project:" + project});
+        if (storage_.use_unified()) {
+            candidates = !project.empty()
+                ? storage_.find_by_tags({"ledger", "project:" + project})
+                : storage_.find_by_tag("ledger");
         } else {
-            candidates = tag_index_.find("ledger");
+            candidates = !project.empty()
+                ? tag_index_.find_all({"ledger", "project:" + project})
+                : tag_index_.find("ledger");
         }
 
         std::vector<std::pair<NodeId, Timestamp>> result;

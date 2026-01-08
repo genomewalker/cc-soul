@@ -236,6 +236,33 @@ public:
         return result;
     }
 
+    // Get slots with ALL tags (AND intersection)
+    std::vector<uint32_t> slots_with_all_tags(const std::vector<std::string>& tags) const {
+        std::shared_lock lock(mutex_);
+
+        if (tags.empty()) return {};
+
+        // Get first tag's bitmap as starting point
+        auto first_it = string_to_id_.find(tags[0]);
+        if (first_it == string_to_id_.end()) return {};
+
+        roaring_bitmap_t* result = roaring_bitmap_copy(postings_[first_it->second]);
+
+        // Intersect with remaining tags
+        for (size_t i = 1; i < tags.size(); ++i) {
+            auto it = string_to_id_.find(tags[i]);
+            if (it == string_to_id_.end()) {
+                roaring_bitmap_free(result);
+                return {};
+            }
+            roaring_bitmap_and_inplace(result, postings_[it->second]);
+        }
+
+        auto vec = bitmap_to_vector(result);
+        roaring_bitmap_free(result);
+        return vec;
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     // Statistics
     // ═══════════════════════════════════════════════════════════════════════

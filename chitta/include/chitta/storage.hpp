@@ -1280,7 +1280,42 @@ public:
         hot_.for_each(fn);
     }
 
+    // Storage mode queries
+    bool use_unified() const { return unified_.valid(); }
+
+    // Tag queries (delegates to SlotTagIndex for unified storage)
+    std::vector<NodeId> find_by_tag(const std::string& tag) const {
+        if (!use_unified()) return {};
+        auto slots = unified_.slot_tag_index().slots_with_tag(tag);
+        return slots_to_node_ids(slots);
+    }
+
+    std::vector<NodeId> find_by_tags(const std::vector<std::string>& tags) const {
+        if (!use_unified()) return {};
+        auto slots = unified_.slot_tag_index().slots_with_all_tags(tags);
+        return slots_to_node_ids(slots);
+    }
+
+    std::vector<std::string> tags_for_node(NodeId id) const {
+        if (!use_unified()) return {};
+        auto slot = unified_.lookup(id);
+        if (!slot.valid()) return {};
+        return unified_.slot_tag_index().tags_for_slot(slot.value);
+    }
+
 private:
+    std::vector<NodeId> slots_to_node_ids(const std::vector<uint32_t>& slots) const {
+        std::vector<NodeId> result;
+        result.reserve(slots.size());
+        for (uint32_t slot : slots) {
+            auto* indexed = unified_.get_slot(SlotId(slot));
+            if (indexed) {
+                result.push_back(indexed->id);
+            }
+        }
+        return result;
+    }
+
     // Replay all WAL entries (called on startup)
     // Phase 2: Handles both full nodes and deltas via replay_v2
     size_t replay_wal() {
@@ -1420,7 +1455,6 @@ private:
         return hot_.get(id);
     }
 
-    bool use_unified() const { return unified_.valid(); }
     bool use_segments() const { return segments_ && segments_->valid(); }
 
     // Reconstruct Node from SegmentManager (for API compatibility)
