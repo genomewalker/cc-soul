@@ -55,7 +55,8 @@ public:
 
     bool create(const std::string& path) {
         path_ = path;
-        return true;  // In-memory until save
+        dirty_ = true;  // Force initial save to create file
+        return save();  // Create empty file immediately
     }
 
     bool open(const std::string& path) {
