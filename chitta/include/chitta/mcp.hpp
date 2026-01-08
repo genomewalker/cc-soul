@@ -243,7 +243,8 @@ private:
             "recall",
             "Recall relevant wisdom and episodes. "
             "zoom='sparse' for overview (20+ titles), 'normal' for balanced (5-10 full), "
-            "'dense' for deep context (3-5 with relationships and temporal info).",
+            "'dense' for deep context (3-5 with relationships and temporal info), "
+            "'full' for complete untruncated content (1-3 results).",
             {
                 {"type", "object"},
                 {"properties", {
@@ -253,9 +254,9 @@ private:
                     }},
                     {"zoom", {
                         {"type", "string"},
-                        {"enum", {"sparse", "normal", "dense"}},
+                        {"enum", {"sparse", "normal", "dense", "full"}},
                         {"default", "normal"},
-                        {"description", "Detail level: sparse (titles, 20+), normal (full text, 5-10), dense (full context, 3-5)"}
+                        {"description", "Detail level: sparse (titles, 20+), normal (text, 5-10), dense (context, 3-5), full (complete content, 1-3)"}
                     }},
                     {"tag", {
                         {"type", "string"},
@@ -929,7 +930,8 @@ private:
 
         // Zoom-aware default limits
         size_t default_limit = (zoom == "sparse") ? 25 :
-                               (zoom == "dense") ? 5 : 10;
+                               (zoom == "dense") ? 5 :
+                               (zoom == "full") ? 3 : 10;
         size_t limit = params.value("limit", static_cast<int>(default_limit));
 
         // Clamp limits per zoom level
@@ -937,6 +939,8 @@ private:
             limit = std::clamp(limit, size_t(5), size_t(100));
         } else if (zoom == "dense") {
             limit = std::clamp(limit, size_t(1), size_t(10));
+        } else if (zoom == "full") {
+            limit = std::clamp(limit, size_t(1), size_t(5));
         } else {
             limit = std::clamp(limit, size_t(1), size_t(50));
         }
@@ -1021,6 +1025,22 @@ private:
                 });
                 ss << "\n[" << node_type_to_string(r.type) << "] " << extract_title(r.text, 80);
                 if (!edges_array.empty()) ss << " (" << edges_array.size() << " related)";
+
+            } else if (zoom == "full") {
+                // Full: complete untruncated content for reconstruction
+                auto result_tags = mind_->get_tags(r.id);
+                results_array.push_back({
+                    {"id", r.id.to_string()},
+                    {"text", r.text},  // Full text, no truncation
+                    {"type", node_type_to_string(r.type)},
+                    {"relevance", r.relevance},
+                    {"confidence", r.confidence.mu},
+                    {"tags", result_tags}
+                });
+                // Output full text in display
+                ss << "\n\n=== [" << node_type_to_string(r.type) << "] ===\n";
+                ss << r.text;
+                ss << "\n";
 
             } else {
                 // Normal: current balanced behavior
