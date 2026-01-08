@@ -1477,8 +1477,9 @@ private:
         node.kappa.mu = meta->confidence_mu;
         node.kappa.sigma_sq = meta->confidence_sigma;
 
-        // Update access time
+        // Update access time in cache and persist to unified index
         node.touch();
+        unified_.touch(slot);
 
         // Limit cache size
         if (unified_cache_.size() > 1000) {

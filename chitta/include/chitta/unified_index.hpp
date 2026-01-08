@@ -457,6 +457,13 @@ public:
         return &meta_region_.as<const NodeMeta>()[slot.value];
     }
 
+    // Update access timestamp for a slot
+    void touch(SlotId slot) {
+        if (!slot.valid()) return;
+        auto* metas = meta_region_.as<NodeMeta>();
+        metas[slot.value].tau_accessed = now();
+    }
+
     // Lookup slot by NodeId
     SlotId lookup(const NodeId& id) const {
         std::shared_lock lock(mutex_);
