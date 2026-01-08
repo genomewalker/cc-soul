@@ -1,5 +1,18 @@
 cmake_minimum_required(VERSION 3.14)
-project(chitta VERSION 0.1.0 LANGUAGES CXX)
+project(chitta VERSION 0.1.0 LANGUAGES C CXX)
+
+include(FetchContent)
+
+# CRoaring - compressed bitmaps for tag indices (100M+ scale)
+FetchContent_Declare(
+    roaring
+    GIT_REPOSITORY https://github.com/RoaringBitmap/CRoaring.git
+    GIT_TAG v4.3.0
+    GIT_SHALLOW TRUE
+)
+set(ROARING_BUILD_STATIC ON CACHE BOOL "" FORCE)
+set(ENABLE_ROARING_TESTS OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(roaring)
 
 # Extract version from plugin.json
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../.claude-plugin/plugin.json" PLUGIN_JSON)
@@ -35,7 +48,7 @@ target_include_directories(chitta INTERFACE
 
 # Find threads
 find_package(Threads REQUIRED)
-target_link_libraries(chitta INTERFACE Threads::Threads)
+target_link_libraries(chitta INTERFACE Threads::Threads roaring)
 
 # nlohmann/json for MCP server
 find_package(nlohmann_json CONFIG QUIET)

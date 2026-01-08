@@ -18,6 +18,7 @@
 #include "mmap.hpp"  // For MappedRegion
 #include "connection_pool.hpp"
 #include "blob_store.hpp"
+#include "tag_index.hpp"
 #include "hnsw.hpp"
 #include <cstdint>
 #include <ctime>
@@ -186,6 +187,12 @@ public:
             return false;
         }
 
+        // Create tag index
+        if (!tags_.create(base_path_ + ".tags")) {
+            std::cerr << "[UnifiedIndex] Failed to create tag index\n";
+            return false;
+        }
+
         // Initialize slot allocation
         next_slot_ = 0;
         capacity_ = initial_capacity;
@@ -247,6 +254,15 @@ public:
             }
         }
 
+        // Open tag index (create if missing for backward compatibility)
+        std::string tags_path = base_path_ + ".tags";
+        if (!tags_.open(tags_path)) {
+            if (!tags_.create(tags_path)) {
+                std::cerr << "[UnifiedIndex] Failed to create tag index\n";
+                return false;
+            }
+        }
+
         // Rebuild NodeId -> SlotId lookup
         rebuild_id_index();
 
@@ -266,12 +282,14 @@ public:
         connections_.close();
         payloads_.close();
         edges_.close();
+        tags_.close();
     }
 
     void sync() {
         connections_.sync();
         payloads_.sync();
         edges_.sync();
+        tags_.save();
         index_region_.sync();
         vectors_region_.sync();
         meta_region_.sync();
@@ -329,6 +347,11 @@ public:
         uint32_t edge_offset = 0;
         if (!node.edges.empty()) {
             edge_offset = static_cast<uint32_t>(store_edges(node.edges));
+        }
+
+        // Store tags in inverted index
+        if (!node.tags.empty()) {
+            tags_.add(slot.value, node.tags);
         }
 
         // Write metadata
@@ -510,6 +533,10 @@ public:
         return index_region_.as<const UnifiedIndexHeader>()->snapshot_id;
     }
 
+    // Access tag index for filtered queries
+    const SlotTagIndex& slot_tag_index() const { return tags_; }
+    SlotTagIndex& slot_tag_index() { return tags_; }
+
     // ═══════════════════════════════════════════════════════════════════════
     // Iteration
     // ═══════════════════════════════════════════════════════════════════════
@@ -549,6 +576,9 @@ public:
             if (meta->edge_offset != 0) {
                 node.edges = load_edges(meta->edge_offset);
             }
+
+            // Load tags from inverted index
+            node.tags = tags_.tags_for_slot(static_cast<uint32_t>(i));
 
             fn(nodes[i].id, node);
         }
@@ -596,6 +626,7 @@ public:
         success &= copy_file_cow(base_path_ + ".connections", snapshot_path + ".connections");
         success &= copy_file_cow(base_path_ + ".payloads", snapshot_path + ".payloads");
         success &= copy_file_cow(base_path_ + ".edges", snapshot_path + ".edges");
+        success &= copy_file_cow(base_path_ + ".tags", snapshot_path + ".tags");
 
         if (success) {
             std::cerr << "[UnifiedIndex] Snapshot " << snap_id << " created at "
@@ -1040,6 +1071,7 @@ private:
     ConnectionPool connections_;
     BlobStore payloads_;       // Variable-length payload storage
     BlobStore edges_;          // Variable-length edge storage
+    SlotTagIndex tags_;            // Inverted index for tags (roaring bitmaps)
 
     mutable std::shared_mutex mutex_;
     std::unordered_map<NodeId, SlotId, NodeIdHash> id_to_slot_;

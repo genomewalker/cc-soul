@@ -1,0 +1,41 @@
+{
+  "project": "cc-soul",
+  "lastUpdated": "2026-01-08",
+  "currentPhase": "Phase 3.5 - Scalability & Integrity",
+  "features": {
+    "roaring_tag_index": {
+      "status": "implemented",
+      "description": "SlotTagIndex with CRoaring bitmaps for 100M+ node tag queries",
+      "files": ["chitta/include/chitta/tag_index.hpp"]
+    },
+    "blob_store": {
+      "status": "implemented",
+      "description": "Variable-length storage for payloads and edges",
+      "files": ["chitta/include/chitta/blob_store.hpp"]
+    },
+    "connection_pool_integrity": {
+      "status": "implemented",
+      "description": "CRC32 checksum validation and best-fit allocator",
+      "files": ["chitta/include/chitta/connection_pool.hpp"]
+    },
+    "segment_iteration": {
+      "status": "implemented",
+      "description": "for_each_hot now iterates all segments",
+      "files": ["chitta/include/chitta/storage.hpp", "chitta/include/chitta/segment_manager.hpp"]
+    }
+  },
+  "knownIssues": [
+    {
+      "id": "edge-delta-corruption",
+      "severity": "high",
+      "description": "test_wal_deltas crashes at line 372 - edge vector corruption during WAL replay",
+      "file": "chitta/src/test.cpp:372"
+    }
+  ],
+  "sessionLog": [
+    {
+      "date": "2026-01-08",
+      "summary": "Implemented roaring bitmap tag index for 100M+ scale, integrated CRoaring via FetchContent, fixed segment iteration, added BlobStore for payloads/edges, added ConnectionPool checksum and best-fit allocator. Pre-existing edge delta bug blocks full test suite."
+    }
+  ]
+}
