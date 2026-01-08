@@ -253,7 +253,8 @@ public:
                 if (text) {
                     bm25_index_.add(node.id, *text);
                 }
-                if (!node.tags.empty()) {
+                // For unified storage, tags are already in SlotTagIndex
+                if (!storage_.use_unified() && !node.tags.empty()) {
                     tag_index_.add(node.id, node.tags);
                 }
                 graph_.insert_raw(node.id);
@@ -329,8 +330,10 @@ public:
         // Add to BM25 index for hybrid search
         bm25_index_.add(id, text);
 
-        // Add to tag index for exact-match filtering
-        tag_index_.add(id, tags);
+        // Add to tag index (unified storage handles this in insert)
+        if (!storage_.use_unified()) {
+            tag_index_.add(id, tags);
+        }
 
         return id;
     }
@@ -354,8 +357,10 @@ public:
         // Add to BM25 index for hybrid search
         bm25_index_.add(id, text);
 
-        // Add to tag index for exact-match filtering
-        tag_index_.add(id, tags);
+        // Add to tag index (unified storage handles this in insert)
+        if (!storage_.use_unified()) {
+            tag_index_.add(id, tags);
+        }
 
         return id;
     }
@@ -590,7 +595,9 @@ public:
         auto tags_copy = node.tags;  // Copy before move
         storage_.insert(id, std::move(node));
         graph_.insert_raw(id);
-        tag_index_.add(id, tags_copy);
+        if (!storage_.use_unified()) {
+            tag_index_.add(id, tags_copy);
+        }
         bm25_index_.add(id, ledger_json);
 
         return id;
