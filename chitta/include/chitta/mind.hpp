@@ -213,7 +213,8 @@ public:
         running_ = true;
 
         // Rebuild indices from existing data
-        rebuild_bm25_index();
+        // BM25 is built lazily on first search (Phase 4 optimization)
+        bm25_built_ = false;
         if (!storage_.use_unified()) {
             // Only rebuild tag index for non-unified storage
             // For unified, SlotTagIndex is already loaded and authoritative
@@ -221,6 +222,20 @@ public:
         }
 
         return true;
+    }
+
+    // Ensure BM25 index is built (lazy initialization)
+    void ensure_bm25_index() {
+        if (bm25_built_) return;
+        rebuild_bm25_index();
+        bm25_built_ = true;
+    }
+
+    // Add to BM25 only if already built (otherwise rebuild will include it)
+    void maybe_add_bm25(NodeId id, const std::string& text) {
+        if (bm25_built_) {
+            maybe_add_bm25(id, text);
+        }
     }
 
     // Rebuild BM25 index from storage (call after loading data)
@@ -251,7 +266,7 @@ public:
                 // New node - add to all indices
                 auto text = payload_to_text(node.payload);
                 if (text) {
-                    bm25_index_.add(node.id, *text);
+                    maybe_add_bm25(node.id, *text);
                 }
                 // For unified storage, tags are already in SlotTagIndex
                 if (!storage_.use_unified() && !node.tags.empty()) {
@@ -287,7 +302,7 @@ public:
         graph_.insert_raw(id);
 
         // Add to BM25 index for hybrid search
-        bm25_index_.add(id, text);
+        maybe_add_bm25(id, text);
 
         return id;
     }
@@ -307,7 +322,7 @@ public:
         graph_.insert_raw(id);
 
         // Add to BM25 index for hybrid search
-        bm25_index_.add(id, text);
+        maybe_add_bm25(id, text);
 
         return id;
     }
@@ -328,7 +343,7 @@ public:
         graph_.insert_raw(id);
 
         // Add to BM25 index for hybrid search
-        bm25_index_.add(id, text);
+        maybe_add_bm25(id, text);
 
         // Add to tag index (unified storage handles this in insert)
         if (!storage_.use_unified()) {
@@ -355,7 +370,7 @@ public:
         graph_.insert_raw(id);
 
         // Add to BM25 index for hybrid search
-        bm25_index_.add(id, text);
+        maybe_add_bm25(id, text);
 
         // Add to tag index (unified storage handles this in insert)
         if (!storage_.use_unified()) {
@@ -545,7 +560,7 @@ public:
             graph_.insert_raw(id);
 
             // Add to BM25 index for hybrid search
-            bm25_index_.add(id, texts[i]);
+            maybe_add_bm25(id, texts[i]);
         }
 
         return ids;
@@ -598,7 +613,7 @@ public:
         if (!storage_.use_unified()) {
             tag_index_.add(id, tags_copy);
         }
-        bm25_index_.add(id, ledger_json);
+        maybe_add_bm25(id, ledger_json);
 
         return id;
     }
@@ -678,7 +693,7 @@ public:
         node->touch();
 
         // Update BM25 index
-        bm25_index_.add(id, updates_json);
+        maybe_add_bm25(id, updates_json);
 
         return true;
     }
@@ -1102,6 +1117,7 @@ private:
 
         if (mode == SearchMode::Sparse || mode == SearchMode::Hybrid) {
             if (!query_text.empty()) {
+                ensure_bm25_index();  // Lazy build on first use
                 auto sparse = bm25_index_.search(query_text, k * 4);
 
                 if (mode == SearchMode::Hybrid && !candidates.empty()) {
@@ -1184,6 +1200,7 @@ private:
     // Soul-aware scoring and hybrid retrieval
     ScoringConfig scoring_config_;
     BM25Index bm25_index_;
+    bool bm25_built_ = false;  // Lazy build on first sparse/hybrid search
     CrossEncoder cross_encoder_;
 
     // Tag index for exact-match filtering (inter-agent communication)
