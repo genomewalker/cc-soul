@@ -13,6 +13,8 @@
 #include <iomanip>
 #include <functional>
 #include <atomic>
+#include <unistd.h>
+#include <climits>
 
 namespace chitta {
 
@@ -542,7 +544,8 @@ private:
         tools_.push_back({
             "ledger",
             "Session ledger operations: save/load/update the Atman snapshot. "
-            "Captures soul state, work state, and continuation for session continuity.",
+            "Captures soul state, work state, and continuation for session continuity. "
+            "Project is auto-detected from cwd if not specified.",
             {
                 {"type", "object"},
                 {"properties", {
@@ -554,6 +557,10 @@ private:
                     {"session_id", {
                         {"type", "string"},
                         {"description", "Session identifier (optional, for filtering)"}
+                    }},
+                    {"project", {
+                        {"type", "string"},
+                        {"description", "Project name for isolation (auto-detected from cwd if not specified)"}
                     }},
                     {"ledger_id", {
                         {"type", "string"},
@@ -1621,9 +1628,36 @@ private:
         return {false, helpful ? "Memory strengthened" : "Memory weakened", result};
     }
 
+    // Helper to detect project name from cwd or environment
+    static std::string detect_project() {
+        // Try CLAUDE_PROJECT env first
+        if (const char* proj = std::getenv("CLAUDE_PROJECT")) {
+            return proj;
+        }
+
+        // Fall back to cwd basename
+        char cwd[PATH_MAX];
+        if (getcwd(cwd, sizeof(cwd))) {
+            std::string path(cwd);
+            size_t last_slash = path.find_last_of('/');
+            if (last_slash != std::string::npos && last_slash + 1 < path.size()) {
+                return path.substr(last_slash + 1);
+            }
+            return path;
+        }
+
+        return "";
+    }
+
     ToolResult tool_ledger(const json& params) {
         std::string action = params.at("action");
         std::string session_id = params.value("session_id", "");
+
+        // Get project from params or auto-detect from cwd
+        std::string project = params.value("project", "");
+        if (project.empty()) {
+            project = detect_project();
+        }
 
         if (action == "save") {
             // Build ledger JSON from provided components
@@ -1704,21 +1738,25 @@ private:
                 ledger_json["continuation"] = json::object();
             }
 
-            NodeId id = mind_->save_ledger(ledger_json.dump(), session_id);
+            NodeId id = mind_->save_ledger(ledger_json.dump(), session_id, project);
 
             json result = {
                 {"id", id.to_string()},
                 {"session_id", session_id},
+                {"project", project},
                 {"ledger", ledger_json}
             };
 
             return {false, "Ledger saved: " + id.to_string(), result};
 
         } else if (action == "load") {
-            auto ledger = mind_->load_ledger(session_id);
+            auto ledger = mind_->load_ledger(session_id, project);
 
             if (!ledger) {
-                return {false, "No ledger found" + (session_id.empty() ? "" : " for session: " + session_id), json()};
+                std::string msg = "No ledger found";
+                if (!project.empty()) msg += " for project: " + project;
+                if (!session_id.empty()) msg += ", session: " + session_id;
+                return {false, msg, json()};
             }
 
             json ledger_json;
@@ -1829,7 +1867,7 @@ private:
 
             if (ledger_id_str.empty()) {
                 // Load current ledger first
-                auto current = mind_->load_ledger(session_id);
+                auto current = mind_->load_ledger(session_id, project);
                 if (!current) {
                     return {true, "No ledger to update", json()};
                 }
@@ -1842,7 +1880,7 @@ private:
             json updated = json::object();
 
             // Load existing ledger content
-            auto existing = mind_->load_ledger(session_id);
+            auto existing = mind_->load_ledger(session_id, project);
             if (existing) {
                 try {
                     updated = json::parse(existing->second);
@@ -1874,11 +1912,13 @@ private:
             return {false, "Ledger updated: " + ledger_id_str, result};
 
         } else if (action == "list") {
-            auto ledgers = mind_->list_ledgers(10);
+            auto ledgers = mind_->list_ledgers(10, project);
 
             json list = json::array();
             std::ostringstream ss;
-            ss << "Ledgers (" << ledgers.size() << "):\n";
+            ss << "Ledgers";
+            if (!project.empty()) ss << " [" << project << "]";
+            ss << " (" << ledgers.size() << "):\n";
 
             for (const auto& [id, timestamp] : ledgers) {
                 list.push_back({

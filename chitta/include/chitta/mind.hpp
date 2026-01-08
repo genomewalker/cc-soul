@@ -543,11 +543,18 @@ public:
     //   "work_state": { "todos": [...], "files": [...], "decisions": [...] },
     //   "continuation": { "next_steps": [...], "deferred": [...], "critical": [...] }
     // }
-    NodeId save_ledger(const std::string& ledger_json, const std::string& session_id = "") {
+    // Project parameter ensures ledgers are isolated per-project when multiple
+    // Claude instances run simultaneously.
+    NodeId save_ledger(const std::string& ledger_json,
+                       const std::string& session_id = "",
+                       const std::string& project = "") {
         std::lock_guard<std::mutex> lock(mutex_);
 
         // Create embedding from a summary of the ledger for semantic search
         std::string summary = "Session ledger: " + session_id;
+        if (!project.empty()) {
+            summary = "[" + project + "] " + summary;
+        }
 
         Node node(NodeType::Ledger, Vector::zeros());
         node.payload = text_to_payload(ledger_json);
@@ -555,6 +562,9 @@ public:
         node.tags = {"ledger", "atman"};
         if (!session_id.empty()) {
             node.tags.push_back("session:" + session_id);
+        }
+        if (!project.empty()) {
+            node.tags.push_back("project:" + project);
         }
 
         if (yantra_) {
@@ -572,14 +582,27 @@ public:
         return id;
     }
 
-    // Load the most recent session ledger (optionally filtered by session_id)
-    std::optional<std::pair<NodeId, std::string>> load_ledger(const std::string& session_id = "") {
+    // Load the most recent session ledger (optionally filtered by session_id and/or project)
+    // When project is specified, only ledgers from that project are considered.
+    // This prevents cross-talk between multiple Claude instances.
+    std::optional<std::pair<NodeId, std::string>> load_ledger(
+        const std::string& session_id = "",
+        const std::string& project = "") {
         std::lock_guard<std::mutex> lock(mutex_);
 
-        // Query by tag
-        std::vector<NodeId> candidates;
+        // Build tag filter
+        std::vector<std::string> required_tags = {"ledger"};
         if (!session_id.empty()) {
-            candidates = tag_index_.find_all({"ledger", "session:" + session_id});
+            required_tags.push_back("session:" + session_id);
+        }
+        if (!project.empty()) {
+            required_tags.push_back("project:" + project);
+        }
+
+        // Query by tags
+        std::vector<NodeId> candidates;
+        if (required_tags.size() > 1) {
+            candidates = tag_index_.find_all(required_tags);
         } else {
             candidates = tag_index_.find("ledger");
         }
@@ -636,10 +659,18 @@ public:
     }
 
     // Get all ledgers (for history/debugging)
-    std::vector<std::pair<NodeId, Timestamp>> list_ledgers(size_t limit = 10) {
+    // When project is specified, only ledgers from that project are listed.
+    std::vector<std::pair<NodeId, Timestamp>> list_ledgers(
+        size_t limit = 10,
+        const std::string& project = "") {
         std::lock_guard<std::mutex> lock(mutex_);
 
-        auto candidates = tag_index_.find("ledger");
+        std::vector<NodeId> candidates;
+        if (!project.empty()) {
+            candidates = tag_index_.find_all({"ledger", "project:" + project});
+        } else {
+            candidates = tag_index_.find("ledger");
+        }
 
         std::vector<std::pair<NodeId, Timestamp>> result;
         for (const auto& id : candidates) {
