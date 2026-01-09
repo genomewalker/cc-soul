@@ -283,6 +283,34 @@ When this skill is invoked:
 - `domain:[area]` - Semantic domain (auth, api, ui, db, etc.)
 - `pattern:[name]` - Architectural pattern
 
+## Codemap Caching
+
+To avoid redundant scans, cache the codemap by git commit hash:
+
+```bash
+CACHE_FILE="${HOME}/.claude/mind/.codemap_cache"
+PROJECT=$(basename $(git rev-parse --show-toplevel 2>/dev/null || pwd))
+GIT_HASH=$(git rev-parse HEAD 2>/dev/null || echo "none")
+
+# Check cache
+if [ -f "$CACHE_FILE" ]; then
+    CACHED=$(grep "^${PROJECT}:" "$CACHE_FILE" | cut -d: -f2)
+    if [ "$CACHED" = "$GIT_HASH" ]; then
+        echo "Codemap unchanged since $GIT_HASH - using cached knowledge"
+        recall(query="codemap $PROJECT", tag="codemap:$PROJECT")
+        exit 0  # Skip re-scan
+    fi
+fi
+
+# After generating codemap, update cache
+echo "${PROJECT}:${GIT_HASH}" >> "$CACHE_FILE"
+```
+
+**Cache invalidation:**
+- New commit → different hash → re-scan
+- Manual refresh with `--refresh` flag
+- Cache persists across sessions
+
 ## Codemap Generation Commands
 
 To generate the codemap, use these patterns:

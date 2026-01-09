@@ -162,6 +162,22 @@ hook_prompt() {
     local user_message
     user_message=$(echo "$input" | jq -r '.message // .prompt // .content // empty' 2>/dev/null | head -c 500)
 
+    # Context-aware auto-ledger: save when context drops below 15%
+    local context_remaining
+    context_remaining=$(echo "$input" | jq -r '.context_window.remaining_percent // 100' 2>/dev/null || echo "100")
+    local auto_save_marker="${HOME}/.claude/mind/.autosave_done"
+
+    if [[ "$context_remaining" -lt 15 && ! -f "$auto_save_marker" ]]; then
+        # Auto-save ledger before context gets too low
+        local session_id="autosave-$(date +%Y%m%d-%H%M%S)"
+        call_mcp "ledger" "{\"action\":\"save\",\"session_id\":\"$session_id\",\"continuation\":{\"reason\":\"low_context\",\"critical\":[\"Context at ${context_remaining}% - auto-saved\"]}}" >/dev/null 2>&1 || true
+        touch "$auto_save_marker"
+        echo "[cc-soul] Auto-saved ledger (context at ${context_remaining}%)"
+    elif [[ "$context_remaining" -gt 50 && -f "$auto_save_marker" ]]; then
+        # Reset marker when context is high again (e.g., after compact/new session)
+        rm -f "$auto_save_marker"
+    fi
+
     # Quick stats output
     if $lean && ! $resonate; then
         local stats

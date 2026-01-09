@@ -136,6 +136,21 @@ private:
     std::vector<ToolSchema> tools_;
     std::unordered_map<std::string, std::function<ToolResult(const json&)>> handlers_;
 
+    // Session learning tracker - append to session file
+    void track_learning(const std::string& node_id, const std::string& type, const std::string& title) {
+        const char* home = getenv("HOME");
+        if (!home) return;
+
+        std::string session_file = std::string(home) + "/.claude/mind/.session_learned";
+        std::ofstream ofs(session_file, std::ios::app);
+        if (ofs) {
+            auto now = std::chrono::system_clock::now();
+            auto epoch = std::chrono::duration_cast<std::chrono::seconds>(
+                now.time_since_epoch()).count();
+            ofs << node_id << "|" << type << "|" << title << "|" << epoch << "\n";
+        }
+    }
+
     void register_tools() {
         // Tool: soul_context - Get soul state for hook injection
         tools_.push_back({
@@ -1079,6 +1094,9 @@ private:
             {"confidence", confidence}
         };
 
+        // Track learning for session summary
+        track_learning(id.to_string(), type_str, title.empty() ? content.substr(0, 50) : title);
+
         std::ostringstream ss;
         ss << "Grew " << type_str << ": " << (title.empty() ? content.substr(0, 50) : title);
         ss << " (id: " << id.to_string() << ")";
@@ -1087,6 +1105,15 @@ private:
     }
 
     ToolResult tool_observe(const json& params) {
+        // Rate limiter: prevent observation spam (min 500ms between observations)
+        static auto last_observe = std::chrono::steady_clock::time_point{};
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_observe).count();
+        if (elapsed < 500 && last_observe != std::chrono::steady_clock::time_point{}) {
+            return {true, "Rate limited: wait " + std::to_string(500 - elapsed) + "ms", json()};
+        }
+        last_observe = now;
+
         std::string category = params.at("category");
         std::string title = params.at("title");
         std::string content = params.at("content");
@@ -1150,6 +1177,9 @@ private:
             {"decay_rate", decay},
             {"tags", tags_vec}
         };
+
+        // Track learning for session summary
+        track_learning(id.to_string(), "episode", title);
 
         return {false, "Observed: " + title, result};
     }

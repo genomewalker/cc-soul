@@ -393,6 +393,22 @@ int cmd_daemon_with_socket(Mind& mind, int interval_seconds,
             auto attractor_report = mind.run_attractor_dynamics(5, 0.01f);
             mind.snapshot();
 
+            // Coherence monitoring (webhook-ready)
+            auto coherence = mind.coherence();
+            static float last_tau = 1.0f;
+            float tau = coherence.tau_k();
+
+            // Alert on significant coherence drop
+            if (tau < 0.5f && last_tau >= 0.5f) {
+                std::cerr << "[daemon] WARNING: Coherence dropped below 50% (tau="
+                          << static_cast<int>(tau * 100) << "%)\n";
+                // Future: webhook call here
+            } else if (tau < 0.3f) {
+                std::cerr << "[daemon] CRITICAL: Coherence very low (tau="
+                          << static_cast<int>(tau * 100) << "%)\n";
+            }
+            last_tau = tau;
+
             auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now() - start).count();
 
@@ -401,6 +417,7 @@ int cmd_daemon_with_socket(Mind& mind, int interval_seconds,
                 std::cerr << "[daemon] Cycle " << cycle_count << ": "
                           << "synth=" << synthesized << " feedback=" << feedback
                           << " settled=" << attractor_report.nodes_settled
+                          << " tau=" << static_cast<int>(tau * 100) << "%"
                           << " clients=" << server.connection_count()
                           << " (" << elapsed << "ms)\n";
             }
