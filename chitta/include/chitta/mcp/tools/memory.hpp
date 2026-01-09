@@ -7,6 +7,7 @@
 #include "../../mind.hpp"
 #include <sstream>
 #include <algorithm>
+#include <unordered_set>
 
 namespace chitta::mcp::tools::memory {
 
@@ -98,7 +99,8 @@ inline void register_schemas(std::vector<ToolSchema>& tools) {
                 {"query", {{"type", "string"}, {"description", "What to search for"}}},
                 {"k", {{"type", "integer"}, {"minimum", 1}, {"maximum", 50}, {"default", 10}}},
                 {"spread_strength", {{"type", "number"}, {"minimum", 0}, {"maximum", 1}, {"default", 0.5}}},
-                {"hebbian_strength", {{"type", "number"}, {"minimum", 0}, {"maximum", 0.2}, {"default", 0.03}}}
+                {"hebbian_strength", {{"type", "number"}, {"minimum", 0}, {"maximum", 0.2}, {"default", 0.03}}},
+                {"exclude_tags", {{"type", "array"}, {"items", {{"type", "string"}}}, {"description", "Tags to exclude from results (e.g., auto:cmd)"}}}
             }},
             {"required", {"query"}}
         }
@@ -357,22 +359,45 @@ inline ToolResult full_resonate(Mind* mind, const json& params) {
     float spread_strength = params.value("spread_strength", 0.5f);
     float hebbian_strength = params.value("hebbian_strength", 0.03f);
 
+    // Parse exclude_tags
+    std::unordered_set<std::string> exclude_tags;
+    if (params.contains("exclude_tags") && params["exclude_tags"].is_array()) {
+        for (const auto& tag : params["exclude_tags"]) {
+            if (tag.is_string()) {
+                exclude_tags.insert(tag.get<std::string>());
+            }
+        }
+    }
+
     if (!mind->has_yantra()) {
         return ToolResult::error("Yantra not ready - cannot perform semantic search");
     }
 
-    auto recalls = mind->full_resonate(query, k, spread_strength, hebbian_strength);
+    // Request more results if we're filtering
+    size_t fetch_k = exclude_tags.empty() ? k : k * 2;
+    auto recalls = mind->full_resonate(query, fetch_k, spread_strength, hebbian_strength);
 
     json results_array = json::array();
     std::ostringstream ss;
-    ss << "Full resonance for: " << query << "\n";
-    ss << "Found " << recalls.size() << " resonant nodes";
-    ss << " (spread=" << spread_strength;
-    ss << ", hebbian=" << hebbian_strength << "):\n";
 
+    size_t included = 0;
     for (const auto& r : recalls) {
-        mind->feedback_used(r.id);
+        if (included >= k) break;
+
         auto result_tags = mind->get_tags(r.id);
+
+        // Check if any result tag matches exclude_tags
+        bool excluded = false;
+        for (const auto& tag : result_tags) {
+            if (exclude_tags.count(tag)) {
+                excluded = true;
+                break;
+            }
+        }
+        if (excluded) continue;
+
+        mind->feedback_used(r.id);
+        ++included;
 
         results_array.push_back({
             {"id", r.id.to_string()},

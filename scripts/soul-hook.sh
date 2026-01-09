@@ -1,10 +1,13 @@
 #!/bin/bash
-# Soul hook handler - self-contained, no Python dependency
+# Soul hook handler - socket-first, daemon-aware
 #
 # Usage: soul-hook.sh <hook-type> [options]
 #   hook-type: start, end, prompt, pre-compact
 #
-# Requires: chitta_mcp binary built, ONNX models downloaded
+# Architecture:
+#   - Uses daemon socket directly for fast queries (no process spawn)
+#   - Falls back to chitta_mcp thin client if socket unavailable
+#   - Never uses direct mode (slow model loading)
 
 set -e
 
@@ -14,18 +17,8 @@ PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
 
 # Paths
 CHITTA_BIN="$PLUGIN_DIR/bin/chitta_mcp"
-CHITTA_CLI="$PLUGIN_DIR/bin/chitta_cli"
-MIND_PATH="${HOME}/.claude/mind/chitta"
-MODEL_PATH="$PLUGIN_DIR/chitta/models/model.onnx"
-VOCAB_PATH="$PLUGIN_DIR/chitta/models/vocab.txt"
 SESSION_FILE="${HOME}/.claude/mind/.session_state"
 LEAN_MODE="${CC_SOUL_LEAN:-false}"  # Set CC_SOUL_LEAN=true for minimal context
-
-# Check binary exists
-if [[ ! -x "$CHITTA_BIN" ]]; then
-    echo "[cc-soul] chitta_mcp not found. Run setup.sh" >&2
-    exit 0  # Don't fail hooks
-fi
 
 # Check jq exists (required for JSON parsing)
 if ! command -v jq &> /dev/null; then
@@ -33,15 +26,59 @@ if ! command -v jq &> /dev/null; then
     exit 0
 fi
 
-# Helper: call MCP tool
+# Find versioned daemon socket
+find_socket() {
+    # Look for versioned sockets first (e.g., /tmp/chitta-2.32.0.sock)
+    local sock
+    sock=$(ls -t /tmp/chitta-*.sock 2>/dev/null | head -1)
+    if [[ -S "$sock" ]]; then
+        echo "$sock"
+        return 0
+    fi
+    # Fall back to legacy socket
+    if [[ -S "/tmp/chitta.sock" ]]; then
+        echo "/tmp/chitta.sock"
+        return 0
+    fi
+    return 1
+}
+
+# Helper: query daemon socket directly (fast path)
+socket_query() {
+    local query="$1"
+    local socket
+    socket=$(find_socket) || return 1
+
+    # Use timeout and netcat for socket communication
+    echo "$query" | timeout 5 nc -U "$socket" 2>/dev/null | head -1
+}
+
+# Helper: call MCP tool via socket or thin client
 call_mcp() {
     local method="$1"
     local params="$2"
     local request="{\"jsonrpc\":\"2.0\",\"method\":\"tools/call\",\"params\":{\"name\":\"$method\",\"arguments\":$params},\"id\":1}"
-    echo "$request" | "$CHITTA_BIN" --path "$MIND_PATH" --model "$MODEL_PATH" --vocab "$VOCAB_PATH" 2>/dev/null | grep -v '^\[chitta' | jq -r '.result.content[0].text' 2>/dev/null || true
+
+    # Try socket first (fast)
+    local response
+    response=$(socket_query "$request" 2>/dev/null)
+    if [[ -n "$response" ]]; then
+        echo "$response" | jq -r '.result.content[0].text' 2>/dev/null || true
+        return 0
+    fi
+
+    # Fall back to thin client (spawns process but uses daemon)
+    if [[ -x "$CHITTA_BIN" ]]; then
+        echo "$request" | "$CHITTA_BIN" 2>/dev/null | grep -v '^\[chitta' | jq -r '.result.content[0].text' 2>/dev/null || true
+    fi
 }
 
-# Helper: escape JSON string (using jq, already verified above)
+# Helper: get stats directly from daemon (fastest path)
+get_stats() {
+    socket_query "stats" 2>/dev/null || echo "{}"
+}
+
+# Helper: escape JSON string
 json_escape() {
     jq -n --arg s "$1" '$s'
 }
@@ -200,39 +237,33 @@ hook_prompt() {
         return
     fi
 
-    # Full resonance mode - inject relevant memories naturally
+    # Full resonance mode - inject relevant memories via daemon socket
     if $resonate && [[ -n "$user_message" && ${#user_message} -gt 10 ]]; then
-        if [[ -x "$CHITTA_CLI" ]]; then
-            local limit=3
-            local resonance_output
+        local limit=3
+        [[ "$LEAN_MODE" == "true" ]] && limit=2
 
-            if [[ "$LEAN_MODE" == "true" ]]; then
-                # Ultra-lean: 2 results, titles only
-                limit=2
-                resonance_output=$("$CHITTA_CLI" resonate "$user_message" --path "$MIND_PATH" --model "$MODEL_PATH" --vocab "$VOCAB_PATH" --limit "$limit" 2>/dev/null \
-                    | grep -v "^No resonant" \
-                    | sed 's/^\[cc-soul\] //' \
-                    | head -c 300)  # Hard cap at 300 chars
-            else
-                resonance_output=$("$CHITTA_CLI" resonate "$user_message" --path "$MIND_PATH" --model "$MODEL_PATH" --vocab "$VOCAB_PATH" --limit "$limit" 2>/dev/null \
-                    | grep -v "^No resonant" \
-                    | sed 's/^\[cc-soul\] //')
-            fi
+        # Escape query for JSON
+        local query_escaped
+        query_escaped=$(echo "$user_message" | jq -Rs '.' | sed 's/^"//;s/"$//')
+
+        # Call full_resonate via daemon with exclude_tags filter
+        local raw_output
+        raw_output=$(call_mcp "full_resonate" "{\"query\":\"$query_escaped\",\"k\":$limit,\"exclude_tags\":[\"auto:cmd\",\"auto:file\",\"auto:edit\"]}")
+
+        if [[ -n "$raw_output" && "$raw_output" != "null" ]]; then
+            # Clean up output for display
+            local resonance_output
+            resonance_output=$(echo "$raw_output" \
+                | grep -v "^Full resonance for:" \
+                | head -c 500)
 
             if [[ -n "$resonance_output" ]]; then
                 echo "$resonance_output"
-                # Track token savings from transparent memory injection
+                # Track token savings
                 local chars_injected=${#resonance_output}
                 "$SCRIPT_DIR/token-savings.sh" add-transparent "$chars_injected" 2>/dev/null || true
             fi
         fi
-    fi
-
-    # In non-lean mode, also show full context
-    if ! $lean; then
-        local context
-        context=$(call_mcp "soul_context" '{"format":"text"}')
-        echo "$context"
     fi
 }
 
