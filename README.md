@@ -35,6 +35,7 @@ CC-Soul is a persistent identity system for Claude Code. It provides:
 - **Transparent Integration** — Memories surface automatically, no explicit tool calls needed
 - **Subconscious Processing** — Background daemon synthesizes wisdom while you work
 - **Multi-Instance Support** — Multiple Claude sessions share the same soul
+- **Graph Structure** — Nodes connected by typed edges, enabling spreading activation through relationships
 
 ### What I Carry
 
@@ -45,6 +46,7 @@ CC-Soul is a persistent identity system for Claude Code. It provides:
 | **Failures** | Gold. What went wrong and why. | Slow (0.02/day) |
 | **Episodes** | Decisions, discoveries, the texture of experience. | Medium (0.05/day) |
 | **Dreams** | Visions of what could be. Aspirations. | Slow (0.03/day) |
+| **Entities** | Named things: code files, projects, concepts. Connected in graph. | Default (0.05/day) |
 | **Signals** | Transient observations. Session notes. | Fast (0.15/day) |
 
 ---

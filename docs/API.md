@@ -11,6 +11,7 @@ This document provides a complete reference for all MCP tools exposed by CC-Soul
 - [Search Tools](#search-tools)
 - [Intention Tools](#intention-tools)
 - [Learning Tools](#learning-tools)
+- [Graph Tools](#graph-tools)
 - [Multi-Voice Tools](#multi-voice-tools)
 - [Session Tools](#session-tools)
 - [Dynamics Tools](#dynamics-tools)
@@ -107,14 +108,14 @@ Get current soul state including coherence, statistics, and session ledger.
 
 ### grow
 
-Add durable knowledge to the soul: wisdom, beliefs, failures, aspirations, dreams, or terms.
+Add durable knowledge to the soul: wisdom, beliefs, failures, aspirations, dreams, terms, or entities.
 
 **Parameters:**
 | Name | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
-| `type` | string | Yes | - | Type: `wisdom`, `belief`, `failure`, `aspiration`, `dream`, `term` |
+| `type` | string | Yes | - | Type: `wisdom`, `belief`, `failure`, `aspiration`, `dream`, `term`, `entity` |
 | `content` | string | Yes | - | The content to add |
-| `title` | string | No* | - | Short title (*required for wisdom/failure) |
+| `title` | string | No* | - | Short title (*required for wisdom/failure/entity) |
 | `domain` | string | No | - | Domain context (e.g., "backend", "authentication") |
 | `confidence` | number | No | `0.8` | Initial confidence (0.0-1.0) |
 
@@ -127,6 +128,7 @@ Add durable knowledge to the soul: wisdom, beliefs, failures, aspirations, dream
 | `aspiration` | 0.03 | Long-term visions |
 | `dream` | 0.03 | Possibilities |
 | `term` | 0.01 | Vocabulary |
+| `entity` | 0.05 | Named things (files, concepts, projects) |
 
 **Example:**
 ```json
@@ -508,6 +510,64 @@ Found 5 attractors:
 3. [0.79] "Error handling strategies"
    Basin: 31 nodes
 ```
+
+---
+
+## Graph Tools
+
+Tools for building and navigating the soul graph structure.
+
+### connect
+
+Create a directed edge between two nodes in the soul graph.
+
+**Parameters:**
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `from_id` | string | Yes | - | Source node UUID |
+| `to_id` | string | Yes | - | Target node UUID |
+| `edge_type` | string | No | `relates_to` | Relationship type |
+| `weight` | number | No | `0.8` | Edge strength (0.0-1.0) |
+
+**Edge Types:**
+| Type | Description | Use Case |
+|------|-------------|----------|
+| `similar` | Semantic similarity | Discovered by embeddings |
+| `supports` | Supports/confirms | Corroborating evidence |
+| `contradicts` | Contradicts | Conflicting information |
+| `relates_to` | Generic relation | File imports, associations |
+| `part_of` | Containment | Dir→file, module→function |
+| `is_a` | Type hierarchy | File is_a entry_point |
+| `mentions` | Reference | Episode mentions concept |
+
+**Example:**
+```json
+{
+  "name": "connect",
+  "arguments": {
+    "from_id": "a1b2c3d4-...",
+    "to_id": "e5f6g7h8-...",
+    "edge_type": "relates_to",
+    "weight": 0.9
+  }
+}
+```
+
+**Response:**
+```
+Edge created
+```
+
+**Use with codemap:**
+```json
+// Create file entity
+{"name": "grow", "arguments": {"type": "entity", "title": "src/auth.ts", "content": "Auth module", "domain": "myproject"}}
+
+// Connect to related file
+{"name": "connect", "arguments": {"from_id": "auth_id", "to_id": "session_id", "edge_type": "relates_to"}}
+```
+
+Edges enable spreading activation — when you search for "authentication", connected files like `session.ts` surface through graph traversal.
 
 ---
 

@@ -169,14 +169,15 @@ private:
         // Tool: grow - Add wisdom, beliefs, or failures to the soul
         tools_.push_back({
             "grow",
-            "Add to the soul: wisdom, beliefs, failures, aspirations, dreams, or terms. "
-            "Each type has different decay and confidence properties.",
+            "Add to the soul: wisdom, beliefs, failures, aspirations, dreams, terms, or entities. "
+            "Each type has different decay and confidence properties. "
+            "Entity type is for named things like code files, projects, concepts.",
             {
                 {"type", "object"},
                 {"properties", {
                     {"type", {
                         {"type", "string"},
-                        {"enum", {"wisdom", "belief", "failure", "aspiration", "dream", "term"}},
+                        {"enum", {"wisdom", "belief", "failure", "aspiration", "dream", "term", "entity"}},
                         {"description", "What to grow"}
                     }},
                     {"content", {
@@ -619,6 +620,41 @@ private:
             }
         });
         handlers_["answer"] = [this](const json& params) { return tool_answer(params); };
+
+        // Tool: connect - Create edges between nodes in the soul graph
+        tools_.push_back({
+            "connect",
+            "Create a directed edge between two nodes in the soul graph. "
+            "Used to build relationships: file imports, concept associations, etc.",
+            {
+                {"type", "object"},
+                {"properties", {
+                    {"from_id", {
+                        {"type", "string"},
+                        {"description", "Source node ID (UUID)"}
+                    }},
+                    {"to_id", {
+                        {"type", "string"},
+                        {"description", "Target node ID (UUID)"}
+                    }},
+                    {"edge_type", {
+                        {"type", "string"},
+                        {"enum", {"similar", "supports", "contradicts", "relates_to", "part_of", "is_a", "mentions"}},
+                        {"default", "relates_to"},
+                        {"description", "Type of relationship"}
+                    }},
+                    {"weight", {
+                        {"type", "number"},
+                        {"minimum", 0.0},
+                        {"maximum", 1.0},
+                        {"default", 0.8},
+                        {"description", "Edge weight/strength (0-1)"}
+                    }}
+                }},
+                {"required", {"from_id", "to_id"}}
+            }
+        });
+        handlers_["connect"] = [this](const json& params) { return tool_connect(params); };
 
         // Tool: narrate - Manage story threads and episodes
         tools_.push_back({
@@ -1870,6 +1906,49 @@ private:
         };
 
         return {false, promote ? "Answer promoted to wisdom" : "Question answered", result};
+    }
+
+    ToolResult tool_connect(const json& params) {
+        std::string from_id_str = params.at("from_id");
+        std::string to_id_str = params.at("to_id");
+        std::string edge_type_str = params.value("edge_type", "relates_to");
+        float weight = params.value("weight", 0.8f);
+
+        NodeId from_id = NodeId::from_string(from_id_str);
+        NodeId to_id = NodeId::from_string(to_id_str);
+
+        // Verify both nodes exist
+        auto from_node = mind_->get(from_id);
+        auto to_node = mind_->get(to_id);
+
+        if (!from_node) {
+            return {true, "Source node not found: " + from_id_str, json()};
+        }
+        if (!to_node) {
+            return {true, "Target node not found: " + to_id_str, json()};
+        }
+
+        // Map string to EdgeType
+        EdgeType edge_type = EdgeType::RelatesTo;
+        if (edge_type_str == "similar") edge_type = EdgeType::Similar;
+        else if (edge_type_str == "supports") edge_type = EdgeType::Supports;
+        else if (edge_type_str == "contradicts") edge_type = EdgeType::Contradicts;
+        else if (edge_type_str == "relates_to") edge_type = EdgeType::RelatesTo;
+        else if (edge_type_str == "part_of") edge_type = EdgeType::PartOf;
+        else if (edge_type_str == "is_a") edge_type = EdgeType::IsA;
+        else if (edge_type_str == "mentions") edge_type = EdgeType::Mentions;
+
+        // Create the edge
+        mind_->connect(from_id, to_id, edge_type, weight);
+
+        json result = {
+            {"from_id", from_id_str},
+            {"to_id", to_id_str},
+            {"edge_type", edge_type_str},
+            {"weight", weight}
+        };
+
+        return {false, "Edge created", result};
     }
 
     ToolResult tool_narrate(const json& params) {
