@@ -153,6 +153,84 @@ inline float session_relevance(
 
 
 // ═══════════════════════════════════════════════════════════════════════════
+// 1c. Lateral Inhibition (Phase 5: Interference/Competition)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Competition configuration for winner-take-all dynamics
+// Similar patterns compete rather than stacking
+struct CompetitionConfig {
+    float similarity_threshold = 0.85f;   // Nodes more similar than this compete
+    float inhibition_strength = 0.7f;     // How strongly winners suppress losers (0-1)
+    size_t max_competitors = 3;           // Max nodes that can compete in one cluster
+    bool hard_suppression = false;        // true = remove losers, false = reduce their score
+
+    // Disable competition entirely
+    bool enabled = true;
+};
+
+// Result of competition: indices of suppressed nodes and their penalty
+struct InhibitionResult {
+    std::vector<size_t> suppressed_indices;
+    std::vector<float> penalties;  // Parallel to suppressed_indices
+};
+
+// Apply lateral inhibition to a sorted relevance vector
+// Returns indices that should be suppressed or penalized
+//
+// Algorithm (neural-inspired winner-take-all):
+// 1. Process nodes in relevance order (highest first = winner)
+// 2. For each winner, find similar nodes below it
+// 3. Inhibit (suppress or penalize) the similar losers
+// 4. Winners create "refractory zones" - suppressed nodes can't inhibit others
+//
+// This prevents redundant similar results from dominating the top-k
+inline InhibitionResult compute_inhibition(
+    const std::vector<float>& similarities,  // Pairwise similarities (upper triangular)
+    const std::vector<float>& relevances,    // Already sorted descending
+    size_t n,                                 // Number of results
+    const CompetitionConfig& config)
+{
+    InhibitionResult result;
+
+    if (!config.enabled || n < 2) {
+        return result;
+    }
+
+    std::vector<bool> suppressed(n, false);
+    std::vector<float> penalties(n, 0.0f);
+
+    // Process in relevance order (winners first)
+    for (size_t i = 0; i < n; ++i) {
+        if (suppressed[i]) continue;  // Already a loser, can't inhibit
+
+        size_t competitors_found = 0;
+
+        // Winner inhibits similar nodes below it
+        for (size_t j = i + 1; j < n && competitors_found < config.max_competitors; ++j) {
+            if (suppressed[j]) continue;
+
+            // Get similarity between i and j
+            // Similarities stored in upper triangular: index = i*n - i*(i+1)/2 + j - i - 1
+            size_t sim_idx = i * n - (i * (i + 1)) / 2 + j - i - 1;
+            float sim = similarities[sim_idx];
+
+            if (sim > config.similarity_threshold) {
+                // Lateral inhibition: winner suppresses this similar loser
+                suppressed[j] = true;
+                penalties[j] = config.inhibition_strength * sim;  // Stronger similarity = stronger inhibition
+                competitors_found++;
+
+                result.suppressed_indices.push_back(j);
+                result.penalties.push_back(penalties[j]);
+            }
+        }
+    }
+
+    return result;
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
 // 2. BM25 Sparse Retrieval
 // ═══════════════════════════════════════════════════════════════════════════
 

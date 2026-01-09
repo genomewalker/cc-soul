@@ -288,6 +288,11 @@ private:
                         {"type", "boolean"},
                         {"default", false},
                         {"description", "Session priming: boost results based on recent observations and active intentions"}
+                    }},
+                    {"compete", {
+                        {"type", "boolean"},
+                        {"default", true},
+                        {"description", "Lateral inhibition: similar results compete, winners suppress losers"}
                     }}
                 }},
                 {"required", {"query"}}
@@ -838,6 +843,15 @@ private:
             {"priming_active", !session.empty()}
         };
 
+        // Add competition config (Phase 5: Interference/Competition)
+        const auto& competition = mind_->competition_config();
+        result["competition"] = {
+            {"enabled", competition.enabled},
+            {"similarity_threshold", competition.similarity_threshold},
+            {"inhibition_strength", competition.inhibition_strength},
+            {"hard_suppression", competition.hard_suppression}
+        };
+
         // Add latest ledger (Atman snapshot) if available
         if (include_ledger) {
             auto ledger = mind_->load_ledger();
@@ -899,6 +913,15 @@ private:
                 ss << session.active_intentions.size() << " intentions, ";
                 ss << session.goal_basin.size() << " basin\n";
             }
+
+            // Competition status
+            ss << "  Competition: " << (competition.enabled ? "enabled" : "disabled");
+            if (competition.enabled) {
+                ss << " (threshold:" << int(competition.similarity_threshold * 100) << "%";
+                ss << " inhibition:" << int(competition.inhibition_strength * 100) << "%";
+                ss << (competition.hard_suppression ? " hard)" : " soft)");
+            }
+            ss << "\n";
 
             // Add ledger summary to text output
             if (result.contains("ledger") && result["ledger"].contains("content")) {
@@ -1069,6 +1092,13 @@ private:
         float threshold = params.value("threshold", 0.0f);
         bool learn = params.value("learn", false);
         bool primed = params.value("primed", false);
+        bool compete = params.value("compete", true);
+
+        // Temporarily adjust competition setting if needed
+        bool original_compete = mind_->competition_config().enabled;
+        if (!compete && original_compete) {
+            mind_->set_competition_enabled(false);
+        }
 
         // Zoom-aware default limits
         size_t default_limit = (zoom == "sparse") ? 25 :
@@ -1101,6 +1131,11 @@ private:
         } else {
             // Standard recall
             recalls = mind_->recall(query, limit, threshold);
+        }
+
+        // Restore competition setting
+        if (!compete && original_compete) {
+            mind_->set_competition_enabled(true);
         }
 
         // Apply Hebbian learning if enabled (independent of priming)

@@ -50,6 +50,10 @@ struct Recall {
     Timestamp accessed;
     std::vector<uint8_t> payload;
     std::string text;  // Original text if available
+
+    // Temporary embedding for competition (cleared after recall)
+    QuantizedVector qnu;
+    bool has_embedding = false;
 };
 
 // Search mode for hybrid retrieval
@@ -1125,6 +1129,29 @@ public:
         recent_observation_order_.clear();
     }
 
+    // ═══════════════════════════════════════════════════════════════════
+    // Competition Config API (Phase 5: Interference/Competition)
+    // ═══════════════════════════════════════════════════════════════════
+
+    // Get current competition configuration
+    const CompetitionConfig& competition_config() const {
+        return competition_config_;
+    }
+
+    // Enable/disable competition
+    void set_competition_enabled(bool enabled) {
+        competition_config_.enabled = enabled;
+    }
+
+    // Set competition parameters
+    void configure_competition(float similarity_threshold,
+                               float inhibition_strength,
+                               bool hard_suppression = false) {
+        competition_config_.similarity_threshold = similarity_threshold;
+        competition_config_.inhibition_strength = inhibition_strength;
+        competition_config_.hard_suppression = hard_suppression;
+    }
+
     // Compute coherence
     Coherence coherence() {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -1992,6 +2019,11 @@ private:
                 r.accessed = node->tau_accessed;
                 r.payload = node->payload;
                 r.text = *text;
+
+                // Store embedding for competition (Phase 5)
+                r.qnu = QuantizedVector::from_float(node->nu);
+                r.has_embedding = true;
+
                 results.push_back(std::move(r));
             }
         }
@@ -2002,9 +2034,21 @@ private:
                 return a.relevance > b.relevance;
             });
 
+        // Phase 5: Apply lateral inhibition (winner-take-all competition)
+        // Similar patterns compete - winners suppress losers
+        if (competition_config_.enabled && results.size() >= 2) {
+            apply_lateral_inhibition(results);
+        }
+
         // Limit to k results
         if (results.size() > k) {
             results.resize(k);
+        }
+
+        // Clear embeddings before returning (not needed by caller)
+        for (auto& r : results) {
+            r.qnu = QuantizedVector{};
+            r.has_embedding = false;
         }
 
         return results;
@@ -2019,6 +2063,70 @@ private:
     static std::optional<std::string> payload_to_text(const std::vector<uint8_t>& payload) {
         if (payload.empty()) return std::nullopt;
         return std::string(payload.begin(), payload.end());
+    }
+
+    // Phase 5: Apply lateral inhibition to recall results
+    // Winners suppress similar losers - prevents redundant results
+    void apply_lateral_inhibition(std::vector<Recall>& results) {
+        const size_t n = results.size();
+        if (n < 2) return;
+
+        // Compute pairwise similarities (upper triangular)
+        // Size: n*(n-1)/2 entries
+        std::vector<float> similarities;
+        similarities.reserve(n * (n - 1) / 2);
+
+        for (size_t i = 0; i < n; ++i) {
+            for (size_t j = i + 1; j < n; ++j) {
+                float sim = 0.0f;
+                if (results[i].has_embedding && results[j].has_embedding) {
+                    sim = results[i].qnu.cosine_approx(results[j].qnu);
+                }
+                similarities.push_back(sim);
+            }
+        }
+
+        // Extract relevances for compute_inhibition
+        std::vector<float> relevances;
+        relevances.reserve(n);
+        for (const auto& r : results) {
+            relevances.push_back(r.relevance);
+        }
+
+        // Compute which nodes get inhibited
+        auto inhibition = compute_inhibition(similarities, relevances, n, competition_config_);
+
+        if (inhibition.suppressed_indices.empty()) {
+            return;  // No competition occurred
+        }
+
+        if (competition_config_.hard_suppression) {
+            // Hard WTA: remove suppressed results entirely
+            // Sort indices descending to remove from back to front
+            std::vector<size_t> to_remove = inhibition.suppressed_indices;
+            std::sort(to_remove.begin(), to_remove.end(), std::greater<size_t>());
+
+            for (size_t idx : to_remove) {
+                if (idx < results.size()) {
+                    results.erase(results.begin() + static_cast<long>(idx));
+                }
+            }
+        } else {
+            // Soft inhibition: reduce relevance of suppressed results
+            for (size_t i = 0; i < inhibition.suppressed_indices.size(); ++i) {
+                size_t idx = inhibition.suppressed_indices[i];
+                float penalty = inhibition.penalties[i];
+                if (idx < results.size()) {
+                    results[idx].relevance *= (1.0f - penalty);
+                }
+            }
+
+            // Re-sort after applying penalties
+            std::sort(results.begin(), results.end(),
+                [](const Recall& a, const Recall& b) {
+                    return a.relevance > b.relevance;
+                });
+        }
     }
 
     // Hebbian strengthening implementation (caller must hold mutex_)
@@ -2101,6 +2209,9 @@ private:
     SessionContext session_context_;
     static constexpr size_t MAX_RECENT_OBSERVATIONS = 50;  // Rolling window
     std::deque<NodeId> recent_observation_order_;  // For FIFO eviction
+
+    // Competition config (Phase 5: Interference/Competition)
+    CompetitionConfig competition_config_;
 };
 
 } // namespace chitta
