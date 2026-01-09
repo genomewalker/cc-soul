@@ -1974,13 +1974,14 @@ public:
         // 4. Confidence: well-learned patterns are high epiplexity
         float confidence = node.kappa.effective();
 
-        // Weighted combination (not geometric mean - allow partial scores)
-        // Structure is most important (0.35), then confidence (0.30),
-        // then integration (0.20), then compression (0.15)
-        float epiplexity = 0.35f * structure +
-                          0.30f * confidence +
-                          0.20f * integration +
-                          0.15f * compression;
+        // Weighted combination (Swarm consensus: rebalanced for regenerability)
+        // Integration elevated: edges enable associative reconstruction
+        // Compression elevated: information density critical for bounded observers
+        // Structure: 30%, Confidence: 25%, Integration: 25%, Compression: 20%
+        float epiplexity = 0.30f * structure +
+                          0.25f * confidence +
+                          0.25f * integration +
+                          0.20f * compression;
 
         return std::min(1.0f, epiplexity);
     }
@@ -2204,6 +2205,7 @@ public:
             r.id = id;
             r.similarity = similarity;
             r.relevance = relevance;
+            r.epiplexity = compute_epiplexity_impl(*node, attractors);
             r.type = node->node_type;
             r.confidence = node->kappa;
             r.created = node->tau_created;
@@ -2215,6 +2217,25 @@ public:
 
             results.push_back(std::move(r));
             seen.insert(id);
+        }
+
+        // Compute epiplexity for seed results too
+        for (auto& seed : results) {
+            if (seed.epiplexity == 0.0f) {
+                if (Node* node = storage_.get(seed.id)) {
+                    seed.epiplexity = compute_epiplexity_impl(*node, attractors);
+                }
+            }
+        }
+
+        // ε-modulated relevance: high-epiplexity memories are better seeds
+        // Formula: relevance × (1 + α × ε) where α = 0.5
+        // Also apply safety gate: safe_ε = sqrt(confidence × epiplexity)
+        // This prevents high-ε false memories from dominating
+        constexpr float EPIPLEXITY_BOOST_ALPHA = 0.5f;
+        for (auto& r : results) {
+            float safe_epsilon = std::sqrt(r.confidence.effective() * r.epiplexity);
+            r.relevance *= (1.0f + EPIPLEXITY_BOOST_ALPHA * safe_epsilon);
         }
 
         // Phase 2: Boost results in same attractor basin as top result
