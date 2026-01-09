@@ -246,7 +246,8 @@ private:
             "Recall relevant wisdom and episodes. "
             "zoom='sparse' for overview (20+ titles), 'normal' for balanced (5-10 full), "
             "'dense' for deep context (3-5 with relationships and temporal info), "
-            "'full' for complete untruncated content (1-3 results).",
+            "'full' for complete untruncated content (1-3 results). "
+            "When learn=true, applies Hebbian learning to strengthen connections between co-retrieved nodes.",
             {
                 {"type", "object"},
                 {"properties", {
@@ -276,6 +277,11 @@ private:
                         {"maximum", 1.0},
                         {"default", 0.0},
                         {"description", "Minimum similarity threshold"}
+                    }},
+                    {"learn", {
+                        {"type", "boolean"},
+                        {"default", false},
+                        {"description", "Apply Hebbian learning: strengthen connections between co-retrieved nodes"}
                     }}
                 }},
                 {"required", {"query"}}
@@ -283,12 +289,13 @@ private:
         });
         handlers_["recall"] = [this](const json& params) { return tool_recall(params); };
 
-        // Tool: resonate - Semantic search with spreading activation
+        // Tool: resonate - Semantic search with spreading activation and Hebbian learning
         tools_.push_back({
             "resonate",
             "Semantic search enhanced with spreading activation through graph edges. "
             "Finds semantically similar nodes, then spreads activation through connections "
-            "to discover related but not directly similar content.",
+            "to discover related but not directly similar content. "
+            "When learn=true, applies Hebbian learning: co-activated nodes strengthen their connections.",
             {
                 {"type", "object"},
                 {"properties", {
@@ -309,6 +316,18 @@ private:
                         {"maximum", 1.0},
                         {"default", 0.5},
                         {"description", "Activation spread strength (0-1)"}
+                    }},
+                    {"learn", {
+                        {"type", "boolean"},
+                        {"default", true},
+                        {"description", "Apply Hebbian learning: strengthen connections between co-activated nodes"}
+                    }},
+                    {"hebbian_strength", {
+                        {"type", "number"},
+                        {"minimum", 0.0},
+                        {"maximum", 0.5},
+                        {"default", 0.03},
+                        {"description", "Strength of Hebbian learning (0-0.5)"}
                     }}
                 }},
                 {"required", {"query"}}
@@ -343,7 +362,8 @@ private:
         // Tool: cycle - Run maintenance cycle
         tools_.push_back({
             "cycle",
-            "Run maintenance cycle: apply decay, prune low-confidence nodes, compute coherence, save.",
+            "Run maintenance cycle: apply decay, prune low-confidence nodes, compute coherence, "
+            "optionally run attractor dynamics, save.",
             {
                 {"type", "object"},
                 {"properties", {
@@ -351,6 +371,11 @@ private:
                         {"type", "boolean"},
                         {"default", true},
                         {"description", "Whether to save after cycle"}
+                    }},
+                    {"attractors", {
+                        {"type", "boolean"},
+                        {"default", false},
+                        {"description", "Run attractor dynamics: settle nodes toward conceptual gravity wells"}
                     }}
                 }},
                 {"required", json::array()}
@@ -358,49 +383,85 @@ private:
         });
         handlers_["cycle"] = [this](const json& params) { return tool_cycle(params); };
 
-        // Tool: voices - Query through Antahkarana voice lens
+        // Tool: attractors - Find and report natural attractors (conceptual gravity wells)
         tools_.push_back({
-            "voices",
-            "Consult the Antahkarana voices. Each voice sees the soul differently: "
-            "manas (quick intuition), buddhi (deep analysis), ahamkara (critical/flaws), "
-            "chitta (memory/practical), vikalpa (imagination/creative), sakshi (witness/essential truth).",
+            "attractors",
+            "Find natural attractors in the soul graph. Attractors are high-confidence, well-connected "
+            "nodes that act as conceptual gravity wells, pulling similar thoughts toward them.",
+            {
+                {"type", "object"},
+                {"properties", {
+                    {"max_attractors", {
+                        {"type", "integer"},
+                        {"minimum", 1},
+                        {"maximum", 20},
+                        {"default", 10},
+                        {"description", "Maximum number of attractors to find"}
+                    }},
+                    {"settle", {
+                        {"type", "boolean"},
+                        {"default", false},
+                        {"description", "Also run settling dynamics (strengthen connections to attractors)"}
+                    }},
+                    {"settle_strength", {
+                        {"type", "number"},
+                        {"minimum", 0.01},
+                        {"maximum", 0.1},
+                        {"default", 0.02},
+                        {"description", "Strength of settling toward attractors"}
+                    }}
+                }},
+                {"required", json::array()}
+            }
+        });
+        handlers_["attractors"] = [this](const json& params) { return tool_attractors(params); };
+
+        // Tool: lens - Biased search through different cognitive modes
+        // NOTE: This is NOT multi-agent reasoning (use /antahkarana skill for that).
+        // These are fast retrieval heuristics that apply different scoring biases.
+        tools_.push_back({
+            "lens",
+            "Search through a cognitive lens (biased retrieval). Each lens applies different scoring: "
+            "manas (recent/practical), buddhi (old/high-confidence wisdom), ahamkara (beliefs/invariants), "
+            "chitta (frequently accessed), vikalpa (low-confidence/exploratory), sakshi (neutral). "
+            "For actual multi-perspective reasoning, use /antahkarana or /debate skill instead.",
             {
                 {"type", "object"},
                 {"properties", {
                     {"query", {
                         {"type", "string"},
-                        {"description", "What to ask the voices"}
+                        {"description", "What to search for"}
                     }},
-                    {"voice", {
+                    {"lens", {
                         {"type", "string"},
                         {"enum", {"manas", "buddhi", "ahamkara", "chitta", "vikalpa", "sakshi", "all"}},
                         {"default", "all"},
-                        {"description", "Which voice to consult, or 'all' for chorus"}
+                        {"description", "Which cognitive lens to apply, or 'all' for combined"}
                     }},
                     {"limit", {
                         {"type", "integer"},
                         {"minimum", 1},
                         {"maximum", 20},
                         {"default", 5},
-                        {"description", "Maximum results per voice"}
+                        {"description", "Maximum results per lens"}
                     }}
                 }},
                 {"required", {"query"}}
             }
         });
-        handlers_["voices"] = [this](const json& params) { return tool_voices(params); };
+        handlers_["lens"] = [this](const json& params) { return tool_voices(params); };
 
-        // Tool: harmonize - Get harmony report from all voices
+        // Tool: lens_harmony - Check if different cognitive lenses agree
         tools_.push_back({
-            "harmonize",
-            "Get harmony report from all Antahkarana voices. Shows whether voices agree on the soul's state.",
+            "lens_harmony",
+            "Check harmony across cognitive lenses. Shows whether different retrieval biases return consistent results.",
             {
                 {"type", "object"},
                 {"properties", json::object()},
                 {"required", json::array()}
             }
         });
-        handlers_["harmonize"] = [this](const json& params) { return tool_harmonize(params); };
+        handlers_["lens_harmony"] = [this](const json& params) { return tool_harmonize(params); };
 
         // Tool: intend - Set or check intentions
         tools_.push_back({
@@ -967,6 +1028,7 @@ private:
         std::string zoom = params.value("zoom", "normal");
         std::string tag = params.value("tag", "");
         float threshold = params.value("threshold", 0.0f);
+        bool learn = params.value("learn", false);
 
         // Zoom-aware default limits
         size_t default_limit = (zoom == "sparse") ? 25 :
@@ -992,6 +1054,18 @@ private:
         std::vector<Recall> recalls;
         if (!tag.empty()) {
             recalls = mind_->recall_with_tag_filter(query, tag, limit, threshold);
+            // Apply Hebbian learning if enabled (tag-filtered recall doesn't have built-in learning)
+            if (learn && recalls.size() >= 2) {
+                std::vector<NodeId> co_retrieved;
+                size_t learn_count = std::min(recalls.size(), size_t(5));
+                co_retrieved.reserve(learn_count);
+                for (size_t i = 0; i < learn_count; ++i) {
+                    co_retrieved.push_back(recalls[i].id);
+                }
+                mind_->hebbian_update(co_retrieved, 0.05f);
+            }
+        } else if (learn) {
+            recalls = mind_->recall_with_learning(query, limit, threshold);
         } else {
             recalls = mind_->recall(query, limit, threshold);
         }
@@ -1138,17 +1212,28 @@ private:
         std::string query = params.at("query");
         size_t k = params.value("k", 10);
         float spread_strength = params.value("spread_strength", 0.5f);
+        bool learn = params.value("learn", true);
+        float hebbian_strength = params.value("hebbian_strength", 0.03f);
 
         if (!mind_->has_yantra()) {
             return {true, "Yantra not ready - cannot perform semantic search", json()};
         }
 
-        auto recalls = mind_->resonate(query, k, spread_strength);
+        // Use learning-enabled resonate when learn=true
+        std::vector<Recall> recalls;
+        if (learn) {
+            recalls = mind_->resonate_with_learning(query, k, spread_strength, hebbian_strength);
+        } else {
+            recalls = mind_->resonate(query, k, spread_strength);
+        }
 
         json results_array = json::array();
         std::ostringstream ss;
         ss << "Resonance search for: " << query << "\n";
-        ss << "Found " << recalls.size() << " resonant nodes (spread_strength=" << spread_strength << "):\n";
+        ss << "Found " << recalls.size() << " resonant nodes";
+        ss << " (spread=" << spread_strength;
+        if (learn) ss << ", hebbian=" << hebbian_strength;
+        ss << "):\n";
 
         for (const auto& r : recalls) {
             mind_->feedback_used(r.id);
@@ -1168,11 +1253,21 @@ private:
             if (r.text.length() > 100) ss << "...";
         }
 
-        return {false, ss.str(), {{"results", results_array}, {"spread_strength", spread_strength}}};
+        json result = {
+            {"results", results_array},
+            {"spread_strength", spread_strength},
+            {"learning_enabled", learn}
+        };
+        if (learn) {
+            result["hebbian_strength"] = hebbian_strength;
+        }
+
+        return {false, ss.str(), result};
     }
 
     ToolResult tool_cycle(const json& params) {
         bool save = params.value("save", true);
+        bool run_attractors = params.value("attractors", false);
 
         DynamicsReport report = mind_->tick();
 
@@ -1181,6 +1276,12 @@ private:
 
         // Attempt automatic synthesis (observations → wisdom)
         size_t synthesized = mind_->synthesize_wisdom();
+
+        // Run attractor dynamics if requested
+        Mind::AttractorReport attractor_report;
+        if (run_attractors) {
+            attractor_report = mind_->run_attractor_dynamics();
+        }
 
         if (save) {
             mind_->snapshot();
@@ -1197,12 +1298,79 @@ private:
             {"saved", save}
         };
 
+        if (run_attractors) {
+            result["attractors_found"] = attractor_report.attractor_count;
+            result["nodes_settled"] = attractor_report.nodes_settled;
+        }
+
         std::ostringstream ss;
         ss << "Cycle complete: coherence=" << (coherence.tau_k() * 100) << "%, ";
         ss << "decay=" << (report.decay_applied ? "yes" : "no");
         ss << ", feedback=" << feedback_applied;
         if (synthesized > 0) {
             ss << ", synthesized=" << synthesized << " wisdom";
+        }
+        if (run_attractors) {
+            ss << ", attractors=" << attractor_report.attractor_count;
+            ss << ", settled=" << attractor_report.nodes_settled;
+        }
+
+        return {false, ss.str(), result};
+    }
+
+    ToolResult tool_attractors(const json& params) {
+        size_t max_attractors = params.value("max_attractors", 10);
+        bool settle = params.value("settle", false);
+        float settle_strength = params.value("settle_strength", 0.02f);
+
+        // Find attractors
+        auto attractors = mind_->find_attractors(max_attractors);
+
+        // Optionally run settling
+        size_t settled = 0;
+        if (settle && !attractors.empty()) {
+            settled = mind_->settle_toward_attractors(attractors, settle_strength);
+        }
+
+        // Build results
+        json attractors_array = json::array();
+        std::ostringstream ss;
+
+        if (attractors.empty()) {
+            ss << "No attractors found (need nodes with high confidence, connections, and age)\n";
+            return {false, ss.str(), {{"attractors", attractors_array}, {"count", 0}}};
+        }
+
+        ss << "Found " << attractors.size() << " attractors";
+        if (settle) {
+            ss << " (settled " << settled << " nodes)";
+        }
+        ss << ":\n";
+
+        // Compute basins for size info
+        auto basins = mind_->compute_basins(attractors);
+
+        for (const auto& attr : attractors) {
+            size_t basin_size = basins.count(attr.id) ? basins[attr.id].size() : 0;
+
+            attractors_array.push_back({
+                {"id", attr.id.to_string()},
+                {"strength", attr.strength},
+                {"label", attr.label},
+                {"basin_size", basin_size}
+            });
+
+            ss << "\n[" << (attr.strength * 100) << "%] " << attr.label;
+            if (attr.label.length() >= 50) ss << "...";
+            ss << " (basin: " << basin_size << " nodes)";
+        }
+
+        json result = {
+            {"attractors", attractors_array},
+            {"count", attractors.size()}
+        };
+        if (settle) {
+            result["nodes_settled"] = settled;
         }
 
         return {false, ss.str(), result};

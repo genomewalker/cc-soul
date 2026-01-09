@@ -1349,6 +1349,242 @@ public:
         return results;
     }
 
+    // ═══════════════════════════════════════════════════════════════════
+    // Attractor Dynamics (Phase 2 of resonance architecture)
+    // ═══════════════════════════════════════════════════════════════════
+
+    // An attractor is a high-confidence, well-connected node that
+    // pulls similar nodes toward it (conceptual gravity well)
+    struct Attractor {
+        NodeId id;
+        float strength;          // Attractor strength (confidence * connectivity)
+        std::string label;       // First 50 chars of content for identification
+        size_t basin_size = 0;   // Number of nodes in this attractor's basin
+    };
+
+    // Find natural attractors in the graph
+    // Attractors are nodes with: high confidence + many connections + stable (old)
+    std::vector<Attractor> find_attractors(size_t max_attractors = 10,
+                                            float min_confidence = 0.6f,
+                                            size_t min_edges = 2) {
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        std::vector<Attractor> candidates;
+        Timestamp current = now();
+
+        storage_.for_each_hot([&](const NodeId& id, const Node& node) {
+            // Skip low-confidence nodes
+            if (node.kappa.effective() < min_confidence) return;
+
+            // Skip poorly connected nodes
+            if (node.edges.size() < min_edges) return;
+
+            // Calculate attractor strength:
+            // - confidence contributes (0.4)
+            // - connectivity contributes (0.3)
+            // - age/stability contributes (0.3)
+            float confidence_score = node.kappa.effective();
+
+            // Connectivity: log-scaled to avoid over-weighting highly connected nodes
+            float connectivity_score = std::min(std::log2(1.0f + node.edges.size()) / 4.0f, 1.0f);
+
+            // Age: older nodes are more stable attractors
+            float age_days = static_cast<float>(current - node.tau_created) / 86400000.0f;
+            float age_score = std::min(age_days / 30.0f, 1.0f);  // Max at 30 days
+
+            float strength = 0.4f * confidence_score +
+                            0.3f * connectivity_score +
+                            0.3f * age_score;
+
+            // Extract label from payload
+            auto text = payload_to_text(node.payload);
+            std::string label = text ? text->substr(0, 50) : "";
+
+            candidates.push_back({id, strength, label, 0});
+        });
+
+        // Sort by strength (strongest first)
+        std::sort(candidates.begin(), candidates.end(),
+                  [](const Attractor& a, const Attractor& b) {
+                      return a.strength > b.strength;
+                  });
+
+        // Limit to max_attractors
+        if (candidates.size() > max_attractors) {
+            candidates.resize(max_attractors);
+        }
+
+        return candidates;
+    }
+
+    // Compute which attractor a node is pulled toward
+    // Returns the attractor ID and the pull strength (0-1)
+    std::optional<std::pair<NodeId, float>> compute_attractor_pull(
+        NodeId node_id,
+        const std::vector<Attractor>& attractors)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return compute_attractor_pull_impl(node_id, attractors);
+    }
+
+    // Settle a set of nodes toward their attractors
+    // This strengthens connections between nodes and their attractors
+    // Returns number of nodes that settled
+    size_t settle_toward_attractors(const std::vector<Attractor>& attractors,
+                                     float settle_strength = 0.02f) {
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        size_t settled = 0;
+
+        storage_.for_each_hot([&](const NodeId& id, const Node& node) {
+            // Skip nodes that are themselves attractors
+            bool is_attractor = false;
+            for (const auto& attr : attractors) {
+                if (attr.id == id) {
+                    is_attractor = true;
+                    break;
+                }
+            }
+            if (is_attractor) return;
+
+            // Find which attractor this node is pulled toward
+            auto pull = compute_attractor_pull_impl(id, attractors);
+            if (!pull) return;
+
+            auto [attractor_id, pull_strength] = *pull;
+
+            // Strengthen connection toward attractor
+            // Weight by pull strength (stronger pull = stronger connection)
+            float actual_strength = settle_strength * pull_strength;
+            if (actual_strength >= 0.01f) {
+                hebbian_strengthen_impl(id, attractor_id, actual_strength);
+                settled++;
+            }
+        });
+
+        return settled;
+    }
+
+    // Assign nodes to attractor basins
+    // Returns map of attractor_id -> list of node_ids in that basin
+    std::unordered_map<NodeId, std::vector<NodeId>, NodeIdHash>
+    compute_basins(const std::vector<Attractor>& attractors) {
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        std::unordered_map<NodeId, std::vector<NodeId>, NodeIdHash> basins;
+
+        // Initialize empty basins for each attractor
+        for (const auto& attr : attractors) {
+            basins[attr.id] = {};
+        }
+
+        storage_.for_each_hot([&](const NodeId& id, const Node& node) {
+            // Skip attractors themselves
+            bool is_attractor = false;
+            for (const auto& attr : attractors) {
+                if (attr.id == id) {
+                    is_attractor = true;
+                    break;
+                }
+            }
+            if (is_attractor) return;
+
+            // Find which attractor this node is pulled toward
+            auto pull = compute_attractor_pull_impl(id, attractors);
+            if (pull) {
+                basins[pull->first].push_back(id);
+            }
+        });
+
+        return basins;
+    }
+
+    // Run one round of attractor dynamics:
+    // 1. Find attractors
+    // 2. Settle nodes toward attractors
+    // 3. Compute basins
+    // Returns a report of what happened
+    struct AttractorReport {
+        size_t attractor_count = 0;
+        size_t nodes_settled = 0;
+        std::vector<std::pair<std::string, size_t>> basin_sizes;  // label -> size
+    };
+
+    AttractorReport run_attractor_dynamics(size_t max_attractors = 10,
+                                            float settle_strength = 0.02f) {
+        AttractorReport report;
+
+        // Step 1: Find attractors
+        auto attractors = find_attractors(max_attractors);
+        report.attractor_count = attractors.size();
+
+        if (attractors.empty()) return report;
+
+        // Step 2: Settle nodes toward attractors
+        report.nodes_settled = settle_toward_attractors(attractors, settle_strength);
+
+        // Step 3: Compute basins for reporting
+        auto basins = compute_basins(attractors);
+        for (const auto& attr : attractors) {
+            report.basin_sizes.push_back({
+                attr.label,
+                basins[attr.id].size()
+            });
+        }
+
+        return report;
+    }
+
+    // Enhanced resonate that uses attractor dynamics
+    // First finds attractors, then resonates within attractor basins
+    std::vector<Recall> resonate_with_attractors(const std::string& query,
+                                                   size_t k = 10,
+                                                   float spread_strength = 0.5f) {
+        // First get regular resonance results
+        auto results = resonate(query, k * 2, spread_strength);
+        if (results.empty()) return results;
+
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        // Find attractors
+        auto attractors = find_attractors(5);
+        if (attractors.empty()) {
+            // No attractors found, return regular results
+            if (results.size() > k) results.resize(k);
+            return results;
+        }
+
+        // Compute basins
+        auto basins = compute_basins(attractors);
+
+        // Find which attractor the top result belongs to
+        auto pull = compute_attractor_pull_impl(results[0].id, attractors);
+        if (!pull) {
+            if (results.size() > k) results.resize(k);
+            return results;
+        }
+
+        NodeId primary_attractor = pull->first;
+
+        // Boost results that are in the same basin
+        for (auto& result : results) {
+            auto result_pull = compute_attractor_pull_impl(result.id, attractors);
+            if (result_pull && result_pull->first == primary_attractor) {
+                // Same basin - boost relevance
+                result.relevance *= 1.2f;
+            }
+        }
+
+        // Re-sort by adjusted relevance
+        std::sort(results.begin(), results.end(),
+                  [](const Recall& a, const Recall& b) {
+                      return a.relevance > b.relevance;
+                  });
+
+        if (results.size() > k) results.resize(k);
+        return results;
+    }
+
 private:
     // Internal recall implementation with soul-aware scoring
     std::vector<Recall> recall_impl(const Vector& query, const std::string& query_text,
@@ -1462,6 +1698,38 @@ private:
         // No existing edge - create new one with initial strength
         // Use storage_.add_edge for WAL persistence
         storage_.add_edge(from, to, EdgeType::Similar, strength);
+    }
+
+    // Internal: compute attractor pull without taking lock
+    std::optional<std::pair<NodeId, float>>
+    compute_attractor_pull_impl(NodeId node_id, const std::vector<Attractor>& attractors) {
+        Node* node = storage_.get(node_id);
+        if (!node || attractors.empty()) return std::nullopt;
+
+        // Find the attractor with strongest pull on this node
+        // Pull = attractor_strength * semantic_similarity
+        NodeId best_attractor;
+        float best_pull = 0.0f;
+
+        for (const auto& attr : attractors) {
+            Node* attr_node = storage_.get(attr.id);
+            if (!attr_node) continue;
+
+            // Semantic similarity between node and attractor
+            float similarity = node->nu.cosine(attr_node->nu);
+
+            // Pull is attractor strength weighted by similarity
+            float pull = attr.strength * similarity;
+
+            if (pull > best_pull) {
+                best_pull = pull;
+                best_attractor = attr.id;
+            }
+        }
+
+        if (best_pull < 0.1f) return std::nullopt;  // Too weak
+
+        return std::make_pair(best_attractor, best_pull);
     }
 
     MindConfig config_;

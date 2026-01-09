@@ -1,6 +1,7 @@
 ---
 name: yajña
-description: Coordinated multi-agent execution through Vedic ritual patterns. Use when a plan requires multiple agents working on different tasks toward a unified goal.
+aliases: [coordinate, ritual, parallel, yajna]
+description: Coordinated multi-agent execution through Vedic ritual patterns. Use when a plan requires multiple agents working on different tasks toward a unified goal. Spawns specialized agents (research, implement, validate) that communicate through shared memory.
 execution: task
 ---
 

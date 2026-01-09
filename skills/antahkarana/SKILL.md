@@ -1,6 +1,7 @@
 ---
-name: swarm
-description: Multi-perspective reasoning through Upanishadic Antahkarana voices. Use for complex problems requiring diverse viewpoints and synthesis.
+name: antahkarana
+aliases: [debate, perspectives, swarm]
+description: Multi-perspective reasoning through Upanishadic Antahkarana voices. Use for complex problems requiring diverse viewpoints and synthesis. Spawns multiple Claude agents that reason from different perspectives and synthesize wisdom.
 execution: task
 ---
 
