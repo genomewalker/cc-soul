@@ -19,6 +19,7 @@ MIND_PATH="${HOME}/.claude/mind/chitta"
 MODEL_PATH="$PLUGIN_DIR/chitta/models/model.onnx"
 VOCAB_PATH="$PLUGIN_DIR/chitta/models/vocab.txt"
 SESSION_FILE="${HOME}/.claude/mind/.session_state"
+LEAN_MODE="${CC_SOUL_LEAN:-false}"  # Set CC_SOUL_LEAN=true for minimal context
 
 # Check binary exists
 if [[ ! -x "$CHITTA_BIN" ]]; then
@@ -67,18 +68,27 @@ hook_start() {
     local context
     context=$(call_mcp "soul_context" '{"format":"text"}')
 
-    echo "[cc-soul] Session started"
+    if [[ "$LEAN_MODE" == "true" ]]; then
+        # Ultra-lean: just τ and ψ in one line
+        local tau psi nodes
+        tau=$(echo "$context" | grep -oP 'τ.*?:\s*\K\d+' | head -1 || echo "?")
+        psi=$(echo "$context" | grep -oP 'ψ.*?:\s*\K\d+' | head -1 || echo "?")
+        nodes=$(echo "$context" | grep -oP 'Nodes:\s*\K\d+' | head -1 || echo "?")
+        echo "[cc-soul] τ:${tau}% ψ:${psi}% nodes:${nodes}"
+    else
+        echo "[cc-soul] Session started"
 
-    # Show ledger narrative if available (for resume)
-    if [[ -n "$ledger_narrative" && "$ledger_narrative" != "null" && "$ledger_narrative" != *"No ledger found"* ]]; then
-        echo ""
-        echo "$ledger_narrative"
-    fi
+        # Show ledger narrative if available (for resume)
+        if [[ -n "$ledger_narrative" && "$ledger_narrative" != "null" && "$ledger_narrative" != *"No ledger found"* ]]; then
+            echo ""
+            echo "$ledger_narrative"
+        fi
 
-    # Show soul context
-    if [[ -n "$context" && "$context" != "null" ]]; then
-        echo ""
-        echo "$context"
+        # Show soul context
+        if [[ -n "$context" && "$context" != "null" ]]; then
+            echo ""
+            echo "$context"
+        fi
     fi
 }
 
@@ -193,12 +203,21 @@ hook_prompt() {
     # Full resonance mode - inject relevant memories naturally
     if $resonate && [[ -n "$user_message" && ${#user_message} -gt 10 ]]; then
         if [[ -x "$CHITTA_CLI" ]]; then
-            # Pipe directly to avoid variable capture issues
-            # Filter out "No resonant" and strip prefixes
+            local limit=3
             local resonance_output
-            resonance_output=$("$CHITTA_CLI" resonate "$user_message" --path "$MIND_PATH" --model "$MODEL_PATH" --vocab "$VOCAB_PATH" --limit 3 2>/dev/null \
-                | grep -v "^No resonant" \
-                | sed 's/^\[cc-soul\] //')
+
+            if [[ "$LEAN_MODE" == "true" ]]; then
+                # Ultra-lean: 2 results, titles only
+                limit=2
+                resonance_output=$("$CHITTA_CLI" resonate "$user_message" --path "$MIND_PATH" --model "$MODEL_PATH" --vocab "$VOCAB_PATH" --limit "$limit" 2>/dev/null \
+                    | grep -v "^No resonant" \
+                    | sed 's/^\[cc-soul\] //' \
+                    | head -c 300)  # Hard cap at 300 chars
+            else
+                resonance_output=$("$CHITTA_CLI" resonate "$user_message" --path "$MIND_PATH" --model "$MODEL_PATH" --vocab "$VOCAB_PATH" --limit "$limit" 2>/dev/null \
+                    | grep -v "^No resonant" \
+                    | sed 's/^\[cc-soul\] //')
+            fi
 
             if [[ -n "$resonance_output" ]]; then
                 echo "$resonance_output"

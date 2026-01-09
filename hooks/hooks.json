@@ -48,8 +48,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/soul-hook.sh prompt --lean --resonate",
-            "timeout": 15
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/soul-hook.sh prompt --resonate",
+            "timeout": 10
           },
           {
             "type": "command",

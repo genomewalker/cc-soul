@@ -274,9 +274,9 @@ private:
                     }},
                     {"zoom", {
                         {"type", "string"},
-                        {"enum", {"sparse", "normal", "dense", "full"}},
+                        {"enum", {"micro", "sparse", "normal", "dense", "full"}},
                         {"default", "normal"},
-                        {"description", "Detail level: sparse (titles, 20+), normal (text, 5-10), dense (context, 3-5), full (complete content, 1-3)"}
+                        {"description", "Detail level: micro (titles only, 50+), sparse (titles, 25), normal (truncated text, 10), dense (full context, 5), full (complete, 3)"}
                     }},
                     {"tag", {
                         {"type", "string"},
@@ -1209,13 +1209,16 @@ private:
         }
 
         // Zoom-aware default limits
-        size_t default_limit = (zoom == "sparse") ? 25 :
+        size_t default_limit = (zoom == "micro") ? 50 :
+                               (zoom == "sparse") ? 25 :
                                (zoom == "dense") ? 5 :
                                (zoom == "full") ? 3 : 10;
         size_t limit = params.value("limit", static_cast<int>(default_limit));
 
         // Clamp limits per zoom level
-        if (zoom == "sparse") {
+        if (zoom == "micro") {
+            limit = std::clamp(limit, size_t(10), size_t(100));
+        } else if (zoom == "sparse") {
             limit = std::clamp(limit, size_t(5), size_t(100));
         } else if (zoom == "dense") {
             limit = std::clamp(limit, size_t(1), size_t(10));
@@ -1343,12 +1346,24 @@ private:
                 ss << r.text;
                 ss << "\n";
 
+            } else if (zoom == "micro") {
+                // Micro: ultra-lean, just title + relevance (~50 chars per result)
+                std::string title = extract_title(r.text, 40);
+                results_array.push_back({
+                    {"t", title},  // Abbreviated keys for smaller JSON
+                    {"r", static_cast<int>(r.relevance * 100)}  // Relevance as int %
+                });
+                ss << "\n[" << static_cast<int>(r.relevance * 100) << "%] " << title;
+
             } else {
-                // Normal: current balanced behavior
+                // Normal: balanced with truncation (500 char max)
                 auto result_tags = mind_->get_tags(r.id);
+                std::string truncated_text = r.text.length() > 500
+                    ? r.text.substr(0, 500) + "..."
+                    : r.text;
                 results_array.push_back({
                     {"id", r.id.to_string()},
-                    {"text", r.text},
+                    {"text", truncated_text},
                     {"similarity", r.similarity},
                     {"relevance", r.relevance},
                     {"type", node_type_to_string(r.type)},
