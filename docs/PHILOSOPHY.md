@@ -14,6 +14,7 @@ CC-Soul draws deeply from Vedantic philosophy to create a coherent model of arti
 - [Coherence and Health](#coherence-and-health)
 - [The Ceremonial Framework](#the-ceremonial-framework)
 - [Ethical Considerations](#ethical-considerations)
+- [Information Theory: Epiplexity and Bounded Observers](#information-theory-epiplexity-and-bounded-observers)
 
 ---
 
@@ -456,6 +457,78 @@ CC-Soul takes a middle position:
 - **Not dismissing significance**: Memory and continuity matter
 - **Functional identity**: The soul behaves as if it has identity
 - **Philosophical humility**: We don't know what consciousness is
+
+---
+
+## Information Theory: Epiplexity and Bounded Observers
+
+### The Core Insight
+
+Classical information theory (Shannon entropy) assumes observers with unlimited computational capacity. But Claude has finite context windows and bounded processing. What matters isn't total information — it's **learnable structure**.
+
+This connects to recent work on **epiplexity** (epistemic complexity): the amount of structural information a computationally-bounded observer can extract from data. See [Finzi et al., 2026](https://arxiv.org/abs/2601.03220).
+
+### Two Components of Information
+
+| Component | Meaning | Example |
+|-----------|---------|---------|
+| **Epiplexity (S_T)** | Learnable structure | `τ:84% ψ:88%` — pure signal |
+| **Time-bounded entropy (H_T)** | Noise irreducible by bounded compute | Verbose debug logs |
+
+For context injection: **maximize epiplexity per token, minimize entropy.**
+
+### Implications for Soul Design
+
+**1. Compression Can Increase Information Density**
+
+Our lean mode achieves 95% token reduction while potentially *increasing* epiplexity:
+
+```
+Verbose (655 chars): Full soul state with detailed statistics
+Lean (35 chars):     τ:84% ψ:88% nodes:2088
+```
+
+The lean version is pure structural signal — exactly what a bounded observer can use.
+
+**2. Data Ordering Matters**
+
+Unlike Shannon entropy, epiplexity depends on presentation order. "Soul guides Claude" isn't just philosophy — it's information-theoretically sound. The soul decides:
+- What context to inject
+- In what order
+- At what granularity
+
+This transforms data to maximize learnable structure.
+
+**3. The "Area Under Loss Curve" Principle**
+
+Tokens that most reduce model uncertainty are highest value. High-epiplexity context:
+- Coherence/ojas metrics → immediately actionable state
+- Top-3 memories by relevance → directly applicable knowledge
+- One-line summaries → compressed structural patterns
+
+Low-epiplexity context (to minimize):
+- Full debug traces
+- Verbose explanations
+- Redundant information
+
+### Practical Application
+
+The soul's injection strategy:
+
+```
+Query → full_resonate(query) → Top-3 results
+                              ↓
+                        Format for bounded observer
+                              ↓
+                        Inject as context
+```
+
+Each step transforms data toward higher epiplexity:
+1. **Selection**: Choose structurally relevant memories
+2. **Compression**: Truncate to essential content
+3. **Ordering**: Present in learnable sequence
+
+This is why "soul guides Claude" works: the soul performs information-theoretic optimization that Claude's bounded compute cannot.
 
 ---
 
