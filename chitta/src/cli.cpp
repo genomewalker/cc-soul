@@ -12,6 +12,8 @@
 #include <chitta/mind.hpp>
 #include <chitta/migrations.hpp>
 #include <chitta/version.hpp>
+#include <chitta/socket_server.hpp>
+#include <chitta/mcp/handler.hpp>
 #ifdef CHITTA_WITH_ONNX
 #include <chitta/vak_onnx.hpp>
 #endif
@@ -24,8 +26,41 @@
 #include <chrono>
 #include <atomic>
 #include <fstream>
+#include <sstream>
 
 using namespace chitta;
+
+// Generate stats JSON for daemon socket endpoint and CLI
+std::string generate_stats_json(Mind& mind) {
+    auto coherence = mind.coherence();
+    auto health = mind.health();
+
+    std::ostringstream oss;
+    oss << "{"
+        << "\"version\":\"" << CHITTA_VERSION << "\","
+        << "\"hot\":" << mind.hot_size() << ","
+        << "\"warm\":" << mind.warm_size() << ","
+        << "\"cold\":" << mind.cold_size() << ","
+        << "\"total\":" << mind.size() << ","
+        << "\"coherence\":{"
+        << "\"global\":" << coherence.global << ","
+        << "\"local\":" << coherence.local << ","
+        << "\"structural\":" << coherence.structural << ","
+        << "\"temporal\":" << coherence.temporal << ","
+        << "\"tau\":" << coherence.tau_k()
+        << "},"
+        << "\"ojas\":{"
+        << "\"structural\":" << health.structural << ","
+        << "\"semantic\":" << health.semantic << ","
+        << "\"temporal\":" << health.temporal << ","
+        << "\"capacity\":" << health.capacity << ","
+        << "\"psi\":" << health.psi() << ","
+        << "\"status\":\"" << health.status_string() << "\""
+        << "},"
+        << "\"yantra\":" << (mind.has_yantra() ? "true" : "false")
+        << "}";
+    return oss.str();
+}
 
 void print_usage(const char* prog) {
     std::cerr << "chitta " << CHITTA_VERSION << "\n\n"
@@ -45,6 +80,8 @@ void print_usage(const char* prog) {
               << "  --fast             Skip BM25 loading (for quick stats)\n"
               << "  --interval SECS    Daemon cycle interval (default: 60)\n"
               << "  --pid-file PATH    Write PID to file (for daemon mode)\n"
+              << "  --socket           Enable socket server mode (daemon becomes IPC server)\n"
+              << "  --socket-path PATH Unix socket path (default: /tmp/chitta.sock)\n"
               << "  -v, --version      Show version\n"
 #ifdef CHITTA_WITH_ONNX
               << "  --model PATH       ONNX model path\n"
@@ -82,34 +119,12 @@ std::string default_vocab_path() {
 }
 
 int cmd_stats(Mind& mind, bool json_output) {
-    auto coherence = mind.coherence();
-    auto health = mind.health();
-
     if (json_output) {
-        std::cout << "{"
-                  << "\"version\":\"" << CHITTA_VERSION << "\","
-                  << "\"hot\":" << mind.hot_size() << ","
-                  << "\"warm\":" << mind.warm_size() << ","
-                  << "\"cold\":" << mind.cold_size() << ","
-                  << "\"total\":" << mind.size() << ","
-                  << "\"coherence\":{"
-                  << "\"global\":" << coherence.global << ","
-                  << "\"local\":" << coherence.local << ","
-                  << "\"structural\":" << coherence.structural << ","
-                  << "\"temporal\":" << coherence.temporal << ","
-                  << "\"tau\":" << coherence.tau_k()
-                  << "},"
-                  << "\"ojas\":{"
-                  << "\"structural\":" << health.structural << ","
-                  << "\"semantic\":" << health.semantic << ","
-                  << "\"temporal\":" << health.temporal << ","
-                  << "\"capacity\":" << health.capacity << ","
-                  << "\"psi\":" << health.psi() << ","
-                  << "\"status\":\"" << health.status_string() << "\""
-                  << "},"
-                  << "\"yantra\":" << (mind.has_yantra() ? "true" : "false")
-                  << "}\n";
+        std::cout << generate_stats_json(mind) << "\n";
     } else {
+        auto coherence = mind.coherence();
+        auto health = mind.health();
+
         std::cout << "Soul Statistics\n";
         std::cout << "═══════════════════════════════\n";
         std::cout << "Nodes:\n";
@@ -307,6 +322,102 @@ int cmd_daemon(Mind& mind, int interval_seconds, const std::string& pid_file) {
     return 0;
 }
 
+// Socket server mode: daemon + MCP handler over Unix socket
+int cmd_daemon_with_socket(Mind& mind, int interval_seconds,
+                           const std::string& pid_file,
+                           const std::string& socket_path) {
+    // Write PID file
+    if (!pid_file.empty()) {
+        std::ofstream pf(pid_file);
+        if (pf) {
+            pf << getpid() << "\n";
+            pf.close();
+        }
+    }
+
+    // Start socket server
+    SocketServer server(socket_path);
+    if (!server.start()) {
+        std::cerr << "[daemon] Failed to start socket server on " << socket_path << "\n";
+        return 1;
+    }
+
+    // Create MCP request handler
+    mcp::Handler handler(&mind);
+
+    // Setup signal handlers
+    std::signal(SIGTERM, daemon_signal_handler);
+    std::signal(SIGINT, daemon_signal_handler);
+
+    std::cerr << "[daemon] Started (socket=" << socket_path
+              << ", interval=" << interval_seconds << "s, pid=" << getpid() << ")\n";
+
+    size_t cycle_count = 0;
+    auto last_maintenance = std::chrono::steady_clock::now();
+    auto maintenance_interval = std::chrono::seconds(interval_seconds);
+
+    while (daemon_running) {
+        // Poll for socket activity (100ms timeout for responsiveness)
+        auto requests = server.poll(100);
+
+        // Process all pending requests
+        for (const auto& req : requests) {
+            // Handle special "stats" request (for cc-status integration)
+            if (req.data == "stats") {
+                server.respond(req.client_fd, generate_stats_json(mind));
+                continue;
+            }
+
+            try {
+                auto response = handler.handle(req.data);
+                server.respond(req.client_fd, response);
+            } catch (const std::exception& e) {
+                std::string error = R"({"jsonrpc":"2.0","error":{"code":-32603,"message":")"
+                                  + std::string(e.what()) + R"("},"id":null})";
+                server.respond(req.client_fd, error);
+            }
+        }
+
+        // Check if it's time for maintenance
+        auto now_time = std::chrono::steady_clock::now();
+        if (now_time - last_maintenance >= maintenance_interval) {
+            last_maintenance = now_time;
+            cycle_count++;
+
+            auto start = std::chrono::steady_clock::now();
+
+            // Subconscious processing
+            auto report = mind.tick();
+            size_t synthesized = mind.synthesize_wisdom();
+            size_t feedback = mind.apply_feedback();
+            auto attractor_report = mind.run_attractor_dynamics(5, 0.01f);
+            mind.snapshot();
+
+            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start).count();
+
+            // Log activity (sparse)
+            if (synthesized > 0 || feedback > 0 || attractor_report.nodes_settled > 0) {
+                std::cerr << "[daemon] Cycle " << cycle_count << ": "
+                          << "synth=" << synthesized << " feedback=" << feedback
+                          << " settled=" << attractor_report.nodes_settled
+                          << " clients=" << server.connection_count()
+                          << " (" << elapsed << "ms)\n";
+            }
+        }
+    }
+
+    // Cleanup
+    server.stop();
+
+    if (!pid_file.empty()) {
+        std::remove(pid_file.c_str());
+    }
+
+    std::cerr << "[daemon] Stopped (cycles=" << cycle_count << ")\n";
+    return 0;
+}
+
 int cmd_upgrade(const std::string& db_path) {
     std::string hot_path = db_path + ".hot";
 
@@ -390,10 +501,12 @@ int main(int argc, char* argv[]) {
     std::string query;
     std::string format;  // For convert command
     std::string pid_file;  // For daemon mode
+    std::string socket_path = SocketServer::DEFAULT_SOCKET_PATH;  // For socket mode
     int limit = 5;
     int daemon_interval = 60;
     bool json_output = false;
     bool fast_mode = false;
+    bool socket_mode = false;
 
     // Parse arguments
     for (int i = 1; i < argc; ++i) {
@@ -413,6 +526,11 @@ int main(int argc, char* argv[]) {
             json_output = true;
         } else if (strcmp(argv[i], "--fast") == 0) {
             fast_mode = true;
+        } else if (strcmp(argv[i], "--socket") == 0) {
+            socket_mode = true;
+        } else if (strcmp(argv[i], "--socket-path") == 0 && i + 1 < argc) {
+            socket_path = argv[++i];
+            socket_mode = true;  // Implies socket mode
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             print_usage(argv[0]);
             return 0;
@@ -501,7 +619,11 @@ int main(int argc, char* argv[]) {
     } else if (command == "cycle") {
         result = cmd_cycle(mind);
     } else if (command == "daemon") {
-        result = cmd_daemon(mind, daemon_interval, pid_file);
+        if (socket_mode) {
+            result = cmd_daemon_with_socket(mind, daemon_interval, pid_file, socket_path);
+        } else {
+            result = cmd_daemon(mind, daemon_interval, pid_file);
+        }
     } else {
         std::cerr << "Unknown command: " << command << "\n";
         print_usage(argv[0]);

@@ -111,14 +111,21 @@ if(CHITTA_BUILD_TESTS)
     add_test(NAME chitta_test COMMAND chitta_test)
 endif()
 
-# MCP server executable
+# MCP server executable (thin client with socket support)
 if(CHITTA_BUILD_MCP)
-    add_executable(chitta_mcp src/mcp_server.cpp)
+    add_executable(chitta_mcp
+        src/mcp_server.cpp
+        src/socket_client.cpp
+    )
     target_link_libraries(chitta_mcp PRIVATE chitta)
 endif()
 
-# CLI tool
-add_executable(chitta_cli src/cli.cpp)
+# CLI tool (includes socket server/client for daemon mode)
+add_executable(chitta_cli
+    src/cli.cpp
+    src/socket_server.cpp
+    src/socket_client.cpp
+)
 target_link_libraries(chitta_cli PRIVATE chitta)
 
 # Migration tool (from SQLite soul.db)
