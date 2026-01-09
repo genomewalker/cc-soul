@@ -35,6 +35,7 @@ struct MindConfig {
     int64_t decay_interval_ms = 600000;  // 10 min between decay (faster for dev)
     int64_t checkpoint_interval_ms = 60000;  // 1 minute between checkpoints
     float prune_threshold = 0.1f;        // Confidence below this = prune
+    bool skip_bm25 = false;              // Skip BM25 loading for fast stats
 };
 
 // Search result with meaning
@@ -275,14 +276,17 @@ public:
         if (!storage_.initialize()) return false;
         running_ = true;
 
-        // Rebuild indices from existing data
-        // BM25: try loading from disk, fall back to lazy rebuild on first search
-        bm25_path_ = storage_.base_path() + ".bm25";
-        if (bm25_index_.load(bm25_path_)) {
-            bm25_built_ = true;
-            std::cerr << "[Mind] Loaded BM25 index (" << bm25_index_.size() << " docs)\n";
-        } else {
-            bm25_built_ = false;  // Will rebuild lazily on first search
+        // Skip BM25 loading for fast operations (stats)
+        if (!config_.skip_bm25) {
+            // Rebuild indices from existing data
+            // BM25: try loading from disk, fall back to lazy rebuild on first search
+            bm25_path_ = storage_.base_path() + ".bm25";
+            if (bm25_index_.load(bm25_path_)) {
+                bm25_built_ = true;
+                std::cerr << "[Mind] Loaded BM25 index (" << bm25_index_.size() << " docs)\n";
+            } else {
+                bm25_built_ = false;  // Will rebuild lazily on first search
+            }
         }
 
         if (!storage_.use_unified()) {

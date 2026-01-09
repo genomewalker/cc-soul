@@ -35,6 +35,7 @@ void print_usage(const char* prog) {
               << "Global options:\n"
               << "  --path PATH        Mind storage path (default: ~/.claude/mind/chitta)\n"
               << "  --json             Output as JSON\n"
+              << "  --fast             Skip BM25 loading (for quick stats)\n"
               << "  -v, --version      Show version\n"
 #ifdef CHITTA_WITH_ONNX
               << "  --model PATH       ONNX model path\n"
@@ -253,6 +254,7 @@ int main(int argc, char* argv[]) {
     std::string format;  // For convert command
     int limit = 5;
     bool json_output = false;
+    bool fast_mode = false;
 
     // Parse arguments
     for (int i = 1; i < argc; ++i) {
@@ -266,6 +268,8 @@ int main(int argc, char* argv[]) {
             limit = std::stoi(argv[++i]);
         } else if (strcmp(argv[i], "--json") == 0) {
             json_output = true;
+        } else if (strcmp(argv[i], "--fast") == 0) {
+            fast_mode = true;
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             print_usage(argv[0]);
             return 0;
@@ -310,6 +314,7 @@ int main(int argc, char* argv[]) {
     // Create and open mind
     MindConfig config;
     config.path = mind_path;
+    config.skip_bm25 = fast_mode;
     Mind mind(config);
 
 #ifdef CHITTA_WITH_ONNX
