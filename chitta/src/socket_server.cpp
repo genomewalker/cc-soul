@@ -26,6 +26,9 @@ std::string ClientConnection::extract_message() {
     return msg;
 }
 
+SocketServer::SocketServer()
+    : socket_path_(default_socket_path()) {}
+
 SocketServer::SocketServer(std::string socket_path)
     : socket_path_(std::move(socket_path)) {}
 

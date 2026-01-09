@@ -3,7 +3,11 @@
 //
 // Connects to the soul daemon via Unix socket, with auto-start
 // capability if daemon is not running.
+//
+// Version-aware: Socket path includes version to ensure clients
+// always connect to compatible daemon. Old daemons are auto-restarted.
 
+#include <chitta/version.hpp>
 #include <string>
 #include <optional>
 
@@ -11,11 +15,18 @@ namespace chitta {
 
 class SocketClient {
 public:
-    static constexpr const char* DEFAULT_SOCKET_PATH = "/tmp/chitta.sock";
+    // Socket path includes version for automatic upgrade handling
+    static std::string default_socket_path() {
+        return std::string("/tmp/chitta-") + CHITTA_VERSION + ".sock";
+    }
+    // Legacy socket path for backwards compatibility during transition
+    static constexpr const char* LEGACY_SOCKET_PATH = "/tmp/chitta.sock";
     static constexpr int CONNECT_TIMEOUT_MS = 5000;
     static constexpr int RESPONSE_TIMEOUT_MS = 30000;
 
-    explicit SocketClient(std::string socket_path = DEFAULT_SOCKET_PATH);
+    // Default constructor uses versioned socket path
+    SocketClient();
+    explicit SocketClient(std::string socket_path);
     ~SocketClient();
 
     // Non-copyable, non-movable (owns file descriptor)
@@ -29,9 +40,12 @@ public:
     void disconnect();
     bool connected() const { return fd_ >= 0; }
 
-    // Auto-start daemon if not running
-    // Returns true if daemon is running (started or was already running)
+    // Auto-start daemon if not running, verify version compatibility
+    // Returns true if daemon is running with compatible version
     bool ensure_daemon_running();
+
+    // Request graceful daemon shutdown (for upgrades)
+    bool request_shutdown();
 
     // Send JSON-RPC request, wait for response
     // Returns nullopt on error
@@ -50,6 +64,8 @@ private:
 
     bool start_daemon();
     bool wait_for_socket(int timeout_ms);
+    bool wait_for_socket_gone(int timeout_ms);
+    void cleanup_legacy_daemon();
 };
 
 } // namespace chitta

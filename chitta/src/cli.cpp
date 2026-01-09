@@ -81,7 +81,7 @@ void print_usage(const char* prog) {
               << "  --interval SECS    Daemon cycle interval (default: 60)\n"
               << "  --pid-file PATH    Write PID to file (for daemon mode)\n"
               << "  --socket           Enable socket server mode (daemon becomes IPC server)\n"
-              << "  --socket-path PATH Unix socket path (default: /tmp/chitta.sock)\n"
+              << "  --socket-path PATH Unix socket path (default: /tmp/chitta-VERSION.sock)\n"
               << "  -v, --version      Show version\n"
 #ifdef CHITTA_WITH_ONNX
               << "  --model PATH       ONNX model path\n"
@@ -368,6 +368,15 @@ int cmd_daemon_with_socket(Mind& mind, int interval_seconds,
                 continue;
             }
 
+            // Handle graceful shutdown request (for version upgrades)
+            if (req.data == "shutdown") {
+                std::cerr << "[daemon] Shutdown requested, saving state...\n";
+                server.respond(req.client_fd, R"({"status":"shutting_down","version":")" + std::string(CHITTA_VERSION) + R"("})");
+                mind.snapshot();
+                daemon_running = false;
+                continue;
+            }
+
             try {
                 auto response = handler.handle(req.data);
                 server.respond(req.client_fd, response);
@@ -518,7 +527,7 @@ int main(int argc, char* argv[]) {
     std::string query;
     std::string format;  // For convert command
     std::string pid_file;  // For daemon mode
-    std::string socket_path = SocketServer::DEFAULT_SOCKET_PATH;  // For socket mode
+    std::string socket_path = SocketServer::default_socket_path();  // Versioned socket
     int limit = 5;
     int daemon_interval = 60;
     bool json_output = false;

@@ -1,7 +1,9 @@
 #include <chitta/socket_client.hpp>
+#include <chitta/version.hpp>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -14,6 +16,7 @@
 #include <iostream>
 #include <vector>
 #include <algorithm>
+#include <glob.h>
 
 namespace chitta {
 
@@ -52,7 +55,25 @@ std::vector<std::string> find_installed_versions(const std::string& cache_base) 
     return versions;
 }
 
+// Find all chitta socket files in /tmp
+std::vector<std::string> find_chitta_sockets() {
+    std::vector<std::string> sockets;
+    glob_t globbuf;
+
+    if (glob("/tmp/chitta*.sock", 0, nullptr, &globbuf) == 0) {
+        for (size_t i = 0; i < globbuf.gl_pathc; ++i) {
+            sockets.push_back(globbuf.gl_pathv[i]);
+        }
+        globfree(&globbuf);
+    }
+
+    return sockets;
+}
+
 }  // anonymous namespace
+
+SocketClient::SocketClient()
+    : socket_path_(default_socket_path()) {}
 
 SocketClient::SocketClient(std::string socket_path)
     : socket_path_(std::move(socket_path)) {}
@@ -93,7 +114,10 @@ void SocketClient::disconnect() {
 }
 
 bool SocketClient::ensure_daemon_running() {
-    // Try to connect first
+    // Cleanup any legacy daemons first (transition period)
+    cleanup_legacy_daemon();
+
+    // Try to connect to versioned socket first
     if (connect()) {
         return true;
     }
@@ -111,6 +135,63 @@ bool SocketClient::ensure_daemon_running() {
     }
 
     return connect();
+}
+
+bool SocketClient::request_shutdown() {
+    if (!connected() && !connect()) {
+        return false;
+    }
+
+    auto response = request("shutdown");
+    disconnect();
+    return response.has_value();
+}
+
+bool SocketClient::wait_for_socket_gone(int timeout_ms) {
+    auto start = std::chrono::steady_clock::now();
+
+    while (access(socket_path_.c_str(), F_OK) == 0) {
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start).count();
+        if (elapsed >= timeout_ms) {
+            return false;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    return true;
+}
+
+void SocketClient::cleanup_legacy_daemon() {
+    // Find all chitta sockets
+    auto sockets = find_chitta_sockets();
+
+    for (const auto& sock : sockets) {
+        // Skip our versioned socket
+        if (sock == socket_path_) continue;
+
+        // Try to shutdown old daemons gracefully
+        std::cerr << "[socket_client] Found old daemon socket: " << sock << "\n";
+
+        SocketClient old_client(sock);
+        if (old_client.connect()) {
+            std::cerr << "[socket_client] Requesting shutdown of old daemon\n";
+            old_client.request("shutdown");
+            old_client.disconnect();
+
+            // Wait for old socket to disappear
+            for (int i = 0; i < 20 && access(sock.c_str(), F_OK) == 0; ++i) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+
+            // Force remove if still exists
+            if (access(sock.c_str(), F_OK) == 0) {
+                unlink(sock.c_str());
+            }
+        } else {
+            // Stale socket file - remove it
+            unlink(sock.c_str());
+        }
+    }
 }
 
 bool SocketClient::start_daemon() {

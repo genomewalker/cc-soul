@@ -1,3 +1,8 @@
+---
+name: epsilon-yajna
+description: Structured node compression ceremony for converting verbose memories to high-epiplexity patterns. Use when batch-migrating nodes to improve reconstructability (ε).
+---
+
 # ε-Yajña: The Compression Ceremony
 
 A structured ritual for converting verbose nodes to high-epiplexity patterns.
