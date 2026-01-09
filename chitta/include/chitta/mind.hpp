@@ -20,6 +20,7 @@
 #include <mutex>
 #include <atomic>
 #include <set>
+#include <deque>
 #include <algorithm>
 #include <unordered_map>
 
@@ -474,6 +475,31 @@ public:
 
         Artha artha = yantra_->transform(query);
         return recall_impl(artha.nu, query, k, threshold, mode);
+    }
+
+    // Recall with session priming (Phase 4: Context Modulation)
+    // Results are boosted based on:
+    // - Recent observations (what you just saw is relevant)
+    // - Active intentions (your goals bias retrieval)
+    // - Goal basin (knowledge near your goals)
+    std::vector<Recall> recall_primed(const std::string& query, size_t k,
+                                      float threshold = 0.0f,
+                                      SearchMode mode = SearchMode::Hybrid) {
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        // Ensure session context is fresh (use unlocked versions - we hold mutex)
+        refresh_session_intentions_unlocked();
+        build_goal_basin_unlocked();
+
+        Artha artha = yantra_->transform(query);
+        auto results = recall_impl(artha.nu, query, k, threshold, mode, &session_context_);
+
+        // Record retrieved nodes for future priming (use unlocked version)
+        for (const auto& r : results) {
+            observe_for_priming_unlocked(r.id);
+        }
+
+        return results;
     }
 
     // Recall by exact tag match (for inter-agent communication)
@@ -977,6 +1003,126 @@ public:
             }
         });
         return results;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Session Context API (Phase 4: Context Modulation)
+    // ═══════════════════════════════════════════════════════════════════
+
+    // Record an observation for session priming
+    // Called when nodes are retrieved/accessed - they prime future retrievals
+    void observe_for_priming(NodeId id) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        observe_for_priming_unlocked(id);
+    }
+
+    // Record multiple observations (batch)
+    void observe_for_priming(const std::vector<NodeId>& ids) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (const auto& id : ids) {
+            observe_for_priming_unlocked(id);
+        }
+    }
+
+    // Refresh session intentions from current intention nodes
+    void refresh_session_intentions() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        refresh_session_intentions_unlocked();
+    }
+
+    // Build goal basin from attractors near active intentions
+    // Expands the "goal neighborhood" for basin-based boosting
+    void build_goal_basin(size_t basin_size = 20) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        build_goal_basin_unlocked(basin_size);
+    }
+
+private:
+    // Unlocked versions (caller must hold mutex_)
+
+    void observe_for_priming_unlocked(NodeId id) {
+        // Skip if already in recent observations
+        if (session_context_.recent_observations.count(id)) {
+            return;
+        }
+
+        // Add to recent observations
+        session_context_.recent_observations.insert(id);
+        recent_observation_order_.push_back(id);
+
+        // Evict oldest if over limit (FIFO)
+        while (recent_observation_order_.size() > MAX_RECENT_OBSERVATIONS) {
+            NodeId oldest = recent_observation_order_.front();
+            recent_observation_order_.pop_front();
+            session_context_.recent_observations.erase(oldest);
+        }
+    }
+
+    void refresh_session_intentions_unlocked() {
+        session_context_.active_intentions.clear();
+
+        // Get all intention nodes with reasonable confidence
+        storage_.for_each_hot([this](const NodeId& id, const Node& node) {
+            if (node.node_type == NodeType::Intention &&
+                node.kappa.effective() > 0.3f) {
+                session_context_.active_intentions.insert(id);
+            }
+        });
+    }
+
+    void build_goal_basin_unlocked(size_t basin_size = 20) {
+        session_context_.goal_basin.clear();
+
+        if (session_context_.active_intentions.empty()) {
+            return;
+        }
+
+        // For each intention, find nearby nodes via graph edges and semantic similarity
+        for (const auto& intention_id : session_context_.active_intentions) {
+            auto node_opt = storage_.get(intention_id);
+            if (!node_opt) continue;
+
+            // Get nodes connected by edges (1-hop neighbors)
+            for (const auto& edge : node_opt->edges) {
+                session_context_.goal_basin.insert(edge.target);
+                if (session_context_.goal_basin.size() >= basin_size) break;
+            }
+
+            // Also include semantically similar nodes via vector search
+            if (session_context_.goal_basin.size() < basin_size) {
+                QuantizedVector qvec = QuantizedVector::from_float(node_opt->nu);
+                auto similar = storage_.search(qvec, basin_size);
+                for (const auto& [sim_id, _] : similar) {
+                    // Don't add the intention itself to the basin
+                    if (sim_id != intention_id) {
+                        session_context_.goal_basin.insert(sim_id);
+                        if (session_context_.goal_basin.size() >= basin_size) break;
+                    }
+                }
+            }
+        }
+    }
+
+public:
+
+    // Get current session context (for external use/debugging)
+    const SessionContext& session_context() const {
+        return session_context_;
+    }
+
+    // Build a fresh session context from current state
+    // Call this at session start or when context needs refresh
+    SessionContext build_session_context() {
+        refresh_session_intentions();
+        build_goal_basin();
+        return session_context_;
+    }
+
+    // Clear session context (for new session)
+    void clear_session_context() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        session_context_ = SessionContext{};
+        recent_observation_order_.clear();
     }
 
     // Compute coherence
@@ -1781,7 +1927,8 @@ public:
 private:
     // Internal recall implementation with soul-aware scoring
     std::vector<Recall> recall_impl(const Vector& query, const std::string& query_text,
-                                    size_t k, float threshold, SearchMode mode)
+                                    size_t k, float threshold, SearchMode mode,
+                                    const SessionContext* session = nullptr)
     {
         // Sync from shared consciousness to see other processes' observations
         // This is the "Atman sees Brahman" moment - we align with shared truth
@@ -1811,7 +1958,7 @@ private:
             }
         }
 
-        // Score candidates with soul-aware relevance
+        // Score candidates with soul-aware relevance (optionally session-primed)
         std::vector<Recall> results;
         for (const auto& [id, base_score] : candidates) {
             if (Node* node = storage_.get(id)) {
@@ -1827,8 +1974,9 @@ private:
 
                 if (similarity < threshold) continue;
 
-                // Soul-aware relevance scoring
-                float relevance = soul_relevance(similarity, *node, current, scoring_config_);
+                // Soul-aware relevance scoring with optional session priming
+                float relevance = session_relevance(similarity, *node, current,
+                                                    scoring_config_, session);
 
                 // Skip nodes without text content
                 auto text = payload_to_text(node->payload);
@@ -1948,6 +2096,11 @@ private:
     // Autonomous dynamics and learning
     Daemon daemon_;
     FeedbackTracker feedback_;
+
+    // Session context for priming (Phase 4: Context Modulation)
+    SessionContext session_context_;
+    static constexpr size_t MAX_RECENT_OBSERVATIONS = 50;  // Rolling window
+    std::deque<NodeId> recent_observation_order_;  // For FIFO eviction
 };
 
 } // namespace chitta

@@ -14,6 +14,14 @@
 
 namespace chitta {
 
+// Hash function for NodeId (needed for unordered_set in SessionContext)
+// Note: Also defined in hnsw.hpp, kept here for independence
+struct ScoringNodeIdHash {
+    size_t operator()(const NodeId& id) const {
+        return std::hash<uint64_t>{}(id.high) ^ (std::hash<uint64_t>{}(id.low) << 1);
+    }
+};
+
 // ═══════════════════════════════════════════════════════════════════════════
 // 1. Soul-Aware Scoring
 // ═══════════════════════════════════════════════════════════════════════════
@@ -66,6 +74,81 @@ inline float soul_relevance(
 
     // Combined score
     return similarity * conf_factor * recency_factor * type_factor;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 1b. Session Context Modulation (Phase 4: Priming)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Session context for priming retrievals
+// Recent observations and active intentions bias future recall
+struct SessionContext {
+    std::unordered_set<NodeId, ScoringNodeIdHash> recent_observations;  // Nodes accessed this session
+    std::unordered_set<NodeId, ScoringNodeIdHash> active_intentions;    // Current goal nodes
+    std::unordered_set<NodeId, ScoringNodeIdHash> goal_basin;           // Nodes in same attractor basin as goals
+
+    // Boost factors (multiplicative on base relevance)
+    float priming_boost = 0.3f;       // Boost for recently observed nodes
+    float intention_boost = 0.25f;    // Boost for intention nodes themselves
+    float basin_boost = 0.15f;        // Boost for nodes in goal basin
+
+    bool empty() const {
+        return recent_observations.empty() &&
+               active_intentions.empty() &&
+               goal_basin.empty();
+    }
+
+    // Clear all session context
+    void clear() {
+        recent_observations.clear();
+        active_intentions.clear();
+        goal_basin.clear();
+    }
+
+    // Get statistics for debugging
+    size_t total_primed_nodes() const {
+        return recent_observations.size() +
+               active_intentions.size() +
+               goal_basin.size();
+    }
+};
+
+// Session-aware relevance score
+// Extends soul_relevance with context priming
+inline float session_relevance(
+    float similarity,
+    const Node& node,
+    Timestamp now,
+    const ScoringConfig& config,
+    const SessionContext* session)
+{
+    float base = soul_relevance(similarity, node, now, config);
+
+    if (!session || session->empty()) {
+        return base;
+    }
+
+    float session_boost = 1.0f;
+
+    // 1. Priming: boost recently observed nodes (temporal coherence)
+    // "What I just saw is more relevant to what I'm doing"
+    if (session->recent_observations.count(node.id)) {
+        session_boost += session->priming_boost;
+    }
+
+    // 2. Intention alignment: boost active goal nodes
+    // "My stated intentions are highly relevant"
+    if (session->active_intentions.count(node.id)) {
+        session_boost += session->intention_boost;
+    }
+
+    // 3. Basin membership: boost nodes gravitating toward same attractors
+    // "Knowledge in the same conceptual neighborhood as my goals"
+    if (session->goal_basin.count(node.id)) {
+        session_boost += session->basin_boost;
+    }
+
+    return base * session_boost;
 }
 
 

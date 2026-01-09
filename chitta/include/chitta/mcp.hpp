@@ -247,7 +247,8 @@ private:
             "zoom='sparse' for overview (20+ titles), 'normal' for balanced (5-10 full), "
             "'dense' for deep context (3-5 with relationships and temporal info), "
             "'full' for complete untruncated content (1-3 results). "
-            "When learn=true, applies Hebbian learning to strengthen connections between co-retrieved nodes.",
+            "When learn=true, applies Hebbian learning to strengthen connections between co-retrieved nodes. "
+            "When primed=true, boosts results based on session context (recent observations, active intentions, goal basin).",
             {
                 {"type", "object"},
                 {"properties", {
@@ -282,6 +283,11 @@ private:
                         {"type", "boolean"},
                         {"default", false},
                         {"description", "Apply Hebbian learning: strengthen connections between co-retrieved nodes"}
+                    }},
+                    {"primed", {
+                        {"type", "boolean"},
+                        {"default", false},
+                        {"description", "Session priming: boost results based on recent observations and active intentions"}
                     }}
                 }},
                 {"required", {"query"}}
@@ -823,6 +829,15 @@ private:
             {"yantra_ready", state.yantra_ready}
         };
 
+        // Add session context (Phase 4: Context Modulation)
+        const auto& session = mind_->session_context();
+        result["session_context"] = {
+            {"recent_observations", session.recent_observations.size()},
+            {"active_intentions", session.active_intentions.size()},
+            {"goal_basin", session.goal_basin.size()},
+            {"priming_active", !session.empty()}
+        };
+
         // Add latest ledger (Atman snapshot) if available
         if (include_ledger) {
             auto ledger = mind_->load_ledger();
@@ -877,6 +892,13 @@ private:
             ss << state.warm_nodes << " warm, ";
             ss << state.cold_nodes << " cold)\n";
             ss << "  Yantra: " << (state.yantra_ready ? "ready" : "not ready") << "\n";
+
+            // Session context (priming status)
+            if (!session.empty()) {
+                ss << "  Priming: " << session.recent_observations.size() << " recent, ";
+                ss << session.active_intentions.size() << " intentions, ";
+                ss << session.goal_basin.size() << " basin\n";
+            }
 
             // Add ledger summary to text output
             if (result.contains("ledger") && result["ledger"].contains("content")) {
@@ -1046,6 +1068,7 @@ private:
         std::string tag = params.value("tag", "");
         float threshold = params.value("threshold", 0.0f);
         bool learn = params.value("learn", false);
+        bool primed = params.value("primed", false);
 
         // Zoom-aware default limits
         size_t default_limit = (zoom == "sparse") ? 25 :
@@ -1070,21 +1093,25 @@ private:
 
         std::vector<Recall> recalls;
         if (!tag.empty()) {
+            // Tag-filtered recall (no priming support for tag queries yet)
             recalls = mind_->recall_with_tag_filter(query, tag, limit, threshold);
-            // Apply Hebbian learning if enabled (tag-filtered recall doesn't have built-in learning)
-            if (learn && recalls.size() >= 2) {
-                std::vector<NodeId> co_retrieved;
-                size_t learn_count = std::min(recalls.size(), size_t(5));
-                co_retrieved.reserve(learn_count);
-                for (size_t i = 0; i < learn_count; ++i) {
-                    co_retrieved.push_back(recalls[i].id);
-                }
-                mind_->hebbian_update(co_retrieved, 0.05f);
-            }
-        } else if (learn) {
-            recalls = mind_->recall_with_learning(query, limit, threshold);
+        } else if (primed) {
+            // Session-primed recall: boost based on recent observations and intentions
+            recalls = mind_->recall_primed(query, limit, threshold);
         } else {
+            // Standard recall
             recalls = mind_->recall(query, limit, threshold);
+        }
+
+        // Apply Hebbian learning if enabled (independent of priming)
+        if (learn && recalls.size() >= 2) {
+            std::vector<NodeId> co_retrieved;
+            size_t learn_count = std::min(recalls.size(), size_t(5));
+            co_retrieved.reserve(learn_count);
+            for (size_t i = 0; i < learn_count; ++i) {
+                co_retrieved.push_back(recalls[i].id);
+            }
+            mind_->hebbian_update(co_retrieved, 0.05f);
         }
 
         json results_array = json::array();
