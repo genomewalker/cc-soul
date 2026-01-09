@@ -346,6 +346,48 @@ private:
         });
         handlers_["resonate"] = [this](const json& params) { return tool_resonate(params); };
 
+        // Tool: full_resonate - PHASE 6: All resonance mechanisms working together
+        tools_.push_back({
+            "full_resonate",
+            "Full resonance: all mechanisms working together. "
+            "Combines session priming (Phase 4), spreading activation (Phase 1), "
+            "attractor dynamics (Phase 2), lateral inhibition (Phase 5), and "
+            "Hebbian learning (Phase 3). The soul doesn't just search - it resonates. "
+            "Use this for deep, context-aware retrieval that learns from usage.",
+            {
+                {"type", "object"},
+                {"properties", {
+                    {"query", {
+                        {"type", "string"},
+                        {"description", "The search query"}
+                    }},
+                    {"k", {
+                        {"type", "integer"},
+                        {"minimum", 1},
+                        {"maximum", 50},
+                        {"default", 10},
+                        {"description", "Maximum results to return"}
+                    }},
+                    {"spread_strength", {
+                        {"type", "number"},
+                        {"minimum", 0.0},
+                        {"maximum", 1.0},
+                        {"default", 0.5},
+                        {"description", "Activation spread strength through graph edges (0-1)"}
+                    }},
+                    {"hebbian_strength", {
+                        {"type", "number"},
+                        {"minimum", 0.0},
+                        {"maximum", 0.2},
+                        {"default", 0.03},
+                        {"description", "Hebbian learning strength: how much to strengthen co-activated connections (0-0.2)"}
+                    }}
+                }},
+                {"required", {"query"}}
+            }
+        });
+        handlers_["full_resonate"] = [this](const json& params) { return tool_full_resonate(params); };
+
         // Tool: recall_by_tag - Pure tag-based lookup (no semantic search)
         tools_.push_back({
             "recall_by_tag",
@@ -1340,6 +1382,64 @@ private:
         if (learn) {
             result["hebbian_strength"] = hebbian_strength;
         }
+
+        return {false, ss.str(), result};
+    }
+
+    // PHASE 6: Full Resonance - All mechanisms working together
+    ToolResult tool_full_resonate(const json& params) {
+        std::string query = params.at("query");
+        size_t k = params.value("k", 10);
+        float spread_strength = params.value("spread_strength", 0.5f);
+        float hebbian_strength = params.value("hebbian_strength", 0.03f);
+
+        if (!mind_->has_yantra()) {
+            return {true, "Yantra not ready - cannot perform semantic search", json()};
+        }
+
+        // Full resonance: priming + spreading + attractors + competition + hebbian
+        auto recalls = mind_->full_resonate(query, k, spread_strength, hebbian_strength);
+
+        json results_array = json::array();
+        std::ostringstream ss;
+        ss << "Full resonance for: " << query << "\n";
+        ss << "Found " << recalls.size() << " resonant nodes";
+        ss << " (spread=" << spread_strength;
+        ss << ", hebbian=" << hebbian_strength << "):\n";
+
+        for (const auto& r : recalls) {
+            mind_->feedback_used(r.id);
+
+            auto result_tags = mind_->get_tags(r.id);
+
+            results_array.push_back({
+                {"id", r.id.to_string()},
+                {"text", r.text},
+                {"relevance", r.relevance},
+                {"similarity", r.similarity},
+                {"type", node_type_to_string(r.type)},
+                {"confidence", r.confidence.mu},
+                {"tags", result_tags}
+            });
+
+            ss << "\n[" << (r.relevance * 100) << "%] ";
+            ss << "[" << node_type_to_string(r.type) << "] ";
+            ss << r.text.substr(0, 90);
+            if (r.text.length() > 90) ss << "...";
+        }
+
+        json result = {
+            {"results", results_array},
+            {"phases_active", {
+                {"priming", true},
+                {"spreading_activation", true},
+                {"attractor_dynamics", true},
+                {"lateral_inhibition", mind_->competition_config().enabled},
+                {"hebbian_learning", hebbian_strength > 0.0f}
+            }},
+            {"spread_strength", spread_strength},
+            {"hebbian_strength", hebbian_strength}
+        };
 
         return {false, ss.str(), result};
     }

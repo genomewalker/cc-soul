@@ -19,6 +19,11 @@
 #include <string>
 #include <cstring>
 #include <cstdlib>
+#include <csignal>
+#include <thread>
+#include <chrono>
+#include <atomic>
+#include <fstream>
 
 using namespace chitta;
 
@@ -28,7 +33,9 @@ void print_usage(const char* prog) {
               << "Commands:\n"
               << "  stats              Show soul statistics\n"
               << "  recall <query>     Semantic search\n"
+              << "  resonate <query>   Full resonance (all phases)\n"
               << "  cycle              Run maintenance cycle\n"
+              << "  daemon             Run subconscious daemon (background processing)\n"
               << "  upgrade            Upgrade database to current version\n"
               << "  convert <format>   Convert to new storage format (unified|segments)\n"
               << "  help               Show this help\n\n"
@@ -36,6 +43,8 @@ void print_usage(const char* prog) {
               << "  --path PATH        Mind storage path (default: ~/.claude/mind/chitta)\n"
               << "  --json             Output as JSON\n"
               << "  --fast             Skip BM25 loading (for quick stats)\n"
+              << "  --interval SECS    Daemon cycle interval (default: 60)\n"
+              << "  --pid-file PATH    Write PID to file (for daemon mode)\n"
               << "  -v, --version      Show version\n"
 #ifdef CHITTA_WITH_ONNX
               << "  --model PATH       ONNX model path\n"
@@ -151,6 +160,53 @@ int cmd_recall(Mind& mind, const std::string& query, int limit) {
     return 0;
 }
 
+int cmd_resonate(Mind& mind, const std::string& query, int limit, bool json_output) {
+    if (!mind.has_yantra()) {
+        std::cerr << "Error: Yantra not attached, semantic search unavailable\n";
+        return 1;
+    }
+
+    auto results = mind.full_resonate(query, limit);
+
+    if (json_output) {
+        std::cout << "{\"query\":" << "\"" << query << "\",\"results\":[";
+        for (size_t i = 0; i < results.size(); ++i) {
+            const auto& r = results[i];
+            if (i > 0) std::cout << ",";
+            std::cout << "{\"relevance\":" << r.relevance
+                      << ",\"similarity\":" << r.similarity
+                      << ",\"text\":\"";
+            // Simple JSON escape for text
+            for (char c : r.text) {
+                if (c == '"') std::cout << "\\\"";
+                else if (c == '\\') std::cout << "\\\\";
+                else if (c == '\n') std::cout << "\\n";
+                else if (c == '\r') std::cout << "\\r";
+                else if (c == '\t') std::cout << "\\t";
+                else std::cout << c;
+            }
+            std::cout << "\"}";
+        }
+        std::cout << "]}\n";
+    } else {
+        if (results.empty()) {
+            std::cout << "No resonant memories for: " << query << "\n";
+            return 0;
+        }
+
+        for (const auto& r : results) {
+            // Truncate long text for hook output
+            std::string text = r.text;
+            if (text.length() > 200) {
+                text = text.substr(0, 200) + "...";
+            }
+            std::cout << "[" << static_cast<int>(r.relevance * 100) << "%] " << text << "\n";
+        }
+    }
+
+    return 0;
+}
+
 int cmd_cycle(Mind& mind) {
     std::cout << "Running maintenance cycle...\n";
 
@@ -166,6 +222,87 @@ int cmd_cycle(Mind& mind) {
     if (before != after) {
         std::cout << "  Changed: " << (before > after ? before - after : after - before) << " nodes\n";
     }
+
+    return 0;
+}
+
+// Global flag for daemon shutdown
+static std::atomic<bool> daemon_running{true};
+
+void daemon_signal_handler(int sig) {
+    (void)sig;
+    daemon_running = false;
+}
+
+int cmd_daemon(Mind& mind, int interval_seconds, const std::string& pid_file) {
+    // Write PID file
+    if (!pid_file.empty()) {
+        std::ofstream pf(pid_file);
+        if (pf) {
+            pf << getpid() << "\n";
+            pf.close();
+        }
+    }
+
+    // Setup signal handlers for graceful shutdown
+    std::signal(SIGTERM, daemon_signal_handler);
+    std::signal(SIGINT, daemon_signal_handler);
+
+    std::cerr << "[subconscious] Daemon started (interval=" << interval_seconds << "s, pid=" << getpid() << ")\n";
+
+    size_t cycle_count = 0;
+    size_t total_synthesized = 0;
+    size_t total_settled = 0;
+
+    while (daemon_running) {
+        // Sleep in small intervals to check for shutdown
+        for (int i = 0; i < interval_seconds && daemon_running; ++i) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+
+        if (!daemon_running) break;
+
+        cycle_count++;
+        auto start = std::chrono::steady_clock::now();
+
+        // Subconscious processing cycle
+        // 1. Apply decay and basic maintenance
+        auto report = mind.tick();
+
+        // 2. Synthesize wisdom from episode clusters
+        size_t synthesized = mind.synthesize_wisdom();
+        total_synthesized += synthesized;
+
+        // 3. Apply pending feedback (Hebbian learning from usage)
+        size_t feedback = mind.apply_feedback();
+
+        // 4. Run attractor dynamics - settle nodes toward conceptual gravity wells
+        auto attractor_report = mind.run_attractor_dynamics(5, 0.01f);
+        total_settled += attractor_report.nodes_settled;
+
+        // 5. Save state
+        mind.snapshot();
+
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start).count();
+
+        // Log activity (sparse - only when something happened)
+        if (synthesized > 0 || feedback > 0 || attractor_report.nodes_settled > 0) {
+            std::cerr << "[subconscious] Cycle " << cycle_count << ": "
+                      << "synth=" << synthesized << " feedback=" << feedback
+                      << " settled=" << attractor_report.nodes_settled
+                      << " (" << elapsed << "ms)\n";
+        }
+    }
+
+    // Cleanup
+    if (!pid_file.empty()) {
+        std::remove(pid_file.c_str());
+    }
+
+    std::cerr << "[subconscious] Daemon stopped (cycles=" << cycle_count
+              << " synthesized=" << total_synthesized
+              << " settled=" << total_settled << ")\n";
 
     return 0;
 }
@@ -252,7 +389,9 @@ int main(int argc, char* argv[]) {
     std::string command;
     std::string query;
     std::string format;  // For convert command
+    std::string pid_file;  // For daemon mode
     int limit = 5;
+    int daemon_interval = 60;
     bool json_output = false;
     bool fast_mode = false;
 
@@ -266,6 +405,10 @@ int main(int argc, char* argv[]) {
             vocab_path = argv[++i];
         } else if (strcmp(argv[i], "--limit") == 0 && i + 1 < argc) {
             limit = std::stoi(argv[++i]);
+        } else if (strcmp(argv[i], "--interval") == 0 && i + 1 < argc) {
+            daemon_interval = std::stoi(argv[++i]);
+        } else if (strcmp(argv[i], "--pid-file") == 0 && i + 1 < argc) {
+            pid_file = argv[++i];
         } else if (strcmp(argv[i], "--json") == 0) {
             json_output = true;
         } else if (strcmp(argv[i], "--fast") == 0) {
@@ -279,7 +422,7 @@ int main(int argc, char* argv[]) {
         } else if (argv[i][0] != '-') {
             if (command.empty()) {
                 command = argv[i];
-            } else if (command == "recall" && query.empty()) {
+            } else if ((command == "recall" || command == "resonate") && query.empty()) {
                 query = argv[i];
             } else if (command == "convert" && format.empty()) {
                 format = argv[i];
@@ -348,8 +491,17 @@ int main(int argc, char* argv[]) {
         } else {
             result = cmd_recall(mind, query, limit);
         }
+    } else if (command == "resonate") {
+        if (query.empty()) {
+            std::cerr << "Usage: chitta_cli resonate <query>\n";
+            result = 1;
+        } else {
+            result = cmd_resonate(mind, query, limit, json_output);
+        }
     } else if (command == "cycle") {
         result = cmd_cycle(mind);
+    } else if (command == "daemon") {
+        result = cmd_daemon(mind, daemon_interval, pid_file);
     } else {
         std::cerr << "Unknown command: " << command << "\n";
         print_usage(argv[0]);

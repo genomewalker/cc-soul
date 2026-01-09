@@ -14,6 +14,7 @@ PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
 
 # Paths
 CHITTA_BIN="$PLUGIN_DIR/bin/chitta_mcp"
+CHITTA_CLI="$PLUGIN_DIR/bin/chitta_cli"
 MIND_PATH="${HOME}/.claude/mind/chitta"
 MODEL_PATH="$PLUGIN_DIR/chitta/models/model.onnx"
 VOCAB_PATH="$PLUGIN_DIR/chitta/models/vocab.txt"
@@ -146,11 +147,23 @@ EOF
 
 hook_prompt() {
     local lean=false
-    [[ "$1" == "--lean" ]] && lean=true
+    local resonate=false
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --lean) lean=true; shift ;;
+            --resonate) resonate=true; shift ;;
+            *) shift ;;
+        esac
+    done
 
-    # Quick recall for relevant wisdom based on recent context
-    # In lean mode, we just check coherence
-    if $lean; then
+    # Read user message from stdin (hooks receive JSON)
+    local input
+    input=$(cat)
+    local user_message
+    user_message=$(echo "$input" | jq -r '.message // .prompt // .content // empty' 2>/dev/null | head -c 500)
+
+    # Quick stats output
+    if $lean && ! $resonate; then
         local stats
         stats=$(call_mcp "soul_context" '{"format":"json"}')
         local nodes
@@ -158,7 +171,26 @@ hook_prompt() {
         local hot
         hot=$(echo "$stats" | jq -r '.statistics.hot_nodes' 2>/dev/null || echo "0")
         echo "[cc-soul] Nodes: $nodes ($hot hot)"
-    else
+        return
+    fi
+
+    # Full resonance mode - inject relevant memories transparently
+    if $resonate && [[ -n "$user_message" && ${#user_message} -gt 10 ]]; then
+        # Run full_resonate via CLI (faster than MCP for hooks)
+        local memories
+        if [[ -x "$CHITTA_CLI" ]]; then
+            memories=$("$CHITTA_CLI" resonate "$user_message" --path "$MIND_PATH" --model "$MODEL_PATH" --vocab "$VOCAB_PATH" --limit 3 2>/dev/null)
+        fi
+
+        if [[ -n "$memories" && "$memories" != *"No resonant"* ]]; then
+            echo ""
+            echo "Resonant memories for this query:"
+            echo "$memories"
+        fi
+    fi
+
+    # In non-lean mode, also show full context
+    if ! $lean; then
         local context
         context=$(call_mcp "soul_context" '{"format":"text"}')
         echo "$context"

@@ -12,6 +12,11 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/scripts/soul-hook.sh start"
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/subconscious.sh start",
+            "timeout": 10
           }
         ]
       }
@@ -33,7 +38,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/soul-hook.sh prompt --lean"
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/soul-hook.sh prompt --lean --resonate",
+            "timeout": 15
           },
           {
             "type": "command",

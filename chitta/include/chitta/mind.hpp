@@ -1951,6 +1951,186 @@ public:
         return results;
     }
 
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE 6: Full Resonance - All Mechanisms Working Together
+    // ═══════════════════════════════════════════════════════════════════
+    //
+    // This is the culmination of the resonance architecture:
+    // 1. Session Priming (Phase 4): Context modulates which patterns activate
+    // 2. Spreading Activation (Phase 1): Activation spreads through graph edges
+    // 3. Attractor Dynamics (Phase 2): Results pulled toward conceptual gravity wells
+    // 4. Lateral Inhibition (Phase 5): Similar patterns compete, winners suppress losers
+    // 5. Hebbian Learning (Phase 3): Co-activated nodes strengthen connections
+    //
+    // The soul doesn't just search - it resonates.
+
+    std::vector<Recall> full_resonate(const std::string& query,
+                                       size_t k = 10,
+                                       float spread_strength = 0.5f,
+                                       float hebbian_strength = 0.03f) {
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        if (!yantra_ || !yantra_->ready()) {
+            return {};
+        }
+
+        // Phase 4: Refresh session context (priming)
+        // Recent observations and active intentions bias retrieval
+        refresh_session_intentions_unlocked();
+        build_goal_basin_unlocked();
+
+        // Transform query to embedding
+        auto artha = yantra_->transform(query);
+        if (artha.nu.size() == 0) return {};
+
+        // Phase 4: Get semantic seeds with session priming
+        // The session context biases which nodes are initially retrieved
+        auto seeds = recall_impl(artha.nu, query, 5, 0.0f, SearchMode::Hybrid, &session_context_);
+        if (seeds.empty()) return {};
+
+        // Phase 2: Find attractors (conceptual gravity wells)
+        auto attractors = find_attractors_unlocked(5);
+
+        // Phase 1: Spread activation from all seeds
+        // Activation flows through graph edges, discovering related concepts
+        std::unordered_map<NodeId, float, NodeIdHash> activation;
+
+        for (const auto& seed : seeds) {
+            float seed_strength = spread_strength * seed.relevance;
+
+            std::queue<std::tuple<NodeId, float, int>> frontier;
+            frontier.push({seed.id, seed_strength, 0});
+
+            std::unordered_set<NodeId, NodeIdHash> visited;
+
+            while (!frontier.empty()) {
+                auto [current_id, strength, hop] = frontier.front();
+                frontier.pop();
+
+                if (hop >= 3 || strength < 0.01f) continue;
+                if (visited.count(current_id)) continue;
+                visited.insert(current_id);
+
+                activation[current_id] += strength;
+
+                Node* node = storage_.get(current_id);
+                if (!node) continue;
+
+                for (const auto& edge : node->edges) {
+                    float propagated = strength * 0.5f * edge.weight;
+                    if (propagated >= 0.02f) {
+                        frontier.push({edge.target, propagated, hop + 1});
+                    }
+                }
+            }
+        }
+
+        // Merge seed results with activation results
+        // Seeds have high relevance, activated nodes have activation scores
+        Timestamp current = now();
+        std::vector<Recall> results;
+        std::unordered_set<NodeId, NodeIdHash> seen;
+
+        // Add seeds first
+        for (const auto& seed : seeds) {
+            results.push_back(seed);
+            seen.insert(seed.id);
+        }
+
+        // Add activated nodes not in seeds
+        for (const auto& [id, act] : activation) {
+            if (seen.count(id)) continue;
+            if (act < 0.1f) continue;  // Minimum activation threshold
+
+            Node* node = storage_.get(id);
+            if (!node) continue;
+
+            auto text = payload_to_text(node->payload);
+            if (!text || text->size() < 3) continue;
+
+            // Compute semantic similarity to query
+            QuantizedVector qquery = QuantizedVector::from_float(artha.nu);
+            QuantizedVector qnode = QuantizedVector::from_float(node->nu);
+            float similarity = qquery.cosine_approx(qnode);
+
+            // Combine activation with semantic relevance
+            float relevance = session_relevance(similarity, *node, current,
+                                                scoring_config_, &session_context_);
+            relevance = relevance * 0.6f + act * 0.4f;  // Blend semantic + activation
+
+            Recall r;
+            r.id = id;
+            r.similarity = similarity;
+            r.relevance = relevance;
+            r.type = node->node_type;
+            r.confidence = node->kappa;
+            r.created = node->tau_created;
+            r.accessed = node->tau_accessed;
+            r.payload = node->payload;
+            r.text = *text;
+            r.qnu = qnode;
+            r.has_embedding = true;
+
+            results.push_back(std::move(r));
+            seen.insert(id);
+        }
+
+        // Phase 2: Boost results in same attractor basin as top result
+        if (!attractors.empty() && !results.empty()) {
+            auto top_pull = compute_attractor_pull_impl(results[0].id, attractors);
+            if (top_pull) {
+                NodeId primary_attractor = top_pull->first;
+                for (auto& result : results) {
+                    auto pull = compute_attractor_pull_impl(result.id, attractors);
+                    if (pull && pull->first == primary_attractor) {
+                        result.relevance *= 1.15f;  // Basin coherence boost
+                    }
+                }
+            }
+        }
+
+        // Sort by relevance before competition
+        std::sort(results.begin(), results.end(),
+                  [](const Recall& a, const Recall& b) {
+                      return a.relevance > b.relevance;
+                  });
+
+        // Phase 5: Lateral inhibition (competition)
+        // Similar patterns compete - winners suppress losers
+        if (competition_config_.enabled && results.size() >= 2) {
+            apply_lateral_inhibition(results);
+        }
+
+        // Limit to k results
+        if (results.size() > k) {
+            results.resize(k);
+        }
+
+        // Phase 3: Hebbian learning - strengthen connections between co-activated nodes
+        // "Neurons that fire together, wire together"
+        if (results.size() >= 2 && hebbian_strength > 0.0f) {
+            std::vector<NodeId> co_activated;
+            co_activated.reserve(std::min(results.size(), size_t(5)));
+            for (size_t i = 0; i < std::min(results.size(), size_t(5)); ++i) {
+                co_activated.push_back(results[i].id);
+            }
+            hebbian_update_unlocked(co_activated, hebbian_strength);
+        }
+
+        // Phase 4: Record for future priming
+        // The results of this query become context for future queries
+        for (const auto& r : results) {
+            observe_for_priming_unlocked(r.id);
+        }
+
+        // Clear embeddings before returning
+        for (auto& r : results) {
+            r.has_embedding = false;
+        }
+
+        return results;
+    }
+
 private:
     // Internal recall implementation with soul-aware scoring
     std::vector<Recall> recall_impl(const Vector& query, const std::string& query_text,
@@ -2147,6 +2327,56 @@ private:
         // No existing edge - create new one with initial strength
         // Use storage_.add_edge for WAL persistence
         storage_.add_edge(from, to, EdgeType::Similar, strength);
+    }
+
+    // Hebbian batch update without locking (caller must hold mutex_)
+    void hebbian_update_unlocked(const std::vector<NodeId>& co_activated, float strength) {
+        if (co_activated.size() < 2) return;
+
+        for (size_t i = 0; i < co_activated.size(); ++i) {
+            for (size_t j = i + 1; j < co_activated.size(); ++j) {
+                hebbian_strengthen_impl(co_activated[i], co_activated[j], strength);
+                hebbian_strengthen_impl(co_activated[j], co_activated[i], strength);
+            }
+        }
+    }
+
+    // Find attractors without locking (caller must hold mutex_)
+    std::vector<Attractor> find_attractors_unlocked(size_t max_attractors = 10,
+                                                     float min_confidence = 0.6f,
+                                                     size_t min_edges = 2) {
+        std::vector<Attractor> candidates;
+        Timestamp current = now();
+
+        storage_.for_each_hot([&](const NodeId& id, const Node& node) {
+            if (node.kappa.effective() < min_confidence) return;
+            if (node.edges.size() < min_edges) return;
+
+            float confidence_score = node.kappa.effective();
+            float connectivity_score = std::min(std::log2(1.0f + node.edges.size()) / 4.0f, 1.0f);
+            float age_days = static_cast<float>(current - node.tau_created) / 86400000.0f;
+            float age_score = std::min(age_days / 30.0f, 1.0f);
+
+            float strength = 0.4f * confidence_score +
+                            0.3f * connectivity_score +
+                            0.3f * age_score;
+
+            auto text = payload_to_text(node.payload);
+            std::string label = text ? text->substr(0, 50) : "";
+
+            candidates.push_back({id, strength, label, 0});
+        });
+
+        std::sort(candidates.begin(), candidates.end(),
+                  [](const Attractor& a, const Attractor& b) {
+                      return a.strength > b.strength;
+                  });
+
+        if (candidates.size() > max_attractors) {
+            candidates.resize(max_attractors);
+        }
+
+        return candidates;
     }
 
     // Internal: compute attractor pull without taking lock
