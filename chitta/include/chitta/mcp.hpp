@@ -945,6 +945,16 @@ private:
             {"hard_suppression", competition.hard_suppression}
         };
 
+        // Add epiplexity stats (learnable structure metric)
+        auto epi_stats = mind_->compute_soul_epiplexity();
+        result["epiplexity"] = {
+            {"mean", epi_stats.mean},
+            {"median", epi_stats.median},
+            {"min", epi_stats.min},
+            {"max", epi_stats.max},
+            {"count", epi_stats.count}
+        };
+
         // Add latest ledger (Atman snapshot) if available
         if (include_ledger) {
             auto ledger = mind_->load_ledger();
@@ -1015,6 +1025,10 @@ private:
                 ss << (competition.hard_suppression ? " hard)" : " soft)");
             }
             ss << "\n";
+
+            // Epiplexity (learnable structure)
+            ss << "  Epiplexity (ε): " << int(epi_stats.mean * 100) << "% mean";
+            ss << " (range:" << int(epi_stats.min * 100) << "-" << int(epi_stats.max * 100) << "%)\n";
 
             // Add ledger summary to text output
             if (result.contains("ledger") && result["ledger"].contains("content")) {

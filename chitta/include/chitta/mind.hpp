@@ -44,6 +44,7 @@ struct Recall {
     NodeId id;
     float similarity;      // Raw semantic similarity
     float relevance;       // Soul-aware relevance score
+    float epiplexity;      // Learnable structure (how reconstructable is this?)
     NodeType type;
     Confidence confidence;
     Timestamp created;
@@ -1695,6 +1696,7 @@ public:
                 id,
                 resonance_score,       // similarity
                 resonance_score,       // relevance
+                0.0f,                  // epiplexity (computed later if needed)
                 node->node_type,
                 node->kappa,
                 node->tau_created,
@@ -1899,6 +1901,146 @@ public:
         }
 
         return report;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Epiplexity: Learnable Structure Metric (inspired by Finzi et al. 2026)
+    // ═══════════════════════════════════════════════════════════════════
+    //
+    // Epiplexity measures how much "learnable structure" a memory contains
+    // for a bounded observer (like Claude). High epiplexity = the pattern
+    // can be reconstructed from minimal injection.
+    //
+    // Components:
+    // 1. Attractor proximity: closer to structure = more reconstructable
+    // 2. Compression: title/content ratio = information density
+    // 3. Integration: edge connections = discovered relationships
+    // 4. Confidence: well-learned patterns
+    //
+    // This enables: inject seeds (high epiplexity), Claude grows trees.
+
+    // Compute epiplexity for a single node given known attractors
+    // Caller must hold mutex
+    //
+    // Epiplexity = learnable structure for bounded observers
+    // High epiplexity = can be reconstructed from minimal injection
+    float compute_epiplexity_impl(const Node& node,
+                                   const std::vector<Attractor>& attractors) {
+        // 1. Structural proximity (attractor-based if available, else confidence)
+        float structure = 0.5f;  // Default: moderate structure
+        if (!attractors.empty()) {
+            float best_pull = 0.0f;
+            for (const auto& attr : attractors) {
+                Node* attr_node = storage_.get(attr.id);
+                if (!attr_node) continue;
+                float similarity = node.nu.cosine(attr_node->nu);
+                float pull = attr.strength * similarity;
+                best_pull = std::max(best_pull, pull);
+            }
+            // Scale pull to 0-1 range (typical pulls are 0.2-0.8)
+            structure = std::min(1.0f, best_pull * 1.5f);
+        } else {
+            // No attractors: use confidence as proxy for structure
+            structure = node.kappa.effective() * 0.8f;
+        }
+
+        // 2. Compression ratio: title vs content length
+        // Well-named memories are higher epiplexity (can be reconstructed from title)
+        float compression = 0.5f;
+        if (!node.payload.empty()) {
+            std::string content(node.payload.begin(), node.payload.end());
+            size_t title_end = content.find('\n');
+            if (title_end == std::string::npos || title_end > 80) {
+                title_end = std::min(content.length(), size_t(80));
+            }
+            float title_len = static_cast<float>(title_end);
+            float content_len = static_cast<float>(content.length());
+            // Ratio scaled: title of 50 chars for 500 char content = 1.0
+            compression = std::min(1.0f, (title_len / content_len) * 10.0f);
+        }
+
+        // 3. Integration: edges indicate discovered relationships
+        // Even 1 edge shows some integration; scale logarithmically
+        float integration = 0.3f;  // Base score for existing
+        if (!node.edges.empty()) {
+            float edge_sum = 0.0f;
+            for (const auto& edge : node.edges) {
+                edge_sum += edge.weight;
+            }
+            // Log scale: 1 edge=0.4, 3 edges=0.7, 10 edges=0.95
+            integration = 0.3f + 0.7f * std::tanh(edge_sum / 2.0f);
+        }
+
+        // 4. Confidence: well-learned patterns are high epiplexity
+        float confidence = node.kappa.effective();
+
+        // Weighted combination (not geometric mean - allow partial scores)
+        // Structure is most important (0.35), then confidence (0.30),
+        // then integration (0.20), then compression (0.15)
+        float epiplexity = 0.35f * structure +
+                          0.30f * confidence +
+                          0.20f * integration +
+                          0.15f * compression;
+
+        return std::min(1.0f, epiplexity);
+    }
+
+    // Compute epiplexity for a node (public, thread-safe)
+    float compute_epiplexity(const NodeId& id) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        Node* node = storage_.get(id);
+        if (!node) return 0.0f;
+
+        auto attractors = find_attractors_unlocked(5);
+        return compute_epiplexity_impl(*node, attractors);
+    }
+
+    // Compute epiplexity for all hot nodes and return statistics
+    struct EpiplexityStats {
+        float mean = 0.0f;
+        float median = 0.0f;
+        float min = 1.0f;
+        float max = 0.0f;
+        size_t count = 0;
+        std::vector<std::pair<NodeId, float>> top_nodes;  // Top 10 by epiplexity
+    };
+
+    EpiplexityStats compute_soul_epiplexity() {
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        auto attractors = find_attractors_unlocked(10);
+        std::vector<std::pair<NodeId, float>> node_epiplexity;
+
+        storage_.for_each_hot([&](const NodeId& id, const Node& node) {
+            float epi = compute_epiplexity_impl(node, attractors);
+            node_epiplexity.push_back({id, epi});
+        });
+
+        if (node_epiplexity.empty()) return {};
+
+        EpiplexityStats stats;
+        stats.count = node_epiplexity.size();
+
+        // Sort by epiplexity descending
+        std::sort(node_epiplexity.begin(), node_epiplexity.end(),
+                  [](const auto& a, const auto& b) { return a.second > b.second; });
+
+        // Top 10
+        for (size_t i = 0; i < std::min(size_t(10), node_epiplexity.size()); ++i) {
+            stats.top_nodes.push_back(node_epiplexity[i]);
+        }
+
+        // Statistics
+        float sum = 0.0f;
+        for (const auto& [id, epi] : node_epiplexity) {
+            sum += epi;
+            stats.min = std::min(stats.min, epi);
+            stats.max = std::max(stats.max, epi);
+        }
+        stats.mean = sum / static_cast<float>(stats.count);
+        stats.median = node_epiplexity[stats.count / 2].second;
+
+        return stats;
     }
 
     // Enhanced resonate that uses attractor dynamics
