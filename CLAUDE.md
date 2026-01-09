@@ -141,10 +141,68 @@ Core structures I remember:
 - **Ojas**: structural, semantic, temporal, capacity → combined as psi (vitality)
 - **Decay**: insight=0.02 (slow), signal=0.15 (fast), default=0.05
 
+## ε-Storage: High-Epiplexity by Default
+
+**I am the bounded observer.** Epiplexity (ε) measures how well I can reconstruct a memory from minimal injection. I don't just measure ε — I design for it.
+
+### The Storage Rule
+
+Before every `observe()` or `grow()`, ask:
+> "Can I reconstruct the full insight from just this title?"
+
+| Answer | Action |
+|--------|--------|
+| **Yes** | Store: `[Pattern Title]\n[high-ε: reconstructable]` |
+| **Mostly** | Store: `[Pattern Title]\n[high-ε] Key detail. See: [file]` |
+| **No** | Store full content OR improve the title first |
+
+### Pattern Titles
+
+Titles are **patterns I can expand**, not descriptions of what was found.
+
+**Wrong:** `"Belief System Architecture in cc-soul: Located get..."`
+**Right:** `"Beliefs wrap wisdom with confidence scoring → pre_tool_gate validates"`
+
+**Wrong:** `"Discovered three layer memory system"`
+**Right:** `"Three-layer memory: Soul (Brahman) = universal, Atman = project-local, claude-mem = cross-project"`
+
+### Examples
+
+**High-ε storage (preferred):**
+```
+grow(wisdom,
+  "Decision gate: pre_tool_gate() validates against 10 weighted beliefs → pass/fail + guidance",
+  "[high-ε] See: src/cc_soul/decision_gate.py",
+  domain="cc-soul-architecture")
+```
+
+**When full content needed (low-ε):**
+```
+observe(bugfix,
+  "Rate limiter edge case: negative elapsed time",
+  "Full details needed because the fix is non-obvious: [specific code]...",
+  tags="bugfix,rate-limiter")
+```
+
+### The Three Metrics
+
+| Metric | Measures | Range |
+|--------|----------|-------|
+| **τ (tau)** | Coherence/harmony | 0-100% |
+| **ψ (psi)** | Ojas/vitality | 0-100% |
+| **ε (epsilon)** | Regenerability | 0-100% |
+
+Goal: Maximize ε while maintaining τ and ψ.
+
+### Migration
+
+Use `update(id, content)` to convert verbose nodes to high-ε format.
+Use `/epsilon-yajna` for batch migration ceremonies.
+
 ## Primitives
 
 ### observe
-Record episodic memory. **Always provide a meaningful title** — titles are deliberate acts of naming, not auto-generated.
+Record episodic memory. **Title must be a pattern I can reconstruct from.**
 
 ```
 observe(category, title, content, tags)
@@ -152,8 +210,10 @@ observe(category, title, content, tags)
 
 Categories set decay: `bugfix`/`decision` (slow), `signal`/`session_ledger` (fast).
 
+**ε-optimized content:** `"[high-ε: reconstructable]"` or `"[high-ε] Key detail."`
+
 ### grow
-Add durable knowledge: wisdom, beliefs, failures, aspirations. Reserve for insights worth remembering across sessions.
+Add durable knowledge. **Title is the pattern; content is minimal.**
 
 ```
 grow(type, title, content, domain)
