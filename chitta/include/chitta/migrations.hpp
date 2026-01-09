@@ -484,11 +484,12 @@ inline ConversionResult convert_to_unified(const std::string& base_path) {
         node.nu.data.resize(EMBED_DIM);
         in.read(reinterpret_cast<char*>(node.nu.data.data()), EMBED_DIM * sizeof(float));
 
-        // Skip payload
+        // Read payload
         size_t payload_size;
         in.read(reinterpret_cast<char*>(&payload_size), sizeof(payload_size));
         if (payload_size > 0 && payload_size < 10000000) {
-            in.seekg(payload_size, std::ios::cur);
+            node.payload.resize(payload_size);
+            in.read(reinterpret_cast<char*>(node.payload.data()), payload_size);
         }
 
         // Read edges

@@ -494,6 +494,15 @@ public:
         metas[slot.value].tau_accessed = now();
     }
 
+    // Update confidence for a slot
+    bool update_confidence(SlotId slot, const Confidence& kappa) {
+        if (!slot.valid()) return false;
+        auto* metas = meta_region_.as<NodeMeta>();
+        metas[slot.value].confidence_mu = kappa.mu;
+        metas[slot.value].confidence_sigma = kappa.sigma_sq;
+        return true;
+    }
+
     // Get payload for a slot
     std::vector<uint8_t> payload(SlotId slot) const {
         if (!slot.valid()) return {};

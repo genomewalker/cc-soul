@@ -425,6 +425,10 @@ public:
         std::vector<Recall> results;
         for (const auto& id : node_ids) {
             if (Node* node = storage_.get(id)) {
+                // Skip nodes without text content
+                auto text = payload_to_text(node->payload);
+                if (!text || text->size() < 3) continue;  // Skip empty/corrupted payloads
+
                 Recall r;
                 r.id = id;
                 r.similarity = 1.0f;  // Exact match
@@ -434,7 +438,7 @@ public:
                 r.created = node->tau_created;
                 r.accessed = node->tau_accessed;
                 r.payload = node->payload;
-                r.text = payload_to_text(node->payload).value_or("");
+                r.text = *text;
                 results.push_back(std::move(r));
             }
         }
@@ -466,6 +470,10 @@ public:
         std::vector<Recall> results;
         for (const auto& id : node_ids) {
             if (Node* node = storage_.get(id)) {
+                // Skip nodes without text content
+                auto text = payload_to_text(node->payload);
+                if (!text || text->size() < 3) continue;  // Skip empty/corrupted payloads
+
                 Recall r;
                 r.id = id;
                 r.similarity = 1.0f;  // Exact match
@@ -475,7 +483,7 @@ public:
                 r.created = node->tau_created;
                 r.accessed = node->tau_accessed;
                 r.payload = node->payload;
-                r.text = payload_to_text(node->payload).value_or("");
+                r.text = *text;
                 results.push_back(std::move(r));
             }
         }
@@ -517,6 +525,10 @@ public:
         std::vector<Recall> results;
         for (const auto& id : node_ids) {
             if (Node* node = storage_.get(id)) {
+                // Skip nodes without text content
+                auto text = payload_to_text(node->payload);
+                if (!text || text->size() < 3) continue;  // Skip empty/corrupted payloads
+
                 // Compute semantic similarity
                 float similarity = node->nu.cosine(artha.nu);
                 if (similarity < threshold) continue;
@@ -533,7 +545,7 @@ public:
                 r.created = node->tau_created;
                 r.accessed = node->tau_accessed;
                 r.payload = node->payload;
-                r.text = payload_to_text(node->payload).value_or("");
+                r.text = *text;
                 results.push_back(std::move(r));
             }
         }
@@ -1033,6 +1045,77 @@ public:
     }
 
     // ═══════════════════════════════════════════════════════════════════
+    // Hebbian Learning: "neurons that fire together wire together"
+    // ═══════════════════════════════════════════════════════════════════
+
+    // Strengthen edge between two nodes (create if doesn't exist)
+    // When nodes are co-activated (retrieved together, spread together),
+    // the connection between them strengthens
+    void hebbian_strengthen(NodeId a, NodeId b, float strength = 0.1f) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        hebbian_strengthen_impl(a, b, strength);
+    }
+
+    // Batch update: strengthen edges between all pairs of co-activated nodes
+    // Call this when multiple nodes are retrieved together in a search
+    void hebbian_update(const std::vector<NodeId>& co_activated, float strength = 0.05f) {
+        if (co_activated.size() < 2) return;
+
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        // For all pairs (i, j) where i < j, strengthen both directions
+        // Bidirectional strengthening: if A activates with B, both directions learn
+        for (size_t i = 0; i < co_activated.size(); ++i) {
+            for (size_t j = i + 1; j < co_activated.size(); ++j) {
+                hebbian_strengthen_impl(co_activated[i], co_activated[j], strength);
+                hebbian_strengthen_impl(co_activated[j], co_activated[i], strength);
+            }
+        }
+    }
+
+    // Recall with Hebbian learning: retrieve memories and strengthen co-retrieval
+    // Top results become more connected over time, enabling emergent associations
+    std::vector<Recall> recall_with_learning(const std::string& query, size_t k,
+                                              float threshold = 0.0f,
+                                              SearchMode mode = SearchMode::Hybrid,
+                                              float hebbian_strength = 0.05f,
+                                              size_t hebbian_top_k = 5) {
+        auto results = recall(query, k, threshold, mode);
+
+        // Apply Hebbian learning to top results
+        if (results.size() >= 2 && hebbian_top_k > 0) {
+            std::vector<NodeId> co_activated;
+            size_t learn_count = std::min(results.size(), hebbian_top_k);
+            co_activated.reserve(learn_count);
+            for (size_t i = 0; i < learn_count; ++i) {
+                co_activated.push_back(results[i].id);
+            }
+            hebbian_update(co_activated, hebbian_strength);
+        }
+
+        return results;
+    }
+
+    // Resonate with Hebbian learning: spreading activation + connection strengthening
+    std::vector<Recall> resonate_with_learning(const std::string& query, size_t k = 10,
+                                                float spread_strength = 0.5f,
+                                                float hebbian_strength = 0.03f) {
+        auto results = resonate(query, k, spread_strength);
+
+        // Apply Hebbian learning to resonant results
+        if (results.size() >= 2) {
+            std::vector<NodeId> co_activated;
+            co_activated.reserve(results.size());
+            for (const auto& r : results) {
+                co_activated.push_back(r.id);
+            }
+            hebbian_update(co_activated, hebbian_strength);
+        }
+
+        return results;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
     // Automatic synthesis (observations → wisdom)
     // ═══════════════════════════════════════════════════════════════════
 
@@ -1119,6 +1202,153 @@ public:
         return synthesized;
     }
 
+    // ═══════════════════════════════════════════════════════════════════
+    // Resonance: Spreading Activation (Phase 1 of resonance architecture)
+    // ═══════════════════════════════════════════════════════════════════
+
+    // Activate a seed node and spread activation through graph edges
+    // Returns nodes sorted by activation level (strongest first)
+    std::vector<std::pair<NodeId, float>> spread_activation(
+        const NodeId& seed,
+        float initial_strength = 1.0f,
+        float decay_factor = 0.5f,
+        int max_hops = 3)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        // Activation map: node -> accumulated activation
+        std::unordered_map<NodeId, float, NodeIdHash> activation;
+
+        // BFS with decaying activation
+        std::queue<std::tuple<NodeId, float, int>> frontier;
+        frontier.push({seed, initial_strength, 0});
+        activation[seed] = initial_strength;
+
+        while (!frontier.empty()) {
+            auto [current_id, strength, hop] = frontier.front();
+            frontier.pop();
+
+            if (hop >= max_hops || strength < 0.01f) continue;
+
+            // Get neighbors through edges
+            Node* node = storage_.get(current_id);
+            if (!node) continue;
+
+            for (const auto& edge : node->edges) {
+                float propagated = strength * decay_factor * edge.weight;
+                activation[edge.target] += propagated;
+
+                // Only add to frontier if significant activation
+                if (propagated >= 0.05f) {
+                    frontier.push({edge.target, propagated, hop + 1});
+                }
+            }
+        }
+
+        // Sort by activation level
+        std::vector<std::pair<NodeId, float>> result(activation.begin(), activation.end());
+        std::sort(result.begin(), result.end(),
+                  [](const auto& a, const auto& b) { return a.second > b.second; });
+
+        return result;
+    }
+
+    // Resonance query: combines semantic search with spreading activation
+    // Seeds from top semantic matches, spreads activation, returns resonant nodes
+    std::vector<Recall> resonate(const std::string& query, size_t k = 10,
+                                  float spread_strength = 0.5f)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        if (!yantra_ || !yantra_->ready()) {
+            return {};
+        }
+
+        // Get semantic seeds
+        auto artha = yantra_->transform(query);
+        if (artha.nu.size() == 0) return {};
+
+        auto seeds = recall_impl(artha.nu, query, 5, 0.0f, SearchMode::Hybrid);
+        if (seeds.empty()) return {};
+
+        // Spread activation from all seeds
+        std::unordered_map<NodeId, float, NodeIdHash> total_activation;
+
+        for (const auto& seed : seeds) {
+            // Weight by semantic similarity
+            float seed_strength = spread_strength * seed.relevance;
+
+            std::queue<std::tuple<NodeId, float, int>> frontier;
+            frontier.push({seed.id, seed_strength, 0});
+
+            std::unordered_set<NodeId, NodeIdHash> visited;
+
+            while (!frontier.empty()) {
+                auto [current_id, strength, hop] = frontier.front();
+                frontier.pop();
+
+                if (hop >= 3 || strength < 0.01f) continue;
+                if (visited.count(current_id)) continue;
+                visited.insert(current_id);
+
+                total_activation[current_id] += strength;
+
+                Node* node = storage_.get(current_id);
+                if (!node) continue;
+
+                for (const auto& edge : node->edges) {
+                    float propagated = strength * 0.5f * edge.weight;
+                    if (propagated >= 0.01f) {
+                        frontier.push({edge.target, propagated, hop + 1});
+                    }
+                }
+            }
+        }
+
+        // Combine semantic scores with activation
+        std::vector<Recall> results;
+        for (const auto& [id, activation] : total_activation) {
+            Node* node = storage_.get(id);
+            if (!node) continue;
+
+            auto text = payload_to_text(node->payload);
+
+            // Find original semantic score if it was a seed
+            float semantic_score = 0.0f;
+            for (const auto& seed : seeds) {
+                if (seed.id == id) {
+                    semantic_score = seed.relevance;
+                    break;
+                }
+            }
+
+            // Resonance score combines semantic and activation
+            float resonance_score = 0.6f * semantic_score + 0.4f * activation;
+
+            results.push_back(Recall{
+                id,
+                resonance_score,       // similarity
+                resonance_score,       // relevance
+                node->node_type,
+                node->kappa,
+                node->tau_created,
+                node->tau_accessed,
+                node->payload,
+                text.value_or("")
+            });
+        }
+
+        // Sort by relevance
+        std::sort(results.begin(), results.end(),
+                  [](const auto& a, const auto& b) { return a.relevance > b.relevance; });
+
+        if (results.size() > k) {
+            results.resize(k);
+        }
+
+        return results;
+    }
+
 private:
     // Internal recall implementation with soul-aware scoring
     std::vector<Recall> recall_impl(const Vector& query, const std::string& query_text,
@@ -1171,6 +1401,10 @@ private:
                 // Soul-aware relevance scoring
                 float relevance = soul_relevance(similarity, *node, current, scoring_config_);
 
+                // Skip nodes without text content
+                auto text = payload_to_text(node->payload);
+                if (!text || text->size() < 3) continue;  // Skip empty/corrupted payloads
+
                 Recall r;
                 r.id = id;
                 r.similarity = similarity;
@@ -1180,7 +1414,7 @@ private:
                 r.created = node->tau_created;
                 r.accessed = node->tau_accessed;
                 r.payload = node->payload;
-                r.text = payload_to_text(node->payload).value_or("");
+                r.text = *text;
                 results.push_back(std::move(r));
             }
         }
@@ -1208,6 +1442,26 @@ private:
     static std::optional<std::string> payload_to_text(const std::vector<uint8_t>& payload) {
         if (payload.empty()) return std::nullopt;
         return std::string(payload.begin(), payload.end());
+    }
+
+    // Hebbian strengthening implementation (caller must hold mutex_)
+    // Finds existing edge and strengthens it, or creates new edge
+    void hebbian_strengthen_impl(NodeId from, NodeId to, float strength) {
+        Node* node = storage_.get(from);
+        if (!node) return;
+
+        // Find existing Similar edge to target
+        for (auto& edge : node->edges) {
+            if (edge.target == to && edge.type == EdgeType::Similar) {
+                // Strengthen existing edge (cap at 1.0)
+                edge.weight = std::min(edge.weight + strength, 1.0f);
+                return;
+            }
+        }
+
+        // No existing edge - create new one with initial strength
+        // Use storage_.add_edge for WAL persistence
+        storage_.add_edge(from, to, EdgeType::Similar, strength);
     }
 
     MindConfig config_;

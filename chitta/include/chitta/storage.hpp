@@ -23,6 +23,8 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <sys/stat.h>
+#include <cstdio>
 
 namespace chitta {
 
@@ -767,7 +769,7 @@ public:
         Timestamp warm_threshold_ms = 2592000000; // 30 days before cold
         bool use_wal = true;               // Enable WAL for concurrency
         size_t wal_compact_threshold = 1000; // Compact WAL after this many entries
-        bool use_unified_index = false;    // Phase 3: Use UnifiedIndex backend
+        bool use_unified_index = true;     // Phase 3: Use UnifiedIndex backend (default)
         bool use_segments = false;         // Phase 3.4: Use SegmentManager backend
     };
 
@@ -814,12 +816,27 @@ public:
         }
 
         // Phase 3: Check for unified index (auto-detect or config flag)
-        std::ifstream unified_check(unified_path, std::ios::binary);
-        bool unified_exists = unified_check.good();
-        unified_check.close();
+        // Check file size, not just existence - 0-byte files are corrupted
+        struct stat unified_stat;
+        bool unified_exists = (stat(unified_path.c_str(), &unified_stat) == 0);
+        bool unified_valid = unified_exists && unified_stat.st_size > 0;
 
-        if (unified_exists || config_.use_unified_index) {
-            if (unified_exists) {
+        // Clean up corrupted (0-byte) unified index files
+        if (unified_exists && !unified_valid) {
+            std::cerr << "[TieredStorage] Removing corrupted unified index (0-byte files)\n";
+            std::remove((config_.base_path + ".unified").c_str());
+            std::remove((config_.base_path + ".vectors").c_str());
+            std::remove((config_.base_path + ".binary").c_str());
+            std::remove((config_.base_path + ".meta").c_str());
+            std::remove((config_.base_path + ".connections").c_str());
+            std::remove((config_.base_path + ".payloads").c_str());
+            std::remove((config_.base_path + ".edges").c_str());
+            std::remove((config_.base_path + ".tags").c_str());
+            unified_exists = false;
+        }
+
+        if (unified_valid || config_.use_unified_index) {
+            if (unified_valid) {
                 std::cerr << "[TieredStorage] Opening unified index (Phase 3)\n";
                 if (unified_.open(config_.base_path)) {
                     std::cerr << "[TieredStorage] Unified index: " << unified_.count()
@@ -919,6 +936,12 @@ public:
 
     // Update node confidence with WAL delta (Phase 2: 72 bytes vs ~500 for full node)
     bool update_confidence(NodeId id, const Confidence& kappa) {
+        // Phase 3: Unified index has its own update path
+        if (use_unified()) {
+            auto slot = unified_.lookup(id);
+            return unified_.update_confidence(slot, kappa);
+        }
+
         Node* node = hot_.get(id);
         if (!node) return false;
 

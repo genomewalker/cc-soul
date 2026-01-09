@@ -314,6 +314,7 @@ void test_wal_deltas() {
     config.base_path = "/tmp/chitta_wal_delta_test";
     config.hot_max_nodes = 100;
     config.use_wal = true;
+    config.use_unified_index = false;  // Test WAL, not unified index
 
     // Phase 1: Create storage with WAL, perform operations
     NodeId node_id;
@@ -1081,6 +1082,282 @@ void test_unified_tag_queries() {
     std::cout << "  PASS" << std::endl;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Phase 5: Spreading Activation Tests
+// ═══════════════════════════════════════════════════════════════════════════
+
+void test_spreading_activation() {
+    std::cout << "Testing Spreading Activation..." << std::endl;
+
+    std::system("rm -f /tmp/chitta_spread_test.*");
+
+    MindConfig config;
+    config.path = "/tmp/chitta_spread_test";
+
+    Mind mind(config);
+    assert(mind.open());
+
+    // Create a linear chain: A -> B -> C -> D
+    // Activation should decay as we move further from seed
+    NodeId id_a = mind.remember(NodeType::Wisdom, test_vector(1.0f));
+    NodeId id_b = mind.remember(NodeType::Wisdom, test_vector(2.0f));
+    NodeId id_c = mind.remember(NodeType::Wisdom, test_vector(3.0f));
+    NodeId id_d = mind.remember(NodeType::Wisdom, test_vector(4.0f));
+
+    // Create edges: A -> B -> C -> D
+    mind.connect(id_a, id_b, EdgeType::Supports, 1.0f);
+    mind.connect(id_b, id_c, EdgeType::Supports, 1.0f);
+    mind.connect(id_c, id_d, EdgeType::Supports, 1.0f);
+
+    // Spread activation from A
+    auto activated = mind.spread_activation(id_a, 1.0f, 0.5f, 5);
+
+    assert(!activated.empty());
+
+    // Build map for easier lookup
+    std::unordered_map<NodeId, float, NodeIdHash> activation_map;
+    for (const auto& [id, act] : activated) {
+        activation_map[id] = act;
+    }
+
+    // Verify seed has highest activation
+    assert(activation_map.count(id_a) > 0);
+    float act_a = activation_map[id_a];
+    assert(act_a == 1.0f);
+
+    // Verify B has activation (decay_factor=0.5, weight=1.0 -> 0.5)
+    assert(activation_map.count(id_b) > 0);
+    float act_b = activation_map[id_b];
+    assert(act_b > 0.0f && act_b < act_a);
+
+    // Verify C has lower activation than B
+    assert(activation_map.count(id_c) > 0);
+    float act_c = activation_map[id_c];
+    assert(act_c > 0.0f && act_c < act_b);
+
+    // Verify D has lowest activation (may be below threshold)
+    if (activation_map.count(id_d) > 0) {
+        float act_d = activation_map[id_d];
+        assert(act_d < act_c);
+    }
+
+    std::cout << "    A=" << act_a << " B=" << act_b << " C=" << act_c << std::endl;
+
+    // Test branching graph: A -> B, A -> C
+    std::system("rm -f /tmp/chitta_spread_branch_test.*");
+    config.path = "/tmp/chitta_spread_branch_test";
+
+    Mind mind2(config);
+    assert(mind2.open());
+
+    NodeId id_root = mind2.remember(NodeType::Wisdom, test_vector(10.0f));
+    NodeId id_left = mind2.remember(NodeType::Wisdom, test_vector(11.0f));
+    NodeId id_right = mind2.remember(NodeType::Wisdom, test_vector(12.0f));
+
+    mind2.connect(id_root, id_left, EdgeType::Supports, 1.0f);
+    mind2.connect(id_root, id_right, EdgeType::Supports, 0.5f);
+
+    auto branch_activated = mind2.spread_activation(id_root, 1.0f, 0.5f, 3);
+
+    std::unordered_map<NodeId, float, NodeIdHash> branch_map;
+    for (const auto& [id, act] : branch_activated) {
+        branch_map[id] = act;
+    }
+
+    // Left branch should have higher activation than right (weight 1.0 vs 0.5)
+    float left_act = branch_map.count(id_left) ? branch_map[id_left] : 0.0f;
+    float right_act = branch_map.count(id_right) ? branch_map[id_right] : 0.0f;
+
+    assert(left_act > right_act);
+    std::cout << "    Branch: left=" << left_act << " right=" << right_act << std::endl;
+
+    mind.close();
+    mind2.close();
+
+    std::cout << "  PASS" << std::endl;
+}
+
+void test_hebbian_learning() {
+    std::cout << "Testing Hebbian Learning..." << std::endl;
+
+    std::system("rm -f /tmp/chitta_hebbian_test.*");
+
+    MindConfig config;
+    config.path = "/tmp/chitta_hebbian_test";
+
+    Mind mind(config);
+    assert(mind.open());
+
+    // Create nodes that will be co-activated
+    NodeId id_a = mind.remember(NodeType::Wisdom, test_vector(1.0f));
+    NodeId id_b = mind.remember(NodeType::Wisdom, test_vector(2.0f));
+    NodeId id_c = mind.remember(NodeType::Wisdom, test_vector(3.0f));
+
+    // Test 1: hebbian_strengthen creates new edge
+    mind.hebbian_strengthen(id_a, id_b, 0.2f);
+
+    auto node_a = mind.get(id_a);
+    assert(node_a.has_value());
+    bool found_edge = false;
+    float edge_weight = 0.0f;
+    for (const auto& edge : node_a->edges) {
+        if (edge.target == id_b && edge.type == EdgeType::Similar) {
+            found_edge = true;
+            edge_weight = edge.weight;
+            break;
+        }
+    }
+    assert(found_edge);
+    assert(std::abs(edge_weight - 0.2f) < 0.001f);
+    std::cout << "    New edge created with weight " << edge_weight << std::endl;
+
+    // Test 2: hebbian_strengthen increases existing edge weight
+    mind.hebbian_strengthen(id_a, id_b, 0.3f);
+
+    node_a = mind.get(id_a);
+    assert(node_a.has_value());
+    edge_weight = 0.0f;
+    for (const auto& edge : node_a->edges) {
+        if (edge.target == id_b && edge.type == EdgeType::Similar) {
+            edge_weight = edge.weight;
+            break;
+        }
+    }
+    assert(std::abs(edge_weight - 0.5f) < 0.001f);
+    std::cout << "    Edge strengthened to " << edge_weight << std::endl;
+
+    // Test 3: hebbian_update connects all pairs bidirectionally
+    std::vector<NodeId> co_activated = {id_a, id_b, id_c};
+    mind.hebbian_update(co_activated, 0.1f);
+
+    // Check A->C edge created
+    node_a = mind.get(id_a);
+    bool found_ac = false;
+    for (const auto& edge : node_a->edges) {
+        if (edge.target == id_c && edge.type == EdgeType::Similar) {
+            found_ac = true;
+            break;
+        }
+    }
+    assert(found_ac);
+
+    // Check B->C edge created
+    auto node_b = mind.get(id_b);
+    bool found_bc = false;
+    for (const auto& edge : node_b->edges) {
+        if (edge.target == id_c && edge.type == EdgeType::Similar) {
+            found_bc = true;
+            break;
+        }
+    }
+    assert(found_bc);
+
+    // Check C->A edge created (bidirectional)
+    auto node_c = mind.get(id_c);
+    bool found_ca = false;
+    for (const auto& edge : node_c->edges) {
+        if (edge.target == id_a && edge.type == EdgeType::Similar) {
+            found_ca = true;
+            break;
+        }
+    }
+    assert(found_ca);
+
+    std::cout << "    Batch update created bidirectional edges" << std::endl;
+
+    // Test 4: Edge weight caps at 1.0
+    for (int i = 0; i < 20; ++i) {
+        mind.hebbian_strengthen(id_a, id_b, 0.1f);
+    }
+
+    node_a = mind.get(id_a);
+    for (const auto& edge : node_a->edges) {
+        if (edge.target == id_b && edge.type == EdgeType::Similar) {
+            assert(edge.weight <= 1.0f);
+            std::cout << "    Weight capped at " << edge.weight << std::endl;
+            break;
+        }
+    }
+
+    // Test 5: Empty/single element co_activated doesn't crash
+    mind.hebbian_update({}, 0.1f);
+    mind.hebbian_update({id_a}, 0.1f);
+    std::cout << "    Edge cases handled" << std::endl;
+
+    mind.close();
+
+    std::cout << "  PASS" << std::endl;
+}
+
+#ifdef CHITTA_WITH_ONNX
+void test_resonate() {
+    std::cout << "Testing Resonate..." << std::endl;
+
+    std::system("rm -f /tmp/chitta_resonate_test.*");
+
+    const char* model_path = "../models/model.onnx";
+    const char* vocab_path = "../models/vocab.txt";
+
+    std::ifstream model_check(model_path);
+    if (!model_check) {
+        std::cout << "  SKIP (model files not found)" << std::endl;
+        return;
+    }
+
+    auto yantra = create_yantra(model_path, vocab_path, 1000);
+    if (!yantra) {
+        std::cout << "  SKIP (failed to create yantra)" << std::endl;
+        return;
+    }
+
+    MindConfig config;
+    config.path = "/tmp/chitta_resonate_test";
+
+    Mind mind(config);
+    mind.attach_yantra(yantra);
+    assert(mind.open());
+    assert(mind.has_yantra());
+
+    // Create interconnected knowledge
+    NodeId id_ml = mind.remember("Machine learning uses algorithms to learn from data.", NodeType::Wisdom);
+    NodeId id_nn = mind.remember("Neural networks are inspired by biological neurons.", NodeType::Wisdom);
+    NodeId id_dl = mind.remember("Deep learning uses multiple layers of neural networks.", NodeType::Wisdom);
+    NodeId id_ai = mind.remember("Artificial intelligence aims to create intelligent machines.", NodeType::Wisdom);
+
+    // Create semantic connections
+    mind.connect(id_ml, id_nn, EdgeType::RelatesTo, 0.8f);
+    mind.connect(id_nn, id_dl, EdgeType::Supports, 0.9f);
+    mind.connect(id_dl, id_ai, EdgeType::RelatesTo, 0.7f);
+    mind.connect(id_ml, id_ai, EdgeType::RelatesTo, 0.6f);
+
+    // Add unrelated node (should not resonate strongly)
+    NodeId id_cooking = mind.remember("Cooking pasta requires boiling water.", NodeType::Episode);
+
+    // Resonate with a query
+    auto results = mind.resonate("How do machines learn?", 10, 0.5f);
+
+    assert(!results.empty());
+    std::cout << "    Resonate results for 'How do machines learn?':" << std::endl;
+    for (const auto& r : results) {
+        std::cout << "      " << r.relevance << ": " << r.text.substr(0, 50) << std::endl;
+    }
+
+    // The cooking node should not be in top results (or have low relevance)
+    bool cooking_in_top = false;
+    for (size_t i = 0; i < std::min(results.size(), size_t(3)); ++i) {
+        if (results[i].id == id_cooking) {
+            cooking_in_top = true;
+            break;
+        }
+    }
+    assert(!cooking_in_top);
+
+    mind.close();
+
+    std::cout << "  PASS" << std::endl;
+}
+#endif
+
 int main() {
     std::cout << "=== Chitta C++ Tests ===" << std::endl;
     std::cout << "EMBED_DIM = " << EMBED_DIM << std::endl;
@@ -1121,11 +1398,20 @@ int main() {
     test_mmap_empty_file();
     test_unified_tag_queries();
 
+    std::cout << std::endl;
+    std::cout << "=== Phase 5: Spreading Activation Tests ===" << std::endl;
+    test_spreading_activation();
+
+    std::cout << std::endl;
+    std::cout << "=== Phase 6: Hebbian Learning Tests ===" << std::endl;
+    test_hebbian_learning();
+
 #ifdef CHITTA_WITH_ONNX
     std::cout << std::endl;
     std::cout << "=== ONNX Embedding Tests ===" << std::endl;
     test_vak_onnx();
     test_mind_with_text();
+    test_resonate();
 #endif
 
     std::cout << std::endl;

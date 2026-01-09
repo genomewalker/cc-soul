@@ -283,6 +283,39 @@ private:
         });
         handlers_["recall"] = [this](const json& params) { return tool_recall(params); };
 
+        // Tool: resonate - Semantic search with spreading activation
+        tools_.push_back({
+            "resonate",
+            "Semantic search enhanced with spreading activation through graph edges. "
+            "Finds semantically similar nodes, then spreads activation through connections "
+            "to discover related but not directly similar content.",
+            {
+                {"type", "object"},
+                {"properties", {
+                    {"query", {
+                        {"type", "string"},
+                        {"description", "The search query"}
+                    }},
+                    {"k", {
+                        {"type", "integer"},
+                        {"minimum", 1},
+                        {"maximum", 100},
+                        {"default", 10},
+                        {"description", "Maximum results to return"}
+                    }},
+                    {"spread_strength", {
+                        {"type", "number"},
+                        {"minimum", 0.0},
+                        {"maximum", 1.0},
+                        {"default", 0.5},
+                        {"description", "Activation spread strength (0-1)"}
+                    }}
+                }},
+                {"required", {"query"}}
+            }
+        });
+        handlers_["resonate"] = [this](const json& params) { return tool_resonate(params); };
+
         // Tool: recall_by_tag - Pure tag-based lookup (no semantic search)
         tools_.push_back({
             "recall_by_tag",
@@ -1099,6 +1132,43 @@ private:
         }
 
         return {false, ss.str(), {{"results", results_array}}};
+    }
+
+    ToolResult tool_resonate(const json& params) {
+        std::string query = params.at("query");
+        size_t k = params.value("k", 10);
+        float spread_strength = params.value("spread_strength", 0.5f);
+
+        if (!mind_->has_yantra()) {
+            return {true, "Yantra not ready - cannot perform semantic search", json()};
+        }
+
+        auto recalls = mind_->resonate(query, k, spread_strength);
+
+        json results_array = json::array();
+        std::ostringstream ss;
+        ss << "Resonance search for: " << query << "\n";
+        ss << "Found " << recalls.size() << " resonant nodes (spread_strength=" << spread_strength << "):\n";
+
+        for (const auto& r : recalls) {
+            mind_->feedback_used(r.id);
+
+            auto result_tags = mind_->get_tags(r.id);
+
+            results_array.push_back({
+                {"id", r.id.to_string()},
+                {"text", r.text},
+                {"relevance", r.relevance},
+                {"type", node_type_to_string(r.type)},
+                {"confidence", r.confidence.mu},
+                {"tags", result_tags}
+            });
+
+            ss << "\n[" << (r.relevance * 100) << "%] " << r.text.substr(0, 100);
+            if (r.text.length() > 100) ss << "...";
+        }
+
+        return {false, ss.str(), {{"results", results_array}, {"spread_strength", spread_strength}}};
     }
 
     ToolResult tool_cycle(const json& params) {
