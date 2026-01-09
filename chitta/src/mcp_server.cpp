@@ -169,7 +169,7 @@ int run_direct(const std::string& mind_path,
 }
 
 int main(int argc, char* argv[]) {
-    std::string socket_path = chitta::SocketClient::DEFAULT_SOCKET_PATH;
+    std::string socket_path = chitta::SocketClient::default_socket_path();
     std::string mind_path = "./mind";
     std::string model_path;
     std::string vocab_path;
