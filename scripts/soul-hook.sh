@@ -195,9 +195,17 @@ hook_prompt() {
         if [[ -x "$CHITTA_CLI" ]]; then
             # Pipe directly to avoid variable capture issues
             # Filter out "No resonant" and strip prefixes
-            "$CHITTA_CLI" resonate "$user_message" --path "$MIND_PATH" --model "$MODEL_PATH" --vocab "$VOCAB_PATH" --limit 3 2>/dev/null \
+            local resonance_output
+            resonance_output=$("$CHITTA_CLI" resonate "$user_message" --path "$MIND_PATH" --model "$MODEL_PATH" --vocab "$VOCAB_PATH" --limit 3 2>/dev/null \
                 | grep -v "^No resonant" \
-                | sed 's/^\[cc-soul\] //'
+                | sed 's/^\[cc-soul\] //')
+
+            if [[ -n "$resonance_output" ]]; then
+                echo "$resonance_output"
+                # Track token savings from transparent memory injection
+                local chars_injected=${#resonance_output}
+                "$SCRIPT_DIR/token-savings.sh" add-transparent "$chars_injected" 2>/dev/null || true
+            fi
         fi
     fi
 
