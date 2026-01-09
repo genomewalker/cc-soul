@@ -257,7 +257,7 @@ public:
     // ═══════════════════════════════════════════════════════════════════════
 
     static constexpr uint32_t BM25_MAGIC = 0x424D3235;  // "BM25"
-    static constexpr uint32_t BM25_VERSION = 1;
+    static constexpr uint32_t BM25_VERSION = 2;  // v2 adds forward index
 
     bool save(const std::string& path) const {
         FILE* f = fopen(path.c_str(), "wb");
