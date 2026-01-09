@@ -73,6 +73,7 @@ std::string default_vocab_path() {
 
 int cmd_stats(Mind& mind, bool json_output) {
     auto coherence = mind.coherence();
+    auto health = mind.health();
 
     if (json_output) {
         std::cout << "{"
@@ -88,6 +89,14 @@ int cmd_stats(Mind& mind, bool json_output) {
                   << "\"temporal\":" << coherence.temporal << ","
                   << "\"tau\":" << coherence.tau_k()
                   << "},"
+                  << "\"ojas\":{"
+                  << "\"structural\":" << health.structural << ","
+                  << "\"semantic\":" << health.semantic << ","
+                  << "\"temporal\":" << health.temporal << ","
+                  << "\"capacity\":" << health.capacity << ","
+                  << "\"psi\":" << health.psi() << ","
+                  << "\"status\":\"" << health.status_string() << "\""
+                  << "},"
                   << "\"yantra\":" << (mind.has_yantra() ? "true" : "false")
                   << "}\n";
     } else {
@@ -98,12 +107,18 @@ int cmd_stats(Mind& mind, bool json_output) {
         std::cout << "  Warm:   " << mind.warm_size() << "\n";
         std::cout << "  Cold:   " << mind.cold_size() << "\n";
         std::cout << "  Total:  " << mind.size() << "\n";
-        std::cout << "\nCoherence:\n";
+        std::cout << "\nSāmarasya (Coherence):\n";
         std::cout << "  Global:     " << coherence.global << "\n";
         std::cout << "  Local:      " << coherence.local << "\n";
         std::cout << "  Structural: " << coherence.structural << "\n";
         std::cout << "  Temporal:   " << coherence.temporal << "\n";
-        std::cout << "  Tau-k:      " << coherence.tau_k() << "\n";
+        std::cout << "  τ (tau):    " << coherence.tau_k() << "\n";
+        std::cout << "\nOjas (Vitality):\n";
+        std::cout << "  Structural: " << health.structural << "\n";
+        std::cout << "  Semantic:   " << health.semantic << "\n";
+        std::cout << "  Temporal:   " << health.temporal << "\n";
+        std::cout << "  Capacity:   " << health.capacity << "\n";
+        std::cout << "  ψ (psi):    " << health.psi() << " [" << health.status_string() << "]\n";
         std::cout << "\nYantra: " << (mind.has_yantra() ? "ready" : "not attached") << "\n";
     }
 

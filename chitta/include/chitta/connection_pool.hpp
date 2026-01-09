@@ -144,6 +144,55 @@ public:
         }
 
         write_pos_ = header->used_bytes;
+
+        // Validate free list integrity on open
+        if (!validate_free_list()) {
+            std::cerr << "[ConnectionPool] Free list corrupt on open, resetting\n";
+            region_.as<ConnectionPoolHeader>()->free_list_head = 0;
+        }
+
+        return true;
+    }
+
+    // Validate free list integrity - returns false if corruption detected
+    bool validate_free_list() {
+        auto* header = region_.as<ConnectionPoolHeader>();
+        uint64_t file_size = header->total_bytes;
+        uint64_t offset = header->free_list_head;
+
+        if (offset == 0) return true;  // Empty free list is valid
+
+        // Safety limit: prevent infinite loops
+        const size_t max_blocks = file_size / sizeof(FreeBlock);
+        size_t count = 0;
+
+        while (offset != 0 && count < max_blocks) {
+            // Check bounds
+            if (!is_valid_offset(offset, file_size)) {
+                std::cerr << "[ConnectionPool] Free list validation failed: "
+                          << "invalid offset " << offset << " (file_size=" << file_size << ")\n";
+                return false;
+            }
+
+            auto* block = region_.at<FreeBlock>(offset);
+
+            // Check block size sanity
+            if (block->size == 0 || block->size > file_size ||
+                offset + block->size > file_size) {
+                std::cerr << "[ConnectionPool] Free list validation failed: "
+                          << "invalid block size " << block->size << " at offset " << offset << "\n";
+                return false;
+            }
+
+            offset = block->next_offset;
+            count++;
+        }
+
+        if (count >= max_blocks) {
+            std::cerr << "[ConnectionPool] Free list validation failed: possible circular list\n";
+            return false;
+        }
+
         return true;
     }
 
@@ -365,10 +414,28 @@ private:
         return offset;
     }
 
+    // Validate that an offset is within valid bounds
+    bool is_valid_offset(uint64_t offset, uint64_t file_size) const {
+        return offset >= sizeof(ConnectionPoolHeader) && offset < file_size;
+    }
+
     // Try to allocate from free list using best-fit strategy
     // Best-fit reduces fragmentation by finding the smallest block that fits
+    // ROBUST: Validates all offsets before dereferencing, self-heals on corruption
     uint64_t try_allocate_from_free_list(size_t required) {
         auto* header = region_.as<ConnectionPoolHeader>();
+        uint64_t file_size = header->total_bytes;
+
+        // Validate free_list_head before use
+        if (header->free_list_head != 0) {
+            if (!is_valid_offset(header->free_list_head, file_size)) {
+                std::cerr << "[ConnectionPool] Corrupt free_list_head="
+                          << header->free_list_head << ", resetting to 0\n";
+                header->free_list_head = 0;
+                return 0;
+            }
+        }
+
         if (header->free_list_head == 0) return 0;
 
         // Best-fit: find smallest block that fits
@@ -379,8 +446,47 @@ private:
         uint64_t prev_offset = 0;
         uint64_t current_offset = header->free_list_head;
 
-        while (current_offset != 0) {
+        // Safety limit: prevent infinite loops from circular corruption
+        const size_t max_iterations = file_size / sizeof(FreeBlock);
+        size_t iterations = 0;
+
+        while (current_offset != 0 && iterations < max_iterations) {
+            iterations++;
+
+            // Validate current offset before dereferencing
+            if (!is_valid_offset(current_offset, file_size)) {
+                std::cerr << "[ConnectionPool] Corrupt free list link at offset "
+                          << prev_offset << " -> " << current_offset
+                          << " (file_size=" << file_size << "), truncating\n";
+                // Truncate free list at previous valid block
+                if (prev_offset != 0 && is_valid_offset(prev_offset, file_size)) {
+                    auto* prev_block = region_.at<FreeBlock>(prev_offset);
+                    prev_block->next_offset = 0;
+                } else {
+                    header->free_list_head = 0;
+                }
+                break;
+            }
+
             auto* block = region_.at<FreeBlock>(current_offset);
+
+            // Validate block size (must be positive and fit in file)
+            if (block->size == 0 || block->size > file_size ||
+                current_offset + block->size > file_size) {
+                std::cerr << "[ConnectionPool] Corrupt block size=" << block->size
+                          << " at offset " << current_offset << ", removing from list\n";
+                // Skip this corrupt block
+                uint64_t next = block->next_offset;
+                if (prev_offset == 0) {
+                    header->free_list_head = next;
+                } else if (is_valid_offset(prev_offset, file_size)) {
+                    auto* prev_block = region_.at<FreeBlock>(prev_offset);
+                    prev_block->next_offset = next;
+                }
+                current_offset = next;
+                continue;
+            }
+
             if (block->size >= required && block->size < best_size) {
                 best_offset = current_offset;
                 best_prev_offset = prev_offset;
@@ -392,6 +498,12 @@ private:
 
             prev_offset = current_offset;
             current_offset = block->next_offset;
+        }
+
+        if (iterations >= max_iterations) {
+            std::cerr << "[ConnectionPool] Free list may be circular, resetting\n";
+            header->free_list_head = 0;
+            return 0;
         }
 
         if (best_offset == 0) return 0;  // No suitable block found

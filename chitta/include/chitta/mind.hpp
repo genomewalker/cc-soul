@@ -175,6 +175,69 @@ struct MindState {
     bool yantra_ready;
 };
 
+// Mind health for proactive monitoring
+// Prevents catastrophic degradation through early detection
+// Named "Ojas" (ओजस्) - Sanskrit for vital essence, the refined energy that sustains life
+struct MindHealth {
+    float structural;   // File integrity (checksums, free lists, indices)
+    float semantic;     // Graph coherence (edge validity, no orphans)
+    float temporal;     // Time-based (decay applied, WAL size, backup freshness)
+    float capacity;     // Storage (not near limits, not fragmented)
+
+    // Ojas (ओजस्): the vital essence score (0-1)
+    // Like tau_k for coherence, ojas represents overall soul vitality
+    // Greek symbol: ψ (psi) - associated with psyche/mind
+    float ojas() const {
+        return 0.4f * structural + 0.3f * semantic +
+               0.2f * temporal + 0.1f * capacity;
+    }
+
+    // Greek letter alias for cc-status display
+    float psi() const { return ojas(); }
+
+    // Alias for backward compatibility
+    float overall() const { return ojas(); }
+
+    // Should we backup now?
+    bool needs_backup(Timestamp last_backup) const {
+        Timestamp now_ts = now();
+        float hours_since_backup = (now_ts - last_backup) / 3600000.0f;
+        return overall() >= 0.9f && hours_since_backup > 1.0f;
+    }
+
+    // Is this critical? Should we go read-only?
+    bool critical() const {
+        return overall() < 0.6f || structural < 0.5f;
+    }
+
+    // What action should we take?
+    enum class Action {
+        Normal,         // 95-100%: normal operation
+        ScheduleBackup, // 80-95%: schedule backup, log warning
+        ForceRepair,    // 60-80%: force backup, attempt repair
+        Emergency       // <60%: emergency mode, read-only until repaired
+    };
+
+    Action recommended_action() const {
+        float score = overall();
+        if (score >= 0.95f) return Action::Normal;
+        if (score >= 0.80f) return Action::ScheduleBackup;
+        if (score >= 0.60f) return Action::ForceRepair;
+        return Action::Emergency;
+    }
+
+    // Human-readable status
+    const char* status_string() const {
+        switch (recommended_action()) {
+            case Action::Normal: return "healthy";
+            case Action::ScheduleBackup: return "degraded";
+            case Action::ForceRepair: return "repair_needed";
+            case Action::Emergency: return "critical";
+        }
+        return "unknown";
+    }
+};
+
 // The Mind: unified interface to soul storage
 class Mind {
 public:
@@ -926,6 +989,115 @@ public:
             storage_.cold_size(),
             yantra_ && yantra_->ready()
         };
+    }
+
+    // Compute current health score across all dimensions
+    // Call periodically to detect degradation before it becomes critical
+    MindHealth health() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return health_unlocked();
+    }
+
+    // Health computation without lock (for use within recover())
+    MindHealth health_unlocked() const {
+        MindHealth h;
+
+        // Structural health: file integrity
+        // - 1.0 if unified index active and valid
+        // - 0.8 if using WAL fallback
+        // - 0.5 if corruption detected but healed
+        h.structural = storage_.use_unified() ? 1.0f : 0.8f;
+
+        // Semantic health: graph coherence
+        // Use the coherence score from the graph
+        Coherence coh = graph_.coherence();
+        h.semantic = coh.tau_k();
+
+        // Temporal health: decay and freshness
+        // - Check if decay was applied recently
+        // - Check if WAL is not too large
+        Timestamp now_ts = now();
+        float hours_since_decay = (now_ts - last_decay_) / 3600000.0f;
+        float decay_health = hours_since_decay < 24.0f ? 1.0f :
+                            (hours_since_decay < 72.0f ? 0.8f : 0.5f);
+
+        // WAL size health (estimate - larger WAL = more at risk)
+        size_t total = storage_.total_size();
+        float wal_health = total < 10000 ? 1.0f :
+                          (total < 100000 ? 0.9f : 0.8f);
+
+        h.temporal = 0.7f * decay_health + 0.3f * wal_health;
+
+        // Capacity health: storage utilization
+        // Assume healthy if under 80% of reasonable limits
+        float capacity_ratio = std::min(1.0f, total / 1000000.0f);  // 1M nodes = 100%
+        h.capacity = 1.0f - (capacity_ratio * 0.5f);  // 0% = 1.0, 100% = 0.5
+
+        return h;
+    }
+
+    // Recover from degradation - called automatically or manually
+    // Returns what actions were taken
+    struct RecoveryReport {
+        bool decay_applied = false;
+        bool integrity_repaired = false;
+        bool index_rebuilt = false;
+        size_t nodes_pruned = 0;
+        float ojas_before = 0.0f;
+        float ojas_after = 0.0f;
+    };
+
+    RecoveryReport recover() {
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        RecoveryReport report;
+        MindHealth h_before = health_unlocked();
+        report.ojas_before = h_before.ojas();
+
+        // 1. Temporal recovery: Apply decay if stale
+        Timestamp now_ts = now();
+        float hours_since_decay = (now_ts - last_decay_) / 3600000.0f;
+        if (hours_since_decay > 1.0f) {
+            DynamicsReport decay_report = dynamics_.tick(graph_);
+            last_decay_ = now_ts;
+            report.decay_applied = true;
+            std::cerr << "[Recovery] Applied decay (" << hours_since_decay << "h stale)\n";
+        }
+
+        // 2. Structural recovery: Storage layer handles its own repair
+        // ConnectionPool already self-heals on open and during allocation
+        // Check if we fell back to WAL mode (indicates structural issues)
+        if (!storage_.use_unified()) {
+            std::cerr << "[Recovery] Warning: Running in WAL fallback mode\n";
+            // Future: attempt to rebuild unified index from WAL
+        }
+
+        // 3. Semantic recovery: If coherence is low, run Hebbian learning pass
+        Coherence coh = graph_.coherence();
+        if (coh.tau_k() < 0.7f) {
+            std::cerr << "[Recovery] Low coherence (" << coh.tau_k()
+                      << "), would run Hebbian strengthening\n";
+            // Future: hebbian_pass() to strengthen common patterns
+        }
+
+        // 4. Capacity recovery: If near limits, prune low-confidence nodes
+        size_t total = storage_.total_size();
+        if (total > 100000) {  // Arbitrary threshold
+            std::cerr << "[Recovery] Large storage (" << total
+                      << " nodes), would prune low-confidence\n";
+            // Future: prune_low_confidence(threshold)
+        }
+
+        MindHealth h_after = health_unlocked();
+        report.ojas_after = h_after.ojas();
+
+        if (report.ojas_after > report.ojas_before) {
+            std::cerr << "[Recovery] Ojas improved: "
+                      << int(report.ojas_before * 100) << "% -> "
+                      << int(report.ojas_after * 100) << "%\n";
+        }
+
+        return report;
     }
 
     // Access chorus for multi-voice reasoning

@@ -795,14 +795,24 @@ private:
 
         MindState state = mind_->state();
         Coherence coherence = mind_->coherence();
+        MindHealth health = mind_->health();
 
         json result = {
-            {"coherence", {
+            {"samarasya", {  // Sāmarasya (सामरस्य) = harmony/equilibrium
                 {"local", coherence.local},
                 {"global", coherence.global},
                 {"temporal", coherence.temporal},
                 {"structural", coherence.structural},
-                {"tau_k", coherence.tau_k()}
+                {"tau", coherence.tau_k()}  // Greek: τ
+            }},
+            {"ojas", {
+                {"structural", health.structural},
+                {"semantic", health.semantic},
+                {"temporal", health.temporal},
+                {"capacity", health.capacity},
+                {"vitality", health.ojas()},
+                {"psi", health.psi()},
+                {"status", health.status_string()}
             }},
             {"statistics", {
                 {"total_nodes", state.total_nodes},
@@ -850,11 +860,18 @@ private:
         if (format == "text") {
             std::ostringstream ss;
             ss << "Soul State:\n";
-            ss << "  Coherence: " << int(coherence.tau_k() * 100) << "% ";
+            // Sāmarasya (सामरस्य) = harmony/equilibrium, measured as τ (tau)
+            ss << "  Sāmarasya (τ): " << int(coherence.tau_k() * 100) << "% ";
             ss << "(L:" << int(coherence.local * 100);
             ss << " G:" << int(coherence.global * 100);
             ss << " T:" << int(coherence.temporal * 100);
             ss << " S:" << int(coherence.structural * 100) << ")\n";
+            // Ojas (ओजस्) = vital essence, measured as ψ (psi)
+            ss << "  Ojas (ψ): " << int(health.psi() * 100) << "% [" << health.status_string() << "] ";
+            ss << "(S:" << int(health.structural * 100);
+            ss << " M:" << int(health.semantic * 100);
+            ss << " T:" << int(health.temporal * 100);
+            ss << " C:" << int(health.capacity * 100) << ")\n";
             ss << "  Nodes: " << state.total_nodes << " total (";
             ss << state.hot_nodes << " hot, ";
             ss << state.warm_nodes << " warm, ";
