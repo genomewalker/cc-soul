@@ -256,6 +256,33 @@ private:
         });
         handlers_["observe"] = [this](const json& params) { return tool_observe(params); };
 
+        // Tool: update - Update an existing node's content (for ε-optimization migration)
+        tools_.push_back({
+            "update",
+            "Update an existing node's content. Used for ε-optimization: convert verbose content "
+            "to high-epiplexity pattern format. The node's embedding is recomputed from new content.",
+            {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {
+                        {"type", "string"},
+                        {"description", "Node ID to update"}
+                    }},
+                    {"content", {
+                        {"type", "string"},
+                        {"description", "New content (will replace existing)"}
+                    }},
+                    {"keep_metadata", {
+                        {"type", "boolean"},
+                        {"default", true},
+                        {"description", "Keep original timestamps and confidence"}
+                    }}
+                }},
+                {"required", {"id", "content"}}
+            }
+        });
+        handlers_["update"] = [this](const json& params) { return tool_update(params); };
+
         // Tool: recall - Semantic search in soul with zoom levels
         tools_.push_back({
             "recall",
@@ -1198,6 +1225,59 @@ private:
         return {false, "Observed: " + title, result};
     }
 
+    // Tool: update - Update a node's content for ε-optimization
+    ToolResult tool_update(const json& params) {
+        std::string id_str = params.at("id");
+        std::string new_content = params.at("content");
+        bool keep_metadata = params.value("keep_metadata", true);
+
+        NodeId id = NodeId::from_string(id_str);
+        auto node_opt = mind_->get(id);
+        if (!node_opt) {
+            return {true, "Node not found: " + id_str, json()};
+        }
+
+        // Store original metadata if keeping
+        Confidence original_conf = node_opt->kappa;
+        Timestamp original_created = node_opt->tau_created;
+        NodeType original_type = node_opt->node_type;
+        auto original_tags = node_opt->tags;
+        auto original_edges = node_opt->edges;
+
+        // Compute new embedding from new content
+        auto new_embedding = mind_->embed(new_content);
+        if (new_embedding) {
+            node_opt->nu = *new_embedding;
+        }
+
+        // Update payload
+        node_opt->payload = std::vector<uint8_t>(new_content.begin(), new_content.end());
+
+        // Restore or reset metadata
+        if (keep_metadata) {
+            node_opt->kappa = original_conf;
+            node_opt->tau_created = original_created;
+            node_opt->tags = original_tags;
+            node_opt->edges = original_edges;
+        }
+        node_opt->tau_accessed = chitta::now();  // Touch
+
+        // Update the node in storage
+        mind_->update_node(id, *node_opt);
+
+        // Compute new epiplexity
+        float new_epsilon = mind_->compute_epiplexity(id);
+
+        json result = {
+            {"id", id_str},
+            {"content_length", new_content.length()},
+            {"epiplexity", new_epsilon},
+            {"kept_metadata", keep_metadata}
+        };
+
+        return {false, "Updated node (ε:" + std::to_string(int(new_epsilon * 100)) + "%)", result};
+    }
+
     // Helper: extract title from text (first line or N chars)
     std::string extract_title(const std::string& text, size_t max_len = 60) const {
         size_t newline = text.find('\n');
@@ -1274,6 +1354,17 @@ private:
             mind_->hebbian_update(co_retrieved, 0.05f);
         }
 
+        // Compute epiplexity for results if using seeds zoom
+        // (avoid overhead for other zoom levels)
+        if (zoom == "seeds") {
+            auto attractors = mind_->find_attractors(5);
+            for (auto& r : recalls) {
+                if (auto node = mind_->get(r.id)) {
+                    r.epiplexity = mind_->compute_epiplexity(r.id);
+                }
+            }
+        }
+
         json results_array = json::array();
         std::ostringstream ss;
         ss << "Found " << recalls.size() << " results";
@@ -1282,7 +1373,7 @@ private:
 
         Timestamp current = now();
 
-        for (const auto& r : recalls) {
+        for (auto& r : recalls) {
             mind_->feedback_used(r.id);
 
             if (zoom == "sparse") {
@@ -1368,6 +1459,46 @@ private:
                     {"r", static_cast<int>(r.relevance * 100)}  // Relevance as int %
                 });
                 ss << "\n[" << static_cast<int>(r.relevance * 100) << "%] " << title;
+
+            } else if (zoom == "seeds") {
+                // Seeds: ε-aware injection - high-ε get minimal tokens, low-ε get more
+                // This is the epiplexity-optimized format for bounded observers
+                // Thresholds calibrated to current distribution (mean ~0.31, max ~0.49)
+                std::string title = extract_title(r.text, 60);
+                int epsilon_pct = static_cast<int>(r.epiplexity * 100);
+
+                if (r.epiplexity > 0.38f) {
+                    // High-ε (top quartile): just the seed pattern - Claude reconstructs
+                    results_array.push_back({
+                        {"title", title},
+                        {"type", node_type_to_string(r.type)},
+                        {"ε", epsilon_pct},
+                        {"conf", static_cast<int>(r.confidence.mu * 100)}
+                    });
+                    ss << "\n[" << node_type_to_string(r.type) << "] " << title;
+                    ss << " (ε:" << epsilon_pct << "%)";
+                } else if (r.epiplexity > 0.25f) {
+                    // Medium-ε: title only, no extra content
+                    results_array.push_back({
+                        {"title", title},
+                        {"type", node_type_to_string(r.type)},
+                        {"ε", epsilon_pct}
+                    });
+                    ss << "\n[" << node_type_to_string(r.type) << "] " << title;
+                    ss << " (ε:" << epsilon_pct << "%)";
+                } else {
+                    // Low-ε: need some content, can't fully reconstruct
+                    std::string snippet = r.text.length() > 150
+                        ? r.text.substr(0, 150) + "..."
+                        : r.text;
+                    results_array.push_back({
+                        {"title", title},
+                        {"snippet", snippet},
+                        {"type", node_type_to_string(r.type)},
+                        {"ε", epsilon_pct}
+                    });
+                    ss << "\n[" << node_type_to_string(r.type) << "] " << snippet;
+                }
 
             } else {
                 // Normal: balanced with truncation (500 char max)

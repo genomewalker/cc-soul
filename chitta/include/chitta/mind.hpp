@@ -921,6 +921,25 @@ public:
         return std::nullopt;
     }
 
+    // Update a node's content (for ε-optimization migration)
+    bool update_node(NodeId id, const Node& updated) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (Node* node = storage_.get(id)) {
+            // Update all fields except id
+            node->nu = updated.nu;
+            node->kappa = updated.kappa;
+            node->tau_created = updated.tau_created;
+            node->tau_accessed = updated.tau_accessed;
+            node->delta = updated.delta;
+            node->node_type = updated.node_type;
+            node->payload = updated.payload;
+            node->edges = updated.edges;
+            node->tags = updated.tags;
+            return true;
+        }
+        return false;
+    }
+
     // Get text from a node (if stored as payload)
     std::optional<std::string> text(NodeId id) {
         std::lock_guard<std::mutex> lock(mutex_);
