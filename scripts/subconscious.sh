@@ -41,8 +41,9 @@ cmd_start() {
         return 1
     fi
 
-    # Start daemon in background
+    # Start daemon in background with socket server for MCP clients
     nohup "$CHITTA_CLI" daemon \
+        --socket \
         --path "$MIND_PATH" \
         --model "$MODEL_PATH" \
         --vocab "$VOCAB_PATH" \

@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <dirent.h>
 #include <cerrno>
 #include <cstring>
 #include <cstdlib>
@@ -12,8 +13,46 @@
 #include <chrono>
 #include <iostream>
 #include <vector>
+#include <algorithm>
 
 namespace chitta {
+
+namespace {
+
+// Parse semantic version string (e.g., "2.30.0") into comparable tuple
+std::tuple<int, int, int> parse_version(const std::string& v) {
+    int major = 0, minor = 0, patch = 0;
+    sscanf(v.c_str(), "%d.%d.%d", &major, &minor, &patch);
+    return {major, minor, patch};
+}
+
+// Find all installed plugin versions, sorted newest first
+std::vector<std::string> find_installed_versions(const std::string& cache_base) {
+    std::vector<std::string> versions;
+
+    DIR* dir = opendir(cache_base.c_str());
+    if (!dir) return versions;
+
+    while (struct dirent* entry = readdir(dir)) {
+        if (entry->d_type == DT_DIR && entry->d_name[0] != '.') {
+            std::string name = entry->d_name;
+            // Check if it looks like a version (starts with digit)
+            if (!name.empty() && name[0] >= '0' && name[0] <= '9') {
+                versions.push_back(name);
+            }
+        }
+    }
+    closedir(dir);
+
+    // Sort by version descending (newest first)
+    std::sort(versions.begin(), versions.end(), [](const auto& a, const auto& b) {
+        return parse_version(a) > parse_version(b);
+    });
+
+    return versions;
+}
+
+}  // anonymous namespace
 
 SocketClient::SocketClient(std::string socket_path)
     : socket_path_(std::move(socket_path)) {}
@@ -121,14 +160,14 @@ bool SocketClient::start_daemon() {
             daemon_paths.push_back(std::string(plugin_root) + "/bin/chitta_cli");
         }
 
-        // Standard plugin cache location
+        // Standard plugin cache location - discover installed versions
         if (home) {
-            // Find latest version in cache
             std::string cache_base = std::string(home) +
                 "/.claude/plugins/cache/genomewalker-cc-soul/cc-soul";
-            // Try common version patterns
-            daemon_paths.push_back(cache_base + "/2.27.0/bin/chitta_cli");
-            daemon_paths.push_back(cache_base + "/2.26.0/bin/chitta_cli");
+            auto versions = find_installed_versions(cache_base);
+            for (const auto& ver : versions) {
+                daemon_paths.push_back(cache_base + "/" + ver + "/bin/chitta_cli");
+            }
 
             // Marketplace location
             daemon_paths.push_back(std::string(home) +
@@ -147,13 +186,12 @@ bool SocketClient::start_daemon() {
             mind_path = std::string(home) + "/.claude/mind/chitta";
         }
 
-        // Find model path
+        // Find model path - discover from installed versions
         std::string model_path, vocab_path;
         if (home) {
             std::string base = std::string(home) +
                 "/.claude/plugins/cache/genomewalker-cc-soul/cc-soul";
-            // Try to find model files
-            std::vector<std::string> versions = {"2.27.0", "2.26.0"};
+            auto versions = find_installed_versions(base);
             for (const auto& ver : versions) {
                 std::string model = base + "/" + ver + "/chitta/models/model.onnx";
                 std::string vocab = base + "/" + ver + "/chitta/models/vocab.txt";
