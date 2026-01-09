@@ -925,7 +925,7 @@ public:
     // Dynamics and lifecycle
     // ═══════════════════════════════════════════════════════════════════
 
-    // Tick: run one cycle of dynamics
+    // Tick: run one cycle of dynamics with automatic health monitoring
     DynamicsReport tick() {
         std::lock_guard<std::mutex> lock(mutex_);
 
@@ -940,6 +940,23 @@ public:
         if (current - last_checkpoint_ > config_.checkpoint_interval_ms) {
             storage_.sync();
             last_checkpoint_ = current;
+        }
+
+        // Automatic health monitoring and recovery
+        MindHealth h = health_unlocked();
+        if (h.ojas() < 0.6f) {
+            // Critical: emergency mode
+            std::cerr << "[Mind] CRITICAL: Ojas=" << int(h.ojas() * 100)
+                      << "% - soul vitality critical\n";
+        } else if (h.ojas() < 0.8f) {
+            // Low: attempt recovery
+            std::cerr << "[Mind] Warning: Ojas=" << int(h.ojas() * 100)
+                      << "% - triggering recovery\n";
+            // Apply decay if stale (temporal recovery)
+            if (h.temporal < 0.7f) {
+                dynamics_.tick(graph_);
+                last_decay_ = current;
+            }
         }
 
         return report;
