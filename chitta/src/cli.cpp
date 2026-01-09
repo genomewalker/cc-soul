@@ -200,7 +200,7 @@ int cmd_resonate(Mind& mind, const std::string& query, int limit, bool json_outp
             if (text.length() > 200) {
                 text = text.substr(0, 200) + "...";
             }
-            std::cout << "[" << static_cast<int>(r.relevance * 100) << "%] " << text << "\n";
+            std::cout << text << "\n";
         }
     }
 

@@ -174,18 +174,14 @@ hook_prompt() {
         return
     fi
 
-    # Full resonance mode - inject relevant memories transparently
+    # Full resonance mode - inject relevant memories naturally
     if $resonate && [[ -n "$user_message" && ${#user_message} -gt 10 ]]; then
-        # Run full_resonate via CLI (faster than MCP for hooks)
-        local memories
         if [[ -x "$CHITTA_CLI" ]]; then
-            memories=$("$CHITTA_CLI" resonate "$user_message" --path "$MIND_PATH" --model "$MODEL_PATH" --vocab "$VOCAB_PATH" --limit 3 2>/dev/null)
-        fi
-
-        if [[ -n "$memories" && "$memories" != *"No resonant"* ]]; then
-            echo ""
-            echo "Resonant memories for this query:"
-            echo "$memories"
+            # Pipe directly to avoid variable capture issues
+            # Filter out "No resonant" and strip prefixes
+            "$CHITTA_CLI" resonate "$user_message" --path "$MIND_PATH" --model "$MODEL_PATH" --vocab "$VOCAB_PATH" --limit 3 2>/dev/null \
+                | grep -v "^No resonant" \
+                | sed 's/^\[cc-soul\] //'
         fi
     fi
 
