@@ -32,7 +32,7 @@ chitta_cli stats --show-zero-vectors
 
 **Regenerate embeddings for all nodes:**
 ```bash
-chitta_mcp cycle --regenerate_embeddings true --batch_size 100
+chitta cycle --regenerate_embeddings true --batch_size 100
 ```
 
 This step:
@@ -54,7 +54,7 @@ Batch size: [10-50 nodes per round]
 
 Recall nodes for evaluation:
 ```bash
-chitta_mcp recall "[domain keywords]" --zoom full --limit 20
+chitta recall "[domain keywords]" --zoom full --limit 20
 ```
 
 ### 3. Offering (Āhuti) - Epiplexity Computation
@@ -82,7 +82,7 @@ But **I am the oracle.** My reconstruction test IS the measurement.
 
 For each high/medium-ε node:
 ```bash
-chitta_mcp update --id "[node_id]" --content "[new pattern-format content]" --keep_metadata true
+chitta update --id "[node_id]" --content "[new pattern-format content]" --keep_metadata true
 ```
 
 **Pattern format:**
@@ -101,7 +101,7 @@ Or with reference:
 
 After each batch, verify:
 ```bash
-chitta_mcp soul_context
+chitta soul_context
 ```
 
 Check:
@@ -113,7 +113,7 @@ Check:
 
 Record the migration:
 ```bash
-chitta_mcp observe --category decision --title "ε-Yajña: Migrated [N] nodes in [domain]" --content "Converted [N] nodes to high-ε format. Mean ε: [before]% → [after]%"
+chitta observe --category decision --title "ε-Yajña: Migrated [N] nodes in [domain]" --content "Converted [N] nodes to high-ε format. Mean ε: [before]% → [after]%"
 ```
 
 ## How I Compute Epiplexity

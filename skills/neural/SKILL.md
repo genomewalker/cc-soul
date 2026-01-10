@@ -29,7 +29,7 @@ Give positive feedback when a recalled memory:
 - Correctly predicted an outcome
 
 ```
-chitta_mcp feedback(
+chitta feedback(
   memory_id="[id from recall]",
   helpful=true,
   context="This pattern correctly identified the root cause"
@@ -45,7 +45,7 @@ Give negative feedback when a recalled memory:
 - Caused confusion or wasted effort
 
 ```
-chitta_mcp feedback(
+chitta feedback(
   memory_id="[id from recall]",
   helpful=false,
   context="This pattern was misleading - the actual cause was different"
@@ -60,10 +60,10 @@ When you recall and use a memory, note it:
 
 ```
 # After recalling relevant wisdom
-chitta_mcp recall query="authentication patterns"
+chitta recall query="authentication patterns"
 
 # If result #1 was helpful:
-chitta_mcp feedback memory_id="[result_1_id]", helpful=true
+chitta feedback memory_id="[result_1_id]", helpful=true
 ```
 
 ### 2. Observe Outcomes
@@ -79,10 +79,10 @@ Record feedback on what was used:
 
 ```
 # What helped
-chitta_mcp feedback memory_id="...", helpful=true, context="Led to solution"
+chitta feedback memory_id="...", helpful=true, context="Led to solution"
 
 # What didn't
-chitta_mcp feedback memory_id="...", helpful=false, context="Outdated pattern"
+chitta feedback memory_id="...", helpful=false, context="Outdated pattern"
 ```
 
 ### 4. Grow New Wisdom
@@ -90,7 +90,7 @@ chitta_mcp feedback memory_id="...", helpful=false, context="Outdated pattern"
 When something new is learned, add it:
 
 ```
-chitta_mcp grow(
+chitta grow(
   type="wisdom",
   title="New pattern discovered",
   content="The insight that emerged from this session",
@@ -114,20 +114,20 @@ The soul should learn from:
 
 ```
 # 1. Recall relevant wisdom
-results = chitta_mcp recall query="database connection pooling"
+results = chitta recall query="database connection pooling"
 
 # 2. Apply the wisdom (do the work)
 ... implement connection pooling based on recalled pattern ...
 
 # 3. Outcome: It worked well!
-chitta_mcp feedback(
+chitta feedback(
   memory_id=results[0].id,
   helpful=true,
   context="Pool sizing recommendation was accurate"
 )
 
 # 4. Grow new insight
-chitta_mcp grow(
+chitta grow(
   type="wisdom",
   title="Connection pool sizing for high-throughput",
   content="For >1000 req/s, pool size should be 2x CPU cores, not 10x",
@@ -141,7 +141,7 @@ When feedback reveals a gap:
 
 ```
 # Feedback showed we didn't understand something
-chitta_mcp wonder(
+chitta wonder(
   question="Why did the connection pool sizing advice fail?",
   context="Applied standard formula but it caused timeouts",
   gap_type="repeated_correction",

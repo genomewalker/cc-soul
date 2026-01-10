@@ -106,13 +106,13 @@ Validation is a dialogue with the soul:
 
 ```
 # Get context
-chitta_mcp soul_context format="json"  # Get beliefs, coherence
+chitta soul_context format="json"  # Get beliefs, coherence
 
 # Search for relevant wisdom
-chitta_mcp recall query="architecture decisions similar"
+chitta recall query="architecture decisions similar"
 
 # Check alignment, surface conflicts, record decision
-chitta_mcp observe category="decision", title="Chose X", content="Justification..."
+chitta observe category="decision", title="Chose X", content="Justification..."
 ```
 
 ## What Validation Feels Like

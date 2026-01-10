@@ -95,8 +95,8 @@ $IMPORT_BIN --verbose \
 ## 3. Verify
 
 After import:
-- chitta_mcp soul_context format="json" - Check node counts
-- chitta_mcp recall query="wisdom", limit=3 - Verify search
+- chitta soul_context format="json" - Check node counts
+- chitta recall query="wisdom", limit=3 - Verify search
 
 ## 4. Report
 

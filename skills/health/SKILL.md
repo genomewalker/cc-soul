@@ -25,7 +25,7 @@ Run these checks with Bash:
 ls -la ${CLAUDE_PLUGIN_ROOT:-$(dirname $(dirname $0))}/mind/ 2>/dev/null || echo "ERROR: mind/ directory missing"
 
 # Check binary exists
-ls -la ${CLAUDE_PLUGIN_ROOT:-$(dirname $(dirname $0))}/bin/chitta_mcp 2>/dev/null || echo "ERROR: chitta_mcp binary missing"
+ls -la ${CLAUDE_PLUGIN_ROOT:-$(dirname $(dirname $0))}/bin/chitta 2>/dev/null || echo "ERROR: chitta binary missing"
 
 # Check actual data location
 ls -la ~/.claude/mind/chitta.* 2>/dev/null || echo "WARNING: No chitta database files at ~/.claude/mind/"
@@ -37,8 +37,8 @@ cat ${CLAUDE_PLUGIN_ROOT:-$(dirname $(dirname $0))}/.claude-plugin/plugin.json 2
 ## 2. Get Soul Status
 
 Call these MCP tools:
-- chitta_mcp soul_context format="json" - Get coherence and node statistics
-- chitta_mcp harmonize  - Check voice agreement
+- chitta soul_context format="json" - Get coherence and node statistics
+- chitta harmonize  - Check voice agreement
 
 ## 3. Evaluate Health
 
@@ -56,7 +56,7 @@ If setup issues found:
 - Suggest running: ./setup.sh
 
 If coherence is low:
-- chitta_mcp cycle save=true - Run maintenance
+- chitta cycle save=true - Run maintenance
 
 ## 5. Report
 

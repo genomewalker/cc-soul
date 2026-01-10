@@ -147,7 +147,7 @@ build_from_source() {
 
     # Verify binaries
     local all_built=true
-    for bin in chitta_mcp chitta_cli chitta_migrate chitta_import; do
+    for bin in chitta chitta_cli chitta_migrate chitta_import; do
         if [[ ! -x "$BIN_DIR/$bin" ]]; then
             echo "[cc-soul] WARNING: $bin not built" >&2
             all_built=false
@@ -222,7 +222,7 @@ main() {
     local current_version=$(grep '"version"' "$PLUGIN_DIR/.claude-plugin/plugin.json" 2>/dev/null | cut -d'"' -f4 || echo "0.0.0")
     local installed_version=$(cat "$MARKER" 2>/dev/null || echo "")
 
-    if [[ "$current_version" == "$installed_version" && -x "$BIN_DIR/chitta_mcp" && -f "$MODELS_DIR/model.onnx" ]]; then
+    if [[ "$current_version" == "$installed_version" && -x "$BIN_DIR/chitta" && -f "$MODELS_DIR/model.onnx" ]]; then
         exit 0  # Already installed
     fi
 
@@ -235,7 +235,7 @@ main() {
     local platform=$(detect_platform)
     local need_binaries=false
 
-    if [[ ! -x "$BIN_DIR/chitta_mcp" || "$current_version" != "$installed_version" ]]; then
+    if [[ ! -x "$BIN_DIR/chitta" || "$current_version" != "$installed_version" ]]; then
         need_binaries=true
     fi
 

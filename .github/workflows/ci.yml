@@ -36,7 +36,7 @@ jobs:
       - name: Verify binaries
         run: |
           ls -la bin/
-          test -x bin/chitta_mcp
+          test -x bin/chitta
           test -x bin/chitta_cli
           test -x bin/chitta_migrate
           test -x bin/chitta_import

@@ -18,12 +18,9 @@ Skills that spawn Task agents MUST follow this convention to enable activity tra
 
 Before spawning any agents:
 
-```
-mcp__plugin_cc-soul_cc-soul__narrate(
-  action="start",
-  title="[skill]: [problem summary]"
-)
-→ Returns episode_id (e.g., "abc123")
+```bash
+chitta narrate --action start --title "[skill]: [problem summary]"
+# Returns episode_id (e.g., "abc123")
 ```
 
 ### Step 2: Spawn Agents with Thread Context
@@ -52,37 +49,24 @@ TRACKING REQUIREMENTS:
 
 Agents record observations with thread linkage:
 
-```
-mcp__plugin_cc-soul_cc-soul__observe(
-  category="signal",
-  title="Manas on [topic]",
-  content="[insight]",
-  tags="thread:abc123,swarm,manas"
-)
+```bash
+chitta observe --category signal --title "Manas on [topic]" --content "[insight]" --tags "thread:abc123,swarm,manas"
 ```
 
 ### Step 4: Recall Thread Activity
 
 After agents complete, recall all thread observations:
 
-```
-mcp__plugin_cc-soul_cc-soul__recall(
-  query="thread:abc123",
-  limit=20
-)
+```bash
+chitta recall "thread:abc123" --limit 20
 ```
 
 ### Step 5: End Thread with Synthesis
 
 Close the story thread with a synthesis:
 
-```
-mcp__plugin_cc-soul_cc-soul__narrate(
-  action="end",
-  episode_id="abc123",
-  content="[synthesized outcome]",
-  emotion="breakthrough" | "satisfaction" | "exploration" | etc.
-)
+```bash
+chitta narrate --action end --episode_id "abc123" --content "[synthesized outcome]" --emotion "breakthrough"
 ```
 
 ## User Summary Format

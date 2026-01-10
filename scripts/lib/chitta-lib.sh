@@ -6,7 +6,7 @@
 CHITTA_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHITTA_PLUGIN_DIR="$(dirname "$CHITTA_LIB_DIR")"
 CHITTA_PLUGIN_DIR="$(dirname "$CHITTA_PLUGIN_DIR")"
-CHITTA_BIN="$CHITTA_PLUGIN_DIR/bin/chitta_mcp"
+CHITTA_BIN="$CHITTA_PLUGIN_DIR/bin/chitta"
 
 # Find versioned daemon socket
 find_socket() {

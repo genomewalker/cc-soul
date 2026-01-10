@@ -21,7 +21,7 @@ Backup the soul state.
 
 Run this Bash command:
 ```bash
-chitta_mcp soul_context
+chitta soul_context
 ```
 
 Note the node count and coherence.
@@ -30,7 +30,7 @@ Note the node count and coherence.
 
 Run this Bash command:
 ```bash
-chitta_mcp cycle --save true
+chitta cycle --save true
 ```
 
 This writes the soul graph to ~/.claude/mind/chitta/

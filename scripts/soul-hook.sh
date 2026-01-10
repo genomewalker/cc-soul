@@ -6,7 +6,7 @@
 #
 # Architecture:
 #   - Uses daemon socket directly for fast queries (no process spawn)
-#   - Falls back to chitta_mcp thin client if socket unavailable
+#   - Falls back to chitta thin client if socket unavailable
 #   - Never uses direct mode (slow model loading)
 
 set -e
@@ -16,7 +16,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
 
 # Paths
-CHITTA_BIN="$PLUGIN_DIR/bin/chitta_mcp"
+CHITTA_BIN="$PLUGIN_DIR/bin/chitta"
 SESSION_FILE="${HOME}/.claude/mind/.session_state"
 LEAN_MODE="${CC_SOUL_LEAN:-false}"  # Set CC_SOUL_LEAN=true for minimal context
 

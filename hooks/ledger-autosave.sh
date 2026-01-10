@@ -17,7 +17,7 @@ ACTION="${1:-save}"
 SESSION_ID="${2:-$(date +%Y%m%d-%H%M%S)}"
 
 # Chitta MCP socket or stdio
-CHITTA_MCP="${CHITTA_MCP:-$HOME/.claude/bin/chitta_mcp}"
+CHITTA_MCP="${CHITTA_MCP:-$HOME/.claude/bin/chitta}"
 
 # Build JSON-RPC request
 build_request() {
@@ -51,7 +51,7 @@ send_request() {
     if [[ -x "$CHITTA_MCP" ]]; then
         echo "$request" | "$CHITTA_MCP" 2>/dev/null | head -1
     else
-        echo '{"error": "chitta_mcp not found"}' >&2
+        echo '{"error": "chitta not found"}' >&2
         return 1
     fi
 }

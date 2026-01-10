@@ -38,8 +38,8 @@ rm -f "$FAST_PATH/io_test"
 MIND_PATH="$HOME/.claude/mind"
 FAST_PATH="<user-provided-path>"
 
-# Kill chitta_mcp first
-pkill -9 chitta_mcp 2>/dev/null
+# Kill chitta first
+pkill -9 chitta 2>/dev/null
 sleep 1
 
 # Create fast storage directory

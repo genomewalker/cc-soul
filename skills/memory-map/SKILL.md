@@ -18,8 +18,8 @@ their basins, session context, and optionally the neighborhood around a specific
 
 ```
 # Step 1: Get soul state and attractors
-chitta_mcp soul_context format="json"
-chitta_mcp attractors max_attractors=7
+chitta soul_context format="json"
+chitta attractors max_attractors=7
 
 # Step 2: Render ASCII summary
 === Soul Memory Map ===
@@ -55,7 +55,7 @@ Focus on attractor basins with more detail:
 
 ```
 # Get attractors with higher limit
-chitta_mcp attractors max_attractors=10
+chitta attractors max_attractors=10
 
 # Render detailed basin view
 === Attractor Basins ===
@@ -74,10 +74,10 @@ chitta_mcp attractors max_attractors=10
 
 ```
 # Step 1: Search with dense zoom to get edges
-chitta_mcp recall query="<text>", zoom="dense", limit=8
+chitta recall query="<text>", zoom="dense", limit=8
 
 # Step 2: Get soul state for context
-chitta_mcp soul_context format="json"
+chitta soul_context format="json"
 
 # Step 3: Render neighborhood
 === Memory Neighborhood: "<query>" ===
@@ -103,7 +103,7 @@ graph LR
 
 ```
 # Get full session context with ledger
-chitta_mcp soul_context format="json", include_ledger=true
+chitta soul_context format="json", include_ledger=true
 
 # Render session state
 === Session Context ===

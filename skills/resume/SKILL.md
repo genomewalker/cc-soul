@@ -20,7 +20,7 @@ The ledger is the primary source of continuity - it captures what was happening:
 
 ```
 # Load the previous session ledger
-chitta_mcp ledger action="load"
+chitta ledger action="load"
 ```
 
 The ledger contains:
@@ -37,9 +37,9 @@ git log --oneline -5    # Recent commits
 git diff --stat         # Uncommitted changes
 
 # Query soul for additional context
-chitta_mcp soul_context format="json"  # Includes ledger
-chitta_mcp intend action="list"
-chitta_mcp narrate action="list"  # Story threads
+chitta soul_context format="json"  # Includes ledger
+chitta intend action="list"
+chitta narrate action="list"  # Story threads
 ```
 
 ### 3. Pratyabhijñā: Semantic Recognition
@@ -48,13 +48,13 @@ Use recall to find semantically similar past work:
 
 ```
 # What was I doing?
-chitta_mcp recall query="[current directory/file names]"
+chitta recall query="[current directory/file names]"
 
 # What patterns apply?
-chitta_mcp recall query="[detected task type: debugging/feature/refactor]"
+chitta recall query="[detected task type: debugging/feature/refactor]"
 
 # What should I remember?
-chitta_mcp voices query="resuming work context", voice="chitta", limit=5
+chitta voices query="resuming work context", voice="chitta", limit=5
 ```
 
 Chitta (memory voice) is especially relevant for recognition - it finds practical wisdom from experience.
@@ -74,7 +74,7 @@ From the ledger and gathered signals, recognize:
 ### 5. Consult Voices on Continuation
 
 ```
-chitta_mcp voices query="how should I continue this work?", voice="all", limit=3
+chitta voices query="how should I continue this work?", voice="all", limit=3
 ```
 
 - **Manas**: Quick intuition on next step
@@ -86,7 +86,7 @@ chitta_mcp voices query="how should I continue this work?", voice="all", limit=3
 
 If there were active intentions:
 ```
-chitta_mcp intend action="list"
+chitta intend action="list"
 ```
 
 Check if they're still relevant. If so, acknowledge them. If not, consider fulfilling or abandoning.
@@ -95,7 +95,7 @@ Check if they're still relevant. If so, acknowledge them. If not, consider fulfi
 
 Begin a new episode that continues the story:
 ```
-chitta_mcp narrate(
+chitta narrate(
   action="start",
   title="Resuming: [what we're continuing]",
   content="Recognized context: [summary]",

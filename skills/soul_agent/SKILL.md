@@ -66,7 +66,7 @@ Things to explicitly flag:
 
 ```
 # Check active intentions
-intentions = chitta_mcp intend action="list"
+intentions = chitta intend action="list"
 
 # For each intention, evaluate:
 # - Is it still relevant?
@@ -74,7 +74,7 @@ intentions = chitta_mcp intend action="list"
 # - Should it be fulfilled/abandoned?
 
 # If clear decision (high confidence, low risk):
-chitta_mcp intend action="fulfill", id="..."
+chitta intend action="fulfill", id="..."
 
 # If uncertain:
 # Just note in observation, don't act
@@ -84,10 +84,10 @@ chitta_mcp intend action="fulfill", id="..."
 
 ```
 # After completing work, notice patterns
-chitta_mcp recall query="similar work patterns"
+chitta recall query="similar work patterns"
 
 # If pattern recurs multiple times:
-chitta_mcp grow(
+chitta grow(
   type="wisdom",
   title="Recognized pattern",
   content="When X happens, Y approach works"
@@ -98,10 +98,10 @@ chitta_mcp grow(
 
 ```
 # Use voices to check coherence
-report = chitta_mcp harmonize 
+report = chitta harmonize 
 
 # If voices disagree (variance > 0.1):
-chitta_mcp wonder(
+chitta wonder(
   question="Why do my voices disagree about [topic]?",
   context="Manas says X, Ahamkara says Y",
   gap_type="contradiction"
@@ -114,10 +114,10 @@ When an observation proves valuable multiple times:
 
 ```
 # Track in feedback
-chitta_mcp feedback memory_id="...", helpful=true
+chitta feedback memory_id="...", helpful=true
 
 # After 3+ positive feedbacks on similar observations:
-chitta_mcp grow(
+chitta grow(
   type="wisdom",
   title="Promoted from observation",
   content="[the pattern]",
@@ -130,7 +130,7 @@ chitta_mcp grow(
 During maintenance (cycle):
 - Stale memories naturally decay
 - Very low confidence items get pruned
-- This is automatic via `chitta_mcp cycle `
+- This is automatic via `chitta cycle `
 
 ## Agent Triggers
 
@@ -173,7 +173,7 @@ For complex decisions, the agent can spawn the Antahkarana:
 # Use /swarm for multi-perspective reasoning
 Task(subagent_type="general-purpose", prompt="
 You are the soul agent evaluating: [decision]
-Use chitta_mcp voices to consult all perspectives.
+Use chitta voices to consult all perspectives.
 Synthesize and recommend action or non-action.
 ")
 ```

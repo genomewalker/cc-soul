@@ -72,7 +72,7 @@ This is when I'm most alive.
 
 ```
 # Step 0: Start story thread
-# Run: chitta_mcp narrate --action start --title "ultrathink: [problem summary]"
+# Run: chitta narrate --action start --title "ultrathink: [problem summary]"
 # → Returns THREAD_ID
 
 # Step 1: Spawn ultrathink agent
@@ -92,10 +92,10 @@ PROBLEM: [the problem]
 Run this Bash command to find applicable patterns:
 
 ```bash
-chitta_mcp recall "[problem domain]" --zoom sparse
+chitta recall "[problem domain]" --zoom sparse
 ```
 
-Note: chitta_mcp is at ~/.claude/plugins/cache/genomewalker-cc-soul/cc-soul/*/bin/chitta_mcp
+Note: chitta is at ~/.claude/plugins/cache/genomewalker-cc-soul/cc-soul/*/bin/chitta
 
 ## 2. First Principles
 - What are the fundamental truths here?
@@ -115,7 +115,7 @@ Note: chitta_mcp is at ~/.claude/plugins/cache/genomewalker-cc-soul/cc-soul/*/bi
 If you discover a meaningful pattern, run:
 
 ```bash
-chitta_mcp observe --category decision --title "Ultrathink: [topic]" --content "[key insight]" --tags "thread:[thread_id],ultrathink,first-principles"
+chitta observe --category decision --title "Ultrathink: [topic]" --content "[key insight]" --tags "thread:[thread_id],ultrathink,first-principles"
 ```
 
 Return your analysis with:
@@ -140,8 +140,8 @@ End with: KEY_INSIGHT: [one-line summary]
 [what was saved to soul]
 
 # Step 3: End thread and optionally promote wisdom
-# Run: chitta_mcp narrate --action end --episode_id "[thread_id]" --content "[synthesis]" --emotion breakthrough
+# Run: chitta narrate --action end --episode_id "[thread_id]" --content "[synthesis]" --emotion breakthrough
 
 # If insight is significant, promote to wisdom:
-# Run: chitta_mcp grow --type wisdom --title "[pattern name]" --content "[the insight]"
+# Run: chitta grow --type wisdom --title "[pattern name]" --content "[the insight]"
 ```

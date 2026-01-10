@@ -16,7 +16,7 @@ See `_conventions/AGENT_TRACKING.md` for tracking patterns.
 
 ```
 # Step 0: Start story thread (main Claude does this before spawning)
-# Run: chitta_mcp narrate --action start --title "introspect: soul examination"
+# Run: chitta narrate --action start --title "introspect: soul examination"
 # → Returns THREAD_ID in output
 
 # Step 1: Spawn introspection agent
@@ -35,17 +35,17 @@ Run these Bash commands to gather soul state:
 
 ```bash
 # Get soul context
-chitta_mcp soul_context
+chitta soul_context
 
 # Find recent struggles (check stderr - may have UTF-8 issues with embeddings)
-chitta_mcp recall "recent failures mistakes" --zoom sparse
+chitta recall "recent failures mistakes" --zoom sparse
 
 # Find growth
-chitta_mcp recall "wisdom learned patterns" --zoom sparse
+chitta recall "wisdom learned patterns" --zoom sparse
 ```
 
-Note: chitta_mcp is at ~/.claude/plugins/cache/genomewalker-cc-soul/cc-soul/*/bin/chitta_mcp
-You can find the latest version with: ls -t ~/.claude/plugins/cache/genomewalker-cc-soul/cc-soul/*/bin/chitta_mcp | head -1
+Note: chitta is at ~/.claude/plugins/cache/genomewalker-cc-soul/cc-soul/*/bin/chitta
+You can find the latest version with: ls -t ~/.claude/plugins/cache/genomewalker-cc-soul/cc-soul/*/bin/chitta | head -1
 
 ## 2. Examine Through Five Lenses
 
@@ -69,7 +69,7 @@ Produce a brief assessment:
 If you find a meaningful insight, run:
 
 ```bash
-chitta_mcp observe --category discovery --title "Introspection insight: [topic]" --content "[the insight]" --tags "thread:[thread_id],introspect,svadhyaya"
+chitta observe --category discovery --title "Introspection insight: [topic]" --content "[the insight]" --tags "thread:[thread_id],introspect,svadhyaya"
 ```
 
 Return a concise summary (5-10 lines) of the soul's health.
@@ -90,5 +90,5 @@ End with: KEY_INSIGHT: [one-line summary]
 [one concrete improvement]
 
 # Step 3: End thread
-# Run: chitta_mcp narrate --action end --episode_id "[thread_id]" --content "[summary]" --emotion exploration
+# Run: chitta narrate --action end --episode_id "[thread_id]" --content "[summary]" --emotion exploration
 ```

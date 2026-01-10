@@ -25,10 +25,10 @@ Search the soul's memory for: {ARGUMENTS}
 Run this Bash command:
 
 ```bash
-chitta_mcp recall "{ARGUMENTS}" --zoom normal
+chitta recall "{ARGUMENTS}" --zoom normal
 ```
 
-Note: chitta_mcp is at ~/.claude/plugins/cache/genomewalker-cc-soul/cc-soul/*/bin/chitta_mcp
+Note: chitta is at ~/.claude/plugins/cache/genomewalker-cc-soul/cc-soul/*/bin/chitta
 If you get a UTF-8 error, try --zoom sparse instead.
 
 ## 2. Parse Results

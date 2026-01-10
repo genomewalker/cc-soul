@@ -69,6 +69,14 @@ mind.hot
 mind.hot.lock
 mind.warm
 mind.wal
+mind.binary
+mind.connections
+mind.edges
+mind.meta
+mind.payloads
+mind.tags
+mind.unified
+mind.vectors
 mind/
 
 # Runtime data

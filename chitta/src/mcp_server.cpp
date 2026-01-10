@@ -1,17 +1,17 @@
-// Chitta MCP Server - Multi-mode operation
-// Model Context Protocol server for soul integration with Claude
+// Chitta CLI - Multi-mode memory operations
+// Command-line interface for soul integration
 //
 // Modes:
-//   CLI mode:    chitta_mcp <tool> [args...]  - Direct tool invocation
-//   Thin client: chitta_mcp                   - Forward JSON-RPC to daemon
-//   Direct mode: chitta_mcp --direct          - Standalone server
+//   CLI mode:    chitta <tool> [args...]  - Direct tool invocation
+//   Thin client: chitta                   - Forward JSON-RPC to daemon
+//   Direct mode: chitta --direct          - Standalone mode (legacy)
 //
 // CLI Examples:
-//   chitta_mcp recall "query"
-//   chitta_mcp recall "query" --zoom sparse
-//   chitta_mcp soul_context
-//   chitta_mcp observe --category decision --title "..." --content "..."
-//   chitta_mcp grow --type wisdom --title "..." --content "..."
+//   chitta recall "query"
+//   chitta recall "query" --zoom sparse
+//   chitta soul_context
+//   chitta observe --category decision --title "..." --content "..."
+//   chitta grow --type wisdom --title "..." --content "..."
 //
 // Options:
 //   --socket-path PATH  Unix socket path (default: /tmp/chitta.sock)
@@ -44,7 +44,7 @@ void signal_handler(int sig) {
     g_shutdown_requested.store(true);
     if (g_mind) {
         g_mind->close();
-        std::cerr << "[chitta_mcp] Signal received, state saved\n";
+        std::cerr << "[chitta] Signal received, state saved\n";
     }
     std::_Exit(0);
 }
@@ -60,10 +60,10 @@ static const std::set<std::string> KNOWN_TOOLS = {
 
 void print_usage(const char* prog) {
     std::cerr << "Usage:\n"
-              << "  " << prog << " <tool> [args...]     CLI mode: invoke tool directly\n"
-              << "  " << prog << " [options]            MCP mode: JSON-RPC server\n"
+              << "  " << prog << " <tool> [args...]     Invoke tool directly\n"
+              << "  " << prog << " [options]            Interactive mode (JSON-RPC)\n"
               << "\n"
-              << "CLI Examples:\n"
+              << "Examples:\n"
               << "  " << prog << " recall \"query\"\n"
               << "  " << prog << " recall \"query\" --zoom sparse\n"
               << "  " << prog << " soul_context\n"
@@ -74,7 +74,7 @@ void print_usage(const char* prog) {
               << "       soul_context, attractors, lens, intend, wonder, answer,\n"
               << "       narrate, ledger, cycle, feedback, connect\n"
               << "\n"
-              << "MCP Options:\n"
+              << "Options:\n"
               << "  --socket-path PATH  Unix socket path (default: /tmp/chitta-VERSION.sock)\n"
               << "  --direct            Direct mode: open storage locally (legacy)\n"
               << "  --path PATH         Path to mind storage (direct mode only)\n"
@@ -82,7 +82,7 @@ void print_usage(const char* prog) {
               << "  --model PATH        Path to ONNX model file (direct mode only)\n"
               << "  --vocab PATH        Path to vocabulary file (direct mode only)\n"
 #endif
-              << "  --json              CLI mode: output raw JSON instead of text\n"
+              << "  --json              Output raw JSON instead of text\n"
               << "  --help              Show this help message\n";
 }
 
@@ -157,7 +157,7 @@ int run_cli(const std::string& socket_path, const std::string& tool,
         {"params", {
             {"protocolVersion", "2024-11-05"},
             {"capabilities", json::object()},
-            {"clientInfo", {{"name", "chitta_mcp_cli"}, {"version", CHITTA_VERSION}}}
+            {"clientInfo", {{"name", "chitta_cli"}, {"version", CHITTA_VERSION}}}
         }},
         {"id", 0}
     };
@@ -223,12 +223,12 @@ int run_thin_client(const std::string& socket_path) {
 
     // Try to connect, auto-start daemon if needed
     if (!client.ensure_daemon_running()) {
-        std::cerr << "[chitta_mcp] Failed to connect to daemon: " << client.last_error() << "\n";
+        std::cerr << "[chitta] Failed to connect to daemon: " << client.last_error() << "\n";
         return 1;
     }
 
-    std::cerr << "[chitta_mcp] Connected to daemon at " << socket_path << "\n";
-    std::cerr << "[chitta_mcp] Listening on stdin...\n";
+    std::cerr << "[chitta] Connected to daemon at " << socket_path << "\n";
+    std::cerr << "[chitta] Listening on stdin...\n";
 
     // Forward requests
     std::string line;
@@ -240,15 +240,15 @@ int run_thin_client(const std::string& socket_path) {
             std::cout << *response << "\n";
             std::cout.flush();
         } else {
-            std::cerr << "[chitta_mcp] Request failed: " << client.last_error() << "\n";
+            std::cerr << "[chitta] Request failed: " << client.last_error() << "\n";
 
             // Try to reconnect
             client.disconnect();
             if (!client.ensure_daemon_running()) {
-                std::cerr << "[chitta_mcp] Reconnection failed, exiting\n";
+                std::cerr << "[chitta] Reconnection failed, exiting\n";
                 return 1;
             }
-            std::cerr << "[chitta_mcp] Reconnected to daemon\n";
+            std::cerr << "[chitta] Reconnected to daemon\n";
 
             // Retry the request
             response = client.request(line);
@@ -263,7 +263,7 @@ int run_thin_client(const std::string& socket_path) {
         }
     }
 
-    std::cerr << "[chitta_mcp] Shutdown complete\n";
+    std::cerr << "[chitta] Shutdown complete\n";
     return 0;
 }
 
@@ -287,13 +287,13 @@ int run_direct(const std::string& mind_path,
             auto yantra = std::make_shared<chitta::AntahkaranaYantra>(yantra_config);
             if (yantra->awaken(model_path, vocab_path)) {
                 mind->attach_yantra(yantra);
-                std::cerr << "[chitta_mcp] Yantra attached: " << model_path << "\n";
+                std::cerr << "[chitta] Yantra attached: " << model_path << "\n";
             } else {
-                std::cerr << "[chitta_mcp] Warning: Failed to awaken yantra: "
+                std::cerr << "[chitta] Warning: Failed to awaken yantra: "
                           << yantra->error() << "\n";
             }
         } catch (const std::exception& e) {
-            std::cerr << "[chitta_mcp] Warning: Failed to load yantra: " << e.what() << "\n";
+            std::cerr << "[chitta] Warning: Failed to load yantra: " << e.what() << "\n";
         }
     }
 #else
@@ -303,7 +303,7 @@ int run_direct(const std::string& mind_path,
 
     // Open mind
     if (!mind->open()) {
-        std::cerr << "[chitta_mcp] Error: Failed to open mind at " << mind_path << "\n";
+        std::cerr << "[chitta] Error: Failed to open mind at " << mind_path << "\n";
         return 1;
     }
 
@@ -313,17 +313,17 @@ int run_direct(const std::string& mind_path,
     std::signal(SIGINT, signal_handler);
     std::signal(SIGHUP, signal_handler);
 
-    std::cerr << "[chitta_mcp] Direct mode: Mind opened: " << mind->size() << " nodes\n";
-    std::cerr << "[chitta_mcp] Yantra ready: " << (mind->has_yantra() ? "yes" : "no") << "\n";
-    std::cerr << "[chitta_mcp] Listening on stdin...\n";
+    std::cerr << "[chitta] Direct mode: Mind opened: " << mind->size() << " nodes\n";
+    std::cerr << "[chitta] Yantra ready: " << (mind->has_yantra() ? "yes" : "no") << "\n";
+    std::cerr << "[chitta] Listening on stdin...\n";
 
-    // Run MCP server
+    // Run server (JSON-RPC protocol)
     chitta::MCPServer server(mind, "chitta");
     server.run();
 
     // Cleanup
     mind->close();
-    std::cerr << "[chitta_mcp] Shutdown complete\n";
+    std::cerr << "[chitta] Shutdown complete\n";
 
     return 0;
 }
@@ -355,7 +355,7 @@ int main(int argc, char* argv[]) {
         return run_cli(socket_path, tool, argc, argv, 2, json_output);
     }
 
-    // Parse arguments for MCP mode
+    // Parse arguments for interactive mode
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--socket-path") == 0 && i + 1 < argc) {
             socket_path = argv[++i];

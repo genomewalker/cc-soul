@@ -25,7 +25,7 @@ project=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 call_mcp() {
     local method="$1"
     local params="$2"
-    local bin="$PLUGIN_DIR/bin/chitta_mcp"
+    local bin="$PLUGIN_DIR/bin/chitta"
     local request="{\"jsonrpc\":\"2.0\",\"method\":\"tools/call\",\"params\":{\"name\":\"$method\",\"arguments\":$params},\"id\":1}"
     echo "$request" | "$bin" --path "$MIND_PATH" --model "$MODEL_PATH" --vocab "$VOCAB_PATH" 2>/dev/null | grep -v '^\[chitta' | jq -r '.result.content[0].text' 2>/dev/null || true
 }

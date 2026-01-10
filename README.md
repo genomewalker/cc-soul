@@ -209,7 +209,7 @@ cc-soul/
 │   └── smart-install.sh    # Auto-installation
 ├── commands/               # Plugin commands
 ├── bin/                    # Compiled binaries
-│   ├── chitta_mcp          # MCP server
+│   ├── chitta          # MCP server
 │   ├── chitta_cli          # CLI tool
 │   └── ...
 └── docs/                   # Documentation

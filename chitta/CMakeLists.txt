@@ -111,13 +111,15 @@ if(CHITTA_BUILD_TESTS)
     add_test(NAME chitta_test COMMAND chitta_test)
 endif()
 
-# MCP server executable (thin client with socket support)
+# CLI tool for memory operations (thin client with socket support)
+# Output as 'chitta' binary (target named chitta_tool to avoid library conflict)
 if(CHITTA_BUILD_MCP)
-    add_executable(chitta_mcp
+    add_executable(chitta_tool
         src/mcp_server.cpp
         src/socket_client.cpp
     )
-    target_link_libraries(chitta_mcp PRIVATE chitta)
+    set_target_properties(chitta_tool PROPERTIES OUTPUT_NAME chitta)
+    target_link_libraries(chitta_tool PRIVATE chitta)
 endif()
 
 # CLI tool (includes socket server/client for daemon mode)

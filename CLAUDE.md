@@ -240,14 +240,14 @@ The pattern is a seed. I grow the full insight.
 
 ### Advanced Operations (rare)
 
-For special cases, all 19 daemon tools are available via `chitta_mcp`:
+For special cases, all 19 daemon tools are available via `chitta`:
 - `soul_context`, `recall`, `resonate`, `full_resonate`
 - `grow`, `observe`, `update`, `feedback`
 - `intend`, `wonder`, `answer`
 - `lens`, `attractors`, `cycle`
 - `narrate`, `ledger`, `connect`, `recall_by_tag`
 
-Access via hooks' `call_mcp` function or pipe directly to `chitta_mcp`.
+Access via hooks' `call_mcp` function or pipe directly to `chitta`.
 Only needed for: deep zoom recalls, specific tag searches, explicit feedback.
 
 ## Session Continuity

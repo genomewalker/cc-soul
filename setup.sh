@@ -96,7 +96,7 @@ echo "  Building..."
 make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4) > /dev/null
 
 # Verify all binaries
-BINARIES="chitta_mcp chitta_cli chitta_migrate chitta_import chitta_test"
+BINARIES="chitta chitta_cli chitta_migrate chitta_import chitta_test"
 BUILD_OK=true
 for bin in $BINARIES; do
     if [ -f "$BIN_DIR/$bin" ]; then

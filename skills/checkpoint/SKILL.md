@@ -97,7 +97,7 @@ Checkpoints feed the soul:
 After gathering the checkpoint information, save it to the ledger:
 
 ```
-chitta_mcp ledger(
+chitta ledger(
   action="save",
   session_id="checkpoint-<timestamp>",
   soul_state={
@@ -119,7 +119,7 @@ chitta_mcp ledger(
 
 Then run a cycle to persist:
 ```
-chitta_mcp cycle save=true
+chitta cycle save=true
 ```
 
 ## What This Feels Like
