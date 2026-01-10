@@ -10,6 +10,7 @@
 #include "tools/memory.hpp"
 #include "tools/learning.hpp"
 #include "../mind.hpp"
+#include "../version.hpp"
 #include <unordered_map>
 #include <string>
 #include <sstream>
@@ -103,7 +104,7 @@ private:
             {"protocolVersion", "2024-11-05"},
             {"serverInfo", {
                 {"name", "chitta"},
-                {"version", "2.27.0"}
+                {"version", CHITTA_VERSION}
             }},
             {"capabilities", capabilities}
         });

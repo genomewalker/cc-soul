@@ -29,6 +29,10 @@ PLUGIN_DIR="$HOME/.claude/plugins/marketplaces/genomewalker-cc-soul"
 SETTINGS="$HOME/.claude/settings.json"
 PERM_RULE="mcp__plugin_cc-soul_cc-soul__*"
 
+# Kill any running daemon before rebuild (versioned sockets require matching version)
+pkill -f "chitta_cli daemon" 2>/dev/null && echo "[cc-soul] Stopped existing daemon" || true
+rm -f /tmp/chitta*.sock 2>/dev/null
+
 # Check cmake before deleting binaries
 if ! command -v cmake &>/dev/null; then
   echo "[cc-soul] ERROR: cmake required for building from source"

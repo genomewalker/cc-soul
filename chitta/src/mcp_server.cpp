@@ -44,7 +44,7 @@ void signal_handler(int sig) {
 void print_usage(const char* prog) {
     std::cerr << "Usage: " << prog << " [options]\n"
               << "Options:\n"
-              << "  --socket-path PATH  Unix socket path (default: /tmp/chitta.sock)\n"
+              << "  --socket-path PATH  Unix socket path (default: /tmp/chitta-VERSION.sock)\n"
               << "  --direct            Direct mode: open storage locally (legacy)\n"
               << "  --path PATH         Path to mind storage (direct mode only)\n"
 #ifdef CHITTA_WITH_ONNX
