@@ -1,8 +1,9 @@
 {
+  "description": "cc-soul hooks for persistent memory and identity",
   "hooks": {
     "SessionStart": [
       {
-        "matcher": "startup|resume|clear|compact",
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",
@@ -16,7 +17,8 @@
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/soul-hook.sh start"
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/soul-hook.sh start",
+            "timeout": 10
           },
           {
             "type": "command",
@@ -28,7 +30,7 @@
     ],
     "SessionEnd": [
       {
-        "matcher": "",
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",
@@ -37,14 +39,15 @@
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/soul-hook.sh end"
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/soul-hook.sh end",
+            "timeout": 10
           }
         ]
       }
     ],
     "UserPromptSubmit": [
       {
-        "matcher": "",
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",
@@ -73,18 +76,19 @@
     ],
     "PreCompact": [
       {
-        "matcher": "",
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/soul-hook.sh pre-compact"
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/soul-hook.sh pre-compact",
+            "timeout": 10
           }
         ]
       }
     ],
     "Stop": [
       {
-        "matcher": "",
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",
