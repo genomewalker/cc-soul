@@ -1,7 +1,7 @@
 #pragma once
-// MCP Types: Tool schema and result types
+// RPC Types: Tool schema and result types
 //
-// Defines the data structures used for MCP tool registration
+// Defines the data structures used for RPC tool registration
 // and execution results.
 
 #include "../types.hpp"  // For NodeType
@@ -9,11 +9,11 @@
 #include <string>
 #include <functional>
 
-namespace chitta::mcp {
+namespace chitta::rpc {
 
 using json = nlohmann::json;
 
-// Tool schema definition for MCP tools/list
+// Tool schema definition for RPC tools/list
 struct ToolSchema {
     std::string name;
     std::string description;
@@ -73,4 +73,4 @@ inline std::string node_type_to_string(int type) {
     return node_type_to_string_impl(type);
 }
 
-} // namespace chitta::mcp
+} // namespace chitta::rpc

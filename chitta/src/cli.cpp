@@ -13,7 +13,7 @@
 #include <chitta/migrations.hpp>
 #include <chitta/version.hpp>
 #include <chitta/socket_server.hpp>
-#include <chitta/mcp/handler.hpp>
+#include <chitta/rpc/handler.hpp>
 #ifdef CHITTA_WITH_ONNX
 #include <chitta/vak_onnx.hpp>
 #endif
@@ -373,7 +373,7 @@ int cmd_daemon(Mind& mind, int interval_seconds, const std::string& pid_file) {
     return 0;
 }
 
-// Socket server mode: daemon + MCP handler over Unix socket
+// Socket server mode: daemon + RPC handler over Unix socket
 int cmd_daemon_with_socket(Mind& mind, int interval_seconds,
                            const std::string& pid_file,
                            const std::string& socket_path) {
@@ -393,8 +393,8 @@ int cmd_daemon_with_socket(Mind& mind, int interval_seconds,
         return 1;
     }
 
-    // Create MCP request handler
-    mcp::Handler handler(&mind);
+    // Create RPC request handler
+    rpc::Handler handler(&mind);
 
     // Setup signal handlers
     std::signal(SIGTERM, daemon_signal_handler);
@@ -578,7 +578,7 @@ int main(int argc, char* argv[]) {
     std::string query;
     std::string format;  // For convert command
     std::string pid_file;  // For daemon mode
-    std::string socket_path = SocketServer::default_socket_path();  // Versioned socket
+    std::string socket_path = SocketServer::SOCKET_PATH;
 
     // Connect/query args
     std::string conn_from, conn_rel, conn_to;  // connect --from --rel --to

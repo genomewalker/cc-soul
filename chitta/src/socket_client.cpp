@@ -17,6 +17,7 @@
 #include <vector>
 #include <algorithm>
 #include <glob.h>
+#include <sstream>
 
 namespace chitta {
 
@@ -55,7 +56,7 @@ std::vector<std::string> find_installed_versions(const std::string& cache_base) 
     return versions;
 }
 
-// Find all chitta socket files in /tmp
+// Find all chitta socket files in /tmp (including versioned ones)
 std::vector<std::string> find_chitta_sockets() {
     std::vector<std::string> sockets;
     glob_t globbuf;
@@ -70,10 +71,40 @@ std::vector<std::string> find_chitta_sockets() {
     return sockets;
 }
 
+// Parse JSON field from response (simple parser for {"field": "value"} or {"field": 123})
+std::string json_get_string(const std::string& json, const std::string& key) {
+    std::string search = "\"" + key + "\":";
+    auto pos = json.find(search);
+    if (pos == std::string::npos) return "";
+
+    pos += search.length();
+    while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t')) ++pos;
+
+    if (pos < json.size() && json[pos] == '"') {
+        ++pos;
+        auto end = json.find('"', pos);
+        if (end != std::string::npos) {
+            return json.substr(pos, end - pos);
+        }
+    }
+    return "";
+}
+
+int json_get_int(const std::string& json, const std::string& key) {
+    std::string search = "\"" + key + "\":";
+    auto pos = json.find(search);
+    if (pos == std::string::npos) return 0;
+
+    pos += search.length();
+    while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t')) ++pos;
+
+    return std::atoi(json.c_str() + pos);
+}
+
 }  // anonymous namespace
 
 SocketClient::SocketClient()
-    : socket_path_(default_socket_path()) {}
+    : socket_path_(SOCKET_PATH) {}
 
 SocketClient::SocketClient(std::string socket_path)
     : socket_path_(std::move(socket_path)) {}
@@ -114,24 +145,61 @@ void SocketClient::disconnect() {
 }
 
 bool SocketClient::ensure_daemon_running() {
-    // Cleanup any legacy daemons first (transition period)
-    cleanup_legacy_daemon();
+    // Clean up old versioned sockets from previous versions
+    cleanup_versioned_sockets();
 
-    // Try to connect to versioned socket first
-    if (connect()) {
-        return true;
+    // Try to connect to any running daemon
+    if (try_connect_any_socket()) {
+        // Connected - check version compatibility
+        auto version = check_version();
+        if (version) {
+            bool compatible = chitta::version::protocol_compatible(
+                version->protocol_major, version->protocol_minor);
+
+            if (compatible) {
+                std::cerr << "[socket_client] Connected to compatible daemon v"
+                          << version->software << " (protocol "
+                          << version->protocol_major << "."
+                          << version->protocol_minor << ")\n";
+                return true;
+            }
+
+            // Incompatible - request graceful shutdown
+            std::cerr << "[socket_client] Daemon v" << version->software
+                      << " incompatible with client v" << CHITTA_VERSION
+                      << " - restarting\n";
+            request("shutdown");
+            disconnect();
+
+            // Wait for old daemon to stop
+            if (!wait_for_socket_gone(3000)) {
+                std::cerr << "[socket_client] Old daemon didn't stop, removing socket\n";
+                unlink(socket_path_.c_str());
+            }
+        } else {
+            // Version check failed - old daemon without version support
+            std::cerr << "[socket_client] Daemon doesn't support version check - restarting\n";
+            request("shutdown");
+            disconnect();
+            wait_for_socket_gone(3000);
+        }
     }
 
-    // Socket doesn't exist or daemon not running - acquire lock before starting
+    // No compatible daemon running - acquire lock before starting
     int lock_fd = acquire_daemon_lock();
 
-    // Re-check socket after acquiring lock (another process may have started daemon)
-    if (connect()) {
-        release_daemon_lock(lock_fd);
-        return true;
+    // Re-check after acquiring lock (another process may have started daemon)
+    if (try_connect_any_socket()) {
+        auto version = check_version();
+        if (version && chitta::version::protocol_compatible(
+                version->protocol_major, version->protocol_minor)) {
+            release_daemon_lock(lock_fd);
+            return true;
+        }
+        disconnect();
     }
 
-    // Still no daemon - start it
+    // Start new daemon
     bool started = start_daemon();
     release_daemon_lock(lock_fd);
 
@@ -147,6 +215,88 @@ bool SocketClient::ensure_daemon_running() {
     }
 
     return connect();
+}
+
+std::optional<DaemonVersion> SocketClient::check_version() {
+    // JSON-RPC request for version info
+    auto response = request(R"({"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"version_check"}})");
+    if (!response) {
+        return std::nullopt;
+    }
+
+    // Parse response - look for result.content[0].text or result directly
+    DaemonVersion ver;
+
+    // Try to find version fields in response
+    ver.software = json_get_string(*response, "software_version");
+    if (ver.software.empty()) {
+        ver.software = json_get_string(*response, "version");
+    }
+    if (ver.software.empty()) {
+        // Fallback: try to find in nested result
+        auto text_pos = response->find("\"text\":");
+        if (text_pos != std::string::npos) {
+            ver.software = json_get_string(*response, "software_version");
+        }
+    }
+
+    ver.protocol_major = json_get_int(*response, "protocol_major");
+    ver.protocol_minor = json_get_int(*response, "protocol_minor");
+
+    // If we got at least protocol version, consider it valid
+    if (ver.protocol_major > 0 || !ver.software.empty()) {
+        return ver;
+    }
+
+    return std::nullopt;
+}
+
+bool SocketClient::try_connect_any_socket() {
+    // First try the standard socket path
+    socket_path_ = SOCKET_PATH;
+    if (connect()) {
+        return true;
+    }
+
+    // Then try any other chitta sockets (versioned ones from older versions)
+    auto sockets = find_chitta_sockets();
+    for (const auto& sock : sockets) {
+        if (sock == SOCKET_PATH) continue;
+
+        socket_path_ = sock;
+        if (connect()) {
+            std::cerr << "[socket_client] Found running daemon at " << sock << "\n";
+            return true;
+        }
+    }
+
+    // Reset to standard path
+    socket_path_ = SOCKET_PATH;
+    return false;
+}
+
+void SocketClient::cleanup_versioned_sockets() {
+    // Remove stale versioned sockets (not our main socket)
+    auto sockets = find_chitta_sockets();
+    for (const auto& sock : sockets) {
+        if (sock == SOCKET_PATH) continue;
+
+        // Try to connect - if fails, it's stale
+        int test_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (test_fd < 0) continue;
+
+        struct sockaddr_un addr;
+        memset(&addr, 0, sizeof(addr));
+        addr.sun_family = AF_UNIX;
+        strncpy(addr.sun_path, sock.c_str(), sizeof(addr.sun_path) - 1);
+
+        if (::connect(test_fd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {
+            // Stale socket - remove it
+            std::cerr << "[socket_client] Removing stale socket: " << sock << "\n";
+            unlink(sock.c_str());
+        }
+        close(test_fd);
+    }
 }
 
 bool SocketClient::request_shutdown() {
@@ -173,38 +323,6 @@ bool SocketClient::wait_for_socket_gone(int timeout_ms) {
     return true;
 }
 
-void SocketClient::cleanup_legacy_daemon() {
-    // Find all chitta sockets
-    auto sockets = find_chitta_sockets();
-
-    for (const auto& sock : sockets) {
-        // Skip our versioned socket
-        if (sock == socket_path_) continue;
-
-        // Try to shutdown old daemons gracefully
-        std::cerr << "[socket_client] Found old daemon socket: " << sock << "\n";
-
-        SocketClient old_client(sock);
-        if (old_client.connect()) {
-            std::cerr << "[socket_client] Requesting shutdown of old daemon\n";
-            old_client.request("shutdown");
-            old_client.disconnect();
-
-            // Wait for old socket to disappear
-            for (int i = 0; i < 20 && access(sock.c_str(), F_OK) == 0; ++i) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            }
-
-            // Force remove if still exists
-            if (access(sock.c_str(), F_OK) == 0) {
-                unlink(sock.c_str());
-            }
-        } else {
-            // Stale socket file - remove it
-            unlink(sock.c_str());
-        }
-    }
-}
 
 bool SocketClient::start_daemon() {
     std::cerr << "[socket_client] Starting daemon...\n";

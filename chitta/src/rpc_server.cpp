@@ -21,7 +21,7 @@
 //   --vocab PATH        Path to vocabulary file (direct mode only)
 //   --json              CLI mode: output raw JSON instead of text
 
-#include <chitta/mcp.hpp>
+#include <chitta/rpc.hpp>
 #include <chitta/socket_client.hpp>
 #include <chitta/version.hpp>
 #include <set>
@@ -325,7 +325,7 @@ int run_direct(const std::string& mind_path,
     std::cerr << "[chitta] Listening on stdin...\n";
 
     // Run server (JSON-RPC protocol)
-    chitta::MCPServer server(mind, "chitta");
+    chitta::RpcServer server(mind, "chitta");
     server.run();
 
     // Cleanup
@@ -336,7 +336,7 @@ int run_direct(const std::string& mind_path,
 }
 
 int main(int argc, char* argv[]) {
-    std::string socket_path = chitta::SocketClient::default_socket_path();
+    std::string socket_path = chitta::SocketClient::SOCKET_PATH;
     std::string mind_path = "./mind";
     std::string model_path;
     std::string vocab_path;
@@ -376,7 +376,7 @@ int main(int argc, char* argv[]) {
         } else if (std::strcmp(argv[i], "--vocab") == 0 && i + 1 < argc) {
             vocab_path = argv[++i];
         } else if (std::strcmp(argv[i], "--json") == 0) {
-            json_output = true;  // Ignored in MCP mode
+            json_output = true;  // Ignored in RPC mode
         } else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
             print_usage(argv[0]);
             return 0;

@@ -12,7 +12,7 @@
 
 namespace chitta {
 
-// Message framing: newline-delimited JSON (same as MCP stdio)
+// Message framing: newline-delimited JSON (same as RPC stdio)
 bool ClientConnection::has_complete_message() const {
     return read_buffer.find('\n') != std::string::npos;
 }
@@ -27,7 +27,7 @@ std::string ClientConnection::extract_message() {
 }
 
 SocketServer::SocketServer()
-    : socket_path_(default_socket_path()) {}
+    : socket_path_(SOCKET_PATH) {}
 
 SocketServer::SocketServer(std::string socket_path)
     : socket_path_(std::move(socket_path)) {}

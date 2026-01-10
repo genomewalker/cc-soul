@@ -1,13 +1,13 @@
 #pragma once
-// MCP Protocol: JSON-RPC 2.0 helpers and error codes
+// RPC Protocol: JSON-RPC 2.0 helpers and error codes
 //
 // Provides utilities for building JSON-RPC requests and responses
-// compliant with the Model Context Protocol specification.
+// compliant with the JSON-RPC protocol specification.
 
 #include <nlohmann/json.hpp>
 #include <string>
 
-namespace chitta::mcp {
+namespace chitta::rpc {
 
 using json = nlohmann::json;
 
@@ -79,7 +79,7 @@ namespace error {
     constexpr int METHOD_NOT_FOUND = -32601;
     constexpr int INVALID_PARAMS = -32602;
     constexpr int INTERNAL_ERROR = -32603;
-    // MCP-specific errors
+    // RPC-specific errors
     constexpr int TOOL_NOT_FOUND = -32001;
     constexpr int TOOL_EXECUTION_ERROR = -32002;
 }
@@ -105,7 +105,7 @@ inline json make_error(const json& id, int code, const std::string& message) {
     };
 }
 
-// Build a tool call response (MCP content format)
+// Build a tool call response (RPC content format)
 inline json make_tool_response(const std::string& text, bool is_error = false,
                                 const json& structured = json()) {
     json content = json::array();
@@ -154,4 +154,4 @@ inline RequestInfo parse_request(const json& request) {
     };
 }
 
-} // namespace chitta::mcp
+} // namespace chitta::rpc

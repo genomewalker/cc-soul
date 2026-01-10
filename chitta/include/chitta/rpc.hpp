@@ -1,8 +1,8 @@
 #pragma once
-// MCP Server: Model Context Protocol for soul integration
+// RPC Server: Model Context Protocol for soul integration
 //
 // Implements JSON-RPC 2.0 over stdio for Claude integration.
-// This is not a minimal implementation - it is a proper MCP server
+// This is not a minimal implementation - it is a proper RPC server
 // with full protocol compliance and rich tool schemas.
 
 #include "mind.hpp"
@@ -34,7 +34,7 @@ namespace rpc_error {
     constexpr int METHOD_NOT_FOUND = -32601;
     constexpr int INVALID_PARAMS = -32602;
     constexpr int INTERNAL_ERROR = -32603;
-    // MCP-specific errors
+    // RPC-specific errors
     constexpr int TOOL_NOT_FOUND = -32001;
     constexpr int TOOL_EXECUTION_ERROR = -32002;
 }
@@ -100,10 +100,10 @@ struct ToolResult {
     json structured;
 };
 
-// MCP Server implementation
-class MCPServer {
+// RPC Server implementation
+class RpcServer {
 public:
-    explicit MCPServer(std::shared_ptr<Mind> mind, std::string server_name = "chitta")
+    explicit RpcServer(std::shared_ptr<Mind> mind, std::string server_name = "chitta")
         : mind_(std::move(mind))
         , server_name_(std::move(server_name))
         , running_(false)

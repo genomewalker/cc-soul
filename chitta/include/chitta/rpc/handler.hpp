@@ -1,9 +1,9 @@
 #pragma once
-// MCP Handler: Central request handler for all MCP tools
+// RPC Handler: Central request handler for all RPC tools
 //
 // This handler can be used by both:
 // - The socket server (daemon mode)
-// - The MCP stdio server (thin client mode, though it forwards to daemon)
+// - The RPC stdio server (thin client mode, though it forwards to daemon)
 
 #include "protocol.hpp"
 #include "types.hpp"
@@ -16,7 +16,7 @@
 #include <sstream>
 #include <ctime>
 
-namespace chitta::mcp {
+namespace chitta::rpc {
 
 using json = nlohmann::json;
 
@@ -740,6 +740,17 @@ private:
 
     void register_maintenance_tools() {
         tools_.push_back({
+            "version_check",
+            "Check daemon version and protocol compatibility.",
+            {
+                {"type", "object"},
+                {"properties", json::object()},
+                {"required", json::array()}
+            }
+        });
+        handlers_["version_check"] = [this](const json& p) { return tool_version_check(p); };
+
+        tools_.push_back({
             "cycle",
             "Run a maintenance cycle: decay, feedback, synthesis, attractors, and optionally regenerate embeddings for nodes with zero vectors.",
             {
@@ -757,6 +768,20 @@ private:
             }
         });
         handlers_["cycle"] = [this](const json& p) { return tool_cycle(p); };
+    }
+
+    ToolResult tool_version_check(const json& params) {
+        (void)params;
+        json result = {
+            {"software_version", CHITTA_VERSION},
+            {"protocol_major", CHITTA_PROTOCOL_VERSION_MAJOR},
+            {"protocol_minor", CHITTA_PROTOCOL_VERSION_MINOR}
+        };
+        std::ostringstream ss;
+        ss << "Chitta v" << CHITTA_VERSION
+           << " (protocol " << CHITTA_PROTOCOL_VERSION_MAJOR
+           << "." << CHITTA_PROTOCOL_VERSION_MINOR << ")";
+        return ToolResult::ok(ss.str(), result);
     }
 
     ToolResult tool_cycle(const json& params) {
@@ -822,4 +847,4 @@ private:
     }
 };
 
-} // namespace chitta::mcp
+} // namespace chitta::rpc

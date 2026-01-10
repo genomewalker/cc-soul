@@ -4,8 +4,8 @@
 // Connects to the soul daemon via Unix socket, with auto-start
 // capability if daemon is not running.
 //
-// Version-aware: Socket path includes version to ensure clients
-// always connect to compatible daemon. Old daemons are auto-restarted.
+// Protocol-versioned: Uses a single socket path. Version compatibility
+// is checked via handshake. Incompatible daemons are gracefully restarted.
 
 #include <chitta/version.hpp>
 #include <string>
@@ -13,19 +13,22 @@
 
 namespace chitta {
 
+// Version info returned by daemon
+struct DaemonVersion {
+    std::string software;      // e.g., "2.36.0"
+    int protocol_major = 0;
+    int protocol_minor = 0;
+};
+
 class SocketClient {
 public:
-    // Socket path includes version for automatic upgrade handling
-    static std::string default_socket_path() {
-        return std::string("/tmp/chitta-") + CHITTA_VERSION + ".sock";
-    }
-    // Legacy socket path for backwards compatibility during transition
-    static constexpr const char* LEGACY_SOCKET_PATH = "/tmp/chitta.sock";
+    // Single socket path - version checked via protocol handshake
+    static constexpr const char* SOCKET_PATH = "/tmp/chitta.sock";
     static constexpr const char* DAEMON_LOCK_PATH = "/tmp/chitta-daemon.lock";
     static constexpr int CONNECT_TIMEOUT_MS = 5000;
     static constexpr int RESPONSE_TIMEOUT_MS = 30000;
 
-    // Default constructor uses versioned socket path
+    // Default constructor uses standard socket path
     SocketClient();
     explicit SocketClient(std::string socket_path);
     ~SocketClient();
@@ -42,14 +45,16 @@ public:
     bool connected() const { return fd_ >= 0; }
 
     // Auto-start daemon if not running, verify version compatibility
-    // Returns true if daemon is running with compatible version
+    // Flow: find daemon → version check → compatible? use : restart
     bool ensure_daemon_running();
+
+    // Check daemon version (must be connected)
+    std::optional<DaemonVersion> check_version();
 
     // Request graceful daemon shutdown (for upgrades)
     bool request_shutdown();
 
     // Send JSON-RPC request, wait for response
-    // Returns nullopt on error
     std::optional<std::string> request(const std::string& json_rpc);
 
     // Error message from last failed operation
@@ -66,9 +71,10 @@ private:
     bool start_daemon();
     bool wait_for_socket(int timeout_ms);
     bool wait_for_socket_gone(int timeout_ms);
-    void cleanup_legacy_daemon();
-    int acquire_daemon_lock();  // Returns lock fd or -1 on failure
+    void cleanup_versioned_sockets();
+    int acquire_daemon_lock();
     void release_daemon_lock(int lock_fd);
+    bool try_connect_any_socket();
 };
 
 } // namespace chitta

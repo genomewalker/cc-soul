@@ -4,8 +4,8 @@
 // Provides JSON-RPC 2.0 over Unix socket for multi-client access
 // to the soul daemon. Uses poll() for non-blocking multiplexed I/O.
 //
-// Version-aware: Socket path includes version to ensure clients
-// always connect to compatible daemon.
+// Protocol-versioned: Uses single socket path. Version compatibility
+// is checked via protocol handshake (version_check tool).
 
 #include <chitta/version.hpp>
 #include <string>
@@ -35,16 +35,12 @@ struct ClientConnection {
 // Unix domain socket server for JSON-RPC 2.0
 class SocketServer {
 public:
-    // Socket path includes version for automatic upgrade handling
-    static std::string default_socket_path() {
-        return std::string("/tmp/chitta-") + CHITTA_VERSION + ".sock";
-    }
-    // Legacy constant for backwards compatibility
-    static constexpr const char* LEGACY_SOCKET_PATH = "/tmp/chitta.sock";
+    // Single socket path - version checked via protocol handshake
+    static constexpr const char* SOCKET_PATH = "/tmp/chitta.sock";
     static constexpr int MAX_CONNECTIONS = 32;
     static constexpr size_t MAX_MESSAGE_SIZE = 16 * 1024 * 1024;  // 16MB
 
-    // Default constructor uses versioned socket path
+    // Default constructor uses standard socket path
     SocketServer();
     explicit SocketServer(std::string socket_path);
     ~SocketServer();

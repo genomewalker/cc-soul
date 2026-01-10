@@ -36,7 +36,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../bin)
 
 # Options
 option(CHITTA_BUILD_TESTS "Build tests" ON)
-option(CHITTA_BUILD_MCP "Build MCP server executable" ON)
+option(CHITTA_BUILD_RPC "Build RPC server executable" ON)
 option(CHITTA_WITH_ONNX "Enable ONNX Runtime embeddings" ON)
 
 # Header-only library
@@ -50,7 +50,7 @@ target_include_directories(chitta INTERFACE
 find_package(Threads REQUIRED)
 target_link_libraries(chitta INTERFACE Threads::Threads roaring)
 
-# nlohmann/json for MCP server
+# nlohmann/json for RPC server
 find_package(nlohmann_json CONFIG QUIET)
 if(nlohmann_json_FOUND)
     target_link_libraries(chitta INTERFACE nlohmann_json::nlohmann_json)
@@ -113,9 +113,9 @@ endif()
 
 # CLI tool for memory operations (thin client with socket support)
 # Output as 'chitta' binary (target named chitta_tool to avoid library conflict)
-if(CHITTA_BUILD_MCP)
+if(CHITTA_BUILD_RPC)
     add_executable(chitta_tool
-        src/mcp_server.cpp
+        src/rpc_server.cpp
         src/socket_client.cpp
     )
     set_target_properties(chitta_tool PROPERTIES OUTPUT_NAME chitta)

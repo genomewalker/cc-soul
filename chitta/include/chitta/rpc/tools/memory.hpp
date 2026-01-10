@@ -1,5 +1,5 @@
 #pragma once
-// MCP Memory Tools: recall, resonate, full_resonate, recall_by_tag
+// RPC Memory Tools: recall, resonate, full_resonate, recall_by_tag
 //
 // Semantic search and retrieval operations on the soul's memory.
 
@@ -11,13 +11,13 @@
 #include <cmath>
 #include <unordered_set>
 
-namespace chitta::mcp::tools::memory {
+namespace chitta::rpc::tools::memory {
 
 using json = nlohmann::json;
 
 // Helper: sanitize text for JSON
 inline std::string safe_text(const std::string& text) {
-    return chitta::mcp::sanitize_utf8(text);
+    return chitta::rpc::sanitize_utf8(text);
 }
 
 // Helper: safe float-to-percentage conversion (handles NaN/infinity)
@@ -458,4 +458,4 @@ inline void register_handlers(Mind* mind,
     handlers["full_resonate"] = [mind](const json& p) { return full_resonate(mind, p); };
 }
 
-} // namespace chitta::mcp::tools::memory
+} // namespace chitta::rpc::tools::memory

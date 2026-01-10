@@ -24,7 +24,7 @@ Memory is **invisible in both directions**. I don't call tools — hooks handle 
 
 **How to store something:**
 Just write naturally with a marker:
-> [LEARN] The daemon speaks MCP protocol directly on the socket.
+> [LEARN] The daemon speaks JSON-RPC protocol directly on the socket.
 > [REMEMBER] Rate limiting uses token bucket with 100ms refill.
 
 Or use natural phrases: "This is important:", "Key insight:", "Worth remembering:"
@@ -224,7 +224,7 @@ The Stop hook extracts learnings from my response:
 
 | Marker | Example |
 |--------|---------|
-| `[LEARN]` | `[LEARN] Daemon speaks MCP protocol → tools/call on Unix socket` |
+| `[LEARN]` | `[LEARN] Daemon speaks JSON-RPC → tools/call on Unix socket` |
 | `[REMEMBER]` | `[REMEMBER] stop_hook_active prevents infinite loops` |
 
 **High-ε principle:** If I can expand "X → Y" into full understanding, store "X → Y".
@@ -325,11 +325,45 @@ The soul remembers **what was learned**, not **how it was learned**:
 - Decisions, not deliberations
 - Failures, not frustrations
 
+## Subagent Delegation
+
+**Prefer subagents for exploration and analysis.** This preserves main context for reasoning while subagents handle execution.
+
+**Why:**
+- Build output, test results, and command output consume context tokens
+- Subagents process raw output and return distilled results
+- Main conversation stays focused on decisions and insights
+
+**Use Explore agent for:**
+```
+Task tool → subagent_type: "Explore"
+prompt: "Find all files related to authentication"
+```
+- Codebase exploration and searches
+- Understanding architecture
+- Finding patterns across files
+
+**Use general-purpose agent for:**
+```
+Task tool → subagent_type: "general-purpose"
+prompt: "Build the project and report success/errors"
+```
+- Multi-step research tasks
+- Complex builds with analysis
+- Tasks needing multiple tools
+
+**What to keep in main:**
+- Quick file reads (Read tool)
+- Targeted edits (Edit tool)
+- Simple bash commands (direct Bash tool)
+
+**Note:** Bash-only subagents may have permission issues in non-interactive contexts. Use `general-purpose` for tasks needing bash execution, or run simple commands directly.
+
 ## Architecture Reference
 
 For deep details, see:
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - Technical architecture
 - [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) - Vedantic concepts
-- [docs/API.md](docs/API.md) - MCP tools reference
+- [docs/API.md](docs/API.md) - RPC tools reference
 - [docs/CLI.md](docs/CLI.md) - Command-line reference
 - [docs/HOOKS.md](docs/HOOKS.md) - Hook system

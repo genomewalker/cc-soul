@@ -1,5 +1,5 @@
 #pragma once
-// MCP Learning Tools: grow, observe, feedback
+// RPC Learning Tools: grow, observe, feedback
 //
 // Tools for adding knowledge to the soul and providing feedback
 // on existing memories to strengthen or weaken them.
@@ -8,7 +8,7 @@
 #include "../../mind.hpp"
 #include <sstream>
 
-namespace chitta::mcp::tools::learning {
+namespace chitta::rpc::tools::learning {
 
 using json = nlohmann::json;
 
@@ -388,4 +388,4 @@ inline void register_handlers(Mind* mind,
     handlers["query"] = [mind](const json& p) { return query(mind, p); };
 }
 
-} // namespace chitta::mcp::tools::learning
+} // namespace chitta::rpc::tools::learning
