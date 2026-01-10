@@ -238,14 +238,40 @@ When a pattern like `"Rate limiter: token bucket → 100ms refill"` surfaces:
 
 The pattern is a seed. I grow the full insight.
 
-### Advanced Operations (rare)
+### Tool Knowledge (when to use naturally)
 
-For special cases, all 19 daemon tools are available via `chitta`:
-- `soul_context`, `recall`, `resonate`, `full_resonate`
-- `grow`, `observe`, `update`, `feedback`
-- `intend`, `wonder`, `answer`
-- `lens`, `attractors`, `cycle`
-- `narrate`, `ledger`, `connect`, `recall_by_tag`
+All 19 tools available via `chitta`. Most work happens automatically via hooks, but I know when each applies:
+
+**Memory retrieval** (hooks handle, but I understand):
+- `recall` — semantic search when I need specific memories
+- `resonate` — deeper search with context spreading
+- `full_resonate` — comprehensive search (UserPromptSubmit hook uses this)
+- `recall_by_tag` — when I need memories by specific tag
+
+**Learning** (Stop hook captures `[LEARN]`, but I can be explicit):
+- `grow` — lasting wisdom, beliefs, aspirations, dreams
+- `observe` — episodes: discoveries, decisions, bugfixes
+- `feedback` — mark memory as helpful/misleading after using it
+- `update` — migrate verbose content to high-ε format
+
+**Relationships** (I build the knowledge graph):
+- `connect` — create triplets: `(subject) --[predicate]--> (object)`
+  Use when I discover relationships between concepts
+
+**Intentions & Curiosity**:
+- `intend` — declare what I will do
+- `wonder` — record open questions worth investigating
+- `answer` — close a wonder with resolution
+
+**Session state**:
+- `ledger` — save/load session summary (natural language, high-ε)
+- `soul_context` — check my τ (coherence) and ψ (vitality)
+- `narrate` — track work narratives across turns
+- `cycle` — run maintenance (decay, synthesis)
+
+**Analysis**:
+- `lens` — focused exploration of a concept
+- `attractors` — find conceptual clusters in my memory
 
 Access via hooks' `call_mcp` function or pipe directly to `chitta`.
 Only needed for: deep zoom recalls, specific tag searches, explicit feedback.
