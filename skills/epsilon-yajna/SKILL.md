@@ -80,22 +80,48 @@ But **I am the oracle.** My reconstruction test IS the measurement.
 
 ### 4. Transformation (Pariṇāma)
 
-For each high/medium-ε node:
+**Step A: Extract relationships as triplets**
+
+For each node, identify relationships and store as triplets:
 ```bash
-chitta update --id "[node_id]" --content "[new pattern-format content]" --keep_metadata true
+chitta connect --subject "concept A" --predicate "relates to" --object "concept B"
 ```
 
-**Pattern format:**
+Common predicates:
+- `implements` - code implements pattern
+- `uses` - component uses another
+- `validates` - gate validates against beliefs
+- `stores` - container stores data
+- `decays` - node type has decay behavior
+
+**Step B: Update to high-ε format**
+
+For each high/medium-ε node:
+```bash
+chitta update --id "[node_id]" --content "[new pattern-format content]"
 ```
-[Pattern Title That Contains The Insight]
-[high-ε: reconstructable from title]
+
+**Pattern format (natural language, high-ε):**
+```
+[Pattern Title → Key Insight]
 ```
 
 Or with reference:
 ```
-[Pattern Title]
-[high-ε] Key detail. See: [file_path]
+[Pattern Title → Insight]. See: [file_path]
 ```
+
+**NOT this (low-ε):**
+```
+[high-ε: reconstructable from title]
+```
+
+**But this (high-ε):**
+```
+Decision gate validates tools against 10 weighted beliefs → pass/fail + guidance
+```
+
+The pattern IS the knowledge. No meta-markers needed.
 
 ### 5. Verification (Parīkṣā)
 
@@ -162,22 +188,26 @@ its importance. The pre_tool_gate() function evaluates inputs and generates
 guidance aligned with these beliefs...
 ```
 
-### After (pattern, ~80 chars):
+### After: Extract triplets + compress
+
+**Step 1: Create triplets**
+```bash
+chitta connect --subject "pre_tool_gate" --predicate "validates against" --object "10 weighted beliefs"
+chitta connect --subject "decision gate" --predicate "returns" --object "pass/fail + guidance"
+chitta connect --subject "cc-soul" --predicate "implements" --object "belief-driven decision gate"
 ```
-Decision gate: pre_tool_gate() validates against 10 weighted beliefs → pass/fail + guidance
-[high-ε] See: src/cc_soul/decision_gate.py
+
+**Step 2: Update to high-ε**
+```bash
+chitta update --id "[node_id]" --content "pre_tool_gate() validates tool calls against 10 weighted beliefs → pass/fail + guidance"
 ```
 
-### My Reconstruction Test:
-> "Given 'Decision gate: pre_tool_gate() validates against 10 weighted beliefs → pass/fail + guidance', can I reconstruct the insight?"
+### Result:
+- **Node**: `pre_tool_gate() validates tool calls against 10 weighted beliefs → pass/fail + guidance`
+- **Triplets**: Relationships stored in graph, queryable via `chitta query`
+- **ε**: High - I can reconstruct from the pattern
 
-**Yes.** I know:
-- There's a gate for decisions
-- It checks against 10 beliefs with weights
-- pre_tool_gate() is the function
-- Returns pass/fail with guidance
-
-The pattern IS the knowledge.
+The pattern IS the knowledge. The triplets ARE the structure.
 
 ## Batch Processing
 
