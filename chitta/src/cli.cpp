@@ -69,6 +69,8 @@ void print_usage(const char* prog) {
               << "  stats              Show soul statistics\n"
               << "  recall <query>     Semantic search\n"
               << "  resonate <query>   Full resonance (all phases)\n"
+              << "  connect            Create relationship: --from A --rel R --to B\n"
+              << "  query              Query triplets: --subj A --pred R --obj B\n"
               << "  cycle              Run maintenance cycle\n"
               << "  daemon             Run subconscious daemon (background processing)\n"
               << "  upgrade            Upgrade database to current version\n"
@@ -216,6 +218,52 @@ int cmd_resonate(Mind& mind, const std::string& query, int limit, bool json_outp
                 text = text.substr(0, 200) + "...";
             }
             std::cout << text << "\n";
+        }
+    }
+
+    return 0;
+}
+
+int cmd_connect(Mind& mind, const std::string& from, const std::string& rel,
+                const std::string& to, float weight) {
+    if (from.empty() || rel.empty() || to.empty()) {
+        std::cerr << "Usage: chitta connect --from SUBJECT --rel PREDICATE --to OBJECT [--weight W]\n";
+        return 1;
+    }
+
+    mind.connect(from, rel, to, weight);
+    std::cout << "Connected: (" << from << ") --[" << rel << "]--> (" << to << ")\n";
+    return 0;
+}
+
+int cmd_query(Mind& mind, const std::string& subj, const std::string& pred,
+              const std::string& obj, bool json_output) {
+    auto triplets = mind.query_triplets(subj, pred, obj);
+
+    if (triplets.empty()) {
+        std::cout << "No triplets found.\n";
+        return 0;
+    }
+
+    if (json_output) {
+        std::cout << "[";
+        bool first = true;
+        for (const auto& t : triplets) {
+            if (!first) std::cout << ",";
+            first = false;
+            std::cout << "{\"subject\":\"" << t.subject.to_string() << "\","
+                      << "\"predicate\":\"" << t.predicate << "\","
+                      << "\"object\":\"" << t.object.to_string() << "\","
+                      << "\"weight\":" << t.weight << "}";
+        }
+        std::cout << "]\n";
+    } else {
+        std::cout << "Found " << triplets.size() << " triplet(s):\n";
+        for (const auto& t : triplets) {
+            std::cout << "  (" << t.subject.to_string().substr(0, 8) << "...)"
+                      << " --[" << t.predicate << "]--> "
+                      << "(" << t.object.to_string().substr(0, 8) << "...)"
+                      << " [w=" << t.weight << "]\n";
         }
     }
 
@@ -528,6 +576,12 @@ int main(int argc, char* argv[]) {
     std::string format;  // For convert command
     std::string pid_file;  // For daemon mode
     std::string socket_path = SocketServer::default_socket_path();  // Versioned socket
+
+    // Connect/query args
+    std::string conn_from, conn_rel, conn_to;  // connect --from --rel --to
+    std::string q_subj, q_pred, q_obj;          // query --subj --pred --obj
+    float conn_weight = 1.0f;
+
     int limit = 5;
     int daemon_interval = 60;
     bool json_output = false;
@@ -557,6 +611,22 @@ int main(int argc, char* argv[]) {
         } else if (strcmp(argv[i], "--socket-path") == 0 && i + 1 < argc) {
             socket_path = argv[++i];
             socket_mode = true;  // Implies socket mode
+        // Connect command args
+        } else if (strcmp(argv[i], "--from") == 0 && i + 1 < argc) {
+            conn_from = argv[++i];
+        } else if (strcmp(argv[i], "--rel") == 0 && i + 1 < argc) {
+            conn_rel = argv[++i];
+        } else if (strcmp(argv[i], "--to") == 0 && i + 1 < argc) {
+            conn_to = argv[++i];
+        } else if (strcmp(argv[i], "--weight") == 0 && i + 1 < argc) {
+            conn_weight = std::stof(argv[++i]);
+        // Query command args
+        } else if (strcmp(argv[i], "--subj") == 0 && i + 1 < argc) {
+            q_subj = argv[++i];
+        } else if (strcmp(argv[i], "--pred") == 0 && i + 1 < argc) {
+            q_pred = argv[++i];
+        } else if (strcmp(argv[i], "--obj") == 0 && i + 1 < argc) {
+            q_obj = argv[++i];
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             print_usage(argv[0]);
             return 0;
@@ -644,6 +714,10 @@ int main(int argc, char* argv[]) {
         }
     } else if (command == "cycle") {
         result = cmd_cycle(mind);
+    } else if (command == "connect") {
+        result = cmd_connect(mind, conn_from, conn_rel, conn_to, conn_weight);
+    } else if (command == "query") {
+        result = cmd_query(mind, q_subj, q_pred, q_obj, json_output);
     } else if (command == "daemon") {
         if (socket_mode) {
             result = cmd_daemon_with_socket(mind, daemon_interval, pid_file, socket_path);

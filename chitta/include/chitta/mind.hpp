@@ -1351,6 +1351,93 @@ public:
     }
 
     // ═══════════════════════════════════════════════════════════════════
+    // Triplet API (relational knowledge)
+    // ═══════════════════════════════════════════════════════════════════
+
+    // Add a relationship between concepts
+    void connect(const std::string& subject, const std::string& predicate,
+                 const std::string& object, float weight = 1.0f) {
+        // Find or create subject entity
+        NodeId subj_id = find_or_create_entity(subject);
+        NodeId obj_id = find_or_create_entity(object);
+
+        // Add triplet
+        graph_.add_triplet(subj_id, predicate, obj_id, weight);
+    }
+
+    // Query triplets: (subject?, predicate?, object?)
+    // Pass empty string for wildcards
+    std::vector<Triplet> query_triplets(
+        const std::string& subject = "",
+        const std::string& predicate = "",
+        const std::string& object = "") const
+    {
+        std::optional<NodeId> subj_id = std::nullopt;
+        std::optional<std::string> pred = std::nullopt;
+        std::optional<NodeId> obj_id = std::nullopt;
+
+        if (!subject.empty()) {
+            auto id = find_entity(subject);
+            if (!id) return {};  // Subject not found
+            subj_id = *id;
+        }
+        if (!predicate.empty()) {
+            pred = predicate;
+        }
+        if (!object.empty()) {
+            auto id = find_entity(object);
+            if (!id) return {};  // Object not found
+            obj_id = *id;
+        }
+
+        return graph_.query_triplets(subj_id, pred, obj_id);
+    }
+
+    // Find entity by name (searches canonical and aliases)
+    std::optional<NodeId> find_entity(const std::string& name) const {
+        // Search entities in storage
+        std::optional<NodeId> found;
+        storage_.for_each_hot([&](const NodeId& id, const Node& node) {
+            if (found) return;
+            if (node.node_type != NodeType::Entity) return;
+
+            // Check payload for entity name
+            auto payload_opt = payload_to_text(node.payload);
+            if (!payload_opt) return;
+            // Simple check: entity name in payload
+            if (payload_opt->find(name) != std::string::npos) {
+                found = id;
+            }
+        });
+        return found;
+    }
+
+    // Find or create entity
+    NodeId find_or_create_entity(const std::string& name) {
+        auto existing = find_entity(name);
+        if (existing) return *existing;
+
+        // Create new entity
+        Vector embedding = Vector::zeros();
+        if (yantra_ && yantra_->ready()) {
+            Artha artha = yantra_->transform(name);
+            embedding = artha.nu;
+        }
+
+        Node node(NodeType::Entity, embedding);
+        node.delta = 0.01f;  // Entities decay slowly
+        node.payload = text_to_payload(name);
+        node.tags = {"entity"};
+
+        NodeId id = node.id;
+        storage_.insert(id, std::move(node));
+        graph_.insert_raw(id);
+        maybe_add_bm25(id, name);
+
+        return id;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
     // Autonomous dynamics (daemon)
     // ═══════════════════════════════════════════════════════════════════
 
