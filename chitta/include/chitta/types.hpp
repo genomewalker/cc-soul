@@ -128,6 +128,20 @@ public:
             for (float& x : data) x /= norm;
         }
     }
+
+    // Check if vector is effectively zero (no embedding)
+    bool is_zero() const {
+        float sum_sq = 0.0f;
+        for (float x : data) sum_sq += x * x;
+        return sum_sq < 1e-10f;
+    }
+
+    // Squared L2 norm
+    float norm_sq() const {
+        float sum = 0.0f;
+        for (float x : data) sum += x * x;
+        return sum;
+    }
 };
 
 // Confidence: not a float, a distribution

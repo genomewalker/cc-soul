@@ -1589,6 +1589,80 @@ public:
     }
 
     // ═══════════════════════════════════════════════════════════════════
+    // Embedding Regeneration: Fix nodes with zero vectors
+    // ═══════════════════════════════════════════════════════════════════
+
+    // Regenerate embeddings for nodes with zero vectors
+    // These are nodes created when yantra wasn't available
+    // Returns number of nodes updated
+    size_t regenerate_embeddings(size_t batch_size = 100) {
+        if (!yantra_ || !yantra_->ready()) {
+            return 0;  // Can't regenerate without yantra
+        }
+
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        // Collect nodes with zero vectors
+        std::vector<std::pair<NodeId, std::string>> to_regenerate;
+
+        // for_each_hot iterates all nodes (unified storage covers all tiers)
+        storage_.for_each_hot([&](const NodeId& id, const Node& node) {
+            if (node.nu.is_zero() && !node.payload.empty()) {
+                std::string text(node.payload.begin(), node.payload.end());
+                if (!text.empty()) {
+                    to_regenerate.push_back({id, text});
+                }
+            }
+        });
+
+        if (to_regenerate.empty()) {
+            return 0;
+        }
+
+        // Limit batch size
+        if (to_regenerate.size() > batch_size) {
+            to_regenerate.resize(batch_size);
+        }
+
+        // Batch transform for efficiency
+        std::vector<std::string> texts;
+        for (const auto& [id, text] : to_regenerate) {
+            texts.push_back(text);
+        }
+
+        auto arthas = yantra_->transform_batch(texts);
+
+        // Update nodes with new embeddings
+        size_t updated = 0;
+        for (size_t i = 0; i < to_regenerate.size() && i < arthas.size(); ++i) {
+            const auto& [id, text] = to_regenerate[i];
+            const auto& artha = arthas[i];
+
+            if (!artha.nu.is_zero()) {
+                if (Node* node = storage_.get(id)) {
+                    node->nu = artha.nu;
+                    updated++;
+                }
+            }
+        }
+
+        return updated;
+    }
+
+    // Count nodes with zero vectors (for stats/diagnostics)
+    size_t count_zero_vectors() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        size_t count = 0;
+
+        // for_each_hot iterates all nodes (unified storage covers all tiers)
+        storage_.for_each_hot([&](const NodeId&, const Node& node) {
+            if (node.nu.is_zero()) count++;
+        });
+
+        return count;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
     // Resonance: Spreading Activation (Phase 1 of resonance architecture)
     // ═══════════════════════════════════════════════════════════════════
 

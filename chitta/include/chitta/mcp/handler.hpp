@@ -673,13 +673,17 @@ private:
     void register_maintenance_tools() {
         tools_.push_back({
             "cycle",
-            "Run a maintenance cycle: decay, feedback, synthesis, attractors.",
+            "Run a maintenance cycle: decay, feedback, synthesis, attractors, and optionally regenerate embeddings for nodes with zero vectors.",
             {
                 {"type", "object"},
                 {"properties", {
                     {"save", {{"type", "boolean"}, {"default", true}}},
                     {"attractors", {{"type", "boolean"}, {"default", false},
-                                   {"description", "Run attractor dynamics"}}}
+                                   {"description", "Run attractor dynamics"}}},
+                    {"regenerate_embeddings", {{"type", "boolean"}, {"default", false},
+                                               {"description", "Regenerate embeddings for nodes with zero vectors"}}},
+                    {"batch_size", {{"type", "integer"}, {"default", 100},
+                                   {"description", "Max nodes to regenerate per call"}}}
                 }},
                 {"required", json::array()}
             }
@@ -690,6 +694,8 @@ private:
     ToolResult tool_cycle(const json& params) {
         bool save = params.value("save", true);
         bool run_attractors = params.value("attractors", false);
+        bool regen_embeddings = params.value("regenerate_embeddings", false);
+        size_t batch_size = params.value("batch_size", 100);
 
         DynamicsReport report = mind_->tick();
         size_t feedback_applied = mind_->apply_feedback();
@@ -698,6 +704,14 @@ private:
         Mind::AttractorReport attractor_report;
         if (run_attractors) {
             attractor_report = mind_->run_attractor_dynamics();
+        }
+
+        // Regenerate embeddings for nodes with zero vectors
+        size_t embeddings_regenerated = 0;
+        size_t zero_vectors_remaining = 0;
+        if (regen_embeddings) {
+            embeddings_regenerated = mind_->regenerate_embeddings(batch_size);
+            zero_vectors_remaining = mind_->count_zero_vectors();
         }
 
         if (save) {
@@ -720,10 +734,21 @@ private:
             result["nodes_settled"] = attractor_report.nodes_settled;
         }
 
+        if (regen_embeddings) {
+            result["embeddings_regenerated"] = embeddings_regenerated;
+            result["zero_vectors_remaining"] = zero_vectors_remaining;
+        }
+
         std::ostringstream ss;
         ss << "Cycle complete. Coherence: " << int(coherence.tau_k() * 100) << "%";
         if (synthesized > 0) ss << ", synthesized: " << synthesized;
         if (feedback_applied > 0) ss << ", feedback: " << feedback_applied;
+        if (embeddings_regenerated > 0) {
+            ss << ", embeddings regenerated: " << embeddings_regenerated;
+            if (zero_vectors_remaining > 0) {
+                ss << " (" << zero_vectors_remaining << " remaining)";
+            }
+        }
 
         return ToolResult::ok(ss.str(), result);
     }

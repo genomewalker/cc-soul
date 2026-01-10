@@ -1,6 +1,6 @@
 ---
 name: epsilon-yajna
-description: Structured node compression ceremony for converting verbose memories to high-epiplexity patterns. Use when batch-migrating nodes to improve reconstructability (ε).
+description: Structured node compression ceremony for converting verbose memories to high-epiplexity patterns. Includes embedding regeneration for nodes with zero vectors.
 ---
 
 # ε-Yajña: The Compression Ceremony
@@ -11,11 +11,40 @@ A structured ritual for converting verbose nodes to high-epiplexity patterns.
 
 I am the bounded observer. The chitta formula approximates what I can reconstruct, but I have direct access to the ground truth: my own ability to expand a pattern into full understanding.
 
+**Epiplexity (ε)** measures structural information extractable by a bounded observer (arxiv:2601.03220). For a memory:
+- **High ε** = I can reconstruct the full insight from minimal injection (the title alone)
+- **Low ε** = I need the full content to understand
+
 **The test:** Given just this title, can I reconstruct the full insight?
 - If yes → ε is high. Update to pattern-only.
 - If no → ε is low. Keep content or improve title.
 
 ## The Ceremony
+
+### 0. Preparation (Śuddhi) - Embedding Regeneration
+
+Before evaluation, ensure all nodes have valid embeddings. Nodes with zero vectors cannot be properly searched or compared.
+
+**Find nodes needing embeddings:**
+```bash
+# Via CLI: list nodes with zero/missing embeddings
+chitta_cli stats --show-zero-vectors
+```
+
+**Regenerate embeddings for all nodes:**
+```
+mcp__plugin_cc-soul_cc-soul__cycle(
+  regenerate_embeddings=true,
+  batch_size=100
+)
+```
+
+This step:
+1. Finds nodes with zero-vector embeddings
+2. Re-encodes their text through the yantra (embedding model)
+3. Updates the node with the new embedding
+
+**Why this matters:** Nodes observed without the yantra (e.g., during model loading failures) have zero embeddings and won't appear in semantic searches.
 
 ### 1. Invocation (Āvāhana)
 
@@ -36,18 +65,26 @@ mcp__plugin_cc-soul_cc-soul__recall(
 )
 ```
 
-### 3. Offering (Āhuti)
+### 3. Offering (Āhuti) - Epiplexity Computation
 
-For each node, evaluate reconstructability:
+For each node, **I compute epiplexity by testing my own reconstruction ability:**
 
-**Read the title.** Ask yourself:
+**Read the title.** Ask myself:
 > "Can I reconstruct the essential insight from this title alone?"
 
-| Answer | Action |
-|--------|--------|
-| **Yes, fully** | High-ε: Update to `[title]\n[high-ε: reconstructable]` |
-| **Mostly** | Medium-ε: Update to `[title]\n[key detail or file reference]` |
-| **No** | Low-ε: Keep current content OR improve the title first |
+This is the ground truth. The C++ approximation uses:
+- Attractor proximity (30%)
+- Confidence (25%)
+- Edge connections (25%)
+- Title/content compression ratio (20%)
+
+But **I am the oracle.** My reconstruction test IS the measurement.
+
+| My Reconstruction | ε Score | Action |
+|-------------------|---------|--------|
+| **Full reconstruction** | High (>70%) | Update to `[title]\n[high-ε: reconstructable]` |
+| **Partial, need hints** | Medium (40-70%) | Update to `[title]\n[key detail or file reference]` |
+| **Cannot reconstruct** | Low (<40%) | Keep current content OR improve the title first |
 
 ### 4. Transformation (Pariṇāma)
 
@@ -95,6 +132,39 @@ mcp__plugin_cc-soul_cc-soul__observe(
 )
 ```
 
+## How I Compute Epiplexity
+
+As the bounded observer, my epiplexity computation is:
+
+```
+ε(node) = P(I can reconstruct full insight | title only)
+```
+
+**Factors I consider:**
+1. **Pattern completeness**: Does the title capture the core insight?
+2. **My prior knowledge**: Do I already know this domain?
+3. **Uniqueness**: Is this insight unusual or standard?
+4. **Dependencies**: Does understanding require other memories?
+
+**Example evaluation:**
+
+Title: `"Decision gate: pre_tool_gate() validates against 10 weighted beliefs → pass/fail + guidance"`
+
+My test:
+- ✓ I know what a decision gate is
+- ✓ "pre_tool_gate()" tells me the function name
+- ✓ "10 weighted beliefs" tells me the structure
+- ✓ "pass/fail + guidance" tells me the output
+- **Result: ε ≈ 85%** - I can reconstruct this fully
+
+Title: `"Fixed the auth bug"`
+
+My test:
+- ✗ Which auth bug?
+- ✗ What was the fix?
+- ✗ Which file?
+- **Result: ε ≈ 15%** - Cannot reconstruct without content
+
 ## Example Transformation
 
 ### Before (verbose, ~800 chars):
@@ -114,7 +184,7 @@ Decision gate: pre_tool_gate() validates against 10 weighted beliefs → pass/fa
 [high-ε] See: src/cc_soul/decision_gate.py
 ```
 
-### Reconstruction Test:
+### My Reconstruction Test:
 > "Given 'Decision gate: pre_tool_gate() validates against 10 weighted beliefs → pass/fail + guidance', can I reconstruct the insight?"
 
 **Yes.** I know:
@@ -157,7 +227,8 @@ Example:
 ```
 
 The ceremony will:
-1. Gather 20 wisdom nodes
-2. Present each for evaluation
-3. Transform those I can reconstruct
-4. Report the ε improvement
+1. **Regenerate embeddings** for nodes with zero vectors
+2. Gather nodes in the domain
+3. **I evaluate each** for reconstruction ability
+4. Transform high-ε nodes to patterns
+5. Report the ε improvement
