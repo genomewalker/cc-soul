@@ -117,11 +117,18 @@ int run_cli(const std::string& socket_path, const std::string& tool,
             std::string key = arg.substr(2);
             if (i + 1 < argc && argv[i + 1][0] != '-') {
                 std::string value = argv[++i];
-                // Try to parse as number or boolean
+                // Try to parse as JSON object/array, number, or boolean
                 if (value == "true") {
                     args[key] = true;
                 } else if (value == "false") {
                     args[key] = false;
+                } else if (!value.empty() && (value[0] == '{' || value[0] == '[')) {
+                    // Try to parse as JSON object or array
+                    try {
+                        args[key] = json::parse(value);
+                    } catch (...) {
+                        args[key] = value;  // Fall back to string
+                    }
                 } else {
                     try {
                         if (value.find('.') != std::string::npos) {

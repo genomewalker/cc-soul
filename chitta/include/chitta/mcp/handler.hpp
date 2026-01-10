@@ -14,6 +14,7 @@
 #include <unordered_map>
 #include <string>
 #include <sstream>
+#include <ctime>
 
 namespace chitta::mcp {
 
@@ -583,12 +584,15 @@ private:
 
         tools_.push_back({
             "ledger",
-            "Save or load session state (Atman snapshot).",
+            "Save, load, or list session state as natural language (high-ε).",
             {
                 {"type", "object"},
                 {"properties", {
-                    {"action", {{"type", "string"}, {"enum", {"save", "load"}}}},
-                    {"content", {{"type", "object"}, {"description", "State to save"}}}
+                    {"action", {{"type", "string"}, {"enum", {"save", "load", "list"}}}},
+                    {"content", {{"type", "string"}, {"description", "Session summary in natural language (e.g., 'Working on X → Next: Y')"}}},
+                    {"project", {{"type", "string"}, {"description", "Project name for filtering"}}},
+                    {"id", {{"type", "string"}, {"description", "Ledger ID for loading specific snapshot"}}},
+                    {"limit", {{"type", "integer"}, {"default", 10}, {"description", "Max ledgers to list"}}}
                 }},
                 {"required", {"action"}}
             }
@@ -644,31 +648,87 @@ private:
         return ToolResult::error("Unknown action: " + action);
     }
 
+    static std::string format_timestamp(Timestamp ts) {
+        time_t time = static_cast<time_t>(ts / 1000);  // Convert from millis to seconds
+        struct tm tm_info;
+        localtime_r(&time, &tm_info);
+        char buf[32];
+        strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M", &tm_info);
+        return buf;
+    }
+
     ToolResult tool_ledger(const json& params) {
         std::string action = params.at("action");
+        std::string project = params.value("project", "");
 
         if (action == "save") {
-            json content = params.value("content", json::object());
-            mind_->save_ledger(content.dump());
-            return ToolResult::ok("Ledger saved", {{"status", "saved"}});
+            std::string content = params.value("content", "");
+            if (content.empty()) {
+                return ToolResult::error("Ledger content required (natural language summary)");
+            }
+            NodeId id = mind_->save_ledger(content, "", project);
+            json result;
+            result["status"] = "saved";
+            result["id"] = id.to_string();
+            if (!project.empty()) result["project"] = project;
+            return ToolResult::ok("Ledger saved: " + content.substr(0, 50), result);
 
         } else if (action == "load") {
-            auto ledger = mind_->load_ledger();
-            if (ledger) {
-                try {
-                    json content = json::parse(ledger->second);
-                    return ToolResult::ok("Ledger loaded", {
-                        {"id", ledger->first.to_string()},
-                        {"content", content}
-                    });
-                } catch (...) {
-                    return ToolResult::ok("Ledger loaded (raw)", {
-                        {"id", ledger->first.to_string()},
-                        {"content", {{"raw", ledger->second}}}
-                    });
+            std::string ledger_id = params.value("id", "");
+
+            // Load by ID if specified, otherwise load most recent
+            if (!ledger_id.empty()) {
+                NodeId id = NodeId::from_string(ledger_id);
+                auto node_opt = mind_->get(id);
+                if (!node_opt) {
+                    return ToolResult::error("Ledger not found: " + ledger_id);
                 }
+                auto text_opt = mind_->text(id);
+                if (!text_opt) {
+                    return ToolResult::error("Ledger has no content: " + ledger_id);
+                }
+                std::string date = format_timestamp(node_opt->tau_created);
+                json result;
+                result["id"] = ledger_id;
+                result["date"] = date;
+                result["content"] = *text_opt;
+                return ToolResult::ok(*text_opt, result);
+            }
+
+            auto ledger = mind_->load_ledger("", project);
+            if (ledger) {
+                json result;
+                result["id"] = ledger->first.to_string();
+                result["content"] = ledger->second;
+                return ToolResult::ok(ledger->second, result);
             }
             return ToolResult::ok("No ledger found", {{"status", "empty"}});
+
+        } else if (action == "list") {
+            size_t limit = params.value("limit", 10);
+            auto ledgers = mind_->list_ledgers(limit, project);
+
+            if (ledgers.empty()) {
+                return ToolResult::ok("No ledgers found", {{"ledgers", json::array()}});
+            }
+
+            json ledgers_array = json::array();
+            std::ostringstream ss;
+            ss << "Found " << ledgers.size() << " ledger(s)";
+            if (!project.empty()) ss << " for project: " << project;
+            ss << "\n";
+
+            for (const auto& [id, ts] : ledgers) {
+                std::string date = format_timestamp(ts);
+                ledgers_array.push_back({
+                    {"id", id.to_string()},
+                    {"timestamp", ts},
+                    {"date", date}
+                });
+                ss << "  " << date << "  " << id.to_string().substr(0, 8) << "...\n";
+            }
+
+            return ToolResult::ok(ss.str(), {{"ledgers", ledgers_array}});
         }
 
         return ToolResult::error("Unknown action: " + action);

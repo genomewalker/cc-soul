@@ -23,6 +23,7 @@
 #include <deque>
 #include <algorithm>
 #include <unordered_map>
+#include <sstream>
 
 namespace chitta {
 
@@ -713,14 +714,9 @@ public:
                        const std::string& project = "") {
         std::lock_guard<std::mutex> lock(mutex_);
 
-        // Create embedding from a summary of the ledger for semantic search
-        std::string summary = "Session ledger: " + session_id;
-        if (!project.empty()) {
-            summary = "[" + project + "] " + summary;
-        }
-
+        // Ledger content is natural language (high-ε), embedded directly
         Node node(NodeType::Ledger, Vector::zeros());
-        node.payload = text_to_payload(ledger_json);
+        node.payload = text_to_payload(ledger_json);  // Store as-is (text, not JSON)
         node.delta = 0.1f;  // Moderate decay - ledgers are session-specific
         node.tags = {"ledger", "atman"};
         if (!session_id.empty()) {
@@ -730,8 +726,13 @@ public:
             node.tags.push_back("project:" + project);
         }
 
+        // Embed the actual content for semantic search
         if (yantra_) {
-            Artha artha = yantra_->transform(summary);
+            std::string embed_text = ledger_json;
+            if (!project.empty()) {
+                embed_text = "[" + project + "] " + embed_text;
+            }
+            Artha artha = yantra_->transform(embed_text);
             node.nu = std::move(artha.nu);
         }
 

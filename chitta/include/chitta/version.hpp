@@ -1,3 +1,3 @@
 #pragma once
 
-#define CHITTA_VERSION "2.34.1"
+#define CHITTA_VERSION "2.35.0"
