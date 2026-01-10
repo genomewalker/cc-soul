@@ -9,8 +9,8 @@
   "repository": "https://github.com/genomewalker/cc-soul",
   "license": "MIT",
   "keywords": ["memory", "identity", "wisdom", "continuity", "soul"],
-  "commands": "../commands/",
-  "skills": "../skills/",
+  "commands": "./commands/",
+  "skills": "./skills/",
   "mcpServers": {
     "cc-soul": {
       "command": "${CLAUDE_PLUGIN_ROOT}/bin/chitta_mcp",
