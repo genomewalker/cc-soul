@@ -7,11 +7,18 @@
 #include "../../mind.hpp"
 #include <sstream>
 #include <algorithm>
+#include <cmath>
 #include <unordered_set>
 
 namespace chitta::mcp::tools::memory {
 
 using json = nlohmann::json;
+
+// Helper: safe float-to-percentage conversion (handles NaN/infinity)
+inline int safe_pct(float value) {
+    if (std::isnan(value) || std::isinf(value)) return 0;
+    return static_cast<int>(std::clamp(value * 100.0f, -999.0f, 999.0f));
+}
 
 // Helper: extract title from text (first line or first N chars)
 inline std::string extract_title(const std::string& text, size_t max_len = 60) {
@@ -260,7 +267,7 @@ inline ToolResult recall(Mind* mind, const json& params) {
                 {"confidence", r.confidence.mu},
                 {"tags", result_tags}
             });
-            ss << "\n[" << static_cast<int>(r.relevance * 100) << "%] " << r.text.substr(0, 100);
+            ss << "\n[" << safe_pct(r.relevance) << "%] " << r.text.substr(0, 100);
             if (r.text.length() > 100) ss << "...";
         }
     }
@@ -337,7 +344,7 @@ inline ToolResult resonate(Mind* mind, const json& params) {
             {"tags", result_tags}
         });
 
-        ss << "\n[" << static_cast<int>(r.relevance * 100) << "%] " << r.text.substr(0, 100);
+        ss << "\n[" << safe_pct(r.relevance) << "%] " << r.text.substr(0, 100);
         if (r.text.length() > 100) ss << "...";
     }
 
@@ -409,7 +416,7 @@ inline ToolResult full_resonate(Mind* mind, const json& params) {
             {"tags", result_tags}
         });
 
-        ss << "\n[" << static_cast<int>(r.relevance * 100) << "%] ";
+        ss << "\n[" << safe_pct(r.relevance) << "%] ";
         ss << "[" << node_type_to_string(r.type) << "] ";
         ss << r.text.substr(0, 90);
         if (r.text.length() > 90) ss << "...";

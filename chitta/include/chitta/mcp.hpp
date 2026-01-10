@@ -15,8 +15,15 @@
 #include <atomic>
 #include <unistd.h>
 #include <climits>
+#include <cmath>
 
 namespace chitta {
+
+// Helper: safe float-to-percentage conversion (handles NaN/infinity)
+inline int safe_pct(float value) {
+    if (std::isnan(value) || std::isinf(value)) return 0;
+    return static_cast<int>(std::clamp(value * 100.0f, -999.0f, 999.0f));
+}
 
 using json = nlohmann::json;
 
@@ -1456,9 +1463,9 @@ private:
                 std::string title = extract_title(r.text, 40);
                 results_array.push_back({
                     {"t", title},  // Abbreviated keys for smaller JSON
-                    {"r", static_cast<int>(r.relevance * 100)}  // Relevance as int %
+                    {"r", safe_pct(r.relevance)}  // Relevance as int %
                 });
-                ss << "\n[" << static_cast<int>(r.relevance * 100) << "%] " << title;
+                ss << "\n[" << safe_pct(r.relevance) << "%] " << title;
 
             } else if (zoom == "seeds") {
                 // Seeds: ε-aware injection - high-ε get minimal tokens, low-ε get more
@@ -1515,7 +1522,7 @@ private:
                     {"confidence", r.confidence.mu},
                     {"tags", result_tags}
                 });
-                ss << "\n[" << (r.relevance * 100) << "%] " << r.text.substr(0, 100);
+                ss << "\n[" << safe_pct(r.relevance) << "%] " << r.text.substr(0, 100);
                 if (r.text.length() > 100) ss << "...";
             }
         }
@@ -1596,7 +1603,7 @@ private:
                 {"tags", result_tags}
             });
 
-            ss << "\n[" << (r.relevance * 100) << "%] " << r.text.substr(0, 100);
+            ss << "\n[" << safe_pct(r.relevance) << "%] " << r.text.substr(0, 100);
             if (r.text.length() > 100) ss << "...";
         }
 
@@ -1648,7 +1655,7 @@ private:
                 {"tags", result_tags}
             });
 
-            ss << "\n[" << (r.relevance * 100) << "%] ";
+            ss << "\n[" << safe_pct(r.relevance) << "%] ";
             ss << "[" << node_type_to_string(r.type) << "] ";
             ss << r.text.substr(0, 90);
             if (r.text.length() > 90) ss << "...";
