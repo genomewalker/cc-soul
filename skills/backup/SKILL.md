@@ -19,17 +19,21 @@ Backup the soul state.
 
 ## 1. Get Current State
 
-Call:
-- mcp__plugin_cc-soul_cc-soul__soul_context(format="json") - Get statistics before backup
+Run this Bash command:
+```bash
+chitta_mcp soul_context
+```
 
 Note the node count and coherence.
 
 ## 2. Run Backup
 
-Call:
-- mcp__plugin_cc-soul_cc-soul__cycle(save=true) - Save current state to disk
+Run this Bash command:
+```bash
+chitta_mcp cycle --save true
+```
 
-This writes the soul graph to ~/.claude/mind/synapse/
+This writes the soul graph to ~/.claude/mind/chitta/
 
 ## 3. Verify
 
@@ -55,9 +59,9 @@ After the agent returns, confirm the backup to the user.
 
 ## Storage
 
-Soul state is saved to: `~/.claude/mind/synapse/`
+Soul state is saved to: `~/.claude/mind/chitta/`
 
 For additional backup, you can copy this directory:
 ```bash
-cp -r ~/.claude/mind/synapse ~/.claude/mind/synapse-backup-$(date +%Y%m%d)
+cp -r ~/.claude/mind/chitta ~/.claude/mind/chitta-backup-$(date +%Y%m%d)
 ```

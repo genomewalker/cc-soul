@@ -47,7 +47,7 @@ Agents communicate through shared observations in chitta with **exact-match tag 
 
 ```
 # Agent writes progress (tags are indexed for exact-match lookup)
-mcp__plugin_cc-soul_cc-soul__observe(
+chitta_mcp observe(
   category="signal",
   title="[Role]: [brief status]",
   content="[detailed progress or findings]",
@@ -55,14 +55,14 @@ mcp__plugin_cc-soul_cc-soul__observe(
 )
 
 # Agent reads teammates' progress (exact tag match + semantic ranking)
-mcp__plugin_cc-soul_cc-soul__recall(
+chitta_mcp recall(
   query="progress findings",
   tag="thread:<id>",
   limit=20
 )
 
 # Or: pure tag-based lookup (no semantic search, sorted by time)
-mcp__plugin_cc-soul_cc-soul__recall_by_tag(
+chitta_mcp recall_by_tag(
   tag="thread:<id>",
   limit=50
 )
@@ -86,7 +86,7 @@ A yajña requires a plan. Either:
 ### Step 1: Start the Ritual Thread
 
 ```
-mcp__plugin_cc-soul_cc-soul__narrate(
+chitta_mcp narrate(
   action="start",
   title="yajña: [goal summary]"
 )
@@ -184,7 +184,7 @@ After agents complete, main Claude (as Brahman) synthesizes:
 
 ```
 # Recall all thread activity (exact tag match, sorted by time)
-mcp__plugin_cc-soul_cc-soul__recall_by_tag(tag="thread:[thread_id]", limit=50)
+chitta_mcp recall_by_tag tag="thread:[thread_id]", limit=50
 
 # Synthesize results
 BRAHMAN SYNTHESIS:
@@ -219,7 +219,7 @@ Outcome: [final result]
 ### Step 5: End the Ritual
 
 ```
-mcp__plugin_cc-soul_cc-soul__narrate(
+chitta_mcp narrate(
   action="end",
   episode_id="[thread_id]",
   content="[synthesis summary]",

@@ -11,6 +11,67 @@ namespace chitta::mcp {
 
 using json = nlohmann::json;
 
+// Sanitize string to valid UTF-8, replacing invalid bytes with replacement char
+inline std::string sanitize_utf8(const std::string& input) {
+    std::string output;
+    output.reserve(input.size());
+
+    size_t i = 0;
+    while (i < input.size()) {
+        unsigned char c = static_cast<unsigned char>(input[i]);
+
+        if (c < 0x80) {
+            // ASCII: valid single byte
+            output += input[i];
+            ++i;
+        } else if ((c & 0xE0) == 0xC0) {
+            // 2-byte sequence
+            if (i + 1 < input.size() && (input[i + 1] & 0xC0) == 0x80) {
+                output += input[i];
+                output += input[i + 1];
+                i += 2;
+            } else {
+                output += '\xEF'; output += '\xBF'; output += '\xBD'; // replacement char
+                ++i;
+            }
+        } else if ((c & 0xF0) == 0xE0) {
+            // 3-byte sequence
+            if (i + 2 < input.size() &&
+                (input[i + 1] & 0xC0) == 0x80 &&
+                (input[i + 2] & 0xC0) == 0x80) {
+                output += input[i];
+                output += input[i + 1];
+                output += input[i + 2];
+                i += 3;
+            } else {
+                output += '\xEF'; output += '\xBF'; output += '\xBD';
+                ++i;
+            }
+        } else if ((c & 0xF8) == 0xF0) {
+            // 4-byte sequence
+            if (i + 3 < input.size() &&
+                (input[i + 1] & 0xC0) == 0x80 &&
+                (input[i + 2] & 0xC0) == 0x80 &&
+                (input[i + 3] & 0xC0) == 0x80) {
+                output += input[i];
+                output += input[i + 1];
+                output += input[i + 2];
+                output += input[i + 3];
+                i += 4;
+            } else {
+                output += '\xEF'; output += '\xBF'; output += '\xBD';
+                ++i;
+            }
+        } else {
+            // Invalid leading byte
+            output += '\xEF'; output += '\xBF'; output += '\xBD';
+            ++i;
+        }
+    }
+
+    return output;
+}
+
 // JSON-RPC 2.0 error codes
 namespace error {
     constexpr int PARSE_ERROR = -32700;
@@ -50,7 +111,7 @@ inline json make_tool_response(const std::string& text, bool is_error = false,
     json content = json::array();
     content.push_back({
         {"type", "text"},
-        {"text", text}
+        {"text", sanitize_utf8(text)}
     });
 
     json response = {

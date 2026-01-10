@@ -2,6 +2,7 @@
 name: search
 description: Unified memory search across synapse. Use to find past decisions, wisdom, patterns, and context.
 execution: task
+args: query
 ---
 
 # Search
@@ -21,8 +22,14 @@ Search the soul's memory for: {ARGUMENTS}
 
 ## 1. Execute Search
 
-Call:
-- mcp__plugin_cc-soul_cc-soul__recall(query="{ARGUMENTS}", limit=10)
+Run this Bash command:
+
+```bash
+chitta_mcp recall "{ARGUMENTS}" --zoom normal
+```
+
+Note: chitta_mcp is at ~/.claude/plugins/cache/genomewalker-cc-soul/cc-soul/*/bin/chitta_mcp
+If you get a UTF-8 error, try --zoom sparse instead.
 
 ## 2. Parse Results
 

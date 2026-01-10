@@ -95,8 +95,8 @@ $IMPORT_BIN --verbose \
 ## 3. Verify
 
 After import:
-- mcp__plugin_cc-soul_cc-soul__soul_context(format="json") - Check node counts
-- mcp__plugin_cc-soul_cc-soul__recall(query="wisdom", limit=3) - Verify search
+- chitta_mcp soul_context format="json" - Check node counts
+- chitta_mcp recall query="wisdom", limit=3 - Verify search
 
 ## 4. Report
 

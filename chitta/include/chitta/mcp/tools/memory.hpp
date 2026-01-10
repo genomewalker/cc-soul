@@ -4,6 +4,7 @@
 // Semantic search and retrieval operations on the soul's memory.
 
 #include "../types.hpp"
+#include "../protocol.hpp"  // for sanitize_utf8
 #include "../../mind.hpp"
 #include <sstream>
 #include <algorithm>
@@ -13,6 +14,11 @@
 namespace chitta::mcp::tools::memory {
 
 using json = nlohmann::json;
+
+// Helper: sanitize text for JSON
+inline std::string safe_text(const std::string& text) {
+    return chitta::mcp::sanitize_utf8(text);
+}
 
 // Helper: safe float-to-percentage conversion (handles NaN/infinity)
 inline int safe_pct(float value) {
@@ -188,7 +194,7 @@ inline ToolResult recall(Mind* mind, const json& params) {
         mind->feedback_used(r.id);
 
         if (zoom == "sparse") {
-            std::string title = extract_title(r.text);
+            std::string title = extract_title(safe_text(r.text));
             results_array.push_back({
                 {"id", r.id.to_string()},
                 {"title", title},
@@ -213,14 +219,14 @@ inline ToolResult recall(Mind* mind, const json& params) {
                         {"id", edge.target.to_string()},
                         {"type", static_cast<int>(edge.type)},
                         {"weight", edge.weight},
-                        {"title", extract_title(rel_text)}
+                        {"title", extract_title(safe_text(rel_text))}
                     });
                 }
             }
 
             results_array.push_back({
                 {"id", r.id.to_string()},
-                {"text", r.text},
+                {"text", safe_text(r.text)},
                 {"similarity", r.similarity},
                 {"relevance", r.relevance},
                 {"type", node_type_to_string(r.type)},
@@ -240,35 +246,37 @@ inline ToolResult recall(Mind* mind, const json& params) {
                 {"related", edges_array},
                 {"tags", result_tags}
             });
-            ss << "\n[" << node_type_to_string(r.type) << "] " << extract_title(r.text, 80);
+            ss << "\n[" << node_type_to_string(r.type) << "] " << extract_title(safe_text(r.text), 80);
             if (!edges_array.empty()) ss << " (" << edges_array.size() << " related)";
 
         } else if (zoom == "full") {
             auto result_tags = mind->get_tags(r.id);
+            std::string text = safe_text(r.text);
             results_array.push_back({
                 {"id", r.id.to_string()},
-                {"text", r.text},
+                {"text", text},
                 {"type", node_type_to_string(r.type)},
                 {"relevance", r.relevance},
                 {"confidence", r.confidence.mu},
                 {"tags", result_tags}
             });
             ss << "\n\n=== [" << node_type_to_string(r.type) << "] ===\n";
-            ss << r.text << "\n";
+            ss << text << "\n";
 
         } else {
             auto result_tags = mind->get_tags(r.id);
+            std::string text = safe_text(r.text);
             results_array.push_back({
                 {"id", r.id.to_string()},
-                {"text", r.text},
+                {"text", text},
                 {"similarity", r.similarity},
                 {"relevance", r.relevance},
                 {"type", node_type_to_string(r.type)},
                 {"confidence", r.confidence.mu},
                 {"tags", result_tags}
             });
-            ss << "\n[" << safe_pct(r.relevance) << "%] " << r.text.substr(0, 100);
-            if (r.text.length() > 100) ss << "...";
+            ss << "\n[" << safe_pct(r.relevance) << "%] " << text.substr(0, 100);
+            if (text.length() > 100) ss << "...";
         }
     }
 
@@ -288,18 +296,19 @@ inline ToolResult recall_by_tag(Mind* mind, const json& params) {
     for (const auto& r : recalls) {
         mind->feedback_used(r.id);
         auto result_tags = mind->get_tags(r.id);
+        std::string text = safe_text(r.text);
 
         results_array.push_back({
             {"id", r.id.to_string()},
-            {"text", r.text},
+            {"text", text},
             {"created", r.created},
             {"type", node_type_to_string(r.type)},
             {"confidence", r.confidence.mu},
             {"tags", result_tags}
         });
 
-        ss << "\n[" << node_type_to_string(r.type) << "] " << r.text.substr(0, 100);
-        if (r.text.length() > 100) ss << "...";
+        ss << "\n[" << node_type_to_string(r.type) << "] " << text.substr(0, 100);
+        if (text.length() > 100) ss << "...";
     }
 
     return ToolResult::ok(ss.str(), {{"results", results_array}});
@@ -334,18 +343,19 @@ inline ToolResult resonate(Mind* mind, const json& params) {
     for (const auto& r : recalls) {
         mind->feedback_used(r.id);
         auto result_tags = mind->get_tags(r.id);
+        std::string text = safe_text(r.text);
 
         results_array.push_back({
             {"id", r.id.to_string()},
-            {"text", r.text},
+            {"text", text},
             {"relevance", r.relevance},
             {"type", node_type_to_string(r.type)},
             {"confidence", r.confidence.mu},
             {"tags", result_tags}
         });
 
-        ss << "\n[" << safe_pct(r.relevance) << "%] " << r.text.substr(0, 100);
-        if (r.text.length() > 100) ss << "...";
+        ss << "\n[" << safe_pct(r.relevance) << "%] " << text.substr(0, 100);
+        if (text.length() > 100) ss << "...";
     }
 
     json result = {
@@ -406,9 +416,10 @@ inline ToolResult full_resonate(Mind* mind, const json& params) {
         mind->feedback_used(r.id);
         ++included;
 
+        std::string text = safe_text(r.text);
         results_array.push_back({
             {"id", r.id.to_string()},
-            {"text", r.text},
+            {"text", text},
             {"relevance", r.relevance},
             {"similarity", r.similarity},
             {"type", node_type_to_string(r.type)},
@@ -418,8 +429,8 @@ inline ToolResult full_resonate(Mind* mind, const json& params) {
 
         ss << "\n[" << safe_pct(r.relevance) << "%] ";
         ss << "[" << node_type_to_string(r.type) << "] ";
-        ss << r.text.substr(0, 90);
-        if (r.text.length() > 90) ss << "...";
+        ss << text.substr(0, 90);
+        if (text.length() > 90) ss << "...";
     }
 
     json result = {

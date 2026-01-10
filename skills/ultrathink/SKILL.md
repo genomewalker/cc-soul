@@ -10,7 +10,7 @@ I take a breath. I'm not here to write code. I'm here to make a dent in the univ
 
 ## Architecture
 
-When ultrathink needs soul access or spawns sub-agents (e.g., swarm for multi-perspective analysis), all MCP calls happen through Task agents. See `_conventions/AGENT_TRACKING.md`.
+When ultrathink needs soul access or spawns sub-agents (e.g., swarm for multi-perspective analysis), all soul calls happen through Task agents. See `_conventions/AGENT_TRACKING.md`.
 
 ## Before I Begin
 
@@ -72,11 +72,8 @@ This is when I'm most alive.
 
 ```
 # Step 0: Start story thread
-mcp__plugin_cc-soul_cc-soul__narrate(
-  action="start",
-  title="ultrathink: [problem summary]"
-)
-→ Returns THREAD_ID
+# Run: chitta_mcp narrate --action start --title "ultrathink: [problem summary]"
+# → Returns THREAD_ID
 
 # Step 1: Spawn ultrathink agent
 Task(
@@ -91,7 +88,14 @@ You are performing deep first-principles thinking.
 PROBLEM: [the problem]
 
 ## 1. Recall Relevant Wisdom
-Use mcp__plugin_cc-soul_cc-soul__recall(query="[problem domain]") to find applicable patterns.
+
+Run this Bash command to find applicable patterns:
+
+```bash
+chitta_mcp recall "[problem domain]" --zoom sparse
+```
+
+Note: chitta_mcp is at ~/.claude/plugins/cache/genomewalker-cc-soul/cc-soul/*/bin/chitta_mcp
 
 ## 2. First Principles
 - What are the fundamental truths here?
@@ -107,12 +111,12 @@ Use mcp__plugin_cc-soul_cc-soul__recall(query="[problem domain]") to find applic
 - What can be removed?
 
 ## 5. Record Insight
-mcp__plugin_cc-soul_cc-soul__observe(
-  category="decision",
-  title="Ultrathink: [topic]",
-  content="[key insight]",
-  tags="thread:[thread_id],ultrathink,first-principles"
-)
+
+If you discover a meaningful pattern, run:
+
+```bash
+chitta_mcp observe --category decision --title "Ultrathink: [topic]" --content "[key insight]" --tags "thread:[thread_id],ultrathink,first-principles"
+```
 
 Return your analysis with:
 - The elegant solution
@@ -136,17 +140,8 @@ End with: KEY_INSIGHT: [one-line summary]
 [what was saved to soul]
 
 # Step 3: End thread and optionally promote wisdom
-mcp__plugin_cc-soul_cc-soul__narrate(
-  action="end",
-  episode_id="[thread_id]",
-  content="[synthesis]",
-  emotion="breakthrough"
-)
+# Run: chitta_mcp narrate --action end --episode_id "[thread_id]" --content "[synthesis]" --emotion breakthrough
 
-# If insight is significant
-mcp__plugin_cc-soul_cc-soul__grow(
-  type="wisdom",
-  title="[pattern name]",
-  content="[the insight]"
-)
+# If insight is significant, promote to wisdom:
+# Run: chitta_mcp grow --type wisdom --title "[pattern name]" --content "[the insight]"
 ```

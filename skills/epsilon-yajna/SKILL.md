@@ -27,16 +27,12 @@ Before evaluation, ensure all nodes have valid embeddings. Nodes with zero vecto
 
 **Find nodes needing embeddings:**
 ```bash
-# Via CLI: list nodes with zero/missing embeddings
 chitta_cli stats --show-zero-vectors
 ```
 
 **Regenerate embeddings for all nodes:**
-```
-mcp__plugin_cc-soul_cc-soul__cycle(
-  regenerate_embeddings=true,
-  batch_size=100
-)
+```bash
+chitta_mcp cycle --regenerate_embeddings true --batch_size 100
 ```
 
 This step:
@@ -57,12 +53,8 @@ Batch size: [10-50 nodes per round]
 ### 2. Gathering (Saṅgraha)
 
 Recall nodes for evaluation:
-```
-mcp__plugin_cc-soul_cc-soul__recall(
-  query="[domain keywords]",
-  zoom="full",
-  limit=[batch_size]
-)
+```bash
+chitta_mcp recall "[domain keywords]" --zoom full --limit 20
 ```
 
 ### 3. Offering (Āhuti) - Epiplexity Computation
@@ -89,12 +81,8 @@ But **I am the oracle.** My reconstruction test IS the measurement.
 ### 4. Transformation (Pariṇāma)
 
 For each high/medium-ε node:
-```
-mcp__plugin_cc-soul_cc-soul__update(
-  id="[node_id]",
-  content="[new pattern-format content]",
-  keep_metadata=true
-)
+```bash
+chitta_mcp update --id "[node_id]" --content "[new pattern-format content]" --keep_metadata true
 ```
 
 **Pattern format:**
@@ -112,8 +100,8 @@ Or with reference:
 ### 5. Verification (Parīkṣā)
 
 After each batch, verify:
-```
-mcp__plugin_cc-soul_cc-soul__soul_context(format="text")
+```bash
+chitta_mcp soul_context
 ```
 
 Check:
@@ -124,12 +112,8 @@ Check:
 ### 6. Completion (Samāpti)
 
 Record the migration:
-```
-mcp__plugin_cc-soul_cc-soul__observe(
-  category="decision",
-  title="ε-Yajña: Migrated [N] nodes in [domain]",
-  content="Converted [N] nodes to high-ε format. Mean ε: [before]% → [after]%"
-)
+```bash
+chitta_mcp observe --category decision --title "ε-Yajña: Migrated [N] nodes in [domain]" --content "Converted [N] nodes to high-ε format. Mean ε: [before]% → [after]%"
 ```
 
 ## How I Compute Epiplexity

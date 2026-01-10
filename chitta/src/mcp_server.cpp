@@ -1,11 +1,17 @@
-// Chitta MCP Server - Thin Client Mode
+// Chitta MCP Server - Multi-mode operation
 // Model Context Protocol server for soul integration with Claude
 //
-// Default mode: Thin client that forwards requests to daemon via Unix socket
-// Direct mode:  Standalone server that opens storage directly (--direct flag)
+// Modes:
+//   CLI mode:    chitta_mcp <tool> [args...]  - Direct tool invocation
+//   Thin client: chitta_mcp                   - Forward JSON-RPC to daemon
+//   Direct mode: chitta_mcp --direct          - Standalone server
 //
-// Usage:
-//   chitta_mcp [options]
+// CLI Examples:
+//   chitta_mcp recall "query"
+//   chitta_mcp recall "query" --zoom sparse
+//   chitta_mcp soul_context
+//   chitta_mcp observe --category decision --title "..." --content "..."
+//   chitta_mcp grow --type wisdom --title "..." --content "..."
 //
 // Options:
 //   --socket-path PATH  Unix socket path (default: /tmp/chitta.sock)
@@ -13,10 +19,12 @@
 //   --path PATH         Path to mind storage (direct mode only)
 //   --model PATH        Path to ONNX model file (direct mode only)
 //   --vocab PATH        Path to vocabulary file (direct mode only)
+//   --json              CLI mode: output raw JSON instead of text
 
 #include <chitta/mcp.hpp>
 #include <chitta/socket_client.hpp>
 #include <chitta/version.hpp>
+#include <set>
 #ifdef CHITTA_WITH_ONNX
 #include <chitta/vak_onnx.hpp>
 #endif
@@ -41,9 +49,32 @@ void signal_handler(int sig) {
     std::_Exit(0);
 }
 
+// Known tool names for CLI mode detection
+static const std::set<std::string> KNOWN_TOOLS = {
+    "recall", "resonate", "full_resonate", "recall_by_tag",
+    "grow", "observe", "update", "feedback", "connect",
+    "soul_context", "attractors", "lens", "lens_harmony",
+    "intend", "wonder", "answer",
+    "narrate", "ledger", "cycle"
+};
+
 void print_usage(const char* prog) {
-    std::cerr << "Usage: " << prog << " [options]\n"
-              << "Options:\n"
+    std::cerr << "Usage:\n"
+              << "  " << prog << " <tool> [args...]     CLI mode: invoke tool directly\n"
+              << "  " << prog << " [options]            MCP mode: JSON-RPC server\n"
+              << "\n"
+              << "CLI Examples:\n"
+              << "  " << prog << " recall \"query\"\n"
+              << "  " << prog << " recall \"query\" --zoom sparse\n"
+              << "  " << prog << " soul_context\n"
+              << "  " << prog << " observe --category decision --title \"...\" --content \"...\"\n"
+              << "  " << prog << " grow --type wisdom --title \"...\" --content \"...\"\n"
+              << "\n"
+              << "Tools: recall, resonate, full_resonate, grow, observe, update,\n"
+              << "       soul_context, attractors, lens, intend, wonder, answer,\n"
+              << "       narrate, ledger, cycle, feedback, connect\n"
+              << "\n"
+              << "MCP Options:\n"
               << "  --socket-path PATH  Unix socket path (default: /tmp/chitta-VERSION.sock)\n"
               << "  --direct            Direct mode: open storage locally (legacy)\n"
               << "  --path PATH         Path to mind storage (direct mode only)\n"
@@ -51,10 +82,139 @@ void print_usage(const char* prog) {
               << "  --model PATH        Path to ONNX model file (direct mode only)\n"
               << "  --vocab PATH        Path to vocabulary file (direct mode only)\n"
 #endif
-              << "  --help              Show this help message\n"
-              << "\n"
-              << "Default: Thin client forwarding to daemon via socket.\n"
-              << "Use --direct to open storage locally (legacy standalone mode).\n";
+              << "  --json              CLI mode: output raw JSON instead of text\n"
+              << "  --help              Show this help message\n";
+}
+
+// CLI mode: invoke tool directly
+int run_cli(const std::string& socket_path, const std::string& tool,
+            int argc, char* argv[], int arg_start, bool json_output) {
+    using json = nlohmann::json;
+
+    // Build arguments JSON from command line
+    json args = json::object();
+    std::string positional_key;  // First positional arg goes to "query" for recall, etc.
+
+    // Determine the primary positional key based on tool
+    if (tool == "recall" || tool == "resonate" || tool == "full_resonate") {
+        positional_key = "query";
+    } else if (tool == "grow") {
+        positional_key = "title";
+    } else if (tool == "observe") {
+        positional_key = "title";
+    } else if (tool == "lens") {
+        positional_key = "query";
+    } else if (tool == "wonder") {
+        positional_key = "question";
+    }
+
+    bool found_positional = false;
+    for (int i = arg_start; i < argc; ++i) {
+        std::string arg = argv[i];
+
+        if (arg.rfind("--", 0) == 0) {
+            // Named argument: --key value
+            std::string key = arg.substr(2);
+            if (i + 1 < argc && argv[i + 1][0] != '-') {
+                std::string value = argv[++i];
+                // Try to parse as number or boolean
+                if (value == "true") {
+                    args[key] = true;
+                } else if (value == "false") {
+                    args[key] = false;
+                } else {
+                    try {
+                        if (value.find('.') != std::string::npos) {
+                            args[key] = std::stod(value);
+                        } else {
+                            args[key] = std::stoi(value);
+                        }
+                    } catch (...) {
+                        args[key] = value;
+                    }
+                }
+            } else {
+                args[key] = true;  // Flag without value
+            }
+        } else if (!found_positional && !positional_key.empty()) {
+            // First positional argument
+            args[positional_key] = arg;
+            found_positional = true;
+        }
+    }
+
+    // Connect to daemon
+    chitta::SocketClient client(socket_path);
+    if (!client.ensure_daemon_running()) {
+        std::cerr << "Error: Cannot connect to daemon: " << client.last_error() << "\n";
+        return 1;
+    }
+
+    // Send initialize
+    json init_req = {
+        {"jsonrpc", "2.0"},
+        {"method", "initialize"},
+        {"params", {
+            {"protocolVersion", "2024-11-05"},
+            {"capabilities", json::object()},
+            {"clientInfo", {{"name", "chitta_mcp_cli"}, {"version", CHITTA_VERSION}}}
+        }},
+        {"id", 0}
+    };
+    auto init_resp = client.request(init_req.dump());
+    if (!init_resp) {
+        std::cerr << "Error: Initialize failed: " << client.last_error() << "\n";
+        return 1;
+    }
+
+    // Send tool call
+    json tool_req = {
+        {"jsonrpc", "2.0"},
+        {"method", "tools/call"},
+        {"params", {
+            {"name", tool},
+            {"arguments", args}
+        }},
+        {"id", 1}
+    };
+
+    auto resp = client.request(tool_req.dump());
+    if (!resp) {
+        std::cerr << "Error: Tool call failed: " << client.last_error() << "\n";
+        return 1;
+    }
+
+    // Parse and output result
+    try {
+        auto result = json::parse(*resp);
+
+        if (result.contains("error")) {
+            std::cerr << "Error: " << result["error"]["message"].get<std::string>() << "\n";
+            return 1;
+        }
+
+        if (json_output) {
+            // Raw JSON output
+            if (result.contains("result") && result["result"].contains("structured")) {
+                std::cout << result["result"]["structured"].dump(2) << "\n";
+            } else {
+                std::cout << result.dump(2) << "\n";
+            }
+        } else {
+            // Text output
+            if (result.contains("result") && result["result"].contains("content")) {
+                auto& content = result["result"]["content"];
+                if (content.is_array() && !content.empty() && content[0].contains("text")) {
+                    std::cout << content[0]["text"].get<std::string>() << "\n";
+                }
+            }
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Error parsing response: " << e.what() << "\n";
+        return 1;
+    }
+
+    return 0;
 }
 
 // Thin client mode: forward stdin → daemon → stdout
@@ -174,13 +334,28 @@ int main(int argc, char* argv[]) {
     std::string model_path;
     std::string vocab_path;
     bool direct_mode = false;
+    bool json_output = false;
 
     // Honor CHITTA_DB_PATH env var
     if (const char* env_path = std::getenv("CHITTA_DB_PATH")) {
         mind_path = env_path;
     }
 
-    // Parse arguments
+    // Check for CLI mode: first arg is a known tool name
+    if (argc > 1 && KNOWN_TOOLS.count(argv[1])) {
+        std::string tool = argv[1];
+
+        // Check for --json flag anywhere in args
+        for (int i = 2; i < argc; ++i) {
+            if (std::strcmp(argv[i], "--json") == 0) {
+                json_output = true;
+            }
+        }
+
+        return run_cli(socket_path, tool, argc, argv, 2, json_output);
+    }
+
+    // Parse arguments for MCP mode
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--socket-path") == 0 && i + 1 < argc) {
             socket_path = argv[++i];
@@ -193,6 +368,8 @@ int main(int argc, char* argv[]) {
             model_path = argv[++i];
         } else if (std::strcmp(argv[i], "--vocab") == 0 && i + 1 < argc) {
             vocab_path = argv[++i];
+        } else if (std::strcmp(argv[i], "--json") == 0) {
+            json_output = true;  // Ignored in MCP mode
         } else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
             print_usage(argv[0]);
             return 0;

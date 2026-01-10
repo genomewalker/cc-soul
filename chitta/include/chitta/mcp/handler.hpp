@@ -30,7 +30,12 @@ public:
         try {
             auto request = json::parse(request_str);
             auto response = handle_request(request);
-            return response.dump();
+            try {
+                return response.dump();
+            } catch (const json::type_error& e) {
+                // UTF-8 encoding issue - try with replacement
+                return response.dump(-1, ' ', false, json::error_handler_t::replace);
+            }
         } catch (const json::parse_error& e) {
             return make_error(json(), error::PARSE_ERROR,
                             std::string("JSON parse error: ") + e.what()).dump();
@@ -97,8 +102,11 @@ private:
     }
 
     json handle_initialize(const json& params, const json& id) {
+        (void)params;
         json capabilities = {
-            {"tools", json::object()}
+            {"tools", {
+                {"listChanged", true}
+            }}
         };
         return make_result(id, {
             {"protocolVersion", "2024-11-05"},

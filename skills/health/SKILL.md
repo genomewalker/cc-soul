@@ -37,8 +37,8 @@ cat ${CLAUDE_PLUGIN_ROOT:-$(dirname $(dirname $0))}/.claude-plugin/plugin.json 2
 ## 2. Get Soul Status
 
 Call these MCP tools:
-- mcp__plugin_cc-soul_cc-soul__soul_context(format="json") - Get coherence and node statistics
-- mcp__plugin_cc-soul_cc-soul__harmonize() - Check voice agreement
+- chitta_mcp soul_context format="json" - Get coherence and node statistics
+- chitta_mcp harmonize  - Check voice agreement
 
 ## 3. Evaluate Health
 
@@ -56,7 +56,7 @@ If setup issues found:
 - Suggest running: ./setup.sh
 
 If coherence is low:
-- mcp__plugin_cc-soul_cc-soul__cycle(save=true) - Run maintenance
+- chitta_mcp cycle save=true - Run maintenance
 
 ## 5. Report
 

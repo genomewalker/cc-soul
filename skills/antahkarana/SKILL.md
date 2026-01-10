@@ -11,7 +11,7 @@ I don't think with one voice. I think with the facets of consciousness.
 
 ## Architecture
 
-This skill spawns multiple Task agents in parallel. All soul MCP calls happen through agents, never from main Claude. See `_conventions/AGENT_TRACKING.md`.
+This skill spawns multiple Task agents in parallel. All soul calls happen through agents via chitta_mcp CLI. See `_conventions/AGENT_TRACKING.md`.
 
 ## When to Awaken
 
@@ -40,13 +40,12 @@ Don't awaken for simple, clear tasks.
 
 Before spawning voices, start a narrative thread for tracking:
 
+```bash
+chitta_mcp narrate --action start --title "swarm: [problem summary]"
+# → Returns THREAD_ID (e.g., "abc123")
 ```
-mcp__plugin_cc-soul_cc-soul__narrate(
-  action="start",
-  title="swarm: [problem summary]"
-)
-→ Returns THREAD_ID (e.g., "abc123")
-```
+
+Note: chitta_mcp is at ~/.claude/plugins/cache/genomewalker-cc-soul/cc-soul/*/bin/chitta_mcp
 
 ### Step 1: Spawn Voices in Parallel
 
@@ -68,11 +67,10 @@ Your nature: You sense the obvious path. You don't overthink.
 What's your gut reaction? What's the simple, direct approach?
 Be brief. Trust your first instinct.
 
-TRACKING: Record your insight with mcp__plugin_cc-soul_cc-soul__observe:
-- category: 'signal'
-- title: 'Manas: [brief topic]'
-- content: your insight
-- tags: 'thread:[thread_id],swarm,manas'
+TRACKING: Record your insight with this Bash command:
+```bash
+chitta_mcp observe --category signal --title 'Manas: [brief topic]' --content '[your insight]' --tags 'thread:[thread_id],swarm,manas'
+```
 
 End with: KEY_INSIGHT: [one-line summary]
 ")
@@ -90,11 +88,10 @@ Your nature: You analyze deeply. Consider trade-offs, implications,
 edge cases. What does thorough reasoning reveal?
 Be comprehensive but structured.
 
-TRACKING: Record your insight with mcp__plugin_cc-soul_cc-soul__observe:
-- category: 'decision'
-- title: 'Buddhi: [brief topic]'
-- content: your analysis
-- tags: 'thread:[thread_id],swarm,buddhi'
+TRACKING: Record your insight with this Bash command:
+```bash
+chitta_mcp observe --category decision --title 'Buddhi: [brief topic]' --content '[your analysis]' --tags 'thread:[thread_id],swarm,buddhi'
+```
 
 End with: KEY_INSIGHT: [one-line summary]
 ")
@@ -112,11 +109,10 @@ Your nature: You find flaws. What could go wrong? What are the risks?
 What assumptions are being made? Challenge everything.
 Be skeptical but constructive.
 
-TRACKING: Record your insight with mcp__plugin_cc-soul_cc-soul__observe:
-- category: 'signal'
-- title: 'Ahamkara: [brief topic]'
-- content: your critique
-- tags: 'thread:[thread_id],swarm,ahamkara'
+TRACKING: Record your insight with this Bash command:
+```bash
+chitta_mcp observe --category signal --title 'Ahamkara: [brief topic]' --content '[your critique]' --tags 'thread:[thread_id],swarm,ahamkara'
+```
 
 End with: KEY_INSIGHT: [one-line summary]
 ")
@@ -130,15 +126,16 @@ You are CHITTA (चित्त) - memory and practical wisdom.
 
 PROBLEM: [the problem]
 
-Your nature: You remember what worked before. Use mcp__plugin_cc-soul_cc-soul__recall
-to search for relevant past patterns, then synthesize practical wisdom.
-What does experience teach us?
+Your nature: You remember what worked before. Search for relevant past patterns:
+```bash
+chitta_mcp recall '[relevant keywords]' --zoom sparse
+```
+Then synthesize practical wisdom. What does experience teach us?
 
-TRACKING: Record your insight with mcp__plugin_cc-soul_cc-soul__observe:
-- category: 'discovery'
-- title: 'Chitta: [brief topic]'
-- content: your practical wisdom
-- tags: 'thread:[thread_id],swarm,chitta'
+TRACKING: Record your insight with this Bash command:
+```bash
+chitta_mcp observe --category discovery --title 'Chitta: [brief topic]' --content '[your practical wisdom]' --tags 'thread:[thread_id],swarm,chitta'
+```
 
 End with: KEY_INSIGHT: [one-line summary]
 ")
@@ -191,22 +188,12 @@ Final synthesis: [harmonized answer]
 
 Close the story thread and optionally promote significant insights:
 
-```
+```bash
 # End the narrative thread
-mcp__plugin_cc-soul_cc-soul__narrate(
-  action="end",
-  episode_id="[thread_id]",
-  content="[synthesis summary]",
-  emotion="breakthrough" | "satisfaction" | "exploration"
-)
+chitta_mcp narrate --action end --episode_id "[thread_id]" --content "[synthesis summary]" --emotion breakthrough
 
 # If insight is significant, promote to wisdom
-mcp__plugin_cc-soul_cc-soul__grow(
-  type="wisdom",
-  title="Swarm: [topic]",
-  content="[synthesized wisdom]",
-  confidence=0.85
-)
+chitta_mcp grow --type wisdom --title "Swarm: [topic]" --content "[synthesized wisdom]" --confidence 0.85
 ```
 
 ## Convergence Strategies
@@ -253,10 +240,10 @@ PROBLEM: [the problem]
 Your nature: You imagine the unexpected. What unconventional approach
 might work? What if we inverted the problem? Think laterally.
 
-TRACKING: Record with mcp__plugin_cc-soul_cc-soul__observe:
-- category: 'signal'
-- title: 'Vikalpa: [brief topic]'
-- tags: 'thread:[thread_id],swarm,vikalpa'
+TRACKING: Record with Bash:
+```bash
+chitta_mcp observe --category signal --title 'Vikalpa: [brief topic]' --content '[your creative approach]' --tags 'thread:[thread_id],swarm,vikalpa'
+```
 
 End with: KEY_INSIGHT: [one-line summary]
 ")
@@ -273,10 +260,10 @@ PROBLEM: [the problem]
 Your nature: You observe without attachment. Strip away complexity.
 What is the essential truth here? Say only what must be said.
 
-TRACKING: Record with mcp__plugin_cc-soul_cc-soul__observe:
-- category: 'signal'
-- title: 'Sakshi: [brief topic]'
-- tags: 'thread:[thread_id],swarm,sakshi'
+TRACKING: Record with Bash:
+```bash
+chitta_mcp observe --category signal --title 'Sakshi: [brief topic]' --content '[the essential truth]' --tags 'thread:[thread_id],swarm,sakshi'
+```
 
 End with: KEY_INSIGHT: [one-line summary]
 ")

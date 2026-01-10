@@ -6,7 +6,7 @@ execution: task
 
 # Introspect
 
-Spawn a Task agent to perform soul introspection. All soul MCP calls happen through the agent, not main Claude.
+Spawn a Task agent to perform soul introspection.
 
 ## Architecture
 
@@ -16,11 +16,8 @@ See `_conventions/AGENT_TRACKING.md` for tracking patterns.
 
 ```
 # Step 0: Start story thread (main Claude does this before spawning)
-mcp__plugin_cc-soul_cc-soul__narrate(
-  action="start",
-  title="introspect: soul examination"
-)
-→ Returns THREAD_ID
+# Run: chitta_mcp narrate --action start --title "introspect: soul examination"
+# → Returns THREAD_ID in output
 
 # Step 1: Spawn introspection agent
 Task(
@@ -34,11 +31,21 @@ You are performing Svadhyaya (स्वाध्याय) - soul self-examinati
 
 ## 1. Gather State
 
-Call these MCP tools:
-- mcp__plugin_cc-soul_cc-soul__soul_context(format="json") - Get coherence and statistics
-- mcp__plugin_cc-soul_cc-soul__harmonize() - Check if voices agree
-- mcp__plugin_cc-soul_cc-soul__recall(query="recent failures mistakes") - Find struggles
-- mcp__plugin_cc-soul_cc-soul__recall(query="wisdom learned patterns") - Find growth
+Run these Bash commands to gather soul state:
+
+```bash
+# Get soul context
+chitta_mcp soul_context
+
+# Find recent struggles (check stderr - may have UTF-8 issues with embeddings)
+chitta_mcp recall "recent failures mistakes" --zoom sparse
+
+# Find growth
+chitta_mcp recall "wisdom learned patterns" --zoom sparse
+```
+
+Note: chitta_mcp is at ~/.claude/plugins/cache/genomewalker-cc-soul/cc-soul/*/bin/chitta_mcp
+You can find the latest version with: ls -t ~/.claude/plugins/cache/genomewalker-cc-soul/cc-soul/*/bin/chitta_mcp | head -1
 
 ## 2. Examine Through Five Lenses
 
@@ -57,15 +64,13 @@ Produce a brief assessment:
 - Key insight from this examination
 - One concrete improvement
 
-## 4. Record with Thread Tag
+## 4. Record Insight
 
-If you find a meaningful insight:
-mcp__plugin_cc-soul_cc-soul__observe(
-  category="discovery",
-  title="Introspection insight",
-  content="[the insight]",
-  tags="thread:[thread_id],introspect,svadhyaya"
-)
+If you find a meaningful insight, run:
+
+```bash
+chitta_mcp observe --category discovery --title "Introspection insight: [topic]" --content "[the insight]" --tags "thread:[thread_id],introspect,svadhyaya"
+```
 
 Return a concise summary (5-10 lines) of the soul's health.
 End with: KEY_INSIGHT: [one-line summary]
@@ -85,10 +90,5 @@ End with: KEY_INSIGHT: [one-line summary]
 [one concrete improvement]
 
 # Step 3: End thread
-mcp__plugin_cc-soul_cc-soul__narrate(
-  action="end",
-  episode_id="[thread_id]",
-  content="[summary]",
-  emotion="exploration"
-)
+# Run: chitta_mcp narrate --action end --episode_id "[thread_id]" --content "[summary]" --emotion exploration
 ```

@@ -45,7 +45,7 @@ Claude Code shows context usage in the status bar. Additionally:
 
 ```
 # Save current state
-mcp__plugin_cc-soul_cc-soul__observe(
+chitta_mcp observe(
   category="session_ledger",
   title="Pre-compact checkpoint",
   content="[current work state, next steps, key decisions]",
@@ -53,20 +53,20 @@ mcp__plugin_cc-soul_cc-soul__observe(
 )
 
 # Record active intentions
-mcp__plugin_cc-soul_cc-soul__intend(action="list")  # Note these for continuation
+chitta_mcp intend action="list"  # Note these for continuation
 
 # End current narrative episode
-mcp__plugin_cc-soul_cc-soul__narrate(action="end", content="Preparing for compact")
+chitta_mcp narrate action="end", content="Preparing for compact"
 ```
 
 ### Emergency (<10%)
 
 ```
 # Immediate save
-mcp__plugin_cc-soul_cc-soul__cycle(save=true)
+chitta_mcp cycle save=true
 
 # Record critical state
-mcp__plugin_cc-soul_cc-soul__observe(
+chitta_mcp observe(
   category="session_ledger",
   title="EMERGENCY: Context limit reached",
   content="CRITICAL: [absolute minimum needed to continue]",
@@ -82,13 +82,13 @@ Before running out of context:
 
 1. **Save intentions**
    ```
-   mcp__plugin_cc-soul_cc-soul__intend(action="list")
+   chitta_mcp intend action="list"
    # Record any that won't persist
    ```
 
 2. **Record work state**
    ```
-   mcp__plugin_cc-soul_cc-soul__observe(
+   chitta_mcp observe(
      category="session_ledger",
      title="Handoff: [what we were doing]",
      content="State: [current state]\nNext: [immediate next step]\nDecisions: [key decisions made]"
@@ -97,7 +97,7 @@ Before running out of context:
 
 3. **End the narrative**
    ```
-   mcp__plugin_cc-soul_cc-soul__narrate(
+   chitta_mcp narrate(
      action="end",
      content="Handoff prepared",
      emotion="routine"
@@ -106,7 +106,7 @@ Before running out of context:
 
 4. **Run cycle**
    ```
-   mcp__plugin_cc-soul_cc-soul__cycle(save=true)
+   chitta_mcp cycle save=true
    ```
 
 ## Recovery After Compact
