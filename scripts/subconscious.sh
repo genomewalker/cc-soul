@@ -93,17 +93,32 @@ cmd_start() {
         --pid-file "$PID_FILE" \
         >> "$LOG_FILE" 2>&1 &
 
-    # Wait briefly for PID file
-    sleep 1
+    # Wait for socket AND verify daemon responds (up to 10 seconds)
+    # This ensures the daemon is fully ready for MCP clients
+    local daemon_ready=false
+    local socket=""
+    for i in {1..100}; do
+        socket=$(ls $SOCKET_PATTERN 2>/dev/null | head -1)
+        if [[ -S "$socket" ]]; then
+            # Socket exists, now verify daemon responds with heartbeat
+            local response
+            response=$(echo "stats" | timeout 1 nc -U "$socket" 2>/dev/null || true)
+            if [[ -n "$response" && "$response" == *"total"* ]]; then
+                daemon_ready=true
+                break
+            fi
+        fi
+        sleep 0.1
+    done
 
     # Release lock
     exec 200>&-
 
-    if is_running; then
+    if $daemon_ready && is_running; then
         local pid=$(cat "$PID_FILE" 2>/dev/null || pgrep -f "chitta_cli daemon" | head -1)
-        echo "[subconscious] Started (pid=$pid, interval=${INTERVAL}s)"
+        echo "[subconscious] Started (pid=$pid, socket=$socket, heartbeat=ok)"
     else
-        echo "[subconscious] Failed to start" >&2
+        echo "[subconscious] Failed to start (daemon not responding)" >&2
         return 1
     fi
 }

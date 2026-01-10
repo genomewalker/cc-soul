@@ -98,7 +98,7 @@ private:
 
     json handle_initialize(const json& params, const json& id) {
         json capabilities = {
-            {"tools", {}}
+            {"tools", json::object()}
         };
         return make_result(id, {
             {"protocolVersion", "2024-11-05"},

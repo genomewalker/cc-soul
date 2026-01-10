@@ -11,12 +11,12 @@
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/soul-hook.sh start"
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/subconscious.sh start",
+            "timeout": 15
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/subconscious.sh start",
-            "timeout": 10
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/soul-hook.sh start"
           },
           {
             "type": "command",

@@ -15,7 +15,7 @@
     "cc-soul": {
       "command": "${CLAUDE_PLUGIN_ROOT}/bin/chitta_mcp",
       "env": {
-        "CHITTA_DB_PATH": "${CLAUDE_PLUGIN_ROOT}/mind/chitta",
+        "CHITTA_DB_PATH": "${HOME}/.claude/mind/chitta",
         "CLAUDE_PLUGIN_ROOT": "${CLAUDE_PLUGIN_ROOT}"
       }
     }
