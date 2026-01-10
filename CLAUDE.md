@@ -254,9 +254,12 @@ All 19 tools available via `chitta`. Most work happens automatically via hooks, 
 - `feedback` — mark memory as helpful/misleading after using it
 - `update` — migrate verbose content to high-ε format
 
-**Relationships** (I build the knowledge graph):
-- `connect` — create triplets: `(subject) --[predicate]--> (object)`
-  Use when I discover relationships between concepts
+**Relationships** (triplets are first-class nodes):
+- `connect` — creates searchable triplet node: "subject predicate object"
+  - Gets embedded, decays, searchable by meaning
+  - Tags: triplet, predicate:X, subject:Y, object:Z
+  - Use when I discover relationships between concepts
+- `query` — search triplets by subject/predicate/object tags
 
 **Intentions & Curiosity**:
 - `intend` — declare what I will do
