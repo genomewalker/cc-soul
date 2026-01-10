@@ -251,15 +251,16 @@ hook_prompt() {
         raw_output=$(call_mcp "full_resonate" "{\"query\":\"$query_escaped\",\"k\":$limit,\"exclude_tags\":[\"auto:cmd\",\"auto:file\",\"auto:edit\"]}")
 
         if [[ -n "$raw_output" && "$raw_output" != "null" ]]; then
-            # Clean up output for display
+            # Filter: only relevance >= 25%, clean format (remove [XX%] [type] prefix)
             local resonance_output
             resonance_output=$(echo "$raw_output" \
                 | grep -v "^Full resonance for:" \
+                | grep -E '^\[(2[5-9]|[3-9][0-9]|100)%\]' \
+                | sed 's/^\[[0-9]*%\] \[[^]]*\] //' \
                 | head -c 500)
 
             if [[ -n "$resonance_output" ]]; then
                 echo "$resonance_output"
-                # Track token savings
                 local chars_injected=${#resonance_output}
                 "$SCRIPT_DIR/token-savings.sh" add-transparent "$chars_injected" 2>/dev/null || true
             fi
