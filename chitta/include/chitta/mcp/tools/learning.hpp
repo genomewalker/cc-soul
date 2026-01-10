@@ -80,6 +80,34 @@ inline void register_schemas(std::vector<ToolSchema>& tools) {
             {"required", {"memory_id", "helpful"}}
         }
     });
+
+    tools.push_back({
+        "update",
+        "Update a node's content (high-ε migration). Replaces payload while preserving embedding.",
+        {
+            {"type", "object"},
+            {"properties", {
+                {"id", {{"type", "string"}, {"description", "UUID of the node to update"}}},
+                {"content", {{"type", "string"}, {"description", "New content (natural language)"}}}
+            }},
+            {"required", {"id", "content"}}
+        }
+    });
+
+    tools.push_back({
+        "connect",
+        "Create a semantic relationship (triplet): subject --[predicate]--> object.",
+        {
+            {"type", "object"},
+            {"properties", {
+                {"subject", {{"type", "string"}, {"description", "Subject entity"}}},
+                {"predicate", {{"type", "string"}, {"description", "Relationship type"}}},
+                {"object", {{"type", "string"}, {"description", "Object entity"}}},
+                {"weight", {{"type", "number"}, {"minimum", 0}, {"maximum", 1}, {"default", 1.0}}}
+            }},
+            {"required", {"subject", "predicate", "object"}}
+        }
+    });
 }
 
 // Tool implementations
@@ -231,12 +259,63 @@ inline ToolResult feedback(Mind* mind, const json& params) {
     return ToolResult::ok(helpful ? "Memory strengthened" : "Memory weakened", result);
 }
 
+// Update: replace node content while preserving embedding
+inline ToolResult update(Mind* mind, const json& params) {
+    std::string id_str = params.at("id");
+    std::string content = params.at("content");
+
+    NodeId id = NodeId::from_string(id_str);
+    auto node_opt = mind->get(id);
+    if (!node_opt) {
+        return ToolResult::error("Node not found: " + id_str);
+    }
+
+    // Update payload only, preserve embedding
+    Node updated = *node_opt;
+    updated.payload = std::vector<uint8_t>(content.begin(), content.end());
+    updated.touch();
+
+    if (!mind->update_node(id, updated)) {
+        return ToolResult::error("Failed to update node: " + id_str);
+    }
+
+    json result = {
+        {"id", id_str},
+        {"content", content.substr(0, 50) + (content.size() > 50 ? "..." : "")}
+    };
+
+    return ToolResult::ok("Updated: " + content.substr(0, 50), result);
+}
+
+// Connect: create triplet relationship
+inline ToolResult connect(Mind* mind, const json& params) {
+    std::string subject = params.at("subject");
+    std::string predicate = params.at("predicate");
+    std::string object = params.at("object");
+    float weight = params.value("weight", 1.0f);
+
+    mind->connect(subject, predicate, object, weight);
+
+    json result = {
+        {"subject", subject},
+        {"predicate", predicate},
+        {"object", object},
+        {"weight", weight}
+    };
+
+    std::ostringstream ss;
+    ss << "Connected: (" << subject << ") --[" << predicate << "]--> (" << object << ")";
+    return ToolResult::ok(ss.str(), result);
+}
+
 // Register all learning tool handlers
 inline void register_handlers(Mind* mind,
                                std::unordered_map<std::string, ToolHandler>& handlers) {
     handlers["grow"] = [mind](const json& p) { return grow(mind, p); };
     handlers["observe"] = [mind](const json& p) { return observe(mind, p); };
     handlers["feedback"] = [mind](const json& p) { return feedback(mind, p); };
+    handlers["update"] = [mind](const json& p) { return update(mind, p); };
+    handlers["connect"] = [mind](const json& p) { return connect(mind, p); };
 }
 
 } // namespace chitta::mcp::tools::learning
