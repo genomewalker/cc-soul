@@ -2,11 +2,12 @@
 // Daemon: the soul's autonomous heartbeat
 //
 // A living system breathes without being told to.
-// The daemon runs decay, coherence, and pruning in the background.
+// The daemon runs decay, coherence, pruning, and dreaming in the background.
 
 #include "types.hpp"
 #include "graph.hpp"
 #include "dynamics.hpp"
+#include "dream.hpp"
 #include <thread>
 #include <atomic>
 #include <functional>
@@ -21,6 +22,7 @@ struct DaemonConfig {
     int64_t coherence_interval_ms = 300000; // 5 minutes between coherence checks
     int64_t prune_interval_ms = 86400000;   // 1 day between prune cycles
     int64_t save_interval_ms = 300000;      // 5 minutes between saves
+    int64_t dream_interval_ms = 1800000;    // 30 minutes between dream cycles
     float prune_threshold = 0.05f;          // Confidence below this = prune
     float coherence_alert_threshold = 0.3f; // Alert if coherence drops below
 };
@@ -32,6 +34,7 @@ enum class DaemonEvent {
     CoherenceCheck, // Coherence measured
     Pruned,         // Dead nodes removed
     Saved,          // State persisted
+    Dream,          // Dream cycle completed
     Alert           // Coherence critically low
 };
 
@@ -48,6 +51,7 @@ public:
         , last_coherence_(now())
         , last_prune_(now())
         , last_save_(now())
+        , last_dream_(now())
     {}
 
     ~Daemon() {
@@ -68,6 +72,7 @@ public:
         , last_coherence_(other.last_coherence_)
         , last_prune_(other.last_prune_)
         , last_save_(other.last_save_)
+        , last_dream_(other.last_dream_)
         , stats_(other.stats_)
     {
         other.running_ = false;
@@ -86,6 +91,7 @@ public:
             last_coherence_ = other.last_coherence_;
             last_prune_ = other.last_prune_;
             last_save_ = other.last_save_;
+            last_dream_ = other.last_dream_;
             stats_ = other.stats_;
             other.running_ = false;
             other.graph_ = nullptr;
@@ -137,6 +143,8 @@ public:
         size_t ticks = 0;
         size_t decay_cycles = 0;
         size_t coherence_checks = 0;
+        size_t dream_cycles = 0;
+        size_t connections_discovered = 0;
         size_t prune_cycles = 0;
         size_t saves = 0;
         size_t nodes_pruned = 0;
@@ -175,6 +183,12 @@ private:
             if (current - last_save_ >= config_.save_interval_ms) {
                 run_save();
                 last_save_ = current;
+            }
+
+            // Dream cycle
+            if (current - last_dream_ >= config_.dream_interval_ms) {
+                run_dream();
+                last_dream_ = current;
             }
 
             // Sleep until next tick
@@ -231,6 +245,62 @@ private:
         emit(DaemonEvent::Saved, "State persisted");
     }
 
+    void run_dream() {
+        if (!graph_) return;
+
+        // Collect embeddings from graph
+        std::vector<Vector> embeddings;
+        std::vector<NodeId> node_ids;
+
+        auto nodes = graph_->all_nodes();
+        for (const auto& node : nodes) {
+            if (!node.nu.is_zero()) {
+                embeddings.push_back(node.nu);
+                node_ids.push_back(node.id);
+            }
+        }
+
+        if (embeddings.size() < 10) {
+            emit(DaemonEvent::Dream, "Not enough nodes for dreaming");
+            return;
+        }
+
+        size_t connections = 0;
+
+        // 1. Cluster similar concepts
+        auto clusters = dream::cluster_kmeans(embeddings, 5, 10);
+
+        // 2. Find highly similar pairs within clusters
+        for (const auto& cluster : clusters) {
+            if (cluster.members.size() < 2) continue;
+
+            for (size_t i = 0; i < cluster.members.size(); i++) {
+                for (size_t j = i + 1; j < cluster.members.size(); j++) {
+                    size_t idx_i = cluster.members[i];
+                    size_t idx_j = cluster.members[j];
+
+                    float sim = embeddings[idx_i].cosine(embeddings[idx_j]);
+                    if (sim > 0.7f) {
+                        // Connect via triplet (similar relationship)
+                        graph_->add_triplet(node_ids[idx_i], "similar_to",
+                                           node_ids[idx_j], sim);
+                        connections++;
+                    }
+                }
+            }
+        }
+
+        // 3. Find gaps (unexplored regions)
+        auto gaps = dream::find_gaps(embeddings, 50, 0.4f);
+
+        stats_.dream_cycles++;
+        stats_.connections_discovered += connections;
+
+        std::string msg = "Dream: " + std::to_string(connections) + " connections, "
+                        + std::to_string(gaps.size()) + " gaps";
+        emit(DaemonEvent::Dream, msg);
+    }
+
     void emit(DaemonEvent event, const std::string& msg) {
         if (callback_) {
             callback_(event, msg);
@@ -248,6 +318,7 @@ private:
     Timestamp last_coherence_;
     Timestamp last_prune_;
     Timestamp last_save_;
+    Timestamp last_dream_;
 
     Stats stats_;
 };
