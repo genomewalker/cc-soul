@@ -60,6 +60,7 @@ inline std::string node_type_to_string_impl(int type) {
         case 15: return "story_thread";
         case 16: return "ledger";
         case 17: return "entity";
+        case 18: return "triplet";
         default: return "unknown";
     }
 }

@@ -108,6 +108,20 @@ inline void register_schemas(std::vector<ToolSchema>& tools) {
             {"required", {"subject", "predicate", "object"}}
         }
     });
+
+    tools.push_back({
+        "query",
+        "Query triplet relationships. Use empty string as wildcard.",
+        {
+            {"type", "object"},
+            {"properties", {
+                {"subject", {{"type", "string"}, {"description", "Subject entity (empty = any)"}}},
+                {"predicate", {{"type", "string"}, {"description", "Relationship type (empty = any)"}}},
+                {"object", {{"type", "string"}, {"description", "Object entity (empty = any)"}}}
+            }},
+            {"required", {}}
+        }
+    });
 }
 
 // Tool implementations
@@ -259,7 +273,7 @@ inline ToolResult feedback(Mind* mind, const json& params) {
     return ToolResult::ok(helpful ? "Memory strengthened" : "Memory weakened", result);
 }
 
-// Update: replace node content while preserving embedding
+// Update: replace node content and re-embed
 inline ToolResult update(Mind* mind, const json& params) {
     std::string id_str = params.at("id");
     std::string content = params.at("content");
@@ -270,10 +284,18 @@ inline ToolResult update(Mind* mind, const json& params) {
         return ToolResult::error("Node not found: " + id_str);
     }
 
-    // Update payload only, preserve embedding
+    // Update payload and re-embed
     Node updated = *node_opt;
     updated.payload = std::vector<uint8_t>(content.begin(), content.end());
     updated.touch();
+
+    // Re-compute embedding from new content
+    if (mind->has_yantra()) {
+        auto vec = mind->embed(content);
+        if (vec) {
+            updated.nu = std::move(*vec);
+        }
+    }
 
     if (!mind->update_node(id, updated)) {
         return ToolResult::error("Failed to update node: " + id_str);
@@ -281,31 +303,78 @@ inline ToolResult update(Mind* mind, const json& params) {
 
     json result = {
         {"id", id_str},
-        {"content", content.substr(0, 50) + (content.size() > 50 ? "..." : "")}
+        {"content", content.substr(0, 50) + (content.size() > 50 ? "..." : "")},
+        {"re_embedded", mind->has_yantra()}
     };
 
     return ToolResult::ok("Updated: " + content.substr(0, 50), result);
 }
 
-// Connect: create triplet relationship
+// Connect: create triplet as a first-class node
 inline ToolResult connect(Mind* mind, const json& params) {
     std::string subject = params.at("subject");
     std::string predicate = params.at("predicate");
     std::string object = params.at("object");
-    float weight = params.value("weight", 1.0f);
+    float confidence = params.value("confidence", 0.8f);
 
-    mind->connect(subject, predicate, object, weight);
+    // Create natural language content for the triplet
+    std::string content = subject + " " + predicate + " " + object;
+
+    // Tags for filtering and querying
+    std::vector<std::string> tags = {
+        "triplet",
+        "predicate:" + predicate,
+        "subject:" + subject,
+        "object:" + object
+    };
+
+    // Store as a triplet node (searchable, embeddable, decays)
+    NodeId id = mind->remember(content, NodeType::Triplet, Confidence(confidence), tags);
+
+    // Also maintain graph structure for fast traversal
+    mind->connect(subject, predicate, object, confidence);
 
     json result = {
+        {"id", id.to_string()},
+        {"content", content},
         {"subject", subject},
         {"predicate", predicate},
-        {"object", object},
-        {"weight", weight}
+        {"object", object}
     };
 
     std::ostringstream ss;
-    ss << "Connected: (" << subject << ") --[" << predicate << "]--> (" << object << ")";
+    ss << "Connected: " << content;
     return ToolResult::ok(ss.str(), result);
+}
+
+// Query: search triplet relationships
+inline ToolResult query(Mind* mind, const json& params) {
+    std::string subject = params.value("subject", "");
+    std::string predicate = params.value("predicate", "");
+    std::string object = params.value("object", "");
+
+    auto triplets = mind->query_triplets(subject, predicate, object);
+
+    if (triplets.empty()) {
+        return ToolResult::ok("No triplets found", {{"triplets", json::array()}});
+    }
+
+    json triplets_array = json::array();
+    std::ostringstream ss;
+    ss << "Found " << triplets.size() << " triplet(s):\n";
+
+    for (const auto& t : triplets) {
+        triplets_array.push_back({
+            {"subject", t.subject.to_string()},
+            {"predicate", t.predicate},
+            {"object", t.object.to_string()},
+            {"weight", t.weight}
+        });
+        ss << "  (" << t.subject.to_string().substr(0, 8) << ") --["
+           << t.predicate << "]--> (" << t.object.to_string().substr(0, 8) << ")\n";
+    }
+
+    return ToolResult::ok(ss.str(), {{"triplets", triplets_array}});
 }
 
 // Register all learning tool handlers
@@ -316,6 +385,7 @@ inline void register_handlers(Mind* mind,
     handlers["feedback"] = [mind](const json& p) { return feedback(mind, p); };
     handlers["update"] = [mind](const json& p) { return update(mind, p); };
     handlers["connect"] = [mind](const json& p) { return connect(mind, p); };
+    handlers["query"] = [mind](const json& p) { return query(mind, p); };
 }
 
 } // namespace chitta::mcp::tools::learning

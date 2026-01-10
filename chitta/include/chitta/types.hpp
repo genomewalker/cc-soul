@@ -212,6 +212,7 @@ enum class NodeType : uint8_t {
     StoryThread = 15, // Connected episode arc (narrative)
     Ledger = 16,     // Session ledger (Atman snapshot)
     Entity = 17,     // Named entity (person, concept, codebase, etc.)
+    Triplet = 18,    // Relationship: subject --[predicate]--> object
 };
 
 // Edge types connecting nodes
