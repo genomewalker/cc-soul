@@ -21,6 +21,7 @@ public:
     }
     // Legacy socket path for backwards compatibility during transition
     static constexpr const char* LEGACY_SOCKET_PATH = "/tmp/chitta.sock";
+    static constexpr const char* DAEMON_LOCK_PATH = "/tmp/chitta-daemon.lock";
     static constexpr int CONNECT_TIMEOUT_MS = 5000;
     static constexpr int RESPONSE_TIMEOUT_MS = 30000;
 
@@ -66,6 +67,8 @@ private:
     bool wait_for_socket(int timeout_ms);
     bool wait_for_socket_gone(int timeout_ms);
     void cleanup_legacy_daemon();
+    int acquire_daemon_lock();  // Returns lock fd or -1 on failure
+    void release_daemon_lock(int lock_fd);
 };
 
 } // namespace chitta

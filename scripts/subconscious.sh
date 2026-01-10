@@ -16,7 +16,11 @@ PID_FILE="${HOME}/.claude/mind/.subconscious.pid"
 LOG_FILE="${HOME}/.claude/mind/.subconscious.log"
 INTERVAL="${SUBCONSCIOUS_INTERVAL:-60}"
 
+LOCK_FILE="/tmp/chitta-daemon.lock"
+SOCKET_PATTERN="/tmp/chitta-*.sock"
+
 is_running() {
+    # First check PID file
     if [[ -f "$PID_FILE" ]]; then
         local pid
         pid=$(cat "$PID_FILE")
@@ -26,12 +30,23 @@ is_running() {
         # Stale PID file
         rm -f "$PID_FILE"
     fi
+
+    # Also check for any running daemon process (covers MCP-spawned daemons)
+    if pgrep -f "chitta_cli daemon" >/dev/null 2>&1; then
+        return 0
+    fi
+
     return 1
 }
 
 cmd_start() {
     if is_running; then
-        local pid=$(cat "$PID_FILE")
+        local pid
+        if [[ -f "$PID_FILE" ]]; then
+            pid=$(cat "$PID_FILE")
+        else
+            pid=$(pgrep -f "chitta_cli daemon" | head -1)
+        fi
         echo "[subconscious] Already running (pid=$pid)"
         return 0
     fi
@@ -39,6 +54,33 @@ cmd_start() {
     if [[ ! -x "$CHITTA_CLI" ]]; then
         echo "[subconscious] chitta_cli not found" >&2
         return 1
+    fi
+
+    # Acquire lock to prevent race with MCP clients
+    exec 200>"$LOCK_FILE"
+    if ! flock -n 200; then
+        echo "[subconscious] Another process is starting daemon, waiting..."
+        flock -w 5 200 || {
+            echo "[subconscious] Lock timeout, checking if daemon started" >&2
+            if is_running; then
+                echo "[subconscious] Daemon was started by another process"
+                return 0
+            fi
+            return 1
+        }
+    fi
+
+    # Re-check after acquiring lock
+    if is_running; then
+        local pid
+        if [[ -f "$PID_FILE" ]]; then
+            pid=$(cat "$PID_FILE")
+        else
+            pid=$(pgrep -f "chitta_cli daemon" | head -1)
+        fi
+        echo "[subconscious] Already running (started by another process, pid=$pid)"
+        exec 200>&-  # Release lock
+        return 0
     fi
 
     # Start daemon in background with socket server for MCP clients
@@ -54,8 +96,11 @@ cmd_start() {
     # Wait briefly for PID file
     sleep 1
 
+    # Release lock
+    exec 200>&-
+
     if is_running; then
-        local pid=$(cat "$PID_FILE")
+        local pid=$(cat "$PID_FILE" 2>/dev/null || pgrep -f "chitta_cli daemon" | head -1)
         echo "[subconscious] Started (pid=$pid, interval=${INTERVAL}s)"
     else
         echo "[subconscious] Failed to start" >&2
@@ -69,29 +114,56 @@ cmd_stop() {
         return 0
     fi
 
-    local pid=$(cat "$PID_FILE")
-    echo "[subconscious] Stopping (pid=$pid)..."
-    kill "$pid" 2>/dev/null || true
+    # Get PIDs from both PID file and process search
+    local pids=""
+    if [[ -f "$PID_FILE" ]]; then
+        pids=$(cat "$PID_FILE")
+    fi
+    # Also find any MCP-spawned daemons
+    local other_pids
+    other_pids=$(pgrep -f "chitta_cli daemon" 2>/dev/null || true)
+    if [[ -n "$other_pids" ]]; then
+        pids="$pids $other_pids"
+    fi
+    pids=$(echo "$pids" | tr ' ' '\n' | sort -u | tr '\n' ' ')
+
+    echo "[subconscious] Stopping daemon(s): $pids"
+    for pid in $pids; do
+        kill "$pid" 2>/dev/null || true
+    done
 
     # Wait for graceful shutdown
     for i in {1..10}; do
         if ! is_running; then
             echo "[subconscious] Stopped"
+            rm -f "$PID_FILE"
             return 0
         fi
         sleep 0.5
     done
 
-    # Force kill
-    kill -9 "$pid" 2>/dev/null || true
+    # Force kill any remaining
+    for pid in $pids; do
+        kill -9 "$pid" 2>/dev/null || true
+    done
     rm -f "$PID_FILE"
     echo "[subconscious] Force stopped"
 }
 
 cmd_status() {
     if is_running; then
-        local pid=$(cat "$PID_FILE")
-        echo "[subconscious] Running (pid=$pid)"
+        local pid
+        if [[ -f "$PID_FILE" ]]; then
+            pid=$(cat "$PID_FILE")
+            echo "[subconscious] Running (pid=$pid, managed)"
+        else
+            pid=$(pgrep -f "chitta_cli daemon" | head -1)
+            echo "[subconscious] Running (pid=$pid, MCP-spawned)"
+        fi
+        # Show socket info
+        local sockets
+        sockets=$(ls $SOCKET_PATTERN 2>/dev/null || echo "none")
+        echo "[subconscious] Sockets: $sockets"
         return 0
     else
         echo "[subconscious] Not running"

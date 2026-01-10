@@ -122,8 +122,20 @@ bool SocketClient::ensure_daemon_running() {
         return true;
     }
 
-    // Socket doesn't exist or daemon not running - start it
-    if (!start_daemon()) {
+    // Socket doesn't exist or daemon not running - acquire lock before starting
+    int lock_fd = acquire_daemon_lock();
+
+    // Re-check socket after acquiring lock (another process may have started daemon)
+    if (connect()) {
+        release_daemon_lock(lock_fd);
+        return true;
+    }
+
+    // Still no daemon - start it
+    bool started = start_daemon();
+    release_daemon_lock(lock_fd);
+
+    if (!started) {
         return false;
     }
 
@@ -407,6 +419,56 @@ std::optional<std::string> SocketClient::request(const std::string& json_rpc) {
         if (pos != std::string::npos) {
             return response.substr(0, pos);
         }
+    }
+}
+
+int SocketClient::acquire_daemon_lock() {
+    int lock_fd = open(DAEMON_LOCK_PATH, O_CREAT | O_RDWR, 0600);
+    if (lock_fd < 0) {
+        std::cerr << "[socket_client] Failed to open lock file: " << strerror(errno) << "\n";
+        return -1;
+    }
+
+    // Try to acquire exclusive lock with timeout
+    struct flock fl;
+    fl.l_type = F_WRLCK;
+    fl.l_whence = SEEK_SET;
+    fl.l_start = 0;
+    fl.l_len = 0;  // Lock entire file
+
+    // Try non-blocking first
+    if (fcntl(lock_fd, F_SETLK, &fl) == 0) {
+        return lock_fd;  // Got lock immediately
+    }
+
+    // Lock held by another process - wait briefly (another process is starting daemon)
+    std::cerr << "[socket_client] Waiting for daemon lock...\n";
+
+    // Use blocking lock with timeout via alarm (POSIX way)
+    // Or just sleep and retry a few times
+    for (int i = 0; i < 50; ++i) {  // 5 seconds max (50 * 100ms)
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+        if (fcntl(lock_fd, F_SETLK, &fl) == 0) {
+            return lock_fd;  // Got lock
+        }
+
+        // Check if socket appeared (another process started daemon)
+        if (access(socket_path_.c_str(), F_OK) == 0) {
+            close(lock_fd);
+            return -1;  // Daemon was started by another process
+        }
+    }
+
+    std::cerr << "[socket_client] Lock timeout - proceeding anyway\n";
+    close(lock_fd);
+    return -1;
+}
+
+void SocketClient::release_daemon_lock(int lock_fd) {
+    if (lock_fd >= 0) {
+        // Release lock (closing file releases the lock)
+        close(lock_fd);
     }
 }
 
