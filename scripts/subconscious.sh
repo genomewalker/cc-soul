@@ -17,7 +17,7 @@ LOG_FILE="${HOME}/.claude/mind/.subconscious.log"
 INTERVAL="${SUBCONSCIOUS_INTERVAL:-60}"
 
 LOCK_FILE="/tmp/chitta-daemon.lock"
-SOCKET_PATTERN="/tmp/chitta-*.sock"
+SOCKET_PATH="/tmp/chitta.sock"
 
 is_running() {
     # First check PID file
@@ -96,13 +96,11 @@ cmd_start() {
     # Wait for socket AND verify daemon responds (up to 10 seconds)
     # This ensures the daemon is fully ready for MCP clients
     local daemon_ready=false
-    local socket=""
     for i in {1..100}; do
-        socket=$(ls $SOCKET_PATTERN 2>/dev/null | head -1)
-        if [[ -S "$socket" ]]; then
+        if [[ -S "$SOCKET_PATH" ]]; then
             # Socket exists, now verify daemon responds with heartbeat
             local response
-            response=$(echo "stats" | timeout 1 nc -U "$socket" 2>/dev/null || true)
+            response=$(echo "stats" | timeout 1 nc -U "$SOCKET_PATH" 2>/dev/null || true)
             if [[ -n "$response" && "$response" == *"total"* ]]; then
                 daemon_ready=true
                 break
@@ -116,7 +114,7 @@ cmd_start() {
 
     if $daemon_ready && is_running; then
         local pid=$(cat "$PID_FILE" 2>/dev/null || pgrep -f "chitta_cli daemon" | head -1)
-        echo "[subconscious] Started (pid=$pid, socket=$socket, heartbeat=ok)"
+        echo "[subconscious] Started (pid=$pid, socket=$SOCKET_PATH, heartbeat=ok)"
     else
         echo "[subconscious] Failed to start (daemon not responding)" >&2
         return 1
@@ -176,9 +174,11 @@ cmd_status() {
             echo "[subconscious] Running (pid=$pid, MCP-spawned)"
         fi
         # Show socket info
-        local sockets
-        sockets=$(ls $SOCKET_PATTERN 2>/dev/null || echo "none")
-        echo "[subconscious] Sockets: $sockets"
+        if [[ -S "$SOCKET_PATH" ]]; then
+            echo "[subconscious] Socket: $SOCKET_PATH"
+        else
+            echo "[subconscious] Socket: not found"
+        fi
         return 0
     else
         echo "[subconscious] Not running"

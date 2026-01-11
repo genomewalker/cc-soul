@@ -237,9 +237,10 @@ configure_permissions() {
     local updated="$current"
     local added=0
     for perm in "${perms[@]}"; do
-        if ! echo "$updated" | jq -e ".permissions.allow | index(\"$perm\")" &>/dev/null; then
-            updated=$(echo "$updated" | jq ".permissions.allow += [\"$perm\"]")
-            ((added++))
+        # Use --arg to safely escape permission strings (handles embedded quotes)
+        if ! echo "$updated" | jq -e --arg p "$perm" '.permissions.allow | index($p)' &>/dev/null; then
+            updated=$(echo "$updated" | jq --arg p "$perm" '.permissions.allow += [$p]')
+            ((added++)) || true
         fi
     done
 
