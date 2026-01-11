@@ -63,6 +63,9 @@ public:
     // Get socket path (for logging/debugging)
     const std::string& socket_path() const { return socket_path_; }
 
+    // Wait for socket to disappear (for shutdown verification)
+    bool wait_for_socket_gone(int timeout_ms);
+
 private:
     std::string socket_path_;
     int fd_ = -1;
@@ -70,7 +73,6 @@ private:
 
     bool start_daemon();
     bool wait_for_socket(int timeout_ms);
-    bool wait_for_socket_gone(int timeout_ms);
     int acquire_daemon_lock();
     void release_daemon_lock(int lock_fd);
 

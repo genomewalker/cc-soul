@@ -6,6 +6,9 @@
 
 set -e
 
+# Ignore signals that might come from daemon shutdown
+trap '' USR1 USR2
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
 CHITTA_DIR="$PLUGIN_DIR/chitta"
@@ -282,6 +285,34 @@ create_symlinks() {
     done
 }
 
+# Stop any running daemon (gracefully via socket, fallback to signals)
+stop_daemon() {
+    # Try graceful shutdown via thin client (preferred)
+    if [[ -x "$BIN_DIR/chitta" ]]; then
+        if "$BIN_DIR/chitta" shutdown 2>/dev/null; then
+            return 0
+        fi
+    fi
+
+    # Try via CLI if thin client not available
+    if [[ -x "$BIN_DIR/chitta_cli" ]]; then
+        if "$BIN_DIR/chitta_cli" shutdown 2>/dev/null; then
+            return 0
+        fi
+    fi
+
+    # Fallback: find and signal daemon directly
+    local daemon_pid=$(pgrep -f "chitta_cli daemon" 2>/dev/null || true)
+    if [[ -n "$daemon_pid" ]]; then
+        echo "[cc-soul] Stopping daemon (pid $daemon_pid) via signal..."
+        kill -TERM "$daemon_pid" 2>/dev/null || true
+        sleep 0.5
+        kill -9 "$daemon_pid" 2>/dev/null || true
+    fi
+    # Clean up stale sockets
+    rm -f /tmp/chitta*.sock 2>/dev/null || true
+}
+
 # Main
 main() {
     # Check if already installed
@@ -291,6 +322,9 @@ main() {
     if [[ "$current_version" == "$installed_version" && -x "$BIN_DIR/chitta" && -f "$MODELS_DIR/model.onnx" ]]; then
         exit 0  # Already installed
     fi
+
+    # Stop daemon before updating binaries (version mismatch can cause issues)
+    stop_daemon
 
     echo "[cc-soul] Installing v$current_version..."
 

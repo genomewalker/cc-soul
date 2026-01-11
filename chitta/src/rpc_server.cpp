@@ -370,6 +370,24 @@ int main(int argc, char* argv[]) {
         mind_path = env_path;
     }
 
+    // Handle shutdown command specially (not a tool, direct daemon control)
+    if (argc > 1 && std::strcmp(argv[1], "shutdown") == 0) {
+        chitta::SocketClient client(socket_path);
+        if (!client.connect()) {
+            std::cerr << "No daemon running\n";
+            return 1;
+        }
+        if (client.request_shutdown()) {
+            std::cout << "Daemon shutdown requested\n";
+            if (client.wait_for_socket_gone(5000)) {
+                std::cout << "Daemon stopped\n";
+            }
+            return 0;
+        }
+        std::cerr << "Failed to request shutdown\n";
+        return 1;
+    }
+
     // Check for CLI mode: first arg is a known tool name
     if (argc > 1 && KNOWN_TOOLS.count(argv[1])) {
         std::string tool = argv[1];

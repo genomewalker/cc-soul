@@ -13,6 +13,7 @@
 #include <chitta/migrations.hpp>
 #include <chitta/version.hpp>
 #include <chitta/socket_server.hpp>
+#include <chitta/socket_client.hpp>
 #include <chitta/rpc/handler.hpp>
 #ifdef CHITTA_WITH_ONNX
 #include <chitta/vak_onnx.hpp>
@@ -76,6 +77,7 @@ void print_usage(const char* prog) {
               << "  query              Query triplets: --subj A --pred R --obj B\n"
               << "  cycle              Run maintenance cycle\n"
               << "  daemon             Run subconscious daemon (background processing)\n"
+              << "  shutdown           Gracefully stop the running daemon\n"
               << "  upgrade            Upgrade database to current version\n"
               << "  convert <format>   Convert to new storage format (unified|segments)\n"
               << "  help               Show this help\n\n"
@@ -495,6 +497,31 @@ int cmd_daemon_with_socket(Mind& mind, int interval_seconds,
     return 0;
 }
 
+int cmd_shutdown(const std::string& socket_path) {
+    // Use the socket client to request graceful shutdown
+    SocketClient client(socket_path);
+
+    if (!client.connect()) {
+        std::cerr << "No daemon running (could not connect to socket)\n";
+        return 1;
+    }
+
+    if (client.request_shutdown()) {
+        std::cout << "Daemon shutdown requested\n";
+        // Wait for socket to disappear (indicates daemon stopped)
+        if (client.wait_for_socket_gone(5000)) {
+            std::cout << "Daemon stopped\n";
+            return 0;
+        } else {
+            std::cerr << "Warning: shutdown requested but socket still exists\n";
+            return 0;  // Still consider success since we sent the request
+        }
+    } else {
+        std::cerr << "Failed to request shutdown\n";
+        return 1;
+    }
+}
+
 int cmd_upgrade(const std::string& db_path) {
     std::string hot_path = db_path + ".hot";
 
@@ -727,6 +754,10 @@ int main(int argc, char* argv[]) {
         } else {
             result = cmd_daemon(mind, daemon_interval, pid_file);
         }
+    } else if (command == "shutdown") {
+        // Shutdown doesn't need mind - just connects to daemon socket
+        mind.close();
+        return cmd_shutdown(socket_path);
     } else {
         std::cerr << "Unknown command: " << command << "\n";
         print_usage(argv[0]);
