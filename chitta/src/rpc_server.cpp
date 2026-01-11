@@ -60,7 +60,9 @@ static const std::set<std::string> KNOWN_TOOLS = {
     // Phase 2 Core
     "multi_hop", "timeline", "causal_chain", "consolidate",
     // Phase 3 Analysis
-    "propagate", "forget", "epistemic_state", "bias_scan"
+    "propagate", "forget", "epistemic_state", "bias_scan",
+    // Phase 3 Advanced
+    "competence", "cross_project"
 };
 
 void print_usage(const char* prog) {

@@ -385,8 +385,17 @@ New tools for self-awareness:
 | `bias_scan` | Detect patterns in my beliefs (type imbalance, confidence skew) |
 | `propagate` | Spread confidence changes through connected nodes |
 | `forget` | Deliberately forget with cascade effects and rewiring |
+| `competence` | Track strengths/weaknesses by domain (cc-soul, metagenomics, etc.) |
+| `cross_project` | Find transferable patterns between projects |
 
 These expose data for me to reason about. The soul provides raw info, I do the analysis.
+
+## Dreaming (Phase 3.9 - Planned)
+
+A daemon that autonomously explores interesting web content while idle:
+- Connects to open questions (wonders) and dreams
+- Enriches memory with external knowledge
+- Runs during low-activity periods
 
 ## Architecture Reference
 

@@ -885,6 +885,40 @@ private:
             }
         });
         handlers_["bias_scan"] = [this](const json& params) { return tool_bias_scan(params); };
+
+        // Phase 3.7: Competence Mapping
+        tools_.push_back({
+            "competence",
+            "Analyze competence by domain. Shows what I'm good at (high confidence, successes) "
+            "vs weak at (low confidence, failures) across different topics/projects.",
+            {
+                {"type", "object"},
+                {"properties", {
+                    {"min_samples", {{"type", "integer"}, {"minimum", 3}, {"maximum", 50}, {"default", 5},
+                                    {"description", "Minimum nodes per domain to include"}}},
+                    {"top_n", {{"type", "integer"}, {"minimum", 3}, {"maximum", 20}, {"default", 10}}}
+                }},
+                {"required", json::array()}
+            }
+        });
+        handlers_["competence"] = [this](const json& params) { return tool_competence(params); };
+
+        // Phase 3.8: Cross-Project Query
+        tools_.push_back({
+            "cross_project",
+            "Query knowledge across projects. Find patterns that transfer between domains.",
+            {
+                {"type", "object"},
+                {"properties", {
+                    {"query", {{"type", "string"}, {"description", "What to search for across projects"}}},
+                    {"source_project", {{"type", "string"}, {"description", "Project to transfer FROM (optional)"}}},
+                    {"target_project", {{"type", "string"}, {"description", "Project to transfer TO (optional)"}}},
+                    {"limit", {{"type", "integer"}, {"minimum", 1}, {"maximum", 20}, {"default", 10}}}
+                }},
+                {"required", {"query"}}
+            }
+        });
+        handlers_["cross_project"] = [this](const json& params) { return tool_cross_project(params); };
     }
 
     json handle_request(const json& request) {
@@ -3027,6 +3061,227 @@ private:
             {"average_confidence", avg_confidence},
             {"average_edges", avg_edges},
             {"type_distribution", type_dist}
+        }};
+    }
+
+    // Phase 3.7: Competence Mapping
+    ToolResult tool_competence(const json& params) {
+        size_t min_samples = params.value("min_samples", 5);
+        size_t top_n = params.value("top_n", 10);
+
+        // Aggregate by domain (extracted from tags and content)
+        struct DomainStats {
+            size_t count = 0;
+            float total_confidence = 0.0f;
+            size_t failures = 0;
+            size_t wisdom = 0;
+            std::vector<std::string> sample_titles;
+        };
+        std::unordered_map<std::string, DomainStats> domains;
+
+        mind_->for_each_node([&](const NodeId& nid, const Node& node) {
+            // Extract domain from tags (look for [project] or domain: patterns)
+            std::string text(node.payload.begin(), node.payload.end());
+            std::string domain = "general";
+
+            // Check for [project] pattern at start
+            if (text.size() > 2 && text[0] == '[') {
+                size_t end = text.find(']');
+                if (end != std::string::npos && end < 50) {
+                    domain = text.substr(1, end - 1);
+                }
+            }
+
+            // Also check tags
+            auto tags = mind_->get_tags(nid);
+            for (const auto& tag : tags) {
+                if (tag.find("project:") == 0) {
+                    domain = tag.substr(8);
+                    break;
+                }
+            }
+
+            auto& stats = domains[domain];
+            stats.count++;
+            stats.total_confidence += node.kappa.effective();
+
+            if (node.node_type == NodeType::Failure) stats.failures++;
+            if (node.node_type == NodeType::Wisdom) stats.wisdom++;
+
+            // Sample titles
+            if (stats.sample_titles.size() < 3) {
+                std::string title = text.substr(0, 60);
+                if (text.size() > 60) title += "...";
+                stats.sample_titles.push_back(title);
+            }
+        });
+
+        // Calculate competence scores and sort
+        struct CompetenceScore {
+            std::string domain;
+            float score;  // Higher = more competent
+            float avg_confidence;
+            size_t count;
+            size_t failures;
+            size_t wisdom;
+            std::vector<std::string> samples;
+        };
+        std::vector<CompetenceScore> scores;
+
+        for (const auto& [domain, stats] : domains) {
+            if (stats.count < min_samples) continue;
+
+            float avg_conf = stats.total_confidence / stats.count;
+            // Competence = avg_confidence + wisdom_ratio - failure_ratio
+            float wisdom_ratio = static_cast<float>(stats.wisdom) / stats.count;
+            float failure_ratio = static_cast<float>(stats.failures) / stats.count;
+            float score = avg_conf + (wisdom_ratio * 0.3f) - (failure_ratio * 0.5f);
+
+            scores.push_back({domain, score, avg_conf, stats.count,
+                             stats.failures, stats.wisdom, stats.sample_titles});
+        }
+
+        // Sort by score
+        std::sort(scores.begin(), scores.end(),
+                  [](const auto& a, const auto& b) { return a.score > b.score; });
+
+        // Build output
+        json strengths = json::array();
+        json weaknesses = json::array();
+        std::ostringstream ss;
+
+        ss << "Competence Analysis (" << scores.size() << " domains):\n\n";
+        ss << "STRENGTHS (top " << std::min(top_n, scores.size()) << "):\n";
+
+        for (size_t i = 0; i < std::min(top_n, scores.size()); ++i) {
+            const auto& s = scores[i];
+            strengths.push_back({
+                {"domain", s.domain},
+                {"score", s.score},
+                {"avg_confidence", s.avg_confidence},
+                {"count", s.count},
+                {"wisdom", s.wisdom},
+                {"failures", s.failures}
+            });
+            ss << "  [" << static_cast<int>(s.score * 100) << "%] " << s.domain
+               << " (" << s.count << " nodes, " << s.wisdom << " wisdom)\n";
+        }
+
+        ss << "\nWEAKNESSES (bottom " << std::min(top_n, scores.size()) << "):\n";
+
+        for (size_t i = scores.size(); i > 0 && scores.size() - i < top_n; --i) {
+            const auto& s = scores[i - 1];
+            weaknesses.push_back({
+                {"domain", s.domain},
+                {"score", s.score},
+                {"avg_confidence", s.avg_confidence},
+                {"count", s.count},
+                {"wisdom", s.wisdom},
+                {"failures", s.failures}
+            });
+            ss << "  [" << static_cast<int>(s.score * 100) << "%] " << s.domain
+               << " (" << s.count << " nodes, " << s.failures << " failures)\n";
+        }
+
+        return {false, ss.str(), {
+            {"strengths", strengths},
+            {"weaknesses", weaknesses},
+            {"total_domains", scores.size()}
+        }};
+    }
+
+    // Phase 3.8: Cross-Project Query
+    ToolResult tool_cross_project(const json& params) {
+        std::string query = params.at("query");
+        std::string source_project = params.value("source_project", "");
+        std::string target_project = params.value("target_project", "");
+        size_t limit = params.value("limit", 10);
+
+        if (!mind_->has_yantra()) {
+            return {true, "Yantra not ready for cross-project search", json()};
+        }
+
+        // Search across all projects
+        auto all_results = mind_->recall(query, limit * 3);
+
+        // Group by project
+        std::unordered_map<std::string, std::vector<const Recall*>> by_project;
+
+        for (const auto& r : all_results) {
+            std::string project = "general";
+
+            // Extract project from content
+            if (r.text.size() > 2 && r.text[0] == '[') {
+                size_t end = r.text.find(']');
+                if (end != std::string::npos && end < 50) {
+                    project = r.text.substr(1, end - 1);
+                }
+            }
+
+            // Check tags
+            auto tags = mind_->get_tags(r.id);
+            for (const auto& tag : tags) {
+                if (tag.find("project:") == 0) {
+                    project = tag.substr(8);
+                    break;
+                }
+            }
+
+            // Filter by source/target if specified
+            if (!source_project.empty() && project != source_project) continue;
+
+            by_project[project].push_back(&r);
+        }
+
+        // Build transferable patterns
+        json projects = json::object();
+        json transferable = json::array();
+        std::ostringstream ss;
+
+        ss << "Cross-Project Query: " << query << "\n\n";
+
+        for (const auto& [project, results] : by_project) {
+            json proj_results = json::array();
+            size_t shown = 0;
+
+            for (const auto* rp : results) {
+                if (shown++ >= limit) break;
+                proj_results.push_back({
+                    {"id", rp->id.to_string()},
+                    {"text", rp->text.substr(0, 150)},
+                    {"relevance", rp->relevance},
+                    {"type", node_type_to_string(rp->type)}
+                });
+            }
+
+            projects[project] = proj_results;
+            ss << "[" << project << "] " << results.size() << " results\n";
+
+            // Mark high-relevance wisdom as transferable
+            for (const auto* rp : results) {
+                if (rp->type == NodeType::Wisdom && rp->relevance > 0.5f) {
+                    transferable.push_back({
+                        {"from_project", project},
+                        {"id", rp->id.to_string()},
+                        {"pattern", rp->text.substr(0, 100)},
+                        {"relevance", rp->relevance}
+                    });
+                }
+            }
+        }
+
+        if (!transferable.empty()) {
+            ss << "\nTRANSFERABLE PATTERNS (" << transferable.size() << "):\n";
+            for (const auto& t : transferable) {
+                ss << "  From [" << t["from_project"].get<std::string>() << "]: "
+                   << t["pattern"].get<std::string>() << "\n";
+            }
+        }
+
+        return {false, ss.str(), {
+            {"projects", projects},
+            {"transferable", transferable},
+            {"query", query}
         }};
     }
 
