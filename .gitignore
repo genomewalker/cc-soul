@@ -92,3 +92,4 @@ cache/
 
 # NFS stale handles
 .nfs*
+chitta/Testing/
