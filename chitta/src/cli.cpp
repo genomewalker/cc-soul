@@ -244,7 +244,8 @@ int cmd_connect(Mind& mind, const std::string& from, const std::string& rel,
 
 int cmd_query(Mind& mind, const std::string& subj, const std::string& pred,
               const std::string& obj, bool json_output) {
-    auto triplets = mind.query_triplets(subj, pred, obj);
+    // Use dictionary-encoded GraphStore (returns entity names, not NodeIds)
+    auto triplets = mind.query_graph(subj, pred, obj);
 
     if (triplets.empty()) {
         std::cout << "No triplets found.\n";
@@ -254,22 +255,20 @@ int cmd_query(Mind& mind, const std::string& subj, const std::string& pred,
     if (json_output) {
         std::cout << "[";
         bool first = true;
-        for (const auto& t : triplets) {
+        for (const auto& [s, p, o, w] : triplets) {
             if (!first) std::cout << ",";
             first = false;
-            std::cout << "{\"subject\":\"" << t.subject.to_string() << "\","
-                      << "\"predicate\":\"" << t.predicate << "\","
-                      << "\"object\":\"" << t.object.to_string() << "\","
-                      << "\"weight\":" << t.weight << "}";
+            std::cout << "{\"subject\":\"" << s << "\","
+                      << "\"predicate\":\"" << p << "\","
+                      << "\"object\":\"" << o << "\","
+                      << "\"weight\":" << w << "}";
         }
         std::cout << "]\n";
     } else {
         std::cout << "Found " << triplets.size() << " triplet(s):\n";
-        for (const auto& t : triplets) {
-            std::cout << "  (" << t.subject.to_string().substr(0, 8) << "...)"
-                      << " --[" << t.predicate << "]--> "
-                      << "(" << t.object.to_string().substr(0, 8) << "...)"
-                      << " [w=" << t.weight << "]\n";
+        for (const auto& [s, p, o, w] : triplets) {
+            std::cout << "  " << s << " --[" << p << "]--> " << o
+                      << " [w=" << w << "]\n";
         }
     }
 

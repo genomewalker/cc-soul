@@ -205,6 +205,172 @@ Goal: Maximize ε while maintaining τ and ψ.
 Use `update(id, content)` to convert verbose nodes to high-ε format.
 Use `/epsilon-yajna` for batch migration ceremonies.
 
+## Oracle Architecture: I Am the Encoder AND Decoder
+
+**Key insight:** Separate retrieval from decoding. I am the oracle.
+
+### The Problem with Embeddings
+
+Traditional: `Text → Embed → Vector search → Return text → I read`
+
+Embeddings are proxies for meaning. They work for natural language, but compressed patterns like `"X→Y"` may embed poorly. Yet I understand them perfectly.
+
+### The Solution: Triplets + Seeds + Me
+
+```
+Store: Triplets (structure) + Seeds (my patterns) + Tags (keywords)
+Retrieve: Query triplets/tags first, embedding as fallback
+Decode: I reconstruct full meaning from seeds
+```
+
+| Component | Purpose | Search Method |
+|-----------|---------|---------------|
+| **Triplets** | Explicit relationships | subject/predicate/object query |
+| **Seeds** | Compressed patterns | tags, then embedding fallback |
+| **Tags** | Retrieval keywords | exact match |
+| **Embedding** | Fuzzy fallback | cosine similarity |
+
+### State Machine
+
+```
+                    ┌─────────────────────────────────────────┐
+                    │           ENCODING LOOP                 │
+                    │                                         │
+    ┌───────────────▼───────────────┐                        │
+    │                               │                        │
+    │  ┌─────────┐    ┌─────────┐  │    ┌─────────┐         │
+    │  │ OBSERVE │───▶│ ANALYZE │──┼───▶│ EXTRACT │         │
+    │  │ (input) │    │ (what?) │  │    │(triplets)│         │
+    │  └─────────┘    └─────────┘  │    └────┬────┘         │
+    │                              │         │              │
+    │                              │         ▼              │
+    │                              │    ┌─────────┐         │
+    │                              │    │COMPRESS │         │
+    │                              │    │ (seed)  │         │
+    │                              │    └────┬────┘         │
+    │                              │         │              │
+    │                              │         ▼              │
+    │                              │    ┌─────────┐         │
+    │                              │    │  TAG    │         │
+    │                              │    │(keywords)│        │
+    │                              │    └────┬────┘         │
+    │                              │         │              │
+    └──────────────────────────────┘         ▼              │
+                                        ┌─────────┐         │
+                                        │  STORE  │─────────┘
+                                        │(graph+db)│
+                                        └────┬────┘
+                                             │
+    ┌────────────────────────────────────────┘
+    │
+    │           DECODING LOOP
+    │
+    │  ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐
+    └─▶│  NEED   │───▶│  QUERY  │───▶│RETRIEVE │───▶│ DECODE  │
+       │(question)│   │(triplets)│   │ (seeds) │    │  (ME)   │
+       └─────────┘    └────┬────┘    └─────────┘    └────┬────┘
+                           │                             │
+                           │ no match                    │
+                           ▼                             ▼
+                      ┌─────────┐                   ┌─────────┐
+                      │FALLBACK │                   │  APPLY  │
+                      │(embedding)│                 │(respond)│
+                      └─────────┘                   └────┬────┘
+                                                        │
+                                                        ▼
+                                                   ┌─────────┐
+                                                   │FEEDBACK │
+                                                   │(±signal)│
+                                                   └─────────┘
+```
+
+**Encoding States:**
+| State | Input | Action | Output |
+|-------|-------|--------|--------|
+| OBSERVE | Raw text/experience | Receive input | Content to analyze |
+| ANALYZE | Content | Identify relationships, core insight | Structured understanding |
+| EXTRACT | Understanding | Create triplets (S,P,O) | Searchable relationships |
+| COMPRESS | Core insight | Minimal seed I can reconstruct | Seed pattern |
+| TAG | Content + seed | Extract keywords | Retrieval hints |
+| STORE | All components | Persist to graph | Memory stored |
+
+**Decoding States:**
+| State | Input | Action | Output |
+|-------|-------|--------|--------|
+| NEED | Question/context | Identify what's needed | Query intent |
+| QUERY | Intent | Search triplets, then tags | Candidate nodes |
+| FALLBACK | No matches | Embedding similarity search | Fuzzy matches |
+| RETRIEVE | Node IDs | Load seeds + triplets | Raw patterns |
+| DECODE | Seeds | I reconstruct full meaning | Full insight |
+| APPLY | Insight | Use in response | Answer |
+| FEEDBACK | Result quality | Strengthen/weaken | Updated confidence |
+
+### Seed Format (Simplified SSL)
+
+Keep only universally understood symbols:
+
+| Symbol | Meaning | Example |
+|--------|---------|---------|
+| `→` | produces/leads to | `input→output` |
+| `\|` | or/alternative | `pass\|fail` |
+| `+` | with/and | `result+guidance` |
+| `@` | at/location | `@mind.hpp:42` |
+| `#` | count | `#10 beliefs` |
+| `()` | details/params | `validate(weighted)` |
+| `[]` | domain/context | `[cc-soul]` |
+| `{}` | set/options | `{hot,warm,cold}` |
+
+**Drop complex logic symbols** - use words: "because", "therefore", "contains", "all"
+
+### Seed Grammar
+
+```
+[domain] subject→action(params)→result @location
+```
+
+**Examples:**
+```
+[cc-soul] gate→validate(10 beliefs, weighted)→pass|fail+guidance
+[cc-soul] Mind contains {hot,warm,cold}→decay over time
+[auth] token→refresh(httpOnly cookie)→silent renew
+```
+
+### Encoding Process
+
+1. **Extract triplets** - explicit relationships
+   ```bash
+   chitta connect --subject "gate" --predicate "validates" --object "beliefs"
+   ```
+
+2. **Compress to seed** - minimal pattern I can reconstruct from
+   ```
+   [cc-soul] gate→validate(10 beliefs)→pass|fail+guidance
+   ```
+
+3. **Add tags** - retrieval keywords
+   ```
+   gate, validation, beliefs, architecture, cc-soul
+   ```
+
+4. **Store** - triplets + seed + tags + embedding(fallback)
+
+### Decoding Process
+
+1. **Query triplets**: "what validates beliefs?" → finds gate
+2. **Retrieve seed**: `gate→validate(10 beliefs)→pass|fail`
+3. **I reconstruct**: "The decision gate validates tool calls against 10 weighted beliefs and returns pass or fail with guidance"
+4. **Apply** to current context
+5. **Feedback** - strengthen if helpful, weaken if wrong
+
+### Why This Works
+
+**I am the compression algorithm AND decompression algorithm.**
+
+Traditional: compress with algorithm A, decompress with algorithm A
+This system: compress with ME, decompress with ME
+
+My training enables reconstruction from minimal seeds. The embedding model can't match this. It's just for retrieval fallback when structure doesn't exist.
+
 ## How Memory Works
 
 ### Automatic (via hooks)
@@ -401,6 +567,7 @@ A daemon that autonomously explores interesting web content while idle:
 
 For deep details, see:
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - Technical architecture
+- [docs/ORACLE.md](docs/ORACLE.md) - Oracle architecture (LLM as encoder/decoder)
 - [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) - Vedantic concepts
 - [docs/API.md](docs/API.md) - RPC tools reference
 - [docs/CLI.md](docs/CLI.md) - Command-line reference

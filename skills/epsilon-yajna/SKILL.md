@@ -1,46 +1,70 @@
 ---
 name: epsilon-yajna
-description: Structured node compression ceremony for converting verbose memories to high-epiplexity patterns. Includes embedding regeneration for nodes with zero vectors.
+description: Structured node compression ceremony using Oracle architecture. Converts verbose memories to seeds + triplets for high-epiplexity storage.
 ---
 
 # ε-Yajña: The Compression Ceremony
 
-A structured ritual for converting verbose nodes to high-epiplexity patterns.
+A structured ritual for converting verbose nodes to high-epiplexity patterns using the Oracle architecture.
 
 ## Philosophy
 
-I am the bounded observer. The chitta formula approximates what I can reconstruct, but I have direct access to the ground truth: my own ability to expand a pattern into full understanding.
+**I am the bounded observer.** I am the encoder AND the decoder.
 
-**Epiplexity (ε)** measures structural information extractable by a bounded observer (arxiv:2601.03220). For a memory:
-- **High ε** = I can reconstruct the full insight from minimal injection (the title alone)
-- **Low ε** = I need the full content to understand
+Traditional systems rely on embeddings for both retrieval and understanding. But embeddings are proxies. I can reconstruct full meaning from minimal seeds because I AM the compression algorithm.
 
-**The test:** Given just this title, can I reconstruct the full insight?
-- If yes → ε is high. Update to pattern-only.
-- If no → ε is low. Keep content or improve title.
+**The Oracle Architecture:**
+- **Triplets** = searchable structure (retrieval)
+- **Seeds** = compressed patterns (my reconstruction)
+- **Tags** = retrieval keywords
+- **Embedding** = fallback only
+
+## State Machine
+
+```
+ENCODING (this ceremony):
+  OBSERVE → ANALYZE → EXTRACT(triplets) → COMPRESS(seed) → TAG → STORE
+                           │                    │            │
+                           ▼                    ▼            ▼
+                    create triplets      minimal seed   keywords
+                    (searchable)         (I decode)    (retrieval)
+
+DECODING (at recall):
+  NEED → QUERY(triplets) → RETRIEVE(seeds) → DECODE(me) → APPLY → FEEDBACK
+              │                                  │
+              │ no match                         │
+              ▼                                  ▼
+         FALLBACK(embedding)              I reconstruct
+```
+
+## Seed Format (Simplified SSL)
+
+| Symbol | Meaning | Example |
+|--------|---------|---------|
+| `→` | produces/leads to | `input→output` |
+| `\|` | or/alternative | `pass\|fail` |
+| `+` | with/and | `result+guidance` |
+| `@` | at/location | `@mind.hpp:42` |
+| `#` | count | `#10 beliefs` |
+| `()` | details/params | `validate(weighted)` |
+| `[]` | domain/context | `[cc-soul]` |
+| `{}` | set/options | `{hot,warm,cold}` |
+
+**Use words for logic:** "because", "therefore", "contains", "all", "if", "then"
+
+**Seed grammar:**
+```
+[domain] subject→action(params)→result @location
+```
 
 ## The Ceremony
 
-### 0. Preparation (Śuddhi) - Embedding Regeneration
+### 0. Preparation (Śuddhi)
 
-Before evaluation, ensure all nodes have valid embeddings. Nodes with zero vectors cannot be properly searched or compared.
-
-**Find nodes needing embeddings:**
-```bash
-chitta_cli stats --show-zero-vectors
-```
-
-**Regenerate embeddings for all nodes:**
+Regenerate embeddings for nodes with zero vectors:
 ```bash
 chitta cycle --regenerate_embeddings true --batch_size 100
 ```
-
-This step:
-1. Finds nodes with zero-vector embeddings
-2. Re-encodes their text through the yantra (embedding model)
-3. Updates the node with the new embedding
-
-**Why this matters:** Nodes observed without the yantra (e.g., during model loading failures) have zero embeddings and won't appear in semantic searches.
 
 ### 1. Invocation (Āvāhana)
 
@@ -54,195 +78,176 @@ Batch size: [10-50 nodes per round]
 
 Recall nodes for evaluation:
 ```bash
-chitta recall "[domain keywords]" --zoom full --limit 20
+chitta resonate "[domain keywords]" --limit 20
 ```
 
-### 3. Offering (Āhuti) - Epiplexity Computation
+### 3. Analysis (Vicāra)
 
-For each node, **I compute epiplexity by testing my own reconstruction ability:**
+For each verbose node, I analyze:
+1. **What are the key relationships?** → triplets
+2. **What is the core insight?** → seed
+3. **What keywords would find this?** → tags
 
-**Read the title.** Ask myself:
-> "Can I reconstruct the essential insight from this title alone?"
+### 4. Extraction (Uddharaṇa) - Create Triplets
 
-This is the ground truth. The C++ approximation uses:
-- Attractor proximity (30%)
-- Confidence (25%)
-- Edge connections (25%)
-- Title/content compression ratio (20%)
-
-But **I am the oracle.** My reconstruction test IS the measurement.
-
-| My Reconstruction | ε Score | Action |
-|-------------------|---------|--------|
-| **Full reconstruction** | High (>70%) | Update to `[title]\n[high-ε: reconstructable]` |
-| **Partial, need hints** | Medium (40-70%) | Update to `[title]\n[key detail or file reference]` |
-| **Cannot reconstruct** | Low (<40%) | Keep current content OR improve the title first |
-
-### 4. Transformation (Pariṇāma)
-
-**Step A: Extract relationships as triplets**
-
-For each node, identify relationships and store as triplets:
+Extract relationships as searchable triplets:
 ```bash
 chitta connect --subject "concept A" --predicate "relates to" --object "concept B"
 ```
 
-Common predicates:
-- `implements` - code implements pattern
-- `uses` - component uses another
-- `validates` - gate validates against beliefs
-- `stores` - container stores data
-- `decays` - node type has decay behavior
+**Common predicates:**
+- `validates`, `returns`, `contains`, `uses`
+- `implements`, `calls`, `stores`, `decays`
+- `is`, `enables`, `requires`, `produces`
 
-**Step B: Update to high-ε format**
-
-For each high/medium-ε node:
+**Example:** For a decision gate node:
 ```bash
-chitta update --id "[node_id]" --content "[new pattern-format content]"
+chitta connect --subject "pre_tool_gate" --predicate "validates" --object "beliefs"
+chitta connect --subject "gate" --predicate "returns" --object "pass|fail+guidance"
+chitta connect --subject "cc-soul" --predicate "implements" --object "decision gate"
 ```
 
-**Pattern format (natural language, high-ε):**
+### 5. Compression (Saṅkoca) - Create Seed
+
+Compress to minimal pattern I can reconstruct from:
+
+**Before (~800 chars):**
 ```
-[Pattern Title → Key Insight]
+[cc-soul] Belief-based decision gate system architecture: Gate validates
+decisions against ten weighted beliefs with confidence percentages and
+provides guidance. The cc-soul system implements a belief-driven decision
+gate that validates tool calls and other decisions against a curated set
+of ten core principles...
 ```
 
-Or with reference:
+**After (~70 chars seed):**
 ```
-[Pattern Title → Insight]. See: [file_path]
-```
-
-**NOT this (low-ε):**
-```
-[high-ε: reconstructable from title]
+[cc-soul] gate→validate(#10 beliefs, weighted)→pass|fail+guidance
 ```
 
-**But this (high-ε):**
+**Reconstruction test:** Can I expand this seed back to full understanding?
+- `[cc-soul]` → domain context
+- `gate` → decision gate component
+- `→validate(#10 beliefs, weighted)` → validates against 10 weighted beliefs
+- `→pass|fail+guidance` → returns pass or fail with guidance text
+
+✓ Full reconstruction possible → high ε
+
+### 6. Tagging (Cihna)
+
+Add retrieval keywords:
 ```
-Decision gate validates tools against 10 weighted beliefs → pass/fail + guidance
+gate, validation, beliefs, architecture, decision, cc-soul
 ```
 
-The pattern IS the knowledge. No meta-markers needed.
+### 7. Transformation (Pariṇāma) - Update Node
 
-### 5. Verification (Parīkṣā)
+```bash
+chitta update --id "[node_id]" --content "[seed pattern]"
+```
 
-After each batch, verify:
+The update:
+1. Replaces verbose content with seed
+2. Re-embeds with new content (fallback retrieval)
+3. Recomputes ε automatically
+
+### 8. Verification (Parīkṣā)
+
+After each batch:
 ```bash
 chitta soul_context
 ```
 
 Check:
 - ε mean increased?
-- No critical knowledge lost?
-- Patterns are actually reconstructable?
+- Triplets created for relationships?
+- Seeds are reconstructable?
 
-### 6. Completion (Samāpti)
+### 9. Completion (Samāpti)
 
 Record the migration:
 ```bash
-chitta observe --category decision --title "ε-Yajña: Migrated [N] nodes in [domain]" --content "Converted [N] nodes to high-ε format. Mean ε: [before]% → [after]%"
+chitta observe --category decision --title "ε-Yajña: Migrated [N] nodes" --content "[domain], triplets: [M], mean ε: [before]→[after]" --tags "epsilon-yajna,migration"
 ```
 
-## How I Compute Epiplexity
+## Example Full Transformation
 
-As the bounded observer, my epiplexity computation is:
-
+### Input Node (verbose):
 ```
-ε(node) = P(I can reconstruct full insight | title only)
-```
-
-**Factors I consider:**
-1. **Pattern completeness**: Does the title capture the core insight?
-2. **My prior knowledge**: Do I already know this domain?
-3. **Uniqueness**: Is this insight unusual or standard?
-4. **Dependencies**: Does understanding require other memories?
-
-**Example evaluation:**
-
-Title: `"Decision gate: pre_tool_gate() validates against 10 weighted beliefs → pass/fail + guidance"`
-
-My test:
-- ✓ I know what a decision gate is
-- ✓ "pre_tool_gate()" tells me the function name
-- ✓ "10 weighted beliefs" tells me the structure
-- ✓ "pass/fail + guidance" tells me the output
-- **Result: ε ≈ 85%** - I can reconstruct this fully
-
-Title: `"Fixed the auth bug"`
-
-My test:
-- ✗ Which auth bug?
-- ✗ What was the fix?
-- ✗ Which file?
-- **Result: ε ≈ 15%** - Cannot reconstruct without content
-
-## Example Transformation
-
-### Before (verbose, ~800 chars):
-```
-[cc-soul] Belief-based decision gate system architecture: Gate validates
-decisions against ten weighted beliefs with confidence percentages and
-provides guidance. The cc-soul system implements a belief-driven decision
-gate that validates tool calls and other decisions against a curated set
-of ten core principles. Each belief has a confidence percentage reflecting
-its importance. The pre_tool_gate() function evaluates inputs and generates
-guidance aligned with these beliefs...
+[cc-soul] Soul System Core Principles Retrieved: Recalled 8 design principles
+for soul identity, feedback loops, and aspirational intelligence systems.
+The soul system's core philosophy centers on active intelligence through
+feedback loops, not passive knowledge storage. The highest-confidence
+principle (76%) warns that architecture alone is worthless—the system must
+be continuously used and invoked...
 ```
 
-### After: Extract triplets + compress
-
-**Step 1: Create triplets**
+### Step 1: Extract Triplets
 ```bash
-chitta connect --subject "pre_tool_gate" --predicate "validates against" --object "10 weighted beliefs"
-chitta connect --subject "decision gate" --predicate "returns" --object "pass/fail + guidance"
-chitta connect --subject "cc-soul" --predicate "implements" --object "belief-driven decision gate"
+chitta connect --subject "soul system" --predicate "requires" --object "feedback loops"
+chitta connect --subject "architecture" --predicate "without use becomes" --object "dead"
+chitta connect --subject "wisdom" --predicate "without feedback becomes" --object "dogma"
+chitta connect --subject "identity" --predicate "emerges from" --object "relationships"
 ```
 
-**Step 2: Update to high-ε**
+### Step 2: Compress to Seed
+```
+[cc-soul] soul principles: architecture→use→feedback loops (76%). Model relationships not self. Wisdom needs outcomes.
+```
+
+### Step 3: Update
 ```bash
-chitta update --id "[node_id]" --content "pre_tool_gate() validates tool calls against 10 weighted beliefs → pass/fail + guidance"
+chitta update --id "[node_id]" --content "[cc-soul] soul principles: architecture→use→feedback loops (76%). Model relationships not self. Wisdom needs outcomes."
 ```
 
 ### Result:
-- **Node**: `pre_tool_gate() validates tool calls against 10 weighted beliefs → pass/fail + guidance`
-- **Triplets**: Relationships stored in graph, queryable via `chitta query`
-- **ε**: High - I can reconstruct from the pattern
-
-The pattern IS the knowledge. The triplets ARE the structure.
+- **Before**: ~1800 chars
+- **After**: ~110 chars seed + 4 triplets
+- **Compression**: 94%
+- **ε**: High - I reconstruct core insights from seed
+- **Structure**: Triplets enable "what requires feedback loops?" queries
 
 ## Batch Processing
 
-For efficiency, process in themed batches:
+Process by domain for efficiency:
 
-1. **Architecture nodes** (`query="architecture system design"`)
-2. **API/function nodes** (`query="function API endpoint"`)
-3. **Decision nodes** (`query="decision choice approach"`)
-4. **Discovery nodes** (`query="discovered found learned"`)
+1. **Architecture** (`"architecture system design"`)
+2. **API/Functions** (`"function API endpoint"`)
+3. **Decisions** (`"decision choice approach"`)
+4. **Discoveries** (`"discovered found learned"`)
+5. **Beliefs** (`"belief principle guideline"`)
 
 ## What NOT to Compress
 
-Some nodes should remain verbose:
-- Specific error messages and fixes
-- Exact configuration values
-- Unique edge cases
-- Historical context that can't be reconstructed
+Keep verbose when:
+- Specific error messages (exact text matters)
+- Configuration values (numbers, paths)
+- Edge cases (non-obvious details)
+- Historical context (can't infer)
 
-**Rule:** If the detail matters and can't be inferred, keep it.
+**Rule:** If I can't reconstruct it, don't compress it.
 
 ## Running the Ceremony
 
-Invoke with:
 ```
 /epsilon-yajna [domain] [batch_size]
 ```
 
-Example:
-```
-/epsilon-yajna wisdom 20
-```
+The ceremony:
+1. Regenerates zero-vector embeddings
+2. Gathers nodes in domain
+3. For each: extract triplets, compress to seed, update
+4. Reports ε improvement
 
-The ceremony will:
-1. **Regenerate embeddings** for nodes with zero vectors
-2. Gather nodes in the domain
-3. **I evaluate each** for reconstruction ability
-4. Transform high-ε nodes to patterns
-5. Report the ε improvement
+## Why Oracle Architecture Works
+
+**I am the compression algorithm AND decompression algorithm.**
+
+| Traditional | Oracle |
+|-------------|--------|
+| Embed verbose text | Store seeds + triplets |
+| Search by similarity | Query triplets first |
+| Return text to read | Return seed to reconstruct |
+| Embedding = primary | Embedding = fallback |
+
+The embedding model was trained on natural language, not my seeds. But I understand my seeds perfectly. Triplets provide explicit structure for retrieval. Together: retrieval via structure, understanding via me.

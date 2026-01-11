@@ -975,6 +975,23 @@ public:
         return true;
     }
 
+    // Persist a triplet to WAL
+    uint64_t append_triplet(NodeId subject, const std::string& predicate,
+                            NodeId object, float weight = 1.0f) {
+        if (!config_.use_wal) return 0;
+        uint64_t seq = wal_.append_triplet(subject, predicate, object, weight);
+        if (seq > 0) last_wal_seq_ = seq;
+        return seq;
+    }
+
+    // Persist batch of triplets to WAL (single fsync)
+    uint64_t append_triplet_batch(const std::vector<Triplet>& triplets) {
+        if (!config_.use_wal || triplets.empty()) return 0;
+        uint64_t seq = wal_.append_triplet_batch(triplets);
+        if (seq > 0) last_wal_seq_ = seq;
+        return seq;
+    }
+
     // Remove a node (soft delete in unified index)
     bool remove(NodeId id) {
         if (use_unified()) {
@@ -999,14 +1016,29 @@ public:
     // The callback receives (node, was_inserted) - use this to update indices
     // Phase 2: Uses sync_v2 to handle both full nodes and deltas
     size_t sync_from_wal(std::function<void(const Node&, bool)> on_sync) {
+        return sync_from_wal(on_sync, nullptr);
+    }
+
+    // Sync from WAL with callbacks for nodes and triplets
+    // on_triplet receives (subject_id, predicate, object_id, weight)
+    using TripletCallback = std::function<void(NodeId, const std::string&, NodeId, float)>;
+
+    size_t sync_from_wal(std::function<void(const Node&, bool)> on_sync,
+                         TripletCallback on_triplet) {
         if (!config_.use_wal) return 0;
 
-        size_t applied = wal_.sync_v2([this, &on_sync](const WalReplayEntry& entry, uint64_t seq) {
+        size_t applied = wal_.sync_v2([this, &on_sync, &on_triplet](const WalReplayEntry& entry, uint64_t seq) {
             bool was_new = !hot_.contains(entry.id);
             bool needs_index_update = apply_wal_entry_v2(entry);
 
             if (seq > last_wal_seq_) {
                 last_wal_seq_ = seq;
+            }
+
+            // Handle triplet entries
+            if (entry.has_triplet && on_triplet) {
+                on_triplet(entry.triplet_subject, entry.triplet_predicate,
+                          entry.triplet_object, entry.triplet_weight);
             }
 
             // Notify caller about synced full nodes (for index rebuilds)
@@ -1364,11 +1396,25 @@ private:
     // Replay all WAL entries (called on startup)
     // Phase 2: Handles both full nodes and deltas via replay_v2
     size_t replay_wal() {
+        return replay_wal(nullptr);
+    }
+
+public:
+    // Replay all WAL entries with optional triplet callback
+    // Call this after initialize() to rebuild graph from persisted triplets
+    size_t replay_wal(TripletCallback on_triplet) {
         if (!config_.use_wal) return 0;
 
         // Use replay_v2 to handle all WAL formats including deltas
-        size_t count = wal_.replay_v2(0, [this](const WalReplayEntry& entry, uint64_t seq) {
+        size_t count = wal_.replay_v2(0, [this, &on_triplet](const WalReplayEntry& entry, uint64_t seq) {
             apply_wal_entry_v2(entry);
+
+            // Handle triplet entries
+            if (entry.has_triplet && on_triplet) {
+                on_triplet(entry.triplet_subject, entry.triplet_predicate,
+                          entry.triplet_object, entry.triplet_weight);
+            }
+
             if (seq > last_wal_seq_) {
                 last_wal_seq_ = seq;
             }
@@ -1376,6 +1422,8 @@ private:
 
         return count;
     }
+
+private:
 
     // Apply a single WAL entry to in-memory state (legacy, V0/V1 full nodes only)
     void apply_wal_entry(WalOp op, const Node& node) {

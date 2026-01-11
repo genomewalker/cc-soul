@@ -10,6 +10,7 @@
 
 #include "types.hpp"
 #include "graph.hpp"
+#include "graph_store.hpp"
 #include "storage.hpp"
 #include "dynamics.hpp"
 #include "voice.hpp"
@@ -310,6 +311,25 @@ public:
             rebuild_tag_index();
         }
 
+        // Load dictionary-encoded graph store
+        std::string graph_path = storage_.base_path() + ".graph";
+        std::string graph_wal_path = storage_.base_path() + ".graph.wal";
+        if (graph_store_.load(graph_path)) {
+            std::cerr << "[Mind] Loaded graph store (" << graph_store_.triplet_count()
+                      << " triplets, " << graph_store_.entity_count() << " entities)\n";
+        }
+        graph_store_.open_wal(graph_wal_path);
+
+        // Replay legacy WAL triplets to rebuild old graph edges (backward compat)
+        size_t triplet_count = storage_.replay_wal(
+            [this](NodeId subject, const std::string& predicate, NodeId object, float weight) {
+                graph_.add_triplet(subject, predicate, object, weight);
+            }
+        );
+        if (triplet_count > 0) {
+            std::cerr << "[Mind] Replayed legacy triplets from WAL\n";
+        }
+
         // Build Phase 2 indexes (reverse edges, temporal, LSH)
         rebuild_phase2_indexes();
 
@@ -361,20 +381,27 @@ public:
     // Updates all indices with nodes from other processes' observations
     // "Atman aligns with Brahman" - we see what others have learned
     size_t sync_from_shared_field() {
-        return storage_.sync_from_wal([this](const Node& node, bool was_new) {
-            if (was_new) {
-                // New node - add to all indices
-                auto text = payload_to_text(node.payload);
-                if (text) {
-                    maybe_add_bm25(node.id, *text);
+        return storage_.sync_from_wal(
+            // Node callback
+            [this](const Node& node, bool was_new) {
+                if (was_new) {
+                    // New node - add to all indices
+                    auto text = payload_to_text(node.payload);
+                    if (text) {
+                        maybe_add_bm25(node.id, *text);
+                    }
+                    // For unified storage, tags are already in SlotTagIndex
+                    if (!storage_.use_unified() && !node.tags.empty()) {
+                        tag_index_.add(node.id, node.tags);
+                    }
+                    graph_.insert_raw(node.id);
                 }
-                // For unified storage, tags are already in SlotTagIndex
-                if (!storage_.use_unified() && !node.tags.empty()) {
-                    tag_index_.add(node.id, node.tags);
-                }
-                graph_.insert_raw(node.id);
+            },
+            // Triplet callback - rebuild graph edges from WAL
+            [this](NodeId subject, const std::string& predicate, NodeId object, float weight) {
+                graph_.add_triplet(subject, predicate, object, weight);
             }
-        });
+        );
     }
 
     // Close and persist
@@ -384,6 +411,13 @@ public:
         // Save BM25 index if built
         if (bm25_built_ && !bm25_path_.empty() && bm25_index_.size() > 0) {
             bm25_index_.save(bm25_path_);
+        }
+        // Save dictionary-encoded graph store
+        if (graph_store_.triplet_count() > 0) {
+            std::string graph_path = storage_.base_path() + ".graph";
+            if (graph_store_.save(graph_path)) {
+                std::cerr << "[Mind] Saved graph store (" << graph_store_.triplet_count() << " triplets)\n";
+            }
         }
         storage_.sync();
     }
@@ -1434,15 +1468,23 @@ public:
     // Triplet API (relational knowledge)
     // ═══════════════════════════════════════════════════════════════════
 
-    // Add a relationship between concepts
+    // Add a relationship between concepts (uses dictionary-encoded GraphStore)
     void connect(const std::string& subject, const std::string& predicate,
                  const std::string& object, float weight = 1.0f) {
-        // Find or create subject entity
+        // Add to dictionary-encoded graph store (persists via WAL internally)
+        graph_store_.add(subject, predicate, object, weight);
+
+        // Also maintain legacy graph_ for backward compatibility
         NodeId subj_id = find_or_create_entity(subject);
         NodeId obj_id = find_or_create_entity(object);
-
-        // Add triplet
         graph_.add_triplet(subj_id, predicate, obj_id, weight);
+    }
+
+    // Batch connect for bulk operations
+    void connect_batch(const std::vector<std::tuple<std::string, std::string, std::string, float>>& triplets) {
+        for (const auto& [subject, predicate, object, weight] : triplets) {
+            connect(subject, predicate, object, weight);
+        }
     }
 
     // Query triplets: (subject?, predicate?, object?)
@@ -1472,6 +1514,20 @@ public:
 
         return graph_.query_triplets(subj_id, pred, obj_id);
     }
+
+    // Query graph store (string-based, uses dictionary-encoded store)
+    // Returns: vector of (subject, predicate, object, weight)
+    std::vector<std::tuple<std::string, std::string, std::string, float>>
+    query_graph(const std::string& subject = "",
+                const std::string& predicate = "",
+                const std::string& object = "") const {
+        return graph_store_.query(subject, predicate, object);
+    }
+
+    // Graph store stats
+    size_t graph_entity_count() const { return graph_store_.entity_count(); }
+    size_t graph_predicate_count() const { return graph_store_.predicate_count(); }
+    size_t graph_triplet_count() const { return graph_store_.triplet_count(); }
 
     // Find entity by name (searches canonical and aliases)
     std::optional<NodeId> find_entity(const std::string& name) const {
@@ -3348,6 +3404,7 @@ public:
     mutable std::mutex mutex_;
     TieredStorage storage_;
     Graph graph_;
+    GraphStore graph_store_;  // Dictionary-encoded graph for 100M+ scale
     Dynamics dynamics_;
     std::shared_ptr<VakYantra> yantra_;
     std::atomic<bool> running_;

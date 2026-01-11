@@ -40,6 +40,7 @@ constexpr uint8_t WAL_FORMAT_V1 = 1;  // int8 quantized vectors (74% smaller ful
 constexpr uint8_t WAL_FORMAT_V2 = 2;  // Delta: touch only (26 bytes vs ~500)
 constexpr uint8_t WAL_FORMAT_V3 = 3;  // Delta: confidence only (44 bytes)
 constexpr uint8_t WAL_FORMAT_V4 = 4;  // Delta: single edge add (45 bytes)
+constexpr uint8_t WAL_FORMAT_V5 = 5;  // Delta: triplet (subject, predicate, object)
 constexpr uint8_t WAL_FORMAT_CURRENT = WAL_FORMAT_V1;  // Default for full nodes
 
 // WAL entry header (fixed size for easy parsing)
@@ -439,6 +440,54 @@ inline EdgeDelta deserialize_edge(const uint8_t* data, size_t len) {
     return d;
 }
 
+// V5: Triplet delta - subject + object + weight + predicate string
+struct TripletDelta {
+    NodeId subject;      // 16 bytes
+    NodeId object;       // 16 bytes
+    float weight;        // 4 bytes
+    uint32_t pred_len;   // 4 bytes - length of predicate string
+    // predicate string follows (variable length)
+};
+
+inline std::vector<uint8_t> serialize_triplet(NodeId subject, const std::string& predicate,
+                                               NodeId object, float weight) {
+    size_t total = sizeof(TripletDelta) + predicate.size();
+    std::vector<uint8_t> data(total);
+
+    TripletDelta* d = reinterpret_cast<TripletDelta*>(data.data());
+    d->subject = subject;
+    d->object = object;
+    d->weight = weight;
+    d->pred_len = static_cast<uint32_t>(predicate.size());
+
+    // Copy predicate string after fixed header
+    std::memcpy(data.data() + sizeof(TripletDelta), predicate.data(), predicate.size());
+    return data;
+}
+
+struct TripletDeltaResult {
+    NodeId subject;
+    NodeId object;
+    float weight;
+    std::string predicate;
+};
+
+inline TripletDeltaResult deserialize_triplet(const uint8_t* data, size_t len) {
+    TripletDeltaResult r{};
+    if (len < sizeof(TripletDelta)) return r;
+
+    const TripletDelta* d = reinterpret_cast<const TripletDelta*>(data);
+    r.subject = d->subject;
+    r.object = d->object;
+    r.weight = d->weight;
+
+    if (d->pred_len > 0 && len >= sizeof(TripletDelta) + d->pred_len) {
+        r.predicate = std::string(reinterpret_cast<const char*>(data + sizeof(TripletDelta)),
+                                   d->pred_len);
+    }
+    return r;
+}
+
 // Delete delta - just node ID (16 bytes)
 inline std::vector<uint8_t> serialize_delete(NodeId id) {
     std::vector<uint8_t> data(sizeof(NodeId));
@@ -479,9 +528,16 @@ struct WalReplayEntry {
     bool has_edge = false;
     Edge edge;
 
+    // Triplet delta (V5)
+    bool has_triplet = false;
+    NodeId triplet_subject;
+    NodeId triplet_object;
+    float triplet_weight = 0.0f;
+    std::string triplet_predicate;
+
     // Is this entry a delta (vs full node)?
     bool is_delta() const {
-        return has_touch || has_confidence || has_edge;
+        return has_touch || has_confidence || has_edge || has_triplet;
     }
 };
 
@@ -675,6 +731,76 @@ public:
         return header.sequence;
     }
 
+    // Append triplet delta - graph relationship persistence
+    uint64_t append_triplet(NodeId subject, const std::string& predicate,
+                            NodeId object, float weight = 1.0f) {
+        if (fd_ < 0) return 0;
+
+        std::vector<uint8_t> data = serialize_triplet(subject, predicate, object, weight);
+
+        WalEntryHeader header;
+        header.magic = WAL_MAGIC;
+        header.length = sizeof(WalEntryHeader) + data.size();
+        header.sequence = ++next_seq_;
+        header.timestamp = static_cast<uint64_t>(now());
+        header.op = WalOp::Insert;  // Triplets are insertions
+        header.format = WAL_FORMAT_V5;  // Triplet delta
+        std::memset(header.reserved, 0, sizeof(header.reserved));
+        header.checksum = crc32(data.data(), data.size());
+
+        {
+            ScopedFileLock lock(fd_, true);
+            lseek(fd_, 0, SEEK_END);
+            if (::write(fd_, &header, sizeof(header)) != sizeof(header)) return 0;
+            if (::write(fd_, data.data(), data.size()) != static_cast<ssize_t>(data.size())) return 0;
+            fsync(fd_);
+        }
+
+        return header.sequence;
+    }
+
+    // Append triplet batch - single fsync for multiple triplets (for bulk operations)
+    uint64_t append_triplet_batch(const std::vector<Triplet>& triplets) {
+        if (fd_ < 0 || triplets.empty()) return 0;
+
+        // Serialize all triplets
+        std::vector<std::pair<WalEntryHeader, std::vector<uint8_t>>> entries;
+        entries.reserve(triplets.size());
+
+        uint64_t first_seq = next_seq_ + 1;
+        uint64_t ts = static_cast<uint64_t>(now());
+
+        for (const auto& t : triplets) {
+            std::vector<uint8_t> data = serialize_triplet(t.subject, t.predicate, t.object, t.weight);
+
+            WalEntryHeader header;
+            header.magic = WAL_MAGIC;
+            header.length = sizeof(WalEntryHeader) + data.size();
+            header.sequence = ++next_seq_;
+            header.timestamp = ts;
+            header.op = WalOp::Insert;
+            header.format = WAL_FORMAT_V5;
+            std::memset(header.reserved, 0, sizeof(header.reserved));
+            header.checksum = crc32(data.data(), data.size());
+
+            entries.emplace_back(header, std::move(data));
+        }
+
+        // Single lock, single fsync for entire batch
+        {
+            ScopedFileLock lock(fd_, true);
+            lseek(fd_, 0, SEEK_END);
+
+            for (const auto& [header, data] : entries) {
+                if (::write(fd_, &header, sizeof(header)) != sizeof(header)) return 0;
+                if (::write(fd_, data.data(), data.size()) != static_cast<ssize_t>(data.size())) return 0;
+            }
+            fsync(fd_);
+        }
+
+        return first_seq;
+    }
+
     // Append delete (just node ID) - 48 bytes
     uint64_t append_delete(NodeId id) {
         if (fd_ < 0) return 0;
@@ -837,6 +963,16 @@ public:
                         entry.edge.weight = ed.weight;
                         break;
                     }
+                    case WAL_FORMAT_V5: {
+                        TripletDeltaResult tr = deserialize_triplet(data.data(), data.size());
+                        entry.id = tr.subject;  // Use subject as primary ID
+                        entry.has_triplet = true;
+                        entry.triplet_subject = tr.subject;
+                        entry.triplet_object = tr.object;
+                        entry.triplet_weight = tr.weight;
+                        entry.triplet_predicate = tr.predicate;
+                        break;
+                    }
                     default:
                         continue;
                 }
@@ -976,6 +1112,17 @@ public:
                         entry.edge.target = ed.target;
                         entry.edge.type = ed.type;
                         entry.edge.weight = ed.weight;
+                        break;
+                    }
+                    case WAL_FORMAT_V5: {
+                        // Triplet delta
+                        TripletDeltaResult tr = deserialize_triplet(data.data(), data.size());
+                        entry.id = tr.subject;
+                        entry.has_triplet = true;
+                        entry.triplet_subject = tr.subject;
+                        entry.triplet_object = tr.object;
+                        entry.triplet_weight = tr.weight;
+                        entry.triplet_predicate = tr.predicate;
                         break;
                     }
                     default:

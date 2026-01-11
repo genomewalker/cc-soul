@@ -399,14 +399,21 @@ inline ToolResult query(Mind* mind, const json& params) {
     ss << "Found " << triplets.size() << " triplet(s):\n";
 
     for (const auto& t : triplets) {
+        // Resolve entity names from NodeIds
+        auto subj_text = mind->text(t.subject);
+        auto obj_text = mind->text(t.object);
+        std::string subj_name = subj_text.value_or(t.subject.to_string().substr(0, 8));
+        std::string obj_name = obj_text.value_or(t.object.to_string().substr(0, 8));
+
         triplets_array.push_back({
-            {"subject", t.subject.to_string()},
+            {"subject_id", t.subject.to_string()},
+            {"subject", subj_name},
             {"predicate", t.predicate},
-            {"object", t.object.to_string()},
+            {"object_id", t.object.to_string()},
+            {"object", obj_name},
             {"weight", t.weight}
         });
-        ss << "  (" << t.subject.to_string().substr(0, 8) << ") --["
-           << t.predicate << "]--> (" << t.object.to_string().substr(0, 8) << ")\n";
+        ss << "  " << subj_name << " --[" << t.predicate << "]--> " << obj_name << "\n";
     }
 
     return ToolResult::ok(ss.str(), {{"triplets", triplets_array}});

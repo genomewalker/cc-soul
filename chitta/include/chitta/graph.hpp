@@ -7,6 +7,7 @@
 #include "types.hpp"
 #include "hnsw.hpp"  // For NodeIdHash
 #include <algorithm>
+#include <fstream>
 #include <mutex>
 #include <shared_mutex>
 #include <unordered_map>
@@ -1074,6 +1075,108 @@ public:
         auto it = mentions_.find(entity_id);
         if (it != mentions_.end()) return it->second;
         return {};
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Triplet snapshot persistence
+    // ═══════════════════════════════════════════════════════════════════
+
+    // Save triplets to binary file
+    bool save_triplets(const std::string& path) const {
+        std::shared_lock lock(mutex_);
+
+        std::ofstream out(path, std::ios::binary);
+        if (!out) return false;
+
+        // Header: magic + version + count
+        uint32_t magic = 0x54524950;  // "TRIP"
+        uint32_t version = 1;
+        uint64_t count = 0;
+        for (const auto& [_, triplets] : triplets_by_subject_) {
+            count += triplets.size();
+        }
+
+        out.write(reinterpret_cast<const char*>(&magic), sizeof(magic));
+        out.write(reinterpret_cast<const char*>(&version), sizeof(version));
+        out.write(reinterpret_cast<const char*>(&count), sizeof(count));
+
+        // Write each triplet
+        for (const auto& [_, triplets] : triplets_by_subject_) {
+            for (const auto& t : triplets) {
+                // Subject + Object (16 bytes each)
+                out.write(reinterpret_cast<const char*>(&t.subject.high), sizeof(t.subject.high));
+                out.write(reinterpret_cast<const char*>(&t.subject.low), sizeof(t.subject.low));
+                out.write(reinterpret_cast<const char*>(&t.object.high), sizeof(t.object.high));
+                out.write(reinterpret_cast<const char*>(&t.object.low), sizeof(t.object.low));
+                // Weight
+                out.write(reinterpret_cast<const char*>(&t.weight), sizeof(t.weight));
+                // Predicate (length + string)
+                uint32_t pred_len = static_cast<uint32_t>(t.predicate.size());
+                out.write(reinterpret_cast<const char*>(&pred_len), sizeof(pred_len));
+                out.write(t.predicate.data(), pred_len);
+            }
+        }
+
+        out.close();
+        return true;
+    }
+
+    // Load triplets from binary file
+    bool load_triplets(const std::string& path) {
+        std::unique_lock lock(mutex_);
+
+        std::ifstream in(path, std::ios::binary);
+        if (!in) return false;
+
+        // Read header
+        uint32_t magic, version;
+        uint64_t count;
+        in.read(reinterpret_cast<char*>(&magic), sizeof(magic));
+        in.read(reinterpret_cast<char*>(&version), sizeof(version));
+        in.read(reinterpret_cast<char*>(&count), sizeof(count));
+
+        if (magic != 0x54524950 || version != 1) {
+            return false;
+        }
+
+        // Clear existing triplets
+        triplets_by_subject_.clear();
+        triplets_by_object_.clear();
+
+        // Read triplets
+        for (uint64_t i = 0; i < count; ++i) {
+            Triplet t;
+
+            // Subject + Object
+            in.read(reinterpret_cast<char*>(&t.subject.high), sizeof(t.subject.high));
+            in.read(reinterpret_cast<char*>(&t.subject.low), sizeof(t.subject.low));
+            in.read(reinterpret_cast<char*>(&t.object.high), sizeof(t.object.high));
+            in.read(reinterpret_cast<char*>(&t.object.low), sizeof(t.object.low));
+            // Weight
+            in.read(reinterpret_cast<char*>(&t.weight), sizeof(t.weight));
+            // Predicate
+            uint32_t pred_len;
+            in.read(reinterpret_cast<char*>(&pred_len), sizeof(pred_len));
+            t.predicate.resize(pred_len);
+            in.read(t.predicate.data(), pred_len);
+
+            // Add to indices (without lock since we hold unique_lock)
+            triplets_by_subject_[t.subject].push_back(t);
+            triplets_by_object_[t.object].push_back(t.subject);
+        }
+
+        in.close();
+        return true;
+    }
+
+    // Get all triplets (for WAL batch persist)
+    std::vector<Triplet> all_triplets() const {
+        std::shared_lock lock(mutex_);
+        std::vector<Triplet> result;
+        for (const auto& [_, triplets] : triplets_by_subject_) {
+            result.insert(result.end(), triplets.begin(), triplets.end());
+        }
+        return result;
     }
 };
 
