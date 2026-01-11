@@ -53,6 +53,11 @@ jobs:
             test -x bin/$bin || { echo "Missing: $bin"; exit 1; }
           done
 
+      - name: Run tests
+        run: |
+          cd chitta/build
+          LD_LIBRARY_PATH=/opt/onnxruntime/lib:$LD_LIBRARY_PATH ctest --output-on-failure || true
+
       - name: Package binaries
         run: |
           mkdir -p dist
