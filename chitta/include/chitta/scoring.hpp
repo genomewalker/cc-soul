@@ -30,6 +30,7 @@ struct ScoringConfig {
     float confidence_weight = 0.5f;   // How much confidence matters (0-1)
     float recency_weight = 0.3f;      // How much recency matters (0-1)
     float recency_halflife_days = 30.0f;  // Days until recency boost halves
+    float decay_penalty_weight = 0.2f;    // How much decay rate penalizes (0-1)
 
     // Type boosts (multiplicative)
     float failure_boost = 1.2f;   // Failures are gold
@@ -50,7 +51,7 @@ inline float type_boost(NodeType type, const ScoringConfig& config) {
 }
 
 // Soul-aware relevance score
-// Combines semantic similarity with confidence, recency, and type
+// Combines semantic similarity with confidence, recency, decay rate, and type
 inline float soul_relevance(
     float similarity,
     const Node& node,
@@ -69,11 +70,19 @@ inline float soul_relevance(
     float recency_decay = std::exp(-days_ago * 0.693f / config.recency_halflife_days);
     float recency_factor = 1.0f + config.recency_weight * recency_decay;
 
+    // Decay rate penalty: fast-decaying nodes (signals) deprioritized vs slow-decaying (wisdom)
+    // delta=0.02 (wisdom) → factor=1.0, delta=0.15 (signal) → factor≈0.75
+    // Formula: 1 - penalty_weight * (delta - baseline) / range
+    constexpr float DECAY_BASELINE = 0.02f;  // wisdom decay
+    constexpr float DECAY_RANGE = 0.15f;     // signal decay - wisdom decay
+    float decay_normalized = std::clamp((node.delta - DECAY_BASELINE) / DECAY_RANGE, 0.0f, 1.0f);
+    float decay_factor = 1.0f - config.decay_penalty_weight * decay_normalized;
+
     // Type boost
     float type_factor = type_boost(node.node_type, config);
 
     // Combined score
-    return similarity * conf_factor * recency_factor * type_factor;
+    return similarity * conf_factor * recency_factor * decay_factor * type_factor;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

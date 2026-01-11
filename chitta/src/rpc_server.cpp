@@ -56,9 +56,11 @@ static const std::set<std::string> KNOWN_TOOLS = {
     "grow", "observe", "update", "remove", "feedback", "connect", "query",
     "soul_context", "attractors", "lens", "lens_harmony",
     "intend", "wonder", "answer",
-    "narrate", "ledger", "cycle",
+    "narrate", "ledger", "cycle", "version_check",
     // Phase 2 Core
-    "multi_hop", "timeline", "causal_chain", "consolidate"
+    "multi_hop", "timeline", "causal_chain", "consolidate",
+    // Phase 3 Analysis
+    "propagate", "forget", "epistemic_state", "bias_scan"
 };
 
 void print_usage(const char* prog) {

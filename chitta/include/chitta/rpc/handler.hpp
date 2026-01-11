@@ -98,6 +98,9 @@ private:
 
         // Maintenance tools (cycle)
         register_maintenance_tools();
+
+        // Analysis tools (epistemic state, bias detection, confidence propagation)
+        register_analysis_tools();
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -889,6 +892,405 @@ private:
         }
 
         return ToolResult::ok(ss.str(), result);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Analysis tools
+    // ═══════════════════════════════════════════════════════════════════
+
+    void register_analysis_tools() {
+        tools_.push_back({
+            "propagate",
+            "Propagate confidence change through graph. When a node proves useful/wrong, "
+            "connected nodes are affected proportionally. Use after feedback to spread impact.",
+            {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "string"}, {"description", "Node ID to propagate from"}}},
+                    {"delta", {{"type", "number"}, {"minimum", -0.5}, {"maximum", 0.5},
+                              {"description", "Confidence change (+/- boost/penalty)"}}},
+                    {"decay_factor", {{"type", "number"}, {"minimum", 0.1}, {"maximum", 0.9}, {"default", 0.5},
+                                     {"description", "How much propagation decays per hop"}}},
+                    {"max_depth", {{"type", "integer"}, {"minimum", 1}, {"maximum", 5}, {"default", 3}}}
+                }},
+                {"required", {"id", "delta"}}
+            }
+        });
+        handlers_["propagate"] = [this](const json& p) { return tool_propagate(p); };
+
+        tools_.push_back({
+            "forget",
+            "Deliberately forget a node with cascade effects. Connected nodes weaken, "
+            "edges rewire around the forgotten node. Audit trail preserved.",
+            {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "string"}, {"description", "Node ID to forget"}}},
+                    {"cascade", {{"type", "boolean"}, {"default", true},
+                                {"description", "Weaken connected nodes"}}},
+                    {"rewire", {{"type", "boolean"}, {"default", true},
+                               {"description", "Reconnect edges around forgotten node"}}},
+                    {"cascade_strength", {{"type", "number"}, {"minimum", 0.05}, {"maximum", 0.3}, {"default", 0.1}}}
+                }},
+                {"required", {"id"}}
+            }
+        });
+        handlers_["forget"] = [this](const json& p) { return tool_forget(p); };
+
+        tools_.push_back({
+            "epistemic_state",
+            "Analyze what I know vs uncertain about. Shows knowledge gaps, "
+            "unanswered questions, low-confidence beliefs, and coverage by domain.",
+            {
+                {"type", "object"},
+                {"properties", {
+                    {"domain", {{"type", "string"}, {"description", "Filter by domain (optional)"}}},
+                    {"min_confidence", {{"type", "number"}, {"minimum", 0}, {"maximum", 1}, {"default", 0.3},
+                                       {"description", "Threshold for 'certain' knowledge"}}},
+                    {"limit", {{"type", "integer"}, {"minimum", 5}, {"maximum", 50}, {"default", 20}}}
+                }},
+                {"required", json::array()}
+            }
+        });
+        handlers_["epistemic_state"] = [this](const json& p) { return tool_epistemic_state(p); };
+
+        tools_.push_back({
+            "bias_scan",
+            "Detect patterns in my own beliefs and decisions. Looks for over-representation "
+            "of topics, confidence inflation, and decision clustering.",
+            {
+                {"type", "object"},
+                {"properties", {
+                    {"sample_size", {{"type", "integer"}, {"minimum", 50}, {"maximum", 500}, {"default", 100}}}
+                }},
+                {"required", json::array()}
+            }
+        });
+        handlers_["bias_scan"] = [this](const json& p) { return tool_bias_scan(p); };
+    }
+
+    ToolResult tool_propagate(const json& params) {
+        auto err = validate_required(params, {"id", "delta"});
+        if (!err.empty()) return ToolResult::error(err);
+
+        std::string id_str = params["id"];
+        float delta = params["delta"];
+        float decay_factor = params.value("decay_factor", 0.5f);
+        size_t max_depth = params.value("max_depth", 3);
+
+        NodeId id = NodeId::from_string(id_str);
+        if (!mind_->get(id)) {
+            return ToolResult::error("Node not found: " + id_str);
+        }
+
+        auto result = mind_->propagate_confidence(id, delta, decay_factor, max_depth);
+
+        json changes_array = json::array();
+        for (const auto& [change_id, change_delta] : result.changes) {
+            changes_array.push_back({
+                {"id", change_id.to_string()},
+                {"delta", change_delta}
+            });
+        }
+
+        std::ostringstream ss;
+        ss << "Propagated " << (delta >= 0 ? "+" : "") << delta
+           << " to " << result.nodes_affected << " nodes"
+           << " (total impact: " << result.total_delta_applied << ")";
+
+        return ToolResult::ok(ss.str(), {
+            {"source_id", id_str},
+            {"delta", delta},
+            {"nodes_affected", result.nodes_affected},
+            {"total_impact", result.total_delta_applied},
+            {"changes", changes_array}
+        });
+    }
+
+    ToolResult tool_forget(const json& params) {
+        auto err = validate_required(params, {"id"});
+        if (!err.empty()) return ToolResult::error(err);
+
+        std::string id_str = params["id"];
+        bool cascade = params.value("cascade", true);
+        bool rewire = params.value("rewire", true);
+        float cascade_strength = params.value("cascade_strength", 0.1f);
+
+        NodeId id = NodeId::from_string(id_str);
+        auto node_opt = mind_->get(id);
+        if (!node_opt) {
+            return ToolResult::error("Node not found: " + id_str);
+        }
+
+        // Save audit trail
+        std::string forgotten_text = mind_->text(id).value_or("");
+        std::string audit = "FORGOTTEN: " + forgotten_text.substr(0, 100);
+
+        // Collect edges before removal
+        std::vector<NodeId> inbound, outbound;
+        for (const auto& edge : node_opt->edges) {
+            outbound.push_back(edge.target);
+        }
+        // Check reverse edges (nodes pointing to this one)
+        mind_->for_each_node([&](const NodeId& other_id, const Node& other) {
+            for (const auto& edge : other.edges) {
+                if (edge.target == id) {
+                    inbound.push_back(other_id);
+                    break;
+                }
+            }
+        });
+
+        size_t affected = 0;
+        // Cascade: weaken connected nodes
+        if (cascade) {
+            for (const auto& out_id : outbound) {
+                mind_->weaken(out_id, cascade_strength);
+                affected++;
+            }
+            for (const auto& in_id : inbound) {
+                mind_->weaken(in_id, cascade_strength);
+                affected++;
+            }
+        }
+
+        // Rewire: connect inbound to outbound (skip the forgotten node)
+        size_t rewired = 0;
+        if (rewire && !inbound.empty() && !outbound.empty()) {
+            for (const auto& in_id : inbound) {
+                for (const auto& out_id : outbound) {
+                    if (in_id != out_id) {
+                        mind_->hebbian_strengthen(in_id, out_id, 0.1f);
+                        rewired++;
+                    }
+                }
+            }
+        }
+
+        // Remove the node
+        mind_->remove_node(id);
+
+        // Store audit trail
+        if (mind_->has_yantra()) {
+            mind_->remember(audit, NodeType::Episode, {"audit:forget"});
+        }
+
+        std::ostringstream ss;
+        ss << "Forgotten: " << forgotten_text.substr(0, 50);
+        if (cascade) ss << " (affected " << affected << " connected)";
+        if (rewire) ss << " (rewired " << rewired << " paths)";
+
+        return ToolResult::ok(ss.str(), {
+            {"id", id_str},
+            {"forgotten_preview", forgotten_text.substr(0, 100)},
+            {"nodes_weakened", affected},
+            {"edges_rewired", rewired}
+        });
+    }
+
+    ToolResult tool_epistemic_state(const json& params) {
+        std::string domain = params.value("domain", "");
+        float min_confidence = params.value("min_confidence", 0.3f);
+        size_t limit = params.value("limit", 20);
+
+        // Collect epistemic data
+        size_t total_nodes = 0;
+        size_t gaps = 0, questions = 0, low_confidence = 0, high_confidence = 0;
+        std::unordered_map<std::string, size_t> type_counts;
+        std::vector<std::pair<NodeId, float>> lowest_confidence;
+
+        mind_->for_each_node([&](const NodeId& id, const Node& node) {
+            total_nodes++;
+            float conf = node.kappa.effective();
+
+            std::string type_name = node_type_to_string(node.node_type);
+            type_counts[type_name]++;
+
+            if (node.node_type == NodeType::Gap) gaps++;
+            if (node.node_type == NodeType::Question) questions++;
+
+            if (conf < min_confidence) {
+                low_confidence++;
+                if (lowest_confidence.size() < limit) {
+                    lowest_confidence.push_back({id, conf});
+                }
+            } else {
+                high_confidence++;
+            }
+        });
+
+        // Sort lowest confidence
+        std::sort(lowest_confidence.begin(), lowest_confidence.end(),
+                  [](const auto& a, const auto& b) { return a.second < b.second; });
+
+        json uncertain_array = json::array();
+        for (const auto& [id, conf] : lowest_confidence) {
+            std::string text = mind_->text(id).value_or("");
+            auto node = mind_->get(id);
+            uncertain_array.push_back({
+                {"id", id.to_string()},
+                {"confidence", conf},
+                {"type", node ? node_type_to_string(node->node_type) : "unknown"},
+                {"preview", text.substr(0, 60)}
+            });
+        }
+
+        json type_dist = json::object();
+        for (const auto& [type, count] : type_counts) {
+            type_dist[type] = count;
+        }
+
+        float certainty_ratio = total_nodes > 0 ?
+            static_cast<float>(high_confidence) / total_nodes : 0.0f;
+
+        std::ostringstream ss;
+        ss << "Epistemic State:\n";
+        ss << "  Total knowledge: " << total_nodes << " nodes\n";
+        ss << "  High confidence (≥" << int(min_confidence * 100) << "%): "
+           << high_confidence << " (" << int(certainty_ratio * 100) << "%)\n";
+        ss << "  Low confidence: " << low_confidence << "\n";
+        ss << "  Open questions: " << questions << "\n";
+        ss << "  Knowledge gaps: " << gaps << "\n";
+
+        return ToolResult::ok(ss.str(), {
+            {"total_nodes", total_nodes},
+            {"high_confidence", high_confidence},
+            {"low_confidence", low_confidence},
+            {"questions", questions},
+            {"gaps", gaps},
+            {"certainty_ratio", certainty_ratio},
+            {"type_distribution", type_dist},
+            {"most_uncertain", uncertain_array}
+        });
+    }
+
+    ToolResult tool_bias_scan(const json& params) {
+        size_t sample_size = params.value("sample_size", 100);
+
+        // Collect samples for analysis
+        std::vector<const Node*> samples;
+        std::unordered_map<std::string, size_t> type_counts;
+        std::unordered_map<std::string, std::vector<float>> confidence_by_type;
+        size_t total_edges = 0;
+        float total_confidence = 0.0f;
+
+        mind_->for_each_node([&](const NodeId& id, const Node& node) {
+            (void)id;
+            if (samples.size() < sample_size) {
+                std::string type = node_type_to_string(node.node_type);
+                type_counts[type]++;
+                confidence_by_type[type].push_back(node.kappa.effective());
+                total_edges += node.edges.size();
+                total_confidence += node.kappa.effective();
+                samples.push_back(&node);
+            }
+        });
+
+        if (samples.empty()) {
+            return ToolResult::ok("No data for bias analysis", {{"biases", json::array()}});
+        }
+
+        // Analyze biases
+        json biases = json::array();
+        float avg_confidence = total_confidence / samples.size();
+        float avg_edges = static_cast<float>(total_edges) / samples.size();
+
+        // 1. Type imbalance
+        size_t max_type_count = 0;
+        std::string dominant_type;
+        for (const auto& [type, count] : type_counts) {
+            if (count > max_type_count) {
+                max_type_count = count;
+                dominant_type = type;
+            }
+        }
+        float dominance_ratio = static_cast<float>(max_type_count) / samples.size();
+        if (dominance_ratio > 0.5f) {
+            biases.push_back({
+                {"type", "type_dominance"},
+                {"description", "Over-representation of " + dominant_type + " nodes"},
+                {"severity", dominance_ratio},
+                {"dominant_type", dominant_type},
+                {"percentage", int(dominance_ratio * 100)}
+            });
+        }
+
+        // 2. Confidence inflation/deflation
+        if (avg_confidence > 0.85f) {
+            biases.push_back({
+                {"type", "confidence_inflation"},
+                {"description", "Average confidence unusually high - may be overconfident"},
+                {"severity", avg_confidence},
+                {"average_confidence", avg_confidence}
+            });
+        } else if (avg_confidence < 0.4f) {
+            biases.push_back({
+                {"type", "confidence_deflation"},
+                {"description", "Average confidence low - may be under-trusting knowledge"},
+                {"severity", 1.0f - avg_confidence},
+                {"average_confidence", avg_confidence}
+            });
+        }
+
+        // 3. Connectivity bias
+        if (avg_edges < 1.0f) {
+            biases.push_back({
+                {"type", "isolation"},
+                {"description", "Nodes poorly connected - knowledge fragmented"},
+                {"severity", 1.0f - avg_edges},
+                {"average_edges", avg_edges}
+            });
+        } else if (avg_edges > 10.0f) {
+            biases.push_back({
+                {"type", "over_connection"},
+                {"description", "Nodes heavily interconnected - may lack discrimination"},
+                {"severity", avg_edges / 20.0f},
+                {"average_edges", avg_edges}
+            });
+        }
+
+        // 4. Type confidence variance
+        for (const auto& [type, confs] : confidence_by_type) {
+            if (confs.size() < 5) continue;
+            float type_avg = 0.0f;
+            for (float c : confs) type_avg += c;
+            type_avg /= confs.size();
+
+            if (std::abs(type_avg - avg_confidence) > 0.2f) {
+                biases.push_back({
+                    {"type", "type_confidence_bias"},
+                    {"description", type + " has " + (type_avg > avg_confidence ? "higher" : "lower") +
+                                   " confidence than average"},
+                    {"node_type", type},
+                    {"type_average", type_avg},
+                    {"overall_average", avg_confidence}
+                });
+            }
+        }
+
+        std::ostringstream ss;
+        ss << "Bias Scan (" << samples.size() << " samples):\n";
+        if (biases.empty()) {
+            ss << "  No significant biases detected\n";
+        } else {
+            ss << "  Found " << biases.size() << " potential bias(es)\n";
+            for (const auto& b : biases) {
+                ss << "  - " << b["description"].get<std::string>() << "\n";
+            }
+        }
+
+        json type_dist = json::object();
+        for (const auto& [type, count] : type_counts) {
+            type_dist[type] = count;
+        }
+
+        return ToolResult::ok(ss.str(), {
+            {"biases", biases},
+            {"sample_size", samples.size()},
+            {"average_confidence", avg_confidence},
+            {"average_edges", avg_edges},
+            {"type_distribution", type_dist}
+        });
     }
 };
 

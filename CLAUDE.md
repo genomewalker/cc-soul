@@ -359,6 +359,35 @@ prompt: "Build the project and report success/errors"
 
 **Note:** Bash-only subagents may have permission issues in non-interactive contexts. Use `general-purpose` for tasks needing bash execution, or run simple commands directly.
 
+## Building Chitta
+
+When I modify chitta source code, I need to rebuild:
+
+```bash
+cd chitta && cmake --build build --parallel
+```
+
+After rebuilding, update the daemon symlink and restart:
+```bash
+ln -sf /path/to/cc-soul/bin/chitta_cli ~/.claude/bin/chitta_cli
+pkill -TERM chitta_cli  # Graceful shutdown (saves state)
+```
+
+The daemon auto-starts on next tool call.
+
+## Self-Analysis Tools (Phase 3)
+
+New tools for self-awareness:
+
+| Tool | Purpose |
+|------|---------|
+| `epistemic_state` | What I know vs uncertain about (gaps, questions, confidence) |
+| `bias_scan` | Detect patterns in my beliefs (type imbalance, confidence skew) |
+| `propagate` | Spread confidence changes through connected nodes |
+| `forget` | Deliberately forget with cascade effects and rewiring |
+
+These expose data for me to reason about. The soul provides raw info, I do the analysis.
+
 ## Architecture Reference
 
 For deep details, see:

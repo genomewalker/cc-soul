@@ -981,6 +981,74 @@ public:
         }
     }
 
+    // Confidence propagation: propagate confidence change through graph
+    // When a node's confidence changes, connected nodes are affected proportionally
+    // decay_factor: how much propagation decays per hop (default 0.5 = halves each hop)
+    // max_depth: maximum hops to propagate
+    // Returns: number of nodes affected
+    struct PropagationResult {
+        size_t nodes_affected;
+        float total_delta_applied;
+        std::vector<std::pair<NodeId, float>> changes;  // (id, delta)
+    };
+
+    PropagationResult propagate_confidence(NodeId source, float delta,
+                                           float decay_factor = 0.5f,
+                                           size_t max_depth = 3) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        PropagationResult result{0, 0.0f, {}};
+
+        // BFS propagation with decay
+        std::unordered_map<NodeId, float, NodeIdHash> pending_delta;
+        std::unordered_set<NodeId, NodeIdHash> visited;
+
+        // Start with connected nodes
+        if (Node* source_node = storage_.get(source)) {
+            for (const auto& edge : source_node->edges) {
+                if (edge.weight > 0.01f) {
+                    float propagated = delta * edge.weight * decay_factor;
+                    pending_delta[edge.target] = propagated;
+                }
+            }
+        }
+        visited.insert(source);
+
+        // Propagate through depths
+        for (size_t depth = 0; depth < max_depth && !pending_delta.empty(); ++depth) {
+            std::unordered_map<NodeId, float, NodeIdHash> next_pending;
+
+            for (const auto& [id, d] : pending_delta) {
+                if (visited.count(id) || std::abs(d) < 0.001f) continue;
+                visited.insert(id);
+
+                // Apply delta to this node
+                if (Node* node = storage_.get(id)) {
+                    Confidence new_kappa = node->kappa;
+                    new_kappa.observe(new_kappa.mu + d);
+                    storage_.update_confidence(id, new_kappa);
+
+                    result.nodes_affected++;
+                    result.total_delta_applied += std::abs(d);
+                    result.changes.push_back({id, d});
+
+                    // Propagate to next hop
+                    if (depth + 1 < max_depth) {
+                        for (const auto& edge : node->edges) {
+                            if (!visited.count(edge.target) && edge.weight > 0.01f) {
+                                float propagated = d * edge.weight * decay_factor;
+                                next_pending[edge.target] += propagated;
+                            }
+                        }
+                    }
+                }
+            }
+
+            pending_delta = std::move(next_pending);
+        }
+
+        return result;
+    }
+
     // Connect: create edge between nodes (uses WAL delta)
     void connect(NodeId from, NodeId to, EdgeType type, float weight = 1.0f) {
         std::lock_guard<std::mutex> lock(mutex_);
