@@ -316,6 +316,10 @@ private:
                         {"type", "string"},
                         {"description", "Filter by exact tag match (e.g., 'thread:abc123')"}
                     }},
+                    {"exclude_tag", {
+                        {"type", "string"},
+                        {"description", "Exclude nodes with this tag (e.g., 'ε-processed')"}
+                    }},
                     {"limit", {
                         {"type", "integer"},
                         {"minimum", 1},
@@ -704,6 +708,32 @@ private:
             }
         });
         handlers_["connect"] = [this](const json& params) { return tool_connect(params); };
+
+        // Tool: tag - Add or remove tags from nodes
+        tools_.push_back({
+            "tag",
+            "Add or remove tags from a node. Used for ε-yajna tracking (mark nodes as processed) "
+            "and organizing memories by categories.",
+            {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {
+                        {"type", "string"},
+                        {"description", "Node ID to tag"}
+                    }},
+                    {"add", {
+                        {"type", "string"},
+                        {"description", "Tag to add"}
+                    }},
+                    {"remove", {
+                        {"type", "string"},
+                        {"description", "Tag to remove"}
+                    }}
+                }},
+                {"required", {"id"}}
+            }
+        });
+        handlers_["tag"] = [this](const json& params) { return tool_tag(params); };
 
         // Tool: narrate - Manage story threads and episodes
         tools_.push_back({
@@ -1402,6 +1432,7 @@ private:
         std::string query = params.at("query");
         std::string zoom = params.value("zoom", "normal");
         std::string tag = params.value("tag", "");
+        std::string exclude_tag = params.value("exclude_tag", "");
         float threshold = params.value("threshold", 0.0f);
         bool learn = params.value("learn", false);
         bool primed = params.value("primed", false);
@@ -1437,16 +1468,34 @@ private:
             return {true, "Yantra not ready - cannot perform semantic search", json()};
         }
 
+        // Fetch extra results if we need to filter some out
+        size_t fetch_limit = exclude_tag.empty() ? limit : limit * 2;
+
         std::vector<Recall> recalls;
         if (!tag.empty()) {
             // Tag-filtered recall (no priming support for tag queries yet)
-            recalls = mind_->recall_with_tag_filter(query, tag, limit, threshold);
+            recalls = mind_->recall_with_tag_filter(query, tag, fetch_limit, threshold);
         } else if (primed) {
             // Session-primed recall: boost based on recent observations and intentions
-            recalls = mind_->recall_primed(query, limit, threshold);
+            recalls = mind_->recall_primed(query, fetch_limit, threshold);
         } else {
             // Standard recall
-            recalls = mind_->recall(query, limit, threshold);
+            recalls = mind_->recall(query, fetch_limit, threshold);
+        }
+
+        // Filter out nodes with excluded tag
+        if (!exclude_tag.empty()) {
+            recalls.erase(
+                std::remove_if(recalls.begin(), recalls.end(),
+                    [this, &exclude_tag](const Recall& r) {
+                        return mind_->has_tag(r.id, exclude_tag);
+                    }),
+                recalls.end()
+            );
+            // Trim to original limit
+            if (recalls.size() > limit) {
+                recalls.resize(limit);
+            }
         }
 
         // Restore competition setting
@@ -2250,6 +2299,40 @@ private:
         };
 
         return {false, "Edge created", result};
+    }
+
+    ToolResult tool_tag(const json& params) {
+        std::string id_str = params.at("id");
+        std::string add_tag = params.value("add", "");
+        std::string remove_tag = params.value("remove", "");
+
+        NodeId id = NodeId::from_string(id_str);
+
+        // Verify node exists
+        auto node = mind_->get(id);
+        if (!node) {
+            return {true, "Node not found: " + id_str, json()};
+        }
+
+        json result = {{"id", id_str}};
+
+        if (!add_tag.empty()) {
+            mind_->add_tag(id, add_tag);
+            result["added"] = add_tag;
+        }
+
+        if (!remove_tag.empty()) {
+            mind_->remove_tag(id, remove_tag);
+            result["removed"] = remove_tag;
+        }
+
+        if (add_tag.empty() && remove_tag.empty()) {
+            // Return current tags
+            result["tags"] = node->tags;
+            return {false, "Current tags", result};
+        }
+
+        return {false, "Tags updated", result};
     }
 
     ToolResult tool_narrate(const json& params) {

@@ -1015,6 +1015,43 @@ public:
         }
     }
 
+    // Add a tag to a node (for ε-yajna tracking)
+    bool add_tag(NodeId id, const std::string& tag) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (Node* node = storage_.get(id)) {
+            // Check if tag already exists
+            if (std::find(node->tags.begin(), node->tags.end(), tag) == node->tags.end()) {
+                node->tags.push_back(tag);
+                tag_index_.add(id, {tag});
+                // Node is in hot storage, will be persisted on sync
+            }
+            return true;
+        }
+        return false;
+    }
+
+    // Remove a tag from a node
+    bool remove_tag(NodeId id, const std::string& tag) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (Node* node = storage_.get(id)) {
+            auto it = std::find(node->tags.begin(), node->tags.end(), tag);
+            if (it != node->tags.end()) {
+                node->tags.erase(it);
+            }
+            return true;
+        }
+        return false;
+    }
+
+    // Check if node has a tag
+    bool has_tag(NodeId id, const std::string& tag) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (Node* node = storage_.get(id)) {
+            return std::find(node->tags.begin(), node->tags.end(), tag) != node->tags.end();
+        }
+        return false;
+    }
+
     // Confidence propagation: propagate confidence change through graph
     // When a node's confidence changes, connected nodes are affected proportionally
     // decay_factor: how much propagation decays per hop (default 0.5 = halves each hop)

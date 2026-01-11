@@ -68,13 +68,14 @@ void print_usage(const char* prog) {
               << "Usage: " << prog << " <command> [options]\n\n"
               << "Commands:\n"
               << "  stats              Show soul statistics\n"
-              << "  recall <query>     Semantic search\n"
+              << "  recall <query>     Semantic search [--exclude-tag TAG]\n"
               << "  resonate <query>   Full resonance (all phases)\n"
               << "  observe            Store observation: --category C --title T --content X\n"
               << "  grow               Store wisdom: --level L --title T --content X\n"
               << "  ledger             Save/load ledger: --action save|load [--session S]\n"
               << "  connect            Create relationship: --from A --rel R --to B\n"
               << "  query              Query triplets: --subj A --pred R --obj B\n"
+              << "  tag                Manage tags: --id ID --add TAG | --remove TAG\n"
               << "  cycle              Run maintenance cycle\n"
               << "  daemon             Run subconscious daemon (background processing)\n"
               << "  shutdown           Gracefully stop the running daemon\n"
@@ -158,13 +159,30 @@ int cmd_stats(Mind& mind, bool json_output) {
     return 0;
 }
 
-int cmd_recall(Mind& mind, const std::string& query, int limit) {
+int cmd_recall(Mind& mind, const std::string& query, int limit,
+               const std::string& exclude_tag) {
     if (!mind.has_yantra()) {
         std::cerr << "Error: Yantra not attached, semantic search unavailable\n";
         return 1;
     }
 
-    auto results = mind.recall(query, limit);
+    auto results = mind.recall(query, limit * 2);  // Fetch extra to account for filtering
+
+    // Filter out nodes with excluded tag
+    if (!exclude_tag.empty()) {
+        results.erase(
+            std::remove_if(results.begin(), results.end(),
+                [&mind, &exclude_tag](const auto& r) {
+                    return mind.has_tag(r.id, exclude_tag);
+                }),
+            results.end()
+        );
+    }
+
+    // Trim to limit
+    if (results.size() > static_cast<size_t>(limit)) {
+        results.resize(limit);
+    }
 
     if (results.empty()) {
         std::cout << "No results found for: " << query << "\n";
@@ -273,6 +291,45 @@ int cmd_query(Mind& mind, const std::string& subj, const std::string& pred,
     }
 
     return 0;
+}
+
+int cmd_tag(Mind& mind, const std::string& id_str, const std::string& add_tag,
+            const std::string& remove_tag) {
+    if (id_str.empty()) {
+        std::cerr << "Usage: chitta tag --id NODE_ID --add TAG | --remove TAG\n";
+        return 1;
+    }
+
+    NodeId id;
+    try {
+        id = NodeId::from_string(id_str);
+    } catch (...) {
+        std::cerr << "Invalid node ID: " << id_str << "\n";
+        return 1;
+    }
+
+    if (!add_tag.empty()) {
+        if (mind.add_tag(id, add_tag)) {
+            std::cout << "Added tag '" << add_tag << "' to " << id_str.substr(0, 8) << "...\n";
+            return 0;
+        } else {
+            std::cerr << "Node not found: " << id_str << "\n";
+            return 1;
+        }
+    }
+
+    if (!remove_tag.empty()) {
+        if (mind.remove_tag(id, remove_tag)) {
+            std::cout << "Removed tag '" << remove_tag << "' from " << id_str.substr(0, 8) << "...\n";
+            return 0;
+        } else {
+            std::cerr << "Node not found: " << id_str << "\n";
+            return 1;
+        }
+    }
+
+    std::cerr << "Usage: chitta tag --id NODE_ID --add TAG | --remove TAG\n";
+    return 1;
 }
 
 int cmd_cycle(Mind& mind) {
@@ -633,6 +690,12 @@ int main(int argc, char* argv[]) {
     std::string q_subj, q_pred, q_obj;          // query --subj --pred --obj
     float conn_weight = 1.0f;
 
+    // Tag command args
+    std::string tag_id, tag_add, tag_remove;    // tag --id --add --remove
+
+    // Recall filter
+    std::string exclude_tag;                     // recall --exclude-tag
+
     int limit = 5;
     int daemon_interval = 60;
     bool json_output = false;
@@ -678,6 +741,16 @@ int main(int argc, char* argv[]) {
             q_pred = argv[++i];
         } else if (strcmp(argv[i], "--obj") == 0 && i + 1 < argc) {
             q_obj = argv[++i];
+        // Tag command args
+        } else if (strcmp(argv[i], "--id") == 0 && i + 1 < argc) {
+            tag_id = argv[++i];
+        } else if (strcmp(argv[i], "--add") == 0 && i + 1 < argc) {
+            tag_add = argv[++i];
+        } else if (strcmp(argv[i], "--remove") == 0 && i + 1 < argc) {
+            tag_remove = argv[++i];
+        // Recall filter
+        } else if (strcmp(argv[i], "--exclude-tag") == 0 && i + 1 < argc) {
+            exclude_tag = argv[++i];
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             print_usage(argv[0]);
             return 0;
@@ -751,10 +824,10 @@ int main(int argc, char* argv[]) {
         result = cmd_stats(mind, json_output);
     } else if (command == "recall") {
         if (query.empty()) {
-            std::cerr << "Usage: chitta_cli recall <query>\n";
+            std::cerr << "Usage: chitta_cli recall <query> [--exclude-tag TAG]\n";
             result = 1;
         } else {
-            result = cmd_recall(mind, query, limit);
+            result = cmd_recall(mind, query, limit, exclude_tag);
         }
     } else if (command == "resonate") {
         if (query.empty()) {
@@ -769,6 +842,8 @@ int main(int argc, char* argv[]) {
         result = cmd_connect(mind, conn_from, conn_rel, conn_to, conn_weight);
     } else if (command == "query") {
         result = cmd_query(mind, q_subj, q_pred, q_obj, json_output);
+    } else if (command == "tag") {
+        result = cmd_tag(mind, tag_id, tag_add, tag_remove);
     } else if (command == "daemon") {
         if (socket_mode) {
             result = cmd_daemon_with_socket(mind, daemon_interval, pid_file, socket_path);
