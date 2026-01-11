@@ -254,7 +254,10 @@ create_symlinks() {
     # Create global bin symlinks for stable paths (no version parsing needed)
     for bin in chitta chitta_cli chitta_migrate chitta_import; do
         if [[ -x "$BIN_DIR/$bin" ]]; then
-            ln -sfn "$BIN_DIR/$bin" "${HOME}/.claude/bin/$bin"
+            local target="${HOME}/.claude/bin/$bin"
+            # Remove existing file/symlink before creating new symlink
+            [[ -e "$target" || -L "$target" ]] && rm -f "$target"
+            ln -s "$BIN_DIR/$bin" "$target"
         fi
     done
 
