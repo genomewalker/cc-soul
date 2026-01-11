@@ -71,10 +71,11 @@ private:
     bool start_daemon();
     bool wait_for_socket(int timeout_ms);
     bool wait_for_socket_gone(int timeout_ms);
-    void cleanup_versioned_sockets();
     int acquire_daemon_lock();
     void release_daemon_lock(int lock_fd);
-    bool try_connect_any_socket();
+
+    // Internal request without auto-reconnect (used by request())
+    std::optional<std::string> request_internal(const std::string& json_rpc);
 };
 
 } // namespace chitta

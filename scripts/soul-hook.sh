@@ -265,6 +265,25 @@ hook_prompt() {
                 "$SCRIPT_DIR/token-savings.sh" add-transparent "$chars_injected" 2>/dev/null || true
             fi
         fi
+
+        # Proactive surfacing: find important unrequested memories
+        # (failures, questions, beliefs that relate to context)
+        local proactive_output
+        proactive_output=$(call_mcp "proactive_surface" "{\"query\":\"$query_escaped\",\"limit\":2}")
+
+        if [[ -n "$proactive_output" && "$proactive_output" != "null" && "$proactive_output" != *"No proactive"* ]]; then
+            local proactive_clean
+            proactive_clean=$(echo "$proactive_output" \
+                | grep -v "^Proactively surfacing:" \
+                | grep -E '^(!!\s|[?][?]\s|>>\s|##\s|~~\s|\*\*\s)' \
+                | head -c 300)
+
+            if [[ -n "$proactive_clean" ]]; then
+                echo ""
+                echo "[Proactive]"
+                echo "$proactive_clean"
+            fi
+        fi
     fi
 }
 

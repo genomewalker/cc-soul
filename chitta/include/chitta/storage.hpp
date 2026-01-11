@@ -121,7 +121,7 @@ public:
 
     // Storage format version (must match migrations.hpp)
     static constexpr uint32_t STORAGE_MAGIC = 0x43485454;  // "CHTT"
-    static constexpr uint32_t STORAGE_VERSION = 3;          // v3 adds checksum footer
+    static constexpr uint32_t STORAGE_VERSION = 4;          // v4 adds epsilon field
     static constexpr uint32_t FOOTER_MAGIC = 0x454E4443;   // "CDNE" (end marker)
 
     // Check if file needs upgrade before loading
@@ -192,6 +192,7 @@ public:
             write_to_buffer(&node.tau_created, sizeof(node.tau_created));
             write_to_buffer(&node.tau_accessed, sizeof(node.tau_accessed));
             write_to_buffer(&node.delta, sizeof(node.delta));
+            write_to_buffer(&node.epsilon, sizeof(node.epsilon));
             write_to_buffer(&node.kappa.mu, sizeof(node.kappa.mu));
             write_to_buffer(&node.kappa.sigma_sq, sizeof(node.kappa.sigma_sq));
             write_to_buffer(&node.kappa.n, sizeof(node.kappa.n));
@@ -417,6 +418,11 @@ public:
             read_from_buffer(&node.tau_created, sizeof(node.tau_created));
             read_from_buffer(&node.tau_accessed, sizeof(node.tau_accessed));
             read_from_buffer(&node.delta, sizeof(node.delta));
+            if (version >= 4) {
+                read_from_buffer(&node.epsilon, sizeof(node.epsilon));
+            } else {
+                node.epsilon = 0.5f;  // Default for old files
+            }
             read_from_buffer(&node.kappa.mu, sizeof(node.kappa.mu));
             read_from_buffer(&node.kappa.sigma_sq, sizeof(node.kappa.sigma_sq));
             read_from_buffer(&node.kappa.n, sizeof(node.kappa.n));

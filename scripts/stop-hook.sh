@@ -34,6 +34,51 @@ PROJECT=$(basename "$CWD" 2>/dev/null || echo "unknown")
 
     [[ -z "$LAST_MSG" || ${#LAST_MSG} -lt 10 ]] && exit 0
 
+    # Extract [LEARN ε=XX] markers and store as wisdom
+    echo "$LAST_MSG" | grep -oP '\[LEARN[^\]]*\]\s*\K[^\n]+' | while read -r learning; do
+        [[ -z "$learning" ]] && continue
+
+        # Extract epsilon if present
+        EPSILON=$(echo "$LAST_MSG" | grep -oP '\[LEARN ε=\K[0-9]+' | head -1)
+        EPSILON=${EPSILON:-50}
+        EPSILON_FLOAT=$(echo "scale=2; $EPSILON / 100" | bc 2>/dev/null || echo "0.5")
+
+        # Parse title and content
+        if [[ "$learning" == *": "* ]]; then
+            TITLE="${learning%%: *}"
+            CONTENT="${learning#*: }"
+        else
+            TITLE="${learning:0:60}"
+            CONTENT="$learning"
+        fi
+
+        "$CHITTA" grow --type wisdom --title "$TITLE" --content "$CONTENT" --epsilon "$EPSILON_FLOAT" >/dev/null 2>&1 || true
+    done
+
+    # Extract [USED:uuid] markers and strengthen those memories
+    echo "$LAST_MSG" | grep -oP '\[USED:[^\]]+\]' | while read -r marker; do
+        UUID="${marker#\[USED:}"
+        UUID="${UUID%\]}"
+        [[ -z "$UUID" || ${#UUID} -lt 30 ]] && continue
+
+        "$CHITTA" feedback --memory_id "$UUID" --helpful true --context "Used in response" >/dev/null 2>&1 || true
+    done
+
+    # Extract [REMEMBER] markers and store as observations
+    echo "$LAST_MSG" | grep -oP '\[REMEMBER\]\s*\K[^\n]+' | while read -r memory; do
+        [[ -z "$memory" ]] && continue
+
+        if [[ "$memory" == *": "* ]]; then
+            TITLE="${memory%%: *}"
+            CONTENT="${memory#*: }"
+        else
+            TITLE="${memory:0:60}"
+            CONTENT="$memory"
+        fi
+
+        "$CHITTA" observe --category decision --title "$TITLE" --content "$CONTENT" --project "$PROJECT" >/dev/null 2>&1 || true
+    done
+
     # Parse each line for graph patterns
     echo "$LAST_MSG" | while IFS= read -r line; do
         [[ ${#line} -lt 3 ]] && continue

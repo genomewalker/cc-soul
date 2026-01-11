@@ -40,7 +40,9 @@ inline void register_schemas(std::vector<ToolSchema>& tools) {
                 {"content", {{"type", "string"}, {"description", "The content/statement to add"}}},
                 {"title", {{"type", "string"}, {"description", "Short title (required for wisdom/failure)"}}},
                 {"domain", {{"type", "string"}, {"description", "Domain context (optional)"}}},
-                {"confidence", {{"type", "number"}, {"minimum", 0}, {"maximum", 1}, {"default", 0.8}}}
+                {"confidence", {{"type", "number"}, {"minimum", 0}, {"maximum", 1}, {"default", 0.8}}},
+                {"epsilon", {{"type", "number"}, {"minimum", 0}, {"maximum", 1}, {"default", 0.5},
+                            {"description", "Epiplexity: reconstructability from title (Claude-assessed, 0-1)"}}}
             }},
             {"required", {"type", "content"}}
         }
@@ -60,7 +62,9 @@ inline void register_schemas(std::vector<ToolSchema>& tools) {
                 {"title", {{"type", "string"}, {"maxLength", 80}, {"description", "Short title"}}},
                 {"content", {{"type", "string"}, {"description", "Full observation content"}}},
                 {"project", {{"type", "string"}, {"description", "Project name (optional)"}}},
-                {"tags", {{"type", "string"}, {"description", "Comma-separated tags for filtering"}}}
+                {"tags", {{"type", "string"}, {"description", "Comma-separated tags for filtering"}}},
+                {"epsilon", {{"type", "number"}, {"minimum", 0}, {"maximum", 1}, {"default", 0.5},
+                            {"description", "Epiplexity: reconstructability from title (Claude-assessed, 0-1)"}}}
             }},
             {"required", {"category", "title", "content"}}
         }
@@ -131,6 +135,7 @@ inline ToolResult grow(Mind* mind, const json& params) {
     std::string title = params.value("title", "");
     std::string domain = params.value("domain", "");
     float confidence = params.value("confidence", 0.8f);
+    float epsilon = params.value("epsilon", 0.5f);
 
     NodeType type = string_to_node_type(type_str);
 
@@ -156,16 +161,24 @@ inline ToolResult grow(Mind* mind, const json& params) {
                             std::vector<uint8_t>(full_text.begin(), full_text.end()));
     }
 
+    // Set epsilon on the created node
+    if (auto node = mind->get(id)) {
+        Node updated = *node;
+        updated.epsilon = std::clamp(epsilon, 0.0f, 1.0f);
+        mind->update_node(id, updated);
+    }
+
     json result = {
         {"id", id.to_string()},
         {"type", type_str},
         {"title", title},
-        {"confidence", confidence}
+        {"confidence", confidence},
+        {"epsilon", epsilon}
     };
 
     std::ostringstream ss;
     ss << "Grew " << type_str << ": " << (title.empty() ? content.substr(0, 50) : title);
-    ss << " (id: " << id.to_string() << ")";
+    ss << " (id: " << id.to_string() << ", ε=" << static_cast<int>(epsilon * 100) << "%)";
 
     return ToolResult::ok(ss.str(), result);
 }
@@ -176,6 +189,7 @@ inline ToolResult observe(Mind* mind, const json& params) {
     std::string content = params.at("content");
     std::string project = params.value("project", "");
     std::string tags_str = params.value("tags", "");
+    float epsilon = params.value("epsilon", 0.5f);
 
     // Determine decay rate based on category
     float decay = 0.05f;  // default
@@ -220,15 +234,24 @@ inline ToolResult observe(Mind* mind, const json& params) {
                             std::vector<uint8_t>(full_text.begin(), full_text.end()));
     }
 
+    // Set epsilon and decay on the created node
+    if (auto node = mind->get(id)) {
+        Node updated = *node;
+        updated.epsilon = std::clamp(epsilon, 0.0f, 1.0f);
+        updated.delta = decay;
+        mind->update_node(id, updated);
+    }
+
     json result = {
         {"id", id.to_string()},
         {"category", category},
         {"title", title},
         {"decay_rate", decay},
+        {"epsilon", epsilon},
         {"tags", tags_vec}
     };
 
-    return ToolResult::ok("Observed: " + title, result);
+    return ToolResult::ok("Observed: " + title + " (ε=" + std::to_string(static_cast<int>(epsilon * 100)) + "%)", result);
 }
 
 inline ToolResult feedback(Mind* mind, const json& params) {

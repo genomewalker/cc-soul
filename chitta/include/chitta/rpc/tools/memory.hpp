@@ -118,6 +118,42 @@ inline void register_schemas(std::vector<ToolSchema>& tools) {
             {"required", {"query"}}
         }
     });
+
+    tools.push_back({
+        "proactive_surface",
+        "Surface important memories the user didn't ask for but should know about. "
+        "Finds failures (don't repeat mistakes), open questions, beliefs, and constraints "
+        "that relate to the current context. Filters by confidence and epsilon.",
+        {
+            {"type", "object"},
+            {"properties", {
+                {"query", {{"type", "string"}, {"description", "Current context/query"}}},
+                {"exclude_ids", {{"type", "array"}, {"items", {{"type", "string"}}},
+                               {"description", "IDs already in recall results (to avoid duplication)"}}},
+                {"limit", {{"type", "integer"}, {"minimum", 1}, {"maximum", 10}, {"default", 3}}},
+                {"min_relevance", {{"type", "number"}, {"minimum", 0}, {"maximum", 1}, {"default", 0.25}}},
+                {"min_confidence", {{"type", "number"}, {"minimum", 0}, {"maximum", 1}, {"default", 0.6}}},
+                {"min_epsilon", {{"type", "number"}, {"minimum", 0}, {"maximum", 1}, {"default", 0.7}}}
+            }},
+            {"required", {"query"}}
+        }
+    });
+
+    tools.push_back({
+        "detect_contradictions",
+        "Detect potential contradictions between new content and existing memories. "
+        "Uses negation patterns and opposite words to find conflicts. Tags found "
+        "contradictions so proactive_surface will show them.",
+        {
+            {"type", "object"},
+            {"properties", {
+                {"content", {{"type", "string"}, {"description", "New content to check for contradictions"}}},
+                {"similarity_threshold", {{"type", "number"}, {"minimum", 0}, {"maximum", 1}, {"default", 0.6}}},
+                {"limit", {{"type", "integer"}, {"minimum", 1}, {"maximum", 10}, {"default", 5}}}
+            }},
+            {"required", {"content"}}
+        }
+    });
 }
 
 // Tool implementations
@@ -449,6 +485,235 @@ inline ToolResult full_resonate(Mind* mind, const json& params) {
     return ToolResult::ok(ss.str(), result);
 }
 
+// Proactive surfacing: find important unrequested memories
+// Surfaces failures, questions, beliefs, decisions that relate to context
+inline ToolResult proactive_surface(Mind* mind, const json& params) {
+    std::string query = params.value("query", "");
+    json exclude_ids = params.value("exclude_ids", json::array());
+    size_t limit = params.value("limit", 3);
+    float min_relevance = params.value("min_relevance", 0.25f);
+    float min_confidence = params.value("min_confidence", 0.6f);
+    float min_epsilon = params.value("min_epsilon", 0.7f);
+
+    if (query.empty()) {
+        return ToolResult::error("Query required for proactive surfacing");
+    }
+
+    // Build exclusion set from already-recalled IDs
+    std::unordered_set<std::string> excluded;
+    for (const auto& id : exclude_ids) {
+        if (id.is_string()) {
+            excluded.insert(id.get<std::string>());
+        }
+    }
+
+    // Proactive node types (things worth surfacing unrequested)
+    std::unordered_set<NodeType> proactive_types = {
+        NodeType::Failure,     // Don't repeat mistakes
+        NodeType::Question,    // Open questions
+        NodeType::Belief,      // Guiding principles
+        NodeType::Invariant,   // Constraints to respect
+        NodeType::Gap          // Knowledge gaps
+    };
+
+    // Search with broader threshold
+    auto recalls = mind->recall(query, limit * 5, min_relevance);
+
+    std::ostringstream ss;
+    json results_array = json::array();
+    size_t surfaced = 0;
+
+    for (const auto& r : recalls) {
+        if (surfaced >= limit) break;
+
+        // Skip if already in regular recall
+        if (excluded.count(r.id.to_string())) continue;
+
+        // Must be a proactive type OR have decision/warning tag
+        auto tags = mind->get_tags(r.id);
+        bool is_proactive_type = proactive_types.count(r.type) > 0;
+        bool has_proactive_tag = false;
+        for (const auto& tag : tags) {
+            if (tag == "decision" || tag == "warning" || tag == "important" ||
+                tag == "contradiction" || tag == "blocker") {
+                has_proactive_tag = true;
+                break;
+            }
+        }
+
+        if (!is_proactive_type && !has_proactive_tag) continue;
+
+        // Get full node for confidence and epsilon check
+        auto node = mind->get(r.id);
+        if (!node) continue;
+
+        // Filter by confidence and epsilon
+        if (node->kappa.effective() < min_confidence) continue;
+        if (node->epsilon < min_epsilon) continue;
+
+        // This memory qualifies for proactive surfacing
+        ++surfaced;
+
+        // Icon based on type
+        std::string icon;
+        switch (r.type) {
+            case NodeType::Failure:   icon = "!!"; break;
+            case NodeType::Question:  icon = "??"; break;
+            case NodeType::Belief:    icon = ">>"; break;
+            case NodeType::Invariant: icon = "##"; break;
+            case NodeType::Gap:       icon = "~~"; break;
+            default:                  icon = "**"; break;
+        }
+
+        std::string text = safe_text(r.text);
+        std::string title = extract_title(text, 70);
+
+        results_array.push_back({
+            {"id", r.id.to_string()},
+            {"type", node_type_to_string(r.type)},
+            {"title", title},
+            {"relevance", r.relevance},
+            {"confidence", node->kappa.effective()},
+            {"epsilon", node->epsilon},
+            {"tags", tags}
+        });
+
+        ss << icon << " [" << node_type_to_string(r.type) << "] " << title << "\n";
+    }
+
+    if (surfaced == 0) {
+        return ToolResult::ok("No proactive memories to surface", {{"results", json::array()}});
+    }
+
+    json result = {
+        {"results", results_array},
+        {"count", surfaced},
+        {"query", query}
+    };
+
+    return ToolResult::ok("Proactively surfacing:\n" + ss.str(), result);
+}
+
+// Contradiction detection: find memories that may conflict with new content
+inline ToolResult detect_contradictions(Mind* mind, const json& params) {
+    std::string content = params.value("content", "");
+    float similarity_threshold = params.value("similarity_threshold", 0.6f);
+    size_t limit = params.value("limit", 5);
+
+    if (content.empty()) {
+        return ToolResult::error("Content required for contradiction detection");
+    }
+
+    // Negation indicators
+    static const std::vector<std::string> negations = {
+        "not ", "don't ", "doesn't ", "never ", "shouldn't ", "won't ",
+        "isn't ", "aren't ", "wasn't ", "can't ", "cannot ", "avoid ",
+        "bad ", "wrong ", "false ", "fails ", "broken "
+    };
+
+    static const std::vector<std::pair<std::string, std::string>> opposites = {
+        {"always", "never"}, {"good", "bad"}, {"true", "false"},
+        {"works", "fails"}, {"use", "avoid"}, {"do", "don't"},
+        {"should", "shouldn't"}, {"can", "cannot"}, {"is", "isn't"},
+        {"fast", "slow"}, {"safe", "unsafe"}, {"correct", "incorrect"}
+    };
+
+    // Check if content has negation
+    std::string content_lower = content;
+    std::transform(content_lower.begin(), content_lower.end(), content_lower.begin(), ::tolower);
+
+    bool content_has_negation = false;
+    for (const auto& neg : negations) {
+        if (content_lower.find(neg) != std::string::npos) {
+            content_has_negation = true;
+            break;
+        }
+    }
+
+    // Search for similar content
+    auto recalls = mind->recall(content, limit * 3, similarity_threshold);
+
+    std::ostringstream ss;
+    json contradictions = json::array();
+    size_t found = 0;
+
+    for (const auto& r : recalls) {
+        if (found >= limit) break;
+
+        std::string recall_text = r.text;
+        std::string recall_lower = recall_text;
+        std::transform(recall_lower.begin(), recall_lower.end(), recall_lower.begin(), ::tolower);
+
+        // Check if recall has negation
+        bool recall_has_negation = false;
+        for (const auto& neg : negations) {
+            if (recall_lower.find(neg) != std::string::npos) {
+                recall_has_negation = true;
+                break;
+            }
+        }
+
+        // Contradiction: one has negation, other doesn't, AND high similarity
+        bool potential_contradiction = false;
+
+        if (content_has_negation != recall_has_negation && r.similarity > similarity_threshold) {
+            potential_contradiction = true;
+        }
+
+        // Also check for opposite words
+        if (!potential_contradiction) {
+            for (const auto& [word1, word2] : opposites) {
+                bool content_has_w1 = content_lower.find(word1) != std::string::npos;
+                bool content_has_w2 = content_lower.find(word2) != std::string::npos;
+                bool recall_has_w1 = recall_lower.find(word1) != std::string::npos;
+                bool recall_has_w2 = recall_lower.find(word2) != std::string::npos;
+
+                if ((content_has_w1 && recall_has_w2) || (content_has_w2 && recall_has_w1)) {
+                    potential_contradiction = true;
+                    break;
+                }
+            }
+        }
+
+        if (potential_contradiction) {
+            ++found;
+            contradictions.push_back({
+                {"id", r.id.to_string()},
+                {"text", safe_text(recall_text).substr(0, 100)},
+                {"similarity", r.similarity},
+                {"type", node_type_to_string(r.type)}
+            });
+
+            // Tag the existing memory as potentially contradicting
+            auto node = mind->get(r.id);
+            if (node) {
+                auto tags = node->tags;
+                bool has_tag = std::find(tags.begin(), tags.end(), "contradiction") != tags.end();
+                if (!has_tag) {
+                    tags.push_back("contradiction");
+                    Node updated = *node;
+                    updated.tags = tags;
+                    mind->update_node(r.id, updated);
+                }
+            }
+
+            ss << "!! " << safe_text(recall_text).substr(0, 80) << "...\n";
+        }
+    }
+
+    if (found == 0) {
+        return ToolResult::ok("No contradictions detected", {{"contradictions", json::array()}});
+    }
+
+    json result = {
+        {"contradictions", contradictions},
+        {"count", found},
+        {"content_preview", content.substr(0, 50)}
+    };
+
+    return ToolResult::ok("Potential contradictions:\n" + ss.str(), result);
+}
+
 // Register all memory tool handlers
 inline void register_handlers(Mind* mind,
                                std::unordered_map<std::string, ToolHandler>& handlers) {
@@ -456,6 +721,8 @@ inline void register_handlers(Mind* mind,
     handlers["recall_by_tag"] = [mind](const json& p) { return recall_by_tag(mind, p); };
     handlers["resonate"] = [mind](const json& p) { return resonate(mind, p); };
     handlers["full_resonate"] = [mind](const json& p) { return full_resonate(mind, p); };
+    handlers["proactive_surface"] = [mind](const json& p) { return proactive_surface(mind, p); };
+    handlers["detect_contradictions"] = [mind](const json& p) { return detect_contradictions(mind, p); };
 }
 
 } // namespace chitta::rpc::tools::memory

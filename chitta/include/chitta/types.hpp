@@ -368,6 +368,7 @@ struct Node {
     Timestamp tau_created;    // Creation timestamp
     Timestamp tau_accessed;   // Last access timestamp
     float delta;              // Decay rate (per day, 0 = never decays)
+    float epsilon;            // Epiplexity: reconstructability from title (0-1, Claude-assessed)
     NodeType node_type;
     std::vector<uint8_t> payload;
     std::vector<Edge> edges;
@@ -380,6 +381,7 @@ struct Node {
         , tau_created(now())
         , tau_accessed(now())
         , delta(0.05f)
+        , epsilon(0.5f)       // Default: moderate reconstructability
         , node_type(NodeType::Episode) {}
 
     Node(NodeType type, Vector embedding)
@@ -389,6 +391,7 @@ struct Node {
         , tau_created(now())
         , tau_accessed(now())
         , delta(0.05f)
+        , epsilon(0.5f)
         , node_type(type) {}
 
     Node& with_confidence(Confidence c) {
@@ -398,6 +401,11 @@ struct Node {
 
     Node& with_decay(float d) {
         delta = d;
+        return *this;
+    }
+
+    Node& with_epsilon(float e) {
+        epsilon = std::clamp(e, 0.0f, 1.0f);
         return *this;
     }
 

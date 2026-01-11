@@ -4,6 +4,7 @@
 #include <sys/un.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
+#include <signal.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -14,6 +15,7 @@
 #include <thread>
 #include <chrono>
 #include <iostream>
+#include <fstream>
 #include <vector>
 #include <algorithm>
 #include <glob.h>
@@ -23,37 +25,188 @@ namespace chitta {
 
 namespace {
 
-// Parse semantic version string (e.g., "2.30.0") into comparable tuple
-std::tuple<int, int, int> parse_version(const std::string& v) {
-    int major = 0, minor = 0, patch = 0;
-    sscanf(v.c_str(), "%d.%d.%d", &major, &minor, &patch);
-    return {major, minor, patch};
-}
+// PID file location for daemon process tracking
+constexpr const char* DAEMON_PID_FILE = "/tmp/chitta-daemon.pid";
 
-// Find all installed plugin versions, sorted newest first
-std::vector<std::string> find_installed_versions(const std::string& cache_base) {
-    std::vector<std::string> versions;
+// Find all chitta daemon processes (returns PIDs)
+std::vector<pid_t> find_daemon_pids() {
+    std::vector<pid_t> pids;
 
-    DIR* dir = opendir(cache_base.c_str());
-    if (!dir) return versions;
-
-    while (struct dirent* entry = readdir(dir)) {
-        if (entry->d_type == DT_DIR && entry->d_name[0] != '.') {
-            std::string name = entry->d_name;
-            // Check if it looks like a version (starts with digit)
-            if (!name.empty() && name[0] >= '0' && name[0] <= '9') {
-                versions.push_back(name);
+    // Read from PID file first
+    std::ifstream pid_file(DAEMON_PID_FILE);
+    if (pid_file) {
+        pid_t pid;
+        if (pid_file >> pid) {
+            // Verify process is actually chitta
+            std::string cmdline_path = "/proc/" + std::to_string(pid) + "/cmdline";
+            std::ifstream cmdline(cmdline_path);
+            if (cmdline) {
+                std::string cmd;
+                std::getline(cmdline, cmd, '\0');
+                if (cmd.find("chitta") != std::string::npos) {
+                    pids.push_back(pid);
+                }
             }
         }
     }
-    closedir(dir);
 
-    // Sort by version descending (newest first)
-    std::sort(versions.begin(), versions.end(), [](const auto& a, const auto& b) {
-        return parse_version(a) > parse_version(b);
-    });
+    // Also check /proc for any chitta_cli daemon processes we might have missed
+    DIR* proc = opendir("/proc");
+    if (proc) {
+        while (struct dirent* entry = readdir(proc)) {
+            if (entry->d_type != DT_DIR) continue;
 
-    return versions;
+            // Check if directory name is a number (PID)
+            char* end;
+            pid_t pid = strtol(entry->d_name, &end, 10);
+            if (*end != '\0' || pid <= 0) continue;
+
+            // Skip if already found
+            if (std::find(pids.begin(), pids.end(), pid) != pids.end()) continue;
+
+            // Check cmdline
+            std::string cmdline_path = "/proc/" + std::string(entry->d_name) + "/cmdline";
+            std::ifstream cmdline(cmdline_path);
+            if (cmdline) {
+                std::string cmd;
+                std::getline(cmdline, cmd, '\0');
+                if (cmd.find("chitta_cli") != std::string::npos) {
+                    // Check if it's running as daemon
+                    std::string full_cmdline;
+                    cmdline.seekg(0);
+                    char c;
+                    while (cmdline.get(c)) {
+                        full_cmdline += (c == '\0') ? ' ' : c;
+                    }
+                    if (full_cmdline.find("daemon") != std::string::npos) {
+                        pids.push_back(pid);
+                    }
+                }
+            }
+        }
+        closedir(proc);
+    }
+
+    return pids;
+}
+
+// Kill a process gracefully, then forcefully if needed
+bool kill_process(pid_t pid, int timeout_ms = 3000) {
+    // Send SIGTERM first
+    if (kill(pid, SIGTERM) != 0) {
+        return errno == ESRCH;  // Already dead
+    }
+
+    // Wait for process to exit
+    auto start = std::chrono::steady_clock::now();
+    while (true) {
+        if (kill(pid, 0) != 0 && errno == ESRCH) {
+            return true;  // Process exited
+        }
+
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start).count();
+        if (elapsed >= timeout_ms) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+
+    // Force kill
+    std::cerr << "[socket_client] Process " << pid << " didn't respond to SIGTERM, sending SIGKILL\n";
+    kill(pid, SIGKILL);
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    return kill(pid, 0) != 0;
+}
+
+// Terminate all running chitta daemons and clean up sockets
+void terminate_all_daemons() {
+    // Kill all daemon processes
+    auto pids = find_daemon_pids();
+    for (pid_t pid : pids) {
+        std::cerr << "[socket_client] Terminating old daemon (pid=" << pid << ")\n";
+        kill_process(pid);
+    }
+
+    // Remove PID file
+    unlink(DAEMON_PID_FILE);
+
+    // Remove all chitta sockets
+    glob_t globbuf;
+    if (glob("/tmp/chitta*.sock", 0, nullptr, &globbuf) == 0) {
+        for (size_t i = 0; i < globbuf.gl_pathc; ++i) {
+            std::cerr << "[socket_client] Removing socket: " << globbuf.gl_pathv[i] << "\n";
+            unlink(globbuf.gl_pathv[i]);
+        }
+        globfree(&globbuf);
+    }
+
+    // Small delay to ensure cleanup is complete
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+}
+
+// Get the daemon binary path for the current client version
+std::string get_versioned_daemon_path() {
+    const char* home = getenv("HOME");
+    if (!home) return "";
+
+    // First check CLAUDE_PLUGIN_ROOT (when running as plugin)
+    if (const char* plugin_root = getenv("CLAUDE_PLUGIN_ROOT")) {
+        std::string path = std::string(plugin_root) + "/bin/chitta_cli";
+        if (access(path.c_str(), X_OK) == 0) {
+            return path;
+        }
+    }
+
+    // Use the exact version matching our client
+    std::string version_path = std::string(home) +
+        "/.claude/plugins/cache/genomewalker-cc-soul/cc-soul/" +
+        CHITTA_VERSION + "/bin/chitta_cli";
+
+    if (access(version_path.c_str(), X_OK) == 0) {
+        return version_path;
+    }
+
+    // Fallback: marketplace or dev location
+    std::string fallbacks[] = {
+        std::string(home) + "/.claude/plugins/marketplaces/genomewalker-cc-soul/bin/chitta_cli",
+        std::string(home) + "/.claude/bin/chitta_cli"
+    };
+
+    for (const auto& path : fallbacks) {
+        if (access(path.c_str(), X_OK) == 0) {
+            return path;
+        }
+    }
+
+    return "";
+}
+
+// Get model/vocab paths for current version
+std::pair<std::string, std::string> get_model_paths() {
+    const char* home = getenv("HOME");
+    if (!home) return {"", ""};
+
+    // Check CLAUDE_PLUGIN_ROOT first
+    if (const char* plugin_root = getenv("CLAUDE_PLUGIN_ROOT")) {
+        std::string model = std::string(plugin_root) + "/chitta/models/model.onnx";
+        std::string vocab = std::string(plugin_root) + "/chitta/models/vocab.txt";
+        if (access(model.c_str(), R_OK) == 0 && access(vocab.c_str(), R_OK) == 0) {
+            return {model, vocab};
+        }
+    }
+
+    // Use exact version
+    std::string base = std::string(home) +
+        "/.claude/plugins/cache/genomewalker-cc-soul/cc-soul/" + CHITTA_VERSION;
+    std::string model = base + "/chitta/models/model.onnx";
+    std::string vocab = base + "/chitta/models/vocab.txt";
+
+    if (access(model.c_str(), R_OK) == 0 && access(vocab.c_str(), R_OK) == 0) {
+        return {model, vocab};
+    }
+
+    return {"", ""};
 }
 
 // Find all chitta socket files in /tmp (including versioned ones)
@@ -145,11 +298,9 @@ void SocketClient::disconnect() {
 }
 
 bool SocketClient::ensure_daemon_running() {
-    // Clean up old versioned sockets from previous versions
-    cleanup_versioned_sockets();
-
-    // Try to connect to any running daemon
-    if (try_connect_any_socket()) {
+    // First, try to connect to existing daemon at the standard path
+    socket_path_ = SOCKET_PATH;
+    if (connect()) {
         // Connected - check version compatibility
         auto version = check_version();
         if (version) {
@@ -157,49 +308,59 @@ bool SocketClient::ensure_daemon_running() {
                 version->protocol_major, version->protocol_minor);
 
             if (compatible) {
-                std::cerr << "[socket_client] Connected to compatible daemon v"
+                std::cerr << "[socket_client] Connected to daemon v"
                           << version->software << " (protocol "
                           << version->protocol_major << "."
                           << version->protocol_minor << ")\n";
                 return true;
             }
 
-            // Incompatible - request graceful shutdown
+            // Incompatible version - need to restart
             std::cerr << "[socket_client] Daemon v" << version->software
                       << " incompatible with client v" << CHITTA_VERSION
-                      << " - restarting\n";
-            request("shutdown");
+                      << " - forcing restart\n";
             disconnect();
-
-            // Wait for old daemon to stop
-            if (!wait_for_socket_gone(3000)) {
-                std::cerr << "[socket_client] Old daemon didn't stop, removing socket\n";
-                unlink(socket_path_.c_str());
-            }
         } else {
             // Version check failed - old daemon without version support
-            std::cerr << "[socket_client] Daemon doesn't support version check - restarting\n";
-            request("shutdown");
+            std::cerr << "[socket_client] Daemon doesn't support version check - forcing restart\n";
             disconnect();
-            wait_for_socket_gone(3000);
         }
+
+        // Force terminate old daemon(s) and clean up all sockets
+        terminate_all_daemons();
     }
 
-    // No compatible daemon running - acquire lock before starting
+    // Also check for old versioned sockets and clean them up
+    auto old_sockets = find_chitta_sockets();
+    for (const auto& sock : old_sockets) {
+        if (sock != SOCKET_PATH) {
+            std::cerr << "[socket_client] Found legacy socket: " << sock << "\n";
+        }
+    }
+    if (!old_sockets.empty()) {
+        // There are old sockets - clean up everything
+        terminate_all_daemons();
+    }
+
+    // Acquire lock before starting daemon (prevents race with other clients)
     int lock_fd = acquire_daemon_lock();
 
     // Re-check after acquiring lock (another process may have started daemon)
-    if (try_connect_any_socket()) {
+    socket_path_ = SOCKET_PATH;
+    if (connect()) {
         auto version = check_version();
         if (version && chitta::version::protocol_compatible(
                 version->protocol_major, version->protocol_minor)) {
             release_daemon_lock(lock_fd);
+            std::cerr << "[socket_client] Connected to daemon started by another process\n";
             return true;
         }
         disconnect();
+        // Still incompatible - clean up again
+        terminate_all_daemons();
     }
 
-    // Start new daemon
+    // Start new daemon with version-matched binary
     bool started = start_daemon();
     release_daemon_lock(lock_fd);
 
@@ -251,54 +412,6 @@ std::optional<DaemonVersion> SocketClient::check_version() {
     return std::nullopt;
 }
 
-bool SocketClient::try_connect_any_socket() {
-    // First try the standard socket path
-    socket_path_ = SOCKET_PATH;
-    if (connect()) {
-        return true;
-    }
-
-    // Then try any other chitta sockets (versioned ones from older versions)
-    auto sockets = find_chitta_sockets();
-    for (const auto& sock : sockets) {
-        if (sock == SOCKET_PATH) continue;
-
-        socket_path_ = sock;
-        if (connect()) {
-            std::cerr << "[socket_client] Found running daemon at " << sock << "\n";
-            return true;
-        }
-    }
-
-    // Reset to standard path
-    socket_path_ = SOCKET_PATH;
-    return false;
-}
-
-void SocketClient::cleanup_versioned_sockets() {
-    // Remove stale versioned sockets (not our main socket)
-    auto sockets = find_chitta_sockets();
-    for (const auto& sock : sockets) {
-        if (sock == SOCKET_PATH) continue;
-
-        // Try to connect - if fails, it's stale
-        int test_fd = socket(AF_UNIX, SOCK_STREAM, 0);
-        if (test_fd < 0) continue;
-
-        struct sockaddr_un addr;
-        memset(&addr, 0, sizeof(addr));
-        addr.sun_family = AF_UNIX;
-        strncpy(addr.sun_path, sock.c_str(), sizeof(addr.sun_path) - 1);
-
-        if (::connect(test_fd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {
-            // Stale socket - remove it
-            std::cerr << "[socket_client] Removing stale socket: " << sock << "\n";
-            unlink(sock.c_str());
-        }
-        close(test_fd);
-    }
-}
-
 bool SocketClient::request_shutdown() {
     if (!connected() && !connect()) {
         return false;
@@ -325,7 +438,16 @@ bool SocketClient::wait_for_socket_gone(int timeout_ms) {
 
 
 bool SocketClient::start_daemon() {
-    std::cerr << "[socket_client] Starting daemon...\n";
+    // Get version-matched daemon binary
+    std::string daemon_path = get_versioned_daemon_path();
+    if (daemon_path.empty()) {
+        last_error_ = "Could not find chitta daemon binary for version " + std::string(CHITTA_VERSION);
+        std::cerr << "[socket_client] " << last_error_ << "\n";
+        return false;
+    }
+
+    std::cerr << "[socket_client] Starting daemon v" << CHITTA_VERSION
+              << " from " << daemon_path << "\n";
 
     pid_t pid = fork();
 
@@ -340,7 +462,7 @@ bool SocketClient::start_daemon() {
         // Detach from parent process group (become daemon)
         setsid();
 
-        // Redirect stdout/stderr to log file or /dev/null
+        // Redirect stdout/stderr to log file
         const char* home = getenv("HOME");
         std::string log_path;
         if (home) {
@@ -363,32 +485,6 @@ bool SocketClient::start_daemon() {
         // Close stdin
         close(STDIN_FILENO);
 
-        // Find daemon binary - try multiple locations
-        std::vector<std::string> daemon_paths;
-
-        // Check CLAUDE_PLUGIN_ROOT first
-        if (const char* plugin_root = getenv("CLAUDE_PLUGIN_ROOT")) {
-            daemon_paths.push_back(std::string(plugin_root) + "/bin/chitta_cli");
-        }
-
-        // Standard plugin cache location - discover installed versions
-        if (home) {
-            std::string cache_base = std::string(home) +
-                "/.claude/plugins/cache/genomewalker-cc-soul/cc-soul";
-            auto versions = find_installed_versions(cache_base);
-            for (const auto& ver : versions) {
-                daemon_paths.push_back(cache_base + "/" + ver + "/bin/chitta_cli");
-            }
-
-            // Marketplace location
-            daemon_paths.push_back(std::string(home) +
-                "/.claude/plugins/marketplaces/genomewalker-cc-soul/bin/chitta_cli");
-
-            // Development location
-            daemon_paths.push_back(std::string(home) +
-                "/.claude/bin/chitta_cli");
-        }
-
         // Find mind path
         std::string mind_path;
         if (const char* db_path = getenv("CHITTA_DB_PATH")) {
@@ -397,54 +493,39 @@ bool SocketClient::start_daemon() {
             mind_path = std::string(home) + "/.claude/mind/chitta";
         }
 
-        // Find model path - discover from installed versions
-        std::string model_path, vocab_path;
-        if (home) {
-            std::string base = std::string(home) +
-                "/.claude/plugins/cache/genomewalker-cc-soul/cc-soul";
-            auto versions = find_installed_versions(base);
-            for (const auto& ver : versions) {
-                std::string model = base + "/" + ver + "/chitta/models/model.onnx";
-                std::string vocab = base + "/" + ver + "/chitta/models/vocab.txt";
-                if (access(model.c_str(), R_OK) == 0 && access(vocab.c_str(), R_OK) == 0) {
-                    model_path = model;
-                    vocab_path = vocab;
-                    break;
-                }
-            }
+        // Get model paths (version-matched)
+        auto [model_path, vocab_path] = get_model_paths();
+
+        // Build argument list
+        std::vector<const char*> args;
+        args.push_back(daemon_path.c_str());
+        args.push_back("daemon");
+        args.push_back("--socket");
+
+        // PID file for tracking
+        args.push_back("--pid-file");
+        args.push_back(DAEMON_PID_FILE);
+
+        std::string path_arg, model_arg, vocab_arg;
+        if (!mind_path.empty()) {
+            args.push_back("--path");
+            path_arg = mind_path;
+            args.push_back(path_arg.c_str());
         }
-
-        // Try each daemon path
-        for (const auto& daemon_path : daemon_paths) {
-            if (access(daemon_path.c_str(), X_OK) == 0) {
-                // Build argument list
-                std::vector<const char*> args;
-                args.push_back(daemon_path.c_str());
-                args.push_back("daemon");
-                args.push_back("--socket");
-
-                std::string path_arg, model_arg, vocab_arg;
-                if (!mind_path.empty()) {
-                    args.push_back("--path");
-                    path_arg = mind_path;
-                    args.push_back(path_arg.c_str());
-                }
-                if (!model_path.empty() && !vocab_path.empty()) {
-                    args.push_back("--model");
-                    model_arg = model_path;
-                    args.push_back(model_arg.c_str());
-                    args.push_back("--vocab");
-                    vocab_arg = vocab_path;
-                    args.push_back(vocab_arg.c_str());
-                }
-                args.push_back(nullptr);
-
-                execv(daemon_path.c_str(), const_cast<char* const*>(args.data()));
-                // If execv returns, it failed - try next path
-            }
+        if (!model_path.empty() && !vocab_path.empty()) {
+            args.push_back("--model");
+            model_arg = model_path;
+            args.push_back(model_arg.c_str());
+            args.push_back("--vocab");
+            vocab_arg = vocab_path;
+            args.push_back(vocab_arg.c_str());
         }
+        args.push_back(nullptr);
 
-        // All exec attempts failed
+        execv(daemon_path.c_str(), const_cast<char* const*>(args.data()));
+
+        // If execv returns, it failed
+        std::cerr << "[socket_client] execv failed: " << strerror(errno) << "\n";
         _exit(1);
     }
 
@@ -479,7 +560,7 @@ bool SocketClient::wait_for_socket(int timeout_ms) {
     }
 }
 
-std::optional<std::string> SocketClient::request(const std::string& json_rpc) {
+std::optional<std::string> SocketClient::request_internal(const std::string& json_rpc) {
     if (fd_ < 0) {
         last_error_ = "Not connected";
         return std::nullopt;
@@ -538,6 +619,39 @@ std::optional<std::string> SocketClient::request(const std::string& json_rpc) {
             return response.substr(0, pos);
         }
     }
+}
+
+std::optional<std::string> SocketClient::request(const std::string& json_rpc) {
+    // Try the request
+    auto result = request_internal(json_rpc);
+    if (result) {
+        return result;
+    }
+
+    // Request failed - check if it's a connection issue that warrants reconnect
+    bool connection_lost = (last_error_.find("Connection closed") != std::string::npos ||
+                           last_error_.find("write() failed") != std::string::npos ||
+                           last_error_.find("Broken pipe") != std::string::npos ||
+                           last_error_.find("Connection reset") != std::string::npos);
+
+    if (!connection_lost) {
+        return std::nullopt;  // Some other error, don't retry
+    }
+
+    // Connection lost - daemon may have been restarted (version upgrade)
+    std::cerr << "[socket_client] Connection lost (" << last_error_ << "), attempting reconnect...\n";
+    disconnect();
+
+    // Try to reconnect to (possibly new) daemon
+    if (!ensure_daemon_running()) {
+        std::cerr << "[socket_client] Reconnect failed: " << last_error_ << "\n";
+        return std::nullopt;
+    }
+
+    std::cerr << "[socket_client] Reconnected, retrying request\n";
+
+    // Retry the request once
+    return request_internal(json_rpc);
 }
 
 int SocketClient::acquire_daemon_lock() {

@@ -20,6 +20,30 @@ namespace chitta::rpc {
 
 using json = nlohmann::json;
 
+// Helper to validate required parameters before accessing
+// Returns empty string if all required params present, otherwise error message
+inline std::string validate_required(const json& params, std::initializer_list<const char*> required) {
+    for (const char* key : required) {
+        if (!params.contains(key)) {
+            return std::string("Missing required parameter: ") + key;
+        }
+    }
+    return "";
+}
+
+// Safe parameter access with default
+template<typename T>
+inline T get_param(const json& params, const char* key, T default_val) {
+    if (params.contains(key)) {
+        try {
+            return params[key].get<T>();
+        } catch (...) {
+            return default_val;
+        }
+    }
+    return default_val;
+}
+
 class Handler {
 public:
     explicit Handler(Mind* mind) : mind_(mind) {
@@ -368,7 +392,10 @@ private:
     }
 
     ToolResult tool_lens(const json& params) {
-        std::string query = params.at("query");
+        auto err = validate_required(params, {"query"});
+        if (!err.empty()) return ToolResult::error(err);
+
+        std::string query = params["query"];
         std::string lens = params.value("lens", "all");
         size_t limit = params.value("limit", 5);
 
@@ -490,7 +517,10 @@ private:
     }
 
     ToolResult tool_intend(const json& params) {
-        std::string want = params.at("want");
+        auto err = validate_required(params, {"want"});
+        if (!err.empty()) return ToolResult::error(err);
+
+        std::string want = params["want"];
         std::string because = params.value("because", "");
 
         std::string text = "INTENTION: " + want;
@@ -511,7 +541,10 @@ private:
     }
 
     ToolResult tool_wonder(const json& params) {
-        std::string question = params.at("question");
+        auto err = validate_required(params, {"question"});
+        if (!err.empty()) return ToolResult::error(err);
+
+        std::string question = params["question"];
         std::string context = params.value("context", "");
 
         std::string text = "QUESTION: " + question;
@@ -531,8 +564,11 @@ private:
     }
 
     ToolResult tool_answer(const json& params) {
-        std::string question_id_str = params.at("question_id");
-        std::string resolution = params.at("resolution");
+        auto err = validate_required(params, {"question_id", "resolution"});
+        if (!err.empty()) return ToolResult::error(err);
+
+        std::string question_id_str = params["question_id"];
+        std::string resolution = params["resolution"];
 
         NodeId question_id = NodeId::from_string(question_id_str);
         auto question = mind_->get(question_id);
@@ -601,7 +637,10 @@ private:
     }
 
     ToolResult tool_narrate(const json& params) {
-        std::string action = params.at("action");
+        auto err = validate_required(params, {"action"});
+        if (!err.empty()) return ToolResult::error(err);
+
+        std::string action = params["action"];
 
         if (action == "start") {
             std::string title = params.value("title", "untitled thread");
@@ -621,7 +660,10 @@ private:
             });
 
         } else if (action == "end") {
-            std::string episode_id = params.at("episode_id");
+            if (!params.contains("episode_id")) {
+                return ToolResult::error("Missing required parameter: episode_id");
+            }
+            std::string episode_id = params["episode_id"];
             std::string content = params.value("content", "");
             std::string emotion = params.value("emotion", "neutral");
 
@@ -658,7 +700,10 @@ private:
     }
 
     ToolResult tool_ledger(const json& params) {
-        std::string action = params.at("action");
+        auto err = validate_required(params, {"action"});
+        if (!err.empty()) return ToolResult::error(err);
+
+        std::string action = params["action"];
         std::string project = params.value("project", "");
 
         if (action == "save") {

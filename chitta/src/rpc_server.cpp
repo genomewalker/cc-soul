@@ -51,7 +51,8 @@ void signal_handler(int sig) {
 
 // Known tool names for CLI mode detection
 static const std::set<std::string> KNOWN_TOOLS = {
-    "recall", "resonate", "full_resonate", "recall_by_tag",
+    "recall", "resonate", "full_resonate", "recall_by_tag", "proactive_surface",
+    "detect_contradictions",
     "grow", "observe", "update", "feedback", "connect", "query",
     "soul_context", "attractors", "lens", "lens_harmony",
     "intend", "wonder", "answer",
