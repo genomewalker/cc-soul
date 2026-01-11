@@ -15,8 +15,9 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
 
-# Paths
-CHITTA_BIN="$PLUGIN_DIR/bin/chitta"
+# Paths - prefer stable global symlink, fall back to plugin bin
+CHITTA_BIN="${HOME}/.claude/bin/chitta"
+[[ ! -x "$CHITTA_BIN" ]] && CHITTA_BIN="$PLUGIN_DIR/bin/chitta"
 SESSION_FILE="${HOME}/.claude/mind/.session_state"
 LEAN_MODE="${CC_SOUL_LEAN:-false}"  # Set CC_SOUL_LEAN=true for minimal context
 
@@ -26,16 +27,8 @@ if ! command -v jq &> /dev/null; then
     exit 0
 fi
 
-# Find versioned daemon socket
+# Find daemon socket (single path now, no versioned sockets)
 find_socket() {
-    # Look for versioned sockets first (e.g., /tmp/chitta-2.32.0.sock)
-    local sock
-    sock=$(ls -t /tmp/chitta-*.sock 2>/dev/null | head -1)
-    if [[ -S "$sock" ]]; then
-        echo "$sock"
-        return 0
-    fi
-    # Fall back to legacy socket
     if [[ -S "/tmp/chitta.sock" ]]; then
         echo "/tmp/chitta.sock"
         return 0

@@ -6,16 +6,13 @@
 CHITTA_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHITTA_PLUGIN_DIR="$(dirname "$CHITTA_LIB_DIR")"
 CHITTA_PLUGIN_DIR="$(dirname "$CHITTA_PLUGIN_DIR")"
-CHITTA_BIN="$CHITTA_PLUGIN_DIR/bin/chitta"
 
-# Find versioned daemon socket
+# Prefer stable global symlink, fall back to plugin bin
+CHITTA_BIN="${HOME}/.claude/bin/chitta"
+[[ ! -x "$CHITTA_BIN" ]] && CHITTA_BIN="$CHITTA_PLUGIN_DIR/bin/chitta"
+
+# Find daemon socket (single path now, no versioned sockets)
 find_socket() {
-    local sock
-    sock=$(ls -t /tmp/chitta-*.sock 2>/dev/null | head -1)
-    if [[ -S "$sock" ]]; then
-        echo "$sock"
-        return 0
-    fi
     if [[ -S "/tmp/chitta.sock" ]]; then
         echo "/tmp/chitta.sock"
         return 0

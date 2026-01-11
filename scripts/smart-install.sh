@@ -248,7 +248,15 @@ configure_permissions() {
 # Create symlinks, handling dangling targets gracefully
 create_symlinks() {
     mkdir -p "${HOME}/.claude/mind"
+    mkdir -p "${HOME}/.claude/bin"
     mkdir -p "$PLUGIN_DIR/mind"
+
+    # Create global bin symlinks for stable paths (no version parsing needed)
+    for bin in chitta chitta_cli chitta_migrate chitta_import; do
+        if [[ -x "$BIN_DIR/$bin" ]]; then
+            ln -sfn "$BIN_DIR/$bin" "${HOME}/.claude/bin/$bin"
+        fi
+    done
 
     # If both directories resolve to the same path, skip file symlinks
     local user_mind_resolved=$(readlink -f "${HOME}/.claude/mind" 2>/dev/null || echo "${HOME}/.claude/mind")
