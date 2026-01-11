@@ -294,7 +294,6 @@ public:
 
         // Skip BM25 loading for fast operations (stats)
         if (!config_.skip_bm25) {
-            // Rebuild indices from existing data
             // BM25: try loading from disk, fall back to lazy rebuild on first search
             bm25_path_ = storage_.base_path() + ".bm25";
             if (bm25_index_.load(bm25_path_)) {
@@ -310,6 +309,9 @@ public:
             // For unified, SlotTagIndex is already loaded and authoritative
             rebuild_tag_index();
         }
+
+        // Build Phase 2 indexes (reverse edges, temporal, LSH)
+        rebuild_phase2_indexes();
 
         return true;
     }
@@ -2855,6 +2857,21 @@ public:
 
     void index_edge_add(const NodeId& from, const Edge& edge) {
         reverse_edges_[edge.target].push_back({from, edge.type, edge.weight});
+    }
+
+    // Rebuild Phase 2 indexes from storage (call after loading data)
+    void rebuild_phase2_indexes() {
+        reverse_edges_.clear();
+        temporal_buckets_.clear();
+        lsh_buckets_.clear();
+        lsh_initialized_ = false;
+
+        size_t indexed = 0;
+        storage_.for_each_hot([this, &indexed](const NodeId& id, const Node& node) {
+            index_node_insert(id, node);
+            ++indexed;
+        });
+        std::cerr << "[Mind] Built Phase 2 indexes (" << indexed << " nodes)\n";
     }
 
     // ═══════════════════════════════════════════════════════════════════

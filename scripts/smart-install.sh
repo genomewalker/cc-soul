@@ -11,7 +11,7 @@ PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
 CHITTA_DIR="$PLUGIN_DIR/chitta"
 BUILD_DIR="$CHITTA_DIR/build"
 BIN_DIR="$PLUGIN_DIR/bin"
-MODELS_DIR="$CHITTA_DIR/models"
+MODELS_DIR="${HOME}/.claude/models"
 MARKER="$PLUGIN_DIR/.install-complete"
 
 # GitHub release URL base

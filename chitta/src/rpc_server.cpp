@@ -56,7 +56,9 @@ static const std::set<std::string> KNOWN_TOOLS = {
     "grow", "observe", "update", "feedback", "connect", "query",
     "soul_context", "attractors", "lens", "lens_harmony",
     "intend", "wonder", "answer",
-    "narrate", "ledger", "cycle"
+    "narrate", "ledger", "cycle",
+    // Phase 2 Core
+    "multi_hop", "timeline", "causal_chain", "consolidate"
 };
 
 void print_usage(const char* prog) {
@@ -97,7 +99,7 @@ int run_cli(const std::string& socket_path, const std::string& tool,
     std::string positional_key;  // First positional arg goes to "query" for recall, etc.
 
     // Determine the primary positional key based on tool
-    if (tool == "recall" || tool == "resonate" || tool == "full_resonate") {
+    if (tool == "recall" || tool == "resonate" || tool == "full_resonate" || tool == "multi_hop") {
         positional_key = "query";
     } else if (tool == "grow") {
         positional_key = "title";
@@ -107,6 +109,8 @@ int run_cli(const std::string& socket_path, const std::string& tool,
         positional_key = "query";
     } else if (tool == "wonder") {
         positional_key = "question";
+    } else if (tool == "causal_chain") {
+        positional_key = "effect_id";
     }
 
     bool found_positional = false;

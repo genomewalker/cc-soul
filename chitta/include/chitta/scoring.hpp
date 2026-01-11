@@ -517,39 +517,69 @@ public:
 
         if (fread(&magic, sizeof(magic), 1, f) != 1 || magic != BM25_MAGIC) {
             fclose(f);
+            std::remove(path.c_str());  // Delete corrupted file
             return false;
         }
         if (fread(&version, sizeof(version), 1, f) != 1 || version != BM25_VERSION) {
             fclose(f);
+            std::remove(path.c_str());  // Delete incompatible version
             return false;
         }
-        fread(&doc_count_, sizeof(doc_count_), 1, f);
-        fread(&total_length_, sizeof(total_length_), 1, f);
-        fread(&vocab_sz, sizeof(vocab_sz), 1, f);
+        if (fread(&doc_count_, sizeof(doc_count_), 1, f) != 1 ||
+            fread(&total_length_, sizeof(total_length_), 1, f) != 1 ||
+            fread(&vocab_sz, sizeof(vocab_sz), 1, f) != 1) {
+            fclose(f);
+            std::remove(path.c_str());
+            return false;
+        }
+
+        // Sanity check header values
+        if (vocab_sz > 10000000 || doc_count_ > 10000000) {
+            fclose(f);
+            std::remove(path.c_str());
+            return false;
+        }
 
         // String table
         std::vector<std::string> terms;
         terms.reserve(vocab_sz);
         for (uint64_t i = 0; i < vocab_sz; ++i) {
             uint32_t len;
-            fread(&len, sizeof(len), 1, f);
+            if (fread(&len, sizeof(len), 1, f) != 1 || len > 1000) {
+                fclose(f);
+                std::remove(path.c_str());
+                return false;
+            }
             std::string term(len, '\0');
-            fread(&term[0], 1, len, f);
+            if (fread(&term[0], 1, len, f) != len) {
+                fclose(f);
+                std::remove(path.c_str());
+                return false;
+            }
             terms.push_back(std::move(term));
         }
 
         // Postings
-        for (const auto& term : terms) {
+        for (size_t ti = 0; ti < terms.size(); ++ti) {
+            const auto& term = terms[ti];
             uint32_t count;
-            fread(&count, sizeof(count), 1, f);
+            if (fread(&count, sizeof(count), 1, f) != 1 || count > 1000000) {
+                fclose(f);
+                std::remove(path.c_str());
+                return false;
+            }
             std::vector<Posting> list;
             list.reserve(count);
             for (uint32_t j = 0; j < count; ++j) {
                 NodeId id;
                 float tf;
-                fread(&id.high, sizeof(id.high), 1, f);
-                fread(&id.low, sizeof(id.low), 1, f);
-                fread(&tf, sizeof(tf), 1, f);
+                if (fread(&id.high, sizeof(id.high), 1, f) != 1 ||
+                    fread(&id.low, sizeof(id.low), 1, f) != 1 ||
+                    fread(&tf, sizeof(tf), 1, f) != 1) {
+                    fclose(f);
+                    std::remove(path.c_str());
+                    return false;
+                }
                 list.emplace_back(id, tf);
             }
             postings_[term] = std::move(list);
@@ -558,37 +588,62 @@ public:
         // Doc frequencies
         for (const auto& term : terms) {
             uint32_t df;
-            fread(&df, sizeof(df), 1, f);
+            if (fread(&df, sizeof(df), 1, f) != 1) {
+                fclose(f);
+                std::remove(path.c_str());
+                return false;
+            }
             doc_freqs_[term] = df;
         }
 
         // Doc lengths
         uint64_t doc_len_count;
-        fread(&doc_len_count, sizeof(doc_len_count), 1, f);
+        if (fread(&doc_len_count, sizeof(doc_len_count), 1, f) != 1 || doc_len_count > 10000000) {
+            fclose(f);
+            std::remove(path.c_str());
+            return false;
+        }
         for (uint64_t i = 0; i < doc_len_count; ++i) {
             NodeId id;
             uint64_t length;
-            fread(&id.high, sizeof(id.high), 1, f);
-            fread(&id.low, sizeof(id.low), 1, f);
-            fread(&length, sizeof(length), 1, f);
+            if (fread(&id.high, sizeof(id.high), 1, f) != 1 ||
+                fread(&id.low, sizeof(id.low), 1, f) != 1 ||
+                fread(&length, sizeof(length), 1, f) != 1) {
+                fclose(f);
+                std::remove(path.c_str());
+                return false;
+            }
             doc_lengths_[id] = static_cast<size_t>(length);
         }
 
         // Forward index
         uint64_t fwd_count;
-        fread(&fwd_count, sizeof(fwd_count), 1, f);
+        if (fread(&fwd_count, sizeof(fwd_count), 1, f) != 1 || fwd_count > 10000000) {
+            fclose(f);
+            std::remove(path.c_str());
+            return false;
+        }
         for (uint64_t i = 0; i < fwd_count; ++i) {
             NodeId id;
             uint32_t term_count;
-            fread(&id.high, sizeof(id.high), 1, f);
-            fread(&id.low, sizeof(id.low), 1, f);
-            fread(&term_count, sizeof(term_count), 1, f);
+            if (fread(&id.high, sizeof(id.high), 1, f) != 1 ||
+                fread(&id.low, sizeof(id.low), 1, f) != 1 ||
+                fread(&term_count, sizeof(term_count), 1, f) != 1 ||
+                term_count > 100000) {
+                fclose(f);
+                std::remove(path.c_str());
+                return false;
+            }
 
             std::unordered_map<std::string, size_t> terms_map;
             for (uint32_t j = 0; j < term_count; ++j) {
                 uint32_t tid, freq;
-                fread(&tid, sizeof(tid), 1, f);
-                fread(&freq, sizeof(freq), 1, f);
+                if (fread(&tid, sizeof(tid), 1, f) != 1 ||
+                    fread(&freq, sizeof(freq), 1, f) != 1) {
+                    fclose(f);
+                    std::remove(path.c_str());
+                    return false;
+                }
                 if (tid < terms.size()) {
                     terms_map[terms[tid]] = freq;
                 }

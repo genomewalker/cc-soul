@@ -911,21 +911,34 @@ inline ToolResult consolidate(Mind* mind, const json& params) {
         // Just find candidates
         ss << "Consolidation candidates (dry run):\n\n";
 
-        // Use LSH to find similar nodes
+        // Collect nodes and their embeddings first (unlocked)
+        std::vector<std::pair<NodeId, Node>> node_samples;
+        mind->for_each_node([&](const NodeId& id, const Node& node) {
+            if (node_samples.size() < 500 && node.nu.size() > 0) {
+                node_samples.push_back({id, node});
+            }
+        });
+
+        // Find similar pairs using LSH (outside lock)
         std::vector<std::tuple<NodeId, NodeId, float>> candidates;
         std::unordered_set<NodeId, NodeIdHash> checked;
 
-        size_t node_count = 0;
-        mind->for_each_node([&](const NodeId& id, const Node& node) {
-            if (checked.count(id) || node_count > 1000) return;  // Sample limit
+        for (const auto& [id, node] : node_samples) {
+            if (checked.count(id)) continue;
             checked.insert(id);
-            node_count++;
 
             auto similar = mind->lsh_find_similar(node.nu, 10);
             for (const auto& cand_id : similar) {
                 if (cand_id == id || checked.count(cand_id)) continue;
 
-                auto cand = mind->get(cand_id);
+                // Find candidate in our samples
+                const Node* cand = nullptr;
+                for (const auto& [sid, snode] : node_samples) {
+                    if (sid == cand_id) {
+                        cand = &snode;
+                        break;
+                    }
+                }
                 if (!cand || cand->node_type != node.node_type) continue;
 
                 float sim = node.nu.cosine(cand->nu);
@@ -933,7 +946,7 @@ inline ToolResult consolidate(Mind* mind, const json& params) {
                     candidates.push_back({id, cand_id, sim});
                 }
             }
-        });
+        }
 
         if (candidates.empty()) {
             return ToolResult::ok("No consolidation candidates found", {{"candidates", json::array()}});
@@ -943,14 +956,22 @@ inline ToolResult consolidate(Mind* mind, const json& params) {
         std::sort(candidates.begin(), candidates.end(),
                   [](const auto& a, const auto& b) { return std::get<2>(a) > std::get<2>(b); });
 
+        // Build map for quick lookup
+        std::unordered_map<NodeId, const Node*, NodeIdHash> node_map;
+        for (const auto& [id, node] : node_samples) {
+            node_map[id] = &node;
+        }
+
         json cand_array = json::array();
         for (size_t i = 0; i < std::min(max_merges, candidates.size()); ++i) {
             const auto& [id_a, id_b, sim] = candidates[i];
-            auto node_a = mind->get(id_a);
-            auto node_b = mind->get(id_b);
+            auto it_a = node_map.find(id_a);
+            auto it_b = node_map.find(id_b);
 
-            std::string text_a = node_a ? safe_text(mind->payload_to_text(node_a->payload).value_or("")).substr(0, 50) : "?";
-            std::string text_b = node_b ? safe_text(mind->payload_to_text(node_b->payload).value_or("")).substr(0, 50) : "?";
+            std::string text_a = (it_a != node_map.end()) ?
+                safe_text(mind->payload_to_text(it_a->second->payload).value_or("")).substr(0, 50) : "?";
+            std::string text_b = (it_b != node_map.end()) ?
+                safe_text(mind->payload_to_text(it_b->second->payload).value_or("")).substr(0, 50) : "?";
 
             ss << "[" << safe_pct(sim) << "%] " << text_a << " <-> " << text_b << "\n";
 

@@ -145,62 +145,27 @@ void terminate_all_daemons() {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 }
 
-// Get the daemon binary path for the current client version
+// Get the daemon binary path - stable symlink only
 std::string get_versioned_daemon_path() {
     const char* home = getenv("HOME");
     if (!home) return "";
 
-    // First check CLAUDE_PLUGIN_ROOT (when running as plugin)
-    if (const char* plugin_root = getenv("CLAUDE_PLUGIN_ROOT")) {
-        std::string path = std::string(plugin_root) + "/bin/chitta_cli";
-        if (access(path.c_str(), X_OK) == 0) {
-            return path;
-        }
-    }
-
-    // Use the exact version matching our client
-    std::string version_path = std::string(home) +
-        "/.claude/plugins/cache/genomewalker-cc-soul/cc-soul/" +
-        CHITTA_VERSION + "/bin/chitta_cli";
-
-    if (access(version_path.c_str(), X_OK) == 0) {
-        return version_path;
-    }
-
-    // Fallback: marketplace or dev location
-    std::string fallbacks[] = {
-        std::string(home) + "/.claude/plugins/marketplaces/genomewalker-cc-soul/bin/chitta_cli",
-        std::string(home) + "/.claude/bin/chitta_cli"
-    };
-
-    for (const auto& path : fallbacks) {
-        if (access(path.c_str(), X_OK) == 0) {
-            return path;
-        }
+    std::string path = std::string(home) + "/.claude/bin/chitta_cli";
+    if (access(path.c_str(), X_OK) == 0) {
+        return path;
     }
 
     return "";
 }
 
-// Get model/vocab paths for current version
+// Get model/vocab paths - stable location only
 std::pair<std::string, std::string> get_model_paths() {
     const char* home = getenv("HOME");
     if (!home) return {"", ""};
 
-    // Check CLAUDE_PLUGIN_ROOT first
-    if (const char* plugin_root = getenv("CLAUDE_PLUGIN_ROOT")) {
-        std::string model = std::string(plugin_root) + "/chitta/models/model.onnx";
-        std::string vocab = std::string(plugin_root) + "/chitta/models/vocab.txt";
-        if (access(model.c_str(), R_OK) == 0 && access(vocab.c_str(), R_OK) == 0) {
-            return {model, vocab};
-        }
-    }
-
-    // Use exact version
-    std::string base = std::string(home) +
-        "/.claude/plugins/cache/genomewalker-cc-soul/cc-soul/" + CHITTA_VERSION;
-    std::string model = base + "/chitta/models/model.onnx";
-    std::string vocab = base + "/chitta/models/vocab.txt";
+    std::string base = std::string(home) + "/.claude/models";
+    std::string model = base + "/model.onnx";
+    std::string vocab = base + "/vocab.txt";
 
     if (access(model.c_str(), R_OK) == 0 && access(vocab.c_str(), R_OK) == 0) {
         return {model, vocab};
@@ -308,10 +273,7 @@ bool SocketClient::ensure_daemon_running() {
                 version->protocol_major, version->protocol_minor);
 
             if (compatible) {
-                std::cerr << "[socket_client] Connected to daemon v"
-                          << version->software << " (protocol "
-                          << version->protocol_major << "."
-                          << version->protocol_minor << ")\n";
+                // Successfully connected - no verbose output needed
                 return true;
             }
 
@@ -332,13 +294,8 @@ bool SocketClient::ensure_daemon_running() {
 
     // Also check for old versioned sockets and clean them up
     auto old_sockets = find_chitta_sockets();
-    for (const auto& sock : old_sockets) {
-        if (sock != SOCKET_PATH) {
-            std::cerr << "[socket_client] Found legacy socket: " << sock << "\n";
-        }
-    }
     if (!old_sockets.empty()) {
-        // There are old sockets - clean up everything
+        // Silently clean up old sockets
         terminate_all_daemons();
     }
 
@@ -352,7 +309,6 @@ bool SocketClient::ensure_daemon_running() {
         if (version && chitta::version::protocol_compatible(
                 version->protocol_major, version->protocol_minor)) {
             release_daemon_lock(lock_fd);
-            std::cerr << "[socket_client] Connected to daemon started by another process\n";
             return true;
         }
         disconnect();
@@ -445,9 +401,6 @@ bool SocketClient::start_daemon() {
         std::cerr << "[socket_client] " << last_error_ << "\n";
         return false;
     }
-
-    std::cerr << "[socket_client] Starting daemon v" << CHITTA_VERSION
-              << " from " << daemon_path << "\n";
 
     pid_t pid = fork();
 
