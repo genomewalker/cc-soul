@@ -912,6 +912,62 @@ void test_mind() {
     std::cout << "  PASS" << std::endl;
 }
 
+void test_tag_operations() {
+    std::cout << "Testing Tag Operations..." << std::endl;
+
+    std::system("rm -f /tmp/chitta_tag_test /tmp/chitta_tag_test.*");
+
+    MindConfig config;
+    config.path = "/tmp/chitta_tag_test";
+
+    Mind mind(config);
+    if (!mind.open()) {
+        std::cout << "  SKIP (cannot open mind in /tmp)" << std::endl;
+        return;
+    }
+
+    // Create a node
+    NodeId id = mind.remember(NodeType::Wisdom, test_vector(1.0f));
+
+    // Initially no tags
+    assert(!mind.has_tag(id, "test-tag"));
+
+    // Add a tag
+    bool added = mind.add_tag(id, "ε-processed");
+    assert(added);
+    assert(mind.has_tag(id, "ε-processed"));
+
+    // Add another tag
+    mind.add_tag(id, "architecture");
+    assert(mind.has_tag(id, "architecture"));
+    assert(mind.has_tag(id, "ε-processed"));
+
+    // Duplicate add should be idempotent
+    mind.add_tag(id, "ε-processed");
+    auto node = mind.get(id);
+    assert(node.has_value());
+    // Count ε-processed tags
+    int count = 0;
+    for (const auto& t : node->tags) {
+        if (t == "ε-processed") count++;
+    }
+    assert(count == 1);
+
+    // Remove a tag
+    bool removed = mind.remove_tag(id, "architecture");
+    assert(removed);
+    assert(!mind.has_tag(id, "architecture"));
+    assert(mind.has_tag(id, "ε-processed"));
+
+    // has_tag on non-existent node
+    NodeId fake_id = NodeId::generate();
+    assert(!mind.has_tag(fake_id, "test"));
+
+    mind.close();
+
+    std::cout << "  PASS" << std::endl;
+}
+
 void test_persistence() {
     std::cout << "Testing Persistence..." << std::endl;
 
@@ -1575,6 +1631,7 @@ int main() {
 
     test_mind();
     test_persistence();
+    test_tag_operations();
 
     std::cout << std::endl;
     std::cout << "=== Phase 4: Tag Optimization Tests ===" << std::endl;

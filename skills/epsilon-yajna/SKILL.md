@@ -217,6 +217,30 @@ Process by domain for efficiency:
 4. **Discoveries** (`"discovered found learned"`)
 5. **Beliefs** (`"belief principle guideline"`)
 
+## Tracking Processed Nodes
+
+Use tags to track which nodes have been processed:
+
+**After updating a node:**
+```bash
+chitta tag --id "[node_id]" --add "ε-processed"
+```
+
+**When gathering nodes, exclude already-processed:**
+```bash
+chitta recall "[domain]" --exclude-tag "ε-processed" --limit 20
+```
+
+**Query processed nodes:**
+```bash
+chitta recall_by_tag "ε-processed"
+```
+
+This enables:
+- Incremental ceremony runs (don't reprocess)
+- Progress tracking across sessions
+- Batch resumption after interruption
+
 ## What NOT to Compress
 
 Keep verbose when:
