@@ -370,6 +370,26 @@ int main(int argc, char* argv[]) {
         mind_path = env_path;
     }
 
+    // Handle status command (daemon health check)
+    if (argc > 1 && std::strcmp(argv[1], "status") == 0) {
+        chitta::SocketClient client(socket_path);
+        if (!client.connect()) {
+            std::cout << "Daemon: not running\n";
+            std::cout << "Socket: " << socket_path << " (not found)\n";
+            return 1;
+        }
+        auto version = client.check_version();
+        if (version) {
+            std::cout << "Daemon: running\n";
+            std::cout << "Socket: " << socket_path << "\n";
+            std::cout << "Version: " << version->software << "\n";
+            std::cout << "Protocol: " << version->protocol_major << "." << version->protocol_minor << "\n";
+            return 0;
+        }
+        std::cout << "Daemon: running (version unknown)\n";
+        return 0;
+    }
+
     // Handle shutdown command specially (not a tool, direct daemon control)
     if (argc > 1 && std::strcmp(argv[1], "shutdown") == 0) {
         chitta::SocketClient client(socket_path);

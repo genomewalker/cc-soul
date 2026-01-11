@@ -26,9 +26,8 @@ Build cc-soul binaries from source. Use this when pre-built binaries don't work 
 ```bash
 PLUGIN_DIR="$HOME/.claude/plugins/marketplaces/genomewalker-cc-soul"
 
-# Kill any running daemon before rebuild (versioned sockets require matching version)
-pkill -f "chitta_cli daemon" 2>/dev/null && echo "[cc-soul] Stopped existing daemon" || true
-rm -f /tmp/chitta*.sock 2>/dev/null
+# Graceful daemon shutdown before rebuild
+"$PLUGIN_DIR/bin/chitta" shutdown 2>/dev/null || "$PLUGIN_DIR/bin/chitta_cli" shutdown 2>/dev/null || true
 
 # Check cmake before deleting binaries
 if ! command -v cmake &>/dev/null; then

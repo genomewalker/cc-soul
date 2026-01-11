@@ -78,6 +78,7 @@ void print_usage(const char* prog) {
               << "  cycle              Run maintenance cycle\n"
               << "  daemon             Run subconscious daemon (background processing)\n"
               << "  shutdown           Gracefully stop the running daemon\n"
+              << "  status             Check if daemon is running\n"
               << "  upgrade            Upgrade database to current version\n"
               << "  convert <format>   Convert to new storage format (unified|segments)\n"
               << "  help               Show this help\n\n"
@@ -522,6 +523,27 @@ int cmd_shutdown(const std::string& socket_path) {
     }
 }
 
+int cmd_status(const std::string& socket_path) {
+    SocketClient client(socket_path);
+
+    if (!client.connect()) {
+        std::cout << "Daemon: not running\n";
+        std::cout << "Socket: " << socket_path << " (not found)\n";
+        return 1;
+    }
+
+    auto version = client.check_version();
+    if (version) {
+        std::cout << "Daemon: running\n";
+        std::cout << "Socket: " << socket_path << "\n";
+        std::cout << "Version: " << version->software << "\n";
+        std::cout << "Protocol: " << version->protocol_major << "." << version->protocol_minor << "\n";
+        return 0;
+    }
+    std::cout << "Daemon: running (version unknown)\n";
+    return 0;
+}
+
 int cmd_upgrade(const std::string& db_path) {
     std::string hot_path = db_path + ".hot";
 
@@ -758,6 +780,10 @@ int main(int argc, char* argv[]) {
         // Shutdown doesn't need mind - just connects to daemon socket
         mind.close();
         return cmd_shutdown(socket_path);
+    } else if (command == "status") {
+        // Status doesn't need mind - just connects to daemon socket
+        mind.close();
+        return cmd_status(socket_path);
     } else {
         std::cerr << "Unknown command: " << command << "\n";
         print_usage(argv[0]);
