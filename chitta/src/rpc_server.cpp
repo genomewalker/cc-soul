@@ -135,13 +135,26 @@ int run_cli(const std::string& socket_path, const std::string& tool,
                         args[key] = value;  // Fall back to string
                     }
                 } else {
-                    try {
-                        if (value.find('.') != std::string::npos) {
-                            args[key] = std::stod(value);
-                        } else {
-                            args[key] = std::stoi(value);
+                    // Only parse as number if entire string is numeric
+                    bool is_numeric = !value.empty();
+                    bool has_dot = false;
+                    for (size_t j = 0; j < value.size(); ++j) {
+                        char c = value[j];
+                        if (c == '-' && j == 0) continue;  // Leading minus OK
+                        if (c == '.' && !has_dot) { has_dot = true; continue; }
+                        if (!std::isdigit(c)) { is_numeric = false; break; }
+                    }
+                    if (is_numeric && !value.empty()) {
+                        try {
+                            if (has_dot) {
+                                args[key] = std::stod(value);
+                            } else {
+                                args[key] = std::stoll(value);
+                            }
+                        } catch (...) {
+                            args[key] = value;
                         }
-                    } catch (...) {
+                    } else {
                         args[key] = value;
                     }
                 }

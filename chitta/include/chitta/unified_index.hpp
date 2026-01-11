@@ -503,6 +503,26 @@ public:
         return true;
     }
 
+    // Mark node as deleted (soft delete)
+    bool remove(const NodeId& id) {
+        std::unique_lock lock(mutex_);
+        auto it = id_to_slot_.find(id);
+        if (it == id_to_slot_.end()) return false;
+
+        SlotId slot = it->second;
+        auto* nodes = node_array();
+        nodes[slot.value].flags |= NODE_FLAG_DELETED;
+
+        // Update header
+        auto* header = index_region_.as<UnifiedIndexHeader>();
+        if (header->node_count > 0) header->node_count--;
+        header->deleted_count++;
+
+        // Remove from lookup
+        id_to_slot_.erase(it);
+        return true;
+    }
+
     // Get payload for a slot
     std::vector<uint8_t> payload(SlotId slot) const {
         if (!slot.valid()) return {};

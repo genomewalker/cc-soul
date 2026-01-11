@@ -3083,6 +3083,26 @@ private:
     }
 
 public:
+    // Remove a node by ID
+    bool remove_node(const NodeId& id) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return storage_.remove(id);
+    }
+
+    // Merge two nodes: keeper absorbs merged, merged is deleted
+    bool merge_nodes(const NodeId& keeper_id, const NodeId& merged_id) {
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        Node* keeper = storage_.get(keeper_id);
+        Node* merged = storage_.get(merged_id);
+        if (!keeper || !merged) return false;
+        if (keeper_id == merged_id) return false;
+
+        merge_into(keeper_id, merged_id, *keeper, *merged);
+        storage_.remove(merged_id);
+        return true;
+    }
+
     // ═══════════════════════════════════════════════════════════════════
     // PHASE 2 CORE: Temporal Queries (O(log B + k))
     // ═══════════════════════════════════════════════════════════════════

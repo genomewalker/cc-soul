@@ -975,6 +975,20 @@ public:
         return true;
     }
 
+    // Remove a node (soft delete in unified index)
+    bool remove(NodeId id) {
+        if (use_unified()) {
+            return unified_.remove(id);
+        }
+        if (use_segments()) {
+            // TODO: Segment manager remove
+            return false;
+        }
+        // Legacy: remove from hot tier
+        hot_.remove(id);
+        return true;
+    }
+
     // Sync from WAL: see other processes' writes
     // Call this before reads to ensure we see the shared truth
     size_t sync_from_wal() {
