@@ -333,6 +333,18 @@ inline ToolResult update(Mind* mind, const json& params) {
     return ToolResult::ok("Updated: " + content.substr(0, 50), result);
 }
 
+// Remove: delete a node by ID
+inline ToolResult remove(Mind* mind, const json& params) {
+    std::string id_str = params.at("id");
+    NodeId id = NodeId::from_string(id_str);
+
+    if (!mind->remove_node(id)) {
+        return ToolResult::error("Failed to remove node: " + id_str);
+    }
+
+    return ToolResult::ok("Removed: " + id_str, {{"id", id_str}, {"removed", true}});
+}
+
 // Connect: create triplet as a first-class node
 inline ToolResult connect(Mind* mind, const json& params) {
     std::string subject = params.at("subject");
@@ -407,6 +419,7 @@ inline void register_handlers(Mind* mind,
     handlers["observe"] = [mind](const json& p) { return observe(mind, p); };
     handlers["feedback"] = [mind](const json& p) { return feedback(mind, p); };
     handlers["update"] = [mind](const json& p) { return update(mind, p); };
+    handlers["remove"] = [mind](const json& p) { return remove(mind, p); };
     handlers["connect"] = [mind](const json& p) { return connect(mind, p); };
     handlers["query"] = [mind](const json& p) { return query(mind, p); };
 }

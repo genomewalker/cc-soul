@@ -53,7 +53,7 @@ void signal_handler(int sig) {
 static const std::set<std::string> KNOWN_TOOLS = {
     "recall", "resonate", "full_resonate", "recall_by_tag", "proactive_surface",
     "detect_contradictions",
-    "grow", "observe", "update", "feedback", "connect", "query",
+    "grow", "observe", "update", "remove", "feedback", "connect", "query",
     "soul_context", "attractors", "lens", "lens_harmony",
     "intend", "wonder", "answer",
     "narrate", "ledger", "cycle",
