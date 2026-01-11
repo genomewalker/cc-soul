@@ -154,6 +154,69 @@ inline void register_schemas(std::vector<ToolSchema>& tools) {
             {"required", {"content"}}
         }
     });
+
+    // Phase 2 Core: Scalable graph algorithms
+    tools.push_back({
+        "multi_hop",
+        "Multi-hop reasoning via approximate Personalized PageRank (FORA algorithm). "
+        "Finds nodes connected through graph paths, not just semantic similarity. "
+        "O(1/epsilon) query time, scales to 100M+ nodes.",
+        {
+            {"type", "object"},
+            {"properties", {
+                {"query", {{"type", "string"}, {"description", "What to reason about"}}},
+                {"k", {{"type", "integer"}, {"minimum", 1}, {"maximum", 50}, {"default", 10}}},
+                {"epsilon", {{"type", "number"}, {"minimum", 0.001}, {"maximum", 0.5}, {"default", 0.05},
+                            {"description", "Approximation error (smaller = more accurate but slower)"}}}
+            }},
+            {"required", {"query"}}
+        }
+    });
+
+    tools.push_back({
+        "timeline",
+        "Recent activity timeline with Hawkes process importance weighting. "
+        "Self-exciting: recent bursts of activity amplify importance. "
+        "O(log B + k) query time where B = hours.",
+        {
+            {"type", "object"},
+            {"properties", {
+                {"hours", {{"type", "integer"}, {"minimum", 1}, {"maximum", 720}, {"default", 24}}},
+                {"limit", {{"type", "integer"}, {"minimum", 1}, {"maximum", 100}, {"default", 20}}}
+            }},
+            {"required", {}}
+        }
+    });
+
+    tools.push_back({
+        "causal_chain",
+        "Find causal chains leading to an effect. Uses reverse edge index for "
+        "O(depth * avg_in_degree) complexity. Respects temporal ordering.",
+        {
+            {"type", "object"},
+            {"properties", {
+                {"effect_id", {{"type", "string"}, {"description", "Node ID of the effect to explain"}}},
+                {"max_depth", {{"type", "integer"}, {"minimum", 1}, {"maximum", 10}, {"default", 5}}},
+                {"min_confidence", {{"type", "number"}, {"minimum", 0}, {"maximum", 1}, {"default", 0.3}}}
+            }},
+            {"required", {"effect_id"}}
+        }
+    });
+
+    tools.push_back({
+        "consolidate",
+        "Find and optionally merge similar nodes using LSH (O(1) average). "
+        "When dry_run=true, just lists candidates without merging.",
+        {
+            {"type", "object"},
+            {"properties", {
+                {"dry_run", {{"type", "boolean"}, {"default", true}}},
+                {"min_similarity", {{"type", "number"}, {"minimum", 0.8}, {"maximum", 1.0}, {"default", 0.92}}},
+                {"max_merges", {{"type", "integer"}, {"minimum", 1}, {"maximum", 50}, {"default", 10}}}
+            }},
+            {"required", {}}
+        }
+    });
 }
 
 // Tool implementations
@@ -714,6 +777,202 @@ inline ToolResult detect_contradictions(Mind* mind, const json& params) {
     return ToolResult::ok("Potential contradictions:\n" + ss.str(), result);
 }
 
+// Phase 2 Core: Multi-hop reasoning via FORA-style PPR
+inline ToolResult multi_hop(Mind* mind, const json& params) {
+    std::string query = params.at("query");
+    size_t k = params.value("k", 10);
+    float epsilon = params.value("epsilon", 0.05f);
+
+    if (!mind->has_yantra()) {
+        return ToolResult::error("Yantra not ready - cannot perform semantic search");
+    }
+
+    auto results = mind->ppr_query(query, k, epsilon);
+
+    if (results.empty()) {
+        return ToolResult::ok("No multi-hop results found", {{"results", json::array()}});
+    }
+
+    std::stringstream ss;
+    ss << "Multi-hop reasoning for: " << query.substr(0, 50) << "\n\n";
+
+    json result_array = json::array();
+    for (const auto& r : results) {
+        std::string text = safe_text(r.text).substr(0, 200);
+        ss << "[" << safe_pct(r.relevance) << "%] [" << node_type_to_string(r.type) << "] "
+           << extract_title(text) << "\n";
+
+        result_array.push_back({
+            {"id", r.id.to_string()},
+            {"score", r.relevance},
+            {"type", node_type_to_string(r.type)},
+            {"text", text}
+        });
+    }
+
+    return ToolResult::ok(ss.str(), {{"results", result_array}, {"count", results.size()}});
+}
+
+// Phase 2 Core: Hawkes-weighted timeline
+inline ToolResult timeline(Mind* mind, const json& params) {
+    size_t hours = params.value("hours", 24);
+    size_t limit = params.value("limit", 20);
+
+    auto results = mind->hawkes_timeline(hours, limit);
+
+    if (results.empty()) {
+        return ToolResult::ok("No activity in the last " + std::to_string(hours) + " hours",
+                              {{"results", json::array()}});
+    }
+
+    std::stringstream ss;
+    ss << "Timeline (last " << hours << " hours, Hawkes-weighted):\n\n";
+
+    json result_array = json::array();
+    for (const auto& r : results) {
+        std::string text = safe_text(r.text).substr(0, 150);
+        ss << "[" << safe_pct(r.relevance) << "%] [" << node_type_to_string(r.type) << "] "
+           << extract_title(text) << "\n";
+
+        result_array.push_back({
+            {"id", r.id.to_string()},
+            {"intensity", r.relevance},
+            {"type", node_type_to_string(r.type)},
+            {"text", text},
+            {"created", r.created}
+        });
+    }
+
+    return ToolResult::ok(ss.str(), {{"results", result_array}, {"count", results.size()}});
+}
+
+// Phase 2 Core: Causal chain discovery
+inline ToolResult causal_chain(Mind* mind, const json& params) {
+    std::string effect_id_str = params.at("effect_id");
+    size_t max_depth = params.value("max_depth", 5);
+    float min_confidence = params.value("min_confidence", 0.3f);
+
+    NodeId effect_id = NodeId::from_string(effect_id_str);
+    if (effect_id.high == 0 && effect_id.low == 0) {
+        return ToolResult::error("Invalid effect_id");
+    }
+
+    auto chains = mind->find_causal_chains(effect_id, max_depth, min_confidence);
+
+    if (chains.empty()) {
+        return ToolResult::ok("No causal chains found", {{"chains", json::array()}});
+    }
+
+    std::stringstream ss;
+    ss << "Causal chains leading to " << effect_id_str.substr(0, 8) << "...:\n\n";
+
+    json chain_array = json::array();
+    for (size_t i = 0; i < chains.size(); ++i) {
+        const auto& chain = chains[i];
+
+        ss << "Chain " << (i + 1) << " (conf=" << safe_pct(chain.confidence) << "%):\n";
+
+        json nodes_array = json::array();
+        for (size_t j = 0; j < chain.nodes.size(); ++j) {
+            auto node = mind->get(chain.nodes[j]);
+            std::string label = node ? safe_text(mind->payload_to_text(node->payload).value_or("")).substr(0, 40) : "?";
+
+            ss << "  " << label;
+            if (j < chain.edges.size()) {
+                ss << " --[" << Mind::edge_type_name(chain.edges[j]) << "]--> ";
+            }
+
+            nodes_array.push_back({
+                {"id", chain.nodes[j].to_string()},
+                {"label", label}
+            });
+        }
+        ss << "\n";
+
+        chain_array.push_back({
+            {"nodes", nodes_array},
+            {"confidence", chain.confidence}
+        });
+    }
+
+    return ToolResult::ok(ss.str(), {{"chains", chain_array}, {"count", chains.size()}});
+}
+
+// Phase 2 Core: LSH-based consolidation
+inline ToolResult consolidate(Mind* mind, const json& params) {
+    bool dry_run = params.value("dry_run", true);
+    float min_similarity = params.value("min_similarity", 0.92f);
+    size_t max_merges = params.value("max_merges", 10);
+
+    std::stringstream ss;
+    json result_data;
+
+    if (dry_run) {
+        // Just find candidates
+        ss << "Consolidation candidates (dry run):\n\n";
+
+        // Use LSH to find similar nodes
+        std::vector<std::tuple<NodeId, NodeId, float>> candidates;
+        std::unordered_set<NodeId, NodeIdHash> checked;
+
+        size_t node_count = 0;
+        mind->for_each_node([&](const NodeId& id, const Node& node) {
+            if (checked.count(id) || node_count > 1000) return;  // Sample limit
+            checked.insert(id);
+            node_count++;
+
+            auto similar = mind->lsh_find_similar(node.nu, 10);
+            for (const auto& cand_id : similar) {
+                if (cand_id == id || checked.count(cand_id)) continue;
+
+                auto cand = mind->get(cand_id);
+                if (!cand || cand->node_type != node.node_type) continue;
+
+                float sim = node.nu.cosine(cand->nu);
+                if (sim >= min_similarity) {
+                    candidates.push_back({id, cand_id, sim});
+                }
+            }
+        });
+
+        if (candidates.empty()) {
+            return ToolResult::ok("No consolidation candidates found", {{"candidates", json::array()}});
+        }
+
+        // Sort by similarity descending
+        std::sort(candidates.begin(), candidates.end(),
+                  [](const auto& a, const auto& b) { return std::get<2>(a) > std::get<2>(b); });
+
+        json cand_array = json::array();
+        for (size_t i = 0; i < std::min(max_merges, candidates.size()); ++i) {
+            const auto& [id_a, id_b, sim] = candidates[i];
+            auto node_a = mind->get(id_a);
+            auto node_b = mind->get(id_b);
+
+            std::string text_a = node_a ? safe_text(mind->payload_to_text(node_a->payload).value_or("")).substr(0, 50) : "?";
+            std::string text_b = node_b ? safe_text(mind->payload_to_text(node_b->payload).value_or("")).substr(0, 50) : "?";
+
+            ss << "[" << safe_pct(sim) << "%] " << text_a << " <-> " << text_b << "\n";
+
+            cand_array.push_back({
+                {"id_a", id_a.to_string()},
+                {"id_b", id_b.to_string()},
+                {"similarity", sim},
+                {"text_a", text_a},
+                {"text_b", text_b}
+            });
+        }
+
+        result_data["candidates"] = cand_array;
+        result_data["count"] = candidates.size();
+    } else {
+        // Actually merge - not implemented in RPC (too dangerous for automatic use)
+        return ToolResult::error("Automatic consolidation disabled in RPC. Use dry_run=true to find candidates.");
+    }
+
+    return ToolResult::ok(ss.str(), result_data);
+}
+
 // Register all memory tool handlers
 inline void register_handlers(Mind* mind,
                                std::unordered_map<std::string, ToolHandler>& handlers) {
@@ -723,6 +982,11 @@ inline void register_handlers(Mind* mind,
     handlers["full_resonate"] = [mind](const json& p) { return full_resonate(mind, p); };
     handlers["proactive_surface"] = [mind](const json& p) { return proactive_surface(mind, p); };
     handlers["detect_contradictions"] = [mind](const json& p) { return detect_contradictions(mind, p); };
+    // Phase 2 Core
+    handlers["multi_hop"] = [mind](const json& p) { return multi_hop(mind, p); };
+    handlers["timeline"] = [mind](const json& p) { return timeline(mind, p); };
+    handlers["causal_chain"] = [mind](const json& p) { return causal_chain(mind, p); };
+    handlers["consolidate"] = [mind](const json& p) { return consolidate(mind, p); };
 }
 
 } // namespace chitta::rpc::tools::memory

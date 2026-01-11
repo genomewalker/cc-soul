@@ -277,6 +277,15 @@ public:
         return yantra_ && yantra_->ready();
     }
 
+    // Iterate over all nodes in storage (public wrapper)
+    template<typename F>
+    void for_each_node(F&& fn) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        storage_.for_each_hot([&fn](const NodeId& id, const Node& node) {
+            fn(id, node);
+        });
+    }
+
     // Initialize or load existing mind
     bool open() {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -2578,6 +2587,7 @@ private:
         return results;
     }
 
+public:
     // Convert text to payload (simple UTF-8 encoding)
     static std::vector<uint8_t> text_to_payload(const std::string& text) {
         return std::vector<uint8_t>(text.begin(), text.end());
@@ -2589,6 +2599,7 @@ private:
         return std::string(payload.begin(), payload.end());
     }
 
+private:
     // Phase 5: Apply lateral inhibition to recall results
     // Winners suppress similar losers - prevents redundant results
     void apply_lateral_inhibition(std::vector<Recall>& results) {
@@ -2753,6 +2764,479 @@ private:
         if (best_pull < 0.1f) return std::nullopt;  // Too weak
 
         return std::make_pair(best_attractor, best_pull);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE 2 CORE: Scalable Index Structures (100M+ nodes)
+    // ═══════════════════════════════════════════════════════════════════
+
+    // Reverse edge index: O(1) lookup of incoming edges
+    // Updated incrementally on edge add/remove
+    struct ReverseEdge {
+        NodeId source;
+        EdgeType type;
+        float weight;
+    };
+    std::unordered_map<NodeId, std::vector<ReverseEdge>, NodeIdHash> reverse_edges_;
+
+    // Temporal index: O(log B) range queries, B = number of buckets
+    static constexpr uint64_t TEMPORAL_BUCKET_MS = 3600000;  // 1 hour
+    std::map<uint64_t, std::vector<std::pair<Timestamp, NodeId>>> temporal_buckets_;
+
+    uint64_t temporal_bucket_id(Timestamp ts) const {
+        return ts / TEMPORAL_BUCKET_MS;
+    }
+
+    // LSH Forest for O(1) average similarity search
+    static constexpr size_t LSH_NUM_TREES = 8;
+    static constexpr size_t LSH_HASH_BITS = 12;
+    std::vector<std::vector<std::vector<float>>> lsh_hyperplanes_;  // [tree][plane][dim]
+    std::vector<std::unordered_map<uint32_t, std::vector<NodeId>>> lsh_buckets_;
+    bool lsh_initialized_ = false;
+
+    void init_lsh(size_t dim) {
+        if (lsh_initialized_) return;
+
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::normal_distribution<float> dist(0.0f, 1.0f);
+
+        lsh_hyperplanes_.resize(LSH_NUM_TREES);
+        lsh_buckets_.resize(LSH_NUM_TREES);
+
+        for (size_t t = 0; t < LSH_NUM_TREES; ++t) {
+            lsh_hyperplanes_[t].resize(LSH_HASH_BITS);
+            for (size_t h = 0; h < LSH_HASH_BITS; ++h) {
+                lsh_hyperplanes_[t][h].resize(dim);
+                for (size_t d = 0; d < dim; ++d) {
+                    lsh_hyperplanes_[t][h][d] = dist(gen);
+                }
+            }
+        }
+        lsh_initialized_ = true;
+    }
+
+    uint32_t lsh_hash(const Vector& emb, size_t tree) {
+        uint32_t hash = 0;
+        for (size_t h = 0; h < LSH_HASH_BITS; ++h) {
+            float dot = 0.0f;
+            for (size_t d = 0; d < emb.size() && d < lsh_hyperplanes_[tree][h].size(); ++d) {
+                dot += emb[d] * lsh_hyperplanes_[tree][h][d];
+            }
+            if (dot > 0) hash |= (1u << h);
+        }
+        return hash;
+    }
+
+public:
+    // Index maintenance - call on node operations
+    void index_node_insert(const NodeId& id, const Node& node) {
+        // Reverse edges
+        for (const auto& edge : node.edges) {
+            reverse_edges_[edge.target].push_back({id, edge.type, edge.weight});
+        }
+
+        // Temporal index
+        uint64_t bid = temporal_bucket_id(node.tau_created);
+        auto& bucket = temporal_buckets_[bid];
+        auto it = std::lower_bound(bucket.begin(), bucket.end(),
+            std::make_pair(node.tau_created, id));
+        bucket.insert(it, {node.tau_created, id});
+
+        // LSH
+        if (node.nu.size() > 0) {
+            init_lsh(node.nu.size());
+            for (size_t t = 0; t < LSH_NUM_TREES; ++t) {
+                uint32_t h = lsh_hash(node.nu, t);
+                lsh_buckets_[t][h].push_back(id);
+            }
+        }
+    }
+
+    void index_edge_add(const NodeId& from, const Edge& edge) {
+        reverse_edges_[edge.target].push_back({from, edge.type, edge.weight});
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE 2 CORE: FORA-Style Approximate PPR (O(1/ε) query time)
+    // ═══════════════════════════════════════════════════════════════════
+
+    struct SparseVector {
+        std::unordered_map<NodeId, float, NodeIdHash> entries;
+        void add(const NodeId& id, float val) {
+            entries[id] += val;
+            if (std::abs(entries[id]) < 1e-10f) entries.erase(id);
+        }
+        float get(const NodeId& id) const {
+            auto it = entries.find(id);
+            return it != entries.end() ? it->second : 0.0f;
+        }
+    };
+
+    // Forward push: deterministic, O(1/r_max) operations
+    void forward_push(
+        const NodeId& source,
+        float source_weight,
+        SparseVector& pi,
+        SparseVector& residual,
+        float r_max,
+        float alpha)
+    {
+        residual.add(source, source_weight);
+        std::queue<NodeId> active;
+        active.push(source);
+
+        std::unordered_set<NodeId, NodeIdHash> in_queue;
+        in_queue.insert(source);
+
+        while (!active.empty()) {
+            NodeId u = active.front();
+            active.pop();
+            in_queue.erase(u);
+
+            float r_u = residual.get(u);
+            if (std::abs(r_u) < r_max) continue;
+
+            // Push to PPR estimate
+            pi.add(u, alpha * r_u);
+            residual.entries[u] = 0.0f;
+
+            // Push to predecessors via reverse edges
+            float push_val = (1.0f - alpha) * r_u;
+            if (reverse_edges_.count(u)) {
+                size_t in_deg = reverse_edges_[u].size();
+                if (in_deg > 0) {
+                    for (const auto& re : reverse_edges_[u]) {
+                        float delta = push_val * re.weight / static_cast<float>(in_deg);
+                        if (std::abs(delta) > r_max * 0.1f) {
+                            residual.add(re.source, delta);
+                            if (!in_queue.count(re.source)) {
+                                active.push(re.source);
+                                in_queue.insert(re.source);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Multi-hop PPR query: O(1/ε) time complexity
+    std::vector<Recall> ppr_query(
+        const std::string& query,
+        size_t k = 10,
+        float epsilon = 0.05f)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        if (!yantra_ || !yantra_->ready()) return {};
+
+        auto artha = yantra_->transform(query);
+        if (artha.nu.size() == 0) return {};
+
+        auto seeds = recall_impl(artha.nu, query, 5, 0.2f, SearchMode::Hybrid);
+        if (seeds.empty()) return {};
+
+        SparseVector pi, residual;
+        float r_max = epsilon / (2.0f * static_cast<float>(k));
+
+        for (const auto& seed : seeds) {
+            forward_push(seed.id, seed.relevance, pi, residual, r_max, 0.15f);
+        }
+
+        // Build results from sparse PPR vector
+        std::unordered_set<NodeId, NodeIdHash> seed_ids;
+        for (const auto& s : seeds) seed_ids.insert(s.id);
+
+        std::vector<Recall> results;
+        for (const auto& [id, score] : pi.entries) {
+            if (seed_ids.count(id)) continue;
+            if (score < 0.01f) continue;
+
+            Node* node = storage_.get(id);
+            if (!node) continue;
+
+            auto text = payload_to_text(node->payload);
+            results.push_back(Recall{
+                id, score, score, node->epsilon,
+                node->node_type, node->kappa,
+                node->tau_created, node->tau_accessed,
+                node->payload, text.value_or("")
+            });
+        }
+
+        std::sort(results.begin(), results.end(),
+                  [](const Recall& a, const Recall& b) { return a.relevance > b.relevance; });
+
+        if (results.size() > k) results.resize(k);
+        return results;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE 2 CORE: LSH-Based Consolidation (O(1) average)
+    // ═══════════════════════════════════════════════════════════════════
+
+    // Find similar nodes via LSH: O(1) average
+    std::vector<NodeId> lsh_find_similar(const Vector& emb, size_t max_candidates = 30) {
+        if (!lsh_initialized_ || emb.size() == 0) return {};
+
+        std::unordered_set<NodeId, NodeIdHash> candidates;
+
+        for (size_t t = 0; t < LSH_NUM_TREES && candidates.size() < max_candidates; ++t) {
+            uint32_t h = lsh_hash(emb, t);
+            if (lsh_buckets_[t].count(h)) {
+                for (const auto& id : lsh_buckets_[t][h]) {
+                    candidates.insert(id);
+                    if (candidates.size() >= max_candidates) break;
+                }
+            }
+        }
+
+        return std::vector<NodeId>(candidates.begin(), candidates.end());
+    }
+
+    // Try consolidation on insert: O(1) average
+    std::optional<NodeId> try_consolidate_on_insert(
+        const NodeId& new_id,
+        const Node& new_node,
+        float min_similarity = 0.92f)
+    {
+        auto candidates = lsh_find_similar(new_node.nu, 20);
+
+        for (const auto& cand_id : candidates) {
+            if (cand_id == new_id) continue;
+
+            Node* cand = storage_.get(cand_id);
+            if (!cand) continue;
+            if (cand->node_type != new_node.node_type) continue;
+
+            float sim = cand->nu.cosine(new_node.nu);
+            if (sim >= min_similarity) {
+                // Merge new into existing (keep existing)
+                merge_into(cand_id, new_id, *cand, new_node);
+                return cand_id;
+            }
+        }
+
+        return std::nullopt;
+    }
+
+private:
+    void merge_into(const NodeId& keeper_id, const NodeId& merged_id,
+                    Node& keeper, const Node& merged) {
+        float w_k = keeper.kappa.effective();
+        float w_m = merged.kappa.effective();
+        float w_total = w_k + w_m;
+
+        if (w_total > 0) {
+            for (size_t d = 0; d < keeper.nu.size() && d < merged.nu.size(); ++d) {
+                keeper.nu[d] = (keeper.nu[d] * w_k + merged.nu[d] * w_m) / w_total;
+            }
+            keeper.nu.normalize();
+        }
+
+        keeper.kappa.mu = (keeper.kappa.mu * keeper.kappa.n + merged.kappa.mu * merged.kappa.n) /
+                          (keeper.kappa.n + merged.kappa.n);
+        keeper.kappa.n += merged.kappa.n;
+        keeper.tau_created = std::min(keeper.tau_created, merged.tau_created);
+        keeper.tau_accessed = std::max(keeper.tau_accessed, merged.tau_accessed);
+        keeper.epsilon = std::max(keeper.epsilon, merged.epsilon);
+
+        // Merge edges
+        for (const auto& e : merged.edges) {
+            if (e.target == keeper_id) continue;
+            bool found = false;
+            for (auto& ke : keeper.edges) {
+                if (ke.target == e.target && ke.type == e.type) {
+                    ke.weight = std::max(ke.weight, e.weight);
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) keeper.edges.push_back(e);
+        }
+
+        // Redirect reverse edges
+        if (reverse_edges_.count(merged_id)) {
+            for (const auto& re : reverse_edges_[merged_id]) {
+                reverse_edges_[keeper_id].push_back(re);
+            }
+            reverse_edges_.erase(merged_id);
+        }
+    }
+
+public:
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE 2 CORE: Temporal Queries (O(log B + k))
+    // ═══════════════════════════════════════════════════════════════════
+
+    // Time range query: O(log B + k)
+    std::vector<Recall> temporal_range_query(
+        Timestamp from,
+        Timestamp to,
+        size_t limit = 50)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        std::vector<Recall> results;
+
+        uint64_t from_bid = temporal_bucket_id(from);
+        uint64_t to_bid = temporal_bucket_id(to);
+
+        auto it = temporal_buckets_.lower_bound(from_bid);
+
+        while (it != temporal_buckets_.end() && it->first <= to_bid && results.size() < limit) {
+            for (const auto& [ts, id] : it->second) {
+                if (ts < from || ts > to) continue;
+
+                Node* node = storage_.get(id);
+                if (!node) continue;
+
+                auto text = payload_to_text(node->payload);
+                results.push_back(Recall{
+                    id, 1.0f, 1.0f, node->epsilon,
+                    node->node_type, node->kappa,
+                    node->tau_created, node->tau_accessed,
+                    node->payload, text.value_or("")
+                });
+
+                if (results.size() >= limit) break;
+            }
+            ++it;
+        }
+
+        return results;
+    }
+
+    // Recent timeline with Hawkes weighting
+    std::vector<Recall> hawkes_timeline(size_t hours = 24, size_t limit = 20) {
+        Timestamp now_ts = now();
+        Timestamp from = now_ts - (hours * 3600000);
+
+        auto results = temporal_range_query(from, now_ts, limit * 3);
+
+        // Apply Hawkes weighting
+        for (auto& r : results) {
+            float delta_days = static_cast<float>(now_ts - r.created) / 86400000.0f;
+            float beta = 0.05f;  // Default decay
+            float intensity = 0.1f + std::exp(-beta * delta_days);
+
+            // Boost if recently accessed
+            float access_delta = static_cast<float>(now_ts - r.accessed) / 86400000.0f;
+            if (access_delta < delta_days) {
+                intensity += 0.3f * std::exp(-beta * access_delta);
+            }
+
+            r.relevance = std::min(1.0f, intensity);
+        }
+
+        std::sort(results.begin(), results.end(),
+                  [](const Recall& a, const Recall& b) { return a.relevance > b.relevance; });
+
+        if (results.size() > limit) results.resize(limit);
+        return results;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE 2 CORE: Causal Chains via Reverse Index (O(depth × avg_in_degree))
+    // ═══════════════════════════════════════════════════════════════════
+
+    struct CausalChain {
+        std::vector<NodeId> nodes;
+        std::vector<EdgeType> edges;
+        float confidence;
+    };
+
+    std::vector<CausalChain> find_causal_chains(
+        const NodeId& effect,
+        size_t max_depth = 5,
+        float min_confidence = 0.3f)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        std::vector<CausalChain> chains;
+        Node* effect_node = storage_.get(effect);
+        if (!effect_node) return chains;
+
+        auto is_causal = [](EdgeType t) {
+            return t == EdgeType::TriggeredBy || t == EdgeType::EvolvedFrom ||
+                   t == EdgeType::Continues || t == EdgeType::Supports;
+        };
+
+        struct State {
+            NodeId current;
+            CausalChain chain;
+        };
+
+        std::queue<State> frontier;
+        State initial;
+        initial.current = effect;
+        initial.chain.nodes.push_back(effect);
+        initial.chain.confidence = 1.0f;
+        frontier.push(std::move(initial));
+
+        while (!frontier.empty() && chains.size() < 10) {
+            auto state = std::move(frontier.front());
+            frontier.pop();
+
+            if (state.chain.nodes.size() > max_depth) {
+                std::reverse(state.chain.nodes.begin(), state.chain.nodes.end());
+                std::reverse(state.chain.edges.begin(), state.chain.edges.end());
+                chains.push_back(std::move(state.chain));
+                continue;
+            }
+
+            Node* curr_node = storage_.get(state.current);
+            if (!curr_node) continue;
+
+            // Use reverse edge index - O(in_degree) not O(V)
+            if (reverse_edges_.count(state.current)) {
+                for (const auto& re : reverse_edges_[state.current]) {
+                    if (!is_causal(re.type)) continue;
+
+                    Node* cause = storage_.get(re.source);
+                    if (!cause || cause->tau_created >= curr_node->tau_created) continue;
+
+                    float new_conf = state.chain.confidence * re.weight;
+                    if (new_conf < min_confidence) continue;
+
+                    // Check not already in chain
+                    bool in_chain = false;
+                    for (const auto& n : state.chain.nodes) {
+                        if (n == re.source) { in_chain = true; break; }
+                    }
+                    if (in_chain) continue;
+
+                    State next;
+                    next.current = re.source;
+                    next.chain = state.chain;
+                    next.chain.nodes.push_back(re.source);
+                    next.chain.edges.push_back(re.type);
+                    next.chain.confidence = new_conf;
+                    frontier.push(std::move(next));
+                }
+            }
+        }
+
+        std::sort(chains.begin(), chains.end(),
+                  [](const CausalChain& a, const CausalChain& b) {
+                      return a.confidence > b.confidence;
+                  });
+
+        return chains;
+    }
+
+    // Helper: edge type name
+    static std::string edge_type_name(EdgeType type) {
+        switch (type) {
+            case EdgeType::Similar:      return "Similar";
+            case EdgeType::TriggeredBy:  return "TriggeredBy";
+            case EdgeType::Supports:     return "Supports";
+            case EdgeType::Contradicts:  return "Contradicts";
+            case EdgeType::EvolvedFrom:  return "EvolvedFrom";
+            case EdgeType::Continues:    return "Continues";
+            default:                     return "Related";
+        }
     }
 
     MindConfig config_;

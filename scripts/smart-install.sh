@@ -200,6 +200,8 @@ configure_permissions() {
     local perms=(
         'Bash(*/chitta:*)'
         'Bash(*/chitta_cli:*)'
+        'Bash(~/.claude/bin/chitta:*)'
+        'Bash(~/.claude/bin/chitta_cli:*)'
         'Bash(chitta:*)'
         'Bash(chitta_cli:*)'
         'Bash(pkill -f "chitta_cli daemon":*)'
