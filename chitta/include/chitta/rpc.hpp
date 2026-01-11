@@ -735,6 +735,52 @@ private:
         });
         handlers_["tag"] = [this](const json& params) { return tool_tag(params); };
 
+        // Tool: yajna_list - List verbose nodes for ε-yajna ceremony
+        tools_.push_back({
+            "yajna_list",
+            "List verbose nodes ready for ε-yajna compression. Returns nodes with IDs, content length, "
+            "and current ε estimate. Excludes already-processed nodes (tag: ε-processed). "
+            "Use for ceremony batch processing.",
+            {
+                {"type", "object"},
+                {"properties", {
+                    {"query", {
+                        {"type", "string"},
+                        {"description", "Optional domain filter (e.g., 'architecture', 'decision')"}
+                    }},
+                    {"limit", {
+                        {"type", "integer"},
+                        {"default", 10},
+                        {"description", "Max nodes to return"}
+                    }},
+                    {"min_length", {
+                        {"type", "integer"},
+                        {"default", 200},
+                        {"description", "Minimum content length to consider verbose"}
+                    }}
+                }}
+            }
+        });
+        handlers_["yajna_list"] = [this](const json& params) { return tool_yajna_list(params); };
+
+        // Tool: yajna_inspect - Get full node content by ID
+        tools_.push_back({
+            "yajna_inspect",
+            "Get complete node content by ID for ε-yajna analysis. Returns full text, tags, "
+            "edges, and computed ε for compression planning.",
+            {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {
+                        {"type", "string"},
+                        {"description", "Node ID to inspect"}
+                    }}
+                }},
+                {"required", {"id"}}
+            }
+        });
+        handlers_["yajna_inspect"] = [this](const json& params) { return tool_yajna_inspect(params); };
+
         // Tool: narrate - Manage story threads and episodes
         tools_.push_back({
             "narrate",
@@ -2333,6 +2379,137 @@ private:
         }
 
         return {false, "Tags updated", result};
+    }
+
+    // List verbose nodes for ε-yajna ceremony processing
+    ToolResult tool_yajna_list(const json& params) {
+        std::string query = params.value("query", "architecture system pattern decision");
+        size_t limit = params.value("limit", 10);
+        size_t min_length = params.value("min_length", 200);
+
+        if (!mind_->has_yantra()) {
+            return {true, "Yantra not ready - cannot search", json()};
+        }
+
+        // Get candidates via semantic search (larger pool to filter)
+        auto candidates = mind_->recall(query, limit * 5);
+
+        json results = json::array();
+        std::ostringstream ss;
+        ss << "Verbose nodes ready for ε-yajna (" << min_length << "+ chars):\n";
+
+        size_t count = 0;
+        for (const auto& r : candidates) {
+            if (count >= limit) break;
+
+            // Skip if already processed
+            if (mind_->has_tag(r.id, "ε-processed")) continue;
+
+            // Skip short content (not verbose)
+            if (r.text.length() < min_length) continue;
+
+            // Skip triplets and entities (already compressed)
+            if (r.type == NodeType::Entity || r.type == NodeType::Triplet) continue;
+
+            // Extract title
+            std::string title = extract_title(r.text, 80);
+
+            // Compute simple ε estimate based on title/content ratio
+            float epsilon = std::min(1.0f, static_cast<float>(title.length()) / r.text.length() * 10.0f);
+
+            json node_json;
+            node_json["id"] = r.id.to_string();
+            node_json["type"] = node_type_to_string(r.type);
+            node_json["title"] = title;
+            node_json["length"] = r.text.length();
+            node_json["epsilon"] = epsilon;
+            results.push_back(node_json);
+
+            ss << "\n[" << r.id.to_string() << "] " << title;
+            ss << " (" << r.text.length() << " chars, ε≈" << static_cast<int>(epsilon * 100) << "%)";
+
+            count++;
+        }
+
+        ss << "\n\nTotal: " << count << " verbose nodes";
+        return {false, ss.str(), results};
+    }
+
+    // Inspect a single node for ε-yajna analysis
+    ToolResult tool_yajna_inspect(const json& params) {
+        std::string id_str = params.at("id");
+        NodeId id = NodeId::from_string(id_str);
+
+        auto node = mind_->get(id);
+        if (!node) {
+            return {true, "Node not found: " + id_str, json()};
+        }
+
+        std::string text(node->payload.begin(), node->payload.end());
+        auto tags = mind_->get_tags(id);
+
+        // Get edges
+        json edges = json::array();
+        for (const auto& edge : node->edges) {
+            if (auto target = mind_->get(edge.target)) {
+                std::string target_text(target->payload.begin(), target->payload.end());
+                // Convert edge type to string
+                std::string edge_type_str = "relates_to";
+                switch (edge.type) {
+                    case EdgeType::Similar: edge_type_str = "similar"; break;
+                    case EdgeType::Supports: edge_type_str = "supports"; break;
+                    case EdgeType::Contradicts: edge_type_str = "contradicts"; break;
+                    case EdgeType::PartOf: edge_type_str = "part_of"; break;
+                    case EdgeType::IsA: edge_type_str = "is_a"; break;
+                    case EdgeType::Mentions: edge_type_str = "mentions"; break;
+                    default: break;
+                }
+                json edge_json;
+                edge_json["target_id"] = edge.target.to_string();
+                edge_json["type"] = edge_type_str;
+                edge_json["weight"] = edge.weight;
+                edge_json["preview"] = extract_title(target_text, 60);
+                edges.push_back(edge_json);
+            }
+        }
+
+        // Compute ε estimate
+        std::string title = extract_title(text, 80);
+        float epsilon = std::min(1.0f, static_cast<float>(title.length()) / text.length() * 10.0f);
+
+        json result;
+        result["id"] = id_str;
+        result["type"] = node_type_to_string(node->node_type);
+        result["text"] = text;
+        result["length"] = text.length();
+        result["title"] = title;
+        result["epsilon"] = epsilon;
+        result["confidence"] = node->kappa.mu;
+        result["tags"] = tags;
+        result["edges"] = edges;
+        result["created"] = node->tau_created;
+        result["accessed"] = node->tau_accessed;
+
+        std::ostringstream ss;
+        ss << "=== Node " << id_str << " ===\n";
+        ss << "Type: " << node_type_to_string(node->node_type) << "\n";
+        ss << "Length: " << text.length() << " chars\n";
+        ss << "ε estimate: " << static_cast<int>(epsilon * 100) << "%\n";
+        ss << "Tags: ";
+        for (size_t i = 0; i < tags.size(); i++) {
+            if (i > 0) ss << ", ";
+            ss << tags[i];
+        }
+        ss << "\n\n--- Content ---\n" << text;
+
+        if (!edges.empty()) {
+            ss << "\n\n--- Edges (" << edges.size() << ") ---";
+            for (const auto& e : edges) {
+                ss << "\n  → " << e["preview"].get<std::string>();
+            }
+        }
+
+        return {false, ss.str(), result};
     }
 
     ToolResult tool_narrate(const json& params) {

@@ -62,7 +62,9 @@ static const std::set<std::string> KNOWN_TOOLS = {
     // Phase 3 Analysis
     "propagate", "forget", "epistemic_state", "bias_scan",
     // Phase 3 Advanced
-    "competence", "cross_project"
+    "competence", "cross_project",
+    // ε-yajna ceremony tools
+    "tag", "yajna_list", "yajna_inspect"
 };
 
 void print_usage(const char* prog) {
@@ -79,7 +81,8 @@ void print_usage(const char* prog) {
               << "\n"
               << "Tools: recall, resonate, full_resonate, grow, observe, update,\n"
               << "       soul_context, attractors, lens, intend, wonder, answer,\n"
-              << "       narrate, ledger, cycle, feedback, connect\n"
+              << "       narrate, ledger, cycle, feedback, connect, tag,\n"
+              << "       yajna_list, yajna_inspect\n"
               << "\n"
               << "Options:\n"
               << "  --socket-path PATH  Unix socket path (default: /tmp/chitta-VERSION.sock)\n"
@@ -115,6 +118,10 @@ int run_cli(const std::string& socket_path, const std::string& tool,
         positional_key = "question";
     } else if (tool == "causal_chain") {
         positional_key = "effect_id";
+    } else if (tool == "yajna_list") {
+        positional_key = "query";
+    } else if (tool == "yajna_inspect" || tool == "tag") {
+        positional_key = "id";
     }
 
     bool found_positional = false;

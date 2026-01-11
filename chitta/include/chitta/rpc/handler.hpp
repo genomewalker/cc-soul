@@ -9,6 +9,7 @@
 #include "types.hpp"
 #include "tools/memory.hpp"
 #include "tools/learning.hpp"
+#include "tools/yajna.hpp"
 #include "../mind.hpp"
 #include "../version.hpp"
 #include <unordered_map>
@@ -101,6 +102,10 @@ private:
 
         // Analysis tools (epistemic state, bias detection, confidence propagation)
         register_analysis_tools();
+
+        // Yajna tools (yajna_list, yajna_inspect, tag) for epsilon-yajna ceremony
+        tools::yajna::register_schemas(tools_);
+        tools::yajna::register_handlers(mind_, handlers_);
     }
 
     // ═══════════════════════════════════════════════════════════════════
