@@ -567,8 +567,8 @@ private:
         }
         ::close(fd);
 
-        // Reopen
-        if (!region_.open(path_)) {
+        // Reopen with write access
+        if (!region_.open(path_, false)) {  // false = not readonly
             return false;
         }
 

@@ -929,7 +929,7 @@ private:
             return false;
         }
         ::close(fd);
-        if (!index_region_.open(idx_path)) return false;
+        if (!index_region_.open(idx_path, false)) return false;  // false = writable
 
         // Resize vectors file
         std::string vec_path = base_path_ + ".vectors";
@@ -940,7 +940,7 @@ private:
             return false;
         }
         ::close(fd);
-        if (!vectors_region_.open(vec_path)) return false;
+        if (!vectors_region_.open(vec_path, false)) return false;  // false = writable
 
         // Resize metadata file
         std::string meta_path = base_path_ + ".meta";
@@ -951,7 +951,7 @@ private:
             return false;
         }
         ::close(fd);
-        if (!meta_region_.open(meta_path)) return false;
+        if (!meta_region_.open(meta_path, false)) return false;  // false = writable
 
         // Update header
         auto* header = index_region_.as<UnifiedIndexHeader>();
