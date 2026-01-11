@@ -192,6 +192,59 @@ download_models() {
     echo "[cc-soul] Models downloaded"
 }
 
+# Configure bash permissions for chitta commands (global settings)
+configure_permissions() {
+    local settings_file="${HOME}/.claude/settings.json"
+
+    # Permissions to add (global - applies to all projects)
+    local perms=(
+        'Bash(*/chitta:*)'
+        'Bash(*/chitta_cli:*)'
+        'Bash(chitta:*)'
+        'Bash(chitta_cli:*)'
+        'Bash(pkill -f "chitta_cli daemon":*)'
+    )
+
+    # Always use global settings.json
+    mkdir -p "${HOME}/.claude"
+
+    # If no settings file exists, create minimal one
+    if [[ ! -f "$settings_file" ]]; then
+        echo '{}' > "$settings_file"
+    fi
+
+    # Check if jq is available
+    if ! command -v jq &> /dev/null; then
+        echo "[cc-soul] jq not found, skipping permission config" >&2
+        return 0
+    fi
+
+    # Read current settings
+    local current
+    current=$(cat "$settings_file")
+
+    # Ensure permissions.allow exists
+    if ! echo "$current" | jq -e '.permissions.allow' &>/dev/null; then
+        current=$(echo "$current" | jq '.permissions = {"allow": []}')
+    fi
+
+    # Add each permission if not already present
+    local updated="$current"
+    local added=0
+    for perm in "${perms[@]}"; do
+        if ! echo "$updated" | jq -e ".permissions.allow | index(\"$perm\")" &>/dev/null; then
+            updated=$(echo "$updated" | jq ".permissions.allow += [\"$perm\"]")
+            ((added++))
+        fi
+    done
+
+    # Write back if changed
+    if [[ $added -gt 0 ]]; then
+        echo "$updated" | jq '.' > "$settings_file"
+        echo "[cc-soul] Added $added bash permissions for chitta (global)"
+    fi
+}
+
 # Create symlinks, handling dangling targets gracefully
 create_symlinks() {
     mkdir -p "${HOME}/.claude/mind"
@@ -255,6 +308,9 @@ main() {
 
     # Create symlinks
     create_symlinks
+
+    # Configure bash permissions for chitta commands
+    configure_permissions
 
     # Version change notification
     if [[ -n "$installed_version" && "$installed_version" != "$current_version" ]]; then
