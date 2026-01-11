@@ -13,7 +13,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
 CHITTA_DIR="$PLUGIN_DIR/chitta"
 BUILD_DIR="$CHITTA_DIR/build"
-BIN_DIR="$PLUGIN_DIR/bin"
+BIN_DIR="${HOME}/.claude/bin"
 MODELS_DIR="${HOME}/.claude/models"
 MARKER="$PLUGIN_DIR/.install-complete"
 
@@ -131,7 +131,8 @@ build_from_source() {
         return 1
     fi
 
-    mkdir -p "$BUILD_DIR" "$BIN_DIR"
+    local plugin_bin="$PLUGIN_DIR/bin"
+    mkdir -p "$BUILD_DIR" "$BIN_DIR" "$plugin_bin"
     cd "$BUILD_DIR"
 
     # Configure - show errors now for debugging
@@ -141,19 +142,28 @@ build_from_source() {
         return 1
     fi
 
-    # Build
+    # Build (outputs to $PLUGIN_DIR/bin per CMakeLists.txt)
     local nproc_val=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
     if ! make -j"$nproc_val" 2>&1 | tail -10; then
         echo "[cc-soul] ERROR: build failed" >&2
         return 1
     fi
 
-    # Verify binaries
+    # Copy binaries from plugin bin to install location (~/.claude/bin)
     local all_built=true
     for bin in chitta chitta_cli chitta_migrate chitta_import; do
-        if [[ ! -x "$BIN_DIR/$bin" ]]; then
+        if [[ -x "$plugin_bin/$bin" ]]; then
+            cp -f "$plugin_bin/$bin" "$BIN_DIR/$bin"
+        else
             echo "[cc-soul] WARNING: $bin not built" >&2
             all_built=false
+        fi
+    done
+
+    # Copy shared libraries if present
+    for lib in libonnxruntime.so libonnxruntime.so.1.16.3 libsqlite3.so; do
+        if [[ -f "$plugin_bin/$lib" ]]; then
+            cp -f "$plugin_bin/$lib" "$BIN_DIR/$lib"
         fi
     done
 
@@ -200,9 +210,8 @@ configure_permissions() {
     local settings_file="${HOME}/.claude/settings.json"
 
     # Permissions to add (global - applies to all projects)
+    # Binaries install to ~/.claude/bin, so we only need those paths
     local perms=(
-        'Bash(*/chitta:*)'
-        'Bash(*/chitta_cli:*)'
         'Bash(~/.claude/bin/chitta:*)'
         'Bash(~/.claude/bin/chitta_cli:*)'
         'Bash(chitta:*)'
@@ -257,15 +266,7 @@ create_symlinks() {
     mkdir -p "${HOME}/.claude/bin"
     mkdir -p "$PLUGIN_DIR/mind"
 
-    # Create global bin symlinks for stable paths (no version parsing needed)
-    for bin in chitta chitta_cli chitta_migrate chitta_import; do
-        if [[ -x "$BIN_DIR/$bin" ]]; then
-            local target="${HOME}/.claude/bin/$bin"
-            # Remove existing file/symlink before creating new symlink
-            [[ -e "$target" || -L "$target" ]] && rm -f "$target"
-            ln -s "$BIN_DIR/$bin" "$target"
-        fi
-    done
+    # Binaries now install directly to ~/.claude/bin, no symlinks needed
 
     # If both directories resolve to the same path, skip file symlinks
     local user_mind_resolved=$(readlink -f "${HOME}/.claude/mind" 2>/dev/null || echo "${HOME}/.claude/mind")
