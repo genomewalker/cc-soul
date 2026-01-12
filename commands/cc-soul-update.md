@@ -4,33 +4,22 @@ description: Update cc-soul binaries (downloads pre-built or builds from source)
 
 # /cc-soul-update
 
-Install or update cc-soul binaries. Prefers pre-built binaries, falls back to building from source.
+Install or update cc-soul binaries.
 
-## What it does
+## Steps
 
-1. Downloads ONNX embedding model if missing
-2. Tries to download pre-built binaries for your platform
-3. Falls back to building from source if pre-built fails
-4. Creates database symlinks (including unified storage files)
-5. Auto-detects database version and upgrades if needed
-6. Optionally converts to unified storage format (roaring bitmap tags, CoW snapshots)
+1. Find the plugin directory (check `~/.claude/plugins/marketplaces/genomewalker-cc-soul` or similar)
+2. Run `smart-install.sh` from the plugin's scripts directory - this handles:
+   - Downloading ONNX embedding model if missing
+   - Downloading pre-built binaries for the platform
+   - Falling back to building from source if pre-built fails
+   - Creating database symlinks
+3. Verify installation by checking `~/.claude/bin/chittad --version`
+4. Run `~/.claude/bin/chittad upgrade` to upgrade database if needed
+5. Show stats with `~/.claude/bin/chittad stats`
 
-## Usage
+## Notes
 
-```bash
-/cc-soul-update
-```
-
-## Implementation
-
-Run all commands in a single bash block (variables don't persist across separate calls):
-
-```bash
-PLUGIN_DIR="$HOME/.claude/plugins/marketplaces/genomewalker-cc-soul"
-
-# smart-install handles daemon shutdown gracefully
-bash "$PLUGIN_DIR/scripts/smart-install.sh"
-"$PLUGIN_DIR/bin/chittad" --version
-"$PLUGIN_DIR/bin/chittad" upgrade 2>&1
-"$PLUGIN_DIR/bin/chittad" stats 2>&1 | grep -v "^\["
-```
+- Binaries are installed to `~/.claude/bin/` (not the plugin directory)
+- The daemon is gracefully stopped during install
+- Database version is auto-detected and upgraded if needed
