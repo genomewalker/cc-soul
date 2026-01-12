@@ -24,7 +24,11 @@
 #include <iostream>
 #include <memory>
 #include <sys/stat.h>
+#include <sys/file.h>
+#include <unistd.h>
 #include <cstdio>
+#include <cerrno>
+#include <cstring>
 
 namespace chitta {
 
@@ -783,9 +787,25 @@ public:
         : config_(std::move(config))
         , wal_(config_.base_path + ".wal")
         , loaded_successfully_(false)
-        , last_wal_seq_(0) {}
+        , last_wal_seq_(0)
+        , lock_fd_(-1) {}
+
+    ~TieredStorage() {
+        release_lock();
+    }
+
+    // Non-copyable, non-movable (holds file lock)
+    TieredStorage(const TieredStorage&) = delete;
+    TieredStorage& operator=(const TieredStorage&) = delete;
+    TieredStorage(TieredStorage&&) = delete;
+    TieredStorage& operator=(TieredStorage&&) = delete;
 
     bool initialize() {
+        // Acquire exclusive database lock to prevent multiple daemons
+        if (!acquire_lock()) {
+            return false;
+        }
+
         std::string hot_path = config_.base_path + ".hot";
         std::string warm_path = config_.base_path + ".warm";
         std::string cold_path = config_.base_path + ".cold";
@@ -1861,6 +1881,52 @@ private:
     bool loaded_successfully_;
     uint64_t last_wal_seq_;
     bool in_replay_ = false;  // True during WAL replay to skip WAL append
+    int lock_fd_ = -1;  // Database lockfile descriptor
+
+    // Acquire exclusive lock on database (prevents multiple daemons)
+    bool acquire_lock() {
+        // Use /tmp for lockfile (NFS may not support flock)
+        // Hash the base_path to create unique lock name
+        std::hash<std::string> hasher;
+        size_t path_hash = hasher(config_.base_path);
+        std::string lock_path = "/tmp/chitta-" + std::to_string(path_hash) + ".lock";
+        lock_fd_ = ::open(lock_path.c_str(), O_RDWR | O_CREAT, 0644);
+        if (lock_fd_ < 0) {
+            std::cerr << "[TieredStorage] Cannot create lock file: " << lock_path
+                      << " (" << std::strerror(errno) << ")\n";
+            return false;
+        }
+
+        // Try non-blocking exclusive lock
+        if (::flock(lock_fd_, LOCK_EX | LOCK_NB) != 0) {
+            if (errno == EWOULDBLOCK) {
+                std::cerr << "[TieredStorage] Database locked by another process: " << lock_path << "\n";
+                std::cerr << "[TieredStorage] Another daemon is already running on this database.\n";
+            } else {
+                std::cerr << "[TieredStorage] Cannot lock database: " << std::strerror(errno) << "\n";
+            }
+            ::close(lock_fd_);
+            lock_fd_ = -1;
+            return false;
+        }
+
+        // Write PID to lock file for debugging
+        if (::ftruncate(lock_fd_, 0) == 0) {
+            std::string pid_str = std::to_string(getpid()) + "\n";
+            [[maybe_unused]] auto _ = ::write(lock_fd_, pid_str.c_str(), pid_str.size());
+        }
+
+        return true;
+    }
+
+    // Release database lock
+    void release_lock() {
+        if (lock_fd_ >= 0) {
+            ::flock(lock_fd_, LOCK_UN);
+            ::close(lock_fd_);
+            lock_fd_ = -1;
+        }
+    }
 };
 
 } // namespace chitta
