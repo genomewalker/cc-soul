@@ -9,6 +9,9 @@ The `chittad` command-line tool provides direct access to soul operations withou
 - [Installation](#installation)
 - [Global Options](#global-options)
 - [Commands](#commands)
+- [Realm Commands](#realm-commands)
+- [Review Commands](#review-commands)
+- [Evaluation Commands](#evaluation-commands)
 - [Environment Variables](#environment-variables)
 - [Examples](#examples)
 
@@ -341,6 +344,192 @@ Conversion complete!
 
 The database will now use unified format on next open.
 ```
+
+---
+
+## Realm Commands
+
+### realm_get
+
+Get current realm context.
+
+```bash
+chitta realm_get
+```
+
+**Output:**
+```
+Current realm: project:cc-soul
+(Realm context persists across sessions)
+```
+
+---
+
+### realm_set
+
+Set current realm (persists across sessions).
+
+```bash
+chitta realm_set --realm "project:cc-soul"
+```
+
+**Options:**
+| Option | Description | Required |
+|--------|-------------|----------|
+| `--realm NAME` | Realm name | Yes |
+
+---
+
+### realm_create
+
+Create a new realm with optional parent hierarchy.
+
+```bash
+chitta realm_create --realm "project:new-app" --parent "project:shared"
+```
+
+**Options:**
+| Option | Description | Required |
+|--------|-------------|----------|
+| `--realm NAME` | New realm name | Yes |
+| `--parent NAME` | Parent realm | No (default: brahman) |
+
+---
+
+## Review Commands
+
+### review_list
+
+List items in the review queue.
+
+```bash
+chitta review_list --status pending --limit 10
+```
+
+**Options:**
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--status STATUS` | Filter: pending, approved, rejected | pending |
+| `--limit N` | Maximum items | 20 |
+
+---
+
+### review_decide
+
+Approve or reject a node.
+
+```bash
+chitta review_decide --id "a1b2c3d4-..." --decision approve --reason "Verified"
+```
+
+**Options:**
+| Option | Description | Required |
+|--------|-------------|----------|
+| `--id ID` | Node ID | Yes |
+| `--decision DECISION` | approve, reject, edit, defer | Yes |
+| `--edited_content TEXT` | New content (for edit) | No |
+| `--reason TEXT` | Reason for decision | No |
+
+---
+
+### review_batch
+
+Batch decision on multiple items.
+
+```bash
+chitta review_batch --ids "id1,id2,id3" --decision approve
+```
+
+**Options:**
+| Option | Description | Required |
+|--------|-------------|----------|
+| `--ids IDS` | Comma-separated node IDs | Yes |
+| `--decision DECISION` | approve, reject, defer | Yes |
+
+---
+
+### review_stats
+
+Get review queue statistics.
+
+```bash
+chitta review_stats
+```
+
+**Output:**
+```
+=== Review Stats ===
+Pending: 15
+Approved: 142
+Rejected: 8
+Approval rate: 94.7%
+```
+
+---
+
+## Evaluation Commands
+
+### eval_run
+
+Run golden recall test suite.
+
+```bash
+chitta eval_run [--test_name NAME]
+```
+
+**Options:**
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--test_name NAME` | Run specific test | All tests |
+
+---
+
+### eval_add_test
+
+Add a golden test case.
+
+```bash
+chitta eval_add_test --name "auth_test" --query "authentication" --expected "id1,id2"
+```
+
+**Options:**
+| Option | Description | Required |
+|--------|-------------|----------|
+| `--name NAME` | Test case name | Yes |
+| `--query QUERY` | Test query | Yes |
+| `--expected IDS` | Expected node IDs (comma-separated) | Yes |
+
+---
+
+### epiplexity_check
+
+Check compression quality.
+
+```bash
+chitta epiplexity_check --content "Full text" --seed "compressed→seed"
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--content TEXT` | Full content to check |
+| `--seed TEXT` | Compressed seed |
+| `--id ID` | Node ID to check |
+
+---
+
+### epiplexity_drift
+
+Detect compression quality degradation.
+
+```bash
+chitta epiplexity_drift --window_days 7
+```
+
+**Options:**
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--window_days N` | Analysis window | 30 |
 
 ---
 

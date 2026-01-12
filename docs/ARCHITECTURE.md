@@ -14,6 +14,7 @@ This document provides a deep technical dive into the CC-Soul architecture, cove
 - [Subconscious Processing](#subconscious-processing)
 - [Integration Layer](#integration-layer)
 - [Performance Characteristics](#performance-characteristics)
+- [Phase 7: Quality Infrastructure](#phase-7-quality-infrastructure)
 
 ---
 
@@ -818,6 +819,150 @@ SessionEnd
 | full_resonate(k=10) | ~15ms |
 | observe (insert) | ~2ms |
 | daemon cycle | ~50ms |
+
+---
+
+## Phase 7: Quality Infrastructure
+
+Phase 7 adds production-quality features for scale, isolation, and human oversight.
+
+### Realm Scoping
+
+Realms provide cross-session context isolation:
+
+```cpp
+class RealmManager {
+    std::string current_realm_ = "brahman";  // Default: universal
+    std::unordered_map<std::string, std::string> realm_parents_;
+
+    // During recall, filter by realm
+    bool node_in_realm(const Node& node) const {
+        for (const auto& tag : node.tags) {
+            if (tag.starts_with("realm:")) {
+                std::string node_realm = tag.substr(6);
+                return is_ancestor_or_equal(current_realm_, node_realm);
+            }
+        }
+        return true;  // No realm tag = visible everywhere
+    }
+};
+```
+
+**Use Cases:**
+- Project isolation: `realm_set("project:cc-soul")`
+- Team separation: `realm_set("team:backend")`
+- Hierarchical: `project:cc-soul` inherits from `project:shared`
+
+### Human Oversight (ReviewQueue)
+
+AI-generated wisdom requires human approval:
+
+```cpp
+class ReviewQueue {
+    struct ReviewItem {
+        NodeId id;
+        ReviewStatus status;  // Pending, Approved, Rejected
+        Timestamp submitted;
+        std::optional<std::string> reason;
+    };
+
+    std::vector<ReviewItem> queue_;
+
+    void decide(NodeId id, ReviewDecision decision, std::string reason) {
+        auto& node = mind_->get_mutable(id);
+
+        switch (decision) {
+            case Approve:
+                node.kappa.update(true, 0.3f);  // Confidence boost
+                node.tags.push_back("human:approved");
+                break;
+            case Reject:
+                node.kappa.update(false, 0.5f);  // Strong penalty
+                node.tags.push_back("human:rejected");
+                break;
+            case Edit:
+                // Update content, then approve
+                break;
+            case Defer:
+                // Keep in queue
+                break;
+        }
+    }
+};
+```
+
+**Workflow:**
+1. Daemon synthesizes wisdom → auto-queued for review
+2. Human reviews via `review_list`, `review_decide`
+3. Approved nodes gain confidence; rejected nodes decay faster
+
+### Quality Evaluation (EvalHarness)
+
+Golden test suite validates recall quality:
+
+```cpp
+class EvalHarness {
+    struct GoldenTestCase {
+        std::string name;
+        std::string query;
+        std::vector<ExpectedResult> expected;  // ID + min_score + max_rank
+    };
+
+    std::vector<GoldenTestCase> tests_;
+
+    EvalReport run_all(RecallFn recall_fn) {
+        EvalReport report;
+        for (const auto& test : tests_) {
+            auto results = recall_fn(test.query, 10);
+            report.add(test.name, evaluate(results, test.expected));
+        }
+        return report;
+    }
+};
+```
+
+**Metrics:**
+- Recall@k: Expected nodes in top-k results
+- Precision: Relevant nodes / total returned
+- MRR: Mean reciprocal rank of first expected node
+
+### Epiplexity Measurement
+
+Measures compression quality (ε = reconstructability):
+
+```cpp
+class EpiplexityTest {
+    // Can I reconstruct full content from just the seed?
+    float measure(const std::string& full_content,
+                  const std::string& seed,
+                  EmbedFn embed_fn) {
+        Vector full_vec = embed_fn(full_content);
+        Vector seed_vec = embed_fn(seed);
+
+        // High cosine similarity = high epiplexity
+        return full_vec.cosine(seed_vec);
+    }
+
+    // Track drift over time
+    void analyze_drift(std::vector<Measurement>& history) {
+        // Alert if recent ε < historical average
+    }
+};
+```
+
+**Goal:** Maximize ε (>0.85 = excellent compression).
+
+### 100M+ Scale Infrastructure
+
+Built to handle production workloads:
+
+| Component | Purpose | Scale |
+|-----------|---------|-------|
+| UnifiedIndex | Slot-based O(1) access | 100M+ nodes |
+| QueryRouter | Smart index selection | Sub-ms routing |
+| SynthesisQueue | Batched wisdom generation | Background processing |
+| GapInquiry | Knowledge gap detection | Continuous analysis |
+| AttractorDampener | Prevent runaway attractors | Stability |
 
 ---
 

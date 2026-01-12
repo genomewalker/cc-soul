@@ -15,6 +15,9 @@ This document provides a complete reference for all MCP tools exposed by CC-Soul
 - [Multi-Voice Tools](#multi-voice-tools)
 - [Session Tools](#session-tools)
 - [Dynamics Tools](#dynamics-tools)
+- [Realm Tools](#realm-tools)
+- [Review Tools](#review-tools)
+- [Evaluation Tools](#evaluation-tools)
 - [Response Format](#response-format)
 
 ---
@@ -755,6 +758,292 @@ Run maintenance cycle (decay, synthesis, save).
 ```
 Cycle complete: coherence=84%, decay=yes, feedback=3
 Attractors: 5 found, 42 nodes settled
+```
+
+---
+
+## Realm Tools
+
+Tools for cross-session context isolation using realms.
+
+### realm_get
+
+Get current realm context.
+
+**Parameters:** None
+
+**Example:**
+```json
+{
+  "name": "realm_get",
+  "arguments": {}
+}
+```
+
+**Response:**
+```
+Current realm: project:cc-soul
+(Realm context persists across sessions)
+```
+
+---
+
+### realm_set
+
+Set current realm (persists across sessions).
+
+**Parameters:**
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `realm` | string | Yes | - | Realm name (e.g., "project:cc-soul") |
+
+**Example:**
+```json
+{
+  "name": "realm_set",
+  "arguments": {
+    "realm": "project:cc-soul"
+  }
+}
+```
+
+**Effect:** Nodes outside current realm are hidden during recall.
+
+---
+
+### realm_create
+
+Create a new realm with optional parent hierarchy.
+
+**Parameters:**
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `realm` | string | Yes | - | New realm name |
+| `parent` | string | No | "brahman" | Parent realm |
+
+**Example:**
+```json
+{
+  "name": "realm_create",
+  "arguments": {
+    "realm": "project:new-app",
+    "parent": "project:shared"
+  }
+}
+```
+
+---
+
+## Review Tools
+
+Human oversight tools for reviewing AI-generated wisdom.
+
+### review_list
+
+List items in the review queue.
+
+**Parameters:**
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `status` | string | No | "pending" | Filter: `pending`, `approved`, `rejected` |
+| `limit` | integer | No | 20 | Maximum items |
+
+**Example:**
+```json
+{
+  "name": "review_list",
+  "arguments": {
+    "status": "pending",
+    "limit": 10
+  }
+}
+```
+
+---
+
+### review_decide
+
+Approve or reject a node in the review queue.
+
+**Parameters:**
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `id` | string | Yes | - | Node ID |
+| `decision` | string | Yes | - | `approve`, `reject`, `edit`, `defer` |
+| `edited_content` | string | No | - | New content (for `edit`) |
+| `reason` | string | No | - | Reason for decision |
+
+**Example:**
+```json
+{
+  "name": "review_decide",
+  "arguments": {
+    "id": "a1b2c3d4-...",
+    "decision": "approve",
+    "reason": "Verified pattern is accurate"
+  }
+}
+```
+
+**Effect:**
+- `approve`: Boosts confidence, marks trusted
+- `reject`: Lowers confidence significantly
+- `edit`: Updates content, then approves
+- `defer`: Keeps in queue for later
+
+---
+
+### review_batch
+
+Apply same decision to multiple items.
+
+**Parameters:**
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `ids` | string | Yes | - | Comma-separated node IDs |
+| `decision` | string | Yes | - | `approve`, `reject`, `defer` |
+
+**Example:**
+```json
+{
+  "name": "review_batch",
+  "arguments": {
+    "ids": "id1,id2,id3",
+    "decision": "approve"
+  }
+}
+```
+
+---
+
+### review_stats
+
+Get review queue statistics.
+
+**Parameters:** None
+
+**Example:**
+```json
+{
+  "name": "review_stats",
+  "arguments": {}
+}
+```
+
+**Response:**
+```
+=== Review Stats ===
+Pending: 15
+Approved: 142
+Rejected: 8
+Approval rate: 94.7%
+```
+
+---
+
+## Evaluation Tools
+
+Quality assurance tools for memory system.
+
+### eval_run
+
+Run golden recall test suite.
+
+**Parameters:**
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `test_name` | string | No | - | Run specific test (or all) |
+
+**Example:**
+```json
+{
+  "name": "eval_run",
+  "arguments": {}
+}
+```
+
+**Response:**
+```
+=== Eval Harness ===
+Test cases loaded: 12
+Results: 11/12 passed (91.7%)
+```
+
+---
+
+### eval_add_test
+
+Add expected query→results test case.
+
+**Parameters:**
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `name` | string | Yes | - | Test case name |
+| `query` | string | Yes | - | Test query |
+| `expected` | string | Yes | - | Comma-separated expected node IDs |
+
+**Example:**
+```json
+{
+  "name": "eval_add_test",
+  "arguments": {
+    "name": "auth_pattern_test",
+    "query": "authentication patterns",
+    "expected": "auth-wisdom-id,jwt-pattern-id"
+  }
+}
+```
+
+---
+
+### epiplexity_check
+
+Check compression quality (can I reconstruct from seed?).
+
+**Parameters:**
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `content` | string | No | - | Full content to check |
+| `seed` | string | No | - | Compressed seed |
+| `id` | string | No | - | Node ID to check |
+
+**Example:**
+```json
+{
+  "name": "epiplexity_check",
+  "arguments": {
+    "content": "Rate limiter uses token bucket with 100ms refill",
+    "seed": "rate-limiter:token-bucket→100ms"
+  }
+}
+```
+
+**Response:**
+```
+=== Epiplexity Check ===
+Content reconstructable from seed: YES
+Compression ratio: 78%
+```
+
+---
+
+### epiplexity_drift
+
+Detect if compression quality is degrading over time.
+
+**Parameters:**
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `window_days` | integer | No | 30 | Analysis window |
+
+**Example:**
+```json
+{
+  "name": "epiplexity_drift",
+  "arguments": {
+    "window_days": 7
+  }
+}
 ```
 
 ---
