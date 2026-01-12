@@ -1,6 +1,6 @@
 # cc-soul 100M+ Scale Implementation Plan
 
-## Status: Headers Complete, Core Wiring Done (Jan 2026)
+## Status: Priority 1 Wiring Complete (Jan 2026)
 
 ### Implementation Status:
 | Component | Header | Wired | Notes |
@@ -9,9 +9,9 @@
 | QuotaManager | ✅ | ✅ | `remember()` checks quotas |
 | UtilityDecay | ✅ | ✅ | `recall()` + `feedback()` tracked |
 | AttractorDampener | ✅ | ✅ | `recall()` dampens over-retrieved |
-| ProvenanceSpine | ✅ | ❌ | Needs wiring to `remember()` |
-| TruthMaintenance | ✅ | ❌ | Needs wiring to detect conflicts |
-| RealmScoping | ✅ | ❌ | Needs wiring to `recall()` filter |
+| ProvenanceSpine | ✅ | ✅ | `remember()` records source metadata |
+| TruthMaintenance | ✅ | ✅ | `recall()` annotates conflicts |
+| RealmScoping | ✅ | ✅ | `recall()` filters by realm |
 | SynthesisQueue | ✅ | ❌ | Needs synthesis pipeline |
 | EvalHarness | ✅ | ❌ | Needs RPC exposure |
 | EpiplexityTest | ✅ | ❌ | Needs scheduler/RPC |
@@ -20,9 +20,17 @@
 
 **Enable via MindConfig:**
 ```cpp
+// Core scale components
 config.enable_quota_manager = true;
 config.enable_utility_decay = true;
 config.enable_attractor_dampener = true;
+
+// Priority 1 components
+config.enable_provenance = true;
+config.enable_realm_scoping = true;
+config.enable_truth_maintenance = true;
+config.session_id = "session-123";
+config.default_realm = "project:my-project";
 ```
 
 ## Overview
@@ -198,10 +206,10 @@ Workload: 10-50 QPS burst, 100-1000 inserts/day
 
 ## What's Missing (Next Steps)
 
-### Priority 1: Core Runtime Wiring
-1. **ProvenanceSpine** → `remember()`: Record source metadata on every insert
-2. **RealmScoping** → `recall()`: Filter results by current realm
-3. **TruthMaintenance** → `remember()`: Detect semantic contradictions
+### Priority 1: Core Runtime Wiring [DONE]
+1. ~~**ProvenanceSpine** → `remember()`: Record source metadata on every insert~~
+2. ~~**RealmScoping** → `recall()`: Filter results by current realm~~
+3. ~~**TruthMaintenance** → `recall()`: Annotate conflicts in results~~
 
 ### Priority 2: RPC/CLI Exposure
 4. **EvalHarness** → New RPC tool `eval_run` to execute golden tests
@@ -219,5 +227,6 @@ Workload: 10-50 QPS burst, 100-1000 inserts/day
 
 ### Nice to Have
 - Persistence for UtilityDecay, AttractorDampener state
+- Persistence for ProvenanceSpine, RealmScoping, TruthMaintenance state
 - Cross-session realm context
 - Batch review CLI mode

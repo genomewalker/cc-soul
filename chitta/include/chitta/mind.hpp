@@ -24,6 +24,9 @@
 #include "quota_manager.hpp"
 #include "utility_decay.hpp"
 #include "attractor_dampener.hpp"
+#include "provenance.hpp"
+#include "realm_scoping.hpp"
+#include "truth_maintenance.hpp"
 #include <mutex>
 #include <atomic>
 #include <set>
@@ -52,6 +55,14 @@ struct MindConfig {
     bool enable_utility_decay = false;   // Enable usage-driven decay
     bool enable_attractor_dampener = false;  // Enable over-retrieval dampening
     size_t total_capacity = 100000000;   // Total node capacity for quota manager
+
+    // Phase 7: Priority 1 - Core Runtime Wiring
+    bool enable_provenance = false;      // Track source metadata on every insert
+    bool enable_realm_scoping = false;   // Filter recall by current realm
+    bool enable_truth_maintenance = false;  // Surface conflicts in recall results
+    std::string default_realm = "brahman";  // Default realm for new nodes
+    ProvenanceSource default_provenance_source = ProvenanceSource::Unknown;
+    std::string session_id;              // Current session ID for provenance
 };
 
 // Search result with meaning
@@ -70,6 +81,10 @@ struct Recall {
     // Temporary embedding for competition (cleared after recall)
     QuantizedVector qnu;
     bool has_embedding = false;
+
+    // Phase 7: Conflict info from TruthMaintenance
+    bool has_conflict = false;
+    std::vector<NodeId> conflicting_nodes;
 };
 
 // Search mode for hybrid retrieval
@@ -471,12 +486,30 @@ public:
         Node node(type, std::move(artha.nu));
         node.payload = text_to_payload(text);
         NodeId id = node.id;
+        Timestamp current = now();
 
         storage_.insert(id, std::move(node));
         graph_.insert_raw(id);
 
         // Add to BM25 index for hybrid search
         maybe_add_bm25(id, text);
+
+        // Phase 7: Record provenance
+        if (config_.enable_provenance) {
+            Provenance prov;
+            prov.source = config_.default_provenance_source;
+            prov.session_id = config_.session_id;
+            prov.created_at = current;
+            prov.trust_score = 0.5f;  // Default trust
+            provenance_spine_.record(id, prov);
+        }
+
+        // Phase 7: Assign to default realm
+        if (config_.enable_realm_scoping) {
+            RealmId realm;
+            realm.name = config_.default_realm;
+            realm_scoping_.assign(id, realm, RealmVisibility::Inherited, current);
+        }
 
         // Phase 7: Update quota counts
         if (config_.enable_quota_manager) {
@@ -496,12 +529,30 @@ public:
         node.kappa = confidence;
         node.payload = text_to_payload(text);
         NodeId id = node.id;
+        Timestamp current = now();
 
         storage_.insert(id, std::move(node));
         graph_.insert_raw(id);
 
         // Add to BM25 index for hybrid search
         maybe_add_bm25(id, text);
+
+        // Phase 7: Record provenance
+        if (config_.enable_provenance) {
+            Provenance prov;
+            prov.source = config_.default_provenance_source;
+            prov.session_id = config_.session_id;
+            prov.created_at = current;
+            prov.trust_score = confidence.effective();
+            provenance_spine_.record(id, prov);
+        }
+
+        // Phase 7: Assign to default realm
+        if (config_.enable_realm_scoping) {
+            RealmId realm;
+            realm.name = config_.default_realm;
+            realm_scoping_.assign(id, realm, RealmVisibility::Inherited, current);
+        }
 
         return id;
     }
@@ -517,6 +568,7 @@ public:
         node.payload = text_to_payload(text);
         node.tags = tags;
         NodeId id = node.id;
+        Timestamp current = now();
 
         storage_.insert(id, std::move(node));
         graph_.insert_raw(id);
@@ -527,6 +579,23 @@ public:
         // Add to tag index (unified storage handles this in insert)
         if (!storage_.use_unified()) {
             tag_index_.add(id, tags);
+        }
+
+        // Phase 7: Record provenance
+        if (config_.enable_provenance) {
+            Provenance prov;
+            prov.source = config_.default_provenance_source;
+            prov.session_id = config_.session_id;
+            prov.created_at = current;
+            prov.trust_score = 0.5f;
+            provenance_spine_.record(id, prov);
+        }
+
+        // Phase 7: Assign to default realm
+        if (config_.enable_realm_scoping) {
+            RealmId realm;
+            realm.name = config_.default_realm;
+            realm_scoping_.assign(id, realm, RealmVisibility::Inherited, current);
         }
 
         return id;
@@ -544,6 +613,7 @@ public:
         node.payload = text_to_payload(text);
         node.tags = tags;
         NodeId id = node.id;
+        Timestamp current = now();
 
         storage_.insert(id, std::move(node));
         graph_.insert_raw(id);
@@ -554,6 +624,23 @@ public:
         // Add to tag index (unified storage handles this in insert)
         if (!storage_.use_unified()) {
             tag_index_.add(id, tags);
+        }
+
+        // Phase 7: Record provenance
+        if (config_.enable_provenance) {
+            Provenance prov;
+            prov.source = config_.default_provenance_source;
+            prov.session_id = config_.session_id;
+            prov.created_at = current;
+            prov.trust_score = confidence.effective();
+            provenance_spine_.record(id, prov);
+        }
+
+        // Phase 7: Assign to default realm
+        if (config_.enable_realm_scoping) {
+            RealmId realm;
+            realm.name = config_.default_realm;
+            realm_scoping_.assign(id, realm, RealmVisibility::Inherited, current);
         }
 
         return id;
@@ -963,9 +1050,27 @@ public:
         Node node(type, std::move(embedding));
         node.payload = std::move(payload);
         NodeId id = node.id;
+        Timestamp current = now();
 
         storage_.insert(id, std::move(node));
         graph_.insert_raw(id);
+
+        // Phase 7: Record provenance
+        if (config_.enable_provenance) {
+            Provenance prov;
+            prov.source = config_.default_provenance_source;
+            prov.session_id = config_.session_id;
+            prov.created_at = current;
+            prov.trust_score = 0.5f;
+            provenance_spine_.record(id, prov);
+        }
+
+        // Phase 7: Assign to default realm
+        if (config_.enable_realm_scoping) {
+            RealmId realm;
+            realm.name = config_.default_realm;
+            realm_scoping_.assign(id, realm, RealmVisibility::Inherited, current);
+        }
 
         return id;
     }
@@ -980,9 +1085,27 @@ public:
         node.kappa = confidence;
         node.payload = std::move(payload);
         NodeId id = node.id;
+        Timestamp current = now();
 
         storage_.insert(id, std::move(node));
         graph_.insert_raw(id);
+
+        // Phase 7: Record provenance
+        if (config_.enable_provenance) {
+            Provenance prov;
+            prov.source = config_.default_provenance_source;
+            prov.session_id = config_.session_id;
+            prov.created_at = current;
+            prov.trust_score = confidence.effective();
+            provenance_spine_.record(id, prov);
+        }
+
+        // Phase 7: Assign to default realm
+        if (config_.enable_realm_scoping) {
+            RealmId realm;
+            realm.name = config_.default_realm;
+            realm_scoping_.assign(id, realm, RealmVisibility::Inherited, current);
+        }
 
         return id;
     }
@@ -1098,6 +1221,82 @@ public:
             return std::find(node->tags.begin(), node->tags.end(), tag) != node->tags.end();
         }
         return false;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Phase 7: Realm Management
+    // ═══════════════════════════════════════════════════════════════════
+
+    // Set the current realm (gates which nodes are visible in recall)
+    void set_realm(const std::string& realm_name) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        realm_scoping_.set_current_realm(realm_name);
+    }
+
+    // Create a new realm (optional parent for hierarchy)
+    void create_realm(const std::string& name, const std::string& parent = "") {
+        std::lock_guard<std::mutex> lock(mutex_);
+        realm_scoping_.create_realm(name, parent);
+    }
+
+    // Get current realm name
+    std::string current_realm() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return realm_scoping_.current_realm().name;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Phase 7: Provenance Access
+    // ═══════════════════════════════════════════════════════════════════
+
+    // Get provenance info for a node
+    std::optional<Provenance> get_provenance(NodeId id) const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        const Provenance* p = provenance_spine_.get(id);
+        if (p) return *p;
+        return std::nullopt;
+    }
+
+    // Update provenance source for a node
+    void set_provenance_source(NodeId id, ProvenanceSource source, const std::string& source_url = "") {
+        std::lock_guard<std::mutex> lock(mutex_);
+        const Provenance* existing = provenance_spine_.get(id);
+        if (existing) {
+            Provenance p = *existing;
+            p.source = source;
+            p.source_url = source_url;
+            provenance_spine_.record(id, p);
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Phase 7: Truth Maintenance (Contradictions)
+    // ═══════════════════════════════════════════════════════════════════
+
+    // Register a contradiction between two nodes
+    void add_contradiction(NodeId a, NodeId b, const std::string& description,
+                          float confidence = 0.5f) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        truth_maintenance_.add_contradiction(a, b, description, confidence, now());
+    }
+
+    // Resolve a contradiction (one node "wins")
+    void resolve_contradiction(NodeId a, NodeId b, NodeId winner,
+                              NodeId resolution_node, const std::string& rationale) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        truth_maintenance_.resolve(a, b, winner, resolution_node, rationale, now());
+    }
+
+    // Get all unresolved contradictions
+    std::vector<Contradiction> get_unresolved_contradictions() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return truth_maintenance_.get_unresolved();
+    }
+
+    // Check if a node has unresolved conflicts
+    bool has_conflicts(NodeId id) const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return truth_maintenance_.has_unresolved_conflicts(id);
     }
 
     // Confidence propagation: propagate confidence change through graph
@@ -2750,6 +2949,12 @@ private:
             }
         }
 
+        // Phase 7: Filter candidates by realm visibility
+        if (config_.enable_realm_scoping && !candidates.empty()) {
+            auto filtered = realm_scoping_.filter_by_realm(candidates);
+            candidates = std::move(filtered);
+        }
+
         // Score candidates with soul-aware relevance (optionally session-primed)
         std::vector<Recall> results;
         for (const auto& [id, base_score] : candidates) {
@@ -2843,6 +3048,22 @@ private:
                 if (config_.enable_attractor_dampener) {
                     attractor_dampener_.record_retrieval(r.id, r.relevance, current);
                 }
+            }
+        }
+
+        // Phase 7: Annotate conflicts in results
+        if (config_.enable_truth_maintenance && !results.empty()) {
+            // Build ID-to-score map for annotation
+            std::vector<std::pair<NodeId, float>> id_scores;
+            for (const auto& r : results) {
+                id_scores.push_back({r.id, r.relevance});
+            }
+            auto annotated = truth_maintenance_.annotate_conflicts(id_scores);
+
+            // Transfer conflict info to results
+            for (size_t i = 0; i < results.size() && i < annotated.size(); ++i) {
+                results[i].has_conflict = annotated[i].has_conflict;
+                results[i].conflicting_nodes = annotated[i].conflicting_nodes;
             }
         }
 
@@ -3581,6 +3802,11 @@ public:
     QuotaManager quota_manager_;
     UtilityDecay utility_decay_;
     AttractorDampener attractor_dampener_;
+
+    // Phase 7: Priority 1 - Core Runtime Components
+    ProvenanceSpine provenance_spine_;
+    RealmScoping realm_scoping_;
+    TruthMaintenance truth_maintenance_;
 
     // Phase 7: Quota management helpers (caller must hold mutex_)
     void update_quota_counts() {
