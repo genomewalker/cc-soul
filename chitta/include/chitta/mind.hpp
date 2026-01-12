@@ -1027,7 +1027,8 @@ public:
             if (std::find(node->tags.begin(), node->tags.end(), tag) == node->tags.end()) {
                 node->tags.push_back(tag);
                 tag_index_.add(id, {tag});
-                // Node is in hot storage, will be persisted on sync
+                // Persist tag change
+                storage_.update_node(id, *node);
             }
             return true;
         }
@@ -1041,6 +1042,8 @@ public:
             auto it = std::find(node->tags.begin(), node->tags.end(), tag);
             if (it != node->tags.end()) {
                 node->tags.erase(it);
+                // Persist tag change
+                storage_.update_node(id, *node);
             }
             return true;
         }

@@ -241,6 +241,7 @@ inline void register_handlers(Mind* mind, std::unordered_map<std::string, ToolHa
             return ToolResult::ok("Current tags", result);
         }
 
+        // Tags are persisted via mind->add_tag/remove_tag which calls storage_.update_node()
         return ToolResult::ok("Tags updated", result);
     };
 }

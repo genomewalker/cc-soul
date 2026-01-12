@@ -1637,6 +1637,8 @@ private:
         node.kappa.mu = meta->confidence_mu;
         node.kappa.sigma_sq = meta->confidence_sigma;
         node.payload = unified_.payload(slot);
+        // Load tags from SlotTagIndex
+        node.tags = unified_.slot_tag_index().tags_for_slot(slot.value);
 
         // Update access time in cache and persist to unified index
         node.touch();

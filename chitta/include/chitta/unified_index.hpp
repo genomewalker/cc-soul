@@ -482,13 +482,17 @@ public:
         metas[slot.value].payload_offset = payload_offset;
         metas[slot.value].payload_size = payload_size;
 
+        // Update tags: clear old tags and add new ones
+        tags_.remove_all(slot.value);
+        if (!node.tags.empty()) {
+            tags_.add(slot.value, node.tags);
+        }
+        tags_.save();
+
         // Sync to persist changes
         payloads_.sync();
         meta_region_.sync();
         vectors_region_.sync();
-
-        // Note: edges and tags updates would require more complex handling
-        // For now, focus on payload which is the main ε-yajna use case
 
         return true;
     }
