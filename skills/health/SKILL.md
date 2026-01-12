@@ -1,73 +1,30 @@
 ---
 name: health
-description: Soul system health check with remediation. Use to verify setup or diagnose issues.
+description: Soul system health check with remediation
 execution: task
 ---
 
 # Health
 
-Spawn a Task agent to check soul health. This saves context.
+```ssl
+[health] check via Task agent
 
-## Execute
+verify setup:
+  symlinks@plugin/mind/
+  binary@~/.claude/bin/chitta
+  db files@~/.claude/mind/chitta.*
+  version from plugin.json
 
+get status: soul_context(format=json) + harmonize
+
+evaluate:
+  symlinks: valid|missing warm|missing hot/cold
+  coherence(tau_k): >0.7 healthy | 0.5-0.7 warning | <0.5 critical
+  hot nodes %: >50% healthy | 30-50% warning | <30% critical
+
+remediate:
+  setup issues→suggest ./setup.sh
+  low coherence→cycle(save=true)
+
+report: setup status | version | node count | coherence | actions needed
 ```
-Task(
-  subagent_type="general-purpose",
-  description="Soul health check",
-  prompt="""
-Check the soul system health using Bash and MCP tools.
-
-## 1. Verify Setup
-
-Run these checks with Bash:
-```bash
-# Check symlinks exist and point to valid targets
-ls -la ${CLAUDE_PLUGIN_ROOT:-$(dirname $(dirname $0))}/mind/ 2>/dev/null || echo "ERROR: mind/ directory missing"
-
-# Check binary exists
-ls -la ${CLAUDE_PLUGIN_ROOT:-$(dirname $(dirname $0))}/bin/chitta 2>/dev/null || echo "ERROR: chitta binary missing"
-
-# Check actual data location
-ls -la ~/.claude/mind/chitta.* 2>/dev/null || echo "WARNING: No chitta database files at ~/.claude/mind/"
-
-# Check version
-cat ${CLAUDE_PLUGIN_ROOT:-$(dirname $(dirname $0))}/.claude-plugin/plugin.json 2>/dev/null | grep version
-```
-
-## 2. Get Soul Status
-
-Call these MCP tools:
-- chitta soul_context format="json" - Get coherence and node statistics
-- chitta harmonize  - Check voice agreement
-
-## 3. Evaluate Health
-
-| Metric | Healthy | Warning | Critical |
-|--------|---------|---------|----------|
-| Symlinks | Valid | Missing warm | Missing hot/cold |
-| Binary | Present | - | Missing |
-| Database files | Present | Empty | Missing |
-| Coherence (tau_k) | > 0.7 | 0.5-0.7 | < 0.5 |
-| Hot nodes % | > 50% | 30-50% | < 30% |
-
-## 4. Remediate if Needed
-
-If setup issues found:
-- Suggest running: ./setup.sh
-
-If coherence is low:
-- chitta cycle save=true - Run maintenance
-
-## 5. Report
-
-Return a concise health report:
-- Setup status: OK / Issues found
-- Version: X.Y.Z
-- Node count and location
-- Coherence scores
-- Any issues or actions needed
-"""
-)
-```
-
-After the agent returns, present the health report.
