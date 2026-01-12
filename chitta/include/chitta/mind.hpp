@@ -981,6 +981,10 @@ public:
             node->payload = updated.payload;
             node->edges = updated.edges;
             node->tags = updated.tags;
+
+            // Persist the update via storage layer
+            storage_.update_node(id, *node);
+            storage_.sync();
             return true;
         }
         return false;

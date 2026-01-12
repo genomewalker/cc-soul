@@ -960,6 +960,31 @@ public:
         return true;
     }
 
+    // Update node content (for ε-yajna migration)
+    bool update_node(NodeId id, const Node& node) {
+        // Phase 3: Unified index has its own update path
+        if (use_unified()) {
+            bool result = unified_.update(id, node);
+            if (result) {
+                // Also update the cache so subsequent gets see the new data
+                unified_cache_[id] = node;
+            }
+            return result;
+        }
+
+        // For hot storage, just get and update
+        Node* existing = hot_.get(id);
+        if (!existing) return false;
+
+        *existing = node;
+
+        if (config_.use_wal) {
+            wal_.append(WalOp::Insert, node);  // Full node update via WAL
+        }
+
+        return true;
+    }
+
     // Add edge to node with WAL delta (Phase 2: 72 bytes vs ~500 for full node)
     bool add_edge(NodeId from, NodeId to, EdgeType type, float weight) {
         Node* node = hot_.get(from);
@@ -1587,6 +1612,14 @@ private:
     Node* get_from_unified(NodeId id) {
         auto slot = unified_.lookup(id);
         if (!slot.valid()) return nullptr;
+
+        // Check if already in cache (recently updated) - return it without re-reading from file
+        auto cache_it = unified_cache_.find(id);
+        if (cache_it != unified_cache_.end()) {
+            cache_it->second.touch();
+            unified_.touch(slot);
+            return &cache_it->second;
+        }
 
         auto* indexed = unified_.get_slot(slot);
         auto* meta = unified_.meta(slot);

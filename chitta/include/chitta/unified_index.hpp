@@ -444,6 +444,55 @@ public:
         return slot;
     }
 
+    // Update an existing node's payload and metadata (for ε-yajna compression)
+    bool update(const NodeId& id, const Node& node) {
+        std::unique_lock lock(mutex_);
+
+        auto it = id_to_slot_.find(id);
+        if (it == id_to_slot_.end()) {
+            return false;  // Node doesn't exist
+        }
+
+        SlotId slot = it->second;
+
+        // Update vector if changed
+        QuantizedVector qvec = QuantizedVector::from_float(node.nu);
+        auto* vectors = vectors_region_.as<QuantizedVector>();
+        vectors[slot.value] = qvec;
+
+        if (has_binary_) {
+            auto* binvecs = binary_region_.as<BinaryVector>();
+            binvecs[slot.value] = BinaryVector::from_quantized(qvec);
+        }
+
+        // Store new payload (old payload space is orphaned but reclaimed on rebuild)
+        uint32_t payload_offset = 0;
+        uint32_t payload_size = 0;
+        if (!node.payload.empty()) {
+            payload_offset = static_cast<uint32_t>(payloads_.store(node.payload));
+            payload_size = static_cast<uint32_t>(node.payload.size());
+        }
+
+        // Update metadata
+        auto* metas = meta_region_.as<NodeMeta>();
+        metas[slot.value].tau_accessed = node.tau_accessed;
+        metas[slot.value].confidence_mu = node.kappa.mu;
+        metas[slot.value].confidence_sigma = node.kappa.sigma_sq;
+        metas[slot.value].decay_rate = node.delta;
+        metas[slot.value].payload_offset = payload_offset;
+        metas[slot.value].payload_size = payload_size;
+
+        // Sync to persist changes
+        payloads_.sync();
+        meta_region_.sync();
+        vectors_region_.sync();
+
+        // Note: edges and tags updates would require more complex handling
+        // For now, focus on payload which is the main ε-yajna use case
+
+        return true;
+    }
+
     // Get node by ID
     const IndexedNode* get(const NodeId& id) const {
         std::shared_lock lock(mutex_);

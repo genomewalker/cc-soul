@@ -120,7 +120,7 @@ int run_cli(const std::string& socket_path, const std::string& tool,
         positional_key = "effect_id";
     } else if (tool == "yajna_list") {
         positional_key = "query";
-    } else if (tool == "yajna_inspect" || tool == "tag") {
+    } else if (tool == "yajna_inspect" || tool == "tag" || tool == "update" || tool == "remove") {
         positional_key = "id";
     }
 
