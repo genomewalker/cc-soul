@@ -1102,6 +1102,32 @@ public:
         return true;
     }
 
+    // Forget a node: write delete to WAL and remove from storage
+    // This is the durable delete - it persists across restarts
+    bool forget(NodeId id) {
+        // Write delete to WAL first for crash recovery
+        if (config_.use_wal) {
+            uint64_t seq = wal_.append_delete(id);
+            if (seq == 0) {
+                std::cerr << "[TieredStorage] WAL delete failed for " << id.to_string() << "\n";
+                return false;
+            }
+            last_wal_seq_ = seq;
+        }
+
+        // Remove from storage
+        return remove(id);
+    }
+
+    // Forget multiple nodes (batch delete)
+    size_t forget_batch(const std::vector<NodeId>& ids) {
+        size_t forgotten = 0;
+        for (const auto& id : ids) {
+            if (forget(id)) forgotten++;
+        }
+        return forgotten;
+    }
+
     // Sync from WAL: see other processes' writes
     // Call this before reads to ensure we see the shared truth
     size_t sync_from_wal() {

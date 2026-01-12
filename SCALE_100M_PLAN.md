@@ -225,9 +225,9 @@ Workload: 10-50 QPS burst, 100-1000 inserts/day
 8. ~~**GapInquiry** → `recall()` tracks gap encounters~~
 9. ~~**QueryRouter** → Routes queries based on intent classification~~
 
-### Priority 4: Delete/Eviction Support (Future)
-10. WAL delete entries for proper node removal
-11. Full eviction in `maybe_evict_for_quota()`
+### Priority 4: Delete/Eviction Support [DONE]
+10. ~~WAL delete entries for proper node removal~~
+11. ~~Full eviction in `maybe_evict_for_quota()`~~
 
 ### Nice to Have (Future)
 - Persistence for UtilityDecay, AttractorDampener state

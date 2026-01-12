@@ -4026,14 +4026,35 @@ public:
 
         if (candidates.empty()) return;
 
-        // Get eviction candidates from quota manager
+        // Get eviction candidates from quota manager (lowest utility first)
         auto to_evict = quota_manager_.get_eviction_candidates(
             candidates, type, 10, now());
 
-        // Note: Full eviction requires WAL support for delete operations
-        // For now, quota checking prevents new inserts when at capacity
-        // Full delete support can be added when needed
-        (void)to_evict;
+        if (to_evict.empty()) return;
+
+        // Perform evictions using WAL-backed forget
+        size_t evicted = 0;
+        for (const auto& candidate : to_evict) {
+            NodeId id = candidate.id;
+
+            // Remove from Phase 7 tracking structures
+            provenance_spine_.remove(id);
+            utility_decay_.remove(id);
+            attractor_dampener_.remove(id);
+            synthesis_queue_.remove(id);
+            gap_inquiry_.remove(id);
+
+            // Forget from storage (writes to WAL)
+            if (storage_.forget(id)) {
+                evicted++;
+            }
+        }
+
+        // Update quota counts after eviction
+        if (evicted > 0) {
+            update_quota_counts();
+            std::cerr << "[Mind] Evicted " << evicted << " nodes for quota\n";
+        }
     }
 };
 
