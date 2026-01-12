@@ -96,7 +96,7 @@ echo "  Building..."
 make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4) > /dev/null
 
 # Verify all binaries
-BINARIES="chitta chitta_cli chitta_migrate chitta_import chitta_test"
+BINARIES="chitta chittad chitta_migrate chitta_import chitta_test"
 BUILD_OK=true
 for bin in $BINARIES; do
     if [ -f "$BIN_DIR/$bin" ]; then
@@ -143,7 +143,7 @@ echo -e "${YELLOW}[4/4] Checking database...${NC}"
 # Upgrade to current version if needed
 if [ -f "${HOME}/.claude/mind/chitta.hot" ]; then
     echo "  Checking version..."
-    "$BIN_DIR/chitta_cli" upgrade --path "${HOME}/.claude/mind/chitta" 2>&1 | grep -E "^\[migrations\]|Already at" | sed 's/^/  /'
+    "$BIN_DIR/chittad" upgrade --path "${HOME}/.claude/mind/chitta" 2>&1 | grep -E "^\[migrations\]|Already at" | sed 's/^/  /'
 fi
 
 # Done

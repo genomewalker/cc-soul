@@ -1,6 +1,6 @@
 # CC-Soul CLI Reference
 
-The `chitta_cli` command-line tool provides direct access to soul operations without going through Claude Code.
+The `chittad` command-line tool provides direct access to soul operations without going through Claude Code.
 
 ---
 
@@ -23,7 +23,7 @@ cd cc-soul
 ./setup.sh
 
 # CLI is now at:
-./bin/chitta_cli
+./bin/chittad
 ```
 
 Or build manually:
@@ -32,7 +32,7 @@ Or build manually:
 cd chitta
 mkdir build && cd build
 cmake ..
-make chitta_cli
+make chittad
 ```
 
 ---
@@ -67,7 +67,7 @@ If `--model` and `--vocab` are not specified, the CLI looks for them in:
 Show soul statistics and health metrics.
 
 ```bash
-chitta_cli stats [--json] [--fast]
+chittad stats [--json] [--fast]
 ```
 
 **Output:**
@@ -131,7 +131,7 @@ Yantra: ready
 Semantic search across all memory.
 
 ```bash
-chitta_cli recall <query> [--limit N]
+chittad recall <query> [--limit N]
 ```
 
 **Arguments:**
@@ -146,7 +146,7 @@ chitta_cli recall <query> [--limit N]
 
 **Example:**
 ```bash
-chitta_cli recall "error handling patterns" --limit 10
+chittad recall "error handling patterns" --limit 10
 ```
 
 **Output:**
@@ -175,7 +175,7 @@ logging caused hours of debugging. Always log or rethrow.
 Full resonance search (all 6 phases).
 
 ```bash
-chitta_cli resonate <query> [--limit N] [--json]
+chittad resonate <query> [--limit N] [--json]
 ```
 
 **Arguments:**
@@ -191,7 +191,7 @@ chitta_cli resonate <query> [--limit N] [--json]
 
 **Example:**
 ```bash
-chitta_cli resonate "caching strategies" --limit 5
+chittad resonate "caching strategies" --limit 5
 ```
 
 **Output:**
@@ -227,7 +227,7 @@ processes updated cache simultaneously. Solution: distributed locks...
 Run maintenance cycle (decay, synthesis, save).
 
 ```bash
-chitta_cli cycle
+chittad cycle
 ```
 
 **Output:**
@@ -246,7 +246,7 @@ Cycle complete.
 Run the subconscious daemon for background processing.
 
 ```bash
-chitta_cli daemon [--interval SECS] [--pid-file PATH]
+chittad daemon [--interval SECS] [--pid-file PATH]
 ```
 
 **Options:**
@@ -258,10 +258,10 @@ chitta_cli daemon [--interval SECS] [--pid-file PATH]
 **Example:**
 ```bash
 # Run in foreground
-chitta_cli daemon --interval 30
+chittad daemon --interval 30
 
 # Run as background service
-chitta_cli daemon --interval 60 --pid-file ~/.claude/mind/.subconscious.pid &
+chittad daemon --interval 60 --pid-file ~/.claude/mind/.subconscious.pid &
 ```
 
 **Output:**
@@ -297,7 +297,7 @@ kill 12345
 Upgrade database to current schema version.
 
 ```bash
-chitta_cli upgrade
+chittad upgrade
 ```
 
 **Output:**
@@ -318,7 +318,7 @@ Backup saved: /home/user/.claude/mind/chitta.hot.v4.backup
 Convert storage format between unified and segment-based.
 
 ```bash
-chitta_cli convert <format>
+chittad convert <format>
 ```
 
 **Arguments:**
@@ -328,7 +328,7 @@ chitta_cli convert <format>
 
 **Example:**
 ```bash
-chitta_cli convert unified
+chittad convert unified
 ```
 
 **Output:**
@@ -360,28 +360,28 @@ The database will now use unified format on next open.
 
 ```bash
 # Check soul health
-chitta_cli stats
+chittad stats
 
 # Quick search
-chitta_cli recall "authentication" --limit 3
+chittad recall "authentication" --limit 3
 
 # Deep resonance search
-chitta_cli resonate "microservices patterns"
+chittad resonate "microservices patterns"
 
 # Run maintenance
-chitta_cli cycle
+chittad cycle
 ```
 
 ### Daemon Management
 
 ```bash
 # Start daemon in background
-nohup chitta_cli daemon --interval 60 \
+nohup chittad daemon --interval 60 \
   --pid-file ~/.claude/mind/.subconscious.pid \
   >> ~/.claude/mind/.subconscious.log 2>&1 &
 
 # Check if running
-ps aux | grep chitta_cli
+ps aux | grep chittad
 
 # View logs
 tail -f ~/.claude/mind/.subconscious.log
@@ -394,10 +394,10 @@ kill $(cat ~/.claude/mind/.subconscious.pid)
 
 ```bash
 # Get stats as JSON for scripts
-chitta_cli stats --json | jq '.coherence.tau'
+chittad stats --json | jq '.coherence.tau'
 
 # Search and extract
-chitta_cli resonate "error handling" --json --limit 5 | \
+chittad resonate "error handling" --json --limit 5 | \
   jq -r '.results[].text'
 ```
 
@@ -405,20 +405,20 @@ chitta_cli resonate "error handling" --json --limit 5 | \
 
 ```bash
 # Skip BM25 for quick stats
-chitta_cli stats --fast
+chittad stats --fast
 
 # Useful for health checks
-chitta_cli stats --fast --json | jq '.ojas.status'
+chittad stats --fast --json | jq '.ojas.status'
 ```
 
 ### Custom Paths
 
 ```bash
 # Use different database
-chitta_cli stats --path /custom/path/chitta
+chittad stats --path /custom/path/chitta
 
 # Specify model explicitly
-chitta_cli recall "query" \
+chittad recall "query" \
   --model /path/to/model.onnx \
   --vocab /path/to/vocab.txt
 ```
@@ -446,7 +446,7 @@ ls -la ~/.claude/mind/model.onnx
 ls -la ~/.claude/mind/vocab.txt
 
 # Or specify paths explicitly
-chitta_cli stats --model /path/to/model.onnx --vocab /path/to/vocab.txt
+chittad stats --model /path/to/model.onnx --vocab /path/to/vocab.txt
 ```
 
 ### "Failed to open mind"
@@ -470,7 +470,7 @@ BM25 index loading takes time for large databases.
 
 ```bash
 # Use --fast for quick operations
-chitta_cli stats --fast
+chittad stats --fast
 
 # Or disable BM25 permanently (hybrid search won't work)
 # Note: Not recommended for regular use

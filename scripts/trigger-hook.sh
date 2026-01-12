@@ -134,7 +134,7 @@ fi
 
 NEURAL_THRESHOLD=0.30
 NEURAL_LIMIT=2
-CLI_BIN="$PLUGIN_DIR/bin/chitta_cli"
+CLI_BIN="$PLUGIN_DIR/bin/chittad"
 
 # Skip neural triggers for short prompts or commands
 if [[ ${#PROMPT} -lt 15 ]] || [[ "$PROMPT_LOWER" =~ ^(yes|no|ok|thanks|done|help|exit|quit|clear|y|n)$ ]]; then

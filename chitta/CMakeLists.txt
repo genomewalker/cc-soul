@@ -122,13 +122,14 @@ if(CHITTA_BUILD_RPC)
     target_link_libraries(chitta_tool PRIVATE chitta)
 endif()
 
-# CLI tool (includes socket server/client for daemon mode)
-add_executable(chitta_cli
+# Daemon/admin tool (includes socket server for daemon mode)
+# Renamed from chitta_cli to chittad for clarity
+add_executable(chittad
     src/cli.cpp
     src/socket_server.cpp
     src/socket_client.cpp
 )
-target_link_libraries(chitta_cli PRIVATE chitta)
+target_link_libraries(chittad PRIVATE chitta)
 
 # Migration tool (from SQLite soul.db)
 find_package(SQLite3)

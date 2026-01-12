@@ -11,7 +11,7 @@ BATCH_SIZE="${1:-50}"
 MIN_LENGTH="${2:-200}"
 
 # Ensure daemon is running
-if ! pgrep -f "chitta_cli daemon" >/dev/null; then
+if ! pgrep -f "chittad daemon" >/dev/null; then
     echo "[yajna] Starting daemon..." >&2
     "${CHITTA}_cli" daemon &
     sleep 2

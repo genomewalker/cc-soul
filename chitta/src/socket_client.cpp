@@ -50,7 +50,7 @@ std::vector<pid_t> find_daemon_pids() {
         }
     }
 
-    // Also check /proc for any chitta_cli daemon processes we might have missed
+    // Also check /proc for any chittad daemon processes we might have missed
     DIR* proc = opendir("/proc");
     if (proc) {
         while (struct dirent* entry = readdir(proc)) {
@@ -70,7 +70,7 @@ std::vector<pid_t> find_daemon_pids() {
             if (cmdline) {
                 std::string cmd;
                 std::getline(cmdline, cmd, '\0');
-                if (cmd.find("chitta_cli") != std::string::npos) {
+                if (cmd.find("chittad") != std::string::npos) {
                     // Check if it's running as daemon
                     std::string full_cmdline;
                     cmdline.seekg(0);
@@ -150,7 +150,7 @@ std::string get_versioned_daemon_path() {
     const char* home = getenv("HOME");
     if (!home) return "";
 
-    std::string path = std::string(home) + "/.claude/bin/chitta_cli";
+    std::string path = std::string(home) + "/.claude/bin/chittad";
     if (access(path.c_str(), X_OK) == 0) {
         return path;
     }

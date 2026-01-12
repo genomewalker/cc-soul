@@ -323,7 +323,7 @@ The key innovation is **transparent memory** — memories that surface automatic
 
 3. **soul-hook.sh extracts message and runs resonance**:
    ```bash
-   chitta_cli resonate "How should I handle rate limiting?" --limit 3
+   chittad resonate "How should I handle rate limiting?" --limit 3
    ```
 
 4. **Output injected into Claude's context**:
@@ -374,7 +374,7 @@ subconscious.sh start
      │
      ├─▶ Check if already running (PID file)
      │
-     ├─▶ Start chitta_cli daemon in background
+     ├─▶ Start chittad daemon in background
      │
      └─▶ Log: "[subconscious] Started (pid=12345)"
 
@@ -524,7 +524,7 @@ Hooks have timeouts. If they're slow:
 
 1. Check if Yantra is ready:
    ```bash
-   chitta_cli stats | grep Yantra
+   chittad stats | grep Yantra
    ```
 
 2. Verify model files:
@@ -534,14 +534,14 @@ Hooks have timeouts. If they're slow:
 
 3. Test CLI directly:
    ```bash
-   chitta_cli resonate "test query"
+   chittad resonate "test query"
    ```
 
 ### Daemon Not Starting
 
 1. Check for existing process:
    ```bash
-   ps aux | grep chitta_cli
+   ps aux | grep chittad
    ```
 
 2. Check PID file:

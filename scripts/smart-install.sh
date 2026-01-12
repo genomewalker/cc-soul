@@ -96,11 +96,13 @@ download_binaries() {
 
     if download "$url" "$tmp_file"; then
         mkdir -p "$BIN_DIR"
+        # Clean old chitta files before extracting
+        rm -f "$BIN_DIR"/chitta* "$BIN_DIR"/lib*.so* 2>/dev/null
         if tar -xzf "$tmp_file" -C "$BIN_DIR" 2>/dev/null; then
             rm -f "$tmp_file"
             # Verify binaries can actually run (check for missing shared libs)
             # The bundled libs should be found via RPATH=$ORIGIN
-            if "$BIN_DIR/chitta_cli" --help >/dev/null 2>&1 && \
+            if "$BIN_DIR/chittad" --help >/dev/null 2>&1 && \
                "$BIN_DIR/chitta_migrate" --help >/dev/null 2>&1; then
                 echo "[cc-soul] Pre-built binaries installed"
                 return 0
@@ -151,7 +153,7 @@ build_from_source() {
 
     # Copy binaries from plugin bin to install location (~/.claude/bin)
     local all_built=true
-    for bin in chitta chitta_cli chitta_migrate chitta_import; do
+    for bin in chitta chittad chitta_migrate chitta_import; do
         if [[ -x "$plugin_bin/$bin" ]]; then
             cp -f "$plugin_bin/$bin" "$BIN_DIR/$bin"
         else
@@ -213,10 +215,10 @@ configure_permissions() {
     # Binaries install to ~/.claude/bin, so we only need those paths
     local perms=(
         'Bash(~/.claude/bin/chitta:*)'
-        'Bash(~/.claude/bin/chitta_cli:*)'
+        'Bash(~/.claude/bin/chittad:*)'
         'Bash(chitta:*)'
-        'Bash(chitta_cli:*)'
-        'Bash(pkill -f "chitta_cli daemon":*)'
+        'Bash(chittad:*)'
+        'Bash(pkill -f "chittad daemon":*)'
     )
 
     # Always use global settings.json
@@ -297,14 +299,14 @@ stop_daemon() {
     fi
 
     # Try via CLI if thin client not available
-    if [[ -x "$BIN_DIR/chitta_cli" ]]; then
-        if "$BIN_DIR/chitta_cli" shutdown 2>/dev/null; then
+    if [[ -x "$BIN_DIR/chittad" ]]; then
+        if "$BIN_DIR/chittad" shutdown 2>/dev/null; then
             return 0
         fi
     fi
 
     # Fallback: find and signal daemon directly
-    local daemon_pid=$(pgrep -f "chitta_cli daemon" 2>/dev/null || true)
+    local daemon_pid=$(pgrep -f "chittad daemon" 2>/dev/null || true)
     if [[ -n "$daemon_pid" ]]; then
         echo "[cc-soul] Stopping daemon (pid $daemon_pid) via signal..."
         kill -TERM "$daemon_pid" 2>/dev/null || true

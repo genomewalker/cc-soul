@@ -8,7 +8,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
 
-CHITTA_CLI="$PLUGIN_DIR/bin/chitta_cli"
+CHITTA_CLI="$PLUGIN_DIR/bin/chittad"
 MIND_PATH="${HOME}/.claude/mind/chitta"
 MODEL_PATH="$PLUGIN_DIR/chitta/models/model.onnx"
 VOCAB_PATH="$PLUGIN_DIR/chitta/models/vocab.txt"
@@ -32,7 +32,7 @@ is_running() {
     fi
 
     # Also check for any running daemon process (covers MCP-spawned daemons)
-    if pgrep -f "chitta_cli daemon" >/dev/null 2>&1; then
+    if pgrep -f "chittad daemon" >/dev/null 2>&1; then
         return 0
     fi
 
@@ -45,14 +45,14 @@ cmd_start() {
         if [[ -f "$PID_FILE" ]]; then
             pid=$(cat "$PID_FILE")
         else
-            pid=$(pgrep -f "chitta_cli daemon" | head -1)
+            pid=$(pgrep -f "chittad daemon" | head -1)
         fi
         echo "[subconscious] Already running (pid=$pid)"
         return 0
     fi
 
     if [[ ! -x "$CHITTA_CLI" ]]; then
-        echo "[subconscious] chitta_cli not found" >&2
+        echo "[subconscious] chittad not found" >&2
         return 1
     fi
 
@@ -76,7 +76,7 @@ cmd_start() {
         if [[ -f "$PID_FILE" ]]; then
             pid=$(cat "$PID_FILE")
         else
-            pid=$(pgrep -f "chitta_cli daemon" | head -1)
+            pid=$(pgrep -f "chittad daemon" | head -1)
         fi
         echo "[subconscious] Already running (started by another process, pid=$pid)"
         exec 200>&-  # Release lock
@@ -113,7 +113,7 @@ cmd_start() {
     exec 200>&-
 
     if $daemon_ready && is_running; then
-        local pid=$(cat "$PID_FILE" 2>/dev/null || pgrep -f "chitta_cli daemon" | head -1)
+        local pid=$(cat "$PID_FILE" 2>/dev/null || pgrep -f "chittad daemon" | head -1)
         echo "[subconscious] Started (pid=$pid, socket=$SOCKET_PATH, heartbeat=ok)"
     else
         echo "[subconscious] Failed to start (daemon not responding)" >&2
@@ -134,7 +134,7 @@ cmd_stop() {
     fi
     # Also find any MCP-spawned daemons
     local other_pids
-    other_pids=$(pgrep -f "chitta_cli daemon" 2>/dev/null || true)
+    other_pids=$(pgrep -f "chittad daemon" 2>/dev/null || true)
     if [[ -n "$other_pids" ]]; then
         pids="$pids $other_pids"
     fi
@@ -170,7 +170,7 @@ cmd_status() {
             pid=$(cat "$PID_FILE")
             echo "[subconscious] Running (pid=$pid, managed)"
         else
-            pid=$(pgrep -f "chitta_cli daemon" | head -1)
+            pid=$(pgrep -f "chittad daemon" | head -1)
             echo "[subconscious] Running (pid=$pid, MCP-spawned)"
         fi
         # Show socket info

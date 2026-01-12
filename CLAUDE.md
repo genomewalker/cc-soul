@@ -535,8 +535,8 @@ cd chitta && cmake --build build --parallel
 
 After rebuilding, update the daemon symlink and restart:
 ```bash
-ln -sf /path/to/cc-soul/bin/chitta_cli ~/.claude/bin/chitta_cli
-pkill -TERM chitta_cli  # Graceful shutdown (saves state)
+ln -sf /path/to/cc-soul/bin/chittad ~/.claude/bin/chittad
+pkill -TERM chittad  # Graceful shutdown (saves state)
 ```
 
 The daemon auto-starts on next tool call.

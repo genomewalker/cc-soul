@@ -239,7 +239,7 @@ Claude: Let me check what I know about this project...
 I have a codemap from 3 days ago (commit abc123):
 
 cc-soul/
-  Entry: bin/chitta_cli, bin/chitta
+  Entry: bin/chittad, bin/chitta
   Config: CMakeLists.txt, plugin.json
 
   chitta/src/

@@ -445,7 +445,7 @@ inline ConversionResult convert_to_unified(const std::string& base_path) {
     }
 
     if (version < 2) {
-        result.error = "Please upgrade to v3 first: chitta_cli upgrade " + hot_path;
+        result.error = "Please upgrade to v3 first: chittad upgrade " + hot_path;
         return result;
     }
 

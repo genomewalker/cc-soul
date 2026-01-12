@@ -1,6 +1,6 @@
 // chitta-cli: Command-line interface for chitta soul operations
 //
-// Usage: chitta_cli <command> [options]
+// Usage: chittad <command> [options]
 //
 // Commands:
 //   stats      Show soul statistics
@@ -63,34 +63,37 @@ std::string generate_stats_json(Mind& mind) {
     return oss.str();
 }
 
+// Get program name from path
+static const char* prog_name(const char* path) {
+    const char* last = path;
+    for (const char* p = path; *p; ++p) {
+        if (*p == '/') last = p + 1;
+    }
+    return last;
+}
+
 void print_usage(const char* prog) {
-    std::cerr << "chitta " << CHITTA_VERSION << "\n\n"
-              << "Usage: " << prog << " <command> [options]\n\n"
-              << "Commands:\n"
-              << "  stats              Show soul statistics\n"
-              << "  recall <query>     Semantic search [--exclude-tag TAG]\n"
-              << "  resonate <query>   Full resonance (all phases)\n"
-              << "  observe            Store observation: --category C --title T --content X\n"
-              << "  grow               Store wisdom: --level L --title T --content X\n"
-              << "  ledger             Save/load ledger: --action save|load [--session S]\n"
-              << "  connect            Create relationship: --from A --rel R --to B\n"
-              << "  query              Query triplets: --subj A --pred R --obj B\n"
-              << "  tag                Manage tags: --id ID --add TAG | --remove TAG\n"
-              << "  cycle              Run maintenance cycle\n"
+    const char* name = prog_name(prog);
+    std::cerr << "chittad " << CHITTA_VERSION << " - Soul administration\n\n"
+              << "Usage: " << name << " <command> [options]\n\n"
+              << "Admin Commands:\n"
+              << "  stats              Show soul statistics (nodes, tau, psi, epsilon)\n"
               << "  daemon             Run subconscious daemon (background processing)\n"
               << "  shutdown           Gracefully stop the running daemon\n"
               << "  status             Check if daemon is running\n"
               << "  upgrade            Upgrade database to current version\n"
-              << "  convert <format>   Convert to new storage format (unified|segments)\n"
+              << "  convert <format>   Convert to storage format (unified|segments)\n"
               << "  help               Show this help\n\n"
-              << "Global options:\n"
+              << "For tool commands (recall, grow, observe, etc.), use:\n"
+              << "  chitta <tool> --help\n\n"
+              << "Options:\n"
               << "  --path PATH        Mind storage path (default: ~/.claude/mind/chitta)\n"
               << "  --json             Output as JSON\n"
               << "  --fast             Skip BM25 loading (for quick stats)\n"
               << "  --interval SECS    Daemon cycle interval (default: 60)\n"
               << "  --pid-file PATH    Write PID to file (for daemon mode)\n"
-              << "  --socket           Enable socket server mode (daemon becomes IPC server)\n"
-              << "  --socket-path PATH Unix socket path (default: /tmp/chitta-VERSION.sock)\n"
+              << "  --socket           Enable socket server mode\n"
+              << "  --socket-path PATH Unix socket path\n"
               << "  -v, --version      Show version\n"
 #ifdef CHITTA_WITH_ONNX
               << "  --model PATH       ONNX model path\n"
@@ -785,7 +788,7 @@ int main(int argc, char* argv[]) {
     // Handle convert command (doesn't need mind.open())
     if (command == "convert") {
         if (format.empty()) {
-            std::cerr << "Usage: chitta_cli convert <format>\n";
+            std::cerr << "Usage: chittad convert <format>\n";
             std::cerr << "Formats: unified, segments\n";
             return 1;
         }
@@ -822,28 +825,6 @@ int main(int argc, char* argv[]) {
     int result = 0;
     if (command == "stats") {
         result = cmd_stats(mind, json_output);
-    } else if (command == "recall") {
-        if (query.empty()) {
-            std::cerr << "Usage: chitta_cli recall <query> [--exclude-tag TAG]\n";
-            result = 1;
-        } else {
-            result = cmd_recall(mind, query, limit, exclude_tag);
-        }
-    } else if (command == "resonate") {
-        if (query.empty()) {
-            std::cerr << "Usage: chitta_cli resonate <query>\n";
-            result = 1;
-        } else {
-            result = cmd_resonate(mind, query, limit, json_output);
-        }
-    } else if (command == "cycle") {
-        result = cmd_cycle(mind);
-    } else if (command == "connect") {
-        result = cmd_connect(mind, conn_from, conn_rel, conn_to, conn_weight);
-    } else if (command == "query") {
-        result = cmd_query(mind, q_subj, q_pred, q_obj, json_output);
-    } else if (command == "tag") {
-        result = cmd_tag(mind, tag_id, tag_add, tag_remove);
     } else if (command == "daemon") {
         if (socket_mode) {
             result = cmd_daemon_with_socket(mind, daemon_interval, pid_file, socket_path);
@@ -859,7 +840,9 @@ int main(int argc, char* argv[]) {
         mind.close();
         return cmd_status(socket_path);
     } else {
+        // Tool commands should use chitta (thin client), not chittad
         std::cerr << "Unknown command: " << command << "\n";
+        std::cerr << "For tool commands, use: chitta " << command << " --help\n\n";
         print_usage(argv[0]);
         result = 1;
     }

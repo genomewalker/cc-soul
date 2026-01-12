@@ -329,7 +329,7 @@ public:
         uint32_t magic = 0;
         if (!read_from_buffer(&magic, sizeof(magic)) || magic != STORAGE_MAGIC) {
             std::cerr << "[HotStorage] Database needs upgrade (v1 detected). "
-                      << "Run 'chitta_cli upgrade " << path << "'\n";
+                      << "Run 'chittad upgrade " << path << "'\n";
             release_lock();
             return false;
         }
@@ -379,7 +379,7 @@ public:
             std::cerr << "[HotStorage] Reading v2 format (no checksum), will upgrade on save\n";
         } else if (version < 2) {
             std::cerr << "[HotStorage] Database version " << version
-                      << " is too old. Run 'chitta_cli upgrade " << path << "'\n";
+                      << " is too old. Run 'chittad upgrade " << path << "'\n";
             release_lock();
             return false;
         }
@@ -872,7 +872,7 @@ public:
             if (version > 0 && version < HotStorage::STORAGE_VERSION) {
                 std::cerr << "[TieredStorage] Database needs upgrade (v" << version
                           << " → v" << HotStorage::STORAGE_VERSION << "). "
-                          << "Run 'chitta_cli upgrade'\n";
+                          << "Run 'chittad upgrade'\n";
                 return false;  // Fail initialization
             }
         }

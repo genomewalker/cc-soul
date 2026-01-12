@@ -210,7 +210,7 @@ cc-soul/
 ├── commands/               # Plugin commands
 ├── bin/                    # Compiled binaries
 │   ├── chitta          # MCP server
-│   ├── chitta_cli          # CLI tool
+│   ├── chittad          # CLI tool
 │   └── ...
 └── docs/                   # Documentation
 ```
@@ -355,7 +355,7 @@ See [docs/API.md](docs/API.md) for complete reference.
 ## CLI Reference
 
 ```bash
-chitta_cli <command> [options]
+chittad <command> [options]
 
 Commands:
   stats              Show soul statistics
@@ -381,19 +381,19 @@ Options:
 
 ```bash
 # Check soul health
-chitta_cli stats
+chittad stats
 
 # Semantic search
-chitta_cli recall "error handling patterns" --limit 10
+chittad recall "error handling patterns" --limit 10
 
 # Full resonance search
-chitta_cli resonate "caching strategies"
+chittad resonate "caching strategies"
 
 # Start subconscious daemon
-chitta_cli daemon --interval 60 --pid-file ~/.claude/mind/.subconscious.pid
+chittad daemon --interval 60 --pid-file ~/.claude/mind/.subconscious.pid
 
 # Run maintenance
-chitta_cli cycle
+chittad cycle
 ```
 
 See [docs/CLI.md](docs/CLI.md) for complete reference.

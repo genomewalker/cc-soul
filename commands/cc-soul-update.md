@@ -30,7 +30,7 @@ PLUGIN_DIR="$HOME/.claude/plugins/marketplaces/genomewalker-cc-soul"
 
 # smart-install handles daemon shutdown gracefully
 bash "$PLUGIN_DIR/scripts/smart-install.sh"
-"$PLUGIN_DIR/bin/chitta_cli" --version
-"$PLUGIN_DIR/bin/chitta_cli" upgrade 2>&1
-"$PLUGIN_DIR/bin/chitta_cli" stats 2>&1 | grep -v "^\["
+"$PLUGIN_DIR/bin/chittad" --version
+"$PLUGIN_DIR/bin/chittad" upgrade 2>&1
+"$PLUGIN_DIR/bin/chittad" stats 2>&1 | grep -v "^\["
 ```

@@ -27,7 +27,7 @@ Build cc-soul binaries from source. Use this when pre-built binaries don't work 
 PLUGIN_DIR="$HOME/.claude/plugins/marketplaces/genomewalker-cc-soul"
 
 # Graceful daemon shutdown before rebuild
-"$PLUGIN_DIR/bin/chitta" shutdown 2>/dev/null || "$PLUGIN_DIR/bin/chitta_cli" shutdown 2>/dev/null || true
+"$PLUGIN_DIR/bin/chitta" shutdown 2>/dev/null || "$PLUGIN_DIR/bin/chittad" shutdown 2>/dev/null || true
 
 # Check cmake before deleting binaries
 if ! command -v cmake &>/dev/null; then
@@ -37,9 +37,9 @@ if ! command -v cmake &>/dev/null; then
 fi
 rm -rf "$PLUGIN_DIR/bin" "$PLUGIN_DIR/chitta/build" 2>/dev/null
 bash "$PLUGIN_DIR/setup.sh"
-"$PLUGIN_DIR/bin/chitta_cli" --version
-"$PLUGIN_DIR/bin/chitta_cli" upgrade 2>&1
-"$PLUGIN_DIR/bin/chitta_cli" stats 2>&1 | grep -v "^\["
+"$PLUGIN_DIR/bin/chittad" --version
+"$PLUGIN_DIR/bin/chittad" upgrade 2>&1
+"$PLUGIN_DIR/bin/chittad" stats 2>&1 | grep -v "^\["
 ```
 
 ## Optional: Convert to Unified Storage
@@ -47,7 +47,7 @@ bash "$PLUGIN_DIR/setup.sh"
 For better performance with tags and CoW snapshots, convert to unified format:
 
 ```bash
-"$PLUGIN_DIR/bin/chitta_cli" convert unified --path ~/.claude/mind/chitta 2>&1
+"$PLUGIN_DIR/bin/chittad" convert unified --path ~/.claude/mind/chitta 2>&1
 ```
 
 This creates `.unified`, `.vectors`, `.meta`, `.connections`, `.payloads`, `.edges`, `.tags` files alongside the existing `.hot` file. A backup is created automatically.
