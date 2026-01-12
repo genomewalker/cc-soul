@@ -6,15 +6,14 @@ description: Check if cc-soul daemon is running
 
 Check the status of the cc-soul daemon (subconscious process).
 
-## Usage
+## What to do
 
-```bash
-/cc-soul-status
-```
+1. Check if the daemon is running using `~/.claude/bin/chittad status`
+2. Report the daemon PID, uptime, and socket path if running
+3. If not running, indicate that and suggest starting it
 
-## Implementation
+## Notes
 
-```bash
-PLUGIN_DIR="$HOME/.claude/plugins/marketplaces/genomewalker-cc-soul"
-"$PLUGIN_DIR/bin/chitta" status 2>&1
-```
+- The daemon runs background processing (decay, synthesis, Hebbian learning)
+- Socket is typically at `/tmp/chitta-$USER.sock`
+- PID file is at `~/.claude/mind/.subconscious.pid`

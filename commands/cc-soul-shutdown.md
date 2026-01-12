@@ -4,17 +4,16 @@ description: Gracefully stop the cc-soul daemon
 
 # /cc-soul-shutdown
 
-Gracefully stop the cc-soul daemon (subconscious process). This saves state before shutting down.
+Gracefully stop the cc-soul daemon (subconscious process).
 
-## Usage
+## What to do
 
-```bash
-/cc-soul-shutdown
-```
+1. Send shutdown command via `~/.claude/bin/chitta shutdown`
+2. This saves state before shutting down
+3. Confirm the daemon has stopped
 
-## Implementation
+## Notes
 
-```bash
-PLUGIN_DIR="$HOME/.claude/plugins/marketplaces/genomewalker-cc-soul"
-"$PLUGIN_DIR/bin/chitta" shutdown 2>&1
-```
+- Graceful shutdown preserves all pending state
+- The daemon will restart automatically on next session
+- Use `pkill -TERM chittad` as fallback if shutdown command fails
