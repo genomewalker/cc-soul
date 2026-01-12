@@ -14,12 +14,7 @@
 
 namespace chitta {
 
-// Forward declare NodeIdHash from graph.hpp
-struct NodeIdHash {
-    size_t operator()(const NodeId& id) const {
-        return std::hash<uint64_t>{}(id.high) ^ (std::hash<uint64_t>{}(id.low) << 1);
-    }
-};
+// NodeIdHash is now defined in types.hpp
 
 // HNSW configuration
 struct HNSWConfig {

@@ -86,6 +86,36 @@ public:
         }
     }
 
+    // Resize the mapped region (only for writable files)
+    bool resize(size_t new_size) {
+        if (fd_ < 0 || new_size == 0) return false;
+        if (new_size == size_) return true;
+
+        // Sync before resize
+        sync();
+
+        // Unmap current region
+        if (data_) {
+            munmap(data_, size_);
+            data_ = nullptr;
+        }
+
+        // Extend file
+        if (ftruncate(fd_, new_size) < 0) {
+            return false;
+        }
+
+        // Remap with new size
+        data_ = mmap(nullptr, new_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd_, 0);
+        if (data_ == MAP_FAILED) {
+            data_ = nullptr;
+            return false;
+        }
+
+        size_ = new_size;
+        return true;
+    }
+
     ~MappedRegion() { close(); }
 
     // Non-copyable

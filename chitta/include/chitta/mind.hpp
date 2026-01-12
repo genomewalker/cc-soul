@@ -11,6 +11,7 @@
 #include "types.hpp"
 #include "graph.hpp"
 #include "graph_store.hpp"
+#include "mmap_graph_store.hpp"
 #include "storage.hpp"
 #include "dynamics.hpp"
 #include "voice.hpp"
@@ -39,6 +40,7 @@ struct MindConfig {
     int64_t checkpoint_interval_ms = 60000;  // 1 minute between checkpoints
     float prune_threshold = 0.1f;        // Confidence below this = prune
     bool skip_bm25 = false;              // Skip BM25 loading for fast stats
+    bool use_mmap_graph = false;         // Use MmapGraphStore for 100M+ scale
 };
 
 // Search result with meaning
@@ -311,14 +313,24 @@ public:
             rebuild_tag_index();
         }
 
-        // Load dictionary-encoded graph store
-        std::string graph_path = storage_.base_path() + ".graph";
-        std::string graph_wal_path = storage_.base_path() + ".graph.wal";
-        if (graph_store_.load(graph_path)) {
-            std::cerr << "[Mind] Loaded graph store (" << graph_store_.triplet_count()
-                      << " triplets, " << graph_store_.entity_count() << " entities)\n";
+        // Load graph store (mmap or legacy based on config)
+        if (config_.use_mmap_graph) {
+            std::string mmap_graph_path = storage_.base_path();
+            if (mmap_graph_store_.open(mmap_graph_path)) {
+                std::cerr << "[Mind] Loaded mmap graph store (" << mmap_graph_store_.triplet_count()
+                          << " triplets, " << mmap_graph_store_.entity_count() << " entities)\n";
+            } else if (mmap_graph_store_.create(mmap_graph_path)) {
+                std::cerr << "[Mind] Created mmap graph store\n";
+            }
+        } else {
+            std::string graph_path = storage_.base_path() + ".graph";
+            std::string graph_wal_path = storage_.base_path() + ".graph.wal";
+            if (graph_store_.load(graph_path)) {
+                std::cerr << "[Mind] Loaded graph store (" << graph_store_.triplet_count()
+                          << " triplets, " << graph_store_.entity_count() << " entities)\n";
+            }
+            graph_store_.open_wal(graph_wal_path);
         }
-        graph_store_.open_wal(graph_wal_path);
 
         // Replay legacy WAL triplets to rebuild old graph edges (backward compat)
         size_t triplet_count = storage_.replay_wal(
@@ -412,8 +424,14 @@ public:
         if (bm25_built_ && !bm25_path_.empty() && bm25_index_.size() > 0) {
             bm25_index_.save(bm25_path_);
         }
-        // Save dictionary-encoded graph store
-        if (graph_store_.triplet_count() > 0) {
+        // Save graph store
+        if (config_.use_mmap_graph) {
+            if (mmap_graph_store_.triplet_count() > 0) {
+                mmap_graph_store_.build_indices();
+                mmap_graph_store_.sync();
+                std::cerr << "[Mind] Saved mmap graph store (" << mmap_graph_store_.triplet_count() << " triplets)\n";
+            }
+        } else if (graph_store_.triplet_count() > 0) {
             std::string graph_path = storage_.base_path() + ".graph";
             if (graph_store_.save(graph_path)) {
                 std::cerr << "[Mind] Saved graph store (" << graph_store_.triplet_count() << " triplets)\n";
@@ -1515,8 +1533,12 @@ public:
     // Add a relationship between concepts (uses dictionary-encoded GraphStore)
     void connect(const std::string& subject, const std::string& predicate,
                  const std::string& object, float weight = 1.0f) {
-        // Add to dictionary-encoded graph store (persists via WAL internally)
-        graph_store_.add(subject, predicate, object, weight);
+        // Add to graph store (mmap or legacy based on config)
+        if (config_.use_mmap_graph) {
+            mmap_graph_store_.add(subject, predicate, object, weight);
+        } else {
+            graph_store_.add(subject, predicate, object, weight);
+        }
 
         // Also maintain legacy graph_ for backward compatibility
         NodeId subj_id = find_or_create_entity(subject);
@@ -1565,13 +1587,22 @@ public:
     query_graph(const std::string& subject = "",
                 const std::string& predicate = "",
                 const std::string& object = "") const {
+        if (config_.use_mmap_graph) {
+            return mmap_graph_store_.query(subject, predicate, object);
+        }
         return graph_store_.query(subject, predicate, object);
     }
 
     // Graph store stats
-    size_t graph_entity_count() const { return graph_store_.entity_count(); }
-    size_t graph_predicate_count() const { return graph_store_.predicate_count(); }
-    size_t graph_triplet_count() const { return graph_store_.triplet_count(); }
+    size_t graph_entity_count() const {
+        return config_.use_mmap_graph ? mmap_graph_store_.entity_count() : graph_store_.entity_count();
+    }
+    size_t graph_predicate_count() const {
+        return config_.use_mmap_graph ? mmap_graph_store_.predicate_count() : graph_store_.predicate_count();
+    }
+    size_t graph_triplet_count() const {
+        return config_.use_mmap_graph ? mmap_graph_store_.triplet_count() : graph_store_.triplet_count();
+    }
 
     // Find entity by name (searches canonical and aliases)
     std::optional<NodeId> find_entity(const std::string& name) const {
@@ -3448,7 +3479,8 @@ public:
     mutable std::mutex mutex_;
     TieredStorage storage_;
     Graph graph_;
-    GraphStore graph_store_;  // Dictionary-encoded graph for 100M+ scale
+    GraphStore graph_store_;  // Dictionary-encoded graph (legacy)
+    MmapGraphStore mmap_graph_store_;  // Mmap-backed graph for 100M+ scale
     Dynamics dynamics_;
     std::shared_ptr<VakYantra> yantra_;
     std::atomic<bool> running_;

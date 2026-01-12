@@ -78,6 +78,15 @@ struct NodeId {
         }
         return id;
     }
+
+    bool valid() const { return high != 0 || low != 0; }
+};
+
+// Hash function for NodeId (for use in unordered containers)
+struct NodeIdHash {
+    size_t operator()(const NodeId& id) const {
+        return std::hash<uint64_t>{}(id.high) ^ (std::hash<uint64_t>{}(id.low) << 1);
+    }
 };
 
 // Semantic vector - the meaning of a node

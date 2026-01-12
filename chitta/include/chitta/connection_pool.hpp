@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <vector>
 #include <atomic>
+#include <functional>
 
 namespace chitta {
 
@@ -70,11 +71,13 @@ struct FreeBlock {
 
 class ConnectionPool {
 public:
-    static constexpr size_t INITIAL_SIZE = 64 * 1024 * 1024;  // 64MB initial
-    static constexpr size_t GROWTH_FACTOR = 2;
-    static constexpr size_t MAX_SIZE = 16ULL * 1024 * 1024 * 1024;  // 16GB max
+    static constexpr size_t DEFAULT_INITIAL_SIZE = 64 * 1024 * 1024;  // 64MB initial
+    static constexpr size_t DEFAULT_MAX_SIZE = 256ULL * 1024 * 1024 * 1024;  // 256GB max (was 16GB)
+    static constexpr double GROWTH_FACTOR = 1.5;  // Less aggressive than 2x for large pools
 
-    ConnectionPool() = default;
+    // Configurable limits
+    ConnectionPool(size_t max_size = DEFAULT_MAX_SIZE)
+        : max_size_(max_size) {}
     ~ConnectionPool() { close(); }
 
     // Prevent copying
@@ -92,7 +95,7 @@ public:
         // Estimate size: ~256 bytes per node average (32 connections × 8 bytes)
         size_t estimated_size = sizeof(ConnectionPoolHeader) +
                                 estimated_nodes * 256;
-        estimated_size = std::max(estimated_size, INITIAL_SIZE);
+        estimated_size = std::max(estimated_size, DEFAULT_INITIAL_SIZE);
 
         if (!region_.create(path, estimated_size)) {
             return false;
@@ -394,6 +397,124 @@ public:
         return total > 0 ? static_cast<float>(used_bytes()) / total : 0.0f;
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // Compaction (defragmentation)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Callback to update external slot→offset mappings after compaction
+    using OffsetUpdateCallback = std::function<void(uint32_t slot_id, uint64_t old_offset, uint64_t new_offset)>;
+
+    // Compact the pool by eliminating gaps from deleted records
+    // Returns bytes reclaimed, or 0 if compaction not needed/failed
+    // The callback is invoked for each record that moved, allowing callers to update their mappings
+    size_t compact(OffsetUpdateCallback on_moved = nullptr) {
+        if (!region_.valid()) return 0;
+
+        auto* header = region_.as<ConnectionPoolHeader>();
+
+        // Skip if pool is already efficient (< 20% fragmentation)
+        float frag = fragmentation();
+        if (frag < 0.2f) {
+            return 0;
+        }
+
+        std::cerr << "[ConnectionPool] Compacting (fragmentation=" << (frag * 100) << "%)\n";
+
+        // Scan all records, copy live ones to compacted buffer
+        std::vector<uint8_t> compacted;
+        compacted.reserve(header->used_bytes);
+
+        // Copy header space
+        compacted.resize(sizeof(ConnectionPoolHeader));
+
+        uint64_t read_pos = sizeof(ConnectionPoolHeader);
+        size_t live_count = 0;
+        size_t bytes_reclaimed = 0;
+
+        while (read_pos < write_pos_) {
+            auto* record = region_.at<const ConnectionRecord>(read_pos);
+
+            // Calculate record size
+            size_t record_size = sizeof(ConnectionRecord);
+            const uint8_t* data = reinterpret_cast<const uint8_t*>(record) + sizeof(ConnectionRecord);
+            for (uint8_t l = 0; l < record->level_count; ++l) {
+                uint16_t edge_count = *reinterpret_cast<const uint16_t*>(data);
+                data += sizeof(uint16_t) + edge_count * sizeof(ConnectionEdge);
+                record_size += sizeof(uint16_t) + edge_count * sizeof(ConnectionEdge);
+            }
+            record_size = (record_size + 7) & ~7ULL;  // Align
+
+            if (record->flags & 0x01) {
+                // Deleted - skip
+                bytes_reclaimed += record_size;
+            } else {
+                // Live - copy to new position
+                uint64_t new_offset = compacted.size();
+                compacted.insert(compacted.end(),
+                                 region_.at<uint8_t>(read_pos),
+                                 region_.at<uint8_t>(read_pos) + record_size);
+
+                // Notify caller of moved record
+                if (on_moved && new_offset != read_pos) {
+                    on_moved(record->slot_id, read_pos, new_offset);
+                }
+
+                live_count++;
+            }
+
+            read_pos += record_size;
+        }
+
+        if (bytes_reclaimed == 0) return 0;
+
+        // Copy compacted data back to mmap
+        std::memcpy(region_.as<void>(), compacted.data(), compacted.size());
+
+        // Update header
+        header = region_.as<ConnectionPoolHeader>();
+        header->used_bytes = compacted.size();
+        header->node_count = live_count;
+        header->free_list_head = 0;  // Free list cleared after compaction
+
+        write_pos_ = compacted.size();
+
+        std::cerr << "[ConnectionPool] Compacted: reclaimed " << bytes_reclaimed
+                  << " bytes, " << live_count << " live records\n";
+
+        return bytes_reclaimed;
+    }
+
+    // Estimate fragmentation ratio (deleted bytes / used bytes)
+    float fragmentation() const {
+        if (!region_.valid()) return 0.0f;
+
+        auto* header = region_.as<const ConnectionPoolHeader>();
+        uint64_t read_pos = sizeof(ConnectionPoolHeader);
+        size_t deleted_bytes = 0;
+
+        while (read_pos < write_pos_) {
+            auto* record = region_.at<const ConnectionRecord>(read_pos);
+
+            size_t record_size = sizeof(ConnectionRecord);
+            const uint8_t* data = reinterpret_cast<const uint8_t*>(record) + sizeof(ConnectionRecord);
+            for (uint8_t l = 0; l < record->level_count; ++l) {
+                uint16_t edge_count = *reinterpret_cast<const uint16_t*>(data);
+                data += sizeof(uint16_t) + edge_count * sizeof(ConnectionEdge);
+                record_size += sizeof(uint16_t) + edge_count * sizeof(ConnectionEdge);
+            }
+            record_size = (record_size + 7) & ~7ULL;
+
+            if (record->flags & 0x01) {
+                deleted_bytes += record_size;
+            }
+
+            read_pos += record_size;
+        }
+
+        size_t total = header->used_bytes - sizeof(ConnectionPoolHeader);
+        return total > 0 ? static_cast<float>(deleted_bytes) / total : 0.0f;
+    }
+
 private:
     // Allocate new space at end of pool, growing if needed
     uint64_t allocate_new(size_t size) {
@@ -538,41 +659,36 @@ private:
         header->free_list_head = offset;
     }
 
-    // Grow the pool file
+    // Grow the pool file using exponential growth with min 25% increase
     bool grow(size_t needed) {
         auto* header = region_.as<ConnectionPoolHeader>();
         size_t current = header->total_bytes;
-        size_t new_size = current * GROWTH_FACTOR;
 
-        // Ensure we have enough
+        // Exponential growth with minimum 25% increase
+        size_t new_size = static_cast<size_t>(current * GROWTH_FACTOR);
+        new_size = std::max(new_size, current + current / 4);  // At least 25% growth
+
+        // Ensure we have enough for the requested allocation
         while (new_size < write_pos_ + needed) {
-            new_size *= GROWTH_FACTOR;
+            new_size = static_cast<size_t>(new_size * GROWTH_FACTOR);
         }
 
-        if (new_size > MAX_SIZE) {
-            std::cerr << "[ConnectionPool] Cannot grow beyond " << MAX_SIZE << " bytes\n";
+        // Round up to 64MB boundary for better memory alignment
+        constexpr size_t ALIGN_SIZE = 64ULL * 1024 * 1024;
+        new_size = (new_size + ALIGN_SIZE - 1) & ~(ALIGN_SIZE - 1);
+
+        if (new_size > max_size_) {
+            std::cerr << "[ConnectionPool] Cannot grow beyond " << max_size_ << " bytes\n";
             return false;
         }
 
-        // Close and reopen with new size
-        sync();
-        region_.close();
-
-        // Resize the file
-        int fd = ::open(path_.c_str(), O_RDWR);
-        if (fd < 0) return false;
-        if (ftruncate(fd, new_size) < 0) {
-            ::close(fd);
-            return false;
-        }
-        ::close(fd);
-
-        // Reopen with write access
-        if (!region_.open(path_, false)) {  // false = not readonly
+        // Use MappedRegion's resize (handles sync, unmap, truncate, remap)
+        if (!region_.resize(new_size)) {
+            std::cerr << "[ConnectionPool] Failed to resize to " << new_size << " bytes\n";
             return false;
         }
 
-        // Update header
+        // Update header after remap
         header = region_.as<ConnectionPoolHeader>();
         header->total_bytes = new_size;
 
@@ -590,6 +706,7 @@ private:
     std::string path_;
     MappedRegion region_;
     uint64_t write_pos_ = 0;
+    size_t max_size_ = DEFAULT_MAX_SIZE;
 };
 
 } // namespace chitta

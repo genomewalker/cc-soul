@@ -1,5 +1,17 @@
 #include <chitta/chitta.hpp>
 #include <chitta/segment_manager.hpp>
+#include <chitta/query_router.hpp>
+#include <chitta/quota_manager.hpp>
+#include <chitta/utility_decay.hpp>
+#include <chitta/provenance.hpp>
+#include <chitta/truth_maintenance.hpp>
+#include <chitta/realm_scoping.hpp>
+#include <chitta/synthesis_queue.hpp>
+#include <chitta/attractor_dampener.hpp>
+#include <chitta/eval_harness.hpp>
+#include <chitta/epiplexity_test.hpp>
+#include <chitta/review_queue.hpp>
+#include <chitta/gap_inquiry.hpp>
 #include <iostream>
 #include <cassert>
 #include <cmath>
@@ -1522,6 +1534,596 @@ void test_hebbian_learning() {
     std::cout << "  PASS" << std::endl;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Phase 7: 100M Scale Component Tests
+// ═══════════════════════════════════════════════════════════════════════════
+
+void test_query_router() {
+    std::cout << "Testing QueryRouter..." << std::endl;
+
+    QueryRouter router;
+
+    // Triplet lookup pattern
+    auto result1 = router.route("what supports memory?");
+    assert(result1.intent == QueryIntent::TripletLookup || result1.intent == QueryIntent::Hybrid);
+
+    // Tag filter pattern
+    auto result2 = router.route("topic:ai type:wisdom");
+    assert(result2.intent == QueryIntent::TagFilter || result2.intent == QueryIntent::Hybrid);
+
+    // Semantic search pattern
+    auto result3 = router.route("how does machine learning work?");
+    assert(result3.intent == QueryIntent::SemanticSearch || result3.intent == QueryIntent::Hybrid);
+
+    // Exact match pattern
+    auto result4 = router.route("\"exact phrase match\"");
+    assert(result4.intent == QueryIntent::ExactMatch || result4.intent == QueryIntent::Hybrid);
+
+    std::cout << "  PASS" << std::endl;
+}
+
+void test_quota_manager() {
+    std::cout << "Testing QuotaManager..." << std::endl;
+
+    QuotaManager manager(1000);  // 1000 node capacity
+
+    // Set custom quota
+    manager.set_quota(NodeType::Episode, 0.3f, 10, 1.5f);  // 30% max, 10 reserved
+    manager.set_quota(NodeType::Wisdom, 0.5f, 20, 0.5f);   // 50% max, 20 reserved
+
+    // Update counts
+    std::unordered_map<NodeType, size_t> counts;
+    counts[NodeType::Episode] = 100;
+    counts[NodeType::Wisdom] = 200;
+    manager.update_counts(counts);
+
+    // Check stats
+    auto stats = manager.get_stats();
+    assert(stats.size() >= 2);
+
+    // Check if over quota
+    assert(!manager.is_over_quota(NodeType::Episode));  // 100 < 300 (30% of 1000)
+
+    // Get eviction candidates (need actual nodes)
+    std::vector<Node> nodes;
+    Node n1(NodeType::Episode, test_vector(1.0f));
+    n1.kappa.mu = 0.3f;
+    nodes.push_back(n1);
+
+    Node n2(NodeType::Episode, test_vector(2.0f));
+    n2.kappa.mu = 0.9f;
+    nodes.push_back(n2);
+
+    auto candidates = manager.get_eviction_candidates(nodes, NodeType::Episode, 1, 1000);
+    assert(candidates.size() <= 1);
+
+    std::cout << "  PASS" << std::endl;
+}
+
+void test_utility_decay() {
+    std::cout << "Testing UtilityDecay..." << std::endl;
+
+    DecayConfig config;
+    config.wisdom_base_delta = 0.02f;
+    config.episode_base_delta = 0.10f;
+
+    UtilityDecay decay(config);
+
+    NodeId id = NodeId::generate();
+    decay.record_recall(id, 0.8f, 1000);
+    decay.record_recall(id, 0.9f, 2000);
+    decay.record_recall(id, 0.7f, 3000);
+    decay.record_feedback(id, true);
+
+    // Check usage stats
+    auto* stats = decay.get_stats(id);
+    assert(stats != nullptr);
+    assert(stats->recall_count == 3);
+    assert(stats->positive_feedback == 1);
+
+    // Calculate effective delta for a node
+    Node node(NodeType::Wisdom, test_vector(1.0f));
+    node.id = id;
+    float effective = decay.effective_delta(node);
+    assert(effective > 0.0f);
+    assert(effective <= config.wisdom_base_delta);  // Should be reduced due to recalls
+
+    // Test survival probability (static method)
+    float survival = UtilityDecay::survival_probability(0.05f, 10000);
+    assert(survival > 0.0f && survival <= 1.0f);
+
+    // Test persistence
+    std::system("rm -f /tmp/chitta_utility_decay_test");
+    assert(decay.save("/tmp/chitta_utility_decay_test"));
+
+    UtilityDecay decay2(config);
+    assert(decay2.load("/tmp/chitta_utility_decay_test"));
+    auto* stats2 = decay2.get_stats(id);
+    assert(stats2 != nullptr);
+    assert(stats2->recall_count == 3);
+
+    std::cout << "  PASS" << std::endl;
+}
+
+void test_provenance() {
+    std::cout << "Testing ProvenanceSpine..." << std::endl;
+
+    ProvenanceSpine spine;
+
+    NodeId id = NodeId::generate();
+    Provenance prov;
+    prov.source = ProvenanceSource::UserInput;
+    prov.session_id = "session-123";
+    prov.tool_name = "observe";
+    prov.user_id = "user-456";
+    prov.created_at = 1000;
+    prov.trust_score = 0.9f;
+
+    spine.record(id, prov);
+
+    auto* retrieved = spine.get(id);
+    assert(retrieved != nullptr);
+    assert(retrieved->source == ProvenanceSource::UserInput);
+    assert(retrieved->session_id == "session-123");
+
+    // Trust filter
+    TrustConfig trust_config;
+    trust_config.min_trust = 0.5f;
+    assert(spine.passes_trust_filter(id, trust_config));
+
+    // Effective trust
+    float trust = spine.effective_trust(id, 0.8f);
+    assert(trust > 0.0f && trust <= 1.0f);
+
+    // Filter by trust
+    std::vector<NodeId> ids = {id, NodeId::generate()};
+    auto filtered = spine.filter_by_trust(ids, trust_config);
+    assert(filtered.size() >= 1);
+
+    // Persistence
+    std::system("rm -f /tmp/chitta_provenance_test");
+    assert(spine.save("/tmp/chitta_provenance_test"));
+
+    ProvenanceSpine spine2;
+    assert(spine2.load("/tmp/chitta_provenance_test"));
+    assert(spine2.get(id) != nullptr);
+
+    std::cout << "  PASS" << std::endl;
+}
+
+void test_truth_maintenance() {
+    std::cout << "Testing TruthMaintenance..." << std::endl;
+
+    TruthMaintenance tm;
+
+    NodeId id1 = NodeId::generate();
+    NodeId id2 = NodeId::generate();
+    NodeId id3 = NodeId::generate();
+    NodeId resolution = NodeId::generate();
+
+    // Add a contradiction
+    tm.add_contradiction(id1, id2, "Conflicting statements about X", 0.8f, 1000);
+
+    // Check for contradictions
+    assert(tm.has_conflicts(id1));
+    assert(tm.has_conflicts(id2));
+    assert(!tm.has_conflicts(id3));
+
+    auto conflicts = tm.get_conflicts(id1);
+    assert(conflicts.size() == 1);
+    assert(conflicts[0].node_a == id1 || conflicts[0].node_b == id1);
+
+    // Resolve contradiction
+    tm.resolve(id1, id2, id1, resolution, "Resolved by preferring first", 2000);
+
+    auto resolved = tm.get_conflicts(id1);
+    assert(resolved.size() == 1);
+    assert(resolved[0].status == ContradictionStatus::Resolved);
+    assert(resolved[0].resolution_node == resolution);
+
+    // Persistence
+    std::system("rm -f /tmp/chitta_truth_test");
+    assert(tm.save("/tmp/chitta_truth_test"));
+
+    TruthMaintenance tm2;
+    assert(tm2.load("/tmp/chitta_truth_test"));
+    assert(tm2.has_conflicts(id1));
+
+    std::cout << "  PASS" << std::endl;
+}
+
+void test_realm_scoping() {
+    std::cout << "Testing RealmScoping..." << std::endl;
+
+    RealmScoping realms;
+
+    // Create realms
+    realms.create_realm("project-1", "brahman");
+    realms.create_realm("project-2", "brahman");
+
+    // Create RealmId references
+    RealmId project1;
+    project1.name = "project-1";
+    project1.parent = "brahman";
+
+    RealmId project2;
+    project2.name = "project-2";
+    project2.parent = "brahman";
+
+    // Scope nodes
+    NodeId node1 = NodeId::generate();
+    NodeId node2 = NodeId::generate();
+
+    realms.assign(node1, project1, RealmVisibility::Private, 1000);
+    realms.assign(node2, project2, RealmVisibility::Private, 1000);
+
+    // Check visibility in project-1
+    realms.set_current_realm("project-1");
+    assert(realms.is_visible(node1));  // Own node
+    assert(!realms.is_visible(node2)); // Other realm's node
+
+    // Check visibility in project-2
+    realms.set_current_realm("project-2");
+    assert(!realms.is_visible(node1));
+    assert(realms.is_visible(node2));
+
+    // Make node global
+    realms.make_global(node1);
+    assert(realms.is_visible(node1));  // Now visible everywhere
+
+    // Filter by realm
+    realms.set_current_realm("project-1");
+    std::vector<NodeId> all_nodes = {node1, node2};
+    auto visible = realms.filter_by_realm(all_nodes);
+    assert(visible.size() >= 1);  // node1 (global) visible
+
+    std::cout << "  PASS" << std::endl;
+}
+
+void test_synthesis_queue() {
+    std::cout << "Testing SynthesisQueue..." << std::endl;
+
+    PromotionCriteria criteria;
+    criteria.min_quarantine_ms = 1000;
+    criteria.min_evidence_score = 1.0f;
+    criteria.min_recall_count = 1;
+    criteria.require_user_approval = false;
+    criteria.require_episode_support = false;
+
+    SynthesisQueue queue(criteria);
+
+    NodeId id = NodeId::generate();
+    queue.stage(id, "Synthesized wisdom content", 1000);
+
+    // Should be pending initially
+    auto* staged = queue.get(id);
+    assert(staged != nullptr);
+    assert(staged->status == StagingStatus::Pending);
+
+    // Add evidence
+    Evidence ev1;
+    ev1.type = Evidence::Type::EpisodeSupport;
+    ev1.source = NodeId::generate();
+    ev1.added_at = 1500;
+    ev1.weight = 0.6f;
+    queue.add_evidence(id, ev1);
+
+    Evidence ev2;
+    ev2.type = Evidence::Type::UserApproval;
+    ev2.added_at = 1600;
+    ev2.weight = 1.0f;
+    queue.add_evidence(id, ev2);
+
+    // Record recall
+    queue.record_recall(id);
+
+    // Not ready yet (not enough time)
+    assert(!queue.ready_for_promotion(id, 1500));
+
+    // After quarantine period (need enough time)
+    // With min_quarantine_ms=1000, need at least 2000 timestamp
+    assert(queue.ready_for_promotion(id, 3000));
+
+    // Promote
+    queue.promote(id, 3000);
+    staged = queue.get(id);
+    assert(staged->status == StagingStatus::Promoted);
+
+    std::cout << "  PASS" << std::endl;
+}
+
+void test_attractor_dampener() {
+    std::cout << "Testing AttractorDampener..." << std::endl;
+
+    DampenerConfig config;
+    config.over_retrieval_threshold = 3;
+    config.over_retrieval_penalty = 0.1f;
+    config.retrieval_window_ms = 10000;
+
+    AttractorDampener dampener(config);
+
+    NodeId id = NodeId::generate();
+    Timestamp now = 5000;
+
+    // Record retrievals (exceeding threshold)
+    for (int i = 0; i < 5; ++i) {
+        dampener.record_retrieval(id, 0.8f, now - i * 100);
+    }
+
+    // Dampening factor should be reduced for over-retrieved node
+    float factor = dampener.dampening_factor(id, now);
+    assert(factor < 1.0f);
+
+    // Node with no history should have factor 1.0
+    NodeId fresh = NodeId::generate();
+    assert(dampener.dampening_factor(fresh, now) == 1.0f);
+
+    // Dampen results
+    std::vector<std::pair<NodeId, float>> results = {
+        {id, 0.9f},
+        {fresh, 0.8f}
+    };
+    auto dampened = dampener.dampen_results(results, now);
+    assert(dampened.size() == 2);
+    // Fresh node should now rank higher due to dampening of over-retrieved
+    assert(dampened[0].first == fresh || dampened[0].second >= dampened[1].second);
+
+    // Hebbian factor diminishes with updates
+    assert(dampener.hebbian_factor(0) > dampener.hebbian_factor(1));
+    assert(dampener.hebbian_factor(config.max_hebbian_updates_per_query) == 0.0f);
+
+    std::cout << "  PASS" << std::endl;
+}
+
+void test_eval_harness() {
+    std::cout << "Testing EvalHarness..." << std::endl;
+
+    EvalHarness harness;
+
+    // Create a golden test case
+    GoldenTestCase test;
+    test.name = "ml-basics";
+    test.query = "machine learning";
+    test.k = 5;
+
+    ExpectedResult exp1;
+    exp1.id = NodeId::generate();
+    exp1.required = true;
+    exp1.max_rank = 3;
+    test.expected.push_back(exp1);
+
+    ExpectedResult exp2;
+    exp2.id = NodeId::generate();
+    exp2.required = false;
+    exp2.max_rank = 5;
+    test.expected.push_back(exp2);
+
+    harness.add_test(test);
+
+    // Mock recall function that returns partial results
+    auto recall_fn = [&](const std::string& query, const std::vector<std::string>& tags, size_t k) {
+        std::vector<std::pair<NodeId, float>> results;
+        results.push_back({exp1.id, 0.9f});  // Return first expected
+        results.push_back({NodeId::generate(), 0.7f});  // Some other node
+        return results;
+    };
+
+    auto result = harness.evaluate("ml-basics", recall_fn);
+    assert(result.precision > 0.0f);  // At least one correct
+    assert(result.recall > 0.0f);     // At least one found
+
+    // Check test names
+    auto names = harness.test_names();
+    assert(names.size() == 1);
+    assert(names[0] == "ml-basics");
+
+    // Test persistence
+    std::system("rm -f /tmp/chitta_eval_test");
+    assert(harness.save("/tmp/chitta_eval_test"));
+
+    EvalHarness harness2;
+    assert(harness2.load("/tmp/chitta_eval_test"));
+    assert(harness2.test_names().size() == 1);
+
+    std::cout << "  PASS" << std::endl;
+}
+
+void test_epiplexity() {
+    std::cout << "Testing EpiplexityTest..." << std::endl;
+
+    EpiplexityConfig config;
+    config.pass_threshold = 0.7f;
+    config.alert_threshold = 0.5f;
+
+    EpiplexityTest epix(config);
+
+    // Mock reconstruction function (returns similar text)
+    auto reconstruct = [](const std::string& seed) -> std::string {
+        return "Reconstructed: " + seed + " with additional context";
+    };
+
+    // Mock similarity function
+    auto similarity = [](const std::string& a, const std::string& b) -> float {
+        // Simple overlap measure
+        size_t common = 0;
+        for (char c : a) {
+            if (b.find(c) != std::string::npos) common++;
+        }
+        return static_cast<float>(common) / std::max(a.size(), b.size());
+    };
+
+    NodeId id = NodeId::generate();
+    std::string seed = "memory→decay→confidence";
+    std::string original = "Memory nodes decay over time, reducing confidence";
+
+    auto result = epix.test_node(id, seed, original, reconstruct, similarity, 1000);
+
+    assert(result.epsilon > 0.0f);
+    assert(!result.reconstructed.empty());
+
+    // Test batch stats
+    std::vector<ReconstructionResult> results = {result};
+    auto stats = epix.get_stats(results);
+    assert(stats.total == 1);
+    assert(stats.avg_epsilon > 0.0f);
+
+    std::cout << "  PASS" << std::endl;
+}
+
+void test_review_queue() {
+    std::cout << "Testing ReviewQueue..." << std::endl;
+
+    ReviewQueue queue;
+
+    NodeId id1 = NodeId::generate();
+    NodeId id2 = NodeId::generate();
+
+    queue.enqueue(id1, NodeType::Wisdom, "First wisdom", "Auto-synthesized", ReviewPriority::High, 1000);
+    queue.enqueue(id2, NodeType::Wisdom, "Second wisdom", "User submitted", ReviewPriority::Normal, 2000);
+
+    // Get next (should be high priority first)
+    auto next = queue.next();
+    assert(next != nullptr);
+    assert(next->id == id1);
+
+    // Approve first
+    queue.approve(id1, "Looks good", 4.5f, 3000);
+
+    // Approve with edits
+    queue.approve_with_edits(id2, "Edited content", "Minor fix", 4.0f, 4000);
+
+    // Stats
+    auto stats = queue.get_stats();
+    assert(stats.approved == 1);
+    assert(stats.edited == 1);
+    assert(stats.pending == 0);
+
+    // Persistence
+    std::system("rm -f /tmp/chitta_review_test");
+    assert(queue.save("/tmp/chitta_review_test"));
+
+    ReviewQueue queue2;
+    assert(queue2.load("/tmp/chitta_review_test"));
+    assert(queue2.total_count() == 2);
+
+    std::cout << "  PASS" << std::endl;
+}
+
+void test_gap_inquiry() {
+    std::cout << "Testing GapInquiry..." << std::endl;
+
+    GapInquiryConfig config;
+    config.recall_threshold = 2;
+    config.max_active_gaps = 100;
+
+    GapInquiry inquiry(config);
+
+    NodeId gap_id = NodeId::generate();
+    inquiry.register_gap(gap_id, "Authentication", "How does OAuth work?", "Needed for API integration", GapImportance::High, 1000);
+
+    // Record encounters
+    inquiry.record_encounter(gap_id);
+    inquiry.record_encounter(gap_id);
+    inquiry.record_encounter(gap_id);
+
+    // Should be ready to ask now
+    assert(inquiry.ready_to_ask(gap_id, 2000));
+
+    // Get next to ask
+    auto next = inquiry.next_to_ask(2000);
+    assert(next != nullptr);
+    assert(next->id == gap_id);
+
+    // Mark as asked
+    inquiry.mark_asked(gap_id, 2000);
+
+    auto gap = inquiry.get(gap_id);
+    assert(gap != nullptr);
+    assert(gap->status == GapStatus::Pending);
+
+    // Provide answer
+    NodeId answer_id = NodeId::generate();
+    inquiry.answer(gap_id, answer_id, "OAuth uses tokens for...", 3000);
+
+    gap = inquiry.get(gap_id);
+    assert(gap->status == GapStatus::Answered);
+
+    // Stats
+    auto stats = inquiry.get_stats();
+    assert(stats.answered == 1);
+
+    // Persistence
+    std::system("rm -f /tmp/chitta_gap_test");
+    assert(inquiry.save("/tmp/chitta_gap_test"));
+
+    GapInquiry inquiry2(config);
+    assert(inquiry2.load("/tmp/chitta_gap_test"));
+    assert(inquiry2.count() == 1);
+
+    std::cout << "  PASS" << std::endl;
+}
+
+void test_scale_10k() {
+    std::cout << "Testing Scale (10K nodes)..." << std::endl;
+
+    std::system("rm -f /tmp/chitta_scale_10k /tmp/chitta_scale_10k.*");
+
+    MindConfig config;
+    config.path = "/tmp/chitta_scale_10k";
+
+    Mind mind(config);
+    if (!mind.open()) {
+        std::cout << "  SKIP (cannot open mind in /tmp)" << std::endl;
+        return;
+    }
+
+    const int N = 10000;
+
+    // Insert
+    auto insert_start = std::chrono::high_resolution_clock::now();
+    std::vector<NodeId> ids;
+    for (int i = 0; i < N; ++i) {
+        NodeId id = mind.remember(NodeType::Wisdom, test_vector(static_cast<float>(i)));
+        ids.push_back(id);
+    }
+    auto insert_end = std::chrono::high_resolution_clock::now();
+    auto insert_ms = std::chrono::duration_cast<std::chrono::milliseconds>(insert_end - insert_start).count();
+
+    std::cout << "    Insert " << N << " nodes: " << insert_ms << " ms ("
+              << (N * 1000 / std::max(1L, insert_ms)) << " ops/s)" << std::endl;
+
+    assert(mind.size() == static_cast<size_t>(N));
+
+    // Search
+    auto search_start = std::chrono::high_resolution_clock::now();
+    const int SEARCHES = 100;
+    for (int i = 0; i < SEARCHES; ++i) {
+        auto results = mind.recall(test_vector(static_cast<float>(i * 100)), 10, 0.5f);
+    }
+    auto search_end = std::chrono::high_resolution_clock::now();
+    auto search_us = std::chrono::duration_cast<std::chrono::microseconds>(search_end - search_start).count();
+
+    std::cout << "    Search " << SEARCHES << " queries: " << search_us << " us ("
+              << (search_us / SEARCHES) << " us/query)" << std::endl;
+
+    // Lookup
+    auto lookup_start = std::chrono::high_resolution_clock::now();
+    const int LOOKUPS = 1000;
+    for (int i = 0; i < LOOKUPS; ++i) {
+        auto node = mind.get(ids[i % N]);
+        assert(node.has_value());
+    }
+    auto lookup_end = std::chrono::high_resolution_clock::now();
+    auto lookup_us = std::chrono::duration_cast<std::chrono::microseconds>(lookup_end - lookup_start).count();
+
+    std::cout << "    Lookup " << LOOKUPS << " nodes: " << lookup_us << " us ("
+              << (lookup_us / LOOKUPS) << " us/lookup)" << std::endl;
+
+    mind.close();
+
+    std::cout << "  PASS" << std::endl;
+}
+
 #ifdef CHITTA_WITH_ONNX
 void test_resonate() {
     std::cout << "Testing Resonate..." << std::endl;
@@ -1646,6 +2248,25 @@ int main() {
     std::cout << std::endl;
     std::cout << "=== Phase 6: Hebbian Learning Tests ===" << std::endl;
     test_hebbian_learning();
+
+    std::cout << std::endl;
+    std::cout << "=== Phase 7: 100M Scale Component Tests ===" << std::endl;
+    test_query_router();
+    test_quota_manager();
+    test_utility_decay();
+    test_provenance();
+    test_truth_maintenance();
+    test_realm_scoping();
+    test_synthesis_queue();
+    test_attractor_dampener();
+    test_eval_harness();
+    test_epiplexity();
+    test_review_queue();
+    test_gap_inquiry();
+
+    std::cout << std::endl;
+    std::cout << "=== Scale Benchmarks ===" << std::endl;
+    test_scale_10k();
 
 #ifdef CHITTA_WITH_ONNX
     std::cout << std::endl;

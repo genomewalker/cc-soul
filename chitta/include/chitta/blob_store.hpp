@@ -32,8 +32,8 @@ static_assert(sizeof(BlobStoreHeader) == 64, "BlobStoreHeader must be 64 bytes")
 class BlobStore {
 public:
     static constexpr size_t INITIAL_SIZE = 16 * 1024 * 1024;  // 16MB
-    static constexpr size_t GROWTH_FACTOR = 2;
-    static constexpr size_t MAX_SIZE = 4ULL * 1024 * 1024 * 1024;  // 4GB
+    static constexpr double GROWTH_FACTOR = 1.5;  // Less aggressive for large stores
+    static constexpr size_t MAX_SIZE = 256ULL * 1024 * 1024 * 1024;  // 256GB (was 4GB)
 
     BlobStore() = default;
     ~BlobStore() { close(); }
@@ -194,25 +194,23 @@ private:
     bool grow() {
         auto* header = region_.as<BlobStoreHeader>();
         size_t current = header->total_bytes;
-        size_t new_size = current * GROWTH_FACTOR;
+        size_t new_size = static_cast<size_t>(current * GROWTH_FACTOR);
+
+        // At least 25% growth
+        new_size = std::max(new_size, current + current / 4);
+
+        // Round up to 16MB boundary for better performance
+        constexpr size_t ALIGN_SIZE = 16ULL * 1024 * 1024;
+        new_size = (new_size + ALIGN_SIZE - 1) & ~(ALIGN_SIZE - 1);
 
         if (new_size > MAX_SIZE) {
             std::cerr << "[BlobStore] Cannot grow beyond " << MAX_SIZE << " bytes\n";
             return false;
         }
 
-        sync();
-        region_.close();
-
-        int fd = ::open(path_.c_str(), O_RDWR);
-        if (fd < 0) return false;
-        if (ftruncate(fd, new_size) < 0) {
-            ::close(fd);
-            return false;
-        }
-        ::close(fd);
-
-        if (!region_.open(path_)) {
+        // Use MappedRegion's resize (handles sync, unmap, truncate, remap)
+        if (!region_.resize(new_size)) {
+            std::cerr << "[BlobStore] Failed to resize to " << new_size << " bytes\n";
             return false;
         }
 

@@ -39,7 +39,7 @@ namespace chitta {
 // ═══════════════════════════════════════════════════════════════════════════
 
 constexpr uint32_t UNIFIED_MAGIC = 0x554E4946;  // "UNIF"
-constexpr uint32_t UNIFIED_VERSION = 1;
+constexpr uint32_t UNIFIED_VERSION = 2;  // v2: 64-bit offsets in NodeMeta (80 bytes, was 64)
 
 // Slot-based node identifier (replaces pointer indirection)
 struct SlotId {
@@ -387,22 +387,23 @@ public:
             tags_.save();  // Persist immediately for crash safety
         }
 
-        // Write metadata
+        // Write metadata (v2: 64-bit offsets)
         auto* metas = meta_region_.as<NodeMeta>();
         metas[slot.value] = NodeMeta{
             id,
             node.tau_created,
             node.tau_accessed,
+            static_cast<uint64_t>(slot.value),  // vector_offset
+            static_cast<uint64_t>(payload_offset),
+            static_cast<uint64_t>(edge_offset),
             node.kappa.mu,
             node.kappa.sigma_sq,
             node.delta,
-            slot.value,       // vector_offset (same as slot for now)
-            payload_offset,   // payload_offset
-            payload_size,     // payload_size
-            edge_offset,      // edge_offset
+            payload_size,
             node.node_type,
             StorageTier::Hot,
-            0                 // flags
+            0,                // flags
+            0                 // reserved
         };
 
         // Create empty connections (will be populated during HNSW insert)
@@ -647,13 +648,14 @@ public:
         return results;
     }
 
-    // Two-stage search: binary first-pass, int8 rerank
-    // For large scale: binary vectors fit in memory (48 bytes vs 392 bytes)
+    // Two-stage search: HNSW first-pass with larger ef, then int8 rerank
+    // O(log N) complexity via HNSW instead of O(N) binary scan
+    // For 100M+ scale: first pass retrieves candidates, second pass refines
     std::vector<std::pair<SlotId, float>> search_two_stage(
         const QuantizedVector& query, size_t k, size_t first_pass_k = 0) const
     {
-        if (!has_binary_ || count() < 10000) {
-            // Fall back to regular HNSW for small datasets
+        // For small datasets, regular search is sufficient
+        if (count() < 1000) {
             return search(query, k);
         }
 
@@ -662,15 +664,35 @@ public:
         auto* header = index_region_.as<const UnifiedIndexHeader>();
         if (header->node_count == 0) return {};
 
-        if (first_pass_k == 0) first_pass_k = std::max(k * 10, size_t(1000));
+        // First pass: HNSW with larger ef_search for more candidates
+        // Rule of thumb: retrieve 10x candidates for reranking
+        if (first_pass_k == 0) first_pass_k = std::max(k * 10, size_t(100));
 
-        // First pass: brute-force binary search (fast due to popcount)
-        BinaryVector bin_query = BinaryVector::from_quantized(query);
-        auto candidates = search_binary_brute(bin_query, first_pass_k);
+        // Use HNSW search with higher ef for better recall in first pass
+        size_t ef_first_pass = std::max(first_pass_k * 2, size_t(200));
 
-        // Second pass: rerank with int8 cosine
+        // Get entry point and search
+        SlotId entry_point(header->entry_point_slot);
+        if (!entry_point.valid()) return {};
+
+        // Search from top to bottom layers
+        SlotId current = entry_point;
+        for (int level = static_cast<int>(header->max_level); level > 0; --level) {
+            current = search_layer_greedy(query, current, level);
+        }
+
+        // Search layer 0 with expanded ef for first pass
+        auto candidates = search_layer(query, current, 0, ef_first_pass);
+
+        // Limit to first_pass_k candidates
+        if (candidates.size() > first_pass_k) {
+            candidates.resize(first_pass_k);
+        }
+
+        // Second pass: rerank with full int8 cosine similarity
         auto* vectors = vectors_region_.as<const QuantizedVector>();
         for (auto& [slot, score] : candidates) {
+            // Use exact int8 cosine for better precision
             score = vectors[slot.value].cosine_approx(query);
         }
 
@@ -687,6 +709,9 @@ public:
     }
 
     // Binary brute-force search (Hamming distance)
+    // DEPRECATED for large scale - use HNSW-based search_two_stage instead
+    // Kept for small datasets (<10K) where O(N) is acceptable
+    // TODO: Replace with IVF-PQ for very large scale (>10M nodes)
     std::vector<std::pair<SlotId, float>> search_binary_brute(
         const BinaryVector& query, size_t k) const
     {

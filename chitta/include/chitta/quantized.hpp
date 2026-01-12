@@ -150,21 +150,24 @@ enum class StorageTier : uint8_t {
     Cold = 2   // disk, no vectors, re-embed on access
 };
 
-// Node metadata for storage
+// Node metadata for storage (v2: 64-bit offsets for 100M+ scale)
 struct NodeMeta {
     NodeId id;                    // 16 bytes
     Timestamp tau_created;        // 8 bytes
     Timestamp tau_accessed;       // 8 bytes
+    uint64_t vector_offset;       // 8 bytes (offset in vector store, was 32-bit)
+    uint64_t payload_offset;      // 8 bytes (offset in payload store, was 32-bit)
+    uint64_t edge_offset;         // 8 bytes (offset in edge store, was 32-bit)
     float confidence_mu;          // 4 bytes
     float confidence_sigma;       // 4 bytes
     float decay_rate;             // 4 bytes
-    uint32_t vector_offset;       // 4 bytes (offset in vector store)
-    uint32_t payload_offset;      // 4 bytes (offset in payload store)
     uint32_t payload_size;        // 4 bytes
-    uint32_t edge_offset;         // 4 bytes
     NodeType node_type;           // 1 byte
     StorageTier tier;             // 1 byte
     uint16_t flags;               // 2 bytes
+    uint32_t reserved;            // 4 bytes padding for alignment
 };
+
+static_assert(sizeof(NodeMeta) == 80, "NodeMeta must be 80 bytes");
 
 } // namespace chitta
