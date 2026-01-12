@@ -49,7 +49,7 @@ jobs:
       - name: Verify binaries
         run: |
           ls -la bin/
-          for bin in chitta chitta_cli chitta_migrate chitta_import chitta_test; do
+          for bin in chitta chittad chitta_migrate chitta_import chitta_test; do
             test -x bin/$bin || { echo "Missing: $bin"; exit 1; }
           done
 
@@ -73,7 +73,7 @@ jobs:
           fi
           # Verify all binaries have portable library deps
           echo "Verifying library dependencies..."
-          for bin in chitta_cli chitta chitta_migrate chitta_import chitta_test; do
+          for bin in chittad chitta chitta_migrate chitta_import chitta_test; do
             echo "=== $bin ==="
             ldd bin/$bin | grep -E '(not found|/opt/_internal)' && { echo "ERROR: $bin has non-portable deps"; exit 1; } || true
           done
@@ -132,7 +132,7 @@ jobs:
       - name: Verify binaries
         run: |
           ls -la bin/
-          for bin in chitta chitta_cli chitta_migrate chitta_import chitta_test; do
+          for bin in chitta chittad chitta_migrate chitta_import chitta_test; do
             test -x bin/$bin || { echo "Missing: $bin"; exit 1; }
           done
 
