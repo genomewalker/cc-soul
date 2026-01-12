@@ -1122,6 +1122,46 @@ private:
         });
         handlers_["review_stats"] = [this](const json& params) { return tool_review_stats(params); };
 
+        // Tool: review_batch - Batch review mode for multiple items
+        tools_.push_back({
+            "review_batch",
+            "Batch review mode: make the same decision on multiple items at once. "
+            "Use for quickly approving or rejecting similar items. "
+            "Returns summary of processed items.",
+            {
+                {"type", "object"},
+                {"properties", {
+                    {"decision", {
+                        {"type", "string"},
+                        {"enum", {"approve", "reject", "defer"}},
+                        {"description", "Decision to apply to all items"}
+                    }},
+                    {"ids", {
+                        {"type", "array"},
+                        {"items", {{"type", "string"}}},
+                        {"description", "Node IDs to process (empty = all pending, up to limit)"}
+                    }},
+                    {"limit", {
+                        {"type", "integer"},
+                        {"default", 10},
+                        {"description", "Max items to process if ids not specified"}
+                    }},
+                    {"comment", {
+                        {"type", "string"},
+                        {"description", "Comment to apply to all decisions"}
+                    }},
+                    {"quality_rating", {
+                        {"type", "number"},
+                        {"minimum", 0},
+                        {"maximum", 5},
+                        {"description", "Quality rating for approvals (0-5)"}
+                    }}
+                }},
+                {"required", {"decision"}}
+            }
+        });
+        handlers_["review_batch"] = [this](const json& params) { return tool_review_batch(params); };
+
         // Tool: epiplexity_check - Check compression quality
         tools_.push_back({
             "epiplexity_check",
@@ -1163,6 +1203,60 @@ private:
             }
         });
         handlers_["epiplexity_drift"] = [this](const json& params) { return tool_epiplexity_drift(params); };
+
+        // Tool: realm_get - Get current realm context
+        tools_.push_back({
+            "realm_get",
+            "Get the current realm context. Realms gate which nodes are visible during recall. "
+            "Returns the current realm name and available realms.",
+            {
+                {"type", "object"},
+                {"properties", json::object()},
+                {"required", json::array()}
+            }
+        });
+        handlers_["realm_get"] = [this](const json& params) { return tool_realm_get(params); };
+
+        // Tool: realm_set - Set current realm context
+        tools_.push_back({
+            "realm_set",
+            "Set the current realm context. Only nodes scoped to this realm (or global) will be visible. "
+            "Realm context persists across sessions.",
+            {
+                {"type", "object"},
+                {"properties", {
+                    {"realm", {
+                        {"type", "string"},
+                        {"description", "Realm name to switch to (e.g., 'project:cc-soul', 'user:alice')"}
+                    }}
+                }},
+                {"required", {"realm"}}
+            }
+        });
+        handlers_["realm_set"] = [this](const json& params) { return tool_realm_set(params); };
+
+        // Tool: realm_create - Create a new realm
+        tools_.push_back({
+            "realm_create",
+            "Create a new realm. Realms can have parent realms for hierarchical visibility. "
+            "Root realm is 'brahman' (global visibility).",
+            {
+                {"type", "object"},
+                {"properties", {
+                    {"name", {
+                        {"type", "string"},
+                        {"description", "Realm name (e.g., 'project:my-project', 'user:alice')"}
+                    }},
+                    {"parent", {
+                        {"type", "string"},
+                        {"default", "brahman"},
+                        {"description", "Parent realm for inheritance (default: brahman)"}
+                    }}
+                }},
+                {"required", {"name"}}
+            }
+        });
+        handlers_["realm_create"] = [this](const json& params) { return tool_realm_create(params); };
     }
 
     json handle_request(const json& request) {
@@ -3915,6 +4009,59 @@ private:
         }};
     }
 
+    ToolResult tool_review_batch(const json& params) {
+        std::string decision = params.at("decision");
+        auto ids_json = params.value("ids", json::array());
+        size_t limit = params.value("limit", 10);
+        std::string comment = params.value("comment", "Batch decision");
+        float quality_rating = params.value("quality_rating", 3.0f);
+
+        auto& queue = mind_->review_queue();
+        Timestamp current = mind_->now();
+
+        // Get items to process
+        std::vector<NodeId> ids;
+        if (ids_json.empty()) {
+            // Get pending items up to limit
+            auto items = queue.get_batch(limit);
+            for (const auto& item : items) {
+                ids.push_back(item.id);
+            }
+        } else {
+            // Use specified IDs
+            for (const auto& id_str : ids_json) {
+                ids.push_back(NodeId::from_string(id_str.get<std::string>()));
+            }
+        }
+
+        // Apply decision to all
+        size_t processed = 0;
+        for (const auto& id : ids) {
+            if (decision == "approve") {
+                queue.approve(id, comment, quality_rating, current);
+            } else if (decision == "reject") {
+                queue.reject(id, comment, current);
+            } else if (decision == "defer") {
+                queue.defer(id, comment);
+            }
+            processed++;
+        }
+
+        std::ostringstream ss;
+        ss << "=== Batch Review Complete ===\n";
+        ss << "Decision: " << decision << "\n";
+        ss << "Processed: " << processed << " items\n";
+        if (!comment.empty() && comment != "Batch decision") {
+            ss << "Comment: " << comment << "\n";
+        }
+
+        return {false, ss.str(), {
+            {"decision", decision},
+            {"processed", processed},
+            {"ids", ids_json.empty() ? json(ids.size()) : ids_json}
+        }};
+    }
+
     ToolResult tool_epiplexity_check(const json& params) {
         auto node_ids = params.value("node_ids", json::array());
         size_t sample_size = params.value("sample_size", 10);
@@ -4027,6 +4174,62 @@ private:
             {"current_avg", analysis.current_avg},
             {"change", analysis.change},
             {"message", analysis.message}
+        }};
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Realm Tools
+    // ═══════════════════════════════════════════════════════════════════
+
+    ToolResult tool_realm_get(const json& /*params*/) {
+        std::string current = mind_->current_realm();
+
+        std::ostringstream ss;
+        ss << "Current realm: " << current << "\n";
+        ss << "(Realm context persists across sessions)\n";
+
+        return {false, ss.str(), {
+            {"current_realm", current}
+        }};
+    }
+
+    ToolResult tool_realm_set(const json& params) {
+        std::string realm = params.value("realm", "");
+        if (realm.empty()) {
+            return {true, "realm parameter required", {}};
+        }
+
+        std::string old_realm = mind_->current_realm();
+        mind_->set_realm(realm);
+        std::string new_realm = mind_->current_realm();
+
+        std::ostringstream ss;
+        ss << "Realm changed: " << old_realm << " -> " << new_realm << "\n";
+        ss << "(Realm context will persist across sessions)\n";
+
+        return {false, ss.str(), {
+            {"old_realm", old_realm},
+            {"new_realm", new_realm}
+        }};
+    }
+
+    ToolResult tool_realm_create(const json& params) {
+        std::string name = params.value("name", "");
+        std::string parent = params.value("parent", "brahman");
+
+        if (name.empty()) {
+            return {true, "name parameter required", {}};
+        }
+
+        mind_->create_realm(name, parent);
+
+        std::ostringstream ss;
+        ss << "Created realm: " << name << "\n";
+        ss << "Parent: " << parent << "\n";
+
+        return {false, ss.str(), {
+            {"name", name},
+            {"parent", parent}
         }};
     }
 

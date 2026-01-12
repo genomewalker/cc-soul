@@ -391,6 +391,9 @@ public:
         // Build Phase 2 indexes (reverse edges, temporal, LSH)
         rebuild_phase2_indexes();
 
+        // Phase 7: Load component state
+        load_phase7_state();
+
         return true;
     }
 
@@ -484,6 +487,99 @@ public:
             }
         }
         storage_.sync();
+
+        // Phase 7: Save component state
+        save_phase7_state();
+    }
+
+    // Save Phase 7 component state to disk
+    void save_phase7_state() {
+        std::string base = storage_.base_path();
+
+        if (config_.enable_utility_decay && utility_decay_.tracked_nodes() > 0) {
+            if (utility_decay_.save(base + ".utility_decay")) {
+                std::cerr << "[Mind] Saved utility decay (" << utility_decay_.tracked_nodes() << " nodes)\n";
+            }
+        }
+
+        if (config_.enable_attractor_dampener && attractor_dampener_.tracked_count() > 0) {
+            if (attractor_dampener_.save(base + ".attractor_dampener")) {
+                std::cerr << "[Mind] Saved attractor dampener (" << attractor_dampener_.tracked_count() << " nodes)\n";
+            }
+        }
+
+        if (config_.enable_provenance && provenance_spine_.count() > 0) {
+            if (provenance_spine_.save(base + ".provenance")) {
+                std::cerr << "[Mind] Saved provenance spine (" << provenance_spine_.count() << " nodes)\n";
+            }
+        }
+
+        if (config_.enable_realm_scoping && realm_scoping_.scoped_node_count() > 0) {
+            if (realm_scoping_.save(base + ".realm_scoping")) {
+                std::cerr << "[Mind] Saved realm scoping (" << realm_scoping_.scoped_node_count() << " nodes)\n";
+            }
+        }
+
+        if (config_.enable_truth_maintenance && truth_maintenance_.total_contradictions() > 0) {
+            if (truth_maintenance_.save(base + ".truth_maintenance")) {
+                std::cerr << "[Mind] Saved truth maintenance (" << truth_maintenance_.total_contradictions() << " contradictions)\n";
+            }
+        }
+
+        if (synthesis_queue_.staged_count() > 0) {
+            if (synthesis_queue_.save(base + ".synthesis_queue")) {
+                std::cerr << "[Mind] Saved synthesis queue (" << synthesis_queue_.staged_count() << " staged)\n";
+            }
+        }
+
+        if (gap_inquiry_.count() > 0) {
+            if (gap_inquiry_.save(base + ".gap_inquiry")) {
+                std::cerr << "[Mind] Saved gap inquiry (" << gap_inquiry_.count() << " gaps)\n";
+            }
+        }
+    }
+
+    // Load Phase 7 component state from disk
+    void load_phase7_state() {
+        std::string base = storage_.base_path();
+
+        if (config_.enable_utility_decay) {
+            if (utility_decay_.load(base + ".utility_decay")) {
+                std::cerr << "[Mind] Loaded utility decay (" << utility_decay_.tracked_nodes() << " nodes)\n";
+            }
+        }
+
+        if (config_.enable_attractor_dampener) {
+            if (attractor_dampener_.load(base + ".attractor_dampener")) {
+                std::cerr << "[Mind] Loaded attractor dampener (" << attractor_dampener_.tracked_count() << " nodes)\n";
+            }
+        }
+
+        if (config_.enable_provenance) {
+            if (provenance_spine_.load(base + ".provenance")) {
+                std::cerr << "[Mind] Loaded provenance spine (" << provenance_spine_.count() << " nodes)\n";
+            }
+        }
+
+        if (config_.enable_realm_scoping) {
+            if (realm_scoping_.load(base + ".realm_scoping")) {
+                std::cerr << "[Mind] Loaded realm scoping (" << realm_scoping_.scoped_node_count() << " nodes)\n";
+            }
+        }
+
+        if (config_.enable_truth_maintenance) {
+            if (truth_maintenance_.load(base + ".truth_maintenance")) {
+                std::cerr << "[Mind] Loaded truth maintenance (" << truth_maintenance_.total_contradictions() << " contradictions)\n";
+            }
+        }
+
+        if (synthesis_queue_.load(base + ".synthesis_queue")) {
+            std::cerr << "[Mind] Loaded synthesis queue (" << synthesis_queue_.staged_count() << " staged)\n";
+        }
+
+        if (gap_inquiry_.load(base + ".gap_inquiry")) {
+            std::cerr << "[Mind] Loaded gap inquiry (" << gap_inquiry_.count() << " gaps)\n";
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════

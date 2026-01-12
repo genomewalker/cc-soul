@@ -229,9 +229,9 @@ Workload: 10-50 QPS burst, 100-1000 inserts/day
 10. ~~WAL delete entries for proper node removal~~
 11. ~~Full eviction in `maybe_evict_for_quota()`~~
 
-### Nice to Have (Future)
-- Persistence for UtilityDecay, AttractorDampener state
-- Persistence for ProvenanceSpine, RealmScoping, TruthMaintenance state
-- Persistence for SynthesisQueue, GapInquiry state
-- Cross-session realm context
-- Batch review CLI mode
+### Nice to Have [DONE]
+- ~~Persistence for UtilityDecay, AttractorDampener state~~
+- ~~Persistence for ProvenanceSpine, RealmScoping, TruthMaintenance state~~
+- ~~Persistence for SynthesisQueue, GapInquiry state~~
+- ~~Cross-session realm context~~ (RPC: `realm_get`, `realm_set`, `realm_create`)
+- ~~Batch review CLI mode~~ (RPC: `review_batch`)

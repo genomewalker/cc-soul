@@ -202,6 +202,89 @@ public:
     const DampenerConfig& config() const { return config_; }
     void set_config(const DampenerConfig& c) { config_ = c; }
 
+    // Persistence
+    bool save(const std::string& path) const {
+        FILE* f = fopen(path.c_str(), "wb");
+        if (!f) return false;
+
+        uint32_t magic = 0x41545244;  // "ATRD"
+        uint32_t version = 1;
+        uint64_t count = history_.size();
+
+        fwrite(&magic, sizeof(magic), 1, f);
+        fwrite(&version, sizeof(version), 1, f);
+        fwrite(&count, sizeof(count), 1, f);
+
+        for (const auto& [id, hist] : history_) {
+            fwrite(&id.high, sizeof(id.high), 1, f);
+            fwrite(&id.low, sizeof(id.low), 1, f);
+            fwrite(&hist.total_count, sizeof(hist.total_count), 1, f);
+            fwrite(&hist.cumulative_score, sizeof(hist.cumulative_score), 1, f);
+
+            // Save recent timestamps (limit to 100 most recent)
+            size_t ts_count = std::min(hist.timestamps.size(), size_t(100));
+            uint16_t ts_count_16 = static_cast<uint16_t>(ts_count);
+            fwrite(&ts_count_16, sizeof(ts_count_16), 1, f);
+
+            // Write most recent timestamps
+            size_t start = hist.timestamps.size() > 100 ? hist.timestamps.size() - 100 : 0;
+            for (size_t i = start; i < hist.timestamps.size(); ++i) {
+                fwrite(&hist.timestamps[i], sizeof(Timestamp), 1, f);
+            }
+        }
+
+        fclose(f);
+        return true;
+    }
+
+    bool load(const std::string& path) {
+        FILE* f = fopen(path.c_str(), "rb");
+        if (!f) return false;
+
+        uint32_t magic, version;
+        uint64_t count;
+
+        if (fread(&magic, sizeof(magic), 1, f) != 1 || magic != 0x41545244 ||
+            fread(&version, sizeof(version), 1, f) != 1 || version != 1 ||
+            fread(&count, sizeof(count), 1, f) != 1 || count > 100000000) {
+            fclose(f);
+            return false;
+        }
+
+        history_.clear();
+        for (uint64_t i = 0; i < count; ++i) {
+            NodeId id;
+            RetrievalHistory hist;
+
+            if (fread(&id.high, sizeof(id.high), 1, f) != 1 ||
+                fread(&id.low, sizeof(id.low), 1, f) != 1 ||
+                fread(&hist.total_count, sizeof(hist.total_count), 1, f) != 1 ||
+                fread(&hist.cumulative_score, sizeof(hist.cumulative_score), 1, f) != 1) {
+                fclose(f);
+                return false;
+            }
+
+            uint16_t ts_count;
+            if (fread(&ts_count, sizeof(ts_count), 1, f) != 1 || ts_count > 100) {
+                fclose(f);
+                return false;
+            }
+
+            hist.timestamps.resize(ts_count);
+            for (uint16_t j = 0; j < ts_count; ++j) {
+                if (fread(&hist.timestamps[j], sizeof(Timestamp), 1, f) != 1) {
+                    fclose(f);
+                    return false;
+                }
+            }
+
+            history_[id] = hist;
+        }
+
+        fclose(f);
+        return true;
+    }
+
 private:
     DampenerConfig config_;
     std::unordered_map<NodeId, RetrievalHistory, NodeIdHash> history_;
