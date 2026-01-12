@@ -2090,7 +2090,7 @@ void test_scale_10k() {
     auto insert_ms = std::chrono::duration_cast<std::chrono::milliseconds>(insert_end - insert_start).count();
 
     std::cout << "    Insert " << N << " nodes: " << insert_ms << " ms ("
-              << (N * 1000 / std::max(1L, insert_ms)) << " ops/s)" << std::endl;
+              << (N * 1000 / std::max(static_cast<decltype(insert_ms)>(1), insert_ms)) << " ops/s)" << std::endl;
 
     assert(mind.size() == static_cast<size_t>(N));
 
