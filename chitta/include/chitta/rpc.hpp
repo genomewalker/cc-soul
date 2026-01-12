@@ -3966,21 +3966,45 @@ private:
         auto& queue = mind_->review_queue();
         Timestamp current = mind_->now();
 
+        // Calculate confidence delta based on decision and quality rating
+        float q = std::clamp(quality_rating, 0.0f, 5.0f);
+        float conf_delta = 0.0f;
+
         if (decision == "approve") {
             queue.approve(id, comment, quality_rating, current);
+            // Boost confidence: quality 3 = neutral, 5 = +0.1, 0 = -0.15
+            conf_delta = (q > 0.0f) ? (q - 3.0f) * 0.05f : 0.05f;
+            mind_->strengthen(id, std::max(0.0f, conf_delta));
         } else if (decision == "reject") {
             queue.reject(id, comment, current);
+            // Penalize confidence
+            conf_delta = -std::max(0.1f, (3.0f - q) * 0.07f);
+            mind_->weaken(id, -conf_delta);  // weaken takes positive delta
         } else if (decision == "edit") {
             queue.approve_with_edits(id, edited_content, comment, quality_rating, current);
+            // Update content if provided
+            if (!edited_content.empty()) {
+                mind_->update_content(id, edited_content);
+            }
+            // Treat as approval
+            conf_delta = (q > 0.0f) ? (q - 3.0f) * 0.05f : 0.05f;
+            mind_->strengthen(id, std::max(0.0f, conf_delta));
         } else if (decision == "defer") {
             queue.defer(id, comment);
+            // No confidence change for defer
         } else {
             return {true, "Invalid decision: " + decision, json()};
         }
 
+        // Update provenance trust (smaller magnitude than confidence)
+        if (conf_delta != 0.0f) {
+            mind_->update_provenance_trust(id, conf_delta * 0.5f);
+        }
+
         return {false, "Review decision recorded: " + decision + " for " + id_str.substr(0, 8), {
             {"id", id_str},
-            {"decision", decision}
+            {"decision", decision},
+            {"confidence_delta", conf_delta}
         }};
     }
 

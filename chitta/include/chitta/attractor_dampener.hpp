@@ -202,39 +202,36 @@ public:
     const DampenerConfig& config() const { return config_; }
     void set_config(const DampenerConfig& c) { config_ = c; }
 
-    // Persistence
+    // Persistence (atomic: write temp → fsync → rename)
     bool save(const std::string& path) const {
-        FILE* f = fopen(path.c_str(), "wb");
-        if (!f) return false;
+        return safe_save(path, [this](FILE* f) {
+            uint32_t magic = 0x41545244;  // "ATRD"
+            uint32_t version = 1;
+            uint64_t count = history_.size();
 
-        uint32_t magic = 0x41545244;  // "ATRD"
-        uint32_t version = 1;
-        uint64_t count = history_.size();
+            if (fwrite(&magic, sizeof(magic), 1, f) != 1) return false;
+            if (fwrite(&version, sizeof(version), 1, f) != 1) return false;
+            if (fwrite(&count, sizeof(count), 1, f) != 1) return false;
 
-        fwrite(&magic, sizeof(magic), 1, f);
-        fwrite(&version, sizeof(version), 1, f);
-        fwrite(&count, sizeof(count), 1, f);
+            for (const auto& [id, hist] : history_) {
+                if (fwrite(&id.high, sizeof(id.high), 1, f) != 1) return false;
+                if (fwrite(&id.low, sizeof(id.low), 1, f) != 1) return false;
+                if (fwrite(&hist.total_count, sizeof(hist.total_count), 1, f) != 1) return false;
+                if (fwrite(&hist.cumulative_score, sizeof(hist.cumulative_score), 1, f) != 1) return false;
 
-        for (const auto& [id, hist] : history_) {
-            fwrite(&id.high, sizeof(id.high), 1, f);
-            fwrite(&id.low, sizeof(id.low), 1, f);
-            fwrite(&hist.total_count, sizeof(hist.total_count), 1, f);
-            fwrite(&hist.cumulative_score, sizeof(hist.cumulative_score), 1, f);
+                // Save recent timestamps (limit to 100 most recent)
+                size_t ts_count = std::min(hist.timestamps.size(), size_t(100));
+                uint16_t ts_count_16 = static_cast<uint16_t>(ts_count);
+                if (fwrite(&ts_count_16, sizeof(ts_count_16), 1, f) != 1) return false;
 
-            // Save recent timestamps (limit to 100 most recent)
-            size_t ts_count = std::min(hist.timestamps.size(), size_t(100));
-            uint16_t ts_count_16 = static_cast<uint16_t>(ts_count);
-            fwrite(&ts_count_16, sizeof(ts_count_16), 1, f);
-
-            // Write most recent timestamps
-            size_t start = hist.timestamps.size() > 100 ? hist.timestamps.size() - 100 : 0;
-            for (size_t i = start; i < hist.timestamps.size(); ++i) {
-                fwrite(&hist.timestamps[i], sizeof(Timestamp), 1, f);
+                // Write most recent timestamps
+                size_t start = hist.timestamps.size() > 100 ? hist.timestamps.size() - 100 : 0;
+                for (size_t i = start; i < hist.timestamps.size(); ++i) {
+                    if (fwrite(&hist.timestamps[i], sizeof(Timestamp), 1, f) != 1) return false;
+                }
             }
-        }
-
-        fclose(f);
-        return true;
+            return true;
+        });
     }
 
     bool load(const std::string& path) {

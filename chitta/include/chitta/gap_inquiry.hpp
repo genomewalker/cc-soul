@@ -282,53 +282,51 @@ public:
     const GapInquiryConfig& config() const { return config_; }
     void set_config(const GapInquiryConfig& c) { config_ = c; }
 
-    // Persistence
+    // Persistence (atomic: write temp → fsync → rename)
     bool save(const std::string& path) const {
-        FILE* f = fopen(path.c_str(), "wb");
-        if (!f) return false;
+        return safe_save(path, [this](FILE* f) {
+            uint32_t magic = 0x47415049;  // "GAPI"
+            uint32_t version = 1;
+            uint64_t count = gaps_.size();
 
-        uint32_t magic = 0x47415049;  // "GAPI"
-        uint32_t version = 1;
-        uint64_t count = gaps_.size();
+            if (fwrite(&magic, sizeof(magic), 1, f) != 1) return false;
+            if (fwrite(&version, sizeof(version), 1, f) != 1) return false;
+            if (fwrite(&count, sizeof(count), 1, f) != 1) return false;
 
-        fwrite(&magic, sizeof(magic), 1, f);
-        fwrite(&version, sizeof(version), 1, f);
-        fwrite(&count, sizeof(count), 1, f);
+            for (const auto& [id, gap] : gaps_) {
+                if (fwrite(&id.high, sizeof(id.high), 1, f) != 1) return false;
+                if (fwrite(&id.low, sizeof(id.low), 1, f) != 1) return false;
+                if (fwrite(&gap.importance, sizeof(gap.importance), 1, f) != 1) return false;
+                if (fwrite(&gap.status, sizeof(gap.status), 1, f) != 1) return false;
+                if (fwrite(&gap.detected_at, sizeof(gap.detected_at), 1, f) != 1) return false;
+                if (fwrite(&gap.asked_at, sizeof(gap.asked_at), 1, f) != 1) return false;
+                if (fwrite(&gap.answered_at, sizeof(gap.answered_at), 1, f) != 1) return false;
+                if (fwrite(&gap.ask_count, sizeof(gap.ask_count), 1, f) != 1) return false;
+                if (fwrite(&gap.recall_count, sizeof(gap.recall_count), 1, f) != 1) return false;
+                if (fwrite(&gap.answer_node.high, sizeof(gap.answer_node.high), 1, f) != 1) return false;
+                if (fwrite(&gap.answer_node.low, sizeof(gap.answer_node.low), 1, f) != 1) return false;
 
-        for (const auto& [id, gap] : gaps_) {
-            fwrite(&id.high, sizeof(id.high), 1, f);
-            fwrite(&id.low, sizeof(id.low), 1, f);
-            fwrite(&gap.importance, sizeof(gap.importance), 1, f);
-            fwrite(&gap.status, sizeof(gap.status), 1, f);
-            fwrite(&gap.detected_at, sizeof(gap.detected_at), 1, f);
-            fwrite(&gap.asked_at, sizeof(gap.asked_at), 1, f);
-            fwrite(&gap.answered_at, sizeof(gap.answered_at), 1, f);
-            fwrite(&gap.ask_count, sizeof(gap.ask_count), 1, f);
-            fwrite(&gap.recall_count, sizeof(gap.recall_count), 1, f);
-            fwrite(&gap.answer_node.high, sizeof(gap.answer_node.high), 1, f);
-            fwrite(&gap.answer_node.low, sizeof(gap.answer_node.low), 1, f);
+                auto write_string = [f](const std::string& s) -> bool {
+                    uint16_t len = static_cast<uint16_t>(std::min(s.size(), size_t(65535)));
+                    if (fwrite(&len, sizeof(len), 1, f) != 1) return false;
+                    if (fwrite(s.data(), 1, len, f) != len) return false;
+                    return true;
+                };
 
-            auto write_string = [f](const std::string& s) {
-                uint16_t len = static_cast<uint16_t>(std::min(s.size(), size_t(65535)));
-                fwrite(&len, sizeof(len), 1, f);
-                fwrite(s.data(), 1, len, f);
-            };
+                if (!write_string(gap.topic)) return false;
+                if (!write_string(gap.question)) return false;
+                if (!write_string(gap.context)) return false;
+                if (!write_string(gap.answer_preview)) return false;
 
-            write_string(gap.topic);
-            write_string(gap.question);
-            write_string(gap.context);
-            write_string(gap.answer_preview);
-
-            uint16_t rel_count = static_cast<uint16_t>(gap.related_nodes.size());
-            fwrite(&rel_count, sizeof(rel_count), 1, f);
-            for (const auto& rel : gap.related_nodes) {
-                fwrite(&rel.high, sizeof(rel.high), 1, f);
-                fwrite(&rel.low, sizeof(rel.low), 1, f);
+                uint16_t rel_count = static_cast<uint16_t>(gap.related_nodes.size());
+                if (fwrite(&rel_count, sizeof(rel_count), 1, f) != 1) return false;
+                for (const auto& rel : gap.related_nodes) {
+                    if (fwrite(&rel.high, sizeof(rel.high), 1, f) != 1) return false;
+                    if (fwrite(&rel.low, sizeof(rel.low), 1, f) != 1) return false;
+                }
             }
-        }
-
-        fclose(f);
-        return true;
+            return true;
+        });
     }
 
     bool load(const std::string& path) {

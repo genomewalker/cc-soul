@@ -259,40 +259,37 @@ public:
         return count;
     }
 
-    // Persistence
+    // Persistence (atomic: write temp → fsync → rename)
     bool save(const std::string& path) const {
-        FILE* f = fopen(path.c_str(), "wb");
-        if (!f) return false;
+        return safe_save(path, [this](FILE* f) {
+            uint32_t magic = 0x54525554;  // "TRUT"
+            uint32_t version = 1;
+            uint64_t count = contradictions_.size();
 
-        uint32_t magic = 0x54525554;  // "TRUT"
-        uint32_t version = 1;
-        uint64_t count = contradictions_.size();
+            if (fwrite(&magic, sizeof(magic), 1, f) != 1) return false;
+            if (fwrite(&version, sizeof(version), 1, f) != 1) return false;
+            if (fwrite(&count, sizeof(count), 1, f) != 1) return false;
 
-        fwrite(&magic, sizeof(magic), 1, f);
-        fwrite(&version, sizeof(version), 1, f);
-        fwrite(&count, sizeof(count), 1, f);
+            for (const auto& [key, c] : contradictions_) {
+                if (fwrite(&c.node_a.high, sizeof(c.node_a.high), 1, f) != 1) return false;
+                if (fwrite(&c.node_a.low, sizeof(c.node_a.low), 1, f) != 1) return false;
+                if (fwrite(&c.node_b.high, sizeof(c.node_b.high), 1, f) != 1) return false;
+                if (fwrite(&c.node_b.low, sizeof(c.node_b.low), 1, f) != 1) return false;
+                if (fwrite(&c.status, sizeof(c.status), 1, f) != 1) return false;
+                if (fwrite(&c.winner.high, sizeof(c.winner.high), 1, f) != 1) return false;
+                if (fwrite(&c.winner.low, sizeof(c.winner.low), 1, f) != 1) return false;
+                if (fwrite(&c.resolution_node.high, sizeof(c.resolution_node.high), 1, f) != 1) return false;
+                if (fwrite(&c.resolution_node.low, sizeof(c.resolution_node.low), 1, f) != 1) return false;
+                if (fwrite(&c.detected_at, sizeof(c.detected_at), 1, f) != 1) return false;
+                if (fwrite(&c.resolved_at, sizeof(c.resolved_at), 1, f) != 1) return false;
+                if (fwrite(&c.confidence, sizeof(c.confidence), 1, f) != 1) return false;
 
-        for (const auto& [key, c] : contradictions_) {
-            fwrite(&c.node_a.high, sizeof(c.node_a.high), 1, f);
-            fwrite(&c.node_a.low, sizeof(c.node_a.low), 1, f);
-            fwrite(&c.node_b.high, sizeof(c.node_b.high), 1, f);
-            fwrite(&c.node_b.low, sizeof(c.node_b.low), 1, f);
-            fwrite(&c.status, sizeof(c.status), 1, f);
-            fwrite(&c.winner.high, sizeof(c.winner.high), 1, f);
-            fwrite(&c.winner.low, sizeof(c.winner.low), 1, f);
-            fwrite(&c.resolution_node.high, sizeof(c.resolution_node.high), 1, f);
-            fwrite(&c.resolution_node.low, sizeof(c.resolution_node.low), 1, f);
-            fwrite(&c.detected_at, sizeof(c.detected_at), 1, f);
-            fwrite(&c.resolved_at, sizeof(c.resolved_at), 1, f);
-            fwrite(&c.confidence, sizeof(c.confidence), 1, f);
-
-            uint16_t desc_len = static_cast<uint16_t>(std::min(c.description.size(), size_t(65535)));
-            fwrite(&desc_len, sizeof(desc_len), 1, f);
-            fwrite(c.description.data(), 1, desc_len, f);
-        }
-
-        fclose(f);
-        return true;
+                uint16_t desc_len = static_cast<uint16_t>(std::min(c.description.size(), size_t(65535)));
+                if (fwrite(&desc_len, sizeof(desc_len), 1, f) != 1) return false;
+                if (fwrite(c.description.data(), 1, desc_len, f) != desc_len) return false;
+            }
+            return true;
+        });
     }
 
     bool load(const std::string& path) {

@@ -492,50 +492,47 @@ public:
         save_phase7_state();
     }
 
-    // Save Phase 7 component state to disk
+    // Save Phase 7 component state to disk (always write to prevent stale files)
     void save_phase7_state() {
         std::string base = storage_.base_path();
 
-        if (config_.enable_utility_decay && utility_decay_.tracked_nodes() > 0) {
+        if (config_.enable_utility_decay) {
             if (utility_decay_.save(base + ".utility_decay")) {
                 std::cerr << "[Mind] Saved utility decay (" << utility_decay_.tracked_nodes() << " nodes)\n";
             }
         }
 
-        if (config_.enable_attractor_dampener && attractor_dampener_.tracked_count() > 0) {
+        if (config_.enable_attractor_dampener) {
             if (attractor_dampener_.save(base + ".attractor_dampener")) {
                 std::cerr << "[Mind] Saved attractor dampener (" << attractor_dampener_.tracked_count() << " nodes)\n";
             }
         }
 
-        if (config_.enable_provenance && provenance_spine_.count() > 0) {
+        if (config_.enable_provenance) {
             if (provenance_spine_.save(base + ".provenance")) {
                 std::cerr << "[Mind] Saved provenance spine (" << provenance_spine_.count() << " nodes)\n";
             }
         }
 
-        if (config_.enable_realm_scoping && realm_scoping_.scoped_node_count() > 0) {
+        // Always save realm scoping - contains realm hierarchy and current realm
+        if (config_.enable_realm_scoping) {
             if (realm_scoping_.save(base + ".realm_scoping")) {
                 std::cerr << "[Mind] Saved realm scoping (" << realm_scoping_.scoped_node_count() << " nodes)\n";
             }
         }
 
-        if (config_.enable_truth_maintenance && truth_maintenance_.total_contradictions() > 0) {
+        if (config_.enable_truth_maintenance) {
             if (truth_maintenance_.save(base + ".truth_maintenance")) {
                 std::cerr << "[Mind] Saved truth maintenance (" << truth_maintenance_.total_contradictions() << " contradictions)\n";
             }
         }
 
-        if (synthesis_queue_.staged_count() > 0) {
-            if (synthesis_queue_.save(base + ".synthesis_queue")) {
-                std::cerr << "[Mind] Saved synthesis queue (" << synthesis_queue_.staged_count() << " staged)\n";
-            }
+        if (synthesis_queue_.save(base + ".synthesis_queue")) {
+            std::cerr << "[Mind] Saved synthesis queue (" << synthesis_queue_.staged_count() << " staged)\n";
         }
 
-        if (gap_inquiry_.count() > 0) {
-            if (gap_inquiry_.save(base + ".gap_inquiry")) {
-                std::cerr << "[Mind] Saved gap inquiry (" << gap_inquiry_.count() << " gaps)\n";
-            }
+        if (gap_inquiry_.save(base + ".gap_inquiry")) {
+            std::cerr << "[Mind] Saved gap inquiry (" << gap_inquiry_.count() << " gaps)\n";
         }
     }
 
@@ -869,6 +866,11 @@ public:
             ? storage_.find_by_tag(tag)
             : tag_index_.find(tag);
 
+        // Phase 7: Apply realm filtering
+        if (config_.enable_realm_scoping && !node_ids.empty()) {
+            node_ids = realm_scoping_.filter_by_realm(node_ids);
+        }
+
         std::vector<Recall> results;
         for (const auto& id : node_ids) {
             if (Node* node = storage_.get(id)) {
@@ -911,6 +913,11 @@ public:
             ? storage_.find_by_tag(tag)
             : tag_index_.find(tag);
 
+        // Phase 7: Apply realm filtering
+        if (config_.enable_realm_scoping && !node_ids.empty()) {
+            node_ids = realm_scoping_.filter_by_realm(node_ids);
+        }
+
         std::vector<Recall> results;
         for (const auto& id : node_ids) {
             if (Node* node = storage_.get(id)) {
@@ -948,6 +955,11 @@ public:
         auto node_ids = storage_.use_unified()
             ? storage_.find_by_tags(tags)
             : tag_index_.find_all(tags);
+
+        // Phase 7: Apply realm filtering
+        if (config_.enable_realm_scoping && !node_ids.empty()) {
+            node_ids = realm_scoping_.filter_by_realm(node_ids);
+        }
 
         std::vector<Recall> results;
         for (const auto& id : node_ids) {
@@ -999,6 +1011,12 @@ public:
             ? storage_.find_by_tag(tag)
             : tag_index_.find(tag);
         if (node_ids.empty()) return {};
+
+        // Phase 7: Apply realm filtering
+        if (config_.enable_realm_scoping) {
+            node_ids = realm_scoping_.filter_by_realm(node_ids);
+            if (node_ids.empty()) return {};
+        }
 
         // Transform query for semantic scoring
         Artha artha = yantra_->transform(query);
@@ -1364,6 +1382,33 @@ public:
         return false;
     }
 
+    // Update a node's content and re-embed (for review edits)
+    bool update_content(NodeId id, const std::string& new_content) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (Node* node = storage_.get(id)) {
+            // Get old text for BM25 update
+            auto old_text = payload_to_text(node->payload);
+
+            // Re-embed the new content
+            Artha artha = yantra_->transform(new_content);
+            node->nu = std::move(artha.nu);
+            node->payload = text_to_payload(new_content);
+            node->tau_accessed = now();
+
+            // Update BM25 index
+            if (bm25_built_) {
+                if (old_text) bm25_index_.remove(id);
+                bm25_index_.add(id, new_content);
+            }
+
+            // Persist the update
+            storage_.update_node(id, *node);
+            storage_.sync();
+            return true;
+        }
+        return false;
+    }
+
     // Get text from a node (if stored as payload)
     std::optional<std::string> text(NodeId id) {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -1476,6 +1521,14 @@ public:
             p.source = source;
             p.source_url = source_url;
             provenance_spine_.record(id, p);
+        }
+    }
+
+    // Update provenance trust score for a node
+    void update_provenance_trust(NodeId id, float delta) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (config_.enable_provenance) {
+            provenance_spine_.update_trust(id, delta);
         }
     }
 

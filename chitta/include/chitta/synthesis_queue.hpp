@@ -295,50 +295,47 @@ public:
     const PromotionCriteria& criteria() const { return criteria_; }
     void set_criteria(const PromotionCriteria& c) { criteria_ = c; }
 
-    // Persistence
+    // Persistence (atomic: write temp → fsync → rename)
     bool save(const std::string& path) const {
-        FILE* f = fopen(path.c_str(), "wb");
-        if (!f) return false;
+        return safe_save(path, [this](FILE* f) {
+            uint32_t magic = 0x53594E51;  // "SYNQ"
+            uint32_t version = 1;
+            uint64_t count = staged_.size();
 
-        uint32_t magic = 0x53594E51;  // "SYNQ"
-        uint32_t version = 1;
-        uint64_t count = staged_.size();
+            if (fwrite(&magic, sizeof(magic), 1, f) != 1) return false;
+            if (fwrite(&version, sizeof(version), 1, f) != 1) return false;
+            if (fwrite(&count, sizeof(count), 1, f) != 1) return false;
 
-        fwrite(&magic, sizeof(magic), 1, f);
-        fwrite(&version, sizeof(version), 1, f);
-        fwrite(&count, sizeof(count), 1, f);
+            for (const auto& [id, sw] : staged_) {
+                if (fwrite(&id.high, sizeof(id.high), 1, f) != 1) return false;
+                if (fwrite(&id.low, sizeof(id.low), 1, f) != 1) return false;
+                if (fwrite(&sw.status, sizeof(sw.status), 1, f) != 1) return false;
+                if (fwrite(&sw.staged_at, sizeof(sw.staged_at), 1, f) != 1) return false;
+                if (fwrite(&sw.status_changed_at, sizeof(sw.status_changed_at), 1, f) != 1) return false;
+                if (fwrite(&sw.evidence_score, sizeof(sw.evidence_score), 1, f) != 1) return false;
+                if (fwrite(&sw.recall_count, sizeof(sw.recall_count), 1, f) != 1) return false;
+                if (fwrite(&sw.contradiction_count, sizeof(sw.contradiction_count), 1, f) != 1) return false;
 
-        for (const auto& [id, sw] : staged_) {
-            fwrite(&id.high, sizeof(id.high), 1, f);
-            fwrite(&id.low, sizeof(id.low), 1, f);
-            fwrite(&sw.status, sizeof(sw.status), 1, f);
-            fwrite(&sw.staged_at, sizeof(sw.staged_at), 1, f);
-            fwrite(&sw.status_changed_at, sizeof(sw.status_changed_at), 1, f);
-            fwrite(&sw.evidence_score, sizeof(sw.evidence_score), 1, f);
-            fwrite(&sw.recall_count, sizeof(sw.recall_count), 1, f);
-            fwrite(&sw.contradiction_count, sizeof(sw.contradiction_count), 1, f);
+                uint16_t content_len = static_cast<uint16_t>(std::min(sw.content.size(), size_t(65535)));
+                if (fwrite(&content_len, sizeof(content_len), 1, f) != 1) return false;
+                if (fwrite(sw.content.data(), 1, content_len, f) != content_len) return false;
 
-            uint16_t content_len = static_cast<uint16_t>(std::min(sw.content.size(), size_t(65535)));
-            fwrite(&content_len, sizeof(content_len), 1, f);
-            fwrite(sw.content.data(), 1, content_len, f);
+                uint16_t ev_count = static_cast<uint16_t>(sw.evidence.size());
+                if (fwrite(&ev_count, sizeof(ev_count), 1, f) != 1) return false;
+                for (const auto& e : sw.evidence) {
+                    if (fwrite(&e.type, sizeof(e.type), 1, f) != 1) return false;
+                    if (fwrite(&e.source.high, sizeof(e.source.high), 1, f) != 1) return false;
+                    if (fwrite(&e.source.low, sizeof(e.source.low), 1, f) != 1) return false;
+                    if (fwrite(&e.added_at, sizeof(e.added_at), 1, f) != 1) return false;
+                    if (fwrite(&e.weight, sizeof(e.weight), 1, f) != 1) return false;
 
-            uint16_t ev_count = static_cast<uint16_t>(sw.evidence.size());
-            fwrite(&ev_count, sizeof(ev_count), 1, f);
-            for (const auto& e : sw.evidence) {
-                fwrite(&e.type, sizeof(e.type), 1, f);
-                fwrite(&e.source.high, sizeof(e.source.high), 1, f);
-                fwrite(&e.source.low, sizeof(e.source.low), 1, f);
-                fwrite(&e.added_at, sizeof(e.added_at), 1, f);
-                fwrite(&e.weight, sizeof(e.weight), 1, f);
-
-                uint16_t det_len = static_cast<uint16_t>(std::min(e.details.size(), size_t(1000)));
-                fwrite(&det_len, sizeof(det_len), 1, f);
-                fwrite(e.details.data(), 1, det_len, f);
+                    uint16_t det_len = static_cast<uint16_t>(std::min(e.details.size(), size_t(1000)));
+                    if (fwrite(&det_len, sizeof(det_len), 1, f) != 1) return false;
+                    if (fwrite(e.details.data(), 1, det_len, f) != det_len) return false;
+                }
             }
-        }
-
-        fclose(f);
-        return true;
+            return true;
+        });
     }
 
     bool load(const std::string& path) {

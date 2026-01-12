@@ -13,6 +13,11 @@
 #include <vector>
 #include <random>
 
+// POSIX headers for atomic file persistence (must be outside namespace)
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+
 namespace chitta {
 
 // Embedding dimension (all-MiniLM-L6-v2 compatible)
@@ -503,6 +508,48 @@ inline uint32_t crc32(const uint8_t* data, size_t length) {
         }
     }
     return ~crc;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Atomic file persistence: write temp → fsync → rename → fsync dir
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Fsync parent directory for durability
+inline bool fsync_dir(const std::string& path) {
+    auto slash = path.find_last_of('/');
+    std::string dir = (slash == std::string::npos) ? "." : path.substr(0, slash);
+    int dfd = ::open(dir.c_str(), O_RDONLY | O_DIRECTORY);
+    if (dfd < 0) return false;
+    int rc = ::fsync(dfd);
+    ::close(dfd);
+    return rc == 0;
+}
+
+// Atomic save: write to temp file, fsync, rename to final path
+// Writer function takes FILE* and returns true on success
+template <typename Writer>
+bool safe_save(const std::string& path, Writer&& write_fn) {
+    std::string tmp = path + ".tmp." + std::to_string(::getpid());
+    FILE* f = ::fopen(tmp.c_str(), "wb");
+    if (!f) return false;
+
+    bool ok = write_fn(f);
+    if (ok && ::fflush(f) == 0 && ::fsync(::fileno(f)) == 0) {
+        ok = true;
+    } else {
+        ok = false;
+    }
+
+    ::fclose(f);
+    if (!ok) { ::remove(tmp.c_str()); return false; }
+
+    if (::rename(tmp.c_str(), path.c_str()) != 0) {
+        ::remove(tmp.c_str());
+        return false;
+    }
+
+    fsync_dir(path);
+    return true;
 }
 
 } // namespace chitta

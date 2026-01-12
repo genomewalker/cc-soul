@@ -256,31 +256,28 @@ public:
         }
     }
 
-    // Persistence
+    // Persistence (atomic: write temp → fsync → rename)
     bool save(const std::string& path) const {
-        FILE* f = fopen(path.c_str(), "wb");
-        if (!f) return false;
+        return safe_save(path, [this](FILE* f) {
+            uint32_t magic = 0x50524F56;  // "PROV"
+            uint32_t version = 1;
+            uint64_t count = provenance_.size();
 
-        uint32_t magic = 0x50524F56;  // "PROV"
-        uint32_t version = 1;
-        uint64_t count = provenance_.size();
+            if (fwrite(&magic, sizeof(magic), 1, f) != 1) return false;
+            if (fwrite(&version, sizeof(version), 1, f) != 1) return false;
+            if (fwrite(&count, sizeof(count), 1, f) != 1) return false;
 
-        fwrite(&magic, sizeof(magic), 1, f);
-        fwrite(&version, sizeof(version), 1, f);
-        fwrite(&count, sizeof(count), 1, f);
+            for (const auto& [id, prov] : provenance_) {
+                if (fwrite(&id.high, sizeof(id.high), 1, f) != 1) return false;
+                if (fwrite(&id.low, sizeof(id.low), 1, f) != 1) return false;
 
-        for (const auto& [id, prov] : provenance_) {
-            fwrite(&id.high, sizeof(id.high), 1, f);
-            fwrite(&id.low, sizeof(id.low), 1, f);
-
-            auto data = prov.serialize();
-            uint32_t data_size = static_cast<uint32_t>(data.size());
-            fwrite(&data_size, sizeof(data_size), 1, f);
-            fwrite(data.data(), 1, data_size, f);
-        }
-
-        fclose(f);
-        return true;
+                auto data = prov.serialize();
+                uint32_t data_size = static_cast<uint32_t>(data.size());
+                if (fwrite(&data_size, sizeof(data_size), 1, f) != 1) return false;
+                if (fwrite(data.data(), 1, data_size, f) != data_size) return false;
+            }
+            return true;
+        });
     }
 
     bool load(const std::string& path) {

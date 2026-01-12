@@ -243,58 +243,55 @@ public:
     size_t realm_count() const { return realms_.size(); }
     size_t scoped_node_count() const { return memberships_.size(); }
 
-    // Persistence
+    // Persistence (atomic: write temp → fsync → rename)
     bool save(const std::string& path) const {
-        FILE* f = fopen(path.c_str(), "wb");
-        if (!f) return false;
+        return safe_save(path, [this](FILE* f) {
+            uint32_t magic = 0x52454C4D;  // "RELM"
+            uint32_t version = 1;
 
-        uint32_t magic = 0x52454C4D;  // "RELM"
-        uint32_t version = 1;
+            if (fwrite(&magic, sizeof(magic), 1, f) != 1) return false;
+            if (fwrite(&version, sizeof(version), 1, f) != 1) return false;
 
-        fwrite(&magic, sizeof(magic), 1, f);
-        fwrite(&version, sizeof(version), 1, f);
+            // Save current realm
+            uint16_t cur_len = static_cast<uint16_t>(current_realm_.name.size());
+            if (fwrite(&cur_len, sizeof(cur_len), 1, f) != 1) return false;
+            if (fwrite(current_realm_.name.data(), 1, cur_len, f) != cur_len) return false;
 
-        // Save current realm
-        uint16_t cur_len = static_cast<uint16_t>(current_realm_.name.size());
-        fwrite(&cur_len, sizeof(cur_len), 1, f);
-        fwrite(current_realm_.name.data(), 1, cur_len, f);
-
-        // Save realms
-        uint32_t realm_count = static_cast<uint32_t>(realms_.size());
-        fwrite(&realm_count, sizeof(realm_count), 1, f);
-        for (const auto& [name, realm] : realms_) {
-            uint16_t name_len = static_cast<uint16_t>(name.size());
-            uint16_t parent_len = static_cast<uint16_t>(realm.parent.size());
-            fwrite(&name_len, sizeof(name_len), 1, f);
-            fwrite(name.data(), 1, name_len, f);
-            fwrite(&parent_len, sizeof(parent_len), 1, f);
-            fwrite(realm.parent.data(), 1, parent_len, f);
-        }
-
-        // Save memberships
-        uint64_t member_count = memberships_.size();
-        fwrite(&member_count, sizeof(member_count), 1, f);
-        for (const auto& [node, m] : memberships_) {
-            fwrite(&node.high, sizeof(node.high), 1, f);
-            fwrite(&node.low, sizeof(node.low), 1, f);
-
-            uint16_t realm_len = static_cast<uint16_t>(m.primary_realm.name.size());
-            fwrite(&realm_len, sizeof(realm_len), 1, f);
-            fwrite(m.primary_realm.name.data(), 1, realm_len, f);
-            fwrite(&m.visibility, sizeof(m.visibility), 1, f);
-            fwrite(&m.scoped_at, sizeof(m.scoped_at), 1, f);
-
-            uint16_t shared_count = static_cast<uint16_t>(m.shared_with.size());
-            fwrite(&shared_count, sizeof(shared_count), 1, f);
-            for (const auto& sr : m.shared_with) {
-                uint16_t sr_len = static_cast<uint16_t>(sr.name.size());
-                fwrite(&sr_len, sizeof(sr_len), 1, f);
-                fwrite(sr.name.data(), 1, sr_len, f);
+            // Save realms
+            uint32_t realm_count = static_cast<uint32_t>(realms_.size());
+            if (fwrite(&realm_count, sizeof(realm_count), 1, f) != 1) return false;
+            for (const auto& [name, realm] : realms_) {
+                uint16_t name_len = static_cast<uint16_t>(name.size());
+                uint16_t parent_len = static_cast<uint16_t>(realm.parent.size());
+                if (fwrite(&name_len, sizeof(name_len), 1, f) != 1) return false;
+                if (fwrite(name.data(), 1, name_len, f) != name_len) return false;
+                if (fwrite(&parent_len, sizeof(parent_len), 1, f) != 1) return false;
+                if (fwrite(realm.parent.data(), 1, parent_len, f) != parent_len) return false;
             }
-        }
 
-        fclose(f);
-        return true;
+            // Save memberships
+            uint64_t member_count = memberships_.size();
+            if (fwrite(&member_count, sizeof(member_count), 1, f) != 1) return false;
+            for (const auto& [node, m] : memberships_) {
+                if (fwrite(&node.high, sizeof(node.high), 1, f) != 1) return false;
+                if (fwrite(&node.low, sizeof(node.low), 1, f) != 1) return false;
+
+                uint16_t realm_len = static_cast<uint16_t>(m.primary_realm.name.size());
+                if (fwrite(&realm_len, sizeof(realm_len), 1, f) != 1) return false;
+                if (fwrite(m.primary_realm.name.data(), 1, realm_len, f) != realm_len) return false;
+                if (fwrite(&m.visibility, sizeof(m.visibility), 1, f) != 1) return false;
+                if (fwrite(&m.scoped_at, sizeof(m.scoped_at), 1, f) != 1) return false;
+
+                uint16_t shared_count = static_cast<uint16_t>(m.shared_with.size());
+                if (fwrite(&shared_count, sizeof(shared_count), 1, f) != 1) return false;
+                for (const auto& sr : m.shared_with) {
+                    uint16_t sr_len = static_cast<uint16_t>(sr.name.size());
+                    if (fwrite(&sr_len, sizeof(sr_len), 1, f) != 1) return false;
+                    if (fwrite(sr.name.data(), 1, sr_len, f) != sr_len) return false;
+                }
+            }
+            return true;
+        });
     }
 
     bool load(const std::string& path) {
@@ -417,6 +414,21 @@ public:
 
             memberships_[node] = m;
             realm_nodes_[m.primary_realm.name].insert(node);
+        }
+
+        // Restore current_realm_ parent from realms_ (fix: parent was lost during load)
+        auto it = realms_.find(current_realm_.name);
+        if (it != realms_.end()) {
+            current_realm_ = it->second;  // Restores parent
+        } else {
+            // Fallback to root if current realm not found
+            auto root = realms_.find("brahman");
+            if (root != realms_.end()) {
+                current_realm_ = root->second;
+            } else {
+                current_realm_ = RealmId{"brahman", ""};
+                realms_[current_realm_.name] = current_realm_;
+            }
         }
 
         fclose(f);

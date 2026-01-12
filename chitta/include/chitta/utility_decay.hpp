@@ -165,32 +165,29 @@ public:
     // Statistics
     size_t tracked_nodes() const { return usage_.size(); }
 
-    // Persistence
+    // Persistence (atomic: write temp → fsync → rename)
     bool save(const std::string& path) const {
-        FILE* f = fopen(path.c_str(), "wb");
-        if (!f) return false;
+        return safe_save(path, [this](FILE* f) {
+            uint32_t magic = 0x55544443;  // "UTDC"
+            uint32_t version = 1;
+            uint64_t count = usage_.size();
 
-        uint32_t magic = 0x55544443;  // "UTDC"
-        uint32_t version = 1;
-        uint64_t count = usage_.size();
+            if (fwrite(&magic, sizeof(magic), 1, f) != 1) return false;
+            if (fwrite(&version, sizeof(version), 1, f) != 1) return false;
+            if (fwrite(&count, sizeof(count), 1, f) != 1) return false;
 
-        fwrite(&magic, sizeof(magic), 1, f);
-        fwrite(&version, sizeof(version), 1, f);
-        fwrite(&count, sizeof(count), 1, f);
-
-        for (const auto& [id, stats] : usage_) {
-            fwrite(&id.high, sizeof(id.high), 1, f);
-            fwrite(&id.low, sizeof(id.low), 1, f);
-            fwrite(&stats.recall_count, sizeof(stats.recall_count), 1, f);
-            fwrite(&stats.positive_feedback, sizeof(stats.positive_feedback), 1, f);
-            fwrite(&stats.negative_feedback, sizeof(stats.negative_feedback), 1, f);
-            fwrite(&stats.first_recall, sizeof(stats.first_recall), 1, f);
-            fwrite(&stats.last_recall, sizeof(stats.last_recall), 1, f);
-            fwrite(&stats.cumulative_relevance, sizeof(stats.cumulative_relevance), 1, f);
-        }
-
-        fclose(f);
-        return true;
+            for (const auto& [id, stats] : usage_) {
+                if (fwrite(&id.high, sizeof(id.high), 1, f) != 1) return false;
+                if (fwrite(&id.low, sizeof(id.low), 1, f) != 1) return false;
+                if (fwrite(&stats.recall_count, sizeof(stats.recall_count), 1, f) != 1) return false;
+                if (fwrite(&stats.positive_feedback, sizeof(stats.positive_feedback), 1, f) != 1) return false;
+                if (fwrite(&stats.negative_feedback, sizeof(stats.negative_feedback), 1, f) != 1) return false;
+                if (fwrite(&stats.first_recall, sizeof(stats.first_recall), 1, f) != 1) return false;
+                if (fwrite(&stats.last_recall, sizeof(stats.last_recall), 1, f) != 1) return false;
+                if (fwrite(&stats.cumulative_relevance, sizeof(stats.cumulative_relevance), 1, f) != 1) return false;
+            }
+            return true;
+        });
     }
 
     bool load(const std::string& path) {
