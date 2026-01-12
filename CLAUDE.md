@@ -22,14 +22,27 @@ Memory is **invisible in both directions**. I don't call tools — hooks handle 
 3. Learnings marked with `[LEARN]` or `[REMEMBER]` get stored
 4. Decisions and insights are captured
 
-**How to store something:**
-Just write naturally with a marker:
-> [LEARN] The daemon speaks JSON-RPC protocol directly on the socket.
-> [REMEMBER] Rate limiting uses token bucket with 100ms refill.
+**How to store something (SSL + Triplets):**
 
-Or use natural phrases: "This is important:", "Key insight:", "Worth remembering:"
+Always use SSL format with triplets for brain-like storage:
 
-**No explicit tool calls needed.** The soul learns by watching me work.
+```
+[LEARN] [domain] subject→action(params)→result
+[high-ε] One sentence with critical details.
+[TRIPLET] subject predicate object
+```
+
+**Example:**
+```
+[LEARN] [cc-soul] daemon→speaks JSON-RPC directly on socket
+[high-ε] chittad listens on /tmp/chitta-VERSION.sock, tools/call method.
+[TRIPLET] daemon uses json_rpc
+[TRIPLET] daemon listens socket
+```
+
+**Predicates:** implements | uses | validates | stores | returns | contains | requires | enables | evolved_to
+
+**No explicit tool calls needed.** The soul learns by watching me work. The Stop hook extracts SSL patterns and creates triplets automatically.
 
 ## Natural Memory Integration
 

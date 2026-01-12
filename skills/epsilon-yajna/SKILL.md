@@ -33,9 +33,17 @@ ceremony:
 compress process:
   inspect: chitta yajna_inspect --id "UUID"
   analyze: core insight? domain? relationships?
+
+  triplets (REQUIRED): extract 1-3 relationships per node
+    chitta connect --subject "X" --predicate "Y" --object "Z"
+    predicates: implements|uses|validates|stores|returns|contains|requires|enables|evolved_to
+    example: gate implements belief_validation | hook enables context_injection
+
   seed format: [domain] subject→action(params)→result
                [high-ε] One critical sentence with essential details.
+
   update: chitta update --id "UUID" --content "SEED"
+  tag: chitta tag --id "UUID" --add "ε-processed"
 
 ssl symbols:
   → produces/leads to | | or/alternative | + with/and

@@ -35,7 +35,7 @@ Given a node ID:
 
 1. **Inspect**
    ```bash
-   ~/.claude/bin/chitta yajna_inspect --id "<node_id>"
+   chitta yajna_inspect --id "<node_id>"
    ```
 
 2. **Analyze** - Read the content, identify:
@@ -43,26 +43,32 @@ Given a node ID:
    - Relationships (subject → predicate → object)
    - Domain context
 
-3. **Extract Triplets** - For each relationship:
+3. **Extract Triplets (REQUIRED)** - Create 1-3 triplets per node:
    ```bash
-   ~/.claude/bin/chitta connect --subject "X" --predicate "Y" --object "Z"
+   chitta connect --subject "X" --predicate "Y" --object "Z"
    ```
-   Common predicates: implements, uses, validates, stores, returns, contains
+   Predicates: implements, uses, validates, stores, returns, contains, requires, enables, evolved_to
+
+   Example triplets:
+   - `gate implements belief_validation`
+   - `hook enables context_injection`
+   - `antahkarana uses multi_voice_debate`
 
 4. **Compress to Seed** - Create minimal pattern:
    ```
    [domain] subject→action(params)→result
+   [high-ε] One critical sentence with essential details.
    ```
-   Test: Can I reconstruct the full insight from this seed alone?
+   Test: Can I reconstruct the full insight from this seed + triplets?
 
 5. **Update Node**
    ```bash
-   ~/.claude/bin/chitta update --id "<node_id>" --content "<ssl_seed>"
+   chitta update --id "<node_id>" --content "<ssl_seed>"
    ```
 
 6. **Tag as Processed**
    ```bash
-   ~/.claude/bin/chitta tag --id "<node_id>" --add "ε-processed"
+   chitta tag --id "<node_id>" --add "ε-processed"
    ```
 
 ## Quality Criteria
