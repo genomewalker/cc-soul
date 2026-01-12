@@ -1,7 +1,29 @@
 # cc-soul 100M+ Scale Implementation Plan
 
-## Status: COMPLETE (Jan 2026)
-All phases implemented and tested.
+## Status: Headers Complete, Core Wiring Done (Jan 2026)
+
+### Implementation Status:
+| Component | Header | Wired | Notes |
+|-----------|--------|-------|-------|
+| QueryRouter | ✅ | ⚪ | Member ready, not yet routing |
+| QuotaManager | ✅ | ✅ | `remember()` checks quotas |
+| UtilityDecay | ✅ | ✅ | `recall()` + `feedback()` tracked |
+| AttractorDampener | ✅ | ✅ | `recall()` dampens over-retrieved |
+| ProvenanceSpine | ✅ | ❌ | Needs wiring to `remember()` |
+| TruthMaintenance | ✅ | ❌ | Needs wiring to detect conflicts |
+| RealmScoping | ✅ | ❌ | Needs wiring to `recall()` filter |
+| SynthesisQueue | ✅ | ❌ | Needs synthesis pipeline |
+| EvalHarness | ✅ | ❌ | Needs RPC exposure |
+| EpiplexityTest | ✅ | ❌ | Needs scheduler/RPC |
+| ReviewQueue | ✅ | ❌ | Needs RPC exposure |
+| GapInquiry | ✅ | ❌ | Needs gap detection pipeline |
+
+**Enable via MindConfig:**
+```cpp
+config.enable_quota_manager = true;
+config.enable_utility_decay = true;
+config.enable_attractor_dampener = true;
+```
 
 ## Overview
 Target: 100M+ nodes on single node (128GB RAM, NVMe SSD)
@@ -174,22 +196,28 @@ Workload: 10-50 QPS burst, 100-1000 inserts/day
 - [x] All 12 recommendations implemented
 - [ ] Golden Recall Harness passing (needs test data)
 
-## Implementation Order
+## What's Missing (Next Steps)
 
-1. GraphStore mmap rewrite (highest ROI)
-2. ConnectionPool scale-up
-3. 64-bit offsets
-4. Query Compass Router
-5. Type Quotas & Budgeter
-6. BM25 segmentation
-7. Utility-Calibrated Decay
-8. Provenance Spine
-9. TagIndex compaction
-10. Realm Scoping
-11. Contradiction Loom
-12. Attractor Dampener
-13. Two-Stage Wisdom Foundry
-14. Golden Recall Harness
-15. Epiplexity Self-Test
-16. Wisdom Review Queue
-17. Gap-Driven Inquiry
+### Priority 1: Core Runtime Wiring
+1. **ProvenanceSpine** → `remember()`: Record source metadata on every insert
+2. **RealmScoping** → `recall()`: Filter results by current realm
+3. **TruthMaintenance** → `remember()`: Detect semantic contradictions
+
+### Priority 2: RPC/CLI Exposure
+4. **EvalHarness** → New RPC tool `eval_run` to execute golden tests
+5. **ReviewQueue** → New RPC tools `review_list`, `review_approve`, `review_reject`
+6. **EpiplexityTest** → New RPC tool `epiplexity_check` or daemon scheduler
+
+### Priority 3: Pipeline Integration
+7. **SynthesisQueue** → Hook into wisdom synthesis (daemon or explicit)
+8. **GapInquiry** → Hook into Gap node creation, surface questions
+9. **QueryRouter** → Route queries based on intent before search
+
+### Priority 4: Delete/Eviction Support
+10. WAL delete entries for proper node removal
+11. Full eviction in `maybe_evict_for_quota()`
+
+### Nice to Have
+- Persistence for UtilityDecay, AttractorDampener state
+- Cross-session realm context
+- Batch review CLI mode
