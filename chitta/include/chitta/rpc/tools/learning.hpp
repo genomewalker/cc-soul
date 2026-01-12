@@ -383,12 +383,14 @@ inline ToolResult connect(Mind* mind, const json& params) {
 }
 
 // Query: search triplet relationships
+// Uses persistent GraphStore (dictionary-encoded) for reliable persistence
 inline ToolResult query(Mind* mind, const json& params) {
     std::string subject = params.value("subject", "");
     std::string predicate = params.value("predicate", "");
     std::string object = params.value("object", "");
 
-    auto triplets = mind->query_triplets(subject, predicate, object);
+    // Use query_graph which queries the persistent GraphStore
+    auto triplets = mind->query_graph(subject, predicate, object);
 
     if (triplets.empty()) {
         return ToolResult::ok("No triplets found", {{"triplets", json::array()}});
@@ -398,22 +400,14 @@ inline ToolResult query(Mind* mind, const json& params) {
     std::ostringstream ss;
     ss << "Found " << triplets.size() << " triplet(s):\n";
 
-    for (const auto& t : triplets) {
-        // Resolve entity names from NodeIds
-        auto subj_text = mind->text(t.subject);
-        auto obj_text = mind->text(t.object);
-        std::string subj_name = subj_text.value_or(t.subject.to_string().substr(0, 8));
-        std::string obj_name = obj_text.value_or(t.object.to_string().substr(0, 8));
-
+    for (const auto& [subj, pred, obj, weight] : triplets) {
         triplets_array.push_back({
-            {"subject_id", t.subject.to_string()},
-            {"subject", subj_name},
-            {"predicate", t.predicate},
-            {"object_id", t.object.to_string()},
-            {"object", obj_name},
-            {"weight", t.weight}
+            {"subject", subj},
+            {"predicate", pred},
+            {"object", obj},
+            {"weight", weight}
         });
-        ss << "  " << subj_name << " --[" << t.predicate << "]--> " << obj_name << "\n";
+        ss << "  " << subj << " --[" << pred << "]--> " << obj << "\n";
     }
 
     return ToolResult::ok(ss.str(), {{"triplets", triplets_array}});
