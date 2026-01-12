@@ -48,6 +48,7 @@ public:
         return true;
     }
 
+    // Create new file (truncates if exists) - use only for fresh creation
     bool create(const std::string& path, size_t size) {
         fd_ = ::open(path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
         if (fd_ < 0) return false;
@@ -66,6 +67,62 @@ public:
         }
 
         return true;
+    }
+
+    // Atomically create new file - fails if file already exists (safe for concurrency)
+    // Returns: true if created, false if exists or error
+    bool create_exclusive(const std::string& path, size_t size) {
+        fd_ = ::open(path.c_str(), O_RDWR | O_CREAT | O_EXCL, 0644);
+        if (fd_ < 0) {
+            return false;  // File exists or permission error
+        }
+
+        if (ftruncate(fd_, size) < 0) {
+            close();
+            ::unlink(path.c_str());  // Clean up failed creation
+            return false;
+        }
+        size_ = size;
+
+        data_ = mmap(nullptr, size_, PROT_READ | PROT_WRITE, MAP_SHARED, fd_, 0);
+        if (data_ == MAP_FAILED) {
+            data_ = nullptr;
+            close();
+            ::unlink(path.c_str());
+            return false;
+        }
+
+        return true;
+    }
+
+    // Open existing or create new (safe for concurrency)
+    // Grows file if it exists but is smaller than requested size
+    bool open_or_create(const std::string& path, size_t min_size) {
+        // Try to open existing first
+        fd_ = ::open(path.c_str(), O_RDWR);
+        if (fd_ >= 0) {
+            struct stat st;
+            if (fstat(fd_, &st) == 0 && st.st_size > 0) {
+                // File exists with content - use it
+                size_ = st.st_size;
+                // Grow if needed
+                if (static_cast<size_t>(st.st_size) < min_size) {
+                    if (ftruncate(fd_, min_size) == 0) {
+                        size_ = min_size;
+                    }
+                }
+                data_ = mmap(nullptr, size_, PROT_READ | PROT_WRITE, MAP_SHARED, fd_, 0);
+                if (data_ != MAP_FAILED) {
+                    return true;
+                }
+                data_ = nullptr;
+            }
+            ::close(fd_);
+            fd_ = -1;
+        }
+
+        // Try atomic create
+        return create_exclusive(path, min_size);
     }
 
     void close() {

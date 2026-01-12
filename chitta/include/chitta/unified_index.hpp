@@ -212,6 +212,112 @@ public:
         return true;
     }
 
+    // Safe create: uses O_EXCL to atomically create, fails if file exists
+    // Returns: true if created new index, false if file exists or error
+    // Caller should fall back to open() if this returns false
+    bool create_safe(const std::string& base_path, size_t initial_capacity = INITIAL_CAPACITY) {
+        base_path_ = base_path;
+
+        // Create directory if needed
+        std::string dir = base_path_;
+        if (dir.back() != '/') {
+            size_t last_slash = dir.find_last_of('/');
+            if (last_slash != std::string::npos) {
+                dir = dir.substr(0, last_slash);
+            }
+        }
+
+        // Try atomic create of main index file (fails if exists)
+        std::string idx_path = base_path_ + ".unified";
+        size_t idx_size = sizeof(UnifiedIndexHeader) + initial_capacity * sizeof(IndexedNode);
+
+        if (!index_region_.create_exclusive(idx_path, idx_size)) {
+            // File exists or error - caller should try open()
+            return false;
+        }
+
+        // We successfully created the primary file atomically
+        // Now create supporting files (safe since we own the lock via primary file)
+
+        // Initialize header
+        auto* header = index_region_.as<UnifiedIndexHeader>();
+        header->magic = UNIFIED_MAGIC;
+        header->version = UNIFIED_VERSION;
+        header->node_count = 0;
+        header->capacity = initial_capacity;
+        header->deleted_count = 0;
+        header->entry_point_slot = UINT32_MAX;
+        header->max_level = 0;
+        header->hnsw_m = DEFAULT_M;
+        header->hnsw_ef_construction = DEFAULT_EF_CONSTRUCTION;
+        header->snapshot_id = 0;
+        header->checksum = 0;
+        header->wal_sequence = 0;
+
+        // Create vectors file
+        std::string vec_path = base_path_ + ".vectors";
+        size_t vec_size = initial_capacity * sizeof(QuantizedVector);
+        if (!vectors_region_.create(vec_path, vec_size)) {
+            std::cerr << "[UnifiedIndex] Failed to create vectors file\n";
+            cleanup_failed_create();
+            return false;
+        }
+
+        // Create binary vectors file
+        std::string bin_path = base_path_ + ".binary";
+        size_t bin_size = initial_capacity * sizeof(BinaryVector);
+        if (!binary_region_.create(bin_path, bin_size)) {
+            std::cerr << "[UnifiedIndex] Failed to create binary vectors file\n";
+            cleanup_failed_create();
+            return false;
+        }
+        has_binary_ = true;
+
+        // Create metadata file
+        std::string meta_path = base_path_ + ".meta";
+        size_t meta_size = initial_capacity * sizeof(NodeMeta);
+        if (!meta_region_.create(meta_path, meta_size)) {
+            std::cerr << "[UnifiedIndex] Failed to create metadata file\n";
+            cleanup_failed_create();
+            return false;
+        }
+
+        // Create connection pool
+        if (!connections_.create(base_path_ + ".connections", initial_capacity)) {
+            std::cerr << "[UnifiedIndex] Failed to create connection pool\n";
+            cleanup_failed_create();
+            return false;
+        }
+
+        // Create payload store
+        if (!payloads_.create(base_path_ + ".payloads")) {
+            std::cerr << "[UnifiedIndex] Failed to create payload store\n";
+            cleanup_failed_create();
+            return false;
+        }
+
+        // Create edge store
+        if (!edges_.create(base_path_ + ".edges")) {
+            std::cerr << "[UnifiedIndex] Failed to create edge store\n";
+            cleanup_failed_create();
+            return false;
+        }
+
+        // Create tag index
+        if (!tags_.create(base_path_ + ".tags")) {
+            std::cerr << "[UnifiedIndex] Failed to create tag index\n";
+            cleanup_failed_create();
+            return false;
+        }
+
+        // Initialize slot allocation
+        next_slot_ = 0;
+        capacity_ = initial_capacity;
+
+        std::cerr << "[UnifiedIndex] Created safely with capacity " << initial_capacity << "\n";
+        return true;
+    }
+
     // Open existing index
     bool open(const std::string& base_path) {
         base_path_ = base_path;
@@ -977,6 +1083,23 @@ private:
     }
 
 private:
+    // Cleanup after failed create_safe - remove partially created files
+    void cleanup_failed_create() {
+        index_region_.close();
+        vectors_region_.close();
+        binary_region_.close();
+        meta_region_.close();
+        // Remove all files we may have created
+        std::remove((base_path_ + ".unified").c_str());
+        std::remove((base_path_ + ".vectors").c_str());
+        std::remove((base_path_ + ".binary").c_str());
+        std::remove((base_path_ + ".meta").c_str());
+        std::remove((base_path_ + ".connections").c_str());
+        std::remove((base_path_ + ".payloads").c_str());
+        std::remove((base_path_ + ".edges").c_str());
+        std::remove((base_path_ + ".tags").c_str());
+    }
+
     // Get node array from index region
     IndexedNode* node_array() {
         return reinterpret_cast<IndexedNode*>(

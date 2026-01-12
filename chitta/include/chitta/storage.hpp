@@ -861,15 +861,30 @@ public:
                 }
                 std::cerr << "[TieredStorage] Failed to open unified index, falling back\n";
             } else if (config_.use_unified_index) {
-                std::cerr << "[TieredStorage] Creating unified index (Phase 3)\n";
-                if (unified_.create(config_.base_path)) {
+                // Use safe create (atomic with O_EXCL) - won't truncate existing files
+                std::cerr << "[TieredStorage] Creating unified index safely (Phase 3)\n";
+                if (unified_.create_safe(config_.base_path)) {
                     std::cerr << "[TieredStorage] Unified index created\n";
-                    // Open WAL for new unified index
                     if (config_.use_wal) wal_.open();
                     loaded_successfully_ = true;
                     return true;
                 }
-                std::cerr << "[TieredStorage] Failed to create unified index\n";
+                // create_safe failed - file might exist now (race with another process)
+                // Try to open it instead
+                std::cerr << "[TieredStorage] create_safe failed, trying open\n";
+                if (unified_.open(config_.base_path)) {
+                    std::cerr << "[TieredStorage] Opened existing unified index after create race\n";
+                    if (config_.use_wal && wal_.open()) {
+                        uint64_t unified_seq = unified_.wal_sequence();
+                        size_t replayed = replay_wal_to_unified(unified_seq);
+                        if (replayed > 0) {
+                            std::cerr << "[TieredStorage] Replayed " << replayed << " WAL entries\n";
+                        }
+                    }
+                    loaded_successfully_ = true;
+                    return true;
+                }
+                std::cerr << "[TieredStorage] Failed to create or open unified index\n";
             }
         }
 
