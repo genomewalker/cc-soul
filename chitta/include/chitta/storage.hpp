@@ -847,6 +847,15 @@ public:
                 if (unified_.open(config_.base_path)) {
                     std::cerr << "[TieredStorage] Unified index: " << unified_.count()
                               << " nodes, O(1) load\n";
+                    // Open WAL and replay any entries newer than unified's checkpoint
+                    if (config_.use_wal && wal_.open()) {
+                        uint64_t unified_seq = unified_.wal_sequence();
+                        size_t replayed = replay_wal_to_unified(unified_seq);
+                        if (replayed > 0) {
+                            std::cerr << "[TieredStorage] Replayed " << replayed
+                                      << " WAL entries to unified (since seq " << unified_seq << ")\n";
+                        }
+                    }
                     loaded_successfully_ = true;
                     return true;
                 }
@@ -855,6 +864,8 @@ public:
                 std::cerr << "[TieredStorage] Creating unified index (Phase 3)\n";
                 if (unified_.create(config_.base_path)) {
                     std::cerr << "[TieredStorage] Unified index created\n";
+                    // Open WAL for new unified index
+                    if (config_.use_wal) wal_.open();
                     loaded_successfully_ = true;
                     return true;
                 }
@@ -918,7 +929,21 @@ public:
 
         // Phase 3: Delegate to unified index if active
         if (use_unified()) {
+            // WAL first for crash recovery
+            uint64_t seq = 0;
+            if (config_.use_wal) {
+                seq = wal_.append(WalOp::Insert, node);
+                if (seq == 0) {
+                    std::cerr << "[TieredStorage] WAL append failed for unified insert\n";
+                } else {
+                    last_wal_seq_ = seq;
+                }
+            }
+            // Apply to unified storage
             auto slot = unified_.insert(id, node);
+            if (slot.valid() && seq > 0) {
+                unified_.set_wal_sequence(seq);
+            }
             return slot.valid();
         }
 
@@ -944,8 +969,23 @@ public:
     bool update_confidence(NodeId id, const Confidence& kappa) {
         // Phase 3: Unified index has its own update path
         if (use_unified()) {
+            // WAL first for crash recovery
+            uint64_t seq = 0;
+            if (config_.use_wal) {
+                seq = wal_.append_confidence(id, kappa);
+                if (seq > 0) last_wal_seq_ = seq;
+            }
             auto slot = unified_.lookup(id);
-            return unified_.update_confidence(slot, kappa);
+            bool result = unified_.update_confidence(slot, kappa);
+            if (result) {
+                // Update cache to maintain coherence
+                auto cache_it = unified_cache_.find(id);
+                if (cache_it != unified_cache_.end()) {
+                    cache_it->second.kappa = kappa;
+                }
+                if (seq > 0) unified_.set_wal_sequence(seq);
+            }
+            return result;
         }
 
         Node* node = hot_.get(id);
@@ -964,10 +1004,21 @@ public:
     bool update_node(NodeId id, const Node& node) {
         // Phase 3: Unified index has its own update path
         if (use_unified()) {
+            // Verify node exists before WAL append
+            auto slot = unified_.lookup(id);
+            if (!slot.valid()) return false;
+
+            // WAL first for crash recovery
+            uint64_t seq = 0;
+            if (config_.use_wal) {
+                seq = wal_.append(WalOp::Update, node);
+                if (seq > 0) last_wal_seq_ = seq;
+            }
             bool result = unified_.update(id, node);
             if (result) {
                 // Also update the cache so subsequent gets see the new data
                 unified_cache_[id] = node;
+                if (seq > 0) unified_.set_wal_sequence(seq);
             }
             return result;
         }
@@ -987,10 +1038,30 @@ public:
 
     // Add edge to node with WAL delta (Phase 2: 72 bytes vs ~500 for full node)
     bool add_edge(NodeId from, NodeId to, EdgeType type, float weight) {
+        Edge edge{to, type, weight};
+
+        // Unified mode: get from cache, add edge, persist
+        if (use_unified()) {
+            // Verify node exists before WAL append
+            Node* node = get_from_unified(from);
+            if (!node) return false;
+
+            // WAL first for crash recovery
+            uint64_t seq = 0;
+            if (config_.use_wal) {
+                seq = wal_.append_edge(from, edge);
+                if (seq > 0) last_wal_seq_ = seq;
+            }
+            node->edges.push_back(edge);
+            bool result = unified_.update(from, *node);
+            if (result && seq > 0) unified_.set_wal_sequence(seq);
+            return result;
+        }
+
+        // Hot storage path
         Node* node = hot_.get(from);
         if (!node) return false;
 
-        Edge edge{to, type, weight};
         node->edges.push_back(edge);
 
         if (config_.use_wal) {
@@ -1418,6 +1489,77 @@ private:
         return result;
     }
 
+    // Replay WAL entries to unified index (for crash recovery)
+    // Replays entries newer than since_seq and applies them to unified storage
+    size_t replay_wal_to_unified(uint64_t since_seq) {
+        if (!config_.use_wal || !use_unified()) return 0;
+
+        // Set replay flag to prevent WAL append during replay
+        in_replay_ = true;
+
+        size_t count = 0;
+        uint64_t max_seq = since_seq;
+
+        wal_.replay_v2(since_seq, [this, &count, &max_seq](const WalReplayEntry& entry, uint64_t seq) {
+            bool applied = false;
+
+            if (entry.has_full_node) {
+                // Full node insert/update
+                auto slot = unified_.lookup(entry.id);
+                if (slot.valid()) {
+                    applied = unified_.update(entry.id, entry.full_node);
+                } else {
+                    applied = unified_.insert(entry.id, entry.full_node).valid();
+                }
+            } else if (entry.has_touch) {
+                // Touch delta
+                auto slot = unified_.lookup(entry.id);
+                if (slot.valid()) {
+                    unified_.touch(slot);
+                    applied = true;
+                }
+            } else if (entry.has_confidence) {
+                // Confidence delta
+                auto slot = unified_.lookup(entry.id);
+                if (slot.valid()) {
+                    applied = unified_.update_confidence(slot, entry.confidence);
+                }
+            } else if (entry.has_edge) {
+                // Edge delta - get node directly (in_replay_ prevents WAL append)
+                Node* node = get_from_unified(entry.id);
+                if (node) {
+                    // Dedupe: check if edge already exists
+                    bool exists = false;
+                    for (const auto& e : node->edges) {
+                        if (e.target == entry.edge.target && e.type == entry.edge.type) {
+                            exists = true;
+                            break;
+                        }
+                    }
+                    if (!exists) {
+                        node->edges.push_back(entry.edge);
+                        applied = unified_.update(entry.id, *node);
+                    }
+                }
+            }
+            // Note: triplet entries are handled by Mind layer, not storage
+
+            if (applied) {
+                count++;
+                if (seq > max_seq) max_seq = seq;
+            }
+        });
+
+        in_replay_ = false;
+
+        // Update unified index's WAL sequence checkpoint
+        if (max_seq > since_seq) {
+            unified_.set_wal_sequence(max_seq);
+        }
+
+        return count;
+    }
+
     // Replay all WAL entries (called on startup)
     // Phase 2: Handles both full nodes and deltas via replay_v2
     size_t replay_wal() {
@@ -1639,10 +1781,24 @@ private:
         node.payload = unified_.payload(slot);
         // Load tags from SlotTagIndex
         node.tags = unified_.slot_tag_index().tags_for_slot(slot.value);
+        // Load edges if present
+        if (meta->edge_offset != 0) {
+            node.edges = unified_.get_edges(meta->edge_offset);
+        }
 
         // Update access time in cache and persist to unified index
         node.touch();
         unified_.touch(slot);
+
+        // WAL for crash recovery (touch delta is small: 56 bytes)
+        // Skip during replay to avoid deadlock and spurious entries
+        if (config_.use_wal && !in_replay_) {
+            uint64_t seq = wal_.append_touch(id, node.tau_accessed);
+            if (seq > 0) {
+                last_wal_seq_ = seq;
+                unified_.set_wal_sequence(seq);
+            }
+        }
 
         // Limit cache size
         if (unified_cache_.size() > 1000) {
@@ -1663,6 +1819,7 @@ private:
     std::unordered_map<NodeId, Node, NodeIdHash> unified_cache_;  // Reconstructed nodes cache
     bool loaded_successfully_;
     uint64_t last_wal_seq_;
+    bool in_replay_ = false;  // True during WAL replay to skip WAL append
 };
 
 } // namespace chitta

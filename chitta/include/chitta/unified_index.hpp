@@ -86,7 +86,8 @@ struct alignas(4096) UnifiedIndexHeader {
     uint32_t hnsw_ef_construction;
     uint64_t snapshot_id;         // For CoW versioning
     uint64_t checksum;
-    uint8_t reserved[4024];       // Pad to 4KB
+    uint64_t wal_sequence;        // Last applied WAL sequence (for crash recovery)
+    uint8_t reserved[4016];       // Pad to 4KB
 };
 static_assert(sizeof(UnifiedIndexHeader) == 4096, "Header must be 4KB");
 
@@ -152,6 +153,7 @@ public:
         header->hnsw_ef_construction = DEFAULT_EF_CONSTRUCTION;
         header->snapshot_id = 0;
         header->checksum = 0;
+        header->wal_sequence = 0;  // Initialize WAL sequence for crash recovery
 
         // Create vectors file
         std::string vec_path = base_path_ + ".vectors";
@@ -382,6 +384,7 @@ public:
         // Store tags in inverted index
         if (!node.tags.empty()) {
             tags_.add(slot.value, node.tags);
+            tags_.save();  // Persist immediately for crash safety
         }
 
         // Write metadata
@@ -473,14 +476,23 @@ public:
             payload_size = static_cast<uint32_t>(node.payload.size());
         }
 
+        // Store new edges (old edge space is orphaned but reclaimed on rebuild)
+        uint32_t edge_offset = 0;
+        if (!node.edges.empty()) {
+            edge_offset = static_cast<uint32_t>(store_edges(node.edges));
+        }
+
         // Update metadata
         auto* metas = meta_region_.as<NodeMeta>();
         metas[slot.value].tau_accessed = node.tau_accessed;
+        metas[slot.value].tau_created = node.tau_created;
+        metas[slot.value].node_type = node.node_type;
         metas[slot.value].confidence_mu = node.kappa.mu;
         metas[slot.value].confidence_sigma = node.kappa.sigma_sq;
         metas[slot.value].decay_rate = node.delta;
         metas[slot.value].payload_offset = payload_offset;
         metas[slot.value].payload_size = payload_size;
+        metas[slot.value].edge_offset = edge_offset;
 
         // Update tags: clear old tags and add new ones
         tags_.remove_all(slot.value);
@@ -490,6 +502,7 @@ public:
         tags_.save();
 
         // Sync to persist changes
+        edges_.sync();
         payloads_.sync();
         meta_region_.sync();
         vectors_region_.sync();
@@ -744,6 +757,23 @@ public:
         return index_region_.as<const UnifiedIndexHeader>()->snapshot_id;
     }
 
+    // WAL sequence tracking for crash recovery
+    uint64_t wal_sequence() const {
+        if (!index_region_.valid()) return 0;
+        return index_region_.as<const UnifiedIndexHeader>()->wal_sequence;
+    }
+
+    void set_wal_sequence(uint64_t seq) {
+        if (!index_region_.valid()) return;
+        std::unique_lock lock(mutex_);
+        auto* header = index_region_.as<UnifiedIndexHeader>();
+        // Monotonic: only update if new seq is greater (prevents regression)
+        if (seq > header->wal_sequence) {
+            header->wal_sequence = seq;
+            // Don't sync on every call - sync is expensive and will be done periodically
+        }
+    }
+
     // Access tag index for filtered queries
     const SlotTagIndex& slot_tag_index() const { return tags_; }
     SlotTagIndex& slot_tag_index() { return tags_; }
@@ -860,6 +890,11 @@ public:
             header->node_count,
             base_path_
         };
+    }
+
+    // Public accessor for loading edges (used by TieredStorage)
+    std::vector<Edge> get_edges(uint64_t offset) const {
+        return load_edges(offset);
     }
 
 private:

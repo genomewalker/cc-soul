@@ -22,7 +22,7 @@ namespace migrations {
 // Storage format constants
 constexpr uint32_t STORAGE_MAGIC = 0x43485454;  // "CHTT"
 constexpr uint32_t FOOTER_MAGIC = 0x454E4443;   // "CDNE" (end marker)
-constexpr uint32_t CURRENT_VERSION = 3;
+constexpr uint32_t CURRENT_VERSION = 4;
 
 struct MigrationResult {
     bool success;
@@ -310,6 +310,173 @@ inline MigrationResult migrate_v2_to_v3(const std::string& path) {
     return result;
 }
 
+// Migration: v3 → v4 (add epsilon field to each node)
+// v3 format: each node has delta field, no epsilon
+// v4 format: each node has delta then epsilon (default 0.5)
+inline MigrationResult migrate_v3_to_v4(const std::string& path) {
+    MigrationResult result{false, 3, 4, "", ""};
+
+    // Read entire v3 file
+    std::ifstream in(path, std::ios::binary | std::ios::ate);
+    if (!in) {
+        result.error = "Cannot open file for reading";
+        return result;
+    }
+
+    size_t file_size = in.tellg();
+    in.seekg(0, std::ios::beg);
+
+    std::vector<uint8_t> data(file_size);
+    in.read(reinterpret_cast<char*>(data.data()), file_size);
+    in.close();
+
+    // Verify it's v3
+    if (file_size < 12) {
+        result.error = "File too small";
+        return result;
+    }
+
+    uint32_t magic, version;
+    std::memcpy(&magic, data.data(), sizeof(magic));
+    std::memcpy(&version, data.data() + 4, sizeof(version));
+
+    if (magic != STORAGE_MAGIC || version != 3) {
+        result.error = "Not a v3 database";
+        return result;
+    }
+
+    // Create backup
+    result.backup_path = create_backup(path, 3);
+
+    // For v3→v4, we need to parse and rewrite each node to insert epsilon field
+    // The delta field (float) is followed by kappa fields in v3
+    // In v4, delta is followed by epsilon (float), then kappa
+
+    // Parse the file:
+    // [magic:4][version:4][count:8][nodes...][hnsw_index][checksum:4][footer_magic:4]
+    size_t pos = 8;
+    uint64_t node_count;
+    std::memcpy(&node_count, data.data() + pos, sizeof(node_count));
+    pos += 8;
+
+    std::vector<uint8_t> new_data;
+    new_data.reserve(file_size + node_count * sizeof(float));  // Extra space for epsilon fields
+
+    // Write header with new version
+    uint32_t new_version = 4;
+    new_data.insert(new_data.end(), data.data(), data.data() + 4);  // magic
+    new_data.insert(new_data.end(), reinterpret_cast<uint8_t*>(&new_version),
+                    reinterpret_cast<uint8_t*>(&new_version) + 4);
+    new_data.insert(new_data.end(), reinterpret_cast<uint8_t*>(&node_count),
+                    reinterpret_cast<uint8_t*>(&node_count) + 8);
+
+    // Process each node
+    for (uint64_t i = 0; i < node_count; ++i) {
+        if (pos >= file_size - 8) {  // Leave room for checksum+footer
+            result.error = "Truncated file at node " + std::to_string(i);
+            return result;
+        }
+
+        // Node format v3: id(16), type(1), tau_created(8), tau_accessed(8), delta(4),
+        //                 kappa_mu(4), kappa_sigma(4), kappa_n(4), vector(EMBED_DIM*4),
+        //                 payload_size(8), payload(...), edge_count(8), edges(...), tag_count(8), tags(...)
+
+        // Copy id, type, timestamps, delta
+        size_t fixed_before_delta = 16 + 1 + 8 + 8;  // id + type + tau_created + tau_accessed
+        new_data.insert(new_data.end(), data.data() + pos, data.data() + pos + fixed_before_delta + 4);  // +4 for delta
+        pos += fixed_before_delta + 4;
+
+        // Insert epsilon (default 0.5)
+        float epsilon = 0.5f;
+        new_data.insert(new_data.end(), reinterpret_cast<uint8_t*>(&epsilon),
+                        reinterpret_cast<uint8_t*>(&epsilon) + 4);
+
+        // Copy kappa fields (mu, sigma, n)
+        size_t kappa_size = 4 + 4 + 4;  // mu(4), sigma(4), n(4)
+        new_data.insert(new_data.end(), data.data() + pos, data.data() + pos + kappa_size);
+        pos += kappa_size;
+
+        // Copy vector
+        size_t vector_size = EMBED_DIM * sizeof(float);
+        new_data.insert(new_data.end(), data.data() + pos, data.data() + pos + vector_size);
+        pos += vector_size;
+
+        // Copy payload
+        size_t payload_size;
+        std::memcpy(&payload_size, data.data() + pos, sizeof(payload_size));
+        new_data.insert(new_data.end(), data.data() + pos, data.data() + pos + 8 + payload_size);
+        pos += 8 + payload_size;
+
+        // Copy edges
+        size_t edge_count;
+        std::memcpy(&edge_count, data.data() + pos, sizeof(edge_count));
+        size_t edges_size = 8 + edge_count * (16 + 1 + 4);  // count + edges (target:16, type:1, weight:4)
+        new_data.insert(new_data.end(), data.data() + pos, data.data() + pos + edges_size);
+        pos += edges_size;
+
+        // Copy tags
+        size_t tag_count;
+        std::memcpy(&tag_count, data.data() + pos, sizeof(tag_count));
+        new_data.insert(new_data.end(), data.data() + pos, data.data() + pos + 8);  // tag_count
+        pos += 8;
+        for (size_t t = 0; t < tag_count; ++t) {
+            size_t tag_len;
+            std::memcpy(&tag_len, data.data() + pos, sizeof(tag_len));
+            new_data.insert(new_data.end(), data.data() + pos, data.data() + pos + 8 + tag_len);
+            pos += 8 + tag_len;
+        }
+    }
+
+    // Copy HNSW index
+    size_t index_pos = pos;
+    size_t index_size = file_size - pos - 8;  // Subtract checksum + footer
+    new_data.insert(new_data.end(), data.data() + pos, data.data() + pos + index_size);
+
+    // Calculate and append checksum
+    uint32_t checksum = crc32(new_data.data(), new_data.size());
+    new_data.insert(new_data.end(), reinterpret_cast<uint8_t*>(&checksum),
+                    reinterpret_cast<uint8_t*>(&checksum) + 4);
+    new_data.insert(new_data.end(), reinterpret_cast<const uint8_t*>(&FOOTER_MAGIC),
+                    reinterpret_cast<const uint8_t*>(&FOOTER_MAGIC) + 4);
+
+    // Write to temp file and rename
+    std::string tmp_path = path + ".tmp";
+    std::ofstream out(tmp_path, std::ios::binary);
+    if (!out) {
+        result.error = "Cannot open temp file for writing";
+        return result;
+    }
+
+    out.write(reinterpret_cast<const char*>(new_data.data()), new_data.size());
+
+    if (!out.good()) {
+        out.close();
+        std::filesystem::remove(tmp_path);
+        result.error = "Write failed";
+        return result;
+    }
+
+    out.flush();
+    out.close();
+
+    // Fsync before rename
+    int tmp_fd = ::open(tmp_path.c_str(), O_RDONLY);
+    if (tmp_fd >= 0) {
+        fsync(tmp_fd);
+        ::close(tmp_fd);
+    }
+
+    // Atomic rename
+    if (::rename(tmp_path.c_str(), path.c_str()) != 0) {
+        std::filesystem::remove(tmp_path);
+        result.error = "Rename failed";
+        return result;
+    }
+
+    result.success = true;
+    return result;
+}
+
 // Run all necessary migrations to reach current version
 inline MigrationResult upgrade(const std::string& path) {
     namespace fs = std::filesystem;
@@ -370,6 +537,21 @@ inline MigrationResult upgrade(const std::string& path) {
         }
         version = 3;
         std::cerr << "[migrations] v2 → v3 complete. Backup: " << r.backup_path << "\n";
+    }
+
+    // v3 → v4
+    if (version == 3) {
+        std::cerr << "[migrations] Running v3 → v4 migration (adding epsilon field)...\n";
+        auto r = migrate_v3_to_v4(path);
+        if (!r.success) {
+            result.error = "v3→v4 migration failed: " + r.error;
+            return result;
+        }
+        if (result.backup_path.empty()) {
+            result.backup_path = r.backup_path;
+        }
+        version = 4;
+        std::cerr << "[migrations] v3 → v4 complete. Backup: " << r.backup_path << "\n";
     }
 
     // Clear any existing WAL after migration (fresh start)
