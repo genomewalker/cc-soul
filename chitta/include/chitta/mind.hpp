@@ -27,6 +27,9 @@
 #include "provenance.hpp"
 #include "realm_scoping.hpp"
 #include "truth_maintenance.hpp"
+#include "eval_harness.hpp"
+#include "review_queue.hpp"
+#include "epiplexity_test.hpp"
 #include <mutex>
 #include <atomic>
 #include <set>
@@ -314,6 +317,17 @@ public:
         storage_.for_each_hot([&fn](const NodeId& id, const Node& node) {
             fn(id, node);
         });
+    }
+
+    // Get a node by ID (returns nullptr if not found)
+    Node* get_node(const NodeId& id) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return storage_.get(id);
+    }
+
+    // Get current timestamp (public wrapper for RPC)
+    static Timestamp now() {
+        return chitta::now();
     }
 
     // Initialize or load existing mind
@@ -1297,6 +1311,33 @@ public:
     bool has_conflicts(NodeId id) const {
         std::lock_guard<std::mutex> lock(mutex_);
         return truth_maintenance_.has_unresolved_conflicts(id);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Phase 7: Priority 2 - RPC-exposed Component Access
+    // ═══════════════════════════════════════════════════════════════════
+
+    // Get evaluation harness for golden recall tests
+    EvalHarness& eval_harness() { return eval_harness_; }
+    const EvalHarness& eval_harness() const { return eval_harness_; }
+
+    // Get review queue for human oversight
+    ReviewQueue& review_queue() { return review_queue_; }
+    const ReviewQueue& review_queue() const { return review_queue_; }
+
+    // Get epiplexity tester for compression quality checks
+    EpiplexityTest& epiplexity_test() { return epiplexity_test_; }
+    const EpiplexityTest& epiplexity_test() const { return epiplexity_test_; }
+
+    // Enqueue a node for review
+    void enqueue_for_review(NodeId id, const std::string& context = "",
+                           ReviewPriority priority = ReviewPriority::Normal) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (Node* node = storage_.get(id)) {
+            auto text = payload_to_text(node->payload);
+            review_queue_.enqueue(id, node->node_type, text.value_or(""),
+                                 context, priority, now());
+        }
     }
 
     // Confidence propagation: propagate confidence change through graph
@@ -3807,6 +3848,11 @@ public:
     ProvenanceSpine provenance_spine_;
     RealmScoping realm_scoping_;
     TruthMaintenance truth_maintenance_;
+
+    // Phase 7: Priority 2 - RPC-exposed Components
+    EvalHarness eval_harness_;
+    ReviewQueue review_queue_;
+    EpiplexityTest epiplexity_test_;
 
     // Phase 7: Quota management helpers (caller must hold mutex_)
     void update_quota_counts() {

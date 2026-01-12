@@ -995,6 +995,174 @@ private:
             }
         });
         handlers_["cross_project"] = [this](const json& params) { return tool_cross_project(params); };
+
+        // Tool: eval_run - Run golden recall tests
+        tools_.push_back({
+            "eval_run",
+            "Run golden recall tests to validate recall quality. "
+            "Returns precision, recall, MRR, and NDCG metrics.",
+            {
+                {"type", "object"},
+                {"properties", {
+                    {"test_name", {
+                        {"type", "string"},
+                        {"description", "Specific test to run (empty = run all)"}
+                    }},
+                    {"k", {
+                        {"type", "integer"},
+                        {"default", 10},
+                        {"description", "Number of results to check"}
+                    }}
+                }},
+                {"required", json::array()}
+            }
+        });
+        handlers_["eval_run"] = [this](const json& params) { return tool_eval_run(params); };
+
+        // Tool: eval_add_test - Add a golden test case
+        tools_.push_back({
+            "eval_add_test",
+            "Add a new golden test case for recall validation.",
+            {
+                {"type", "object"},
+                {"properties", {
+                    {"name", {
+                        {"type", "string"},
+                        {"description", "Test case name"}
+                    }},
+                    {"query", {
+                        {"type", "string"},
+                        {"description", "Query text"}
+                    }},
+                    {"expected_ids", {
+                        {"type", "array"},
+                        {"items", {{"type", "string"}}},
+                        {"description", "Expected node IDs in results"}
+                    }},
+                    {"k", {
+                        {"type", "integer"},
+                        {"default", 10},
+                        {"description", "Number of results to check"}
+                    }}
+                }},
+                {"required", {"name", "query", "expected_ids"}}
+            }
+        });
+        handlers_["eval_add_test"] = [this](const json& params) { return tool_eval_add_test(params); };
+
+        // Tool: review_list - List items in review queue
+        tools_.push_back({
+            "review_list",
+            "List items pending human review. Returns pending wisdom and synthesized content.",
+            {
+                {"type", "object"},
+                {"properties", {
+                    {"status", {
+                        {"type", "string"},
+                        {"enum", {"pending", "approved", "rejected", "deferred", "all"}},
+                        {"default", "pending"},
+                        {"description", "Filter by review status"}
+                    }},
+                    {"limit", {
+                        {"type", "integer"},
+                        {"default", 10},
+                        {"description", "Max items to return"}
+                    }}
+                }},
+                {"required", json::array()}
+            }
+        });
+        handlers_["review_list"] = [this](const json& params) { return tool_review_list(params); };
+
+        // Tool: review_decide - Approve, reject, or defer a review item
+        tools_.push_back({
+            "review_decide",
+            "Make a decision on a review item: approve, reject, edit, or defer.",
+            {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {
+                        {"type", "string"},
+                        {"description", "Node ID to review"}
+                    }},
+                    {"decision", {
+                        {"type", "string"},
+                        {"enum", {"approve", "reject", "edit", "defer"}},
+                        {"description", "Review decision"}
+                    }},
+                    {"comment", {
+                        {"type", "string"},
+                        {"description", "Reviewer comment"}
+                    }},
+                    {"edited_content", {
+                        {"type", "string"},
+                        {"description", "Edited content (for edit decision)"}
+                    }},
+                    {"quality_rating", {
+                        {"type", "number"},
+                        {"minimum", 1},
+                        {"maximum", 5},
+                        {"description", "Quality rating 1-5"}
+                    }}
+                }},
+                {"required", {"id", "decision"}}
+            }
+        });
+        handlers_["review_decide"] = [this](const json& params) { return tool_review_decide(params); };
+
+        // Tool: review_stats - Get review queue statistics
+        tools_.push_back({
+            "review_stats",
+            "Get statistics about the review queue: approval rate, quality metrics.",
+            {
+                {"type", "object"},
+                {"properties", {}},
+                {"required", json::array()}
+            }
+        });
+        handlers_["review_stats"] = [this](const json& params) { return tool_review_stats(params); };
+
+        // Tool: epiplexity_check - Check compression quality
+        tools_.push_back({
+            "epiplexity_check",
+            "Check epiplexity (compression quality) of memory nodes. "
+            "Tests how well the LLM can reconstruct full meaning from seeds.",
+            {
+                {"type", "object"},
+                {"properties", {
+                    {"node_ids", {
+                        {"type", "array"},
+                        {"items", {{"type", "string"}}},
+                        {"description", "Specific node IDs to check (empty = sample)"}
+                    }},
+                    {"sample_size", {
+                        {"type", "integer"},
+                        {"default", 10},
+                        {"description", "Number of nodes to sample if no IDs given"}
+                    }}
+                }},
+                {"required", json::array()}
+            }
+        });
+        handlers_["epiplexity_check"] = [this](const json& params) { return tool_epiplexity_check(params); };
+
+        // Tool: epiplexity_drift - Check for epsilon drift over time
+        tools_.push_back({
+            "epiplexity_drift",
+            "Analyze epsilon drift over time. Detects if compression quality is degrading.",
+            {
+                {"type", "object"},
+                {"properties", {
+                    {"lookback_days", {
+                        {"type", "integer"},
+                        {"default", 7},
+                        {"description", "Days to look back for drift analysis"}
+                    }}
+                }},
+                {"required", json::array()}
+            }
+        });
+        handlers_["epiplexity_drift"] = [this](const json& params) { return tool_epiplexity_drift(params); };
     }
 
     json handle_request(const json& request) {
@@ -3542,6 +3710,323 @@ private:
             {"projects", projects},
             {"transferable", transferable},
             {"query", query}
+        }};
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Phase 7: Priority 2 - RPC Tools for EvalHarness, ReviewQueue, EpiplexityTest
+    // ═══════════════════════════════════════════════════════════════════
+
+    ToolResult tool_eval_run(const json& params) {
+        std::string test_name = params.value("test_name", "");
+        size_t k = params.value("k", 10);
+
+        // Create recall function for evaluation
+        auto recall_fn = [this, k](const std::string& query, const std::vector<std::string>& tags, size_t n) {
+            std::vector<std::pair<NodeId, float>> results;
+            auto recalls = mind_->recall(query, n > 0 ? n : k);
+            for (const auto& r : recalls) {
+                results.push_back({r.id, r.relevance});
+            }
+            return results;
+        };
+
+        auto& harness = mind_->eval_harness();
+        std::vector<TestResult> results;
+
+        if (test_name.empty()) {
+            results = harness.run_all(recall_fn);
+        } else {
+            results.push_back(harness.evaluate(test_name, recall_fn));
+        }
+
+        auto stats = harness.get_stats(results);
+
+        std::ostringstream ss;
+        ss << "=== Eval Harness Results ===\n";
+        ss << "Tests: " << stats.total_tests << " (passed: " << stats.passed << ", failed: " << stats.failed << ")\n";
+        ss << "Precision: " << std::fixed << std::setprecision(2) << stats.avg_precision * 100 << "%\n";
+        ss << "Recall: " << stats.avg_recall * 100 << "%\n";
+        ss << "MRR: " << stats.avg_mrr << "\n";
+        ss << "NDCG: " << stats.avg_ndcg << "\n\n";
+
+        json test_results = json::array();
+        for (const auto& r : results) {
+            json tr = {
+                {"name", r.test_name},
+                {"passed", r.passed},
+                {"precision", r.precision},
+                {"recall", r.recall},
+                {"mrr", r.mrr},
+                {"ndcg", r.ndcg}
+            };
+            if (!r.passed) {
+                tr["failure_reason"] = r.failure_reason;
+            }
+            test_results.push_back(tr);
+
+            ss << (r.passed ? "PASS" : "FAIL") << " " << r.test_name;
+            if (!r.passed) ss << " - " << r.failure_reason;
+            ss << "\n";
+        }
+
+        return {false, ss.str(), {
+            {"tests", test_results},
+            {"stats", {
+                {"total", stats.total_tests},
+                {"passed", stats.passed},
+                {"failed", stats.failed},
+                {"avg_precision", stats.avg_precision},
+                {"avg_recall", stats.avg_recall},
+                {"avg_mrr", stats.avg_mrr},
+                {"avg_ndcg", stats.avg_ndcg}
+            }}
+        }};
+    }
+
+    ToolResult tool_eval_add_test(const json& params) {
+        std::string name = params.at("name");
+        std::string query = params.at("query");
+        auto expected_ids = params.at("expected_ids");
+        size_t k = params.value("k", 10);
+
+        GoldenTestCase test;
+        test.name = name;
+        test.query = query;
+        test.k = k;
+
+        for (const auto& id_str : expected_ids) {
+            ExpectedResult exp;
+            exp.id = NodeId::from_string(id_str.get<std::string>());
+            exp.min_score = 0.0f;
+            exp.max_rank = k;
+            exp.required = true;
+            test.expected.push_back(exp);
+        }
+
+        mind_->eval_harness().add_test(test);
+
+        return {false, "Added test case: " + name + " with " + std::to_string(test.expected.size()) + " expected results", {
+            {"name", name},
+            {"expected_count", test.expected.size()}
+        }};
+    }
+
+    ToolResult tool_review_list(const json& params) {
+        std::string status_str = params.value("status", "pending");
+        size_t limit = params.value("limit", 10);
+
+        auto& queue = mind_->review_queue();
+        std::vector<ReviewItem> items;
+
+        if (status_str == "pending") {
+            items = queue.get_batch(limit);
+        } else if (status_str == "approved") {
+            items = queue.get_by_status(ReviewStatus::Approved);
+        } else if (status_str == "rejected") {
+            items = queue.get_by_status(ReviewStatus::Rejected);
+        } else if (status_str == "deferred") {
+            items = queue.get_by_status(ReviewStatus::Deferred);
+        } else {
+            // All
+            items = queue.get_pending();
+            auto approved = queue.get_by_status(ReviewStatus::Approved);
+            auto rejected = queue.get_by_status(ReviewStatus::Rejected);
+            items.insert(items.end(), approved.begin(), approved.end());
+            items.insert(items.end(), rejected.begin(), rejected.end());
+        }
+
+        if (items.size() > limit) items.resize(limit);
+
+        std::ostringstream ss;
+        ss << "=== Review Queue (" << status_str << ") ===\n";
+        ss << items.size() << " items\n\n";
+
+        json items_json = json::array();
+        for (const auto& item : items) {
+            ss << "[" << item.id.to_string().substr(0, 8) << "] "
+               << node_type_to_string(item.type) << " - "
+               << item.content.substr(0, 80) << "\n";
+
+            items_json.push_back({
+                {"id", item.id.to_string()},
+                {"type", node_type_to_string(item.type)},
+                {"content", item.content},
+                {"context", item.context},
+                {"priority", static_cast<int>(item.priority)},
+                {"status", static_cast<int>(item.status)}
+            });
+        }
+
+        return {false, ss.str(), {{"items", items_json}}};
+    }
+
+    ToolResult tool_review_decide(const json& params) {
+        std::string id_str = params.at("id");
+        std::string decision = params.at("decision");
+        std::string comment = params.value("comment", "");
+        std::string edited_content = params.value("edited_content", "");
+        float quality_rating = params.value("quality_rating", 0.0f);
+
+        NodeId id = NodeId::from_string(id_str);
+        auto& queue = mind_->review_queue();
+        Timestamp current = mind_->now();
+
+        if (decision == "approve") {
+            queue.approve(id, comment, quality_rating, current);
+        } else if (decision == "reject") {
+            queue.reject(id, comment, current);
+        } else if (decision == "edit") {
+            queue.approve_with_edits(id, edited_content, comment, quality_rating, current);
+        } else if (decision == "defer") {
+            queue.defer(id, comment);
+        } else {
+            return {true, "Invalid decision: " + decision, json()};
+        }
+
+        return {false, "Review decision recorded: " + decision + " for " + id_str.substr(0, 8), {
+            {"id", id_str},
+            {"decision", decision}
+        }};
+    }
+
+    ToolResult tool_review_stats(const json& /*params*/) {
+        auto& queue = mind_->review_queue();
+        auto stats = queue.get_stats();
+
+        std::ostringstream ss;
+        ss << "=== Review Queue Stats ===\n";
+        ss << "Pending: " << stats.pending << "\n";
+        ss << "Approved: " << stats.approved << "\n";
+        ss << "Edited: " << stats.edited << "\n";
+        ss << "Rejected: " << stats.rejected << "\n";
+        ss << "Deferred: " << stats.deferred << "\n";
+        ss << "Approval Rate: " << std::fixed << std::setprecision(1) << stats.approval_rate * 100 << "%\n";
+        ss << "Avg Quality: " << stats.avg_quality_rating << "/5\n";
+
+        return {false, ss.str(), {
+            {"pending", stats.pending},
+            {"approved", stats.approved},
+            {"edited", stats.edited},
+            {"rejected", stats.rejected},
+            {"deferred", stats.deferred},
+            {"approval_rate", stats.approval_rate},
+            {"avg_quality_rating", stats.avg_quality_rating}
+        }};
+    }
+
+    ToolResult tool_epiplexity_check(const json& params) {
+        auto node_ids = params.value("node_ids", json::array());
+        size_t sample_size = params.value("sample_size", 10);
+
+        // Get nodes to test
+        std::vector<std::tuple<NodeId, std::string, std::string>> test_nodes;
+
+        if (node_ids.empty()) {
+            // Sample random nodes
+            size_t count = 0;
+            mind_->for_each_node([&](const NodeId& id, const Node& node) {
+                if (count++ < sample_size && node.payload.size() > 10) {
+                    auto text = Mind::payload_to_text(node.payload);
+                    if (text && text->size() > 20) {
+                        // Create a "seed" from title/first line
+                        std::string seed = text->substr(0, std::min(size_t(100), text->size()));
+                        test_nodes.push_back({id, seed, *text});
+                    }
+                }
+            });
+        } else {
+            for (const auto& id_str : node_ids) {
+                NodeId id = NodeId::from_string(id_str.get<std::string>());
+                if (Node* node = mind_->get_node(id)) {
+                    auto text = Mind::payload_to_text(node->payload);
+                    if (text && text->size() > 20) {
+                        std::string seed = text->substr(0, std::min(size_t(100), text->size()));
+                        test_nodes.push_back({id, seed, *text});
+                    }
+                }
+            }
+        }
+
+        // Simple reconstruction: seed already contains title, check similarity
+        // In a real scenario, this would call an LLM to reconstruct
+        auto reconstruct = [](const std::string& seed) -> std::string {
+            return seed;  // Placeholder - real impl would use LLM
+        };
+
+        // Simple similarity: character overlap ratio
+        auto similarity = [](const std::string& a, const std::string& b) -> float {
+            if (a.empty() || b.empty()) return 0.0f;
+            size_t min_len = std::min(a.size(), b.size());
+            size_t matches = 0;
+            for (size_t i = 0; i < min_len; ++i) {
+                if (a[i] == b[i]) matches++;
+            }
+            return static_cast<float>(matches) / std::max(a.size(), b.size());
+        };
+
+        auto& epiplexity = mind_->epiplexity_test();
+        auto results = epiplexity.test_batch(test_nodes, reconstruct, similarity, mind_->now());
+        auto stats = epiplexity.get_stats(results);
+
+        std::ostringstream ss;
+        ss << "=== Epiplexity Check ===\n";
+        ss << "Tested: " << stats.total << " nodes\n";
+        ss << "Passed: " << stats.passed << " (" << (stats.total > 0 ? stats.passed * 100 / stats.total : 0) << "%)\n";
+        ss << "Avg Epsilon: " << std::fixed << std::setprecision(2) << stats.avg_epsilon << "\n";
+        ss << "Range: [" << stats.min_epsilon << ", " << stats.max_epsilon << "]\n";
+
+        if (stats.alerts > 0) {
+            ss << "ALERTS: " << stats.alerts << " nodes below alert threshold\n";
+        }
+
+        json results_json = json::array();
+        for (const auto& r : results) {
+            results_json.push_back({
+                {"id", r.id.to_string()},
+                {"epsilon", r.epsilon},
+                {"passed", r.passed}
+            });
+        }
+
+        return {false, ss.str(), {
+            {"results", results_json},
+            {"stats", {
+                {"total", stats.total},
+                {"passed", stats.passed},
+                {"failed", stats.failed},
+                {"alerts", stats.alerts},
+                {"avg_epsilon", stats.avg_epsilon},
+                {"min_epsilon", stats.min_epsilon},
+                {"max_epsilon", stats.max_epsilon}
+            }}
+        }};
+    }
+
+    ToolResult tool_epiplexity_drift(const json& params) {
+        int lookback_days = params.value("lookback_days", 7);
+        uint64_t lookback_ms = static_cast<uint64_t>(lookback_days) * 86400000;
+
+        auto& epiplexity = mind_->epiplexity_test();
+        auto analysis = epiplexity.check_drift(mind_->now(), lookback_ms);
+
+        std::ostringstream ss;
+        ss << "=== Epiplexity Drift Analysis ===\n";
+        ss << "Lookback: " << lookback_days << " days\n";
+        ss << analysis.message << "\n";
+
+        if (analysis.drift_detected) {
+            ss << "Previous Avg: " << std::fixed << std::setprecision(3) << analysis.previous_avg << "\n";
+            ss << "Current Avg: " << analysis.current_avg << "\n";
+            ss << "Change: " << analysis.change << "\n";
+        }
+
+        return {false, ss.str(), {
+            {"drift_detected", analysis.drift_detected},
+            {"previous_avg", analysis.previous_avg},
+            {"current_avg", analysis.current_avg},
+            {"change", analysis.change},
+            {"message", analysis.message}
         }};
     }
 

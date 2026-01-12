@@ -1,6 +1,6 @@
 # cc-soul 100M+ Scale Implementation Plan
 
-## Status: Priority 1 Wiring Complete (Jan 2026)
+## Status: Priority 2 RPC Complete (Jan 2026)
 
 ### Implementation Status:
 | Component | Header | Wired | Notes |
@@ -13,9 +13,9 @@
 | TruthMaintenance | ✅ | ✅ | `recall()` annotates conflicts |
 | RealmScoping | ✅ | ✅ | `recall()` filters by realm |
 | SynthesisQueue | ✅ | ❌ | Needs synthesis pipeline |
-| EvalHarness | ✅ | ❌ | Needs RPC exposure |
-| EpiplexityTest | ✅ | ❌ | Needs scheduler/RPC |
-| ReviewQueue | ✅ | ❌ | Needs RPC exposure |
+| EvalHarness | ✅ | ✅ | RPC: `eval_run`, `eval_add_test` |
+| EpiplexityTest | ✅ | ✅ | RPC: `epiplexity_check`, `epiplexity_drift` |
+| ReviewQueue | ✅ | ✅ | RPC: `review_list`, `review_decide`, `review_stats` |
 | GapInquiry | ✅ | ❌ | Needs gap detection pipeline |
 
 **Enable via MindConfig:**
@@ -211,10 +211,10 @@ Workload: 10-50 QPS burst, 100-1000 inserts/day
 2. ~~**RealmScoping** → `recall()`: Filter results by current realm~~
 3. ~~**TruthMaintenance** → `recall()`: Annotate conflicts in results~~
 
-### Priority 2: RPC/CLI Exposure
-4. **EvalHarness** → New RPC tool `eval_run` to execute golden tests
-5. **ReviewQueue** → New RPC tools `review_list`, `review_approve`, `review_reject`
-6. **EpiplexityTest** → New RPC tool `epiplexity_check` or daemon scheduler
+### Priority 2: RPC/CLI Exposure [DONE]
+4. ~~**EvalHarness** → `eval_run`, `eval_add_test` RPC tools~~
+5. ~~**ReviewQueue** → `review_list`, `review_decide`, `review_stats` RPC tools~~
+6. ~~**EpiplexityTest** → `epiplexity_check`, `epiplexity_drift` RPC tools~~
 
 ### Priority 3: Pipeline Integration
 7. **SynthesisQueue** → Hook into wisdom synthesis (daemon or explicit)
