@@ -30,6 +30,8 @@
 #include "eval_harness.hpp"
 #include "review_queue.hpp"
 #include "epiplexity_test.hpp"
+#include "synthesis_queue.hpp"
+#include "gap_inquiry.hpp"
 #include <mutex>
 #include <atomic>
 #include <set>
@@ -66,6 +68,9 @@ struct MindConfig {
     std::string default_realm = "brahman";  // Default realm for new nodes
     ProvenanceSource default_provenance_source = ProvenanceSource::Unknown;
     std::string session_id;              // Current session ID for provenance
+
+    // Phase 7: Priority 3 - Pipeline Integration
+    bool enable_query_routing = false;   // Route queries based on intent classification
 };
 
 // Search result with meaning
@@ -666,8 +671,68 @@ public:
                                SearchMode mode = SearchMode::Hybrid) {
         std::lock_guard<std::mutex> lock(mutex_);
 
+        // Phase 7: Route query based on intent
+        if (config_.enable_query_routing) {
+            auto decision = query_router_.route(query);
+
+            // Use routing decision to optimize search
+            switch (decision.primary_intent) {
+                case QueryIntent::TagFilter:
+                    // Pure tag query - use tag index directly
+                    if (!decision.tags.empty()) {
+                        auto tag_results = recall_by_tag_unlocked(decision.tags[0], k);
+                        // Track gap encounters for any Gap nodes
+                        for (const auto& r : tag_results) {
+                            if (r.type == NodeType::Gap) {
+                                gap_inquiry_.record_encounter(r.id);
+                            }
+                            // Track synthesis recalls
+                            if (synthesis_queue_.is_staged(r.id)) {
+                                synthesis_queue_.record_recall(r.id);
+                            }
+                        }
+                        return tag_results;
+                    }
+                    break;
+
+                case QueryIntent::ExactMatch:
+                    // Exact match - try tag first, then semantic
+                    {
+                        auto exact_results = recall_by_tag_unlocked(query, k);
+                        if (!exact_results.empty()) {
+                            return exact_results;
+                        }
+                    }
+                    // Fall through to semantic search
+                    break;
+
+                case QueryIntent::SemanticSearch:
+                    mode = SearchMode::Dense;  // Pure semantic
+                    break;
+
+                case QueryIntent::Hybrid:
+                    mode = SearchMode::Hybrid;  // Already default
+                    break;
+
+                default:
+                    break;
+            }
+        }
+
         Artha artha = yantra_->transform(query);
-        return recall_impl(artha.nu, query, k, threshold, mode);
+        auto results = recall_impl(artha.nu, query, k, threshold, mode);
+
+        // Phase 7: Track gap encounters and synthesis recalls
+        for (const auto& r : results) {
+            if (r.type == NodeType::Gap) {
+                gap_inquiry_.record_encounter(r.id);
+            }
+            if (synthesis_queue_.is_staged(r.id)) {
+                synthesis_queue_.record_recall(r.id);
+            }
+        }
+
+        return results;
     }
 
     // Recall with session priming (Phase 4: Context Modulation)
@@ -739,6 +804,41 @@ public:
             results.resize(k);
         }
 
+        return results;
+    }
+
+    // Recall by tag (unlocked version - caller must hold mutex)
+    std::vector<Recall> recall_by_tag_unlocked(const std::string& tag, size_t k = 50) {
+        sync_from_shared_field();
+
+        auto node_ids = storage_.use_unified()
+            ? storage_.find_by_tag(tag)
+            : tag_index_.find(tag);
+
+        std::vector<Recall> results;
+        for (const auto& id : node_ids) {
+            if (Node* node = storage_.get(id)) {
+                auto text = payload_to_text(node->payload);
+                if (!text || text->size() < 3) continue;
+
+                Recall r;
+                r.id = id;
+                r.similarity = 1.0f;
+                r.relevance = node->kappa.effective();
+                r.type = node->node_type;
+                r.confidence = node->kappa;
+                r.created = node->tau_created;
+                r.accessed = node->tau_accessed;
+                r.payload = node->payload;
+                r.text = *text;
+                results.push_back(std::move(r));
+            }
+        }
+
+        std::sort(results.begin(), results.end(),
+            [](const Recall& a, const Recall& b) { return a.created > b.created; });
+
+        if (results.size() > k) results.resize(k);
         return results;
     }
 
@@ -1338,6 +1438,54 @@ public:
             review_queue_.enqueue(id, node->node_type, text.value_or(""),
                                  context, priority, now());
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Phase 7: Priority 3 - Pipeline Component Access
+    // ═══════════════════════════════════════════════════════════════════
+
+    // Get synthesis queue for wisdom staging
+    SynthesisQueue& synthesis_queue() { return synthesis_queue_; }
+    const SynthesisQueue& synthesis_queue() const { return synthesis_queue_; }
+
+    // Get gap inquiry for knowledge gap tracking
+    GapInquiry& gap_inquiry() { return gap_inquiry_; }
+    const GapInquiry& gap_inquiry() const { return gap_inquiry_; }
+
+    // Get query router for intent classification
+    QueryRouter& query_router() { return query_router_; }
+    const QueryRouter& query_router() const { return query_router_; }
+
+    // Stage wisdom for synthesis (instead of direct creation)
+    void stage_wisdom(NodeId id, const std::string& content) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        synthesis_queue_.stage(id, content, now());
+    }
+
+    // Add evidence to staged wisdom
+    void add_synthesis_evidence(NodeId id, Evidence::Type type, const std::string& details,
+                               float weight = 1.0f, NodeId source = {}) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        Evidence e;
+        e.type = type;
+        e.source = source;
+        e.details = details;
+        e.weight = weight;
+        e.added_at = now();
+        synthesis_queue_.add_evidence(id, e);
+    }
+
+    // Register a knowledge gap
+    void register_gap(NodeId id, const std::string& topic, const std::string& question,
+                     const std::string& context = "", GapImportance importance = GapImportance::Medium) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        gap_inquiry_.register_gap(id, topic, question, context, importance, now());
+    }
+
+    // Get inquiry queue (gaps ready to ask)
+    std::vector<KnowledgeGap> get_inquiry_queue(size_t limit = 5) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return gap_inquiry_.get_inquiry_queue(limit, now());
     }
 
     // Confidence propagation: propagate confidence change through graph
@@ -3853,6 +4001,10 @@ public:
     EvalHarness eval_harness_;
     ReviewQueue review_queue_;
     EpiplexityTest epiplexity_test_;
+
+    // Phase 7: Priority 3 - Pipeline Components
+    SynthesisQueue synthesis_queue_;
+    GapInquiry gap_inquiry_;
 
     // Phase 7: Quota management helpers (caller must hold mutex_)
     void update_quota_counts() {

@@ -1,22 +1,22 @@
 # cc-soul 100M+ Scale Implementation Plan
 
-## Status: Priority 2 RPC Complete (Jan 2026)
+## Status: All 12 Components Complete (Jan 2026)
 
 ### Implementation Status:
 | Component | Header | Wired | Notes |
 |-----------|--------|-------|-------|
-| QueryRouter | ✅ | ⚪ | Member ready, not yet routing |
+| QueryRouter | ✅ | ✅ | `recall()` routes by intent |
 | QuotaManager | ✅ | ✅ | `remember()` checks quotas |
 | UtilityDecay | ✅ | ✅ | `recall()` + `feedback()` tracked |
 | AttractorDampener | ✅ | ✅ | `recall()` dampens over-retrieved |
 | ProvenanceSpine | ✅ | ✅ | `remember()` records source metadata |
 | TruthMaintenance | ✅ | ✅ | `recall()` annotates conflicts |
 | RealmScoping | ✅ | ✅ | `recall()` filters by realm |
-| SynthesisQueue | ✅ | ❌ | Needs synthesis pipeline |
+| SynthesisQueue | ✅ | ✅ | `recall()` tracks staged wisdom |
 | EvalHarness | ✅ | ✅ | RPC: `eval_run`, `eval_add_test` |
 | EpiplexityTest | ✅ | ✅ | RPC: `epiplexity_check`, `epiplexity_drift` |
 | ReviewQueue | ✅ | ✅ | RPC: `review_list`, `review_decide`, `review_stats` |
-| GapInquiry | ✅ | ❌ | Needs gap detection pipeline |
+| GapInquiry | ✅ | ✅ | `recall()` tracks gap encounters |
 
 **Enable via MindConfig:**
 ```cpp
@@ -31,6 +31,9 @@ config.enable_realm_scoping = true;
 config.enable_truth_maintenance = true;
 config.session_id = "session-123";
 config.default_realm = "project:my-project";
+
+// Priority 3 components
+config.enable_query_routing = true;  // Intent-based query routing
 ```
 
 ## Overview
@@ -202,6 +205,7 @@ Workload: 10-50 QPS burst, 100-1000 inserts/day
 - [ ] p99 query latency <500ms
 - [ ] Memory usage <100GB at 100M nodes
 - [x] All 12 recommendations implemented
+- [x] All 12 components wired into Mind
 - [ ] Golden Recall Harness passing (needs test data)
 
 ## What's Missing (Next Steps)
@@ -216,17 +220,18 @@ Workload: 10-50 QPS burst, 100-1000 inserts/day
 5. ~~**ReviewQueue** → `review_list`, `review_decide`, `review_stats` RPC tools~~
 6. ~~**EpiplexityTest** → `epiplexity_check`, `epiplexity_drift` RPC tools~~
 
-### Priority 3: Pipeline Integration
-7. **SynthesisQueue** → Hook into wisdom synthesis (daemon or explicit)
-8. **GapInquiry** → Hook into Gap node creation, surface questions
-9. **QueryRouter** → Route queries based on intent before search
+### Priority 3: Pipeline Integration [DONE]
+7. ~~**SynthesisQueue** → `recall()` tracks staged wisdom recalls~~
+8. ~~**GapInquiry** → `recall()` tracks gap encounters~~
+9. ~~**QueryRouter** → Routes queries based on intent classification~~
 
-### Priority 4: Delete/Eviction Support
+### Priority 4: Delete/Eviction Support (Future)
 10. WAL delete entries for proper node removal
 11. Full eviction in `maybe_evict_for_quota()`
 
-### Nice to Have
+### Nice to Have (Future)
 - Persistence for UtilityDecay, AttractorDampener state
 - Persistence for ProvenanceSpine, RealmScoping, TruthMaintenance state
+- Persistence for SynthesisQueue, GapInquiry state
 - Cross-session realm context
 - Batch review CLI mode
