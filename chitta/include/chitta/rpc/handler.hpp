@@ -369,7 +369,7 @@ private:
             return ToolResult::ok("No attractors found (need nodes with high confidence, connections, and age)", json());
         }
 
-        Mind::AttractorReport report;
+        AttractorReport report;
         if (settle) {
             report = mind_->run_attractor_dynamics(max_attractors, settle_strength);
         }
@@ -850,7 +850,7 @@ private:
         size_t feedback_applied = mind_->apply_feedback();
         size_t synthesized = mind_->synthesize_wisdom();
 
-        Mind::AttractorReport attractor_report;
+        AttractorReport attractor_report;
         if (run_attractors) {
             attractor_report = mind_->run_attractor_dynamics();
         }

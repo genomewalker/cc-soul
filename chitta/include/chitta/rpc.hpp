@@ -2151,7 +2151,7 @@ private:
         size_t synthesized = mind_->synthesize_wisdom();
 
         // Run attractor dynamics if requested
-        Mind::AttractorReport attractor_report;
+        AttractorReport attractor_report;
         if (run_attractors) {
             attractor_report = mind_->run_attractor_dynamics();
         }

@@ -11,6 +11,7 @@
 // Modular components (extracted for maintainability)
 #include "mind/types.hpp"      // MindConfig, Recall, SearchMode, MindState, MindHealth
 #include "mind/tag_index.hpp"  // TagIndex (lightweight in-memory)
+#include "mind/structs.hpp"    // PropagationResult, Attractor, EpiplexityStats, etc.
 
 // Core dependencies
 #include "types.hpp"
@@ -1405,13 +1406,7 @@ public:
     // When a node's confidence changes, connected nodes are affected proportionally
     // decay_factor: how much propagation decays per hop (default 0.5 = halves each hop)
     // max_depth: maximum hops to propagate
-    // Returns: number of nodes affected
-    struct PropagationResult {
-        size_t nodes_affected;
-        float total_delta_applied;
-        std::vector<std::pair<NodeId, float>> changes;  // (id, delta)
-    };
-
+    // Returns: number of nodes affected (PropagationResult defined in mind/structs.hpp)
     PropagationResult propagate_confidence(NodeId source, float delta,
                                            float decay_factor = 0.5f,
                                            size_t max_depth = 3) {
@@ -1751,16 +1746,7 @@ public:
     }
 
     // Recover from degradation - called automatically or manually
-    // Returns what actions were taken
-    struct RecoveryReport {
-        bool decay_applied = false;
-        bool integrity_repaired = false;
-        bool index_rebuilt = false;
-        size_t nodes_pruned = 0;
-        float ojas_before = 0.0f;
-        float ojas_after = 0.0f;
-    };
-
+    // Returns what actions were taken (RecoveryReport defined in mind/structs.hpp)
     RecoveryReport recover() {
         std::lock_guard<std::mutex> lock(mutex_);
 
@@ -2443,15 +2429,7 @@ public:
     // ═══════════════════════════════════════════════════════════════════
     // Attractor Dynamics (Phase 2 of resonance architecture)
     // ═══════════════════════════════════════════════════════════════════
-
-    // An attractor is a high-confidence, well-connected node that
-    // pulls similar nodes toward it (conceptual gravity well)
-    struct Attractor {
-        NodeId id;
-        float strength;          // Attractor strength (confidence * connectivity)
-        std::string label;       // First 50 chars of content for identification
-        size_t basin_size = 0;   // Number of nodes in this attractor's basin
-    };
+    // (Attractor struct defined in mind/structs.hpp)
 
     // Find natural attractors in the graph
     // Attractors are nodes with: high confidence + many connections + stable (old)
@@ -2594,13 +2572,7 @@ public:
     // 1. Find attractors
     // 2. Settle nodes toward attractors
     // 3. Compute basins
-    // Returns a report of what happened
-    struct AttractorReport {
-        size_t attractor_count = 0;
-        size_t nodes_settled = 0;
-        std::vector<std::pair<std::string, size_t>> basin_sizes;  // label -> size
-    };
-
+    // Returns a report of what happened (AttractorReport defined in mind/structs.hpp)
     AttractorReport run_attractor_dynamics(size_t max_attractors = 10,
                                             float settle_strength = 0.02f) {
         AttractorReport report;
@@ -2720,15 +2692,7 @@ public:
     }
 
     // Compute epiplexity for all hot nodes and return statistics
-    struct EpiplexityStats {
-        float mean = 0.0f;
-        float median = 0.0f;
-        float min = 1.0f;
-        float max = 0.0f;
-        size_t count = 0;
-        std::vector<std::pair<NodeId, float>> top_nodes;  // Top 10 by epiplexity
-    };
-
+    // (EpiplexityStats defined in mind/structs.hpp)
     EpiplexityStats compute_soul_epiplexity() {
         std::lock_guard<std::mutex> lock(mutex_);
 
@@ -3363,11 +3327,7 @@ private:
 
     // Reverse edge index: O(1) lookup of incoming edges
     // Updated incrementally on edge add/remove
-    struct ReverseEdge {
-        NodeId source;
-        EdgeType type;
-        float weight;
-    };
+    // (ReverseEdge defined in mind/structs.hpp)
     std::unordered_map<NodeId, std::vector<ReverseEdge>, NodeIdHash> reverse_edges_;
 
     // Temporal index: O(log B) range queries, B = number of buckets
@@ -3466,18 +3426,7 @@ public:
     // ═══════════════════════════════════════════════════════════════════
     // PHASE 2 CORE: FORA-Style Approximate PPR (O(1/ε) query time)
     // ═══════════════════════════════════════════════════════════════════
-
-    struct SparseVector {
-        std::unordered_map<NodeId, float, NodeIdHash> entries;
-        void add(const NodeId& id, float val) {
-            entries[id] += val;
-            if (std::abs(entries[id]) < 1e-10f) entries.erase(id);
-        }
-        float get(const NodeId& id) const {
-            auto it = entries.find(id);
-            return it != entries.end() ? it->second : 0.0f;
-        }
-    };
+    // (SparseVector defined in mind/structs.hpp)
 
     // Forward push: deterministic, O(1/r_max) operations
     void forward_push(
@@ -3766,12 +3715,7 @@ public:
     // ═══════════════════════════════════════════════════════════════════
     // PHASE 2 CORE: Causal Chains via Reverse Index (O(depth × avg_in_degree))
     // ═══════════════════════════════════════════════════════════════════
-
-    struct CausalChain {
-        std::vector<NodeId> nodes;
-        std::vector<EdgeType> edges;
-        float confidence;
-    };
+    // (CausalChain defined in mind/structs.hpp)
 
     std::vector<CausalChain> find_causal_chains(
         const NodeId& effect,
