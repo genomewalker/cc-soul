@@ -577,6 +577,176 @@ inline bool needs_upgrade(const std::string& path) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// UnifiedIndex migrations: v1 → v2 (32-bit → 64-bit offsets)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// v1 NodeMeta (64 bytes) - old format
+struct NodeMetaV1 {
+    NodeId id;                    // 16 bytes
+    Timestamp tau_created;        // 8 bytes
+    Timestamp tau_accessed;       // 8 bytes
+    float confidence_mu;          // 4 bytes
+    float confidence_sigma;       // 4 bytes
+    float decay_rate;             // 4 bytes
+    uint32_t vector_offset;       // 4 bytes
+    uint32_t payload_offset;      // 4 bytes
+    uint32_t payload_size;        // 4 bytes
+    uint32_t edge_offset;         // 4 bytes
+    NodeType node_type;           // 1 byte
+    StorageTier tier;             // 1 byte
+    uint16_t flags;               // 2 bytes
+};
+static_assert(sizeof(NodeMetaV1) == 64, "NodeMetaV1 must be 64 bytes");
+
+// Upgrade UnifiedIndex metadata from v1 (64-byte) to v2 (80-byte)
+inline MigrationResult upgrade_unified_meta_v1_to_v2(const std::string& base_path) {
+    namespace fs = std::filesystem;
+    MigrationResult result{false, 1, 2, "", ""};
+
+    std::string meta_path = base_path + ".meta";
+    std::string unified_path = base_path + ".unified";
+
+    // Check files exist
+    if (!fs::exists(meta_path)) {
+        result.error = "Meta file not found: " + meta_path;
+        return result;
+    }
+    if (!fs::exists(unified_path)) {
+        result.error = "Unified index not found: " + unified_path;
+        return result;
+    }
+
+    // Read unified header to get node count
+    std::ifstream unified_in(unified_path, std::ios::binary);
+    if (!unified_in) {
+        result.error = "Cannot open unified index";
+        return result;
+    }
+
+    UnifiedIndexHeader header;
+    unified_in.read(reinterpret_cast<char*>(&header), sizeof(header));
+    unified_in.close();
+
+    if (header.magic != 0x554E4946) {  // "UNIF" little-endian = "FINU"
+        result.error = "Invalid unified index magic";
+        return result;
+    }
+
+    if (header.version != 1) {
+        if (header.version == 2) {
+            result.success = true;
+            result.error = "Already at v2";
+            return result;
+        }
+        result.error = "Unexpected version: " + std::to_string(header.version);
+        return result;
+    }
+
+    uint64_t capacity = header.capacity;
+    uint64_t node_count = header.node_count;
+
+    std::cerr << "[unified-migrate] Upgrading " << node_count << " nodes (capacity " << capacity << ")\n";
+
+    // Read old meta file
+    std::ifstream meta_in(meta_path, std::ios::binary);
+    if (!meta_in) {
+        result.error = "Cannot open meta file";
+        return result;
+    }
+
+    std::vector<NodeMetaV1> old_metas(capacity);
+    meta_in.read(reinterpret_cast<char*>(old_metas.data()), capacity * sizeof(NodeMetaV1));
+    meta_in.close();
+
+    // Create backup
+    result.backup_path = meta_path + ".bak.v1";
+    if (fs::exists(result.backup_path)) {
+        auto ts = std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        result.backup_path = meta_path + ".bak.v1." + std::to_string(ts);
+    }
+    fs::copy_file(meta_path, result.backup_path);
+    std::cerr << "[unified-migrate] Backup: " << result.backup_path << "\n";
+
+    // Convert to v2 format
+    std::vector<NodeMeta> new_metas(capacity);
+    for (size_t i = 0; i < capacity; ++i) {
+        const auto& old = old_metas[i];
+        auto& nw = new_metas[i];
+
+        nw.id = old.id;
+        nw.tau_created = old.tau_created;
+        nw.tau_accessed = old.tau_accessed;
+        nw.vector_offset = static_cast<uint64_t>(old.vector_offset);
+        nw.payload_offset = static_cast<uint64_t>(old.payload_offset);
+        nw.edge_offset = static_cast<uint64_t>(old.edge_offset);
+        nw.confidence_mu = old.confidence_mu;
+        nw.confidence_sigma = old.confidence_sigma;
+        nw.decay_rate = old.decay_rate;
+        nw.payload_size = old.payload_size;
+        nw.node_type = old.node_type;
+        nw.tier = old.tier;
+        nw.flags = old.flags;
+        nw.reserved = 0;
+    }
+
+    // Write new meta file
+    std::string tmp_path = meta_path + ".tmp";
+    std::ofstream meta_out(tmp_path, std::ios::binary);
+    if (!meta_out) {
+        result.error = "Cannot create temp meta file";
+        return result;
+    }
+
+    meta_out.write(reinterpret_cast<const char*>(new_metas.data()), capacity * sizeof(NodeMeta));
+    meta_out.flush();
+    meta_out.close();
+
+    if (!meta_out.good()) {
+        fs::remove(tmp_path);
+        result.error = "Write failed";
+        return result;
+    }
+
+    // Update unified header version
+    {
+        std::fstream unified_io(unified_path, std::ios::binary | std::ios::in | std::ios::out);
+        if (!unified_io) {
+            fs::remove(tmp_path);
+            result.error = "Cannot update unified header";
+            return result;
+        }
+        header.version = 2;
+        unified_io.write(reinterpret_cast<const char*>(&header), sizeof(header));
+        unified_io.flush();
+    }
+
+    // Atomic rename
+    if (::rename(tmp_path.c_str(), meta_path.c_str()) != 0) {
+        fs::remove(tmp_path);
+        result.error = "Rename failed";
+        return result;
+    }
+
+    std::cerr << "[unified-migrate] Upgrade complete: v1 → v2\n";
+    result.success = true;
+    return result;
+}
+
+// Check if unified index needs upgrade
+inline bool unified_needs_upgrade(const std::string& base_path) {
+    std::string unified_path = base_path + ".unified";
+    std::ifstream in(unified_path, std::ios::binary);
+    if (!in) return false;
+
+    uint32_t magic, version;
+    in.read(reinterpret_cast<char*>(&magic), sizeof(magic));
+    in.read(reinterpret_cast<char*>(&version), sizeof(version));
+
+    return (magic == 0x554E4946 && version < 2);  // "UNIF" / "FINU"
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Format conversions: .hot → .unified or .manifest
 // ═══════════════════════════════════════════════════════════════════════════
 

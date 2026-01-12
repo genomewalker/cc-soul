@@ -604,47 +604,66 @@ int cmd_status(const std::string& socket_path) {
 }
 
 int cmd_upgrade(const std::string& db_path) {
-    std::string hot_path = db_path + ".hot";
+    bool upgraded_something = false;
 
-    // Check current version
+    // Check for UnifiedIndex (chitta.unified) that needs upgrade
+    if (migrations::unified_needs_upgrade(db_path)) {
+        std::cout << "UnifiedIndex: " << db_path << ".unified\n";
+        std::cout << "Current version: 1 (64-byte NodeMeta)\n";
+        std::cout << "Target version: 2 (80-byte NodeMeta)\n\n";
+        std::cout << "Upgrading UnifiedIndex...\n";
+
+        auto result = migrations::upgrade_unified_meta_v1_to_v2(db_path);
+
+        if (result.success) {
+            std::cout << "UnifiedIndex upgrade complete: v1 → v2\n";
+            if (!result.backup_path.empty()) {
+                std::cout << "Backup saved: " << result.backup_path << "\n";
+            }
+            upgraded_something = true;
+        } else {
+            std::cerr << "UnifiedIndex upgrade failed: " << result.error << "\n";
+            return 1;
+        }
+        std::cout << "\n";
+    }
+
+    // Check for .hot format upgrades
+    std::string hot_path = db_path + ".hot";
     uint32_t version = migrations::detect_version(hot_path);
 
-    if (version == 0) {
-        std::cerr << "No database found at: " << hot_path << "\n";
-        return 1;
-    }
+    if (version > 0 && version < migrations::CURRENT_VERSION) {
+        std::cout << "Hot storage: " << hot_path << "\n";
+        std::cout << "Current version: " << version << "\n";
+        std::cout << "Target version: " << migrations::CURRENT_VERSION << "\n\n";
 
-    std::cout << "Database: " << hot_path << "\n";
-    std::cout << "Current version: " << version << "\n";
-    std::cout << "Target version: " << migrations::CURRENT_VERSION << "\n";
+        std::cout << "Upgrading hot storage...\n";
 
-    if (version == migrations::CURRENT_VERSION) {
-        std::cout << "Already at current version. No upgrade needed.\n";
-        return 0;
-    }
+        auto result = migrations::upgrade(hot_path);
 
-    if (version > migrations::CURRENT_VERSION) {
+        if (result.success) {
+            std::cout << "Hot storage upgrade complete: v" << result.from_version
+                      << " → v" << result.to_version << "\n";
+            if (!result.backup_path.empty()) {
+                std::cout << "Backup saved: " << result.backup_path << "\n";
+            }
+            upgraded_something = true;
+        } else {
+            std::cerr << "Hot storage upgrade failed: " << result.error << "\n";
+            return 1;
+        }
+    } else if (version > migrations::CURRENT_VERSION) {
         std::cerr << "Database version " << version
                   << " is newer than supported " << migrations::CURRENT_VERSION << "\n";
         std::cerr << "Update chitta to read this database.\n";
         return 1;
     }
 
-    std::cout << "\nUpgrading...\n";
-
-    auto result = migrations::upgrade(hot_path);
-
-    if (result.success) {
-        std::cout << "Upgrade complete: v" << result.from_version
-                  << " → v" << result.to_version << "\n";
-        if (!result.backup_path.empty()) {
-            std::cout << "Backup saved: " << result.backup_path << "\n";
-        }
-        return 0;
-    } else {
-        std::cerr << "Upgrade failed: " << result.error << "\n";
-        return 1;
+    if (!upgraded_something) {
+        std::cout << "All storage formats are at current version. No upgrade needed.\n";
     }
+
+    return 0;
 }
 
 int cmd_convert(const std::string& db_path, const std::string& format) {
