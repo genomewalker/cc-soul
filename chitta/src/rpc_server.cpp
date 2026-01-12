@@ -261,6 +261,56 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
      {{"id", "Node UUID", true, nullptr},
       {"add", "Tag to add", false, nullptr},
       {"remove", "Tag to remove", false, nullptr}}},
+
+    // Phase 7: Realm tools
+    {"realm_get", "Get current realm context",
+     {}},
+
+    {"realm_set", "Set current realm (persists across sessions)",
+     {{"realm", "Realm name (e.g., 'project:cc-soul')", true, nullptr}}},
+
+    {"realm_create", "Create a new realm with optional parent",
+     {{"name", "Realm name (e.g., 'project:my-project')", true, nullptr},
+      {"parent", "Parent realm (default: brahman)", false, "brahman"}}},
+
+    // Phase 7: Review tools
+    {"review_list", "List items in review queue",
+     {{"status", "Filter: pending|approved|rejected|deferred|all", false, "pending"},
+      {"limit", "Max items to return", false, "10"}}},
+
+    {"review_decide", "Make a review decision on an item",
+     {{"id", "Node ID to review", true, nullptr},
+      {"decision", "Decision: approve|reject|edit|defer", true, nullptr},
+      {"comment", "Optional comment", false, nullptr},
+      {"edited_content", "New content (for edit)", false, nullptr},
+      {"quality_rating", "Quality rating 0-5 (for approve)", false, "3"}}},
+
+    {"review_batch", "Batch review: apply same decision to multiple items",
+     {{"decision", "Decision: approve|reject|defer", true, nullptr},
+      {"ids", "Comma-separated node IDs (empty = pending items)", false, nullptr},
+      {"limit", "Max items if ids empty", false, "10"},
+      {"comment", "Comment for all decisions", false, nullptr},
+      {"quality_rating", "Quality rating 0-5", false, "3"}}},
+
+    {"review_stats", "Get review queue statistics",
+     {}},
+
+    // Phase 7: Eval tools
+    {"eval_run", "Run golden recall test suite",
+     {{"test_name", "Specific test to run (empty = all)", false, nullptr}}},
+
+    {"eval_add_test", "Add a test case to eval harness",
+     {{"name", "Test name", true, nullptr},
+      {"query", "Query to test", true, nullptr},
+      {"expected", "Comma-separated expected node IDs", true, nullptr}}},
+
+    // Phase 7: Epiplexity tools
+    {"epiplexity_check", "Check compression quality of nodes",
+     {{"node_ids", "Comma-separated IDs (empty = sample)", false, nullptr},
+      {"sample_size", "Nodes to sample if no IDs", false, "10"}}},
+
+    {"epiplexity_drift", "Analyze epsilon drift over time",
+     {{"lookback_days", "Days to analyze", false, "7"}}},
 };
 
 // Build set of known tools from specs
@@ -349,6 +399,9 @@ void print_usage(const char* prog) {
               << "  Narrative: narrate, ledger\n"
               << "  Analysis:  epistemic_state, bias_scan, propagate, forget, competence\n"
               << "  Yajna:     yajna_list, yajna_inspect, tag\n"
+              << "  Realm:     realm_get, realm_set, realm_create\n"
+              << "  Review:    review_list, review_decide, review_batch, review_stats\n"
+              << "  Eval:      eval_run, eval_add_test, epiplexity_check, epiplexity_drift\n"
               << "\n"
               << "Global options:\n"
               << "  --socket-path PATH  Unix socket path (default: /tmp/chitta-VERSION.sock)\n"

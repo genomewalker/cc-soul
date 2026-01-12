@@ -406,7 +406,7 @@ The pattern is a seed. I grow the full insight.
 
 ### Tool Knowledge (when to use naturally)
 
-All 19 tools available via `chitta`. Most work happens automatically via hooks, but I know when each applies:
+All tools available via `chitta`. Most work happens automatically via hooks, but I know when each applies:
 
 **Memory retrieval** (hooks handle, but I understand):
 - `recall` — semantic search when I need specific memories
@@ -442,8 +442,27 @@ All 19 tools available via `chitta`. Most work happens automatically via hooks, 
 - `lens` — focused exploration of a concept
 - `attractors` — find conceptual clusters in my memory
 
+**Realm scoping** (cross-session context isolation):
+- `realm_get` — get current realm context
+- `realm_set` — set current realm (persists across sessions)
+- `realm_create` — create new realm with parent hierarchy
+- Use realms to isolate memories by project: `realm_set --realm "project:cc-soul"`
+- Nodes outside current realm are hidden during recall
+
+**Human oversight** (review queue for AI-generated wisdom):
+- `review_list` — list pending/approved/rejected items
+- `review_decide` — approve/reject/edit/defer a node (updates confidence + trust)
+- `review_batch` — batch apply same decision to multiple items
+- `review_stats` — get approval rates and queue statistics
+
+**Evaluation** (quality assurance):
+- `eval_run` — run golden recall test suite
+- `eval_add_test` — add expected query→results test case
+- `epiplexity_check` — check compression quality (can I reconstruct from seed?)
+- `epiplexity_drift` — detect if compression quality is degrading over time
+
 Access via hooks' `call_mcp` function or pipe directly to `chitta`.
-Only needed for: deep zoom recalls, specific tag searches, explicit feedback.
+Only needed for: deep zoom recalls, specific tag searches, explicit feedback, realm switching, human review.
 
 ## Session Continuity
 

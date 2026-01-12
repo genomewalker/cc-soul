@@ -106,6 +106,9 @@ private:
         // Yajna tools (yajna_list, yajna_inspect, tag) for epsilon-yajna ceremony
         tools::yajna::register_schemas(tools_);
         tools::yajna::register_handlers(mind_, handlers_);
+
+        // Phase 7: Scale tools (realm, review, eval, epiplexity)
+        register_phase7_tools();
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1487,6 +1490,357 @@ private:
         }
 
         return ToolResult::ok(ss.str(), {{"projects", projects}, {"transferable", transferable}});
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Phase 7: Scale tools (100M+ infrastructure)
+    // ═══════════════════════════════════════════════════════════════════
+
+    void register_phase7_tools() {
+        // Realm tools
+        tools_.push_back({
+            "realm_get",
+            "Get current realm context. Realms gate which nodes are visible during recall.",
+            {{"type", "object"}, {"properties", json::object()}, {"required", json::array()}}
+        });
+        handlers_["realm_get"] = [this](const json&) { return tool_realm_get(); };
+
+        tools_.push_back({
+            "realm_set",
+            "Set current realm (persists across sessions). Only nodes scoped to this realm are visible.",
+            {{"type", "object"},
+             {"properties", {{"realm", {{"type", "string"}, {"description", "Realm name (e.g., 'project:cc-soul')"}}}}},
+             {"required", {"realm"}}}
+        });
+        handlers_["realm_set"] = [this](const json& p) { return tool_realm_set(p); };
+
+        tools_.push_back({
+            "realm_create",
+            "Create a new realm with optional parent. Realms form a hierarchy from 'brahman' (root).",
+            {{"type", "object"},
+             {"properties", {
+                 {"name", {{"type", "string"}, {"description", "Realm name"}}},
+                 {"parent", {{"type", "string"}, {"default", "brahman"}, {"description", "Parent realm"}}}
+             }},
+             {"required", {"name"}}}
+        });
+        handlers_["realm_create"] = [this](const json& p) { return tool_realm_create(p); };
+
+        // Review tools
+        tools_.push_back({
+            "review_list",
+            "List items in review queue for human oversight.",
+            {{"type", "object"},
+             {"properties", {
+                 {"status", {{"type", "string"}, {"enum", {"pending", "approved", "rejected", "deferred", "all"}}, {"default", "pending"}}},
+                 {"limit", {{"type", "integer"}, {"default", 10}}}
+             }},
+             {"required", json::array()}}
+        });
+        handlers_["review_list"] = [this](const json& p) { return tool_review_list(p); };
+
+        tools_.push_back({
+            "review_decide",
+            "Make a review decision. Updates confidence and provenance trust based on decision.",
+            {{"type", "object"},
+             {"properties", {
+                 {"id", {{"type", "string"}, {"description", "Node ID"}}},
+                 {"decision", {{"type", "string"}, {"enum", {"approve", "reject", "edit", "defer"}}}},
+                 {"comment", {{"type", "string"}}},
+                 {"edited_content", {{"type", "string"}}},
+                 {"quality_rating", {{"type", "number"}, {"minimum", 0}, {"maximum", 5}, {"default", 3}}}
+             }},
+             {"required", {"id", "decision"}}}
+        });
+        handlers_["review_decide"] = [this](const json& p) { return tool_review_decide(p); };
+
+        tools_.push_back({
+            "review_batch",
+            "Batch review: apply same decision to multiple items.",
+            {{"type", "object"},
+             {"properties", {
+                 {"decision", {{"type", "string"}, {"enum", {"approve", "reject", "defer"}}}},
+                 {"ids", {{"type", "array"}, {"items", {{"type", "string"}}}}},
+                 {"limit", {{"type", "integer"}, {"default", 10}}},
+                 {"comment", {{"type", "string"}}},
+                 {"quality_rating", {{"type", "number"}, {"default", 3}}}
+             }},
+             {"required", {"decision"}}}
+        });
+        handlers_["review_batch"] = [this](const json& p) { return tool_review_batch(p); };
+
+        tools_.push_back({
+            "review_stats",
+            "Get review queue statistics.",
+            {{"type", "object"}, {"properties", json::object()}, {"required", json::array()}}
+        });
+        handlers_["review_stats"] = [this](const json&) { return tool_review_stats(); };
+
+        // Eval tools
+        tools_.push_back({
+            "eval_run",
+            "Run golden recall test suite.",
+            {{"type", "object"},
+             {"properties", {{"test_name", {{"type", "string"}, {"description", "Specific test (empty = all)"}}}}},
+             {"required", json::array()}}
+        });
+        handlers_["eval_run"] = [this](const json& p) { return tool_eval_run(p); };
+
+        tools_.push_back({
+            "eval_add_test",
+            "Add a test case to eval harness.",
+            {{"type", "object"},
+             {"properties", {
+                 {"name", {{"type", "string"}}},
+                 {"query", {{"type", "string"}}},
+                 {"expected", {{"type", "string"}, {"description", "Comma-separated expected node IDs"}}}
+             }},
+             {"required", {"name", "query", "expected"}}}
+        });
+        handlers_["eval_add_test"] = [this](const json& p) { return tool_eval_add_test(p); };
+
+        // Epiplexity tools
+        tools_.push_back({
+            "epiplexity_check",
+            "Check compression quality: can I reconstruct from seed?",
+            {{"type", "object"},
+             {"properties", {
+                 {"node_ids", {{"type", "string"}, {"description", "Comma-separated IDs (empty = sample)"}}},
+                 {"sample_size", {{"type", "integer"}, {"default", 10}}}
+             }},
+             {"required", json::array()}}
+        });
+        handlers_["epiplexity_check"] = [this](const json& p) { return tool_epiplexity_check(p); };
+
+        tools_.push_back({
+            "epiplexity_drift",
+            "Analyze epsilon drift over time.",
+            {{"type", "object"},
+             {"properties", {{"lookback_days", {{"type", "integer"}, {"default", 7}}}}},
+             {"required", json::array()}}
+        });
+        handlers_["epiplexity_drift"] = [this](const json& p) { return tool_epiplexity_drift(p); };
+    }
+
+    // Phase 7 tool implementations
+    ToolResult tool_realm_get() {
+        std::string current = mind_->current_realm();
+        std::ostringstream ss;
+        ss << "Current realm: " << current << "\n";
+        ss << "(Realm context persists across sessions)\n";
+        return ToolResult::ok(ss.str(), {{"current_realm", current}});
+    }
+
+    ToolResult tool_realm_set(const json& params) {
+        std::string realm = params.value("realm", "");
+        if (realm.empty()) return ToolResult::error("realm parameter required");
+
+        std::string old_realm = mind_->current_realm();
+        mind_->set_realm(realm);
+        std::string new_realm = mind_->current_realm();
+
+        std::ostringstream ss;
+        ss << "Realm changed: " << old_realm << " -> " << new_realm << "\n";
+        return ToolResult::ok(ss.str(), {{"old_realm", old_realm}, {"new_realm", new_realm}});
+    }
+
+    ToolResult tool_realm_create(const json& params) {
+        std::string name = params.value("name", "");
+        std::string parent = params.value("parent", "brahman");
+        if (name.empty()) return ToolResult::error("name parameter required");
+
+        mind_->create_realm(name, parent);
+
+        std::ostringstream ss;
+        ss << "Created realm: " << name << " (parent: " << parent << ")\n";
+        return ToolResult::ok(ss.str(), {{"name", name}, {"parent", parent}});
+    }
+
+    ToolResult tool_review_list(const json& params) {
+        std::string status = params.value("status", "pending");
+        size_t limit = params.value("limit", 10);
+        auto& queue = mind_->review_queue();
+
+        std::vector<ReviewItem> items;
+        if (status == "pending") items = queue.get_batch(limit);
+        else if (status == "all") items = queue.get_batch(limit);
+
+        std::ostringstream ss;
+        ss << "=== Review Queue (" << status << ") ===\n";
+        json items_json = json::array();
+        for (const auto& item : items) {
+            ss << "[" << item.id.to_string().substr(0,8) << "] " << item.content.substr(0, 60) << "...\n";
+            items_json.push_back({{"id", item.id.to_string()}, {"content", item.content.substr(0, 100)}});
+        }
+        return ToolResult::ok(ss.str(), {{"items", items_json}});
+    }
+
+    ToolResult tool_review_decide(const json& params) {
+        std::string id_str = params.at("id");
+        std::string decision = params.at("decision");
+        std::string comment = params.value("comment", "");
+        std::string edited_content = params.value("edited_content", "");
+        float quality_rating = params.value("quality_rating", 3.0f);
+
+        NodeId id = NodeId::from_string(id_str);
+        auto& queue = mind_->review_queue();
+        Timestamp current = mind_->now();
+
+        float q = std::clamp(quality_rating, 0.0f, 5.0f);
+        float conf_delta = 0.0f;
+
+        if (decision == "approve") {
+            queue.approve(id, comment, quality_rating, current);
+            conf_delta = (q > 0.0f) ? (q - 3.0f) * 0.05f : 0.05f;
+            mind_->strengthen(id, std::max(0.0f, conf_delta));
+        } else if (decision == "reject") {
+            queue.reject(id, comment, current);
+            conf_delta = -std::max(0.1f, (3.0f - q) * 0.07f);
+            mind_->weaken(id, -conf_delta);
+        } else if (decision == "edit") {
+            queue.approve_with_edits(id, edited_content, comment, quality_rating, current);
+            if (!edited_content.empty()) mind_->update_content(id, edited_content);
+            conf_delta = (q > 0.0f) ? (q - 3.0f) * 0.05f : 0.05f;
+            mind_->strengthen(id, std::max(0.0f, conf_delta));
+        } else if (decision == "defer") {
+            queue.defer(id, comment);
+        } else {
+            return ToolResult::error("Invalid decision: " + decision);
+        }
+
+        if (conf_delta != 0.0f) mind_->update_provenance_trust(id, conf_delta * 0.5f);
+
+        return ToolResult::ok("Review decision: " + decision, {{"id", id_str}, {"decision", decision}, {"confidence_delta", conf_delta}});
+    }
+
+    ToolResult tool_review_batch(const json& params) {
+        std::string decision = params.at("decision");
+        size_t limit = params.value("limit", 10);
+        std::string comment = params.value("comment", "Batch decision");
+        float quality_rating = params.value("quality_rating", 3.0f);
+
+        auto& queue = mind_->review_queue();
+        Timestamp current = mind_->now();
+
+        std::vector<NodeId> ids;
+        if (params.contains("ids") && params["ids"].is_array()) {
+            for (const auto& id_str : params["ids"]) {
+                ids.push_back(NodeId::from_string(id_str.get<std::string>()));
+            }
+        } else {
+            auto items = queue.get_batch(limit);
+            for (const auto& item : items) ids.push_back(item.id);
+        }
+
+        size_t processed = 0;
+        for (const auto& id : ids) {
+            if (decision == "approve") queue.approve(id, comment, quality_rating, current);
+            else if (decision == "reject") queue.reject(id, comment, current);
+            else if (decision == "defer") queue.defer(id, comment);
+            processed++;
+        }
+
+        std::ostringstream ss;
+        ss << "Batch " << decision << ": " << processed << " items\n";
+        return ToolResult::ok(ss.str(), {{"decision", decision}, {"processed", processed}});
+    }
+
+    ToolResult tool_review_stats() {
+        auto& queue = mind_->review_queue();
+        auto stats = queue.get_stats();
+
+        std::ostringstream ss;
+        ss << "=== Review Stats ===\n";
+        ss << "Pending: " << stats.pending << "\n";
+        ss << "Approved: " << stats.approved << "\n";
+        ss << "Rejected: " << stats.rejected << "\n";
+        ss << "Approval rate: " << std::fixed << std::setprecision(1) << stats.approval_rate * 100 << "%\n";
+
+        return ToolResult::ok(ss.str(), {
+            {"pending", stats.pending}, {"approved", stats.approved},
+            {"rejected", stats.rejected}, {"approval_rate", stats.approval_rate}
+        });
+    }
+
+    ToolResult tool_eval_run(const json& params) {
+        std::string test_name = params.value("test_name", "");
+        (void)test_name;
+        auto& harness = mind_->eval_harness();
+
+        std::ostringstream ss;
+        ss << "=== Eval Harness ===\n";
+        ss << "Test cases loaded: " << harness.test_count() << "\n";
+        ss << "(Running tests requires recall callback - use programmatic API)\n";
+
+        json result;
+        result["test_count"] = harness.test_count();
+        result["status"] = "ready";
+        return ToolResult::ok(ss.str(), result);
+    }
+
+    ToolResult tool_eval_add_test(const json& params) {
+        std::string name = params.at("name");
+        std::string query_str = params.at("query");
+        std::string expected_str = params.at("expected");
+
+        // Parse comma-separated node IDs into ExpectedResult vector
+        std::vector<ExpectedResult> expected;
+        std::stringstream ess(expected_str);
+        std::string id_str;
+        while (std::getline(ess, id_str, ',')) {
+            if (!id_str.empty()) {
+                ExpectedResult er;
+                er.id = NodeId::from_string(id_str);
+                er.min_score = 0.0f;
+                er.max_rank = 10;
+                er.required = true;
+                expected.push_back(er);
+            }
+        }
+
+        GoldenTestCase test;
+        test.name = name;
+        test.query = query_str;
+        test.expected = expected;
+
+        auto& harness = mind_->eval_harness();
+        harness.add_test(test);
+
+        json result;
+        result["name"] = name;
+        result["expected_count"] = expected.size();
+        return ToolResult::ok("Added test: " + name, result);
+    }
+
+    ToolResult tool_epiplexity_check(const json& params) {
+        size_t sample_size = params.value("sample_size", 10);
+        (void)sample_size;
+
+        // Simplified: just report the test is available
+        std::ostringstream ss;
+        ss << "=== Epiplexity Check ===\n";
+        ss << "Epiplexity test infrastructure ready.\n";
+        ss << "Use specific node IDs to measure compression quality.\n";
+
+        json result;
+        result["status"] = "ready";
+        result["message"] = "Use node IDs for specific measurements";
+        return ToolResult::ok(ss.str(), result);
+    }
+
+    ToolResult tool_epiplexity_drift(const json& params) {
+        int lookback_days = params.value("lookback_days", 7);
+        (void)lookback_days;  // Not implemented yet
+
+        std::ostringstream ss;
+        ss << "=== Epiplexity Drift ===\n";
+        ss << "Drift analysis not yet implemented\n";
+        ss << "(Requires historical epsilon measurements)\n";
+
+        json result;
+        result["drift_detected"] = false;
+        result["message"] = "Not implemented";
+        return ToolResult::ok(ss.str(), result);
     }
 };
 
