@@ -11,9 +11,26 @@ CHITTA_PLUGIN_DIR="$(dirname "$CHITTA_PLUGIN_DIR")"
 CHITTA_BIN="${HOME}/.claude/bin/chitta"
 [[ ! -x "$CHITTA_BIN" ]] && CHITTA_BIN="$CHITTA_PLUGIN_DIR/bin/chitta"
 
-# Find daemon socket (UID-scoped path)
+# Mind path for socket derivation
+CHITTA_MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind/chitta}"
+
+# djb2 hash - must match C++ implementation in socket_server.hpp
+_djb2_hash() {
+    local str="$1"
+    local hash=5381
+    local i c
+    for ((i=0; i<${#str}; i++)); do
+        c=$(printf '%d' "'${str:$i:1}")
+        hash=$(( ((hash << 5) + hash) + c ))
+        hash=$((hash & 0xFFFFFFFF))
+    done
+    echo "$hash"
+}
+
+# Find daemon socket (mind-scoped path)
 find_socket() {
-    local socket="/tmp/chitta-$(id -u).sock"
+    local hash=$(_djb2_hash "$CHITTA_MIND_PATH")
+    local socket="/tmp/chitta-${hash}.sock"
     if [[ -S "$socket" ]]; then
         echo "$socket"
         return 0

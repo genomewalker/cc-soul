@@ -4,17 +4,40 @@
 // Provides JSON-RPC 2.0 over Unix socket for multi-client access
 // to the soul daemon. Uses poll() for non-blocking multiplexed I/O.
 //
-// UID-scoped: Socket path includes user ID for multi-user safety.
-// Version compatibility checked via protocol handshake.
+// Mind-scoped: Socket path derived from mind database path hash.
+// Each mind gets its own daemon. Version compatibility checked via handshake.
 
 #include <chitta/version.hpp>
 #include <string>
 #include <vector>
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <unistd.h>
 
 namespace chitta {
+
+// djb2 hash - deterministic across platforms (unlike std::hash)
+inline uint32_t djb2_hash(const std::string& str) {
+    uint32_t hash = 5381;
+    for (char c : str) {
+        hash = ((hash << 5) + hash) + static_cast<unsigned char>(c);
+    }
+    return hash;
+}
+
+// Derive socket/lock/pid paths from mind database path
+inline std::string socket_path_for_mind(const std::string& mind_path) {
+    return "/tmp/chitta-" + std::to_string(djb2_hash(mind_path)) + ".sock";
+}
+
+inline std::string lock_path_for_mind(const std::string& mind_path) {
+    return "/tmp/chitta-" + std::to_string(djb2_hash(mind_path)) + ".lock";
+}
+
+inline std::string pid_path_for_mind(const std::string& mind_path) {
+    return "/tmp/chitta-" + std::to_string(djb2_hash(mind_path)) + ".pid";
+}
 
 // Represents a pending request from a client
 struct ClientRequest {

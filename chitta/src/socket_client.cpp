@@ -9,7 +9,6 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <poll.h>
-#include <dirent.h>
 #include <cerrno>
 #include <cstring>
 #include <cstdlib>
@@ -18,77 +17,30 @@
 #include <iostream>
 #include <fstream>
 #include <vector>
-#include <algorithm>
-#include <glob.h>
 #include <sstream>
 
 namespace chitta {
 
 namespace {
 
-// PID file location for daemon process tracking
-constexpr const char* DAEMON_PID_FILE = "/tmp/chitta-daemon.pid";
+// Find daemon PID for a specific socket path (reads PID file)
+pid_t find_daemon_pid(const std::string& pid_path) {
+    std::ifstream pid_file(pid_path);
+    if (!pid_file) return 0;
 
-// Find all chitta daemon processes (returns PIDs)
-std::vector<pid_t> find_daemon_pids() {
-    std::vector<pid_t> pids;
+    pid_t pid = 0;
+    if (!(pid_file >> pid)) return 0;
 
-    // Read from PID file first
-    std::ifstream pid_file(DAEMON_PID_FILE);
-    if (pid_file) {
-        pid_t pid;
-        if (pid_file >> pid) {
-            // Verify process is actually chitta
-            std::string cmdline_path = "/proc/" + std::to_string(pid) + "/cmdline";
-            std::ifstream cmdline(cmdline_path);
-            if (cmdline) {
-                std::string cmd;
-                std::getline(cmdline, cmd, '\0');
-                if (cmd.find("chitta") != std::string::npos) {
-                    pids.push_back(pid);
-                }
-            }
-        }
-    }
+    // Verify process is actually chitta
+    std::string cmdline_path = "/proc/" + std::to_string(pid) + "/cmdline";
+    std::ifstream cmdline(cmdline_path);
+    if (!cmdline) return 0;
 
-    // Also check /proc for any chittad daemon processes we might have missed
-    DIR* proc = opendir("/proc");
-    if (proc) {
-        while (struct dirent* entry = readdir(proc)) {
-            if (entry->d_type != DT_DIR) continue;
+    std::string cmd;
+    std::getline(cmdline, cmd, '\0');
+    if (cmd.find("chitta") == std::string::npos) return 0;
 
-            // Check if directory name is a number (PID)
-            char* end;
-            pid_t pid = strtol(entry->d_name, &end, 10);
-            if (*end != '\0' || pid <= 0) continue;
-
-            // Skip if already found
-            if (std::find(pids.begin(), pids.end(), pid) != pids.end()) continue;
-
-            // Check cmdline
-            std::string cmdline_path = "/proc/" + std::string(entry->d_name) + "/cmdline";
-            std::ifstream cmdline(cmdline_path);
-            if (cmdline) {
-                std::string cmd;
-                std::getline(cmdline, cmd, '\0');
-                if (cmd.find("chittad") != std::string::npos) {
-                    // Check if it's running as daemon
-                    std::string full_cmdline;
-                    cmdline.seekg(0);
-                    char c;
-                    while (cmdline.get(c)) {
-                        full_cmdline += (c == '\0') ? ' ' : c;
-                    }
-                    if (full_cmdline.find("daemon") != std::string::npos) {
-                        pids.push_back(pid);
-                    }
-                }
-            }
-        }
-        closedir(proc);
-    }
-
-    return pids;
+    return pid;
 }
 
 // Kill a process gracefully, then forcefully if needed
@@ -120,27 +72,18 @@ bool kill_process(pid_t pid, int timeout_ms = 3000) {
     return kill(pid, 0) != 0;
 }
 
-// Terminate all running chitta daemons and clean up sockets
-void terminate_all_daemons() {
-    // Kill all daemon processes
-    auto pids = find_daemon_pids();
-    for (pid_t pid : pids) {
-        std::cerr << "[socket_client] Terminating old daemon (pid=" << pid << ")\n";
+// Terminate daemon for a specific mind path
+void terminate_daemon(const std::string& socket_path, const std::string& pid_path) {
+    // Find and kill daemon by PID file
+    pid_t pid = find_daemon_pid(pid_path);
+    if (pid > 0) {
+        std::cerr << "[socket_client] Terminating daemon (pid=" << pid << ")\n";
         kill_process(pid);
     }
 
-    // Remove PID file
-    unlink(DAEMON_PID_FILE);
-
-    // Remove all chitta sockets
-    glob_t globbuf;
-    if (glob("/tmp/chitta*.sock", 0, nullptr, &globbuf) == 0) {
-        for (size_t i = 0; i < globbuf.gl_pathc; ++i) {
-            std::cerr << "[socket_client] Removing socket: " << globbuf.gl_pathv[i] << "\n";
-            unlink(globbuf.gl_pathv[i]);
-        }
-        globfree(&globbuf);
-    }
+    // Clean up files
+    unlink(pid_path.c_str());
+    unlink(socket_path.c_str());
 
     // Small delay to ensure cleanup is complete
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -173,21 +116,6 @@ std::pair<std::string, std::string> get_model_paths() {
     }
 
     return {"", ""};
-}
-
-// Find all chitta socket files in /tmp (including versioned ones)
-std::vector<std::string> find_chitta_sockets() {
-    std::vector<std::string> sockets;
-    glob_t globbuf;
-
-    if (glob("/tmp/chitta*.sock", 0, nullptr, &globbuf) == 0) {
-        for (size_t i = 0; i < globbuf.gl_pathc; ++i) {
-            sockets.push_back(globbuf.gl_pathv[i]);
-        }
-        globfree(&globbuf);
-    }
-
-    return sockets;
 }
 
 }  // anonymous namespace
@@ -234,8 +162,10 @@ void SocketClient::disconnect() {
 }
 
 bool SocketClient::ensure_daemon_running() {
-    // First, try to connect to existing daemon at the standard path
-    socket_path_ = default_socket_path();
+    // Socket path already set from default_socket_path() (mind-derived)
+    std::string pid_path = default_pid_path();
+
+    // First, try to connect to existing daemon
     if (connect()) {
         // Connected - check version compatibility
         auto version = check_version();
@@ -259,22 +189,14 @@ bool SocketClient::ensure_daemon_running() {
             disconnect();
         }
 
-        // Force terminate old daemon(s) and clean up all sockets
-        terminate_all_daemons();
-    }
-
-    // Also check for old versioned sockets and clean them up
-    auto old_sockets = find_chitta_sockets();
-    if (!old_sockets.empty()) {
-        // Silently clean up old sockets
-        terminate_all_daemons();
+        // Terminate this mind's daemon
+        terminate_daemon(socket_path_, pid_path);
     }
 
     // Acquire lock before starting daemon (prevents race with other clients)
     int lock_fd = acquire_daemon_lock();
 
     // Re-check after acquiring lock (another process may have started daemon)
-    socket_path_ = default_socket_path();
     if (connect()) {
         auto version = check_version();
         if (version && chitta::version::protocol_compatible(
@@ -284,7 +206,7 @@ bool SocketClient::ensure_daemon_running() {
         }
         disconnect();
         // Still incompatible - clean up again
-        terminate_all_daemons();
+        terminate_daemon(socket_path_, pid_path);
     }
 
     // Start new daemon with version-matched binary
@@ -372,6 +294,9 @@ bool SocketClient::start_daemon() {
         return false;
     }
 
+    // Mind path determines socket/pid paths (same derivation as client uses)
+    std::string mind_path = default_mind_path();
+
     pid_t pid = fork();
 
     if (pid < 0) {
@@ -408,26 +333,14 @@ bool SocketClient::start_daemon() {
         // Close stdin
         close(STDIN_FILENO);
 
-        // Find mind path
-        std::string mind_path;
-        if (const char* db_path = getenv("CHITTA_DB_PATH")) {
-            mind_path = db_path;
-        } else if (home) {
-            mind_path = std::string(home) + "/.claude/mind/chitta";
-        }
-
         // Get model paths (version-matched)
         auto [model_path, vocab_path] = get_model_paths();
 
-        // Build argument list
+        // Build argument list - daemon derives socket path from mind path
         std::vector<const char*> args;
         args.push_back(daemon_path.c_str());
         args.push_back("daemon");
         args.push_back("--socket");
-
-        // PID file for tracking
-        args.push_back("--pid-file");
-        args.push_back(DAEMON_PID_FILE);
 
         std::string path_arg, model_arg, vocab_arg;
         if (!mind_path.empty()) {
@@ -631,7 +544,10 @@ bool SocketClient::connect_only() {
     // Safe connect: never kill or start daemons
     // Use this for parallel agents to avoid killing shared daemon
 
-    socket_path_ = default_socket_path();
+    // Only set default if not already set by constructor
+    if (socket_path_.empty()) {
+        socket_path_ = default_socket_path();
+    }
 
     if (!connect()) {
         last_error_ = "Cannot connect to daemon at " + socket_path_ + " - is daemon running?";

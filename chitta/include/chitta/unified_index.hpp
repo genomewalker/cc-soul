@@ -396,8 +396,44 @@ public:
         // Rebuild NodeId -> SlotId lookup
         rebuild_id_index();
 
-        capacity_ = header->capacity;
-        next_slot_ = header->node_count + header->deleted_count;
+        // Calculate required slots
+        uint64_t used_slots = header->node_count + header->deleted_count;
+
+        // Validate capacity - if corrupted (0 or less than used), fix it
+        if (header->capacity < used_slots) {
+            std::cerr << "[UnifiedIndex] Corrupted capacity (" << header->capacity
+                      << ") < used slots (" << used_slots << "), repairing...\n";
+
+            // Calculate new capacity with headroom
+            size_t new_capacity = std::max(used_slots * 2, static_cast<uint64_t>(INITIAL_CAPACITY));
+
+            // Update header
+            auto* mutable_header = index_region_.as<UnifiedIndexHeader>();
+            mutable_header->capacity = new_capacity;
+            index_region_.sync();
+
+            // Grow the backing files to match new capacity
+            std::string vec_path = base_path_ + ".vectors";
+            std::string meta_path = base_path_ + ".meta";
+            size_t new_vec_size = new_capacity * sizeof(QuantizedVector);
+            size_t new_meta_size = new_capacity * sizeof(NodeMeta);
+
+            extend_file(vec_path, new_vec_size);
+            extend_file(meta_path, new_meta_size);
+
+            // Reopen vectors and meta with new size
+            vectors_region_.close();
+            meta_region_.close();
+            vectors_region_.open(vec_path, false);
+            meta_region_.open(meta_path, false);
+
+            capacity_ = new_capacity;
+            std::cerr << "[UnifiedIndex] Repaired capacity to " << new_capacity << "\n";
+        } else {
+            capacity_ = header->capacity;
+        }
+
+        next_slot_ = used_slots;
 
         std::cerr << "[UnifiedIndex] Opened " << header->node_count << " nodes (capacity "
                   << capacity_ << ")\n";
@@ -1154,6 +1190,15 @@ private:
     // Phase 2: Create new mappings, swap in atomically, update header last
     bool grow() {
         size_t new_capacity = capacity_ * GROWTH_FACTOR;
+
+        // Safety: ensure we never grow to 0 or smaller than needed
+        if (new_capacity < INITIAL_CAPACITY) {
+            new_capacity = INITIAL_CAPACITY;
+        }
+        if (new_capacity <= next_slot_) {
+            new_capacity = next_slot_ * GROWTH_FACTOR;
+        }
+
         std::cerr << "[UnifiedIndex] Growing from " << capacity_ << " to " << new_capacity << "\n";
 
         // Acquire cross-process lock for grow operation

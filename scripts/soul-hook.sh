@@ -20,17 +20,35 @@ CHITTA_BIN="${HOME}/.claude/bin/chitta"
 SESSION_FILE="${HOME}/.claude/mind/.session_state"
 LEAN_MODE="${CC_SOUL_LEAN:-false}"  # Set CC_SOUL_LEAN=true for minimal context
 
+# Mind path for socket derivation
+MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind/chitta}"
+
 # Check jq exists (required for JSON parsing)
 if ! command -v jq &> /dev/null; then
     echo "[cc-soul] jq not found. Install jq for full functionality." >&2
     exit 0
 fi
 
-# Find daemon socket (UID-scoped path)
+# djb2 hash - must match C++ implementation in socket_server.hpp
+djb2_hash() {
+    local str="$1"
+    local hash=5381
+    local i c
+    for ((i=0; i<${#str}; i++)); do
+        c=$(printf '%d' "'${str:$i:1}")
+        hash=$(( ((hash << 5) + hash) + c ))
+        hash=$((hash & 0xFFFFFFFF))
+    done
+    echo "$hash"
+}
+
+MIND_HASH=$(djb2_hash "$MIND_PATH")
+
+# Find daemon socket (mind-scoped path)
 # Cleans up stale sockets if daemon is dead
 find_socket() {
-    local socket_path="/tmp/chitta-$(id -u).sock"
-    local pid_file="/tmp/chitta-daemon-$(id -u).pid"
+    local socket_path="/tmp/chitta-${MIND_HASH}.sock"
+    local pid_file="/tmp/chitta-${MIND_HASH}.pid"
 
     if [[ -S "$socket_path" ]]; then
         # Check if daemon PID is alive

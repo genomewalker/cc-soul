@@ -1886,9 +1886,11 @@ private:
     // Acquire exclusive lock on database (prevents multiple daemons)
     bool acquire_lock() {
         // Use /tmp for lockfile (NFS may not support flock)
-        // Hash the base_path to create unique lock name
-        std::hash<std::string> hasher;
-        size_t path_hash = hasher(config_.base_path);
+        // Hash the base_path using djb2 (matches socket_server.hpp)
+        uint32_t path_hash = 5381;
+        for (char c : config_.base_path) {
+            path_hash = ((path_hash << 5) + path_hash) + static_cast<unsigned char>(c);
+        }
         std::string lock_path = "/tmp/chitta-" + std::to_string(path_hash) + ".lock";
         lock_fd_ = ::open(lock_path.c_str(), O_RDWR | O_CREAT, 0644);
         if (lock_fd_ < 0) {

@@ -4,12 +4,14 @@
 // Connects to the soul daemon via Unix socket, with auto-start
 // capability if daemon is not running.
 //
-// UID-scoped: Socket path includes user ID for multi-user safety.
+// Mind-scoped: Socket path derived from mind database path.
 // Version compatibility checked via handshake.
 
+#include <chitta/socket_server.hpp>  // For socket_path_for_mind
 #include <chitta/version.hpp>
 #include <string>
 #include <optional>
+#include <cstdlib>
 #include <unistd.h>
 
 namespace chitta {
@@ -23,15 +25,26 @@ struct DaemonVersion {
 
 class SocketClient {
 public:
-    // UID-scoped paths for multi-user safety
+    // Get mind path from env or default
+    static std::string default_mind_path() {
+        if (const char* db_path = std::getenv("CHITTA_DB_PATH")) {
+            return db_path;
+        }
+        if (const char* home = std::getenv("HOME")) {
+            return std::string(home) + "/.claude/mind/chitta";
+        }
+        return "";
+    }
+
+    // Mind-scoped paths - derived from mind database path
     static std::string default_socket_path() {
-        return "/tmp/chitta-" + std::to_string(getuid()) + ".sock";
+        return socket_path_for_mind(default_mind_path());
     }
     static std::string default_lock_path() {
-        return "/tmp/chitta-daemon-" + std::to_string(getuid()) + ".lock";
+        return lock_path_for_mind(default_mind_path());
     }
     static std::string default_pid_path() {
-        return "/tmp/chitta-daemon-" + std::to_string(getuid()) + ".pid";
+        return pid_path_for_mind(default_mind_path());
     }
     static constexpr int CONNECT_TIMEOUT_MS = 5000;
     static constexpr int RESPONSE_TIMEOUT_MS = 30000;

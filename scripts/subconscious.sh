@@ -10,15 +10,29 @@ PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
 
 # Binaries are installed to ~/.claude/bin/ by setup.sh
 CHITTA_CLI="${HOME}/.claude/bin/chittad"
-MIND_PATH="${HOME}/.claude/mind/chitta"
+MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind/chitta}"
 MODEL_PATH="${HOME}/.claude/bin/model.onnx"
 VOCAB_PATH="${HOME}/.claude/bin/vocab.txt"
 PID_FILE="${HOME}/.claude/mind/.subconscious.pid"
 LOG_FILE="${HOME}/.claude/mind/.subconscious.log"
 INTERVAL="${SUBCONSCIOUS_INTERVAL:-60}"
 
-LOCK_FILE="/tmp/chitta-daemon-$(id -u).lock"
-SOCKET_PATH="/tmp/chitta-$(id -u).sock"
+# djb2 hash - must match C++ implementation in socket_server.hpp
+djb2_hash() {
+    local str="$1"
+    local hash=5381
+    local i c
+    for ((i=0; i<${#str}; i++)); do
+        c=$(printf '%d' "'${str:$i:1}")
+        hash=$(( ((hash << 5) + hash) + c ))
+        hash=$((hash & 0xFFFFFFFF))  # Keep 32-bit
+    done
+    echo "$hash"
+}
+
+MIND_HASH=$(djb2_hash "$MIND_PATH")
+LOCK_FILE="/tmp/chitta-${MIND_HASH}.lock"
+SOCKET_PATH="/tmp/chitta-${MIND_HASH}.sock"
 
 is_running() {
     # First check PID file

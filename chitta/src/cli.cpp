@@ -847,7 +847,8 @@ int main(int argc, char* argv[]) {
     std::string query;
     std::string format;  // For convert command
     std::string pid_file;  // For daemon mode
-    std::string socket_path = SocketServer::default_socket_path();
+    std::string socket_path;  // Derived from mind_path if not specified
+    bool socket_path_explicit = false;
 
     // Connect/query args
     std::string conn_from, conn_rel, conn_to;  // connect --from --rel --to
@@ -892,6 +893,7 @@ int main(int argc, char* argv[]) {
             socket_mode = true;
         } else if (strcmp(argv[i], "--socket-path") == 0 && i + 1 < argc) {
             socket_path = argv[++i];
+            socket_path_explicit = true;
             socket_mode = true;  // Implies socket mode
         // Connect command args
         } else if (strcmp(argv[i], "--from") == 0 && i + 1 < argc) {
@@ -943,6 +945,12 @@ int main(int argc, char* argv[]) {
             print_usage(argv[0]);
             return 1;
         }
+    }
+
+    // Derive socket path from mind path if not explicitly provided
+    if (!socket_path_explicit) {
+        socket_path = socket_path_for_mind(mind_path);
+        pid_file = pid_path_for_mind(mind_path);
     }
 
     if (command.empty() || command == "help") {
