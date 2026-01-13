@@ -1,0 +1,131 @@
+# cc-soul bootstrap knowledge
+# Native SSL format - imported on install, updated on commit
+# This file provides the soul with knowledge of its own architecture
+
+@vessel
+
+# Core Architecture
+[cc-soul] chitta→semantic memory substrate→tiered storage + decay + triplets @chitta/include/chitta/mind.hpp:1
+[high-ε] C++ daemon (chittad) with hot/warm/cold tiers, JSON-RPC over Unix socket, BM25 hybrid search.
+[TRIPLET] chitta contains Mind
+[TRIPLET] Mind uses TieredStorage
+[TRIPLET] Mind uses GraphStore
+
+[cc-soul] chittad→daemon binary→socket server + subconscious processing @chitta/src/cli.cpp:1
+[high-ε] Main entry point: cmd_daemon_with_socket runs SocketServer.poll() + decay/synthesis cycles.
+[TRIPLET] chittad contains cmd_daemon_with_socket
+[TRIPLET] cmd_daemon_with_socket uses SocketServer
+
+[cc-soul] chitta→CLI client→thin client mode + tool invocation @chitta/src/rpc_server.cpp:1
+[high-ε] Connects to daemon socket, forwards JSON-RPC requests, handles status/shutdown.
+[TRIPLET] chitta uses SocketClient
+[TRIPLET] chitta forwards json_rpc
+
+# RPC Handler
+[cc-soul] Handler→JSON-RPC dispatcher→routes tools/call to handlers @chitta/include/chitta/rpc/handler.hpp:48
+[high-ε] Central handler with ~50 tools: recall, grow, observe, connect, etc.
+[TRIPLET] Handler dispatches tools_call
+[TRIPLET] Handler contains tool_handlers
+
+# Memory Tools
+[cc-soul] recall→semantic search→BM25 + embedding hybrid @chitta/include/chitta/rpc/tools/memory.hpp:1
+[high-ε] Primary retrieval: query text embedded, cosine similarity + BM25 fusion.
+[TRIPLET] recall uses Yantra
+[TRIPLET] recall uses BM25Index
+
+[cc-soul] full_resonate→deep retrieval→spreading activation + graph walk @chitta/include/chitta/mind.hpp:892
+[high-ε] Multi-phase: semantic recall, graph neighbors, coherence filtering.
+[TRIPLET] full_resonate extends recall
+[TRIPLET] full_resonate uses graph_walk
+
+# Learning Tools
+[cc-soul] grow→add wisdom/beliefs→remember with NodeType @chitta/include/chitta/rpc/tools/learning.hpp:132
+[high-ε] Creates node: wisdom, belief, failure, aspiration, dream, term types.
+[TRIPLET] grow calls remember
+[TRIPLET] grow sets NodeType
+
+[cc-soul] observe→record episodes→category determines decay @chitta/include/chitta/rpc/tools/learning.hpp:186
+[high-ε] Episodes: bugfix/decision (slow), discovery/feature (medium), signal (fast).
+[TRIPLET] observe creates Episode
+[TRIPLET] observe sets decay_rate
+
+[cc-soul] connect→create triplets→subject predicate object @chitta/include/chitta/rpc/tools/learning.hpp:103
+[high-ε] Triplets stored in GraphStore, searchable by any component.
+[TRIPLET] connect uses GraphStore
+[TRIPLET] connect creates triplet
+
+# Storage Architecture
+[cc-soul] TieredStorage→hot/warm/cold→unified index + segments @chitta/include/chitta/storage.hpp:1
+[high-ε] Phase 3 unified: single mmap file, O(1) node access, WAL for durability.
+[TRIPLET] TieredStorage contains UnifiedIndex
+[TRIPLET] TieredStorage uses WAL
+
+[cc-soul] UnifiedIndex→mmap storage→nodes + vectors + payloads @chitta/include/chitta/unified_index.hpp:1
+[high-ε] Single file: header + node metadata + vectors + payloads + edges.
+[TRIPLET] UnifiedIndex uses mmap
+[TRIPLET] UnifiedIndex stores NodeMeta
+
+[cc-soul] WAL→write-ahead log→atomic durability @chitta/include/chitta/wal.hpp:1
+[high-ε] Append-only log with sequence numbers, replayed on startup.
+[TRIPLET] WAL enables durability
+[TRIPLET] WAL uses flock
+
+# Subconscious Processing
+[cc-soul] decay→confidence reduction→utility-based @chitta/include/chitta/utility_decay.hpp:1
+[high-ε] Wisdom=0.02 (slow), Signal=0.15 (fast), based on usage stats.
+[TRIPLET] decay uses UsageStats
+[TRIPLET] decay reduces confidence
+
+[cc-soul] synthesis→wisdom extraction→episode clustering @chitta/include/chitta/synthesis_queue.hpp:1
+[high-ε] Groups related episodes, extracts patterns, creates wisdom nodes.
+[TRIPLET] synthesis uses clustering
+[TRIPLET] synthesis creates Wisdom
+
+[cc-soul] attractor_dampener→conceptual settling→bayesian update @chitta/include/chitta/attractor_dampener.hpp:1
+[high-ε] Nodes drift toward conceptual attractors based on semantic similarity.
+[TRIPLET] attractor_dampener uses attractors
+[TRIPLET] attractor_dampener updates confidence
+
+# Hook System
+[cc-soul] soul-hook.sh→session lifecycle→start/end/prompt/pre-compact @scripts/soul-hook.sh:1
+[high-ε] Manages session state, injects context, saves ledger.
+[TRIPLET] soul-hook handles SessionStart
+[TRIPLET] soul-hook handles SessionEnd
+
+[cc-soul] stop-hook.sh→learning extraction→[LEARN] markers @scripts/stop-hook.sh:1
+[high-ε] Parses assistant response for SSL patterns, stores as wisdom/triplets.
+[TRIPLET] stop-hook extracts learnings
+[TRIPLET] stop-hook creates triplets
+
+# Embedding
+[cc-soul] Yantra→embedding engine→ONNX runtime @chitta/include/chitta/vak_onnx.hpp:1
+[high-ε] BGE-small-en model, 384-dim vectors, mean pooling.
+[TRIPLET] Yantra uses ONNX
+[TRIPLET] Yantra produces embeddings
+
+# Key Metrics
+[cc-soul] tau→coherence→global+local+structural+temporal @chitta/include/chitta/mind.hpp:100
+[high-ε] Measures knowledge harmony: contradiction detection, graph consistency.
+[TRIPLET] tau measures coherence
+[TRIPLET] tau combines components
+
+[cc-soul] psi→ojas/vitality→structural+semantic+temporal+capacity @chitta/include/chitta/mind.hpp:150
+[high-ε] Measures system health: connectivity, embedding coverage, recency, space.
+[TRIPLET] psi measures health
+[TRIPLET] psi indicates vitality
+
+[cc-soul] epsilon→epiplexity→reconstructability @chitta/include/chitta/types.hpp:50
+[high-ε] Claude-assessed: can I reconstruct full meaning from minimal seed?
+[TRIPLET] epsilon measures compression
+[TRIPLET] epsilon enables oracle
+
+# Socket Communication
+[cc-soul] SocketServer→Unix domain socket→poll loop @chitta/include/chitta/socket_server.hpp:1
+[high-ε] Listens on /tmp/chitta-{uid}.sock, handles multiple clients.
+[TRIPLET] SocketServer uses poll
+[TRIPLET] SocketServer accepts clients
+
+[cc-soul] SocketClient→daemon connection→JSON-RPC @chitta/include/chitta/socket_client.hpp:1
+[high-ε] Connects to daemon, sends requests, receives responses.
+[TRIPLET] SocketClient sends requests
+[TRIPLET] SocketClient uses socket

@@ -34,6 +34,95 @@ PROJECT=$(basename "$CWD" 2>/dev/null || echo "unknown")
 
     [[ -z "$LAST_MSG" || ${#LAST_MSG} -lt 10 ]] && exit 0
 
+    # Extract recently edited files from transcript for context tagging
+    # Look for Edit tool results and file paths in recent messages
+    RECENT_FILES=$(grep -oP '"file_path"\s*:\s*"\K[^"]+' "$TRANSCRIPT" 2>/dev/null | \
+        tail -10 | sort -u | head -5 | tr '\n' ',' | sed 's/,$//')
+
+    # Build file tags from recent context
+    FILE_TAGS=""
+    if [[ -n "$RECENT_FILES" ]]; then
+        # Convert absolute paths to relative for cleaner tags
+        for fpath in $(echo "$RECENT_FILES" | tr ',' '\n'); do
+            fname=$(basename "$fpath")
+            FILE_TAGS="${FILE_TAGS},file:${fname}"
+        done
+        FILE_TAGS="${FILE_TAGS#,}"  # Remove leading comma
+    fi
+
+    # Hot update: Extract key patterns from recently edited files
+    # These are stored with dev:hot tag (ephemeral, fast decay)
+    for fpath in $(echo "$RECENT_FILES" | tr ',' '\n'); do
+        [[ ! -f "$fpath" ]] && continue
+        fname=$(basename "$fpath")
+        fext="${fname##*.}"
+
+        # Extract patterns based on file type
+        case "$fext" in
+            hpp|h|cpp|c|cc)
+                # C/C++: Extract class/struct definitions and key function signatures
+                # Class/struct definitions
+                grep -oP '(class|struct)\s+\K[A-Z][a-zA-Z0-9_]+' "$fpath" 2>/dev/null | head -10 | while read -r name; do
+                    "$CHITTA" observe \
+                        --category signal \
+                        --title "$name defined in $fname" \
+                        --content "[$PROJECT] $name :: $fext type @$fname" \
+                        --project "$PROJECT" \
+                        --tags "dev:hot,file:$fname,type:$fext" \
+                        >/dev/null 2>&1 || true
+                done
+
+                # Key function signatures (public methods, main functions)
+                grep -oP '^\s*(inline\s+)?(static\s+)?\w+\s+\K[a-z][a-zA-Z0-9_]+(?=\s*\()' "$fpath" 2>/dev/null | \
+                    grep -v '^if$\|^for$\|^while$\|^switch$' | head -10 | while read -r func; do
+                    "$CHITTA" observe \
+                        --category signal \
+                        --title "$func() in $fname" \
+                        --content "[$PROJECT] function $func @$fname" \
+                        --project "$PROJECT" \
+                        --tags "dev:hot,file:$fname,func:$func" \
+                        >/dev/null 2>&1 || true
+                done
+                ;;
+
+            py)
+                # Python: Extract class and function definitions
+                grep -oP '^class\s+\K[A-Z][a-zA-Z0-9_]+' "$fpath" 2>/dev/null | head -10 | while read -r name; do
+                    "$CHITTA" observe \
+                        --category signal \
+                        --title "$name defined in $fname" \
+                        --content "[$PROJECT] $name :: python class @$fname" \
+                        --project "$PROJECT" \
+                        --tags "dev:hot,file:$fname,type:py" \
+                        >/dev/null 2>&1 || true
+                done
+
+                grep -oP '^def\s+\K[a-z_][a-zA-Z0-9_]+' "$fpath" 2>/dev/null | head -10 | while read -r func; do
+                    "$CHITTA" observe \
+                        --category signal \
+                        --title "$func() in $fname" \
+                        --content "[$PROJECT] function $func @$fname" \
+                        --project "$PROJECT" \
+                        --tags "dev:hot,file:$fname,func:$func" \
+                        >/dev/null 2>&1 || true
+                done
+                ;;
+
+            sh|bash)
+                # Shell: Extract function definitions
+                grep -oP '^[a-z_][a-zA-Z0-9_]+(?=\s*\(\))' "$fpath" 2>/dev/null | head -10 | while read -r func; do
+                    "$CHITTA" observe \
+                        --category signal \
+                        --title "$func() in $fname" \
+                        --content "[$PROJECT] shell function $func @$fname" \
+                        --project "$PROJECT" \
+                        --tags "dev:hot,file:$fname,func:$func" \
+                        >/dev/null 2>&1 || true
+                done
+                ;;
+        esac
+    done
+
     # Extract [LEARN ε=XX] markers and store as wisdom
     echo "$LAST_MSG" | grep -oP '\[LEARN[^\]]*\]\s*\K[^\n]+' | while read -r learning; do
         [[ -z "$learning" ]] && continue
@@ -52,7 +141,11 @@ PROJECT=$(basename "$CWD" 2>/dev/null || echo "unknown")
             CONTENT="$learning"
         fi
 
-        "$CHITTA" grow --type wisdom --title "$TITLE" --content "$CONTENT" --epsilon "$EPSILON_FLOAT" >/dev/null 2>&1 || true
+        # Add file tags if we have file context
+        local tags_arg=""
+        [[ -n "$FILE_TAGS" ]] && tags_arg="--tags $FILE_TAGS"
+
+        "$CHITTA" grow --type wisdom --title "$TITLE" --content "$CONTENT" --epsilon "$EPSILON_FLOAT" $tags_arg >/dev/null 2>&1 || true
     done
 
     # Extract [USED:uuid] markers and strengthen those memories
@@ -76,7 +169,11 @@ PROJECT=$(basename "$CWD" 2>/dev/null || echo "unknown")
             CONTENT="$memory"
         fi
 
-        "$CHITTA" observe --category decision --title "$TITLE" --content "$CONTENT" --project "$PROJECT" >/dev/null 2>&1 || true
+        # Add file tags if we have file context
+        local tags_arg=""
+        [[ -n "$FILE_TAGS" ]] && tags_arg="--tags $FILE_TAGS"
+
+        "$CHITTA" observe --category decision --title "$TITLE" --content "$CONTENT" --project "$PROJECT" $tags_arg >/dev/null 2>&1 || true
     done
 
     # Parse each line for graph patterns

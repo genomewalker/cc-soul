@@ -1,0 +1,856 @@
+# chitta code intelligence
+# Oracle format: minimal seeds + triplets
+# Generated: 2026-01-13T09:47:58+01:00
+
+@vessel
+
+# Symbols @file:line
+[chitta] accept_new_connections @src/socket_server.cpp:211
+[chitta] access_count @include/chitta/feedback.hpp:159
+[chitta] accessed @include/chitta/mind/types.hpp:55
+[chitta] access_order_ @include/chitta/vak.hpp:277
+[chitta] acquire_daemon_lock @src/socket_client.cpp:610
+[chitta] acquire_lock @include/chitta/storage.hpp:1887
+[chitta] Acting @include/chitta/dynamics.hpp:140
+[chitta] action @include/chitta/dynamics.hpp:151
+[chitta] Action @include/chitta/mind/types.hpp:124
+[chitta] activation @include/chitta/dream.hpp:185
+[chitta] ActivationResult @include/chitta/dream.hpp:183
+[chitta] Active @include/chitta/segment_manager.hpp:34
+[chitta] active @include/chitta/voice.hpp:32
+[chitta] active_intentions @include/chitta/scoring.hpp:96
+[chitta] active_segment @include/chitta/segment_manager.hpp:403
+[chitta] add_alias @include/chitta/types.hpp:339
+[chitta] add_batch @include/chitta/mmap_graph_store.hpp:227
+[chitta] add_connection @include/chitta/connection_pool.hpp:350
+[chitta] add_contradiction @include/chitta/mind.hpp:1304
+[chitta] add_contradiction @include/chitta/truth_maintenance.hpp:57
+[chitta] added_at @include/chitta/synthesis_queue.hpp:41
+[chitta] add_edge @include/chitta/storage.hpp:1075
+[chitta] add_entity_alias @include/chitta/graph.hpp:859
+[chitta] add_evidence @include/chitta/synthesis_queue.hpp:103
+[chitta] add @include/chitta/graph_store.hpp:197
+[chitta] add @include/chitta/mind/structs.hpp:67
+[chitta] add @include/chitta/mind/tag_index.hpp:22
+[chitta] add @include/chitta/mmap_graph_store.hpp:199
+[chitta] add @include/chitta/mmap_graph_store.hpp:63
+[chitta] add @include/chitta/scoring.hpp:293
+[chitta] add @include/chitta/tag_index.hpp:115
+[chitta] add @include/chitta/tag_index.hpp:130
+[chitta] add @include/chitta/voice.hpp:181
+[chitta] add_mention @include/chitta/graph.hpp:1067
+[chitta] Addresses @include/chitta/types.hpp:244
+[chitta] add_reverse_connection @include/chitta/unified_index.hpp:1403
+[chitta] add_synthesis_evidence @include/chitta/mind.hpp:1379
+[chitta] add_tag @include/chitta/mind.hpp:1206
+[chitta] add_test @include/chitta/eval_harness.hpp:72
+[chitta] add_to_free_list @include/chitta/connection_pool.hpp:654
+[chitta] add_trigger @include/chitta/dynamics.hpp:32
+[chitta] add_triplet @include/chitta/graph.hpp:961
+[chitta] add_triplet @include/chitta/graph.hpp:968
+[chitta] advance @include/chitta/dynamics.hpp:153
+[chitta] AgencyCycle @include/chitta/dynamics.hpp:144
+[chitta] AgencyPhase @include/chitta/dynamics.hpp:139
+[chitta] ahamkara @include/chitta/voice.hpp:118
+[chitta] alert_level @include/chitta/quota_manager.hpp:119
+[chitta] alert_level @include/chitta/quota_manager.hpp:61
+[chitta] alert_name @include/chitta/quota_manager.hpp:242
+[chitta] alerts @include/chitta/epiplexity_test.hpp:129
+[chitta] alert_threshold @include/chitta/epiplexity_test.hpp:42
+[chitta] aliases @include/chitta/types.hpp:301
+[chitta] all_entities @include/chitta/graph.hpp:941
+[chitta] all @include/chitta/voice.hpp:160
+[chitta] all_nodes @include/chitta/graph.hpp:544
+[chitta] allocate @include/chitta/connection_pool.hpp:226
+[chitta] allocate_new @include/chitta/connection_pool.hpp:520
+[chitta] allowed @include/chitta/realm_scoping.hpp:59
+[chitta] allowed_sessions @include/chitta/provenance.hpp:123
+[chitta] allowed_tools @include/chitta/provenance.hpp:122
+[chitta] allowed_types @include/chitta/realm_scoping.hpp:62
+[chitta] all_tags @include/chitta/mind/tag_index.hpp:104
+[chitta] all_triplets @include/chitta/graph.hpp:1173
+[chitta] Always @include/chitta/ops.hpp:68
+[chitta] always @include/chitta/ops.hpp:77
+[chitta] analogy @include/chitta/dream.hpp:22
+[chitta] and_ @include/chitta/ops.hpp:105
+[chitta] And @include/chitta/ops.hpp:68
+[chitta] annotate_conflicts @include/chitta/truth_maintenance.hpp:194
+[chitta] answered_at @include/chitta/gap_inquiry.hpp:45
+[chitta] answered @include/chitta/gap_inquiry.hpp:254
+[chitta] Answered @include/chitta/gap_inquiry.hpp:31
+[chitta] answer @include/chitta/gap_inquiry.hpp:175
+[chitta] answer_node @include/chitta/gap_inquiry.hpp:51
+[chitta] answer_preview @include/chitta/gap_inquiry.hpp:52
+[chitta] Answers @include/chitta/types.hpp:243
+[chitta] antahkarana @include/chitta/voice.hpp:94
+[chitta] AntahkaranaYantra @include/chitta/vak_onnx.hpp:315
+[chitta] AntahkaranaYantra @include/chitta/vak_onnx.hpp:325
+[chitta] AntahkaranaYantra @include/chitta/vak_onnx.hpp:327
+[chitta] append_confidence @include/chitta/wal.hpp:681
+[chitta] append_delete @include/chitta/wal.hpp:805
+[chitta] append_edge @include/chitta/wal.hpp:708
+[chitta] append @include/chitta/wal.hpp:582
+[chitta] append_touch @include/chitta/wal.hpp:654
+[chitta] append_triplet_batch @include/chitta/storage.hpp:1119
+[chitta] append_triplet_batch @include/chitta/wal.hpp:763
+[chitta] append_triplet @include/chitta/storage.hpp:1110
+[chitta] append_triplet @include/chitta/wal.hpp:735
+[chitta] applied @include/chitta/dynamics.hpp:107
+[chitta] AppliedIn @include/chitta/types.hpp:235
+[chitta] apply_decay @include/chitta/graph.hpp:403
+[chitta] apply_decay @include/chitta/types.hpp:450
+[chitta] apply_feedback @include/chitta/mind.hpp:1988
+[chitta] apply @include/chitta/dynamics.hpp:118
+[chitta] apply @include/chitta/dynamics.hpp:222
+[chitta] apply_lateral_inhibition @include/chitta/mind.hpp:3129
+[chitta] apply_wal_entry @include/chitta/storage.hpp:1657
+[chitta] apply_wal_entry_v2 @include/chitta/storage.hpp:1687
+[chitta] approval_rate @include/chitta/review_queue.hpp:65
+[chitta] Approved @include/chitta/review_queue.hpp:22
+[chitta] approved @include/chitta/review_queue.hpp:60
+[chitta] Approved @include/chitta/synthesis_queue.hpp:23
+[chitta] approve @include/chitta/review_queue.hpp:116
+[chitta] approve @include/chitta/synthesis_queue.hpp:134
+[chitta] approve_with_edits @include/chitta/review_queue.hpp:128
+[chitta] Artha @include/chitta/vak.hpp:51
+[chitta] Artha @include/chitta/vak.hpp:56
+[chitta] Artha @include/chitta/vak.hpp:57
+[chitta] ask_count @include/chitta/gap_inquiry.hpp:55
+[chitta] asked_at @include/chitta/gap_inquiry.hpp:44
+[chitta] aspiration @include/chitta/dynamics.hpp:148
+[chitta] Aspiration @include/chitta/types.hpp:214
+[chitta] aspirations @src/import.cpp:29
+[chitta] aspirations @src/migrate.cpp:29
+[chitta] Aspiring @include/chitta/dynamics.hpp:140
+[chitta] as_ptr @include/chitta/types.hpp:117
+[chitta] as_ptr @include/chitta/types.hpp:118
+[chitta] assign @include/chitta/realm_scoping.hpp:95
+[chitta] assign_level @include/chitta/unified_index.hpp:1220
+[chitta] at_quota @include/chitta/quota_manager.hpp:107
+[chitta] attach_yantra @include/chitta/mind.hpp:71
+[chitta] attend @include/chitta/voice.hpp:39
+[chitta] attention @include/chitta/voice.hpp:29
+[chitta] attention_mask @include/chitta/vak.hpp:43
+[chitta] attention_mask @include/chitta/vak_onnx.hpp:154
+[chitta] attractor_count @include/chitta/mind/structs.hpp:41
+[chitta] AttractorDampener @include/chitta/attractor_dampener.hpp:62
+[chitta] AttractorDampener @include/chitta/attractor_dampener.hpp:64
+[chitta] attractor_dampener_ @include/chitta/mind.hpp:3818
+[chitta] Attractor @include/chitta/mind/structs.hpp:32
+[chitta] AttractorReport @include/chitta/mind/structs.hpp:40
+[chitta] auto_dismiss_low_importance @include/chitta/gap_inquiry.hpp:64
+[chitta] auto_dismiss_ms @include/chitta/gap_inquiry.hpp:65
+[chitta] avg_epsilon @include/chitta/epiplexity_test.hpp:130
+[chitta] avg_mrr @include/chitta/eval_harness.hpp:62
+[chitta] avg_ndcg @include/chitta/eval_harness.hpp:63
+[chitta] avg_precision @include/chitta/eval_harness.hpp:60
+[chitta] avg_quality_rating @include/chitta/review_queue.hpp:64
+[chitta] avg_recall @include/chitta/eval_harness.hpp:61
+[chitta] avg_relevance @include/chitta/utility_decay.hpp:35
+[chitta] awaken @include/chitta/vak_onnx.hpp:331
+[chitta] backup_path @include/chitta/migrations.hpp:32
+[chitta] backup_path @include/chitta/migrations.hpp:757
+[chitta] base_delta @include/chitta/utility_decay.hpp:232
+[chitta] base_path_ @include/chitta/mmap_graph_store.hpp:607
+[chitta] base_path_ @include/chitta/segment_manager.hpp:156
+[chitta] base_path_ @include/chitta/segment_manager.hpp:410
+[chitta] base_path @include/chitta/storage.hpp:1503
+[chitta] base_path @include/chitta/storage.hpp:770
+[chitta] base_path_ @include/chitta/unified_index.hpp:1501
+[chitta] base_path @include/chitta/unified_index.hpp:968
+[chitta] basin_boost @include/chitta/scoring.hpp:102
+[chitta] basin_size @include/chitta/mind/structs.hpp:36
+[chitta] basin_sizes @include/chitta/mind/structs.hpp:43
+[chitta] BatchDecision @include/chitta/review_queue.hpp:199
+[chitta] batch_interval_ms @include/chitta/feedback.hpp:42
+[chitta] batch_size @include/chitta/vak_onnx.hpp:320
+[chitta] BatchStats @include/chitta/epiplexity_test.hpp:125
+[chitta] belief_base_delta @include/chitta/utility_decay.hpp:45
+[chitta] belief_boost @include/chitta/scoring.hpp:37
+[chitta] belief_count @include/chitta/graph.hpp:301
+[chitta] Belief @include/chitta/types.hpp:212
+[chitta] beliefs @src/import.cpp:26
+[chitta] beliefs @src/migrate.cpp:27
+[chitta] belief_wisdom_count @include/chitta/graph.hpp:303
+[chitta] binary_region_ @include/chitta/unified_index.hpp:1504
+[chitta] BinaryVector @include/chitta/quantized.hpp:87
+[chitta] BinaryVector @include/chitta/quantized.hpp:91
+[chitta] bitmap_to_vector @include/chitta/tag_index.hpp:437
+[chitta] bits @include/chitta/quantized.hpp:89
+[chitta] blob_count @include/chitta/blob_store.hpp:183
+[chitta] blob_count @include/chitta/blob_store.hpp:26
+[chitta] BlobStoreHeader @include/chitta/blob_store.hpp:21
+[chitta] BlobStore @include/chitta/blob_store.hpp:32
+[chitta] ~BlobStore @include/chitta/blob_store.hpp:39
+[chitta] BLOB_STORE_MAGIC @include/chitta/blob_store.hpp:18
+[chitta] BLOB_STORE_VERSION @include/chitta/blob_store.hpp:19
+[chitta] bm25_built_ @include/chitta/mind.hpp:3797
+[chitta] BM25Config @include/chitta/scoring.hpp:268
+[chitta] bm25_index_ @include/chitta/mind.hpp:3795
+[chitta] BM25Index @include/chitta/scoring.hpp:285
+[chitta] BM25Index @include/chitta/scoring.hpp:290
+[chitta] BM25_MAGIC @include/chitta/scoring.hpp:435
+[chitta] BM25_MAX_NODES @include/chitta/mind.hpp:166
+[chitta] bm25_path_ @include/chitta/mind.hpp:3796
+[chitta] BM25_VERSION @include/chitta/scoring.hpp:436
+[chitta] buddhi @include/chitta/voice.hpp:107
+[chitta] BudgetAlert @include/chitta/quota_manager.hpp:48
+[chitta] build_goal_basin @include/chitta/mind.hpp:1553
+[chitta] build_goal_basin_unlocked @include/chitta/mind.hpp:1591
+[chitta] build @include/chitta/graph_store.hpp:142
+[chitta] build_indices @include/chitta/graph_store.hpp:348
+[chitta] build_indices @include/chitta/mmap_graph_store.hpp:253
+[chitta] build_known_tools @src/rpc_server.cpp:297
+[chitta] build_session_context @include/chitta/mind.hpp:1633
+[chitta] BYTES @include/chitta/quantized.hpp:88
+[chitta] by_type @include/chitta/mind.hpp:1514
+[chitta] cache_ @include/chitta/vak.hpp:276
+[chitta] candidates_for_promotion @include/chitta/storage.hpp:742
+[chitta] canonical_name @include/chitta/types.hpp:300
+[chitta] can_transfer @include/chitta/realm_scoping.hpp:454
+[chitta] capacity @include/chitta/mind/types.hpp:95
+[chitta] capacity_ @include/chitta/mmap_graph_store.hpp:625
+[chitta] capacity @include/chitta/segment_manager.hpp:124
+[chitta] capacity_ @include/chitta/storage.hpp:665
+[chitta] capacity_ @include/chitta/unified_index.hpp:1513
+[chitta] capacity @include/chitta/unified_index.hpp:874
+[chitta] CausalChain @include/chitta/mind/structs.hpp:79
+[chitta] causal_chain @include/chitta/rpc/tools/memory.hpp:850
+[chitta] centroid @include/chitta/dream.hpp:124
+[chitta] centroid @include/chitta/dream.hpp:45
+[chitta] certain @include/chitta/types.hpp:175
+[chitta] certainty @include/chitta/vak.hpp:53
+[chitta] challenged_count @include/chitta/feedback.hpp:163
+[chitta] challenged_delta @include/chitta/feedback.hpp:39
+[chitta] challenged @include/chitta/feedback.hpp:115
+[chitta] change @include/chitta/epiplexity_test.hpp:163
+[chitta] changes @include/chitta/mind/structs.hpp:17
+[chitta] check_drift @include/chitta/epiplexity_test.hpp:167
+[chitta] check @include/chitta/ops.hpp:256
+[chitta] Checkpoint @include/chitta/wal.hpp:34
+[chitta] checkpoint @include/chitta/wal.hpp:623
+[chitta] checkpoint_interval_ms @include/chitta/mind/types.hpp:23
+[chitta] checksum @include/chitta/blob_store.hpp:27
+[chitta] checksum @include/chitta/tag_index.hpp:39
+[chitta] checksum @include/chitta/wal.hpp:55
+[chitta] check_version @src/socket_client.cpp:337
+[chitta] chitta @include/chitta/attractor_dampener.hpp:18
+[chitta] chitta @include/chitta/blob_store.hpp:16
+[chitta] chitta @include/chitta/connection_pool.hpp:21
+[chitta] chitta @include/chitta/dream.hpp:13
+[chitta] chitta @include/chitta/dynamics.hpp:12
+[chitta] chitta @include/chitta/epiplexity_test.hpp:17
+[chitta] chitta @include/chitta/eval_harness.hpp:19
+[chitta] chitta @include/chitta/feedback.hpp:13
+[chitta] chitta @include/chitta/gap_inquiry.hpp:17
+[chitta] chitta @include/chitta/graph.hpp:18
+[chitta] chitta @include/chitta/graph_store.hpp:29
+[chitta] chitta @include/chitta/hilbert.hpp:13
+[chitta] chitta @include/chitta/hnsw.hpp:15
+[chitta] chitta @include/chitta/migrations.hpp:19
+[chitta] chitta @include/chitta/mind.hpp:48
+[chitta] chitta @include/chitta/mind/structs.hpp:11
+[chitta] chitta @include/chitta/mind/tag_index.hpp:15
+[chitta] chitta @include/chitta/mind/types.hpp:13
+[chitta] chitta @include/chitta/mmap_graph_store.hpp:28
+[chitta] chitta @include/chitta/mmap.hpp:13
+[chitta] chitta @include/chitta/ops.hpp:12
+[chitta] chitta @include/chitta/provenance.hpp:18
+[chitta] chitta @include/chitta/quantized.hpp:9
+[chitta] chitta @include/chitta/query_router.hpp:19
+[chitta] chitta @include/chitta/quota_manager.hpp:20
+[chitta] chitta @include/chitta/realm_scoping.hpp:19
+[chitta] chitta @include/chitta/review_queue.hpp:17
+[chitta] chitta @include/chitta/scoring.hpp:15
+[chitta] chitta @include/chitta/segment_manager.hpp:22
+[chitta] chitta @include/chitta/socket_client.hpp:15
+[chitta] chitta @include/chitta/socket_server.hpp:17
+[chitta] chitta @include/chitta/storage.hpp:33
+[chitta] chitta @include/chitta/synthesis_queue.hpp:17
+[chitta] chitta @include/chitta/tag_index.hpp:25
+[chitta] chitta @include/chitta/truth_maintenance.hpp:18
+[chitta] chitta @include/chitta/types.hpp:21
+[chitta] chitta @include/chitta/unified_index.hpp:35
+[chitta] chitta @include/chitta/utility_decay.hpp:16
+[chitta] chitta @include/chitta/vak.hpp:24
+[chitta] chitta @include/chitta/vak_onnx.hpp:20
+[chitta] chitta @include/chitta/version.hpp:7
+[chitta] chitta @include/chitta/voice.hpp:11
+[chitta] chitta @include/chitta/voice.hpp:128
+[chitta] chitta @include/chitta/wal.hpp:27
+[chitta] CHITTA_PROTOCOL_VERSION_MAJOR @include/chitta/version.hpp:4
+[chitta] CHITTA_PROTOCOL_VERSION_MINOR @include/chitta/version.hpp:5
+[chitta] chitta @src/socket_client.cpp:24
+[chitta] chitta @src/socket_server.cpp:13
+[chitta] CHITTA_VERSION @include/chitta/version.hpp:3
+[chitta] Chorus @include/chitta/voice.hpp:175
+[chitta] Chorus @include/chitta/voice.hpp:179
+[chitta] cleanup_closed_connections @src/socket_server.cpp:240
+[chitta] cleanup_failed_create @include/chitta/unified_index.hpp:1087
+[chitta] cleanup @include/chitta/review_queue.hpp:272
+[chitta] cleanup_rejected @include/chitta/synthesis_queue.hpp:266
+[chitta] clear @include/chitta/graph_store.hpp:128
+[chitta] clear @include/chitta/graph_store.hpp:185
+[chitta] clear @include/chitta/mmap_graph_store.hpp:88
+[chitta] clear @include/chitta/provenance.hpp:236
+[chitta] clear @include/chitta/scoring.hpp:111
+[chitta] clear @include/chitta/tag_index.hpp:427
+[chitta] clear @include/chitta/utility_decay.hpp:161
+[chitta] clear_session_context @include/chitta/mind.hpp:1640
+[chitta] ClientConnection @include/chitta/socket_server.hpp:26
+[chitta] client_fd @include/chitta/socket_server.hpp:21
+[chitta] ClientRequest @include/chitta/socket_server.hpp:20
+[chitta] close @include/chitta/blob_store.hpp:84
+[chitta] close @include/chitta/connection_pool.hpp:202
+[chitta] close @include/chitta/mind.hpp:233
+[chitta] close @include/chitta/mmap_graph_store.hpp:180
+[chitta] close @include/chitta/mmap.hpp:128
+
+# Dependencies
+[TRIPLET] chitta includes algorithm
+[TRIPLET] chitta includes apple_arm_events.h
+[TRIPLET] chitta includes arm_neon.h
+[TRIPLET] chitta includes array
+[TRIPLET] chitta includes asm/unistd.h
+[TRIPLET] chitta includes assert.h
+[TRIPLET] chitta includes atomic
+[TRIPLET] chitta includes attractor_dampener.hpp
+[TRIPLET] chitta includes avx2intrin.h
+[TRIPLET] chitta includes avx512bwintrin.h
+[TRIPLET] chitta includes avx512cdintrin.h
+[TRIPLET] chitta includes avx512dqintrin.h
+[TRIPLET] chitta includes avx512fintrin.h
+[TRIPLET] chitta includes avx512vbmi2intrin.h
+[TRIPLET] chitta includes avx512vbmiintrin.h
+[TRIPLET] chitta includes avx512vlintrin.h
+[TRIPLET] chitta includes avx512vpopcntdqintrin.h
+[TRIPLET] chitta includes avxintrin.h
+[TRIPLET] chitta includes bench.h
+[TRIPLET] chitta includes benchmark/benchmark.h
+[TRIPLET] chitta includes benchmark.h
+[TRIPLET] chitta includes ../benchmarks/numbersfromtextfiles.h
+[TRIPLET] chitta includes blob_store.hpp
+[TRIPLET] chitta includes bmiintrin.h
+[TRIPLET] chitta includes byteswap.h
+[TRIPLET] chitta includes cassert
+[TRIPLET] chitta includes cctype
+[TRIPLET] chitta includes cerrno
+[TRIPLET] chitta includes chitta/attractor_dampener.hpp
+[TRIPLET] chitta includes chitta/chitta.hpp
+[TRIPLET] chitta includes chitta/epiplexity_test.hpp
+[TRIPLET] chitta includes chitta/eval_harness.hpp
+[TRIPLET] chitta includes chitta/gap_inquiry.hpp
+[TRIPLET] chitta includes chitta/migrations.hpp
+[TRIPLET] chitta includes chitta/mind.hpp
+[TRIPLET] chitta includes chitta/provenance.hpp
+[TRIPLET] chitta includes chitta/query_router.hpp
+[TRIPLET] chitta includes chitta/quota_manager.hpp
+[TRIPLET] chitta includes chitta/realm_scoping.hpp
+[TRIPLET] chitta includes chitta/review_queue.hpp
+[TRIPLET] chitta includes chitta/rpc/handler.hpp
+[TRIPLET] chitta includes chitta/segment_manager.hpp
+[TRIPLET] chitta includes chitta/socket_client.hpp
+[TRIPLET] chitta includes chitta/socket_server.hpp
+[TRIPLET] chitta includes chitta/synthesis_queue.hpp
+[TRIPLET] chitta includes chitta/truth_maintenance.hpp
+[TRIPLET] chitta includes chitta/utility_decay.hpp
+[TRIPLET] chitta includes chitta/vak_onnx.hpp
+[TRIPLET] chitta includes chitta/version.hpp
+[TRIPLET] chitta includes chrono
+[TRIPLET] chitta imports fileinput
+[TRIPLET] chitta imports io
+[TRIPLET] chitta imports os
+[TRIPLET] chitta imports Path
+[TRIPLET] chitta imports pathlib
+[TRIPLET] chitta imports re
+[TRIPLET] chitta imports subprocess
+[TRIPLET] chitta imports sys
+
+# Call graph
+[TRIPLET] import calls attach_yantra
+[TRIPLET] import calls awaken
+[TRIPLET] import calls begin
+[TRIPLET] import calls chitta
+[TRIPLET] import calls close
+[TRIPLET] import calls cold_size
+[TRIPLET] import calls Confidence
+[TRIPLET] import calls default_target
+[TRIPLET] import calls embeddings
+[TRIPLET] import calls empty
+[TRIPLET] cli calls activity
+[TRIPLET] cli calls add_tag
+[TRIPLET] cli calls apply_feedback
+[TRIPLET] cli calls attach_yantra
+[TRIPLET] cli calls awaken
+[TRIPLET] cli calls begin
+[TRIPLET] cli calls catch
+[TRIPLET] cli calls check_version
+[TRIPLET] cli calls chitta
+[TRIPLET] cli calls clear
+[TRIPLET] test calls abs
+[TRIPLET] test calls activation
+[TRIPLET] test calls add
+[TRIPLET] test calls add_contradiction
+[TRIPLET] test calls add_edge
+[TRIPLET] test calls add_evidence
+[TRIPLET] test calls add_tag
+[TRIPLET] test calls add_test
+[TRIPLET] test calls ahamkara
+[TRIPLET] test calls allocate
+[TRIPLET] socket_client calls access
+[TRIPLET] socket_client calls acquire_daemon_lock
+[TRIPLET] socket_client calls alarm
+[TRIPLET] socket_client calls appeared
+[TRIPLET] socket_client calls append
+[TRIPLET] socket_client calls atoi
+[TRIPLET] socket_client calls begin
+[TRIPLET] socket_client calls briefly
+[TRIPLET] socket_client calls check_version
+[TRIPLET] socket_client calls child
+[TRIPLET] socket_server calls accept
+[TRIPLET] socket_server calls accept_new_connections
+[TRIPLET] socket_server calls append
+[TRIPLET] socket_server calls begin
+[TRIPLET] socket_server calls bind
+[TRIPLET] socket_server calls chmod
+[TRIPLET] socket_server calls cleanup_closed_connections
+[TRIPLET] socket_server calls clear
+[TRIPLET] socket_server calls close
+[TRIPLET] socket_server calls connected
+[TRIPLET] migrate calls attach_yantra
+[TRIPLET] migrate calls awaken
+[TRIPLET] migrate calls close
+[TRIPLET] migrate calls Confidence
+[TRIPLET] migrate calls c_str
+[TRIPLET] migrate calls db
+[TRIPLET] migrate calls default_soul_db
+[TRIPLET] migrate calls empty
+[TRIPLET] migrate calls error
+[TRIPLET] migrate calls getenv
+[TRIPLET] rpc_server calls build_known_tools
+[TRIPLET] rpc_server calls catch
+[TRIPLET] rpc_server calls change
+[TRIPLET] rpc_server calls check_version
+[TRIPLET] rpc_server calls client
+[TRIPLET] rpc_server calls command
+[TRIPLET] rpc_server calls confidence
+[TRIPLET] rpc_server calls connect
+[TRIPLET] rpc_server calls contains
+[TRIPLET] rpc_server calls content
+[TRIPLET] CMakeCCompilerId calls DEC
+[TRIPLET] CMakeCCompilerId calls defined
+[TRIPLET] CMakeCCompilerId calls elif
+[TRIPLET] CMakeCCompilerId calls __has_include
+[TRIPLET] CMakeCCompilerId calls HEX
+[TRIPLET] CMakeCCompilerId calls main
+[TRIPLET] CMakeCCompilerId calls STRINGIFY
+[TRIPLET] CMakeCCompilerId calls STRINGIFY_HELPER
+[TRIPLET] CMakeCXXCompilerId calls DEC
+[TRIPLET] CMakeCXXCompilerId calls defined
+[TRIPLET] CMakeCXXCompilerId calls elif
+[TRIPLET] CMakeCXXCompilerId calls __has_include
+[TRIPLET] CMakeCXXCompilerId calls HEX
+[TRIPLET] CMakeCXXCompilerId calls main
+[TRIPLET] CMakeCXXCompilerId calls STRINGIFY
+[TRIPLET] CMakeCXXCompilerId calls STRINGIFY_HELPER
+[TRIPLET] synthetic_bench calls add
+[TRIPLET] synthetic_bench calls aligned_alloc
+[TRIPLET] synthetic_bench calls ArgsProduct
+[TRIPLET] synthetic_bench calls BENCHMARK
+[TRIPLET] synthetic_bench calls BENCHMARK_MAIN
+[TRIPLET] synthetic_bench calls buf
+[TRIPLET] synthetic_bench calls contains
+[TRIPLET] synthetic_bench calls cppContainsHit
+[TRIPLET] synthetic_bench calls cppContainsMiss
+[TRIPLET] synthetic_bench calls cppContainsRandom
+[TRIPLET] bench calls access
+[TRIPLET] bench calls AddCustomContext
+[TRIPLET] bench calls BENCHMARK
+[TRIPLET] bench calls contains
+[TRIPLET] bench calls croaring_hardware_support
+[TRIPLET] bench calls data
+[TRIPLET] bench calls defined
+[TRIPLET] bench calls free
+[TRIPLET] bench calls has_events
+[TRIPLET] bench calls Initialize
+[TRIPLET] robust_deserialization_unit calls assert_false
+[TRIPLET] robust_deserialization_unit calls assert_int_equal
+[TRIPLET] robust_deserialization_unit calls assert_non_null
+[TRIPLET] robust_deserialization_unit calls assert_null
+[TRIPLET] robust_deserialization_unit calls assert_true
+[TRIPLET] robust_deserialization_unit calls Bitset
+[TRIPLET] robust_deserialization_unit calls cmocka_run_group_tests
+[TRIPLET] robust_deserialization_unit calls cmocka_unit_test
+[TRIPLET] robust_deserialization_unit calls compare
+[TRIPLET] robust_deserialization_unit calls container
+[TRIPLET] util_unit calls assert_int_equal
+[TRIPLET] util_unit calls bitset_extract_setbits
+[TRIPLET] util_unit calls bitset_extract_setbits_uint16
+[TRIPLET] util_unit calls bitset_set_list
+[TRIPLET] util_unit calls calloc
+[TRIPLET] util_unit calls cmocka_run_group_tests
+[TRIPLET] util_unit calls cmocka_unit_test
+[TRIPLET] util_unit calls DEFINE_TEST
+[TRIPLET] util_unit calls free
+[TRIPLET] util_unit calls main
+[TRIPLET] container_comparison_unit calls array_container_add
+[TRIPLET] container_comparison_unit calls array_container_create
+[TRIPLET] container_comparison_unit calls assert
+[TRIPLET] container_comparison_unit calls assert_false
+[TRIPLET] container_comparison_unit calls assert_int_equal
+[TRIPLET] container_comparison_unit calls assert_non_null
+[TRIPLET] container_comparison_unit calls assert_true
+[TRIPLET] container_comparison_unit calls bitset_container_add
+[TRIPLET] container_comparison_unit calls bitset_container_create
+[TRIPLET] container_comparison_unit calls CAST_array
+[TRIPLET] cpp_example2 calls add
+[TRIPLET] cpp_example2 calls assert_true
+[TRIPLET] cpp_example2 calls begin
+[TRIPLET] cpp_example2 calls bitmapOf
+[TRIPLET] cpp_example2 calls cardinality
+[TRIPLET] cpp_example2 calls contains
+[TRIPLET] cpp_example2 calls end
+[TRIPLET] cpp_example2 calls fastunion
+[TRIPLET] cpp_example2 calls getSizeInBytes
+[TRIPLET] cpp_example2 calls iterate
+[TRIPLET] format_portability_unit calls assert_false
+[TRIPLET] format_portability_unit calls assert_int_equal
+[TRIPLET] format_portability_unit calls assert_int_not_equal
+[TRIPLET] format_portability_unit calls assert_non_null
+[TRIPLET] format_portability_unit calls cmocka_run_group_tests
+[TRIPLET] format_portability_unit calls cmocka_unit_test
+[TRIPLET] format_portability_unit calls compare
+[TRIPLET] format_portability_unit calls DEFINE_TEST
+[TRIPLET] format_portability_unit calls fclose
+[TRIPLET] format_portability_unit calls filesize
+[TRIPLET] roaring64_unit calls a2
+[TRIPLET] roaring64_unit calls assert_false
+[TRIPLET] roaring64_unit calls assert_int_equal
+[TRIPLET] roaring64_unit calls assert_non_null
+[TRIPLET] roaring64_unit calls assert_r32_valid
+[TRIPLET] roaring64_unit calls assert_r64_valid
+[TRIPLET] roaring64_unit calls assert_true
+[TRIPLET] roaring64_unit calls assert_vector_equal
+[TRIPLET] roaring64_unit calls begin
+[TRIPLET] roaring64_unit calls buf
+[TRIPLET] cpp_random_unit calls add
+[TRIPLET] cpp_random_unit calls addRange
+[TRIPLET] cpp_random_unit calls and_cardinality
+[TRIPLET] cpp_random_unit calls andnot_cardinality
+[TRIPLET] cpp_random_unit calls assert_false
+[TRIPLET] cpp_random_unit calls assert_int_equal
+[TRIPLET] cpp_random_unit calls assert_true
+[TRIPLET] cpp_random_unit calls cardinality
+[TRIPLET] cpp_random_unit calls check
+[TRIPLET] cpp_random_unit calls cmocka_run_group_tests
+[TRIPLET] mixed_container_unit calls array_array_container_andnot
+[TRIPLET] mixed_container_unit calls array_array_container_iandnot
+[TRIPLET] mixed_container_unit calls array_array_container_ixor
+[TRIPLET] mixed_container_unit calls array_array_container_lazy_xor
+[TRIPLET] mixed_container_unit calls array_array_container_xor
+[TRIPLET] mixed_container_unit calls array_bitset_container_andnot
+[TRIPLET] mixed_container_unit calls array_bitset_container_iandnot
+[TRIPLET] mixed_container_unit calls array_bitset_container_intersection
+[TRIPLET] mixed_container_unit calls array_bitset_container_ixor
+[TRIPLET] mixed_container_unit calls array_bitset_container_lazy_xor
+[TRIPLET] toplevel_unit calls abort
+[TRIPLET] toplevel_unit calls array
+[TRIPLET] toplevel_unit calls array_container_free
+[TRIPLET] toplevel_unit calls array_container_from_bitset
+[TRIPLET] toplevel_unit calls array_container_from_run
+[TRIPLET] toplevel_unit calls array_equals
+[TRIPLET] toplevel_unit calls assert_bitmap_validate
+[TRIPLET] toplevel_unit calls assert_false
+[TRIPLET] toplevel_unit calls assert_in_range
+[TRIPLET] toplevel_unit calls assert_int_equal
+[TRIPLET] run_container_unit calls assert_false
+[TRIPLET] run_container_unit calls assert_int_equal
+[TRIPLET] run_container_unit calls assert_non_null
+[TRIPLET] run_container_unit calls assert_true
+[TRIPLET] run_container_unit calls cmocka_run_group_tests
+[TRIPLET] run_container_unit calls cmocka_unit_test
+[TRIPLET] run_container_unit calls DEFINE_TEST
+[TRIPLET] run_container_unit calls free
+[TRIPLET] run_container_unit calls main
+[TRIPLET] run_container_unit calls malloc
+[TRIPLET] unit calls all
+[TRIPLET] unit calls create_all_bitmaps
+[TRIPLET] unit calls fclose
+[TRIPLET] unit calls fopen
+[TRIPLET] unit calls fread
+[TRIPLET] unit calls free
+[TRIPLET] unit calls fseek
+[TRIPLET] unit calls ftell
+[TRIPLET] unit calls hasExtension
+[TRIPLET] unit calls intersection_uint32_card
+[TRIPLET] art_unit calls art_erase
+[TRIPLET] art_unit calls art_find
+[TRIPLET] art_unit calls art_free
+[TRIPLET] art_unit calls art_frozen_view
+[TRIPLET] art_unit calls art_init_cleared
+[TRIPLET] art_unit calls art_init_iterator
+[TRIPLET] art_unit calls art_insert
+[TRIPLET] art_unit calls art_internal_validate
+[TRIPLET] art_unit calls art_is_empty
+[TRIPLET] art_unit calls art_iterator_erase
+[TRIPLET] cbitset_unit calls assert_int_equal
+[TRIPLET] cbitset_unit calls assert_true
+[TRIPLET] cbitset_unit calls bitset_contains_all
+[TRIPLET] cbitset_unit calls bitset_count
+[TRIPLET] cbitset_unit calls bitset_create
+[TRIPLET] cbitset_unit calls bitset_create_with_capacity
+[TRIPLET] cbitset_unit calls bitset_empty
+[TRIPLET] cbitset_unit calls bitset_for_each
+[TRIPLET] cbitset_unit calls bitset_free
+[TRIPLET] cbitset_unit calls bitset_get
+[TRIPLET] roaring64_serialization calls assert_false
+[TRIPLET] roaring64_serialization calls assert_int_equal
+[TRIPLET] roaring64_serialization calls assert_true
+[TRIPLET] roaring64_serialization calls Bitset
+[TRIPLET] roaring64_serialization calls buf1
+[TRIPLET] roaring64_serialization calls buf2
+[TRIPLET] roaring64_serialization calls cmocka_run_group_tests
+[TRIPLET] roaring64_serialization calls cmocka_unit_test
+[TRIPLET] roaring64_serialization calls data
+[TRIPLET] roaring64_serialization calls DEFINE_TEST
+[TRIPLET] c_example1 calls assert_true
+[TRIPLET] c_example1 calls free
+[TRIPLET] c_example1 calls main
+[TRIPLET] c_example1 calls malloc
+[TRIPLET] c_example1 calls printf
+[TRIPLET] c_example1 calls roaring_bitmap_add
+[TRIPLET] c_example1 calls roaring_bitmap_and
+[TRIPLET] c_example1 calls roaring_bitmap_contains
+[TRIPLET] c_example1 calls roaring_bitmap_copy
+[TRIPLET] c_example1 calls roaring_bitmap_create
+[TRIPLET] cpp_example1 calls add
+[TRIPLET] cpp_example1 calls cardinality
+[TRIPLET] cpp_example1 calls main
+[TRIPLET] bitset_container_unit calls assert_false
+[TRIPLET] bitset_container_unit calls assert_int_equal
+[TRIPLET] bitset_container_unit calls assert_int_not_equal
+[TRIPLET] bitset_container_unit calls assert_non_null
+[TRIPLET] bitset_container_unit calls assert_true
+[TRIPLET] bitset_container_unit calls bitset_container_add
+[TRIPLET] bitset_container_unit calls bitset_container_add_from_range
+[TRIPLET] bitset_container_unit calls bitset_container_and
+[TRIPLET] bitset_container_unit calls bitset_container_andnot
+[TRIPLET] bitset_container_unit calls bitset_container_andnot_nocard
+[TRIPLET] add_offset calls ARRAY_ADD_OFFSET_TEST_CASE
+[TRIPLET] add_offset calls array_container_add
+[TRIPLET] add_offset calls array_container_create
+[TRIPLET] add_offset calls ARRAY_SIZE
+[TRIPLET] add_offset calls assert_int_equal
+[TRIPLET] add_offset calls assert_non_null
+[TRIPLET] add_offset calls assert_null
+[TRIPLET] add_offset calls assert_ptr_not_equal
+[TRIPLET] add_offset calls assert_roaring_offset
+[TRIPLET] add_offset calls assert_true
+[TRIPLET] threads_unit calls join
+[TRIPLET] threads_unit calls main
+[TRIPLET] threads_unit calls printf
+[TRIPLET] threads_unit calls roaring_bitmap_add
+[TRIPLET] threads_unit calls roaring_bitmap_and_inplace
+[TRIPLET] threads_unit calls roaring_bitmap_andnot_inplace
+[TRIPLET] threads_unit calls roaring_bitmap_copy
+[TRIPLET] threads_unit calls roaring_bitmap_create
+[TRIPLET] threads_unit calls roaring_bitmap_free
+[TRIPLET] threads_unit calls roaring_bitmap_from
+[TRIPLET] cpp_unit calls a
+[TRIPLET] cpp_unit calls add
+[TRIPLET] cpp_unit calls addBulk
+[TRIPLET] cpp_unit calls addChecked
+[TRIPLET] cpp_unit calls addMany
+[TRIPLET] cpp_unit calls addRange
+[TRIPLET] cpp_unit calls addRangeClosed
+[TRIPLET] cpp_unit calls assert
+[TRIPLET] cpp_unit calls assert_false
+[TRIPLET] cpp_unit calls assert_int_equal
+[TRIPLET] cpp_unit_util calls add
+[TRIPLET] cpp_unit_util calls buf
+[TRIPLET] cpp_unit_util calls data
+[TRIPLET] cpp_unit_util calls getSizeInBytes
+[TRIPLET] cpp_unit_util calls main
+[TRIPLET] cpp_unit_util calls out
+[TRIPLET] cpp_unit_util calls size
+[TRIPLET] cpp_unit_util calls write
+[TRIPLET] cpp_unit_util calls writeToFile
+[TRIPLET] array_container_unit calls array_container_add
+[TRIPLET] array_container_unit calls array_container_cardinality
+[TRIPLET] array_container_unit calls array_container_contains
+[TRIPLET] array_container_unit calls array_container_create
+[TRIPLET] array_container_unit calls array_container_equal_bitset
+[TRIPLET] array_container_unit calls array_container_equals
+[TRIPLET] array_container_unit calls array_container_free
+[TRIPLET] array_container_unit calls array_container_intersection
+[TRIPLET] array_container_unit calls array_container_intersection_inplace
+[TRIPLET] array_container_unit calls array_container_printf
+[TRIPLET] realdata_unit calls array_equals
+[TRIPLET] realdata_unit calls assert_true
+[TRIPLET] realdata_unit calls compare_andnots
+[TRIPLET] realdata_unit calls compare_intersections
+[TRIPLET] realdata_unit calls compare_negations
+[TRIPLET] realdata_unit calls compare_unions
+[TRIPLET] realdata_unit calls compare_wide_unions
+[TRIPLET] realdata_unit calls compare_wide_xors
+[TRIPLET] realdata_unit calls compare_xors
+[TRIPLET] realdata_unit calls create_all_bitmaps
+[TRIPLET] croaring_fuzzer calls bitmap32
+[TRIPLET] croaring_fuzzer calls bitmap64
+[TRIPLET] croaring_fuzzer calls exit
+[TRIPLET] croaring_fuzzer calls LLVMFuzzerTestOneInput
+[TRIPLET] croaring_fuzzer calls printf
+[TRIPLET] croaring_fuzzer calls roaring64_bitmap_add
+[TRIPLET] croaring_fuzzer calls roaring64_bitmap_contains
+[TRIPLET] croaring_fuzzer calls roaring64_bitmap_free
+[TRIPLET] croaring_fuzzer calls roaring64_bitmap_get_cardinality
+[TRIPLET] croaring_fuzzer calls roaring64_bitmap_internal_validate
+[TRIPLET] mixed_andnot calls advanceUntil
+[TRIPLET] mixed_andnot calls array_array_container_andnot
+[TRIPLET] mixed_andnot calls array_array_container_iandnot
+[TRIPLET] mixed_andnot calls array_bitset_container_andnot
+[TRIPLET] mixed_andnot calls array_bitset_container_iandnot
+[TRIPLET] mixed_andnot calls array_container_andnot
+[TRIPLET] mixed_andnot calls array_container_cardinality
+[TRIPLET] mixed_andnot calls array_container_create_given_capacity
+[TRIPLET] mixed_andnot calls array_container_from_bitset
+[TRIPLET] mixed_andnot calls array_container_grow
+[TRIPLET] array calls array_container_add
+[TRIPLET] array calls array_container_add_from_range
+[TRIPLET] array calls array_container_andnot
+[TRIPLET] array calls array_container_append
+[TRIPLET] array calls array_container_cardinality
+[TRIPLET] array calls array_container_clone
+[TRIPLET] array calls array_container_contains
+[TRIPLET] array calls array_container_copy
+[TRIPLET] array calls array_container_create
+[TRIPLET] array calls array_container_create_given_capacity
+[TRIPLET] mixed_xor calls array_array_container_ixor
+[TRIPLET] mixed_xor calls array_array_container_lazy_xor
+[TRIPLET] mixed_xor calls array_array_container_xor
+[TRIPLET] mixed_xor calls array_bitset_container_ixor
+[TRIPLET] mixed_xor calls array_bitset_container_lazy_xor
+[TRIPLET] mixed_xor calls array_bitset_container_xor
+[TRIPLET] mixed_xor calls array_container_create_given_capacity
+[TRIPLET] mixed_xor calls array_container_free
+[TRIPLET] mixed_xor calls array_container_from_bitset
+[TRIPLET] mixed_xor calls array_container_from_run
+[TRIPLET] bitset calls assert
+[TRIPLET] bitset calls _avx2_bitset_container_equals
+[TRIPLET] bitset calls avx2_harley_seal_popcount256
+[TRIPLET] bitset calls _avx512_bitset_container_equals
+[TRIPLET] bitset calls avx512_vpopcount
+[TRIPLET] bitset calls avx_intrinsic
+[TRIPLET] bitset calls bitset_container_add
+[TRIPLET] bitset calls bitset_container_add_from_range
+[TRIPLET] bitset calls bitset_container_cardinality
+[TRIPLET] bitset calls bitset_container_clear
+[TRIPLET] mixed_equal calls array_container_equal_bitset
+[TRIPLET] mixed_equal calls bitset_container_compute_cardinality
+[TRIPLET] mixed_equal calls bitset_container_contains
+[TRIPLET] mixed_equal calls bitset_container_contains_range
+[TRIPLET] mixed_equal calls return
+[TRIPLET] mixed_equal calls roaring_trailing_zeroes
+[TRIPLET] mixed_equal calls run_container_cardinality
+[TRIPLET] mixed_equal calls run_container_equals_array
+[TRIPLET] mixed_equal calls run_container_equals_bitset
+[TRIPLET] mixed_negation calls array_container_clone
+[TRIPLET] mixed_negation calls array_container_create_given_capacity
+[TRIPLET] mixed_negation calls array_container_free
+[TRIPLET] mixed_negation calls array_container_from_bitset
+[TRIPLET] mixed_negation calls array_container_negation
+[TRIPLET] mixed_negation calls array_container_negation_range
+[TRIPLET] mixed_negation calls array_container_negation_range_inplace
+[TRIPLET] mixed_negation calls binarySearch
+[TRIPLET] mixed_negation calls bitset_clear_list
+[TRIPLET] mixed_negation calls bitset_container_clone
+[TRIPLET] mixed_intersection calls advanceUntil
+[TRIPLET] mixed_intersection calls array
+[TRIPLET] mixed_intersection calls array_bitset_container_intersect
+[TRIPLET] mixed_intersection calls array_bitset_container_intersection
+[TRIPLET] mixed_intersection calls array_bitset_container_intersection_cardinality
+[TRIPLET] mixed_intersection calls array_container_copy
+[TRIPLET] mixed_intersection calls array_container_create_given_capacity
+[TRIPLET] mixed_intersection calls array_container_empty
+[TRIPLET] mixed_intersection calls array_container_from_bitset
+[TRIPLET] mixed_intersection calls array_container_grow
+[TRIPLET] containers calls array_container_clone
+[TRIPLET] containers calls array_container_free
+[TRIPLET] containers calls array_container_index_equalorlarger
+[TRIPLET] containers calls array_container_printf
+[TRIPLET] containers calls array_container_printf_as_uint32_array
+[TRIPLET] containers calls array_container_validate
+[TRIPLET] containers calls assert
+[TRIPLET] containers calls bitset_container_clone
+[TRIPLET] containers calls bitset_container_free
+[TRIPLET] containers calls bitset_container_index_equalorlarger
+[TRIPLET] mixed_subset calls advanceUntil
+[TRIPLET] mixed_subset calls array_container_is_subset_bitset
+[TRIPLET] mixed_subset calls array_container_is_subset_run
+[TRIPLET] mixed_subset calls bitset_container_compute_cardinality
+[TRIPLET] mixed_subset calls bitset_container_contains
+[TRIPLET] mixed_subset calls bitset_container_is_subset_run
+[TRIPLET] mixed_subset calls roaring_trailing_zeroes
+[TRIPLET] mixed_subset calls run_container_cardinality
+[TRIPLET] mixed_subset calls run_container_is_subset_array
+[TRIPLET] mixed_subset calls run_container_is_subset_bitset
+[TRIPLET] run calls assert
+[TRIPLET] run calls _avx2_run_container_cardinality
+[TRIPLET] run calls _avx2_run_container_to_uint32_array
+[TRIPLET] run calls _avx512_run_container_cardinality
+[TRIPLET] run calls croaring_hardware_support
+[TRIPLET] run calls CROARING_MAKE_RLE16
+[TRIPLET] run calls defined
+[TRIPLET] run calls interleavedBinarySearch
+[TRIPLET] run calls iterator
+[TRIPLET] run calls makeRoomAtIndex
+[TRIPLET] mixed_union calls array_array_container_inplace_union
+[TRIPLET] mixed_union calls array_array_container_lazy_inplace_union
+[TRIPLET] mixed_union calls array_array_container_lazy_union
+[TRIPLET] mixed_union calls array_array_container_union
+[TRIPLET] mixed_union calls array_bitset_container_lazy_union
+[TRIPLET] mixed_union calls array_bitset_container_union
+[TRIPLET] mixed_union calls array_container_create_given_capacity
+[TRIPLET] mixed_union calls array_container_from_bitset
+[TRIPLET] mixed_union calls array_container_grow
+[TRIPLET] mixed_union calls array_container_union
+[TRIPLET] convert calls add_run
+[TRIPLET] convert calls array_container_cardinality
+[TRIPLET] convert calls array_container_create_given_capacity
+[TRIPLET] convert calls array_container_free
+[TRIPLET] convert calls array_container_from_bitset
+[TRIPLET] convert calls array_container_from_run
+[TRIPLET] convert calls array_container_number_of_runs
+[TRIPLET] convert calls array_container_serialized_size_in_bytes
+[TRIPLET] convert calls assert
+[TRIPLET] convert calls bitset_container_create
+[TRIPLET] bitset calls any_bits_set
+[TRIPLET] bitset calls bitset_clear
+[TRIPLET] bitset calls bitset_contains_all
+[TRIPLET] bitset calls bitset_copy
+[TRIPLET] bitset calls bitset_count
+[TRIPLET] bitset calls bitset_create
+[TRIPLET] bitset calls bitset_create_with_capacity
+[TRIPLET] bitset calls bitset_difference_count
+[TRIPLET] bitset calls bitset_empty
+[TRIPLET] bitset calls bitset_fill
+[TRIPLET] art calls alignof
+[TRIPLET] art calls art_allocate_index
+[TRIPLET] art calls art_common_prefix
+[TRIPLET] art calls art_compare_keys
+[TRIPLET] art calls art_compare_prefix
+[TRIPLET] art calls art_deref
+[TRIPLET] art calls art_erase
+[TRIPLET] art calls art_erase_at
+[TRIPLET] art calls art_extend
+[TRIPLET] art calls art_find
+[TRIPLET] roaring64 calls add_container
+[TRIPLET] roaring64 calls add_range_closed_at
+[TRIPLET] roaring64 calls alignof
+[TRIPLET] roaring64 calls align_size
+[TRIPLET] roaring64 calls allocate_index
+[TRIPLET] roaring64 calls and
+[TRIPLET] roaring64 calls array_container_create
+[TRIPLET] roaring64 calls ART
+[TRIPLET] roaring64 calls art_compare_keys
+[TRIPLET] roaring64 calls art_erase

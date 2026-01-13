@@ -142,6 +142,28 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
       {"predicate", "Predicate (empty = any)", false, nullptr},
       {"object", "Object (empty = any)", false, nullptr}}},
 
+    {"import_soul", "Import .soul file (SSL format) into mind",
+     {{"file", "Path to .soul file", true, nullptr},
+      {"replace", "Full rewire: remove existing codebase nodes first", false, "false"}}},
+
+    {"export_soul", "Export knowledge to .soul file (SSL format)",
+     {{"file", "Output path for .soul file", true, nullptr},
+      {"tag", "Tag to filter nodes (e.g., vessel, codebase, symbol)", true, nullptr},
+      {"include_triplets", "Include triplets in export", false, "true"}}},
+
+    {"resolve_entity", "Resolve entity name to NodeId (O(1) via EntityIndex)",
+     {{"entity", "Entity name to resolve", true, nullptr}}},
+
+    {"link_entity", "Link entity name to an existing node",
+     {{"entity", "Entity name", true, nullptr},
+      {"node_id", "NodeId to link to", true, nullptr}}},
+
+    {"bootstrap_entity_index", "Auto-link triplet entities to existing nodes by title match",
+     {}},
+
+    {"list_entities", "List all linked entities in EntityIndex",
+     {}},
+
     // Context tools
     {"soul_context", "Get soul state (tau, psi, stats)",
      {{"query", "Optional context for relevant wisdom", false, nullptr},
@@ -369,7 +391,8 @@ void print_usage(const char* prog) {
               << "\n"
               << "Tool categories:\n"
               << "  Memory:    recall, resonate, full_resonate, recall_by_tag, multi_hop, timeline\n"
-              << "  Learning:  grow, observe, update, feedback, connect, query\n"
+              << "  Learning:  grow, observe, update, feedback, connect, query, import_soul, export_soul\n"
+              << "  Entity:    resolve_entity, link_entity, bootstrap_entity_index, list_entities\n"
               << "  Context:   soul_context, attractors, lens, lens_harmony\n"
               << "  Intention: intend, wonder, answer\n"
               << "  Narrative: narrate, ledger\n"
@@ -478,10 +501,11 @@ int run_cli(const std::string& socket_path, const std::string& tool,
         }
     }
 
-    // Connect to daemon
+    // Connect to daemon (safe mode: never kill/restart)
     chitta::SocketClient client(socket_path);
-    if (!client.ensure_daemon_running()) {
-        std::cerr << "Error: Cannot connect to daemon: " << client.last_error() << "\n";
+    if (!client.connect_only()) {
+        std::cerr << "Error: " << client.last_error() << "\n";
+        std::cerr << "Hint: Start daemon with 'chittad daemon --socket' or let hooks start it\n";
         return 1;
     }
 
@@ -552,13 +576,14 @@ int run_cli(const std::string& socket_path, const std::string& tool,
     return 0;
 }
 
-// Thin client mode: forward stdin → daemon → stdout
+/// Thin client mode: forward stdin → daemon → stdout
 int run_thin_client(const std::string& socket_path) {
     chitta::SocketClient client(socket_path);
 
-    // Try to connect, auto-start daemon if needed
-    if (!client.ensure_daemon_running()) {
-        std::cerr << "[chitta] Failed to connect to daemon: " << client.last_error() << "\n";
+    // Safe connect: never kill/restart daemon
+    if (!client.connect_only()) {
+        std::cerr << "[chitta] " << client.last_error() << "\n";
+        std::cerr << "[chitta] Hint: Start daemon with 'chittad daemon --socket'\n";
         return 1;
     }
 
@@ -577,10 +602,10 @@ int run_thin_client(const std::string& socket_path) {
         } else {
             std::cerr << "[chitta] Request failed: " << client.last_error() << "\n";
 
-            // Try to reconnect
+            // Try to reconnect (safe: don't restart daemon)
             client.disconnect();
-            if (!client.ensure_daemon_running()) {
-                std::cerr << "[chitta] Reconnection failed, exiting\n";
+            if (!client.connect_only()) {
+                std::cerr << "[chitta] Reconnection failed: " << client.last_error() << "\n";
                 return 1;
             }
             std::cerr << "[chitta] Reconnected to daemon\n";

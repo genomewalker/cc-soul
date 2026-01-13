@@ -54,7 +54,13 @@ public:
 
     // Auto-start daemon if not running, verify version compatibility
     // Flow: find daemon → version check → compatible? use : restart
+    // WARNING: This may kill existing daemons on version mismatch!
     bool ensure_daemon_running();
+
+    // Safe connect: only connect to existing daemon, never kill/restart
+    // Returns false with error if daemon not running or version mismatch
+    // Use this for parallel agents to avoid killing shared daemon
+    bool connect_only();
 
     // Check daemon version (must be connected)
     std::optional<DaemonVersion> check_version();

@@ -1913,18 +1913,138 @@ public:
         return config_.use_mmap_graph ? mmap_graph_store_.triplet_count() : graph_store_.triplet_count();
     }
 
-    // Find entity by name (searches canonical and aliases)
+    // Get all triplets for export
+    std::vector<GraphStore::DecodedTriplet> all_triplets() const {
+        // Only supported with non-mmap graph store for now
+        if (!config_.use_mmap_graph) {
+            return graph_store_.all_triplets();
+        }
+        return {};  // TODO: implement for mmap graph store
+    }
+
+    // === EntityIndex: O(1) entity name → NodeId resolution ===
+
+    // Link entity string to a soul node (enables fast resolution)
+    void link_entity(const std::string& entity, NodeId node_id) {
+        if (!config_.use_mmap_graph) {
+            graph_store_.link_entity(entity, node_id);
+        }
+        // TODO: add to mmap graph store
+    }
+
+    // Bootstrap EntityIndex from existing nodes
+    // Scans all nodes and auto-links based on title extraction
+    size_t bootstrap_entity_index() {
+        if (config_.use_mmap_graph) return 0;
+
+        size_t linked = 0;
+
+        // Scan all triplet entities and try to find matching nodes
+        auto triplets = graph_store_.all_triplets();
+        for (const auto& t : triplets) {
+            // Try to link subject entity
+            if (!graph_store_.entity_has_node(t.subject)) {
+                auto node = find_node_by_title(t.subject);
+                if (node) {
+                    graph_store_.link_entity(t.subject, *node);
+                    linked++;
+                }
+            }
+            // Try to link object entity
+            if (!graph_store_.entity_has_node(t.object)) {
+                auto node = find_node_by_title(t.object);
+                if (node) {
+                    graph_store_.link_entity(t.object, *node);
+                    linked++;
+                }
+            }
+        }
+
+        return linked;
+    }
+
+    // Find node by exact or fuzzy title match
+    std::optional<NodeId> find_node_by_title(const std::string& title) const {
+        std::optional<NodeId> found;
+
+        // Exact match first
+        storage_.for_each_hot([&](const NodeId& id, const Node& node) {
+            if (found) return;
+            auto text = payload_to_text(node.payload);
+            if (!text) return;
+
+            // Check if title appears at start of payload (title line)
+            if (text->find(title) == 0 || text->find("[" + title + "]") != std::string::npos) {
+                found = id;
+            }
+        });
+
+        return found;
+    }
+
+    // Resolve entity name to NodeId (O(1) via EntityIndex)
+    std::optional<NodeId> resolve_entity(const std::string& entity) const {
+        if (!config_.use_mmap_graph) {
+            return graph_store_.resolve_entity(entity);
+        }
+        return std::nullopt;  // TODO: mmap implementation
+    }
+
+    // Get all entity names linked to a node
+    std::vector<std::string> entities_for_node(NodeId node_id) const {
+        if (!config_.use_mmap_graph) {
+            return graph_store_.entities_for_node(node_id);
+        }
+        return {};
+    }
+
+    // Check if entity has a linked node
+    bool entity_has_node(const std::string& entity) const {
+        if (!config_.use_mmap_graph) {
+            return graph_store_.entity_has_node(entity);
+        }
+        return false;
+    }
+
+    // Unlink entity from its node
+    void unlink_entity(const std::string& entity) {
+        if (!config_.use_mmap_graph) {
+            graph_store_.unlink_entity(entity);
+        }
+    }
+
+    // Get all linked entities (for debug/export)
+    std::vector<std::pair<std::string, NodeId>> linked_entities() const {
+        if (!config_.use_mmap_graph) {
+            return graph_store_.linked_entities();
+        }
+        return {};
+    }
+
+    // Count of linked entities
+    size_t linked_entity_count() const {
+        if (!config_.use_mmap_graph) {
+            return graph_store_.linked_entity_count();
+        }
+        return 0;
+    }
+
+    // Find entity by name - O(1) via EntityIndex, fallback to scan
     std::optional<NodeId> find_entity(const std::string& name) const {
-        // Search entities in storage
+        // Fast path: check EntityIndex first (O(1))
+        if (!config_.use_mmap_graph) {
+            auto resolved = graph_store_.resolve_entity(name);
+            if (resolved) return resolved;
+        }
+
+        // Slow path: scan storage for entity nodes (legacy, used during bootstrap)
         std::optional<NodeId> found;
         storage_.for_each_hot([&](const NodeId& id, const Node& node) {
             if (found) return;
             if (node.node_type != NodeType::Entity) return;
 
-            // Check payload for entity name
             auto payload_opt = payload_to_text(node.payload);
             if (!payload_opt) return;
-            // Simple check: entity name in payload
             if (payload_opt->find(name) != std::string::npos) {
                 found = id;
             }
@@ -1932,12 +2052,18 @@ public:
         return found;
     }
 
-    // Find or create entity
+    // Find or create entity - auto-links to EntityIndex
     NodeId find_or_create_entity(const std::string& name) {
         auto existing = find_entity(name);
-        if (existing) return *existing;
+        if (existing) {
+            // Ensure it's linked in EntityIndex (bootstrap existing entities)
+            if (!config_.use_mmap_graph && !graph_store_.entity_has_node(name)) {
+                graph_store_.link_entity(name, *existing);
+            }
+            return *existing;
+        }
 
-        // Create new entity
+        // Create new entity node
         Vector embedding = Vector::zeros();
         if (yantra_ && yantra_->ready()) {
             Artha artha = yantra_->transform(name);
@@ -1953,6 +2079,11 @@ public:
         storage_.insert(id, std::move(node));
         graph_.insert_raw(id);
         maybe_add_bm25(id, name);
+
+        // Link to EntityIndex for O(1) future lookups
+        if (!config_.use_mmap_graph) {
+            graph_store_.link_entity(name, id);
+        }
 
         return id;
     }

@@ -27,10 +27,24 @@ if ! command -v jq &> /dev/null; then
     exit 0
 fi
 
-# Find daemon socket (single path now, no versioned sockets)
+# Find daemon socket (UID-scoped path)
+# Cleans up stale sockets if daemon is dead
 find_socket() {
-    if [[ -S "/tmp/chitta.sock" ]]; then
-        echo "/tmp/chitta.sock"
+    local socket_path="/tmp/chitta-$(id -u).sock"
+    local pid_file="/tmp/chitta-daemon-$(id -u).pid"
+
+    if [[ -S "$socket_path" ]]; then
+        # Check if daemon PID is alive
+        if [[ -f "$pid_file" ]]; then
+            local pid
+            pid=$(cat "$pid_file" 2>/dev/null)
+            if [[ -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null; then
+                # Daemon dead, clean up stale socket
+                rm -f "$socket_path" "$pid_file" 2>/dev/null
+                return 1
+            fi
+        fi
+        echo "$socket_path"
         return 0
     fi
     return 1
@@ -44,6 +58,15 @@ socket_query() {
 
     # Use timeout and netcat for socket communication
     echo "$query" | timeout 5 nc -U "$socket" 2>/dev/null | head -1
+}
+
+# Helper: check if daemon is responsive (fast health check)
+daemon_healthy() {
+    local socket
+    socket=$(find_socket) || return 1
+    # Quick ping - just check if socket accepts connection
+    echo '{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"version_check"}}' \
+        | timeout 2 nc -U "$socket" 2>/dev/null | grep -q '"result"'
 }
 
 # Helper: call MCP tool via socket or thin client
@@ -60,9 +83,12 @@ call_mcp() {
         return 0
     fi
 
-    # Fall back to thin client (spawns process but uses daemon)
+    # Fall back to thin client with timeout (prevents hanging)
     if [[ -x "$CHITTA_BIN" ]]; then
-        echo "$request" | "$CHITTA_BIN" 2>/dev/null | grep -v '^\[chitta' | jq -r '.result.content[0].text' 2>/dev/null || true
+        response=$(echo "$request" | timeout 10 "$CHITTA_BIN" 2>/dev/null | grep -v '^\[chitta')
+        if [[ -n "$response" ]]; then
+            echo "$response" | jq -r '.result.content[0].text' 2>/dev/null || true
+        fi
     fi
 }
 
@@ -118,6 +144,27 @@ hook_start() {
         if [[ -n "$context" && "$context" != "null" ]]; then
             echo ""
             echo "$context"
+        fi
+
+        # Load code intelligence for current project (if bootstrap exists)
+        local project_name
+        project_name=$(basename "$PWD")
+        local bootstrap_dir="$PWD/bootstrap"
+        local code_intel="$bootstrap_dir/code-intel.soul"
+
+        if [[ -f "$code_intel" ]]; then
+            # Import code intelligence - I now know this codebase
+            call_mcp "import_soul" "{\"file\":\"$code_intel\",\"replace\":false}" >/dev/null 2>&1 || true
+        fi
+
+        # Surface what I know about this project
+        local arch_context
+        arch_context=$(call_mcp "recall" "{\"query\":\"$project_name architecture structure patterns\",\"zoom\":\"sparse\",\"k\":5,\"tag\":\"codebase\"}" 2>/dev/null)
+
+        if [[ -n "$arch_context" && "$arch_context" != "null" && "$arch_context" != *"No results"* && "$arch_context" != *"No memories"* ]]; then
+            echo ""
+            echo "[I know]"
+            echo "$arch_context" | head -c 800
         fi
     fi
 }

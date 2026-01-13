@@ -81,6 +81,7 @@ void print_usage(const char* prog) {
               << "  daemon             Run subconscious daemon (background processing)\n"
               << "  shutdown           Gracefully stop the running daemon\n"
               << "  status             Check if daemon is running\n"
+              << "  import <file>      Import .soul file into mind\n"
               << "  upgrade            Upgrade database to current version\n"
               << "  convert <format>   Convert to storage format (unified|segments)\n"
               << "  help               Show this help\n\n"
@@ -94,6 +95,7 @@ void print_usage(const char* prog) {
               << "  --pid-file PATH    Write PID to file (for daemon mode)\n"
               << "  --socket           Enable socket server mode\n"
               << "  --socket-path PATH Unix socket path\n"
+              << "  --update           Update existing nodes (for import)\n"
               << "  -v, --version      Show version\n"
 #ifdef CHITTA_WITH_ONNX
               << "  --model PATH       ONNX model path\n"
@@ -350,6 +352,146 @@ int cmd_cycle(Mind& mind) {
     if (before != after) {
         std::cout << "  Changed: " << (before > after ? before - after : after - before) << " nodes\n";
     }
+
+    return 0;
+}
+
+// Parse .soul file format and populate mind
+int cmd_import_soul(Mind& mind, const std::string& soul_file, bool update_mode) {
+    std::ifstream file(soul_file);
+    if (!file.is_open()) {
+        std::cerr << "Error: Cannot open soul file: " << soul_file << "\n";
+        return 1;
+    }
+
+    std::string line;
+    std::string current_domain;
+    std::string current_title;
+    std::string current_location;
+    bool vessel_mode = false;  // @vessel directive for protected nodes
+    int nodes_created = 0;
+    int triplets_created = 0;
+    int nodes_updated = 0;
+    (void)nodes_updated;  // Suppress warning until update mode is implemented
+    (void)update_mode;
+
+    while (std::getline(file, line)) {
+        // Skip empty lines and comments
+        if (line.empty() || line[0] == '#') continue;
+
+        // Trim leading whitespace
+        size_t start = line.find_first_not_of(" \t");
+        if (start == std::string::npos) continue;
+        line = line.substr(start);
+
+        // @vessel directive - marks following nodes as protected
+        if (line.find("@vessel") == 0) {
+            vessel_mode = true;
+            continue;
+        }
+
+        // Parse [domain] title→action→result @location format
+        if (line[0] == '[' && line.find(']') != std::string::npos) {
+            size_t bracket_end = line.find(']');
+            std::string bracket_content = line.substr(1, bracket_end - 1);
+
+            // Check if this is a special marker
+            if (bracket_content == "TRIPLET") {
+                // [TRIPLET] subject predicate object
+                std::string triplet = line.substr(bracket_end + 1);
+                start = triplet.find_first_not_of(" \t");
+                if (start != std::string::npos) {
+                    triplet = triplet.substr(start);
+                    // Parse "subject predicate object"
+                    std::istringstream iss(triplet);
+                    std::string subj, pred, obj;
+                    if (iss >> subj >> pred) {
+                        std::getline(iss, obj);
+                        // Trim leading space from object
+                        start = obj.find_first_not_of(" \t");
+                        if (start != std::string::npos) obj = obj.substr(start);
+                        if (!obj.empty()) {
+                            mind.connect(subj, pred, obj, vessel_mode ? 1.0f : 0.8f);
+                            triplets_created++;
+                        }
+                    }
+                }
+                continue;
+            } else if (bracket_content == "high-ε" || bracket_content == "high-e") {
+                // [high-ε] Content for previous title
+                if (!current_title.empty()) {
+                    std::string content = line.substr(bracket_end + 1);
+                    start = content.find_first_not_of(" \t");
+                    if (start != std::string::npos) content = content.substr(start);
+
+                    // Add location to content if present
+                    if (!current_location.empty()) {
+                        content += " @" + current_location;
+                    }
+
+                    // Build full text for embedding: [domain] title: content
+                    std::string full_text;
+                    if (!current_domain.empty()) {
+                        full_text = "[" + current_domain + "] ";
+                    }
+                    full_text += current_title + ": " + content;
+
+                    // Create node with Wisdom type and appropriate confidence
+                    float confidence = vessel_mode ? 1.0f : 0.7f;
+                    NodeId id;
+                    if (mind.has_yantra()) {
+                        id = mind.remember(full_text, NodeType::Wisdom, Confidence(confidence));
+                    } else {
+                        id = mind.remember(NodeType::Wisdom, Vector::zeros(), Confidence(confidence),
+                                           std::vector<uint8_t>(full_text.begin(), full_text.end()));
+                    }
+
+                    // Add tags to the created node
+                    mind.add_tag(id, "codebase");
+                    mind.add_tag(id, "architecture");
+                    if (!current_domain.empty()) {
+                        mind.add_tag(id, "project:" + current_domain);
+                    }
+                    if (vessel_mode) {
+                        mind.add_tag(id, "vessel");
+                    }
+
+                    // Set epsilon on the node
+                    if (auto node_opt = mind.get(id)) {
+                        Node node = *node_opt;
+                        node.epsilon = 0.8f;  // High epiplexity
+                        mind.update_node(id, node);
+                    }
+
+                    nodes_created++;
+                    current_title.clear();
+                    current_location.clear();
+                }
+                continue;
+            } else {
+                // [domain] title format - parse SSL pattern
+                current_domain = bracket_content;
+                std::string rest = line.substr(bracket_end + 1);
+                start = rest.find_first_not_of(" \t");
+                if (start != std::string::npos) rest = rest.substr(start);
+
+                // Check for @location at end
+                size_t loc_pos = rest.rfind(" @");
+                if (loc_pos != std::string::npos) {
+                    current_location = rest.substr(loc_pos + 2);
+                    rest = rest.substr(0, loc_pos);
+                } else {
+                    current_location.clear();
+                }
+                current_title = rest;
+            }
+        }
+    }
+
+    std::cout << "Soul import complete:\n";
+    std::cout << "  Nodes created: " << nodes_created << "\n";
+    std::cout << "  Triplets created: " << triplets_created << "\n";
+    std::cout << "  Vessel mode: " << (vessel_mode ? "yes" : "no") << "\n";
 
     return 0;
 }
@@ -718,6 +860,10 @@ int main(int argc, char* argv[]) {
     // Recall filter
     std::string exclude_tag;                     // recall --exclude-tag
 
+    // Import command args
+    std::string import_file;                       // import <file>
+    bool update_mode = false;                      // --update
+
     int limit = 5;
     int daemon_interval = 60;
     bool json_output = false;
@@ -773,6 +919,9 @@ int main(int argc, char* argv[]) {
         // Recall filter
         } else if (strcmp(argv[i], "--exclude-tag") == 0 && i + 1 < argc) {
             exclude_tag = argv[++i];
+        // Import flags
+        } else if (strcmp(argv[i], "--update") == 0) {
+            update_mode = true;
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             print_usage(argv[0]);
             return 0;
@@ -784,6 +933,8 @@ int main(int argc, char* argv[]) {
                 command = argv[i];
             } else if ((command == "recall" || command == "resonate") && query.empty()) {
                 query = argv[i];
+            } else if (command == "import" && import_file.empty()) {
+                import_file = argv[i];
             } else if (command == "convert" && format.empty()) {
                 format = argv[i];
             }
@@ -858,6 +1009,13 @@ int main(int argc, char* argv[]) {
         // Status doesn't need mind - just connects to daemon socket
         mind.close();
         return cmd_status(socket_path);
+    } else if (command == "import") {
+        if (import_file.empty()) {
+            std::cerr << "Usage: chittad import <file.soul> [--update]\n";
+            result = 1;
+        } else {
+            result = cmd_import_soul(mind, import_file, update_mode);
+        }
     } else {
         // Tool commands should use chitta (thin client), not chittad
         std::cerr << "Unknown command: " << command << "\n";

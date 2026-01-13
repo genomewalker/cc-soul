@@ -21,6 +21,7 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <optional>
 #include <fstream>
 #include <cstring>
 #include <algorithm>
@@ -42,7 +43,7 @@ static_assert(sizeof(CompactTriplet) == 16, "CompactTriplet must be 16 bytes");
 
 // File format constants
 constexpr uint32_t GRAPH_MAGIC = 0x47525048;  // "GRPH"
-constexpr uint32_t GRAPH_VERSION = 1;
+constexpr uint32_t GRAPH_VERSION = 2;  // v2: added EntityIndex
 
 // File header
 struct GraphHeader {
@@ -56,7 +57,8 @@ struct GraphHeader {
     uint64_t triplets_offset;
     uint64_t subject_index_offset;
     uint64_t object_index_offset;
-    uint64_t reserved[4];
+    uint64_t entity_index_offset;  // v2: EntityIndex (string → NodeId)
+    uint64_t reserved[3];
 };
 
 static_assert(sizeof(GraphHeader) == 96, "GraphHeader should be 96 bytes");
@@ -186,6 +188,107 @@ public:
 
 private:
     std::vector<uint64_t> offsets_;
+};
+
+// EntityIndex: Links triplet entity indices to soul NodeIds
+// Uses dictionary indices (uint32_t) instead of strings for 100M+ scale:
+//   entity_idx → NodeId (compact, O(1))
+//   node_id → [entity_idx...] (reverse lookup)
+// Strings only stored once in the parent Dictionary.
+class EntityIndex {
+public:
+    // Link an entity index to a NodeId
+    void link(uint32_t entity_idx, NodeId node_id) {
+        idx_to_node_[entity_idx] = node_id;
+        node_to_indices_[node_id].push_back(entity_idx);
+    }
+
+    // Resolve entity index to NodeId
+    std::optional<NodeId> resolve(uint32_t entity_idx) const {
+        auto it = idx_to_node_.find(entity_idx);
+        if (it != idx_to_node_.end()) {
+            return it->second;
+        }
+        return std::nullopt;
+    }
+
+    // Get all entity indices linked to a NodeId
+    std::vector<uint32_t> indices_for_node(NodeId node_id) const {
+        auto it = node_to_indices_.find(node_id);
+        if (it != node_to_indices_.end()) {
+            return it->second;
+        }
+        return {};
+    }
+
+    // Check if entity index is linked
+    bool has(uint32_t entity_idx) const {
+        return idx_to_node_.find(entity_idx) != idx_to_node_.end();
+    }
+
+    // Remove a link
+    void unlink(uint32_t entity_idx) {
+        auto it = idx_to_node_.find(entity_idx);
+        if (it != idx_to_node_.end()) {
+            NodeId node_id = it->second;
+            idx_to_node_.erase(it);
+            auto& indices = node_to_indices_[node_id];
+            indices.erase(std::remove(indices.begin(), indices.end(), entity_idx), indices.end());
+            if (indices.empty()) {
+                node_to_indices_.erase(node_id);
+            }
+        }
+    }
+
+    // Get all linked entity indices
+    std::vector<std::pair<uint32_t, NodeId>> all() const {
+        std::vector<std::pair<uint32_t, NodeId>> result;
+        result.reserve(idx_to_node_.size());
+        for (const auto& [idx, node_id] : idx_to_node_) {
+            result.emplace_back(idx, node_id);
+        }
+        return result;
+    }
+
+    size_t size() const { return idx_to_node_.size(); }
+    bool empty() const { return idx_to_node_.empty(); }
+    void clear() { idx_to_node_.clear(); node_to_indices_.clear(); }
+
+    // Serialization (compact: pairs of uint32_t + NodeId)
+    void save(std::ostream& out) const {
+        uint32_t count = static_cast<uint32_t>(idx_to_node_.size());
+        out.write(reinterpret_cast<const char*>(&count), sizeof(count));
+
+        for (const auto& [entity_idx, node_id] : idx_to_node_) {
+            out.write(reinterpret_cast<const char*>(&entity_idx), sizeof(entity_idx));
+            out.write(reinterpret_cast<const char*>(&node_id), sizeof(node_id));
+        }
+    }
+
+    bool load(std::istream& in) {
+        clear();
+
+        uint32_t count;
+        in.read(reinterpret_cast<char*>(&count), sizeof(count));
+        if (!in) return false;
+
+        for (uint32_t i = 0; i < count; ++i) {
+            uint32_t entity_idx;
+            in.read(reinterpret_cast<char*>(&entity_idx), sizeof(entity_idx));
+            if (!in) return false;
+
+            NodeId node_id;
+            in.read(reinterpret_cast<char*>(&node_id), sizeof(node_id));
+            if (!in) return false;
+
+            link(entity_idx, node_id);
+        }
+        return true;
+    }
+
+private:
+    std::unordered_map<uint32_t, NodeId> idx_to_node_;
+    std::unordered_map<NodeId, std::vector<uint32_t>, NodeIdHash> node_to_indices_;
 };
 
 // Main graph store
@@ -415,6 +518,10 @@ public:
         header.object_index_offset = out.tellp();
         object_index_.save(out);
 
+        // EntityIndex (v2)
+        header.entity_index_offset = out.tellp();
+        entity_index_.save(out);
+
         // Update header with offsets
         out.seekp(0);
         out.write(reinterpret_cast<const char*>(&header), sizeof(header));
@@ -439,7 +546,9 @@ public:
         // Read header
         GraphHeader header;
         in.read(reinterpret_cast<char*>(&header), sizeof(header));
-        if (!in || header.magic != GRAPH_MAGIC || header.version != GRAPH_VERSION) {
+        // Accept v1 (original) and v2 (with EntityIndex)
+        if (!in || header.magic != GRAPH_MAGIC ||
+            (header.version != 1 && header.version != GRAPH_VERSION)) {
             return false;
         }
 
@@ -450,6 +559,7 @@ public:
         triplets_by_object_.clear();
         subject_index_.clear();
         object_index_.clear();
+        entity_index_.clear();
 
         // Load entity dictionary
         in.seekg(header.entity_dict_offset);
@@ -473,6 +583,15 @@ public:
         // Load object index
         in.seekg(header.object_index_offset);
         if (!object_index_.load(in, header.entity_count + 1)) return false;
+
+        // Load EntityIndex (v2+)
+        if (header.version >= 2 && header.entity_index_offset > 0) {
+            in.seekg(header.entity_index_offset);
+            if (!entity_index_.load(in)) {
+                // Non-fatal: continue without EntityIndex
+                entity_index_.clear();
+            }
+        }
 
         // Create object-sorted triplets
         triplets_by_object_ = triplets_;
@@ -526,6 +645,30 @@ public:
     size_t predicate_count() const { return predicates_.size(); }
     size_t triplet_count() const { return triplets_.size(); }
 
+    // Decoded triplet for export
+    struct DecodedTriplet {
+        std::string subject;
+        std::string predicate;
+        std::string object;
+        float weight;
+    };
+
+    // Get all triplets as decoded strings (for export)
+    std::vector<DecodedTriplet> all_triplets() const {
+        std::shared_lock lock(mutex_);
+        std::vector<DecodedTriplet> result;
+        result.reserve(triplets_.size());
+        for (const auto& t : triplets_) {
+            result.push_back({
+                entities_.get(t.subject),
+                predicates_.get(t.predicate),
+                entities_.get(t.object),
+                t.weight
+            });
+        }
+        return result;
+    }
+
     // Memory usage estimate
     size_t memory_bytes() const {
         size_t bytes = 0;
@@ -537,11 +680,76 @@ public:
         return bytes;
     }
 
+    // === EntityIndex methods (string API backed by dictionary indices) ===
+
+    // Link an entity name to a NodeId in the soul
+    void link_entity(const std::string& entity, NodeId node_id) {
+        std::unique_lock lock(mutex_);
+        uint32_t idx = entities_.get_or_create(entity);
+        entity_index_.link(idx, node_id);
+    }
+
+    // Resolve entity name to NodeId
+    std::optional<NodeId> resolve_entity(const std::string& entity) const {
+        std::shared_lock lock(mutex_);
+        int64_t idx = entities_.get(entity);
+        if (idx < 0) return std::nullopt;
+        return entity_index_.resolve(static_cast<uint32_t>(idx));
+    }
+
+    // Get all entity names linked to a NodeId
+    std::vector<std::string> entities_for_node(NodeId node_id) const {
+        std::shared_lock lock(mutex_);
+        auto indices = entity_index_.indices_for_node(node_id);
+        std::vector<std::string> result;
+        result.reserve(indices.size());
+        for (uint32_t idx : indices) {
+            result.push_back(entities_.get(idx));
+        }
+        return result;
+    }
+
+    // Check if entity is linked to a node
+    bool entity_has_node(const std::string& entity) const {
+        std::shared_lock lock(mutex_);
+        int64_t idx = entities_.get(entity);
+        if (idx < 0) return false;
+        return entity_index_.has(static_cast<uint32_t>(idx));
+    }
+
+    // Unlink an entity from its node
+    void unlink_entity(const std::string& entity) {
+        std::unique_lock lock(mutex_);
+        int64_t idx = entities_.get(entity);
+        if (idx >= 0) {
+            entity_index_.unlink(static_cast<uint32_t>(idx));
+        }
+    }
+
+    // Get all linked entities (for export/debug)
+    std::vector<std::pair<std::string, NodeId>> linked_entities() const {
+        std::shared_lock lock(mutex_);
+        auto pairs = entity_index_.all();
+        std::vector<std::pair<std::string, NodeId>> result;
+        result.reserve(pairs.size());
+        for (const auto& [idx, node_id] : pairs) {
+            result.emplace_back(entities_.get(idx), node_id);
+        }
+        return result;
+    }
+
+    // Count of linked entities
+    size_t linked_entity_count() const {
+        std::shared_lock lock(mutex_);
+        return entity_index_.size();
+    }
+
 private:
     mutable std::shared_mutex mutex_;
 
-    Dictionary entities_;
-    Dictionary predicates_;
+    Dictionary entities_;       // String → compact index (for triplets)
+    Dictionary predicates_;     // String → compact index (for triplets)
+    EntityIndex entity_index_;  // String → NodeId (links to soul nodes)
 
     std::vector<CompactTriplet> triplets_;          // Sorted by subject
     std::vector<CompactTriplet> triplets_by_object_; // Sorted by object
