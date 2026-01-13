@@ -16,8 +16,8 @@ PID_FILE="${HOME}/.claude/mind/.subconscious.pid"
 LOG_FILE="${HOME}/.claude/mind/.subconscious.log"
 INTERVAL="${SUBCONSCIOUS_INTERVAL:-60}"
 
-LOCK_FILE="/tmp/chitta-daemon.lock"
-SOCKET_PATH="/tmp/chitta.sock"
+LOCK_FILE="/tmp/chitta-daemon-$(id -u).lock"
+SOCKET_PATH="/tmp/chitta-$(id -u).sock"
 
 is_running() {
     # First check PID file

@@ -1,5 +1,6 @@
 #include <chitta/socket_client.hpp>
 #include <chitta/version.hpp>
+#include <nlohmann/json.hpp>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/wait.h>
@@ -189,36 +190,6 @@ std::vector<std::string> find_chitta_sockets() {
     return sockets;
 }
 
-// Parse JSON field from response (simple parser for {"field": "value"} or {"field": 123})
-std::string json_get_string(const std::string& json, const std::string& key) {
-    std::string search = "\"" + key + "\":";
-    auto pos = json.find(search);
-    if (pos == std::string::npos) return "";
-
-    pos += search.length();
-    while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t')) ++pos;
-
-    if (pos < json.size() && json[pos] == '"') {
-        ++pos;
-        auto end = json.find('"', pos);
-        if (end != std::string::npos) {
-            return json.substr(pos, end - pos);
-        }
-    }
-    return "";
-}
-
-int json_get_int(const std::string& json, const std::string& key) {
-    std::string search = "\"" + key + "\":";
-    auto pos = json.find(search);
-    if (pos == std::string::npos) return 0;
-
-    pos += search.length();
-    while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t')) ++pos;
-
-    return std::atoi(json.c_str() + pos);
-}
-
 }  // anonymous namespace
 
 SocketClient::SocketClient()
@@ -335,34 +306,33 @@ bool SocketClient::ensure_daemon_running() {
 }
 
 std::optional<DaemonVersion> SocketClient::check_version() {
+    using json = nlohmann::json;
+
     // JSON-RPC request for version info
     auto response = request(R"({"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"version_check"}})");
     if (!response) {
         return std::nullopt;
     }
 
-    // Parse response - look for result.content[0].text or result directly
-    DaemonVersion ver;
+    try {
+        auto j = json::parse(*response);
 
-    // Try to find version fields in response
-    ver.software = json_get_string(*response, "software_version");
-    if (ver.software.empty()) {
-        ver.software = json_get_string(*response, "version");
-    }
-    if (ver.software.empty()) {
-        // Fallback: try to find in nested result
-        auto text_pos = response->find("\"text\":");
-        if (text_pos != std::string::npos) {
-            ver.software = json_get_string(*response, "software_version");
+        // Navigate: result.structured.{software_version, protocol_major, protocol_minor}
+        if (!j.contains("result") || !j["result"].contains("structured")) {
+            return std::nullopt;
         }
-    }
 
-    ver.protocol_major = json_get_int(*response, "protocol_major");
-    ver.protocol_minor = json_get_int(*response, "protocol_minor");
+        auto& structured = j["result"]["structured"];
+        DaemonVersion ver;
+        ver.software = structured.value("software_version", "");
+        ver.protocol_major = structured.value("protocol_major", 0);
+        ver.protocol_minor = structured.value("protocol_minor", 0);
 
-    // If we got at least protocol version, consider it valid
-    if (ver.protocol_major > 0 || !ver.software.empty()) {
-        return ver;
+        if (ver.protocol_major > 0 || !ver.software.empty()) {
+            return ver;
+        }
+    } catch (...) {
+        // JSON parse failed
     }
 
     return std::nullopt;
@@ -591,12 +561,12 @@ std::optional<std::string> SocketClient::request(const std::string& json_rpc) {
         return std::nullopt;  // Some other error, don't retry
     }
 
-    // Connection lost - daemon may have been restarted (version upgrade)
+    // Connection lost - try simple reconnect (don't start daemon)
     std::cerr << "[socket_client] Connection lost (" << last_error_ << "), attempting reconnect...\n";
     disconnect();
 
-    // Try to reconnect to (possibly new) daemon
-    if (!ensure_daemon_running()) {
+    // Just try to reconnect - don't auto-start daemon
+    if (!connect()) {
         std::cerr << "[socket_client] Reconnect failed: " << last_error_ << "\n";
         return std::nullopt;
     }
@@ -655,6 +625,38 @@ void SocketClient::release_daemon_lock(int lock_fd) {
         // Release lock (closing file releases the lock)
         close(lock_fd);
     }
+}
+
+bool SocketClient::connect_only() {
+    // Safe connect: never kill or start daemons
+    // Use this for parallel agents to avoid killing shared daemon
+
+    socket_path_ = default_socket_path();
+
+    if (!connect()) {
+        last_error_ = "Cannot connect to daemon at " + socket_path_ + " - is daemon running?";
+        return false;
+    }
+
+    // Check version compatibility
+    auto version = check_version();
+    if (!version) {
+        last_error_ = "Daemon does not support version check - may need restart (but connect_only won't do it)";
+        disconnect();
+        return false;
+    }
+
+    bool compatible = chitta::version::protocol_compatible(
+        version->protocol_major, version->protocol_minor);
+
+    if (!compatible) {
+        last_error_ = "Daemon v" + version->software + " incompatible with client v" +
+                      std::string(CHITTA_VERSION) + " - restart daemon manually";
+        disconnect();
+        return false;
+    }
+
+    return true;
 }
 
 } // namespace chitta
