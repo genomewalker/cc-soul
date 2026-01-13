@@ -1666,6 +1666,27 @@ public:
         competition_config_.hard_suppression = hard_suppression;
     }
 
+    // ═══════════════════════════════════════════════════════════════════
+    // Resonance Config API (MemRL-inspired utility ranking)
+    // ═══════════════════════════════════════════════════════════════════
+
+    // Get current resonance configuration
+    const ResonanceConfig& resonance_config() const {
+        return resonance_config_;
+    }
+
+    // Set resonance configuration
+    void set_resonance_config(const ResonanceConfig& config) {
+        resonance_config_ = config;
+    }
+
+    // Configure individual resonance parameters
+    void configure_resonance(float lambda, float epsilon_alpha, bool use_utility) {
+        resonance_config_.lambda = std::clamp(lambda, 0.0f, 1.0f);
+        resonance_config_.epsilon_boost_alpha = epsilon_alpha;
+        resonance_config_.use_utility = use_utility;
+    }
+
     // Compute coherence
     Coherence coherence() {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -3029,26 +3050,30 @@ public:
         }
 
         // ε-modulated relevance: high-epiplexity memories are better seeds
-        // Formula: relevance × (1 + α × ε) where α = 0.5
+        // Formula: relevance × (1 + α × ε) where α = epsilon_boost_alpha
         // Also apply safety gate: safe_ε = sqrt(confidence × epiplexity)
         // This prevents high-ε false memories from dominating
         //
-        // MemRL-inspired utility integration:
+        // MemRL-inspired utility integration (when use_utility=true):
         // Combined score: λ × relevance + (1-λ) × utility
         // Then apply ε boost: combined × (1 + α × safe_ε)
-        constexpr float EPIPLEXITY_BOOST_ALPHA = 0.5f;
-        constexpr float UTILITY_LAMBDA = 0.7f;  // Exploration/exploitation balance
+        const float epsilon_alpha = resonance_config_.epsilon_boost_alpha;
+        const float lambda = resonance_config_.lambda;
+        const bool use_utility = resonance_config_.use_utility;
+
         for (auto& r : results) {
             float safe_epsilon = std::sqrt(r.confidence.effective() * r.epiplexity);
 
-            // Get utility score (0.5 neutral if no outcome data)
-            float utility = utility_decay_.get_utility(r.id);
-
-            // Two-phase combination: semantic relevance + learned utility
-            float combined = UTILITY_LAMBDA * r.relevance + (1.0f - UTILITY_LAMBDA) * utility;
+            float combined = r.relevance;
+            if (use_utility) {
+                // Get utility score (0.5 neutral if no outcome data)
+                float utility = utility_decay_.get_utility(r.id);
+                // Two-phase combination: semantic relevance + learned utility
+                combined = lambda * r.relevance + (1.0f - lambda) * utility;
+            }
 
             // Apply ε boost on combined score
-            r.relevance = combined * (1.0f + EPIPLEXITY_BOOST_ALPHA * safe_epsilon);
+            r.relevance = combined * (1.0f + epsilon_alpha * safe_epsilon);
         }
 
         // Phase 2: Boost results in same attractor basin as top result
@@ -3967,6 +3992,9 @@ public:
 
     // Competition config (Phase 5: Interference/Competition)
     CompetitionConfig competition_config_;
+
+    // Resonance config (MemRL-inspired utility ranking)
+    ResonanceConfig resonance_config_;
 
     // Phase 7: 100M Scale Components
     QueryRouter query_router_;

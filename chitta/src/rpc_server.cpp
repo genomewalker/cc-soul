@@ -170,6 +170,14 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
     {"list_entities", "List all linked entities in EntityIndex",
      {}},
 
+    {"set_resonance_config", "Configure retrieval ranking (MemRL): relevance vs utility balance",
+     {{"lambda", "Relevance vs utility (0-1, default 0.7)", false, "0.7"},
+      {"epsilon_alpha", "Epiplexity boost factor (default 0.5)", false, "0.5"},
+      {"use_utility", "Enable utility ranking (true/false)", false, "true"}}},
+
+    {"get_resonance_config", "Get current retrieval ranking configuration",
+     {}},
+
     // Context tools
     {"soul_context", "Get soul state (tau, psi, stats)",
      {{"query", "Optional context for relevant wisdom", false, nullptr},

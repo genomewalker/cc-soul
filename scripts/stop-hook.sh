@@ -27,7 +27,7 @@ PROJECT=$(basename "$CWD" 2>/dev/null || echo "unknown")
 
 (
     source "$SCRIPT_DIR/lib/chitta-lib.sh"
-    CHITTA="$CHITTA_PLUGIN_DIR/bin/chitta"
+    CHITTA="${HOME}/.claude/bin/chitta"
 
     LAST_MSG=$(tac "$TRANSCRIPT" | grep -m1 '"role":"assistant"' | \
         jq -r '.message.content[] | select(.type=="text") | .text' 2>/dev/null | head -c 8000)

@@ -14,10 +14,11 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
 
-CHITTA_BIN="$PLUGIN_DIR/bin/chitta"
+# Binaries installed to ~/.claude/bin/ by setup.sh
+CHITTA_BIN="${HOME}/.claude/bin/chitta"
 MIND_PATH="${HOME}/.claude/mind/chitta"
-MODEL_PATH="$PLUGIN_DIR/chitta/models/model.onnx"
-VOCAB_PATH="$PLUGIN_DIR/chitta/models/vocab.txt"
+MODEL_PATH="${HOME}/.claude/bin/model.onnx"
+VOCAB_PATH="${HOME}/.claude/bin/vocab.txt"
 
 # Session-local cache for quick redundancy check
 CACHE_DIR="${HOME}/.claude/mind/.cmd_cache"

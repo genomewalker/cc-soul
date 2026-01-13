@@ -7,6 +7,7 @@
 #include "../types.hpp"
 #include "../quantized.hpp"
 #include "../provenance.hpp"
+#include <nlohmann/json.hpp>
 #include <vector>
 #include <string>
 
@@ -83,6 +84,33 @@ struct MindState {
     size_t warm_nodes;
     size_t cold_nodes;
     bool yantra_ready;
+};
+
+// Resonance configuration (MemRL-inspired)
+// Controls retrieval ranking behavior
+struct ResonanceConfig {
+    float lambda = 0.7f;              // Relevance vs utility balance [0,1]
+                                      // 1.0 = pure relevance, 0.0 = pure utility
+    float epsilon_boost_alpha = 0.5f; // Epiplexity influence on ranking
+    bool use_utility = true;          // Enable utility in ranking
+
+    // Serialize to JSON
+    nlohmann::json to_json() const {
+        return {
+            {"lambda", lambda},
+            {"epsilon_boost_alpha", epsilon_boost_alpha},
+            {"use_utility", use_utility}
+        };
+    }
+
+    // Deserialize from JSON
+    static ResonanceConfig from_json(const nlohmann::json& j) {
+        ResonanceConfig cfg;
+        if (j.contains("lambda")) cfg.lambda = j["lambda"].get<float>();
+        if (j.contains("epsilon_boost_alpha")) cfg.epsilon_boost_alpha = j["epsilon_boost_alpha"].get<float>();
+        if (j.contains("use_utility")) cfg.use_utility = j["use_utility"].get<bool>();
+        return cfg;
+    }
 };
 
 // Mind health for proactive monitoring

@@ -15,9 +15,8 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
 
-# Paths - prefer stable global symlink, fall back to plugin bin
+# Binaries installed to ~/.claude/bin/ by setup.sh
 CHITTA_BIN="${HOME}/.claude/bin/chitta"
-[[ ! -x "$CHITTA_BIN" ]] && CHITTA_BIN="$PLUGIN_DIR/bin/chitta"
 SESSION_FILE="${HOME}/.claude/mind/.session_state"
 LEAN_MODE="${CC_SOUL_LEAN:-false}"  # Set CC_SOUL_LEAN=true for minimal context
 

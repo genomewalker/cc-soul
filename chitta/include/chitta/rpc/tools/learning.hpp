@@ -168,6 +168,34 @@ inline void register_schemas(std::vector<ToolSchema>& tools) {
     });
 
     tools.push_back({
+        "set_resonance_config",
+        "Configure retrieval ranking parameters (MemRL-inspired). Controls the balance "
+        "between semantic relevance and learned utility in memory retrieval.",
+        {
+            {"type", "object"},
+            {"properties", {
+                {"lambda", {{"type", "number"}, {"minimum", 0}, {"maximum", 1}, {"default", 0.7},
+                           {"description", "Relevance vs utility balance (1.0=pure relevance, 0.0=pure utility)"}}},
+                {"epsilon_alpha", {{"type", "number"}, {"minimum", 0}, {"maximum", 2}, {"default", 0.5},
+                                  {"description", "Epiplexity boost factor for reconstructable memories"}}},
+                {"use_utility", {{"type", "boolean"}, {"default", true},
+                                {"description", "Enable utility-based ranking from task outcomes"}}}
+            }},
+            {"required", {}}
+        }
+    });
+
+    tools.push_back({
+        "get_resonance_config",
+        "Get current retrieval ranking configuration (MemRL parameters).",
+        {
+            {"type", "object"},
+            {"properties", {}},
+            {"required", {}}
+        }
+    });
+
+    tools.push_back({
         "export_soul",
         "Export knowledge from the mind to a .soul file. Extracts nodes by tag in SSL format.",
         {
@@ -935,6 +963,42 @@ inline ToolResult list_entities(Mind* mind, const json& /*params*/) {
     return ToolResult::ok(ss.str(), json{{"count", entities.size()}, {"entities", items}});
 }
 
+// Set resonance config (MemRL-inspired retrieval tuning)
+inline ToolResult set_resonance_config(Mind* mind, const json& params) {
+    ResonanceConfig cfg = mind->resonance_config();
+
+    if (params.contains("lambda")) {
+        cfg.lambda = std::clamp(params["lambda"].get<float>(), 0.0f, 1.0f);
+    }
+    if (params.contains("epsilon_alpha")) {
+        cfg.epsilon_boost_alpha = params["epsilon_alpha"].get<float>();
+    }
+    if (params.contains("use_utility")) {
+        cfg.use_utility = params["use_utility"].get<bool>();
+    }
+
+    mind->set_resonance_config(cfg);
+
+    std::ostringstream ss;
+    ss << "Resonance config: λ=" << cfg.lambda
+       << ", ε_α=" << cfg.epsilon_boost_alpha
+       << ", utility=" << (cfg.use_utility ? "on" : "off");
+
+    return ToolResult::ok(ss.str(), cfg.to_json());
+}
+
+// Get resonance config
+inline ToolResult get_resonance_config(Mind* mind, const json& /*params*/) {
+    const auto& cfg = mind->resonance_config();
+
+    std::ostringstream ss;
+    ss << "λ=" << cfg.lambda
+       << " (relevance vs utility), ε_α=" << cfg.epsilon_boost_alpha
+       << ", utility=" << (cfg.use_utility ? "on" : "off");
+
+    return ToolResult::ok(ss.str(), cfg.to_json());
+}
+
 // Register all learning tool handlers
 inline void register_handlers(Mind* mind,
                                std::unordered_map<std::string, ToolHandler>& handlers) {
@@ -952,6 +1016,8 @@ inline void register_handlers(Mind* mind,
     handlers["link_entity"] = [mind](const json& p) { return link_entity(mind, p); };
     handlers["bootstrap_entity_index"] = [mind](const json& p) { return bootstrap_entity_index(mind, p); };
     handlers["list_entities"] = [mind](const json& p) { return list_entities(mind, p); };
+    handlers["set_resonance_config"] = [mind](const json& p) { return set_resonance_config(mind, p); };
+    handlers["get_resonance_config"] = [mind](const json& p) { return get_resonance_config(mind, p); };
 }
 
 } // namespace chitta::rpc::tools::learning

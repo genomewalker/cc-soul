@@ -11,10 +11,11 @@ CHITTA_PLUGIN_DIR="$(dirname "$CHITTA_PLUGIN_DIR")"
 CHITTA_BIN="${HOME}/.claude/bin/chitta"
 [[ ! -x "$CHITTA_BIN" ]] && CHITTA_BIN="$CHITTA_PLUGIN_DIR/bin/chitta"
 
-# Find daemon socket (single path now, no versioned sockets)
+# Find daemon socket (UID-scoped path)
 find_socket() {
-    if [[ -S "/tmp/chitta.sock" ]]; then
-        echo "/tmp/chitta.sock"
+    local socket="/tmp/chitta-$(id -u).sock"
+    if [[ -S "$socket" ]]; then
+        echo "$socket"
         return 0
     fi
     return 1

@@ -13,10 +13,12 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
-CHITTA_CLI="$PLUGIN_DIR/bin/chittad"
+
+# Binaries installed to ~/.claude/bin/ by setup.sh
+CHITTA_CLI="${HOME}/.claude/bin/chittad"
 MIND_PATH="${HOME}/.claude/mind/chitta"
-MODEL_PATH="$PLUGIN_DIR/chitta/models/model.onnx"
-VOCAB_PATH="$PLUGIN_DIR/chitta/models/vocab.txt"
+MODEL_PATH="${HOME}/.claude/bin/model.onnx"
+VOCAB_PATH="${HOME}/.claude/bin/vocab.txt"
 
 # Get project name from git or cwd
 project=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
@@ -25,7 +27,7 @@ project=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 call_mcp() {
     local method="$1"
     local params="$2"
-    local bin="$PLUGIN_DIR/bin/chitta"
+    local bin="${HOME}/.claude/bin/chitta"
     local request="{\"jsonrpc\":\"2.0\",\"method\":\"tools/call\",\"params\":{\"name\":\"$method\",\"arguments\":$params},\"id\":1}"
     echo "$request" | "$bin" --path "$MIND_PATH" --model "$MODEL_PATH" --vocab "$VOCAB_PATH" 2>/dev/null | grep -v '^\[chitta' | jq -r '.result.content[0].text' 2>/dev/null || true
 }

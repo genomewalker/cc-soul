@@ -13,10 +13,12 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
-CHITTA_CLI="$PLUGIN_DIR/bin/chittad"
+
+# Binaries installed to ~/.claude/bin/ by setup.sh
+CHITTA_CLI="${HOME}/.claude/bin/chittad"
 MIND_PATH="${HOME}/.claude/mind/chitta"
-MODEL_PATH="$PLUGIN_DIR/chitta/models/model.onnx"
-VOCAB_PATH="$PLUGIN_DIR/chitta/models/vocab.txt"
+MODEL_PATH="${HOME}/.claude/bin/model.onnx"
+VOCAB_PATH="${HOME}/.claude/bin/vocab.txt"
 
 query="$1"
 [[ -z "$query" ]] && exit 0
