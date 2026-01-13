@@ -185,8 +185,8 @@ public:
 
     // Rebuild BM25 index from storage (call after loading data)
     void rebuild_bm25_index() {
-        storage_.for_each_hot([this](const NodeId& id, const Node& node) {
-            auto text = payload_to_text(node.payload);
+        storage_.for_each_payload([this](const NodeId& id, const std::vector<uint8_t>& payload) {
+            auto text = payload_to_text(payload);
             if (text) {
                 bm25_index_.add(id, *text);
             }
@@ -219,6 +219,7 @@ public:
                     if (!storage_.use_unified() && !node.tags.empty()) {
                         tag_index_.add(node.id, node.tags);
                     }
+                    index_node_insert(node.id, node);
                     graph_.insert_raw(node.id);
                 }
             },
@@ -364,6 +365,7 @@ public:
         NodeId id = node.id;
         Timestamp current = now();
 
+        index_node_insert(id, node);
         storage_.insert(id, std::move(node));
         graph_.insert_raw(id);
 
@@ -407,6 +409,7 @@ public:
         NodeId id = node.id;
         Timestamp current = now();
 
+        index_node_insert(id, node);
         storage_.insert(id, std::move(node));
         graph_.insert_raw(id);
 
@@ -446,6 +449,7 @@ public:
         NodeId id = node.id;
         Timestamp current = now();
 
+        index_node_insert(id, node);
         storage_.insert(id, std::move(node));
         graph_.insert_raw(id);
 
@@ -491,6 +495,7 @@ public:
         NodeId id = node.id;
         Timestamp current = now();
 
+        index_node_insert(id, node);
         storage_.insert(id, std::move(node));
         graph_.insert_raw(id);
 
@@ -851,6 +856,7 @@ public:
             NodeId id = node.id;
             ids.push_back(id);
 
+            index_node_insert(id, node);
             storage_.insert(id, std::move(node));
             graph_.insert_raw(id);
 
@@ -903,6 +909,7 @@ public:
 
         NodeId id = node.id;
         auto tags_copy = node.tags;  // Copy before move
+        index_node_insert(id, node);
         storage_.insert(id, std::move(node));
         graph_.insert_raw(id);
         if (!storage_.use_unified()) {
@@ -1044,6 +1051,7 @@ public:
         NodeId id = node.id;
         Timestamp current = now();
 
+        index_node_insert(id, node);
         storage_.insert(id, std::move(node));
         graph_.insert_raw(id);
 
@@ -1079,6 +1087,7 @@ public:
         NodeId id = node.id;
         Timestamp current = now();
 
+        index_node_insert(id, node);
         storage_.insert(id, std::move(node));
         graph_.insert_raw(id);
 
@@ -1141,6 +1150,7 @@ public:
             // Persist the update via storage layer
             storage_.update_node(id, *node);
             storage_.sync();
+            rebuild_phase2_indexes();
             return true;
         }
         return false;
@@ -1168,6 +1178,7 @@ public:
             // Persist the update
             storage_.update_node(id, *node);
             storage_.sync();
+            rebuild_phase2_indexes();
             return true;
         }
         return false;
@@ -1466,7 +1477,10 @@ public:
     // Connect: create edge between nodes (uses WAL delta)
     void connect(NodeId from, NodeId to, EdgeType type, float weight = 1.0f) {
         std::lock_guard<std::mutex> lock(mutex_);
-        storage_.add_edge(from, to, type, weight);
+        Edge edge{to, type, weight};
+        if (storage_.add_edge(from, to, type, weight)) {
+            index_edge_add(from, edge);
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -2097,6 +2111,7 @@ public:
         node.tags = {"entity"};
 
         NodeId id = node.id;
+        index_node_insert(id, node);
         storage_.insert(id, std::move(node));
         graph_.insert_raw(id);
         maybe_add_bm25(id, name);
@@ -3144,11 +3159,12 @@ private:
 
         Timestamp current = now();
         std::vector<std::pair<NodeId, float>> candidates;
+        std::optional<QuantizedVector> qquery;
 
         // Get candidates based on search mode
         if (mode == SearchMode::Dense || mode == SearchMode::Hybrid) {
-            QuantizedVector qquery = QuantizedVector::from_float(query);
-            auto dense = storage_.search(qquery, k * 4);  // Get extra for fusion/filtering
+            qquery = QuantizedVector::from_float(query);
+            auto dense = storage_.search(*qquery, k * 4);  // Get extra for fusion/filtering
             candidates = dense;
         }
 
@@ -3178,12 +3194,11 @@ private:
             if (Node* node = storage_.get(id)) {
                 // Get semantic similarity (for dense) or use base score (for sparse)
                 float similarity = base_score;
-                if (mode == SearchMode::Hybrid) {
+                if (mode == SearchMode::Hybrid && qquery) {
                     // For hybrid, base_score is RRF score, not similarity
                     // Compute actual similarity if we have the embedding
-                    QuantizedVector qquery = QuantizedVector::from_float(query);
                     QuantizedVector qnode = QuantizedVector::from_float(node->nu);
-                    similarity = qquery.cosine_approx(qnode);
+                    similarity = qquery->cosine_approx(qnode);
                 }
 
                 if (similarity < threshold) continue;
@@ -3381,13 +3396,17 @@ private:
             if (edge.target == to && edge.type == EdgeType::Similar) {
                 // Strengthen existing edge (cap at 1.0)
                 edge.weight = std::min(edge.weight + strength, 1.0f);
+                update_reverse_edge_weight(from, to, EdgeType::Similar, edge.weight);
                 return;
             }
         }
 
         // No existing edge - create new one with initial strength
         // Use storage_.add_edge for WAL persistence
-        storage_.add_edge(from, to, EdgeType::Similar, strength);
+        Edge new_edge{to, EdgeType::Similar, strength};
+        if (storage_.add_edge(from, to, EdgeType::Similar, strength)) {
+            index_edge_add(from, new_edge);
+        }
     }
 
     // Hebbian batch update without locking (caller must hold mutex_)
@@ -3557,6 +3576,20 @@ public:
 
     void index_edge_add(const NodeId& from, const Edge& edge) {
         reverse_edges_[edge.target].push_back({from, edge.type, edge.weight});
+    }
+
+    void update_reverse_edge_weight(const NodeId& from, const NodeId& to,
+                                    EdgeType type, float weight) {
+        auto it = reverse_edges_.find(to);
+        if (it == reverse_edges_.end()) {
+            return;
+        }
+        for (auto& edge : it->second) {
+            if (edge.source == from && edge.type == type) {
+                edge.weight = weight;
+                return;
+            }
+        }
     }
 
     // Rebuild Phase 2 indexes from storage (call after loading data)

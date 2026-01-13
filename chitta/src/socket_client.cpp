@@ -3,11 +3,7 @@
 #include <nlohmann/json.hpp>
 #include <sys/socket.h>
 #include <sys/un.h>
-#include <sys/wait.h>
-#include <sys/stat.h>
-#include <signal.h>
 #include <unistd.h>
-#include <fcntl.h>
 #include <poll.h>
 #include <cerrno>
 #include <cstring>
@@ -15,110 +11,9 @@
 #include <thread>
 #include <chrono>
 #include <iostream>
-#include <fstream>
-#include <vector>
-#include <sstream>
 
 namespace chitta {
 
-namespace {
-
-// Find daemon PID for a specific socket path (reads PID file)
-pid_t find_daemon_pid(const std::string& pid_path) {
-    std::ifstream pid_file(pid_path);
-    if (!pid_file) return 0;
-
-    pid_t pid = 0;
-    if (!(pid_file >> pid)) return 0;
-
-    // Verify process is actually chitta
-    std::string cmdline_path = "/proc/" + std::to_string(pid) + "/cmdline";
-    std::ifstream cmdline(cmdline_path);
-    if (!cmdline) return 0;
-
-    std::string cmd;
-    std::getline(cmdline, cmd, '\0');
-    if (cmd.find("chitta") == std::string::npos) return 0;
-
-    return pid;
-}
-
-// Kill a process gracefully, then forcefully if needed
-bool kill_process(pid_t pid, int timeout_ms = 3000) {
-    // Send SIGTERM first
-    if (kill(pid, SIGTERM) != 0) {
-        return errno == ESRCH;  // Already dead
-    }
-
-    // Wait for process to exit
-    auto start = std::chrono::steady_clock::now();
-    while (true) {
-        if (kill(pid, 0) != 0 && errno == ESRCH) {
-            return true;  // Process exited
-        }
-
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now() - start).count();
-        if (elapsed >= timeout_ms) {
-            break;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    }
-
-    // Force kill
-    std::cerr << "[socket_client] Process " << pid << " didn't respond to SIGTERM, sending SIGKILL\n";
-    kill(pid, SIGKILL);
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    return kill(pid, 0) != 0;
-}
-
-// Terminate daemon for a specific mind path
-void terminate_daemon(const std::string& socket_path, const std::string& pid_path) {
-    // Find and kill daemon by PID file
-    pid_t pid = find_daemon_pid(pid_path);
-    if (pid > 0) {
-        std::cerr << "[socket_client] Terminating daemon (pid=" << pid << ")\n";
-        kill_process(pid);
-    }
-
-    // Clean up files
-    unlink(pid_path.c_str());
-    unlink(socket_path.c_str());
-
-    // Small delay to ensure cleanup is complete
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-}
-
-// Get the daemon binary path - stable symlink only
-std::string get_versioned_daemon_path() {
-    const char* home = getenv("HOME");
-    if (!home) return "";
-
-    std::string path = std::string(home) + "/.claude/bin/chittad";
-    if (access(path.c_str(), X_OK) == 0) {
-        return path;
-    }
-
-    return "";
-}
-
-// Get model/vocab paths - stable location only
-std::pair<std::string, std::string> get_model_paths() {
-    const char* home = getenv("HOME");
-    if (!home) return {"", ""};
-
-    std::string base = std::string(home) + "/.claude/models";
-    std::string model = base + "/model.onnx";
-    std::string vocab = base + "/vocab.txt";
-
-    if (access(model.c_str(), R_OK) == 0 && access(vocab.c_str(), R_OK) == 0) {
-        return {model, vocab};
-    }
-
-    return {"", ""};
-}
-
-}  // anonymous namespace
 
 SocketClient::SocketClient()
     : socket_path_(default_socket_path()) {}
@@ -162,69 +57,29 @@ void SocketClient::disconnect() {
 }
 
 bool SocketClient::ensure_daemon_running() {
-    // Socket path already set from default_socket_path() (mind-derived)
-    std::string pid_path = default_pid_path();
-
-    // First, try to connect to existing daemon
-    if (connect()) {
-        // Connected - check version compatibility
-        auto version = check_version();
-        if (version) {
-            bool compatible = chitta::version::protocol_compatible(
-                version->protocol_major, version->protocol_minor);
-
-            if (compatible) {
-                // Successfully connected - no verbose output needed
-                return true;
-            }
-
-            // Incompatible version - need to restart
-            std::cerr << "[socket_client] Daemon v" << version->software
-                      << " incompatible with client v" << CHITTA_VERSION
-                      << " - forcing restart\n";
-            disconnect();
-        } else {
-            // Version check failed - old daemon without version support
-            std::cerr << "[socket_client] Daemon doesn't support version check - forcing restart\n";
-            disconnect();
-        }
-
-        // Terminate this mind's daemon
-        terminate_daemon(socket_path_, pid_path);
+    if (!connect()) {
+        last_error_ = "Cannot connect to daemon at " + socket_path_ + " - is daemon running?";
+        return false;
     }
 
-    // Acquire lock before starting daemon (prevents race with other clients)
-    int lock_fd = acquire_daemon_lock();
-
-    // Re-check after acquiring lock (another process may have started daemon)
-    if (connect()) {
-        auto version = check_version();
-        if (version && chitta::version::protocol_compatible(
-                version->protocol_major, version->protocol_minor)) {
-            release_daemon_lock(lock_fd);
-            return true;
-        }
+    auto health = check_health();
+    if (!health) {
+        last_error_ = "Daemon did not respond to health check";
         disconnect();
-        // Still incompatible - clean up again
-        terminate_daemon(socket_path_, pid_path);
-    }
-
-    // Start new daemon with version-matched binary
-    bool started = start_daemon();
-    release_daemon_lock(lock_fd);
-
-    if (!started) {
         return false;
     }
 
-    // Wait for socket to become available
-    if (!wait_for_socket(CONNECT_TIMEOUT_MS)) {
-        last_error_ = "Daemon started but socket not available after " +
-                      std::to_string(CONNECT_TIMEOUT_MS) + "ms";
+    bool compatible = chitta::version::protocol_compatible(
+        health->protocol_major, health->protocol_minor);
+
+    if (!compatible) {
+        last_error_ = "Daemon v" + health->software + " incompatible with client v" +
+                      std::string(CHITTA_VERSION);
+        disconnect();
         return false;
     }
 
-    return connect();
+    return true;
 }
 
 std::optional<DaemonVersion> SocketClient::check_version() {
@@ -260,6 +115,42 @@ std::optional<DaemonVersion> SocketClient::check_version() {
     return std::nullopt;
 }
 
+std::optional<DaemonHealth> SocketClient::check_health() {
+    using json = nlohmann::json;
+
+    auto response = request(R"({"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"health_check"}})");
+    if (!response) {
+        return std::nullopt;
+    }
+
+    try {
+        auto j = json::parse(*response);
+
+        if (!j.contains("result") || !j["result"].contains("structured")) {
+            return std::nullopt;
+        }
+
+        auto& structured = j["result"]["structured"];
+        DaemonHealth health;
+        health.software = structured.value("software_version", "");
+        health.protocol_major = structured.value("protocol_major", 0);
+        health.protocol_minor = structured.value("protocol_minor", 0);
+        health.pid = structured.value("pid", 0);
+        health.uptime_ms = structured.value("uptime_ms", 0);
+        health.socket_path = structured.value("socket_path", "");
+        health.db_path = structured.value("db_path", "");
+        health.status = structured.value("status", "");
+
+        if (health.protocol_major > 0 || !health.software.empty()) {
+            return health;
+        }
+    } catch (...) {
+        // JSON parse failed
+    }
+
+    return std::nullopt;
+}
+
 bool SocketClient::request_shutdown() {
     if (!connected() && !connect()) {
         return false;
@@ -284,117 +175,6 @@ bool SocketClient::wait_for_socket_gone(int timeout_ms) {
     return true;
 }
 
-
-bool SocketClient::start_daemon() {
-    // Get version-matched daemon binary
-    std::string daemon_path = get_versioned_daemon_path();
-    if (daemon_path.empty()) {
-        last_error_ = "Could not find chitta daemon binary for version " + std::string(CHITTA_VERSION);
-        std::cerr << "[socket_client] " << last_error_ << "\n";
-        return false;
-    }
-
-    // Mind path determines socket/pid paths (same derivation as client uses)
-    std::string mind_path = default_mind_path();
-
-    pid_t pid = fork();
-
-    if (pid < 0) {
-        last_error_ = std::string("fork() failed: ") + strerror(errno);
-        return false;
-    }
-
-    if (pid == 0) {
-        // Child process - exec daemon
-
-        // Detach from parent process group (become daemon)
-        setsid();
-
-        // Redirect stdout/stderr to log file
-        const char* home = getenv("HOME");
-        std::string log_path;
-        if (home) {
-            log_path = std::string(home) + "/.claude/mind/.daemon.log";
-        }
-
-        int log_fd = -1;
-        if (!log_path.empty()) {
-            log_fd = open(log_path.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0600);
-        }
-        if (log_fd < 0) {
-            log_fd = open("/dev/null", O_RDWR);
-        }
-        if (log_fd >= 0) {
-            dup2(log_fd, STDOUT_FILENO);
-            dup2(log_fd, STDERR_FILENO);
-            close(log_fd);
-        }
-
-        // Close stdin
-        close(STDIN_FILENO);
-
-        // Get model paths (version-matched)
-        auto [model_path, vocab_path] = get_model_paths();
-
-        // Build argument list - daemon derives socket path from mind path
-        std::vector<const char*> args;
-        args.push_back(daemon_path.c_str());
-        args.push_back("daemon");
-        args.push_back("--socket");
-
-        std::string path_arg, model_arg, vocab_arg;
-        if (!mind_path.empty()) {
-            args.push_back("--path");
-            path_arg = mind_path;
-            args.push_back(path_arg.c_str());
-        }
-        if (!model_path.empty() && !vocab_path.empty()) {
-            args.push_back("--model");
-            model_arg = model_path;
-            args.push_back(model_arg.c_str());
-            args.push_back("--vocab");
-            vocab_arg = vocab_path;
-            args.push_back(vocab_arg.c_str());
-        }
-        args.push_back(nullptr);
-
-        execv(daemon_path.c_str(), const_cast<char* const*>(args.data()));
-
-        // If execv returns, it failed
-        std::cerr << "[socket_client] execv failed: " << strerror(errno) << "\n";
-        _exit(1);
-    }
-
-    // Parent process - don't wait for child (it's a daemon)
-    // Small delay to let daemon start
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    return true;
-}
-
-bool SocketClient::wait_for_socket(int timeout_ms) {
-    auto start = std::chrono::steady_clock::now();
-
-    while (true) {
-        // Check if socket file exists
-        if (access(socket_path_.c_str(), F_OK) == 0) {
-            // Try to connect
-            if (connect()) {
-                disconnect();  // Will reconnect in caller
-                return true;
-            }
-        }
-
-        // Check timeout
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now() - start).count();
-        if (elapsed >= timeout_ms) {
-            return false;
-        }
-
-        // Wait a bit before retrying
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    }
-}
 
 std::optional<std::string> SocketClient::request_internal(const std::string& json_rpc) {
     if (fd_ < 0) {
@@ -448,6 +228,10 @@ std::optional<std::string> SocketClient::request_internal(const std::string& jso
         }
 
         response.append(buf, static_cast<size_t>(n));
+        if (response.size() > SocketClient::MAX_RESPONSE_SIZE) {
+            last_error_ = "Response too large";
+            return std::nullopt;
+        }
 
         // Check for complete message (newline)
         size_t pos = response.find('\n');
@@ -490,56 +274,6 @@ std::optional<std::string> SocketClient::request(const std::string& json_rpc) {
     return request_internal(json_rpc);
 }
 
-int SocketClient::acquire_daemon_lock() {
-    int lock_fd = open(default_lock_path().c_str(), O_CREAT | O_RDWR, 0600);
-    if (lock_fd < 0) {
-        std::cerr << "[socket_client] Failed to open lock file: " << strerror(errno) << "\n";
-        return -1;
-    }
-
-    // Try to acquire exclusive lock with timeout
-    struct flock fl;
-    fl.l_type = F_WRLCK;
-    fl.l_whence = SEEK_SET;
-    fl.l_start = 0;
-    fl.l_len = 0;  // Lock entire file
-
-    // Try non-blocking first
-    if (fcntl(lock_fd, F_SETLK, &fl) == 0) {
-        return lock_fd;  // Got lock immediately
-    }
-
-    // Lock held by another process - wait briefly (another process is starting daemon)
-    std::cerr << "[socket_client] Waiting for daemon lock...\n";
-
-    // Use blocking lock with timeout via alarm (POSIX way)
-    // Or just sleep and retry a few times
-    for (int i = 0; i < 50; ++i) {  // 5 seconds max (50 * 100ms)
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
-        if (fcntl(lock_fd, F_SETLK, &fl) == 0) {
-            return lock_fd;  // Got lock
-        }
-
-        // Check if socket appeared (another process started daemon)
-        if (access(socket_path_.c_str(), F_OK) == 0) {
-            close(lock_fd);
-            return -1;  // Daemon was started by another process
-        }
-    }
-
-    std::cerr << "[socket_client] Lock timeout - proceeding anyway\n";
-    close(lock_fd);
-    return -1;
-}
-
-void SocketClient::release_daemon_lock(int lock_fd) {
-    if (lock_fd >= 0) {
-        // Release lock (closing file releases the lock)
-        close(lock_fd);
-    }
-}
-
 bool SocketClient::connect_only() {
     // Safe connect: never kill or start daemons
     // Use this for parallel agents to avoid killing shared daemon
@@ -554,19 +288,18 @@ bool SocketClient::connect_only() {
         return false;
     }
 
-    // Check version compatibility
-    auto version = check_version();
-    if (!version) {
-        last_error_ = "Daemon does not support version check - may need restart (but connect_only won't do it)";
+    auto health = check_health();
+    if (!health) {
+        last_error_ = "Daemon did not respond to health check";
         disconnect();
         return false;
     }
 
     bool compatible = chitta::version::protocol_compatible(
-        version->protocol_major, version->protocol_minor);
+        health->protocol_major, health->protocol_minor);
 
     if (!compatible) {
-        last_error_ = "Daemon v" + version->software + " incompatible with client v" +
+        last_error_ = "Daemon v" + health->software + " incompatible with client v" +
                       std::string(CHITTA_VERSION) + " - restart daemon manually";
         disconnect();
         return false;

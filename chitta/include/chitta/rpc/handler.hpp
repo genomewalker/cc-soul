@@ -16,6 +16,9 @@
 #include <string>
 #include <sstream>
 #include <ctime>
+#include <chrono>
+#include <unistd.h>
+#include <utility>
 
 namespace chitta::rpc {
 
@@ -45,9 +48,17 @@ inline T get_param(const json& params, const char* key, T default_val) {
     return default_val;
 }
 
+struct HandlerContext {
+    std::string socket_path;
+    std::string db_path;
+};
+
 class Handler {
 public:
-    explicit Handler(Mind* mind) : mind_(mind) {
+    explicit Handler(Mind* mind, HandlerContext context = {})
+        : mind_(mind),
+          context_(std::move(context)),
+          start_time_(std::chrono::steady_clock::now()) {
         register_all_tools();
     }
 
@@ -76,6 +87,8 @@ public:
 
 private:
     Mind* mind_;
+    HandlerContext context_;
+    std::chrono::steady_clock::time_point start_time_;
     std::vector<ToolSchema> tools_;
     std::unordered_map<std::string, ToolHandler> handlers_;
 
@@ -796,6 +809,17 @@ private:
 
     void register_maintenance_tools() {
         tools_.push_back({
+            "health_check",
+            "Return daemon health, version, and readiness metadata.",
+            {
+                {"type", "object"},
+                {"properties", json::object()},
+                {"required", json::array()}
+            }
+        });
+        handlers_["health_check"] = [this](const json& p) { return tool_health_check(p); };
+
+        tools_.push_back({
             "version_check",
             "Check daemon version and protocol compatibility.",
             {
@@ -824,6 +848,27 @@ private:
             }
         });
         handlers_["cycle"] = [this](const json& p) { return tool_cycle(p); };
+    }
+
+    ToolResult tool_health_check(const json& params) {
+        (void)params;
+        auto now = std::chrono::steady_clock::now();
+        auto uptime_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time_).count();
+        json result = {
+            {"software_version", CHITTA_VERSION},
+            {"protocol_major", CHITTA_PROTOCOL_VERSION_MAJOR},
+            {"protocol_minor", CHITTA_PROTOCOL_VERSION_MINOR},
+            {"pid", static_cast<int>(getpid())},
+            {"uptime_ms", static_cast<uint64_t>(uptime_ms)},
+            {"socket_path", context_.socket_path},
+            {"db_path", context_.db_path},
+            {"status", "ok"}
+        };
+        std::ostringstream ss;
+        ss << "Chitta v" << CHITTA_VERSION
+           << " (protocol " << CHITTA_PROTOCOL_VERSION_MAJOR
+           << "." << CHITTA_PROTOCOL_VERSION_MINOR << ")";
+        return ToolResult::ok(ss.str(), result);
     }
 
     ToolResult tool_version_check(const json& params) {

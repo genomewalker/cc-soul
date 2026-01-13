@@ -12,6 +12,44 @@
 
 namespace chitta {
 
+namespace {
+
+bool socket_is_active(const std::string& path) {
+    if (access(path.c_str(), F_OK) != 0) {
+        return false;
+    }
+
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0) {
+        return true;
+    }
+
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, path.c_str(), sizeof(addr.sun_path) - 1);
+
+    bool active = (::connect(fd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == 0);
+    int err = errno;
+    close(fd);
+
+    if (active) {
+        return true;
+    }
+
+    if (err == ECONNREFUSED || err == ENOENT) {
+        return false;
+    }
+
+    if (err == EACCES) {
+        return true;
+    }
+
+    return false;
+}
+
+}
+
 // Message framing: newline-delimited JSON (same as RPC stdio)
 bool ClientConnection::has_complete_message() const {
     return read_buffer.find('\n') != std::string::npos;
@@ -67,8 +105,17 @@ void SocketServer::stop() {
 }
 
 bool SocketServer::create_socket() {
-    // Remove stale socket file
-    unlink(socket_path_.c_str());
+    if (socket_is_active(socket_path_)) {
+        std::cerr << "[socket_server] Socket already active at " << socket_path_ << "\n";
+        return false;
+    }
+
+    if (access(socket_path_.c_str(), F_OK) == 0) {
+        if (unlink(socket_path_.c_str()) != 0) {
+            std::cerr << "[socket_server] Failed to remove stale socket: " << strerror(errno) << "\n";
+            return false;
+        }
+    }
 
     // Create socket
     server_fd_ = socket(AF_UNIX, SOCK_STREAM, 0);

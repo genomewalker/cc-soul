@@ -738,6 +738,17 @@ public:
 
     size_t size() const { return metas_.size(); }
 
+    void for_each(std::function<void(const NodeId&, const NodeMeta&, const std::vector<uint8_t>&)> fn) const {
+        for (const auto& [id, meta] : metas_) {
+            auto pit = payloads_.find(id);
+            if (pit != payloads_.end()) {
+                fn(id, meta, pit->second);
+            } else {
+                fn(id, meta, {});
+            }
+        }
+    }
+
     // Promote to warm tier (need to re-embed)
     std::vector<NodeId> candidates_for_promotion(size_t max_count) const {
         std::vector<std::pair<NodeId, Timestamp>> by_access;
@@ -1512,6 +1523,27 @@ public:
             return;
         }
         hot_.for_each(fn);
+    }
+
+    void for_each_payload(std::function<void(const NodeId&, const std::vector<uint8_t>&)> fn) const {
+        if (use_segments()) {
+            segments_->for_each([&](const NodeId& id, const Node& node) {
+                fn(id, node.payload);
+            });
+            return;
+        }
+        if (use_unified()) {
+            unified_.for_each([&](const NodeId& id, const Node& node) {
+                fn(id, node.payload);
+            });
+            return;
+        }
+        hot_.for_each([&](const NodeId& id, const Node& node) {
+            fn(id, node.payload);
+        });
+        cold_.for_each([&](const NodeId& id, const NodeMeta&, const std::vector<uint8_t>& payload) {
+            fn(id, payload);
+        });
     }
 
     // Storage mode queries

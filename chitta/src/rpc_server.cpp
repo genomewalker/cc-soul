@@ -232,6 +232,9 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
     {"version_check", "Check version compatibility",
      {}},
 
+    {"health_check", "Check daemon health and readiness",
+     {}},
+
     // Analysis tools
     {"epistemic_state", "What I know vs uncertain about",
      {{"domain", "Filter by domain", false, nullptr}}},

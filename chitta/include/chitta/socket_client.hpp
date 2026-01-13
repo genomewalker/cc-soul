@@ -1,8 +1,7 @@
 #pragma once
 // Socket Client: Unix domain socket client for daemon IPC
 //
-// Connects to the soul daemon via Unix socket, with auto-start
-// capability if daemon is not running.
+// Connects to the soul daemon via Unix socket without auto-start.
 //
 // Mind-scoped: Socket path derived from mind database path.
 // Version compatibility checked via handshake.
@@ -21,6 +20,17 @@ struct DaemonVersion {
     std::string software;      // e.g., "2.36.0"
     int protocol_major = 0;
     int protocol_minor = 0;
+};
+
+struct DaemonHealth {
+    std::string software;
+    int protocol_major = 0;
+    int protocol_minor = 0;
+    int pid = 0;
+    uint64_t uptime_ms = 0;
+    std::string socket_path;
+    std::string db_path;
+    std::string status;
 };
 
 class SocketClient {
@@ -48,6 +58,7 @@ public:
     }
     static constexpr int CONNECT_TIMEOUT_MS = 5000;
     static constexpr int RESPONSE_TIMEOUT_MS = 30000;
+    static constexpr size_t MAX_RESPONSE_SIZE = 16 * 1024 * 1024;
 
     // Default constructor uses UID-scoped socket path
     SocketClient();
@@ -65,9 +76,8 @@ public:
     void disconnect();
     bool connected() const { return fd_ >= 0; }
 
-    // Auto-start daemon if not running, verify version compatibility
-    // Flow: find daemon → version check → compatible? use : restart
-    // WARNING: This may kill existing daemons on version mismatch!
+    // Connect to daemon and verify version compatibility.
+    // Never restarts or kills running daemons.
     bool ensure_daemon_running();
 
     // Safe connect: only connect to existing daemon, never kill/restart
@@ -77,6 +87,9 @@ public:
 
     // Check daemon version (must be connected)
     std::optional<DaemonVersion> check_version();
+
+    // Check daemon health (must be connected)
+    std::optional<DaemonHealth> check_health();
 
     // Request graceful daemon shutdown (for upgrades)
     bool request_shutdown();
@@ -97,11 +110,6 @@ private:
     std::string socket_path_;
     int fd_ = -1;
     std::string last_error_;
-
-    bool start_daemon();
-    bool wait_for_socket(int timeout_ms);
-    int acquire_daemon_lock();
-    void release_daemon_lock(int lock_fd);
 
     // Internal request without auto-reconnect (used by request())
     std::optional<std::string> request_internal(const std::string& json_rpc);

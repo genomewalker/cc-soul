@@ -28,6 +28,8 @@
 #include <atomic>
 #include <fstream>
 #include <sstream>
+#include <unistd.h>
+#include <fcntl.h>
 
 using namespace chitta;
 
@@ -504,7 +506,62 @@ void daemon_signal_handler(int sig) {
     daemon_running = false;
 }
 
-int cmd_daemon(Mind& mind, int interval_seconds, const std::string& pid_file) {
+struct DaemonLock {
+    int fd = -1;
+    std::string path;
+};
+
+bool acquire_daemon_lock(const std::string& mind_path, DaemonLock& lock, std::string& error) {
+    lock.path = lock_path_for_mind(mind_path);
+    lock.fd = open(lock.path.c_str(), O_CREAT | O_RDWR, 0600);
+    if (lock.fd < 0) {
+        error = std::string("Failed to open daemon lock: ") + strerror(errno);
+        return false;
+    }
+
+    struct flock fl;
+    fl.l_type = F_WRLCK;
+    fl.l_whence = SEEK_SET;
+    fl.l_start = 0;
+    fl.l_len = 0;
+
+    if (fcntl(lock.fd, F_SETLK, &fl) != 0) {
+        if (errno == EACCES || errno == EAGAIN) {
+            error = "Daemon already running (lock held)";
+        } else {
+            error = std::string("Failed to acquire daemon lock: ") + strerror(errno);
+        }
+        close(lock.fd);
+        lock.fd = -1;
+        return false;
+    }
+
+    std::string pid = std::to_string(getpid()) + "\n";
+    if (ftruncate(lock.fd, 0) == 0) {
+        (void)write(lock.fd, pid.data(), pid.size());
+    }
+
+    return true;
+}
+
+void release_daemon_lock(DaemonLock& lock) {
+    if (lock.fd >= 0) {
+        close(lock.fd);
+        lock.fd = -1;
+    }
+    if (!lock.path.empty()) {
+        unlink(lock.path.c_str());
+    }
+}
+
+int cmd_daemon(Mind& mind, int interval_seconds, const std::string& pid_file, const std::string& mind_path) {
+    DaemonLock lock;
+    std::string lock_error;
+    if (!acquire_daemon_lock(mind_path, lock, lock_error)) {
+        std::cerr << "[subconscious] " << lock_error << "\n";
+        return 1;
+    }
+
     // Write PID file
     if (!pid_file.empty()) {
         std::ofstream pf(pid_file);
@@ -535,33 +592,41 @@ int cmd_daemon(Mind& mind, int interval_seconds, const std::string& pid_file) {
         cycle_count++;
         auto start = std::chrono::steady_clock::now();
 
-        // Subconscious processing cycle
-        // 1. Apply decay and basic maintenance
-        auto report = mind.tick();
+        try {
+            // Subconscious processing cycle
+            // 1. Apply decay and basic maintenance
+            auto report = mind.tick();
 
-        // 2. Synthesize wisdom from episode clusters
-        size_t synthesized = mind.synthesize_wisdom();
-        total_synthesized += synthesized;
+            // 2. Synthesize wisdom from episode clusters
+            size_t synthesized = mind.synthesize_wisdom();
+            total_synthesized += synthesized;
 
-        // 3. Apply pending feedback (Hebbian learning from usage)
-        size_t feedback = mind.apply_feedback();
+            // 3. Apply pending feedback (Hebbian learning from usage)
+            size_t feedback = mind.apply_feedback();
 
-        // 4. Run attractor dynamics - settle nodes toward conceptual gravity wells
-        auto attractor_report = mind.run_attractor_dynamics(5, 0.01f);
-        total_settled += attractor_report.nodes_settled;
+            // 4. Run attractor dynamics - settle nodes toward conceptual gravity wells
+            auto attractor_report = mind.run_attractor_dynamics(5, 0.01f);
+            total_settled += attractor_report.nodes_settled;
 
-        // 5. Save state
-        mind.snapshot();
+            // 5. Save state
+            mind.snapshot();
 
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now() - start).count();
+            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start).count();
 
-        // Log activity (sparse - only when something happened)
-        if (synthesized > 0 || feedback > 0 || attractor_report.nodes_settled > 0) {
-            std::cerr << "[subconscious] Cycle " << cycle_count << ": "
-                      << "synth=" << synthesized << " feedback=" << feedback
-                      << " settled=" << attractor_report.nodes_settled
-                      << " (" << elapsed << "ms)\n";
+            // Log activity (sparse - only when something happened)
+            if (synthesized > 0 || feedback > 0 || attractor_report.nodes_settled > 0) {
+                std::cerr << "[subconscious] Cycle " << cycle_count << ": "
+                          << "synth=" << synthesized << " feedback=" << feedback
+                          << " settled=" << attractor_report.nodes_settled
+                          << " (" << elapsed << "ms)\n";
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "[subconscious] Cycle " << cycle_count
+                      << " failed: " << e.what() << "\n";
+        } catch (...) {
+            std::cerr << "[subconscious] Cycle " << cycle_count
+                      << " failed: unknown error\n";
         }
     }
 
@@ -569,6 +634,8 @@ int cmd_daemon(Mind& mind, int interval_seconds, const std::string& pid_file) {
     if (!pid_file.empty()) {
         std::remove(pid_file.c_str());
     }
+
+    release_daemon_lock(lock);
 
     std::cerr << "[subconscious] Daemon stopped (cycles=" << cycle_count
               << " synthesized=" << total_synthesized
@@ -580,7 +647,15 @@ int cmd_daemon(Mind& mind, int interval_seconds, const std::string& pid_file) {
 // Socket server mode: daemon + RPC handler over Unix socket
 int cmd_daemon_with_socket(Mind& mind, int interval_seconds,
                            const std::string& pid_file,
-                           const std::string& socket_path) {
+                           const std::string& socket_path,
+                           const std::string& mind_path) {
+    DaemonLock lock;
+    std::string lock_error;
+    if (!acquire_daemon_lock(mind_path, lock, lock_error)) {
+        std::cerr << "[daemon] " << lock_error << "\n";
+        return 1;
+    }
+
     // Write PID file
     if (!pid_file.empty()) {
         std::ofstream pf(pid_file);
@@ -594,11 +669,12 @@ int cmd_daemon_with_socket(Mind& mind, int interval_seconds,
     SocketServer server(socket_path);
     if (!server.start()) {
         std::cerr << "[daemon] Failed to start socket server on " << socket_path << "\n";
+        release_daemon_lock(lock);
         return 1;
     }
 
     // Create RPC request handler
-    rpc::Handler handler(&mind);
+    rpc::Handler handler(&mind, rpc::HandlerContext{socket_path, mind_path});
 
     // Setup signal handlers
     std::signal(SIGTERM, daemon_signal_handler);
@@ -650,40 +726,48 @@ int cmd_daemon_with_socket(Mind& mind, int interval_seconds,
 
             auto start = std::chrono::steady_clock::now();
 
-            // Subconscious processing
-            auto report = mind.tick();
-            size_t synthesized = mind.synthesize_wisdom();
-            size_t feedback = mind.apply_feedback();
-            auto attractor_report = mind.run_attractor_dynamics(5, 0.01f);
-            mind.snapshot();
+            try {
+                // Subconscious processing
+                auto report = mind.tick();
+                size_t synthesized = mind.synthesize_wisdom();
+                size_t feedback = mind.apply_feedback();
+                auto attractor_report = mind.run_attractor_dynamics(5, 0.01f);
+                mind.snapshot();
 
-            // Coherence monitoring (webhook-ready)
-            auto coherence = mind.coherence();
-            static float last_tau = 1.0f;
-            float tau = coherence.tau_k();
+                // Coherence monitoring (webhook-ready)
+                auto coherence = mind.coherence();
+                static float last_tau = 1.0f;
+                float tau = coherence.tau_k();
 
-            // Alert on significant coherence drop
-            if (tau < 0.5f && last_tau >= 0.5f) {
-                std::cerr << "[daemon] WARNING: Coherence dropped below 50% (tau="
-                          << static_cast<int>(tau * 100) << "%)\n";
-                // Future: webhook call here
-            } else if (tau < 0.3f) {
-                std::cerr << "[daemon] CRITICAL: Coherence very low (tau="
-                          << static_cast<int>(tau * 100) << "%)\n";
-            }
-            last_tau = tau;
+                // Alert on significant coherence drop
+                if (tau < 0.5f && last_tau >= 0.5f) {
+                    std::cerr << "[daemon] WARNING: Coherence dropped below 50% (tau="
+                              << static_cast<int>(tau * 100) << "%)\n";
+                    // Future: webhook call here
+                } else if (tau < 0.3f) {
+                    std::cerr << "[daemon] CRITICAL: Coherence very low (tau="
+                              << static_cast<int>(tau * 100) << "%)\n";
+                }
+                last_tau = tau;
 
-            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - start).count();
+                auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - start).count();
 
-            // Log activity (sparse)
-            if (synthesized > 0 || feedback > 0 || attractor_report.nodes_settled > 0) {
-                std::cerr << "[daemon] Cycle " << cycle_count << ": "
-                          << "synth=" << synthesized << " feedback=" << feedback
-                          << " settled=" << attractor_report.nodes_settled
-                          << " tau=" << static_cast<int>(tau * 100) << "%"
-                          << " clients=" << server.connection_count()
-                          << " (" << elapsed << "ms)\n";
+                // Log activity (sparse)
+                if (synthesized > 0 || feedback > 0 || attractor_report.nodes_settled > 0) {
+                    std::cerr << "[daemon] Cycle " << cycle_count << ": "
+                              << "synth=" << synthesized << " feedback=" << feedback
+                              << " settled=" << attractor_report.nodes_settled
+                              << " tau=" << static_cast<int>(tau * 100) << "%"
+                              << " clients=" << server.connection_count()
+                              << " (" << elapsed << "ms)\n";
+                }
+            } catch (const std::exception& e) {
+                std::cerr << "[daemon] Cycle " << cycle_count
+                          << " failed: " << e.what() << "\n";
+            } catch (...) {
+                std::cerr << "[daemon] Cycle " << cycle_count
+                          << " failed: unknown error\n";
             }
         }
     }
@@ -694,6 +778,8 @@ int cmd_daemon_with_socket(Mind& mind, int interval_seconds,
     if (!pid_file.empty()) {
         std::remove(pid_file.c_str());
     }
+
+    release_daemon_lock(lock);
 
     std::cerr << "[daemon] Stopped (cycles=" << cycle_count << ")\n";
     return 0;
@@ -973,6 +1059,17 @@ int main(int argc, char* argv[]) {
         return cmd_convert(mind_path, format);
     }
 
+    if (command != "daemon" && command != "shutdown" && command != "status") {
+        DaemonLock lock;
+        std::string lock_error;
+        if (!acquire_daemon_lock(mind_path, lock, lock_error)) {
+            std::cerr << "[cli] " << lock_error
+                      << " - stop daemon before accessing the database\n";
+            return 1;
+        }
+        release_daemon_lock(lock);
+    }
+
     // Create and open mind
     MindConfig config;
     config.path = mind_path;
@@ -1005,9 +1102,9 @@ int main(int argc, char* argv[]) {
         result = cmd_stats(mind, json_output);
     } else if (command == "daemon") {
         if (socket_mode) {
-            result = cmd_daemon_with_socket(mind, daemon_interval, pid_file, socket_path);
+            result = cmd_daemon_with_socket(mind, daemon_interval, pid_file, socket_path, mind_path);
         } else {
-            result = cmd_daemon(mind, daemon_interval, pid_file);
+            result = cmd_daemon(mind, daemon_interval, pid_file, mind_path);
         }
     } else if (command == "shutdown") {
         // Shutdown doesn't need mind - just connects to daemon socket
