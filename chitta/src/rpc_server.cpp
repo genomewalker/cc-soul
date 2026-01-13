@@ -124,6 +124,12 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
       {"helpful", "true=helpful, false=misleading", true, nullptr},
       {"context", "Why this feedback", false, nullptr}}},
 
+    {"record_outcome", "Record task outcome for utility learning (MemRL)",
+     {{"memory_ids", "JSON array of memory UUIDs", true, nullptr},
+      {"success", "Task success (0-1)", true, nullptr},
+      {"context", "Task description", false, nullptr},
+      {"learning_rate", "Utility update rate (0.01-0.5)", false, "0.1"}}},
+
     {"update", "Update node content (for epsilon-yajna)",
      {{"id", "Node UUID to update", true, nullptr},
       {"content", "New content", true, nullptr}}},

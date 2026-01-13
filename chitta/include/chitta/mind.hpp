@@ -2115,6 +2115,19 @@ public:
         }
     }
 
+    // Record task outcome for utility learning (MemRL-inspired)
+    // outcome: 0.0 = task failed, 1.0 = task succeeded
+    void record_outcome(NodeId id, float outcome, float learning_rate = 0.1f) {
+        if (config_.enable_utility_decay) {
+            utility_decay_.record_outcome(id, outcome, learning_rate);
+        }
+    }
+
+    // Get utility score for a node (0.5 if no outcome data)
+    float get_utility(NodeId id) const {
+        return utility_decay_.get_utility(id);
+    }
+
     // Apply pending feedback to node confidences (uses WAL delta)
     size_t apply_feedback() {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -3019,10 +3032,23 @@ public:
         // Formula: relevance × (1 + α × ε) where α = 0.5
         // Also apply safety gate: safe_ε = sqrt(confidence × epiplexity)
         // This prevents high-ε false memories from dominating
+        //
+        // MemRL-inspired utility integration:
+        // Combined score: λ × relevance + (1-λ) × utility
+        // Then apply ε boost: combined × (1 + α × safe_ε)
         constexpr float EPIPLEXITY_BOOST_ALPHA = 0.5f;
+        constexpr float UTILITY_LAMBDA = 0.7f;  // Exploration/exploitation balance
         for (auto& r : results) {
             float safe_epsilon = std::sqrt(r.confidence.effective() * r.epiplexity);
-            r.relevance *= (1.0f + EPIPLEXITY_BOOST_ALPHA * safe_epsilon);
+
+            // Get utility score (0.5 neutral if no outcome data)
+            float utility = utility_decay_.get_utility(r.id);
+
+            // Two-phase combination: semantic relevance + learned utility
+            float combined = UTILITY_LAMBDA * r.relevance + (1.0f - UTILITY_LAMBDA) * utility;
+
+            // Apply ε boost on combined score
+            r.relevance = combined * (1.0f + EPIPLEXITY_BOOST_ALPHA * safe_epsilon);
         }
 
         // Phase 2: Boost results in same attractor basin as top result

@@ -92,6 +92,25 @@ inline void register_schemas(std::vector<ToolSchema>& tools) {
     });
 
     tools.push_back({
+        "record_outcome",
+        "Record task outcome for utility learning (MemRL-inspired). "
+        "Updates learned effectiveness of memories based on task success.",
+        {
+            {"type", "object"},
+            {"properties", {
+                {"memory_ids", {{"type", "array"}, {"items", {{"type", "string"}}},
+                               {"description", "UUIDs of memories that were injected for this task"}}},
+                {"success", {{"type", "number"}, {"minimum", 0}, {"maximum", 1},
+                            {"description", "Task success score (0=failed, 1=succeeded)"}}},
+                {"context", {{"type", "string"}, {"description", "Task description (optional)"}}},
+                {"learning_rate", {{"type", "number"}, {"minimum", 0.01}, {"maximum", 0.5}, {"default", 0.1},
+                                  {"description", "How quickly utility updates (default 0.1)"}}}
+            }},
+            {"required", {"memory_ids", "success"}}
+        }
+    });
+
+    tools.push_back({
         "update",
         "Update a node's content (high-ε migration). Replaces payload while preserving embedding.",
         {
@@ -369,6 +388,46 @@ inline ToolResult feedback(Mind* mind, const json& params) {
     };
 
     return ToolResult::ok(helpful ? "Memory strengthened" : "Memory weakened", result);
+}
+
+// Record task outcome for utility learning (MemRL-inspired)
+// Updates learned effectiveness of memories based on task success
+inline ToolResult record_outcome(Mind* mind, const json& params) {
+    auto memory_ids = params.at("memory_ids").get<std::vector<std::string>>();
+    float success = params.at("success").get<float>();
+    std::string context = params.value("context", "");
+    float learning_rate = params.value("learning_rate", 0.1f);
+
+    // Validate
+    if (success < 0.0f || success > 1.0f) {
+        return ToolResult::error("Success must be between 0 and 1");
+    }
+    if (memory_ids.empty()) {
+        return ToolResult::error("No memory IDs provided");
+    }
+
+    size_t updated = 0;
+    json updated_ids = json::array();
+
+    for (const auto& id_str : memory_ids) {
+        NodeId id = NodeId::from_string(id_str);
+        if (mind->get(id)) {
+            mind->record_outcome(id, success, learning_rate);
+            updated_ids.push_back(id_str);
+            updated++;
+        }
+    }
+
+    json result = {
+        {"updated", updated},
+        {"memory_ids", updated_ids},
+        {"success", success},
+        {"learning_rate", learning_rate}
+    };
+
+    std::string msg = "Recorded outcome (" + std::to_string(static_cast<int>(success * 100)) +
+                      "% success) for " + std::to_string(updated) + " memories";
+    return ToolResult::ok(msg, result);
 }
 
 // Update: replace node content and re-embed
@@ -882,6 +941,7 @@ inline void register_handlers(Mind* mind,
     handlers["grow"] = [mind](const json& p) { return grow(mind, p); };
     handlers["observe"] = [mind](const json& p) { return observe(mind, p); };
     handlers["feedback"] = [mind](const json& p) { return feedback(mind, p); };
+    handlers["record_outcome"] = [mind](const json& p) { return record_outcome(mind, p); };
     handlers["update"] = [mind](const json& p) { return update(mind, p); };
     handlers["remove"] = [mind](const json& p) { return remove(mind, p); };
     handlers["connect"] = [mind](const json& p) { return connect(mind, p); };

@@ -24,6 +24,10 @@ struct UsageStats {
     Timestamp last_recall = 0;      // When last recalled
     float cumulative_relevance = 0; // Sum of relevance scores when recalled
 
+    // MemRL-inspired utility tracking (Q-value analog)
+    float utility = 0.5f;           // Learned effectiveness [0,1], starts neutral
+    uint32_t outcome_count = 0;     // Number of task outcomes recorded
+
     // Net feedback score (-1 to +1)
     float feedback_score() const {
         uint32_t total = positive_feedback + negative_feedback;
@@ -35,6 +39,21 @@ struct UsageStats {
     float avg_relevance() const {
         if (recall_count == 0) return 0.0f;
         return cumulative_relevance / recall_count;
+    }
+
+    // Update utility with task outcome (Monte Carlo style from MemRL)
+    // outcome: 0.0 = task failed, 1.0 = task succeeded
+    void update_utility(float outcome, float learning_rate = 0.1f) {
+        outcome_count++;
+        // Exponential moving average: Q ← Q + α(outcome - Q)
+        utility += learning_rate * (outcome - utility);
+        utility = std::clamp(utility, 0.0f, 1.0f);
+    }
+
+    // Get utility score (neutral 0.5 if no outcomes recorded)
+    float utility_score() const {
+        if (outcome_count == 0) return 0.5f;
+        return utility;
     }
 };
 
@@ -83,6 +102,17 @@ public:
         } else {
             stats.negative_feedback++;
         }
+    }
+
+    // Record task outcome (MemRL-inspired utility update)
+    void record_outcome(const NodeId& id, float success, float learning_rate = 0.1f) {
+        usage_[id].update_utility(success, learning_rate);
+    }
+
+    // Get utility score for a node (returns 0.5 if unknown)
+    float get_utility(const NodeId& id) const {
+        auto it = usage_.find(id);
+        return (it != usage_.end()) ? it->second.utility_score() : 0.5f;
     }
 
     // Get usage stats for a node
@@ -166,10 +196,11 @@ public:
     size_t tracked_nodes() const { return usage_.size(); }
 
     // Persistence (atomic: write temp → fsync → rename)
+    // Version 2: Added utility and outcome_count fields
     bool save(const std::string& path) const {
         return safe_save(path, [this](FILE* f) {
             uint32_t magic = 0x55544443;  // "UTDC"
-            uint32_t version = 1;
+            uint32_t version = 2;         // v2: utility tracking
             uint64_t count = usage_.size();
 
             if (fwrite(&magic, sizeof(magic), 1, f) != 1) return false;
@@ -185,6 +216,9 @@ public:
                 if (fwrite(&stats.first_recall, sizeof(stats.first_recall), 1, f) != 1) return false;
                 if (fwrite(&stats.last_recall, sizeof(stats.last_recall), 1, f) != 1) return false;
                 if (fwrite(&stats.cumulative_relevance, sizeof(stats.cumulative_relevance), 1, f) != 1) return false;
+                // v2 fields
+                if (fwrite(&stats.utility, sizeof(stats.utility), 1, f) != 1) return false;
+                if (fwrite(&stats.outcome_count, sizeof(stats.outcome_count), 1, f) != 1) return false;
             }
             return true;
         });
@@ -198,7 +232,7 @@ public:
         uint64_t count;
 
         if (fread(&magic, sizeof(magic), 1, f) != 1 || magic != 0x55544443 ||
-            fread(&version, sizeof(version), 1, f) != 1 || version != 1 ||
+            fread(&version, sizeof(version), 1, f) != 1 || (version != 1 && version != 2) ||
             fread(&count, sizeof(count), 1, f) != 1 || count > 100000000) {
             fclose(f);
             return false;
@@ -219,6 +253,15 @@ public:
                 fread(&stats.cumulative_relevance, sizeof(stats.cumulative_relevance), 1, f) != 1) {
                 fclose(f);
                 return false;
+            }
+
+            // v2 fields (default to neutral if v1)
+            if (version >= 2) {
+                if (fread(&stats.utility, sizeof(stats.utility), 1, f) != 1 ||
+                    fread(&stats.outcome_count, sizeof(stats.outcome_count), 1, f) != 1) {
+                    fclose(f);
+                    return false;
+                }
             }
 
             usage_[id] = stats;
