@@ -97,3 +97,4 @@ chitta/Testing/
 # IDE/Editor caches
 .cache/
 .clangd/
+chitta/.cache/clangd/
