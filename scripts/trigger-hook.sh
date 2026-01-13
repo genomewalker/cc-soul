@@ -19,8 +19,58 @@ PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
 # Binaries installed to ~/.claude/bin/ by setup.sh
 CHITTA_BIN="${HOME}/.claude/bin/chitta"
 MIND_PATH="${HOME}/.claude/mind/chitta"
-MODEL_PATH="${HOME}/.claude/bin/model.onnx"
-VOCAB_PATH="${HOME}/.claude/bin/vocab.txt"
+TIMEOUT_CMD=()
+TIMEOUT_WARNED=false
+MAX_WAIT="${CC_SOUL_MAX_WAIT:-5}"
+
+if [[ "$MAX_WAIT" != "0" ]] && command -v timeout >/dev/null 2>&1; then
+    TIMEOUT_CMD=(timeout "$MAX_WAIT")
+fi
+
+run_with_timeout() {
+    if [[ "$MAX_WAIT" != "0" && ${#TIMEOUT_CMD[@]} -eq 0 && "$TIMEOUT_WARNED" != "true" ]]; then
+        echo "[cc-soul] timeout not available; running without limit" >&2
+        TIMEOUT_WARNED=true
+    fi
+
+    if [[ ${#TIMEOUT_CMD[@]} -gt 0 ]]; then
+        "${TIMEOUT_CMD[@]}" "$@"
+    else
+        "$@"
+    fi
+}
+
+CHITTA_ARGS=()
+
+_djb2_hash() {
+    local str="$1"
+    local hash=5381
+    local i c
+    for ((i=0; i<${#str}; i++)); do
+        c=$(printf '%d' "'${str:$i:1}")
+        hash=$(( ((hash << 5) + hash) + c ))
+        hash=$((hash & 0xFFFFFFFF))
+    done
+    echo "$hash"
+}
+
+init_chitta_args() {
+    local help_output
+    help_output=$(run_with_timeout "$CHITTA_BIN" --help 2>/dev/null || true)
+
+    if [[ -z "$help_output" ]]; then
+        return
+    fi
+
+    if echo "$help_output" | grep -q -- "--socket-path"; then
+        local mind_hash
+        mind_hash=$(_djb2_hash "$MIND_PATH")
+        local socket_path="/tmp/chitta-${mind_hash}.sock"
+        if [[ -S "$socket_path" ]]; then
+            CHITTA_ARGS+=("--socket-path" "$socket_path")
+        fi
+    fi
+}
 
 # Check dependencies
 if [[ ! -x "$CHITTA_BIN" ]]; then
@@ -30,6 +80,8 @@ fi
 if ! command -v jq &> /dev/null; then
     exit 0
 fi
+
+init_chitta_args
 
 # Read input from stdin
 INPUT=$(cat)
@@ -46,7 +98,7 @@ call_mcp() {
     local method="$1"
     local params="$2"
     local request="{\"jsonrpc\":\"2.0\",\"method\":\"tools/call\",\"params\":{\"name\":\"$method\",\"arguments\":$params},\"id\":1}"
-    echo "$request" | "$CHITTA_BIN" --path "$MIND_PATH" --model "$MODEL_PATH" --vocab "$VOCAB_PATH" 2>/dev/null | grep -v '^\[chitta' || true
+    echo "$request" | run_with_timeout "$CHITTA_BIN" "${CHITTA_ARGS[@]}" 2>/dev/null | grep -v '^\[chitta' || true
 }
 
 # Helper: escape for JSON
@@ -148,7 +200,10 @@ if [[ ! -x "$CLI_BIN" ]]; then
 fi
 
 # Run semantic recall (use default paths - explicit paths break embedding loading)
-RECALL_OUTPUT=$(timeout 5 "$CLI_BIN" recall "$PROMPT" 2>/dev/null || true)
+if ! RECALL_OUTPUT=$(run_with_timeout "$CLI_BIN" recall "$PROMPT" 2>/dev/null); then
+    echo "[cc-soul] Recall failed: daemon not responding" >&2
+    exit 0
+fi
 
 # Parse results above threshold
 NEURAL_MATCHES=""

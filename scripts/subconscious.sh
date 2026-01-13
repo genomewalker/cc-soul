@@ -16,6 +16,26 @@ VOCAB_PATH="${HOME}/.claude/bin/vocab.txt"
 PID_FILE="${HOME}/.claude/mind/.subconscious.pid"
 LOG_FILE="${HOME}/.claude/mind/.subconscious.log"
 INTERVAL="${SUBCONSCIOUS_INTERVAL:-60}"
+TIMEOUT_CMD=()
+TIMEOUT_WARNED=false
+MAX_WAIT="${CC_SOUL_MAX_WAIT:-5}"
+
+if [[ "$MAX_WAIT" != "0" ]] && command -v timeout >/dev/null 2>&1; then
+    TIMEOUT_CMD=(timeout "$MAX_WAIT")
+fi
+
+run_with_timeout() {
+    if [[ "$MAX_WAIT" != "0" && ${#TIMEOUT_CMD[@]} -eq 0 && "$TIMEOUT_WARNED" != "true" ]]; then
+        echo "[cc-soul] timeout not available; running without limit" >&2
+        TIMEOUT_WARNED=true
+    fi
+
+    if [[ ${#TIMEOUT_CMD[@]} -gt 0 ]]; then
+        "${TIMEOUT_CMD[@]}" "$@"
+    else
+        "$@"
+    fi
+}
 
 # djb2 hash - must match C++ implementation in socket_server.hpp
 djb2_hash() {
@@ -75,12 +95,8 @@ cmd_start() {
     exec 200>"$LOCK_FILE"
     if ! flock -n 200; then
         echo "[subconscious] Another process is starting daemon, waiting..."
-        flock -w 5 200 || {
-            echo "[subconscious] Lock timeout, checking if daemon started" >&2
-            if is_running; then
-                echo "[subconscious] Daemon was started by another process"
-                return 0
-            fi
+        flock 200 || {
+            echo "[subconscious] Failed to acquire lock" >&2
             return 1
         }
     fi
@@ -98,29 +114,81 @@ cmd_start() {
         return 0
     fi
 
-    # Start daemon in background with socket server for MCP clients
-    nohup "$CHITTA_CLI" daemon \
-        --socket \
-        --path "$MIND_PATH" \
-        --model "$MODEL_PATH" \
-        --vocab "$VOCAB_PATH" \
-        --interval "$INTERVAL" \
-        --pid-file "$PID_FILE" \
-        >> "$LOG_FILE" 2>&1 &
+    # Detect supported daemon flags (avoid incompatible binaries)
+    local daemon_help
+    daemon_help=$(run_with_timeout "$CHITTA_CLI" daemon --help 2>&1 || true)
+    if [[ -z "$daemon_help" ]]; then
+        echo "[subconscious] Unable to read daemon help; proceeding cautiously" >&2
+    fi
 
-    # Wait for socket AND verify daemon responds (up to 10 seconds)
+    local support_socket=false
+    local support_interval=false
+    local support_pid=false
+
+    if echo "$daemon_help" | grep -q -- "--socket"; then
+        support_socket=true
+    fi
+    if echo "$daemon_help" | grep -q -- "--interval"; then
+        support_interval=true
+    fi
+    if echo "$daemon_help" | grep -q -- "--pid-file"; then
+        support_pid=true
+    fi
+
+    if [[ -n "$daemon_help" && "$support_socket" != "true" ]]; then
+        echo "[subconscious] Daemon does not support --socket; aborting startup" >&2
+        exec 200>&-
+        return 1
+    fi
+
+    local daemon_args=(daemon "--path" "$MIND_PATH" "--model" "$MODEL_PATH" "--vocab" "$VOCAB_PATH")
+    if [[ "$support_socket" == "true" ]]; then
+        daemon_args+=("--socket")
+    fi
+    if [[ "$support_interval" == "true" ]]; then
+        daemon_args+=("--interval" "$INTERVAL")
+    else
+        echo "[subconscious] --interval not supported; using daemon default" >&2
+    fi
+    if [[ "$support_pid" == "true" ]]; then
+        daemon_args+=("--pid-file" "$PID_FILE")
+    else
+        echo "[subconscious] --pid-file not supported; PID file not written" >&2
+    fi
+
+    # Start daemon in background with socket server for MCP clients
+    nohup "$CHITTA_CLI" "${daemon_args[@]}" >> "$LOG_FILE" 2>&1 &
+
+    # Wait for socket AND verify daemon responds
     # This ensures the daemon is fully ready for MCP clients
     local daemon_ready=false
-    for i in {1..100}; do
+    local wait_start
+    wait_start=$(date +%s)
+    while true; do
         if [[ -S "$SOCKET_PATH" ]]; then
             # Socket exists, now verify daemon responds with heartbeat
             local response
-            response=$(echo "stats" | timeout 1 nc -U "$SOCKET_PATH" 2>/dev/null || true)
+            response=$(echo "stats" | run_with_timeout nc -U "$SOCKET_PATH" 2>/dev/null || true)
             if [[ -n "$response" && "$response" == *"total"* ]]; then
                 daemon_ready=true
                 break
             fi
         fi
+
+        if ! is_running; then
+            echo "[subconscious] Failed to start (daemon exited). See $LOG_FILE" >&2
+            break
+        fi
+
+        if [[ "$MAX_WAIT" != "0" ]]; then
+            local now
+            now=$(date +%s)
+            if (( now - wait_start >= MAX_WAIT )); then
+                echo "[subconscious] Startup timed out after ${MAX_WAIT}s (daemon may still be initializing)" >&2
+                break
+            fi
+        fi
+
         sleep 0.1
     done
 
@@ -194,9 +262,12 @@ cmd_status() {
         else
             echo "[subconscious] Socket: not found"
         fi
+        echo "[subconscious] PID file: $PID_FILE"
         return 0
     else
         echo "[subconscious] Not running"
+        echo "[subconscious] Socket: $SOCKET_PATH"
+        echo "[subconscious] PID file: $PID_FILE"
         return 1
     fi
 }

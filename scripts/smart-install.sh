@@ -317,6 +317,38 @@ stop_daemon() {
     rm -f /tmp/chitta*.sock 2>/dev/null || true
 }
 
+validate_binaries() {
+    if [[ ! -x "$BIN_DIR/chittad" ]]; then
+        echo "[cc-soul] ERROR: chittad not found after install" >&2
+        return 1
+    fi
+    if [[ ! -x "$BIN_DIR/chitta" ]]; then
+        echo "[cc-soul] ERROR: chitta not found after install" >&2
+        return 1
+    fi
+
+    local daemon_help
+    daemon_help=$("$BIN_DIR/chittad" daemon --help 2>&1 || true)
+    if [[ -z "$daemon_help" ]]; then
+        echo "[cc-soul] ERROR: Unable to query chittad daemon help" >&2
+        return 1
+    fi
+    if ! echo "$daemon_help" | grep -q -- "--socket"; then
+        echo "[cc-soul] ERROR: chittad daemon lacks --socket support" >&2
+        return 1
+    fi
+
+    local cli_help
+    cli_help=$("$BIN_DIR/chitta" --help 2>&1 || true)
+    if [[ -z "$cli_help" ]]; then
+        echo "[cc-soul] ERROR: Unable to query chitta help" >&2
+        return 1
+    fi
+    if ! echo "$cli_help" | grep -q -- "--socket-path"; then
+        echo "[cc-soul] WARNING: chitta missing --socket-path support" >&2
+    fi
+}
+
 # Main
 main() {
     # Check if already installed
@@ -362,6 +394,11 @@ main() {
 
     # Configure bash permissions for chitta commands
     configure_permissions
+
+    if ! validate_binaries; then
+        echo "[cc-soul] ERROR: Installation incomplete (invalid binaries)" >&2
+        exit 1
+    fi
 
     # Version change notification
     if [[ -n "$installed_version" && "$installed_version" != "$current_version" ]]; then

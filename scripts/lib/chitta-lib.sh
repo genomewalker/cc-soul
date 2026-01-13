@@ -14,6 +14,28 @@ CHITTA_BIN="${HOME}/.claude/bin/chitta"
 # Mind path for socket derivation
 CHITTA_MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind/chitta}"
 
+TIMEOUT_CMD=()
+TIMEOUT_WARNED=false
+MAX_WAIT="${CC_SOUL_MAX_WAIT:-5}"
+CHITTA_ARGS=()
+
+if [[ "$MAX_WAIT" != "0" ]] && command -v timeout >/dev/null 2>&1; then
+    TIMEOUT_CMD=(timeout "$MAX_WAIT")
+fi
+
+run_with_timeout() {
+    if [[ "$MAX_WAIT" != "0" && ${#TIMEOUT_CMD[@]} -eq 0 && "$TIMEOUT_WARNED" != "true" ]]; then
+        echo "[cc-soul] timeout not available; running without limit" >&2
+        TIMEOUT_WARNED=true
+    fi
+
+    if [[ ${#TIMEOUT_CMD[@]} -gt 0 ]]; then
+        "${TIMEOUT_CMD[@]}" "$@"
+    else
+        "$@"
+    fi
+}
+
 # djb2 hash - must match C++ implementation in socket_server.hpp
 _djb2_hash() {
     local str="$1"
@@ -38,12 +60,31 @@ find_socket() {
     return 1
 }
 
+init_chitta_args() {
+    local help_output
+    help_output=$(run_with_timeout "$CHITTA_BIN" --help 2>/dev/null || true)
+
+    if [[ -z "$help_output" ]]; then
+        return
+    fi
+
+    if echo "$help_output" | grep -q -- "--socket-path"; then
+        local socket
+        socket=$(find_socket || true)
+        if [[ -n "$socket" ]]; then
+            CHITTA_ARGS+=("--socket-path" "$socket")
+        fi
+    fi
+}
+
+init_chitta_args
+
 # Query daemon socket directly (fast path)
 socket_query() {
     local query="$1"
     local socket
     socket=$(find_socket) || return 1
-    echo "$query" | timeout 5 nc -U "$socket" 2>/dev/null | head -1
+    echo "$query" | run_with_timeout nc -U "$socket" 2>/dev/null | head -1
 }
 
 # Call MCP tool via socket or thin client
@@ -62,7 +103,8 @@ call_mcp() {
 
     # Fall back to thin client
     if [[ -x "$CHITTA_BIN" ]]; then
-        echo "$request" | "$CHITTA_BIN" 2>/dev/null | grep -v '^\[chitta' | jq -r '.result.content[0].text' 2>/dev/null || true
+        run_with_timeout "$CHITTA_BIN" "${CHITTA_ARGS[@]}" 2>/dev/null \
+            | grep -v '^\[chitta' | jq -r '.result.content[0].text' 2>/dev/null || true
     fi
 }
 

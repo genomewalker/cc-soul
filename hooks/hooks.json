@@ -7,23 +7,19 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/smart-install.sh",
-            "timeout": 300
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/smart-install.sh"
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/subconscious.sh start",
-            "timeout": 15
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/subconscious.sh start"
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/soul-hook.sh start",
-            "timeout": 10
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/soul-hook.sh start"
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/session-tracker.sh start",
-            "timeout": 5
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/session-tracker.sh start"
           }
         ]
       }
@@ -34,13 +30,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/session-tracker.sh end",
-            "timeout": 5
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/session-tracker.sh end"
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/soul-hook.sh end",
-            "timeout": 10
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/soul-hook.sh end"
           }
         ]
       }
@@ -51,13 +45,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/soul-hook.sh prompt --resonate",
-            "timeout": 10
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/soul-hook.sh prompt --resonate"
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/trigger-hook.sh",
-            "timeout": 10
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/trigger-hook.sh"
           }
         ]
       }
@@ -68,8 +60,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/capture-hook.sh",
-            "timeout": 10
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/capture-hook.sh"
           }
         ]
       }
@@ -80,8 +71,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/soul-hook.sh pre-compact",
-            "timeout": 10
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/soul-hook.sh pre-compact"
           }
         ]
       }
@@ -92,8 +82,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/stop-hook.sh",
-            "timeout": 5
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/stop-hook.sh"
           }
         ]
       }

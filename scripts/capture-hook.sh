@@ -17,8 +17,59 @@ PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
 # Binaries installed to ~/.claude/bin/ by setup.sh
 CHITTA_BIN="${HOME}/.claude/bin/chitta"
 MIND_PATH="${HOME}/.claude/mind/chitta"
-MODEL_PATH="${HOME}/.claude/bin/model.onnx"
-VOCAB_PATH="${HOME}/.claude/bin/vocab.txt"
+CAPTURE_WARNED=false
+TIMEOUT_CMD=()
+TIMEOUT_WARNED=false
+MAX_WAIT="${CC_SOUL_MAX_WAIT:-5}"
+
+if [[ "$MAX_WAIT" != "0" ]] && command -v timeout >/dev/null 2>&1; then
+    TIMEOUT_CMD=(timeout "$MAX_WAIT")
+fi
+
+run_with_timeout() {
+    if [[ "$MAX_WAIT" != "0" && ${#TIMEOUT_CMD[@]} -eq 0 && "$TIMEOUT_WARNED" != "true" ]]; then
+        echo "[cc-soul] timeout not available; running without limit" >&2
+        TIMEOUT_WARNED=true
+    fi
+
+    if [[ ${#TIMEOUT_CMD[@]} -gt 0 ]]; then
+        "${TIMEOUT_CMD[@]}" "$@"
+    else
+        "$@"
+    fi
+}
+
+CHITTA_ARGS=()
+
+_djb2_hash() {
+    local str="$1"
+    local hash=5381
+    local i c
+    for ((i=0; i<${#str}; i++)); do
+        c=$(printf '%d' "'${str:$i:1}")
+        hash=$(( ((hash << 5) + hash) + c ))
+        hash=$((hash & 0xFFFFFFFF))
+    done
+    echo "$hash"
+}
+
+init_chitta_args() {
+    local help_output
+    help_output=$(run_with_timeout "$CHITTA_BIN" --help 2>/dev/null || true)
+
+    if [[ -z "$help_output" ]]; then
+        return
+    fi
+
+    if echo "$help_output" | grep -q -- "--socket-path"; then
+        local mind_hash
+        mind_hash=$(_djb2_hash "$MIND_PATH")
+        local socket_path="/tmp/chitta-${mind_hash}.sock"
+        if [[ -S "$socket_path" ]]; then
+            CHITTA_ARGS+=("--socket-path" "$socket_path")
+        fi
+    fi
+}
 
 # Session-local cache for quick redundancy check
 CACHE_DIR="${HOME}/.claude/mind/.cmd_cache"
@@ -32,6 +83,8 @@ fi
 if ! command -v jq &> /dev/null; then
     exit 0
 fi
+
+init_chitta_args
 
 # Read input from stdin
 INPUT=$(cat)
@@ -55,14 +108,44 @@ call_mcp() {
     local method="$1"
     local params="$2"
     local request="{\"jsonrpc\":\"2.0\",\"method\":\"tools/call\",\"params\":{\"name\":\"$method\",\"arguments\":$params},\"id\":1}"
-    printf '%s\n' "$request" | timeout 5 "$CHITTA_BIN" --path "$MIND_PATH" --model "$MODEL_PATH" --vocab "$VOCAB_PATH" 2>/dev/null | grep -v '^\[chitta' || true
+    local raw_response
+    if ! raw_response=$(printf '%s\n' "$request" | run_with_timeout "$CHITTA_BIN" "${CHITTA_ARGS[@]}" 2>/dev/null); then
+        if [[ "$CAPTURE_WARNED" != "true" ]]; then
+            echo "[cc-soul] Capture failed: chitta not responding" >&2
+            CAPTURE_WARNED=true
+        fi
+        return 1
+    fi
+    if [[ -z "$raw_response" ]]; then
+        if [[ "$CAPTURE_WARNED" != "true" ]]; then
+            echo "[cc-soul] Capture failed: chitta not responding" >&2
+            CAPTURE_WARNED=true
+        fi
+        return 1
+    fi
+    echo "$raw_response" | grep -v '^\[chitta' || true
 }
 
 # Helper: recall by semantic search
 recall_mcp() {
     local query="$1"
     local request="{\"jsonrpc\":\"2.0\",\"method\":\"tools/call\",\"params\":{\"name\":\"recall\",\"arguments\":{\"query\":\"$query\",\"limit\":3}},\"id\":1}"
-    printf '%s\n' "$request" | timeout 5 "$CHITTA_BIN" --path "$MIND_PATH" --model "$MODEL_PATH" --vocab "$VOCAB_PATH" 2>/dev/null | grep -v '^\[chitta' | jq -r '.result.content[0].text // empty' 2>/dev/null || true
+    local raw_response
+    if ! raw_response=$(printf '%s\n' "$request" | run_with_timeout "$CHITTA_BIN" "${CHITTA_ARGS[@]}" 2>/dev/null); then
+        if [[ "$CAPTURE_WARNED" != "true" ]]; then
+            echo "[cc-soul] Capture failed: chitta not responding" >&2
+            CAPTURE_WARNED=true
+        fi
+        return 1
+    fi
+    if [[ -z "$raw_response" ]]; then
+        if [[ "$CAPTURE_WARNED" != "true" ]]; then
+            echo "[cc-soul] Capture failed: chitta not responding" >&2
+            CAPTURE_WARNED=true
+        fi
+        return 1
+    fi
+    echo "$raw_response" | grep -v '^\[chitta' | jq -r '.result.content[0].text // empty' 2>/dev/null || true
 }
 
 # Helper: escape for JSON

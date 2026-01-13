@@ -19,6 +19,27 @@ PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
 CHITTA_BIN="${HOME}/.claude/bin/chitta"
 SESSION_FILE="${HOME}/.claude/mind/.session_state"
 LEAN_MODE="${CC_SOUL_LEAN:-false}"  # Set CC_SOUL_LEAN=true for minimal context
+MCP_WARNED=false
+TIMEOUT_CMD=()
+TIMEOUT_WARNED=false
+MAX_WAIT="${CC_SOUL_MAX_WAIT:-5}"
+
+if [[ "$MAX_WAIT" != "0" ]] && command -v timeout >/dev/null 2>&1; then
+    TIMEOUT_CMD=(timeout "$MAX_WAIT")
+fi
+
+run_with_timeout() {
+    if [[ "$MAX_WAIT" != "0" && ${#TIMEOUT_CMD[@]} -eq 0 && "$TIMEOUT_WARNED" != "true" ]]; then
+        echo "[cc-soul] timeout not available; running without limit" >&2
+        TIMEOUT_WARNED=true
+    fi
+
+    if [[ ${#TIMEOUT_CMD[@]} -gt 0 ]]; then
+        "${TIMEOUT_CMD[@]}" "$@"
+    else
+        "$@"
+    fi
+}
 
 # Mind path for socket derivation
 MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind/chitta}"
@@ -73,8 +94,8 @@ socket_query() {
     local socket
     socket=$(find_socket) || return 1
 
-    # Use timeout and netcat for socket communication
-    echo "$query" | timeout 5 nc -U "$socket" 2>/dev/null | head -1
+    # Use netcat for socket communication
+    echo "$query" | run_with_timeout nc -U "$socket" 2>/dev/null | head -1
 }
 
 # Helper: check if daemon is responsive (fast health check)
@@ -83,7 +104,7 @@ daemon_healthy() {
     socket=$(find_socket) || return 1
     # Quick ping - just check if socket accepts connection
     echo '{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"version_check"}}' \
-        | timeout 2 nc -U "$socket" 2>/dev/null | grep -q '"result"'
+        | run_with_timeout nc -U "$socket" 2>/dev/null | grep -q '"result"'
 }
 
 # Helper: call MCP tool via socket or thin client
@@ -94,19 +115,42 @@ call_mcp() {
 
     # Try socket first (fast)
     local response
-    response=$(socket_query "$request" 2>/dev/null)
-    if [[ -n "$response" ]]; then
-        echo "$response" | jq -r '.result.content[0].text' 2>/dev/null || true
-        return 0
-    fi
-
-    # Fall back to thin client with timeout (prevents hanging)
-    if [[ -x "$CHITTA_BIN" ]]; then
-        response=$(echo "$request" | timeout 10 "$CHITTA_BIN" 2>/dev/null | grep -v '^\[chitta')
+    if response=$(socket_query "$request" 2>/dev/null); then
         if [[ -n "$response" ]]; then
             echo "$response" | jq -r '.result.content[0].text' 2>/dev/null || true
+            return 0
         fi
     fi
+
+    # Fall back to thin client
+    if [[ -x "$CHITTA_BIN" ]]; then
+        local raw_response
+        if ! raw_response=$(echo "$request" | run_with_timeout "$CHITTA_BIN" 2>/dev/null); then
+            if [[ "$MCP_WARNED" != "true" ]]; then
+                echo "[cc-soul] Daemon not responding; MCP calls skipped" >&2
+                MCP_WARNED=true
+            fi
+            return 1
+        fi
+        if [[ -z "$raw_response" ]]; then
+            if [[ "$MCP_WARNED" != "true" ]]; then
+                echo "[cc-soul] Daemon not responding; MCP calls skipped" >&2
+                MCP_WARNED=true
+            fi
+            return 1
+        fi
+        response=$(echo "$raw_response" | grep -v '^\[chitta')
+        if [[ -n "$response" ]]; then
+            echo "$response" | jq -r '.result.content[0].text' 2>/dev/null || true
+            return 0
+        fi
+    fi
+
+    if [[ "$MCP_WARNED" != "true" ]]; then
+        echo "[cc-soul] Daemon not responding; MCP calls skipped" >&2
+        MCP_WARNED=true
+    fi
+    return 1
 }
 
 # Helper: get stats directly from daemon (fastest path)
@@ -122,6 +166,7 @@ json_escape() {
 # Hook handlers
 hook_start() {
     local trigger="${1:-startup}"
+    echo "[cc-soul] hook_start: begin (${trigger})" >&2
 
     # Record session start state
     local start_time=$(date +%s)
@@ -140,6 +185,10 @@ hook_start() {
     # Get soul context
     local context
     context=$(call_mcp "soul_context" '{"format":"text"}')
+
+    if [[ "$MCP_WARNED" == "true" ]]; then
+        echo "[cc-soul] Startup incomplete: daemon not responding"
+    fi
 
     if [[ "$LEAN_MODE" == "true" ]]; then
         # Ultra-lean: just τ and ψ in one line
@@ -184,9 +233,11 @@ hook_start() {
             echo "$arch_context" | head -c 800
         fi
     fi
+    echo "[cc-soul] hook_start: end" >&2
 }
 
 hook_end() {
+    echo "[cc-soul] hook_end: begin" >&2
     # Calculate session duration and node delta
     local end_time=$(date +%s)
     local duration=0
@@ -247,9 +298,14 @@ EOF
     call_mcp "cycle" '{"save":true}' >/dev/null 2>&1 || true
 
     echo "[cc-soul] Session ended (${duration}s, ${node_delta:+$node_delta} nodes, ledger saved)"
+    if [[ "$MCP_WARNED" == "true" ]]; then
+        echo "[cc-soul] Session end incomplete: daemon not responding"
+    fi
+    echo "[cc-soul] hook_end: end" >&2
 }
 
 hook_prompt() {
+    echo "[cc-soul] hook_prompt: begin" >&2
     local lean=false
     local resonate=false
     while [[ $# -gt 0 ]]; do
@@ -342,6 +398,11 @@ hook_prompt() {
             fi
         fi
     fi
+
+    if [[ "$MCP_WARNED" == "true" ]]; then
+        echo "[cc-soul] Prompt incomplete: daemon not responding"
+    fi
+    echo "[cc-soul] hook_prompt: end" >&2
 }
 
 hook_pre_compact() {
@@ -367,6 +428,9 @@ EOF
     call_mcp "observe" '{"category":"signal","title":"Pre-compact checkpoint","content":"Context about to be compacted. Ledger saved with full work state."}' >/dev/null 2>&1 || true
     call_mcp "cycle" '{"save":true}' >/dev/null 2>&1 || true
     echo "[cc-soul] Ledger and state saved before compact"
+    if [[ "$MCP_WARNED" == "true" ]]; then
+        echo "[cc-soul] Pre-compact incomplete: daemon not responding"
+    fi
 }
 
 # Main dispatch

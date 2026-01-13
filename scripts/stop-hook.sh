@@ -20,14 +20,25 @@ TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty')
 CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
 STOP_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
 
+echo "[cc-soul] stop-hook: begin" >&2
+
 [[ "$STOP_ACTIVE" == "true" ]] && echo '{}' && exit 0
 [[ -z "$TRANSCRIPT" || ! -f "$TRANSCRIPT" ]] && echo '{}' && exit 0
 
 PROJECT=$(basename "$CWD" 2>/dev/null || echo "unknown")
 
 (
+    echo "[cc-soul] stop-hook: process begin" >&2
     source "$SCRIPT_DIR/lib/chitta-lib.sh"
     CHITTA="${HOME}/.claude/bin/chitta"
+    CHITTA_RUN=("$CHITTA")
+    MAX_WAIT="${CC_SOUL_MAX_WAIT:-5}"
+
+    if [[ "$MAX_WAIT" != "0" ]] && command -v timeout >/dev/null 2>&1; then
+        CHITTA_RUN=(timeout "$MAX_WAIT" "${CHITTA_RUN[@]}")
+    elif [[ "$MAX_WAIT" != "0" ]]; then
+        echo "[cc-soul] timeout not available; running without limit" >&2
+    fi
 
     LAST_MSG=$(tac "$TRANSCRIPT" | grep -m1 '"role":"assistant"' | \
         jq -r '.message.content[] | select(.type=="text") | .text' 2>/dev/null | head -c 8000)
@@ -63,7 +74,7 @@ PROJECT=$(basename "$CWD" 2>/dev/null || echo "unknown")
                 # C/C++: Extract class/struct definitions and key function signatures
                 # Class/struct definitions
                 grep -oP '(class|struct)\s+\K[A-Z][a-zA-Z0-9_]+' "$fpath" 2>/dev/null | head -10 | while read -r name; do
-                    "$CHITTA" observe \
+                    "${CHITTA_RUN[@]}" observe \
                         --category signal \
                         --title "$name defined in $fname" \
                         --content "[$PROJECT] $name :: $fext type @$fname" \
@@ -75,7 +86,7 @@ PROJECT=$(basename "$CWD" 2>/dev/null || echo "unknown")
                 # Key function signatures (public methods, main functions)
                 grep -oP '^\s*(inline\s+)?(static\s+)?\w+\s+\K[a-z][a-zA-Z0-9_]+(?=\s*\()' "$fpath" 2>/dev/null | \
                     grep -v '^if$\|^for$\|^while$\|^switch$' | head -10 | while read -r func; do
-                    "$CHITTA" observe \
+                    "${CHITTA_RUN[@]}" observe \
                         --category signal \
                         --title "$func() in $fname" \
                         --content "[$PROJECT] function $func @$fname" \
@@ -88,7 +99,7 @@ PROJECT=$(basename "$CWD" 2>/dev/null || echo "unknown")
             py)
                 # Python: Extract class and function definitions
                 grep -oP '^class\s+\K[A-Z][a-zA-Z0-9_]+' "$fpath" 2>/dev/null | head -10 | while read -r name; do
-                    "$CHITTA" observe \
+                    "${CHITTA_RUN[@]}" observe \
                         --category signal \
                         --title "$name defined in $fname" \
                         --content "[$PROJECT] $name :: python class @$fname" \
@@ -98,7 +109,7 @@ PROJECT=$(basename "$CWD" 2>/dev/null || echo "unknown")
                 done
 
                 grep -oP '^def\s+\K[a-z_][a-zA-Z0-9_]+' "$fpath" 2>/dev/null | head -10 | while read -r func; do
-                    "$CHITTA" observe \
+                    "${CHITTA_RUN[@]}" observe \
                         --category signal \
                         --title "$func() in $fname" \
                         --content "[$PROJECT] function $func @$fname" \
@@ -111,7 +122,7 @@ PROJECT=$(basename "$CWD" 2>/dev/null || echo "unknown")
             sh|bash)
                 # Shell: Extract function definitions
                 grep -oP '^[a-z_][a-zA-Z0-9_]+(?=\s*\(\))' "$fpath" 2>/dev/null | head -10 | while read -r func; do
-                    "$CHITTA" observe \
+                    "${CHITTA_RUN[@]}" observe \
                         --category signal \
                         --title "$func() in $fname" \
                         --content "[$PROJECT] shell function $func @$fname" \
@@ -145,7 +156,7 @@ PROJECT=$(basename "$CWD" 2>/dev/null || echo "unknown")
         local tags_arg=""
         [[ -n "$FILE_TAGS" ]] && tags_arg="--tags $FILE_TAGS"
 
-        "$CHITTA" grow --type wisdom --title "$TITLE" --content "$CONTENT" --epsilon "$EPSILON_FLOAT" $tags_arg >/dev/null 2>&1 || true
+        "${CHITTA_RUN[@]}" grow --type wisdom --title "$TITLE" --content "$CONTENT" --epsilon "$EPSILON_FLOAT" $tags_arg >/dev/null 2>&1 || true
     done
 
     # Extract [USED:uuid] markers and strengthen those memories
@@ -154,7 +165,7 @@ PROJECT=$(basename "$CWD" 2>/dev/null || echo "unknown")
         UUID="${UUID%\]}"
         [[ -z "$UUID" || ${#UUID} -lt 30 ]] && continue
 
-        "$CHITTA" feedback --memory_id "$UUID" --helpful true --context "Used in response" >/dev/null 2>&1 || true
+        "${CHITTA_RUN[@]}" feedback --memory_id "$UUID" --helpful true --context "Used in response" >/dev/null 2>&1 || true
     done
 
     # Extract [REMEMBER] markers and store as observations
@@ -173,7 +184,7 @@ PROJECT=$(basename "$CWD" 2>/dev/null || echo "unknown")
         local tags_arg=""
         [[ -n "$FILE_TAGS" ]] && tags_arg="--tags $FILE_TAGS"
 
-        "$CHITTA" observe --category decision --title "$TITLE" --content "$CONTENT" --project "$PROJECT" $tags_arg >/dev/null 2>&1 || true
+        "${CHITTA_RUN[@]}" observe --category decision --title "$TITLE" --content "$CONTENT" --project "$PROJECT" $tags_arg >/dev/null 2>&1 || true
     done
 
     # Parse each line for graph patterns
@@ -189,7 +200,7 @@ PROJECT=$(basename "$CWD" 2>/dev/null || echo "unknown")
             obj="${BASH_REMATCH[2]}"
 
             # Store as insight with relationship encoded
-            "$CHITTA" observe \
+            "${CHITTA_RUN[@]}" observe \
                 --category insight \
                 --title "$subj → $obj" \
                 --content "$line" \
@@ -198,7 +209,7 @@ PROJECT=$(basename "$CWD" 2>/dev/null || echo "unknown")
                 >/dev/null 2>&1 || true
 
             # Create edge between concepts
-            "$CHITTA" connect \
+            "${CHITTA_RUN[@]}" connect \
                 --from "$subj" \
                 --to "$obj" \
                 --relation "causes" \
@@ -212,7 +223,7 @@ PROJECT=$(basename "$CWD" 2>/dev/null || echo "unknown")
             subj="${BASH_REMATCH[1]}"
             obj="${BASH_REMATCH[2]}"
 
-            "$CHITTA" observe \
+            "${CHITTA_RUN[@]}" observe \
                 --category insight \
                 --title "$subj :: $obj" \
                 --content "$line" \
@@ -220,7 +231,7 @@ PROJECT=$(basename "$CWD" 2>/dev/null || echo "unknown")
                 --tags "relation:is_a,$subj,$obj" \
                 >/dev/null 2>&1 || true
 
-            "$CHITTA" connect \
+            "${CHITTA_RUN[@]}" connect \
                 --from "$subj" \
                 --to "$obj" \
                 --relation "is_a" \
@@ -234,7 +245,7 @@ PROJECT=$(basename "$CWD" 2>/dev/null || echo "unknown")
             subj="${BASH_REMATCH[1]}"
             obj="${BASH_REMATCH[2]}"
 
-            "$CHITTA" connect \
+            "${CHITTA_RUN[@]}" connect \
                 --from "$subj" \
                 --to "$obj" \
                 --relation "related" \
@@ -247,7 +258,7 @@ PROJECT=$(basename "$CWD" 2>/dev/null || echo "unknown")
         if [[ "$line" =~ ^[[:space:]]*!([a-zA-Z0-9._-]+) ]]; then
             stmt="${BASH_REMATCH[1]}"
 
-            "$CHITTA" observe \
+            "${CHITTA_RUN[@]}" observe \
                 --category decision \
                 --title "!$stmt" \
                 --content "$line" \
@@ -260,14 +271,14 @@ PROJECT=$(basename "$CWD" 2>/dev/null || echo "unknown")
         # Pattern: +A (positive signal)
         if [[ "$line" =~ ^[[:space:]]*\+([a-zA-Z0-9._-]+) ]]; then
             target="${BASH_REMATCH[1]}"
-            "$CHITTA" feedback --signal positive --context "$target" >/dev/null 2>&1 || true
+            "${CHITTA_RUN[@]}" feedback --signal positive --context "$target" >/dev/null 2>&1 || true
             continue
         fi
 
         # Pattern: -A (negative signal)
         if [[ "$line" =~ ^[[:space:]]*-([a-zA-Z0-9._-]+) ]]; then
             target="${BASH_REMATCH[1]}"
-            "$CHITTA" feedback --signal negative --context "$target" >/dev/null 2>&1 || true
+            "${CHITTA_RUN[@]}" feedback --signal negative --context "$target" >/dev/null 2>&1 || true
             continue
         fi
 
@@ -276,11 +287,14 @@ PROJECT=$(basename "$CWD" 2>/dev/null || echo "unknown")
             question="${BASH_REMATCH[1]}"
             hint="${BASH_REMATCH[2]}"
 
-            "$CHITTA" wonder --question "$question${hint:+ ($hint)}" >/dev/null 2>&1 || true
+            "${CHITTA_RUN[@]}" wonder --question "$question${hint:+ ($hint)}" >/dev/null 2>&1 || true
             continue
         fi
 
     done
+
+    echo "[cc-soul] stop-hook: process end" >&2
 ) &
 
+echo "[cc-soul] stop-hook: spawned" >&2
 echo '{}'
