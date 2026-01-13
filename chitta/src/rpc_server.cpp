@@ -4,7 +4,6 @@
 // Modes:
 //   CLI mode:    chitta <tool> [args...]  - Direct tool invocation
 //   Thin client: chitta                   - Forward JSON-RPC to daemon
-//   Direct mode: chitta --direct          - Standalone mode (legacy)
 //
 // CLI Examples:
 //   chitta recall "query"
@@ -14,40 +13,17 @@
 //   chitta grow --type wisdom --title "..." --content "..."
 //
 // Options:
-//   --socket-path PATH  Unix socket path (default: /tmp/chitta.sock)
-//   --direct            Direct mode: open storage locally (legacy)
-//   --path PATH         Path to mind storage (direct mode only)
-//   --model PATH        Path to ONNX model file (direct mode only)
-//   --vocab PATH        Path to vocabulary file (direct mode only)
+//   --socket-path PATH  Unix socket path
 //   --json              CLI mode: output raw JSON instead of text
 
-#include <chitta/rpc.hpp>
 #include <chitta/socket_client.hpp>
 #include <chitta/version.hpp>
 #include <set>
-#ifdef CHITTA_WITH_ONNX
-#include <chitta/vak_onnx.hpp>
-#endif
 #include <iostream>
 #include <string>
 #include <cstring>
 #include <cstdlib>
-#include <csignal>
-#include <atomic>
-
-// Global state for signal handler
-static std::shared_ptr<chitta::Mind> g_mind;
-static std::atomic<bool> g_shutdown_requested{false};
-
-void signal_handler(int sig) {
-    (void)sig;
-    g_shutdown_requested.store(true);
-    if (g_mind) {
-        g_mind->close();
-        std::cerr << "[chitta] Signal received, state saved\n";
-    }
-    std::_Exit(0);
-}
+#include <nlohmann/json.hpp>
 
 // Tool parameter specification
 struct ToolParam {
@@ -404,13 +380,7 @@ void print_usage(const char* prog) {
               << "  Eval:      eval_run, eval_add_test, epiplexity_check, epiplexity_drift\n"
               << "\n"
               << "Global options:\n"
-              << "  --socket-path PATH  Unix socket path (default: /tmp/chitta-VERSION.sock)\n"
-              << "  --direct            Direct mode: open storage locally (legacy)\n"
-              << "  --path PATH         Path to mind storage (direct mode only)\n"
-#ifdef CHITTA_WITH_ONNX
-              << "  --model PATH        Path to ONNX model file (direct mode only)\n"
-              << "  --vocab PATH        Path to vocabulary file (direct mode only)\n"
-#endif
+              << "  --socket-path PATH  Unix socket path\n"
               << "  --json              Output raw JSON instead of text\n"
               << "  --help              Show this help message\n";
 }
@@ -632,79 +602,9 @@ int run_thin_client(const std::string& socket_path) {
     return 0;
 }
 
-// Direct mode: open storage locally (legacy)
-int run_direct(const std::string& mind_path,
-               const std::string& model_path,
-               const std::string& vocab_path) {
-    // Create mind
-    chitta::MindConfig config;
-    config.path = mind_path;
-    auto mind = std::make_shared<chitta::Mind>(config);
-
-    // Attach ONNX yantra if available
-#ifdef CHITTA_WITH_ONNX
-    if (!model_path.empty() && !vocab_path.empty()) {
-        try {
-            chitta::AntahkaranaYantra::Config yantra_config;
-            yantra_config.pooling = chitta::PoolingStrategy::Mean;
-            yantra_config.normalize_embeddings = true;
-
-            auto yantra = std::make_shared<chitta::AntahkaranaYantra>(yantra_config);
-            if (yantra->awaken(model_path, vocab_path)) {
-                mind->attach_yantra(yantra);
-                std::cerr << "[chitta] Yantra attached: " << model_path << "\n";
-            } else {
-                std::cerr << "[chitta] Warning: Failed to awaken yantra: "
-                          << yantra->error() << "\n";
-            }
-        } catch (const std::exception& e) {
-            std::cerr << "[chitta] Warning: Failed to load yantra: " << e.what() << "\n";
-        }
-    }
-#else
-    (void)model_path;
-    (void)vocab_path;
-#endif
-
-    // Open mind
-    if (!mind->open()) {
-        std::cerr << "[chitta] Error: Failed to open mind at " << mind_path << "\n";
-        return 1;
-    }
-
-    // Set up signal handling for graceful shutdown
-    g_mind = mind;
-    std::signal(SIGTERM, signal_handler);
-    std::signal(SIGINT, signal_handler);
-    std::signal(SIGHUP, signal_handler);
-
-    std::cerr << "[chitta] Direct mode: Mind opened: " << mind->size() << " nodes\n";
-    std::cerr << "[chitta] Yantra ready: " << (mind->has_yantra() ? "yes" : "no") << "\n";
-    std::cerr << "[chitta] Listening on stdin...\n";
-
-    // Run server (JSON-RPC protocol)
-    chitta::RpcServer server(mind, "chitta");
-    server.run();
-
-    // Cleanup
-    mind->close();
-    std::cerr << "[chitta] Shutdown complete\n";
-
-    return 0;
-}
-
 int main(int argc, char* argv[]) {
-    std::string socket_path = chitta::SocketClient::SOCKET_PATH;
-    std::string mind_path = "./mind";
-    std::string model_path;
-    std::string vocab_path;
-    bool direct_mode = false;
+    std::string socket_path = chitta::SocketClient::default_socket_path();
     bool json_output = false;
-
-    // Honor CHITTA_DB_PATH env var
-    if (const char* env_path = std::getenv("CHITTA_DB_PATH")) {
-        mind_path = env_path;
-    }
 
     // Handle status command (daemon health check)
     if (argc > 1 && std::strcmp(argv[1], "status") == 0) {
@@ -762,17 +662,6 @@ int main(int argc, char* argv[]) {
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--socket-path") == 0 && i + 1 < argc) {
             socket_path = argv[++i];
-        } else if (std::strcmp(argv[i], "--direct") == 0) {
-            direct_mode = true;
-        } else if (std::strcmp(argv[i], "--path") == 0 && i + 1 < argc) {
-            mind_path = argv[++i];
-            direct_mode = true;  // --path implies direct mode
-        } else if (std::strcmp(argv[i], "--model") == 0 && i + 1 < argc) {
-            model_path = argv[++i];
-        } else if (std::strcmp(argv[i], "--vocab") == 0 && i + 1 < argc) {
-            vocab_path = argv[++i];
-        } else if (std::strcmp(argv[i], "--json") == 0) {
-            json_output = true;  // Ignored in RPC mode
         } else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
             print_usage(argv[0]);
             return 0;
@@ -783,9 +672,5 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    if (direct_mode) {
-        return run_direct(mind_path, model_path, vocab_path);
-    } else {
-        return run_thin_client(socket_path);
-    }
+    return run_thin_client(socket_path);
 }

@@ -705,7 +705,7 @@ int main(int argc, char* argv[]) {
     std::string query;
     std::string format;  // For convert command
     std::string pid_file;  // For daemon mode
-    std::string socket_path = SocketServer::SOCKET_PATH;
+    std::string socket_path = SocketServer::default_socket_path();
 
     // Connect/query args
     std::string conn_from, conn_rel, conn_to;  // connect --from --rel --to

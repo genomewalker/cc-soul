@@ -222,7 +222,7 @@ int json_get_int(const std::string& json, const std::string& key) {
 }  // anonymous namespace
 
 SocketClient::SocketClient()
-    : socket_path_(SOCKET_PATH) {}
+    : socket_path_(default_socket_path()) {}
 
 SocketClient::SocketClient(std::string socket_path)
     : socket_path_(std::move(socket_path)) {}
@@ -264,7 +264,7 @@ void SocketClient::disconnect() {
 
 bool SocketClient::ensure_daemon_running() {
     // First, try to connect to existing daemon at the standard path
-    socket_path_ = SOCKET_PATH;
+    socket_path_ = default_socket_path();
     if (connect()) {
         // Connected - check version compatibility
         auto version = check_version();
@@ -303,7 +303,7 @@ bool SocketClient::ensure_daemon_running() {
     int lock_fd = acquire_daemon_lock();
 
     // Re-check after acquiring lock (another process may have started daemon)
-    socket_path_ = SOCKET_PATH;
+    socket_path_ = default_socket_path();
     if (connect()) {
         auto version = check_version();
         if (version && chitta::version::protocol_compatible(
@@ -608,7 +608,7 @@ std::optional<std::string> SocketClient::request(const std::string& json_rpc) {
 }
 
 int SocketClient::acquire_daemon_lock() {
-    int lock_fd = open(DAEMON_LOCK_PATH, O_CREAT | O_RDWR, 0600);
+    int lock_fd = open(default_lock_path().c_str(), O_CREAT | O_RDWR, 0600);
     if (lock_fd < 0) {
         std::cerr << "[socket_client] Failed to open lock file: " << strerror(errno) << "\n";
         return -1;

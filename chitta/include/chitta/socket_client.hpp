@@ -4,12 +4,13 @@
 // Connects to the soul daemon via Unix socket, with auto-start
 // capability if daemon is not running.
 //
-// Protocol-versioned: Uses a single socket path. Version compatibility
-// is checked via handshake. Incompatible daemons are gracefully restarted.
+// UID-scoped: Socket path includes user ID for multi-user safety.
+// Version compatibility checked via handshake.
 
 #include <chitta/version.hpp>
 #include <string>
 #include <optional>
+#include <unistd.h>
 
 namespace chitta {
 
@@ -22,13 +23,20 @@ struct DaemonVersion {
 
 class SocketClient {
 public:
-    // Single socket path - version checked via protocol handshake
-    static constexpr const char* SOCKET_PATH = "/tmp/chitta.sock";
-    static constexpr const char* DAEMON_LOCK_PATH = "/tmp/chitta-daemon.lock";
+    // UID-scoped paths for multi-user safety
+    static std::string default_socket_path() {
+        return "/tmp/chitta-" + std::to_string(getuid()) + ".sock";
+    }
+    static std::string default_lock_path() {
+        return "/tmp/chitta-daemon-" + std::to_string(getuid()) + ".lock";
+    }
+    static std::string default_pid_path() {
+        return "/tmp/chitta-daemon-" + std::to_string(getuid()) + ".pid";
+    }
     static constexpr int CONNECT_TIMEOUT_MS = 5000;
     static constexpr int RESPONSE_TIMEOUT_MS = 30000;
 
-    // Default constructor uses standard socket path
+    // Default constructor uses UID-scoped socket path
     SocketClient();
     explicit SocketClient(std::string socket_path);
     ~SocketClient();

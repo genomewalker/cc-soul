@@ -23,7 +23,6 @@
 #include "voice.hpp"
 #include "vak.hpp"
 #include "scoring.hpp"
-#include "daemon.hpp"
 #include "feedback.hpp"
 // Phase 7: 100M Scale Components
 #include "query_router.hpp"
@@ -1959,36 +1958,6 @@ public:
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    // Autonomous dynamics (daemon)
-    // ═══════════════════════════════════════════════════════════════════
-
-    // Start the background daemon
-    void start_daemon(DaemonConfig config = {}) {
-        daemon_ = Daemon(config);
-        daemon_.attach(&graph_);
-        daemon_.on_save([this]() {
-            std::lock_guard<std::mutex> lock(mutex_);
-            storage_.sync();
-        });
-        daemon_.start();
-    }
-
-    // Stop the background daemon
-    void stop_daemon() {
-        daemon_.stop();
-    }
-
-    // Check if daemon is running
-    bool daemon_running() const {
-        return daemon_.is_running();
-    }
-
-    // Get daemon stats
-    Daemon::Stats daemon_stats() const {
-        return daemon_.stats();
-    }
-
-    // ═══════════════════════════════════════════════════════════════════
     // Learning feedback
     // ═══════════════════════════════════════════════════════════════════
 
@@ -3831,8 +3800,7 @@ public:
     // Tag index for exact-match filtering (inter-agent communication)
     TagIndex tag_index_;
 
-    // Autonomous dynamics and learning
-    Daemon daemon_;
+    // Learning feedback
     FeedbackTracker feedback_;
 
     // Session context for priming (Phase 4: Context Modulation)

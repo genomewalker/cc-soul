@@ -4,14 +4,15 @@
 // Provides JSON-RPC 2.0 over Unix socket for multi-client access
 // to the soul daemon. Uses poll() for non-blocking multiplexed I/O.
 //
-// Protocol-versioned: Uses single socket path. Version compatibility
-// is checked via protocol handshake (version_check tool).
+// UID-scoped: Socket path includes user ID for multi-user safety.
+// Version compatibility checked via protocol handshake.
 
 #include <chitta/version.hpp>
 #include <string>
 #include <vector>
 #include <atomic>
 #include <cstddef>
+#include <unistd.h>
 
 namespace chitta {
 
@@ -35,12 +36,14 @@ struct ClientConnection {
 // Unix domain socket server for JSON-RPC 2.0
 class SocketServer {
 public:
-    // Single socket path - version checked via protocol handshake
-    static constexpr const char* SOCKET_PATH = "/tmp/chitta.sock";
+    // UID-scoped socket path for multi-user safety
+    static std::string default_socket_path() {
+        return "/tmp/chitta-" + std::to_string(getuid()) + ".sock";
+    }
     static constexpr int MAX_CONNECTIONS = 32;
     static constexpr size_t MAX_MESSAGE_SIZE = 16 * 1024 * 1024;  // 16MB
 
-    // Default constructor uses standard socket path
+    // Default constructor uses UID-scoped socket path
     SocketServer();
     explicit SocketServer(std::string socket_path);
     ~SocketServer();
