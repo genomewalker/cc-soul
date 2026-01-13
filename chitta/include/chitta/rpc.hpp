@@ -2643,57 +2643,79 @@ private:
         return {false, "Tags updated", result};
     }
 
-    // List verbose nodes for ε-yajna ceremony processing
+    // List nodes for ε-yajna ceremony processing (SSL + triplet conversion)
     ToolResult tool_yajna_list(const json& params) {
-        std::string query = params.value("query", "architecture system pattern decision");
-        size_t limit = params.value("limit", 10);
-        size_t min_length = params.value("min_length", 200);
+        size_t limit = params.value("limit", 100);
+        std::string filter = params.value("filter", "");  // Optional domain filter
 
-        if (!mind_->has_yantra()) {
-            return {true, "Yantra not ready - cannot search", json()};
-        }
+        // Collect ALL unprocessed nodes by scanning entire storage
+        struct YajnaNode {
+            NodeId id;
+            NodeType type;
+            std::string title;
+            size_t length;
+            float epsilon;
+        };
+        std::vector<YajnaNode> nodes;
 
-        // Get candidates via semantic search (larger pool to filter)
-        auto candidates = mind_->recall(query, limit * 5);
+        mind_->for_each_node([&](const NodeId& id, const Node& node) {
+            // Skip triplets and entities (already in target format)
+            if (node.node_type == NodeType::Entity || node.node_type == NodeType::Triplet) return;
+
+            std::string text(node.payload.begin(), node.payload.end());
+
+            // Skip if already processed (check tags directly to avoid lock)
+            if (std::find(node.tags.begin(), node.tags.end(), "ε-processed") != node.tags.end()) return;
+
+            // Apply optional domain filter
+            if (!filter.empty() && text.find(filter) == std::string::npos) return;
+
+            std::string title = extract_title(text, 80);
+            float epsilon = text.length() > 0
+                ? std::min(1.0f, static_cast<float>(title.length()) / text.length() * 10.0f)
+                : 1.0f;
+
+            YajnaNode yn;
+            yn.id = id;
+            yn.type = node.node_type;
+            yn.title = title;
+            yn.length = text.length();
+            yn.epsilon = epsilon;
+            nodes.push_back(yn);
+        });
+
+        // Sort by length descending (longest first - most to compress)
+        std::sort(nodes.begin(), nodes.end(),
+            [](const YajnaNode& a, const YajnaNode& b) {
+                return a.length > b.length;
+            });
 
         json results = json::array();
         std::ostringstream ss;
-        ss << "Verbose nodes ready for ε-yajna (" << min_length << "+ chars):\n";
+        ss << "Nodes for epsilon-yajna (SSL + triplet conversion):\n";
 
         size_t count = 0;
-        for (const auto& r : candidates) {
+        for (const auto& yn : nodes) {
             if (count >= limit) break;
 
-            // Skip if already processed
-            if (mind_->has_tag(r.id, "ε-processed")) continue;
-
-            // Skip short content (not verbose)
-            if (r.text.length() < min_length) continue;
-
-            // Skip triplets and entities (already compressed)
-            if (r.type == NodeType::Entity || r.type == NodeType::Triplet) continue;
-
-            // Extract title
-            std::string title = extract_title(r.text, 80);
-
-            // Compute simple ε estimate based on title/content ratio
-            float epsilon = std::min(1.0f, static_cast<float>(title.length()) / r.text.length() * 10.0f);
-
             json node_json;
-            node_json["id"] = r.id.to_string();
-            node_json["type"] = node_type_to_string(r.type);
-            node_json["title"] = title;
-            node_json["length"] = r.text.length();
-            node_json["epsilon"] = epsilon;
+            node_json["id"] = yn.id.to_string();
+            node_json["type"] = node_type_to_string(yn.type);
+            node_json["title"] = yn.title;
+            node_json["length"] = yn.length;
+            node_json["epsilon"] = yn.epsilon;
             results.push_back(node_json);
 
-            ss << "\n[" << r.id.to_string() << "] " << title;
-            ss << " (" << r.text.length() << " chars, ε≈" << static_cast<int>(epsilon * 100) << "%)";
+            ss << "\n[" << yn.id.to_string() << "] " << yn.title;
+            ss << " (" << yn.length << " chars, epsilon=" << static_cast<int>(yn.epsilon * 100) << "%)";
 
             count++;
         }
 
-        ss << "\n\nTotal: " << count << " verbose nodes";
+        ss << "\n\nTotal: " << nodes.size() << " nodes need processing";
+        if (nodes.size() > limit) {
+            ss << " (showing " << count << ")";
+        }
         return {false, ss.str(), results};
     }
 

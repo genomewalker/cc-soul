@@ -46,18 +46,16 @@ inline std::string edge_type_str(EdgeType type) {
 inline void register_schemas(std::vector<ToolSchema>& tools) {
     tools.push_back({
         "yajna_list",
-        "List verbose nodes ready for epsilon-yajna compression. Returns nodes with IDs, "
-        "content length, and current epsilon estimate. Excludes already-processed nodes "
-        "(tag: epsilon-processed). Use for ceremony batch processing.",
+        "List ALL nodes for epsilon-yajna SSL+triplet conversion. Scans entire storage, "
+        "excludes already-processed nodes (tag: epsilon-processed or ε-processed). "
+        "Returns nodes sorted by length (longest first).",
         {
             {"type", "object"},
             {"properties", {
-                {"query", {{"type", "string"},
-                          {"description", "Optional domain filter (e.g., 'architecture', 'decision')"},
-                          {"default", "architecture system pattern decision"}}},
-                {"limit", {{"type", "integer"}, {"minimum", 1}, {"maximum", 50}, {"default", 10}}},
-                {"min_length", {{"type", "integer"}, {"minimum", 50}, {"default", 200},
-                               {"description", "Minimum content length to consider verbose"}}}
+                {"filter", {{"type", "string"},
+                          {"description", "Optional domain filter (e.g., 'cc-soul', 'architecture')"},
+                          {"default", ""}}},
+                {"limit", {{"type", "integer"}, {"minimum", 1}, {"maximum", 5000}, {"default", 100}}}
             }}
         }
     });
@@ -94,53 +92,80 @@ inline void register_schemas(std::vector<ToolSchema>& tools) {
 // Register yajna tool handlers
 inline void register_handlers(Mind* mind, std::unordered_map<std::string, ToolHandler>& handlers) {
 
-    // yajna_list: List verbose nodes for compression
+    // yajna_list: List ALL nodes for SSL + triplet conversion
     handlers["yajna_list"] = [mind](const json& params) -> ToolResult {
-        std::string query = params.value("query", "architecture system pattern decision");
-        size_t limit = params.value("limit", 10);
-        size_t min_length = params.value("min_length", 200);
+        size_t limit = params.value("limit", 100);
+        std::string filter = params.value("filter", "");  // Optional domain filter
 
-        if (!mind->has_yantra()) {
-            return ToolResult::error("Yantra not ready - cannot search");
-        }
+        // Collect ALL unprocessed nodes by scanning entire storage
+        struct YajnaNode {
+            NodeId id;
+            NodeType type;
+            std::string title;
+            size_t length;
+            float epsilon;
+        };
+        std::vector<YajnaNode> nodes;
 
-        auto candidates = mind->recall(query, limit * 5);
+        mind->for_each_node([&](const NodeId& id, const Node& node) {
+            // Skip triplets and entities (already in target format)
+            if (node.node_type == NodeType::Entity || node.node_type == NodeType::Triplet) return;
+
+            std::string text(node.payload.begin(), node.payload.end());
+
+            // Skip if already processed (check tags directly to avoid lock)
+            if (std::find(node.tags.begin(), node.tags.end(), "ε-processed") != node.tags.end()) return;
+            if (std::find(node.tags.begin(), node.tags.end(), "epsilon-processed") != node.tags.end()) return;
+
+            // Apply optional domain filter
+            if (!filter.empty() && text.find(filter) == std::string::npos) return;
+
+            std::string title = extract_title(text, 80);
+            float epsilon = text.length() > 0
+                ? std::min(1.0f, static_cast<float>(title.length()) / text.length() * 10.0f)
+                : 1.0f;
+
+            YajnaNode yn;
+            yn.id = id;
+            yn.type = node.node_type;
+            yn.title = title;
+            yn.length = text.length();
+            yn.epsilon = epsilon;
+            nodes.push_back(yn);
+        });
+
+        // Sort by length descending (longest first - most to compress)
+        std::sort(nodes.begin(), nodes.end(),
+            [](const YajnaNode& a, const YajnaNode& b) {
+                return a.length > b.length;
+            });
 
         json results = json::array();
         std::ostringstream ss;
-        ss << "Verbose nodes ready for epsilon-yajna (" << min_length << "+ chars):\n";
+        ss << "Nodes for epsilon-yajna (SSL + triplet conversion):\n";
 
         size_t count = 0;
-        for (const auto& r : candidates) {
+        for (const auto& yn : nodes) {
             if (count >= limit) break;
 
-            // Skip if already processed
-            if (mind->has_tag(r.id, "epsilon-processed") || mind->has_tag(r.id, "ε-processed")) continue;
-
-            // Skip short content
-            if (r.text.length() < min_length) continue;
-
-            // Skip triplets and entities (already compressed)
-            if (r.type == NodeType::Entity || r.type == NodeType::Triplet) continue;
-
-            std::string title = extract_title(r.text, 80);
-            float epsilon = std::min(1.0f, static_cast<float>(title.length()) / r.text.length() * 10.0f);
-
             json node_json;
-            node_json["id"] = r.id.to_string();
-            node_json["type"] = node_type_to_string(r.type);
-            node_json["title"] = title;
-            node_json["length"] = r.text.length();
-            node_json["epsilon"] = epsilon;
+            node_json["id"] = yn.id.to_string();
+            node_json["type"] = node_type_to_string(yn.type);
+            node_json["title"] = yn.title;
+            node_json["length"] = yn.length;
+            node_json["epsilon"] = yn.epsilon;
             results.push_back(node_json);
 
-            ss << "\n[" << r.id.to_string() << "] " << title;
-            ss << " (" << r.text.length() << " chars, epsilon=" << static_cast<int>(epsilon * 100) << "%)";
+            ss << "\n[" << yn.id.to_string() << "] " << yn.title;
+            ss << " (" << yn.length << " chars, epsilon=" << static_cast<int>(yn.epsilon * 100) << "%)";
 
             count++;
         }
 
-        ss << "\n\nTotal: " << count << " verbose nodes";
+        ss << "\n\nTotal: " << nodes.size() << " nodes need processing";
+        if (nodes.size() > limit) {
+            ss << " (showing " << count << ")";
+        }
         return ToolResult::ok(ss.str(), results);
     };
 

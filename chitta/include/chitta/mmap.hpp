@@ -227,4 +227,91 @@ private:
     int fd_ = -1;
 };
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Grow Lock: Cross-process exclusive lock for resize operations
+// Uses fcntl (NFS-compatible) instead of flock
+// ═══════════════════════════════════════════════════════════════════════════
+class GrowLock {
+public:
+    explicit GrowLock(const std::string& base_path)
+        : lock_path_(base_path + ".grow.lock"), fd_(-1), locked_(false) {}
+
+    ~GrowLock() { unlock(); }
+
+    // Non-copyable, non-movable
+    GrowLock(const GrowLock&) = delete;
+    GrowLock& operator=(const GrowLock&) = delete;
+
+    bool lock_exclusive() {
+        fd_ = ::open(lock_path_.c_str(), O_RDWR | O_CREAT, 0644);
+        if (fd_ < 0) return false;
+
+        struct flock fl;
+        fl.l_type = F_WRLCK;
+        fl.l_whence = SEEK_SET;
+        fl.l_start = 0;
+        fl.l_len = 0;  // Lock entire file
+
+        // Non-blocking try
+        if (fcntl(fd_, F_SETLK, &fl) < 0) {
+            ::close(fd_);
+            fd_ = -1;
+            return false;
+        }
+
+        locked_ = true;
+        return true;
+    }
+
+    void unlock() {
+        if (locked_ && fd_ >= 0) {
+            struct flock fl;
+            fl.l_type = F_UNLCK;
+            fl.l_whence = SEEK_SET;
+            fl.l_start = 0;
+            fl.l_len = 0;
+            fcntl(fd_, F_SETLK, &fl);
+            locked_ = false;
+        }
+        if (fd_ >= 0) {
+            ::close(fd_);
+            fd_ = -1;
+        }
+    }
+
+    bool is_locked() const { return locked_; }
+
+private:
+    std::string lock_path_;
+    int fd_;
+    bool locked_;
+};
+
+// Helper: Extend file without affecting existing mmaps
+// Opens file, extends, closes. Does not mmap.
+inline bool extend_file(const std::string& path, size_t new_size) {
+    int fd = ::open(path.c_str(), O_RDWR);
+    if (fd < 0) return false;
+
+    struct stat st;
+    if (fstat(fd, &st) < 0) {
+        ::close(fd);
+        return false;
+    }
+
+    // Only extend, never shrink
+    if (static_cast<size_t>(st.st_size) >= new_size) {
+        ::close(fd);
+        return true;  // Already large enough
+    }
+
+    if (ftruncate(fd, new_size) < 0) {
+        ::close(fd);
+        return false;
+    }
+
+    ::close(fd);
+    return true;
+}
+
 } // namespace chitta

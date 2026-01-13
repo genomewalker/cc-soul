@@ -1149,51 +1149,70 @@ private:
                   << " binary vectors for two-stage search\n";
     }
 
-    // Grow capacity
+    // Grow capacity (atomic two-phase approach)
+    // Phase 1: Extend all files without touching existing mappings
+    // Phase 2: Create new mappings, swap in atomically, update header last
     bool grow() {
         size_t new_capacity = capacity_ * GROWTH_FACTOR;
         std::cerr << "[UnifiedIndex] Growing from " << capacity_ << " to " << new_capacity << "\n";
 
-        // Resize index file
+        // Acquire cross-process lock for grow operation
+        GrowLock lock(base_path_);
+        if (!lock.lock_exclusive()) {
+            std::cerr << "[UnifiedIndex] Could not acquire grow lock (another process growing?)\n";
+            return false;
+        }
+
         std::string idx_path = base_path_ + ".unified";
-        size_t new_idx_size = sizeof(UnifiedIndexHeader) + new_capacity * sizeof(IndexedNode);
-
-        index_region_.close();
-        int fd = ::open(idx_path.c_str(), O_RDWR);
-        if (fd < 0 || ftruncate(fd, new_idx_size) < 0) {
-            if (fd >= 0) ::close(fd);
-            return false;
-        }
-        ::close(fd);
-        if (!index_region_.open(idx_path, false)) return false;  // false = writable
-
-        // Resize vectors file
         std::string vec_path = base_path_ + ".vectors";
-        vectors_region_.close();
-        fd = ::open(vec_path.c_str(), O_RDWR);
-        if (fd < 0 || ftruncate(fd, new_capacity * sizeof(QuantizedVector)) < 0) {
-            if (fd >= 0) ::close(fd);
-            return false;
-        }
-        ::close(fd);
-        if (!vectors_region_.open(vec_path, false)) return false;  // false = writable
-
-        // Resize metadata file
         std::string meta_path = base_path_ + ".meta";
-        meta_region_.close();
-        fd = ::open(meta_path.c_str(), O_RDWR);
-        if (fd < 0 || ftruncate(fd, new_capacity * sizeof(NodeMeta)) < 0) {
-            if (fd >= 0) ::close(fd);
+
+        size_t new_idx_size = sizeof(UnifiedIndexHeader) + new_capacity * sizeof(IndexedNode);
+        size_t new_vec_size = new_capacity * sizeof(QuantizedVector);
+        size_t new_meta_size = new_capacity * sizeof(NodeMeta);
+
+        // Phase 1: Extend files WITHOUT closing existing mappings
+        // If any fails, old mappings remain valid
+        if (!extend_file(idx_path, new_idx_size)) {
+            std::cerr << "[UnifiedIndex] Failed to extend index file\n";
             return false;
         }
-        ::close(fd);
-        if (!meta_region_.open(meta_path, false)) return false;  // false = writable
+        if (!extend_file(vec_path, new_vec_size)) {
+            std::cerr << "[UnifiedIndex] Failed to extend vectors file\n";
+            return false;
+        }
+        if (!extend_file(meta_path, new_meta_size)) {
+            std::cerr << "[UnifiedIndex] Failed to extend meta file\n";
+            return false;
+        }
 
-        // Update header
+        // Phase 2: Open new mappings into temporaries
+        MappedRegion new_index, new_vectors, new_meta;
+        if (!new_index.open(idx_path, false)) {
+            std::cerr << "[UnifiedIndex] Failed to remap index\n";
+            return false;
+        }
+        if (!new_vectors.open(vec_path, false)) {
+            std::cerr << "[UnifiedIndex] Failed to remap vectors\n";
+            return false;
+        }
+        if (!new_meta.open(meta_path, false)) {
+            std::cerr << "[UnifiedIndex] Failed to remap meta\n";
+            return false;
+        }
+
+        // Phase 3: Swap mappings atomically (old mappings closed by move assignment)
+        index_region_ = std::move(new_index);
+        vectors_region_ = std::move(new_vectors);
+        meta_region_ = std::move(new_meta);
+
+        // Phase 4: Update header LAST and sync
         auto* header = index_region_.as<UnifiedIndexHeader>();
         header->capacity = new_capacity;
+        index_region_.sync();
         capacity_ = new_capacity;
 
+        std::cerr << "[UnifiedIndex] Grow complete: capacity=" << new_capacity << "\n";
         return true;
     }
 

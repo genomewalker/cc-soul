@@ -93,3 +93,7 @@ cache/
 # NFS stale handles
 .nfs*
 chitta/Testing/
+
+# IDE/Editor caches
+.cache/
+.clangd/
