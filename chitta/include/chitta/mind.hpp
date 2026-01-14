@@ -38,6 +38,7 @@
 #include "synthesis_queue.hpp"
 #include "gap_inquiry.hpp"
 #include <mutex>
+#include <shared_mutex>
 #include <atomic>
 #include <set>
 #include <deque>
@@ -75,20 +76,20 @@ public:
 
     // Attach a VakYantra for text→embedding transformation
     void attach_yantra(std::shared_ptr<VakYantra> yantra) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         yantra_ = std::move(yantra);
     }
 
-    // Check if yantra is ready for embeddings
+    // Check if yantra is ready for embeddings (read-only)
     bool has_yantra() const {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::shared_lock<std::shared_mutex> lock(mutex_);
         return yantra_ && yantra_->ready();
     }
 
     // Iterate over all nodes in storage (public wrapper)
     template<typename F>
     void for_each_node(F&& fn) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         storage_.for_each_hot([&fn](const NodeId& id, const Node& node) {
             fn(id, node);
         });
@@ -96,7 +97,7 @@ public:
 
     // Get a node by ID (returns nullptr if not found)
     Node* get_node(const NodeId& id) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         return storage_.get(id);
     }
 
@@ -107,7 +108,7 @@ public:
 
     // Initialize or load existing mind
     bool open() {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         if (!storage_.initialize()) return false;
         running_ = true;
 
@@ -238,7 +239,7 @@ public:
 
     // Close and persist
     void close() {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         running_ = false;
         // Save BM25 index if built
         if (bm25_built_ && !bm25_path_.empty() && bm25_index_.size() > 0) {
@@ -356,7 +357,7 @@ public:
 
     // Remember text: transform to embedding and store
     NodeId remember(const std::string& text, NodeType type = NodeType::Wisdom) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
 
         // Phase 7: Check quota before inserting
         if (config_.enable_quota_manager && quota_manager_.at_quota(type)) {
@@ -405,7 +406,7 @@ public:
 
     // Remember with explicit confidence
     NodeId remember(const std::string& text, NodeType type, Confidence confidence) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
 
         Artha artha = yantra_->transform(text);
 
@@ -445,7 +446,7 @@ public:
     // Remember with tags for exact-match filtering (inter-agent communication)
     NodeId remember(const std::string& text, NodeType type,
                     const std::vector<std::string>& tags) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
 
         Artha artha = yantra_->transform(text);
 
@@ -490,7 +491,7 @@ public:
     // Remember with confidence and tags
     NodeId remember(const std::string& text, NodeType type, Confidence confidence,
                     const std::vector<std::string>& tags) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
 
         Artha artha = yantra_->transform(text);
 
@@ -537,7 +538,7 @@ public:
     std::vector<Recall> recall(const std::string& query, size_t k,
                                float threshold = 0.0f,
                                SearchMode mode = SearchMode::Hybrid) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
 
         // Phase 7: Route query based on intent
         if (config_.enable_query_routing) {
@@ -611,7 +612,7 @@ public:
     std::vector<Recall> recall_primed(const std::string& query, size_t k,
                                       float threshold = 0.0f,
                                       SearchMode mode = SearchMode::Hybrid) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
 
         // Ensure session context is fresh (use unlocked versions - we hold mutex)
         refresh_session_intentions_unlocked();
@@ -631,7 +632,7 @@ public:
     // Recall by exact tag match (for inter-agent communication)
     // Returns all nodes with the given tag, sorted by recency
     std::vector<Recall> recall_by_tag(const std::string& tag, size_t k = 50) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
 
         // Sync from shared consciousness to see all observations
         sync_from_shared_field();
@@ -722,7 +723,7 @@ public:
 
     // Recall by multiple tags (AND - all must match)
     std::vector<Recall> recall_by_tags(const std::vector<std::string>& tags, size_t k = 50) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
 
         // Sync from shared consciousness to see all observations
         sync_from_shared_field();
@@ -776,7 +777,7 @@ public:
                                                 const std::string& tag,
                                                 size_t k,
                                                 float threshold = 0.0f) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
 
         // Sync from shared consciousness to see all observations
         sync_from_shared_field();
@@ -849,7 +850,7 @@ public:
     // Remember batch (more efficient)
     std::vector<NodeId> remember_batch(const std::vector<std::string>& texts,
                                        NodeType type = NodeType::Wisdom) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
 
         auto arthas = yantra_->transform_batch(texts);
 
@@ -889,7 +890,7 @@ public:
     NodeId save_ledger(const std::string& ledger_json,
                        const std::string& session_id = "",
                        const std::string& project = "") {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
 
         // Ledger content is natural language (high-ε), embedded directly
         Node node(NodeType::Ledger, Vector::zeros());
@@ -932,7 +933,7 @@ public:
     std::optional<std::pair<NodeId, std::string>> load_ledger(
         const std::string& session_id = "",
         const std::string& project = "") {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
 
         // Build tag filter
         std::vector<std::string> required_tags = {"ledger"};
@@ -988,7 +989,7 @@ public:
 
     // Update an existing ledger (merge updates into current)
     bool update_ledger(NodeId id, const std::string& updates_json) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
 
         Node* node = storage_.get(id);
         if (!node || node->node_type != NodeType::Ledger) {
@@ -1011,7 +1012,7 @@ public:
     std::vector<std::pair<NodeId, Timestamp>> list_ledgers(
         size_t limit = 10,
         const std::string& project = "") {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
 
         std::vector<NodeId> candidates;
         if (storage_.use_unified()) {
@@ -1050,7 +1051,7 @@ public:
     NodeId remember(NodeType type, Vector embedding,
                     std::vector<uint8_t> payload = {})
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
 
         Node node(type, std::move(embedding));
         node.payload = std::move(payload);
@@ -1085,7 +1086,7 @@ public:
     NodeId remember(NodeType type, Vector embedding, Confidence confidence,
                     std::vector<uint8_t> payload = {})
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
 
         Node node(type, std::move(embedding));
         node.kappa = confidence;
@@ -1121,7 +1122,7 @@ public:
     std::vector<Recall> recall(const Vector& query, size_t k,
                                float threshold = 0.0f)
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         return recall_impl(query, "", k, threshold, SearchMode::Dense);
     }
 
@@ -1131,7 +1132,7 @@ public:
 
     // Get a specific node
     std::optional<Node> get(NodeId id) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         if (Node* node = storage_.get(id)) {
             return *node;
         }
@@ -1140,7 +1141,7 @@ public:
 
     // Update a node's content (for ε-optimization migration)
     bool update_node(NodeId id, const Node& updated) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         if (Node* node = storage_.get(id)) {
             // Update all fields except id
             node->nu = updated.nu;
@@ -1164,7 +1165,7 @@ public:
 
     // Update a node's content and re-embed (for review edits)
     bool update_content(NodeId id, const std::string& new_content) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         if (Node* node = storage_.get(id)) {
             // Get old text for BM25 update
             auto old_text = payload_to_text(node->payload);
@@ -1192,7 +1193,7 @@ public:
 
     // Get text from a node (if stored as payload)
     std::optional<std::string> text(NodeId id) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         if (Node* node = storage_.get(id)) {
             return payload_to_text(node->payload);
         }
@@ -1201,7 +1202,7 @@ public:
 
     // Strengthen: increase confidence (uses WAL delta)
     void strengthen(NodeId id, float delta = 0.1f) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         if (Node* node = storage_.get(id)) {
             Confidence new_kappa = node->kappa;
             new_kappa.observe(new_kappa.mu + delta);
@@ -1211,7 +1212,7 @@ public:
 
     // Weaken: decrease confidence (uses WAL delta)
     void weaken(NodeId id, float delta = 0.1f) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         if (Node* node = storage_.get(id)) {
             Confidence new_kappa = node->kappa;
             new_kappa.observe(new_kappa.mu - delta);
@@ -1221,7 +1222,7 @@ public:
 
     // Add a tag to a node (for ε-yajna tracking)
     bool add_tag(NodeId id, const std::string& tag) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         if (Node* node = storage_.get(id)) {
             // Check if tag already exists
             if (std::find(node->tags.begin(), node->tags.end(), tag) == node->tags.end()) {
@@ -1237,7 +1238,7 @@ public:
 
     // Remove a tag from a node
     bool remove_tag(NodeId id, const std::string& tag) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         if (Node* node = storage_.get(id)) {
             auto it = std::find(node->tags.begin(), node->tags.end(), tag);
             if (it != node->tags.end()) {
@@ -1252,7 +1253,7 @@ public:
 
     // Check if node has a tag
     bool has_tag(NodeId id, const std::string& tag) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         if (Node* node = storage_.get(id)) {
             return std::find(node->tags.begin(), node->tags.end(), tag) != node->tags.end();
         }
@@ -1265,19 +1266,19 @@ public:
 
     // Set the current realm (gates which nodes are visible in recall)
     void set_realm(const std::string& realm_name) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         realm_scoping_.set_current_realm(realm_name);
     }
 
     // Create a new realm (optional parent for hierarchy)
     void create_realm(const std::string& name, const std::string& parent = "") {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         realm_scoping_.create_realm(name, parent);
     }
 
     // Get current realm name
     std::string current_realm() const {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         return realm_scoping_.current_realm().name;
     }
 
@@ -1287,7 +1288,7 @@ public:
 
     // Get provenance info for a node
     std::optional<Provenance> get_provenance(NodeId id) const {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         const Provenance* p = provenance_spine_.get(id);
         if (p) return *p;
         return std::nullopt;
@@ -1295,7 +1296,7 @@ public:
 
     // Update provenance source for a node
     void set_provenance_source(NodeId id, ProvenanceSource source, const std::string& source_url = "") {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         const Provenance* existing = provenance_spine_.get(id);
         if (existing) {
             Provenance p = *existing;
@@ -1307,7 +1308,7 @@ public:
 
     // Update provenance trust score for a node
     void update_provenance_trust(NodeId id, float delta) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         if (config_.enable_provenance) {
             provenance_spine_.update_trust(id, delta);
         }
@@ -1320,26 +1321,26 @@ public:
     // Register a contradiction between two nodes
     void add_contradiction(NodeId a, NodeId b, const std::string& description,
                           float confidence = 0.5f) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         truth_maintenance_.add_contradiction(a, b, description, confidence, now());
     }
 
     // Resolve a contradiction (one node "wins")
     void resolve_contradiction(NodeId a, NodeId b, NodeId winner,
                               NodeId resolution_node, const std::string& rationale) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         truth_maintenance_.resolve(a, b, winner, resolution_node, rationale, now());
     }
 
     // Get all unresolved contradictions
     std::vector<Contradiction> get_unresolved_contradictions() const {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         return truth_maintenance_.get_unresolved();
     }
 
     // Check if a node has unresolved conflicts
     bool has_conflicts(NodeId id) const {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         return truth_maintenance_.has_unresolved_conflicts(id);
     }
 
@@ -1362,7 +1363,7 @@ public:
     // Enqueue a node for review
     void enqueue_for_review(NodeId id, const std::string& context = "",
                            ReviewPriority priority = ReviewPriority::Normal) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         if (Node* node = storage_.get(id)) {
             auto text = payload_to_text(node->payload);
             review_queue_.enqueue(id, node->node_type, text.value_or(""),
@@ -1388,14 +1389,14 @@ public:
 
     // Stage wisdom for synthesis (instead of direct creation)
     void stage_wisdom(NodeId id, const std::string& content) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         synthesis_queue_.stage(id, content, now());
     }
 
     // Add evidence to staged wisdom
     void add_synthesis_evidence(NodeId id, Evidence::Type type, const std::string& details,
                                float weight = 1.0f, NodeId source = {}) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         Evidence e;
         e.type = type;
         e.source = source;
@@ -1408,13 +1409,13 @@ public:
     // Register a knowledge gap
     void register_gap(NodeId id, const std::string& topic, const std::string& question,
                      const std::string& context = "", GapImportance importance = GapImportance::Medium) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         gap_inquiry_.register_gap(id, topic, question, context, importance, now());
     }
 
     // Get inquiry queue (gaps ready to ask)
     std::vector<KnowledgeGap> get_inquiry_queue(size_t limit = 5) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         return gap_inquiry_.get_inquiry_queue(limit, now());
     }
 
@@ -1426,7 +1427,7 @@ public:
     PropagationResult propagate_confidence(NodeId source, float delta,
                                            float decay_factor = 0.5f,
                                            size_t max_depth = 3) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         PropagationResult result{0, 0.0f, {}};
 
         // BFS propagation with decay
@@ -1482,7 +1483,7 @@ public:
 
     // Connect: create edge between nodes (uses WAL delta)
     void connect(NodeId from, NodeId to, EdgeType type, float weight = 1.0f) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         Edge edge{to, type, weight};
         if (storage_.add_edge(from, to, type, weight)) {
             index_edge_add(from, edge);
@@ -1495,7 +1496,7 @@ public:
 
     // Tick: run one cycle of dynamics with automatic health monitoring
     DynamicsReport tick() {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
 
         // Run dynamics on graph
         DynamicsReport report = dynamics_.tick(graph_);
@@ -1532,7 +1533,7 @@ public:
 
     // Query by type
     std::vector<NodeId> by_type(NodeType type, size_t limit = 100) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
 
         std::vector<NodeId> results;
         storage_.for_each_hot([&](const NodeId& id, const Node& node) {
@@ -1550,13 +1551,13 @@ public:
     // Record an observation for session priming
     // Called when nodes are retrieved/accessed - they prime future retrievals
     void observe_for_priming(NodeId id) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         observe_for_priming_unlocked(id);
     }
 
     // Record multiple observations (batch)
     void observe_for_priming(const std::vector<NodeId>& ids) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         for (const auto& id : ids) {
             observe_for_priming_unlocked(id);
         }
@@ -1564,14 +1565,14 @@ public:
 
     // Refresh session intentions from current intention nodes
     void refresh_session_intentions() {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         refresh_session_intentions_unlocked();
     }
 
     // Build goal basin from attractors near active intentions
     // Expands the "goal neighborhood" for basin-based boosting
     void build_goal_basin(size_t basin_size = 20) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         build_goal_basin_unlocked(basin_size);
     }
 
@@ -1658,7 +1659,7 @@ public:
 
     // Clear session context (for new session)
     void clear_session_context() {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         session_context_ = SessionContext{};
         recent_observation_order_.clear();
     }
@@ -1707,26 +1708,41 @@ public:
         resonance_config_.use_utility = use_utility;
     }
 
-    // Compute coherence
+    // Compute coherence (updates internal state so not const)
     Coherence coherence() {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::shared_lock<std::shared_mutex> lock(mutex_);
         return graph_.compute_coherence();
     }
 
     // Snapshot for recovery
+    // Components handle their own thread safety:
+    // - BM25Index::save() uses shared_lock internally
+    // - UnifiedIndex::sync() uses shared_lock internally (msync is thread-safe)
+    // - Graph::snapshot() has internal mutex
+    // No Mind lock needed during I/O - keeps RPC responsive
     uint64_t snapshot() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        // Save BM25 index if built
-        if (bm25_built_ && !bm25_path_.empty() && bm25_index_.size() > 0) {
-            bm25_index_.save(bm25_path_);
+        bool should_save_bm25;
+        std::string bm25_path_copy;
+
+        {
+            std::shared_lock<std::shared_mutex> lock(mutex_);
+            should_save_bm25 = bm25_built_ && !bm25_path_.empty() && bm25_index_.size() > 0;
+            if (should_save_bm25) {
+                bm25_path_copy = bm25_path_;
+            }
+        }
+
+        // I/O without Mind lock - components are internally thread-safe
+        if (should_save_bm25) {
+            bm25_index_.save(bm25_path_copy);
         }
         storage_.sync();
         return graph_.snapshot();
     }
 
-    // Get current state
+    // Get current state (read-only)
     MindState state() const {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::shared_lock<std::shared_mutex> lock(mutex_);
         return MindState{
             graph_.current_snapshot(),
             graph_.coherence(),
@@ -1740,10 +1756,10 @@ public:
         };
     }
 
-    // Compute current health score across all dimensions
+    // Compute current health score across all dimensions (read-only)
     // Call periodically to detect degradation before it becomes critical
     MindHealth health() const {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::shared_lock<std::shared_mutex> lock(mutex_);
         return health_unlocked();
     }
 
@@ -1788,7 +1804,7 @@ public:
     // Recover from degradation - called automatically or manually
     // Returns what actions were taken (RecoveryReport defined in mind/structs.hpp)
     RecoveryReport recover() {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
 
         RecoveryReport report;
         MindHealth h_before = health_unlocked();
@@ -1842,7 +1858,7 @@ public:
 
     // Access chorus for multi-voice reasoning
     HarmonyReport harmonize(const std::vector<Voice>& voices) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         Chorus chorus(voices);
         return chorus.harmonize(graph_);
     }
@@ -2172,7 +2188,7 @@ public:
 
     // Apply pending feedback to node confidences (uses WAL delta)
     size_t apply_feedback() {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
 
         auto deltas = feedback_.process_pending();
         size_t applied = 0;
@@ -2209,7 +2225,7 @@ public:
     // When nodes are co-activated (retrieved together, spread together),
     // the connection between them strengthens
     void hebbian_strengthen(NodeId a, NodeId b, float strength = 0.1f) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         hebbian_strengthen_impl(a, b, strength);
     }
 
@@ -2218,7 +2234,7 @@ public:
     void hebbian_update(const std::vector<NodeId>& co_activated, float strength = 0.05f) {
         if (co_activated.size() < 2) return;
 
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
 
         // For all pairs (i, j) where i < j, strengthen both directions
         // Bidirectional strengthening: if A activates with B, both directions learn
@@ -2371,7 +2387,7 @@ public:
             return 0;  // Can't regenerate without yantra
         }
 
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
 
         // Collect nodes with zero vectors
         std::vector<std::pair<NodeId, std::string>> to_regenerate;
@@ -2422,7 +2438,7 @@ public:
 
     // Count nodes with zero vectors (for stats/diagnostics)
     size_t count_zero_vectors() const {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         size_t count = 0;
 
         // for_each_hot iterates all nodes (unified storage covers all tiers)
@@ -2445,7 +2461,7 @@ public:
         float decay_factor = 0.5f,
         int max_hops = 3)
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
 
         // Activation map: node -> accumulated activation
         std::unordered_map<NodeId, float, NodeIdHash> activation;
@@ -2489,7 +2505,7 @@ public:
     std::vector<Recall> resonate(const std::string& query, size_t k = 10,
                                   float spread_strength = 0.5f)
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
 
         if (!yantra_ || !yantra_->ready()) {
             return {};
@@ -2591,7 +2607,7 @@ public:
     std::vector<Attractor> find_attractors(size_t max_attractors = 10,
                                             float min_confidence = 0.6f,
                                             size_t min_edges = 2) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
 
         std::vector<Attractor> candidates;
         Timestamp current = now();
@@ -2647,7 +2663,7 @@ public:
         NodeId node_id,
         const std::vector<Attractor>& attractors)
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         return compute_attractor_pull_impl(node_id, attractors);
     }
 
@@ -2656,7 +2672,7 @@ public:
     // Returns number of nodes that settled
     size_t settle_toward_attractors(const std::vector<Attractor>& attractors,
                                      float settle_strength = 0.02f) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
 
         size_t settled = 0;
 
@@ -2693,7 +2709,7 @@ public:
     // Returns map of attractor_id -> list of node_ids in that basin
     std::unordered_map<NodeId, std::vector<NodeId>, NodeIdHash>
     compute_basins(const std::vector<Attractor>& attractors) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
 
         std::unordered_map<NodeId, std::vector<NodeId>, NodeIdHash> basins;
 
@@ -2838,7 +2854,7 @@ public:
 
     // Compute epiplexity for a node (public, thread-safe)
     float compute_epiplexity(const NodeId& id) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         Node* node = storage_.get(id);
         if (!node) return 0.0f;
 
@@ -2849,7 +2865,7 @@ public:
     // Compute epiplexity for all hot nodes and return statistics
     // (EpiplexityStats defined in mind/structs.hpp)
     EpiplexityStats compute_soul_epiplexity() {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
 
         auto attractors = find_attractors_unlocked(10);
         std::vector<std::pair<NodeId, float>> node_epiplexity;
@@ -2895,7 +2911,7 @@ public:
         auto results = resonate(query, k * 2, spread_strength);
         if (results.empty()) return results;
 
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
 
         // Find attractors
         auto attractors = find_attractors(5);
@@ -2953,7 +2969,7 @@ public:
                                        size_t k = 10,
                                        float spread_strength = 0.5f,
                                        float hebbian_strength = 0.03f) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
 
         if (!yantra_ || !yantra_->ready()) {
             return {};
@@ -3672,7 +3688,7 @@ public:
         size_t k = 10,
         float epsilon = 0.05f)
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
 
         if (!yantra_ || !yantra_->ready()) return {};
 
@@ -3813,13 +3829,13 @@ private:
 public:
     // Remove a node by ID
     bool remove_node(const NodeId& id) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         return storage_.remove(id);
     }
 
     // Merge two nodes: keeper absorbs merged, merged is deleted
     bool merge_nodes(const NodeId& keeper_id, const NodeId& merged_id) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
 
         Node* keeper = storage_.get(keeper_id);
         Node* merged = storage_.get(merged_id);
@@ -3841,7 +3857,7 @@ public:
         Timestamp to,
         size_t limit = 50)
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
 
         std::vector<Recall> results;
 
@@ -3912,7 +3928,7 @@ public:
         size_t max_depth = 5,
         float min_confidence = 0.3f)
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
 
         std::vector<CausalChain> chains;
         Node* effect_node = storage_.get(effect);
@@ -4000,7 +4016,7 @@ public:
     }
 
     MindConfig config_;
-    mutable std::mutex mutex_;
+    mutable std::shared_mutex mutex_;  // Reader-writer lock: shared for reads, unique for writes
     TieredStorage storage_;
     Graph graph_;
     GraphStore graph_store_;  // Dictionary-encoded graph (legacy)

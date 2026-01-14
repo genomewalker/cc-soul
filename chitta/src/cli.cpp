@@ -709,6 +709,7 @@ int cmd_daemon(Mind& mind, int interval_seconds, const std::string& pid_file, co
 
 // Socket server mode: daemon + RPC handler over Unix socket
 // Note: daemonization happens BEFORE Mind is opened (in main)
+// Architecture: main thread handles socket I/O, separate thread handles maintenance
 int cmd_daemon_with_socket(Mind& mind, int interval_seconds,
                            const std::string& pid_file,
                            const std::string& socket_path,
@@ -748,10 +749,71 @@ int cmd_daemon_with_socket(Mind& mind, int interval_seconds,
     std::cerr << "[daemon] Started (socket=" << socket_path
               << ", interval=" << interval_seconds << "s, pid=" << getpid() << ")\n";
 
-    size_t cycle_count = 0;
-    auto last_maintenance = std::chrono::steady_clock::now();
-    auto maintenance_interval = std::chrono::seconds(interval_seconds);
+    // Maintenance thread - runs independently from socket handling
+    std::atomic<size_t> cycle_count{0};
+    std::thread maintenance_thread([&]() {
+        auto maintenance_interval = std::chrono::seconds(interval_seconds);
+        auto last_maintenance = std::chrono::steady_clock::now();
+        float last_tau = 1.0f;
 
+        while (daemon_running) {
+            // Sleep in small increments to check daemon_running frequently
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+            auto now_time = std::chrono::steady_clock::now();
+            if (now_time - last_maintenance < maintenance_interval) {
+                continue;
+            }
+
+            last_maintenance = now_time;
+            cycle_count++;
+            auto start = std::chrono::steady_clock::now();
+
+            try {
+                // Subconscious processing - uses reader-writer lock so
+                // doesn't block read-only RPC requests
+                auto report = mind.tick();
+                size_t synthesized = mind.synthesize_wisdom();
+                size_t feedback = mind.apply_feedback();
+                auto attractor_report = mind.run_attractor_dynamics(5, 0.01f);
+                mind.snapshot();  // Releases lock before disk I/O
+
+                // Coherence monitoring (webhook-ready)
+                auto coherence = mind.coherence();
+                float tau = coherence.tau_k();
+
+                // Alert on significant coherence drop
+                if (tau < 0.5f && last_tau >= 0.5f) {
+                    std::cerr << "[maintenance] WARNING: Coherence dropped below 50% (tau="
+                              << static_cast<int>(tau * 100) << "%)\n";
+                } else if (tau < 0.3f) {
+                    std::cerr << "[maintenance] CRITICAL: Coherence very low (tau="
+                              << static_cast<int>(tau * 100) << "%)\n";
+                }
+                last_tau = tau;
+
+                auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - start).count();
+
+                // Log activity (sparse)
+                if (synthesized > 0 || feedback > 0 || attractor_report.nodes_settled > 0) {
+                    std::cerr << "[maintenance] Cycle " << cycle_count << ": "
+                              << "synth=" << synthesized << " feedback=" << feedback
+                              << " settled=" << attractor_report.nodes_settled
+                              << " tau=" << static_cast<int>(tau * 100) << "%"
+                              << " (" << elapsed << "ms)\n";
+                }
+            } catch (const std::exception& e) {
+                std::cerr << "[maintenance] Cycle " << cycle_count
+                          << " failed: " << e.what() << "\n";
+            } catch (...) {
+                std::cerr << "[maintenance] Cycle " << cycle_count
+                          << " failed: unknown error\n";
+            }
+        }
+    });
+
+    // Main loop - dedicated to socket I/O only
     while (daemon_running) {
         // Poll for socket activity (100ms timeout for responsiveness)
         auto requests = server.poll(100);
@@ -782,59 +844,11 @@ int cmd_daemon_with_socket(Mind& mind, int interval_seconds,
                 server.respond(req.client_fd, error);
             }
         }
+    }
 
-        // Check if it's time for maintenance
-        auto now_time = std::chrono::steady_clock::now();
-        if (now_time - last_maintenance >= maintenance_interval) {
-            last_maintenance = now_time;
-            cycle_count++;
-
-            auto start = std::chrono::steady_clock::now();
-
-            try {
-                // Subconscious processing
-                auto report = mind.tick();
-                size_t synthesized = mind.synthesize_wisdom();
-                size_t feedback = mind.apply_feedback();
-                auto attractor_report = mind.run_attractor_dynamics(5, 0.01f);
-                mind.snapshot();
-
-                // Coherence monitoring (webhook-ready)
-                auto coherence = mind.coherence();
-                static float last_tau = 1.0f;
-                float tau = coherence.tau_k();
-
-                // Alert on significant coherence drop
-                if (tau < 0.5f && last_tau >= 0.5f) {
-                    std::cerr << "[daemon] WARNING: Coherence dropped below 50% (tau="
-                              << static_cast<int>(tau * 100) << "%)\n";
-                    // Future: webhook call here
-                } else if (tau < 0.3f) {
-                    std::cerr << "[daemon] CRITICAL: Coherence very low (tau="
-                              << static_cast<int>(tau * 100) << "%)\n";
-                }
-                last_tau = tau;
-
-                auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::steady_clock::now() - start).count();
-
-                // Log activity (sparse)
-                if (synthesized > 0 || feedback > 0 || attractor_report.nodes_settled > 0) {
-                    std::cerr << "[daemon] Cycle " << cycle_count << ": "
-                              << "synth=" << synthesized << " feedback=" << feedback
-                              << " settled=" << attractor_report.nodes_settled
-                              << " tau=" << static_cast<int>(tau * 100) << "%"
-                              << " clients=" << server.connection_count()
-                              << " (" << elapsed << "ms)\n";
-                }
-            } catch (const std::exception& e) {
-                std::cerr << "[daemon] Cycle " << cycle_count
-                          << " failed: " << e.what() << "\n";
-            } catch (...) {
-                std::cerr << "[daemon] Cycle " << cycle_count
-                          << " failed: unknown error\n";
-            }
-        }
+    // Wait for maintenance thread to finish
+    if (maintenance_thread.joinable()) {
+        maintenance_thread.join();
     }
 
     // Cleanup

@@ -453,6 +453,8 @@ public:
     }
 
     void sync() {
+        // msync() is thread-safe, use shared_lock to allow concurrent reads
+        std::shared_lock lock(mutex_);
         connections_.sync();
         payloads_.sync();
         edges_.sync();

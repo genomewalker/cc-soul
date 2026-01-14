@@ -11,6 +11,7 @@
 #include <sstream>
 #include <algorithm>
 #include <cctype>
+#include <shared_mutex>
 
 namespace chitta {
 
@@ -294,9 +295,11 @@ public:
         auto tokens = tokenize(text);
         if (tokens.empty()) return;
 
+        std::unique_lock lock(mutex_);
+
         // Remove if already exists (update case)
         if (doc_lengths_.count(id)) {
-            remove(id);
+            remove_unlocked(id);
         }
 
         doc_lengths_[id] = tokens.size();
@@ -324,36 +327,8 @@ public:
 
     // Remove a document - O(terms in doc)
     void remove(NodeId id) {
-        auto it = doc_terms_.find(id);
-        if (it == doc_terms_.end()) return;
-
-        // Remove from posting lists
-        for (const auto& [term, freq] : it->second) {
-            auto pit = postings_.find(term);
-            if (pit != postings_.end()) {
-                auto& list = pit->second;
-                list.erase(
-                    std::remove_if(list.begin(), list.end(),
-                        [&id](const Posting& p) { return p.doc_id == id; }),
-                    list.end());
-                if (list.empty()) {
-                    postings_.erase(pit);
-                }
-            }
-
-            if (--doc_freqs_[term] == 0) {
-                doc_freqs_.erase(term);
-            }
-        }
-
-        total_length_ -= doc_lengths_[id];
-        doc_count_--;
-
-        doc_terms_.erase(it);
-        doc_lengths_.erase(id);
-
-        // Invalidate IDF cache
-        idf_dirty_ = true;
+        std::unique_lock lock(mutex_);
+        remove_unlocked(id);
     }
 
     // Search with BM25 scoring - O(query_terms × avg_posting_length)
@@ -361,12 +336,17 @@ public:
         const std::string& query, size_t limit) const
     {
         auto query_tokens = tokenize(query);
-        if (query_tokens.empty() || doc_count_ == 0) return {};
 
-        // Refresh IDF cache if needed
+        // Refresh IDF cache if needed (requires unique lock)
         if (idf_dirty_) {
-            refresh_idf_cache();
+            std::unique_lock lock(mutex_);
+            if (idf_dirty_) {  // Double-check after acquiring lock
+                refresh_idf_cache();
+            }
         }
+
+        std::shared_lock lock(mutex_);
+        if (query_tokens.empty() || doc_count_ == 0) return {};
 
         float avg_dl = static_cast<float>(total_length_) / doc_count_;
 
@@ -416,7 +396,10 @@ public:
         return results;
     }
 
-    size_t size() const { return doc_count_; }
+    size_t size() const {
+        std::shared_lock lock(mutex_);
+        return doc_count_;
+    }
 
     // Statistics for debugging
     size_t vocab_size() const { return postings_.size(); }
@@ -436,6 +419,8 @@ public:
     static constexpr uint32_t BM25_VERSION = 2;  // v2 adds forward index
 
     bool save(const std::string& path) const {
+        std::shared_lock lock(mutex_);
+
         FILE* f = fopen(path.c_str(), "wb");
         if (!f) return false;
 
@@ -516,6 +501,8 @@ public:
     }
 
     bool load(const std::string& path) {
+        std::unique_lock lock(mutex_);
+
         FILE* f = fopen(path.c_str(), "rb");
         if (!f) return false;
 
@@ -672,6 +659,35 @@ public:
     }
 
 private:
+    // Remove without locking (called from add() which already holds lock)
+    void remove_unlocked(NodeId id) {
+        auto it = doc_terms_.find(id);
+        if (it == doc_terms_.end()) return;
+
+        for (const auto& [term, freq] : it->second) {
+            auto pit = postings_.find(term);
+            if (pit != postings_.end()) {
+                auto& list = pit->second;
+                list.erase(
+                    std::remove_if(list.begin(), list.end(),
+                        [&id](const Posting& p) { return p.doc_id == id; }),
+                    list.end());
+                if (list.empty()) {
+                    postings_.erase(pit);
+                }
+            }
+            if (--doc_freqs_[term] == 0) {
+                doc_freqs_.erase(term);
+            }
+        }
+
+        total_length_ -= doc_lengths_[id];
+        doc_count_--;
+        doc_terms_.erase(it);
+        doc_lengths_.erase(id);
+        idf_dirty_ = true;
+    }
+
     // Refresh IDF cache - called lazily before search
     void refresh_idf_cache() const {
         idf_cache_.clear();
@@ -702,6 +718,9 @@ private:
     // Cached IDF values (refreshed lazily)
     mutable std::unordered_map<std::string, float> idf_cache_;
     mutable bool idf_dirty_ = true;
+
+    // Thread safety: shared for reads (search, save, size), unique for writes (add, remove, load)
+    mutable std::shared_mutex mutex_;
 };
 
 
