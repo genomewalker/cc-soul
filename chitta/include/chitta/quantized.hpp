@@ -8,14 +8,28 @@
 
 namespace chitta {
 
-// Quantized 384-dim vector: 392 bytes vs 1536 bytes (74% savings)
+// Quantized 384-dim vector: 396 bytes vs 1536 bytes (74% savings)
 struct QuantizedVector {
     int8_t data[EMBED_DIM];  // 384 bytes
     float scale;              // 4 bytes
     float offset;             // 4 bytes
+    mutable int32_t cached_norm_sq_ = 0;  // Cached squared norm (lazy computed)
+    mutable bool norm_valid_ = false;      // Is cached norm valid?
 
     QuantizedVector() : scale(1.0f), offset(0.0f) {
         std::memset(data, 0, EMBED_DIM);
+    }
+
+    // Get squared norm (cached for O(1) repeated access)
+    int32_t norm_squared() const {
+        if (!norm_valid_) {
+            cached_norm_sq_ = 0;
+            for (size_t i = 0; i < EMBED_DIM; ++i) {
+                cached_norm_sq_ += static_cast<int32_t>(data[i]) * static_cast<int32_t>(data[i]);
+            }
+            norm_valid_ = true;
+        }
+        return cached_norm_sq_;
     }
 
     // Quantize from float32
@@ -57,19 +71,16 @@ struct QuantizedVector {
     }
 
     // Fast approximate cosine similarity (without full dequantization)
+    // Uses cached norms for O(EMBED_DIM) instead of O(3*EMBED_DIM)
     float cosine_approx(const QuantizedVector& other) const {
         int32_t dot = 0;
-        int32_t norm_a = 0;
-        int32_t norm_b = 0;
-
         for (size_t i = 0; i < EMBED_DIM; ++i) {
             dot += static_cast<int32_t>(data[i]) * static_cast<int32_t>(other.data[i]);
-            norm_a += static_cast<int32_t>(data[i]) * static_cast<int32_t>(data[i]);
-            norm_b += static_cast<int32_t>(other.data[i]) * static_cast<int32_t>(other.data[i]);
         }
 
-        float denom = std::sqrt(static_cast<float>(norm_a)) *
-                      std::sqrt(static_cast<float>(norm_b));
+        // Use cached norms - only computed once per vector
+        float denom = std::sqrt(static_cast<float>(norm_squared())) *
+                      std::sqrt(static_cast<float>(other.norm_squared()));
         return denom > 0.0f ? static_cast<float>(dot) / denom : 0.0f;
     }
 
@@ -79,7 +90,8 @@ struct QuantizedVector {
     }
 };
 
-static_assert(sizeof(QuantizedVector) == EMBED_DIM + 8, "QuantizedVector should be 392 bytes");
+// QuantizedVector: 384 (data) + 4 (scale) + 4 (offset) + 4 (cached_norm) + 1 (bool) + padding
+static_assert(sizeof(QuantizedVector) <= EMBED_DIM + 16, "QuantizedVector size check");
 
 // Binary quantized vector: 48 bytes for 384 dims (32x compression vs float32)
 // Uses sign bit: positive → 1, negative → 0

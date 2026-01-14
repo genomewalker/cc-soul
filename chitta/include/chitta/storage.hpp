@@ -561,9 +561,52 @@ public:
         }
         capacity_ = header->node_count;  // Set to current count for existing file
 
-        // Rebuild HNSW index from stored vectors
-        rebuild_index();
+        // Try to load persisted HNSW index, only rebuild if missing/invalid
+        if (!load_index()) {
+            std::cerr << "[WarmStorage] Rebuilding HNSW index...\n";
+            rebuild_index();
+            save_index();  // Persist for next time
+        }
         return true;
+    }
+
+    // Load persisted HNSW index from .hnsw file
+    bool load_index() {
+        std::string hnsw_path = path_ + ".hnsw";
+        std::ifstream in(hnsw_path, std::ios::binary);
+        if (!in) return false;
+
+        in.seekg(0, std::ios::end);
+        size_t size = in.tellg();
+        in.seekg(0, std::ios::beg);
+
+        if (size < 16) return false;  // Too small to be valid
+
+        std::vector<uint8_t> data(size);
+        if (!in.read(reinterpret_cast<char*>(data.data()), size)) {
+            return false;
+        }
+
+        try {
+            index_ = HNSWIndex::deserialize(data);
+            std::cerr << "[WarmStorage] Loaded HNSW index (" << index_.size() << " nodes)\n";
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
+    // Save HNSW index to .hnsw file
+    void save_index() {
+        if (path_.empty()) return;
+        std::string hnsw_path = path_ + ".hnsw";
+        auto data = index_.serialize();
+
+        std::ofstream out(hnsw_path, std::ios::binary | std::ios::trunc);
+        if (out) {
+            out.write(reinterpret_cast<const char*>(data.data()), data.size());
+            std::cerr << "[WarmStorage] Saved HNSW index (" << index_.size() << " nodes)\n";
+        }
     }
 
     bool create(const std::string& path, size_t estimated_nodes) {
@@ -593,6 +636,10 @@ public:
     }
 
     void close() {
+        // Persist HNSW index before closing
+        if (!index_.empty()) {
+            save_index();
+        }
         region_.close();
         id_to_index_.clear();
     }

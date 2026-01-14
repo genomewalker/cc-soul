@@ -110,23 +110,37 @@ public:
         return results;
     }
 
-    // Remove a node (optimized O(m) by tracking bidirectional connections)
+    // Remove a node - O(m) using reverse index instead of O(n*m) scanning
     void remove(NodeId id) {
         auto it = nodes_.find(id);
         if (it == nodes_.end()) return;
 
-        // Remove from neighbors' connection lists
+        // Use reverse index to find all nodes pointing TO this node
+        auto rev_it = reverse_connections_.find(id);
+        if (rev_it != reverse_connections_.end()) {
+            for (size_t l = 0; l < rev_it->second.size(); ++l) {
+                for (const auto& pointer_id : rev_it->second[l]) {
+                    auto nit = nodes_.find(pointer_id);
+                    if (nit != nodes_.end() && l < nit->second->connections.size()) {
+                        auto& conns = nit->second->connections[l];
+                        auto conn_it = std::find(conns.begin(), conns.end(), id);
+                        if (conn_it != conns.end()) {
+                            conns.erase(conn_it);
+                        }
+                    }
+                }
+            }
+            reverse_connections_.erase(rev_it);
+        }
+
+        // Remove this node's outgoing connections from neighbors' reverse indices
         auto& node = it->second;
         for (size_t l = 0; l < node->connections.size(); ++l) {
             for (const auto& neighbor_id : node->connections[l]) {
-                auto nit = nodes_.find(neighbor_id);
-                if (nit != nodes_.end()) {
-                    auto& conns = nit->second->connections[l];
-                    // Use unordered_map for O(1) lookup instead of linear scan
-                    auto conn_it = std::find(conns.begin(), conns.end(), id);
-                    if (conn_it != conns.end()) {
-                        conns.erase(conn_it);
-                    }
+                auto neighbor_rev_it = reverse_connections_.find(neighbor_id);
+                if (neighbor_rev_it != reverse_connections_.end() &&
+                    l < neighbor_rev_it->second.size()) {
+                    neighbor_rev_it->second[l].erase(id);
                 }
             }
         }
@@ -268,7 +282,24 @@ public:
             index.nodes_[id] = node;
         }
 
+        // Rebuild reverse connections from forward connections
+        index.rebuild_reverse_connections();
+
         return index;
+    }
+
+    // Rebuild reverse_connections_ from forward connections
+    void rebuild_reverse_connections() {
+        reverse_connections_.clear();
+        for (const auto& [id, node] : nodes_) {
+            for (size_t l = 0; l < node->connections.size(); ++l) {
+                for (const auto& neighbor_id : node->connections[l]) {
+                    auto& rev = reverse_connections_[neighbor_id];
+                    if (rev.size() <= l) rev.resize(l + 1);
+                    rev[l].insert(id);
+                }
+            }
+        }
     }
 
 private:
@@ -376,11 +407,20 @@ private:
             NodeId neighbor_id = candidates[i].id;
             node->connections[layer].push_back(neighbor_id);
 
-            // Add reverse connection
+            // Track reverse connection: neighbor_id is pointed to by node->id
+            auto& rev = reverse_connections_[neighbor_id];
+            if (rev.size() <= layer) rev.resize(layer + 1);
+            rev[layer].insert(node->id);
+
+            // Add bidirectional connection
             auto& neighbor = nodes_[neighbor_id];
             if (layer < neighbor->connections.size()) {
                 if (neighbor->connections[layer].size() < M) {
                     neighbor->connections[layer].push_back(node->id);
+                    // Track reverse: node->id is pointed to by neighbor_id
+                    auto& rev2 = reverse_connections_[node->id];
+                    if (rev2.size() <= layer) rev2.resize(layer + 1);
+                    rev2[layer].insert(neighbor_id);
                 }
             }
         }
@@ -388,6 +428,9 @@ private:
 
     HNSWConfig config_;
     std::unordered_map<NodeId, std::shared_ptr<HNSWNode>, NodeIdHash> nodes_;
+    // Reverse index: for each node, track all nodes that point TO it (per layer)
+    // Enables O(1) removal instead of O(n*m) scanning
+    std::unordered_map<NodeId, std::vector<std::unordered_set<NodeId, NodeIdHash>>, NodeIdHash> reverse_connections_;
     NodeId entry_point_;
     size_t max_level_ = 0;
     mutable std::mt19937 rng_;
