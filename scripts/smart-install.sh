@@ -21,9 +21,10 @@ MARKER="$PLUGIN_DIR/.install-complete"
 GITHUB_REPO="genomewalker/cc-soul"
 RELEASE_URL="https://github.com/$GITHUB_REPO/releases/download"
 
-# ONNX model checksums (SHA256)
-MODEL_CHECKSUM="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"  # placeholder
-VOCAB_CHECKSUM="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"  # placeholder
+# ONNX model checksums (SHA256) - empty hash = skip verification
+# TODO: compute actual checksums when models are pinned
+MODEL_CHECKSUM=""
+VOCAB_CHECKSUM=""
 
 # Detect platform
 detect_platform() {
@@ -63,20 +64,17 @@ download() {
     fi
 }
 
-# Verify checksum
+# Verify checksum (empty expected = skip verification)
 verify_checksum() {
     local file="$1"
     local expected="$2"
 
-    if [[ "$expected" == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" ]]; then
-        # Placeholder checksum - skip verification
-        return 0
-    fi
+    [[ -z "$expected" ]] && return 0  # Skip if no checksum provided
 
     local actual
-    if command -v sha256sum &> /dev/null; then
+    if command -v sha256sum &>/dev/null; then
         actual=$(sha256sum "$file" | cut -d' ' -f1)
-    elif command -v shasum &> /dev/null; then
+    elif command -v shasum &>/dev/null; then
         actual=$(shasum -a 256 "$file" | cut -d' ' -f1)
     else
         return 0  # Can't verify, assume OK
@@ -103,7 +101,7 @@ download_binaries() {
             # Verify binaries can actually run (check for missing shared libs)
             # The bundled libs should be found via RPATH=$ORIGIN
             if "$BIN_DIR/chittad" --help >/dev/null 2>&1 && \
-               "$BIN_DIR/chitta_migrate" --help >/dev/null 2>&1; then
+               "$BIN_DIR/chitta" --help >/dev/null 2>&1; then
                 echo "[cc-soul] Pre-built binaries installed"
                 return 0
             else
@@ -262,59 +260,30 @@ configure_permissions() {
     fi
 }
 
-# Create symlinks, handling dangling targets gracefully
-create_symlinks() {
+# Create directories (symlinks no longer needed - mind is at ~/.claude/mind)
+create_directories() {
     mkdir -p "${HOME}/.claude/mind"
     mkdir -p "${HOME}/.claude/bin"
-    mkdir -p "$PLUGIN_DIR/mind"
-
-    # Binaries now install directly to ~/.claude/bin, no symlinks needed
-
-    # If both directories resolve to the same path, skip file symlinks
-    local user_mind_resolved=$(readlink -f "${HOME}/.claude/mind" 2>/dev/null || echo "${HOME}/.claude/mind")
-    local plugin_mind_resolved=$(readlink -f "$PLUGIN_DIR/mind" 2>/dev/null || echo "$PLUGIN_DIR/mind")
-
-    if [[ "$user_mind_resolved" == "$plugin_mind_resolved" ]]; then
-        return 0
-    fi
-
-    for ext in hot warm cold wal unified vectors meta connections payloads edges tags; do
-        local target="${HOME}/.claude/mind/chitta.$ext"
-        local link="$PLUGIN_DIR/mind/chitta.$ext"
-
-        # Touch target if it doesn't exist (prevents dangling symlink issues)
-        [[ -e "$target" ]] || touch "$target"
-
-        ln -sfn "$target" "$link"
-    done
 }
 
-# Stop any running daemon (gracefully via socket, fallback to signals)
+# Stop any running daemon (gracefully via chittad shutdown, fallback to signals)
 stop_daemon() {
-    # Try graceful shutdown via thin client (preferred)
-    if [[ -x "$BIN_DIR/chitta" ]]; then
-        if "$BIN_DIR/chitta" shutdown 2>/dev/null; then
-            return 0
-        fi
-    fi
-
-    # Try via CLI if thin client not available
+    # Try graceful shutdown via chittad
     if [[ -x "$BIN_DIR/chittad" ]]; then
-        if "$BIN_DIR/chittad" shutdown 2>/dev/null; then
-            return 0
-        fi
+        "$BIN_DIR/chittad" shutdown 2>/dev/null && sleep 1 && return 0
     fi
 
-    # Fallback: find and signal daemon directly
+    # Fallback: signal daemon directly
     local daemon_pid=$(pgrep -f "chittad daemon" 2>/dev/null || true)
     if [[ -n "$daemon_pid" ]]; then
-        echo "[cc-soul] Stopping daemon (pid $daemon_pid) via signal..."
+        echo "[cc-soul] Stopping daemon (pid $daemon_pid)..."
         kill -TERM "$daemon_pid" 2>/dev/null || true
-        sleep 0.5
-        kill -9 "$daemon_pid" 2>/dev/null || true
+        sleep 1
+        kill -0 "$daemon_pid" 2>/dev/null && kill -9 "$daemon_pid" 2>/dev/null || true
     fi
-    # Clean up stale sockets
-    rm -f /tmp/chitta*.sock 2>/dev/null || true
+
+    # Clean up stale files
+    rm -f /tmp/chitta-*.sock /tmp/chitta-*.lock /tmp/chitta-*.pid 2>/dev/null || true
 }
 
 validate_binaries() {
@@ -352,7 +321,12 @@ validate_binaries() {
 # Main
 main() {
     # Check if already installed
-    local current_version=$(grep '"version"' "$PLUGIN_DIR/.claude-plugin/plugin.json" 2>/dev/null | cut -d'"' -f4 || echo "0.0.0")
+    local current_version
+    if command -v jq &>/dev/null; then
+        current_version=$(jq -r '.version // "0.0.0"' "$PLUGIN_DIR/.claude-plugin/plugin.json" 2>/dev/null || echo "0.0.0")
+    else
+        current_version=$(grep '"version"' "$PLUGIN_DIR/.claude-plugin/plugin.json" 2>/dev/null | head -1 | sed 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || echo "0.0.0")
+    fi
     local installed_version=$(cat "$MARKER" 2>/dev/null || echo "")
 
     if [[ "$current_version" == "$installed_version" && -x "$BIN_DIR/chitta" && -f "$MODELS_DIR/model.onnx" ]]; then
@@ -389,8 +363,8 @@ main() {
         fi
     fi
 
-    # Create symlinks
-    create_symlinks
+    # Create directories
+    create_directories
 
     # Configure bash permissions for chitta commands
     configure_permissions
