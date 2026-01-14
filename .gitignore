@@ -98,3 +98,4 @@ chitta/Testing/
 .cache/
 .clangd/
 chitta/.cache/clangd/
+nohup.out
