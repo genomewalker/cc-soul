@@ -1,7 +1,7 @@
 {
   "name": "cc-soul",
   "description": "Persistent identity for Claude Code. Wisdom, beliefs, failures, and continuity across sessions.",
-  "version": "2.50.1",
+  "version": "2.51.0",
   "author": {
     "name": "Antonio Fernandez-Guerra",
     "url": "https://github.com/genomewalker"

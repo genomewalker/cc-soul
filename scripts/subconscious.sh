@@ -13,8 +13,8 @@ CHITTA_CLI="${HOME}/.claude/bin/chittad"
 MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind/chitta}"
 MODEL_PATH="${HOME}/.claude/bin/model.onnx"
 VOCAB_PATH="${HOME}/.claude/bin/vocab.txt"
-PID_FILE="${HOME}/.claude/mind/.subconscious.pid"
 LOG_FILE="${HOME}/.claude/mind/.subconscious.log"
+# PID_FILE is defined after MIND_HASH calculation below
 INTERVAL="${SUBCONSCIOUS_INTERVAL:-60}"
 TIMEOUT_CMD=()
 TIMEOUT_WARNED=false
@@ -53,6 +53,7 @@ djb2_hash() {
 MIND_HASH=$(djb2_hash "$MIND_PATH")
 LOCK_FILE="/tmp/chitta-${MIND_HASH}.lock"
 SOCKET_PATH="/tmp/chitta-${MIND_HASH}.sock"
+PID_FILE="/tmp/chitta-${MIND_HASH}.pid"  # Daemon writes PID here
 
 is_running() {
     # First check PID file
@@ -91,28 +92,7 @@ cmd_start() {
         return 1
     fi
 
-    # Acquire lock to prevent race with MCP clients
-    exec 200>"$LOCK_FILE"
-    if ! flock -n 200; then
-        echo "[subconscious] Another process is starting daemon, waiting..."
-        flock 200 || {
-            echo "[subconscious] Failed to acquire lock" >&2
-            return 1
-        }
-    fi
-
-    # Re-check after acquiring lock
-    if is_running; then
-        local pid
-        if [[ -f "$PID_FILE" ]]; then
-            pid=$(cat "$PID_FILE")
-        else
-            pid=$(pgrep -f "chittad daemon" | head -1)
-        fi
-        echo "[subconscious] Already running (started by another process, pid=$pid)"
-        exec 200>&-  # Release lock
-        return 0
-    fi
+    # Daemon handles its own locking via fcntl - no need for flock here
 
     # Detect supported daemon flags (avoid incompatible binaries)
     local daemon_help
@@ -137,7 +117,6 @@ cmd_start() {
 
     if [[ -n "$daemon_help" && "$support_socket" != "true" ]]; then
         echo "[subconscious] Daemon does not support --socket; aborting startup" >&2
-        exec 200>&-
         return 1
     fi
 
@@ -147,17 +126,12 @@ cmd_start() {
     fi
     if [[ "$support_interval" == "true" ]]; then
         daemon_args+=("--interval" "$INTERVAL")
-    else
-        echo "[subconscious] --interval not supported; using daemon default" >&2
     fi
-    if [[ "$support_pid" == "true" ]]; then
-        daemon_args+=("--pid-file" "$PID_FILE")
-    else
-        echo "[subconscious] --pid-file not supported; PID file not written" >&2
-    fi
+    # Daemon self-daemonizes and logs to ~/.claude/mind/.subconscious.log by default
+    # No need for nohup wrapper or --pid-file (PID is written to /tmp/chitta-HASH.pid)
 
-    # Start daemon in background with socket server for MCP clients
-    nohup "$CHITTA_CLI" "${daemon_args[@]}" >> "$LOG_FILE" 2>&1 &
+    # Start daemon - it will fork and return immediately
+    "$CHITTA_CLI" "${daemon_args[@]}" 2>>"$LOG_FILE"
 
     # Wait for socket AND verify daemon responds
     # This ensures the daemon is fully ready for MCP clients
@@ -191,9 +165,6 @@ cmd_start() {
 
         sleep 0.1
     done
-
-    # Release lock
-    exec 200>&-
 
     if $daemon_ready && is_running; then
         local pid=$(cat "$PID_FILE" 2>/dev/null || pgrep -f "chittad daemon" | head -1)

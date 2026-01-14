@@ -30,8 +30,66 @@
 #include <sstream>
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/stat.h>
 
 using namespace chitta;
+
+// Daemonize the process using double-fork
+// Returns true if we're now the daemon, false if daemonization failed
+// log_path: where to redirect stdout/stderr (empty = /dev/null)
+bool daemonize(const std::string& log_path) {
+    // First fork - parent exits, child continues
+    pid_t pid = fork();
+    if (pid < 0) {
+        std::cerr << "[daemon] First fork failed: " << strerror(errno) << "\n";
+        return false;
+    }
+    if (pid > 0) {
+        // Parent: exit cleanly (child will continue)
+        _exit(0);
+    }
+
+    // Child: create new session to detach from terminal
+    if (setsid() < 0) {
+        std::cerr << "[daemon] setsid failed: " << strerror(errno) << "\n";
+        return false;
+    }
+
+    // Second fork - prevents acquiring a controlling terminal
+    pid = fork();
+    if (pid < 0) {
+        std::cerr << "[daemon] Second fork failed: " << strerror(errno) << "\n";
+        return false;
+    }
+    if (pid > 0) {
+        // First child exits, grandchild continues as daemon
+        _exit(0);
+    }
+
+    // Daemon process: set up environment
+    umask(0);
+    if (chdir("/") < 0) {
+        // Non-fatal, just log
+    }
+
+    // Redirect stdin to /dev/null
+    int null_fd = open("/dev/null", O_RDONLY);
+    if (null_fd >= 0) {
+        dup2(null_fd, STDIN_FILENO);
+        close(null_fd);
+    }
+
+    // Redirect stdout/stderr to log file or /dev/null
+    const char* out_path = log_path.empty() ? "/dev/null" : log_path.c_str();
+    int log_fd = open(out_path, O_WRONLY | O_CREAT | O_APPEND, 0644);
+    if (log_fd >= 0) {
+        dup2(log_fd, STDOUT_FILENO);
+        dup2(log_fd, STDERR_FILENO);
+        close(log_fd);
+    }
+
+    return true;
+}
 
 // Generate stats JSON for daemon socket endpoint and CLI
 std::string generate_stats_json(Mind& mind) {
@@ -97,6 +155,8 @@ void print_usage(const char* prog) {
               << "  --pid-file PATH    Write PID to file (for daemon mode)\n"
               << "  --socket           Enable socket server mode\n"
               << "  --socket-path PATH Unix socket path\n"
+              << "  -f, --foreground   Run in foreground (don't daemonize)\n"
+              << "  --log PATH         Log file for daemon output\n"
               << "  --update           Update existing nodes (for import)\n"
               << "  -v, --version      Show version\n"
 #ifdef CHITTA_WITH_ONNX
@@ -648,7 +708,30 @@ int cmd_daemon(Mind& mind, int interval_seconds, const std::string& pid_file, co
 int cmd_daemon_with_socket(Mind& mind, int interval_seconds,
                            const std::string& pid_file,
                            const std::string& socket_path,
-                           const std::string& mind_path) {
+                           const std::string& mind_path,
+                           bool foreground,
+                           const std::string& log_file) {
+    // Daemonize unless --foreground is specified
+    if (!foreground) {
+        // Default log path if not specified
+        std::string log_path = log_file;
+        if (log_path.empty()) {
+            const char* home = getenv("HOME");
+            if (home) {
+                log_path = std::string(home) + "/.claude/mind/.subconscious.log";
+            }
+        }
+
+        std::cerr << "[daemon] Daemonizing (log=" << log_path << ")\n";
+
+        if (!daemonize(log_path)) {
+            std::cerr << "[daemon] Failed to daemonize\n";
+            return 1;
+        }
+        // After daemonize(), we're in the grandchild process
+        // stdout/stderr are now redirected to log file
+    }
+
     DaemonLock lock;
     std::string lock_error;
     if (!acquire_daemon_lock(mind_path, lock, lock_error)) {
@@ -656,7 +739,7 @@ int cmd_daemon_with_socket(Mind& mind, int interval_seconds,
         return 1;
     }
 
-    // Write PID file
+    // Write PID file (after daemonizing, so we have the correct PID)
     if (!pid_file.empty()) {
         std::ofstream pf(pid_file);
         if (pf) {
@@ -956,6 +1039,8 @@ int main(int argc, char* argv[]) {
     bool json_output = false;
     bool fast_mode = false;
     bool socket_mode = false;
+    bool foreground_mode = false;  // --foreground: don't daemonize
+    std::string log_file;  // --log: log file for daemon output
 
     // Parse arguments
     for (int i = 1; i < argc; ++i) {
@@ -981,6 +1066,10 @@ int main(int argc, char* argv[]) {
             socket_path = argv[++i];
             socket_path_explicit = true;
             socket_mode = true;  // Implies socket mode
+        } else if (strcmp(argv[i], "--foreground") == 0 || strcmp(argv[i], "-f") == 0) {
+            foreground_mode = true;
+        } else if (strcmp(argv[i], "--log") == 0 && i + 1 < argc) {
+            log_file = argv[++i];
         // Connect command args
         } else if (strcmp(argv[i], "--from") == 0 && i + 1 < argc) {
             conn_from = argv[++i];
@@ -1059,7 +1148,15 @@ int main(int argc, char* argv[]) {
         return cmd_convert(mind_path, format);
     }
 
-    if (command != "daemon" && command != "shutdown" && command != "status") {
+    // Handle shutdown/status commands (just connect to socket, don't open mind)
+    if (command == "shutdown") {
+        return cmd_shutdown(socket_path);
+    }
+    if (command == "status") {
+        return cmd_status(socket_path);
+    }
+
+    if (command != "daemon") {
         DaemonLock lock;
         std::string lock_error;
         if (!acquire_daemon_lock(mind_path, lock, lock_error)) {
@@ -1102,18 +1199,10 @@ int main(int argc, char* argv[]) {
         result = cmd_stats(mind, json_output);
     } else if (command == "daemon") {
         if (socket_mode) {
-            result = cmd_daemon_with_socket(mind, daemon_interval, pid_file, socket_path, mind_path);
+            result = cmd_daemon_with_socket(mind, daemon_interval, pid_file, socket_path, mind_path, foreground_mode, log_file);
         } else {
             result = cmd_daemon(mind, daemon_interval, pid_file, mind_path);
         }
-    } else if (command == "shutdown") {
-        // Shutdown doesn't need mind - just connects to daemon socket
-        mind.close();
-        return cmd_shutdown(socket_path);
-    } else if (command == "status") {
-        // Status doesn't need mind - just connects to daemon socket
-        mind.close();
-        return cmd_status(socket_path);
     } else if (command == "import") {
         if (import_file.empty()) {
             std::cerr << "Usage: chittad import <file.soul> [--update]\n";
