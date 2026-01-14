@@ -23,11 +23,13 @@
 #include <cstring>
 #include <cstdlib>
 #include <csignal>
+#include <cstdarg>
 #include <thread>
 #include <chrono>
 #include <atomic>
 #include <fstream>
 #include <sstream>
+#include <iomanip>
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -132,6 +134,30 @@ static const char* prog_name(const char* path) {
     return last;
 }
 
+// Global verbose flag for debug logging
+static std::atomic<bool> verbose_mode{false};
+
+void log_debug(const char* component, const char* fmt, ...) {
+    if (!verbose_mode) return;
+
+    // Get timestamp with milliseconds
+    auto now = std::chrono::system_clock::now();
+    auto now_time_t = std::chrono::system_clock::to_time_t(now);
+    auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        now.time_since_epoch()) % 1000;
+
+    char time_buf[32];
+    std::strftime(time_buf, sizeof(time_buf), "%H:%M:%S", std::localtime(&now_time_t));
+
+    std::cerr << "[" << time_buf << "." << std::setfill('0') << std::setw(3) << now_ms.count() << "][" << component << "] ";
+
+    va_list args;
+    va_start(args, fmt);
+    vfprintf(stderr, fmt, args);
+    va_end(args);
+    std::cerr << "\n";
+}
+
 void print_usage(const char* prog) {
     const char* name = prog_name(prog);
     std::cerr << "chittad " << CHITTA_VERSION << " - Soul administration\n\n"
@@ -157,6 +183,7 @@ void print_usage(const char* prog) {
               << "  --socket-path PATH Unix socket path\n"
               << "  -f, --foreground   Run in foreground (don't daemonize)\n"
               << "  --log PATH         Log file for daemon output\n"
+              << "  --verbose          Enable verbose debug logging\n"
               << "  --update           Update existing nodes (for import)\n"
               << "  -v, --version      Show version\n"
 #ifdef CHITTA_WITH_ONNX
@@ -747,7 +774,8 @@ int cmd_daemon_with_socket(Mind& mind, int interval_seconds,
     std::signal(SIGINT, daemon_signal_handler);
 
     std::cerr << "[daemon] Started (socket=" << socket_path
-              << ", interval=" << interval_seconds << "s, pid=" << getpid() << ")\n";
+              << ", interval=" << interval_seconds << "s, pid=" << getpid()
+              << (verbose_mode ? ", verbose=on" : "") << ")\n";
 
     // Maintenance thread - runs independently from socket handling
     std::atomic<size_t> cycle_count{0};
@@ -770,13 +798,65 @@ int cmd_daemon_with_socket(Mind& mind, int interval_seconds,
             auto start = std::chrono::steady_clock::now();
 
             try {
+                log_debug("maint", "cycle %zu starting", cycle_count.load());
+
                 // Subconscious processing - uses reader-writer lock so
                 // doesn't block read-only RPC requests
+                auto tick_start = std::chrono::steady_clock::now();
                 auto report = mind.tick();
+                auto tick_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - tick_start).count();
+                log_debug("maint", "tick completed in %ldms", tick_ms);
+
+                auto synth_start = std::chrono::steady_clock::now();
                 size_t synthesized = mind.synthesize_wisdom();
+                auto synth_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - synth_start).count();
+                log_debug("maint", "synthesize_wisdom: %zu in %ldms", synthesized, synth_ms);
+
+                auto feedback_start = std::chrono::steady_clock::now();
                 size_t feedback = mind.apply_feedback();
-                auto attractor_report = mind.run_attractor_dynamics(5, 0.01f);
+                auto feedback_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - feedback_start).count();
+                log_debug("maint", "apply_feedback: %zu in %ldms", feedback, feedback_ms);
+
+                // Step-by-step attractor dynamics with granular logging
+                auto attractor_start = std::chrono::steady_clock::now();
+                log_debug("maint", "attractor_dynamics: starting find_attractors");
+
+                auto find_start = std::chrono::steady_clock::now();
+                auto attractors = mind.find_attractors(5);
+                auto find_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - find_start).count();
+                log_debug("maint", "find_attractors: found %zu in %ldms", attractors.size(), find_ms);
+
+                size_t nodes_settled = 0;
+                if (!attractors.empty()) {
+                    auto settle_start = std::chrono::steady_clock::now();
+                    log_debug("maint", "settle_toward_attractors: starting");
+                    nodes_settled = mind.settle_toward_attractors(attractors, 0.01f);
+                    auto settle_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - settle_start).count();
+                    log_debug("maint", "settle_toward_attractors: settled %zu in %ldms", nodes_settled, settle_ms);
+
+                    auto basins_start = std::chrono::steady_clock::now();
+                    log_debug("maint", "compute_basins: starting");
+                    auto basins = mind.compute_basins(attractors);
+                    auto basins_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - basins_start).count();
+                    log_debug("maint", "compute_basins: computed in %ldms", basins_ms);
+                }
+
+                auto attractor_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - attractor_start).count();
+                log_debug("maint", "attractor_dynamics: total=%ldms settled=%zu",
+                          attractor_ms, nodes_settled);
+
+                auto snapshot_start = std::chrono::steady_clock::now();
                 mind.snapshot();  // Releases lock before disk I/O
+                auto snapshot_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - snapshot_start).count();
+                log_debug("maint", "snapshot in %ldms", snapshot_ms);
 
                 // Coherence monitoring (webhook-ready)
                 auto coherence = mind.coherence();
@@ -795,18 +875,23 @@ int cmd_daemon_with_socket(Mind& mind, int interval_seconds,
                 auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now() - start).count();
 
+                log_debug("maint", "cycle %zu complete in %ldms (tau=%.0f%%)",
+                          cycle_count.load(), elapsed, tau * 100);
+
                 // Log activity (sparse)
-                if (synthesized > 0 || feedback > 0 || attractor_report.nodes_settled > 0) {
+                if (synthesized > 0 || feedback > 0 || nodes_settled > 0) {
                     std::cerr << "[maintenance] Cycle " << cycle_count << ": "
                               << "synth=" << synthesized << " feedback=" << feedback
-                              << " settled=" << attractor_report.nodes_settled
+                              << " settled=" << nodes_settled
                               << " tau=" << static_cast<int>(tau * 100) << "%"
                               << " (" << elapsed << "ms)\n";
                 }
             } catch (const std::exception& e) {
+                log_debug("maint", "cycle %zu EXCEPTION: %s", cycle_count.load(), e.what());
                 std::cerr << "[maintenance] Cycle " << cycle_count
                           << " failed: " << e.what() << "\n";
             } catch (...) {
+                log_debug("maint", "cycle %zu UNKNOWN EXCEPTION", cycle_count.load());
                 std::cerr << "[maintenance] Cycle " << cycle_count
                           << " failed: unknown error\n";
             }
@@ -814,15 +899,45 @@ int cmd_daemon_with_socket(Mind& mind, int interval_seconds,
     });
 
     // Main loop - dedicated to socket I/O only
+    size_t total_requests = 0;
+    auto last_status_log = std::chrono::steady_clock::now();
+
     while (daemon_running) {
         // Poll for socket activity (100ms timeout for responsiveness)
+        auto poll_start = std::chrono::steady_clock::now();
         auto requests = server.poll(100);
+        auto poll_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - poll_start).count();
+
+        if (!requests.empty()) {
+            log_debug("poll", "received %zu requests (conns=%zu, poll=%ldms)",
+                      requests.size(), server.connection_count(), poll_elapsed);
+        }
 
         // Process all pending requests
         for (const auto& req : requests) {
+            total_requests++;
+
+            // Extract method name for logging
+            std::string method = "unknown";
+            auto method_pos = req.data.find("\"method\":");
+            if (method_pos != std::string::npos) {
+                auto start = req.data.find('"', method_pos + 9);
+                if (start != std::string::npos) {
+                    auto end = req.data.find('"', start + 1);
+                    if (end != std::string::npos) {
+                        method = req.data.substr(start + 1, end - start - 1);
+                    }
+                }
+            }
+
+            log_debug("rpc", "request #%zu fd=%d method=%s len=%zu",
+                      total_requests, req.client_fd, method.c_str(), req.data.size());
+
             // Handle special "stats" request (for cc-status integration)
             if (req.data == "stats") {
                 server.respond(req.client_fd, generate_stats_json(mind));
+                log_debug("rpc", "stats response sent");
                 continue;
             }
 
@@ -836,13 +951,32 @@ int cmd_daemon_with_socket(Mind& mind, int interval_seconds,
             }
 
             try {
+                auto handle_start = std::chrono::steady_clock::now();
                 auto response = handler.handle(req.data);
+                auto handle_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - handle_start).count();
+
+                log_debug("rpc", "request #%zu method=%s handled in %ldms (resp_len=%zu)",
+                          total_requests, method.c_str(), handle_elapsed, response.size());
+
                 server.respond(req.client_fd, response);
             } catch (const std::exception& e) {
+                log_debug("rpc", "request #%zu method=%s EXCEPTION: %s",
+                          total_requests, method.c_str(), e.what());
                 std::string error = R"({"jsonrpc":"2.0","error":{"code":-32603,"message":")"
                                   + std::string(e.what()) + R"("},"id":null})";
                 server.respond(req.client_fd, error);
             }
+        }
+
+        // Periodic status log (every 10s in verbose mode)
+        auto now = std::chrono::steady_clock::now();
+        if (verbose_mode &&
+            std::chrono::duration_cast<std::chrono::seconds>(now - last_status_log).count() >= 10) {
+            last_status_log = now;
+            log_debug("status", "total_requests=%zu conns=%zu pending_writes=%zu cycles=%zu",
+                      total_requests, server.connection_count(), server.pending_writes(),
+                      cycle_count.load());
         }
     }
 
@@ -1066,6 +1200,8 @@ int main(int argc, char* argv[]) {
             foreground_mode = true;
         } else if (strcmp(argv[i], "--log") == 0 && i + 1 < argc) {
             log_file = argv[++i];
+        } else if (strcmp(argv[i], "--verbose") == 0) {
+            verbose_mode = true;
         // Connect command args
         } else if (strcmp(argv[i], "--from") == 0 && i + 1 < argc) {
             conn_from = argv[++i];

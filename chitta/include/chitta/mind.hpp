@@ -2670,11 +2670,31 @@ public:
     // Settle a set of nodes toward their attractors
     // This strengthens connections between nodes and their attractors
     // Returns number of nodes that settled
+    //
+    // Note: Collects edges during iteration, adds them after to avoid deadlock
+    // (for_each holds shared_lock, add_edge needs unique_lock on same mutex)
     size_t settle_toward_attractors(const std::vector<Attractor>& attractors,
                                      float settle_strength = 0.02f) {
         std::unique_lock<std::shared_mutex> lock(mutex_);
 
-        size_t settled = 0;
+        // Collect edges to add (avoid deadlock: for_each holds shared_lock,
+        // hebbian_strengthen_impl->add_edge needs unique_lock on same mutex)
+        struct PendingEdge {
+            NodeId from;
+            NodeId to;
+            float strength;
+        };
+        std::vector<PendingEdge> pending_edges;
+
+        // Pre-fetch attractor nodes to avoid calling storage_.get() during iteration
+        // (storage_.get() takes locks which deadlocks with for_each's lock)
+        std::vector<std::pair<NodeId, const Node*>> attractor_nodes;
+        for (const auto& attr : attractors) {
+            Node* attr_node = storage_.get(attr.id);
+            if (attr_node) {
+                attractor_nodes.push_back({attr.id, attr_node});
+            }
+        }
 
         storage_.for_each_hot([&](const NodeId& id, const Node& node) {
             // Skip nodes that are themselves attractors
@@ -2688,19 +2708,37 @@ public:
             if (is_attractor) return;
 
             // Find which attractor this node is pulled toward
-            auto pull = compute_attractor_pull_impl(id, attractors);
-            if (!pull) return;
+            // (inline computation to avoid storage_.get() which takes locks)
+            NodeId best_attractor;
+            float best_pull = 0.0f;
+            for (size_t i = 0; i < attractors.size(); ++i) {
+                const auto& attr = attractors[i];
+                const Node* attr_node = (i < attractor_nodes.size()) ? attractor_nodes[i].second : nullptr;
+                if (!attr_node) continue;
 
-            auto [attractor_id, pull_strength] = *pull;
+                float similarity = node.nu.cosine(attr_node->nu);
+                float pull = attr.strength * similarity;
+                if (pull > best_pull) {
+                    best_pull = pull;
+                    best_attractor = attr.id;
+                }
+            }
 
-            // Strengthen connection toward attractor
-            // Weight by pull strength (stronger pull = stronger connection)
-            float actual_strength = settle_strength * pull_strength;
+            if (best_pull < 0.1f) return;  // Too weak
+
+            // Collect edge for later addition
+            float actual_strength = settle_strength * best_pull;
             if (actual_strength >= 0.01f) {
-                hebbian_strengthen_impl(id, attractor_id, actual_strength);
-                settled++;
+                pending_edges.push_back({id, best_attractor, actual_strength});
             }
         });
+
+        // Now add edges (after for_each released its shared_lock)
+        size_t settled = 0;
+        for (const auto& edge : pending_edges) {
+            hebbian_strengthen_impl(edge.from, edge.to, edge.strength);
+            settled++;
+        }
 
         return settled;
     }
@@ -2710,12 +2748,35 @@ public:
     std::unordered_map<NodeId, std::vector<NodeId>, NodeIdHash>
     compute_basins(const std::vector<Attractor>& attractors) {
         std::unique_lock<std::shared_mutex> lock(mutex_);
+        return compute_basins_internal(attractors);
+    }
 
+    // Compute basins without locking (caller must hold mutex_)
+    std::unordered_map<NodeId, std::vector<NodeId>, NodeIdHash>
+    compute_basins_unlocked(const std::vector<Attractor>& attractors) {
+        return compute_basins_internal(attractors);
+    }
+
+private:
+    // Internal basin computation (assumes lock already held or not needed)
+    // Pre-fetches attractor nodes to avoid storage_.get() during for_each iteration
+    std::unordered_map<NodeId, std::vector<NodeId>, NodeIdHash>
+    compute_basins_internal(const std::vector<Attractor>& attractors) {
         std::unordered_map<NodeId, std::vector<NodeId>, NodeIdHash> basins;
 
         // Initialize empty basins for each attractor
         for (const auto& attr : attractors) {
             basins[attr.id] = {};
+        }
+
+        // Pre-fetch attractor nodes to avoid storage_.get() during iteration
+        // (storage_.get() takes locks which deadlocks with for_each's lock)
+        std::vector<std::pair<NodeId, const Node*>> attractor_nodes;
+        for (const auto& attr : attractors) {
+            Node* attr_node = storage_.get(attr.id);
+            if (attr_node) {
+                attractor_nodes.push_back({attr.id, attr_node});
+            }
         }
 
         storage_.for_each_hot([&](const NodeId& id, const Node& node) {
@@ -2729,15 +2790,31 @@ public:
             }
             if (is_attractor) return;
 
-            // Find which attractor this node is pulled toward
-            auto pull = compute_attractor_pull_impl(id, attractors);
-            if (pull) {
-                basins[pull->first].push_back(id);
+            // Inline attractor pull computation to avoid storage_.get()
+            NodeId best_attractor;
+            float best_pull = 0.0f;
+            for (size_t i = 0; i < attractors.size(); ++i) {
+                const auto& attr = attractors[i];
+                const Node* attr_node = (i < attractor_nodes.size()) ? attractor_nodes[i].second : nullptr;
+                if (!attr_node) continue;
+
+                float similarity = node.nu.cosine(attr_node->nu);
+                float pull = attr.strength * similarity;
+                if (pull > best_pull) {
+                    best_pull = pull;
+                    best_attractor = attr.id;
+                }
+            }
+
+            if (best_pull >= 0.1f) {
+                basins[best_attractor].push_back(id);
             }
         });
 
         return basins;
     }
+
+public:
 
     // Run one round of attractor dynamics:
     // 1. Find attractors
@@ -2913,16 +2990,16 @@ public:
 
         std::unique_lock<std::shared_mutex> lock(mutex_);
 
-        // Find attractors
-        auto attractors = find_attractors(5);
+        // Find attractors (use unlocked version - we already hold the lock)
+        auto attractors = find_attractors_unlocked(5);
         if (attractors.empty()) {
             // No attractors found, return regular results
             if (results.size() > k) results.resize(k);
             return results;
         }
 
-        // Compute basins
-        auto basins = compute_basins(attractors);
+        // Compute basins (use unlocked version - we already hold the lock)
+        auto basins = compute_basins_unlocked(attractors);
 
         // Find which attractor the top result belongs to
         auto pull = compute_attractor_pull_impl(results[0].id, attractors);
