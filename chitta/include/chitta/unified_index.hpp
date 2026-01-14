@@ -455,14 +455,7 @@ public:
     void sync() {
         // msync() is thread-safe, use shared_lock to allow concurrent reads
         std::shared_lock lock(mutex_);
-        connections_.sync();
-        payloads_.sync();
-        edges_.sync();
-        tags_.save();
-        index_region_.sync();
-        vectors_region_.sync();
-        meta_region_.sync();
-        if (has_binary_) binary_region_.sync();
+        sync_unlocked();
     }
 
     bool valid() const {
@@ -1017,8 +1010,8 @@ public:
             return false;
         }
 
-        // Sync all pending writes to disk
-        sync();
+        // Sync all pending writes to disk (already hold lock, use unlocked version)
+        sync_unlocked();
 
         // Increment snapshot ID
         auto* header = index_region_.as<UnifiedIndexHeader>();
@@ -1067,6 +1060,18 @@ public:
     }
 
 private:
+    // Sync without taking lock (caller must hold mutex_)
+    void sync_unlocked() {
+        connections_.sync();
+        payloads_.sync();
+        edges_.sync();
+        tags_.save();
+        index_region_.sync();
+        vectors_region_.sync();
+        meta_region_.sync();
+        if (has_binary_) binary_region_.sync();
+    }
+
     // Copy file using CoW (reflink) if available, fall back to regular copy
     static bool copy_file_cow(const std::string& src, const std::string& dst) {
         // Try reflink first (instant CoW copy)

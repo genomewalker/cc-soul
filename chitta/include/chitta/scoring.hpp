@@ -337,15 +337,14 @@ public:
     {
         auto query_tokens = tokenize(query);
 
-        // Refresh IDF cache if needed (requires unique lock)
+        // Single lock for entire method - avoids re-entrant locking issues
+        // (std::shared_mutex is non-recursive, double-locking causes EDEADLK)
+        std::unique_lock lock(mutex_);
+
         if (idf_dirty_) {
-            std::unique_lock lock(mutex_);
-            if (idf_dirty_) {  // Double-check after acquiring lock
-                refresh_idf_cache();
-            }
+            refresh_idf_cache();
         }
 
-        std::shared_lock lock(mutex_);
         if (query_tokens.empty() || doc_count_ == 0) return {};
 
         float avg_dl = static_cast<float>(total_length_) / doc_count_;
