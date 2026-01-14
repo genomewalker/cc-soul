@@ -708,33 +708,12 @@ int cmd_daemon(Mind& mind, int interval_seconds, const std::string& pid_file, co
 }
 
 // Socket server mode: daemon + RPC handler over Unix socket
+// Note: daemonization happens BEFORE Mind is opened (in main)
 int cmd_daemon_with_socket(Mind& mind, int interval_seconds,
                            const std::string& pid_file,
                            const std::string& socket_path,
                            const std::string& mind_path,
-                           bool foreground,
                            const std::string& log_file) {
-    // Daemonize unless --foreground is specified
-    if (!foreground) {
-        // Default log path if not specified
-        std::string log_path = log_file;
-        if (log_path.empty()) {
-            const char* home = getenv("HOME");
-            if (home) {
-                log_path = std::string(home) + "/.claude/mind/.subconscious.log";
-            }
-        }
-
-        std::cerr << "[daemon] Daemonizing (log=" << log_path << ")\n";
-
-        if (!daemonize(log_path)) {
-            std::cerr << "[daemon] Failed to daemonize\n";
-            return 1;
-        }
-        // After daemonize(), we're in the grandchild process
-        // stdout/stderr are now redirected to log file
-    }
-
     DaemonLock lock;
     std::string lock_error;
     if (!acquire_daemon_lock(mind_path, lock, lock_error)) {
@@ -1159,6 +1138,52 @@ int main(int argc, char* argv[]) {
         return cmd_status(socket_path);
     }
 
+    // Handle daemon command: daemonize BEFORE opening Mind
+    // (fork() doesn't play nice with open database handles)
+    if (command == "daemon") {
+        if (!foreground_mode) {
+            std::string log_path = log_file;
+            if (log_path.empty()) {
+                const char* home = getenv("HOME");
+                if (home) {
+                    log_path = std::string(home) + "/.claude/mind/.subconscious.log";
+                }
+            }
+            std::cerr << "[daemon] Daemonizing (log=" << log_path << ")\n";
+            if (!daemonize(log_path)) {
+                std::cerr << "[daemon] Failed to daemonize\n";
+                return 1;
+            }
+        }
+        // Now in daemon process - safe to open Mind
+        MindConfig config;
+        config.path = mind_path;
+        config.skip_bm25 = fast_mode;
+        Mind mind(config);
+
+#ifdef CHITTA_WITH_ONNX
+        if (model_path.empty()) model_path = default_model_path();
+        if (vocab_path.empty()) vocab_path = default_vocab_path();
+        AntahkaranaYantra::Config yantra_config;
+        yantra_config.pooling = PoolingStrategy::Mean;
+        yantra_config.normalize_embeddings = true;
+        auto yantra = std::make_shared<AntahkaranaYantra>(yantra_config);
+        if (yantra->awaken(model_path, vocab_path)) {
+            mind.attach_yantra(yantra);
+        }
+#endif
+        if (!mind.open()) {
+            std::cerr << "Error: Failed to open mind at " << mind_path << "\n";
+            return 1;
+        }
+
+        if (socket_mode) {
+            return cmd_daemon_with_socket(mind, daemon_interval, pid_file, socket_path, mind_path, log_file);
+        } else {
+            return cmd_daemon(mind, daemon_interval, pid_file, mind_path);
+        }
+    }
+
     if (command != "daemon") {
         DaemonLock lock;
         std::string lock_error;
@@ -1170,7 +1195,7 @@ int main(int argc, char* argv[]) {
         release_daemon_lock(lock);
     }
 
-    // Create and open mind
+    // Create and open mind (for non-daemon commands)
     MindConfig config;
     config.path = mind_path;
     config.skip_bm25 = fast_mode;
@@ -1200,12 +1225,6 @@ int main(int argc, char* argv[]) {
     int result = 0;
     if (command == "stats") {
         result = cmd_stats(mind, json_output);
-    } else if (command == "daemon") {
-        if (socket_mode) {
-            result = cmd_daemon_with_socket(mind, daemon_interval, pid_file, socket_path, mind_path, foreground_mode, log_file);
-        } else {
-            result = cmd_daemon(mind, daemon_interval, pid_file, mind_path);
-        }
     } else if (command == "import") {
         if (import_file.empty()) {
             std::cerr << "Usage: chittad import <file.soul> [--update]\n";
