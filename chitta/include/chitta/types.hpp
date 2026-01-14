@@ -121,13 +121,15 @@ public:
     float& operator[](size_t i) { return data[i]; }
     const float& operator[](size_t i) const { return data[i]; }
 
-    // Cosine similarity
+    // Cosine similarity (optimized: single pass)
     float cosine(const Vector& other) const {
         float dot = 0.0f, norm_a = 0.0f, norm_b = 0.0f;
         for (size_t i = 0; i < EMBED_DIM; ++i) {
-            dot += data[i] * other.data[i];
-            norm_a += data[i] * data[i];
-            norm_b += other.data[i] * other.data[i];
+            float ai = data[i];
+            float bi = other.data[i];
+            dot += ai * bi;
+            norm_a += ai * ai;
+            norm_b += bi * bi;
         }
         float denom = std::sqrt(norm_a) * std::sqrt(norm_b);
         return denom > 0.0f ? dot / denom : 0.0f;

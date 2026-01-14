@@ -157,8 +157,12 @@ public:
             flock(lock_fd, LOCK_EX);
         }
 
+        // RAII wrapper for lock cleanup
         auto release_lock = [&lock_fd]() {
-            if (lock_fd >= 0) { flock(lock_fd, LOCK_UN); ::close(lock_fd); }
+            if (lock_fd >= 0) {
+                flock(lock_fd, LOCK_UN);
+                ::close(lock_fd);
+            }
         };
 
         // Write to temporary file first (atomic write pattern)
@@ -180,6 +184,13 @@ public:
         // Write magic and version header (v3+)
         write_to_buffer(&STORAGE_MAGIC, sizeof(STORAGE_MAGIC));
         write_to_buffer(&STORAGE_VERSION, sizeof(STORAGE_VERSION));
+
+        // Validate buffer size before proceeding (catch overflow early)
+        if (buffer.capacity() > 500 * 1024 * 1024) {  // 500MB sanity limit
+            release_lock();
+            std::cerr << "[HotStorage] Buffer too large: " << buffer.capacity() << " bytes\n";
+            return false;
+        }
 
         // Write node count
         size_t count = nodes_.size();
@@ -248,6 +259,29 @@ public:
         if (!out.good()) {
             out.close();
             ::unlink(tmp_path.c_str());  // Clean up failed write
+            std::cerr << "[HotStorage] Write failed: stream not good for " << path << "\n";
+            release_lock();
+            return false;
+        }
+
+        // Flush to disk before rename
+        out.flush();
+        out.close();
+
+        // Fsync file to ensure durability
+        int tmp_file_fd = ::open(tmp_path.c_str(), O_RDONLY);
+        if (tmp_file_fd >= 0) {
+            if (fsync(tmp_file_fd) != 0) {
+                std::cerr << "[HotStorage] fsync failed: " << strerror(errno) << "\n";
+                ::close(tmp_file_fd);
+                ::unlink(tmp_path.c_str());
+                release_lock();
+                return false;
+            }
+            ::close(tmp_file_fd);
+        } else {
+            std::cerr << "[HotStorage] Failed to open temp file for fsync: " << strerror(errno) << "\n";
+            ::unlink(tmp_path.c_str());
             release_lock();
             return false;
         }
@@ -425,7 +459,8 @@ public:
             if (version >= 4) {
                 read_from_buffer(&node.epsilon, sizeof(node.epsilon));
             } else {
-                node.epsilon = 0.5f;  // Default for old files
+                node.epsilon = 0.5f;  // Default for v3 and earlier
+                std::cerr << "[HotStorage] Note: v3 format loaded, epsilon defaulted to 0.5\n";
             }
             read_from_buffer(&node.kappa.mu, sizeof(node.kappa.mu));
             read_from_buffer(&node.kappa.sigma_sq, sizeof(node.kappa.sigma_sq));
@@ -901,8 +936,9 @@ public:
                     return true;
                 }
                 // create_safe failed - file might exist now (race with another process)
-                // Try to open it instead
-                std::cerr << "[TieredStorage] create_safe failed, trying open\n";
+                // Race condition: another process created it
+                // Try to open the now-existing file instead
+                std::cerr << "[TieredStorage] create_safe failed (likely race), trying open\n";
                 if (unified_.open(config_.base_path)) {
                     std::cerr << "[TieredStorage] Opened existing unified index after create race\n";
                     if (config_.use_wal && wal_.open()) {

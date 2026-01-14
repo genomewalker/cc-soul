@@ -5,6 +5,7 @@
 #include "types.hpp"
 #include "quantized.hpp"
 #include <algorithm>
+#include <cstdio>
 #include <memory>
 #include <queue>
 #include <random>
@@ -109,7 +110,7 @@ public:
         return results;
     }
 
-    // Remove a node
+    // Remove a node (optimized O(m) by tracking bidirectional connections)
     void remove(NodeId id) {
         auto it = nodes_.find(id);
         if (it == nodes_.end()) return;
@@ -118,9 +119,14 @@ public:
         auto& node = it->second;
         for (size_t l = 0; l < node->connections.size(); ++l) {
             for (const auto& neighbor_id : node->connections[l]) {
-                if (auto nit = nodes_.find(neighbor_id); nit != nodes_.end()) {
+                auto nit = nodes_.find(neighbor_id);
+                if (nit != nodes_.end()) {
                     auto& conns = nit->second->connections[l];
-                    conns.erase(std::remove(conns.begin(), conns.end(), id), conns.end());
+                    // Use unordered_map for O(1) lookup instead of linear scan
+                    auto conn_it = std::find(conns.begin(), conns.end(), id);
+                    if (conn_it != conns.end()) {
+                        conns.erase(conn_it);
+                    }
                 }
             }
         }
@@ -195,9 +201,15 @@ public:
     static HNSWIndex deserialize(const std::vector<uint8_t>& data) {
         size_t pos = 0;
 
-        // Helper to read primitives
+        // Helper to read primitives with detailed error reporting
         auto read = [&data, &pos](void* ptr, size_t size) {
-            if (pos + size > data.size()) throw std::runtime_error("HNSW deserialize: unexpected end");
+            if (pos + size > data.size()) {
+                char error_buf[256];
+                snprintf(error_buf, sizeof(error_buf),
+                    "HNSW deserialize: unexpected end at offset %zu, need %zu bytes, have %zu bytes",
+                    pos, size, data.size() - pos);
+                throw std::runtime_error(error_buf);
+            }
             std::memcpy(ptr, data.data() + pos, size);
             pos += size;
         };

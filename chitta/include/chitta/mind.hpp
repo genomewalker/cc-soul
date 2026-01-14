@@ -60,11 +60,17 @@ public:
             config_.warm_age_ms
           })
         , dynamics_()
-        , yantra_(std::make_shared<ShantaYantra>())  // Silent by default
+        , yantra_(std::make_shared<ShantaYantra>())
         , running_(false)
         , quota_manager_(config_.total_capacity)
     {
         dynamics_.with_defaults();
+    }
+
+    ~Mind() {
+        if (running_) {
+            close();
+        }
     }
 
     // Attach a VakYantra for text→embedding transformation

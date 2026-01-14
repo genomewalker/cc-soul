@@ -619,7 +619,7 @@ int cmd_daemon(Mind& mind, int interval_seconds, const std::string& pid_file, co
     std::string lock_error;
     if (!acquire_daemon_lock(mind_path, lock, lock_error)) {
         std::cerr << "[subconscious] " << lock_error << "\n";
-        return 1;
+        return false;
     }
 
     // Write PID file
@@ -634,6 +634,9 @@ int cmd_daemon(Mind& mind, int interval_seconds, const std::string& pid_file, co
     // Setup signal handlers for graceful shutdown
     std::signal(SIGTERM, daemon_signal_handler);
     std::signal(SIGINT, daemon_signal_handler);
+
+    // Release lock before starting socket server (avoids deadlock)
+    release_daemon_lock(lock);
 
     std::cerr << "[subconscious] Daemon started (interval=" << interval_seconds << "s, pid=" << getpid() << ")\n";
 

@@ -156,9 +156,17 @@ bool SocketClient::request_shutdown() {
         return false;
     }
 
-    auto response = request("shutdown");
+    // Use request_internal directly - don't retry on connection close
+    // (daemon closing connection after shutdown is expected behavior)
+    auto response = request_internal("shutdown");
     disconnect();
-    return response.has_value();
+
+    // Success if we got a response OR if connection was closed (daemon shutting down)
+    if (response.has_value()) {
+        return true;
+    }
+    // Connection closed = daemon received shutdown and is stopping
+    return last_error_.find("Connection closed") != std::string::npos;
 }
 
 bool SocketClient::wait_for_socket_gone(int timeout_ms) {
