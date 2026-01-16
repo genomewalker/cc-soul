@@ -2000,6 +2000,7 @@ public:
     // ═══════════════════════════════════════════════════════════════════
 
     // Add a relationship between concepts (uses dictionary-encoded GraphStore)
+    // UNIFIED: Now also creates edges between nodes for graph traversal
     void connect(const std::string& subject, const std::string& predicate,
                  const std::string& object, float weight = 1.0f) {
         // Add to graph store (mmap or legacy based on config)
@@ -2009,10 +2010,26 @@ public:
             graph_store_.add(subject, predicate, object, weight);
         }
 
-        // Also maintain legacy graph_ for backward compatibility
+        // Find or create entity nodes
         NodeId subj_id = find_or_create_entity(subject);
         NodeId obj_id = find_or_create_entity(object);
+
+        // Add to legacy triplet index
         graph_.add_triplet(subj_id, predicate, obj_id, weight);
+
+        // UNIFICATION: Map predicate to EdgeType and create actual node edges
+        EdgeType edge_type = predicate_to_edge_type(predicate);
+        EdgeType reverse_type = reverse_edge_type(edge_type);
+
+        // Add forward edge: subject → object
+        if (storage_.add_edge(subj_id, obj_id, edge_type, weight)) {
+            index_edge_add(subj_id, Edge{obj_id, edge_type, weight});
+        }
+
+        // Add reverse edge: object → subject (for bidirectional traversal)
+        if (storage_.add_edge(obj_id, subj_id, reverse_type, weight)) {
+            index_edge_add(obj_id, Edge{subj_id, reverse_type, weight});
+        }
     }
 
     // Batch connect for bulk operations

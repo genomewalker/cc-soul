@@ -248,7 +248,60 @@ enum class EdgeType : uint8_t {
     Mentions = 12,   // Episode/wisdom mentions entity
     IsA = 13,        // Entity type hierarchy (pizza IsA food)
     RelatesTo = 14,  // Generic entity relationship
+    Uses = 15,       // Uses/depends on
+    Implements = 16, // Implements interface/concept
+    Contains = 17,   // Contains/has
+    Causes = 18,     // Causes/leads to
+    Requires = 19,   // Requires/needs
 };
+
+// Map predicate strings to EdgeType for triplet-node unification
+inline EdgeType predicate_to_edge_type(const std::string& predicate) {
+    // Normalize to lowercase for matching
+    std::string p = predicate;
+    for (auto& c : p) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+    // Exact matches
+    if (p == "uses" || p == "depends_on") return EdgeType::Uses;
+    if (p == "implements") return EdgeType::Implements;
+    if (p == "supports" || p == "confirms") return EdgeType::Supports;
+    if (p == "contradicts" || p == "conflicts_with") return EdgeType::Contradicts;
+    if (p == "contains" || p == "has") return EdgeType::Contains;
+    if (p == "part_of" || p == "belongs_to") return EdgeType::PartOf;
+    if (p == "is_a" || p == "isa" || p == "type_of") return EdgeType::IsA;
+    if (p == "causes" || p == "leads_to" || p == "produces") return EdgeType::Causes;
+    if (p == "requires" || p == "needs") return EdgeType::Requires;
+    if (p == "evolved_from" || p == "derived_from") return EdgeType::EvolvedFrom;
+    if (p == "applied_in" || p == "used_in") return EdgeType::AppliedIn;
+    if (p == "triggered_by") return EdgeType::TriggeredBy;
+    if (p == "created_by") return EdgeType::CreatedBy;
+    if (p == "scoped_to") return EdgeType::ScopedTo;
+    if (p == "answers") return EdgeType::Answers;
+    if (p == "addresses") return EdgeType::Addresses;
+    if (p == "continues") return EdgeType::Continues;
+    if (p == "mentions") return EdgeType::Mentions;
+    if (p == "similar_to" || p == "like") return EdgeType::Similar;
+
+    // Default: generic relationship
+    return EdgeType::RelatesTo;
+}
+
+// Get reverse edge type for bidirectional relationships
+inline EdgeType reverse_edge_type(EdgeType type) {
+    switch (type) {
+        case EdgeType::Uses:       return EdgeType::AppliedIn;  // X uses Y → Y applied_in X
+        case EdgeType::AppliedIn:  return EdgeType::Uses;
+        case EdgeType::Contains:   return EdgeType::PartOf;     // X contains Y → Y part_of X
+        case EdgeType::PartOf:     return EdgeType::Contains;
+        case EdgeType::Causes:     return EdgeType::TriggeredBy; // X causes Y → Y triggered_by X
+        case EdgeType::TriggeredBy: return EdgeType::Causes;
+        case EdgeType::Implements: return EdgeType::IsA;        // X implements Y → Y is_a X (loosely)
+        case EdgeType::Supports:   return EdgeType::Supports;   // Symmetric
+        case EdgeType::Contradicts: return EdgeType::Contradicts; // Symmetric
+        case EdgeType::Similar:    return EdgeType::Similar;    // Symmetric
+        default:                   return EdgeType::RelatesTo;
+    }
+}
 
 // Intention scope
 enum class Scope : uint8_t {

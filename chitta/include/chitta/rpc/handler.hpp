@@ -427,49 +427,88 @@ private:
             return ToolResult::error("Yantra not ready");
         }
 
+        // Get Voice attention weights for each lens
+        auto get_voice_weights = [](const std::string& name) -> std::unordered_map<NodeType, float> {
+            using NT = NodeType;
+            if (name == "manas") {
+                // Manas: Quick intuition, boosts episodes
+                return {{NT::Wisdom, 0.8f}, {NT::Episode, 1.2f}, {NT::Intention, 1.0f}};
+            } else if (name == "buddhi") {
+                // Buddhi: Deep analysis, boosts wisdom and beliefs
+                return {{NT::Wisdom, 1.5f}, {NT::Belief, 1.3f}, {NT::Episode, 0.7f}};
+            } else if (name == "ahamkara") {
+                // Ahamkara: Self-protective critic, boosts failures
+                return {{NT::Failure, 1.5f}, {NT::Invariant, 1.3f}, {NT::Dream, 0.5f}};
+            } else if (name == "chitta") {
+                // Chitta: Memory patterns, boosts episodes and terms
+                return {{NT::Episode, 1.5f}, {NT::Wisdom, 1.2f}, {NT::Term, 1.3f}};
+            } else if (name == "vikalpa") {
+                // Vikalpa: Imagination, boosts dreams and aspirations
+                return {{NT::Dream, 1.5f}, {NT::Aspiration, 1.3f}, {NT::Belief, 0.7f}};
+            } else if (name == "sakshi") {
+                // Sakshi: Witness, boosts invariants and beliefs
+                return {{NT::Invariant, 1.5f}, {NT::Belief, 1.2f}, {NT::Wisdom, 1.0f}, {NT::Episode, 0.5f}};
+            }
+            return {};  // No weights for unknown lens
+        };
+
+        auto apply_voice_weight = [&](const Recall& r, const std::unordered_map<NodeType, float>& weights) -> float {
+            float attn = 1.0f;
+            auto it = weights.find(r.type);
+            if (it != weights.end()) attn = it->second;
+            return r.relevance * attn;
+        };
+
         json result = json::object();
         std::ostringstream ss;
         ss << "Lens search for: " << query << "\n";
 
-        // Simplified lens: do semantic search and categorize by type
-        auto recalls = mind_->recall(query, limit * 5);  // Get more to filter
+        // Get more results to filter through lenses
+        auto recalls = mind_->recall(query, limit * 10);
 
-        std::map<std::string, std::vector<const Recall*>> by_type;
-        for (const auto& r : recalls) {
-            std::string type_name = node_type_to_string(r.type);
-            if (type_name == "episode") by_type["manas"].push_back(&r);
-            else if (type_name == "wisdom") by_type["buddhi"].push_back(&r);
-            else if (type_name == "belief") by_type["ahamkara"].push_back(&r);
-            else if (type_name == "dream") by_type["vikalpa"].push_back(&r);
-            else if (type_name == "failure") by_type["sakshi"].push_back(&r);
-            else by_type["chitta"].push_back(&r);  // Default bucket
-        }
+        auto process_lens = [&](const std::string& name) {
+            auto weights = get_voice_weights(name);
 
-        auto fill_result = [&](const std::string& name) {
+            // Score and sort recalls through this lens
+            struct ScoredRecall {
+                const Recall* recall;
+                float score;
+            };
+            std::vector<ScoredRecall> scored;
+            for (const auto& r : recalls) {
+                float score = apply_voice_weight(r, weights);
+                scored.push_back({&r, score});
+            }
+
+            // Sort by lens-weighted score
+            std::sort(scored.begin(), scored.end(),
+                [](const ScoredRecall& a, const ScoredRecall& b) {
+                    return a.score > b.score;
+                });
+
+            // Build result
             json arr = json::array();
-            auto it = by_type.find(name);
-            if (it != by_type.end()) {
-                size_t count = 0;
-                for (const auto* rp : it->second) {
-                    if (count++ >= limit) break;
-                    json item;
-                    item["id"] = rp->id.to_string();
-                    item["text"] = rp->text;
-                    item["score"] = rp->relevance;
-                    item["type"] = node_type_to_string(rp->type);
-                    arr.push_back(item);
-                }
+            size_t count = 0;
+            for (const auto& sr : scored) {
+                if (count++ >= limit) break;
+                json item;
+                item["id"] = sr.recall->id.to_string();
+                item["text"] = sr.recall->text;
+                item["score"] = sr.score;
+                item["raw_score"] = sr.recall->relevance;
+                item["type"] = node_type_to_string(sr.recall->type);
+                arr.push_back(item);
             }
             result[name] = arr;
             ss << "\n" << name << ": " << arr.size() << " results";
         };
 
-        if (lens == "all" || lens == "manas") fill_result("manas");
-        if (lens == "all" || lens == "buddhi") fill_result("buddhi");
-        if (lens == "all" || lens == "ahamkara") fill_result("ahamkara");
-        if (lens == "all" || lens == "chitta") fill_result("chitta");
-        if (lens == "all" || lens == "vikalpa") fill_result("vikalpa");
-        if (lens == "all" || lens == "sakshi") fill_result("sakshi");
+        if (lens == "all" || lens == "manas") process_lens("manas");
+        if (lens == "all" || lens == "buddhi") process_lens("buddhi");
+        if (lens == "all" || lens == "ahamkara") process_lens("ahamkara");
+        if (lens == "all" || lens == "chitta") process_lens("chitta");
+        if (lens == "all" || lens == "vikalpa") process_lens("vikalpa");
+        if (lens == "all" || lens == "sakshi") process_lens("sakshi");
 
         return ToolResult::ok(ss.str(), result);
     }

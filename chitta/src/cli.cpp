@@ -170,6 +170,7 @@ void print_usage(const char* prog) {
               << "  import <file>      Import .soul file into mind\n"
               << "  upgrade            Upgrade database to current version\n"
               << "  convert <format>   Convert to storage format (unified|segments)\n"
+              << "  unify-triplets     Create edges for existing triplets [--dry-run]\n"
               << "  help               Show this help\n\n"
               << "For tool commands (recall, grow, observe, etc.), use:\n"
               << "  chitta <tool> --help\n\n"
@@ -581,6 +582,105 @@ int cmd_import_soul(Mind& mind, const std::string& soul_file, bool update_mode) 
     std::cout << "  Nodes created: " << nodes_created << "\n";
     std::cout << "  Triplets created: " << triplets_created << "\n";
     std::cout << "  Vessel mode: " << (vessel_mode ? "yes" : "no") << "\n";
+
+    return 0;
+}
+
+// Unify triplets: create bidirectional edges for all triplets
+int cmd_unify_triplets(Mind& mind, bool dry_run) {
+    std::cout << "[unify-triplets] Scanning triplets...\n";
+
+    // Get all triplets from graph store
+    auto triplets = mind.query_graph("", "", "");
+    size_t total = triplets.size();
+    std::cout << "[unify-triplets] Found " << total << " triplets\n";
+
+    if (total == 0) {
+        std::cout << "[unify-triplets] No triplets to process\n";
+        return 0;
+    }
+
+    // Collect edges to create
+    struct EdgeWork {
+        NodeId from;
+        NodeId to;
+        EdgeType type;
+    };
+    std::vector<EdgeWork> work;
+
+    size_t skipped_no_entity = 0;
+    size_t already_have_edge = 0;
+
+    for (const auto& [subject, predicate, object, weight] : triplets) {
+        auto subj_id = mind.find_entity(subject);
+        auto obj_id = mind.find_entity(object);
+
+        if (!subj_id || !obj_id) {
+            skipped_no_entity++;
+            continue;
+        }
+
+        auto subj_node = mind.get(*subj_id);
+        auto obj_node = mind.get(*obj_id);
+        if (!subj_node || !obj_node) {
+            skipped_no_entity++;
+            continue;
+        }
+
+        EdgeType edge_type = predicate_to_edge_type(predicate);
+        EdgeType reverse_type = reverse_edge_type(edge_type);
+
+        // Check forward edge
+        bool has_forward = false;
+        for (const auto& edge : subj_node->edges) {
+            if (edge.target == *obj_id) {
+                has_forward = true;
+                break;
+            }
+        }
+        if (!has_forward) {
+            work.push_back({*subj_id, *obj_id, edge_type});
+        } else {
+            already_have_edge++;
+        }
+
+        // Check reverse edge
+        bool has_reverse = false;
+        for (const auto& edge : obj_node->edges) {
+            if (edge.target == *subj_id) {
+                has_reverse = true;
+                break;
+            }
+        }
+        if (!has_reverse) {
+            work.push_back({*obj_id, *subj_id, reverse_type});
+        } else {
+            already_have_edge++;
+        }
+    }
+
+    std::cout << "[unify-triplets] Need to create " << work.size() << " edges\n";
+    std::cout << "[unify-triplets] Skipped (no entity): " << skipped_no_entity << "\n";
+    std::cout << "[unify-triplets] Already have edge: " << already_have_edge << "\n";
+
+    if (dry_run) {
+        std::cout << "[unify-triplets] Dry run - no edges created\n";
+        return 0;
+    }
+
+    // Create edges in batch
+    size_t created = 0;
+    for (const auto& e : work) {
+        mind.connect(e.from, e.to, e.type, 1.0f);
+        created++;
+        if (created % 100 == 0) {
+            std::cout << "[unify-triplets] Created " << created << "/" << work.size() << " edges\r" << std::flush;
+        }
+    }
+
+    std::cout << "\n[unify-triplets] Created " << created << " edges\n";
+    mind.snapshot();
+    std::cout << "[unify-triplets] Saved\n";
 
     return 0;
 }
@@ -1232,6 +1332,8 @@ int main(int argc, char* argv[]) {
         // Import flags
         } else if (strcmp(argv[i], "--update") == 0) {
             update_mode = true;
+        } else if (strcmp(argv[i], "--dry-run") == 0) {
+            // Handled per-command, just skip
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             print_usage(argv[0]);
             return 0;
@@ -1383,6 +1485,13 @@ int main(int argc, char* argv[]) {
         } else {
             result = cmd_import_soul(mind, import_file, update_mode);
         }
+    } else if (command == "unify-triplets") {
+        // Check for --dry-run in remaining args
+        bool dry_run = false;
+        for (int i = 1; i < argc; i++) {
+            if (strcmp(argv[i], "--dry-run") == 0) dry_run = true;
+        }
+        result = cmd_unify_triplets(mind, dry_run);
     } else {
         // Tool commands should use chitta (thin client), not chittad
         std::cerr << "Unknown command: " << command << "\n";

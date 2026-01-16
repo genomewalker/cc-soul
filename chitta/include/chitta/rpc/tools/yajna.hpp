@@ -132,6 +132,20 @@ inline void register_schemas(std::vector<ToolSchema>& tools) {
             {"required", {"file", "add"}}
         }
     });
+
+    tools.push_back({
+        "backfill_triplet_edges",
+        "Backfill edges for existing triplets. Creates bidirectional edges between entity nodes "
+        "for all triplets in the graph store that don't have corresponding edges. Use after "
+        "upgrading to unified triplet-node system.",
+        {
+            {"type", "object"},
+            {"properties", {
+                {"dry_run", {{"type", "boolean"}, {"default", true},
+                           {"description", "Preview only, don't actually create edges"}}}
+            }}
+        }
+    });
 }
 
 // Register yajna tool handlers
@@ -492,6 +506,112 @@ inline void register_handlers(Mind* mind, std::unordered_map<std::string, ToolHa
         } else {
             ss << "Tagged " << tagged << " nodes with '" << add_tag << "'";
             if (not_found > 0) ss << " (" << not_found << " not found)";
+        }
+        return ToolResult::ok(ss.str(), result);
+    };
+
+    // backfill_triplet_edges: Create edges for existing triplets
+    handlers["backfill_triplet_edges"] = [mind](const json& params) -> ToolResult {
+        bool dry_run = params.value("dry_run", true);
+
+        // Get all triplets from graph store
+        auto triplets = mind->query_graph("", "", "");  // All triplets
+
+        struct EdgeToCreate {
+            std::string subject;
+            std::string predicate;
+            std::string object;
+            std::optional<NodeId> subj_id;
+            std::optional<NodeId> obj_id;
+            bool has_forward_edge;
+            bool has_reverse_edge;
+        };
+        std::vector<EdgeToCreate> edges_needed;
+
+        for (const auto& [subject, predicate, object, weight] : triplets) {
+            // Find entity nodes for subject and object
+            auto subj_id = mind->find_entity(subject);
+            auto obj_id = mind->find_entity(object);
+
+            if (!subj_id || !obj_id) continue;  // Skip if entities don't exist
+
+            // Check if edges already exist
+            auto subj_node = mind->get(*subj_id);
+            auto obj_node = mind->get(*obj_id);
+            if (!subj_node || !obj_node) continue;
+
+            bool has_forward = false;
+            bool has_reverse = false;
+
+            for (const auto& edge : subj_node->edges) {
+                if (edge.target == *obj_id) {
+                    has_forward = true;
+                    break;
+                }
+            }
+
+            for (const auto& edge : obj_node->edges) {
+                if (edge.target == *subj_id) {
+                    has_reverse = true;
+                    break;
+                }
+            }
+
+            if (!has_forward || !has_reverse) {
+                edges_needed.push_back({
+                    subject, predicate, object,
+                    subj_id, obj_id,
+                    has_forward, has_reverse
+                });
+            }
+        }
+
+        size_t forward_created = 0;
+        size_t reverse_created = 0;
+
+        if (!dry_run) {
+            for (const auto& e : edges_needed) {
+                EdgeType edge_type = predicate_to_edge_type(e.predicate);
+                EdgeType reverse_type = reverse_edge_type(edge_type);
+
+                if (!e.has_forward_edge && e.subj_id && e.obj_id) {
+                    mind->connect(*e.subj_id, *e.obj_id, edge_type, 1.0f);
+                    forward_created++;
+                }
+
+                if (!e.has_reverse_edge && e.subj_id && e.obj_id) {
+                    mind->connect(*e.obj_id, *e.subj_id, reverse_type, 1.0f);
+                    reverse_created++;
+                }
+            }
+        }
+
+        json result;
+        result["triplets_total"] = triplets.size();
+        result["edges_needed"] = edges_needed.size();
+        result["forward_created"] = forward_created;
+        result["reverse_created"] = reverse_created;
+        result["dry_run"] = dry_run;
+
+        std::ostringstream ss;
+        if (dry_run) {
+            ss << "Would create edges for " << edges_needed.size() << " triplets:\n";
+            size_t shown = 0;
+            for (const auto& e : edges_needed) {
+                if (shown++ >= 20) {
+                    ss << "  ... and " << (edges_needed.size() - 20) << " more\n";
+                    break;
+                }
+                ss << "  " << e.subject << " --[" << e.predicate << "]--> " << e.object;
+                if (!e.has_forward_edge) ss << " [+fwd]";
+                if (!e.has_reverse_edge) ss << " [+rev]";
+                ss << "\n";
+            }
+            ss << "\nTotal: " << triplets.size() << " triplets, "
+               << edges_needed.size() << " need edges";
+        } else {
+            ss << "Created " << forward_created << " forward edges and "
+               << reverse_created << " reverse edges for " << edges_needed.size() << " triplets";
         }
         return ToolResult::ok(ss.str(), result);
     };
