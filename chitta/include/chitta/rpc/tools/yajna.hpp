@@ -146,6 +146,22 @@ inline void register_schemas(std::vector<ToolSchema>& tools) {
             }}
         }
     });
+
+    tools.push_back({
+        "import_soul",
+        "Import a .soul file into the mind. Parses SSL format with [domain] patterns, "
+        "[TRIPLET] relationships, and [high-ε] content. Supports @vessel directive for "
+        "protected nodes.",
+        {
+            {"type", "object"},
+            {"properties", {
+                {"file", {{"type", "string"}, {"description", "Path to .soul file"}}},
+                {"update", {{"type", "boolean"}, {"default", false},
+                          {"description", "Update existing nodes if they match"}}}
+            }},
+            {"required", {"file"}}
+        }
+    });
 }
 
 // Register yajna tool handlers
@@ -613,6 +629,141 @@ inline void register_handlers(Mind* mind, std::unordered_map<std::string, ToolHa
             ss << "Created " << forward_created << " forward edges and "
                << reverse_created << " reverse edges for " << edges_needed.size() << " triplets";
         }
+        return ToolResult::ok(ss.str(), result);
+    };
+
+    // import_soul: Import .soul file into mind
+    handlers["import_soul"] = [mind](const json& params) -> ToolResult {
+        std::string soul_file = params.value("file", "");
+        bool update_mode = params.value("update", false);
+        (void)update_mode;  // Reserved for future use
+
+        if (soul_file.empty()) {
+            return ToolResult::error("Missing required parameter: file");
+        }
+
+        std::ifstream file(soul_file);
+        if (!file.is_open()) {
+            return ToolResult::error("Cannot open soul file: " + soul_file);
+        }
+
+        std::string line;
+        std::string current_domain;
+        std::string current_title;
+        std::string current_location;
+        bool vessel_mode = false;
+        int nodes_created = 0;
+        int triplets_created = 0;
+
+        while (std::getline(file, line)) {
+            if (line.empty() || line[0] == '#') continue;
+
+            size_t start = line.find_first_not_of(" \t");
+            if (start == std::string::npos) continue;
+            line = line.substr(start);
+
+            if (line.find("@vessel") == 0) {
+                vessel_mode = true;
+                continue;
+            }
+
+            if (line[0] == '[' && line.find(']') != std::string::npos) {
+                size_t bracket_end = line.find(']');
+                std::string bracket_content = line.substr(1, bracket_end - 1);
+
+                if (bracket_content == "TRIPLET") {
+                    std::string triplet = line.substr(bracket_end + 1);
+                    start = triplet.find_first_not_of(" \t");
+                    if (start != std::string::npos) {
+                        triplet = triplet.substr(start);
+                        std::istringstream iss(triplet);
+                        std::string subj, pred, obj;
+                        if (iss >> subj >> pred) {
+                            std::getline(iss, obj);
+                            start = obj.find_first_not_of(" \t");
+                            if (start != std::string::npos) obj = obj.substr(start);
+                            if (!obj.empty()) {
+                                mind->connect(subj, pred, obj, vessel_mode ? 1.0f : 0.8f);
+                                triplets_created++;
+                            }
+                        }
+                    }
+                    continue;
+                } else if (bracket_content == "high-ε" || bracket_content == "high-e" || bracket_content == "ε") {
+                    if (!current_title.empty()) {
+                        std::string content = line.substr(bracket_end + 1);
+                        start = content.find_first_not_of(" \t");
+                        if (start != std::string::npos) content = content.substr(start);
+
+                        if (!current_location.empty()) {
+                            content += " @" + current_location;
+                        }
+
+                        std::string full_text;
+                        if (!current_domain.empty()) {
+                            full_text = "[" + current_domain + "] ";
+                        }
+                        full_text += current_title + ": " + content;
+
+                        float confidence = vessel_mode ? 1.0f : 0.7f;
+                        NodeId id;
+                        if (mind->has_yantra()) {
+                            id = mind->remember(full_text, NodeType::Wisdom, Confidence(confidence));
+                        } else {
+                            id = mind->remember(NodeType::Wisdom, Vector::zeros(), Confidence(confidence),
+                                               std::vector<uint8_t>(full_text.begin(), full_text.end()));
+                        }
+
+                        mind->add_tag(id, "codebase");
+                        mind->add_tag(id, "architecture");
+                        if (!current_domain.empty()) {
+                            mind->add_tag(id, "project:" + current_domain);
+                        }
+                        if (vessel_mode) {
+                            mind->add_tag(id, "vessel");
+                        }
+
+                        if (auto node_opt = mind->get(id)) {
+                            Node node = *node_opt;
+                            node.epsilon = 0.8f;
+                            mind->update_node(id, node);
+                        }
+
+                        nodes_created++;
+                        current_title.clear();
+                        current_location.clear();
+                    }
+                    continue;
+                } else {
+                    current_domain = bracket_content;
+                    std::string rest = line.substr(bracket_end + 1);
+                    start = rest.find_first_not_of(" \t");
+                    if (start != std::string::npos) rest = rest.substr(start);
+
+                    size_t loc_pos = rest.rfind(" @");
+                    if (loc_pos != std::string::npos) {
+                        current_location = rest.substr(loc_pos + 2);
+                        rest = rest.substr(0, loc_pos);
+                    } else {
+                        current_location.clear();
+                    }
+                    current_title = rest;
+                }
+            }
+        }
+
+        json result;
+        result["nodes_created"] = nodes_created;
+        result["triplets_created"] = triplets_created;
+        result["vessel_mode"] = vessel_mode;
+        result["file"] = soul_file;
+
+        std::ostringstream ss;
+        ss << "Soul import complete:\n";
+        ss << "  Nodes created: " << nodes_created << "\n";
+        ss << "  Triplets created: " << triplets_created << "\n";
+        ss << "  Vessel mode: " << (vessel_mode ? "yes" : "no");
+
         return ToolResult::ok(ss.str(), result);
     };
 }
