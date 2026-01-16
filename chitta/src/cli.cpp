@@ -772,6 +772,7 @@ int cmd_daemon_with_socket(Mind& mind, int interval_seconds,
     // Setup signal handlers
     std::signal(SIGTERM, daemon_signal_handler);
     std::signal(SIGINT, daemon_signal_handler);
+    std::signal(SIGPIPE, SIG_IGN);  // Prevent death when client disconnects during write
 
     std::cerr << "[daemon] Started (socket=" << socket_path
               << ", interval=" << interval_seconds << "s, pid=" << getpid()
