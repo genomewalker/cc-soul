@@ -9,6 +9,7 @@ The `chittad` command-line tool provides direct access to soul operations withou
 - [Installation](#installation)
 - [Global Options](#global-options)
 - [Commands](#commands)
+- [Yajna Commands](#yajna-commands)
 - [Realm Commands](#realm-commands)
 - [Review Commands](#review-commands)
 - [Evaluation Commands](#evaluation-commands)
@@ -240,6 +241,116 @@ Cycle complete.
   Before: 1963 nodes
   After:  1963 nodes
   Decay applied: yes
+```
+
+---
+
+## Yajna Commands
+
+Memory maintenance and batch operations.
+
+### get
+
+Fast direct ID lookup with full content.
+
+```bash
+chitta get --id "UUID"
+```
+
+**Output:**
+```
+=== a1b2c3d4-... ===
+Type: episode
+Confidence: 85%
+Tags: dev:hot, file:auth.ts, ε-processed
+
+[auth] JWT validation→check_expiry→refresh_if_needed @auth.ts:42
+[ε] Validates JWT, refreshes if within 5min of expiry.
+```
+
+---
+
+### yajna_list
+
+List nodes needing ε-yajna processing.
+
+```bash
+chitta yajna_list --limit 20 [--filter "domain"]
+```
+
+**Output:**
+```
+Nodes for epsilon-yajna (SSL + triplet conversion):
+
+[a1b2c3d4-...] Verbose explanation... (820 chars, epsilon=13%)
+[b2c3d4e5-...] [cc-soul] func()→result @file.hpp (150 chars, epsilon=100%)
+
+Total: 42 nodes need processing (showing 20)
+```
+
+---
+
+### yajna_inspect
+
+Inspect a node for yajna analysis.
+
+```bash
+chitta yajna_inspect --id "UUID"
+```
+
+---
+
+### yajna_mark_processed
+
+Batch mark SSL-format nodes as ε-processed. Efficient C++ loop.
+
+```bash
+chitta yajna_mark_processed [--epsilon_threshold 0.8] [--dry_run true|false]
+```
+
+**Options:**
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--epsilon_threshold` | 0.8 | Min epsilon to auto-mark |
+| `--dry_run` | true | Preview only |
+| `--filter` | - | Text filter |
+
+**Output:**
+```
+Marked 788 nodes as ε-processed
+```
+
+---
+
+### batch_remove
+
+Remove multiple nodes from a file of UUIDs.
+
+```bash
+chitta batch_remove --file /tmp/ids.txt [--dry_run false]
+```
+
+File format: one UUID per line, `#` for comments.
+
+---
+
+### batch_tag
+
+Tag multiple nodes from a file of UUIDs.
+
+```bash
+chitta batch_tag --file /tmp/ids.txt --add "ε-processed" [--dry_run false]
+```
+
+---
+
+### tag
+
+Add or remove tags from a node.
+
+```bash
+chitta tag --id "UUID" --add "important"
+chitta tag --id "UUID" --remove "old-tag"
 ```
 
 ---

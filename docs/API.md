@@ -18,6 +18,7 @@ This document provides a complete reference for all MCP tools exposed by CC-Soul
 - [Realm Tools](#realm-tools)
 - [Review Tools](#review-tools)
 - [Evaluation Tools](#evaluation-tools)
+- [Yajna Tools](#yajna-tools)
 - [Response Format](#response-format)
 
 ---
@@ -1042,6 +1043,203 @@ Detect if compression quality is degrading over time.
   "name": "epiplexity_drift",
   "arguments": {
     "window_days": 7
+  }
+}
+```
+
+---
+
+## Yajna Tools
+
+Tools for memory maintenance ceremonies - compression, cleanup, and batch operations.
+
+### get
+
+Fast direct ID lookup with full content.
+
+**Parameters:**
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `id` | string | Yes | - | Node UUID to retrieve |
+
+**Example:**
+```json
+{
+  "name": "get",
+  "arguments": {
+    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+  }
+}
+```
+
+**Response:**
+```
+=== a1b2c3d4-e5f6-7890-abcd-ef1234567890 ===
+Type: episode
+Confidence: 85%
+Tags: dev:hot, file:auth.ts, ε-processed
+
+[auth] JWT validation→check_expiry→refresh_if_needed @auth.ts:42
+[ε] Validates JWT, refreshes if within 5min of expiry.
+[TRIPLET] JWT_validation uses check_expiry
+[TRIPLET] JWT_validation triggers refresh_if_needed
+
+--- 2 edges ---
+  -> [supports] Token refresh flow...
+  -> [mentions] Authentication middleware...
+```
+
+---
+
+### yajna_list
+
+List nodes needing ε-yajna processing (SSL conversion).
+
+**Parameters:**
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `limit` | integer | No | 100 | Max nodes to list |
+| `filter` | string | No | - | Text filter for domain |
+
+**Example:**
+```json
+{
+  "name": "yajna_list",
+  "arguments": {
+    "limit": 20,
+    "filter": "cc-soul"
+  }
+}
+```
+
+**Response:**
+```
+Nodes for epsilon-yajna (SSL + triplet conversion):
+
+[a1b2c3d4-...] Verbose explanation of... (820 chars, epsilon=13%)
+[b2c3d4e5-...] [cc-soul] func()→result @file.hpp (150 chars, epsilon=100%)
+
+Total: 42 nodes need processing (showing 20)
+```
+
+---
+
+### yajna_inspect
+
+Get complete node content for yajna analysis.
+
+**Parameters:**
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `id` | string | Yes | - | Node UUID to inspect |
+
+**Example:**
+```json
+{
+  "name": "yajna_inspect",
+  "arguments": {
+    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+  }
+}
+```
+
+---
+
+### yajna_mark_processed
+
+Batch mark SSL-format nodes as ε-processed. Efficient C++ loop.
+
+**Parameters:**
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `epsilon_threshold` | number | No | 0.8 | Min epsilon to auto-mark |
+| `dry_run` | boolean | No | true | Preview only |
+| `filter` | string | No | - | Text filter |
+
+**Example:**
+```json
+{
+  "name": "yajna_mark_processed",
+  "arguments": {
+    "epsilon_threshold": 0.8,
+    "dry_run": false
+  }
+}
+```
+
+**Response:**
+```
+Marked 788 nodes as ε-processed
+```
+
+---
+
+### batch_remove
+
+Remove multiple nodes from a file of UUIDs. Efficient C++ loop.
+
+**Parameters:**
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `file` | string | Yes | - | Path to file with UUIDs (one per line) |
+| `dry_run` | boolean | No | true | Preview only |
+
+**Example:**
+```json
+{
+  "name": "batch_remove",
+  "arguments": {
+    "file": "/tmp/noise_ids.txt",
+    "dry_run": false
+  }
+}
+```
+
+---
+
+### batch_tag
+
+Tag multiple nodes from a file of UUIDs. Efficient C++ loop.
+
+**Parameters:**
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `file` | string | Yes | - | Path to file with UUIDs (one per line) |
+| `add` | string | Yes | - | Tag to add to all nodes |
+| `dry_run` | boolean | No | true | Preview only |
+
+**Example:**
+```json
+{
+  "name": "batch_tag",
+  "arguments": {
+    "file": "/tmp/processed_ids.txt",
+    "add": "ε-processed",
+    "dry_run": false
+  }
+}
+```
+
+---
+
+### tag
+
+Add or remove tags from a single node.
+
+**Parameters:**
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `id` | string | Yes | - | Node UUID |
+| `add` | string | No | - | Tag to add |
+| `remove` | string | No | - | Tag to remove |
+
+**Example:**
+```json
+{
+  "name": "tag",
+  "arguments": {
+    "id": "a1b2c3d4-...",
+    "add": "important"
   }
 }
 ```

@@ -326,6 +326,18 @@ The soul exposes tools through the Model Context Protocol:
 | `ledger` | Save/load session state (Atman snapshots) |
 | `narrate` | Record narrative episodes and story arcs |
 
+### Yajna Tools (Memory Maintenance)
+
+| Tool | Description |
+|------|-------------|
+| `get` | Fast direct ID lookup with full content |
+| `yajna_list` | List nodes needing ε-yajna processing |
+| `yajna_inspect` | Inspect node for yajna analysis |
+| `yajna_mark_processed` | Batch mark SSL nodes as processed (C++ loop) |
+| `batch_remove` | Remove nodes from file of UUIDs (C++ loop) |
+| `batch_tag` | Tag nodes from file of UUIDs (C++ loop) |
+| `tag` | Add/remove tags from a single node |
+
 ### Example Usage
 
 ```python
