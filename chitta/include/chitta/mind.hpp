@@ -114,11 +114,20 @@ public:
 
         // Skip BM25 loading for fast operations (stats)
         if (!config_.skip_bm25) {
-            // BM25: try loading from disk, fall back to lazy rebuild on first search
+            // BM25: try loading from disk, validate, fall back to rebuild if invalid
             bm25_path_ = storage_.base_path() + ".bm25";
             if (bm25_index_.load(bm25_path_)) {
-                bm25_built_ = true;
-                std::cerr << "[Mind] Loaded BM25 index (" << bm25_index_.size() << " docs)\n";
+                // Validate loaded index - check for corruption/inconsistency
+                if (bm25_index_.validate() && validate_bm25_storage_sync()) {
+                    bm25_built_ = true;
+                    std::cerr << "[Mind] Loaded BM25 index (" << bm25_index_.size() << " docs)\n";
+                } else {
+                    // Index is corrupt or stale - force rebuild
+                    std::cerr << "[Mind] BM25 index invalid, rebuilding...\n";
+                    rebuild_bm25_index();
+                    bm25_built_ = true;
+                    std::cerr << "[Mind] Rebuilt BM25 index (" << bm25_index_.size() << " docs)\n";
+                }
             } else {
                 bm25_built_ = false;  // Will rebuild lazily on first search
             }
@@ -176,11 +185,14 @@ public:
         if (bm25_built_) return;
         if (storage_.total_size() > BM25_MAX_NODES) {
             // Too large for in-memory BM25 - skip and use dense search only
+            std::cerr << "[Mind] BM25 skipped (too many nodes: " << storage_.total_size() << ")\n";
             bm25_built_ = true;  // Mark as "built" to prevent retry
             return;
         }
+        std::cerr << "[Mind] Rebuilding BM25 index from " << storage_.total_size() << " nodes...\n";
         rebuild_bm25_index();
         bm25_built_ = true;
+        std::cerr << "[Mind] BM25 index rebuilt (" << bm25_index_.size() << " docs)\n";
     }
 
     // Add to BM25 only if already built (otherwise rebuild will include it)
@@ -192,12 +204,35 @@ public:
 
     // Rebuild BM25 index from storage (call after loading data)
     void rebuild_bm25_index() {
+        bm25_index_.clear();  // Clear before rebuilding
         storage_.for_each_payload([this](const NodeId& id, const std::vector<uint8_t>& payload) {
             auto text = payload_to_text(payload);
             if (text) {
                 bm25_index_.add(id, *text);
             }
         });
+    }
+
+    // Validate BM25 index is in sync with storage (sample NodeIds and check existence)
+    // Returns true if > 50% of sampled NodeIds exist in storage
+    bool validate_bm25_storage_sync() {
+        auto sample = bm25_index_.sample_docs(20);
+        if (sample.empty()) return true;  // Empty index is valid
+
+        size_t found = 0;
+        for (const auto& id : sample) {
+            if (storage_.get(id) != nullptr) {
+                found++;
+            }
+        }
+
+        float hit_rate = static_cast<float>(found) / sample.size();
+        if (hit_rate < 0.5f) {
+            std::cerr << "[Mind] BM25 storage sync failed: " << found << "/" << sample.size()
+                      << " (" << (hit_rate * 100.0f) << "%) NodeIds exist\n";
+            return false;
+        }
+        return true;
     }
 
     // Rebuild tag index from storage (call after loading data)
@@ -355,9 +390,28 @@ public:
     // Text-based API (requires VakYantra)
     // ═══════════════════════════════════════════════════════════════════
 
+    // Quality gate: reject low-quality content (Issue #1)
+    bool passes_quality_gate(const std::string& text) const {
+        if (!config_.enable_quality_gate) return true;
+        if (text.size() < config_.min_content_length) return false;
+
+        // Check signal ratio (alphanumeric vs noise)
+        size_t signal = 0;
+        for (char c : text) {
+            if (std::isalnum(static_cast<unsigned char>(c)) || c == '_') signal++;
+        }
+        float ratio = static_cast<float>(signal) / text.size();
+        return ratio >= config_.min_signal_ratio;
+    }
+
     // Remember text: transform to embedding and store
     NodeId remember(const std::string& text, NodeType type = NodeType::Wisdom) {
         std::unique_lock<std::shared_mutex> lock(mutex_);
+
+        // Quality gate: reject garbage before it enters (Issue #1)
+        if (!passes_quality_gate(text)) {
+            return NodeId{};  // Return null ID for rejected content
+        }
 
         // Phase 7: Check quota before inserting
         if (config_.enable_quota_manager && quota_manager_.at_quota(type)) {
@@ -366,6 +420,19 @@ public:
         }
 
         Artha artha = yantra_->transform(text);
+
+        // Deduplication: Check for very similar existing nodes
+        if (config_.enable_deduplication && lsh_initialized_) {
+            auto existing = find_duplicate_unlocked(artha.nu, text, config_.dedup_threshold);
+            if (existing) {
+                // Strengthen existing node instead of creating duplicate
+                if (Node* node = storage_.get(*existing)) {
+                    node->tau_accessed = now();
+                    node->kappa.observe(0.9f);  // Reinforce confidence
+                }
+                return *existing;
+            }
+        }
 
         Node node(type, std::move(artha.nu));
         node.payload = text_to_payload(text);
@@ -410,6 +477,18 @@ public:
 
         Artha artha = yantra_->transform(text);
 
+        // Deduplication check
+        if (config_.enable_deduplication && lsh_initialized_) {
+            auto existing = find_duplicate_unlocked(artha.nu, text, config_.dedup_threshold);
+            if (existing) {
+                if (Node* node = storage_.get(*existing)) {
+                    node->tau_accessed = now();
+                    node->kappa.observe(confidence.effective());
+                }
+                return *existing;
+            }
+        }
+
         Node node(type, std::move(artha.nu));
         node.kappa = confidence;
         node.payload = text_to_payload(text);
@@ -449,6 +528,18 @@ public:
         std::unique_lock<std::shared_mutex> lock(mutex_);
 
         Artha artha = yantra_->transform(text);
+
+        // Deduplication check
+        if (config_.enable_deduplication && lsh_initialized_) {
+            auto existing = find_duplicate_unlocked(artha.nu, text, config_.dedup_threshold);
+            if (existing) {
+                if (Node* node = storage_.get(*existing)) {
+                    node->tau_accessed = now();
+                    node->kappa.observe(0.9f);
+                }
+                return *existing;
+            }
+        }
 
         Node node(type, std::move(artha.nu));
         node.payload = text_to_payload(text);
@@ -494,6 +585,18 @@ public:
         std::unique_lock<std::shared_mutex> lock(mutex_);
 
         Artha artha = yantra_->transform(text);
+
+        // Deduplication check
+        if (config_.enable_deduplication && lsh_initialized_) {
+            auto existing = find_duplicate_unlocked(artha.nu, text, config_.dedup_threshold);
+            if (existing) {
+                if (Node* node = storage_.get(*existing)) {
+                    node->tau_accessed = now();
+                    node->kappa.observe(confidence.effective());
+                }
+                return *existing;
+            }
+        }
 
         Node node(type, std::move(artha.nu));
         node.kappa = confidence;
@@ -2604,44 +2707,68 @@ public:
 
     // Find natural attractors in the graph
     // Attractors are nodes with: high confidence + many connections + stable (old)
+    // Uses snapshot-then-compute pattern to minimize lock hold time
     std::vector<Attractor> find_attractors(size_t max_attractors = 10,
                                             float min_confidence = 0.6f,
                                             size_t min_edges = 2) {
-        std::unique_lock<std::shared_mutex> lock(mutex_);
+        // Snapshot struct - minimal data for lock-free computation
+        struct AttractorSnapshot {
+            NodeId id;
+            float confidence;
+            size_t edge_count;
+            Timestamp created;
+            std::string label;
+        };
 
-        std::vector<Attractor> candidates;
+        std::vector<AttractorSnapshot> snapshot;
         Timestamp current = now();
 
-        storage_.for_each_hot([&](const NodeId& id, const Node& node) {
-            // Skip low-confidence nodes
-            if (node.kappa.effective() < min_confidence) return;
+        // Phase 1: Snapshot under shared lock (brief)
+        {
+            std::shared_lock<std::shared_mutex> lock(mutex_);
+            snapshot.reserve(storage_.hot_size());
 
-            // Skip poorly connected nodes
-            if (node.edges.size() < min_edges) return;
+            storage_.for_each_hot([&](const NodeId& id, const Node& node) {
+                // Pre-filter during snapshot to reduce memory
+                if (node.kappa.effective() < min_confidence) return;
+                if (node.edges.size() < min_edges) return;
 
+                auto text = payload_to_text(node.payload);
+                snapshot.push_back({
+                    id,
+                    node.kappa.effective(),
+                    node.edges.size(),
+                    node.tau_created,
+                    text ? text->substr(0, 50) : ""
+                });
+            });
+        }
+        // Lock released - compute phase is lock-free
+
+        // Phase 2: Compute attractors from snapshot (no lock)
+        std::vector<Attractor> candidates;
+        candidates.reserve(snapshot.size());
+
+        for (const auto& s : snapshot) {
             // Calculate attractor strength:
             // - confidence contributes (0.4)
             // - connectivity contributes (0.3)
             // - age/stability contributes (0.3)
-            float confidence_score = node.kappa.effective();
+            float confidence_score = s.confidence;
 
             // Connectivity: log-scaled to avoid over-weighting highly connected nodes
-            float connectivity_score = std::min(std::log2(1.0f + node.edges.size()) / 4.0f, 1.0f);
+            float connectivity_score = std::min(std::log2(1.0f + s.edge_count) / 4.0f, 1.0f);
 
             // Age: older nodes are more stable attractors
-            float age_days = static_cast<float>(current - node.tau_created) / 86400000.0f;
+            float age_days = static_cast<float>(current - s.created) / 86400000.0f;
             float age_score = std::min(age_days / 30.0f, 1.0f);  // Max at 30 days
 
             float strength = 0.4f * confidence_score +
                             0.3f * connectivity_score +
                             0.3f * age_score;
 
-            // Extract label from payload
-            auto text = payload_to_text(node.payload);
-            std::string label = text ? text->substr(0, 50) : "";
-
-            candidates.push_back({id, strength, label, 0});
-        });
+            candidates.push_back({s.id, strength, s.label, 0});
+        }
 
         // Sort by strength (strongest first)
         std::sort(candidates.begin(), candidates.end(),
@@ -3277,6 +3404,9 @@ private:
                     candidates = rrf_fusion(candidates, sparse, 60.0f, 0.7f);
                 } else if (mode == SearchMode::Sparse) {
                     candidates = sparse;
+                } else if (mode == SearchMode::Hybrid && candidates.empty() && !sparse.empty()) {
+                    // Dense is empty (yantra not ready?) - use sparse results directly
+                    candidates = sparse;
                 }
             }
         }
@@ -3290,7 +3420,9 @@ private:
         // Score candidates with soul-aware relevance (optionally session-primed)
         std::vector<Recall> results;
         for (const auto& [id, base_score] : candidates) {
-            if (Node* node = storage_.get(id)) {
+            Node* node = storage_.get(id);
+            if (!node) continue;
+            {
                 // Get semantic similarity (for dense) or use base score (for sparse)
                 float similarity = base_score;
                 if (mode == SearchMode::Hybrid && qquery) {
@@ -3308,7 +3440,7 @@ private:
 
                 // Skip nodes without text content
                 auto text = payload_to_text(node->payload);
-                if (!text || text->size() < 3) continue;  // Skip empty/corrupted payloads
+                if (!text || text->size() < 3) continue;
 
                 Recall r;
                 r.id = id;
@@ -3363,6 +3495,46 @@ private:
                 [](const Recall& a, const Recall& b) {
                     return a.relevance > b.relevance;
                 });
+        }
+
+        // Diversity sampling: prevent confirmation bias (Issue #2)
+        // Prefer diverse results but always return at least min_diverse_results
+        if (config_.enable_diversity_sampling && results.size() > config_.min_diverse_results) {
+            std::vector<size_t> keep_indices;
+            std::vector<size_t> similar_indices;  // Track similar ones as fallback
+            keep_indices.push_back(0);  // Always keep top result
+
+            for (size_t i = 1; i < results.size() && keep_indices.size() < k; ++i) {
+                bool is_diverse = true;
+                for (size_t kept_idx : keep_indices) {
+                    if (results[kept_idx].has_embedding && results[i].has_embedding) {
+                        float sim = results[kept_idx].qnu.cosine_approx(results[i].qnu);
+                        if (sim > config_.diversity_threshold) {
+                            is_diverse = false;
+                            break;
+                        }
+                    }
+                }
+                if (is_diverse) {
+                    keep_indices.push_back(i);
+                } else {
+                    similar_indices.push_back(i);  // Track for fallback
+                }
+            }
+
+            // Guarantee minimum results: fill with similar ones if needed
+            size_t min_to_return = std::min(config_.min_diverse_results, k);
+            for (size_t i = 0; i < similar_indices.size() && keep_indices.size() < min_to_return; ++i) {
+                keep_indices.push_back(similar_indices[i]);
+            }
+
+            // Build results from kept indices
+            std::vector<Recall> diverse;
+            diverse.reserve(keep_indices.size());
+            for (size_t idx : keep_indices) {
+                diverse.push_back(std::move(results[idx]));
+            }
+            results = std::move(diverse);
         }
 
         // Limit to k results
@@ -3833,6 +4005,37 @@ public:
         return std::vector<NodeId>(candidates.begin(), candidates.end());
     }
 
+    // Find duplicate node before insert (returns existing ID if duplicate found)
+    // Uses LSH for fast candidate retrieval, then verifies similarity
+    std::optional<NodeId> find_duplicate_unlocked(
+        const Vector& embedding,
+        const std::string& text,
+        float min_similarity = 0.95f)
+    {
+        if (!lsh_initialized_) return std::nullopt;
+
+        auto candidates = lsh_find_similar(embedding, 10);
+
+        for (const auto& cand_id : candidates) {
+            Node* cand = storage_.get(cand_id);
+            if (!cand) continue;
+
+            float sim = cand->nu.cosine(embedding);
+            if (sim >= min_similarity) {
+                // Optional: Also check text similarity for safety
+                auto cand_text = payload_to_text(cand->payload);
+                if (cand_text && *cand_text == text) {
+                    return cand_id;  // Exact text match
+                }
+                if (sim >= 0.98f) {
+                    return cand_id;  // Very high similarity, likely duplicate
+                }
+            }
+        }
+
+        return std::nullopt;
+    }
+
     // Try consolidation on insert: O(1) average
     std::optional<NodeId> try_consolidate_on_insert(
         const NodeId& new_id,
@@ -3910,6 +4113,76 @@ public:
         return storage_.remove(id);
     }
 
+    // Cleanup garbage nodes matching patterns
+    // Returns: {removed_count, patterns_matched}
+    std::pair<size_t, std::vector<std::string>> cleanup_garbage(bool dry_run = true) {
+        std::unique_lock<std::shared_mutex> lock(mutex_);
+
+        std::vector<NodeId> to_remove;
+        std::vector<std::string> patterns_matched;
+
+        // Garbage patterns to detect
+        auto is_garbage = [](const std::string& text) -> std::optional<std::string> {
+            if (text.empty() || text.size() < 3) return "empty";
+            // Verbose command logs
+            if (text.rfind("Edited:", 0) == 0) return "edited_log";
+            if (text.rfind("Ran:", 0) == 0) return "ran_log";
+            if (text.rfind("Failed:", 0) == 0) return "failed_log";
+            if (text.rfind("Created:", 0) == 0) return "created_log";
+            // Error messages
+            if (text.find("sleep: invalid") != std::string::npos) return "sleep_error";
+            if (text.find("sleep: unrecognized") != std::string::npos) return "sleep_error";
+            if (text.find("Command running in background") != std::string::npos) return "background_log";
+            if (text.find("Exit code 1") != std::string::npos && text.size() < 100) return "exit_error";
+            if (text.find("error: Cannot connect to daemon") != std::string::npos) return "daemon_error";
+            // Build output noise
+            if (text.find("Building CXX object") != std::string::npos) return "build_log";
+            if (text.find("Linking CXX executable") != std::string::npos) return "build_log";
+            if (text.find("[100%] Built target") != std::string::npos) return "build_log";
+            return std::nullopt;
+        };
+
+        std::unordered_map<std::string, size_t> pattern_counts;
+
+        storage_.for_each_payload([&](const NodeId& id, const std::vector<uint8_t>& payload) {
+            auto text = payload_to_text(payload);
+            if (!text) {
+                to_remove.push_back(id);
+                pattern_counts["empty"]++;
+                return;
+            }
+
+            auto pattern = is_garbage(*text);
+            if (pattern) {
+                to_remove.push_back(id);
+                pattern_counts[*pattern]++;
+            }
+        });
+
+        // Build pattern summary
+        for (const auto& [pat, count] : pattern_counts) {
+            patterns_matched.push_back(pat + ":" + std::to_string(count));
+        }
+
+        // Actually remove if not dry run
+        size_t removed = 0;
+        if (!dry_run) {
+            for (const auto& id : to_remove) {
+                if (storage_.remove(id)) {
+                    removed++;
+                }
+            }
+            // Rebuild BM25 to reflect removals
+            if (removed > 0) {
+                rebuild_bm25_index();
+            }
+        } else {
+            removed = to_remove.size();  // Report what would be removed
+        }
+
+        return {removed, patterns_matched};
+    }
+
     // Merge two nodes: keeper absorbs merged, merged is deleted
     bool merge_nodes(const NodeId& keeper_id, const NodeId& merged_id) {
         std::unique_lock<std::shared_mutex> lock(mutex_);
@@ -3922,6 +4195,91 @@ public:
         merge_into(keeper_id, merged_id, *keeper, *merged);
         storage_.remove(merged_id);
         return true;
+    }
+
+    // Deduplicate all nodes by text content
+    // Groups nodes with identical text, keeps the one with highest confidence
+    // Memory-efficient: processes in batches, skips edges during merge
+    std::pair<size_t, size_t> deduplicate_all(bool dry_run = true) {
+        std::unique_lock<std::shared_mutex> lock(mutex_);
+
+        // Group nodes by text hash (just stores NodeIds, not text)
+        std::unordered_map<size_t, std::vector<NodeId>> hash_groups;
+        std::hash<std::string> hasher;
+
+        storage_.for_each_payload([&](const NodeId& id, const std::vector<uint8_t>& payload) {
+            auto text = payload_to_text(payload);
+            if (!text || text->size() < 10) return;
+            size_t h = hasher(*text);
+            hash_groups[h].push_back(id);
+        });
+
+        size_t groups_found = 0;
+        size_t nodes_merged = 0;
+        std::vector<NodeId> to_remove;  // Batch removals
+
+        for (auto& [hash, ids] : hash_groups) {
+            if (ids.size() < 2) continue;
+
+            // Get first node's text for comparison
+            Node* first = storage_.get(ids[0]);
+            if (!first) continue;
+            auto first_text = payload_to_text(first->payload);
+            if (!first_text) continue;
+
+            // Find exact matches
+            std::vector<NodeId> exact_matches;
+            exact_matches.push_back(ids[0]);
+
+            for (size_t i = 1; i < ids.size(); ++i) {
+                Node* node = storage_.get(ids[i]);
+                if (!node) continue;
+                auto text = payload_to_text(node->payload);
+                if (text && *text == *first_text) {
+                    exact_matches.push_back(ids[i]);
+                }
+            }
+
+            if (exact_matches.size() < 2) continue;
+            groups_found++;
+
+            // Find best node
+            NodeId best_id = exact_matches[0];
+            float best_conf = 0.0f;
+            Timestamp best_ts = 0;
+
+            for (const auto& id : exact_matches) {
+                Node* node = storage_.get(id);
+                if (!node) continue;
+                float conf = node->kappa.effective();
+                if (conf > best_conf || (conf == best_conf && node->tau_accessed > best_ts)) {
+                    best_conf = conf;
+                    best_ts = node->tau_accessed;
+                    best_id = id;
+                }
+            }
+
+            // Queue removals (don't merge, just remove duplicates)
+            for (const auto& id : exact_matches) {
+                if (id == best_id) continue;
+                if (!dry_run) {
+                    to_remove.push_back(id);
+                }
+                nodes_merged++;
+            }
+        }
+
+        // Batch remove all duplicates
+        if (!dry_run) {
+            for (const auto& id : to_remove) {
+                storage_.remove(id);
+            }
+            if (!to_remove.empty()) {
+                rebuild_bm25_index();
+            }
+        }
+
+        return {groups_found, nodes_merged};
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -4093,7 +4451,11 @@ public:
     }
 
     MindConfig config_;
-    mutable std::shared_mutex mutex_;  // Reader-writer lock: shared for reads, unique for writes
+
+    // Lock usage: snapshot under lock, compute outside, apply in short batches.
+    // Avoid re-entering Mind methods while holding mutex_.
+    // For read-heavy operations (search, find_attractors), prefer shared_lock.
+    mutable std::shared_mutex mutex_;
     TieredStorage storage_;
     Graph graph_;
     GraphStore graph_store_;  // Dictionary-encoded graph (legacy)

@@ -57,7 +57,7 @@ public:
         return pid_path_for_mind(default_mind_path());
     }
     static constexpr int CONNECT_TIMEOUT_MS = 5000;
-    static constexpr int RESPONSE_TIMEOUT_MS = 30000;
+    static constexpr int RESPONSE_TIMEOUT_MS = 120000;  // 2 minutes for long ops
     static constexpr size_t MAX_RESPONSE_SIZE = 16 * 1024 * 1024;
 
     // Default constructor uses UID-scoped socket path

@@ -389,8 +389,8 @@ chittad recall "error handling patterns" --limit 10
 # Full resonance search
 chittad resonate "caching strategies"
 
-# Start subconscious daemon
-chittad daemon --interval 60 --pid-file ~/.claude/mind/.subconscious.pid
+# Start daemon (socket required for RPC)
+chittad daemon --socket
 
 # Run maintenance
 chittad cycle

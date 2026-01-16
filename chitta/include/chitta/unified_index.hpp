@@ -961,7 +961,7 @@ public:
             if (!meta || !qvec) continue;
 
             Node node;
-            node.id = nodes[i].id;
+            node.id = meta->id;  // Use meta->id (correct) instead of nodes[i].id (may be zero after restore)
             node.node_type = meta->node_type;
             node.nu = qvec->to_float();
             node.tau_created = meta->tau_created;
@@ -983,7 +983,7 @@ public:
             // Tags not loaded - use slot_tag_index().tags_for_slot() if needed
             // This saves memory during iteration (e.g., BM25 rebuild)
 
-            fn(nodes[i].id, node);
+            fn(meta->id, node);  // Use meta->id for correct ID
         }
     }
 
@@ -1166,7 +1166,11 @@ private:
 
         for (size_t i = 0; i < header->node_count + header->deleted_count; ++i) {
             if (!(nodes[i].flags & NODE_FLAG_DELETED)) {
-                id_to_slot_[nodes[i].id] = SlotId(i);
+                // Use meta->id (correct) instead of nodes[i].id (may be zero after restore)
+                auto* m = meta(SlotId(static_cast<uint32_t>(i)));
+                if (m) {
+                    id_to_slot_[m->id] = SlotId(i);
+                }
             }
         }
     }

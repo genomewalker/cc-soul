@@ -296,7 +296,7 @@ class GraphStore {
 public:
     GraphStore() = default;
 
-    // Add a triplet (thread-safe)
+    // Add a triplet (thread-safe, deduplicates)
     void add(const std::string& subject, const std::string& predicate,
              const std::string& object, float weight = 1.0f) {
         std::unique_lock lock(mutex_);
@@ -306,6 +306,15 @@ public:
         t.predicate = static_cast<uint32_t>(predicates_.get_or_create(predicate));
         t.object = entities_.get_or_create(object);
         t.weight = weight;
+
+        // Check for duplicate triplet
+        for (const auto& existing : triplets_) {
+            if (existing.subject == t.subject &&
+                existing.predicate == t.predicate &&
+                existing.object == t.object) {
+                return;  // Already exists, skip
+            }
+        }
 
         triplets_.push_back(t);
         dirty_ = true;

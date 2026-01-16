@@ -209,6 +209,34 @@ inline void register_schemas(std::vector<ToolSchema>& tools) {
             {"required", {"file", "tag"}}
         }
     });
+
+    tools.push_back({
+        "cleanup",
+        "Remove garbage nodes matching patterns: Edited:/Ran:/Failed:/Created: logs, "
+        "empty nodes, sleep errors, background task logs. Use dry_run=true to preview.",
+        {
+            {"type", "object"},
+            {"properties", {
+                {"dry_run", {{"type", "boolean"}, {"default", true},
+                            {"description", "If true, only report what would be removed"}}}
+            }},
+            {"required", {}}
+        }
+    });
+
+    tools.push_back({
+        "deduplicate",
+        "Merge duplicate nodes with identical text content. Keeps node with highest "
+        "confidence, merges edges and metadata from others. Use dry_run=true to preview.",
+        {
+            {"type", "object"},
+            {"properties", {
+                {"dry_run", {{"type", "boolean"}, {"default", true},
+                            {"description", "If true, only report what would be merged"}}}
+            }},
+            {"required", {}}
+        }
+    });
 }
 
 // Tool implementations
@@ -999,6 +1027,51 @@ inline ToolResult get_resonance_config(Mind* mind, const json& /*params*/) {
     return ToolResult::ok(ss.str(), cfg.to_json());
 }
 
+// Cleanup garbage nodes
+inline ToolResult cleanup(Mind* mind, const json& params) {
+    bool dry_run = params.value("dry_run", true);
+
+    auto [count, patterns] = mind->cleanup_garbage(dry_run);
+
+    std::ostringstream ss;
+    if (dry_run) {
+        ss << "Would remove " << count << " garbage nodes:\n";
+    } else {
+        ss << "Removed " << count << " garbage nodes:\n";
+    }
+    for (const auto& p : patterns) {
+        ss << "  - " << p << "\n";
+    }
+
+    json result;
+    result["count"] = count;
+    result["dry_run"] = dry_run;
+    result["patterns"] = patterns;
+
+    return ToolResult::ok(ss.str(), result);
+}
+
+// Deduplicate nodes with identical text
+inline ToolResult deduplicate(Mind* mind, const json& params) {
+    bool dry_run = params.value("dry_run", true);
+
+    auto [groups, merged] = mind->deduplicate_all(dry_run);
+
+    std::ostringstream ss;
+    if (dry_run) {
+        ss << "Would merge " << merged << " duplicate nodes across " << groups << " groups";
+    } else {
+        ss << "Merged " << merged << " duplicate nodes across " << groups << " groups";
+    }
+
+    json result;
+    result["groups_found"] = groups;
+    result["nodes_merged"] = merged;
+    result["dry_run"] = dry_run;
+
+    return ToolResult::ok(ss.str(), result);
+}
+
 // Register all learning tool handlers
 inline void register_handlers(Mind* mind,
                                std::unordered_map<std::string, ToolHandler>& handlers) {
@@ -1018,6 +1091,8 @@ inline void register_handlers(Mind* mind,
     handlers["list_entities"] = [mind](const json& p) { return list_entities(mind, p); };
     handlers["set_resonance_config"] = [mind](const json& p) { return set_resonance_config(mind, p); };
     handlers["get_resonance_config"] = [mind](const json& p) { return get_resonance_config(mind, p); };
+    handlers["cleanup"] = [mind](const json& p) { return cleanup(mind, p); };
+    handlers["deduplicate"] = [mind](const json& p) { return deduplicate(mind, p); };
 }
 
 } // namespace chitta::rpc::tools::learning

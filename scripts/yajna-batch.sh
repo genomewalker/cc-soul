@@ -13,7 +13,7 @@ MIN_LENGTH="${2:-200}"
 # Ensure daemon is running
 if ! pgrep -f "chittad daemon" >/dev/null; then
     echo "[yajna] Starting daemon..." >&2
-    "${CHITTA}_cli" daemon &
+    "${HOME}/.claude/bin/chittad" daemon --socket
     sleep 2
 fi
 

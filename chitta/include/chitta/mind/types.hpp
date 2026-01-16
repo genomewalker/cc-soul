@@ -42,6 +42,29 @@ struct MindConfig {
 
     // Phase 7: Priority 3 - Pipeline Integration
     bool enable_query_routing = false;   // Route queries based on intent classification
+
+    // Deduplication
+    bool enable_deduplication = true;    // Check for duplicates before insert
+    float dedup_threshold = 0.95f;       // Similarity threshold for duplicate detection
+
+    // Quality gating (Issue #1: Garbage in, garbage out)
+    bool enable_quality_gate = true;     // Reject low-quality observations
+    float min_content_length = 10.0f;    // Minimum chars for valid content
+    float min_signal_ratio = 0.3f;       // Min ratio of alphanumeric to total chars
+
+    // Anti-confirmation bias (Issue #2: Rigidity)
+    bool enable_diversity_sampling = true;  // Ensure diverse retrievals
+    float diversity_threshold = 0.95f;      // Max similarity between results (0.95 = very similar)
+    size_t min_diverse_results = 5;         // Keep at least N results before diversity filter
+
+    // Context vs directive (Issue #3: Soul as substrate)
+    float memory_weight = 0.6f;          // How much to weight stored vs fresh (0-1)
+    bool memories_as_hints = true;       // Present memories as suggestions, not facts
+
+    // Anti-dependency (Issue #4: Over-reliance)
+    bool enable_freshness_bias = true;   // Prefer varied over repeated retrievals
+    float overuse_penalty = 0.1f;        // Penalty per recent retrieval
+    size_t overuse_window = 10;          // Track last N retrievals for penalty
 };
 
 // Search result with meaning

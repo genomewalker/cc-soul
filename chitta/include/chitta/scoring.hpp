@@ -332,20 +332,25 @@ public:
     }
 
     // Search with BM25 scoring - O(query_terms × avg_posting_length)
+    // Uses shared lock for reads, upgrades to unique only for IDF refresh
     std::vector<std::pair<NodeId, float>> search(
         const std::string& query, size_t limit) const
     {
         auto query_tokens = tokenize(query);
+        if (query_tokens.empty()) return {};
 
-        // Single lock for entire method - avoids re-entrant locking issues
-        // (std::shared_mutex is non-recursive, double-locking causes EDEADLK)
-        std::unique_lock lock(mutex_);
-
+        // Refresh IDF under unique lock if needed (rare path)
         if (idf_dirty_) {
-            refresh_idf_cache();
+            std::unique_lock ulock(mutex_);
+            if (idf_dirty_) {  // Double-check after acquiring lock
+                refresh_idf_cache();
+            }
         }
 
-        if (query_tokens.empty() || doc_count_ == 0) return {};
+        // Main search under shared lock (common path)
+        std::shared_lock lock(mutex_);
+
+        if (doc_count_ == 0) return {};
 
         float avg_dl = static_cast<float>(total_length_) / doc_count_;
 
@@ -408,6 +413,68 @@ public:
             total += list.size();
         }
         return total;
+    }
+    size_t doc_lengths_size() const {
+        std::shared_lock lock(mutex_);
+        return doc_lengths_.size();
+    }
+
+    // Validate index consistency - returns true if healthy
+    // Checks: doc_lengths_ matches doc_count_, postings reference valid docs
+    bool validate() const {
+        std::shared_lock lock(mutex_);
+
+        // Check 1: doc_lengths_ should match doc_count_
+        if (doc_lengths_.size() != doc_count_) {
+            return false;
+        }
+
+        // Check 2: doc_terms_ should match doc_count_
+        if (doc_terms_.size() != doc_count_) {
+            return false;
+        }
+
+        // Check 3: All postings should reference docs in doc_lengths_
+        for (const auto& [term, posting_list] : postings_) {
+            for (const auto& posting : posting_list) {
+                if (doc_lengths_.find(posting.doc_id) == doc_lengths_.end()) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    // Clear all data - O(N)
+    void clear() {
+        std::unique_lock lock(mutex_);
+        postings_.clear();
+        doc_freqs_.clear();
+        doc_lengths_.clear();
+        doc_terms_.clear();
+        idf_cache_.clear();
+        doc_count_ = 0;
+        total_length_ = 0;
+        idf_dirty_ = false;
+    }
+
+    // Sample random document IDs for validation - O(N) in worst case
+    std::vector<NodeId> sample_docs(size_t count) const {
+        std::shared_lock lock(mutex_);
+        std::vector<NodeId> result;
+        result.reserve(std::min(count, doc_lengths_.size()));
+
+        size_t i = 0;
+        size_t step = std::max(size_t(1), doc_lengths_.size() / count);
+        for (const auto& [id, _] : doc_lengths_) {
+            if (i % step == 0 && result.size() < count) {
+                result.push_back(id);
+            }
+            i++;
+            if (result.size() >= count) break;
+        }
+        return result;
     }
 
     // ═══════════════════════════════════════════════════════════════════════

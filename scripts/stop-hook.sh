@@ -62,7 +62,15 @@ PROJECT=$(basename "$CWD" 2>/dev/null || echo "unknown")
     fi
 
     # Hot update: Extract key patterns from recently edited files
-    # These are stored with dev:hot tag (ephemeral, fast decay)
+    # DISABLED: Code indexing creates too many duplicates and noise
+    # Instead, use /codebase-learn skill for intentional code indexing
+    # The soul learns from [LEARN] markers in Claude's responses, not from file parsing
+    #
+    # To enable code indexing for a specific project, use:
+    #   /codebase-learn --project PROJECT --files "src/**/*.hpp"
+    #
+    # Legacy code kept for reference but skipped:
+    if false; then
     for fpath in $(echo "$RECENT_FILES" | tr ',' '\n'); do
         [[ ! -f "$fpath" ]] && continue
         fname=$(basename "$fpath")
@@ -133,30 +141,91 @@ PROJECT=$(basename "$CWD" 2>/dev/null || echo "unknown")
                 ;;
         esac
     done
+    fi  # end disabled code indexing
 
-    # Extract [LEARN ε=XX] markers and store as wisdom
-    echo "$LAST_MSG" | grep -oP '\[LEARN[^\]]*\]\s*\K[^\n]+' | while read -r learning; do
-        [[ -z "$learning" ]] && continue
+    # Extract [LEARN] blocks in SSL v0.2 format
+    # Format:
+    #   [LEARN] [domain] subject→action→result @location
+    #   [ε] Expansion hint (optional)
+    #   [TRIPLET] subject predicate object (0 or more)
+    #
+    # The [LEARN] line becomes the title, subsequent [ε] and [TRIPLET] lines are collected
 
-        # Extract epsilon if present
-        EPSILON=$(echo "$LAST_MSG" | grep -oP '\[LEARN ε=\K[0-9]+' | head -1)
-        EPSILON=${EPSILON:-50}
-        EPSILON_FLOAT=$(echo "scale=2; $EPSILON / 100" | bc 2>/dev/null || echo "0.5")
+    IN_LEARN_BLOCK=false
+    LEARN_TITLE=""
+    LEARN_CONTENT=""
+    LEARN_TRIPLETS=""
 
-        # Parse title and content
-        if [[ "$learning" == *": "* ]]; then
-            TITLE="${learning%%: *}"
-            CONTENT="${learning#*: }"
-        else
-            TITLE="${learning:0:60}"
-            CONTENT="$learning"
+    while IFS= read -r line; do
+        # Start of new [LEARN] block
+        if [[ "$line" =~ ^\[LEARN[^\]]*\] ]]; then
+            # Save previous block if exists
+            if [[ -n "$LEARN_TITLE" ]]; then
+                # Store the learning
+                "${CHITTA_RUN[@]}" grow --type wisdom \
+                    --title "$LEARN_TITLE" \
+                    --content "$LEARN_CONTENT" \
+                    --epsilon "0.8" \
+                    >/dev/null 2>&1 || true
+
+                # Create triplets
+                echo "$LEARN_TRIPLETS" | while IFS= read -r triplet; do
+                    [[ -z "$triplet" ]] && continue
+                    # Parse: subject predicate object
+                    subj=$(echo "$triplet" | awk '{print $1}')
+                    pred=$(echo "$triplet" | awk '{print $2}')
+                    obj=$(echo "$triplet" | awk '{$1=$2=""; print $0}' | xargs)
+                    [[ -n "$subj" && -n "$pred" && -n "$obj" ]] && \
+                        "${CHITTA_RUN[@]}" connect --subject "$subj" --predicate "$pred" --object "$obj" >/dev/null 2>&1 || true
+                done
+            fi
+
+            # Start new block
+            LEARN_TITLE="${line#\[LEARN*\] }"
+            LEARN_CONTENT="$LEARN_TITLE"
+            LEARN_TRIPLETS=""
+            IN_LEARN_BLOCK=true
+            continue
         fi
 
-        # Add file tags if we have file context
-        local tags_arg=""
-        [[ -n "$FILE_TAGS" ]] && tags_arg="--tags $FILE_TAGS"
+        # Inside a [LEARN] block - collect [ε] and [TRIPLET] lines
+        if [[ "$IN_LEARN_BLOCK" == "true" ]]; then
+            if [[ "$line" =~ ^\[ε\] ]]; then
+                # Expansion hint - add to content
+                LEARN_CONTENT="$LEARN_CONTENT\n${line#\[ε\] }"
+            elif [[ "$line" =~ ^\[TRIPLET\] ]]; then
+                # Triplet - collect for batch creation
+                LEARN_TRIPLETS="$LEARN_TRIPLETS\n${line#\[TRIPLET\] }"
+            elif [[ "$line" =~ ^[[:space:]]*$ ]] || [[ "$line" =~ ^\[ ]]; then
+                # Empty line or new block - end current block
+                IN_LEARN_BLOCK=false
+            fi
+        fi
+    done <<< "$LAST_MSG"
 
-        "${CHITTA_RUN[@]}" grow --type wisdom --title "$TITLE" --content "$CONTENT" --epsilon "$EPSILON_FLOAT" $tags_arg >/dev/null 2>&1 || true
+    # Save final block if exists
+    if [[ -n "$LEARN_TITLE" ]]; then
+        "${CHITTA_RUN[@]}" grow --type wisdom \
+            --title "$LEARN_TITLE" \
+            --content "$LEARN_CONTENT" \
+            --epsilon "0.8" \
+            >/dev/null 2>&1 || true
+
+        echo -e "$LEARN_TRIPLETS" | while IFS= read -r triplet; do
+            [[ -z "$triplet" ]] && continue
+            subj=$(echo "$triplet" | awk '{print $1}')
+            pred=$(echo "$triplet" | awk '{print $2}')
+            obj=$(echo "$triplet" | awk '{$1=$2=""; print $0}' | xargs)
+            [[ -n "$subj" && -n "$pred" && -n "$obj" ]] && \
+                "${CHITTA_RUN[@]}" connect --subject "$subj" --predicate "$pred" --object "$obj" >/dev/null 2>&1 || true
+        done
+    fi
+
+    # Also extract simple [LEARN] one-liners (legacy format)
+    echo "$LAST_MSG" | grep -oP '^\[LEARN\]\s*\K[^\n]+' | while read -r learning; do
+        [[ -z "$learning" || "$learning" =~ ^\[ ]] && continue
+        TITLE="${learning:0:80}"
+        "${CHITTA_RUN[@]}" grow --type wisdom --title "$TITLE" --content "$learning" --epsilon "0.7" >/dev/null 2>&1 || true
     done
 
     # Extract [USED:uuid] markers and strengthen those memories

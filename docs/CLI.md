@@ -246,32 +246,35 @@ Cycle complete.
 
 ### daemon
 
-Run the subconscious daemon for background processing.
+Run the daemon for background processing and RPC communication.
 
 ```bash
-chittad daemon [--interval SECS] [--pid-file PATH]
+chittad daemon --socket [--interval SECS] [--foreground]
 ```
 
 **Options:**
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--interval SECS` | Cycle interval in seconds | `60` |
-| `--pid-file PATH` | Write PID to file | None |
+| `--socket` | Enable RPC socket server (required for hooks/MCP) | Off |
+| `--interval SECS` | Maintenance cycle interval in seconds | `60` |
+| `--foreground` | Run in foreground (don't daemonize) | Off |
 
 **Example:**
 ```bash
-# Run in foreground
-chittad daemon --interval 30
+# Standard daemon (daemonizes, creates socket)
+chittad daemon --socket
 
-# Run as background service
-chittad daemon --interval 60 --pid-file ~/.claude/mind/.subconscious.pid &
+# Run in foreground for debugging
+chittad daemon --socket --foreground
+
+# Custom interval
+chittad daemon --socket --interval 30
 ```
 
 **Output:**
 ```
-[subconscious] Daemon started (interval=60s, pid=12345)
-[subconscious] Cycle 1: synth=0 feedback=2 settled=15 (45ms)
-[subconscious] Cycle 2: synth=1 feedback=0 settled=8 (52ms)
+[socket_server] Listening on /tmp/chitta-HASH.sock
+[daemon] Started (socket=/tmp/chitta-HASH.sock, interval=60s, pid=12345)
 ...
 ```
 
@@ -286,11 +289,11 @@ Each cycle performs:
 
 **Stopping:**
 ```bash
-# If using PID file
-kill $(cat ~/.claude/mind/.subconscious.pid)
+# Graceful shutdown (preferred)
+chittad shutdown
 
-# Or send SIGTERM/SIGINT
-kill 12345
+# Or send SIGTERM
+pkill -f "chittad daemon"
 ```
 
 ---
@@ -564,19 +567,17 @@ chittad cycle
 ### Daemon Management
 
 ```bash
-# Start daemon in background
-nohup chittad daemon --interval 60 \
-  --pid-file ~/.claude/mind/.subconscious.pid \
-  >> ~/.claude/mind/.subconscious.log 2>&1 &
+# Start daemon (self-daemonizes)
+chittad daemon --socket
 
-# Check if running
-ps aux | grep chittad
+# Check status
+chittad status
 
 # View logs
 tail -f ~/.claude/mind/.subconscious.log
 
 # Stop daemon
-kill $(cat ~/.claude/mind/.subconscious.pid)
+chittad shutdown
 ```
 
 ### JSON Integration

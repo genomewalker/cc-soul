@@ -178,6 +178,12 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
     {"get_resonance_config", "Get current retrieval ranking configuration",
      {}},
 
+    {"cleanup", "Remove garbage nodes (Edited:/Ran:/Failed: logs, empty nodes)",
+     {{"dry_run", "Preview only, don't actually remove", false, "true"}}},
+
+    {"deduplicate", "Merge duplicate nodes with identical text",
+     {{"dry_run", "Preview only, don't actually merge", false, "true"}}},
+
     // Context tools
     {"soul_context", "Get soul state (tau, psi, stats)",
      {{"query", "Optional context for relevant wisdom", false, nullptr},
@@ -408,7 +414,7 @@ void print_usage(const char* prog) {
               << "\n"
               << "Tool categories:\n"
               << "  Memory:    recall, resonate, full_resonate, recall_by_tag, multi_hop, timeline\n"
-              << "  Learning:  grow, observe, update, feedback, connect, query, import_soul, export_soul\n"
+              << "  Learning:  grow, observe, update, feedback, connect, query, import_soul, export_soul, cleanup, deduplicate\n"
               << "  Entity:    resolve_entity, link_entity, bootstrap_entity_index, list_entities\n"
               << "  Context:   soul_context, attractors, lens, lens_harmony\n"
               << "  Intention: intend, wonder, answer\n"

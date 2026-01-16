@@ -1,13 +1,21 @@
 #!/bin/bash
-# Smart capture hook - workflow memory with redundancy detection
+# DISABLED: Automatic capture creates noise, not wisdom
 #
-# Features:
-#   - Captures significant commands with context
-#   - Detects redundant command patterns (same command + similar inputs)
-#   - Links related commands in workflows
-#   - Extracts input/output files for connection mapping
+# The soul learns from Claude's [LEARN] and [REMEMBER] markers in responses,
+# not from automatic command logging. All text that enters the mind should
+# be processed by Claude first.
 #
-# Usage: Called by PostToolUse hook with JSON on stdin
+# To store learnings, Claude writes in responses:
+#   [LEARN] pattern→insight
+#   [REMEMBER] decision or fact
+#
+# These are extracted by stop-hook.sh
+#
+# This hook now only passes through - no automatic storage.
+
+exit 0
+
+# === LEGACY CODE BELOW (disabled) ===
 
 set -e
 
@@ -173,59 +181,78 @@ if [[ "$TOOL_NAME" == "Bash" ]]; then
     [[ -z "$COMMAND" ]] && exit 0
 
     # Skip trivial commands
-    if [[ "$COMMAND" =~ ^(ls|pwd|cd|echo|cat|head|tail|wc|date|which|type)([[:space:]]|$) ]]; then
+    if [[ "$COMMAND" =~ ^(ls|pwd|cd|echo|cat|head|tail|wc|date|which|type|sleep|true|false)([[:space:]]|$) ]]; then
+        exit 0
+    fi
+
+    # Skip chitta/soul commands - these are tool invocations, not learnings
+    # The LEARNING is extracted from Claude's response by stop-hook.sh
+    if [[ "$COMMAND" =~ chitta|chittad|soul-hook ]]; then
+        exit 0
+    fi
+
+    # Skip internal operations (pkill, rm sockets, etc.)
+    if [[ "$COMMAND" =~ ^(pkill|rm -f /tmp/chitta|kill) ]]; then
         exit 0
     fi
 
     # Extract context
     FILES=$(extract_files "$COMMAND")
     CMD_SIG=$(cmd_signature "$COMMAND")
-    CMD_BASE=$(echo "$COMMAND" | awk '{print $1}')
+    CMD_BASE=$(echo "$COMMAND" | awk '{print $1}' | sed 's|.*/||')  # basename
     CMD_SHORT=$(echo "$COMMAND" | head -c 200)
-    RESULT_SHORT=$(echo "$TOOL_RESPONSE" | head -c 500)
+    RESULT_SHORT=$(echo "$TOOL_RESPONSE" | head -c 300)
 
-    # Check for recent similar command (session cache)
+    # Check for recent similar command (skip if duplicate within 5 min)
     CACHE_FILE="$CACHE_DIR/${SESSION_ID:-default}_$CMD_SIG"
     if [[ -f "$CACHE_FILE" ]]; then
         PREV_RUN=$(cat "$CACHE_FILE")
         AGO=$(( $(date +%s) - PREV_RUN ))
-        if [[ $AGO -lt 300 ]]; then  # Within 5 minutes
-            echo "[cc-soul] Similar command ran ${AGO}s ago" >&2
+        if [[ $AGO -lt 300 ]]; then
+            # Skip duplicate - don't pollute memory with repeated commands
+            exit 0
         fi
     fi
     echo "$(date +%s)" > "$CACHE_FILE"
 
-    # Check for failures
+    # Check for failures - these ARE worth capturing
     IS_FAILURE=false
     if echo "$TOOL_RESPONSE" | grep -qiE 'error|failed|fatal|exception|traceback|not found|permission denied'; then
         IS_FAILURE=true
     fi
 
-    # Build observation content with context
-    CONTENT="Command: $CMD_SHORT"
-    [[ -n "$FILES" ]] && CONTENT="$CONTENT\n\nFiles: $FILES"
-    [[ -n "$RESULT_SHORT" ]] && CONTENT="$CONTENT\n\nResult: $RESULT_SHORT"
-
-    # Determine category
-    CATEGORY="discovery"
+    # Only capture: failures OR significant commands (git, make, npm, docker, etc.)
+    SIGNIFICANT=false
     if [[ "$IS_FAILURE" == "true" ]]; then
-        CATEGORY="signal"
-        TITLE="Failed: $CMD_BASE"
-    elif [[ "$COMMAND" =~ git[[:space:]]+commit ]]; then
-        CATEGORY="feature"
-        TITLE="Commit"
-    else
-        TITLE="Ran: $CMD_BASE"
+        SIGNIFICANT=true
+    elif [[ "$COMMAND" =~ ^(git|make|cmake|npm|yarn|pip|cargo|docker|kubectl) ]]; then
+        SIGNIFICANT=true
     fi
 
-    # Build tags
-    TAGS="auto:cmd,cmd:$CMD_BASE,project:$PROJECT"
-    [[ "$IS_FAILURE" == "true" ]] && TAGS="$TAGS,auto:failure"
+    # Skip non-significant, non-failure commands
+    if [[ "$SIGNIFICANT" != "true" ]]; then
+        exit 0
+    fi
 
-    # Semantic search for related past work
-    RELATED=$(recall_mcp "$CMD_BASE $FILES" 2>/dev/null | head -c 200)
-    if [[ -n "$RELATED" && "$RELATED" != "Found 0 results:" ]]; then
-        CONTENT="$CONTENT\n\nRelated: $RELATED"
+    # Build SSL-style content (extracting the PATTERN, not verbatim)
+    if [[ "$IS_FAILURE" == "true" ]]; then
+        # For failures: capture what went wrong and how to fix
+        TITLE="[failure] $CMD_BASE"
+        ERROR_MSG=$(echo "$TOOL_RESPONSE" | grep -iE 'error|failed|fatal' | head -1 | head -c 100)
+        CONTENT="[$PROJECT] $CMD_BASE→failed
+[ε] $ERROR_MSG
+Command: $CMD_SHORT"
+        CATEGORY="signal"
+        TAGS="auto:failure,cmd:$CMD_BASE,project:$PROJECT"
+    else
+        # For significant commands: extract usage pattern
+        TITLE="[$PROJECT] $CMD_BASE usage"
+        # Extract flags/subcommands used
+        FLAGS=$(echo "$COMMAND" | grep -oE ' --?[a-zA-Z0-9-]+' | tr '\n' ' ' | head -c 50)
+        CONTENT="[$PROJECT] $CMD_BASE$FLAGS→success
+[ε] Usage pattern for $CMD_BASE in this project."
+        CATEGORY="discovery"
+        TAGS="cmd:$CMD_BASE,project:$PROJECT"
     fi
 
     # Store observation
@@ -234,7 +261,7 @@ if [[ "$TOOL_NAME" == "Bash" ]]; then
     if [[ "$IS_FAILURE" == "true" ]]; then
         echo "[cc-soul] Captured failure: $CMD_BASE" >&2
     else
-        echo "[cc-soul] Captured: $CMD_BASE" >&2
+        echo "[cc-soul] Captured pattern: $CMD_BASE" >&2
     fi
 fi
 
