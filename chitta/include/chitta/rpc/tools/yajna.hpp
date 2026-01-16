@@ -877,6 +877,21 @@ inline void register_handlers(Mind* mind, std::unordered_map<std::string, ToolHa
                             mind->update_node(id, node);
                         }
 
+                        // Auto-link wisdom to subject entity
+                        // Extract subject from title (before first →)
+                        size_t arrow_pos = current_title.find("→");
+                        if (arrow_pos != std::string::npos) {
+                            std::string subject = current_title.substr(0, arrow_pos);
+                            // Trim whitespace
+                            while (!subject.empty() && subject.back() == ' ') subject.pop_back();
+                            if (!subject.empty()) {
+                                // Find or create entity, link wisdom to it
+                                auto entity_id = mind->find_or_create_entity(subject);
+                                mind->connect(id, entity_id, EdgeType::Mentions, 1.0f);
+                                mind->connect(entity_id, id, EdgeType::Mentions, 1.0f);
+                            }
+                        }
+
                         nodes_created++;
                         current_title.clear();
                         current_location.clear();
