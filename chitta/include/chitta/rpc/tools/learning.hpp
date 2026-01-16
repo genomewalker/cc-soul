@@ -535,6 +535,67 @@ inline ToolResult remove(Mind* mind, const json& params) {
     return ToolResult::ok("Removed: " + id_str, {{"id", id_str}, {"removed", true}});
 }
 
+// Get: retrieve a node by ID with full content - fast, direct lookup
+inline ToolResult get(Mind* mind, const json& params) {
+    std::string id_str = params.at("id");
+    NodeId id = NodeId::from_string(id_str);
+
+    auto node = mind->get(id);
+    if (!node) {
+        return ToolResult::error("Node not found: " + id_str);
+    }
+
+    std::string text = mind->payload_to_text(node->payload).value_or("");
+    auto tags = mind->get_tags(id);
+
+    // Get edges with previews
+    json edges_array = json::array();
+    for (const auto& edge : node->edges) {
+        if (auto target = mind->get(edge.target)) {
+            std::string target_text = mind->payload_to_text(target->payload).value_or("");
+            std::string preview = target_text.length() > 60
+                ? target_text.substr(0, 57) + "..."
+                : target_text;
+            edges_array.push_back({
+                {"target_id", edge.target.to_string()},
+                {"type", Mind::edge_type_name(edge.type)},
+                {"weight", edge.weight},
+                {"preview", preview}
+            });
+        }
+    }
+
+    json result;
+    result["id"] = id_str;
+    result["type"] = node_type_to_string(node->node_type);
+    result["text"] = text;
+    result["tags"] = tags;
+    result["confidence"] = node->kappa.mu;
+    result["created"] = node->tau_created;
+    result["accessed"] = node->tau_accessed;
+    result["decay_rate"] = node->delta;
+    result["edges"] = edges_array;
+
+    std::ostringstream ss;
+    ss << "=== " << id_str << " ===\n";
+    ss << "Type: " << node_type_to_string(node->node_type) << "\n";
+    ss << "Confidence: " << static_cast<int>(node->kappa.mu * 100) << "%\n";
+    ss << "Tags: ";
+    for (size_t i = 0; i < tags.size(); i++) {
+        if (i > 0) ss << ", ";
+        ss << tags[i];
+    }
+    ss << "\n\n" << text;
+    if (!edges_array.empty()) {
+        ss << "\n\n--- " << edges_array.size() << " edges ---";
+        for (const auto& e : edges_array) {
+            ss << "\n  -> [" << e["type"].get<std::string>() << "] " << e["preview"].get<std::string>();
+        }
+    }
+
+    return ToolResult::ok(ss.str(), result);
+}
+
 // Connect: create triplet as a first-class node
 inline ToolResult connect(Mind* mind, const json& params) {
     std::string subject = params.at("subject");
@@ -1081,6 +1142,7 @@ inline void register_handlers(Mind* mind,
     handlers["record_outcome"] = [mind](const json& p) { return record_outcome(mind, p); };
     handlers["update"] = [mind](const json& p) { return update(mind, p); };
     handlers["remove"] = [mind](const json& p) { return remove(mind, p); };
+    handlers["get"] = [mind](const json& p) { return get(mind, p); };
     handlers["connect"] = [mind](const json& p) { return connect(mind, p); };
     handlers["query"] = [mind](const json& p) { return query(mind, p); };
     handlers["import_soul"] = [mind](const json& p) { return import_soul(mind, p); };

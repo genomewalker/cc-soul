@@ -137,6 +137,9 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
     {"remove", "Remove a node from memory",
      {{"id", "Node UUID to remove", true, nullptr}}},
 
+    {"get", "Get a node by ID - direct lookup with full content",
+     {{"id", "Node UUID to retrieve", true, nullptr}}},
+
     {"connect", "Create triplet: subject --[predicate]--> object",
      {{"subject", "Subject entity", true, nullptr},
       {"predicate", "Relationship type", true, nullptr},
@@ -283,6 +286,20 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
       {"add", "Tag to add", false, nullptr},
       {"remove", "Tag to remove", false, nullptr}}},
 
+    {"yajna_mark_processed", "Batch mark SSL-format nodes as ε-processed",
+     {{"epsilon_threshold", "Min epsilon (0-1)", false, "0.8"},
+      {"dry_run", "Preview only", false, "true"},
+      {"filter", "Text filter", false, nullptr}}},
+
+    {"batch_remove", "Remove multiple nodes from file of IDs",
+     {{"file", "File with one UUID per line", true, nullptr},
+      {"dry_run", "Preview only", false, "true"}}},
+
+    {"batch_tag", "Tag multiple nodes from file of IDs",
+     {{"file", "File with one UUID per line", true, nullptr},
+      {"add", "Tag to add to all", true, nullptr},
+      {"dry_run", "Preview only", false, "true"}}},
+
     // Phase 7: Realm tools
     {"realm_get", "Get current realm context",
      {}},
@@ -414,13 +431,13 @@ void print_usage(const char* prog) {
               << "\n"
               << "Tool categories:\n"
               << "  Memory:    recall, resonate, full_resonate, recall_by_tag, multi_hop, timeline\n"
-              << "  Learning:  grow, observe, update, feedback, connect, query, import_soul, export_soul, cleanup, deduplicate\n"
+              << "  Learning:  grow, observe, update, get, feedback, connect, query, import_soul, export_soul, cleanup, deduplicate\n"
               << "  Entity:    resolve_entity, link_entity, bootstrap_entity_index, list_entities\n"
               << "  Context:   soul_context, attractors, lens, lens_harmony\n"
               << "  Intention: intend, wonder, answer\n"
               << "  Narrative: narrate, ledger\n"
               << "  Analysis:  epistemic_state, bias_scan, propagate, forget, competence\n"
-              << "  Yajna:     yajna_list, yajna_inspect, tag\n"
+              << "  Yajna:     yajna_list, yajna_inspect, tag, yajna_mark_processed, batch_remove, batch_tag\n"
               << "  Realm:     realm_get, realm_set, realm_create\n"
               << "  Review:    review_list, review_decide, review_batch, review_stats\n"
               << "  Eval:      eval_run, eval_add_test, epiplexity_check, epiplexity_drift\n"

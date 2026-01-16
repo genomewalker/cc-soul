@@ -1,5 +1,5 @@
 #pragma once
-// RPC Yajna Tools: yajna_list, yajna_inspect, tag
+// RPC Yajna Tools: yajna_list, yajna_inspect, tag, yajna_mark_processed, batch_remove, batch_tag
 //
 // Tools for the epsilon-yajna ceremony - compressing verbose nodes to
 // high-epiplexity patterns using the Oracle architecture.
@@ -9,6 +9,7 @@
 #include "../../mind.hpp"
 #include <sstream>
 #include <algorithm>
+#include <fstream>
 
 namespace chitta::rpc::tools::yajna {
 
@@ -87,6 +88,50 @@ inline void register_schemas(std::vector<ToolSchema>& tools) {
             {"required", {"id"}}
         }
     });
+
+    tools.push_back({
+        "yajna_mark_processed",
+        "Batch mark nodes as ε-processed. Processes all unprocessed nodes meeting criteria: "
+        "SSL format (has → arrow) OR epsilon >= threshold. Efficient C++ batch operation.",
+        {
+            {"type", "object"},
+            {"properties", {
+                {"epsilon_threshold", {{"type", "number"}, {"minimum", 0.0}, {"maximum", 1.0},
+                                      {"default", 0.8}, {"description", "Min epsilon to auto-mark (0.8 = 80%)"}}},
+                {"dry_run", {{"type", "boolean"}, {"default", true},
+                           {"description", "Preview only, don't actually tag"}}},
+                {"filter", {{"type", "string"}, {"default", ""},
+                          {"description", "Only process nodes matching this text filter"}}}
+            }}
+        }
+    });
+
+    tools.push_back({
+        "batch_remove",
+        "Remove multiple nodes from a file of IDs. One UUID per line. Efficient C++ batch.",
+        {
+            {"type", "object"},
+            {"properties", {
+                {"file", {{"type", "string"}, {"description", "Path to file with UUIDs (one per line)"}}},
+                {"dry_run", {{"type", "boolean"}, {"default", true}, {"description", "Preview only"}}}
+            }},
+            {"required", {"file"}}
+        }
+    });
+
+    tools.push_back({
+        "batch_tag",
+        "Tag multiple nodes from a file of IDs. One UUID per line. Efficient C++ batch.",
+        {
+            {"type", "object"},
+            {"properties", {
+                {"file", {{"type", "string"}, {"description", "Path to file with UUIDs (one per line)"}}},
+                {"add", {{"type", "string"}, {"description", "Tag to add to all nodes"}}},
+                {"dry_run", {{"type", "boolean"}, {"default", true}, {"description", "Preview only"}}}
+            }},
+            {"required", {"file", "add"}}
+        }
+    });
 }
 
 // Register yajna tool handlers
@@ -113,9 +158,10 @@ inline void register_handlers(Mind* mind, std::unordered_map<std::string, ToolHa
 
             std::string text(node.payload.begin(), node.payload.end());
 
-            // Skip if already processed (check tags directly to avoid lock)
-            if (std::find(node.tags.begin(), node.tags.end(), "ε-processed") != node.tags.end()) return;
-            if (std::find(node.tags.begin(), node.tags.end(), "epsilon-processed") != node.tags.end()) return;
+            // Skip if already processed (get tags from index, not node.tags which may be empty during iteration)
+            auto tags = mind->get_tags(id);
+            if (std::find(tags.begin(), tags.end(), "ε-processed") != tags.end()) return;
+            if (std::find(tags.begin(), tags.end(), "epsilon-processed") != tags.end()) return;
 
             // Apply optional domain filter
             if (!filter.empty() && text.find(filter) == std::string::npos) return;
@@ -268,6 +314,186 @@ inline void register_handlers(Mind* mind, std::unordered_map<std::string, ToolHa
 
         // Tags are persisted via mind->add_tag/remove_tag which calls storage_.update_node()
         return ToolResult::ok("Tags updated", result);
+    };
+
+    // yajna_mark_processed: Batch mark high-epsilon nodes as processed
+    handlers["yajna_mark_processed"] = [mind](const json& params) -> ToolResult {
+        float epsilon_threshold = params.value("epsilon_threshold", 0.8f);
+        bool dry_run = params.value("dry_run", true);
+        std::string filter = params.value("filter", "");
+
+        struct Candidate {
+            NodeId id;
+            std::string title;
+            float epsilon;
+            bool has_arrow;
+        };
+        std::vector<Candidate> candidates;
+
+        // Scan all unprocessed nodes
+        mind->for_each_node([&](const NodeId& id, const Node& node) {
+            if (node.node_type == NodeType::Entity || node.node_type == NodeType::Triplet) return;
+
+            // Skip already processed (get tags from index, not node.tags which may be empty during iteration)
+            auto tags = mind->get_tags(id);
+            if (std::find(tags.begin(), tags.end(), "ε-processed") != tags.end()) return;
+            if (std::find(tags.begin(), tags.end(), "epsilon-processed") != tags.end()) return;
+
+            std::string text(node.payload.begin(), node.payload.end());
+            if (!filter.empty() && text.find(filter) == std::string::npos) return;
+
+            std::string title = extract_title(text, 80);
+            float epsilon = text.length() > 0
+                ? std::min(1.0f, static_cast<float>(title.length()) / text.length() * 10.0f)
+                : 1.0f;
+
+            // Check for SSL format (has → arrow) - this is UTF-8 for →
+            bool has_arrow = text.find("\xe2\x86\x92") != std::string::npos;
+
+            // Accept if: has SSL arrow OR meets epsilon threshold
+            if (has_arrow || epsilon >= epsilon_threshold) {
+                candidates.push_back({id, title, epsilon, has_arrow});
+            }
+        });
+
+        // Sort by epsilon descending
+        std::sort(candidates.begin(), candidates.end(),
+            [](const Candidate& a, const Candidate& b) { return a.epsilon > b.epsilon; });
+
+        size_t tagged = 0;
+        if (!dry_run) {
+            for (const auto& c : candidates) {
+                mind->add_tag(c.id, "ε-processed");
+                tagged++;
+            }
+        }
+
+        json result;
+        result["candidates"] = candidates.size();
+        result["tagged"] = tagged;
+        result["dry_run"] = dry_run;
+
+        std::ostringstream ss;
+        if (dry_run) {
+            ss << "Would mark " << candidates.size() << " nodes as ε-processed:\n";
+            size_t shown = 0;
+            for (const auto& c : candidates) {
+                if (shown++ >= 20) { ss << "... and " << (candidates.size() - 20) << " more\n"; break; }
+                ss << "  [" << (c.has_arrow ? "→" : std::to_string(static_cast<int>(c.epsilon * 100)) + "%")
+                   << "] " << c.title << "\n";
+            }
+        } else {
+            ss << "Marked " << tagged << " nodes as ε-processed";
+        }
+        return ToolResult::ok(ss.str(), result);
+    };
+
+    // batch_remove: Remove nodes from file of IDs
+    handlers["batch_remove"] = [mind](const json& params) -> ToolResult {
+        std::string file_path = params.at("file");
+        bool dry_run = params.value("dry_run", true);
+
+        std::ifstream file(file_path);
+        if (!file.is_open()) {
+            return ToolResult::error("Cannot open file: " + file_path);
+        }
+
+        std::vector<std::string> ids;
+        std::string line;
+        while (std::getline(file, line)) {
+            // Skip empty lines and comments
+            if (line.empty() || line[0] == '#') continue;
+            // Trim whitespace
+            size_t start = line.find_first_not_of(" \t\r\n");
+            size_t end = line.find_last_not_of(" \t\r\n");
+            if (start != std::string::npos) {
+                ids.push_back(line.substr(start, end - start + 1));
+            }
+        }
+
+        size_t removed = 0;
+        size_t not_found = 0;
+        if (!dry_run) {
+            for (const auto& id_str : ids) {
+                NodeId id = NodeId::from_string(id_str);
+                if (mind->get(id)) {
+                    mind->remove_node(id);
+                    removed++;
+                } else {
+                    not_found++;
+                }
+            }
+        }
+
+        json result;
+        result["file"] = file_path;
+        result["ids_in_file"] = ids.size();
+        result["removed"] = removed;
+        result["not_found"] = not_found;
+        result["dry_run"] = dry_run;
+
+        std::ostringstream ss;
+        if (dry_run) {
+            ss << "Would remove " << ids.size() << " nodes from " << file_path;
+        } else {
+            ss << "Removed " << removed << " nodes";
+            if (not_found > 0) ss << " (" << not_found << " not found)";
+        }
+        return ToolResult::ok(ss.str(), result);
+    };
+
+    // batch_tag: Tag nodes from file of IDs
+    handlers["batch_tag"] = [mind](const json& params) -> ToolResult {
+        std::string file_path = params.at("file");
+        std::string add_tag = params.at("add");
+        bool dry_run = params.value("dry_run", true);
+
+        std::ifstream file(file_path);
+        if (!file.is_open()) {
+            return ToolResult::error("Cannot open file: " + file_path);
+        }
+
+        std::vector<std::string> ids;
+        std::string line;
+        while (std::getline(file, line)) {
+            if (line.empty() || line[0] == '#') continue;
+            size_t start = line.find_first_not_of(" \t\r\n");
+            size_t end = line.find_last_not_of(" \t\r\n");
+            if (start != std::string::npos) {
+                ids.push_back(line.substr(start, end - start + 1));
+            }
+        }
+
+        size_t tagged = 0;
+        size_t not_found = 0;
+        if (!dry_run) {
+            for (const auto& id_str : ids) {
+                NodeId id = NodeId::from_string(id_str);
+                if (mind->get(id)) {
+                    mind->add_tag(id, add_tag);
+                    tagged++;
+                } else {
+                    not_found++;
+                }
+            }
+        }
+
+        json result;
+        result["file"] = file_path;
+        result["tag"] = add_tag;
+        result["ids_in_file"] = ids.size();
+        result["tagged"] = tagged;
+        result["not_found"] = not_found;
+        result["dry_run"] = dry_run;
+
+        std::ostringstream ss;
+        if (dry_run) {
+            ss << "Would tag " << ids.size() << " nodes with '" << add_tag << "'";
+        } else {
+            ss << "Tagged " << tagged << " nodes with '" << add_tag << "'";
+            if (not_found > 0) ss << " (" << not_found << " not found)";
+        }
+        return ToolResult::ok(ss.str(), result);
     };
 }
 

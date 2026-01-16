@@ -980,8 +980,8 @@ public:
                 node.edges = load_edges(meta->edge_offset);
             }
 
-            // Tags not loaded - use slot_tag_index().tags_for_slot() if needed
-            // This saves memory during iteration (e.g., BM25 rebuild)
+            // Tags not loaded inline to save memory during iteration
+            // Use tags_.tags_for_slot(slot) or mind->get_tags(id) if needed
 
             fn(meta->id, node);  // Use meta->id for correct ID
         }
