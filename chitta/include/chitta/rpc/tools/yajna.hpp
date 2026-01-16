@@ -8,6 +8,7 @@
 #include "../protocol.hpp"
 #include "../../mind.hpp"
 #include <sstream>
+#include <iomanip>
 #include <algorithm>
 #include <fstream>
 
@@ -34,12 +35,26 @@ inline std::string extract_title(const std::string& text, size_t max_len = 80) {
 inline std::string edge_type_str(EdgeType type) {
     switch (type) {
         case EdgeType::Similar: return "similar";
-        case EdgeType::Supports: return "supports";
+        case EdgeType::AppliedIn: return "applied_in";
         case EdgeType::Contradicts: return "contradicts";
+        case EdgeType::Supports: return "supports";
+        case EdgeType::EvolvedFrom: return "evolved_from";
         case EdgeType::PartOf: return "part_of";
-        case EdgeType::IsA: return "is_a";
+        case EdgeType::TriggeredBy: return "triggered_by";
+        case EdgeType::CreatedBy: return "created_by";
+        case EdgeType::ScopedTo: return "scoped_to";
+        case EdgeType::Answers: return "answers";
+        case EdgeType::Addresses: return "addresses";
+        case EdgeType::Continues: return "continues";
         case EdgeType::Mentions: return "mentions";
-        default: return "relates_to";
+        case EdgeType::IsA: return "is_a";
+        case EdgeType::RelatesTo: return "relates_to";
+        case EdgeType::Uses: return "uses";
+        case EdgeType::Implements: return "implements";
+        case EdgeType::Contains: return "contains";
+        case EdgeType::Causes: return "causes";
+        case EdgeType::Requires: return "requires";
+        default: return "unknown";
     }
 }
 
@@ -71,6 +86,21 @@ inline void register_schemas(std::vector<ToolSchema>& tools) {
                 {"id", {{"type", "string"}, {"description", "Node ID to inspect"}}}
             }},
             {"required", {"id"}}
+        }
+    });
+
+    tools.push_back({
+        "node_edges",
+        "Get edges for a node by name or ID. Shows all connections with type, weight, and "
+        "target preview. Finds node by semantic search if name given.",
+        {
+            {"type", "object"},
+            {"properties", {
+                {"query", {{"type", "string"}, {"description", "Node name or ID to find edges for"}}},
+                {"direction", {{"type", "string"}, {"enum", {"outgoing", "incoming", "both"}},
+                             {"default", "both"}, {"description", "Edge direction to show"}}}
+            }},
+            {"required", {"query"}}
         }
     });
 
@@ -307,6 +337,124 @@ inline void register_handlers(Mind* mind, std::unordered_map<std::string, ToolHa
                 ss << "\n  -> " << e["preview"].get<std::string>();
             }
         }
+
+        return ToolResult::ok(ss.str(), result);
+    };
+
+    // node_edges: Get edges for a node by name or ID
+    handlers["node_edges"] = [mind](const json& params) -> ToolResult {
+        std::string query = params.at("query");
+        std::string direction = params.value("direction", "both");
+
+        // Try to parse as UUID first
+        NodeId target_id;
+        bool found = false;
+        std::string node_name;
+
+        if (query.length() == 36 && query[8] == '-') {
+            // Looks like UUID
+            target_id = NodeId::from_string(query);
+            if (auto node = mind->get(target_id)) {
+                found = true;
+                node_name = std::string(node->payload.begin(), node->payload.end());
+                if (node_name.length() > 60) node_name = node_name.substr(0, 57) + "...";
+            }
+        }
+
+        // If not UUID or not found, search by name
+        if (!found) {
+            auto results = mind->recall(query, 1);
+            if (results.empty()) {
+                return ToolResult::error("No node found for: " + query);
+            }
+            target_id = results[0].id;
+            node_name = results[0].text;
+            if (node_name.length() > 60) node_name = node_name.substr(0, 57) + "...";
+        }
+
+        auto node = mind->get(target_id);
+        if (!node) {
+            return ToolResult::error("Node not found");
+        }
+
+        json result;
+        result["id"] = target_id.to_string();
+        result["name"] = node_name;
+        result["type"] = node_type_to_string(node->node_type);
+
+        std::ostringstream ss;
+        ss << "═══ " << node_name << " ═══\n";
+        ss << "ID: " << target_id.to_string() << "\n";
+        ss << "Type: " << node_type_to_string(node->node_type) << "\n\n";
+
+        // Outgoing edges (from this node)
+        json outgoing = json::array();
+        if (direction == "outgoing" || direction == "both") {
+            ss << "── Outgoing Edges (" << node->edges.size() << ") ──\n";
+            for (const auto& edge : node->edges) {
+                std::string target_text;
+                std::string target_type;
+                if (auto target = mind->get(edge.target)) {
+                    target_text = std::string(target->payload.begin(), target->payload.end());
+                    if (target_text.length() > 50) target_text = target_text.substr(0, 47) + "...";
+                    target_type = node_type_to_string(target->node_type);
+                } else {
+                    target_text = "(deleted)";
+                    target_type = "?";
+                }
+
+                json e;
+                e["target_id"] = edge.target.to_string();
+                e["target"] = target_text;
+                e["target_type"] = target_type;
+                e["type"] = edge_type_str(edge.type);
+                e["weight"] = edge.weight;
+                outgoing.push_back(e);
+
+                ss << "  ──[" << edge_type_str(edge.type) << ": "
+                   << std::fixed << std::setprecision(2) << edge.weight
+                   << "]──► " << target_text << " (" << target_type << ")\n";
+            }
+            if (node->edges.empty()) {
+                ss << "  (none)\n";
+            }
+        }
+        result["outgoing"] = outgoing;
+
+        // Incoming edges (to this node) - scan all nodes
+        json incoming = json::array();
+        if (direction == "incoming" || direction == "both") {
+            ss << "\n── Incoming Edges ──\n";
+            size_t incoming_count = 0;
+
+            mind->for_each_node([&](const NodeId& id, const Node& n) {
+                if (id == target_id) return;
+                for (const auto& edge : n.edges) {
+                    if (edge.target == target_id) {
+                        std::string source_text(n.payload.begin(), n.payload.end());
+                        if (source_text.length() > 50) source_text = source_text.substr(0, 47) + "...";
+
+                        json e;
+                        e["source_id"] = id.to_string();
+                        e["source"] = source_text;
+                        e["source_type"] = node_type_to_string(n.node_type);
+                        e["type"] = edge_type_str(edge.type);
+                        e["weight"] = edge.weight;
+                        incoming.push_back(e);
+
+                        ss << "  " << source_text << " (" << node_type_to_string(n.node_type) << ")\n"
+                           << "    ──[" << edge_type_str(edge.type) << ": "
+                           << std::fixed << std::setprecision(2) << edge.weight << "]──►\n";
+                        incoming_count++;
+                    }
+                }
+            });
+
+            if (incoming_count == 0) {
+                ss << "  (none)\n";
+            }
+        }
+        result["incoming"] = incoming;
 
         return ToolResult::ok(ss.str(), result);
     };
