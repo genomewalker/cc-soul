@@ -10,6 +10,7 @@
 #include "tools/memory.hpp"
 #include "tools/learning.hpp"
 #include "tools/yajna.hpp"
+#include "tools/code_intel.hpp"
 #include "../mind.hpp"
 #include "../version.hpp"
 #include <unordered_map>
@@ -119,6 +120,10 @@ private:
         // Yajna tools (yajna_list, yajna_inspect, tag) for epsilon-yajna ceremony
         tools::yajna::register_schemas(tools_);
         tools::yajna::register_handlers(mind_, handlers_);
+
+        // Code intelligence tools (analyze_code, code_context, code_search)
+        tools::code_intel::register_schemas(tools_);
+        tools::code_intel::register_handlers(handlers_, mind_);
 
         // Phase 7: Scale tools (realm, review, eval, epiplexity)
         register_phase7_tools();
