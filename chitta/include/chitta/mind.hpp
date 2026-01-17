@@ -37,6 +37,8 @@
 #include "epiplexity_test.hpp"
 #include "synthesis_queue.hpp"
 #include "gap_inquiry.hpp"
+#include "file_tracker.hpp"
+#include "hierarchical_state.hpp"
 #include <mutex>
 #include <shared_mutex>
 #include <atomic>
@@ -47,6 +49,34 @@
 #include <sstream>
 
 namespace chitta {
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Batch API types for high-performance bulk operations
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Specification for creating a node in batch (includes tags to avoid per-tag updates)
+struct RawNodeSpec {
+    NodeType type = NodeType::Symbol;      // Default to Symbol for code indexing
+    Vector embedding;                      // Use Vector::zeros() to skip embedding
+    Confidence confidence = Confidence(0.9f);
+    std::vector<uint8_t> payload;
+    std::vector<std::string> tags;         // Set at creation time (critical for perf!)
+
+    // Optional provenance for code indexing
+    std::string source_path;
+    std::string source_hash;
+    Timestamp last_verified_at = 0;
+    StaleState stale_state = StaleState::Fresh;
+};
+
+// Options for batch write operations
+struct BatchWriteOptions {
+    bool update_bm25 = false;       // Skip BM25 for code symbols (use graph search)
+    bool update_tag_index = true;   // Update in-memory tag index
+    bool sync_on_flush = true;      // Call storage_.sync() once at end
+    bool skip_provenance = true;    // Skip provenance spine for speed
+    bool skip_realm = true;         // Skip realm assignment for speed
+};
 
 // The Mind: unified interface to soul storage
 class Mind {
@@ -1221,6 +1251,101 @@ public:
         return id;
     }
 
+    // ═══════════════════════════════════════════════════════════════════
+    // Batch operations (high-performance bulk insert)
+    // ═══════════════════════════════════════════════════════════════════
+
+    // Remember batch: create multiple nodes with tags pre-set (10x faster than per-node)
+    // Tags are set at creation time, avoiding expensive per-tag storage_.update_node() calls
+    // Uses storage_.insert_batch() for single WAL fsync across all nodes
+    std::vector<NodeId> remember_batch_raw(
+        const std::vector<RawNodeSpec>& specs,
+        const BatchWriteOptions& opts = {})
+    {
+        std::unique_lock<std::shared_mutex> lock(mutex_);
+
+        std::vector<NodeId> ids;
+        ids.reserve(specs.size());
+        std::vector<Node> nodes;
+        nodes.reserve(specs.size());
+        Timestamp current = now();
+
+        // Phase 1: Build all nodes (no storage yet)
+        for (const auto& spec : specs) {
+            // Create node with embedding and confidence
+            Node node(spec.type, spec.embedding);
+            node.kappa = spec.confidence;
+            node.payload = spec.payload;
+
+            // Set tags at creation time (critical: avoids per-tag update_node calls)
+            node.tags = spec.tags;
+
+            // Set provenance fields directly on node
+            if (!spec.source_path.empty()) {
+                node.source_path = spec.source_path;
+                node.source_hash = spec.source_hash;
+                node.last_verified_at = spec.last_verified_at > 0 ? spec.last_verified_at : current;
+                node.stale_state = spec.stale_state;
+            }
+
+            ids.push_back(node.id);
+            nodes.push_back(std::move(node));
+        }
+
+        // Phase 2: Index all nodes (in-memory, fast)
+        for (size_t i = 0; i < nodes.size(); ++i) {
+            const auto& node = nodes[i];
+            NodeId id = ids[i];
+
+            index_node_insert(id, node);
+            graph_.insert_raw(id);
+
+            // Update tag index (in-memory, fast)
+            if (opts.update_tag_index && !specs[i].tags.empty()) {
+                tag_index_.add(id, specs[i].tags);
+            }
+
+            // Optional BM25 (skip for code symbols)
+            if (opts.update_bm25 && !specs[i].payload.empty()) {
+                std::string text(specs[i].payload.begin(), specs[i].payload.end());
+                maybe_add_bm25(id, text);
+            }
+
+            // Optional provenance spine (skip for speed)
+            if (!opts.skip_provenance && config_.enable_provenance) {
+                Provenance prov;
+                prov.source = config_.default_provenance_source;
+                prov.session_id = config_.session_id;
+                prov.created_at = current;
+                prov.trust_score = specs[i].confidence.effective();
+                provenance_spine_.record(id, prov);
+            }
+
+            // Optional realm (skip for speed)
+            if (!opts.skip_realm && config_.enable_realm_scoping) {
+                RealmId realm;
+                realm.name = config_.default_realm;
+                realm_scoping_.assign(id, realm, RealmVisibility::Inherited, current);
+            }
+        }
+
+        // Phase 3: Batch insert to storage (single WAL fsync!)
+        storage_.insert_batch(std::move(nodes));
+
+        // Single sync at end (unified index flush)
+        if (opts.sync_on_flush) {
+            storage_.sync();
+        }
+
+        return ids;
+    }
+
+    // Sync: persist all pending changes to storage
+    void sync() {
+        std::unique_lock<std::shared_mutex> lock(mutex_);
+        storage_.sync();
+    }
+
     // Recall: semantic search with pre-computed query vector
     std::vector<Recall> recall(const Vector& query, size_t k,
                                float threshold = 0.0f)
@@ -2039,6 +2164,71 @@ public:
         }
     }
 
+    // Fast batch connect: no embeddings, triplet-only (for code indexing)
+    // Optimizations:
+    // 1. O(1) entity lookup (no storage scan)
+    // 2. Batch entity creation (single WAL fsync)
+    // 3. Batch-local triplet dedupe (O(batch_size), not O(total))
+    // 4. Skip node edges (triplets are sufficient for code queries)
+    void connect_batch_fast(const std::vector<std::tuple<std::string, std::string, std::string, float>>& triplets) {
+        if (triplets.empty()) return;
+
+        // Phase 1: Collect unique entity names
+        std::unordered_set<std::string> entity_names;
+        for (const auto& [subject, predicate, object, weight] : triplets) {
+            entity_names.insert(subject);
+            entity_names.insert(object);
+        }
+
+        // Phase 2: Find existing entities via O(1) index lookup only
+        std::unordered_map<std::string, NodeId> entity_map;
+        std::vector<std::string> missing_names;
+
+        for (const auto& name : entity_names) {
+            auto existing = find_entity_fast(name);
+            if (existing) {
+                entity_map[name] = *existing;
+                if (!config_.use_mmap_graph && !graph_store_.entity_has_node(name)) {
+                    graph_store_.link_entity(name, *existing);
+                }
+            } else {
+                missing_names.push_back(name);
+            }
+        }
+
+        // Phase 3: Batch create missing entities (no embedding, single WAL)
+        if (!missing_names.empty()) {
+            std::vector<Node> new_nodes;
+            new_nodes.reserve(missing_names.size());
+
+            for (const auto& name : missing_names) {
+                Node node(NodeType::Entity, Vector::zeros());
+                node.delta = 0.01f;
+                node.payload = text_to_payload(name);
+                node.tags = {"entity"};
+
+                entity_map[name] = node.id;
+                index_node_insert(node.id, node);
+                graph_.insert_raw(node.id);
+
+                if (!config_.use_mmap_graph) {
+                    graph_store_.link_entity(name, node.id);
+                }
+
+                new_nodes.push_back(std::move(node));
+            }
+
+            storage_.insert_batch(std::move(new_nodes));
+        }
+
+        // Phase 4: Batch add triplets (triplet-first, no node edges)
+        if (config_.use_mmap_graph) {
+            mmap_graph_store_.add_batch(triplets);
+        } else {
+            graph_store_.add_batch(triplets);
+        }
+    }
+
     // Query triplets: (subject?, predicate?, object?)
     // Pass empty string for wildcards
     std::vector<Triplet> query_triplets(
@@ -2190,6 +2380,27 @@ public:
         }
     }
 
+    // Get triplet count from graph store
+    size_t graph_store_triplet_count() const {
+        if (config_.use_mmap_graph) {
+            return mmap_graph_store_.triplet_count();
+        }
+        return graph_store_.triplet_count();
+    }
+
+    // Compact triplets: remove duplicates
+    size_t compact_triplets() {
+        if (config_.use_mmap_graph) {
+            return 0;  // TODO: implement for mmap graph store
+        }
+        size_t removed = graph_store_.compact();
+        if (removed > 0) {
+            std::string graph_path = storage_.base_path() + ".graph";
+            graph_store_.save(graph_path);
+        }
+        return removed;
+    }
+
     // Get all linked entities (for debug/export)
     std::vector<std::pair<std::string, NodeId>> linked_entities() const {
         if (!config_.use_mmap_graph) {
@@ -2208,11 +2419,24 @@ public:
 
     // Find entity by name - O(1) via EntityIndex, fallback to scan
     std::optional<NodeId> find_entity(const std::string& name) const {
+        return find_entity_impl(name, false);
+    }
+
+    // Fast-only entity lookup: O(1) index check, no storage scan
+    std::optional<NodeId> find_entity_fast(const std::string& name) const {
+        return find_entity_impl(name, true);
+    }
+
+private:
+    std::optional<NodeId> find_entity_impl(const std::string& name, bool fast_only) const {
         // Fast path: check EntityIndex first (O(1))
         if (!config_.use_mmap_graph) {
             auto resolved = graph_store_.resolve_entity(name);
             if (resolved) return resolved;
         }
+
+        // Skip slow path for fast-only lookups
+        if (fast_only) return std::nullopt;
 
         // Slow path: scan storage for entity nodes (legacy, used during bootstrap)
         std::optional<NodeId> found;
@@ -2228,6 +2452,7 @@ public:
         });
         return found;
     }
+public:
 
     // Find or create entity - auto-links to EntityIndex
     NodeId find_or_create_entity(const std::string& name) {
@@ -4130,6 +4355,130 @@ public:
         return storage_.remove(id);
     }
 
+    // ========== Code Intelligence: File Tracking ==========
+
+    // Register a file after symbol extraction
+    void register_file(const std::string& path, const std::string& extractor_version) {
+        std::unique_lock<std::shared_mutex> lock(mutex_);
+        file_tracker_.register_file(path, extractor_version);
+    }
+
+    // Register a node's source path for staleness tracking
+    void register_node_source(const NodeId& id, const std::string& source_path) {
+        std::unique_lock<std::shared_mutex> lock(mutex_);
+        nodes_by_source_path_[source_path].push_back(id);
+    }
+
+    // Get all nodes derived from a source file
+    std::vector<NodeId> get_nodes_by_source(const std::string& path) const {
+        std::shared_lock<std::shared_mutex> lock(mutex_);
+        auto it = nodes_by_source_path_.find(path);
+        if (it != nodes_by_source_path_.end()) {
+            return it->second;
+        }
+        return {};
+    }
+
+    // Mark all nodes from a file as potentially stale
+    size_t mark_file_stale(const std::string& path) {
+        std::unique_lock<std::shared_mutex> lock(mutex_);
+        auto it = nodes_by_source_path_.find(path);
+        if (it == nodes_by_source_path_.end()) return 0;
+
+        size_t marked = 0;
+        for (const auto& id : it->second) {
+            Node* node = storage_.get(id);
+            if (node && node->stale_state == StaleState::Fresh) {
+                node->mark_maybe_stale();
+                marked++;
+            }
+        }
+        return marked;
+    }
+
+    // Check changed files and mark nodes stale (Phase 1: immediate marking)
+    size_t refresh_staleness(const std::string& dir = "") {
+        std::unique_lock<std::shared_mutex> lock(mutex_);
+        auto changed = file_tracker_.get_changed_files(dir);
+
+        size_t total_marked = 0;
+        for (const auto& path : changed) {
+            auto it = nodes_by_source_path_.find(path);
+            if (it != nodes_by_source_path_.end()) {
+                for (const auto& id : it->second) {
+                    Node* node = storage_.get(id);
+                    if (node) {
+                        node->mark_maybe_stale();
+                        total_marked++;
+                    }
+                }
+            }
+        }
+        return total_marked;
+    }
+
+    // Get file tracker for direct access
+    FileTracker& file_tracker() { return file_tracker_; }
+    const FileTracker& file_tracker() const { return file_tracker_; }
+
+    // Get staleness statistics
+    struct StalenessStats {
+        size_t fresh = 0;
+        size_t maybe_stale = 0;
+        size_t stale = 0;
+        size_t deleted = 0;
+        size_t no_source = 0;  // Nodes without source path
+    };
+
+    StalenessStats get_staleness_stats() const {
+        std::shared_lock<std::shared_mutex> lock(mutex_);
+        StalenessStats stats;
+
+        storage_.for_each_hot([&stats](const NodeId&, const Node& node) {
+            if (node.source_path.empty()) {
+                stats.no_source++;
+            } else {
+                switch (node.stale_state) {
+                    case StaleState::Fresh: stats.fresh++; break;
+                    case StaleState::MaybeStale: stats.maybe_stale++; break;
+                    case StaleState::Stale: stats.stale++; break;
+                    case StaleState::Deleted: stats.deleted++; break;
+                }
+            }
+        });
+
+        return stats;
+    }
+
+    // ========== Hierarchical State: Token-Efficient Injection ==========
+
+    // Get hierarchical state for modification
+    HierarchicalState& hierarchical_state() { return hierarchical_state_; }
+    const HierarchicalState& hierarchical_state() const { return hierarchical_state_; }
+
+    // Generate injection context for a query
+    // Returns token-budgeted text ready for context window
+    std::string generate_injection(
+        const std::vector<std::string>& relevant_modules = {},
+        const std::vector<std::string>& relevant_patterns = {},
+        const InjectionBudget& budget = InjectionBudget()) const
+    {
+        return hierarchical_state_.generate_injection(relevant_modules, relevant_patterns, budget);
+    }
+
+    // Bootstrap hierarchical state from code intelligence
+    void bootstrap_hierarchical_state(const std::string& project_name,
+                                      const std::vector<std::pair<std::string, std::string>>& class_files)
+    {
+        std::unique_lock<std::shared_mutex> lock(mutex_);
+        hierarchical_state_.bootstrap_from_symbols(project_name, class_files);
+
+        // Update metrics from current soul state
+        Coherence coh = graph_.coherence();
+        MindHealth h = health_unlocked();
+        hierarchical_state_.update_metrics(coh.tau_k(), h.overall());
+    }
+
     // Cleanup garbage nodes matching patterns
     // Returns: {removed_count, patterns_matched}
     std::pair<size_t, std::vector<std::string>> cleanup_garbage(bool dry_run = true) {
@@ -4526,6 +4875,13 @@ public:
     // Phase 7: Priority 3 - Pipeline Components
     SynthesisQueue synthesis_queue_;
     GapInquiry gap_inquiry_;
+
+    // Code intelligence: file tracking and staleness detection
+    FileTracker file_tracker_;
+    std::unordered_map<std::string, std::vector<NodeId>> nodes_by_source_path_;
+
+    // Hierarchical state for token-efficient context injection
+    HierarchicalState hierarchical_state_;
 
     // Phase 7: Quota management helpers (caller must hold mutex_)
     void update_quota_counts() {

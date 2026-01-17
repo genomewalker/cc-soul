@@ -208,6 +208,24 @@ struct Confidence {
     }
 };
 
+// Staleness state for code-derived nodes
+enum class StaleState : uint8_t {
+    Fresh = 0,       // Verified against current code
+    MaybeStale = 1,  // File changed, needs verification
+    Stale = 2,       // Verified as changed
+    Deleted = 3      // Source file/symbol no longer exists
+};
+
+inline const char* stale_state_str(StaleState s) {
+    switch (s) {
+        case StaleState::Fresh: return "fresh";
+        case StaleState::MaybeStale: return "maybe_stale";
+        case StaleState::Stale: return "stale";
+        case StaleState::Deleted: return "deleted";
+        default: return "unknown";
+    }
+}
+
 // Node types in the soul graph
 enum class NodeType : uint8_t {
     Wisdom = 0,      // Universal pattern/insight
@@ -229,6 +247,11 @@ enum class NodeType : uint8_t {
     Ledger = 16,     // Session ledger (Atman snapshot)
     Entity = 17,     // Named entity (person, concept, codebase, etc.)
     Triplet = 18,    // Relationship: subject --[predicate]--> object
+    // Hierarchical state compression (token-efficient context injection)
+    ProjectEssence = 19,  // Level 0: project thesis, core modules (~50 tokens)
+    ModuleState = 20,     // Level 1: module summary, entrypoints (~20 tokens each)
+    PatternState = 21,    // Level 2: active patterns, seeds (~10 tokens each)
+    Symbol = 22,          // Level 3: code symbol (function, class, etc.)
 };
 
 // Edge types connecting nodes
@@ -443,6 +466,12 @@ struct Node {
     std::vector<Edge> edges;
     std::vector<std::string> tags;  // Exact-match tags for filtering
 
+    // Source provenance (for code-derived nodes: Symbol, ModuleState, etc.)
+    std::string source_path;        // Normalized path (empty if not from code)
+    std::string source_hash;        // Git OID or content hash
+    Timestamp last_verified_at = 0; // When staleness was last checked
+    StaleState stale_state = StaleState::Fresh;
+
     Node()
         : id()
         , nu()
@@ -492,6 +521,36 @@ struct Node {
     Node& with_tags(std::vector<std::string> t) {
         tags = std::move(t);
         return *this;
+    }
+
+    Node& with_provenance(const std::string& path, const std::string& hash) {
+        source_path = path;
+        source_hash = hash;
+        last_verified_at = now();
+        stale_state = StaleState::Fresh;
+        return *this;
+    }
+
+    // Mark as potentially stale (file changed, needs verification)
+    void mark_maybe_stale() {
+        if (stale_state == StaleState::Fresh) {
+            stale_state = StaleState::MaybeStale;
+        }
+    }
+
+    // Verify against current code state
+    void verify(bool still_valid, const std::string& new_hash = "") {
+        last_verified_at = now();
+        if (still_valid) {
+            stale_state = StaleState::Fresh;
+            if (!new_hash.empty()) source_hash = new_hash;
+        } else {
+            stale_state = source_path.empty() ? StaleState::Deleted : StaleState::Stale;
+        }
+    }
+
+    bool is_code_derived() const {
+        return !source_path.empty();
     }
 
     void connect(NodeId target, EdgeType type, float weight) {

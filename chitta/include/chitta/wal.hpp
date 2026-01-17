@@ -801,6 +801,48 @@ public:
         return first_seq;
     }
 
+    // Append node insert batch - single fsync for multiple nodes (for bulk indexing)
+    // Returns last sequence number, or 0 on failure
+    uint64_t append_insert_batch(const std::vector<Node>& nodes) {
+        if (fd_ < 0 || nodes.empty()) return 0;
+
+        // Serialize all nodes
+        std::vector<std::pair<WalEntryHeader, std::vector<uint8_t>>> entries;
+        entries.reserve(nodes.size());
+
+        uint64_t ts = static_cast<uint64_t>(now());
+
+        for (const auto& node : nodes) {
+            std::vector<uint8_t> data = serialize_node(node);
+
+            WalEntryHeader header;
+            header.magic = WAL_MAGIC;
+            header.length = sizeof(WalEntryHeader) + data.size();
+            header.sequence = ++next_seq_;
+            header.timestamp = ts;
+            header.op = WalOp::Insert;
+            header.format = WAL_FORMAT_CURRENT;
+            std::memset(header.reserved, 0, sizeof(header.reserved));
+            header.checksum = crc32(data.data(), data.size());
+
+            entries.emplace_back(header, std::move(data));
+        }
+
+        // Single lock, single fsync for entire batch
+        {
+            ScopedFileLock lock(fd_, true);
+            lseek(fd_, 0, SEEK_END);
+
+            for (const auto& [header, data] : entries) {
+                if (::write(fd_, &header, sizeof(header)) != sizeof(header)) return 0;
+                if (::write(fd_, data.data(), data.size()) != static_cast<ssize_t>(data.size())) return 0;
+            }
+            fsync(fd_);
+        }
+
+        return next_seq_;  // Return last sequence
+    }
+
     // Append delete (just node ID) - 48 bytes
     uint64_t append_delete(NodeId id) {
         if (fd_ < 0) return 0;

@@ -21,6 +21,7 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 #include <optional>
 #include <fstream>
 #include <cstring>
@@ -325,6 +326,100 @@ public:
             wal_stream_.flush();
         }
     }
+
+    // Batch add with incremental global dedupe
+    // Uses persistent hash set built lazily, O(batch_size) per call after first build
+    void add_batch(const std::vector<std::tuple<std::string, std::string, std::string, float>>& triplets) {
+        if (triplets.empty()) return;
+
+        std::unique_lock lock(mutex_);
+
+        // Build global hash set on first batch call (lazy initialization)
+        // After that, it's maintained incrementally - O(1) per insert
+        if (triplet_hashes_.empty() && !triplets_.empty()) {
+            triplet_hashes_.reserve(triplets_.size() * 2);
+            for (const auto& t : triplets_) {
+                triplet_hashes_.insert(make_triplet_key(t.subject, t.predicate, t.object));
+            }
+        }
+
+        std::vector<CompactTriplet> new_triplets;
+        new_triplets.reserve(triplets.size());
+
+        for (const auto& [subject, predicate, object, weight] : triplets) {
+            uint32_t subj_idx = entities_.get_or_create(subject);
+            uint32_t pred_idx = static_cast<uint32_t>(predicates_.get_or_create(predicate));
+            uint32_t obj_idx = entities_.get_or_create(object);
+
+            uint64_t key = make_triplet_key(subj_idx, pred_idx, obj_idx);
+            if (triplet_hashes_.find(key) != triplet_hashes_.end()) continue;
+            triplet_hashes_.insert(key);
+
+            CompactTriplet t;
+            t.subject = subj_idx;
+            t.predicate = pred_idx;
+            t.object = obj_idx;
+            t.weight = weight;
+
+            triplets_.push_back(t);
+            new_triplets.push_back(t);
+        }
+
+        if (!new_triplets.empty()) {
+            dirty_ = true;
+
+            // Batch WAL write with single flush
+            if (wal_stream_.is_open()) {
+                for (const auto& t : new_triplets) {
+                    wal_stream_.write(reinterpret_cast<const char*>(&t), sizeof(t));
+                }
+                wal_stream_.flush();
+            }
+        }
+    }
+
+    // Compact: remove duplicate triplets (one-time cleanup)
+    size_t compact() {
+        std::unique_lock lock(mutex_);
+
+        size_t before = triplets_.size();
+        std::unordered_set<uint64_t> seen;
+        seen.reserve(triplets_.size());
+
+        std::vector<CompactTriplet> unique;
+        unique.reserve(triplets_.size());
+
+        for (const auto& t : triplets_) {
+            uint64_t key = make_triplet_key(t.subject, t.predicate, t.object);
+            if (seen.insert(key).second) {
+                unique.push_back(t);
+            }
+        }
+
+        size_t removed = before - unique.size();
+        if (removed > 0) {
+            triplets_ = std::move(unique);
+            triplet_hashes_ = std::move(seen);
+            dirty_ = true;
+        }
+
+        return removed;
+    }
+
+private:
+    // FNV-1a hash combining for triplet key
+    static uint64_t make_triplet_key(uint32_t subj, uint32_t pred, uint32_t obj) {
+        uint64_t h = 14695981039346656037ULL;
+        h ^= subj; h *= 1099511628211ULL;
+        h ^= pred; h *= 1099511628211ULL;
+        h ^= obj;  h *= 1099511628211ULL;
+        return h;
+    }
+
+    // Persistent hash set for O(1) dedupe (built lazily, maintained incrementally)
+    std::unordered_set<uint64_t> triplet_hashes_;
+
+public:
 
     // Query by subject
     std::vector<std::tuple<std::string, std::string, float>>

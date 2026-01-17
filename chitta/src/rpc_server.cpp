@@ -187,6 +187,9 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
     {"deduplicate", "Merge duplicate nodes with identical text",
      {{"dry_run", "Preview only, don't actually merge", false, "true"}}},
 
+    {"compact_triplets", "Remove duplicate triplets from graph store",
+     {}},
+
     // Context tools
     {"soul_context", "Get soul state (tau, psi, stats)",
      {{"query", "Optional context for relevant wisdom", false, nullptr},
@@ -354,7 +357,13 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
     {"extract_symbols", "Extract symbols from source files (tree-sitter AST)",
      {{"path", "File or directory path", true, nullptr},
       {"recursive", "Traverse directories recursively", false, "true"},
-      {"exclude", "Comma-separated dirs to exclude", false, nullptr}}},
+      {"exclude", "Comma-separated dirs to exclude", false, nullptr},
+      {"changed_only", "Only analyze git-changed files", false, "false"},
+      {"since", "Git ref to compare (HEAD~5, main)", false, nullptr}}},
+
+    {"code_summary", "Token-efficient codebase summary",
+     {{"path", "Directory path", true, nullptr},
+      {"depth", "Directory depth to show", false, "2"}}},
 
     {"analyze_code", "Analyze source file and store symbols with line numbers",
      {{"file", "Path to source file", true, nullptr},
@@ -371,6 +380,19 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
       {"kind", "Filter: function|class|struct|method|any", false, "any"},
       {"file", "Filter by file pattern", false, nullptr},
       {"limit", "Max results", false, "20"}}},
+
+    {"staleness_stats", "Get staleness statistics for code-derived nodes",
+     {}},
+
+    {"hierarchical_state", "Get hierarchical state for context injection",
+     {{"modules", "Comma-separated module names (empty = all)", false, nullptr},
+      {"max_modules", "Maximum modules to include", false, "5"}}},
+
+    {"learn_codebase", "Learn entire codebase in one call",
+     {{"path", "Directory path to analyze", true, nullptr},
+      {"project", "Project name (auto-detected if empty)", false, nullptr},
+      {"max_files", "Maximum files to analyze", false, "100"},
+      {"bootstrap_state", "Bootstrap hierarchical state", false, "true"}}},
 };
 
 // Build set of known tools from specs
@@ -453,7 +475,7 @@ void print_usage(const char* prog) {
               << "\n"
               << "Tool categories:\n"
               << "  Memory:    recall, resonate, full_resonate, recall_by_tag, multi_hop, timeline\n"
-              << "  Learning:  grow, observe, update, get, feedback, connect, query, import_soul, export_soul, cleanup, deduplicate\n"
+              << "  Learning:  grow, observe, update, get, feedback, connect, query, import_soul, export_soul, cleanup, deduplicate, compact_triplets\n"
               << "  Entity:    resolve_entity, link_entity, bootstrap_entity_index, list_entities\n"
               << "  Context:   soul_context, attractors, lens, lens_harmony\n"
               << "  Intention: intend, wonder, answer\n"
@@ -463,6 +485,7 @@ void print_usage(const char* prog) {
               << "  Realm:     realm_get, realm_set, realm_create\n"
               << "  Review:    review_list, review_decide, review_batch, review_stats\n"
               << "  Eval:      eval_run, eval_add_test, epiplexity_check, epiplexity_drift\n"
+              << "  Code:      learn_codebase, analyze_code, extract_symbols, code_summary, staleness_stats, hierarchical_state\n"
               << "\n"
               << "Global options:\n"
               << "  --socket-path PATH  Unix socket path\n"
@@ -692,9 +715,23 @@ int run_thin_client(const std::string& socket_path) {
 int main(int argc, char* argv[]) {
     std::string socket_path = chitta::SocketClient::default_socket_path();
     bool json_output = false;
+    std::string tool;
+    int tool_arg_index = 0;
+
+    // Pre-scan for --socket-path and --json flags, find tool name
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--socket-path") == 0 && i + 1 < argc) {
+            socket_path = argv[++i];
+        } else if (std::strcmp(argv[i], "--json") == 0) {
+            json_output = true;
+        } else if (tool.empty() && argv[i][0] != '-') {
+            tool = argv[i];
+            tool_arg_index = i;
+        }
+    }
 
     // Handle status command (daemon health check)
-    if (argc > 1 && std::strcmp(argv[1], "status") == 0) {
+    if (tool == "status") {
         chitta::SocketClient client(socket_path);
         if (!client.connect()) {
             std::cout << "Daemon: not running\n";
@@ -714,7 +751,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Handle shutdown command specially (not a tool, direct daemon control)
-    if (argc > 1 && std::strcmp(argv[1], "shutdown") == 0) {
+    if (tool == "shutdown") {
         chitta::SocketClient client(socket_path);
         if (!client.connect()) {
             std::cerr << "No daemon running\n";
@@ -731,33 +768,28 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Check for CLI mode: first arg is a known tool name
-    if (argc > 1 && KNOWN_TOOLS.count(argv[1])) {
-        std::string tool = argv[1];
-
-        // Check for --json flag anywhere in args
-        for (int i = 2; i < argc; ++i) {
-            if (std::strcmp(argv[i], "--json") == 0) {
-                json_output = true;
+    // Check for --help without a tool
+    if (tool.empty()) {
+        for (int i = 1; i < argc; ++i) {
+            if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
+                print_usage(argv[0]);
+                return 0;
             }
         }
-
-        return run_cli(socket_path, tool, argc, argv, 2, json_output);
     }
 
-    // Parse arguments for interactive mode
-    for (int i = 1; i < argc; ++i) {
-        if (std::strcmp(argv[i], "--socket-path") == 0 && i + 1 < argc) {
-            socket_path = argv[++i];
-        } else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
-            print_usage(argv[0]);
-            return 0;
-        } else {
-            std::cerr << "Unknown option: " << argv[i] << "\n";
-            print_usage(argv[0]);
-            return 1;
-        }
+    // Check for CLI mode: tool is a known tool name
+    if (!tool.empty() && KNOWN_TOOLS.count(tool)) {
+        return run_cli(socket_path, tool, argc, argv, tool_arg_index + 1, json_output);
     }
 
-    return run_thin_client(socket_path);
+    // No tool specified - run interactive mode or show usage
+    if (tool.empty()) {
+        return run_thin_client(socket_path);
+    }
+
+    // Unknown tool
+    std::cerr << "Unknown option: " << tool << "\n";
+    print_usage(argv[0]);
+    return 1;
 }

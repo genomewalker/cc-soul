@@ -1133,6 +1133,25 @@ inline ToolResult deduplicate(Mind* mind, const json& params) {
     return ToolResult::ok(ss.str(), result);
 }
 
+// Compact triplets: remove duplicate triplets from graph store
+inline ToolResult compact_triplets(Mind* mind, const json& params) {
+    (void)params;  // No parameters needed
+
+    size_t before = mind->graph_store_triplet_count();
+    size_t removed = mind->compact_triplets();
+    size_t after = before - removed;
+
+    std::ostringstream ss;
+    ss << "Compacted triplets: " << before << " → " << after << " (" << removed << " duplicates removed)";
+
+    json result;
+    result["before"] = before;
+    result["after"] = after;
+    result["removed"] = removed;
+
+    return ToolResult::ok(ss.str(), result);
+}
+
 // Register all learning tool handlers
 inline void register_handlers(Mind* mind,
                                std::unordered_map<std::string, ToolHandler>& handlers) {
@@ -1155,6 +1174,7 @@ inline void register_handlers(Mind* mind,
     handlers["get_resonance_config"] = [mind](const json& p) { return get_resonance_config(mind, p); };
     handlers["cleanup"] = [mind](const json& p) { return cleanup(mind, p); };
     handlers["deduplicate"] = [mind](const json& p) { return deduplicate(mind, p); };
+    handlers["compact_triplets"] = [mind](const json& p) { return compact_triplets(mind, p); };
 }
 
 } // namespace chitta::rpc::tools::learning
