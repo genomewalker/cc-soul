@@ -349,6 +349,28 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
 
     {"epiplexity_drift", "Analyze epsilon drift over time",
      {{"lookback_days", "Days to analyze", false, "7"}}},
+
+    // Code intelligence tools
+    {"extract_symbols", "Extract symbols from source files (tree-sitter AST)",
+     {{"path", "File or directory path", true, nullptr},
+      {"recursive", "Traverse directories recursively", false, "true"},
+      {"exclude", "Comma-separated dirs to exclude", false, nullptr}}},
+
+    {"analyze_code", "Analyze source file and store symbols with line numbers",
+     {{"file", "Path to source file", true, nullptr},
+      {"project", "Project name for tagging", false, nullptr},
+      {"update", "Update existing symbols", false, "true"}}},
+
+    {"code_context", "Get code around a specific line",
+     {{"file", "Path to source file", true, nullptr},
+      {"line", "Target line number", true, nullptr},
+      {"context", "Lines of context before/after", false, "10"}}},
+
+    {"code_search", "Search for code symbols by name/type",
+     {{"query", "Symbol name or pattern", true, nullptr},
+      {"kind", "Filter: function|class|struct|method|any", false, "any"},
+      {"file", "Filter by file pattern", false, nullptr},
+      {"limit", "Max results", false, "20"}}},
 };
 
 // Build set of known tools from specs

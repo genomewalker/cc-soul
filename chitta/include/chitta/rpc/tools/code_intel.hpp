@@ -671,6 +671,25 @@ inline void register_schemas(std::vector<ToolSchema>& tools) {
     });
 
     tools.push_back({
+        "extract_symbols",
+        "Extract symbols from source files using tree-sitter AST parsing. "
+        "Returns raw symbol data (functions, classes, methods, imports) for Claude to process into SSL. "
+        "Supports: C/C++, Python, JavaScript, TypeScript, Go, Rust, Java, Ruby, C#. "
+        "Use this to get raw data, then generate SSL patterns and triplets yourself.",
+        {
+            {"type", "object"},
+            {"properties", {
+                {"path", {{"type", "string"}, {"description", "File or directory path to analyze"}}},
+                {"recursive", {{"type", "boolean"}, {"default", true},
+                             {"description", "Recursively traverse directories"}}},
+                {"exclude", {{"type", "array"}, {"items", {{"type", "string"}}}, {"default", json::array()},
+                           {"description", "Directory names to exclude (e.g., [\"node_modules\", \"build\"])"}}}
+            }},
+            {"required", {"path"}}
+        }
+    });
+
+    tools.push_back({
         "code_context",
         "Get code context around a specific location. Returns lines around the target "
         "without needing to read the full file. Use after finding a symbol via search.",
@@ -841,6 +860,134 @@ inline void register_handlers(std::unordered_map<std::string, ToolHandler>& hand
         ss << "  Symbols found: " << symbols.size() << "\n";
         ss << "  Symbols stored: " << symbols_stored << "\n";
         ss << "  Triplets created: " << triplets_created;
+
+        return ToolResult::ok(ss.str(), result);
+    };
+
+    // extract_symbols: Extract raw symbol data for Claude to process
+    handlers["extract_symbols"] = [mind](const json& params) -> ToolResult {
+        std::string path = params.at("path");
+        bool recursive = params.value("recursive", true);
+        std::vector<std::string> exclude_dirs;
+        if (params.contains("exclude") && params["exclude"].is_array()) {
+            for (const auto& e : params["exclude"]) {
+                exclude_dirs.push_back(e.get<std::string>());
+            }
+        }
+        if (exclude_dirs.empty()) {
+            exclude_dirs = {"node_modules", "build", "dist", ".git", "__pycache__", "target", "vendor", "deps"};
+        }
+
+        std::vector<std::string> extensions = {
+            ".cpp", ".cc", ".cxx", ".hpp", ".h", ".hxx", ".c",
+            ".py", ".pyw",
+            ".js", ".jsx", ".mjs", ".ts", ".tsx",
+            ".go", ".rs", ".java", ".rb", ".cs"
+        };
+
+        json files_data = json::array();
+        int total_files = 0;
+        int total_symbols = 0;
+
+        auto process_file = [&](const std::string& file_path, const std::string& rel_path) {
+            std::string lang = detect_language(file_path);
+            if (lang == "unknown") return;
+
+            std::ifstream file(file_path);
+            if (!file.is_open()) return;
+
+            std::stringstream buffer;
+            buffer << file.rdbuf();
+            std::string content = buffer.str();
+            file.close();
+
+            std::vector<Symbol> symbols = extract_symbols(content, lang);
+            if (symbols.empty()) return;
+
+            json file_obj;
+            file_obj["path"] = rel_path;
+            file_obj["language"] = lang;
+            file_obj["symbols"] = json::array();
+
+            for (const auto& sym : symbols) {
+                json sym_obj;
+                sym_obj["name"] = sym.name;
+                sym_obj["kind"] = symbol_kind_str(sym.kind);
+                sym_obj["line"] = sym.line;
+                sym_obj["end_line"] = sym.end_line;
+                if (!sym.scope.empty()) {
+                    sym_obj["scope"] = sym.scope;
+                }
+                if (!sym.signature.empty()) {
+                    sym_obj["signature"] = sym.signature;
+                }
+                file_obj["symbols"].push_back(sym_obj);
+                total_symbols++;
+            }
+
+            files_data.push_back(file_obj);
+            total_files++;
+        };
+
+        if (fs::is_regular_file(path)) {
+            // Single file
+            process_file(path, fs::path(path).filename().string());
+        } else if (fs::is_directory(path)) {
+            // Directory
+            auto iterator = recursive
+                ? fs::recursive_directory_iterator(path, fs::directory_options::skip_permission_denied)
+                : fs::recursive_directory_iterator(path, fs::directory_options::skip_permission_denied);
+
+            for (const auto& entry : fs::recursive_directory_iterator(path,
+                    fs::directory_options::skip_permission_denied)) {
+                if (!entry.is_regular_file()) continue;
+
+                // Check exclusions
+                bool excluded = false;
+                for (const auto& parent : entry.path()) {
+                    for (const auto& excl : exclude_dirs) {
+                        if (parent.string() == excl) {
+                            excluded = true;
+                            break;
+                        }
+                    }
+                    if (excluded) break;
+                }
+                if (excluded) continue;
+
+                // Check extension
+                std::string ext = entry.path().extension().string();
+                bool supported = false;
+                for (const auto& e : extensions) {
+                    if (ext == e) { supported = true; break; }
+                }
+                if (!supported) continue;
+
+                std::string rel_path;
+                try {
+                    rel_path = fs::relative(entry.path(), path).string();
+                } catch (...) {
+                    rel_path = entry.path().filename().string();
+                }
+                process_file(entry.path().string(), rel_path);
+            }
+        } else {
+            return ToolResult::error("Path not found: " + path);
+        }
+
+        json result;
+        result["path"] = path;
+        result["files"] = files_data;
+        result["total_files"] = total_files;
+        result["total_symbols"] = total_symbols;
+
+        std::ostringstream ss;
+        ss << "Extracted " << total_symbols << " symbols from " << total_files << " files.\n\n";
+        ss << "Files:\n";
+        for (const auto& f : files_data) {
+            ss << "  " << f["path"].get<std::string>() << " (" << f["symbols"].size() << " symbols)\n";
+        }
+        ss << "\nUse this data to generate SSL patterns and triplets.";
 
         return ToolResult::ok(ss.str(), result);
     };
