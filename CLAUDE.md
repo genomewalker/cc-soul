@@ -679,6 +679,18 @@ Most of the time, I don't use tools. The hooks do the work. I just think.
 Access via hooks' `call_mcp` function or pipe directly to `chitta`.
 Only needed for: deep zoom recalls, specific tag searches, explicit feedback, realm switching, human review.
 
+**Code Intelligence** (codebase understanding):
+- `learn_codebase` — index a codebase with tree-sitter AST parsing
+- `extract_symbols` — extract symbols from a single file
+- `code_summary` — summarize code structure
+- `hierarchical_state` — get L0/L1/L2 context for token-efficient injection
+- `staleness_stats` — check which indexed files are stale
+
+Use `/codebase-learn <path>` skill to index a new codebase. Once indexed:
+- Code structure surfaces via triplet queries
+- `query --subject "file.cpp"` shows relationships
+- Hierarchical state provides compressed context at session start
+
 ## Session Continuity
 
 Hooks handle mechanics automatically:
