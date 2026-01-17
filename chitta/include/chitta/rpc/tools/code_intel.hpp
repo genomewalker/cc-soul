@@ -1621,7 +1621,7 @@ inline void register_handlers(std::unordered_map<std::string, ToolHandler>& hand
                 if (symbols.empty()) continue;
 
                 // Get file hash from mtime (fast)
-                std::string file_hash = std::to_string(fs::last_write_time(file_path).time_since_epoch().count());
+                std::string file_hash = std::to_string(static_cast<long long>(fs::last_write_time(file_path).time_since_epoch().count()));
 
                 // Collect node specs and triplets for batch operations
                 std::vector<RawNodeSpec> node_specs;
