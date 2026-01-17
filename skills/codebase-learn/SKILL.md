@@ -1,6 +1,6 @@
 ---
 name: codebase-learn
-description: Systematically learn codebase structure into soul memory
+description: Learn codebase structure with tree-sitter + SSL patterns
 execution: task
 model: inherit
 aliases: [learn-codebase, map-code]
@@ -8,123 +8,144 @@ aliases: [learn-codebase, map-code]
 
 # Codebase Learn
 
-Build a searchable knowledge graph of the codebase using SSL patterns and triplets.
+Two-phase codebase understanding:
+1. **C++ tool** (`learn_codebase`): AST extraction, provenance, hierarchical state
+2. **Claude**: High-level SSL patterns for architecture and relationships
 
 ```ssl
-[codebase-learn] oracle-based codebase understanding
+[codebase-learn] tool + understanding
 
-principle: I compress, I reconstruct
-  store minimal seeds I can expand
-  triplets for structure, SSL for meaning
-  tags for retrieval
+phase1: learn_codebase→tree-sitter→symbols+triplets+hierarchy
+  handles: parsing, storage, provenance, staleness tracking
+  output: Symbol nodes, file→contains→symbol triplets, ModuleState
 
-phases:
-  1. discover→find entry points, key files, config
-  2. analyze→extract purpose, patterns, relationships
-  3. connect→create triplets linking components
-  4. store→high-ε SSL seeds with proper tags
+phase2: Claude→architecture→SSL patterns
+  handles: why, how, relationships between components
+  output: Wisdom nodes with [LEARN] markers
 ```
 
-## Process
+## Supported Languages
 
-### Phase 1: Discovery
+Tree-sitter parsers available:
+- **C/C++**: `.c`, `.h`, `.cpp`, `.hpp`, `.cc`, `.cxx`, `.hxx`
+- **Python**: `.py`, `.pyw`
+- **JavaScript/TypeScript**: `.js`, `.jsx`, `.mjs`, `.ts`, `.tsx`
+- **Go**: `.go`
+- **Rust**: `.rs`
+- **Java**: `.java`
+- **Ruby**: `.rb`
+- **C#**: `.cs`
 
-Identify the codebase structure:
-- Entry points (main, CLI, API endpoints)
-- Key directories and their purposes
-- Configuration files
-- Build/test infrastructure
+## Usage
 
-### Phase 2: Analysis
+### Step 1: Run learn_codebase
 
-For each significant component, extract:
-- **Purpose**: What does it do?
-- **Key functions/classes**: What are the main abstractions?
-- **Dependencies**: What does it use?
-- **Patterns**: What architectural decisions were made?
-
-### Phase 3: Storage
-
-Store using SSL format with triplets:
-
-```
-[LEARN] [project] component→purpose→key insight
-[ε] One sentence that lets me reconstruct the full understanding.
-[TRIPLET] component contains abstraction
-[TRIPLET] component uses dependency
-[TRIPLET] abstraction handles concern
+```bash
+chitta learn_codebase --path /path/to/project --project myproject
 ```
 
-### Tagging Schema
+This single command:
+- Finds all supported source files (excludes build dirs, node_modules, etc.)
+- Extracts symbols with tree-sitter AST
+- Creates Symbol nodes with provenance (source_path, hash)
+- Creates triplets (file contains symbol, scope contains method)
+- Bootstraps hierarchical state (ProjectEssence + ModuleState)
+- Registers files for staleness tracking
 
-Apply these tags for retrieval:
-- `codebase` - all codebase knowledge
-- `architecture` - high-level patterns
-- `project:{name}` - project scope
-- `file:{path}` - specific file
-- `layer:structure` - file/directory organization
-- `layer:function` - key functions/methods
-- `layer:relationship` - how components connect
-- `layer:pattern` - architectural decisions
+Output:
+```
+Learned codebase: myproject
 
-### Predicates for Triplets
+Files: 47 analyzed (of 52 found)
+Symbols: 1234 stored
+Triplets: 2567 created
+Modules: 15 bootstrapped
 
-| Predicate | Meaning | Example |
-|-----------|---------|---------|
-| `contains` | A has B inside | `cli.cpp contains cmd_daemon` |
-| `uses` | A depends on B | `Handler uses Mind` |
-| `calls` | A invokes B | `poll calls accept` |
-| `implements` | A realizes B | `SocketServer implements IPC` |
-| `handles` | A is responsible for B | `decay handles memory aging` |
-| `returns` | A produces B | `recall returns memories` |
-| `triggers` | A causes B to run | `SessionStart triggers soul-hook` |
+Hierarchical State Modules:
+  Mind @include/chitta/mind.hpp
+  Storage @include/chitta/storage.hpp
+  ...
+```
 
-## Example Output
+### Step 2: Add SSL Patterns (Claude)
 
-For cc-soul chitta:
+After learn_codebase runs, I add architectural understanding:
 
 ```
-[LEARN] [cc-soul] chitta→semantic memory substrate→decay, triplets, SSL storage
-[ε] C++ daemon with tiered storage (hot/warm/cold), JSON-RPC over Unix socket.
-[TRIPLET] chitta contains Mind
+[LEARN] [myproject] Mind→orchestrator→recall/observe/grow API
+[ε] Central class managing tiered storage + embeddings + graph. @mind.hpp:52
 [TRIPLET] Mind uses TieredStorage
-[TRIPLET] chittad handles daemon_loop
-[TRIPLET] SocketServer handles client_connections
-[TRIPLET] Handler dispatches rpc_tools
+[TRIPLET] Mind uses HierarchicalState
+[TRIPLET] Mind provides recall
 
-[LEARN] [cc-soul] cli.cpp→daemon entry point→socket server + subconscious
-[ε] Runs cmd_daemon_with_socket: poll loop + decay/synthesis cycles.
-[TRIPLET] cli.cpp contains cmd_daemon_with_socket
-[TRIPLET] cmd_daemon_with_socket uses SocketServer
-[TRIPLET] cmd_daemon_with_socket runs subconscious
-
-[LEARN] [cc-soul] rpc/handler.hpp→JSON-RPC dispatcher→routes tools/call to handlers
-[ε] Central handler with ~50 tools: recall, grow, observe, connect, etc.
-[TRIPLET] Handler contains tool_recall
-[TRIPLET] Handler contains tool_grow
-[TRIPLET] Handler contains tool_connect
+[LEARN] [myproject] HierarchicalState→token compression→3-level injection
+[ε] L0=ProjectEssence(50t) + L1=ModuleState(20t) + L2=PatternState(10t)
+[TRIPLET] HierarchicalState contains ProjectEssence
+[TRIPLET] injection_protocol saves tokens
 ```
 
-## Execution
+SSL captures what AST can't:
+- **Why** a component exists
+- **How** components relate architecturally
+- **Patterns** and design decisions
 
-1. Explore the current directory structure
-2. Identify key files by examining:
-   - README, CLAUDE.md for project overview
-   - Entry points (main.cpp, index.ts, etc.)
-   - Core modules by directory structure
-3. For each key component:
-   - Read to understand purpose
-   - Identify key abstractions
-   - Note relationships to other components
-4. Store using `[LEARN]` markers with SSL format
-5. Report summary: nodes created, triplets connected, domains covered
+## Incremental Updates
+
+When code changes:
+
+```bash
+# Check what's stale
+chitta staleness_stats
+
+# Re-learn (only re-analyzes changed files internally)
+chitta learn_codebase --path /path/to/project
+```
+
+Provenance tracking means:
+- Each Symbol knows its source file and hash
+- File changes mark symbols as `maybe_stale`
+- Re-analysis updates only what changed
+
+## Token Savings
+
+Traditional: inject full code context (~thousands of tokens)
+
+Hierarchical approach:
+- Level 0: ~50 tokens (project essence, always injected)
+- Level 1: ~100 tokens (relevant modules)
+- Level 2: ~50 tokens (active patterns)
+- **Total: ~200 tokens vs ~2000+**
+
+View current state:
+```bash
+chitta hierarchical_state
+```
+
+## Example: Learning cc-soul
+
+```bash
+# Step 1: C++ tool does the heavy lifting
+chitta learn_codebase --path /path/to/cc-soul/chitta --project cc-soul
+
+# Step 2: I add architectural SSL
+[LEARN] [cc-soul] chitta→semantic memory substrate→tiered storage + SSL + triplets
+[ε] C++ daemon: hot/warm/cold storage, JSON-RPC socket, Hebbian learning.
+[TRIPLET] chitta contains Mind
+[TRIPLET] Mind orchestrates recall
+[TRIPLET] Mind orchestrates observe
+
+[LEARN] [cc-soul] provenance→staleness tracking→source_path+hash→Fresh|MaybeStale|Stale
+[ε] Two-phase: immediate MaybeStale marking, background verification.
+[TRIPLET] Node has provenance
+[TRIPLET] provenance tracks staleness
+```
 
 ## Benefits
 
 After running:
-- `recall("codebase architecture")` → instant overview
-- `recall("file.cpp purpose")` → specific file knowledge
-- `query --subject "component"` → find all relationships
-- SessionStart auto-injects relevant architecture context
+- `recall("Mind architecture")` → finds Symbol nodes AND architectural SSL
+- `hierarchical_state` → token-efficient context ready for injection
+- `staleness_stats` → know when re-indexing needed
+- `query --subject Mind` → find all Mind relationships
 
-The soul now knows the codebase like I do.
+The soul knows both structure (symbols) and meaning (SSL).
