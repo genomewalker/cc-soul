@@ -11,10 +11,10 @@
 [TRIPLET] Mind uses TieredStorage
 [TRIPLET] Mind uses GraphStore
 
-[cc-soul] chittad→daemon binary→socket server + subconscious processing @chitta/src/cli.cpp:1
-[high-ε] Main entry point: cmd_daemon_with_socket runs SocketServer.poll() + decay/synthesis cycles.
-[TRIPLET] chittad contains cmd_daemon_with_socket
-[TRIPLET] cmd_daemon_with_socket uses SocketServer
+[cc-soul] chittad→daemon binary→socket server + subconscious processing @chitta/src/cli.cpp:745
+[high-ε] Main entry point: cmd_daemon runs SocketServer.poll() + decay/synthesis cycles.
+[TRIPLET] chittad contains cmd_daemon
+[TRIPLET] cmd_daemon uses SocketServer
 
 [cc-soul] chitta→CLI client→thin client mode + tool invocation @chitta/src/rpc_server.cpp:1
 [high-ε] Connects to daemon socket, forwards JSON-RPC requests, handles status/shutdown.

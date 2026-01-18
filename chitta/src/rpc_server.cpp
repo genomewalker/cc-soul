@@ -590,7 +590,7 @@ int run_cli(const std::string& socket_path, const std::string& tool,
     chitta::SocketClient client(socket_path);
     if (!client.connect_only()) {
         std::cerr << "Error: " << client.last_error() << "\n";
-        std::cerr << "Hint: Start daemon with 'chittad daemon --socket' or let hooks start it\n";
+        std::cerr << "Hint: Start daemon with 'chittad daemon' or let hooks start it\n";
         return 1;
     }
 
@@ -668,7 +668,7 @@ int run_thin_client(const std::string& socket_path) {
     // Safe connect: never kill/restart daemon
     if (!client.connect_only()) {
         std::cerr << "[chitta] " << client.last_error() << "\n";
-        std::cerr << "[chitta] Hint: Start daemon with 'chittad daemon --socket'\n";
+        std::cerr << "[chitta] Hint: Start daemon with 'chittad daemon'\n";
         return 1;
     }
 

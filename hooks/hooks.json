@@ -56,11 +56,11 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Bash|Write|Edit",
+        "matcher": "Bash|Write|Edit|Read",
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/capture-hook.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/event-collector.sh"
           }
         ]
       }

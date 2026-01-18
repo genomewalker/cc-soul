@@ -401,8 +401,8 @@ chittad recall "error handling patterns" --limit 10
 # Full resonance search
 chittad resonate "caching strategies"
 
-# Start daemon (socket required for RPC)
-chittad daemon --socket
+# Start daemon
+chittad daemon
 
 # Run maintenance
 chittad cycle

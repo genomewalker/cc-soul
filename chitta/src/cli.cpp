@@ -29,12 +29,140 @@
 #include <atomic>
 #include <fstream>
 #include <sstream>
+#include <nlohmann/json.hpp>
 #include <iomanip>
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 
 using namespace chitta;
+using json = nlohmann::json;
+
+// ═══════════════════════════════════════════════════════════════════
+// Event Distillation: Convert captured events to soul knowledge
+// ═══════════════════════════════════════════════════════════════════
+
+// Distill captured events from the event collector hook into triplets
+// Returns number of events processed
+size_t distill_events(Mind& mind, size_t batch_size = 20) {
+    const char* home = std::getenv("HOME");
+    if (!home) return 0;
+
+    std::string candidate_path = std::string(home) + "/.claude/mind/.event_candidates.jsonl";
+    std::ifstream infile(candidate_path);
+    if (!infile.is_open()) return 0;
+
+    std::vector<std::string> lines;
+    std::string line;
+    while (std::getline(infile, line) && lines.size() < batch_size) {
+        if (!line.empty()) {
+            lines.push_back(line);
+        }
+    }
+    infile.close();
+
+    if (lines.empty()) return 0;
+
+    size_t processed = 0;
+    for (const auto& l : lines) {
+        try {
+            auto event = json::parse(l);
+
+            std::string type = event.value("type", "");
+            std::string content = event.value("content", "");
+            std::string project = event.value("project", "unknown");
+            std::string signal = event.value("signal", "");
+
+            if (content.empty()) continue;
+
+            // Generate SSL-style title based on event type
+            std::string title;
+            std::string predicate;
+
+            if (type == "bash") {
+                // Script or command execution
+                if (signal.find("script") != std::string::npos) {
+                    // Extract script name from path
+                    size_t last_slash = content.rfind('/');
+                    std::string script_name = (last_slash != std::string::npos)
+                        ? content.substr(last_slash + 1)
+                        : content;
+                    title = "[" + project + "] script→`" + script_name + "`";
+                    predicate = "uses_script";
+                } else if (signal.find("build") != std::string::npos) {
+                    title = "[" + project + "] build→" + content.substr(0, 50);
+                    predicate = "builds_with";
+                } else if (signal.find("test") != std::string::npos) {
+                    title = "[" + project + "] test→" + content.substr(0, 50);
+                    predicate = "tests_with";
+                } else if (signal.find("release") != std::string::npos) {
+                    title = "[" + project + "] release→" + content.substr(0, 50);
+                    predicate = "releases_via";
+                } else {
+                    title = "[" + project + "] cmd→" + content.substr(0, 50);
+                    predicate = "uses_command";
+                }
+            } else if (type == "read") {
+                // File read
+                size_t last_slash = content.rfind('/');
+                std::string filename = (last_slash != std::string::npos)
+                    ? content.substr(last_slash + 1)
+                    : content;
+                title = "[" + project + "] file→`" + filename + "`";
+                predicate = "has_file";
+            } else if (type == "edit") {
+                // File edit
+                size_t last_slash = content.rfind('/');
+                std::string filename = (last_slash != std::string::npos)
+                    ? content.substr(last_slash + 1)
+                    : content;
+                title = "[" + project + "] edited→`" + filename + "`";
+                predicate = "modifies";
+            } else {
+                continue;  // Unknown type
+            }
+
+            // Add location hint for high epiplexity
+            std::string full_content = title + " @" + content;
+
+            // Create Episode node for the event
+            mind.remember(full_content, NodeType::Episode);
+
+            // Create triplet: project predicate content
+            mind.connect(project, predicate, content, 0.7f);
+
+            processed++;
+        } catch (const std::exception& e) {
+            // Skip malformed lines
+            continue;
+        }
+    }
+
+    // Truncate processed lines from file
+    if (processed > 0) {
+        // Read remaining lines
+        std::ifstream remaining(candidate_path);
+        std::vector<std::string> keep_lines;
+        size_t skip = lines.size();
+        while (std::getline(remaining, line)) {
+            if (skip > 0) {
+                skip--;
+            } else {
+                keep_lines.push_back(line);
+            }
+        }
+        remaining.close();
+
+        // Rewrite file with remaining lines
+        std::ofstream outfile(candidate_path, std::ios::trunc);
+        for (const auto& kept : keep_lines) {
+            outfile << kept << "\n";
+        }
+        outfile.close();
+    }
+
+    return processed;
+}
 
 // Daemonize the process using double-fork
 // Returns true if we're now the daemon, false if daemonization failed
@@ -180,7 +308,6 @@ void print_usage(const char* prog) {
               << "  --fast             Skip BM25 loading (for quick stats)\n"
               << "  --interval SECS    Daemon cycle interval (default: 60)\n"
               << "  --pid-file PATH    Write PID to file (for daemon mode)\n"
-              << "  --socket           Enable socket server mode\n"
               << "  --socket-path PATH Unix socket path\n"
               << "  -f, --foreground   Run in foreground (don't daemonize)\n"
               << "  --log PATH         Log file for daemon output\n"
@@ -741,103 +868,9 @@ void release_daemon_lock(DaemonLock& lock) {
     }
 }
 
-int cmd_daemon(Mind& mind, int interval_seconds, const std::string& pid_file, const std::string& mind_path) {
-    DaemonLock lock;
-    std::string lock_error;
-    if (!acquire_daemon_lock(mind_path, lock, lock_error)) {
-        std::cerr << "[subconscious] " << lock_error << "\n";
-        return false;
-    }
-
-    // Write PID file
-    if (!pid_file.empty()) {
-        std::ofstream pf(pid_file);
-        if (pf) {
-            pf << getpid() << "\n";
-            pf.close();
-        }
-    }
-
-    // Setup signal handlers for graceful shutdown
-    std::signal(SIGTERM, daemon_signal_handler);
-    std::signal(SIGINT, daemon_signal_handler);
-
-    // Release lock before starting socket server (avoids deadlock)
-    release_daemon_lock(lock);
-
-    std::cerr << "[subconscious] Daemon started (interval=" << interval_seconds << "s, pid=" << getpid() << ")\n";
-
-    size_t cycle_count = 0;
-    size_t total_synthesized = 0;
-    size_t total_settled = 0;
-
-    while (daemon_running) {
-        // Sleep in small intervals to check for shutdown
-        for (int i = 0; i < interval_seconds && daemon_running; ++i) {
-            std::this_thread::sleep_for(std::chrono::seconds(1));
-        }
-
-        if (!daemon_running) break;
-
-        cycle_count++;
-        auto start = std::chrono::steady_clock::now();
-
-        try {
-            // Subconscious processing cycle
-            // 1. Apply decay and basic maintenance
-            auto report = mind.tick();
-
-            // 2. Synthesize wisdom from episode clusters
-            size_t synthesized = mind.synthesize_wisdom();
-            total_synthesized += synthesized;
-
-            // 3. Apply pending feedback (Hebbian learning from usage)
-            size_t feedback = mind.apply_feedback();
-
-            // 4. Run attractor dynamics - settle nodes toward conceptual gravity wells
-            auto attractor_report = mind.run_attractor_dynamics(5, 0.01f);
-            total_settled += attractor_report.nodes_settled;
-
-            // 5. Save state
-            mind.snapshot();
-
-            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - start).count();
-
-            // Log activity (sparse - only when something happened)
-            if (synthesized > 0 || feedback > 0 || attractor_report.nodes_settled > 0) {
-                std::cerr << "[subconscious] Cycle " << cycle_count << ": "
-                          << "synth=" << synthesized << " feedback=" << feedback
-                          << " settled=" << attractor_report.nodes_settled
-                          << " (" << elapsed << "ms)\n";
-            }
-        } catch (const std::exception& e) {
-            std::cerr << "[subconscious] Cycle " << cycle_count
-                      << " failed: " << e.what() << "\n";
-        } catch (...) {
-            std::cerr << "[subconscious] Cycle " << cycle_count
-                      << " failed: unknown error\n";
-        }
-    }
-
-    // Cleanup
-    if (!pid_file.empty()) {
-        std::remove(pid_file.c_str());
-    }
-
-    release_daemon_lock(lock);
-
-    std::cerr << "[subconscious] Daemon stopped (cycles=" << cycle_count
-              << " synthesized=" << total_synthesized
-              << " settled=" << total_settled << ")\n";
-
-    return 0;
-}
-
-// Socket server mode: daemon + RPC handler over Unix socket
 // Note: daemonization happens BEFORE Mind is opened (in main)
 // Architecture: main thread handles socket I/O, separate thread handles maintenance
-int cmd_daemon_with_socket(Mind& mind, int interval_seconds,
+int cmd_daemon(Mind& mind, int interval_seconds,
                            const std::string& pid_file,
                            const std::string& socket_path,
                            const std::string& mind_path,
@@ -921,6 +954,15 @@ int cmd_daemon_with_socket(Mind& mind, int interval_seconds,
                     std::chrono::steady_clock::now() - feedback_start).count();
                 log_debug("maint", "apply_feedback: %zu in %ldms", feedback, feedback_ms);
 
+                // Distill captured events from event collector hook
+                auto distill_start = std::chrono::steady_clock::now();
+                size_t distilled = distill_events(mind);
+                auto distill_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - distill_start).count();
+                if (distilled > 0) {
+                    log_debug("maint", "distill_events: %zu in %ldms", distilled, distill_ms);
+                }
+
                 // Step-by-step attractor dynamics with granular logging
                 auto attractor_start = std::chrono::steady_clock::now();
                 log_debug("maint", "attractor_dynamics: starting find_attractors");
@@ -980,10 +1022,10 @@ int cmd_daemon_with_socket(Mind& mind, int interval_seconds,
                           cycle_count.load(), elapsed, tau * 100);
 
                 // Log activity (sparse)
-                if (synthesized > 0 || feedback > 0 || nodes_settled > 0) {
+                if (synthesized > 0 || feedback > 0 || nodes_settled > 0 || distilled > 0) {
                     std::cerr << "[maintenance] Cycle " << cycle_count << ": "
                               << "synth=" << synthesized << " feedback=" << feedback
-                              << " settled=" << nodes_settled
+                              << " settled=" << nodes_settled << " distilled=" << distilled
                               << " tau=" << static_cast<int>(tau * 100) << "%"
                               << " (" << elapsed << "ms)\n";
                 }
@@ -1269,7 +1311,6 @@ int main(int argc, char* argv[]) {
     int daemon_interval = 60;
     bool json_output = false;
     bool fast_mode = false;
-    bool socket_mode = false;
     bool foreground_mode = false;  // --foreground: don't daemonize
     std::string log_file;  // --log: log file for daemon output
 
@@ -1291,12 +1332,9 @@ int main(int argc, char* argv[]) {
             json_output = true;
         } else if (strcmp(argv[i], "--fast") == 0) {
             fast_mode = true;
-        } else if (strcmp(argv[i], "--socket") == 0) {
-            socket_mode = true;
         } else if (strcmp(argv[i], "--socket-path") == 0 && i + 1 < argc) {
             socket_path = argv[++i];
             socket_path_explicit = true;
-            socket_mode = true;  // Implies socket mode
         } else if (strcmp(argv[i], "--foreground") == 0 || strcmp(argv[i], "-f") == 0) {
             foreground_mode = true;
         } else if (strcmp(argv[i], "--log") == 0 && i + 1 < argc) {
@@ -1430,11 +1468,7 @@ int main(int argc, char* argv[]) {
             return 1;
         }
 
-        if (socket_mode) {
-            return cmd_daemon_with_socket(mind, daemon_interval, pid_file, socket_path, mind_path, log_file);
-        } else {
-            return cmd_daemon(mind, daemon_interval, pid_file, mind_path);
-        }
+        return cmd_daemon(mind, daemon_interval, pid_file, socket_path, mind_path, log_file);
     }
 
     if (command != "daemon") {

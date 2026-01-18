@@ -360,26 +360,25 @@ chitta tag --id "UUID" --remove "old-tag"
 Run the daemon for background processing and RPC communication.
 
 ```bash
-chittad daemon --socket [--interval SECS] [--foreground]
+chittad daemon [--interval SECS] [--foreground]
 ```
 
 **Options:**
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--socket` | Enable RPC socket server (required for hooks/MCP) | Off |
 | `--interval SECS` | Maintenance cycle interval in seconds | `60` |
 | `--foreground` | Run in foreground (don't daemonize) | Off |
 
 **Example:**
 ```bash
 # Standard daemon (daemonizes, creates socket)
-chittad daemon --socket
+chittad daemon
 
 # Run in foreground for debugging
-chittad daemon --socket --foreground
+chittad daemon --foreground
 
 # Custom interval
-chittad daemon --socket --interval 30
+chittad daemon --interval 30
 ```
 
 **Output:**
@@ -679,7 +678,7 @@ chittad cycle
 
 ```bash
 # Start daemon (self-daemonizes)
-chittad daemon --socket
+chittad daemon
 
 # Check status
 chittad status

@@ -101,29 +101,12 @@ cmd_start() {
         echo "[subconscious] Unable to read daemon help; proceeding cautiously" >&2
     fi
 
-    local support_socket=false
     local support_interval=false
-    local support_pid=false
-
-    if echo "$daemon_help" | grep -q -- "--socket"; then
-        support_socket=true
-    fi
     if echo "$daemon_help" | grep -q -- "--interval"; then
         support_interval=true
     fi
-    if echo "$daemon_help" | grep -q -- "--pid-file"; then
-        support_pid=true
-    fi
-
-    if [[ -n "$daemon_help" && "$support_socket" != "true" ]]; then
-        echo "[subconscious] Daemon does not support --socket; aborting startup" >&2
-        return 1
-    fi
 
     local daemon_args=(daemon "--path" "$MIND_PATH" "--model" "$MODEL_PATH" "--vocab" "$VOCAB_PATH")
-    if [[ "$support_socket" == "true" ]]; then
-        daemon_args+=("--socket")
-    fi
     if [[ "$support_interval" == "true" ]]; then
         daemon_args+=("--interval" "$INTERVAL")
     fi

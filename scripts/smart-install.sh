@@ -296,17 +296,6 @@ validate_binaries() {
         return 1
     fi
 
-    local daemon_help
-    daemon_help=$("$BIN_DIR/chittad" daemon --help 2>&1 || true)
-    if [[ -z "$daemon_help" ]]; then
-        echo "[cc-soul] ERROR: Unable to query chittad daemon help" >&2
-        return 1
-    fi
-    if ! echo "$daemon_help" | grep -q -- "--socket"; then
-        echo "[cc-soul] ERROR: chittad daemon lacks --socket support" >&2
-        return 1
-    fi
-
     local cli_help
     cli_help=$("$BIN_DIR/chitta" --help 2>&1 || true)
     if [[ -z "$cli_help" ]]; then
