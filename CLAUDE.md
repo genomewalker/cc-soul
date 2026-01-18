@@ -124,7 +124,7 @@ These go in `[ε]` line verbatim. Compress explanation, preserve math.
 [TRIPLET] hooks enable context_injection
 ```
 
-**Predicates:** implements | uses | validates | stores | returns | contains | requires | enables | evolved_to | supersedes | correlates_with | prefers | contradicts | causes | implies | determines | occurs_at
+**Predicates:** implements | uses | validates | stores | returns | contains | requires | enables | evolved_to | supersedes | correlates_with | prefers | contradicts | causes | implies | determines | occurs_at | relates_to | occurred_before | exemplifies | reinforces | derived_from | part_of | invalidated_by
 
 **No explicit tool calls needed.** The soul learns by watching me work. The Stop hook extracts SSL patterns and creates triplets automatically.
 
