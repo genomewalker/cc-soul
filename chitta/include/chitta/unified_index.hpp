@@ -680,19 +680,24 @@ public:
     }
 
     // Get quantized vector for a slot
+    // NOTE: Returns pointer that may become invalid after grow() - caller must not store
     const QuantizedVector* vector(SlotId slot) const {
+        std::shared_lock lock(mutex_);
         if (!slot.valid()) return nullptr;
         return &vectors_region_.as<const QuantizedVector>()[slot.value];
     }
 
     // Get metadata for a slot
+    // NOTE: Returns pointer that may become invalid after grow() - caller must not store
     const NodeMeta* meta(SlotId slot) const {
+        std::shared_lock lock(mutex_);
         if (!slot.valid()) return nullptr;
         return &meta_region_.as<const NodeMeta>()[slot.value];
     }
 
     // Update access timestamp for a slot
     void touch(SlotId slot) {
+        std::shared_lock lock(mutex_);  // shared OK - only updating timestamp
         if (!slot.valid()) return;
         auto* metas = meta_region_.as<NodeMeta>();
         metas[slot.value].tau_accessed = now();
@@ -700,6 +705,7 @@ public:
 
     // Update confidence for a slot
     bool update_confidence(SlotId slot, const Confidence& kappa) {
+        std::shared_lock lock(mutex_);  // shared OK - only updating metadata
         if (!slot.valid()) return false;
         auto* metas = meta_region_.as<NodeMeta>();
         metas[slot.value].confidence_mu = kappa.mu;
@@ -1199,7 +1205,10 @@ private:
     // Grow capacity (atomic two-phase approach)
     // Phase 1: Extend all files without touching existing mappings
     // Phase 2: Create new mappings, swap in atomically, update header last
+    // IMPORTANT: grow() is called from insert() which already holds mutex_
+    // The mutex_ prevents concurrent insert() from using stale pointers after remap
     bool grow() {
+        // Caller (insert) must hold mutex_ - we don't acquire it here to avoid deadlock
         size_t new_capacity = capacity_ * GROWTH_FACTOR;
 
         // Safety: ensure we never grow to 0 or smaller than needed
