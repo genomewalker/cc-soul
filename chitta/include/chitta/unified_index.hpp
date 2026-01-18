@@ -679,39 +679,57 @@ public:
         return node;
     }
 
-    // Get quantized vector for a slot
-    // NOTE: Returns pointer that may become invalid after grow() - caller must not store
+    // Get quantized vector for a slot (external API - acquires lock)
     const QuantizedVector* vector(SlotId slot) const {
         std::shared_lock lock(mutex_);
-        if (!slot.valid()) return nullptr;
-        return &vectors_region_.as<const QuantizedVector>()[slot.value];
+        return vector_unlocked(slot);
     }
 
-    // Get metadata for a slot
-    // NOTE: Returns pointer that may become invalid after grow() - caller must not store
+    // Get metadata for a slot (external API - acquires lock)
     const NodeMeta* meta(SlotId slot) const {
         std::shared_lock lock(mutex_);
-        if (!slot.valid()) return nullptr;
-        return &meta_region_.as<const NodeMeta>()[slot.value];
+        return meta_unlocked(slot);
     }
 
     // Update access timestamp for a slot
     void touch(SlotId slot) {
-        std::shared_lock lock(mutex_);  // shared OK - only updating timestamp
+        std::shared_lock lock(mutex_);
+        touch_unlocked(slot);
+    }
+
+    // Update confidence for a slot
+    bool update_confidence(SlotId slot, const Confidence& kappa) {
+        std::shared_lock lock(mutex_);
+        return update_confidence_unlocked(slot, kappa);
+    }
+
+private:
+    // Internal unlocked versions - caller must hold mutex_
+    const QuantizedVector* vector_unlocked(SlotId slot) const {
+        if (!slot.valid()) return nullptr;
+        return &vectors_region_.as<const QuantizedVector>()[slot.value];
+    }
+
+    const NodeMeta* meta_unlocked(SlotId slot) const {
+        if (!slot.valid()) return nullptr;
+        return &meta_region_.as<const NodeMeta>()[slot.value];
+    }
+
+    void touch_unlocked(SlotId slot) {
         if (!slot.valid()) return;
         auto* metas = meta_region_.as<NodeMeta>();
         metas[slot.value].tau_accessed = now();
     }
 
-    // Update confidence for a slot
-    bool update_confidence(SlotId slot, const Confidence& kappa) {
-        std::shared_lock lock(mutex_);  // shared OK - only updating metadata
+    bool update_confidence_unlocked(SlotId slot, const Confidence& kappa) {
         if (!slot.valid()) return false;
         auto* metas = meta_region_.as<NodeMeta>();
         metas[slot.value].confidence_mu = kappa.mu;
         metas[slot.value].confidence_sigma = kappa.sigma_sq;
         return true;
     }
+
+public:
 
     // Mark node as deleted (soft delete)
     bool remove(const NodeId& id) {
@@ -1296,7 +1314,7 @@ private:
         auto* nodes = node_array();
         auto& new_node = nodes[new_slot.value];
 
-        const auto* query_vec = vector(new_slot);
+        const auto* query_vec = vector_unlocked(new_slot);
         if (!query_vec) return;
 
         // If only node, nothing to connect
@@ -1333,7 +1351,7 @@ private:
             float dist_to_new = 0.0f;  // Will compute per neighbor
             for (const auto& edge : selected) {
                 SlotId neighbor(edge.target_slot);
-                const auto* neighbor_vec = vector(neighbor);
+                const auto* neighbor_vec = vector_unlocked(neighbor);
                 if (neighbor_vec) {
                     float dist = query_vec->cosine_approx(*neighbor_vec);
                     add_reverse_connection(neighbor, level, new_slot, 1.0f - dist);
@@ -1427,8 +1445,9 @@ private:
     }
 
     // Compute distance (1 - cosine similarity)
+    // NOTE: Caller must hold mutex_ (this is an internal helper)
     float distance_to(const QuantizedVector& query, SlotId slot) const {
-        const auto* vec = vector(slot);
+        const auto* vec = vector_unlocked(slot);
         if (!vec) return 1.0f;
         return 1.0f - query.cosine_approx(*vec);
     }

@@ -264,6 +264,98 @@ configure_permissions() {
 create_directories() {
     mkdir -p "${HOME}/.claude/mind"
     mkdir -p "${HOME}/.claude/bin"
+    mkdir -p "${HOME}/.claude/hooks"
+}
+
+# Install a config file, checking for user modifications
+# Sets global: INSTALL_RESULT (new|updated|unchanged|skipped)
+install_file() {
+    local src="$1"
+    local dst="$2"
+    local make_exec="${3:-false}"
+
+    if [[ ! -f "$dst" ]]; then
+        cp -f "$src" "$dst"
+        [[ "$make_exec" == "true" ]] && chmod +x "$dst"
+        INSTALL_RESULT="new"
+        return 0
+    fi
+
+    if diff -q "$src" "$dst" &>/dev/null; then
+        INSTALL_RESULT="unchanged"
+        return 0
+    fi
+
+    # File differs - check if it's a user modification or old version
+    # If dst is older than src, it's likely an old version we should update
+    if [[ "$src" -nt "$dst" ]]; then
+        cp -f "$src" "$dst"
+        [[ "$make_exec" == "true" ]] && chmod +x "$dst"
+        INSTALL_RESULT="updated"
+        return 0
+    fi
+
+    # dst is newer - user likely modified it, skip
+    INSTALL_RESULT="skipped"
+    return 0
+}
+
+# Install hooks, skills, and commands from plugin directory
+install_config_files() {
+    local base_dst="${HOME}/.claude"
+
+    # Install hooks
+    if [[ -d "$PLUGIN_DIR/hooks" ]]; then
+        local installed=0 skipped=0
+        for f in "$PLUGIN_DIR/hooks"/*.sh; do
+            [[ -f "$f" ]] || continue
+            install_file "$f" "$base_dst/hooks/$(basename "$f")" true
+            case "$INSTALL_RESULT" in
+                new|updated) ((installed++)) || true ;;
+                skipped) ((skipped++)) || true ;;
+            esac
+        done
+        if [[ $installed -gt 0 ]]; then echo "[cc-soul] Installed $installed hooks"; fi
+        if [[ $skipped -gt 0 ]]; then echo "[cc-soul] Skipped $skipped hooks (user modified)"; fi
+    fi
+
+    # Install skills (each skill is a directory with SKILL.md inside)
+    if [[ -d "$PLUGIN_DIR/skills" ]]; then
+        mkdir -p "$base_dst/skills"
+        local installed=0 skipped=0
+        for skill_dir in "$PLUGIN_DIR/skills"/*/; do
+            [[ -d "$skill_dir" ]] || continue
+            local skill_name=$(basename "$skill_dir")
+            [[ "$skill_name" == _* ]] && continue  # Skip convention dirs
+            local skill_file="$skill_dir/SKILL.md"
+            [[ -f "$skill_file" ]] || continue
+            local dst_dir="$base_dst/skills/$skill_name"
+            mkdir -p "$dst_dir"
+            install_file "$skill_file" "$dst_dir/SKILL.md" false
+            case "$INSTALL_RESULT" in
+                new|updated) ((installed++)) || true ;;
+                skipped) ((skipped++)) || true ;;
+            esac
+        done
+        if [[ $installed -gt 0 ]]; then echo "[cc-soul] Installed $installed skills"; fi
+        if [[ $skipped -gt 0 ]]; then echo "[cc-soul] Skipped $skipped skills (user modified)"; fi
+    fi
+
+    # Install commands
+    if [[ -d "$PLUGIN_DIR/commands" ]]; then
+        mkdir -p "$base_dst/commands"
+        local installed=0 skipped=0
+        for f in "$PLUGIN_DIR/commands"/*.md; do
+            [[ -f "$f" ]] || continue
+            install_file "$f" "$base_dst/commands/$(basename "$f")" false
+            case "$INSTALL_RESULT" in
+                new|updated) ((installed++)) || true ;;
+                skipped) ((skipped++)) || true ;;
+            esac
+        done
+        if [[ $installed -gt 0 ]]; then echo "[cc-soul] Installed $installed commands"; fi
+        if [[ $skipped -gt 0 ]]; then echo "[cc-soul] Skipped $skipped commands (user modified)"; fi
+    fi
 }
 
 # Stop any running daemon (gracefully via chittad shutdown, fallback to signals)
@@ -357,6 +449,9 @@ main() {
 
     # Configure bash permissions for chitta commands
     configure_permissions
+
+    # Install hooks, skills, and commands
+    install_config_files
 
     if ! validate_binaries; then
         echo "[cc-soul] ERROR: Installation incomplete (invalid binaries)" >&2
