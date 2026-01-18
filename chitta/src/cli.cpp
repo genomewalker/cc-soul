@@ -34,6 +34,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <execinfo.h>
 
 using namespace chitta;
 using json = nlohmann::json;
@@ -837,8 +838,35 @@ int cmd_unify_triplets(Mind& mind, bool dry_run) {
 // Global flag for daemon shutdown
 static std::atomic<bool> daemon_running{true};
 
+void log_backtrace() {
+    void* buf[50];
+    int nptrs = backtrace(buf, 50);
+    char** strings = backtrace_symbols(buf, nptrs);
+    if (strings != nullptr) {
+        std::cerr << "[fatal] Backtrace (" << nptrs << " frames):\n";
+        for (int i = 0; i < nptrs; ++i) {
+            std::cerr << "  " << strings[i] << "\n";
+        }
+        free(strings);
+    }
+}
+
+void fatal_signal_handler(int sig) {
+    std::cerr << "[fatal] Received signal " << sig << " - terminating\n";
+    log_backtrace();
+    // Re-raise default handler to produce core if enabled
+    std::signal(sig, SIG_DFL);
+    raise(sig);
+}
+
+void terminate_handler() {
+    std::cerr << "[fatal] terminate() called - uncaught exception or abort\n";
+    log_backtrace();
+    std::abort();
+}
+
 void daemon_signal_handler(int sig) {
-    (void)sig;
+    std::cerr << "[daemon] Signal " << sig << " received, initiating shutdown\n";
     daemon_running = false;
 }
 
@@ -928,6 +956,13 @@ int cmd_daemon(Mind& mind, int interval_seconds,
     std::signal(SIGTERM, daemon_signal_handler);
     std::signal(SIGINT, daemon_signal_handler);
     std::signal(SIGPIPE, SIG_IGN);  // Prevent death when client disconnects during write
+
+    // Install fatal signal handlers to log backtraces
+    std::signal(SIGSEGV, fatal_signal_handler);
+    std::signal(SIGABRT, fatal_signal_handler);
+    std::signal(SIGBUS, fatal_signal_handler);
+    std::signal(SIGFPE, fatal_signal_handler);
+    std::set_terminate(terminate_handler);
 
     std::cerr << "[daemon] Started (socket=" << socket_path
               << ", interval=" << interval_seconds << "s, pid=" << getpid()
@@ -1108,7 +1143,7 @@ int cmd_daemon(Mind& mind, int interval_seconds,
 
             // Handle graceful shutdown request (for version upgrades)
             if (req.data == "shutdown") {
-                std::cerr << "[daemon] Shutdown requested, saving state...\n";
+                std::cerr << "[daemon] Shutdown requested by fd=" << req.client_fd << ", conns=" << server.connection_count() << ", len=" << req.data.size() << "\n";
                 server.respond(req.client_fd, R"({"status":"shutting_down","version":")" + std::string(CHITTA_VERSION) + R"("})");
                 mind.snapshot();
                 daemon_running = false;
