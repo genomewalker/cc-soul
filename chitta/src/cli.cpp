@@ -125,11 +125,33 @@ size_t distill_events(Mind& mind, size_t batch_size = 20) {
             // Add location hint for high epiplexity
             std::string full_content = title + " @" + content;
 
+            // Determine confidence based on signal strength
+            bool is_repeated = signal.find("repeated") != std::string::npos;
+            bool is_script = signal.find("script") != std::string::npos;
+            float confidence = is_repeated ? 0.8f : (is_script ? 0.7f : 0.5f);
+
             // Create Episode node for the event
-            mind.remember(full_content, NodeType::Episode);
+            NodeId node_id = mind.remember(full_content, NodeType::Episode);
+
+            if (node_id.valid()) {
+                // Add tags
+                mind.add_tag(node_id, "auto:event");
+                mind.add_tag(node_id, "project:" + project);
+                mind.add_tag(node_id, "type:" + type);
+                if (is_repeated) {
+                    mind.add_tag(node_id, "repeated");
+                }
+
+                // Route low-confidence events to review queue
+                if (confidence < 0.6f) {
+                    mind.enqueue_for_review(node_id,
+                        "Auto-captured " + type + " event: " + title,
+                        ReviewPriority::Low);
+                }
+            }
 
             // Create triplet: project predicate content
-            mind.connect(project, predicate, content, 0.7f);
+            mind.connect(project, predicate, content, confidence);
 
             processed++;
         } catch (const std::exception& e) {
