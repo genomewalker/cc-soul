@@ -117,42 +117,64 @@ def f1_multi(prediction: str, ground_truth: str) -> float:
     return np.mean([max([f1_score(pred, gt) for pred in predictions]) for gt in ground_truths])
 
 
-def extract_entities_and_triplets(text: str, speaker: str, timestamp: str, dialog_id: str):
-    """Extract entities and relationships from conversation turn."""
-    triplets = []
-    entities = set()
+def extract_with_llm(session_text: str, session_date: str, speakers: tuple, model: str) -> tuple:
+    """Use LLM to extract entities, relationships, and SSL patterns from conversation."""
+    prompt = f"""Analyze this conversation and extract:
+1. Key facts mentioned (who did what, when, where)
+2. Relationships between people/things
+3. Temporal references resolved to actual dates (session date: {session_date})
 
-    # Add speaker as entity
-    entities.add(speaker)
+Conversation between {speakers[0]} and {speakers[1]}:
+{session_text}
 
-    # Simple patterns for entity extraction (could be enhanced with NLP)
-    # Dates
-    date_patterns = [
-        r'\b(\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4})\b',
-        r'\b(\d{4})\b',  # Year
-        r'\b((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday))\b',
-    ]
+Output as JSON:
+{{
+  "facts": [
+    {{"subject": "Person", "predicate": "action", "object": "thing", "date": "resolved date or null"}}
+  ],
+  "ssl_summary": "One sentence capturing the key information for reconstruction"
+}}
 
-    for pattern in date_patterns:
-        for match in re.findall(pattern, text, re.IGNORECASE):
-            entities.add(match)
-            triplets.append((dialog_id, "occurred_at", match))
+Be precise with dates - resolve "yesterday", "last week", etc. relative to {session_date}.
+Extract ALL factual claims, preferences, events, and relationships mentioned."""
 
-    # Events (simple heuristics)
-    event_keywords = ['went to', 'visited', 'attended', 'started', 'finished', 'joined', 'left']
-    for kw in event_keywords:
-        if kw in text.lower():
-            # Extract the phrase after the keyword
-            idx = text.lower().find(kw)
-            phrase = text[idx:idx+50].split('.')[0].split(',')[0]
-            triplets.append((speaker, kw.replace(' ', '_'), phrase))
+    try:
+        import anthropic
+        client = anthropic.Anthropic()
+        response = client.messages.create(
+            model=model,
+            max_tokens=1024,
+            messages=[{"role": "user", "content": prompt}]
+        )
 
-    return entities, triplets
+        import json
+        # Extract JSON from response
+        text = response.content[0].text
+        # Find JSON block
+        start = text.find('{')
+        end = text.rfind('}') + 1
+        if start >= 0 and end > start:
+            data = json.loads(text[start:end])
+            triplets = []
+            for fact in data.get('facts', []):
+                subj = fact.get('subject', '')
+                pred = fact.get('predicate', '')
+                obj = fact.get('object', '')
+                date = fact.get('date')
+                if subj and pred and obj:
+                    triplets.append((subj, pred, obj))
+                    if date:
+                        triplets.append((subj, f"{pred}_at", date))
+            return triplets, data.get('ssl_summary', '')
+    except Exception as e:
+        print(f"    LLM extraction error: {e}")
+
+    return [], ""
 
 
-def ingest_conversation(sample_id: str, conversation: dict, session_summaries: dict = None):
-    """Ingest a conversation into cc-soul memory using SSL patterns and triplets."""
-    print(f"  Ingesting conversation {sample_id}...")
+def ingest_conversation(sample_id: str, conversation: dict, session_summaries: dict = None, model: str = "claude-3-5-sonnet-20241022"):
+    """Ingest a conversation into cc-soul memory using LLM-based SSL extraction."""
+    print(f"  Ingesting conversation {sample_id} (LLM extraction)...")
 
     # Extract speakers
     speaker_a = conversation.get('speaker_a', 'Speaker A')
@@ -187,19 +209,21 @@ def ingest_conversation(sample_id: str, conversation: dict, session_summaries: d
             dialog_id = turn.get('dia_id', '')
             turns_text.append(f"[{dialog_id}] {speaker}: {text}")
 
-            # Extract entities and triplets from each turn
-            entities, triplets = extract_entities_and_triplets(text, speaker, timestamp, dialog_id)
-            all_triplets.extend(triplets)
-
-            # Link dialog to speaker and session
-            all_triplets.append((dialog_id, "spoken_by", speaker))
-            all_triplets.append((dialog_id, "part_of", f"session_{session_num}"))
-
         session_text = '\n'.join(turns_text)
 
-        # Store session as SSL pattern
+        # Use LLM to extract facts and create SSL pattern
+        triplets, ssl_summary = extract_with_llm(
+            session_text, timestamp, (speaker_a, speaker_b), model
+        )
+        all_triplets.extend(triplets)
+
+        # Link session structure
+        all_triplets.append((f"session_{session_num}", "occurred_at", timestamp))
+        all_triplets.append((sample_id, "contains", f"session_{session_num}"))
+
+        # Store session with LLM-generated SSL summary
         ssl_content = f"""[{sample_id}] Session {session_num}→{timestamp}→conversation
-[ε] {speaker_a} and {speaker_b} conversation on {timestamp}. {len(turns)} turns.
+[ε] {ssl_summary if ssl_summary else f'{speaker_a} and {speaker_b} conversation on {timestamp}'}
 {session_text}"""
 
         call_chitta(
@@ -209,10 +233,6 @@ def ingest_conversation(sample_id: str, conversation: dict, session_summaries: d
             content=ssl_content,
             tags=f"locomo,{sample_id},session_{session_num}"
         )
-
-        # Add session triplets
-        all_triplets.append((f"session_{session_num}", "occurred_at", timestamp))
-        all_triplets.append((sample_id, "contains", f"session_{session_num}"))
 
         # Store session summary as wisdom if available
         if session_summaries:
@@ -227,11 +247,12 @@ def ingest_conversation(sample_id: str, conversation: dict, session_summaries: d
                     tags=f"locomo,{sample_id},summary"
                 )
 
+        print(f"    Session {session_num}: {len(triplets)} facts extracted")
+
     # Batch store all triplets
-    if all_triplets:
-        # Use connect for triplet storage
-        for subj, pred, obj in all_triplets[:100]:  # Limit to avoid overwhelming
-            call_chitta("connect", subject=subj, predicate=pred, object=obj, weight=0.8)
+    print(f"  Storing {len(all_triplets)} triplets...")
+    for subj, pred, obj in all_triplets:
+        call_chitta("connect", subject=subj, predicate=pred, object=obj, weight=0.8)
 
     print(f"  Ingested {num_sessions} sessions, {len(all_triplets)} triplets")
 
@@ -349,11 +370,12 @@ def run_benchmark(data_file: str, model: str, output_file: str, sample_ids: list
         sample_id = sample['sample_id']
         print(f"\n=== Processing sample {sample_id} ===")
 
-        # Phase 1: Ingest conversation
+        # Phase 1: Ingest conversation with LLM extraction
         ingest_conversation(
             sample_id,
             sample['conversation'],
-            sample.get('session_summary', [])
+            sample.get('session_summary', {}),
+            model
         )
 
         # Phase 2-4: Answer each QA pair
