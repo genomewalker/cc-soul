@@ -2,10 +2,11 @@
 # Release automation script for cc-soul
 #
 # Usage:
-#   ./scripts/release.sh patch   # Bug fixes (2.56.0 → 2.56.1)
-#   ./scripts/release.sh minor   # New features (2.56.0 → 2.57.0)
-#   ./scripts/release.sh major   # Breaking changes (2.56.0 → 3.0.0)
-#   ./scripts/release.sh 2.57.0  # Explicit version
+#   ./scripts/release.sh patch       # Bug fixes (2.56.0 → 2.56.1)
+#   ./scripts/release.sh minor       # New features (2.56.0 → 2.57.0)
+#   ./scripts/release.sh major       # Breaking changes (2.56.0 → 3.0.0)
+#   ./scripts/release.sh 2.57.0      # Explicit version
+#   ./scripts/release.sh minor -y    # Skip confirmation
 #
 # SemVer Guidelines:
 #   MAJOR: Breaking changes (protocol change, removed tool, renamed param)
@@ -52,10 +53,24 @@ validate_version() {
 }
 
 # Main
-BUMP_TYPE="$1"
+BUMP_TYPE=""
+AUTO_CONFIRM=false
+
+for arg in "$@"; do
+    case "$arg" in
+        -y|--yes)
+            AUTO_CONFIRM=true
+            ;;
+        *)
+            if [[ -z "$BUMP_TYPE" ]]; then
+                BUMP_TYPE="$arg"
+            fi
+            ;;
+    esac
+done
 
 if [[ -z "$BUMP_TYPE" ]]; then
-    echo "Usage: $0 <patch|minor|major|X.Y.Z>"
+    echo "Usage: $0 <patch|minor|major|X.Y.Z> [-y|--yes]"
     echo ""
     echo "SemVer Guidelines:"
     echo "  patch  Bug fixes only (2.56.0 → 2.56.1)"
@@ -87,10 +102,12 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
 fi
 
 # Confirm
-read -p "Proceed with release v$NEW_VERSION? [y/N] " confirm
-if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
-    echo "Aborted."
-    exit 0
+if [[ "$AUTO_CONFIRM" != "true" ]]; then
+    read -p "Proceed with release v$NEW_VERSION? [y/N] " confirm
+    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+        echo "Aborted."
+        exit 0
+    fi
 fi
 
 # Update version.hpp
