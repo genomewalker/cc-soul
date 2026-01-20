@@ -78,7 +78,10 @@ mind.payloads
 mind.tags
 mind.unified
 mind.vectors
-mind/
+# Mind data directories (not chitta/include/chitta/mind code)
+/mind/
+*.duckdb
+*.duckdb.wal
 
 # Runtime data
 .claude/swarm/
