@@ -97,11 +97,28 @@ bool DuckDBStore::create_schema() {
             decay_rate FLOAT,
             created_at BIGINT,
             accessed_at BIGINT,
-            embedding FLOAT[384]
+            embedding FLOAT[384],
+            realm VARCHAR DEFAULT 'brahman',
+            visibility INTEGER DEFAULT 0
         )
     )")) {
         return false;
     }
+
+    // Realm membership table for multi-realm support
+    if (!execute(R"(
+        CREATE TABLE IF NOT EXISTS realm_membership (
+            memory_id BIGINT,
+            realm VARCHAR,
+            PRIMARY KEY (memory_id, realm)
+        )
+    )")) {
+        return false;
+    }
+
+    // Index for realm filtering
+    execute("CREATE INDEX IF NOT EXISTS idx_memory_realm ON memory(realm)");
+    execute("CREATE INDEX IF NOT EXISTS idx_realm_membership ON realm_membership(realm)");
 
     // Triplet table for graph relationships
     if (!execute(R"(
@@ -222,7 +239,10 @@ int64_t DuckDBStore::remember(
     const std::string& kind,
     const std::vector<float>& embedding,
     float confidence,
-    float decay_rate
+    float decay_rate,
+    const std::string& realm,
+    RealmVisibility visibility,
+    const std::vector<std::string>& shared_realms
 ) {
     std::lock_guard lock(mutex_);
     if (!db_) return -1;
@@ -236,11 +256,18 @@ int64_t DuckDBStore::remember(
         else escaped_content += c;
     }
 
+    std::string escaped_realm;
+    for (char c : realm) {
+        if (c == '\'') escaped_realm += "''";
+        else escaped_realm += c;
+    }
+
     std::ostringstream sql;
-    sql << "INSERT INTO memory (id, kind, content, confidence, decay_rate, created_at, accessed_at, embedding) "
+    sql << "INSERT INTO memory (id, kind, content, confidence, decay_rate, created_at, accessed_at, embedding, realm, visibility) "
         << "VALUES (nextval('memory_seq'), '" << kind << "', '" << escaped_content << "', "
         << confidence << ", " << decay_rate << ", " << now_ts << ", " << now_ts << ", "
-        << embedding_to_sql(embedding) << ") RETURNING id";
+        << embedding_to_sql(embedding) << ", '" << escaped_realm << "', "
+        << static_cast<int>(visibility) << ") RETURNING id";
 
     auto result = query(sql.str());
     if (!result || result->HasError()) {
@@ -248,38 +275,70 @@ int64_t DuckDBStore::remember(
     }
 
     auto chunk = result->Fetch();
-    if (chunk && chunk->size() > 0) {
-        return chunk->GetValue(0, 0).GetValue<int64_t>();
+    if (!chunk || chunk->size() == 0) {
+        return -1;
     }
 
-    return -1;
+    int64_t id = chunk->GetValue(0, 0).GetValue<int64_t>();
+
+    // Add shared realm memberships
+    for (const auto& shared : shared_realms) {
+        std::string escaped_shared;
+        for (char c : shared) {
+            if (c == '\'') escaped_shared += "''";
+            else escaped_shared += c;
+        }
+        std::ostringstream membership_sql;
+        membership_sql << "INSERT INTO realm_membership (memory_id, realm) VALUES ("
+                       << id << ", '" << escaped_shared << "')";
+        execute(membership_sql.str());
+    }
+
+    return id;
 }
 
 std::vector<MemoryResult> DuckDBStore::recall(
     const std::vector<float>& query_embedding,
-    size_t k
+    size_t k,
+    const std::string& realm,
+    bool include_global
 ) {
     std::lock_guard lock(mutex_);
     std::vector<MemoryResult> results;
     if (!db_) return results;
 
+    // Escape realm for SQL
+    std::string escaped_realm;
+    for (char c : realm) {
+        if (c == '\'') escaped_realm += "''";
+        else escaped_realm += c;
+    }
+
+    // Build WHERE clause for realm filtering
+    std::ostringstream where_clause;
+    if (!realm.empty()) {
+        // Filter by realm: primary realm OR shared via membership OR global
+        where_clause << "WHERE (m.realm = '" << escaped_realm << "' ";
+        where_clause << "OR m.id IN (SELECT memory_id FROM realm_membership WHERE realm = '" << escaped_realm << "') ";
+        if (include_global) {
+            where_clause << "OR m.visibility = 2 ";  // Global visibility
+        }
+        where_clause << ") ";
+    }
+
     std::ostringstream sql;
+    sql << "SELECT m.id, m.kind, m.content, m.confidence, m.created_at, m.accessed_at, "
+        << "m.realm, m.visibility, "
+        << "array_cosine_similarity(m.embedding, " << embedding_to_sql(query_embedding) << ") AS similarity "
+        << "FROM memory m "
+        << where_clause.str();
 
     if (vss_loaded_) {
-        // Use HNSW index if available
-        sql << "SELECT id, kind, content, confidence, created_at, accessed_at, "
-            << "array_cosine_similarity(embedding, " << embedding_to_sql(query_embedding) << ") AS similarity "
-            << "FROM memory "
-            << "ORDER BY array_distance(embedding, " << embedding_to_sql(query_embedding) << ") "
-            << "LIMIT " << k;
+        sql << "ORDER BY array_distance(m.embedding, " << embedding_to_sql(query_embedding) << ") ";
     } else {
-        // Brute force cosine similarity
-        sql << "SELECT id, kind, content, confidence, created_at, accessed_at, "
-            << "array_cosine_similarity(embedding, " << embedding_to_sql(query_embedding) << ") AS similarity "
-            << "FROM memory "
-            << "ORDER BY similarity DESC "
-            << "LIMIT " << k;
+        sql << "ORDER BY similarity DESC ";
     }
+    sql << "LIMIT " << k;
 
     auto result = query(sql.str());
     if (!result || result->HasError()) {
@@ -298,8 +357,26 @@ std::vector<MemoryResult> DuckDBStore::recall(
             r.confidence = chunk->GetValue(3, i).GetValue<float>();
             r.created_at = chunk->GetValue(4, i).GetValue<int64_t>();
             r.accessed_at = chunk->GetValue(5, i).GetValue<int64_t>();
-            r.similarity = chunk->GetValue(6, i).GetValue<float>();
+            r.realm = chunk->GetValue(6, i).ToString();
+            r.visibility = static_cast<RealmVisibility>(chunk->GetValue(7, i).GetValue<int32_t>());
+            r.similarity = chunk->GetValue(8, i).GetValue<float>();
             results.push_back(r);
+        }
+    }
+
+    // Load shared realms for each result
+    for (auto& r : results) {
+        std::ostringstream membership_sql;
+        membership_sql << "SELECT realm FROM realm_membership WHERE memory_id = " << r.id;
+        auto membership_result = query(membership_sql.str());
+        if (membership_result && !membership_result->HasError()) {
+            while (true) {
+                auto chunk = membership_result->Fetch();
+                if (!chunk || chunk->size() == 0) break;
+                for (size_t i = 0; i < chunk->size(); ++i) {
+                    r.shared_realms.push_back(chunk->GetValue(0, i).ToString());
+                }
+            }
         }
     }
 
@@ -353,7 +430,7 @@ std::optional<MemoryResult> DuckDBStore::get_memory(int64_t id) {
     if (!db_) return std::nullopt;
 
     std::ostringstream sql;
-    sql << "SELECT id, kind, content, confidence, created_at, accessed_at "
+    sql << "SELECT id, kind, content, confidence, created_at, accessed_at, realm, visibility "
         << "FROM memory WHERE id = " << id;
 
     auto result = query(sql.str());
@@ -373,7 +450,23 @@ std::optional<MemoryResult> DuckDBStore::get_memory(int64_t id) {
     r.confidence = chunk->GetValue(3, 0).GetValue<float>();
     r.created_at = chunk->GetValue(4, 0).GetValue<int64_t>();
     r.accessed_at = chunk->GetValue(5, 0).GetValue<int64_t>();
+    r.realm = chunk->GetValue(6, 0).ToString();
+    r.visibility = static_cast<RealmVisibility>(chunk->GetValue(7, 0).GetValue<int32_t>());
     r.similarity = 1.0f;
+
+    // Load shared realms
+    std::ostringstream membership_sql;
+    membership_sql << "SELECT realm FROM realm_membership WHERE memory_id = " << id;
+    auto membership_result = query(membership_sql.str());
+    if (membership_result && !membership_result->HasError()) {
+        while (true) {
+            auto mchunk = membership_result->Fetch();
+            if (!mchunk || mchunk->size() == 0) break;
+            for (size_t i = 0; i < mchunk->size(); ++i) {
+                r.shared_realms.push_back(mchunk->GetValue(0, i).ToString());
+            }
+        }
+    }
 
     return r;
 }
@@ -460,6 +553,125 @@ std::vector<std::string> DuckDBStore::get_tags(int64_t id) {
     }
 
     return tags;
+}
+
+// Realm management methods
+
+bool DuckDBStore::set_realm(int64_t id, const std::string& realm) {
+    std::lock_guard lock(mutex_);
+    if (!db_) return false;
+
+    std::string escaped;
+    for (char c : realm) {
+        if (c == '\'') escaped += "''";
+        else escaped += c;
+    }
+
+    std::ostringstream sql;
+    sql << "UPDATE memory SET realm = '" << escaped << "' WHERE id = " << id;
+    return execute(sql.str());
+}
+
+bool DuckDBStore::set_visibility(int64_t id, RealmVisibility visibility) {
+    std::lock_guard lock(mutex_);
+    if (!db_) return false;
+
+    std::ostringstream sql;
+    sql << "UPDATE memory SET visibility = " << static_cast<int>(visibility)
+        << " WHERE id = " << id;
+    return execute(sql.str());
+}
+
+bool DuckDBStore::add_to_realm(int64_t id, const std::string& realm) {
+    std::lock_guard lock(mutex_);
+    if (!db_) return false;
+
+    std::string escaped;
+    for (char c : realm) {
+        if (c == '\'') escaped += "''";
+        else escaped += c;
+    }
+
+    std::ostringstream sql;
+    sql << "INSERT OR IGNORE INTO realm_membership (memory_id, realm) VALUES ("
+        << id << ", '" << escaped << "')";
+    return execute(sql.str());
+}
+
+bool DuckDBStore::remove_from_realm(int64_t id, const std::string& realm) {
+    std::lock_guard lock(mutex_);
+    if (!db_) return false;
+
+    std::string escaped;
+    for (char c : realm) {
+        if (c == '\'') escaped += "''";
+        else escaped += c;
+    }
+
+    std::ostringstream sql;
+    sql << "DELETE FROM realm_membership WHERE memory_id = " << id
+        << " AND realm = '" << escaped << "'";
+    return execute(sql.str());
+}
+
+std::vector<std::string> DuckDBStore::get_realms(int64_t id) {
+    std::lock_guard lock(mutex_);
+    std::vector<std::string> realms;
+    if (!db_) return realms;
+
+    // First get primary realm
+    std::ostringstream primary_sql;
+    primary_sql << "SELECT realm FROM memory WHERE id = " << id;
+    auto result = query(primary_sql.str());
+    if (result && !result->HasError()) {
+        auto chunk = result->Fetch();
+        if (chunk && chunk->size() > 0) {
+            realms.push_back(chunk->GetValue(0, 0).ToString());
+        }
+    }
+
+    // Then get shared realms
+    std::ostringstream shared_sql;
+    shared_sql << "SELECT realm FROM realm_membership WHERE memory_id = " << id;
+    result = query(shared_sql.str());
+    if (result && !result->HasError()) {
+        while (true) {
+            auto chunk = result->Fetch();
+            if (!chunk || chunk->size() == 0) break;
+            for (size_t i = 0; i < chunk->size(); ++i) {
+                realms.push_back(chunk->GetValue(0, i).ToString());
+            }
+        }
+    }
+
+    return realms;
+}
+
+std::vector<std::string> DuckDBStore::list_realms() {
+    std::lock_guard lock(mutex_);
+    std::vector<std::string> realms;
+    if (!db_) return realms;
+
+    // Get all unique realms from both memory and realm_membership tables
+    auto result = query(
+        "SELECT DISTINCT realm FROM ("
+        "  SELECT realm FROM memory "
+        "  UNION "
+        "  SELECT realm FROM realm_membership"
+        ") ORDER BY realm"
+    );
+
+    if (result && !result->HasError()) {
+        while (true) {
+            auto chunk = result->Fetch();
+            if (!chunk || chunk->size() == 0) break;
+            for (size_t i = 0; i < chunk->size(); ++i) {
+                realms.push_back(chunk->GetValue(0, i).ToString());
+            }
+        }
+    }
+
+    return realms;
 }
 
 size_t DuckDBStore::apply_decay() {

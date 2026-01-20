@@ -15,6 +15,7 @@
 #include <chrono>
 #include <iomanip>
 #include <filesystem>
+#include <algorithm>
 
 namespace chitta {
 
@@ -73,13 +74,16 @@ private:
         // remember
         tools_.push_back({
             {"name", "remember"},
-            {"description", "Store text in memory with optional tags"},
+            {"description", "Store text in memory with optional tags and realm"},
             {"inputSchema", {
                 {"type", "object"},
                 {"properties", {
                     {"content", {{"type", "string"}, {"description", "Text to remember"}}},
                     {"type", {{"type", "string"}, {"description", "Node type (wisdom, insight, signal, episode)"}}},
-                    {"tags", {{"type", "array"}, {"items", {{"type", "string"}}}, {"description", "Optional tags"}}}
+                    {"tags", {{"type", "array"}, {"items", {{"type", "string"}}}, {"description", "Optional tags"}}},
+                    {"realm", {{"type", "string"}, {"description", "Primary realm (default: brahman)"}}},
+                    {"visibility", {{"type", "integer"}, {"description", "0=Private, 1=Shared, 2=Global (default: 0)"}}},
+                    {"shared_realms", {{"type", "array"}, {"items", {{"type", "string"}}}, {"description", "Additional realms to share with"}}}
                 }},
                 {"required", {"content"}}
             }}
@@ -89,13 +93,15 @@ private:
         // recall
         tools_.push_back({
             {"name", "recall"},
-            {"description", "Search memory by semantic similarity"},
+            {"description", "Search memory by semantic similarity with realm filtering"},
             {"inputSchema", {
                 {"type", "object"},
                 {"properties", {
                     {"query", {{"type", "string"}, {"description", "Search query"}}},
                     {"limit", {{"type", "integer"}, {"description", "Max results (default 10)"}}},
-                    {"tag", {{"type", "string"}, {"description", "Filter by tag"}}}
+                    {"tag", {{"type", "string"}, {"description", "Filter by tag"}}},
+                    {"realm", {{"type", "string"}, {"description", "Filter by realm (empty = all realms)"}}},
+                    {"include_global", {{"type", "boolean"}, {"description", "Include global memories (default: true)"}}}
                 }},
                 {"required", {"query"}}
             }}
@@ -411,6 +417,83 @@ private:
             }}
         });
         handlers_["export_soul"] = [this](const json& p) { return tool_export_soul(p); };
+
+        // Realm tools
+        tools_.push_back({
+            {"name", "realm_list"},
+            {"description", "List all known realms"},
+            {"inputSchema", {{"type", "object"}, {"properties", json::object()}}}
+        });
+        handlers_["realm_list"] = [this](const json&) { return tool_realm_list(); };
+
+        tools_.push_back({
+            {"name", "realm_get"},
+            {"description", "Get all realms a memory belongs to"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "string"}, {"description", "Memory ID"}}}
+                }},
+                {"required", {"id"}}
+            }}
+        });
+        handlers_["realm_get"] = [this](const json& p) { return tool_realm_get(p); };
+
+        tools_.push_back({
+            {"name", "realm_set"},
+            {"description", "Set primary realm for a memory"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "string"}, {"description", "Memory ID"}}},
+                    {"realm", {{"type", "string"}, {"description", "Primary realm name"}}}
+                }},
+                {"required", {"id", "realm"}}
+            }}
+        });
+        handlers_["realm_set"] = [this](const json& p) { return tool_realm_set(p); };
+
+        tools_.push_back({
+            {"name", "realm_add"},
+            {"description", "Add memory to a shared realm (multi-realm membership)"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "string"}, {"description", "Memory ID"}}},
+                    {"realm", {{"type", "string"}, {"description", "Realm to add to"}}}
+                }},
+                {"required", {"id", "realm"}}
+            }}
+        });
+        handlers_["realm_add"] = [this](const json& p) { return tool_realm_add(p); };
+
+        tools_.push_back({
+            {"name", "realm_remove"},
+            {"description", "Remove memory from a shared realm"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "string"}, {"description", "Memory ID"}}},
+                    {"realm", {{"type", "string"}, {"description", "Realm to remove from"}}}
+                }},
+                {"required", {"id", "realm"}}
+            }}
+        });
+        handlers_["realm_remove"] = [this](const json& p) { return tool_realm_remove(p); };
+
+        tools_.push_back({
+            {"name", "realm_visibility"},
+            {"description", "Set visibility level for a memory (0=Private, 1=Shared, 2=Global)"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "string"}, {"description", "Memory ID"}}},
+                    {"visibility", {{"type", "integer"}, {"description", "0=Private, 1=Shared, 2=Global"}}}
+                }},
+                {"required", {"id", "visibility"}}
+            }}
+        });
+        handlers_["realm_visibility"] = [this](const json& p) { return tool_realm_visibility(p); };
     }
 
     // Tool implementations
@@ -421,6 +504,17 @@ private:
         }
 
         std::string type_str = params.value("type", "episode");
+        std::string realm = params.value("realm", "brahman");
+        int visibility_int = params.value("visibility", 0);
+        RealmVisibility visibility = static_cast<RealmVisibility>(std::clamp(visibility_int, 0, 2));
+
+        std::vector<std::string> shared_realms;
+        if (params.contains("shared_realms") && params["shared_realms"].is_array()) {
+            for (const auto& r : params["shared_realms"]) {
+                if (r.is_string()) shared_realms.push_back(r.get<std::string>());
+            }
+        }
+
         NodeType type = NodeType::Episode;
         if (type_str == "wisdom") type = NodeType::Wisdom;
         else if (type_str == "belief") type = NodeType::Belief;
@@ -442,13 +536,30 @@ private:
             return DuckDBToolResult::error("Failed to remember (quality gate or embedding failed)");
         }
 
+        // Set realm and visibility if non-default
+        int64_t db_id = static_cast<int64_t>(id.low);
+        if (realm != "brahman") {
+            mind_->store().set_realm(db_id, realm);
+        }
+        if (visibility != RealmVisibility::Private) {
+            mind_->store().set_visibility(db_id, visibility);
+        }
+        for (const auto& shared : shared_realms) {
+            mind_->store().add_to_realm(db_id, shared);
+        }
+
         std::string preview = content.substr(0, 50);
         if (content.size() > 50) preview += "...";
 
-        return DuckDBToolResult::ok(
-            "Remembered: " + preview,
-            {{"id", id.to_string()}}
-        );
+        json result = {{"id", id.to_string()}, {"realm", realm}};
+        if (visibility != RealmVisibility::Private) {
+            result["visibility"] = visibility_int;
+        }
+        if (!shared_realms.empty()) {
+            result["shared_realms"] = shared_realms;
+        }
+
+        return DuckDBToolResult::ok("Remembered: " + preview, result);
     }
 
     DuckDBToolResult tool_recall(const json& params) {
@@ -458,13 +569,39 @@ private:
         }
 
         size_t limit = params.value("limit", 10);
-        auto results = mind_->recall(query, limit);
+        std::string realm = params.value("realm", "");
+        bool include_global = params.value("include_global", true);
+
+        // If realm filtering is requested, we need to use the store directly
+        std::vector<MemoryResult> store_results;
+        if (!realm.empty() && mind_->has_yantra()) {
+            // Get embedding for query and call store directly with realm filter
+            // For now, fall back to mind_->recall() and filter post-hoc
+            // TODO: Expose embedder through mind for direct store queries
+        }
+
+        auto results = mind_->recall(query, realm.empty() ? limit : limit * 2);
 
         std::ostringstream ss;
-        ss << "Found " << results.size() << " results:\n";
-
         json results_json = json::array();
+        size_t count = 0;
+
         for (const auto& r : results) {
+            // Post-hoc realm filtering if realm specified
+            if (!realm.empty()) {
+                auto realms = mind_->store().get_realms(static_cast<int64_t>(r.id.low));
+                bool in_realm = false;
+                for (const auto& rm : realms) {
+                    if (rm == realm) { in_realm = true; break; }
+                }
+                // Check if memory is global and include_global is true
+                auto mem = mind_->store().get_memory(static_cast<int64_t>(r.id.low));
+                if (mem && mem->visibility == RealmVisibility::Global && include_global) {
+                    in_realm = true;
+                }
+                if (!in_realm) continue;
+            }
+
             int pct = static_cast<int>(std::min(r.relevance, 1.0f) * 100);
             std::string type_name = node_type_name(r.type);
 
@@ -473,16 +610,34 @@ private:
             if (r.text.size() > 100) ss << "...";
             ss << "\n";
 
-            results_json.push_back({
+            json result_entry = {
                 {"id", r.id.to_string()},
                 {"relevance", r.relevance},
                 {"similarity", r.similarity},
                 {"type", type_name},
                 {"text", r.text}
-            });
+            };
+
+            // Include realm info in results
+            auto mem = mind_->store().get_memory(static_cast<int64_t>(r.id.low));
+            if (mem) {
+                result_entry["realm"] = mem->realm;
+                if (mem->visibility != RealmVisibility::Private) {
+                    result_entry["visibility"] = static_cast<int>(mem->visibility);
+                }
+            }
+
+            results_json.push_back(result_entry);
+            count++;
+            if (count >= limit) break;
         }
 
-        return DuckDBToolResult::ok(ss.str(), {{"results", results_json}});
+        ss.str("");
+        ss << "Found " << count << " results";
+        if (!realm.empty()) ss << " in realm '" << realm << "'";
+        ss << ":\n";
+
+        return DuckDBToolResult::ok(ss.str(), {{"results", results_json}, {"realm", realm}});
     }
 
     DuckDBToolResult tool_connect(const json& params) {
@@ -1219,6 +1374,158 @@ private:
         }
 
         return DuckDBToolResult::ok(ss.str(), {{"count", all.size()}});
+    }
+
+    // Realm tool implementations
+    DuckDBToolResult tool_realm_list() {
+        auto realms = mind_->store().list_realms();
+
+        std::ostringstream ss;
+        ss << "Known realms (" << realms.size() << "):\n";
+        for (const auto& r : realms) {
+            ss << "  - " << r << "\n";
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {{"realms", realms}, {"count", realms.size()}});
+    }
+
+    DuckDBToolResult tool_realm_get(const json& params) {
+        std::string id_str = params.value("id", "");
+        if (id_str.empty()) {
+            return DuckDBToolResult::error("ID is required");
+        }
+
+        int64_t db_id = 0;
+        try {
+            db_id = std::stoll(id_str);
+        } catch (...) {
+            NodeId nid = NodeId::from_string(id_str);
+            db_id = static_cast<int64_t>(nid.low);
+        }
+
+        auto realms = mind_->store().get_realms(db_id);
+        if (realms.empty()) {
+            return DuckDBToolResult::ok("Memory not found or has no realms", {{"realms", json::array()}});
+        }
+
+        std::ostringstream ss;
+        ss << "Memory " << id_str << " belongs to:\n";
+        ss << "  Primary: " << realms[0] << "\n";
+        if (realms.size() > 1) {
+            ss << "  Shared: ";
+            for (size_t i = 1; i < realms.size(); ++i) {
+                if (i > 1) ss << ", ";
+                ss << realms[i];
+            }
+            ss << "\n";
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"primary", realms[0]},
+            {"shared", json(std::vector<std::string>(realms.begin() + 1, realms.end()))},
+            {"all", realms}
+        });
+    }
+
+    DuckDBToolResult tool_realm_set(const json& params) {
+        std::string id_str = params.value("id", "");
+        std::string realm = params.value("realm", "");
+
+        if (id_str.empty() || realm.empty()) {
+            return DuckDBToolResult::error("ID and realm are required");
+        }
+
+        int64_t db_id = 0;
+        try {
+            db_id = std::stoll(id_str);
+        } catch (...) {
+            NodeId nid = NodeId::from_string(id_str);
+            db_id = static_cast<int64_t>(nid.low);
+        }
+
+        bool ok = mind_->store().set_realm(db_id, realm);
+        if (!ok) {
+            return DuckDBToolResult::error("Failed to set realm");
+        }
+
+        return DuckDBToolResult::ok("Set primary realm to '" + realm + "' for memory " + id_str);
+    }
+
+    DuckDBToolResult tool_realm_add(const json& params) {
+        std::string id_str = params.value("id", "");
+        std::string realm = params.value("realm", "");
+
+        if (id_str.empty() || realm.empty()) {
+            return DuckDBToolResult::error("ID and realm are required");
+        }
+
+        int64_t db_id = 0;
+        try {
+            db_id = std::stoll(id_str);
+        } catch (...) {
+            NodeId nid = NodeId::from_string(id_str);
+            db_id = static_cast<int64_t>(nid.low);
+        }
+
+        bool ok = mind_->store().add_to_realm(db_id, realm);
+        if (!ok) {
+            return DuckDBToolResult::error("Failed to add to realm");
+        }
+
+        return DuckDBToolResult::ok("Added memory " + id_str + " to realm '" + realm + "'");
+    }
+
+    DuckDBToolResult tool_realm_remove(const json& params) {
+        std::string id_str = params.value("id", "");
+        std::string realm = params.value("realm", "");
+
+        if (id_str.empty() || realm.empty()) {
+            return DuckDBToolResult::error("ID and realm are required");
+        }
+
+        int64_t db_id = 0;
+        try {
+            db_id = std::stoll(id_str);
+        } catch (...) {
+            NodeId nid = NodeId::from_string(id_str);
+            db_id = static_cast<int64_t>(nid.low);
+        }
+
+        bool ok = mind_->store().remove_from_realm(db_id, realm);
+        if (!ok) {
+            return DuckDBToolResult::error("Failed to remove from realm");
+        }
+
+        return DuckDBToolResult::ok("Removed memory " + id_str + " from realm '" + realm + "'");
+    }
+
+    DuckDBToolResult tool_realm_visibility(const json& params) {
+        std::string id_str = params.value("id", "");
+        int visibility = params.value("visibility", 0);
+
+        if (id_str.empty()) {
+            return DuckDBToolResult::error("ID is required");
+        }
+
+        if (visibility < 0 || visibility > 2) {
+            return DuckDBToolResult::error("Visibility must be 0 (Private), 1 (Shared), or 2 (Global)");
+        }
+
+        int64_t db_id = 0;
+        try {
+            db_id = std::stoll(id_str);
+        } catch (...) {
+            NodeId nid = NodeId::from_string(id_str);
+            db_id = static_cast<int64_t>(nid.low);
+        }
+
+        bool ok = mind_->store().set_visibility(db_id, static_cast<RealmVisibility>(visibility));
+        if (!ok) {
+            return DuckDBToolResult::error("Failed to set visibility");
+        }
+
+        std::string vis_name = visibility == 0 ? "Private" : (visibility == 1 ? "Shared" : "Global");
+        return DuckDBToolResult::ok("Set visibility to " + vis_name + " for memory " + id_str);
     }
 
     // Helpers

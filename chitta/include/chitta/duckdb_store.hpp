@@ -16,6 +16,13 @@
 
 namespace chitta {
 
+// Realm visibility levels
+enum class RealmVisibility : uint8_t {
+    Private = 0,   // Only visible in primary realm
+    Shared = 1,    // Visible in primary + shared realms
+    Global = 2,    // Visible everywhere (brahman)
+};
+
 // Memory result from vector search
 struct MemoryResult {
     int64_t id;
@@ -25,6 +32,9 @@ struct MemoryResult {
     float similarity;
     Timestamp created_at;
     Timestamp accessed_at;
+    std::string realm;                      // Primary realm
+    RealmVisibility visibility = RealmVisibility::Private;
+    std::vector<std::string> shared_realms; // For Shared visibility
 };
 
 // String-based triplet for DuckDB (different from NodeId-based Triplet in types.hpp)
@@ -73,13 +83,26 @@ public:
         const std::string& kind,
         const std::vector<float>& embedding,
         float confidence = 0.8f,
-        float decay_rate = 0.05f
+        float decay_rate = 0.05f,
+        const std::string& realm = "brahman",
+        RealmVisibility visibility = RealmVisibility::Private,
+        const std::vector<std::string>& shared_realms = {}
     );
 
     std::vector<MemoryResult> recall(
         const std::vector<float>& query_embedding,
-        size_t k = 10
+        size_t k = 10,
+        const std::string& realm = "",      // Empty = all realms
+        bool include_global = true          // Include brahman/global memories
     );
+
+    // Realm management
+    bool set_realm(int64_t id, const std::string& realm);
+    bool set_visibility(int64_t id, RealmVisibility visibility);
+    bool add_to_realm(int64_t id, const std::string& realm);      // Multi-realm membership
+    bool remove_from_realm(int64_t id, const std::string& realm);
+    std::vector<std::string> get_realms(int64_t id);              // Get all realms for a memory
+    std::vector<std::string> list_realms();                        // List all known realms
 
     bool strengthen(int64_t id, float amount = 0.1f);
     bool weaken(int64_t id, float amount = 0.1f);
