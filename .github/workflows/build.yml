@@ -20,7 +20,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          dnf install -y sqlite-devel curl patchelf
+          dnf install -y sqlite-devel curl patchelf unzip
           # Download pre-built nlohmann_json
           curl -L -o /tmp/json.hpp https://github.com/nlohmann/json/releases/download/v3.11.3/json.hpp
           mkdir -p /usr/local/include/nlohmann
@@ -32,6 +32,14 @@ jobs:
           # Create conda-forge compatible include structure
           mkdir -p /opt/onnxruntime/include/onnxruntime/core/session
           cp /opt/onnxruntime/include/*.h /opt/onnxruntime/include/onnxruntime/core/session/
+          # Download DuckDB
+          DUCKDB_VERSION="1.1.3"
+          curl -L -o /tmp/duckdb.zip https://github.com/duckdb/duckdb/releases/download/v${DUCKDB_VERSION}/libduckdb-linux-amd64.zip
+          mkdir -p /opt/duckdb
+          unzip /tmp/duckdb.zip -d /opt/duckdb
+          # Make DuckDB findable
+          cp /opt/duckdb/duckdb.h /opt/duckdb/duckdb.hpp /usr/local/include/
+          cp /opt/duckdb/libduckdb.so /usr/local/lib/
 
       - name: Build chitta
         run: |
@@ -49,7 +57,7 @@ jobs:
       - name: Verify binaries
         run: |
           ls -la bin/
-          for bin in chitta chittad chitta_migrate chitta_import chitta_test; do
+          for bin in chitta chittad chitta_migrate chitta_import duckdb_test; do
             test -x bin/$bin || { echo "Missing: $bin"; exit 1; }
           done
 
@@ -62,6 +70,7 @@ jobs:
         run: |
           mkdir -p dist
           cp /opt/onnxruntime/lib/libonnxruntime.so* bin/
+          cp /usr/local/lib/libduckdb.so bin/
           # Find and bundle sqlite (may be in /opt/_internal or system paths)
           # ldd shows the absolute path when it's hardcoded in the binary
           SQLITE_PATH=$(ldd bin/chitta_migrate | grep -o '/[^ ]*libsqlite3[^ ]*' | head -1)
@@ -73,7 +82,7 @@ jobs:
           fi
           # Verify all binaries have portable library deps
           echo "Verifying library dependencies..."
-          for bin in chittad chitta chitta_migrate chitta_import chitta_test; do
+          for bin in chittad chitta chitta_migrate chitta_import duckdb_test; do
             echo "=== $bin ==="
             ldd bin/$bin | grep -E '(not found|/opt/_internal)' && { echo "ERROR: $bin has non-portable deps"; exit 1; } || true
           done
@@ -114,7 +123,7 @@ jobs:
       - name: Install dependencies
         shell: bash -l {0}
         run: |
-          conda install -y cmake nlohmann_json sqlite onnxruntime-cpp=${{ env.ONNX_VERSION }}
+          conda install -y cmake nlohmann_json sqlite onnxruntime-cpp=${{ env.ONNX_VERSION }} libduckdb-devel
 
       - name: Build chitta
         shell: bash -l {0}
@@ -132,7 +141,7 @@ jobs:
       - name: Verify binaries
         run: |
           ls -la bin/
-          for bin in chitta chittad chitta_migrate chitta_import chitta_test; do
+          for bin in chitta chittad chitta_migrate chitta_import duckdb_test; do
             test -x bin/$bin || { echo "Missing: $bin"; exit 1; }
           done
 
@@ -147,6 +156,7 @@ jobs:
         run: |
           mkdir -p dist
           cp $CONDA_PREFIX/lib/libonnxruntime*.dylib bin/
+          cp $CONDA_PREFIX/lib/libduckdb*.dylib bin/
           tar -czvf dist/chitta-${{ matrix.platform }}.tar.gz -C bin .
 
       - name: Upload artifacts
