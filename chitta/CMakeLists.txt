@@ -330,7 +330,7 @@ endif()
 
 # DuckDBStore library
 add_library(duckdb_store STATIC src/duckdb_store.cpp)
-target_link_libraries(duckdb_store PUBLIC chitta)
+target_link_libraries(duckdb_store PUBLIC chitta duckdb)
 target_include_directories(duckdb_store PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
 )
