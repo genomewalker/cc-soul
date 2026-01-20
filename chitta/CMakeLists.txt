@@ -27,11 +27,10 @@ find_path(DUCKDB_INCLUDE duckdb.hpp HINTS
     "/usr/local/include"
 )
 if(DUCKDB_LIB AND DUCKDB_INCLUDE)
-    add_library(duckdb SHARED IMPORTED)
-    set_target_properties(duckdb PROPERTIES
-        IMPORTED_LOCATION "${DUCKDB_LIB}"
-        INTERFACE_INCLUDE_DIRECTORIES "${DUCKDB_INCLUDE}"
-    )
+    # Use INTERFACE library instead of IMPORTED for better cross-platform compatibility
+    add_library(duckdb INTERFACE)
+    target_include_directories(duckdb INTERFACE "${DUCKDB_INCLUDE}")
+    target_link_libraries(duckdb INTERFACE "${DUCKDB_LIB}")
     message(STATUS "DuckDB found: ${DUCKDB_LIB}")
 else()
     message(FATAL_ERROR "DuckDB not found. Install with: mamba install libduckdb-devel")
