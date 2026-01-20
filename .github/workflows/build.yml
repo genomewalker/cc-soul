@@ -40,12 +40,15 @@ jobs:
           # Make DuckDB findable
           cp /opt/duckdb/duckdb.h /opt/duckdb/duckdb.hpp /usr/local/include/
           cp /opt/duckdb/libduckdb.so /usr/local/lib/
+          ldconfig /usr/local/lib
+          ldconfig -p | grep duckdb
 
       - name: Build chitta
         run: |
           mkdir -p chitta/build bin
           cd chitta/build
           export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
+          export LIBRARY_PATH=/usr/local/lib:$LIBRARY_PATH
           cmake .. \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_RPATH="\$ORIGIN" \
@@ -54,8 +57,11 @@ jobs:
             -DONNXRUNTIME_INCLUDE_DIR=/opt/onnxruntime/include \
             -DONNXRUNTIME_LIB_DIR=/opt/onnxruntime/lib \
             -DDUCKDB_INCLUDE_DIR=/usr/local/include \
-            -DDUCKDB_LIB_DIR=/usr/local/lib
-          make -j$(nproc)
+            -DDUCKDB_LIB_DIR=/usr/local/lib \
+            --debug-output 2>&1 | tee cmake.log
+          echo "=== Checking DuckDB library resolution ==="
+          grep -i duckdb cmake.log || true
+          make VERBOSE=1 -j$(nproc) 2>&1 | tee make.log
 
       - name: Verify binaries
         run: |
