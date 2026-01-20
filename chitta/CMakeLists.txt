@@ -313,7 +313,7 @@ if(CHITTA_BUILD_TESTS)
 
     # DuckDB store test
     add_executable(duckdb_test src/duckdb_test.cpp)
-    target_link_libraries(duckdb_test PRIVATE duckdb_store)
+    target_link_libraries(duckdb_test PRIVATE duckdb_store duckdb)
     add_test(NAME duckdb_test COMMAND duckdb_test)
 endif()
 
