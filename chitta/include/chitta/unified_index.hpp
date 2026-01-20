@@ -751,6 +751,52 @@ public:
         return true;
     }
 
+    // Purge nodes with zero vectors by slot (bypasses id_to_slot_ lookup)
+    // Returns number of nodes deleted
+    size_t purge_zero_vectors() {
+        std::unique_lock lock(mutex_);
+        auto* header = index_region_.as<UnifiedIndexHeader>();
+        auto* nodes = node_array();
+        size_t deleted = 0;
+
+        for (size_t i = 0; i < header->node_count + header->deleted_count; ++i) {
+            if (nodes[i].flags & NODE_FLAG_DELETED) continue;
+
+            SlotId slot(static_cast<uint32_t>(i));
+            auto* qvec = vector_unlocked(slot);  // Use unlocked version (we already hold mutex_)
+            if (!qvec) continue;
+
+            // Check if vector is zero
+            Vector v = qvec->to_float();
+            if (v.is_zero()) {
+                // Mark as deleted
+                nodes[i].flags |= NODE_FLAG_DELETED;
+                if (header->node_count > 0) header->node_count--;
+                header->deleted_count++;
+
+                // Remove from id_to_slot_ if present
+                auto* m = meta_unlocked(slot);  // Use unlocked version (we already hold mutex_)
+                if (m) {
+                    auto it = id_to_slot_.find(m->id);
+                    if (it != id_to_slot_.end() && it->second.value == slot.value) {
+                        id_to_slot_.erase(it);
+                    }
+                }
+
+                // Clear from tag index
+                tags_.remove_all(slot.value);
+
+                deleted++;
+            }
+        }
+
+        if (deleted > 0) {
+            tags_.save();
+        }
+
+        return deleted;
+    }
+
     // Get payload for a slot
     std::vector<uint8_t> payload(SlotId slot) const {
         if (!slot.valid()) return {};

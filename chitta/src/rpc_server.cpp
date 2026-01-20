@@ -39,360 +39,117 @@ struct ToolSpec {
     std::vector<ToolParam> params;
 };
 
-// Complete tool specifications with all parameters
+// Tool specifications - only includes tools implemented in daemon
 static const std::vector<ToolSpec> TOOL_SPECS = {
-    // Memory tools
-    {"recall", "Semantic search with zoom levels",
-     {{"query", "What to search for", true, nullptr},
-      {"zoom", "Detail: sparse|normal|dense|full", false, "normal"},
-      {"tag", "Filter by exact tag", false, nullptr},
-      {"limit", "Max results", false, nullptr},
-      {"threshold", "Min similarity (0-1)", false, "0"},
-      {"learn", "Apply Hebbian learning", false, "false"},
-      {"primed", "Boost by session context", false, "false"},
-      {"compete", "Lateral inhibition", false, "true"}}},
+    // Core memory tools
+    {"remember", "Store text in memory with optional tags",
+     {{"content", "Text to remember", true, nullptr},
+      {"type", "Node type: wisdom|belief|episode", false, "episode"},
+      {"tags", "Comma-separated tags", false, nullptr}}},
 
-    {"recall_by_tag", "Recall by exact tag match only",
-     {{"tag", "Tag to filter by", true, nullptr},
-      {"limit", "Max results", false, "50"}}},
+    {"recall", "Search memory by semantic similarity",
+     {{"query", "Search query", true, nullptr},
+      {"limit", "Max results", false, "10"},
+      {"tag", "Filter by tag", false, nullptr}}},
 
-    {"resonate", "Semantic search with spreading activation",
-     {{"query", "What to search for", true, nullptr},
-      {"k", "Max results", false, "10"},
-      {"spread_strength", "Activation spread (0-1)", false, "0.5"},
-      {"learn", "Apply Hebbian learning", false, "true"},
-      {"hebbian_strength", "Learning rate (0-0.5)", false, "0.03"}}},
+    {"grow", "Add wisdom, belief, failure, aspiration, or dream",
+     {{"type", "Type: wisdom|belief|failure|aspiration|dream", true, nullptr},
+      {"content", "Content to store", true, nullptr},
+      {"title", "Short title", false, nullptr},
+      {"tags", "Comma-separated tags", false, nullptr}}},
 
-    {"full_resonate", "Full resonance with all mechanisms",
-     {{"query", "What to search for", true, nullptr},
-      {"k", "Max results", false, "10"},
-      {"spread_strength", "Activation spread (0-1)", false, "0.5"},
-      {"hebbian_strength", "Learning rate (0-0.2)", false, "0.03"},
-      {"exclude_tags", "JSON array of tags to exclude", false, nullptr}}},
+    {"get", "Get a node by ID",
+     {{"id", "Node ID", true, nullptr}}},
 
-    {"proactive_surface", "Surface important unrequested memories",
-     {{"query", "Current context", true, nullptr},
-      {"exclude_ids", "JSON array of IDs to skip", false, nullptr},
-      {"limit", "Max results", false, "3"},
-      {"min_relevance", "Min relevance (0-1)", false, "0.25"},
-      {"min_confidence", "Min confidence (0-1)", false, "0.6"},
-      {"min_epsilon", "Min epsilon (0-1)", false, "0.7"}}},
-
-    {"detect_contradictions", "Find memories conflicting with new content",
-     {{"content", "New content to check", true, nullptr},
-      {"similarity_threshold", "Min similarity (0-1)", false, "0.6"},
-      {"limit", "Max results", false, "5"}}},
-
-    {"multi_hop", "Multi-hop reasoning via PageRank",
-     {{"query", "What to reason about", true, nullptr},
-      {"k", "Max results", false, "10"},
-      {"epsilon", "Approximation error (0.001-0.5)", false, "0.05"}}},
-
-    {"timeline", "Recent activity with Hawkes weighting",
-     {{"hours", "Time window (1-720)", false, "24"},
-      {"limit", "Max results", false, "20"}}},
-
-    {"causal_chain", "Find causal chains to an effect",
-     {{"effect_id", "Node ID of the effect", true, nullptr},
-      {"max_depth", "Max chain length (1-10)", false, "5"},
-      {"min_confidence", "Min confidence (0-1)", false, "0.3"}}},
-
-    {"consolidate", "Find/merge similar nodes via LSH",
-     {{"dry_run", "Just list candidates", false, "true"},
-      {"min_similarity", "Min similarity (0.8-1)", false, "0.92"},
-      {"max_merges", "Max merges", false, "10"}}},
-
-    // Learning tools
-    {"grow", "Add wisdom, beliefs, failures, aspirations, dreams, terms",
-     {{"type", "Type: wisdom|belief|failure|aspiration|dream|term", true, nullptr},
-      {"content", "The content to add", true, nullptr},
-      {"title", "Short title (required for wisdom/failure)", false, nullptr},
-      {"domain", "Domain context", false, nullptr},
-      {"confidence", "Initial confidence (0-1)", false, "0.8"},
-      {"epsilon", "Reconstructability (0-1)", false, "0.5"}}},
-
-    {"observe", "Record an observation/episode",
-     {{"category", "Type: bugfix|decision|discovery|feature|refactor|session_ledger|signal", true, nullptr},
-      {"title", "Short title (max 80 chars)", true, nullptr},
-      {"content", "Full observation content", true, nullptr},
-      {"project", "Project name", false, nullptr},
-      {"tags", "Comma-separated tags", false, nullptr},
-      {"epsilon", "Reconstructability (0-1)", false, "0.5"}}},
-
-    {"feedback", "Mark memory as helpful or misleading",
-     {{"memory_id", "UUID of the memory", true, nullptr},
-      {"helpful", "true=helpful, false=misleading", true, nullptr},
-      {"context", "Why this feedback", false, nullptr}}},
-
-    {"record_outcome", "Record task outcome for utility learning (MemRL)",
-     {{"memory_ids", "JSON array of memory UUIDs", true, nullptr},
-      {"success", "Task success (0-1)", true, nullptr},
-      {"context", "Task description", false, nullptr},
-      {"learning_rate", "Utility update rate (0.01-0.5)", false, "0.1"}}},
-
-    {"update", "Update node content (for epsilon-yajna)",
-     {{"id", "Node UUID to update", true, nullptr},
+    {"update", "Update node content",
+     {{"id", "Node ID", true, nullptr},
       {"content", "New content", true, nullptr}}},
 
-    {"remove", "Remove a node from memory",
-     {{"id", "Node UUID to remove", true, nullptr}}},
+    {"forget", "Remove a memory",
+     {{"id", "Node ID to forget", true, nullptr}}},
 
-    {"get", "Get a node by ID - direct lookup with full content",
-     {{"id", "Node UUID to retrieve", true, nullptr}}},
+    {"strengthen", "Increase confidence of a memory",
+     {{"id", "Node ID", true, nullptr},
+      {"amount", "Amount to strengthen (0-1)", false, "0.1"}}},
 
-    {"connect", "Create triplet: subject --[predicate]--> object",
+    {"weaken", "Decrease confidence of a memory",
+     {{"id", "Node ID", true, nullptr},
+      {"amount", "Amount to weaken (0-1)", false, "0.1"}}},
+
+    {"tag", "Add or remove tags from a node",
+     {{"id", "Node ID", true, nullptr},
+      {"add", "Tag to add", false, nullptr},
+      {"remove", "Tag to remove", false, nullptr}}},
+
+    // Graph/Triplet tools
+    {"connect", "Create triplet: subject → predicate → object",
      {{"subject", "Subject entity", true, nullptr},
       {"predicate", "Relationship type", true, nullptr},
-      {"object", "Object entity", true, nullptr},
-      {"weight", "Edge weight (0-1)", false, "1.0"}}},
+      {"object", "Object entity", true, nullptr}}},
 
-    {"query", "Query triplet relationships",
-     {{"subject", "Subject (empty = any)", false, nullptr},
-      {"predicate", "Predicate (empty = any)", false, nullptr},
-      {"object", "Object (empty = any)", false, nullptr}}},
+    {"query", "Query triplets with flexible filters",
+     {{"subject", "Subject filter", false, nullptr},
+      {"predicate", "Predicate filter", false, nullptr},
+      {"object", "Object filter", false, nullptr}}},
 
-    {"import_soul", "Import .soul file (SSL format) into mind",
-     {{"file", "Path to .soul file", true, nullptr},
-      {"replace", "Full rewire: remove existing codebase nodes first", false, "false"}}},
+    {"query_graph", "Query triplets by subject or object",
+     {{"subject", "Query by subject", false, nullptr},
+      {"object", "Query by object", false, nullptr}}},
 
-    {"export_soul", "Export knowledge to .soul file (SSL format)",
-     {{"file", "Output path for .soul file", true, nullptr},
-      {"tag", "Tag to filter nodes (e.g., vessel, codebase, symbol)", true, nullptr},
-      {"include_triplets", "Include triplets in export", false, "true"}}},
+    // Hook tools
+    {"observe", "Store observation (used by hooks for [LEARN] extraction)",
+     {{"title", "Short title", true, nullptr},
+      {"content", "Full content", true, nullptr},
+      {"category", "Category: wisdom|insight|signal|episode", false, "episode"},
+      {"tags", "Comma-separated tags", false, nullptr}}},
 
-    {"resolve_entity", "Resolve entity name to NodeId (O(1) via EntityIndex)",
-     {{"entity", "Entity name to resolve", true, nullptr}}},
-
-    {"link_entity", "Link entity name to an existing node",
-     {{"entity", "Entity name", true, nullptr},
-      {"node_id", "NodeId to link to", true, nullptr}}},
-
-    {"bootstrap_entity_index", "Auto-link triplet entities to existing nodes by title match",
-     {}},
-
-    {"list_entities", "List all linked entities in EntityIndex",
-     {}},
-
-    {"set_resonance_config", "Configure retrieval ranking (MemRL): relevance vs utility balance",
-     {{"lambda", "Relevance vs utility (0-1, default 0.7)", false, "0.7"},
-      {"epsilon_alpha", "Epiplexity boost factor (default 0.5)", false, "0.5"},
-      {"use_utility", "Enable utility ranking (true/false)", false, "true"}}},
-
-    {"get_resonance_config", "Get current retrieval ranking configuration",
-     {}},
-
-    {"cleanup", "Remove garbage nodes (Edited:/Ran:/Failed: logs, empty nodes)",
-     {{"dry_run", "Preview only, don't actually remove", false, "true"}}},
-
-    {"deduplicate", "Merge duplicate nodes with identical text",
-     {{"dry_run", "Preview only, don't actually merge", false, "true"}}},
-
-    {"compact_triplets", "Remove duplicate triplets from graph store",
-     {}},
+    {"full_resonate", "Semantic search with full context (for hooks)",
+     {{"query", "Search query", true, nullptr},
+      {"k", "Max results", false, "10"}}},
 
     // Context tools
-    {"soul_context", "Get soul state (tau, psi, stats)",
-     {{"query", "Optional context for relevant wisdom", false, nullptr},
-      {"format", "Output: text|json", false, "text"}}},
-
-    {"attractors", "Find conceptual clusters in memory",
-     {{"k", "Number of attractors", false, "5"},
-      {"min_size", "Min cluster size", false, "3"}}},
-
-    {"lens", "Search through cognitive perspective",
-     {{"query", "What to search for", true, nullptr},
-      {"lens", "Perspective: manas|buddhi|ahamkara|chitta|vikalpa|sakshi|all", false, "all"},
-      {"limit", "Max results per lens", false, "5"}}},
-
-    {"lens_harmony", "Check harmony across all lenses",
-     {{"query", "What to check", true, nullptr}}},
-
-    // Intention tools
-    {"intend", "Set an active intention",
-     {{"want", "What you want to achieve", true, nullptr},
-      {"because", "Why this matters", false, nullptr}}},
-
-    {"wonder", "Register a question/knowledge gap",
-     {{"question", "The question", true, nullptr},
-      {"context", "Why this matters", false, nullptr}}},
-
-    {"answer", "Resolve a knowledge gap",
-     {{"question_id", "ID of the gap node", true, nullptr},
-      {"resolution", "The answer", true, nullptr}}},
-
-    // Narrative tools
-    {"narrate", "Start or end a narrative thread",
-     {{"action", "Action: start|end", true, nullptr},
-      {"title", "Thread title (for start)", false, nullptr},
-      {"episode_id", "Thread ID (for end)", false, nullptr},
-      {"content", "Summary (for end)", false, nullptr},
-      {"emotion", "Emotional tone (for end)", false, nullptr}}},
-
-    {"ledger", "Save/load/list session state",
-     {{"action", "Action: save|load|list", true, nullptr},
-      {"content", "Session summary (for save)", false, nullptr},
-      {"project", "Project name", false, nullptr},
-      {"id", "Ledger ID (for load)", false, nullptr},
-      {"limit", "Max ledgers to list", false, "10"}}},
-
-    // Maintenance tools
-    {"cycle", "Run maintenance (decay, synthesis)",
-     {{"force", "Force full cycle", false, "false"},
-      {"regenerate_embeddings", "Regenerate zero-vector embeddings", false, "false"},
-      {"batch_size", "Batch size for regeneration", false, "100"}}},
-
-    {"version_check", "Check version compatibility",
+    {"soul_context", "Get current soul state and statistics",
      {}},
 
     {"health_check", "Check daemon health and readiness",
      {}},
 
-    // Analysis tools
-    {"epistemic_state", "What I know vs uncertain about",
-     {{"domain", "Filter by domain", false, nullptr}}},
-
-    {"bias_scan", "Detect belief patterns and skews",
-     {{"limit", "Max nodes to scan", false, "100"}}},
-
-    {"propagate", "Propagate confidence change through graph",
-     {{"id", "Node ID to propagate from", true, nullptr},
-      {"delta", "Confidence change (-0.5 to 0.5)", true, nullptr},
-      {"decay_factor", "Decay per hop (0.1-0.9)", false, "0.5"},
-      {"max_depth", "Max propagation depth (1-5)", false, "3"}}},
-
-    {"forget", "Deliberately forget a node",
-     {{"id", "Node ID to forget", true, nullptr},
-      {"cascade", "Weaken connected nodes", false, "true"},
-      {"rewire", "Reconnect edges around", false, "true"},
-      {"cascade_strength", "Cascade decay (0.05-0.3)", false, "0.1"}}},
-
-    {"competence", "Track strengths/weaknesses by domain",
-     {{"domain", "Specific domain to query", false, nullptr}}},
-
-    {"cross_project", "Query knowledge across projects",
-     {{"query", "What to search for", true, nullptr},
-      {"source_project", "Project to transfer FROM", false, nullptr},
-      {"target_project", "Project to transfer TO", false, nullptr},
-      {"limit", "Max results", false, "10"}}},
-
-    // Yajna tools
-    {"yajna_list", "List verbose nodes for epsilon-yajna",
-     {{"query", "Domain filter", false, "architecture system pattern decision"},
-      {"limit", "Max results", false, "10"},
-      {"min_length", "Min content length", false, "200"}}},
-
-    {"yajna_inspect", "Get complete node content by ID",
-     {{"id", "Node UUID to inspect", true, nullptr}}},
-
-    {"tag", "Add or remove tags from a node",
-     {{"id", "Node UUID", true, nullptr},
-      {"add", "Tag to add", false, nullptr},
-      {"remove", "Tag to remove", false, nullptr}}},
-
-    {"yajna_mark_processed", "Batch mark SSL-format nodes as ε-processed",
-     {{"epsilon_threshold", "Min epsilon (0-1)", false, "0.8"},
-      {"dry_run", "Preview only", false, "true"},
-      {"filter", "Text filter", false, nullptr}}},
-
-    {"batch_remove", "Remove multiple nodes from file of IDs",
-     {{"file", "File with one UUID per line", true, nullptr},
-      {"dry_run", "Preview only", false, "true"}}},
-
-    {"batch_tag", "Tag multiple nodes from file of IDs",
-     {{"file", "File with one UUID per line", true, nullptr},
-      {"add", "Tag to add to all", true, nullptr},
-      {"dry_run", "Preview only", false, "true"}}},
-
-    // Phase 7: Realm tools
-    {"realm_get", "Get current realm context",
+    {"version_check", "Get version information",
      {}},
 
-    {"realm_set", "Set current realm (persists across sessions)",
-     {{"realm", "Realm name (e.g., 'project:cc-soul')", true, nullptr}}},
+    // Maintenance tools
+    {"cycle", "Run maintenance cycle (decay, cleanup)",
+     {{"force", "Force full cycle", false, "false"}}},
 
-    {"realm_create", "Create a new realm with optional parent",
-     {{"name", "Realm name (e.g., 'project:my-project')", true, nullptr},
-      {"parent", "Parent realm (default: brahman)", false, "brahman"}}},
+    {"cleanup", "Remove weak/garbage nodes",
+     {{"dry_run", "Preview only", false, "true"}}},
 
-    // Phase 7: Review tools
-    {"review_list", "List items in review queue",
-     {{"status", "Filter: pending|approved|rejected|deferred|all", false, "pending"},
-      {"limit", "Max items to return", false, "10"}}},
+    // Import/Export tools
+    {"import_soul", "Import .soul file (SSL format)",
+     {{"file", "Path to .soul file", false, nullptr},
+      {"content", "SSL content (alternative to file)", false, nullptr}}},
 
-    {"review_decide", "Make a review decision on an item",
-     {{"id", "Node ID to review", true, nullptr},
-      {"decision", "Decision: approve|reject|edit|defer", true, nullptr},
-      {"comment", "Optional comment", false, nullptr},
-      {"edited_content", "New content (for edit)", false, nullptr},
-      {"quality_rating", "Quality rating 0-5 (for approve)", false, "3"}}},
-
-    {"review_batch", "Batch review: apply same decision to multiple items",
-     {{"decision", "Decision: approve|reject|defer", true, nullptr},
-      {"ids", "Comma-separated node IDs (empty = pending items)", false, nullptr},
-      {"limit", "Max items if ids empty", false, "10"},
-      {"comment", "Comment for all decisions", false, nullptr},
-      {"quality_rating", "Quality rating 0-5", false, "3"}}},
-
-    {"review_stats", "Get review queue statistics",
-     {}},
-
-    // Phase 7: Eval tools
-    {"eval_run", "Run golden recall test suite",
-     {{"test_name", "Specific test to run (empty = all)", false, nullptr}}},
-
-    {"eval_add_test", "Add a test case to eval harness",
-     {{"name", "Test name", true, nullptr},
-      {"query", "Query to test", true, nullptr},
-      {"expected", "Comma-separated expected node IDs", true, nullptr}}},
-
-    // Phase 7: Epiplexity tools
-    {"epiplexity_check", "Check compression quality of nodes",
-     {{"node_ids", "Comma-separated IDs (empty = sample)", false, nullptr},
-      {"sample_size", "Nodes to sample if no IDs", false, "10"}}},
-
-    {"epiplexity_drift", "Analyze epsilon drift over time",
-     {{"lookback_days", "Days to analyze", false, "7"}}},
+    {"export_soul", "Export memories to SSL format",
+     {{"file", "Output file path", false, nullptr},
+      {"tag", "Filter by tag", false, nullptr},
+      {"limit", "Max nodes to export", false, "100"}}},
 
     // Code intelligence tools
-    {"extract_symbols", "Extract symbols from source files (tree-sitter AST)",
-     {{"path", "File or directory path", true, nullptr},
-      {"recursive", "Traverse directories recursively", false, "true"},
-      {"exclude", "Comma-separated dirs to exclude", false, nullptr},
-      {"changed_only", "Only analyze git-changed files", false, "false"},
-      {"since", "Git ref to compare (HEAD~5, main)", false, nullptr}}},
+    {"extract_symbols", "Extract symbols from source file using tree-sitter",
+     {{"path", "File path to analyze", true, nullptr}}},
 
-    {"code_summary", "Token-efficient codebase summary",
-     {{"path", "Directory path", true, nullptr},
-      {"depth", "Directory depth to show", false, "2"}}},
-
-    {"analyze_code", "Analyze source file and store symbols with line numbers",
-     {{"file", "Path to source file", true, nullptr},
-      {"project", "Project name for tagging", false, nullptr},
-      {"update", "Update existing symbols", false, "true"}}},
-
-    {"code_context", "Get code around a specific line",
-     {{"file", "Path to source file", true, nullptr},
-      {"line", "Target line number", true, nullptr},
-      {"context", "Lines of context before/after", false, "10"}}},
-
-    {"code_search", "Search for code symbols by name/type",
-     {{"query", "Symbol name or pattern", true, nullptr},
-      {"kind", "Filter: function|class|struct|method|any", false, "any"},
-      {"file", "Filter by file pattern", false, nullptr},
-      {"limit", "Max results", false, "20"}}},
-
-    {"staleness_stats", "Get staleness statistics for code-derived nodes",
-     {}},
-
-    {"hierarchical_state", "Get hierarchical state for context injection",
-     {{"modules", "Comma-separated module names (empty = all)", false, nullptr},
-      {"max_modules", "Maximum modules to include", false, "5"}}},
-
-    {"learn_codebase", "Learn entire codebase in one call",
+    {"learn_codebase", "Learn codebase by extracting all symbols",
      {{"path", "Directory path to analyze", true, nullptr},
       {"project", "Project name (auto-detected if empty)", false, nullptr},
-      {"max_files", "Maximum files to analyze", false, "100"},
-      {"bootstrap_state", "Bootstrap hierarchical state", false, "true"}}},
+      {"max_files", "Max files to process", false, "500"},
+      {"exclude", "Comma-separated directories to exclude", false, nullptr}}},
+
+    {"find_symbol", "Search for symbols by name",
+     {{"name", "Symbol name to search", true, nullptr},
+      {"kind", "Symbol kind filter (function, class, method)", false, nullptr}}},
+
+    {"code_context", "Get code context summary",
+     {{"path", "Limit to files under this path", false, nullptr}}},
 };
 
 // Build set of known tools from specs
@@ -467,25 +224,20 @@ void print_usage(const char* prog) {
               << "  " << name << " [options]                  Interactive mode (JSON-RPC)\n"
               << "\n"
               << "Examples:\n"
-              << "  " << name << " recall --query \"search terms\" --zoom sparse\n"
+              << "  " << name << " recall --query \"search terms\"\n"
               << "  " << name << " soul_context\n"
-              << "  " << name << " observe --category decision --title \"...\" --content \"...\"\n"
-              << "  " << name << " grow --type wisdom --content \"...\" --title \"...\"\n"
-              << "  " << name << " yajna_inspect --id \"uuid\"\n"
+              << "  " << name << " observe --title \"Decision\" --content \"Chose X over Y\"\n"
+              << "  " << name << " grow --type wisdom --content \"Pattern discovered\"\n"
+              << "  " << name << " learn_codebase --path /path/to/project\n"
               << "\n"
               << "Tool categories:\n"
-              << "  Memory:    recall, resonate, full_resonate, recall_by_tag, multi_hop, timeline\n"
-              << "  Learning:  grow, observe, update, get, feedback, connect, query, import_soul, export_soul, cleanup, deduplicate, compact_triplets\n"
-              << "  Entity:    resolve_entity, link_entity, bootstrap_entity_index, list_entities\n"
-              << "  Context:   soul_context, attractors, lens, lens_harmony\n"
-              << "  Intention: intend, wonder, answer\n"
-              << "  Narrative: narrate, ledger\n"
-              << "  Analysis:  epistemic_state, bias_scan, propagate, forget, competence\n"
-              << "  Yajna:     yajna_list, yajna_inspect, tag, yajna_mark_processed, batch_remove, batch_tag\n"
-              << "  Realm:     realm_get, realm_set, realm_create\n"
-              << "  Review:    review_list, review_decide, review_batch, review_stats\n"
-              << "  Eval:      eval_run, eval_add_test, epiplexity_check, epiplexity_drift\n"
-              << "  Code:      learn_codebase, analyze_code, extract_symbols, code_summary, staleness_stats, hierarchical_state\n"
+              << "  Memory:      remember, recall, grow, get, update, forget, strengthen, weaken, tag\n"
+              << "  Triplets:    connect, query, query_graph\n"
+              << "  Hooks:       observe, full_resonate\n"
+              << "  Context:     soul_context, health_check, version_check\n"
+              << "  Maintenance: cycle, cleanup\n"
+              << "  Import/Export: import_soul, export_soul\n"
+              << "  Code Intel:  extract_symbols, learn_codebase, find_symbol, code_context\n"
               << "\n"
               << "Global options:\n"
               << "  --socket-path PATH  Unix socket path\n"

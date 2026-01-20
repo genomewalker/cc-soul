@@ -141,7 +141,15 @@ public:
             return false;
         }
 
+        // Initialize in-memory state
         capacity_ = initial_capacity;
+        triplet_count_ = 0;
+        indices_dirty_ = false;
+        entities_.clear();
+        predicates_.clear();
+        entity_to_idx_.clear();
+        predicate_to_idx_.clear();
+
         return true;
     }
 

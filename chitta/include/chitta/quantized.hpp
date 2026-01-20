@@ -46,7 +46,15 @@ struct QuantizedVector {
 
         // Compute scale and offset
         float range = max_val - min_val;
-        if (range < 1e-8f) range = 1.0f;
+
+        // Handle constant vectors (including all-zeros): store as zeros with offset
+        // This prevents artificial 100% similarity between constant vectors
+        if (range < 1e-8f) {
+            q.scale = 1.0f;
+            q.offset = min_val;  // Preserve the constant value
+            std::fill(q.data, q.data + EMBED_DIM, int8_t(0));
+            return q;
+        }
 
         q.scale = range / 254.0f;  // Map to [-127, 127]
         q.offset = min_val + range / 2.0f;

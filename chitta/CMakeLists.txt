@@ -14,6 +14,37 @@ set(ROARING_BUILD_STATIC ON CACHE BOOL "" FORCE)
 set(ENABLE_ROARING_TESTS OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(roaring)
 
+# DuckDB - embedded database with vector search and graph queries
+# Uses system/conda installation
+find_library(DUCKDB_LIB duckdb HINTS "$ENV{CONDA_PREFIX}/lib")
+find_path(DUCKDB_INCLUDE duckdb.hpp HINTS "$ENV{CONDA_PREFIX}/include")
+if(DUCKDB_LIB AND DUCKDB_INCLUDE)
+    add_library(duckdb SHARED IMPORTED)
+    set_target_properties(duckdb PROPERTIES
+        IMPORTED_LOCATION "${DUCKDB_LIB}"
+        INTERFACE_INCLUDE_DIRECTORIES "${DUCKDB_INCLUDE}"
+    )
+    message(STATUS "DuckDB found: ${DUCKDB_LIB}")
+else()
+    message(FATAL_ERROR "DuckDB not found. Install with: mamba install libduckdb-devel")
+endif()
+
+# PostgreSQL - for multi-writer HPC deployments
+find_library(LIBPQ_LIB pq HINTS "$ENV{CONDA_PREFIX}/lib")
+find_path(LIBPQ_INCLUDE libpq-fe.h HINTS "$ENV{CONDA_PREFIX}/include")
+if(LIBPQ_LIB AND LIBPQ_INCLUDE)
+    add_library(libpq SHARED IMPORTED)
+    set_target_properties(libpq PROPERTIES
+        IMPORTED_LOCATION "${LIBPQ_LIB}"
+        INTERFACE_INCLUDE_DIRECTORIES "${LIBPQ_INCLUDE}"
+    )
+    set(CHITTA_WITH_POSTGRES ON)
+    message(STATUS "PostgreSQL (libpq) found: ${LIBPQ_LIB}")
+else()
+    set(CHITTA_WITH_POSTGRES OFF)
+    message(STATUS "PostgreSQL (libpq) not found - PostgresStore disabled")
+endif()
+
 # Tree-sitter - incremental parsing for code intelligence
 FetchContent_Declare(
     tree-sitter
@@ -183,7 +214,7 @@ configure_file(
     @ONLY
 )
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -204,7 +235,7 @@ target_include_directories(chitta INTERFACE
 
 # Find threads
 find_package(Threads REQUIRED)
-target_link_libraries(chitta INTERFACE Threads::Threads roaring tree-sitter-parsers)
+target_link_libraries(chitta INTERFACE Threads::Threads roaring tree-sitter-parsers duckdb)
 
 # nlohmann/json for RPC server
 find_package(nlohmann_json CONFIG QUIET)
@@ -262,9 +293,20 @@ endif()
 # Tests
 if(CHITTA_BUILD_TESTS)
     enable_testing()
-    add_executable(chitta_test src/test.cpp)
-    target_link_libraries(chitta_test PRIVATE chitta)
-    add_test(NAME chitta_test COMMAND chitta_test)
+
+    # Old mmap-based tests (disabled - using DuckDB now)
+    # add_executable(chitta_test src/test.cpp)
+    # target_link_libraries(chitta_test PRIVATE chitta)
+    # add_test(NAME chitta_test COMMAND chitta_test)
+
+    # SimpleMind test (disabled - using DuckDBMind now)
+    # add_executable(simple_test src/simple_test.cpp)
+    # target_link_libraries(simple_test PRIVATE chitta)
+
+    # DuckDB store test
+    add_executable(duckdb_test src/duckdb_test.cpp)
+    target_link_libraries(duckdb_test PRIVATE duckdb_store)
+    add_test(NAME duckdb_test COMMAND duckdb_test)
 endif()
 
 # CLI tool for memory operations (thin client with socket support)
@@ -278,14 +320,35 @@ if(CHITTA_BUILD_RPC)
     target_link_libraries(chitta_tool PRIVATE chitta)
 endif()
 
-# Daemon/admin tool (includes socket server for daemon mode)
-# Renamed from chitta_cli to chittad for clarity
+# DuckDBStore library
+add_library(duckdb_store STATIC src/duckdb_store.cpp)
+target_link_libraries(duckdb_store PUBLIC chitta)
+target_include_directories(duckdb_store PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+)
+
+# PostgresStore library (optional, for HPC multi-writer)
+if(CHITTA_WITH_POSTGRES)
+    add_library(postgres_store STATIC src/postgres_store.cpp)
+    target_link_libraries(postgres_store PUBLIC chitta libpq)
+    target_include_directories(postgres_store PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    )
+    target_compile_definitions(postgres_store PUBLIC CHITTA_WITH_POSTGRES=1)
+    message(STATUS "PostgresStore enabled")
+endif()
+
+# Daemon/admin tool (uses DuckDBMind or PostgresMind)
 add_executable(chittad
-    src/cli.cpp
+    src/simple_cli.cpp
     src/socket_server.cpp
     src/socket_client.cpp
 )
-target_link_libraries(chittad PRIVATE chitta)
+target_link_libraries(chittad PRIVATE chitta duckdb_store)
+if(CHITTA_WITH_POSTGRES)
+    target_link_libraries(chittad PRIVATE postgres_store)
+    target_compile_definitions(chittad PRIVATE CHITTA_WITH_POSTGRES=1)
+endif()
 
 # Migration tool (from SQLite soul.db)
 find_package(SQLite3)

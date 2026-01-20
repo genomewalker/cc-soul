@@ -235,3 +235,80 @@ Workload: 10-50 QPS burst, 100-1000 inserts/day
 - ~~Persistence for SynthesisQueue, GapInquiry state~~
 - ~~Cross-session realm context~~ (RPC: `realm_get`, `realm_set`, `realm_create`)
 - ~~Batch review CLI mode~~ (RPC: `review_batch`)
+
+## Phase 5: Event Collector (v2.60.x) [IN PROGRESS]
+
+Automatic memory capture from tool usage.
+
+### 5.1 Event Collection Pipeline [DONE]
+| Component | File | Status |
+|-----------|------|--------|
+| PostToolUse hook | `hooks/hooks.json` | ✅ Triggers on Bash/Read/Edit/Write |
+| Event collector | `scripts/event-collector.sh` | ✅ Captures events to JSONL |
+| Signal prefilter | `scripts/lib/event-rules.sh` | ✅ Classifies signals, detects repetition |
+| Event distillation | `chitta/src/cli.cpp:48-188` | ✅ Batch processes candidates |
+
+### 5.2 Signal Classification [DONE]
+| Type | Signals Generated |
+|------|-------------------|
+| Bash | `script_run`, `release`, `build`, `test`, `dependency`, `docker`, `command` |
+| Read | `script_read`, `config_read`, `doc_read`, `manifest_read`, `ci_read` |
+| Edit | `script_edit`, `config_edit`, `doc_edit`, `code_edit` |
+
+### 5.3 Automatic Tagging [DONE]
+- `auto:event` - marks auto-generated
+- `project:{name}` - project context
+- `type:{bash|read|edit}` - event type
+- `repeated` - if seen 2+ times in 5-min window
+
+### 5.4 Dynamic Confidence [DONE]
+| Signal Type | Confidence |
+|-------------|------------|
+| Repeated events | 0.8 |
+| Script executions | 0.7 |
+| Other events | 0.5 → review queue |
+
+### 5.5 Review Queue Routing [DONE]
+- Events with confidence < 0.6 → `enqueue_for_review(id, context, Low)`
+- RPC: `review_list`, `review_decide`, `review_batch`, `review_stats`
+
+### 5.6 Triplet Creation [DONE]
+Predicates: `uses_script`, `builds_with`, `tests_with`, `releases_via`, `uses_command`, `has_file`, `modifies`
+
+### What's Missing (Event Collector)
+| Feature | Priority | Notes |
+|---------|----------|-------|
+| Async distillation | Medium | Currently in maintenance loop, not background |
+| Smart batching | Low | Fixed batch size (20), could be adaptive |
+| Feedback learning | Medium | Signal thresholds hardcoded, not learned |
+| Realm scoping | Medium | Events not filtered by current realm |
+| Event archival | Low | Rotation only, no historical analysis |
+
+## Phase 6: Stability Fixes (v2.60.2+)
+
+### 6.1 UnifiedIndex Race Condition [DONE]
+**Problem**: `grow()` remaps memory while accessors read it → segfault
+**Fix**: Added `shared_lock` to `vector()`, `meta()`, `touch()`, `update_confidence()`
+**Files**: `chitta/include/chitta/unified_index.hpp`
+
+### 6.2 Deadlock Prevention [DONE]
+**Problem**: `insert()` holds `unique_lock`, calls `insert_hnsw()` → `vector()` → tries `shared_lock` → deadlock
+**Fix**: Created `_unlocked` internal variants for use within locked contexts
+```cpp
+// Public (external callers)
+const QuantizedVector* vector(SlotId slot) const {
+    std::shared_lock lock(mutex_);
+    return vector_unlocked(slot);
+}
+
+// Internal (caller holds mutex)
+const QuantizedVector* vector_unlocked(SlotId slot) const {
+    if (!slot.valid()) return nullptr;
+    return &vectors_region_.as<const QuantizedVector>()[slot.value];
+}
+```
+
+### 6.3 smart-install.sh Enhancements [DONE]
+- `install_file()` helper with diff-based modification detection
+- `install_config_files()` installs hooks, skills, commands
+- Skips user-modified files (newer than source)

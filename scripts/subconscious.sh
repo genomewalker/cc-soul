@@ -106,7 +106,7 @@ cmd_start() {
         support_interval=true
     fi
 
-    local daemon_args=(daemon "--path" "$MIND_PATH" "--model" "$MODEL_PATH" "--vocab" "$VOCAB_PATH")
+    local daemon_args=(daemon "--path" "$MIND_PATH")
     if [[ "$support_interval" == "true" ]]; then
         daemon_args+=("--interval" "$INTERVAL")
     fi
@@ -126,7 +126,7 @@ cmd_start() {
             # Socket exists, now verify daemon responds with heartbeat
             local response
             response=$(echo "stats" | run_with_timeout nc -U "$SOCKET_PATH" 2>/dev/null || true)
-            if [[ -n "$response" && "$response" == *"total"* ]]; then
+            if [[ -n "$response" && "$response" == *"nodes"* ]]; then
                 daemon_ready=true
                 break
             fi

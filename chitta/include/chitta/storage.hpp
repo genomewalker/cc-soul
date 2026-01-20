@@ -1302,6 +1302,15 @@ public:
         return forgotten;
     }
 
+    // Purge all nodes with zero vectors (slot-based, bypasses id_to_slot_)
+    // Use when id_to_slot_ is corrupted/incomplete
+    size_t purge_zero_vectors() {
+        if (use_unified()) {
+            return unified_.purge_zero_vectors();
+        }
+        return 0;  // Only supported for unified storage
+    }
+
     // Sync from WAL: see other processes' writes
     // Call this before reads to ensure we see the shared truth
     size_t sync_from_wal() {

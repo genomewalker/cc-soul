@@ -260,6 +260,82 @@ configure_permissions() {
     fi
 }
 
+# Configure hooks in settings.json (merges plugin hooks.json into user settings)
+configure_hooks() {
+    local settings_file="${HOME}/.claude/settings.json"
+    local hooks_file="$PLUGIN_DIR/.claude-plugin/hooks.json"
+
+    # Check if hooks.json exists
+    if [[ ! -f "$hooks_file" ]]; then
+        hooks_file="$PLUGIN_DIR/hooks/hooks.json"
+    fi
+    if [[ ! -f "$hooks_file" ]]; then
+        echo "[cc-soul] No hooks.json found, skipping hooks config" >&2
+        return 0
+    fi
+
+    # Check if jq is available
+    if ! command -v jq &> /dev/null; then
+        echo "[cc-soul] jq not found, skipping hooks config" >&2
+        return 0
+    fi
+
+    # Ensure settings file exists
+    mkdir -p "${HOME}/.claude"
+    if [[ ! -f "$settings_file" ]]; then
+        echo '{}' > "$settings_file"
+    fi
+
+    # Read current settings and plugin hooks
+    local current plugin_hooks
+    current=$(cat "$settings_file")
+    plugin_hooks=$(jq '.hooks' "$hooks_file")
+
+    # Ensure hooks object exists in settings
+    if ! echo "$current" | jq -e '.hooks' &>/dev/null; then
+        current=$(echo "$current" | jq '.hooks = {}')
+    fi
+
+    # Merge plugin hooks into settings (plugin hooks take precedence for cc-soul events)
+    # We merge each hook event, replacing commands that reference CLAUDE_PLUGIN_ROOT
+    local updated="$current"
+    local added=0
+
+    # Get list of hook events from plugin
+    local events
+    events=$(echo "$plugin_hooks" | jq -r 'keys[]')
+
+    for event in $events; do
+        # Get plugin hooks for this event (with CLAUDE_PLUGIN_ROOT expanded)
+        local event_hooks
+        event_hooks=$(echo "$plugin_hooks" | jq --arg e "$event" --arg root "$PLUGIN_DIR" \
+            '.[$e] | walk(if type == "string" then gsub("\\$\\{CLAUDE_PLUGIN_ROOT\\}"; $root) else . end)')
+
+        # Check if this event already has cc-soul hooks
+        local existing
+        existing=$(echo "$updated" | jq --arg e "$event" '.hooks[$e] // []')
+
+        # Remove any existing cc-soul hooks (identified by plugin path)
+        local filtered
+        filtered=$(echo "$existing" | jq --arg root "$PLUGIN_DIR" \
+            '[.[] | select(.hooks | all(.command | contains($root) | not))]')
+
+        # Merge: existing non-cc-soul hooks + new cc-soul hooks
+        local merged
+        merged=$(echo "$filtered" "$event_hooks" | jq -s 'add')
+
+        # Update settings
+        updated=$(echo "$updated" | jq --arg e "$event" --argjson h "$merged" '.hooks[$e] = $h')
+        ((added++)) || true
+    done
+
+    # Write back
+    if [[ $added -gt 0 ]]; then
+        echo "$updated" | jq '.' > "$settings_file"
+        echo "[cc-soul] Configured $added hook events in settings.json"
+    fi
+}
+
 # Create directories (symlinks no longer needed - mind is at ~/.claude/mind)
 create_directories() {
     mkdir -p "${HOME}/.claude/mind"
@@ -449,6 +525,9 @@ main() {
 
     # Configure bash permissions for chitta commands
     configure_permissions
+
+    # Hooks are loaded automatically from .claude-plugin/hooks.json by plugin system
+    # configure_hooks  # Don't duplicate - causes hooks to run twice
 
     # Install hooks, skills, and commands
     install_config_files

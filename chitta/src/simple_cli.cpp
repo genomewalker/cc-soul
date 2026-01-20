@@ -1,0 +1,562 @@
+// chitta-cli: Simplified daemon for SimpleMind
+//
+// Usage: chittad <command> [options]
+//
+// Commands:
+//   daemon     Run background daemon
+//   shutdown   Stop running daemon
+//   status     Check daemon status
+//   stats      Show soul statistics
+
+#include <chitta/mind/duckdb_mind.hpp>
+#include <chitta/rpc/duckdb_handler.hpp>
+#ifdef CHITTA_WITH_POSTGRES
+#include <chitta/mind/postgres_mind.hpp>
+#include <chitta/rpc/postgres_handler.hpp>
+#endif
+#include <chitta/socket_server.hpp>
+#include <chitta/socket_client.hpp>
+#include <chitta/version.hpp>
+#ifdef CHITTA_WITH_ONNX
+#include <chitta/vak_onnx.hpp>
+#endif
+#include <iostream>
+#include <string>
+#include <cstring>
+#include <cstdlib>
+#include <csignal>
+#include <thread>
+#include <chrono>
+#include <atomic>
+#include <fstream>
+#include <sstream>
+#include <nlohmann/json.hpp>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+
+using namespace chitta;
+using json = nlohmann::json;
+
+// Global flags
+static std::atomic<bool> daemon_running{true};
+static std::atomic<bool> verbose_mode{false};
+
+void daemon_signal_handler(int sig) {
+    std::cerr << "[daemon] Signal " << sig << " received, shutting down\n";
+    daemon_running = false;
+}
+
+// Daemonize using double-fork
+bool daemonize(const std::string& log_path) {
+    pid_t pid = fork();
+    if (pid < 0) return false;
+    if (pid > 0) _exit(0);
+
+    if (setsid() < 0) return false;
+
+    pid = fork();
+    if (pid < 0) return false;
+    if (pid > 0) _exit(0);
+
+    umask(0);
+    chdir("/");
+
+    int null_fd = open("/dev/null", O_RDONLY);
+    if (null_fd >= 0) {
+        dup2(null_fd, STDIN_FILENO);
+        close(null_fd);
+    }
+
+    const char* out_path = log_path.empty() ? "/dev/null" : log_path.c_str();
+    int log_fd = open(out_path, O_WRONLY | O_CREAT | O_APPEND, 0644);
+    if (log_fd >= 0) {
+        dup2(log_fd, STDOUT_FILENO);
+        dup2(log_fd, STDERR_FILENO);
+        close(log_fd);
+    }
+
+    return true;
+}
+
+// Lock management
+struct DaemonLock {
+    int fd = -1;
+    std::string path;
+};
+
+bool acquire_lock(const std::string& mind_path, DaemonLock& lock) {
+    lock.path = lock_path_for_mind(mind_path);
+    lock.fd = open(lock.path.c_str(), O_CREAT | O_RDWR, 0600);
+    if (lock.fd < 0) return false;
+
+    struct flock fl;
+    fl.l_type = F_WRLCK;
+    fl.l_whence = SEEK_SET;
+    fl.l_start = 0;
+    fl.l_len = 0;
+
+    if (fcntl(lock.fd, F_SETLK, &fl) != 0) {
+        close(lock.fd);
+        lock.fd = -1;
+        return false;
+    }
+
+    std::string pid = std::to_string(getpid()) + "\n";
+    ftruncate(lock.fd, 0);
+    write(lock.fd, pid.data(), pid.size());
+    return true;
+}
+
+void release_lock(DaemonLock& lock) {
+    if (lock.fd >= 0) {
+        close(lock.fd);
+        unlink(lock.path.c_str());
+    }
+}
+
+std::string default_mind_path() {
+    const char* home = std::getenv("HOME");
+    return std::string(home ? home : ".") + "/.claude/mind/chitta";
+}
+
+std::string default_model_path() {
+    if (const char* plugin_root = std::getenv("CLAUDE_PLUGIN_ROOT")) {
+        return std::string(plugin_root) + "/chitta/models/model.onnx";
+    }
+    const char* home = std::getenv("HOME");
+    return std::string(home ? home : ".") + "/.claude/mind/model.onnx";
+}
+
+std::string default_vocab_path() {
+    if (const char* plugin_root = std::getenv("CLAUDE_PLUGIN_ROOT")) {
+        return std::string(plugin_root) + "/chitta/models/vocab.txt";
+    }
+    const char* home = std::getenv("HOME");
+    return std::string(home ? home : ".") + "/.claude/mind/vocab.txt";
+}
+
+// Generate stats JSON
+std::string generate_stats(DuckDBMind& mind) {
+    std::ostringstream oss;
+    oss << "{"
+        << "\"version\":\"" << CHITTA_VERSION << "\","
+        << "\"nodes\":" << mind.size() << ","
+        << "\"triplets\":" << mind.triplet_count() << ","
+        << "\"yantra\":" << (mind.has_yantra() ? "true" : "false")
+        << "}";
+    return oss.str();
+}
+
+int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
+               const std::string& mind_path, const std::string& pid_file) {
+    DaemonLock lock;
+    if (!acquire_lock(mind_path, lock)) {
+        std::cerr << "[daemon] Another daemon is running\n";
+        return 1;
+    }
+
+    if (!pid_file.empty()) {
+        std::ofstream pf(pid_file);
+        if (pf) pf << getpid() << "\n";
+    }
+
+    SocketServer server(socket_path);
+    if (!server.start()) {
+        std::cerr << "[daemon] Failed to start socket server\n";
+        release_lock(lock);
+        return 1;
+    }
+
+    DuckDBRpcHandler handler(&mind);
+
+    std::signal(SIGTERM, daemon_signal_handler);
+    std::signal(SIGINT, daemon_signal_handler);
+    std::signal(SIGPIPE, SIG_IGN);
+
+    std::cerr << "[daemon] Started (socket=" << socket_path
+              << ", interval=" << interval << "s, pid=" << getpid() << ")\n";
+
+    // Maintenance thread - sync and apply decay periodically
+    std::atomic<size_t> cycle_count{0};
+    std::thread maintenance([&]() {
+        auto interval_secs = std::chrono::seconds(interval);
+        auto last_sync = std::chrono::steady_clock::now();
+
+        while (daemon_running) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+            auto now_time = std::chrono::steady_clock::now();
+            if (now_time - last_sync >= interval_secs) {
+                last_sync = now_time;
+                cycle_count++;
+
+                try {
+                    // Apply decay and prune weak nodes
+                    size_t decayed = mind.tick();
+
+                    // Sync to disk
+                    mind.sync();
+
+                    if (verbose_mode) {
+                        auto health = mind.health();
+                        std::cerr << "[maint] Cycle " << cycle_count
+                                  << ": " << health.total_nodes << " nodes"
+                                  << ", " << health.active_nodes << " active"
+                                  << ", " << decayed << " decayed"
+                                  << ", status=" << health.status() << "\n";
+                    }
+                } catch (const std::exception& e) {
+                    std::cerr << "[maint] Cycle failed: " << e.what() << "\n";
+                }
+            }
+        }
+    });
+
+    // Main loop - handle socket I/O
+    while (daemon_running) {
+        auto requests = server.poll(100);
+
+        for (const auto& req : requests) {
+            // Special commands
+            if (req.data == "stats") {
+                server.respond(req.client_fd, generate_stats(mind));
+                continue;
+            }
+            if (req.data == "shutdown") {
+                server.respond(req.client_fd, R"({"status":"shutting_down"})");
+                mind.sync();
+                daemon_running = false;
+                continue;
+            }
+
+            // JSON-RPC requests
+            try {
+                auto request = json::parse(req.data);
+                auto response = handler.handle(request);
+                server.respond(req.client_fd, response.dump());
+            } catch (const std::exception& e) {
+                std::string error = R"({"jsonrpc":"2.0","error":{"code":-32700,"message":")"
+                                  + std::string(e.what()) + R"("},"id":null})";
+                server.respond(req.client_fd, error);
+            }
+        }
+    }
+
+    maintenance.join();
+    server.stop();
+
+    if (!pid_file.empty()) std::remove(pid_file.c_str());
+    release_lock(lock);
+
+    std::cerr << "[daemon] Stopped (cycles=" << cycle_count << ")\n";
+    return 0;
+}
+
+int cmd_shutdown(const std::string& socket_path) {
+    SocketClient client(socket_path);
+    if (!client.connect()) {
+        std::cerr << "No daemon running\n";
+        return 1;
+    }
+    if (client.request_shutdown()) {
+        std::cout << "Daemon shutdown requested\n";
+        client.wait_for_socket_gone(5000);
+        return 0;
+    }
+    return 1;
+}
+
+int cmd_status(const std::string& socket_path) {
+    SocketClient client(socket_path);
+    if (!client.connect()) {
+        std::cout << "Daemon: not running\n";
+        return 1;
+    }
+    auto version = client.check_version();
+    std::cout << "Daemon: running\n";
+    std::cout << "Socket: " << socket_path << "\n";
+    if (version) std::cout << "Version: " << version->software << "\n";
+    return 0;
+}
+
+int cmd_stats(DuckDBMind& mind) {
+    std::cout << "Soul Statistics (DuckDB)\n";
+    std::cout << "═══════════════════════════════\n";
+    std::cout << "  Nodes:    " << mind.size() << "\n";
+    std::cout << "  Triplets: " << mind.triplet_count() << "\n";
+    std::cout << "  Yantra:   " << (mind.has_yantra() ? "ready" : "not attached") << "\n";
+    return 0;
+}
+
+void print_usage(const char* prog) {
+    std::cerr << "chittad " << CHITTA_VERSION << " - Soul daemon\n\n"
+              << "Usage: " << prog << " <command> [options]\n\n"
+              << "Commands:\n"
+              << "  daemon     Run background daemon\n"
+              << "  shutdown   Stop running daemon\n"
+              << "  status     Check daemon status\n"
+              << "  stats      Show soul statistics\n"
+              << "  help       Show this help\n\n"
+              << "Options:\n"
+              << "  --path PATH        Mind storage path (DuckDB)\n"
+              << "  --interval SECS    Sync interval (default: 60)\n"
+              << "  -f, --foreground   Run in foreground\n"
+              << "  --verbose          Verbose logging\n"
+              << "  -v, --version      Show version\n"
+#ifdef CHITTA_WITH_POSTGRES
+              << "\nPostgreSQL backend (for HPC multi-writer):\n"
+              << "  --backend postgres Use PostgreSQL instead of DuckDB\n"
+              << "  --pg-host HOST     PostgreSQL host (default: localhost)\n"
+              << "  --pg-port PORT     PostgreSQL port (default: 5432)\n"
+              << "  --pg-db NAME       Database name (default: soul)\n"
+              << "  --pg-user USER     Database user (default: soul)\n"
+              << "  --pg-pass PASS     Database password\n"
+#endif
+              ;
+}
+
+int main(int argc, char* argv[]) {
+    std::string mind_path = default_mind_path();
+    std::string command;
+    int interval = 60;
+    bool foreground = false;
+    std::string backend = "duckdb";
+
+#ifdef CHITTA_WITH_POSTGRES
+    // PostgreSQL options
+    std::string pg_host = "localhost";
+    int pg_port = 5432;
+    std::string pg_db = "soul";
+    std::string pg_user = "soul";
+    std::string pg_pass = "";
+#endif
+
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "--path") == 0 && i + 1 < argc) {
+            mind_path = argv[++i];
+        } else if (strcmp(argv[i], "--interval") == 0 && i + 1 < argc) {
+            interval = std::stoi(argv[++i]);
+        } else if (strcmp(argv[i], "-f") == 0 || strcmp(argv[i], "--foreground") == 0) {
+            foreground = true;
+        } else if (strcmp(argv[i], "--verbose") == 0) {
+            verbose_mode = true;
+        } else if (strcmp(argv[i], "--backend") == 0 && i + 1 < argc) {
+            backend = argv[++i];
+#ifdef CHITTA_WITH_POSTGRES
+        } else if (strcmp(argv[i], "--pg-host") == 0 && i + 1 < argc) {
+            pg_host = argv[++i];
+        } else if (strcmp(argv[i], "--pg-port") == 0 && i + 1 < argc) {
+            pg_port = std::stoi(argv[++i]);
+        } else if (strcmp(argv[i], "--pg-db") == 0 && i + 1 < argc) {
+            pg_db = argv[++i];
+        } else if (strcmp(argv[i], "--pg-user") == 0 && i + 1 < argc) {
+            pg_user = argv[++i];
+        } else if (strcmp(argv[i], "--pg-pass") == 0 && i + 1 < argc) {
+            pg_pass = argv[++i];
+#endif
+        } else if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--version") == 0) {
+            std::cout << "chittad " << CHITTA_VERSION << "\n";
+            return 0;
+        } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+            print_usage(argv[0]);
+            return 0;
+        } else if (argv[i][0] != '-' && command.empty()) {
+            command = argv[i];
+        }
+    }
+
+    std::string sock_path = socket_path_for_mind(mind_path);
+    std::string pid_file = pid_path_for_mind(mind_path);
+
+    if (command.empty() || command == "help") {
+        print_usage(argv[0]);
+        return 0;
+    }
+
+    if (command == "shutdown") return cmd_shutdown(sock_path);
+    if (command == "status") return cmd_status(sock_path);
+
+    // Commands that need Mind - daemonize first if needed
+    if (command == "daemon") {
+        if (!foreground) {
+            const char* home = getenv("HOME");
+            std::string log_path = std::string(home ? home : ".") + "/.claude/mind/.subconscious.log";
+            if (!daemonize(log_path)) {
+                std::cerr << "Failed to daemonize\n";
+                return 1;
+            }
+        }
+    }
+
+    // Create yantra for embeddings
+#ifdef CHITTA_WITH_ONNX
+    std::string model_path = default_model_path();
+    std::string vocab_path = default_vocab_path();
+    AntahkaranaYantra::Config yantra_config;
+    yantra_config.pooling = PoolingStrategy::Mean;
+    yantra_config.normalize_embeddings = true;
+    auto yantra = std::make_shared<AntahkaranaYantra>(yantra_config);
+    if (yantra->awaken(model_path, vocab_path)) {
+        std::cerr << "[Yantra] Awakened\n";
+    } else {
+        std::cerr << "[Yantra] Failed: " << yantra->error() << "\n";
+        yantra.reset();
+    }
+#endif
+
+#ifdef CHITTA_WITH_POSTGRES
+    // PostgreSQL backend
+    if (backend == "postgres" || backend == "postgresql" || backend == "pg") {
+        PostgresMindConfig config;
+        config.host = pg_host;
+        config.port = pg_port;
+        config.dbname = pg_db;
+        config.user = pg_user;
+        config.password = pg_pass;
+
+        PostgresMind mind(config);
+
+#ifdef CHITTA_WITH_ONNX
+        if (yantra) mind.attach_yantra(yantra);
+#endif
+
+        if (!mind.open()) {
+            std::cerr << "Failed to connect to PostgreSQL at " << pg_host << ":" << pg_port << "\n";
+            return 1;
+        }
+
+        std::cerr << "[Backend] PostgreSQL (" << pg_host << ":" << pg_port << "/" << pg_db << ")\n";
+
+        int result = 0;
+        if (command == "daemon") {
+            // Use PostgresRpcHandler
+            DaemonLock lock;
+            if (!acquire_lock(mind_path, lock)) {
+                std::cerr << "[daemon] Another daemon is running\n";
+                return 1;
+            }
+
+            if (!pid_file.empty()) {
+                std::ofstream pf(pid_file);
+                if (pf) pf << getpid() << "\n";
+            }
+
+            SocketServer server(sock_path);
+            if (!server.start()) {
+                std::cerr << "[daemon] Failed to start socket server\n";
+                release_lock(lock);
+                return 1;
+            }
+
+            PostgresRpcHandler handler(&mind);
+
+            std::signal(SIGTERM, daemon_signal_handler);
+            std::signal(SIGINT, daemon_signal_handler);
+            std::signal(SIGPIPE, SIG_IGN);
+
+            std::cerr << "[daemon] Started PostgreSQL backend (socket=" << sock_path << ")\n";
+
+            std::atomic<size_t> cycle_count{0};
+            std::thread maintenance([&]() {
+                auto interval_secs = std::chrono::seconds(interval);
+                auto last_sync = std::chrono::steady_clock::now();
+                while (daemon_running) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                    auto now_time = std::chrono::steady_clock::now();
+                    if (now_time - last_sync >= interval_secs) {
+                        last_sync = now_time;
+                        cycle_count++;
+                        try {
+                            mind.tick();
+                        } catch (const std::exception& e) {
+                            std::cerr << "[maint] Cycle failed: " << e.what() << "\n";
+                        }
+                    }
+                }
+            });
+
+            while (daemon_running) {
+                auto requests = server.poll(100);
+                for (const auto& req : requests) {
+                    if (req.data == "stats") {
+                        std::ostringstream oss;
+                        oss << "{\"version\":\"" << CHITTA_VERSION << "\","
+                            << "\"backend\":\"postgres\","
+                            << "\"nodes\":" << mind.size() << ","
+                            << "\"triplets\":" << mind.triplet_count() << "}";
+                        server.respond(req.client_fd, oss.str());
+                        continue;
+                    }
+                    if (req.data == "shutdown") {
+                        server.respond(req.client_fd, R"({"status":"shutting_down"})");
+                        daemon_running = false;
+                        continue;
+                    }
+                    try {
+                        auto request = json::parse(req.data);
+                        auto response = handler.handle(request);
+                        server.respond(req.client_fd, response.dump());
+                    } catch (const std::exception& e) {
+                        std::string error = R"({"jsonrpc":"2.0","error":{"code":-32700,"message":")"
+                                          + std::string(e.what()) + R"("},"id":null})";
+                        server.respond(req.client_fd, error);
+                    }
+                }
+            }
+
+            maintenance.join();
+            server.stop();
+            if (!pid_file.empty()) std::remove(pid_file.c_str());
+            release_lock(lock);
+            std::cerr << "[daemon] Stopped\n";
+        } else if (command == "stats") {
+            auto h = mind.health();
+            std::cout << "Soul Statistics (PostgreSQL)\n";
+            std::cout << "═══════════════════════════════\n";
+            std::cout << "  Backend:  PostgreSQL\n";
+            std::cout << "  Host:     " << pg_host << ":" << pg_port << "\n";
+            std::cout << "  Database: " << pg_db << "\n";
+            std::cout << "  Nodes:    " << mind.size() << "\n";
+            std::cout << "  Triplets: " << mind.triplet_count() << "\n";
+            std::cout << "  Yantra:   " << (mind.has_yantra() ? "ready" : "not attached") << "\n";
+        } else {
+            std::cerr << "Unknown command: " << command << "\n";
+            result = 1;
+        }
+
+        mind.close();
+        return result;
+    }
+#endif
+
+    // Default: DuckDB backend
+    DuckDBMindConfig config;
+    config.path = mind_path;
+    DuckDBMind mind(config);
+
+#ifdef CHITTA_WITH_ONNX
+    if (yantra) mind.attach_yantra(yantra);
+#endif
+
+    if (!mind.open()) {
+        std::cerr << "Failed to open mind at " << mind_path << "\n";
+        return 1;
+    }
+
+    std::cerr << "[Backend] DuckDB (" << mind_path << ")\n";
+
+    int result = 0;
+    if (command == "daemon") {
+        result = cmd_daemon(mind, interval, sock_path, mind_path, pid_file);
+    } else if (command == "stats") {
+        result = cmd_stats(mind);
+    } else {
+        std::cerr << "Unknown command: " << command << "\n";
+        print_usage(argv[0]);
+        result = 1;
+    }
+
+    mind.close();
+    return result;
+}

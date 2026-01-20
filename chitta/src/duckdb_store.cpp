@@ -1,0 +1,908 @@
+#include "chitta/duckdb_store.hpp"
+#include <iostream>
+#include <sstream>
+#include <cmath>
+#include <chrono>
+
+namespace chitta {
+
+DuckDBStore::~DuckDBStore() {
+    close();
+}
+
+bool DuckDBStore::open(const std::string& path) {
+    std::lock_guard lock(mutex_);
+
+    if (db_) {
+        std::cerr << "[DuckDBStore] Already open\n";
+        return false;
+    }
+
+    try {
+        path_ = path;
+
+        // Create database with WAL enabled
+        duckdb::DBConfig config;
+        config.SetOption("enable_external_access", duckdb::Value(true));
+
+        db_ = std::make_unique<duckdb::DuckDB>(path_, &config);
+        conn_ = std::make_unique<duckdb::Connection>(*db_);
+
+        // Load extensions
+        if (!load_extensions()) {
+            std::cerr << "[DuckDBStore] Warning: Some extensions failed to load\n";
+        }
+
+        // Create schema
+        if (!create_schema()) {
+            std::cerr << "[DuckDBStore] Failed to create schema\n";
+            close();
+            return false;
+        }
+
+        // Create vector index (if VSS available)
+        if (vss_loaded_) {
+            create_vector_index();
+        }
+
+        std::cerr << "[DuckDBStore] Opened database at " << path_ << "\n";
+        return true;
+
+    } catch (const std::exception& e) {
+        std::cerr << "[DuckDBStore] Failed to open: " << e.what() << "\n";
+        db_.reset();
+        conn_.reset();
+        return false;
+    }
+}
+
+void DuckDBStore::close() {
+    std::lock_guard lock(mutex_);
+    conn_.reset();
+    db_.reset();
+    vss_loaded_ = false;
+    pgq_loaded_ = false;
+}
+
+bool DuckDBStore::load_extensions() {
+    // Try to load VSS extension for vector search
+    try {
+        conn_->Query("INSTALL vss; LOAD vss;");
+        vss_loaded_ = true;
+        std::cerr << "[DuckDBStore] VSS extension loaded\n";
+    } catch (...) {
+        std::cerr << "[DuckDBStore] VSS extension not available (will use brute force)\n";
+    }
+
+    // Try to load DuckPGQ for graph queries
+    try {
+        conn_->Query("INSTALL duckpgq FROM community; LOAD duckpgq;");
+        pgq_loaded_ = true;
+        std::cerr << "[DuckDBStore] DuckPGQ extension loaded\n";
+    } catch (...) {
+        std::cerr << "[DuckDBStore] DuckPGQ not available (will use SQL joins)\n";
+    }
+
+    return true;
+}
+
+bool DuckDBStore::create_schema() {
+    // Memory table with ARRAY for embeddings
+    if (!execute(R"(
+        CREATE TABLE IF NOT EXISTS memory (
+            id BIGINT PRIMARY KEY,
+            kind VARCHAR,
+            content VARCHAR,
+            confidence FLOAT,
+            decay_rate FLOAT,
+            created_at BIGINT,
+            accessed_at BIGINT,
+            embedding FLOAT[384]
+        )
+    )")) {
+        return false;
+    }
+
+    // Triplet table for graph relationships
+    if (!execute(R"(
+        CREATE TABLE IF NOT EXISTS triplet (
+            id BIGINT PRIMARY KEY,
+            subject VARCHAR,
+            predicate VARCHAR,
+            object VARCHAR,
+            weight FLOAT DEFAULT 1.0,
+            created_at BIGINT
+        )
+    )")) {
+        return false;
+    }
+
+    // Indexes for triplet queries
+    execute("CREATE INDEX IF NOT EXISTS idx_triplet_subject ON triplet(subject)");
+    execute("CREATE INDEX IF NOT EXISTS idx_triplet_object ON triplet(object)");
+    execute("CREATE INDEX IF NOT EXISTS idx_triplet_predicate ON triplet(predicate)");
+
+    // Symbol table for code intelligence
+    if (!execute(R"(
+        CREATE TABLE IF NOT EXISTS symbol (
+            id BIGINT PRIMARY KEY,
+            kind VARCHAR,
+            name VARCHAR,
+            signature VARCHAR,
+            file_path VARCHAR,
+            line_start INTEGER,
+            line_end INTEGER,
+            repo_id BIGINT,
+            embedding FLOAT[384]
+        )
+    )")) {
+        return false;
+    }
+
+    // Call graph table
+    if (!execute(R"(
+        CREATE TABLE IF NOT EXISTS call_edge (
+            caller_id BIGINT,
+            callee_id BIGINT,
+            PRIMARY KEY (caller_id, callee_id)
+        )
+    )")) {
+        return false;
+    }
+
+    // Index for symbol lookup
+    execute("CREATE INDEX IF NOT EXISTS idx_symbol_name ON symbol(name)");
+    execute("CREATE INDEX IF NOT EXISTS idx_symbol_kind ON symbol(kind)");
+
+    // Sequence for IDs
+    execute("CREATE SEQUENCE IF NOT EXISTS memory_seq START 1");
+    execute("CREATE SEQUENCE IF NOT EXISTS triplet_seq START 1");
+    execute("CREATE SEQUENCE IF NOT EXISTS symbol_seq START 1");
+
+    return true;
+}
+
+bool DuckDBStore::create_vector_index() {
+    if (!vss_loaded_) return false;
+
+    // Enable experimental persistence for HNSW
+    execute("SET hnsw_enable_experimental_persistence = true");
+
+    // Create HNSW index on memory embeddings
+    try {
+        execute(R"(
+            CREATE INDEX IF NOT EXISTS memory_embedding_idx
+            ON memory USING HNSW (embedding)
+            WITH (metric = 'cosine')
+        )");
+        std::cerr << "[DuckDBStore] Created HNSW index on memory.embedding\n";
+        return true;
+    } catch (...) {
+        std::cerr << "[DuckDBStore] Failed to create HNSW index\n";
+        return false;
+    }
+}
+
+bool DuckDBStore::execute(const std::string& sql) {
+    try {
+        auto result = conn_->Query(sql);
+        if (result->HasError()) {
+            std::cerr << "[DuckDBStore] Query error: " << result->GetError() << "\n";
+            return false;
+        }
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "[DuckDBStore] Exception: " << e.what() << "\n";
+        return false;
+    }
+}
+
+std::unique_ptr<duckdb::QueryResult> DuckDBStore::query(const std::string& sql) {
+    try {
+        return conn_->Query(sql);
+    } catch (const std::exception& e) {
+        std::cerr << "[DuckDBStore] Query exception: " << e.what() << "\n";
+        return nullptr;
+    }
+}
+
+std::string DuckDBStore::embedding_to_sql(const std::vector<float>& embedding) {
+    std::ostringstream ss;
+    ss << "[";
+    for (size_t i = 0; i < embedding.size(); ++i) {
+        if (i > 0) ss << ",";
+        ss << embedding[i];
+    }
+    ss << "]::FLOAT[384]";
+    return ss.str();
+}
+
+int64_t DuckDBStore::remember(
+    const std::string& content,
+    const std::string& kind,
+    const std::vector<float>& embedding,
+    float confidence,
+    float decay_rate
+) {
+    std::lock_guard lock(mutex_);
+    if (!db_) return -1;
+
+    Timestamp now_ts = now();
+
+    // Escape content for SQL
+    std::string escaped_content;
+    for (char c : content) {
+        if (c == '\'') escaped_content += "''";
+        else escaped_content += c;
+    }
+
+    std::ostringstream sql;
+    sql << "INSERT INTO memory (id, kind, content, confidence, decay_rate, created_at, accessed_at, embedding) "
+        << "VALUES (nextval('memory_seq'), '" << kind << "', '" << escaped_content << "', "
+        << confidence << ", " << decay_rate << ", " << now_ts << ", " << now_ts << ", "
+        << embedding_to_sql(embedding) << ") RETURNING id";
+
+    auto result = query(sql.str());
+    if (!result || result->HasError()) {
+        return -1;
+    }
+
+    auto chunk = result->Fetch();
+    if (chunk && chunk->size() > 0) {
+        return chunk->GetValue(0, 0).GetValue<int64_t>();
+    }
+
+    return -1;
+}
+
+std::vector<MemoryResult> DuckDBStore::recall(
+    const std::vector<float>& query_embedding,
+    size_t k
+) {
+    std::lock_guard lock(mutex_);
+    std::vector<MemoryResult> results;
+    if (!db_) return results;
+
+    std::ostringstream sql;
+
+    if (vss_loaded_) {
+        // Use HNSW index if available
+        sql << "SELECT id, kind, content, confidence, created_at, accessed_at, "
+            << "array_cosine_similarity(embedding, " << embedding_to_sql(query_embedding) << ") AS similarity "
+            << "FROM memory "
+            << "ORDER BY array_distance(embedding, " << embedding_to_sql(query_embedding) << ") "
+            << "LIMIT " << k;
+    } else {
+        // Brute force cosine similarity
+        sql << "SELECT id, kind, content, confidence, created_at, accessed_at, "
+            << "array_cosine_similarity(embedding, " << embedding_to_sql(query_embedding) << ") AS similarity "
+            << "FROM memory "
+            << "ORDER BY similarity DESC "
+            << "LIMIT " << k;
+    }
+
+    auto result = query(sql.str());
+    if (!result || result->HasError()) {
+        return results;
+    }
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            MemoryResult r;
+            r.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            r.kind = chunk->GetValue(1, i).ToString();
+            r.content = chunk->GetValue(2, i).ToString();
+            r.confidence = chunk->GetValue(3, i).GetValue<float>();
+            r.created_at = chunk->GetValue(4, i).GetValue<int64_t>();
+            r.accessed_at = chunk->GetValue(5, i).GetValue<int64_t>();
+            r.similarity = chunk->GetValue(6, i).GetValue<float>();
+            results.push_back(r);
+        }
+    }
+
+    return results;
+}
+
+bool DuckDBStore::strengthen(int64_t id, float amount) {
+    std::lock_guard lock(mutex_);
+    if (!db_) return false;
+
+    std::ostringstream sql;
+    sql << "UPDATE memory SET confidence = LEAST(confidence + " << amount << ", 1.0), "
+        << "accessed_at = " << now() << " WHERE id = " << id;
+
+    return execute(sql.str());
+}
+
+bool DuckDBStore::weaken(int64_t id, float amount) {
+    std::lock_guard lock(mutex_);
+    if (!db_) return false;
+
+    std::ostringstream sql;
+    sql << "UPDATE memory SET confidence = GREATEST(confidence - " << amount << ", 0.0) "
+        << "WHERE id = " << id;
+
+    return execute(sql.str());
+}
+
+bool DuckDBStore::forget(int64_t id) {
+    std::lock_guard lock(mutex_);
+    if (!db_) return false;
+
+    std::ostringstream sql;
+    sql << "DELETE FROM memory WHERE id = " << id;
+
+    return execute(sql.str());
+}
+
+bool DuckDBStore::touch(int64_t id) {
+    std::lock_guard lock(mutex_);
+    if (!db_) return false;
+
+    std::ostringstream sql;
+    sql << "UPDATE memory SET accessed_at = " << now() << " WHERE id = " << id;
+
+    return execute(sql.str());
+}
+
+std::optional<MemoryResult> DuckDBStore::get_memory(int64_t id) {
+    std::lock_guard lock(mutex_);
+    if (!db_) return std::nullopt;
+
+    std::ostringstream sql;
+    sql << "SELECT id, kind, content, confidence, created_at, accessed_at "
+        << "FROM memory WHERE id = " << id;
+
+    auto result = query(sql.str());
+    if (!result || result->HasError()) {
+        return std::nullopt;
+    }
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) {
+        return std::nullopt;
+    }
+
+    MemoryResult r;
+    r.id = chunk->GetValue(0, 0).GetValue<int64_t>();
+    r.kind = chunk->GetValue(1, 0).ToString();
+    r.content = chunk->GetValue(2, 0).ToString();
+    r.confidence = chunk->GetValue(3, 0).GetValue<float>();
+    r.created_at = chunk->GetValue(4, 0).GetValue<int64_t>();
+    r.accessed_at = chunk->GetValue(5, 0).GetValue<int64_t>();
+    r.similarity = 1.0f;
+
+    return r;
+}
+
+bool DuckDBStore::update_content(int64_t id, const std::string& new_content) {
+    std::lock_guard lock(mutex_);
+    if (!db_) return false;
+
+    // Escape content for SQL
+    std::string escaped = new_content;
+    size_t pos = 0;
+    while ((pos = escaped.find('\'', pos)) != std::string::npos) {
+        escaped.replace(pos, 1, "''");
+        pos += 2;
+    }
+
+    std::ostringstream sql;
+    sql << "UPDATE memory SET content = '" << escaped << "', "
+        << "accessed_at = " << now() << " WHERE id = " << id;
+
+    return execute(sql.str());
+}
+
+bool DuckDBStore::add_tag(int64_t id, const std::string& tag) {
+    std::lock_guard lock(mutex_);
+    if (!db_) return false;
+
+    // Check if tags table exists, create if not
+    execute("CREATE TABLE IF NOT EXISTS memory_tags ("
+            "memory_id BIGINT, tag VARCHAR, "
+            "PRIMARY KEY (memory_id, tag))");
+
+    // Escape tag
+    std::string escaped = tag;
+    size_t pos = 0;
+    while ((pos = escaped.find('\'', pos)) != std::string::npos) {
+        escaped.replace(pos, 1, "''");
+        pos += 2;
+    }
+
+    std::ostringstream sql;
+    sql << "INSERT OR IGNORE INTO memory_tags (memory_id, tag) VALUES ("
+        << id << ", '" << escaped << "')";
+
+    return execute(sql.str());
+}
+
+bool DuckDBStore::remove_tag(int64_t id, const std::string& tag) {
+    std::lock_guard lock(mutex_);
+    if (!db_) return false;
+
+    std::string escaped = tag;
+    size_t pos = 0;
+    while ((pos = escaped.find('\'', pos)) != std::string::npos) {
+        escaped.replace(pos, 1, "''");
+        pos += 2;
+    }
+
+    std::ostringstream sql;
+    sql << "DELETE FROM memory_tags WHERE memory_id = " << id
+        << " AND tag = '" << escaped << "'";
+
+    return execute(sql.str());
+}
+
+std::vector<std::string> DuckDBStore::get_tags(int64_t id) {
+    std::lock_guard lock(mutex_);
+    std::vector<std::string> tags;
+    if (!db_) return tags;
+
+    std::ostringstream sql;
+    sql << "SELECT tag FROM memory_tags WHERE memory_id = " << id;
+
+    auto result = query(sql.str());
+    if (!result || result->HasError()) return tags;
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); i++) {
+            tags.push_back(chunk->GetValue(0, i).ToString());
+        }
+    }
+
+    return tags;
+}
+
+size_t DuckDBStore::apply_decay() {
+    std::lock_guard lock(mutex_);
+    if (!db_) return 0;
+
+    Timestamp current = now();
+
+    // Apply exponential decay based on time since last access
+    std::ostringstream sql;
+    sql << "UPDATE memory SET confidence = confidence * exp(-decay_rate * "
+        << "(" << current << " - accessed_at) / 86400000.0) "
+        << "WHERE decay_rate > 0";
+
+    execute(sql.str());
+
+    // Return count of memories with decay
+    auto result = query("SELECT COUNT(*) FROM memory WHERE decay_rate > 0");
+    if (result && !result->HasError()) {
+        auto chunk = result->Fetch();
+        if (chunk && chunk->size() > 0) {
+            return chunk->GetValue(0, 0).GetValue<int64_t>();
+        }
+    }
+    return 0;
+}
+
+size_t DuckDBStore::prune(float threshold, float min_age_days) {
+    std::lock_guard lock(mutex_);
+    if (!db_) return 0;
+
+    Timestamp current = now();
+    Timestamp min_created = current - static_cast<int64_t>(min_age_days * 86400000.0);
+
+    // Count first
+    std::ostringstream count_sql;
+    count_sql << "SELECT COUNT(*) FROM memory WHERE confidence < " << threshold
+              << " AND created_at < " << min_created;
+
+    size_t count = 0;
+    auto result = query(count_sql.str());
+    if (result && !result->HasError()) {
+        auto chunk = result->Fetch();
+        if (chunk && chunk->size() > 0) {
+            count = chunk->GetValue(0, 0).GetValue<int64_t>();
+        }
+    }
+
+    // Delete
+    std::ostringstream del_sql;
+    del_sql << "DELETE FROM memory WHERE confidence < " << threshold
+            << " AND created_at < " << min_created;
+    execute(del_sql.str());
+
+    return count;
+}
+
+bool DuckDBStore::connect(
+    const std::string& subject,
+    const std::string& predicate,
+    const std::string& object,
+    float weight
+) {
+    std::lock_guard lock(mutex_);
+    if (!db_) return false;
+
+    // Escape strings
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    std::ostringstream sql;
+    sql << "INSERT INTO triplet (id, subject, predicate, object, weight, created_at) VALUES ("
+        << "nextval('triplet_seq'), "
+        << "'" << escape(subject) << "', "
+        << "'" << escape(predicate) << "', "
+        << "'" << escape(object) << "', "
+        << weight << ", " << now() << ")";
+
+    return execute(sql.str());
+}
+
+std::vector<StringTriplet> DuckDBStore::query_subject(const std::string& subject) {
+    std::lock_guard lock(mutex_);
+    std::vector<StringTriplet> results;
+    if (!db_) return results;
+
+    std::string escaped;
+    for (char c : subject) {
+        if (c == '\'') escaped += "''";
+        else escaped += c;
+    }
+
+    std::ostringstream sql;
+    sql << "SELECT subject, predicate, object, weight FROM triplet "
+        << "WHERE subject = '" << escaped << "'";
+
+    auto result = query(sql.str());
+    if (!result || result->HasError()) return results;
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            StringTriplet t;
+            t.subject = chunk->GetValue(0, i).ToString();
+            t.predicate = chunk->GetValue(1, i).ToString();
+            t.object = chunk->GetValue(2, i).ToString();
+            t.weight = chunk->GetValue(3, i).GetValue<float>();
+            results.push_back(t);
+        }
+    }
+
+    return results;
+}
+
+std::vector<StringTriplet> DuckDBStore::query_object(const std::string& object) {
+    std::lock_guard lock(mutex_);
+    std::vector<StringTriplet> results;
+    if (!db_) return results;
+
+    std::string escaped;
+    for (char c : object) {
+        if (c == '\'') escaped += "''";
+        else escaped += c;
+    }
+
+    std::ostringstream sql;
+    sql << "SELECT subject, predicate, object, weight FROM triplet "
+        << "WHERE object = '" << escaped << "'";
+
+    auto result = query(sql.str());
+    if (!result || result->HasError()) return results;
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            StringTriplet t;
+            t.subject = chunk->GetValue(0, i).ToString();
+            t.predicate = chunk->GetValue(1, i).ToString();
+            t.object = chunk->GetValue(2, i).ToString();
+            t.weight = chunk->GetValue(3, i).GetValue<float>();
+            results.push_back(t);
+        }
+    }
+
+    return results;
+}
+
+std::vector<StringTriplet> DuckDBStore::query_predicate(const std::string& predicate) {
+    std::lock_guard lock(mutex_);
+    std::vector<StringTriplet> results;
+    if (!db_) return results;
+
+    std::string escaped;
+    for (char c : predicate) {
+        if (c == '\'') escaped += "''";
+        else escaped += c;
+    }
+
+    std::ostringstream sql;
+    sql << "SELECT subject, predicate, object, weight FROM triplet "
+        << "WHERE predicate = '" << escaped << "'";
+
+    auto result = query(sql.str());
+    if (!result || result->HasError()) return results;
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            StringTriplet t;
+            t.subject = chunk->GetValue(0, i).ToString();
+            t.predicate = chunk->GetValue(1, i).ToString();
+            t.object = chunk->GetValue(2, i).ToString();
+            t.weight = chunk->GetValue(3, i).GetValue<float>();
+            results.push_back(t);
+        }
+    }
+
+    return results;
+}
+
+int64_t DuckDBStore::add_symbol(const Symbol& sym, const std::vector<float>& embedding) {
+    std::lock_guard lock(mutex_);
+    if (!db_) return -1;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    // Use zero vector if no embedding provided
+    std::vector<float> embed = embedding;
+    if (embed.empty()) {
+        embed.resize(EMBED_DIM, 0.0f);
+    }
+
+    std::ostringstream sql;
+    sql << "INSERT INTO symbol (id, kind, name, signature, file_path, line_start, line_end, repo_id, embedding) "
+        << "VALUES (nextval('symbol_seq'), "
+        << "'" << escape(sym.kind) << "', "
+        << "'" << escape(sym.name) << "', "
+        << "'" << escape(sym.signature) << "', "
+        << "'" << escape(sym.file_path) << "', "
+        << sym.line_start << ", "
+        << sym.line_end << ", "
+        << sym.repo_id << ", "
+        << embedding_to_sql(embed) << ") RETURNING id";
+
+    auto result = query(sql.str());
+    if (!result || result->HasError()) {
+        return -1;
+    }
+
+    auto chunk = result->Fetch();
+    if (chunk && chunk->size() > 0) {
+        return chunk->GetValue(0, 0).GetValue<int64_t>();
+    }
+
+    return -1;
+}
+
+std::vector<Symbol> DuckDBStore::find_symbol(const std::string& name, const std::string& kind) {
+    std::lock_guard lock(mutex_);
+    std::vector<Symbol> results;
+    if (!db_) return results;
+
+    std::string escaped_name;
+    for (char c : name) {
+        if (c == '\'') escaped_name += "''";
+        else escaped_name += c;
+    }
+
+    std::ostringstream sql;
+    sql << "SELECT id, kind, name, signature, file_path, line_start, line_end, repo_id "
+        << "FROM symbol WHERE name LIKE '%" << escaped_name << "%'";
+
+    if (!kind.empty()) {
+        std::string escaped_kind;
+        for (char c : kind) {
+            if (c == '\'') escaped_kind += "''";
+            else escaped_kind += c;
+        }
+        sql << " AND kind = '" << escaped_kind << "'";
+    }
+
+    auto result = query(sql.str());
+    if (!result || result->HasError()) return results;
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            Symbol s;
+            s.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            s.kind = chunk->GetValue(1, i).ToString();
+            s.name = chunk->GetValue(2, i).ToString();
+            s.signature = chunk->GetValue(3, i).ToString();
+            s.file_path = chunk->GetValue(4, i).ToString();
+            s.line_start = chunk->GetValue(5, i).GetValue<int32_t>();
+            s.line_end = chunk->GetValue(6, i).GetValue<int32_t>();
+            s.repo_id = chunk->GetValue(7, i).GetValue<int64_t>();
+            results.push_back(s);
+        }
+    }
+
+    return results;
+}
+
+std::vector<int64_t> DuckDBStore::callers(int64_t symbol_id) {
+    std::lock_guard lock(mutex_);
+    std::vector<int64_t> results;
+    if (!db_) return results;
+
+    std::ostringstream sql;
+    sql << "SELECT caller_id FROM call_edge WHERE callee_id = " << symbol_id;
+
+    auto result = query(sql.str());
+    if (!result || result->HasError()) return results;
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            results.push_back(chunk->GetValue(0, i).GetValue<int64_t>());
+        }
+    }
+
+    return results;
+}
+
+std::vector<int64_t> DuckDBStore::callees(int64_t symbol_id) {
+    std::lock_guard lock(mutex_);
+    std::vector<int64_t> results;
+    if (!db_) return results;
+
+    std::ostringstream sql;
+    sql << "SELECT callee_id FROM call_edge WHERE caller_id = " << symbol_id;
+
+    auto result = query(sql.str());
+    if (!result || result->HasError()) return results;
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            results.push_back(chunk->GetValue(0, i).GetValue<int64_t>());
+        }
+    }
+
+    return results;
+}
+
+bool DuckDBStore::add_call(int64_t caller_id, int64_t callee_id) {
+    std::lock_guard lock(mutex_);
+    if (!db_) return false;
+
+    std::ostringstream sql;
+    sql << "INSERT OR IGNORE INTO call_edge (caller_id, callee_id) VALUES ("
+        << caller_id << ", " << callee_id << ")";
+
+    return execute(sql.str());
+}
+
+StoreHealth DuckDBStore::health() {
+    std::lock_guard lock(mutex_);
+    StoreHealth h;
+    h.is_open = (db_ != nullptr);
+
+    if (!db_) return h;
+
+    // Count memories and avg confidence
+    auto result = query("SELECT COUNT(*), AVG(confidence) FROM memory");
+    if (result && !result->HasError()) {
+        auto chunk = result->Fetch();
+        if (chunk && chunk->size() > 0) {
+            h.total_memories = chunk->GetValue(0, 0).GetValue<int64_t>();
+            if (!chunk->GetValue(1, 0).IsNull()) {
+                h.avg_confidence = chunk->GetValue(1, 0).GetValue<double>();
+            }
+        }
+    }
+
+    // Count symbols
+    result = query("SELECT COUNT(*) FROM symbol");
+    if (result && !result->HasError()) {
+        auto chunk = result->Fetch();
+        if (chunk && chunk->size() > 0) {
+            h.total_symbols = chunk->GetValue(0, 0).GetValue<int64_t>();
+        }
+    }
+
+    // Count triplets
+    result = query("SELECT COUNT(*) FROM triplet");
+    if (result && !result->HasError()) {
+        auto chunk = result->Fetch();
+        if (chunk && chunk->size() > 0) {
+            h.total_triplets = chunk->GetValue(0, 0).GetValue<int64_t>();
+        }
+    }
+
+    return h;
+}
+
+size_t DuckDBStore::memory_count() {
+    std::lock_guard lock(mutex_);
+    if (!db_) return 0;
+
+    auto result = query("SELECT COUNT(*) FROM memory");
+    if (result && !result->HasError()) {
+        auto chunk = result->Fetch();
+        if (chunk && chunk->size() > 0) {
+            return chunk->GetValue(0, 0).GetValue<int64_t>();
+        }
+    }
+    return 0;
+}
+
+size_t DuckDBStore::triplet_count() {
+    std::lock_guard lock(mutex_);
+    if (!db_) return 0;
+
+    auto result = query("SELECT COUNT(*) FROM triplet");
+    if (result && !result->HasError()) {
+        auto chunk = result->Fetch();
+        if (chunk && chunk->size() > 0) {
+            return chunk->GetValue(0, 0).GetValue<int64_t>();
+        }
+    }
+    return 0;
+}
+
+size_t DuckDBStore::symbol_count() {
+    std::lock_guard lock(mutex_);
+    if (!db_) return 0;
+
+    auto result = query("SELECT COUNT(*) FROM symbol");
+    if (result && !result->HasError()) {
+        auto chunk = result->Fetch();
+        if (chunk && chunk->size() > 0) {
+            return chunk->GetValue(0, 0).GetValue<int64_t>();
+        }
+    }
+    return 0;
+}
+
+std::string DuckDBStore::kind_to_string(NodeType type) {
+    switch (type) {
+        case NodeType::Wisdom: return "wisdom";
+        case NodeType::Belief: return "belief";
+        case NodeType::Intention: return "intention";
+        case NodeType::Episode: return "episode";
+        case NodeType::Symbol: return "symbol";
+        case NodeType::Dream: return "dream";
+        default: return "unknown";
+    }
+}
+
+NodeType DuckDBStore::string_to_kind(const std::string& kind) {
+    if (kind == "wisdom") return NodeType::Wisdom;
+    if (kind == "belief") return NodeType::Belief;
+    if (kind == "intention") return NodeType::Intention;
+    if (kind == "episode") return NodeType::Episode;
+    if (kind == "symbol") return NodeType::Symbol;
+    if (kind == "dream") return NodeType::Dream;
+    return NodeType::Episode;
+}
+
+}  // namespace chitta

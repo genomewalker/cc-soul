@@ -17,6 +17,7 @@
 #include <vector>
 #include <atomic>
 #include <functional>
+#include <iostream>
 
 namespace chitta {
 

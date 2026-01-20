@@ -1877,6 +1877,14 @@ public:
         return session_context_;
     }
 
+    // Storage accessor (for rebuild_indexes tool)
+    TieredStorage& storage() { return storage_; }
+    const TieredStorage& storage() const { return storage_; }
+
+    // BM25 index accessor (for rebuild_indexes tool)
+    BM25Index& bm25_index() { return bm25_index_; }
+    const BM25Index& bm25_index() const { return bm25_index_; }
+
     // Build a fresh session context from current state
     // Call this at session start or when context needs refresh
     SessionContext build_session_context() {
@@ -2764,7 +2772,8 @@ public:
 
         auto arthas = yantra_->transform_batch(texts);
 
-        // Update nodes with new embeddings
+        // Update nodes with new embeddings via proper storage path
+        // This ensures both the float vector AND quantized storage are updated
         size_t updated = 0;
         for (size_t i = 0; i < to_regenerate.size() && i < arthas.size(); ++i) {
             const auto& [id, text] = to_regenerate[i];
@@ -2772,8 +2781,14 @@ public:
 
             if (!artha.nu.is_zero()) {
                 if (Node* node = storage_.get(id)) {
-                    node->nu = artha.nu;
-                    updated++;
+                    // Create updated node with new embedding
+                    Node updated_node = *node;
+                    updated_node.nu = artha.nu;
+
+                    // Update via storage layer to persist to UnifiedIndex
+                    if (storage_.update_node(id, updated_node)) {
+                        updated++;
+                    }
                 }
             }
         }

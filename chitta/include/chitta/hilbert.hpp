@@ -9,6 +9,8 @@
 #include <cstdint>
 #include <array>
 #include <algorithm>
+#include <functional>
+#include <vector>
 
 namespace chitta {
 
@@ -134,7 +136,7 @@ template<typename T>
 void sort_by_hilbert(std::vector<T>& items,
                      std::function<uint64_t(const T&)> key_func) {
     std::sort(items.begin(), items.end(),
-        [&key_func](const T& a, const T& b) {
+        [&](const T& a, const T& b) {
             return key_func(a) < key_func(b);
         });
 }

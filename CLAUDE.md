@@ -679,17 +679,52 @@ Most of the time, I don't use tools. The hooks do the work. I just think.
 Access via hooks' `call_mcp` function or pipe directly to `chitta`.
 Only needed for: deep zoom recalls, specific tag searches, explicit feedback, realm switching, human review.
 
-**Code Intelligence** (codebase understanding):
-- `learn_codebase` — index a codebase with tree-sitter AST parsing
-- `extract_symbols` — extract symbols from a single file
-- `code_summary` — summarize code structure
-- `hierarchical_state` — get L0/L1/L2 context for token-efficient injection
-- `staleness_stats` — check which indexed files are stale
+## Code Intelligence
 
-Use `/codebase-learn <path>` skill to index a new codebase. Once indexed:
-- Code structure surfaces via triplet queries
-- `query --subject "file.cpp"` shows relationships
-- Hierarchical state provides compressed context at session start
+**When I need to understand code, I use the soul — not grep.**
+
+### First: Index the Codebase
+```bash
+/codebase-learn /path/to/project
+```
+This skill does two things:
+1. **C++ tool** (`learn_codebase`): AST parsing → Symbol nodes + triplets
+2. **Claude**: Adds architectural SSL patterns
+
+**Always use the skill, not the raw command.** The skill orchestrates the full workflow.
+
+### Then: Query Naturally
+
+| Question | Tool | Example |
+|----------|------|---------|
+| Where is X defined? | `code_search` | `chitta code_search --query "Mind" --kind class` |
+| What does file X contain? | `query` | `chitta query --subject "mind.hpp"` |
+| What methods does X have? | `query` | `chitta query --subject "Mind" --predicate contains` |
+| Overview of architecture? | `hierarchical_state` | `chitta hierarchical_state` |
+| What's changed? | `staleness_stats` | `chitta staleness_stats` |
+
+### How It Works
+
+Symbols are stored with:
+- `Vector::zeros()` — no embedding (exact match, not semantic)
+- Tags: `code`, `project:X`, `file:Y`, `kind:Z`, `line:N`
+- Triplets: `file contains symbol`, `class contains method`
+
+**I am the decoder.** The seed `"[chitta] Mind @mind.hpp:142"` is compressed, but I reconstruct:
+- Project: chitta
+- Symbol: Mind class
+- Location: mind.hpp line 142
+
+### Why Not Grep?
+
+| Grep | Code Intelligence |
+|------|-------------------|
+| Text matching only | Understands structure (class vs function vs variable) |
+| No relationships | Knows "Mind contains recall" |
+| Re-parses every time | Indexed once, queries fast |
+| No staleness tracking | Knows when files changed |
+
+**Use code intelligence for structure. Use grep only for text patterns.**
 
 ## Session Continuity
 
@@ -786,6 +821,55 @@ pkill -TERM chittad  # Graceful shutdown (saves state)
 ```
 
 The daemon auto-starts on next tool call.
+
+## Recovery and Repair
+
+When the mind becomes corrupted (crashes, WAL errors, zero results from recall):
+
+**Diagnosis:**
+```bash
+chitta soul_context                    # Check node count and health
+chitta recall --query "test" --limit 3  # Test if recall works
+```
+
+**Repair tools (via RPC):**
+| Tool | Purpose |
+|------|---------|
+| `rebuild_indexes` | Rebuild BM25 and tag indexes from stored nodes |
+| `delete_zero_vectors` | Remove nodes with zero vectors (corrupted code symbols) |
+
+```bash
+# Dry run first
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"rebuild_indexes","arguments":{"dry_run":true}}}' | nc -U /tmp/chitta-*.sock
+
+# Actual rebuild
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"rebuild_indexes","arguments":{}}}' | nc -U /tmp/chitta-*.sock
+```
+
+**Recovery from snapshots:**
+```bash
+# Stop daemon
+pkill -9 chittad
+
+# Find mind directory (follow symlink if needed)
+MIND_DIR=$(readlink -f ~/.claude/mind)
+
+# List available snapshots (if using NFS with snapshots)
+ls "$MIND_DIR/.snapshot/"
+
+# Restore from snapshot (choose one with good BM25 size)
+SNAP="$MIND_DIR/.snapshot/<snapshot-name>"
+rm -f "$MIND_DIR/chitta."*
+cp "$SNAP/chitta."* "$MIND_DIR/"
+
+# Restart daemon
+~/.claude/bin/chittad daemon &
+```
+
+**Signs of corruption:**
+- `rebuild_indexes` shows 0 documents indexed
+- `recall` returns empty for any query
+- All nodes have zero vectors (count_zero_vectors matches node_count)
 
 ## Self-Analysis Tools (Phase 3)
 
