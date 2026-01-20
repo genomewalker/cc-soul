@@ -15,9 +15,17 @@ set(ENABLE_ROARING_TESTS OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(roaring)
 
 # DuckDB - embedded database with vector search and graph queries
-# Uses system/conda installation
-find_library(DUCKDB_LIB duckdb HINTS "$ENV{CONDA_PREFIX}/lib")
-find_path(DUCKDB_INCLUDE duckdb.hpp HINTS "$ENV{CONDA_PREFIX}/include")
+# Uses system/conda installation, or custom paths via DUCKDB_INCLUDE_DIR/DUCKDB_LIB_DIR
+find_library(DUCKDB_LIB duckdb HINTS
+    "${DUCKDB_LIB_DIR}"
+    "$ENV{CONDA_PREFIX}/lib"
+    "/usr/local/lib"
+)
+find_path(DUCKDB_INCLUDE duckdb.hpp HINTS
+    "${DUCKDB_INCLUDE_DIR}"
+    "$ENV{CONDA_PREFIX}/include"
+    "/usr/local/include"
+)
 if(DUCKDB_LIB AND DUCKDB_INCLUDE)
     add_library(duckdb SHARED IMPORTED)
     set_target_properties(duckdb PROPERTIES

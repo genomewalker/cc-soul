@@ -45,13 +45,16 @@ jobs:
         run: |
           mkdir -p chitta/build bin
           cd chitta/build
+          export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
           cmake .. \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_RPATH="\$ORIGIN" \
             -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
-            -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc" \
+            -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc -L/usr/local/lib" \
             -DONNXRUNTIME_INCLUDE_DIR=/opt/onnxruntime/include \
-            -DONNXRUNTIME_LIB_DIR=/opt/onnxruntime/lib
+            -DONNXRUNTIME_LIB_DIR=/opt/onnxruntime/lib \
+            -DDUCKDB_INCLUDE_DIR=/usr/local/include \
+            -DDUCKDB_LIB_DIR=/usr/local/lib
           make -j$(nproc)
 
       - name: Verify binaries
@@ -64,7 +67,7 @@ jobs:
       - name: Run tests
         run: |
           cd chitta/build
-          LD_LIBRARY_PATH=/opt/onnxruntime/lib:$LD_LIBRARY_PATH ctest --output-on-failure || true
+          LD_LIBRARY_PATH=/opt/onnxruntime/lib:/usr/local/lib:$LD_LIBRARY_PATH ctest --output-on-failure || true
 
       - name: Package binaries
         run: |
