@@ -128,7 +128,8 @@ bool DuckDBStore::create_schema() {
             predicate VARCHAR,
             object VARCHAR,
             weight FLOAT DEFAULT 1.0,
-            created_at BIGINT
+            created_at BIGINT,
+            source_file VARCHAR DEFAULT ''
         )
     )")) {
         return false;
@@ -138,6 +139,7 @@ bool DuckDBStore::create_schema() {
     execute("CREATE INDEX IF NOT EXISTS idx_triplet_subject ON triplet(subject)");
     execute("CREATE INDEX IF NOT EXISTS idx_triplet_object ON triplet(object)");
     execute("CREATE INDEX IF NOT EXISTS idx_triplet_predicate ON triplet(predicate)");
+    execute("CREATE INDEX IF NOT EXISTS idx_triplet_source_file ON triplet(source_file)");
 
     // Symbol table for code intelligence
     if (!execute(R"(
@@ -197,6 +199,25 @@ bool DuckDBStore::create_schema() {
     execute("CREATE INDEX IF NOT EXISTS idx_ledger_session ON ledger(session_id)");
     execute("CREATE INDEX IF NOT EXISTS idx_ledger_project ON ledger(project)");
     execute("CREATE INDEX IF NOT EXISTS idx_ledger_created ON ledger(created_at DESC)");
+
+    // Code files table for incremental indexing
+    if (!execute(R"(
+        CREATE TABLE IF NOT EXISTS code_file (
+            path VARCHAR PRIMARY KEY,
+            project VARCHAR NOT NULL,
+            mtime BIGINT NOT NULL,
+            indexed_at BIGINT NOT NULL,
+            symbols_count INTEGER DEFAULT 0,
+            callsites_count INTEGER DEFAULT 0,
+            file_hash VARCHAR
+        )
+    )")) {
+        return false;
+    }
+
+    // Indexes for code file queries
+    execute("CREATE INDEX IF NOT EXISTS idx_code_file_project ON code_file(project)");
+    execute("CREATE INDEX IF NOT EXISTS idx_code_file_mtime ON code_file(mtime)");
 
     // Sequence for IDs
     execute("CREATE SEQUENCE IF NOT EXISTS memory_seq START 1");
@@ -787,14 +808,144 @@ bool DuckDBStore::connect(
     std::string norm_object = to_lower(object);
 
     std::ostringstream sql;
-    sql << "INSERT INTO triplet (id, subject, predicate, object, weight, created_at) VALUES ("
+    sql << "INSERT INTO triplet (id, subject, predicate, object, weight, created_at, source_file) VALUES ("
         << "nextval('triplet_seq'), "
         << "'" << escape(norm_subject) << "', "
         << "'" << escape(predicate) << "', "
         << "'" << escape(norm_object) << "', "
-        << weight << ", " << now() << ")";
+        << weight << ", " << now() << ", '')";
 
     return execute(sql.str());
+}
+
+bool DuckDBStore::connect_with_source(
+    const std::string& subject,
+    const std::string& predicate,
+    const std::string& object,
+    const std::string& source_file,
+    float weight
+) {
+    std::lock_guard lock(mutex_);
+    if (!db_) return false;
+
+    auto to_lower = [](const std::string& s) {
+        std::string result;
+        for (char c : s) result += std::tolower(c);
+        return result;
+    };
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    std::string norm_subject = to_lower(subject);
+    std::string norm_object = to_lower(object);
+
+    std::ostringstream sql;
+    sql << "INSERT INTO triplet (id, subject, predicate, object, weight, created_at, source_file) VALUES ("
+        << "nextval('triplet_seq'), "
+        << "'" << escape(norm_subject) << "', "
+        << "'" << escape(predicate) << "', "
+        << "'" << escape(norm_object) << "', "
+        << weight << ", " << now() << ", "
+        << "'" << escape(source_file) << "')";
+
+    return execute(sql.str());
+}
+
+size_t DuckDBStore::connect_batch(
+    const std::vector<std::tuple<std::string, std::string, std::string, std::string>>& triplets,
+    float weight
+) {
+    // Use SQL batch insert (Appender has issues with locks)
+    std::lock_guard lock(mutex_);
+    if (!db_ || triplets.empty()) return 0;
+    return connect_batch_sql(triplets, weight);
+}
+
+// Fallback SQL-based batch insert
+size_t DuckDBStore::connect_batch_sql(
+    const std::vector<std::tuple<std::string, std::string, std::string, std::string>>& triplets,
+    float weight
+) {
+    std::string sql;
+    sql.reserve(triplets.size() * 200);
+    std::string temp;
+    temp.reserve(256);
+
+    auto append_escaped_lower = [&sql, &temp](const std::string& s) {
+        temp.clear();
+        for (char c : s) {
+            char lc = (c >= 'A' && c <= 'Z') ? (c + 32) : c;
+            if (lc == '\'') { temp += '\''; temp += '\''; }
+            else temp += lc;
+        }
+        sql += temp;
+    };
+
+    auto append_escaped = [&sql, &temp](const std::string& s) {
+        temp.clear();
+        for (char c : s) {
+            if (c == '\'') { temp += '\''; temp += '\''; }
+            else temp += c;
+        }
+        sql += temp;
+    };
+
+    execute("BEGIN TRANSACTION");
+
+    int64_t ts = now();
+    char ts_buf[32];
+    int ts_len = snprintf(ts_buf, sizeof(ts_buf), "%ld", ts);
+    char weight_buf[32];
+    int weight_len = snprintf(weight_buf, sizeof(weight_buf), "%.2f", weight);
+
+    static constexpr size_t BATCH_SIZE = 500;
+    size_t batch_count = 0;
+    size_t inserted = 0;
+
+    for (const auto& [subject, predicate, object, source_file] : triplets) {
+        if (batch_count == 0) {
+            sql.clear();
+            sql += "INSERT INTO triplet (id, subject, predicate, object, weight, created_at, source_file) VALUES ";
+        } else {
+            sql += ", ";
+        }
+
+        sql += "(nextval('triplet_seq'), '";
+        append_escaped_lower(subject);
+        sql += "', '";
+        append_escaped(predicate);
+        sql += "', '";
+        append_escaped_lower(object);
+        sql += "', ";
+        sql.append(weight_buf, weight_len);
+        sql += ", ";
+        sql.append(ts_buf, ts_len);
+        sql += ", '";
+        append_escaped(source_file);
+        sql += "')";
+
+        batch_count++;
+        inserted++;
+
+        if (batch_count >= BATCH_SIZE) {
+            execute(sql);
+            batch_count = 0;
+        }
+    }
+
+    if (batch_count > 0) {
+        execute(sql);
+    }
+
+    execute("COMMIT");
+    return inserted;
 }
 
 std::vector<StringTriplet> DuckDBStore::query_subject(const std::string& subject) {
@@ -1366,6 +1517,220 @@ bool DuckDBStore::delete_ledger(int64_t id) {
     sql << "DELETE FROM ledger WHERE id = " << id;
 
     return execute(sql.str());
+}
+
+// ============================================================================
+// Code File Tracking (Incremental Indexing)
+// ============================================================================
+
+bool DuckDBStore::set_file_metadata(const CodeFile& file) {
+    std::lock_guard lock(mutex_);
+    if (!db_) return false;
+
+    // Escape strings
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    // UPSERT: insert or replace on conflict
+    std::ostringstream sql;
+    sql << "INSERT OR REPLACE INTO code_file "
+        << "(path, project, mtime, indexed_at, symbols_count, callsites_count, file_hash) "
+        << "VALUES ('"
+        << escape(file.path) << "', '"
+        << escape(file.project) << "', "
+        << file.mtime << ", "
+        << file.indexed_at << ", "
+        << file.symbols_count << ", "
+        << file.callsites_count << ", '"
+        << escape(file.file_hash) << "')";
+
+    return execute(sql.str());
+}
+
+std::optional<CodeFile> DuckDBStore::get_file_metadata(const std::string& path) {
+    std::lock_guard lock(mutex_);
+    if (!db_) return std::nullopt;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    std::ostringstream sql;
+    sql << "SELECT path, project, mtime, indexed_at, symbols_count, callsites_count, file_hash "
+        << "FROM code_file WHERE path = '" << escape(path) << "'";
+
+    auto result = query(sql.str());
+    if (!result || result->HasError()) return std::nullopt;
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return std::nullopt;
+
+    CodeFile file;
+    file.path = chunk->GetValue(0, 0).ToString();
+    file.project = chunk->GetValue(1, 0).ToString();
+    file.mtime = chunk->GetValue(2, 0).GetValue<int64_t>();
+    file.indexed_at = chunk->GetValue(3, 0).GetValue<int64_t>();
+    file.symbols_count = chunk->GetValue(4, 0).GetValue<int32_t>();
+    file.callsites_count = chunk->GetValue(5, 0).GetValue<int32_t>();
+    file.file_hash = chunk->GetValue(6, 0).ToString();
+
+    return file;
+}
+
+std::vector<CodeFile> DuckDBStore::list_project_files(const std::string& project) {
+    std::lock_guard lock(mutex_);
+    std::vector<CodeFile> files;
+    if (!db_) return files;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    std::ostringstream sql;
+    sql << "SELECT path, project, mtime, indexed_at, symbols_count, callsites_count, file_hash "
+        << "FROM code_file WHERE project = '" << escape(project) << "' "
+        << "ORDER BY path";
+
+    auto result = query(sql.str());
+    if (!result || result->HasError()) return files;
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            CodeFile file;
+            file.path = chunk->GetValue(0, i).ToString();
+            file.project = chunk->GetValue(1, i).ToString();
+            file.mtime = chunk->GetValue(2, i).GetValue<int64_t>();
+            file.indexed_at = chunk->GetValue(3, i).GetValue<int64_t>();
+            file.symbols_count = chunk->GetValue(4, i).GetValue<int32_t>();
+            file.callsites_count = chunk->GetValue(5, i).GetValue<int32_t>();
+            file.file_hash = chunk->GetValue(6, i).ToString();
+            files.push_back(file);
+        }
+    }
+
+    return files;
+}
+
+bool DuckDBStore::delete_file_metadata(const std::string& path) {
+    std::lock_guard lock(mutex_);
+    if (!db_) return false;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    std::ostringstream sql;
+    sql << "DELETE FROM code_file WHERE path = '" << escape(path) << "'";
+
+    return execute(sql.str());
+}
+
+bool DuckDBStore::delete_project_files(const std::string& project) {
+    std::lock_guard lock(mutex_);
+    if (!db_) return false;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    std::ostringstream sql;
+    sql << "DELETE FROM code_file WHERE project = '" << escape(project) << "'";
+
+    return execute(sql.str());
+}
+
+size_t DuckDBStore::delete_file_symbols(const std::string& file_path) {
+    std::lock_guard lock(mutex_);
+    if (!db_) return 0;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    // Get count first
+    std::ostringstream count_sql;
+    count_sql << "SELECT COUNT(*) FROM symbol WHERE file_path = '" << escape(file_path) << "'";
+    auto result = query(count_sql.str());
+    size_t count = 0;
+    if (result && !result->HasError()) {
+        auto chunk = result->Fetch();
+        if (chunk && chunk->size() > 0) {
+            count = chunk->GetValue(0, 0).GetValue<int64_t>();
+        }
+    }
+
+    // Delete
+    std::ostringstream sql;
+    sql << "DELETE FROM symbol WHERE file_path = '" << escape(file_path) << "'";
+    execute(sql.str());
+
+    return count;
+}
+
+size_t DuckDBStore::delete_file_triplets(const std::string& file_path) {
+    std::lock_guard lock(mutex_);
+    if (!db_) return 0;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    // Fast deletion using indexed source_file column
+    std::ostringstream count_sql;
+    count_sql << "SELECT COUNT(*) FROM triplet WHERE source_file = '" << escape(file_path) << "'";
+    auto result = query(count_sql.str());
+    size_t count = 0;
+    if (result && !result->HasError()) {
+        auto chunk = result->Fetch();
+        if (chunk && chunk->size() > 0) {
+            count = chunk->GetValue(0, 0).GetValue<int64_t>();
+        }
+    }
+
+    std::ostringstream sql;
+    sql << "DELETE FROM triplet WHERE source_file = '" << escape(file_path) << "'";
+    execute(sql.str());
+
+    return count;
 }
 
 }  // namespace chitta

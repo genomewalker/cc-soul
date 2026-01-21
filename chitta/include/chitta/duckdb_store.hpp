@@ -92,6 +92,17 @@ struct LedgerEntry {
     std::string snapshot;
 };
 
+// Code file metadata for incremental indexing
+struct CodeFile {
+    std::string path;           // Full file path (primary key)
+    std::string project;        // Project identifier
+    int64_t mtime = 0;          // Last modification time
+    int64_t indexed_at = 0;     // When we last indexed
+    int32_t symbols_count = 0;  // Number of symbols extracted
+    int32_t callsites_count = 0;// Number of callsites extracted
+    std::string file_hash;      // Optional content hash
+};
+
 // DuckDBStore: unified storage using DuckDB embedded database
 class DuckDBStore {
 public:
@@ -160,6 +171,28 @@ public:
         float weight = 1.0f
     );
 
+    // Connect with source file tracking (for fast file-based deletion)
+    bool connect_with_source(
+        const std::string& subject,
+        const std::string& predicate,
+        const std::string& object,
+        const std::string& source_file,
+        float weight = 1.0f
+    );
+
+    // Batch connect: (subject, predicate, object, source_file) tuples
+    // Uses DuckDB Appender for maximum speed (bypasses SQL parser)
+    size_t connect_batch(
+        const std::vector<std::tuple<std::string, std::string, std::string, std::string>>& triplets,
+        float weight = 1.0f
+    );
+
+    // Fallback SQL-based batch insert (if Appender fails)
+    size_t connect_batch_sql(
+        const std::vector<std::tuple<std::string, std::string, std::string, std::string>>& triplets,
+        float weight = 1.0f
+    );
+
     std::vector<StringTriplet> query_subject(const std::string& subject);
     std::vector<StringTriplet> query_object(const std::string& object);
     std::vector<StringTriplet> query_predicate(const std::string& predicate);
@@ -183,6 +216,17 @@ public:
     std::vector<LedgerEntry> list_ledgers(const std::string& project = "", size_t limit = 10);
     std::optional<LedgerEntry> get_ledger(int64_t id);
     bool delete_ledger(int64_t id);
+
+    // Code file tracking (incremental indexing)
+    bool set_file_metadata(const CodeFile& file);
+    std::optional<CodeFile> get_file_metadata(const std::string& path);
+    std::vector<CodeFile> list_project_files(const std::string& project);
+    bool delete_file_metadata(const std::string& path);
+    bool delete_project_files(const std::string& project);  // Clear all files for project
+
+    // Delete symbols/triplets for a file (before re-indexing)
+    size_t delete_file_symbols(const std::string& file_path);
+    size_t delete_file_triplets(const std::string& file_path);
 
 private:
     std::unique_ptr<duckdb::DuckDB> db_;

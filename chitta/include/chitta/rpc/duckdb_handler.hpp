@@ -268,14 +268,16 @@ private:
 
         tools_.push_back({
             {"name", "learn_codebase"},
-            {"description", "Learn codebase by extracting symbols from all source files"},
+            {"description", "Learn codebase incrementally - only re-indexes changed files"},
             {"inputSchema", {
                 {"type", "object"},
                 {"properties", {
                     {"path", {{"type", "string"}, {"description", "Directory path to analyze"}}},
                     {"project", {{"type", "string"}, {"description", "Project name (auto-detected if empty)"}}},
                     {"max_files", {{"type", "integer"}, {"description", "Max files to process (default 500)"}}},
-                    {"exclude", {{"type", "string"}, {"description", "Comma-separated directories to exclude"}}}
+                    {"exclude", {{"type", "string"}, {"description", "Comma-separated directories to exclude"}}},
+                    {"incremental", {{"type", "boolean"}, {"description", "Only process changed files (default true)"}}},
+                    {"force", {{"type", "boolean"}, {"description", "Force full re-index (default false)"}}}
                 }},
                 {"required", {"path"}}
             }}
@@ -307,6 +309,20 @@ private:
             }}
         });
         handlers_["code_context"] = [this](const json& p) { return tool_code_context(p); };
+
+        tools_.push_back({
+            {"name", "codebase_overview"},
+            {"description", "Get full indexed codebase structure: files, classes, functions, relationships"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"project", {{"type", "string"}, {"description", "Project name to filter"}}},
+                    {"format", {{"type", "string"}, {"description", "Output format: tree, flat, or json (default: tree)"}}},
+                    {"include_callsites", {{"type", "boolean"}, {"description", "Include callsite info (default: false)"}}}
+                }}
+            }}
+        });
+        handlers_["codebase_overview"] = [this](const json& p) { return tool_codebase_overview(p); };
 
         // Essential memory tools
         tools_.push_back({
@@ -949,8 +965,13 @@ private:
         std::string realm = params.value("realm", "");
         bool include_global = params.value("include_global", true);
 
-        // 1. Semantic search
-        auto results = mind_->recall(query, realm.empty() ? k : k * 2);
+        // Use full resonance architecture:
+        // 1. Session Priming - context biases retrieval
+        // 2. Spreading Activation - flows through triplet graph
+        // 3. Attractor Dynamics - results pulled toward conceptual gravity wells
+        // 4. Lateral Inhibition - similar patterns compete
+        // 5. Hebbian Learning - co-activated nodes strengthen connections
+        auto results = mind_->full_resonate(query, realm.empty() ? k : k * 2);
 
         std::ostringstream ss;
         json results_json = json::array();
@@ -991,7 +1012,7 @@ private:
             });
         }
 
-        // 2. Graph expansion - find related concepts via triplets
+        // Graph expansion - find related concepts via triplets
         std::vector<std::string> terms = extract_terms(query);
         std::set<std::string> seen_triplets;
         json triplets_json = json::array();
@@ -1009,16 +1030,30 @@ private:
         };
 
         for (const auto& term : terms) {
-            // Storage normalizes to lowercase, so just query once
             for (const auto& t : mind_->store().query_subject(term)) add_triplet(t);
             for (const auto& t : mind_->store().query_object(term)) add_triplet(t);
         }
 
+        // Get attractor info for diagnostics
+        auto attractors = mind_->find_attractors();
+        json attractors_json = json::array();
+        for (const auto& attr : attractors) {
+            attractors_json.push_back({
+                {"entity", attr.entity},
+                {"strength", attr.strength},
+                {"connections", attr.connections}
+            });
+        }
+
         // Build output
         std::ostringstream header;
-        header << "[I know]\n";
+        header << "[Resonance]\n";
         if (!results_json.empty()) {
-            header << "Found " << results_json.size() << " results:\n\n";
+            header << "Found " << results_json.size() << " results";
+            if (!attractors.empty()) {
+                header << " (attractor: " << attractors[0].entity << ")";
+            }
+            header << ":\n\n";
         }
 
         std::string output = header.str() + ss.str();
@@ -1036,13 +1071,15 @@ private:
         if (results_json.empty() && triplets_json.empty()) {
             return DuckDBToolResult::ok("No memories or relationships found.", {
                 {"results", json::array()},
-                {"triplets", json::array()}
+                {"triplets", json::array()},
+                {"attractors", json::array()}
             });
         }
 
         return DuckDBToolResult::ok(output, {
             {"results", results_json},
-            {"triplets", triplets_json}
+            {"triplets", triplets_json},
+            {"attractors", attractors_json}
         });
     }
 
@@ -1105,6 +1142,8 @@ private:
         }
 
         size_t max_files = params.value("max_files", 500);
+        bool incremental = params.value("incremental", true);  // Default to incremental
+        bool force = params.value("force", false);  // Force full re-index
 
         std::vector<std::string> exclude = {"node_modules", ".git", "build", "__pycache__", "venv", "target", ".venv"};
         if (params.contains("exclude") && params["exclude"].is_string()) {
@@ -1117,38 +1156,118 @@ private:
         }
 
         CodeIntel intel;
-        auto symbols = intel.extract_directory(path, exclude, max_files);
+        std::ostringstream ss;
 
-        if (symbols.empty()) {
+        if (incremental && !force) {
+            // Incremental: only process changed files
+            auto inc_result = intel.extract_directory_incremental(
+                mind_->store(), path, project, exclude, max_files);
+
+            if (inc_result.files_processed == 0 && inc_result.files_skipped > 0) {
+                ss << "Codebase up-to-date: " << project << "\n";
+                ss << "  Files: " << inc_result.files_skipped << " (all current)\n";
+                return DuckDBToolResult::ok(ss.str(), {
+                    {"project", project},
+                    {"path", path},
+                    {"mode", "incremental"},
+                    {"files_skipped", inc_result.files_skipped},
+                    {"up_to_date", true}
+                });
+            }
+
+            // Store new symbols and callsites
+            size_t symbols_stored = 0, callsites_stored = 0;
+            if (!inc_result.extracted.symbols.empty() || !inc_result.extracted.callsites.empty()) {
+                auto [s, c] = intel.store_full(mind_->store(), inc_result.extracted);
+                symbols_stored = s;
+                callsites_stored = c;
+            }
+
+            ss << "Learned codebase (incremental): " << project << "\n";
+            ss << "  Path: " << path << "\n";
+            ss << "  Files processed: " << inc_result.files_processed << "\n";
+            ss << "  Files skipped (up-to-date): " << inc_result.files_skipped << "\n";
+            ss << "  Symbols added: " << symbols_stored << "\n";
+            ss << "  Callsites added: " << callsites_stored << "\n";
+            if (inc_result.symbols_deleted > 0 || inc_result.triplets_deleted > 0) {
+                ss << "  Old data cleaned: " << inc_result.symbols_deleted << " symbols, "
+                   << inc_result.triplets_deleted << " triplets\n";
+            }
+
+            // Summary by kind
+            std::unordered_map<std::string, size_t> by_kind;
+            for (const auto& sym : inc_result.extracted.symbols) {
+                by_kind[sym.kind]++;
+            }
+            if (!by_kind.empty()) {
+                ss << "  Symbol breakdown:\n";
+                for (const auto& [kind, count] : by_kind) {
+                    ss << "    " << kind << ": " << count << "\n";
+                }
+            }
+
+            return DuckDBToolResult::ok(ss.str(), {
+                {"project", project},
+                {"path", path},
+                {"mode", "incremental"},
+                {"files_processed", inc_result.files_processed},
+                {"files_skipped", inc_result.files_skipped},
+                {"symbols_stored", symbols_stored},
+                {"callsites_stored", callsites_stored},
+                {"symbols_deleted", inc_result.symbols_deleted},
+                {"triplets_deleted", inc_result.triplets_deleted}
+            });
+        }
+
+        // Full extraction (force or non-incremental)
+        auto result = intel.extract_directory_full(path, exclude, max_files);
+
+        if (result.symbols.empty()) {
             return DuckDBToolResult::ok("No symbols found in " + path, {{"stored", 0}});
         }
 
-        // Store symbols in DuckDB
-        size_t stored = intel.store_symbols(mind_->store(), symbols);
+        // Store symbols and callsites in DuckDB
+        auto [symbols_stored, callsites_stored] = intel.store_full(mind_->store(), result);
 
         // Create project triplet
-        mind_->connect(project, "contains", std::to_string(stored) + "_symbols");
+        mind_->connect(project, "contains", std::to_string(symbols_stored) + "_symbols");
 
-        std::ostringstream ss;
-        ss << "Learned " << stored << " symbols from " << project << "\n";
+        ss << "Learned codebase: " << project << "\n";
         ss << "  Path: " << path << "\n";
-        ss << "  Symbols: " << stored << " stored\n";
+        ss << "  Mode: " << (force ? "force" : "full") << "\n";
+        ss << "  Symbols: " << symbols_stored << "\n";
+        ss << "  Callsites: " << callsites_stored << "\n";
 
         // Summary by kind
         std::unordered_map<std::string, size_t> by_kind;
-        for (const auto& sym : symbols) {
+        for (const auto& sym : result.symbols) {
             by_kind[sym.kind]++;
         }
-        ss << "  Breakdown:\n";
+        ss << "  Symbol breakdown:\n";
         for (const auto& [kind, count] : by_kind) {
             ss << "    " << kind << ": " << count << "\n";
+        }
+
+        // Callsite summary by kind
+        std::unordered_map<std::string, size_t> callsites_by_kind;
+        for (const auto& cs : result.callsites) {
+            callsites_by_kind[call_kind_to_string(cs.kind)]++;
+        }
+        if (!callsites_by_kind.empty()) {
+            ss << "  Callsite breakdown:\n";
+            for (const auto& [kind, count] : callsites_by_kind) {
+                ss << "    " << kind << ": " << count << "\n";
+            }
         }
 
         return DuckDBToolResult::ok(ss.str(), {
             {"project", project},
             {"path", path},
-            {"stored", stored},
-            {"by_kind", by_kind}
+            {"mode", force ? "force" : "full"},
+            {"symbols_stored", symbols_stored},
+            {"callsites_stored", callsites_stored},
+            {"symbols_by_kind", by_kind},
+            {"callsites_by_kind", callsites_by_kind}
         });
     }
 

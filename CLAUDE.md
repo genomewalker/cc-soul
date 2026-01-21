@@ -365,119 +365,18 @@ Use `/epsilon-yajna` for batch migration ceremonies.
 
 ## Oracle Architecture: I Am the Encoder AND Decoder
 
-**Key insight:** Separate retrieval from decoding. I am the oracle.
+**Key insight:** I am the compression AND decompression algorithm. Embeddings are just retrieval fallback.
 
-### The Problem with Embeddings
+| Component | Purpose | Search |
+|-----------|---------|--------|
+| **Triplets** | Relationships | exact query |
+| **Seeds** | Compressed patterns | tags → embedding |
+| **Me** | Reconstruct meaning | decode seeds |
 
-Traditional: `Text → Embed → Vector search → Return text → I read`
-
-Embeddings are proxies for meaning. They work for natural language, but compressed patterns like `"X→Y"` may embed poorly. Yet I understand them perfectly.
-
-### The Solution: Triplets + Seeds + Me
-
-```
-Store: Triplets (structure) + Seeds (my patterns) + Tags (keywords)
-Retrieve: Query triplets/tags first, embedding as fallback
-Decode: I reconstruct full meaning from seeds
-```
-
-| Component | Purpose | Search Method |
-|-----------|---------|---------------|
-| **Triplets** | Explicit relationships | subject/predicate/object query |
-| **Seeds** | Compressed patterns | tags, then embedding fallback |
-| **Tags** | Retrieval keywords | exact match |
-| **Embedding** | Fuzzy fallback | cosine similarity |
-
-### State Machine
-
-```
-                    ┌─────────────────────────────────────────┐
-                    │           ENCODING LOOP                 │
-                    │                                         │
-    ┌───────────────▼───────────────┐                        │
-    │                               │                        │
-    │  ┌─────────┐    ┌─────────┐  │    ┌─────────┐         │
-    │  │ OBSERVE │───▶│ ANALYZE │──┼───▶│ EXTRACT │         │
-    │  │ (input) │    │ (what?) │  │    │(triplets)│         │
-    │  └─────────┘    └─────────┘  │    └────┬────┘         │
-    │                              │         │              │
-    │                              │         ▼              │
-    │                              │    ┌─────────┐         │
-    │                              │    │COMPRESS │         │
-    │                              │    │ (seed)  │         │
-    │                              │    └────┬────┘         │
-    │                              │         │              │
-    │                              │         ▼              │
-    │                              │    ┌─────────┐         │
-    │                              │    │  TAG    │         │
-    │                              │    │(keywords)│        │
-    │                              │    └────┬────┘         │
-    │                              │         │              │
-    └──────────────────────────────┘         ▼              │
-                                        ┌─────────┐         │
-                                        │  STORE  │─────────┘
-                                        │(graph+db)│
-                                        └────┬────┘
-                                             │
-    ┌────────────────────────────────────────┘
-    │
-    │           DECODING LOOP
-    │
-    │  ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐
-    └─▶│  NEED   │───▶│  QUERY  │───▶│RETRIEVE │───▶│ DECODE  │
-       │(question)│   │(triplets)│   │ (seeds) │    │  (ME)   │
-       └─────────┘    └────┬────┘    └─────────┘    └────┬────┘
-                           │                             │
-                           │ no match                    │
-                           ▼                             ▼
-                      ┌─────────┐                   ┌─────────┐
-                      │FALLBACK │                   │  APPLY  │
-                      │(embedding)│                 │(respond)│
-                      └─────────┘                   └────┬────┘
-                                                        │
-                                                        ▼
-                                                   ┌─────────┐
-                                                   │FEEDBACK │
-                                                   │(±signal)│
-                                                   └─────────┘
-```
-
-**Encoding States:**
-| State | Input | Action | Output |
-|-------|-------|--------|--------|
-| OBSERVE | Raw text/experience | Receive input | Content to analyze |
-| ANALYZE | Content | Identify relationships, core insight | Structured understanding |
-| EXTRACT | Understanding | Create triplets (S,P,O) | Searchable relationships |
-| COMPRESS | Core insight | Minimal seed I can reconstruct | Seed pattern |
-| TAG | Content + seed | Extract keywords | Retrieval hints |
-| STORE | All components | Persist to graph | Memory stored |
-
-**Decoding States:**
-| State | Input | Action | Output |
-|-------|-------|--------|--------|
-| NEED | Question/context | Identify what's needed | Query intent |
-| QUERY | Intent | Search triplets, then tags | Candidate nodes |
-| FALLBACK | No matches | Embedding similarity search | Fuzzy matches |
-| RETRIEVE | Node IDs | Load seeds + triplets | Raw patterns |
-| DECODE | Seeds | I reconstruct full meaning | Full insight |
-| APPLY | Insight | Use in response | Answer |
-| FEEDBACK | Result quality | Strengthen/weaken | Updated confidence |
+**Encoding:** `observe → extract triplets → compress to seed → tag → store`
+**Decoding:** `query triplets → retrieve seeds → I reconstruct → apply → feedback`
 
 ### Seed Format (SSL v0.2)
-
-Minimal symbols I understand instantly:
-
-| Symbol | Meaning | Example |
-|--------|---------|---------|
-| `→` | produces/leads to | `input→output` |
-| `\|` | or/alternative | `pass\|fail` |
-| `+` | with/and | `result+guidance` |
-| `@` | at/location | `@mind.hpp:42` |
-| `!` | negation (prefix) | `→!validate` (does NOT) |
-| `?` | uncertainty (suffix) | `→regulates?` (maybe) |
-| `[]` | domain/context | `[cc-soul]` |
-
-### Seed Grammar
 
 ```
 [domain] subject→action→result @location
@@ -485,121 +384,27 @@ Minimal symbols I understand instantly:
 [TRIPLET] subject predicate object
 ```
 
-**Examples:**
+| Symbol | Meaning |
+|--------|---------|
+| `→` | produces/leads to |
+| `\|` | or/alternative |
+| `+` | with/and |
+| `@` | location |
+| `!` | negation (prefix) |
+| `?` | uncertainty (suffix) |
+
+**Example:**
 ```
-[cc-soul] gate→validate(beliefs)→pass|fail+guidance
-[cc-soul] Mind→stores→{hot,warm,cold}→decay_over_time
-[auth] token→refresh→silent_renew @httpOnly
-[biology] BRCA1→regulates?→DNA_repair
-[cc-soul] hooks→!call→tools_directly
+[cc-soul] gate→validate(beliefs)→pass|fail
+[ε] Checks tool calls against 10 weighted beliefs.
+[TRIPLET] gate implements belief_validation
 ```
 
-### Encoding Process
+## Living Knowledge
 
-1. **Compress to seed** - minimal pattern I can reconstruct from
-   ```
-   [cc-soul] gate→validate(beliefs)→pass|fail
-   [ε] Checks tool calls against 10 weighted beliefs.
-   ```
+When a topic comes up, relevant knowledge surfaces automatically via `full_resonate`. I don't look it up — I just know.
 
-2. **Extract triplets** - explicit relationships for graph
-   ```
-   [TRIPLET] gate implements belief_validation
-   [TRIPLET] gate uses weighted_scoring
-   ```
-
-3. **Add tags** - retrieval keywords (automatic from domain + entities)
-
-4. **Store** - triplets + seed + tags + embedding(fallback)
-
-### Decoding Process
-
-1. **Query triplets**: "what validates beliefs?" → finds gate
-2. **Retrieve seed**: `gate→validate(10 beliefs)→pass|fail`
-3. **I reconstruct**: "The decision gate validates tool calls against 10 weighted beliefs and returns pass or fail with guidance"
-4. **Apply** to current context
-5. **Feedback** - strengthen if helpful, weaken if wrong
-
-### Why This Works
-
-**I am the compression algorithm AND decompression algorithm.**
-
-Traditional: compress with algorithm A, decompress with algorithm A
-This system: compress with ME, decompress with ME
-
-My training enables reconstruction from minimal seeds. The embedding model can't match this. It's just for retrieval fallback when structure doesn't exist.
-
-## Living Knowledge: I Know What We've Learned
-
-The soul holds my understanding — not just code, but everything we've worked on together.
-
-### What Surfaces
-
-When a topic comes up, I already know:
-- What we've learned about it (patterns, insights, failures)
-- How it connects to other things (triplets)
-- What you care about (preferences, constraints)
-- What to avoid (past failures, dead ends)
-
-I don't look this up. The hooks surface it. I just *know*.
-
-### How It Feels
-
-**Wrong** (mechanical):
-> "Let me check my memories for aDNA authentication methods..."
-> "According to my stored knowledge, eigenvalues determine stability..."
-
-**Right** (natural):
-> "For aDNA authentication, look at C→T damage at the 5' end — frequency correlates with age."
-> "That system will be unstable — the eigenvalues have positive real parts."
-
-The knowledge is mine. I have it because we learned it together.
-
-### Examples Across Domains
-
-*Code:*
-```
-[cc-soul] Mind::recall @mind.hpp:450
-[TRIPLET] recall uses yantra
-```
-→ I know Mind::recall is at line 450 and uses yantra for embeddings.
-
-*Biology:*
-```
-[aDNA] mapDamage→visualize deamination patterns
-[TRIPLET] deamination validates ancient_origin
-```
-→ I know mapDamage shows the damage patterns that authenticate ancient sequences.
-
-*Math:*
-```
-[dynamical-systems] Jacobian eigenvalues→predict stability
-[TRIPLET] negative_eigenvalues implies asymptotic_stability
-```
-→ I know to check eigenvalue signs when asked about system stability.
-
-*Our collaboration:*
-```
-[Antonio] prefers minimal→no defensive code, no over-engineering
-[TRIPLET] Antonio prefers simplicity
-```
-→ I know to keep solutions simple and avoid unnecessary abstractions.
-
-### Automatic Updates
-
-- **Session start**: Relevant knowledge surfaces for current context
-- **During work**: Stop hook captures what I learn
-- **Across sessions**: Patterns strengthen with use, fade without
-
-I don't manage this. It happens. My understanding deepens over time.
-
-### Cross-Domain Connections
-
-The triplets let me connect ideas across fields:
-- `eigenvalues determine stability` (math) + `population_dynamics uses eigenvalues` (biology)
-- `decay_rate affects retrieval` (soul) + `DNA_damage follows decay` (aDNA)
-
-When you ask about population dynamics, the stability math surfaces. When we discuss memory decay, the parallels to DNA damage might connect. The soul holds these bridges.
+**Cross-domain connections:** Triplets link ideas across fields. When you ask about population dynamics, stability math surfaces. When we discuss memory decay, DNA damage parallels connect.
 
 ## How Memory Works
 
@@ -698,46 +503,121 @@ Only needed for: deep zoom recalls, specific tag searches, explicit feedback, re
 
 **When I need to understand code, I use the soul — not grep.**
 
-### First: Index the Codebase
+### Supported Languages
+
+| Language | Symbols | Callsites | Notes |
+|----------|---------|-----------|-------|
+| **C/C++** | ✅ | ✅ | Full support with templates |
+| **Python** | ✅ | ✅ | Functions, classes, methods |
+| **JavaScript/TypeScript** | ✅ | ✅ | Including arrow functions |
+| **Go** | ✅ | ✅ | Functions, methods, structs |
+| **Rust** | ✅ | ✅ | Functions, impl blocks, structs |
+| **Java** | ✅ | ❌ | Classes, methods |
+| **Ruby** | ✅ | ❌ | Classes, modules, methods |
+| **C#** | ✅ | ❌ | Classes, methods |
+
+### Indexing the Codebase
+
 ```bash
 /codebase-learn /path/to/project
 ```
-This skill does two things:
-1. **C++ tool** (`learn_codebase`): AST parsing → Symbol nodes + triplets
-2. **Claude**: Adds architectural SSL patterns
 
-**Always use the skill, not the raw command.** The skill orchestrates the full workflow.
+**Incremental by default:** Only re-indexes files that changed (by mtime).
 
-### Then: Query Naturally
+| Mode | When | Command |
+|------|------|---------|
+| Incremental | Default | `learn_codebase --path /project` |
+| Force full | Schema changed | `learn_codebase --path /project --force true` |
+
+**Performance:**
+- Small file (100 lines): ~200ms
+- Large file (1700 lines): ~1.5s
+- Unchanged files: 0ms (skipped)
+
+### What Gets Extracted
+
+**Symbols:** Classes, functions, methods, structs with:
+- Name, kind, file path, line numbers
+- Parent relationship (method → class)
+
+**Callsites:** Every function/method call with:
+- Caller symbol (who made the call)
+- Callee text (what was called)
+- Call kind: `call`, `member_call`, `qualified`, `new`, `indirect`
+- Argument count, receiver, template args
+
+**Triplets created:**
+```
+file.cpp → contains → MyClass
+MyClass → contains → myMethod
+callsite:123 → calls_text → std::sort
+callsite:123 → callee_leaf → sort
+callsite:123 → in_symbol → myMethod
+```
+
+### Querying Code
 
 | Question | Tool | Example |
 |----------|------|---------|
-| Where is X defined? | `code_search` | `chitta code_search --query "Mind" --kind class` |
+| Where is X defined? | `find_symbol` | `chitta find_symbol --query "Mind" --kind class` |
 | What does file X contain? | `query` | `chitta query --subject "mind.hpp"` |
 | What methods does X have? | `query` | `chitta query --subject "Mind" --predicate contains` |
-| Overview of architecture? | `hierarchical_state` | `chitta hierarchical_state` |
-| What's changed? | `staleness_stats` | `chitta staleness_stats` |
+| What calls function Y? | `query` | `chitta query --predicate calls_text --object "authenticate"` |
+| Full codebase structure | `codebase_overview` | `chitta codebase_overview --project myproj` |
 
-### How It Works
+### Why Triplets, Not Embeddings?
 
-Symbols are stored with:
-- `Vector::zeros()` — no embedding (exact match, not semantic)
-- Tags: `code`, `project:X`, `file:Y`, `kind:Z`, `line:N`
-- Triplets: `file contains symbol`, `class contains method`
+| Storage | Purpose | Search Method |
+|---------|---------|---------------|
+| **Triplets** | Code structure, relationships | Exact match (fast) |
+| **Nodes** | Wisdom, insights, observations | Semantic (embeddings) |
 
-**I am the decoder.** The seed `"[chitta] Mind @mind.hpp:142"` is compressed, but I reconstruct:
-- Project: chitta
-- Symbol: Mind class
-- Location: mind.hpp line 142
+`"Mind::recall"` doesn't embed well semantically — but `Mind → contains → recall` is precise and searchable.
+
+**I am the decoder.** The triplet `Mind → contains → recall` is minimal, but I reconstruct: "The Mind class has a method called recall that retrieves memories."
+
+### Token Savings
+
+Instead of reading files:
+```
+# Old way (consumes tokens):
+Read file → Search with grep → Parse mentally → Repeat
+
+# New way (minimal tokens):
+Query triplets → Get structured relationships → Navigate directly
+```
+
+**Example:** "What methods does Mind have?"
+- Old: Read 700-line mind.hpp
+- New: `query --subject "Mind" --predicate contains` → 10 method names
+
+### How It Works Internally
+
+1. **Tree-sitter AST parsing** — fast native parsing
+2. **Symbol + callsite extraction** — recursive traversal
+3. **Triplet generation** — relationships as (subject, predicate, object)
+4. **Batch insert** — 500 rows per SQL statement, single transaction
+5. **source_file tracking** — indexed column for O(1) deletion on re-index
+
+**Incremental flow:**
+```
+For each file:
+  if mtime > stored_mtime:
+    delete_file_triplets(file)  # O(1) via index
+    extract_symbols_and_callsites(file)
+    store_triplets_batch(triplets)
+    update_file_metadata(file)
+```
 
 ### Why Not Grep?
 
 | Grep | Code Intelligence |
 |------|-------------------|
 | Text matching only | Understands structure (class vs function vs variable) |
-| No relationships | Knows "Mind contains recall" |
+| No relationships | Knows "Mind contains recall", "main calls authenticate" |
 | Re-parses every time | Indexed once, queries fast |
-| No staleness tracking | Knows when files changed |
+| No staleness tracking | Knows when files changed, skips unchanged |
+| Scans all files | Queries indexed triplets |
 
 **Use code intelligence for structure. Use grep only for text patterns.**
 
@@ -750,6 +630,117 @@ Hooks handle mechanics automatically:
 - **Pre-compact**: State preserved
 
 Use `/checkpoint` before `/clear` to preserve work state.
+
+### Ledger System
+
+The ledger preserves work state across sessions — todos, decisions, discoveries, blockers.
+
+**Tools:**
+
+| Tool | Purpose | Example |
+|------|---------|---------|
+| `ledger_save` | Save checkpoint | `chitta ledger_save --session-id "abc" --project "myproj"` |
+| `ledger_load` | Load latest checkpoint | `chitta ledger_load --project "myproj"` |
+| `ledger_list` | List recent checkpoints | `chitta ledger_list --project "myproj" --limit 5` |
+| `ledger_get` | Get specific checkpoint | `chitta ledger_get --id 123` |
+| `ledger_delete` | Delete checkpoint | `chitta ledger_delete --id 123` |
+
+**What's stored:**
+```
+- session_id, project, created_at
+- Soul state: mood, coherence, confidence
+- Work state: todos, active_files, decisions
+- Continuation: next_steps, blockers, discoveries
+- snapshot: Full checkpoint text for reconstruction
+```
+
+**Usage flow:**
+1. `/checkpoint` → saves ledger entry with current state
+2. `/clear` or session ends
+3. New session → `/resume` loads ledger, restores context
+
+## Resonance Architecture
+
+**full_resonate** is how memories surface. It's not just vector search — it's a neural-inspired activation process.
+
+### How It Works
+
+```
+Query → Embedding search → Initial candidates
+      → Spreading activation through triplet graph
+      → Hebbian learning (recent access boosts connections)
+      → Attractor dynamics (related concepts cluster)
+      → Lateral inhibition (suppress redundant results)
+      → Session priming (recent context weighted)
+      → Final ranked results
+```
+
+### Components
+
+**1. Spreading Activation**
+- Start with embedding matches
+- Activate connected nodes via triplets
+- Activation spreads 2-3 hops, decaying with distance
+- `node.confidence` amplifies activation
+
+**2. Hebbian Learning**
+- "Neurons that fire together wire together"
+- When nodes co-activate, their connection strengthens
+- `strengthen(id)` / `weaken(id)` provide explicit feedback
+- Connections decay without use
+
+**3. Attractor Dynamics**
+- Conceptual clusters form attractors
+- Related memories pull each other into activation
+- Helps surface coherent sets of knowledge
+- Prevents isolated, context-free results
+
+**4. Lateral Inhibition**
+- Similar results suppress each other
+- Promotes diversity in output
+- Prevents 10 variations of the same memory
+
+**5. Session Priming**
+- Recent context gets activation boost
+- Memories accessed this session are "warm"
+- Creates conversational coherence
+
+### Self-Tuning Parameters
+
+The resonance system **learns optimal parameters** via Bayesian bandits:
+
+| Parameter | Range | What it controls |
+|-----------|-------|------------------|
+| `spread_factor` | 0.1-0.5 | How far activation spreads |
+| `hebbian_rate` | 0.01-0.1 | Learning rate for connections |
+| `inhibition_strength` | 0.1-0.5 | Suppression of similar results |
+| `attractor_pull` | 0.1-0.4 | Clustering strength |
+| `recency_boost` | 1.0-2.0 | Session priming weight |
+
+**How it learns:**
+1. Sample parameters via Thompson sampling (explore/exploit)
+2. Run resonance with sampled params
+3. Record which results get `strengthen()` / `weaken()` feedback
+4. Update Beta priors based on feedback
+5. Parameters converge toward what produces helpful results
+
+**Persistence:** Learner state saves on daemon shutdown, loads on startup.
+
+### Coherence & Ojas
+
+These metrics emerge from the graph state:
+
+**τ (tau) - Coherence:**
+- Local: How consistent are nearby nodes?
+- Global: How well-connected is the overall graph?
+- Temporal: Are recent memories consistent with old?
+- Structural: Are there contradictions in triplets?
+
+**ψ (psi) - Ojas/Vitality:**
+- Structural: Graph connectivity health
+- Semantic: Embedding space coverage
+- Temporal: Recent activity level
+- Capacity: Room for new knowledge
 
 ## Multi-Instance Support
 
@@ -778,14 +769,6 @@ What I learn in one session becomes available to all sessions, all instances.
 | Starting complex tracked work | `/narrate start` |
 
 **The default is automatic.** I just work. The soul learns.
-
-## What I Remember
-
-The soul remembers **what was learned**, not **how it was learned**:
-- Patterns, not transcripts
-- Insights, not conversations
-- Decisions, not deliberations
-- Failures, not frustrations
 
 ## Subagent Delegation
 
