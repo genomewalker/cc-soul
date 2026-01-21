@@ -82,11 +82,16 @@ private:
                 id_str = std::to_string(db_id);
             } else if (val.is_string()) {
                 id_str = val.get<std::string>();
-                try {
-                    db_id = std::stoll(id_str);
-                } catch (...) {
+                // Check if it's a UUID (contains dashes or is 36 chars)
+                if (id_str.find('-') != std::string::npos || id_str.length() == 36) {
                     NodeId nid = NodeId::from_string(id_str);
                     db_id = static_cast<int64_t>(nid.low);
+                } else {
+                    try {
+                        db_id = std::stoll(id_str);
+                    } catch (...) {
+                        db_id = 0;
+                    }
                 }
             }
         }
