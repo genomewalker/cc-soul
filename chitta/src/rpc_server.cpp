@@ -589,7 +589,10 @@ int main(int argc, char* argv[]) {
 
     // Pre-scan for --socket-path and --json flags, find tool name
     for (int i = 1; i < argc; ++i) {
-        if (std::strcmp(argv[i], "--socket-path") == 0 && i + 1 < argc) {
+        if (std::strcmp(argv[i], "--version") == 0 || std::strcmp(argv[i], "-v") == 0) {
+            std::cout << "chitta " << CHITTA_VERSION << "\n";
+            return 0;
+        } else if (std::strcmp(argv[i], "--socket-path") == 0 && i + 1 < argc) {
             socket_path = argv[++i];
         } else if (std::strcmp(argv[i], "--json") == 0) {
             json_output = true;
