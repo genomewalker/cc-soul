@@ -206,8 +206,12 @@ case "$HOOK_TYPE" in
         memories=$(extract_text "$response")
 
         if [[ -n "$memories" && "$memories" != *"No memories"* ]]; then
-            echo "[I know]"
-            echo "$memories"
+            # Extract just the score lines for compact output (max 3)
+            compact=$(echo "$memories" | grep -E '^\[[0-9]+%\]' | head -3 | sed 's/^\(\[[0-9]*%\]\) \[[^]]*\] /\1 /')
+            if [[ -n "$compact" ]]; then
+                echo "[I recall]"
+                echo "$compact"
+            fi
         fi
         ;;
 
