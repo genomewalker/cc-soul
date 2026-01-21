@@ -264,15 +264,20 @@ endif()
 
 # ONNX Runtime (optional)
 if(CHITTA_WITH_ONNX)
-    # Try to find ONNX Runtime
-    # Check conda environment first
-    if(DEFINED ENV{CONDA_PREFIX})
-        set(ONNXRUNTIME_INCLUDE_DIR "$ENV{CONDA_PREFIX}/include")
-        set(ONNXRUNTIME_LIB_DIR "$ENV{CONDA_PREFIX}/lib")
-    else()
-        # Fallback to system paths or user-specified
-        set(ONNXRUNTIME_INCLUDE_DIR "" CACHE PATH "ONNX Runtime include directory")
-        set(ONNXRUNTIME_LIB_DIR "" CACHE PATH "ONNX Runtime library directory")
+    # Allow user-specified paths via -D flags, fallback to conda/system
+    if(NOT ONNXRUNTIME_INCLUDE_DIR)
+        if(DEFINED ENV{CONDA_PREFIX})
+            set(ONNXRUNTIME_INCLUDE_DIR "$ENV{CONDA_PREFIX}/include")
+        else()
+            set(ONNXRUNTIME_INCLUDE_DIR "" CACHE PATH "ONNX Runtime include directory")
+        endif()
+    endif()
+    if(NOT ONNXRUNTIME_LIB_DIR)
+        if(DEFINED ENV{CONDA_PREFIX})
+            set(ONNXRUNTIME_LIB_DIR "$ENV{CONDA_PREFIX}/lib")
+        else()
+            set(ONNXRUNTIME_LIB_DIR "" CACHE PATH "ONNX Runtime library directory")
+        endif()
     endif()
 
     # Create imported target (platform-aware library extension)
