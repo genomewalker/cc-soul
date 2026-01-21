@@ -151,11 +151,20 @@ case "$HOOK_TYPE" in
             exit 0
         fi
 
+        # Detect current realm/project for scoped recall
+        CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
+        if [[ -x "$CHITTA_BIN" ]]; then
+            REALM=$("$CHITTA_BIN" realm_detect 2>/dev/null || echo "brahman")
+        else
+            REALM="brahman"
+        fi
+
         # Escape query for JSON
         ESCAPED_QUERY=$(json_escape "$QUERY")
+        ESCAPED_REALM=$(json_escape "$REALM")
 
-        # Get relevant memories
-        response=$(rpc_call "full_resonate" "{\"query\":\"$ESCAPED_QUERY\",\"k\":5}")
+        # Get relevant memories filtered by realm (includes global memories)
+        response=$(rpc_call "full_resonate" "{\"query\":\"$ESCAPED_QUERY\",\"k\":5,\"realm\":\"$ESCAPED_REALM\",\"include_global\":true}")
         memories=$(extract_text "$response")
 
         if [[ -n "$memories" && "$memories" != *"No memories"* ]]; then

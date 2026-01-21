@@ -238,7 +238,9 @@ private:
                 {"type", "object"},
                 {"properties", {
                     {"query", {{"type", "string"}, {"description", "Search query"}}},
-                    {"k", {{"type", "integer"}, {"description", "Max results"}}}
+                    {"k", {{"type", "integer"}, {"description", "Max results"}}},
+                    {"realm", {{"type", "string"}, {"description", "Filter by realm (e.g., 'project:my-project')"}}},
+                    {"include_global", {{"type", "boolean"}, {"description", "Include global memories (default true)"}}}
                 }},
                 {"required", {"query"}}
             }}
@@ -915,18 +917,35 @@ private:
         }
 
         size_t k = params.value("k", 10);
-        auto results = mind_->recall(query, k);
+        std::string realm = params.value("realm", "");
+        bool include_global = params.value("include_global", true);
 
-        if (results.empty()) {
-            return DuckDBToolResult::ok("No memories found matching query.", {{"results", json::array()}});
-        }
+        // Over-fetch if realm filtering to account for filtered results
+        auto results = mind_->recall(query, realm.empty() ? k : k * 2);
 
         std::ostringstream ss;
-        ss << "[I know]\n";
-        ss << "Found " << results.size() << " results:\n\n";
-
         json results_json = json::array();
+        size_t count = 0;
+
         for (const auto& r : results) {
+            // Post-hoc realm filtering if realm specified
+            if (!realm.empty()) {
+                auto realms = mind_->store().get_realms(static_cast<int64_t>(r.id.low));
+                bool in_realm = false;
+                for (const auto& rm : realms) {
+                    if (rm == realm) { in_realm = true; break; }
+                }
+                // Check if memory is global and include_global is true
+                auto mem = mind_->store().get_memory(static_cast<int64_t>(r.id.low));
+                if (mem && mem->visibility == RealmVisibility::Global && include_global) {
+                    in_realm = true;
+                }
+                if (!in_realm) continue;
+            }
+
+            if (count >= k) break;
+            count++;
+
             int pct = static_cast<int>(std::min(r.relevance, 1.0f) * 100);
             std::string type_name = node_type_name(r.type);
 
@@ -943,7 +962,15 @@ private:
             });
         }
 
-        return DuckDBToolResult::ok(ss.str(), {{"results", results_json}});
+        if (results_json.empty()) {
+            return DuckDBToolResult::ok("No memories found matching query.", {{"results", json::array()}});
+        }
+
+        std::ostringstream header;
+        header << "[I know]\n";
+        header << "Found " << results_json.size() << " results:\n\n";
+
+        return DuckDBToolResult::ok(header.str() + ss.str(), {{"results", results_json}});
     }
 
     DuckDBToolResult tool_extract_symbols(const json& params) {
