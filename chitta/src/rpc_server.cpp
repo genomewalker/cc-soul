@@ -47,18 +47,23 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
     {"remember", "Store text in memory with optional tags",
      {{"content", "Text to remember", true, nullptr},
       {"type", "Node type: wisdom|belief|episode", false, "episode"},
-      {"tags", "Comma-separated tags", false, nullptr}}},
+      {"tags", "Comma-separated tags", false, nullptr},
+      {"realm", "Primary realm (default: brahman)", false, nullptr},
+      {"visibility", "0=Private, 1=Shared, 2=Global", false, "0"}}},
 
     {"recall", "Search memory by semantic similarity",
      {{"query", "Search query", true, nullptr},
       {"limit", "Max results", false, "10"},
-      {"tag", "Filter by tag", false, nullptr}}},
+      {"tag", "Filter by tag", false, nullptr},
+      {"realm", "Filter by realm (empty = all visible)", false, nullptr}}},
 
     {"grow", "Add wisdom, belief, failure, aspiration, or dream",
      {{"type", "Type: wisdom|belief|failure|aspiration|dream", true, nullptr},
       {"content", "Content to store", true, nullptr},
       {"title", "Short title", false, nullptr},
-      {"tags", "Comma-separated tags", false, nullptr}}},
+      {"tags", "Comma-separated tags", false, nullptr},
+      {"realm", "Primary realm (default: brahman)", false, nullptr},
+      {"visibility", "0=Private, 1=Shared, 2=Global", false, "0"}}},
 
     {"get", "Get a node by ID",
      {{"id", "Node ID", true, nullptr}}},
@@ -103,11 +108,13 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
      {{"title", "Short title", true, nullptr},
       {"content", "Full content", true, nullptr},
       {"category", "Category: wisdom|insight|signal|episode", false, "episode"},
-      {"tags", "Comma-separated tags", false, nullptr}}},
+      {"tags", "Comma-separated tags", false, nullptr},
+      {"realm", "Primary realm (default: brahman)", false, nullptr}}},
 
     {"full_resonate", "Semantic search with full context (for hooks)",
      {{"query", "Search query", true, nullptr},
-      {"k", "Max results", false, "10"}}},
+      {"k", "Max results", false, "10"},
+      {"realm", "Filter by realm (empty = all visible)", false, nullptr}}},
 
     // Context tools
     {"soul_context", "Get current soul state and statistics",

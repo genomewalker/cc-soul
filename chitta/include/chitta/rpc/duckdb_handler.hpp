@@ -1041,6 +1041,8 @@ private:
         std::string type_str = params.value("type", "");
         std::string content = params.value("content", "");
         std::string title = params.value("title", "");
+        std::string realm = params.value("realm", "brahman");
+        int visibility = params.value("visibility", 0);
 
         if (type_str.empty() || content.empty()) {
             return DuckDBToolResult::error("Type and content are required");
@@ -1053,7 +1055,7 @@ private:
         else if (type_str == "dream") type = NodeType::Dream;
 
         std::string full_content = title.empty() ? content : title + "\n" + content;
-        NodeId id = mind_->remember(full_content, type);
+        NodeId id = mind_->remember(full_content, type, realm, static_cast<RealmVisibility>(visibility));
 
         static const NodeId null_id{};
         if (id == null_id) {
@@ -1062,7 +1064,7 @@ private:
 
         return DuckDBToolResult::ok(
             "Grew " + type_str + ": " + (title.empty() ? content.substr(0, 50) : title),
-            {{"id", id.to_string()}, {"type", type_str}}
+            {{"id", id.to_string()}, {"type", type_str}, {"realm", realm}}
         );
     }
 

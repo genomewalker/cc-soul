@@ -90,7 +90,9 @@ public:
     }
 
     // Remember - store with embedding
-    NodeId remember(const std::string& text, NodeType type = NodeType::Wisdom) {
+    NodeId remember(const std::string& text, NodeType type = NodeType::Wisdom,
+                    const std::string& realm = "brahman",
+                    RealmVisibility visibility = RealmVisibility::Private) {
         std::unique_lock lock(mutex_);
 
         if (!passes_quality_gate(text)) {
@@ -116,7 +118,7 @@ public:
         std::string kind = node_type_to_string(type);
         float decay_rate = default_decay_rate(type);
 
-        int64_t id = store_.remember(text, kind, artha.nu.data, 0.8f, decay_rate);
+        int64_t id = store_.remember(text, kind, artha.nu.data, 0.8f, decay_rate, realm, visibility);
         if (id < 0) {
             return NodeId{};
         }
@@ -126,8 +128,7 @@ public:
 
     NodeId remember(const std::string& text, NodeType type, const std::vector<std::string>& tags) {
         // For now, tags are stored in the content (DuckDB doesn't have native tag support yet)
-        // TODO: Add tags table
-        return remember(text, type);
+        return remember(text, type, "brahman", RealmVisibility::Private);
     }
 
     // Recall - search with auto-reinforcement
@@ -238,6 +239,10 @@ public:
     // Access to store for advanced operations
     DuckDBStore& store() { return store_; }
     const DuckDBStore& store() const { return store_; }
+
+    // Access to embedder for direct embedding
+    Embedder& embedder() { return embedder_; }
+    const Embedder& embedder() const { return embedder_; }
 
     // Tags (stub for compatibility)
     std::vector<std::string> get_tags(NodeId) const { return {}; }
