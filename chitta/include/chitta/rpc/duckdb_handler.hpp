@@ -1209,6 +1209,9 @@ private:
 
         return DuckDBToolResult::ok(ss.str(), {
             {"status", health.is_open ? "ok" : "error"},
+            {"software_version", CHITTA_VERSION},
+            {"protocol_major", CHITTA_PROTOCOL_VERSION_MAJOR},
+            {"protocol_minor", CHITTA_PROTOCOL_VERSION_MINOR},
             {"memories", health.total_memories},
             {"symbols", health.total_symbols},
             {"triplets", health.total_triplets},
