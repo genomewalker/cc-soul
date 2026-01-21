@@ -1009,21 +1009,9 @@ private:
         };
 
         for (const auto& term : terms) {
-            // Try multiple case variants: lowercase, Capitalized, UPPERCASE
-            std::string cap_term = term;
-            if (!cap_term.empty()) cap_term[0] = std::toupper(cap_term[0]);
-            std::string upper_term;
-            for (char c : term) upper_term += std::toupper(c);
-
-            // Query as subject (all case variants)
+            // Storage normalizes to lowercase, so just query once
             for (const auto& t : mind_->store().query_subject(term)) add_triplet(t);
-            for (const auto& t : mind_->store().query_subject(cap_term)) add_triplet(t);
-            for (const auto& t : mind_->store().query_subject(upper_term)) add_triplet(t);
-
-            // Query as object (all case variants)
             for (const auto& t : mind_->store().query_object(term)) add_triplet(t);
-            for (const auto& t : mind_->store().query_object(cap_term)) add_triplet(t);
-            for (const auto& t : mind_->store().query_object(upper_term)) add_triplet(t);
         }
 
         // Build output

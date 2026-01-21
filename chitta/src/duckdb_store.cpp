@@ -766,6 +766,13 @@ bool DuckDBStore::connect(
     std::lock_guard lock(mutex_);
     if (!db_) return false;
 
+    // Normalize to lowercase for consistent querying
+    auto to_lower = [](const std::string& s) {
+        std::string result;
+        for (char c : s) result += std::tolower(c);
+        return result;
+    };
+
     // Escape strings
     auto escape = [](const std::string& s) {
         std::string result;
@@ -776,12 +783,15 @@ bool DuckDBStore::connect(
         return result;
     };
 
+    std::string norm_subject = to_lower(subject);
+    std::string norm_object = to_lower(object);
+
     std::ostringstream sql;
     sql << "INSERT INTO triplet (id, subject, predicate, object, weight, created_at) VALUES ("
         << "nextval('triplet_seq'), "
-        << "'" << escape(subject) << "', "
+        << "'" << escape(norm_subject) << "', "
         << "'" << escape(predicate) << "', "
-        << "'" << escape(object) << "', "
+        << "'" << escape(norm_object) << "', "
         << weight << ", " << now() << ")";
 
     return execute(sql.str());
@@ -792,10 +802,12 @@ std::vector<StringTriplet> DuckDBStore::query_subject(const std::string& subject
     std::vector<StringTriplet> results;
     if (!db_) return results;
 
+    // Normalize to lowercase
     std::string escaped;
     for (char c : subject) {
-        if (c == '\'') escaped += "''";
-        else escaped += c;
+        char lc = std::tolower(c);
+        if (lc == '\'') escaped += "''";
+        else escaped += lc;
     }
 
     std::ostringstream sql;
@@ -827,10 +839,12 @@ std::vector<StringTriplet> DuckDBStore::query_object(const std::string& object) 
     std::vector<StringTriplet> results;
     if (!db_) return results;
 
+    // Normalize to lowercase
     std::string escaped;
     for (char c : object) {
-        if (c == '\'') escaped += "''";
-        else escaped += c;
+        char lc = std::tolower(c);
+        if (lc == '\'') escaped += "''";
+        else escaped += lc;
     }
 
     std::ostringstream sql;
