@@ -15,15 +15,14 @@ jobs:
   build-linux:
     runs-on: ubuntu-latest
     container:
-      image: quay.io/pypa/manylinux2014_x86_64
+      image: quay.io/pypa/manylinux_2_28_x86_64
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Install build tools
         run: |
-          yum install -y wget perl-IPC-Cmd
-          # Install newer cmake (manylinux2014 has old one)
+          dnf install -y wget perl-IPC-Cmd
           pip3 install cmake ninja
 
       - name: Download and build ONNX Runtime
