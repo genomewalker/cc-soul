@@ -738,18 +738,11 @@ int main(int argc, char* argv[]) {
                         auto daemon_resp = nlohmann::json::parse(*result_str);
                         auto result = daemon_resp.value("result", nlohmann::json::object());
 
-                        // Format as MCP response
-                        nlohmann::json content = nlohmann::json::array();
-                        if (result.contains("text")) {
-                            nlohmann::json text_content;
-                            text_content["type"] = "text";
-                            text_content["text"] = result["text"];
-                            content.push_back(text_content);
-                        }
-
+                        // Daemon already returns MCP-compatible content array
+                        // Just pass it through
                         nlohmann::json response;
                         response["jsonrpc"] = "2.0";
-                        response["result"]["content"] = content;
+                        response["result"]["content"] = result.value("content", nlohmann::json::array());
                         response["id"] = request_id;
                         std::cout << response.dump() << std::endl;
                     }
