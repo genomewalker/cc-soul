@@ -31,7 +31,7 @@ jobs:
       - name: Install dependencies (except DuckDB)
         shell: bash -l {0}
         run: |
-          conda install -y cmake nlohmann_json sqlite onnxruntime-cpp=${{ env.ONNX_VERSION }} patchelf
+          conda install -y cmake ninja nlohmann_json sqlite onnxruntime-cpp=${{ env.ONNX_VERSION }} patchelf
 
       - name: Build DuckDB from source
         shell: bash -l {0}
@@ -39,13 +39,13 @@ jobs:
           git clone --depth 1 --branch v${{ env.DUCKDB_VERSION }} https://github.com/duckdb/duckdb.git
           cd duckdb
           mkdir build && cd build
-          cmake .. \
+          cmake .. -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_SHELL=OFF \
             -DBUILD_UNITTESTS=OFF \
             -DENABLE_SANITIZER=OFF \
             -DENABLE_UBSAN=OFF
-          make -j$(nproc)
+          ninja
           # Install to a local prefix
           mkdir -p /opt/duckdb/{lib,include}
           sudo cp src/libduckdb.so /opt/duckdb/lib/
@@ -56,7 +56,7 @@ jobs:
         run: |
           mkdir -p chitta/build bin
           cd chitta/build
-          cmake .. \
+          cmake .. -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_RPATH="\$ORIGIN" \
             -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
@@ -64,7 +64,7 @@ jobs:
             -DDUCKDB_LIB_DIR=/opt/duckdb/lib \
             -DONNXRUNTIME_INCLUDE_DIR=$CONDA_PREFIX/include \
             -DONNXRUNTIME_LIB_DIR=$CONDA_PREFIX/lib
-          make -j$(nproc)
+          ninja
 
       - name: Verify binaries
         run: |
