@@ -32,10 +32,20 @@ jobs:
           bash miniconda.sh -b -p /opt/conda
           rm miniconda.sh
 
-      - name: Install dependencies (except DuckDB)
+      - name: Install dependencies (except DuckDB and ONNX)
         run: |
           source /opt/conda/bin/activate
-          conda install -y -c conda-forge cmake nlohmann_json sqlite onnxruntime-cpp=${{ env.ONNX_VERSION }}
+          conda install -y -c conda-forge cmake nlohmann_json sqlite
+
+      - name: Download ONNX Runtime
+        run: |
+          # Download official pre-built ONNX Runtime (better glibc compatibility than conda)
+          curl -L -o onnxruntime.tgz \
+            "https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ONNX_VERSION }}/onnxruntime-linux-x64-${{ env.ONNX_VERSION }}.tgz"
+          tar xzf onnxruntime.tgz
+          mkdir -p /opt/onnxruntime
+          mv onnxruntime-linux-x64-${{ env.ONNX_VERSION }}/* /opt/onnxruntime/
+          rm onnxruntime.tgz
 
       - name: Build DuckDB from source
         run: |
@@ -65,8 +75,8 @@ jobs:
             -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
             -DDUCKDB_INCLUDE_DIR=/opt/duckdb/include \
             -DDUCKDB_LIB_DIR=/opt/duckdb/lib \
-            -DONNXRUNTIME_INCLUDE_DIR=$CONDA_PREFIX/include \
-            -DONNXRUNTIME_LIB_DIR=$CONDA_PREFIX/lib
+            -DONNXRUNTIME_INCLUDE_DIR=/opt/onnxruntime/include \
+            -DONNXRUNTIME_LIB_DIR=/opt/onnxruntime/lib
           make -j$(nproc)
 
       - name: Verify binaries
@@ -78,16 +88,14 @@ jobs:
 
       - name: Run tests
         run: |
-          source /opt/conda/bin/activate
           cd chitta/build
-          LD_LIBRARY_PATH=/opt/duckdb/lib:$CONDA_PREFIX/lib:$LD_LIBRARY_PATH ctest --output-on-failure || true
+          LD_LIBRARY_PATH=/opt/duckdb/lib:/opt/onnxruntime/lib:$LD_LIBRARY_PATH ctest --output-on-failure || true
 
       - name: Package binaries
         run: |
-          source /opt/conda/bin/activate
           mkdir -p dist
           # Bundle all required libraries
-          cp $CONDA_PREFIX/lib/libonnxruntime.so* bin/
+          cp /opt/onnxruntime/lib/libonnxruntime.so* bin/
           cp /opt/duckdb/lib/libduckdb.so bin/
           # Set RPATH for all binaries to find bundled libs
           for bin in bin/chitta bin/chittad bin/chitta_migrate bin/chitta_import bin/duckdb_test; do
