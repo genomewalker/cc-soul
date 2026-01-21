@@ -138,39 +138,25 @@ case "$HOOK_TYPE" in
             REALM="brahman"
         fi
 
-        # Get soul context
+        # Get soul context (compact: just node count and status)
         response=$(rpc_call "soul_context" '{}')
         context=$(extract_text "$response")
-
         if [[ -n "$context" ]]; then
-            echo "$context"
+            nodes=$(echo "$context" | grep -oE 'Nodes: [0-9]+' | grep -oE '[0-9]+' || echo "0")
+            status=$(echo "$context" | grep -oE 'Status: [a-z]+' | cut -d' ' -f2 || echo "unknown")
+            echo "[soul] $nodes nodes, $status"
         fi
 
-        # Load ledger checkpoint for current realm
+        # Load ledger checkpoint (compact: one line)
         escaped_realm=$(json_escape "$REALM")
         response=$(rpc_call "ledger_load" "{\"project\":\"$escaped_realm\"}")
-        ledger_text=$(extract_text "$response")
-
-        # Check if checkpoint was found (structured response has "found" field)
         ledger_json=$(echo "$response" | jq -r '.result.structured // empty' 2>/dev/null)
         ledger_found=$(echo "$ledger_json" | jq -r '.found // false' 2>/dev/null)
 
         if [[ "$ledger_found" == "true" ]]; then
-            mood=$(echo "$ledger_json" | jq -r '.mood // ""' 2>/dev/null)
             snapshot=$(echo "$ledger_json" | jq -r '.snapshot // ""' 2>/dev/null)
-
-            # Count pending todos
-            todos=$(echo "$ledger_json" | jq -r '.todos // []' 2>/dev/null)
-            pending_count=$(echo "$todos" | jq '[.[] | select(.status != "completed" and .status != "done")] | length' 2>/dev/null || echo "0")
-
-            # Get first next step
-            next_step=$(echo "$ledger_json" | jq -r '.next_steps[0] // ""' 2>/dev/null)
-
+            [[ -n "$snapshot" && "$snapshot" != "null" ]] && echo "[last] $snapshot" | head -c 100
             echo ""
-            echo "[I remember working on: $REALM]"
-            [[ -n "$snapshot" && "$snapshot" != "null" ]] && echo "  $snapshot"
-            [[ "$pending_count" -gt 0 ]] && echo "  ($pending_count pending tasks)"
-            [[ -n "$next_step" && "$next_step" != "null" ]] && echo "  Next: $next_step"
         fi
 
         ;;
