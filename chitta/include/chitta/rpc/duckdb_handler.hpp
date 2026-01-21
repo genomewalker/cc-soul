@@ -707,11 +707,6 @@ private:
             int pct = static_cast<int>(std::min(r.relevance, 1.0f) * 100);
             std::string type_name = node_type_name(r.type);
 
-            ss << "[" << pct << "%] [" << type_name << "] "
-               << r.text.substr(0, 100);
-            if (r.text.size() > 100) ss << "...";
-            ss << "\n";
-
             json result_entry = {
                 {"id", r.id.to_string()},
                 {"relevance", r.relevance},
@@ -734,10 +729,17 @@ private:
             if (count >= limit) break;
         }
 
-        ss.str("");
+        // Build output text with header and results
         ss << "Found " << count << " results";
         if (!realm.empty()) ss << " in realm '" << realm << "'";
         ss << ":\n";
+        for (const auto& r : results_json) {
+            int pct = static_cast<int>(r["relevance"].get<double>() * 100);
+            ss << "[" << pct << "%] [" << r["type"].get<std::string>() << "] "
+               << r["text"].get<std::string>().substr(0, 100);
+            if (r["text"].get<std::string>().size() > 100) ss << "...";
+            ss << "\n";
+        }
 
         return DuckDBToolResult::ok(ss.str(), {{"results", results_json}, {"realm", realm}});
     }
