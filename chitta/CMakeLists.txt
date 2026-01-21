@@ -316,17 +316,6 @@ if(CHITTA_BUILD_TESTS)
     add_test(NAME duckdb_test COMMAND duckdb_test)
 endif()
 
-# CLI tool for memory operations (thin client with socket support)
-# Output as 'chitta' binary (target named chitta_tool to avoid library conflict)
-if(CHITTA_BUILD_RPC)
-    add_executable(chitta_tool
-        src/rpc_server.cpp
-        src/socket_client.cpp
-    )
-    set_target_properties(chitta_tool PROPERTIES OUTPUT_NAME chitta)
-    target_link_libraries(chitta_tool PRIVATE chitta)
-endif()
-
 # DuckDBStore library
 add_library(duckdb_store STATIC src/duckdb_store.cpp)
 target_link_libraries(duckdb_store PUBLIC chitta duckdb)
@@ -355,6 +344,21 @@ target_link_libraries(chittad PRIVATE chitta duckdb_store)
 if(CHITTA_WITH_POSTGRES)
     target_link_libraries(chittad PRIVATE postgres_store)
     target_compile_definitions(chittad PRIVATE CHITTA_WITH_POSTGRES=1)
+endif()
+
+# CLI tool for memory operations (thin client + MCP server)
+# Output as 'chitta' binary (target named chitta_tool to avoid library conflict)
+if(CHITTA_BUILD_RPC)
+    add_executable(chitta_tool
+        src/rpc_server.cpp
+        src/socket_client.cpp
+    )
+    set_target_properties(chitta_tool PROPERTIES OUTPUT_NAME chitta)
+    target_link_libraries(chitta_tool PRIVATE chitta duckdb_store)
+    if(TARGET onnx_yantra)
+        target_link_libraries(chitta_tool PRIVATE onnx_yantra)
+        target_compile_definitions(chitta_tool PRIVATE CHITTA_WITH_ONNX)
+    endif()
 endif()
 
 # Migration tool (from SQLite soul.db)

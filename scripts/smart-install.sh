@@ -290,8 +290,8 @@ configure_mcp() {
         # Update command path if needed
         local current_cmd
         current_cmd=$(echo "$current" | jq -r '.mcpServers.chitta.command // ""')
-        if [[ "$current_cmd" != "$BIN_DIR/chittad" && "$current_cmd" != "chittad" ]]; then
-            current=$(echo "$current" | jq --arg cmd "$BIN_DIR/chittad" \
+        if [[ "$current_cmd" != "$BIN_DIR/chitta" && "$current_cmd" != "chitta" ]]; then
+            current=$(echo "$current" | jq --arg cmd "$BIN_DIR/chitta" \
                 '.mcpServers.chitta.command = $cmd')
             echo "$current" | jq '.' > "$settings_file"
             echo "[cc-soul] Updated MCP server path"
@@ -300,7 +300,7 @@ configure_mcp() {
     fi
 
     # Add chitta MCP server
-    current=$(echo "$current" | jq --arg cmd "$BIN_DIR/chittad" \
+    current=$(echo "$current" | jq --arg cmd "$BIN_DIR/chitta" \
         '.mcpServers.chitta = {"command": $cmd, "args": ["mcp"]}')
 
     echo "$current" | jq '.' > "$settings_file"

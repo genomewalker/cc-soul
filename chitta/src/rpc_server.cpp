@@ -17,6 +17,11 @@
 //   --json              CLI mode: output raw JSON instead of text
 
 #include <chitta/socket_client.hpp>
+#include <chitta/mind/duckdb_mind.hpp>
+#include <chitta/rpc/duckdb_handler.hpp>
+#ifdef CHITTA_WITH_ONNX
+#include <chitta/vak_onnx.hpp>
+#endif
 #include <fstream>
 #include <array>
 #include <chitta/version.hpp>
@@ -651,6 +656,75 @@ int main(int argc, char* argv[]) {
                 return 0;
             }
         }
+    }
+
+    // Handle MCP mode (standalone server, stdin/stdout JSON-RPC)
+    if (tool == "mcp") {
+        // MCP mode: open database directly, no daemon needed
+        std::string mind_path;
+        const char* home = std::getenv("HOME");
+        mind_path = std::string(home ? home : ".") + "/.claude/mind/chitta";
+
+        // Check for --path override
+        for (int i = 1; i < argc; ++i) {
+            if (std::strcmp(argv[i], "--path") == 0 && i + 1 < argc) {
+                mind_path = argv[++i];
+            }
+        }
+
+        chitta::DuckDBMindConfig config;
+        config.path = mind_path;
+        chitta::DuckDBMind mind(config);
+
+        // Try to attach yantra for embeddings
+        std::string model_path = std::string(home ? home : ".") + "/.claude/mind/model.onnx";
+        std::string vocab_path = std::string(home ? home : ".") + "/.claude/mind/vocab.txt";
+        if (const char* models_dir = std::getenv("CHITTA_MODELS_DIR")) {
+            model_path = std::string(models_dir) + "/model.onnx";
+            vocab_path = std::string(models_dir) + "/vocab.txt";
+        }
+
+#ifdef CHITTA_WITH_ONNX
+        chitta::AntahkaranaYantra::Config yantra_config;
+        yantra_config.pooling = chitta::PoolingStrategy::Mean;
+        yantra_config.normalize_embeddings = true;
+        auto yantra = std::make_shared<chitta::AntahkaranaYantra>(yantra_config);
+        if (yantra->awaken(model_path, vocab_path)) {
+            mind.attach_yantra(yantra);
+        }
+#endif
+
+        if (!mind.open()) {
+            std::cerr << "Failed to open mind at " << mind_path << "\n";
+            return 1;
+        }
+
+        chitta::DuckDBRpcHandler handler(&mind);
+
+        // Read JSON-RPC from stdin, write to stdout
+        std::string line;
+        while (std::getline(std::cin, line)) {
+            if (line.empty()) continue;
+
+            try {
+                auto request = nlohmann::json::parse(line);
+                auto response = handler.handle(request);
+                std::cout << response.dump() << std::endl;
+            } catch (const std::exception& e) {
+                nlohmann::json error = {
+                    {"jsonrpc", "2.0"},
+                    {"error", {
+                        {"code", -32700},
+                        {"message", e.what()}
+                    }},
+                    {"id", nullptr}
+                };
+                std::cout << error.dump() << std::endl;
+            }
+        }
+
+        mind.close();
+        return 0;
     }
 
     // Check for CLI mode: tool is a known tool name

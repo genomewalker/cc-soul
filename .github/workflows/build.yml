@@ -12,36 +12,29 @@ env:
 
 jobs:
   build-linux:
-    runs-on: ubuntu-latest
-    container:
-      image: quay.io/pypa/manylinux_2_28_x86_64
+    # Ubuntu 20.04 has glibc 2.31 - compatible with most systems including RHEL 8+
+    runs-on: ubuntu-20.04
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install system dependencies
-        run: |
-          # manylinux_2_28 uses AlmaLinux 8 (glibc 2.28)
-          dnf install -y cmake make gcc-c++ git curl
-
       - name: Setup Miniconda
-        run: |
-          curl -L -o miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
-          bash miniconda.sh -b -p /opt/conda
-          rm miniconda.sh
-          /opt/conda/bin/conda init bash
-          echo 'export PATH="/opt/conda/bin:$PATH"' >> ~/.bashrc
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+          python-version: "3.11"
+          channels: conda-forge
+          channel-priority: strict
+          conda-remove-defaults: true
 
       - name: Install dependencies
-        shell: bash
+        shell: bash -l {0}
         run: |
-          source /opt/conda/bin/activate
-          conda install -y -c conda-forge cmake nlohmann_json sqlite onnxruntime-cpp=${{ env.ONNX_VERSION }} libduckdb-devel patchelf
+          conda install -y cmake nlohmann_json sqlite onnxruntime-cpp=${{ env.ONNX_VERSION }} libduckdb-devel patchelf
 
       - name: Build chitta
-        shell: bash
+        shell: bash -l {0}
         run: |
-          source /opt/conda/bin/activate
           mkdir -p chitta/build bin
           cd chitta/build
           cmake .. \
@@ -60,16 +53,14 @@ jobs:
           done
 
       - name: Run tests
-        shell: bash
+        shell: bash -l {0}
         run: |
-          source /opt/conda/bin/activate
           cd chitta/build
           LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH ctest --output-on-failure || true
 
       - name: Package binaries
-        shell: bash
+        shell: bash -l {0}
         run: |
-          source /opt/conda/bin/activate
           mkdir -p dist
           # Bundle all required libraries
           cp $CONDA_PREFIX/lib/libonnxruntime.so* bin/
@@ -78,6 +69,8 @@ jobs:
           cp $CONDA_PREFIX/lib/libicui18n.so* bin/ 2>/dev/null || true
           cp $CONDA_PREFIX/lib/libicuuc.so* bin/ 2>/dev/null || true
           cp $CONDA_PREFIX/lib/libicudata.so* bin/ 2>/dev/null || true
+          # Bundle libstdc++ to avoid version mismatches
+          cp $CONDA_PREFIX/lib/libstdc++.so* bin/ 2>/dev/null || true
           # Set RPATH for all binaries to find bundled libs
           for bin in bin/chitta bin/chittad bin/chitta_migrate bin/chitta_import bin/duckdb_test; do
             patchelf --set-rpath '$ORIGIN' $bin 2>/dev/null || true
