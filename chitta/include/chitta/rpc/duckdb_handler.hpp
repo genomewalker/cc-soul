@@ -1335,6 +1335,76 @@ private:
         return DuckDBToolResult::ok(ss.str(), result);
     }
 
+    DuckDBToolResult tool_codebase_overview(const json& params) {
+        std::string project = params.value("project", "");
+        std::string format = params.value("format", "tree");
+        bool include_callsites = params.value("include_callsites", false);
+
+        std::ostringstream ss;
+        json result;
+
+        // Get all files for project
+        auto files = mind_->store().list_project_files(project);
+
+        if (files.empty()) {
+            ss << "No indexed files";
+            if (!project.empty()) ss << " for project: " << project;
+            ss << "\nRun: learn_codebase --path /your/project --project " << (project.empty() ? "myproj" : project);
+            return DuckDBToolResult::ok(ss.str(), {{"files", 0}});
+        }
+
+        // Summary
+        size_t total_symbols = 0, total_callsites = 0;
+        for (const auto& f : files) {
+            total_symbols += f.symbols_count;
+            total_callsites += f.callsites_count;
+        }
+
+        ss << "Codebase: " << (project.empty() ? "(all)" : project) << "\n";
+        ss << "  Files: " << files.size() << "\n";
+        ss << "  Symbols: " << total_symbols << "\n";
+        ss << "  Callsites: " << total_callsites << "\n\n";
+
+        // List files with counts
+        ss << "Files:\n";
+        for (const auto& f : files) {
+            std::filesystem::path p(f.path);
+            ss << "  " << p.filename().string() << " (" << f.symbols_count << " symbols";
+            if (include_callsites) ss << ", " << f.callsites_count << " callsites";
+            ss << ")\n";
+        }
+
+        // Get symbol breakdown by querying triplets
+        auto contains_triplets = mind_->store().query_predicate("contains");
+        std::unordered_map<std::string, std::vector<std::string>> file_symbols;
+
+        for (const auto& t : contains_triplets) {
+            // subject is file or class, object is symbol
+            file_symbols[t.subject].push_back(t.object);
+        }
+
+        if (format == "tree" && !file_symbols.empty()) {
+            ss << "\nStructure:\n";
+            for (const auto& [parent, children] : file_symbols) {
+                if (children.size() > 1) {  // Only show containers
+                    ss << "  " << parent << ":\n";
+                    for (const auto& child : children) {
+                        if (child.find("callsite") == std::string::npos) {  // Skip callsites in tree
+                            ss << "    - " << child << "\n";
+                        }
+                    }
+                }
+            }
+        }
+
+        result["files"] = files.size();
+        result["symbols"] = total_symbols;
+        result["callsites"] = total_callsites;
+        result["project"] = project;
+
+        return DuckDBToolResult::ok(ss.str(), result);
+    }
+
     // Essential memory tool implementations
     DuckDBToolResult tool_grow(const json& params) {
         std::string type_str = params.value("type", "");
