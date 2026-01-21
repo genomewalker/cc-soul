@@ -563,49 +563,79 @@ validate_binaries() {
     fi
 }
 
+# Compare semantic versions: returns 0 if v1 > v2, 1 otherwise
+version_gt() {
+    local v1="$1" v2="$2"
+    # Split on dots and compare numerically
+    local IFS=.
+    local i v1_parts=($v1) v2_parts=($v2)
+    for ((i=0; i<${#v1_parts[@]} || i<${#v2_parts[@]}; i++)); do
+        local n1=${v1_parts[i]:-0}
+        local n2=${v2_parts[i]:-0}
+        ((n1 > n2)) && return 0
+        ((n1 < n2)) && return 1
+    done
+    return 1  # Equal
+}
+
 # Main
 main() {
-    # Check if already installed
-    local current_version
+    # Get plugin version (what we want to install)
+    local plugin_version
     if command -v jq &>/dev/null; then
-        current_version=$(jq -r '.version // "0.0.0"' "$PLUGIN_DIR/.claude-plugin/plugin.json" 2>/dev/null || echo "0.0.0")
+        plugin_version=$(jq -r '.version // "0.0.0"' "$PLUGIN_DIR/.claude-plugin/plugin.json" 2>/dev/null || echo "0.0.0")
     else
-        current_version=$(grep '"version"' "$PLUGIN_DIR/.claude-plugin/plugin.json" 2>/dev/null | head -1 | sed 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || echo "0.0.0")
-    fi
-    local installed_version=$(cat "$MARKER" 2>/dev/null || echo "")
-
-    if [[ "$current_version" == "$installed_version" && -x "$BIN_DIR/chitta" && -f "$MODELS_DIR/model.onnx" ]]; then
-        exit 0  # Already installed
+        plugin_version=$(grep '"version"' "$PLUGIN_DIR/.claude-plugin/plugin.json" 2>/dev/null | head -1 | sed 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || echo "0.0.0")
     fi
 
-    # Stop daemon before updating binaries (version mismatch can cause issues)
+    # Get installed binary version (if binary exists and runs)
+    local installed_version="0.0.0"
+    if [[ -x "$BIN_DIR/chitta" ]]; then
+        installed_version=$("$BIN_DIR/chitta" --version 2>/dev/null | awk '{print $2}' || echo "0.0.0")
+    fi
+
+    # Check if models exist
+    local have_models=false
+    [[ -f "$MODELS_DIR/model.onnx" && -f "$MODELS_DIR/vocab.txt" ]] && have_models=true
+
+    # Skip if binary works and version >= plugin version
+    if [[ "$installed_version" != "0.0.0" ]] && ! version_gt "$plugin_version" "$installed_version" && $have_models; then
+        exit 0  # Already installed with same or newer version
+    fi
+
+    # If binary is a working symlink, don't replace it
+    if [[ -L "$BIN_DIR/chitta" && "$installed_version" != "0.0.0" ]]; then
+        # Symlink to working binary - just ensure models exist
+        if ! $have_models; then
+            download_models
+        fi
+        echo "$installed_version" > "$MARKER"
+        exit 0
+    fi
+
+    # Stop daemon before updating binaries
     stop_daemon
 
-    echo "[cc-soul] Installing v$current_version..."
+    echo "[cc-soul] Installing v$plugin_version (have: $installed_version)..."
 
-    # Download models
-    download_models
+    # Download models if needed
+    if ! $have_models; then
+        download_models
+    fi
 
     # Install binaries (try pre-built first, then build)
     local platform=$(detect_platform)
-    local need_binaries=false
 
-    if [[ ! -x "$BIN_DIR/chitta" || "$current_version" != "$installed_version" ]]; then
-        need_binaries=true
-    fi
-
-    if $need_binaries; then
-        if [[ "$platform" != "unknown" ]]; then
-            download_binaries "$current_version" "$platform" || build_from_source || {
-                echo "[cc-soul] ERROR: Installation failed" >&2
-                exit 1
-            }
-        else
-            build_from_source || {
-                echo "[cc-soul] ERROR: Build failed and no pre-built binaries for this platform" >&2
-                exit 1
-            }
-        fi
+    if [[ "$platform" != "unknown" ]]; then
+        download_binaries "$plugin_version" "$platform" || build_from_source || {
+            echo "[cc-soul] ERROR: Installation failed" >&2
+            exit 1
+        }
+    else
+        build_from_source || {
+            echo "[cc-soul] ERROR: Build failed and no pre-built binaries for this platform" >&2
+            exit 1
+        }
     fi
 
     # Create directories
@@ -630,13 +660,13 @@ main() {
     fi
 
     # Version change notification
-    if [[ -n "$installed_version" && "$installed_version" != "$current_version" ]]; then
-        echo "[cc-soul] Updated: $installed_version → $current_version"
+    if [[ -n "$installed_version" && "$installed_version" != "0.0.0" && "$installed_version" != "$plugin_version" ]]; then
+        echo "[cc-soul] Updated: $installed_version → $plugin_version"
     fi
 
     # Mark as installed
-    echo "$current_version" > "$MARKER"
-    echo "[cc-soul] Installation complete (v$current_version)"
+    echo "$plugin_version" > "$MARKER"
+    echo "[cc-soul] Installation complete (v$plugin_version)"
 }
 
 main "$@"
