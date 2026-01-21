@@ -46,6 +46,9 @@ jobs:
           mkdir -p /opt/onnxruntime
           mv onnxruntime-linux-x64-${{ env.ONNX_VERSION }}/* /opt/onnxruntime/
           rm onnxruntime.tgz
+          # Create expected header structure (code expects onnxruntime/core/session/...)
+          mkdir -p /opt/onnxruntime/include/onnxruntime/core/session
+          cp /opt/onnxruntime/include/*.h /opt/onnxruntime/include/onnxruntime/core/session/
 
       - name: Build DuckDB from source
         run: |
@@ -67,7 +70,8 @@ jobs:
       - name: Build chitta
         run: |
           source /opt/conda/bin/activate
-          mkdir -p chitta/build bin
+          mkdir -p bin
+          rm -rf chitta/build && mkdir -p chitta/build
           cd chitta/build
           cmake .. \
             -DCMAKE_BUILD_TYPE=Release \
