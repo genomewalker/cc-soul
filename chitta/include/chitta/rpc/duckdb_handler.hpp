@@ -917,6 +917,28 @@ private:
         );
     }
 
+    // Extract significant words from query for graph lookup
+    static std::vector<std::string> extract_terms(const std::string& query) {
+        std::vector<std::string> terms;
+        std::istringstream iss(query);
+        std::string word;
+        while (iss >> word) {
+            // Remove punctuation and convert to lowercase
+            std::string clean;
+            for (char c : word) {
+                if (std::isalnum(c)) clean += std::tolower(c);
+            }
+            // Keep words with 3+ chars, skip common words
+            if (clean.length() >= 3 &&
+                clean != "the" && clean != "and" && clean != "for" &&
+                clean != "that" && clean != "with" && clean != "how" &&
+                clean != "what" && clean != "does" && clean != "can") {
+                terms.push_back(clean);
+            }
+        }
+        return terms;
+    }
+
     DuckDBToolResult tool_full_resonate(const json& params) {
         std::string query = params.value("query", "");
         if (query.empty()) {
@@ -927,7 +949,7 @@ private:
         std::string realm = params.value("realm", "");
         bool include_global = params.value("include_global", true);
 
-        // Over-fetch if realm filtering to account for filtered results
+        // 1. Semantic search
         auto results = mind_->recall(query, realm.empty() ? k : k * 2);
 
         std::ostringstream ss;
@@ -969,15 +991,71 @@ private:
             });
         }
 
-        if (results_json.empty()) {
-            return DuckDBToolResult::ok("No memories found matching query.", {{"results", json::array()}});
+        // 2. Graph expansion - find related concepts via triplets
+        std::vector<std::string> terms = extract_terms(query);
+        std::set<std::string> seen_triplets;
+        json triplets_json = json::array();
+
+        auto add_triplet = [&](const StringTriplet& t) {
+            std::string key = t.subject + "→" + t.predicate + "→" + t.object;
+            if (seen_triplets.find(key) == seen_triplets.end()) {
+                seen_triplets.insert(key);
+                triplets_json.push_back({
+                    {"subject", t.subject},
+                    {"predicate", t.predicate},
+                    {"object", t.object}
+                });
+            }
+        };
+
+        for (const auto& term : terms) {
+            // Try multiple case variants: lowercase, Capitalized, UPPERCASE
+            std::string cap_term = term;
+            if (!cap_term.empty()) cap_term[0] = std::toupper(cap_term[0]);
+            std::string upper_term;
+            for (char c : term) upper_term += std::toupper(c);
+
+            // Query as subject (all case variants)
+            for (const auto& t : mind_->store().query_subject(term)) add_triplet(t);
+            for (const auto& t : mind_->store().query_subject(cap_term)) add_triplet(t);
+            for (const auto& t : mind_->store().query_subject(upper_term)) add_triplet(t);
+
+            // Query as object (all case variants)
+            for (const auto& t : mind_->store().query_object(term)) add_triplet(t);
+            for (const auto& t : mind_->store().query_object(cap_term)) add_triplet(t);
+            for (const auto& t : mind_->store().query_object(upper_term)) add_triplet(t);
         }
 
+        // Build output
         std::ostringstream header;
         header << "[I know]\n";
-        header << "Found " << results_json.size() << " results:\n\n";
+        if (!results_json.empty()) {
+            header << "Found " << results_json.size() << " results:\n\n";
+        }
 
-        return DuckDBToolResult::ok(header.str() + ss.str(), {{"results", results_json}});
+        std::string output = header.str() + ss.str();
+
+        // Add graph relationships if found
+        if (!triplets_json.empty()) {
+            output += "[Related]\n";
+            for (const auto& t : triplets_json) {
+                output += t["subject"].get<std::string>() + " → " +
+                         t["predicate"].get<std::string>() + " → " +
+                         t["object"].get<std::string>() + "\n";
+            }
+        }
+
+        if (results_json.empty() && triplets_json.empty()) {
+            return DuckDBToolResult::ok("No memories or relationships found.", {
+                {"results", json::array()},
+                {"triplets", json::array()}
+            });
+        }
+
+        return DuckDBToolResult::ok(output, {
+            {"results", results_json},
+            {"triplets", triplets_json}
+        });
     }
 
     DuckDBToolResult tool_extract_symbols(const json& params) {
