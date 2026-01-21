@@ -31,6 +31,38 @@ djb2_hash() {
 }
 
 SOCKET="/tmp/chitta-$(djb2_hash "$MIND_PATH").sock"
+CHITTAD_BIN="${CHITTAD_BIN:-$HOME/.claude/bin/chittad}"
+
+# Ensure daemon is running
+ensure_daemon() {
+    if [[ -S "$SOCKET" ]]; then
+        return 0  # Already running
+    fi
+
+    if [[ ! -x "$CHITTAD_BIN" ]]; then
+        echo "[simple-hook] chittad not found at $CHITTAD_BIN" >&2
+        return 1
+    fi
+
+    # Start daemon in background
+    "$CHITTAD_BIN" daemon &
+    disown
+
+    # Wait for socket (max 5 seconds)
+    local waited=0
+    while [[ ! -S "$SOCKET" && $waited -lt 50 ]]; do
+        sleep 0.1
+        ((waited++))
+    done
+
+    if [[ -S "$SOCKET" ]]; then
+        echo "[simple-hook] Daemon started"
+        return 0
+    else
+        echo "[simple-hook] Daemon failed to start" >&2
+        return 1
+    fi
+}
 
 # RPC call helper
 rpc_call() {
@@ -95,6 +127,9 @@ json_escape() {
 
 case "$HOOK_TYPE" in
     start|SessionStart)
+        # Ensure daemon is running before any RPC calls
+        ensure_daemon || exit 0  # Soft fail - don't block session
+
         # Detect current realm/project
         CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
         if [[ -x "$CHITTA_BIN" ]]; then
@@ -141,6 +176,9 @@ case "$HOOK_TYPE" in
         ;;
 
     prompt|UserPromptSubmit)
+        # Ensure daemon is running
+        ensure_daemon || exit 0
+
         # Get query from stdin or argument
         QUERY="${1:-}"
         if [[ -z "$QUERY" ]]; then
@@ -174,6 +212,9 @@ case "$HOOK_TYPE" in
         ;;
 
     stop|Stop)
+        # Ensure daemon is running
+        ensure_daemon || exit 0
+
         # Get response from stdin
         RESPONSE=$(cat)
 
@@ -277,6 +318,9 @@ case "$HOOK_TYPE" in
         ;;
 
     pre-compact|PreCompact)
+        # Ensure daemon is running
+        ensure_daemon || exit 0
+
         # Detect realm for project scoping
         CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
         if [[ -x "$CHITTA_BIN" ]]; then
