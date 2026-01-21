@@ -12,35 +12,59 @@ env:
 
 jobs:
   build-linux:
-    # Ubuntu 20.04 has glibc 2.31 - compatible with most systems including RHEL 8+
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
+    container:
+      image: quay.io/pypa/manylinux_2_28_x86_64
+
+    env:
+      DUCKDB_VERSION: "1.1.3"
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Miniconda
-        uses: conda-incubator/setup-miniconda@v3
-        with:
-          auto-update-conda: true
-          python-version: "3.11"
-          channels: conda-forge
-          channel-priority: strict
-          conda-remove-defaults: true
-
-      - name: Install dependencies
-        shell: bash -l {0}
+      - name: Install system dependencies
         run: |
-          conda install -y cmake nlohmann_json sqlite onnxruntime-cpp=${{ env.ONNX_VERSION }} libduckdb-devel patchelf
+          dnf install -y cmake ninja-build git curl patchelf
+
+      - name: Setup Miniconda
+        run: |
+          curl -L -o miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+          bash miniconda.sh -b -p /opt/conda
+          rm miniconda.sh
+
+      - name: Install dependencies (except DuckDB)
+        run: |
+          source /opt/conda/bin/activate
+          conda install -y -c conda-forge cmake nlohmann_json sqlite onnxruntime-cpp=${{ env.ONNX_VERSION }}
+
+      - name: Build DuckDB from source
+        run: |
+          git clone --depth 1 --branch v${{ env.DUCKDB_VERSION }} https://github.com/duckdb/duckdb.git
+          cd duckdb
+          mkdir build && cd build
+          cmake .. -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHELL=OFF \
+            -DBUILD_UNITTESTS=OFF \
+            -DENABLE_SANITIZER=OFF \
+            -DENABLE_UBSAN=OFF
+          ninja -j$(nproc)
+          # Install to a local prefix
+          mkdir -p /opt/duckdb/{lib,include}
+          cp src/libduckdb.so /opt/duckdb/lib/
+          cp -r ../src/include/duckdb* /opt/duckdb/include/
 
       - name: Build chitta
-        shell: bash -l {0}
         run: |
+          source /opt/conda/bin/activate
           mkdir -p chitta/build bin
           cd chitta/build
           cmake .. \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_RPATH="\$ORIGIN" \
             -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
+            -DDUCKDB_INCLUDE_DIR=/opt/duckdb/include \
+            -DDUCKDB_LIB_DIR=/opt/duckdb/lib \
             -DONNXRUNTIME_INCLUDE_DIR=$CONDA_PREFIX/include \
             -DONNXRUNTIME_LIB_DIR=$CONDA_PREFIX/lib
           make -j$(nproc)
@@ -53,24 +77,18 @@ jobs:
           done
 
       - name: Run tests
-        shell: bash -l {0}
         run: |
+          source /opt/conda/bin/activate
           cd chitta/build
-          LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH ctest --output-on-failure || true
+          LD_LIBRARY_PATH=/opt/duckdb/lib:$CONDA_PREFIX/lib:$LD_LIBRARY_PATH ctest --output-on-failure || true
 
       - name: Package binaries
-        shell: bash -l {0}
         run: |
+          source /opt/conda/bin/activate
           mkdir -p dist
           # Bundle all required libraries
           cp $CONDA_PREFIX/lib/libonnxruntime.so* bin/
-          cp $CONDA_PREFIX/lib/libduckdb.so bin/
-          # DuckDB dependencies (ICU)
-          cp $CONDA_PREFIX/lib/libicui18n.so* bin/ 2>/dev/null || true
-          cp $CONDA_PREFIX/lib/libicuuc.so* bin/ 2>/dev/null || true
-          cp $CONDA_PREFIX/lib/libicudata.so* bin/ 2>/dev/null || true
-          # Bundle libstdc++ to avoid version mismatches
-          cp $CONDA_PREFIX/lib/libstdc++.so* bin/ 2>/dev/null || true
+          cp /opt/duckdb/lib/libduckdb.so bin/
           # Set RPATH for all binaries to find bundled libs
           for bin in bin/chitta bin/chittad bin/chitta_migrate bin/chitta_import bin/duckdb_test; do
             patchelf --set-rpath '$ORIGIN' $bin 2>/dev/null || true
