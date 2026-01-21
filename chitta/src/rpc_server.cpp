@@ -17,6 +17,8 @@
 //   --json              CLI mode: output raw JSON instead of text
 
 #include <chitta/socket_client.hpp>
+#include <fstream>
+#include <array>
 #include <chitta/version.hpp>
 #include <set>
 #include <iostream>
@@ -261,7 +263,7 @@ void print_usage(const char* prog) {
               << "  Maintenance: cycle, cleanup\n"
               << "  Import/Export: import_soul, export_soul\n"
               << "  Code Intel:  extract_symbols, learn_codebase, find_symbol, code_context\n"
-              << "  Realm:       realm_list, realm_get, realm_set, realm_add, realm_remove, realm_visibility\n"
+              << "  Realm:       realm_detect, realm_list, realm_get, realm_set, realm_add, realm_remove, realm_visibility\n"
               << "\n"
               << "Global options:\n"
               << "  --socket-path PATH  Unix socket path\n"
@@ -488,6 +490,55 @@ int run_thin_client(const std::string& socket_path) {
     return 0;
 }
 
+// Detect realm from environment/git/config
+// Priority: CHITTA_REALM env > .cc-soul-realm file > git repo name > "brahman"
+static std::string detect_realm() {
+    // 1. Environment variable
+    if (const char* env_realm = std::getenv("CHITTA_REALM")) {
+        return env_realm;
+    }
+
+    // 2. Config file in current directory
+    std::ifstream realm_file(".cc-soul-realm");
+    if (realm_file.good()) {
+        std::string realm;
+        std::getline(realm_file, realm);
+        // Trim whitespace
+        realm.erase(0, realm.find_first_not_of(" \t\n\r"));
+        realm.erase(realm.find_last_not_of(" \t\n\r") + 1);
+        if (!realm.empty()) {
+            return realm;
+        }
+    }
+
+    // 3. Git repository name
+    std::array<char, 256> buffer;
+    std::string git_root;
+    FILE* pipe = popen("git rev-parse --show-toplevel 2>/dev/null", "r");
+    if (pipe) {
+        if (fgets(buffer.data(), buffer.size(), pipe)) {
+            git_root = buffer.data();
+            // Remove trailing newline
+            if (!git_root.empty() && git_root.back() == '\n') {
+                git_root.pop_back();
+            }
+        }
+        pclose(pipe);
+    }
+
+    if (!git_root.empty()) {
+        // Extract repo name from path
+        size_t last_slash = git_root.rfind('/');
+        std::string repo_name = (last_slash != std::string::npos)
+            ? git_root.substr(last_slash + 1)
+            : git_root;
+        return "project:" + repo_name;
+    }
+
+    // 4. Default
+    return "brahman";
+}
+
 int main(int argc, char* argv[]) {
     std::string socket_path = chitta::SocketClient::default_socket_path();
     bool json_output = false;
@@ -504,6 +555,17 @@ int main(int argc, char* argv[]) {
             tool = argv[i];
             tool_arg_index = i;
         }
+    }
+
+    // Handle realm_detect command (client-side, no daemon needed)
+    if (tool == "realm_detect") {
+        std::string realm = detect_realm();
+        if (json_output) {
+            std::cout << "{\"realm\":\"" << realm << "\"}\n";
+        } else {
+            std::cout << realm << "\n";
+        }
+        return 0;
     }
 
     // Handle status command (daemon health check)
