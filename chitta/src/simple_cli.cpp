@@ -289,11 +289,40 @@ int cmd_stats(DuckDBMind& mind) {
     return 0;
 }
 
+// MCP mode: read JSON-RPC from stdin, write to stdout
+int cmd_mcp(DuckDBMind& mind) {
+    DuckDBRpcHandler handler(&mind);
+
+    std::string line;
+    while (std::getline(std::cin, line)) {
+        if (line.empty()) continue;
+
+        try {
+            auto request = json::parse(line);
+            auto response = handler.handle(request);
+            std::cout << response.dump() << std::endl;
+        } catch (const std::exception& e) {
+            json error = {
+                {"jsonrpc", "2.0"},
+                {"error", {
+                    {"code", -32700},
+                    {"message", e.what()}
+                }},
+                {"id", nullptr}
+            };
+            std::cout << error.dump() << std::endl;
+        }
+    }
+
+    return 0;
+}
+
 void print_usage(const char* prog) {
     std::cerr << "chittad " << CHITTA_VERSION << " - Soul daemon\n\n"
               << "Usage: " << prog << " <command> [options]\n\n"
               << "Commands:\n"
               << "  daemon     Run background daemon\n"
+              << "  mcp        MCP server mode (stdin/stdout JSON-RPC)\n"
               << "  shutdown   Stop running daemon\n"
               << "  status     Check daemon status\n"
               << "  stats      Show soul statistics\n"
@@ -549,6 +578,8 @@ int main(int argc, char* argv[]) {
     int result = 0;
     if (command == "daemon") {
         result = cmd_daemon(mind, interval, sock_path, mind_path, pid_file);
+    } else if (command == "mcp") {
+        result = cmd_mcp(mind);
     } else if (command == "stats") {
         result = cmd_stats(mind);
     } else {
