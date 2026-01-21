@@ -150,6 +150,29 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
 
     {"code_context", "Get code context summary",
      {{"path", "Limit to files under this path", false, nullptr}}},
+
+    // Realm tools
+    {"realm_list", "List all known realms",
+     {}},
+
+    {"realm_get", "Get realm for a memory",
+     {{"id", "Memory ID", true, nullptr}}},
+
+    {"realm_set", "Set primary realm for a memory",
+     {{"id", "Memory ID", true, nullptr},
+      {"realm", "Realm name", true, nullptr}}},
+
+    {"realm_add", "Add memory to additional realm",
+     {{"id", "Memory ID", true, nullptr},
+      {"realm", "Realm name to add", true, nullptr}}},
+
+    {"realm_remove", "Remove memory from realm",
+     {{"id", "Memory ID", true, nullptr},
+      {"realm", "Realm name to remove", true, nullptr}}},
+
+    {"realm_visibility", "Set realm visibility for a memory",
+     {{"id", "Memory ID", true, nullptr},
+      {"visibility", "Visibility: private|shared|global", true, nullptr}}},
 };
 
 // Build set of known tools from specs
@@ -238,6 +261,7 @@ void print_usage(const char* prog) {
               << "  Maintenance: cycle, cleanup\n"
               << "  Import/Export: import_soul, export_soul\n"
               << "  Code Intel:  extract_symbols, learn_codebase, find_symbol, code_context\n"
+              << "  Realm:       realm_list, realm_get, realm_set, realm_add, realm_remove, realm_visibility\n"
               << "\n"
               << "Global options:\n"
               << "  --socket-path PATH  Unix socket path\n"

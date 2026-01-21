@@ -70,6 +70,29 @@ private:
     std::vector<json> tools_;
     std::unordered_map<std::string, std::function<DuckDBToolResult(const json&)>> handlers_;
 
+    // Helper to parse ID from JSON (accepts both string and number)
+    static std::pair<int64_t, std::string> parse_id(const json& params, const std::string& key = "id") {
+        int64_t db_id = 0;
+        std::string id_str;
+
+        if (params.contains(key)) {
+            const auto& val = params[key];
+            if (val.is_number_integer()) {
+                db_id = val.get<int64_t>();
+                id_str = std::to_string(db_id);
+            } else if (val.is_string()) {
+                id_str = val.get<std::string>();
+                try {
+                    db_id = std::stoll(id_str);
+                } catch (...) {
+                    NodeId nid = NodeId::from_string(id_str);
+                    db_id = static_cast<int64_t>(nid.low);
+                }
+            }
+        }
+        return {db_id, id_str};
+    }
+
     void register_tools() {
         // remember
         tools_.push_back({
@@ -1393,17 +1416,9 @@ private:
     }
 
     DuckDBToolResult tool_realm_get(const json& params) {
-        std::string id_str = params.value("id", "");
+        auto [db_id, id_str] = parse_id(params);
         if (id_str.empty()) {
             return DuckDBToolResult::error("ID is required");
-        }
-
-        int64_t db_id = 0;
-        try {
-            db_id = std::stoll(id_str);
-        } catch (...) {
-            NodeId nid = NodeId::from_string(id_str);
-            db_id = static_cast<int64_t>(nid.low);
         }
 
         auto realms = mind_->store().get_realms(db_id);
@@ -1431,19 +1446,11 @@ private:
     }
 
     DuckDBToolResult tool_realm_set(const json& params) {
-        std::string id_str = params.value("id", "");
+        auto [db_id, id_str] = parse_id(params);
         std::string realm = params.value("realm", "");
 
         if (id_str.empty() || realm.empty()) {
             return DuckDBToolResult::error("ID and realm are required");
-        }
-
-        int64_t db_id = 0;
-        try {
-            db_id = std::stoll(id_str);
-        } catch (...) {
-            NodeId nid = NodeId::from_string(id_str);
-            db_id = static_cast<int64_t>(nid.low);
         }
 
         bool ok = mind_->store().set_realm(db_id, realm);
@@ -1455,19 +1462,11 @@ private:
     }
 
     DuckDBToolResult tool_realm_add(const json& params) {
-        std::string id_str = params.value("id", "");
+        auto [db_id, id_str] = parse_id(params);
         std::string realm = params.value("realm", "");
 
         if (id_str.empty() || realm.empty()) {
             return DuckDBToolResult::error("ID and realm are required");
-        }
-
-        int64_t db_id = 0;
-        try {
-            db_id = std::stoll(id_str);
-        } catch (...) {
-            NodeId nid = NodeId::from_string(id_str);
-            db_id = static_cast<int64_t>(nid.low);
         }
 
         bool ok = mind_->store().add_to_realm(db_id, realm);
@@ -1479,19 +1478,11 @@ private:
     }
 
     DuckDBToolResult tool_realm_remove(const json& params) {
-        std::string id_str = params.value("id", "");
+        auto [db_id, id_str] = parse_id(params);
         std::string realm = params.value("realm", "");
 
         if (id_str.empty() || realm.empty()) {
             return DuckDBToolResult::error("ID and realm are required");
-        }
-
-        int64_t db_id = 0;
-        try {
-            db_id = std::stoll(id_str);
-        } catch (...) {
-            NodeId nid = NodeId::from_string(id_str);
-            db_id = static_cast<int64_t>(nid.low);
         }
 
         bool ok = mind_->store().remove_from_realm(db_id, realm);
@@ -1503,7 +1494,7 @@ private:
     }
 
     DuckDBToolResult tool_realm_visibility(const json& params) {
-        std::string id_str = params.value("id", "");
+        auto [db_id, id_str] = parse_id(params);
         int visibility = params.value("visibility", 0);
 
         if (id_str.empty()) {
@@ -1512,14 +1503,6 @@ private:
 
         if (visibility < 0 || visibility > 2) {
             return DuckDBToolResult::error("Visibility must be 0 (Private), 1 (Shared), or 2 (Global)");
-        }
-
-        int64_t db_id = 0;
-        try {
-            db_id = std::stoll(id_str);
-        } catch (...) {
-            NodeId nid = NodeId::from_string(id_str);
-            db_id = static_cast<int64_t>(nid.low);
         }
 
         bool ok = mind_->store().set_visibility(db_id, static_cast<RealmVisibility>(visibility));
