@@ -182,6 +182,35 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
     {"realm_visibility", "Set realm visibility for a memory",
      {{"id", "Memory ID", true, nullptr},
       {"visibility", "Visibility: private|shared|global", true, nullptr}}},
+
+    // Ledger tools (session continuity)
+    {"ledger_save", "Save session checkpoint for continuity",
+     {{"session_id", "Session identifier", true, nullptr},
+      {"project", "Project scope", false, "default"},
+      {"mood", "Current feeling: confident|uncertain|flowing|frustrated", false, nullptr},
+      {"coherence", "Coherence score 0-1", false, nullptr},
+      {"confidence", "Confidence score 0-1", false, nullptr},
+      {"todos", "JSON array of {content, status} objects", false, nullptr},
+      {"active_files", "JSON array of file paths", false, nullptr},
+      {"decisions", "JSON array of key decisions", false, nullptr},
+      {"next_steps", "JSON array of next steps", false, nullptr},
+      {"blockers", "JSON array of blockers", false, nullptr},
+      {"discoveries", "JSON array of discoveries", false, nullptr},
+      {"snapshot", "Full checkpoint text for reconstruction", false, nullptr}}},
+
+    {"ledger_load", "Load most recent checkpoint",
+     {{"session_id", "Session identifier (optional)", false, nullptr},
+      {"project", "Project filter (optional)", false, nullptr}}},
+
+    {"ledger_list", "List recent checkpoints",
+     {{"project", "Project filter (optional)", false, nullptr},
+      {"limit", "Max entries to return", false, "10"}}},
+
+    {"ledger_get", "Get specific checkpoint by ID",
+     {{"id", "Checkpoint ID", true, nullptr}}},
+
+    {"ledger_delete", "Delete checkpoint",
+     {{"id", "Checkpoint ID to delete", true, nullptr}}},
 };
 
 // Build set of known tools from specs
@@ -271,6 +300,7 @@ void print_usage(const char* prog) {
               << "  Import/Export: import_soul, export_soul\n"
               << "  Code Intel:  extract_symbols, learn_codebase, find_symbol, code_context\n"
               << "  Realm:       realm_detect, realm_list, realm_get, realm_set, realm_add, realm_remove, realm_visibility\n"
+              << "  Ledger:      ledger_save, ledger_load, ledger_list, ledger_get, ledger_delete\n"
               << "\n"
               << "Global options:\n"
               << "  --socket-path PATH  Unix socket path\n"

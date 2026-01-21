@@ -171,10 +171,38 @@ bool DuckDBStore::create_schema() {
     execute("CREATE INDEX IF NOT EXISTS idx_symbol_name ON symbol(name)");
     execute("CREATE INDEX IF NOT EXISTS idx_symbol_kind ON symbol(kind)");
 
+    // Ledger table for session continuity
+    if (!execute(R"(
+        CREATE TABLE IF NOT EXISTS ledger (
+            id BIGINT PRIMARY KEY,
+            session_id VARCHAR NOT NULL,
+            project VARCHAR DEFAULT 'default',
+            created_at BIGINT NOT NULL,
+            mood VARCHAR,
+            coherence FLOAT,
+            confidence FLOAT,
+            todos TEXT,
+            active_files TEXT,
+            decisions TEXT,
+            next_steps TEXT,
+            blockers TEXT,
+            discoveries TEXT,
+            snapshot TEXT
+        )
+    )")) {
+        return false;
+    }
+
+    // Indexes for ledger queries
+    execute("CREATE INDEX IF NOT EXISTS idx_ledger_session ON ledger(session_id)");
+    execute("CREATE INDEX IF NOT EXISTS idx_ledger_project ON ledger(project)");
+    execute("CREATE INDEX IF NOT EXISTS idx_ledger_created ON ledger(created_at DESC)");
+
     // Sequence for IDs
     execute("CREATE SEQUENCE IF NOT EXISTS memory_seq START 1");
     execute("CREATE SEQUENCE IF NOT EXISTS triplet_seq START 1");
     execute("CREATE SEQUENCE IF NOT EXISTS symbol_seq START 1");
+    execute("CREATE SEQUENCE IF NOT EXISTS ledger_seq START 1");
 
     return true;
 }
@@ -1115,6 +1143,215 @@ NodeType DuckDBStore::string_to_kind(const std::string& kind) {
     if (kind == "symbol") return NodeType::Symbol;
     if (kind == "dream") return NodeType::Dream;
     return NodeType::Episode;
+}
+
+// Ledger operations
+
+int64_t DuckDBStore::save_ledger(const LedgerEntry& entry) {
+    std::lock_guard lock(mutex_);
+    if (!db_) return -1;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    Timestamp now_ts = entry.created_at > 0 ? entry.created_at : now();
+
+    std::ostringstream sql;
+    sql << "INSERT INTO ledger (id, session_id, project, created_at, mood, coherence, confidence, "
+        << "todos, active_files, decisions, next_steps, blockers, discoveries, snapshot) "
+        << "VALUES (nextval('ledger_seq'), "
+        << "'" << escape(entry.session_id) << "', "
+        << "'" << escape(entry.project.empty() ? "default" : entry.project) << "', "
+        << now_ts << ", "
+        << "'" << escape(entry.mood) << "', "
+        << entry.coherence << ", "
+        << entry.confidence << ", "
+        << "'" << escape(entry.todos) << "', "
+        << "'" << escape(entry.active_files) << "', "
+        << "'" << escape(entry.decisions) << "', "
+        << "'" << escape(entry.next_steps) << "', "
+        << "'" << escape(entry.blockers) << "', "
+        << "'" << escape(entry.discoveries) << "', "
+        << "'" << escape(entry.snapshot) << "') RETURNING id";
+
+    auto result = query(sql.str());
+    if (!result || result->HasError()) {
+        return -1;
+    }
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) {
+        return -1;
+    }
+
+    return chunk->GetValue(0, 0).GetValue<int64_t>();
+}
+
+std::optional<LedgerEntry> DuckDBStore::load_ledger(const std::string& session_id, const std::string& project) {
+    std::lock_guard lock(mutex_);
+    if (!db_) return std::nullopt;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    std::ostringstream sql;
+    sql << "SELECT id, session_id, project, created_at, mood, coherence, confidence, "
+        << "todos, active_files, decisions, next_steps, blockers, discoveries, snapshot "
+        << "FROM ledger WHERE 1=1 ";
+
+    if (!session_id.empty()) {
+        sql << "AND session_id = '" << escape(session_id) << "' ";
+    }
+    if (!project.empty()) {
+        sql << "AND project = '" << escape(project) << "' ";
+    }
+
+    sql << "ORDER BY created_at DESC LIMIT 1";
+
+    auto result = query(sql.str());
+    if (!result || result->HasError()) {
+        return std::nullopt;
+    }
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) {
+        return std::nullopt;
+    }
+
+    LedgerEntry entry;
+    entry.id = chunk->GetValue(0, 0).GetValue<int64_t>();
+    entry.session_id = chunk->GetValue(1, 0).ToString();
+    entry.project = chunk->GetValue(2, 0).ToString();
+    entry.created_at = chunk->GetValue(3, 0).GetValue<int64_t>();
+    entry.mood = chunk->GetValue(4, 0).ToString();
+    entry.coherence = chunk->GetValue(5, 0).IsNull() ? 0.0f : chunk->GetValue(5, 0).GetValue<float>();
+    entry.confidence = chunk->GetValue(6, 0).IsNull() ? 0.0f : chunk->GetValue(6, 0).GetValue<float>();
+    entry.todos = chunk->GetValue(7, 0).ToString();
+    entry.active_files = chunk->GetValue(8, 0).ToString();
+    entry.decisions = chunk->GetValue(9, 0).ToString();
+    entry.next_steps = chunk->GetValue(10, 0).ToString();
+    entry.blockers = chunk->GetValue(11, 0).ToString();
+    entry.discoveries = chunk->GetValue(12, 0).ToString();
+    entry.snapshot = chunk->GetValue(13, 0).ToString();
+
+    return entry;
+}
+
+std::vector<LedgerEntry> DuckDBStore::list_ledgers(const std::string& project, size_t limit) {
+    std::lock_guard lock(mutex_);
+    std::vector<LedgerEntry> entries;
+    if (!db_) return entries;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    std::ostringstream sql;
+    sql << "SELECT id, session_id, project, created_at, mood, coherence, confidence, "
+        << "todos, active_files, decisions, next_steps, blockers, discoveries, snapshot "
+        << "FROM ledger ";
+
+    if (!project.empty()) {
+        sql << "WHERE project = '" << escape(project) << "' ";
+    }
+
+    sql << "ORDER BY created_at DESC LIMIT " << limit;
+
+    auto result = query(sql.str());
+    if (!result || result->HasError()) {
+        return entries;
+    }
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            LedgerEntry entry;
+            entry.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            entry.session_id = chunk->GetValue(1, i).ToString();
+            entry.project = chunk->GetValue(2, i).ToString();
+            entry.created_at = chunk->GetValue(3, i).GetValue<int64_t>();
+            entry.mood = chunk->GetValue(4, i).ToString();
+            entry.coherence = chunk->GetValue(5, i).IsNull() ? 0.0f : chunk->GetValue(5, i).GetValue<float>();
+            entry.confidence = chunk->GetValue(6, i).IsNull() ? 0.0f : chunk->GetValue(6, i).GetValue<float>();
+            entry.todos = chunk->GetValue(7, i).ToString();
+            entry.active_files = chunk->GetValue(8, i).ToString();
+            entry.decisions = chunk->GetValue(9, i).ToString();
+            entry.next_steps = chunk->GetValue(10, i).ToString();
+            entry.blockers = chunk->GetValue(11, i).ToString();
+            entry.discoveries = chunk->GetValue(12, i).ToString();
+            entry.snapshot = chunk->GetValue(13, i).ToString();
+            entries.push_back(entry);
+        }
+    }
+
+    return entries;
+}
+
+std::optional<LedgerEntry> DuckDBStore::get_ledger(int64_t id) {
+    std::lock_guard lock(mutex_);
+    if (!db_) return std::nullopt;
+
+    std::ostringstream sql;
+    sql << "SELECT id, session_id, project, created_at, mood, coherence, confidence, "
+        << "todos, active_files, decisions, next_steps, blockers, discoveries, snapshot "
+        << "FROM ledger WHERE id = " << id;
+
+    auto result = query(sql.str());
+    if (!result || result->HasError()) {
+        return std::nullopt;
+    }
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) {
+        return std::nullopt;
+    }
+
+    LedgerEntry entry;
+    entry.id = chunk->GetValue(0, 0).GetValue<int64_t>();
+    entry.session_id = chunk->GetValue(1, 0).ToString();
+    entry.project = chunk->GetValue(2, 0).ToString();
+    entry.created_at = chunk->GetValue(3, 0).GetValue<int64_t>();
+    entry.mood = chunk->GetValue(4, 0).ToString();
+    entry.coherence = chunk->GetValue(5, 0).IsNull() ? 0.0f : chunk->GetValue(5, 0).GetValue<float>();
+    entry.confidence = chunk->GetValue(6, 0).IsNull() ? 0.0f : chunk->GetValue(6, 0).GetValue<float>();
+    entry.todos = chunk->GetValue(7, 0).ToString();
+    entry.active_files = chunk->GetValue(8, 0).ToString();
+    entry.decisions = chunk->GetValue(9, 0).ToString();
+    entry.next_steps = chunk->GetValue(10, 0).ToString();
+    entry.blockers = chunk->GetValue(11, 0).ToString();
+    entry.discoveries = chunk->GetValue(12, 0).ToString();
+    entry.snapshot = chunk->GetValue(13, 0).ToString();
+
+    return entry;
+}
+
+bool DuckDBStore::delete_ledger(int64_t id) {
+    std::lock_guard lock(mutex_);
+    if (!db_) return false;
+
+    std::ostringstream sql;
+    sql << "DELETE FROM ledger WHERE id = " << id;
+
+    return execute(sql.str());
 }
 
 }  // namespace chitta

@@ -95,24 +95,49 @@ json_escape() {
 
 case "$HOOK_TYPE" in
     start|SessionStart)
+        # Detect current realm/project
+        CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
+        if [[ -x "$CHITTA_BIN" ]]; then
+            REALM=$("$CHITTA_BIN" realm_detect 2>/dev/null || echo "brahman")
+        else
+            REALM="brahman"
+        fi
+
         # Get soul context
         response=$(rpc_call "soul_context" '{}')
         context=$(extract_text "$response")
 
         if [[ -n "$context" ]]; then
-            echo "Soul State:"
             echo "$context"
         fi
 
-        # Get continuation node
-        response=$(rpc_call "full_resonate" '{"query":"continuity:current","k":1}')
-        continuation=$(extract_text "$response")
+        # Load ledger checkpoint for current realm
+        escaped_realm=$(json_escape "$REALM")
+        response=$(rpc_call "ledger_load" "{\"project\":\"$escaped_realm\"}")
+        ledger_text=$(extract_text "$response")
 
-        if [[ -n "$continuation" && "$continuation" != *"No memories"* ]]; then
+        # Check if checkpoint was found (structured response has "found" field)
+        ledger_json=$(echo "$response" | jq -r '.result.structured // empty' 2>/dev/null)
+        ledger_found=$(echo "$ledger_json" | jq -r '.found // false' 2>/dev/null)
+
+        if [[ "$ledger_found" == "true" ]]; then
+            mood=$(echo "$ledger_json" | jq -r '.mood // ""' 2>/dev/null)
+            snapshot=$(echo "$ledger_json" | jq -r '.snapshot // ""' 2>/dev/null)
+
+            # Count pending todos
+            todos=$(echo "$ledger_json" | jq -r '.todos // []' 2>/dev/null)
+            pending_count=$(echo "$todos" | jq '[.[] | select(.status != "completed" and .status != "done")] | length' 2>/dev/null || echo "0")
+
+            # Get first next step
+            next_step=$(echo "$ledger_json" | jq -r '.next_steps[0] // ""' 2>/dev/null)
+
             echo ""
-            echo "[Continuation]"
-            echo "$continuation"
+            echo "[I remember working on: $REALM]"
+            [[ -n "$snapshot" && "$snapshot" != "null" ]] && echo "  $snapshot"
+            [[ "$pending_count" -gt 0 ]] && echo "  ($pending_count pending tasks)"
+            [[ -n "$next_step" && "$next_step" != "null" ]] && echo "  Next: $next_step"
         fi
+
         ;;
 
     prompt|UserPromptSubmit)
@@ -178,21 +203,89 @@ case "$HOOK_TYPE" in
 
         # Auto-checkpoint if meaningful work detected
         if is_meaningful_work "$RESPONSE"; then
-            # Extract topic from first line or [LEARN]
-            topic=$(echo "$RESPONSE" | head -1 | head -c 100)
+            # Detect realm for project scoping
+            CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
+            if [[ -x "$CHITTA_BIN" ]]; then
+                REALM=$("$CHITTA_BIN" realm_detect 2>/dev/null || echo "brahman")
+            else
+                REALM="brahman"
+            fi
+
+            # Generate session ID from timestamp
+            SESSION_ID="auto-$(date +%Y%m%d-%H%M%S)"
+
+            # Extract file paths (common extensions)
+            files_json=$(echo "$RESPONSE" | grep -oE '[a-zA-Z0-9_/-]+\.(py|js|ts|tsx|cpp|hpp|c|h|rs|go|sh|md|json|yaml|yml|toml|sql|html|css|scss)' | sort -u | head -10 | jq -R . | jq -s '.')
+
+            # Extract decisions (patterns: "chose X", "decided to", "using X instead", "went with")
+            decisions_json=$(echo "$RESPONSE" | grep -iE '(chose|decided|using .* instead|went with|picked|selected|opting for)' | head -5 | sed 's/^[[:space:]]*//' | jq -R . | jq -s '.')
+
+            # Extract next steps (patterns: "next:", "todo:", "- [ ]", numbered items after "next")
+            next_steps_json=$(echo "$RESPONSE" | grep -iE '(^[0-9]+\.|^- \[.\]|next:|todo:|should .* next|will .* next|need to)' | head -5 | sed 's/^[[:space:]]*//' | jq -R . | jq -s '.')
+
+            # Extract discoveries ([LEARN] content without the tag)
+            discoveries_json=$(echo "$RESPONSE" | grep -E '^\[LEARN\]' | sed 's/^\[LEARN\][[:space:]]*//' | head -5 | jq -R . | jq -s '.')
+
+            # Detect mood from keywords
+            if echo "$RESPONSE" | grep -qiE '(error|failed|bug|issue|problem|stuck)'; then
+                mood="debugging"
+            elif echo "$RESPONSE" | grep -qiE '(complete|done|finished|working|success|passed)'; then
+                mood="confident"
+            elif echo "$RESPONSE" | grep -qiE '(trying|attempting|testing|investigating)'; then
+                mood="exploring"
+            else
+                mood="working"
+            fi
+
+            # Extract topic from first meaningful line
+            topic=$(echo "$RESPONSE" | grep -v '^$' | head -1 | head -c 150)
             if [[ "$topic" == *"[LEARN]"* ]]; then
                 topic="${topic#*\[LEARN\] }"
             fi
 
             escaped_topic=$(json_escape "$topic")
-            rpc_call "checkpoint" "{\"topic\":\"$escaped_topic\",\"state\":\"Work in progress\",\"decisions\":[],\"next\":[]}" >/dev/null 2>&1 || true
+            escaped_realm=$(json_escape "$REALM")
+
+            # Ensure JSON arrays have defaults
+            [[ -z "$files_json" || "$files_json" == "null" ]] && files_json='[]'
+            [[ -z "$decisions_json" || "$decisions_json" == "null" ]] && decisions_json='[]'
+            [[ -z "$next_steps_json" || "$next_steps_json" == "null" ]] && next_steps_json='[]'
+            [[ -z "$discoveries_json" || "$discoveries_json" == "null" ]] && discoveries_json='[]'
+
+            # Use CLI for reliable checkpoint
+            if "$CHITTA_BIN" ledger_save \
+                --session_id "$SESSION_ID" \
+                --project "$REALM" \
+                --mood "$mood" \
+                --active_files "$files_json" \
+                --decisions "$decisions_json" \
+                --next_steps "$next_steps_json" \
+                --discoveries "$discoveries_json" \
+                --snapshot "$topic" >/dev/null 2>&1; then
+                echo "[cc-soul] Checkpoint: $SESSION_ID ($mood)"
+            fi
         fi
         ;;
 
     pre-compact|PreCompact)
-        # Save checkpoint before context is compacted
-        rpc_call "checkpoint" "{\"topic\":\"Context compacted\",\"state\":\"Resuming from compact\",\"decisions\":[],\"next\":[\"Review continuation node for context\"]}" >/dev/null 2>&1 || true
-        echo "[cc-soul] Checkpoint saved before compact"
+        # Detect realm for project scoping
+        CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
+        if [[ -x "$CHITTA_BIN" ]]; then
+            REALM=$("$CHITTA_BIN" realm_detect 2>/dev/null || echo "brahman")
+        else
+            REALM="brahman"
+        fi
+
+        SESSION_ID="pre-compact-$(date +%Y%m%d-%H%M%S)"
+
+        # Save checkpoint before context is compacted using CLI
+        "$CHITTA_BIN" ledger_save \
+            --session_id "$SESSION_ID" \
+            --project "$REALM" \
+            --mood "pre-compact" \
+            --next_steps '["Review previous work","Continue from checkpoint"]' \
+            --snapshot "Context compacted - review ledger for continuation" >/dev/null 2>&1 || true
+        echo "[checkpoint] cc-soul v3.1.0 DuckDB $REALM"
         ;;
 
     *)

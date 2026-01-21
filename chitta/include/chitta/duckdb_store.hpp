@@ -66,6 +66,32 @@ struct StoreHealth {
     bool is_open = false;
 };
 
+// Ledger entry for session continuity
+struct LedgerEntry {
+    int64_t id = 0;
+    std::string session_id;
+    std::string project;
+    int64_t created_at = 0;
+
+    // Soul state
+    std::string mood;
+    float coherence = 0.0f;
+    float confidence = 0.0f;
+
+    // Work state (JSON strings)
+    std::string todos;           // JSON array of {content, status}
+    std::string active_files;    // JSON array of file paths
+    std::string decisions;       // JSON array of key decisions
+
+    // Continuation (JSON strings)
+    std::string next_steps;      // JSON array of next steps
+    std::string blockers;        // JSON array of blockers
+    std::string discoveries;     // JSON array of discoveries
+
+    // Full snapshot for reconstruction
+    std::string snapshot;
+};
+
 // DuckDBStore: unified storage using DuckDB embedded database
 class DuckDBStore {
 public:
@@ -150,6 +176,13 @@ public:
     size_t memory_count();
     size_t triplet_count();
     size_t symbol_count();
+
+    // Ledger operations (session continuity)
+    int64_t save_ledger(const LedgerEntry& entry);
+    std::optional<LedgerEntry> load_ledger(const std::string& session_id = "", const std::string& project = "");
+    std::vector<LedgerEntry> list_ledgers(const std::string& project = "", size_t limit = 10);
+    std::optional<LedgerEntry> get_ledger(int64_t id);
+    bool delete_ledger(int64_t id);
 
 private:
     std::unique_ptr<duckdb::DuckDB> db_;
