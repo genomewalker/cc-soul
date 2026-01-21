@@ -260,6 +260,94 @@ configure_permissions() {
     fi
 }
 
+# Configure MCP server in settings.json
+configure_mcp() {
+    local settings_file="${HOME}/.claude/settings.json"
+
+    # Check if jq is available
+    if ! command -v jq &> /dev/null; then
+        echo "[cc-soul] jq not found, skipping MCP config" >&2
+        return 0
+    fi
+
+    # Ensure settings file exists
+    mkdir -p "${HOME}/.claude"
+    if [[ ! -f "$settings_file" ]]; then
+        echo '{}' > "$settings_file"
+    fi
+
+    # Read current settings
+    local current
+    current=$(cat "$settings_file")
+
+    # Ensure mcpServers object exists
+    if ! echo "$current" | jq -e '.mcpServers' &>/dev/null; then
+        current=$(echo "$current" | jq '.mcpServers = {}')
+    fi
+
+    # Check if chitta MCP is already configured
+    if echo "$current" | jq -e '.mcpServers.chitta' &>/dev/null; then
+        # Update command path if needed
+        local current_cmd
+        current_cmd=$(echo "$current" | jq -r '.mcpServers.chitta.command // ""')
+        if [[ "$current_cmd" != "$BIN_DIR/chittad" && "$current_cmd" != "chittad" ]]; then
+            current=$(echo "$current" | jq --arg cmd "$BIN_DIR/chittad" \
+                '.mcpServers.chitta.command = $cmd')
+            echo "$current" | jq '.' > "$settings_file"
+            echo "[cc-soul] Updated MCP server path"
+        fi
+        return 0
+    fi
+
+    # Add chitta MCP server
+    current=$(echo "$current" | jq --arg cmd "$BIN_DIR/chittad" \
+        '.mcpServers.chitta = {"command": $cmd, "args": ["mcp"]}')
+
+    echo "$current" | jq '.' > "$settings_file"
+    echo "[cc-soul] Configured chitta MCP server"
+}
+
+# Configure MCP tool permissions in settings.json
+configure_mcp_permissions() {
+    local settings_file="${HOME}/.claude/settings.json"
+
+    # Check if jq is available
+    if ! command -v jq &> /dev/null; then
+        echo "[cc-soul] jq not found, skipping MCP permissions" >&2
+        return 0
+    fi
+
+    # MCP tool permissions to add
+    local mcp_perms=(
+        'mcp__chitta__*'
+    )
+
+    # Read current settings
+    local current
+    current=$(cat "$settings_file")
+
+    # Ensure permissions.allow exists
+    if ! echo "$current" | jq -e '.permissions.allow' &>/dev/null; then
+        current=$(echo "$current" | jq '.permissions = {"allow": []}')
+    fi
+
+    # Add MCP permissions if not already present
+    local updated="$current"
+    local added=0
+    for perm in "${mcp_perms[@]}"; do
+        if ! echo "$updated" | jq -e --arg p "$perm" '.permissions.allow | index($p)' &>/dev/null; then
+            updated=$(echo "$updated" | jq --arg p "$perm" '.permissions.allow += [$p]')
+            ((added++)) || true
+        fi
+    done
+
+    # Write back if changed
+    if [[ $added -gt 0 ]]; then
+        echo "$updated" | jq '.' > "$settings_file"
+        echo "[cc-soul] Added MCP tool permissions (mcp__chitta__*)"
+    fi
+}
+
 # Configure hooks in settings.json (merges plugin hooks.json into user settings)
 configure_hooks() {
     local settings_file="${HOME}/.claude/settings.json"
@@ -525,6 +613,10 @@ main() {
 
     # Configure bash permissions for chitta commands
     configure_permissions
+
+    # Configure MCP server and permissions
+    configure_mcp
+    configure_mcp_permissions
 
     # Hooks are loaded automatically from .claude-plugin/hooks.json by plugin system
     # configure_hooks  # Don't duplicate - causes hooks to run twice
