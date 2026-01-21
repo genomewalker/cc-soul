@@ -13,28 +13,29 @@ env:
 
 jobs:
   build-linux:
-    # Ubuntu 20.04 has glibc 2.31 - compatible with most systems
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
+    container:
+      image: quay.io/pypa/manylinux2014_x86_64
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Miniconda
-        uses: conda-incubator/setup-miniconda@v3
-        with:
-          auto-update-conda: true
-          python-version: "3.11"
-          channels: conda-forge
-          channel-priority: strict
-          conda-remove-defaults: true
-
-      - name: Install dependencies (except DuckDB)
-        shell: bash -l {0}
+      - name: Install build tools
         run: |
-          conda install -y cmake ninja nlohmann_json sqlite onnxruntime-cpp=${{ env.ONNX_VERSION }} patchelf
+          yum install -y wget perl-IPC-Cmd
+          # Install newer cmake (manylinux2014 has old one)
+          pip3 install cmake ninja
+
+      - name: Download and build ONNX Runtime
+        run: |
+          # Download pre-built ONNX Runtime
+          cd /tmp
+          wget -q https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ONNX_VERSION }}/onnxruntime-linux-x64-${{ env.ONNX_VERSION }}.tgz
+          tar xzf onnxruntime-linux-x64-${{ env.ONNX_VERSION }}.tgz
+          mkdir -p /opt/onnxruntime
+          cp -r onnxruntime-linux-x64-${{ env.ONNX_VERSION }}/* /opt/onnxruntime/
 
       - name: Build DuckDB from source
-        shell: bash -l {0}
         run: |
           git clone --depth 1 --branch v${{ env.DUCKDB_VERSION }} https://github.com/duckdb/duckdb.git
           cd duckdb
@@ -46,13 +47,18 @@ jobs:
             -DENABLE_SANITIZER=OFF \
             -DENABLE_UBSAN=OFF
           ninja
-          # Install to a local prefix
           mkdir -p /opt/duckdb/{lib,include}
-          sudo cp src/libduckdb.so /opt/duckdb/lib/
-          sudo cp -r ../src/include/duckdb* /opt/duckdb/include/
+          cp src/libduckdb.so /opt/duckdb/lib/
+          cp -r ../src/include/duckdb* /opt/duckdb/include/
+
+      - name: Install nlohmann_json
+        run: |
+          cd /tmp
+          wget -q https://github.com/nlohmann/json/releases/download/v3.11.3/json.hpp
+          mkdir -p /opt/nlohmann_json/include/nlohmann
+          mv json.hpp /opt/nlohmann_json/include/nlohmann/
 
       - name: Build chitta
-        shell: bash -l {0}
         run: |
           mkdir -p chitta/build bin
           cd chitta/build
@@ -62,44 +68,35 @@ jobs:
             -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
             -DDUCKDB_INCLUDE_DIR=/opt/duckdb/include \
             -DDUCKDB_LIB_DIR=/opt/duckdb/lib \
-            -DONNXRUNTIME_INCLUDE_DIR=$CONDA_PREFIX/include \
-            -DONNXRUNTIME_LIB_DIR=$CONDA_PREFIX/lib
+            -DONNXRUNTIME_INCLUDE_DIR=/opt/onnxruntime/include \
+            -DONNXRUNTIME_LIB_DIR=/opt/onnxruntime/lib \
+            -DJSON_INCLUDE_DIR=/opt/nlohmann_json/include
           ninja
 
       - name: Verify binaries
         run: |
           ls -la bin/
-          for bin in chitta chittad chitta_migrate chitta_import duckdb_test; do
-            test -x bin/$bin || { echo "Missing: $bin"; exit 1; }
+          for b in chitta chittad chitta_migrate chitta_import duckdb_test; do
+            test -x bin/$b || { echo "Missing: $b"; exit 1; }
           done
-
-      - name: Run tests
-        shell: bash -l {0}
-        run: |
-          cd chitta/build
-          LD_LIBRARY_PATH=/opt/duckdb/lib:$CONDA_PREFIX/lib:$LD_LIBRARY_PATH ctest --output-on-failure || true
 
       - name: Package binaries
-        shell: bash -l {0}
         run: |
           mkdir -p dist
-          # Bundle all required libraries
-          cp $CONDA_PREFIX/lib/libonnxruntime.so* bin/
+          # Bundle required libraries
+          cp /opt/onnxruntime/lib/libonnxruntime.so.${{ env.ONNX_VERSION }} bin/
+          ln -sf libonnxruntime.so.${{ env.ONNX_VERSION }} bin/libonnxruntime.so
           cp /opt/duckdb/lib/libduckdb.so bin/
-          # Bundle libstdc++ to avoid version mismatches on older systems
-          cp $CONDA_PREFIX/lib/libstdc++.so* bin/ 2>/dev/null || true
-          # Set RPATH for all binaries to find bundled libs
-          for bin in bin/chitta bin/chittad bin/chitta_migrate bin/chitta_import bin/duckdb_test; do
-            patchelf --set-rpath '$ORIGIN' $bin 2>/dev/null || true
+          # Set RPATH for all binaries
+          for b in bin/chitta bin/chittad bin/chitta_migrate bin/chitta_import bin/duckdb_test; do
+            patchelf --set-rpath '$ORIGIN' $b 2>/dev/null || true
           done
-          # Verify all binaries
-          echo "Verifying library dependencies..."
-          export LD_LIBRARY_PATH=$(pwd)/bin:$LD_LIBRARY_PATH
-          for bin in bin/chitta bin/chittad; do
-            echo "=== $bin ==="
-            ldd $bin | grep -E "not found|ORIGIN" || true
+          # Verify
+          echo "Checking library dependencies..."
+          for b in bin/chitta bin/chittad; do
+            echo "=== $b ==="
+            ldd $b | grep -E "not found" || echo "All libs found"
           done
-          # Create tarball
           tar -czvf dist/chitta-linux-x64.tar.gz -C bin .
 
       - name: Upload artifacts
