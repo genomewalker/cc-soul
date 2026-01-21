@@ -1,5 +1,5 @@
 {
-  "description": "cc-soul hooks for persistent memory and identity",
+  "description": "cc-soul hooks for persistent memory and realm-scoped recall",
   "hooks": {
     "SessionStart": [
       {
@@ -15,30 +15,7 @@
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/soul-hook.sh start"
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/session-tracker.sh start"
-          }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/distill-conversation.sh"
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/session-tracker.sh end"
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/soul-hook.sh end"
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/simple-hook.sh start"
           }
         ]
       }
@@ -49,37 +26,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/soul-hook.sh prompt --resonate"
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/trigger-hook.sh"
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "Bash|Write|Edit|Read",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/event-collector.sh"
-          }
-        ]
-      }
-    ],
-    "PreCompact": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/distill-conversation.sh"
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/soul-hook.sh pre-compact"
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/simple-hook.sh prompt"
           }
         ]
       }
@@ -90,7 +37,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/stop-hook.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/simple-hook.sh stop"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/simple-hook.sh pre-compact"
           }
         ]
       }
