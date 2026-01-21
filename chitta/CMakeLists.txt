@@ -380,6 +380,65 @@ endif()
 add_executable(chitta_import src/import.cpp)
 target_link_libraries(chitta_import PRIVATE chitta)
 
+# RPATH configuration for runtime library discovery
+# Collects library directories from DuckDB and ONNX Runtime
+# CI builds can override with CMAKE_INSTALL_RPATH=$ORIGIN to bundle libs
+set(CHITTA_RUNTIME_LIBS "")
+
+# Get DuckDB library directory
+get_filename_component(DUCKDB_LIB_DIR "${DUCKDB_LIB}" DIRECTORY)
+list(APPEND CHITTA_RUNTIME_LIBS "${DUCKDB_LIB_DIR}")
+
+# Get ONNX Runtime library directory if enabled
+if(CHITTA_WITH_ONNX AND ONNXRUNTIME_LIB_DIR)
+    list(APPEND CHITTA_RUNTIME_LIBS "${ONNXRUNTIME_LIB_DIR}")
+endif()
+
+# Remove duplicates
+list(REMOVE_DUPLICATES CHITTA_RUNTIME_LIBS)
+
+# Set RPATH for all executables
+# If CMAKE_INSTALL_RPATH is set externally (e.g., $ORIGIN for bundled builds), use it
+# Otherwise, use the discovered library paths
+if(CMAKE_INSTALL_RPATH)
+    set(CHITTA_RPATH "${CMAKE_INSTALL_RPATH}")
+    message(STATUS "Using externally specified RPATH: ${CHITTA_RPATH}")
+else()
+    string(JOIN ":" CHITTA_RPATH ${CHITTA_RUNTIME_LIBS})
+    message(STATUS "Using discovered library RPATH: ${CHITTA_RPATH}")
+endif()
+
+# Apply RPATH to all executables
+foreach(exe chittad chitta_import)
+    if(TARGET ${exe})
+        set_target_properties(${exe} PROPERTIES
+            BUILD_RPATH "${CHITTA_RPATH}"
+            INSTALL_RPATH "${CHITTA_RPATH}"
+        )
+    endif()
+endforeach()
+
+if(TARGET chitta_tool)
+    set_target_properties(chitta_tool PROPERTIES
+        BUILD_RPATH "${CHITTA_RPATH}"
+        INSTALL_RPATH "${CHITTA_RPATH}"
+    )
+endif()
+
+if(TARGET chitta_migrate)
+    set_target_properties(chitta_migrate PROPERTIES
+        BUILD_RPATH "${CHITTA_RPATH}"
+        INSTALL_RPATH "${CHITTA_RPATH}"
+    )
+endif()
+
+if(TARGET duckdb_test)
+    set_target_properties(duckdb_test PROPERTIES
+        BUILD_RPATH "${CHITTA_RPATH}"
+        INSTALL_RPATH "${CHITTA_RPATH}"
+    )
+endif()
+
 # Install
 install(DIRECTORY include/ DESTINATION include)
 install(TARGETS chitta EXPORT chittaTargets)

@@ -658,72 +658,117 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // Handle MCP mode (standalone server, stdin/stdout JSON-RPC)
+    // Handle MCP mode (JSON-RPC bridge to daemon via socket)
     if (tool == "mcp") {
-        // MCP mode: open database directly, no daemon needed
-        std::string mind_path;
-        const char* home = std::getenv("HOME");
-        mind_path = std::string(home ? home : ".") + "/.claude/mind/chitta";
+        // MCP mode: connect to daemon via socket, forward JSON-RPC
+        chitta::SocketClient client(socket_path);
 
-        // Check for --path override
-        for (int i = 1; i < argc; ++i) {
-            if (std::strcmp(argv[i], "--path") == 0 && i + 1 < argc) {
-                mind_path = argv[++i];
-            }
-        }
-
-        chitta::DuckDBMindConfig config;
-        config.path = mind_path;
-        chitta::DuckDBMind mind(config);
-
-        // Try to attach yantra for embeddings
-        std::string model_path = std::string(home ? home : ".") + "/.claude/mind/model.onnx";
-        std::string vocab_path = std::string(home ? home : ".") + "/.claude/mind/vocab.txt";
-        if (const char* models_dir = std::getenv("CHITTA_MODELS_DIR")) {
-            model_path = std::string(models_dir) + "/model.onnx";
-            vocab_path = std::string(models_dir) + "/vocab.txt";
-        }
-
-#ifdef CHITTA_WITH_ONNX
-        chitta::AntahkaranaYantra::Config yantra_config;
-        yantra_config.pooling = chitta::PoolingStrategy::Mean;
-        yantra_config.normalize_embeddings = true;
-        auto yantra = std::make_shared<chitta::AntahkaranaYantra>(yantra_config);
-        if (yantra->awaken(model_path, vocab_path)) {
-            mind.attach_yantra(yantra);
-        }
-#endif
-
-        if (!mind.open()) {
-            std::cerr << "Failed to open mind at " << mind_path << "\n";
+        if (!client.connect()) {
+            // Daemon not running - output MCP error
+            nlohmann::json error;
+            error["jsonrpc"] = "2.0";
+            error["error"]["code"] = -32603;
+            error["error"]["message"] = "Daemon not running. Start with: chittad daemon";
+            error["id"] = nullptr;
+            std::cout << error.dump() << std::endl;
             return 1;
         }
 
-        chitta::DuckDBRpcHandler handler(&mind);
-
-        // Read JSON-RPC from stdin, write to stdout
+        // Read JSON-RPC from stdin, forward to daemon, write response to stdout
         std::string line;
         while (std::getline(std::cin, line)) {
             if (line.empty()) continue;
 
             try {
-                auto request = nlohmann::json::parse(line);
-                auto response = handler.handle(request);
-                std::cout << response.dump() << std::endl;
+                auto mcp_request = nlohmann::json::parse(line);
+                std::string method = mcp_request.value("method", "");
+                auto request_id = mcp_request.value("id", nlohmann::json());
+
+                // Handle MCP protocol methods
+                if (method == "initialize") {
+                    // MCP initialization response
+                    nlohmann::json response;
+                    response["jsonrpc"] = "2.0";
+                    response["result"]["protocolVersion"] = "2024-11-05";
+                    response["result"]["capabilities"]["tools"] = nlohmann::json::object();
+                    response["result"]["serverInfo"]["name"] = "chitta";
+                    response["result"]["serverInfo"]["version"] = "3.2.0";
+                    response["id"] = request_id;
+                    std::cout << response.dump() << std::endl;
+                } else if (method == "notifications/initialized") {
+                    // No response needed for notifications
+                    continue;
+                } else if (method == "tools/list") {
+                    // Forward to daemon
+                    nlohmann::json daemon_req;
+                    daemon_req["jsonrpc"] = "2.0";
+                    daemon_req["id"] = 1;
+                    daemon_req["method"] = "tools/list";
+                    daemon_req["params"] = nlohmann::json::object();
+
+                    auto result_str = client.request(daemon_req.dump());
+                    if (result_str) {
+                        auto daemon_resp = nlohmann::json::parse(*result_str);
+                        auto tools = daemon_resp.value("result", nlohmann::json::object()).value("tools", nlohmann::json::array());
+
+                        nlohmann::json response;
+                        response["jsonrpc"] = "2.0";
+                        response["result"]["tools"] = tools;
+                        response["id"] = request_id;
+                        std::cout << response.dump() << std::endl;
+                    }
+                } else if (method == "tools/call") {
+                    // Forward tool call to daemon
+                    auto params = mcp_request.value("params", nlohmann::json::object());
+                    std::string tool_name = params.value("name", "");
+                    auto arguments = params.value("arguments", nlohmann::json::object());
+
+                    nlohmann::json daemon_req;
+                    daemon_req["jsonrpc"] = "2.0";
+                    daemon_req["id"] = 1;
+                    daemon_req["method"] = "tools/call";
+                    daemon_req["params"]["name"] = tool_name;
+                    daemon_req["params"]["arguments"] = arguments;
+
+                    auto result_str = client.request(daemon_req.dump());
+                    if (result_str) {
+                        auto daemon_resp = nlohmann::json::parse(*result_str);
+                        auto result = daemon_resp.value("result", nlohmann::json::object());
+
+                        // Format as MCP response
+                        nlohmann::json content = nlohmann::json::array();
+                        if (result.contains("text")) {
+                            nlohmann::json text_content;
+                            text_content["type"] = "text";
+                            text_content["text"] = result["text"];
+                            content.push_back(text_content);
+                        }
+
+                        nlohmann::json response;
+                        response["jsonrpc"] = "2.0";
+                        response["result"]["content"] = content;
+                        response["id"] = request_id;
+                        std::cout << response.dump() << std::endl;
+                    }
+                } else {
+                    // Unknown method
+                    nlohmann::json response;
+                    response["jsonrpc"] = "2.0";
+                    response["error"]["code"] = -32601;
+                    response["error"]["message"] = "Method not found: " + method;
+                    response["id"] = request_id;
+                    std::cout << response.dump() << std::endl;
+                }
             } catch (const std::exception& e) {
-                nlohmann::json error = {
-                    {"jsonrpc", "2.0"},
-                    {"error", {
-                        {"code", -32700},
-                        {"message", e.what()}
-                    }},
-                    {"id", nullptr}
-                };
+                nlohmann::json error;
+                error["jsonrpc"] = "2.0";
+                error["error"]["code"] = -32700;
+                error["error"]["message"] = e.what();
+                error["id"] = nullptr;
                 std::cout << error.dump() << std::endl;
             }
         }
 
-        mind.close();
         return 0;
     }
 
