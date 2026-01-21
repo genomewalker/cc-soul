@@ -13,27 +13,35 @@ env:
 jobs:
   build-linux:
     runs-on: ubuntu-latest
+    container:
+      image: quay.io/pypa/manylinux_2_28_x86_64
 
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install system dependencies
+        run: |
+          # manylinux_2_28 uses AlmaLinux 8 (glibc 2.28)
+          dnf install -y cmake make gcc-c++ git curl
+
       - name: Setup Miniconda
-        uses: conda-incubator/setup-miniconda@v3
-        with:
-          auto-update-conda: true
-          python-version: "3.11"
-          channels: conda-forge
-          channel-priority: strict
-          conda-remove-defaults: true
+        run: |
+          curl -L -o miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+          bash miniconda.sh -b -p /opt/conda
+          rm miniconda.sh
+          /opt/conda/bin/conda init bash
+          echo 'export PATH="/opt/conda/bin:$PATH"' >> ~/.bashrc
 
       - name: Install dependencies
-        shell: bash -l {0}
+        shell: bash
         run: |
-          conda install -y cmake nlohmann_json sqlite onnxruntime-cpp=${{ env.ONNX_VERSION }} libduckdb-devel patchelf
+          source /opt/conda/bin/activate
+          conda install -y -c conda-forge cmake nlohmann_json sqlite onnxruntime-cpp=${{ env.ONNX_VERSION }} libduckdb-devel patchelf
 
       - name: Build chitta
-        shell: bash -l {0}
+        shell: bash
         run: |
+          source /opt/conda/bin/activate
           mkdir -p chitta/build bin
           cd chitta/build
           cmake .. \
@@ -52,14 +60,16 @@ jobs:
           done
 
       - name: Run tests
-        shell: bash -l {0}
+        shell: bash
         run: |
+          source /opt/conda/bin/activate
           cd chitta/build
           LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH ctest --output-on-failure || true
 
       - name: Package binaries
-        shell: bash -l {0}
+        shell: bash
         run: |
+          source /opt/conda/bin/activate
           mkdir -p dist
           # Bundle all required libraries
           cp $CONDA_PREFIX/lib/libonnxruntime.so* bin/
