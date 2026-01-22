@@ -1074,57 +1074,17 @@ private:
     }
 
     // Find attractors: entities with high triplet connectivity
-    // Uses DuckDB query to find high-connectivity entities directly
+    // Uses efficient SQL query that excludes code intel triplets
     std::vector<DuckDBAttractor> find_attractors_unlocked() const {
-        // Query common predicates to find well-connected entities
-        static const std::vector<std::string> key_predicates = {
-            "uses", "implements", "contains", "provides", "requires",
-            "related_to", "stores", "validates", "returns", "evolved_to"
-        };
+        // Use efficient SQL-based counting (excludes code intel predicates)
+        auto top_entities = store_.get_top_connected_entities(resonance_config_.max_attractors);
 
-        std::unordered_map<std::string, size_t> entity_connections;
-
-        // Count connections for each entity found via predicate queries
-        for (const auto& pred : key_predicates) {
-            auto triplets = store_.query_predicate(pred);
-            for (const auto& t : triplets) {
-                entity_connections[t.subject]++;
-                entity_connections[t.object]++;
-            }
-        }
-
-        // Also check for entities that are subjects in any triplet
-        // Query a few known high-value subjects
-        static const std::vector<std::string> known_subjects = {
-            "cc-soul", "chitta", "duckdb", "mind", "soul", "memory",
-            "triplet", "node", "ledger", "checkpoint", "daemon"
-        };
-
-        for (const auto& subj : known_subjects) {
-            auto triplets = store_.query_subject(subj);
-            if (!triplets.empty()) {
-                entity_connections[subj] += triplets.size();
-            }
-        }
-
-        // Convert to attractors
         std::vector<DuckDBAttractor> attractors;
-        for (const auto& [entity, count] : entity_connections) {
-            if (count >= static_cast<size_t>(resonance_config_.attractor_min_connections)) {
-                float strength = std::min(std::log2(1.0f + count) / 4.0f, 1.0f);
-                attractors.push_back({entity, strength, count});
-            }
-        }
+        attractors.reserve(top_entities.size());
 
-        // Sort by strength
-        std::sort(attractors.begin(), attractors.end(),
-                  [](const DuckDBAttractor& a, const DuckDBAttractor& b) {
-                      return a.strength > b.strength;
-                  });
-
-        // Limit to max_attractors
-        if (attractors.size() > resonance_config_.max_attractors) {
-            attractors.resize(resonance_config_.max_attractors);
+        for (const auto& [entity, count] : top_entities) {
+            float strength = std::min(std::log2(1.0f + count) / 4.0f, 1.0f);
+            attractors.push_back({entity, strength, count});
         }
 
         return attractors;

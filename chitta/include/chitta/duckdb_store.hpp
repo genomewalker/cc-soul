@@ -227,6 +227,9 @@ public:
     size_t triplet_count();
     size_t symbol_count();
 
+    // Efficient attractor finding (excludes code intel triplets)
+    std::vector<std::pair<std::string, size_t>> get_top_connected_entities(size_t limit = 20);
+
     // Ledger operations (session continuity)
     int64_t save_ledger(const LedgerEntry& entry);
     std::optional<LedgerEntry> load_ledger(const std::string& session_id = "", const std::string& project = "");

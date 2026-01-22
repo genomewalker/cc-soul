@@ -1318,6 +1318,43 @@ size_t DuckDBStore::symbol_count() {
     return 0;
 }
 
+std::vector<std::pair<std::string, size_t>> DuckDBStore::get_top_connected_entities(size_t limit) {
+    std::lock_guard lock(mutex_);
+    std::vector<std::pair<std::string, size_t>> results;
+    if (!db_) return results;
+
+    // Use SQL to count connections per entity efficiently
+    // Combines subjects and objects, excludes code intel predicates for performance
+    std::ostringstream sql;
+    sql << "WITH entity_counts AS ("
+        << "  SELECT entity, SUM(cnt) as total FROM ("
+        << "    SELECT subject as entity, COUNT(*) as cnt FROM triplet "
+        << "    WHERE predicate NOT IN ('contains', 'calls_text', 'callee_leaf', 'in_symbol') "
+        << "    GROUP BY subject "
+        << "    UNION ALL "
+        << "    SELECT object as entity, COUNT(*) as cnt FROM triplet "
+        << "    WHERE predicate NOT IN ('contains', 'calls_text', 'callee_leaf', 'in_symbol') "
+        << "    GROUP BY object"
+        << "  ) GROUP BY entity"
+        << ") SELECT entity, total FROM entity_counts "
+        << "WHERE total >= 3 ORDER BY total DESC LIMIT " << limit;
+
+    auto result = query(sql.str());
+    if (!result || result->HasError()) return results;
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); i++) {
+            std::string entity = chunk->GetValue(0, i).ToString();
+            size_t count = static_cast<size_t>(chunk->GetValue(1, i).GetValue<int64_t>());
+            results.emplace_back(entity, count);
+        }
+    }
+    return results;
+}
+
 std::string DuckDBStore::kind_to_string(NodeType type) {
     switch (type) {
         case NodeType::Wisdom: return "wisdom";
