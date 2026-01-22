@@ -135,6 +135,9 @@ bool DuckDBStore::create_schema() {
         return false;
     }
 
+    // Migration: add source_file column if missing (for databases created before v3.3.0)
+    execute("ALTER TABLE triplet ADD COLUMN IF NOT EXISTS source_file VARCHAR DEFAULT ''");
+
     // Indexes for triplet queries
     execute("CREATE INDEX IF NOT EXISTS idx_triplet_subject ON triplet(subject)");
     execute("CREATE INDEX IF NOT EXISTS idx_triplet_object ON triplet(object)");
@@ -218,6 +221,23 @@ bool DuckDBStore::create_schema() {
     // Indexes for code file queries
     execute("CREATE INDEX IF NOT EXISTS idx_code_file_project ON code_file(project)");
     execute("CREATE INDEX IF NOT EXISTS idx_code_file_mtime ON code_file(mtime)");
+
+    // Transcript state table for distillation (reads JSONL directly)
+    if (!execute(R"(
+        CREATE TABLE IF NOT EXISTS transcript_state (
+            session_id VARCHAR PRIMARY KEY,
+            transcript_path VARCHAR NOT NULL,
+            realm VARCHAR DEFAULT 'default',
+            last_processed_line BIGINT DEFAULT 0,
+            last_distilled_at BIGINT DEFAULT 0,
+            created_at BIGINT NOT NULL
+        )
+    )")) {
+        return false;
+    }
+
+    // Indexes for transcript queries
+    execute("CREATE INDEX IF NOT EXISTS idx_transcript_realm ON transcript_state(realm)");
 
     // Sequence for IDs
     execute("CREATE SEQUENCE IF NOT EXISTS memory_seq START 1");
@@ -724,16 +744,17 @@ std::vector<std::string> DuckDBStore::list_realms() {
 }
 
 size_t DuckDBStore::apply_decay() {
-    std::lock_guard lock(mutex_);
+    // No application lock needed - DuckDB handles concurrency via MVCC
     if (!db_) return 0;
 
     Timestamp current = now();
 
     // Apply exponential decay based on time since last access
+    // Single atomic UPDATE - DuckDB handles locking internally
     std::ostringstream sql;
     sql << "UPDATE memory SET confidence = confidence * exp(-decay_rate * "
         << "(" << current << " - accessed_at) / 86400000.0) "
-        << "WHERE decay_rate > 0";
+        << "WHERE decay_rate > 0 AND accessed_at < " << (current - 60000);  // Only decay if >1min since access
 
     execute(sql.str());
 
@@ -749,13 +770,20 @@ size_t DuckDBStore::apply_decay() {
 }
 
 size_t DuckDBStore::prune(float threshold, float min_age_days) {
-    std::lock_guard lock(mutex_);
+    // No application lock needed - DuckDB handles concurrency via MVCC
     if (!db_) return 0;
 
     Timestamp current = now();
     Timestamp min_created = current - static_cast<int64_t>(min_age_days * 86400000.0);
 
-    // Count first
+    // Use a single transaction for count + delete to ensure consistency
+    std::ostringstream sql;
+    sql << "BEGIN TRANSACTION; "
+        << "DELETE FROM memory WHERE confidence < " << threshold
+        << " AND created_at < " << min_created << "; "
+        << "COMMIT;";
+
+    // Get count before delete (approximate is fine for maintenance)
     std::ostringstream count_sql;
     count_sql << "SELECT COUNT(*) FROM memory WHERE confidence < " << threshold
               << " AND created_at < " << min_created;
@@ -769,11 +797,13 @@ size_t DuckDBStore::prune(float threshold, float min_age_days) {
         }
     }
 
-    // Delete
-    std::ostringstream del_sql;
-    del_sql << "DELETE FROM memory WHERE confidence < " << threshold
-            << " AND created_at < " << min_created;
-    execute(del_sql.str());
+    if (count > 0) {
+        // Only execute delete if there's something to prune
+        std::ostringstream del_sql;
+        del_sql << "DELETE FROM memory WHERE confidence < " << threshold
+                << " AND created_at < " << min_created;
+        execute(del_sql.str());
+    }
 
     return count;
 }
@@ -1731,6 +1761,190 @@ size_t DuckDBStore::delete_file_triplets(const std::string& file_path) {
     execute(sql.str());
 
     return count;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Transcript State Operations (for distillation)
+// ═══════════════════════════════════════════════════════════════════════════
+
+bool DuckDBStore::register_transcript(const std::string& session_id, const std::string& transcript_path,
+                                       const std::string& realm) {
+    std::lock_guard lock(mutex_);
+    if (!db_) return false;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        result.reserve(s.size() + 10);
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    Timestamp now_ts = now();
+
+    // Use INSERT OR REPLACE to update if exists
+    std::ostringstream sql;
+    sql << "INSERT OR REPLACE INTO transcript_state "
+        << "(session_id, transcript_path, realm, last_processed_line, last_distilled_at, created_at) "
+        << "VALUES ("
+        << "'" << escape(session_id) << "', "
+        << "'" << escape(transcript_path) << "', "
+        << "'" << escape(realm.empty() ? "default" : realm) << "', "
+        << "0, 0, " << now_ts << ")";
+
+    return execute(sql.str());
+}
+
+std::optional<TranscriptState> DuckDBStore::get_transcript(const std::string& session_id) {
+    std::lock_guard lock(mutex_);
+    if (!db_) return std::nullopt;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    std::ostringstream sql;
+    sql << "SELECT session_id, transcript_path, realm, last_processed_line, last_distilled_at, created_at "
+        << "FROM transcript_state WHERE session_id = '" << escape(session_id) << "'";
+
+    auto result = query(sql.str());
+    if (!result || result->HasError()) {
+        return std::nullopt;
+    }
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) {
+        return std::nullopt;
+    }
+
+    TranscriptState state;
+    state.session_id = chunk->GetValue(0, 0).ToString();
+    state.transcript_path = chunk->GetValue(1, 0).ToString();
+    state.realm = chunk->GetValue(2, 0).ToString();
+    state.last_processed_line = chunk->GetValue(3, 0).GetValue<int64_t>();
+    state.last_distilled_at = chunk->GetValue(4, 0).GetValue<int64_t>();
+    state.created_at = chunk->GetValue(5, 0).GetValue<int64_t>();
+
+    return state;
+}
+
+std::vector<TranscriptState> DuckDBStore::get_pending_transcripts() {
+    std::lock_guard lock(mutex_);
+    std::vector<TranscriptState> states;
+    if (!db_) return states;
+
+    // Get all transcripts - daemon will check file sizes
+    auto result = query(
+        "SELECT session_id, transcript_path, realm, last_processed_line, last_distilled_at, created_at "
+        "FROM transcript_state ORDER BY created_at"
+    );
+
+    if (!result || result->HasError()) {
+        return states;
+    }
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            TranscriptState state;
+            state.session_id = chunk->GetValue(0, i).ToString();
+            state.transcript_path = chunk->GetValue(1, i).ToString();
+            state.realm = chunk->GetValue(2, i).ToString();
+            state.last_processed_line = chunk->GetValue(3, i).GetValue<int64_t>();
+            state.last_distilled_at = chunk->GetValue(4, i).GetValue<int64_t>();
+            state.created_at = chunk->GetValue(5, i).GetValue<int64_t>();
+            states.push_back(std::move(state));
+        }
+    }
+
+    return states;
+}
+
+bool DuckDBStore::update_transcript_progress(const std::string& session_id, int64_t last_line) {
+    std::lock_guard lock(mutex_);
+    if (!db_) return false;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    std::ostringstream sql;
+    sql << "UPDATE transcript_state SET last_processed_line = " << last_line
+        << " WHERE session_id = '" << escape(session_id) << "'";
+
+    return execute(sql.str());
+}
+
+bool DuckDBStore::mark_transcript_distilled(const std::string& session_id) {
+    std::lock_guard lock(mutex_);
+    if (!db_) return false;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    Timestamp now_ts = now();
+
+    std::ostringstream sql;
+    sql << "UPDATE transcript_state SET last_distilled_at = " << now_ts
+        << " WHERE session_id = '" << escape(session_id) << "'";
+
+    return execute(sql.str());
+}
+
+bool DuckDBStore::remove_transcript(const std::string& session_id) {
+    std::lock_guard lock(mutex_);
+    if (!db_) return false;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    std::ostringstream sql;
+    sql << "DELETE FROM transcript_state WHERE session_id = '" << escape(session_id) << "'";
+
+    return execute(sql.str());
+}
+
+size_t DuckDBStore::transcript_count() {
+    std::lock_guard lock(mutex_);
+    if (!db_) return 0;
+
+    auto result = query("SELECT COUNT(*) FROM transcript_state");
+    if (!result || result->HasError()) {
+        return 0;
+    }
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) {
+        return 0;
+    }
+
+    return chunk->GetValue(0, 0).GetValue<int64_t>();
 }
 
 }  // namespace chitta

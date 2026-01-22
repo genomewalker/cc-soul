@@ -42,6 +42,15 @@ using json = nlohmann::json;
 static std::atomic<bool> daemon_running{true};
 static std::atomic<bool> verbose_mode{false};
 
+// Distillation configuration
+struct DistillConfig {
+    int interval_minutes = 5;       // How often to check for batches
+    int min_turns = 4;              // Minimum turns before distilling
+    std::string script_path;        // Path to distillation script
+    std::string model = "github-copilot/gpt-5-mini";  // OpenCode model
+    bool enabled = true;
+};
+
 void daemon_signal_handler(int sig) {
     std::cerr << "[daemon] Signal " << sig << " received, shutting down\n";
     daemon_running = false;
@@ -136,6 +145,132 @@ std::string default_vocab_path() {
     return std::string(home ? home : ".") + "/.claude/mind/vocab.txt";
 }
 
+std::string default_distill_script() {
+    if (const char* plugin_root = std::getenv("CLAUDE_PLUGIN_ROOT")) {
+        return std::string(plugin_root) + "/scripts/distill.sh";
+    }
+    const char* home = std::getenv("HOME");
+    return std::string(home ? home : ".") + "/.claude/hooks/distill.sh";
+}
+
+// Run distillation for a single transcript
+// Returns true if distillation was successful
+bool run_distillation(DuckDBMind& mind, const TranscriptState& state,
+                      const DistillConfig& config) {
+    // Parse transcript for new turns
+    std::ifstream file(state.transcript_path);
+    if (!file) {
+        if (verbose_mode) {
+            std::cerr << "[distill] Cannot open: " << state.transcript_path << "\n";
+        }
+        return false;
+    }
+
+    // Skip to last processed line
+    std::string line;
+    int64_t current_line = 0;
+    while (current_line < state.last_processed_line && std::getline(file, line)) {
+        current_line++;
+    }
+
+    // Parse new turns
+    std::vector<std::pair<std::string, std::string>> turns;  // (role, content)
+    int64_t last_line = state.last_processed_line;
+
+    while (std::getline(file, line)) {
+        current_line++;
+        if (line.empty()) continue;
+
+        try {
+            auto entry = json::parse(line);
+            std::string type = entry.value("type", "");
+            if (type != "user" && type != "assistant") continue;
+
+            std::string content;
+            if (entry.contains("message")) {
+                auto& msg = entry["message"];
+                if (msg.contains("content")) {
+                    auto& msg_content = msg["content"];
+                    if (msg_content.is_string()) {
+                        content = msg_content.get<std::string>();
+                    } else if (msg_content.is_array()) {
+                        for (const auto& block : msg_content) {
+                            if (block.contains("text")) {
+                                if (!content.empty()) content += "\n";
+                                content += block["text"].get<std::string>();
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (!content.empty()) {
+                turns.emplace_back(type, content);
+                last_line = current_line;
+            }
+        } catch (...) {
+            continue;
+        }
+    }
+
+    // Check if we have enough turns
+    if (static_cast<int>(turns.size()) < config.min_turns) {
+        return false;
+    }
+
+    if (verbose_mode) {
+        std::cerr << "[distill] Session " << state.session_id
+                  << ": " << turns.size() << " new turns\n";
+    }
+
+    // Build conversation text for distillation
+    std::ostringstream conversation;
+    for (const auto& [role, content] : turns) {
+        conversation << "[" << role << "]\n" << content << "\n\n";
+    }
+
+    // Call distillation script if configured
+    if (!config.script_path.empty()) {
+        // Write conversation to temp file
+        std::string temp_path = "/tmp/distill-" + state.session_id + ".txt";
+        {
+            std::ofstream temp(temp_path);
+            if (temp) {
+                temp << "SESSION_ID=" << state.session_id << "\n";
+                temp << "REALM=" << state.realm << "\n";
+                temp << "MODEL=" << config.model << "\n";
+                temp << "---\n";
+                temp << conversation.str();
+            }
+        }
+
+        // Execute script
+        std::string cmd = config.script_path + " " + temp_path + " 2>&1";
+        int result = std::system(cmd.c_str());
+
+        // Cleanup
+        std::remove(temp_path.c_str());
+
+        if (result != 0) {
+            if (verbose_mode) {
+                std::cerr << "[distill] Script failed for " << state.session_id << "\n";
+            }
+            return false;
+        }
+    }
+
+    // Update progress
+    mind.store().update_transcript_progress(state.session_id, last_line);
+    mind.store().mark_transcript_distilled(state.session_id);
+
+    if (verbose_mode) {
+        std::cerr << "[distill] Completed " << state.session_id
+                  << " (line " << last_line << ")\n";
+    }
+
+    return true;
+}
+
 // Generate stats JSON
 std::string generate_stats(DuckDBMind& mind) {
     std::ostringstream oss;
@@ -149,11 +284,26 @@ std::string generate_stats(DuckDBMind& mind) {
 }
 
 int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
-               const std::string& mind_path, const std::string& pid_file) {
+               const std::string& mind_path, const std::string& pid_file,
+               const DistillConfig& distill_config) {
     DaemonLock lock;
     if (!acquire_lock(mind_path, lock)) {
         std::cerr << "[daemon] Another daemon is running\n";
         return 1;
+    }
+
+    // Check if opencode is available for distillation
+    if (distill_config.enabled) {
+        int result = std::system("command -v opencode >/dev/null 2>&1");
+        if (result != 0) {
+            std::cerr << "[daemon] ERROR: opencode not found in PATH\n";
+            std::cerr << "[daemon] Distillation requires opencode. Install it or use --no-distill\n";
+            release_lock(lock);
+            return 1;
+        }
+        std::cerr << "[daemon] Distillation enabled (interval=" << distill_config.interval_minutes
+                  << "m, min_turns=" << distill_config.min_turns
+                  << ", model=" << distill_config.model << ")\n";
     }
 
     if (!pid_file.empty()) {
@@ -213,6 +363,49 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
         }
     });
 
+    // Distillation thread - process transcripts periodically
+    std::atomic<size_t> distill_count{0};
+    std::thread distillation([&]() {
+        if (!distill_config.enabled) return;
+
+        auto interval_mins = std::chrono::minutes(distill_config.interval_minutes);
+        auto last_distill = std::chrono::steady_clock::now();
+
+        // Initial delay to let things settle
+        std::this_thread::sleep_for(std::chrono::seconds(30));
+
+        while (daemon_running) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+
+            auto now_time = std::chrono::steady_clock::now();
+            if (now_time - last_distill >= interval_mins) {
+                last_distill = now_time;
+
+                try {
+                    // Get all registered transcripts
+                    auto transcripts = mind.store().get_pending_transcripts();
+
+                    size_t processed = 0;
+                    for (const auto& state : transcripts) {
+                        if (!daemon_running) break;
+
+                        if (run_distillation(mind, state, distill_config)) {
+                            processed++;
+                            distill_count++;
+                        }
+                    }
+
+                    if (verbose_mode && processed > 0) {
+                        std::cerr << "[distill] Processed " << processed
+                                  << " transcript(s), total=" << distill_count << "\n";
+                    }
+                } catch (const std::exception& e) {
+                    std::cerr << "[distill] Error: " << e.what() << "\n";
+                }
+            }
+        }
+    });
+
     // Main loop - handle socket I/O
     while (daemon_running) {
         auto requests = server.poll(100);
@@ -244,12 +437,14 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
     }
 
     maintenance.join();
+    if (distillation.joinable()) distillation.join();
     server.stop();
 
     if (!pid_file.empty()) std::remove(pid_file.c_str());
     release_lock(lock);
 
-    std::cerr << "[daemon] Stopped (cycles=" << cycle_count << ")\n";
+    std::cerr << "[daemon] Stopped (cycles=" << cycle_count
+              << ", distilled=" << distill_count << ")\n";
     return 0;
 }
 
@@ -304,6 +499,12 @@ void print_usage(const char* prog) {
               << "  -f, --foreground   Run in foreground\n"
               << "  --verbose          Verbose logging\n"
               << "  -v, --version      Show version\n"
+              << "\nDistillation:\n"
+              << "  --distill-interval MINS  Distillation interval (default: 5)\n"
+              << "  --distill-min-turns N    Min turns before distilling (default: 4)\n"
+              << "  --distill-script PATH    Distillation script path\n"
+              << "  --distill-model MODEL    OpenCode model (default: github-copilot/gpt-5-mini)\n"
+              << "  --no-distill             Disable automatic distillation\n"
 #ifdef CHITTA_WITH_POSTGRES
               << "\nPostgreSQL backend (for HPC multi-writer):\n"
               << "  --backend postgres Use PostgreSQL instead of DuckDB\n"
@@ -322,6 +523,10 @@ int main(int argc, char* argv[]) {
     int interval = 60;
     bool foreground = false;
     std::string backend = "duckdb";
+
+    // Distillation config
+    DistillConfig distill_config;
+    distill_config.script_path = default_distill_script();
 
 #ifdef CHITTA_WITH_POSTGRES
     // PostgreSQL options
@@ -355,6 +560,16 @@ int main(int argc, char* argv[]) {
         } else if (strcmp(argv[i], "--pg-pass") == 0 && i + 1 < argc) {
             pg_pass = argv[++i];
 #endif
+        } else if (strcmp(argv[i], "--distill-interval") == 0 && i + 1 < argc) {
+            distill_config.interval_minutes = std::stoi(argv[++i]);
+        } else if (strcmp(argv[i], "--distill-min-turns") == 0 && i + 1 < argc) {
+            distill_config.min_turns = std::stoi(argv[++i]);
+        } else if (strcmp(argv[i], "--distill-script") == 0 && i + 1 < argc) {
+            distill_config.script_path = argv[++i];
+        } else if (strcmp(argv[i], "--distill-model") == 0 && i + 1 < argc) {
+            distill_config.model = argv[++i];
+        } else if (strcmp(argv[i], "--no-distill") == 0) {
+            distill_config.enabled = false;
         } else if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--version") == 0) {
             std::cout << "chittad " << CHITTA_VERSION << "\n";
             return 0;
@@ -548,7 +763,7 @@ int main(int argc, char* argv[]) {
 
     int result = 0;
     if (command == "daemon") {
-        result = cmd_daemon(mind, interval, sock_path, mind_path, pid_file);
+        result = cmd_daemon(mind, interval, sock_path, mind_path, pid_file, distill_config);
     } else if (command == "stats") {
         result = cmd_stats(mind);
     } else {

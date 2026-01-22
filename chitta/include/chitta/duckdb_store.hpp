@@ -103,6 +103,23 @@ struct CodeFile {
     std::string file_hash;      // Optional content hash
 };
 
+// Transcript state for distillation (reads JSONL directly)
+struct TranscriptState {
+    std::string session_id;         // Claude session ID (primary key)
+    std::string transcript_path;    // Path to .jsonl file
+    std::string realm;              // Project/realm isolation
+    int64_t last_processed_line = 0;// Last line number processed
+    int64_t last_distilled_at = 0;  // When we last distilled
+    int64_t created_at = 0;
+};
+
+// Parsed conversation turn from JSONL
+struct TranscriptTurn {
+    std::string role;       // "user" or "assistant"
+    std::string content;    // Message content
+    int64_t line_number;    // Line in JSONL file
+};
+
 // DuckDBStore: unified storage using DuckDB embedded database
 class DuckDBStore {
 public:
@@ -227,6 +244,16 @@ public:
     // Delete symbols/triplets for a file (before re-indexing)
     size_t delete_file_symbols(const std::string& file_path);
     size_t delete_file_triplets(const std::string& file_path);
+
+    // Transcript state operations (for distillation)
+    bool register_transcript(const std::string& session_id, const std::string& transcript_path,
+                             const std::string& realm = "default");
+    std::optional<TranscriptState> get_transcript(const std::string& session_id);
+    std::vector<TranscriptState> get_pending_transcripts();  // Transcripts with new content
+    bool update_transcript_progress(const std::string& session_id, int64_t last_line);
+    bool mark_transcript_distilled(const std::string& session_id);
+    bool remove_transcript(const std::string& session_id);
+    size_t transcript_count();
 
 private:
     std::unique_ptr<duckdb::DuckDB> db_;

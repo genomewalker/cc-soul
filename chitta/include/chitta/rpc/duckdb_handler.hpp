@@ -617,6 +617,113 @@ private:
             }}
         });
         handlers_["ledger_delete"] = [this](const json& p) { return tool_ledger_delete(p); };
+
+        // Transcript tools (for distillation)
+        tools_.push_back({
+            {"name", "transcript_register"},
+            {"description", "Register a transcript file for distillation tracking"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"session_id", {{"type", "string"}, {"description", "Claude session ID"}}},
+                    {"transcript_path", {{"type", "string"}, {"description", "Path to .jsonl transcript file"}}},
+                    {"realm", {{"type", "string"}, {"description", "Project/realm isolation (default: 'default')"}}}
+                }},
+                {"required", {"session_id", "transcript_path"}}
+            }}
+        });
+        handlers_["transcript_register"] = [this](const json& p) { return tool_transcript_register(p); };
+
+        tools_.push_back({
+            {"name", "transcript_get"},
+            {"description", "Get transcript state for a session"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"session_id", {{"type", "string"}, {"description", "Session ID to look up"}}}
+                }},
+                {"required", {"session_id"}}
+            }}
+        });
+        handlers_["transcript_get"] = [this](const json& p) { return tool_transcript_get(p); };
+
+        tools_.push_back({
+            {"name", "transcript_list"},
+            {"description", "List all registered transcripts"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {}}
+            }}
+        });
+        handlers_["transcript_list"] = [this](const json& p) { return tool_transcript_list(p); };
+
+        tools_.push_back({
+            {"name", "transcript_update"},
+            {"description", "Update transcript processing progress"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"session_id", {{"type", "string"}, {"description", "Session ID"}}},
+                    {"last_line", {{"type", "integer"}, {"description", "Last processed line number"}}}
+                }},
+                {"required", {"session_id", "last_line"}}
+            }}
+        });
+        handlers_["transcript_update"] = [this](const json& p) { return tool_transcript_update(p); };
+
+        tools_.push_back({
+            {"name", "transcript_remove"},
+            {"description", "Remove transcript from tracking"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"session_id", {{"type", "string"}, {"description", "Session ID to remove"}}}
+                }},
+                {"required", {"session_id"}}
+            }}
+        });
+        handlers_["transcript_remove"] = [this](const json& p) { return tool_transcript_remove(p); };
+
+        tools_.push_back({
+            {"name", "transcript_parse"},
+            {"description", "Parse new turns from a transcript JSONL file"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"session_id", {{"type", "string"}, {"description", "Session ID to parse"}}},
+                    {"min_turns", {{"type", "integer"}, {"description", "Minimum turns to return (default: 4)"}}}
+                }},
+                {"required", {"session_id"}}
+            }}
+        });
+        handlers_["transcript_parse"] = [this](const json& p) { return tool_transcript_parse(p); };
+
+        tools_.push_back({
+            {"name", "distill_status"},
+            {"description", "Get distillation system status: transcripts, realms, pending work"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {}}
+            }}
+        });
+        handlers_["distill_status"] = [this](const json& p) { return tool_distill_status(p); };
+
+        // Epiplexity tools
+        tools_.push_back({
+            {"name", "epiplexity_check"},
+            {"description", "Compute epiplexity (ε) score for a seed - measures reconstruction quality"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"original", {{"type", "string"}, {"description", "Original full text"}}},
+                    {"seed", {{"type", "string"}, {"description", "Compressed SSL seed"}}},
+                    {"reconstructed", {{"type", "string"}, {"description", "Text reconstructed from seed"}}}
+                }},
+                {"required", {"original", "seed", "reconstructed"}}
+            }}
+        });
+        handlers_["epiplexity_check"] = [this](const json& p) { return tool_epiplexity_check(p); };
+
     }
 
     // Tool implementations
@@ -1004,12 +1111,39 @@ private:
             if (r.text.size() > 200) ss << "...";
             ss << "\n\n";
 
-            results_json.push_back({
+            // Check for provenance: wisdom derived_from episode
+            std::string provenance;
+            if (r.type == NodeType::Wisdom) {
+                std::string wisdom_ref = "wisdom:" + r.id.to_string();
+                auto provenance_triplets = mind_->store().query_subject(wisdom_ref);
+                for (const auto& pt : provenance_triplets) {
+                    if (pt.predicate == "derived_from" && pt.object.substr(0, 8) == "episode:") {
+                        // Extract episode ID and fetch content
+                        std::string episode_id_str = pt.object.substr(8);
+                        try {
+                            NodeId episode_id = NodeId::from_string(episode_id_str);
+                            auto episode_mem = mind_->store().get_memory(static_cast<int64_t>(episode_id.low));
+                            if (episode_mem) {
+                                provenance = episode_mem->content.substr(0, 300);
+                                if (episode_mem->content.size() > 300) provenance += "...";
+                            }
+                        } catch (...) {}
+                        break;
+                    }
+                }
+            }
+
+            json result_entry = {
                 {"id", r.id.to_string()},
                 {"relevance", r.relevance},
                 {"type", type_name},
                 {"text", r.text}
-            });
+            };
+            if (!provenance.empty()) {
+                result_entry["provenance"] = provenance;
+                ss << "  ↳ Source: " << provenance.substr(0, 100) << "...\n\n";
+            }
+            results_json.push_back(result_entry);
         }
 
         // Graph expansion - find related concepts via triplets
@@ -2063,6 +2197,333 @@ private:
         }
 
         return DuckDBToolResult::ok("Deleted checkpoint " + std::to_string(id), {{"id", id}, {"deleted", true}});
+    }
+
+    // Transcript tools
+    DuckDBToolResult tool_transcript_register(const json& params) {
+        std::string session_id = params.value("session_id", "");
+        std::string transcript_path = params.value("transcript_path", "");
+        std::string realm = params.value("realm", "default");
+
+        if (session_id.empty()) {
+            return DuckDBToolResult::error("session_id is required");
+        }
+        if (transcript_path.empty()) {
+            return DuckDBToolResult::error("transcript_path is required");
+        }
+
+        bool ok = mind_->store().register_transcript(session_id, transcript_path, realm);
+        if (!ok) {
+            return DuckDBToolResult::error("Failed to register transcript");
+        }
+
+        return DuckDBToolResult::ok("Registered transcript", {
+            {"session_id", session_id},
+            {"transcript_path", transcript_path},
+            {"realm", realm}
+        });
+    }
+
+    DuckDBToolResult tool_transcript_get(const json& params) {
+        std::string session_id = params.value("session_id", "");
+
+        if (session_id.empty()) {
+            return DuckDBToolResult::error("session_id is required");
+        }
+
+        auto state = mind_->store().get_transcript(session_id);
+        if (!state) {
+            return DuckDBToolResult::ok("Transcript not found", {{"found", false}});
+        }
+
+        std::ostringstream ss;
+        ss << "Transcript: " << state->session_id << "\n";
+        ss << "  Path: " << state->transcript_path << "\n";
+        ss << "  Realm: " << state->realm << "\n";
+        ss << "  Last processed line: " << state->last_processed_line << "\n";
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"found", true},
+            {"session_id", state->session_id},
+            {"transcript_path", state->transcript_path},
+            {"realm", state->realm},
+            {"last_processed_line", state->last_processed_line},
+            {"last_distilled_at", state->last_distilled_at},
+            {"created_at", state->created_at}
+        });
+    }
+
+    DuckDBToolResult tool_transcript_list(const json& params) {
+        auto transcripts = mind_->store().get_pending_transcripts();
+
+        std::ostringstream ss;
+        ss << "Registered transcripts: " << transcripts.size() << "\n\n";
+
+        json list_json = json::array();
+        for (const auto& t : transcripts) {
+            ss << "  [" << t.session_id << "] " << t.realm << " - line " << t.last_processed_line << "\n";
+            ss << "    " << t.transcript_path << "\n";
+
+            list_json.push_back({
+                {"session_id", t.session_id},
+                {"transcript_path", t.transcript_path},
+                {"realm", t.realm},
+                {"last_processed_line", t.last_processed_line},
+                {"last_distilled_at", t.last_distilled_at}
+            });
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"transcripts", list_json},
+            {"count", transcripts.size()}
+        });
+    }
+
+    DuckDBToolResult tool_transcript_update(const json& params) {
+        std::string session_id = params.value("session_id", "");
+        int64_t last_line = params.value("last_line", 0LL);
+
+        if (session_id.empty()) {
+            return DuckDBToolResult::error("session_id is required");
+        }
+
+        bool ok = mind_->store().update_transcript_progress(session_id, last_line);
+        if (!ok) {
+            return DuckDBToolResult::error("Failed to update transcript progress");
+        }
+
+        return DuckDBToolResult::ok("Updated transcript progress", {
+            {"session_id", session_id},
+            {"last_line", last_line}
+        });
+    }
+
+    DuckDBToolResult tool_transcript_remove(const json& params) {
+        std::string session_id = params.value("session_id", "");
+
+        if (session_id.empty()) {
+            return DuckDBToolResult::error("session_id is required");
+        }
+
+        bool ok = mind_->store().remove_transcript(session_id);
+        if (!ok) {
+            return DuckDBToolResult::error("Failed to remove transcript");
+        }
+
+        return DuckDBToolResult::ok("Removed transcript", {
+            {"session_id", session_id}
+        });
+    }
+
+    DuckDBToolResult tool_transcript_parse(const json& params) {
+        std::string session_id = params.value("session_id", "");
+        size_t min_turns = params.value("min_turns", 4);
+
+        if (session_id.empty()) {
+            return DuckDBToolResult::error("session_id is required");
+        }
+
+        // Get transcript state
+        auto state = mind_->store().get_transcript(session_id);
+        if (!state) {
+            return DuckDBToolResult::error("Transcript not found: " + session_id);
+        }
+
+        // Open and read the JSONL file
+        std::ifstream file(state->transcript_path);
+        if (!file) {
+            return DuckDBToolResult::error("Cannot open transcript: " + state->transcript_path);
+        }
+
+        // Skip to last processed line
+        std::string line;
+        int64_t current_line = 0;
+        while (current_line < state->last_processed_line && std::getline(file, line)) {
+            current_line++;
+        }
+
+        // Parse new lines
+        json turns_json = json::array();
+        int64_t last_line = state->last_processed_line;
+
+        while (std::getline(file, line)) {
+            current_line++;
+            if (line.empty()) continue;
+
+            try {
+                auto entry = json::parse(line);
+
+                // Claude Code JSONL format: {"type": "user"|"assistant", "message": {...}}
+                std::string type = entry.value("type", "");
+                if (type != "user" && type != "assistant") continue;
+
+                std::string content;
+                if (entry.contains("message")) {
+                    auto& msg = entry["message"];
+                    // Extract text content from message
+                    if (msg.contains("content")) {
+                        auto& msg_content = msg["content"];
+                        if (msg_content.is_string()) {
+                            content = msg_content.get<std::string>();
+                        } else if (msg_content.is_array()) {
+                            // Array of content blocks
+                            for (const auto& block : msg_content) {
+                                if (block.contains("text")) {
+                                    if (!content.empty()) content += "\n";
+                                    content += block["text"].get<std::string>();
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (!content.empty()) {
+                    turns_json.push_back({
+                        {"role", type},
+                        {"content", content},
+                        {"line", current_line}
+                    });
+                    last_line = current_line;
+                }
+            } catch (...) {
+                // Skip malformed lines
+                continue;
+            }
+        }
+
+        // Check if we have enough turns
+        if (turns_json.size() < min_turns) {
+            return DuckDBToolResult::ok("Not enough new turns", {
+                {"session_id", session_id},
+                {"turns_found", turns_json.size()},
+                {"min_turns", min_turns},
+                {"ready", false}
+            });
+        }
+
+        std::ostringstream ss;
+        ss << "Parsed " << turns_json.size() << " new turns from transcript\n";
+        ss << "  Session: " << session_id << "\n";
+        ss << "  Lines: " << state->last_processed_line << " -> " << last_line << "\n";
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"session_id", session_id},
+            {"realm", state->realm},
+            {"turns", turns_json},
+            {"turns_count", turns_json.size()},
+            {"last_line", last_line},
+            {"ready", true}
+        });
+    }
+
+    DuckDBToolResult tool_distill_status(const json& params) {
+        auto transcripts = mind_->store().get_pending_transcripts();
+
+        // Group by realm
+        std::map<std::string, std::vector<const TranscriptState*>> by_realm;
+        for (const auto& t : transcripts) {
+            by_realm[t.realm].push_back(&t);
+        }
+
+        // Count pending work per transcript
+        size_t total_pending = 0;
+        json transcripts_json = json::array();
+
+        for (const auto& t : transcripts) {
+            // Check file for new lines
+            size_t file_lines = 0;
+            size_t pending_lines = 0;
+
+            std::ifstream file(t.transcript_path);
+            if (file) {
+                std::string line;
+                while (std::getline(file, line)) {
+                    file_lines++;
+                }
+                pending_lines = (file_lines > static_cast<size_t>(t.last_processed_line))
+                    ? file_lines - t.last_processed_line : 0;
+                total_pending += pending_lines;
+            }
+
+            transcripts_json.push_back({
+                {"session_id", t.session_id},
+                {"realm", t.realm},
+                {"last_processed_line", t.last_processed_line},
+                {"file_lines", file_lines},
+                {"pending_lines", pending_lines},
+                {"last_distilled_at", t.last_distilled_at}
+            });
+        }
+
+        // Build realm summary
+        json realms_json = json::object();
+        for (const auto& [realm, ts] : by_realm) {
+            realms_json[realm] = ts.size();
+        }
+
+        std::ostringstream ss;
+        ss << "Distillation Status\n";
+        ss << "═══════════════════════════════\n\n";
+        ss << "Registered transcripts: " << transcripts.size() << "\n";
+        ss << "Total pending lines: " << total_pending << "\n\n";
+
+        ss << "By realm:\n";
+        for (const auto& [realm, ts] : by_realm) {
+            ss << "  " << realm << ": " << ts.size() << " transcript(s)\n";
+        }
+
+        ss << "\nTranscripts:\n";
+        for (const auto& t : transcripts) {
+            ss << "  [" << t.session_id.substr(0, 8) << "...] "
+               << t.realm << " - line " << t.last_processed_line << "\n";
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"transcript_count", transcripts.size()},
+            {"total_pending_lines", total_pending},
+            {"realms", realms_json},
+            {"transcripts", transcripts_json}
+        });
+    }
+
+    DuckDBToolResult tool_epiplexity_check(const json& params) {
+        std::string original = params.value("original", "");
+        std::string seed = params.value("seed", "");
+        std::string reconstructed = params.value("reconstructed", "");
+
+        if (original.empty() || seed.empty() || reconstructed.empty()) {
+            return DuckDBToolResult::error("original, seed, and reconstructed are all required");
+        }
+
+        Epiplexity e = mind_->compute_epiplexity(original, seed, reconstructed);
+
+        std::ostringstream ss;
+        ss << std::fixed << std::setprecision(2);
+        ss << "Epiplexity Analysis\n";
+        ss << "═══════════════════════════════\n\n";
+        ss << "ε = " << e.score << " (combined score)\n\n";
+        ss << "Components:\n";
+        ss << "  S (semantic fidelity):    " << e.semantic_fidelity << "\n";
+        ss << "  K (entity preservation):  " << e.entity_preservation << "\n";
+        ss << "  D (information density):  " << e.information_density << "\n";
+        ss << "  C (compression utility):  " << e.compression_utility << "\n\n";
+
+        // Quality assessment
+        std::string quality;
+        if (e.score >= 0.8f) quality = "Excellent - seed is highly reconstructable";
+        else if (e.score >= 0.6f) quality = "Good - seed preserves key meaning";
+        else if (e.score >= 0.4f) quality = "Fair - some information loss";
+        else quality = "Poor - consider expanding seed or using full content";
+
+        ss << "Quality: " << quality << "\n";
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"score", e.score},
+            {"semantic_fidelity", e.semantic_fidelity},
+            {"entity_preservation", e.entity_preservation},
+            {"information_density", e.information_density},
+            {"compression_utility", e.compression_utility}
+        });
     }
 
     // Helpers

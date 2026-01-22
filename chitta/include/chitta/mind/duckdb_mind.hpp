@@ -28,6 +28,8 @@
 #include <cctype>
 #include <sstream>
 #include <random>
+#include <filesystem>
+#include <set>
 #include <chrono>
 #include <cmath>
 
@@ -449,6 +451,32 @@ struct DuckDBHealth {
     }
 };
 
+// Epiplexity: measures reconstruction quality from compressed seeds
+// ε = (S · K · D · C)^0.25 where each component ∈ [0,1]
+struct Epiplexity {
+    float semantic_fidelity = 0.0f;     // S: embedding similarity between original and reconstructed
+    float entity_preservation = 0.0f;   // K: key concepts retained (F1 score)
+    float information_density = 0.0f;   // D: concepts per token (sigmoid normalized)
+    float compression_utility = 0.0f;   // C: compression ratio benefit (saturating)
+    float score = 0.0f;                 // Combined ε (geometric mean)
+
+    // Compute combined score
+    void compute_score() {
+        // Geometric mean - if any component is 0, ε collapses
+        score = std::pow(semantic_fidelity * entity_preservation *
+                        information_density * compression_utility, 0.25f);
+    }
+
+    std::string to_string() const {
+        std::ostringstream ss;
+        ss << std::fixed << std::setprecision(2);
+        ss << "ε=" << score << " (S=" << semantic_fidelity
+           << " K=" << entity_preservation << " D=" << information_density
+           << " C=" << compression_utility << ")";
+        return ss.str();
+    }
+};
+
 class DuckDBMind {
 public:
     explicit DuckDBMind(DuckDBMindConfig config)
@@ -467,7 +495,14 @@ public:
     // Lifecycle
     bool open() {
         std::unique_lock lock(mutex_);
-        if (!store_.open(config_.path + ".duckdb")) {
+        // Path convention: if path is a directory, use chitta.duckdb inside it
+        std::string db_path = config_.path;
+        if (std::filesystem::is_directory(config_.path)) {
+            db_path = config_.path + "/chitta.duckdb";
+        } else if (!config_.path.ends_with(".duckdb")) {
+            db_path = config_.path + ".duckdb";
+        }
+        if (!store_.open(db_path)) {
             return false;
         }
         running_ = true;
@@ -597,8 +632,9 @@ public:
     }
 
     // Living memory operations
+    // Note: No lock needed - DuckDB handles concurrency internally via MVCC
+    // apply_decay() and prune() use atomic SQL statements
     size_t tick() {
-        std::unique_lock lock(mutex_);
         size_t decayed = store_.apply_decay();
         store_.prune(config_.prune_threshold, config_.prune_min_age_days);
         return decayed;
@@ -670,6 +706,90 @@ public:
     size_t triplet_count() const {
         std::shared_lock lock(mutex_);
         return store_.triplet_count();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // EPIPLEXITY: Reconstruction quality metric
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Compute epiplexity for a seed given original and reconstructed text
+    // Parameters tuned for SSL format seeds
+    Epiplexity compute_epiplexity(const std::string& original,
+                                   const std::string& seed,
+                                   const std::string& reconstructed) {
+        Epiplexity e;
+
+        if (!embedder_.ready()) {
+            return e;  // All zeros if no embedder
+        }
+
+        // S: Semantic fidelity - cosine similarity mapped to [0,1]
+        Vector orig_emb = embedder_.embed(original);
+        Vector recon_emb = embedder_.embed(reconstructed);
+        if (orig_emb.size() > 0 && recon_emb.size() > 0) {
+            float cosine = orig_emb.cosine(recon_emb);
+            e.semantic_fidelity = (1.0f + cosine) / 2.0f;  // Map [-1,1] to [0,1]
+        }
+
+        // K: Entity preservation - count key terms preserved in seed
+        auto count_terms = [](const std::string& text) {
+            std::set<std::string> terms;
+            std::string word;
+            for (char c : text) {
+                if (std::isalnum(c) || c == '_') {
+                    word += std::tolower(c);
+                } else if (!word.empty()) {
+                    if (word.length() >= 3) terms.insert(word);
+                    word.clear();
+                }
+            }
+            if (!word.empty() && word.length() >= 3) terms.insert(word);
+            return terms;
+        };
+        auto orig_terms = count_terms(original);
+        auto seed_terms = count_terms(seed);
+        if (!orig_terms.empty()) {
+            size_t preserved = 0;
+            for (const auto& t : seed_terms) {
+                if (orig_terms.count(t)) preserved++;
+            }
+            float precision = seed_terms.empty() ? 0.0f :
+                             static_cast<float>(preserved) / seed_terms.size();
+            float recall = static_cast<float>(preserved) / orig_terms.size();
+            e.entity_preservation = (precision + recall > 0) ?
+                                   2.0f * precision * recall / (precision + recall) : 0.0f;
+        }
+
+        // D: Information density - concepts per token (sigmoid normalized)
+        auto count_tokens = [](const std::string& text) {
+            size_t count = 0;
+            bool in_word = false;
+            for (char c : text) {
+                if (std::isalnum(c)) {
+                    if (!in_word) { count++; in_word = true; }
+                } else {
+                    in_word = false;
+                }
+            }
+            return count;
+        };
+        size_t seed_tokens = count_tokens(seed);
+        float density = seed_tokens > 0 ?
+                       static_cast<float>(seed_terms.size()) / seed_tokens : 0.0f;
+        // Sigmoid with target density τ=0.5, steepness α=5
+        e.information_density = 1.0f / (1.0f + std::exp(-5.0f * (density - 0.5f)));
+
+        // C: Compression utility - reward compression with saturation
+        size_t orig_tokens = count_tokens(original);
+        if (orig_tokens > 0 && seed_tokens > 0 && orig_tokens > seed_tokens) {
+            float log_ratio = std::log(static_cast<float>(orig_tokens) / seed_tokens);
+            e.compression_utility = 1.0f - std::exp(-0.5f * log_ratio);  // β=0.5
+        } else if (orig_tokens <= seed_tokens) {
+            e.compression_utility = 0.1f;  // Penalty for expansion
+        }
+
+        e.compute_score();
+        return e;
     }
 
     // ═══════════════════════════════════════════════════════════════════════

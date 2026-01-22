@@ -216,6 +216,32 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
 
     {"ledger_delete", "Delete checkpoint",
      {{"id", "Checkpoint ID to delete", true, nullptr}}},
+
+    // Transcript tools (for distillation)
+    {"transcript_register", "Register a transcript file for distillation tracking",
+     {{"session_id", "Claude session ID", true, nullptr},
+      {"transcript_path", "Path to .jsonl transcript file", true, nullptr},
+      {"realm", "Project/realm isolation", false, "default"}}},
+
+    {"transcript_get", "Get transcript state for a session",
+     {{"session_id", "Session ID to look up", true, nullptr}}},
+
+    {"transcript_list", "List all registered transcripts",
+     {}},
+
+    {"transcript_update", "Update transcript processing progress",
+     {{"session_id", "Session ID", true, nullptr},
+      {"last_line", "Last processed line number", true, nullptr}}},
+
+    {"transcript_remove", "Remove transcript from tracking",
+     {{"session_id", "Session ID to remove", true, nullptr}}},
+
+    {"transcript_parse", "Parse new turns from a transcript JSONL file",
+     {{"session_id", "Session ID to parse", true, nullptr},
+      {"min_turns", "Minimum turns to return", false, "4"}}},
+
+    {"distill_status", "Get distillation system status: transcripts, realms, pending work",
+     {}},
 };
 
 // Build set of known tools from specs
@@ -306,6 +332,7 @@ void print_usage(const char* prog) {
               << "  Code Intel:  extract_symbols, learn_codebase, find_symbol, code_context\n"
               << "  Realm:       realm_detect, realm_list, realm_get, realm_set, realm_add, realm_remove, realm_visibility\n"
               << "  Ledger:      ledger_save, ledger_load, ledger_list, ledger_get, ledger_delete\n"
+              << "  Transcript:  transcript_register, transcript_get, transcript_list, transcript_update, transcript_remove\n"
               << "\n"
               << "Global options:\n"
               << "  --socket-path PATH  Unix socket path\n"
