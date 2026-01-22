@@ -230,6 +230,10 @@ public:
     // Efficient attractor finding (excludes code intel triplets)
     std::vector<std::pair<std::string, size_t>> get_top_connected_entities(size_t limit = 20);
 
+    // BM25 full-text search on symbols (no embeddings needed)
+    std::vector<Symbol> bm25_search_symbols(const std::string& query, size_t limit = 10);
+    bool has_fts() const;
+
     // Ledger operations (session continuity)
     int64_t save_ledger(const LedgerEntry& entry);
     std::optional<LedgerEntry> load_ledger(const std::string& session_id = "", const std::string& project = "");
@@ -265,6 +269,7 @@ private:
     mutable std::mutex mutex_;
     bool vss_loaded_ = false;
     bool pgq_loaded_ = false;
+    bool fts_loaded_ = false;
 
     // Schema creation
     bool create_schema();

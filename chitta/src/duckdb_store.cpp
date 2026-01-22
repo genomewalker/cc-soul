@@ -83,6 +83,15 @@ bool DuckDBStore::load_extensions() {
         std::cerr << "[DuckDBStore] DuckPGQ not available (will use SQL joins)\n";
     }
 
+    // Try to load FTS extension for full-text search with BM25
+    try {
+        conn_->Query("INSTALL fts; LOAD fts;");
+        fts_loaded_ = true;
+        std::cerr << "[DuckDBStore] FTS extension loaded\n";
+    } catch (...) {
+        std::cerr << "[DuckDBStore] FTS not available (will use LIKE)\n";
+    }
+
     return true;
 }
 
@@ -175,6 +184,17 @@ bool DuckDBStore::create_schema() {
     // Index for symbol lookup
     execute("CREATE INDEX IF NOT EXISTS idx_symbol_name ON symbol(name)");
     execute("CREATE INDEX IF NOT EXISTS idx_symbol_kind ON symbol(kind)");
+
+    // FTS index for BM25 search on symbols (if FTS extension loaded)
+    if (fts_loaded_) {
+        try {
+            // Create FTS index on symbol name and signature for keyword search
+            execute("PRAGMA create_fts_index('symbol', 'id', 'name', 'signature', 'file_path', overwrite=1)");
+            std::cerr << "[DuckDBStore] Created FTS index on symbol table\n";
+        } catch (...) {
+            std::cerr << "[DuckDBStore] FTS index creation failed\n";
+        }
+    }
 
     // Ledger table for session continuity
     if (!execute(R"(
@@ -1353,6 +1373,65 @@ std::vector<std::pair<std::string, size_t>> DuckDBStore::get_top_connected_entit
         }
     }
     return results;
+}
+
+std::vector<Symbol> DuckDBStore::bm25_search_symbols(const std::string& search_query, size_t limit) {
+    std::lock_guard lock(mutex_);
+    std::vector<Symbol> results;
+    if (!db_ || !fts_loaded_) return results;
+
+    // Escape search_query for SQL
+    std::string escaped;
+    for (char c : search_query) {
+        if (c == '\'') escaped += "''";
+        else escaped += c;
+    }
+
+    // Use FTS match_bm25 for ranked search
+    std::ostringstream sql;
+    sql << "SELECT s.id, s.kind, s.name, s.signature, s.file_path, "
+        << "s.line_start, s.line_end, s.repo_id, "
+        << "fts_main_symbol.match_bm25(s.id, '" << escaped << "') as score "
+        << "FROM symbol s "
+        << "WHERE score IS NOT NULL "
+        << "ORDER BY score DESC "
+        << "LIMIT " << limit;
+
+    auto result = query(sql.str());
+    if (!result || result->HasError()) {
+        // Fallback to LIKE search if FTS fails
+        std::ostringstream fallback;
+        fallback << "SELECT id, kind, name, signature, file_path, "
+                 << "line_start, line_end, repo_id "
+                 << "FROM symbol WHERE name ILIKE '%" << escaped << "%' "
+                 << "OR signature ILIKE '%" << escaped << "%' "
+                 << "LIMIT " << limit;
+        result = this->query(fallback.str());
+        if (!result || result->HasError()) return results;
+    }
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); i++) {
+            Symbol sym;
+            sym.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            sym.kind = chunk->GetValue(1, i).ToString();
+            sym.name = chunk->GetValue(2, i).ToString();
+            sym.signature = chunk->GetValue(3, i).ToString();
+            sym.file_path = chunk->GetValue(4, i).ToString();
+            sym.line_start = chunk->GetValue(5, i).GetValue<int32_t>();
+            sym.line_end = chunk->GetValue(6, i).GetValue<int32_t>();
+            sym.repo_id = chunk->GetValue(7, i).GetValue<int64_t>();
+            results.push_back(std::move(sym));
+        }
+    }
+    return results;
+}
+
+bool DuckDBStore::has_fts() const {
+    return fts_loaded_;
 }
 
 std::string DuckDBStore::kind_to_string(NodeType type) {

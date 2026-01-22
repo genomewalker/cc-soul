@@ -920,9 +920,26 @@ public:
             seen.insert(id);
         }
 
-        // Phase 4b: Code intelligence - find matching code symbols
-        auto code_symbols = find_code_symbols_unlocked(query_terms,
-                                                        active_config.max_code_symbols);
+        // Phase 4b: Code intelligence - hybrid BM25 + term search
+        std::vector<Symbol> code_symbols;
+        if (store_.has_fts()) {
+            // Use BM25 full-text search (ranked by relevance)
+            code_symbols = store_.bm25_search_symbols(query, active_config.max_code_symbols);
+        }
+        // Fallback or supplement with term-based search
+        if (code_symbols.size() < active_config.max_code_symbols) {
+            auto term_symbols = find_code_symbols_unlocked(query_terms,
+                active_config.max_code_symbols - code_symbols.size());
+            // Merge, avoiding duplicates
+            std::unordered_set<int64_t> seen_symbols;
+            for (const auto& s : code_symbols) seen_symbols.insert(s.id);
+            for (auto& s : term_symbols) {
+                if (!seen_symbols.count(s.id)) {
+                    code_symbols.push_back(std::move(s));
+                }
+            }
+        }
+
         for (const auto& sym : code_symbols) {
             Recall recall;
             // Use negative ID range for code symbols to avoid collision
