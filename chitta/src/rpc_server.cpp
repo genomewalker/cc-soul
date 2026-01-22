@@ -242,6 +242,11 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
 
     {"distill_status", "Get distillation system status: transcripts, realms, pending work",
      {}},
+
+    {"epiplexity_check", "Compute epiplexity (ε) score for a seed - measures reconstruction quality",
+     {{"original", "Original full text", true, nullptr},
+      {"seed", "Compressed SSL seed", true, nullptr},
+      {"reconstructed", "Text reconstructed from seed", true, nullptr}}},
 };
 
 // Build set of known tools from specs
