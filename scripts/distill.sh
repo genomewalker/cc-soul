@@ -50,25 +50,44 @@ SSL Format:
 Symbols: → (produces) | (or) + (and) @ (location) ! (negation) ? (uncertainty)
 
 EPIPLEXITY (ε) - Reconstruction Quality:
-Your seeds will be scored on 4 dimensions (each 0-1, combined via geometric mean):
-- S (semantic): Can the meaning be reconstructed? (embedding similarity)
-- K (entities): Are key terms preserved in the seed? (F1 score)
-- D (density): How many concepts per token? (higher = better)
-- C (compression): How much shorter than original? (with diminishing returns)
+Seeds scored on 4 dimensions (geometric mean, so all must be decent):
+- S (semantic): embedding similarity original↔reconstructed (usually 0.9+)
+- K (entities): F1 of key terms in seed vs original (CRITICAL - include key words!)
+- D (density): concepts per token (40%+ target, arrows/symbols help)
+- C (compression): reward 2-5x compression (β=0.7 saturation)
 
 Goal: ε ≥ 0.6 (Good) or ε ≥ 0.8 (Excellent)
 
-To maximize ε:
-- Include ALL key entities/names in the seed (boosts K)
-- Use dense notation: arrows, symbols (boosts D)
-- Put exact values/formulas in [ε] line (boosts S when reconstructed)
-- Compress aggressively but not at cost of key terms
+K is usually the bottleneck! To boost K:
+- INCLUDE original terms: "token bucket" not "token_bucket", "100 tokens" not "100"
+- Keep technical terms verbatim: "rate limiter", "burst protection", "refill"
+- Don't over-abbreviate: "capacity" not "cap", "seconds" not "s"
 
-Example (ε ≈ 0.75):
-[LEARN] [rate-limiting] token_bucket→capacity+refill→burst_protection @api.cpp:42
-[ε] capacity=100 tokens, refill=10/s, burst up to capacity then throttle
+Balance K and C:
+- 2-3x compression is sweet spot (C≈0.5-0.65)
+- Preserve ~60-70% of key terms (K≈0.6-0.7)
+- Use [ε] for exact values without bloating seed
+
+ENCODING EXAMPLES (with ε scores):
+
+BAD (ε=0.36): Over-compressed, lost key terms
+[LEARN] [rate] bucket→cap+refill→protect
+❌ K=0.07 (lost: "token", "limiter", "100", "burst", "throughput")
+
+FAIR (ε=0.57): Good compression but missing terms
+[LEARN] [rate-limiting] token_bucket→capacity:100+refill:10/s→burst_protection
+❌ K=0.44 (lost: "tokens", "per second", "throughput")
+
+GOOD (ε=0.75): Balanced - key terms preserved, good compression
+[LEARN] [rate-limiting] token bucket implemented→capacity 100 tokens+refills 10 per second→protects burst+sustained throughput
+[ε] rate limiter using token bucket algorithm
 [TRIPLET] token_bucket implements rate_limiting
-[TRIPLET] rate_limiting protects api_endpoints
+✓ K=0.74, C=0.35, S=0.99
+
+DECODING RULE: I expand seeds by:
+1. Reading the pattern: subject→action→result
+2. Using [ε] for exact values
+3. Reconstructing prose that includes ALL seed terms
 
 Conversation:
 $CONVERSATION

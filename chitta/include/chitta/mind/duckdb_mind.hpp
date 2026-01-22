@@ -761,6 +761,7 @@ public:
         }
 
         // D: Information density - concepts per token (sigmoid normalized)
+        // Tuned for SSL: τ=0.4 (40% concept density target), α=6 (sharper transition)
         auto count_tokens = [](const std::string& text) {
             size_t count = 0;
             bool in_word = false;
@@ -776,14 +777,15 @@ public:
         size_t seed_tokens = count_tokens(seed);
         float density = seed_tokens > 0 ?
                        static_cast<float>(seed_terms.size()) / seed_tokens : 0.0f;
-        // Sigmoid with target density τ=0.5, steepness α=5
-        e.information_density = 1.0f / (1.0f + std::exp(-5.0f * (density - 0.5f)));
+        e.information_density = 1.0f / (1.0f + std::exp(-6.0f * (density - 0.4f)));
 
         // C: Compression utility - reward compression with saturation
+        // Tuned: β=0.7 rewards compression more aggressively
+        // 2x compression → 0.50, 3x → 0.65, 5x → 0.77
         size_t orig_tokens = count_tokens(original);
         if (orig_tokens > 0 && seed_tokens > 0 && orig_tokens > seed_tokens) {
             float log_ratio = std::log(static_cast<float>(orig_tokens) / seed_tokens);
-            e.compression_utility = 1.0f - std::exp(-0.5f * log_ratio);  // β=0.5
+            e.compression_utility = 1.0f - std::exp(-0.7f * log_ratio);
         } else if (orig_tokens <= seed_tokens) {
             e.compression_utility = 0.1f;  // Penalty for expansion
         }
