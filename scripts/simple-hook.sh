@@ -125,6 +125,40 @@ json_escape() {
     echo -n "$text" | jq -Rs '.' | sed 's/^"//;s/"$//'
 }
 
+# Auto-register transcript for distillation (on first meaningful work)
+register_transcript_if_needed() {
+    local realm="$1"
+    local chitta_bin="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
+
+    # Derive project slug from CWD (same logic Claude uses: replace / with -)
+    local cwd="${PWD:-$(pwd)}"
+    local project_slug=$(echo "$cwd" | sed 's|/|-|g')
+    local project_dir="$HOME/.claude/projects/$project_slug"
+
+    # Find most recent transcript
+    local transcript=$(ls -t "$project_dir"/*.jsonl 2>/dev/null | head -1)
+    if [[ -z "$transcript" ]]; then
+        return 0  # No transcript found
+    fi
+
+    # Extract session ID from filename
+    local session_id=$(basename "$transcript" .jsonl)
+
+    # Check if already registered (fast path)
+    local existing=$("$chitta_bin" transcript_get --session_id "$session_id" --json 2>/dev/null | jq -r '.found // false')
+    if [[ "$existing" == "true" ]]; then
+        return 0  # Already registered
+    fi
+
+    # Register for distillation
+    if "$chitta_bin" transcript_register \
+        --session_id "$session_id" \
+        --transcript_path "$transcript" \
+        --realm "$realm" >/dev/null 2>&1; then
+        echo "[cc-soul] Transcript registered for distillation"
+    fi
+}
+
 case "$HOOK_TYPE" in
     start|SessionStart)
         # Ensure daemon is running before any RPC calls
@@ -250,6 +284,9 @@ case "$HOOK_TYPE" in
             else
                 REALM="brahman"
             fi
+
+            # Auto-register transcript for distillation (first meaningful work)
+            register_transcript_if_needed "$REALM"
 
             # Generate session ID from timestamp
             SESSION_ID="auto-$(date +%Y%m%d-%H%M%S)"
