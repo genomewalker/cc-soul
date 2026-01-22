@@ -632,9 +632,10 @@ public:
     }
 
     // Living memory operations
-    // Note: No lock needed - DuckDB handles concurrency internally via MVCC
-    // apply_decay() and prune() use atomic SQL statements
+    // IMPORTANT: DuckDB Connection is NOT thread-safe - must hold mutex_
+    // MVCC handles transaction isolation, NOT connection thread-safety
     size_t tick() {
+        std::unique_lock lock(mutex_);
         size_t decayed = store_.apply_decay();
         store_.prune(config_.prune_threshold, config_.prune_min_age_days);
         return decayed;
@@ -706,6 +707,26 @@ public:
     size_t triplet_count() const {
         std::shared_lock lock(mutex_);
         return store_.triplet_count();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // THREAD-SAFE TRANSCRIPT OPERATIONS (for distillation thread)
+    // IMPORTANT: Always use these instead of store() for transcript operations
+    // ═══════════════════════════════════════════════════════════════════════
+
+    std::vector<TranscriptState> get_pending_transcripts() {
+        std::shared_lock lock(mutex_);
+        return store_.get_pending_transcripts();
+    }
+
+    bool update_transcript_progress(const std::string& session_id, int64_t last_line) {
+        std::unique_lock lock(mutex_);
+        return store_.update_transcript_progress(session_id, last_line);
+    }
+
+    bool mark_transcript_distilled(const std::string& session_id) {
+        std::unique_lock lock(mutex_);
+        return store_.mark_transcript_distilled(session_id);
     }
 
     // ═══════════════════════════════════════════════════════════════════════

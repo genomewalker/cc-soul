@@ -259,9 +259,9 @@ bool run_distillation(DuckDBMind& mind, const TranscriptState& state,
         }
     }
 
-    // Update progress
-    mind.store().update_transcript_progress(state.session_id, last_line);
-    mind.store().mark_transcript_distilled(state.session_id);
+    // Update progress (using thread-safe methods)
+    mind.update_transcript_progress(state.session_id, last_line);
+    mind.mark_transcript_distilled(state.session_id);
 
     if (verbose_mode) {
         std::cerr << "[distill] Completed " << state.session_id
@@ -382,8 +382,8 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                 last_distill = now_time;
 
                 try {
-                    // Get all registered transcripts
-                    auto transcripts = mind.store().get_pending_transcripts();
+                    // Get all registered transcripts (thread-safe method)
+                    auto transcripts = mind.get_pending_transcripts();
 
                     size_t processed = 0;
                     for (const auto& state : transcripts) {
