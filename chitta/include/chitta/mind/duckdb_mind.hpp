@@ -66,6 +66,10 @@ struct DuckDBResonanceConfig {
     // Relevance blend (semantic vs activation)
     float semantic_weight = 0.6f;       // Weight for semantic similarity
     float activation_weight = 0.4f;     // Weight for spreading activation
+
+    // Code intelligence integration
+    float code_symbol_weight = 0.5f;    // Relevance weight for matching code symbols
+    size_t max_code_symbols = 5;        // Maximum code symbols to include in results
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -916,6 +920,22 @@ public:
             seen.insert(id);
         }
 
+        // Phase 4b: Code intelligence - find matching code symbols
+        auto code_symbols = find_code_symbols_unlocked(query_terms,
+                                                        active_config.max_code_symbols);
+        for (const auto& sym : code_symbols) {
+            Recall recall;
+            // Use negative ID range for code symbols to avoid collision
+            recall.id = NodeId{static_cast<uint64_t>(-sym.id), 0};
+            // Format: "kind name @ file:line"
+            recall.text = "[CODE] " + sym.kind + " " + sym.name +
+                         " @ " + sym.file_path + ":" + std::to_string(sym.line_start);
+            recall.type = NodeType::Operation;  // Code symbols are operations
+            recall.relevance = active_config.code_symbol_weight;
+            recall.confidence = Confidence(1.0f);  // Code symbols are certain
+            results.push_back(std::move(recall));
+        }
+
         // Phase 5: Attractor dynamics - boost results in same basin
         if (!attractors.empty() && !results.empty()) {
             apply_attractor_boost_unlocked(results, attractors, query_terms);
@@ -1204,6 +1224,31 @@ private:
                 act += boost;
             }
         }
+    }
+
+    // Find code symbols matching query terms (for hybrid search)
+    std::vector<Symbol> find_code_symbols_unlocked(const std::vector<std::string>& terms,
+                                                    size_t max_results) {
+        std::vector<Symbol> symbols;
+        std::unordered_set<int64_t> seen_ids;
+
+        for (const auto& term : terms) {
+            if (term.length() < 3) continue;  // Skip very short terms
+
+            // Search for symbols matching this term
+            auto matches = store_.find_symbol(term);
+
+            for (auto& sym : matches) {
+                if (seen_ids.count(sym.id)) continue;
+                seen_ids.insert(sym.id);
+                symbols.push_back(std::move(sym));
+
+                if (symbols.size() >= max_results) {
+                    return symbols;
+                }
+            }
+        }
+        return symbols;
     }
 
     // Apply attractor boost to results in same conceptual basin
