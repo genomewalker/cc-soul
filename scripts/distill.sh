@@ -39,24 +39,41 @@ if [[ -z "$CONVERSATION" ]]; then
     exit 0
 fi
 
-# Create distillation prompt
-PROMPT="Analyze this conversation and extract learnings in SSL (Soul Semantic Language) format.
+# Create distillation prompt with SSL v0.2 format and epiplexity tuning
+PROMPT="Extract learnings from this conversation in SSL v0.2 format.
 
-For each insight, output:
-[LEARN] [domain] pattern → result
+SSL Format:
+[LEARN] [domain] subject→action→result @location
+[ε] Expansion hint (exact formulas/code preserved verbatim)
 [TRIPLET] subject predicate object
 
-Rules:
-- Extract key decisions, insights, patterns learned
-- Use arrows (→) to show cause/effect
-- Create triplets for relationships discovered
-- Be concise - compress to reconstructable seeds
-- Domain should match the conversation topic
+Symbols: → (produces) | (or) + (and) @ (location) ! (negation) ? (uncertainty)
+
+EPIPLEXITY (ε) - Reconstruction Quality:
+Your seeds will be scored on 4 dimensions (each 0-1, combined via geometric mean):
+- S (semantic): Can the meaning be reconstructed? (embedding similarity)
+- K (entities): Are key terms preserved in the seed? (F1 score)
+- D (density): How many concepts per token? (higher = better)
+- C (compression): How much shorter than original? (with diminishing returns)
+
+Goal: ε ≥ 0.6 (Good) or ε ≥ 0.8 (Excellent)
+
+To maximize ε:
+- Include ALL key entities/names in the seed (boosts K)
+- Use dense notation: arrows, symbols (boosts D)
+- Put exact values/formulas in [ε] line (boosts S when reconstructed)
+- Compress aggressively but not at cost of key terms
+
+Example (ε ≈ 0.75):
+[LEARN] [rate-limiting] token_bucket→capacity+refill→burst_protection @api.cpp:42
+[ε] capacity=100 tokens, refill=10/s, burst up to capacity then throttle
+[TRIPLET] token_bucket implements rate_limiting
+[TRIPLET] rate_limiting protects api_endpoints
 
 Conversation:
 $CONVERSATION
 
-Output only SSL format, no explanation:"
+Output only SSL format, optimized for high ε:"
 
 # Call OpenCode to distill the conversation
 echo "[distill] Session $SESSION_ID: Calling OpenCode for distillation"
@@ -83,24 +100,38 @@ else
     echo "[distill]   Warning: Could not get episode ID"
 fi
 
-# Extract and store [LEARN] lines, linking to episode
-echo "$RESULT" | grep '^\[LEARN\]' | while read -r line; do
-    content="${line#\[LEARN\] }"
-    if [[ -n "$content" ]]; then
-        # Store wisdom and get its ID
-        WISDOM_RESPONSE=$("$CHITTA_BIN" grow --type wisdom --content "$content" --realm "$REALM" --json 2>/dev/null || echo "{}")
-        WISDOM_ID=$(echo "$WISDOM_RESPONSE" | grep -oP '"id"\s*:\s*"\K[^"]+' | head -1)
-
-        if [[ -n "$WISDOM_ID" ]]; then
-            echo "[distill]   Stored wisdom: ${content:0:50}..."
-
-            # Link wisdom to episode
-            if [[ -n "$EPISODE_ID" ]]; then
-                "$CHITTA_BIN" connect --subject "wisdom:$WISDOM_ID" --predicate "derived_from" --object "episode:$EPISODE_ID" 2>/dev/null || true
+# Extract and store [LEARN] lines with their [ε] hints, linking to episode
+# Process line by line, combining [LEARN] with following [ε] if present
+LEARN_CONTENT=""
+while IFS= read -r line; do
+    if [[ "$line" == "[LEARN]"* ]]; then
+        # If we have a pending LEARN, store it first
+        if [[ -n "$LEARN_CONTENT" ]]; then
+            WISDOM_RESPONSE=$("$CHITTA_BIN" grow --type wisdom --content "$LEARN_CONTENT" --realm "$REALM" --json 2>/dev/null || echo "{}")
+            WISDOM_ID=$(echo "$WISDOM_RESPONSE" | grep -oP '"id"\s*:\s*"\K[^"]+' | head -1)
+            if [[ -n "$WISDOM_ID" ]]; then
+                echo "[distill]   Stored: ${LEARN_CONTENT:0:60}..."
+                [[ -n "$EPISODE_ID" ]] && "$CHITTA_BIN" connect --subject "wisdom:$WISDOM_ID" --predicate "derived_from" --object "episode:$EPISODE_ID" 2>/dev/null || true
             fi
         fi
+        # Start new LEARN
+        LEARN_CONTENT="${line#\[LEARN\] }"
+    elif [[ "$line" == "[ε]"* && -n "$LEARN_CONTENT" ]]; then
+        # Append epsilon hint to current LEARN
+        LEARN_CONTENT="$LEARN_CONTENT
+${line}"
     fi
-done
+done <<< "$RESULT"
+
+# Store last LEARN if pending
+if [[ -n "$LEARN_CONTENT" ]]; then
+    WISDOM_RESPONSE=$("$CHITTA_BIN" grow --type wisdom --content "$LEARN_CONTENT" --realm "$REALM" --json 2>/dev/null || echo "{}")
+    WISDOM_ID=$(echo "$WISDOM_RESPONSE" | grep -oP '"id"\s*:\s*"\K[^"]+' | head -1)
+    if [[ -n "$WISDOM_ID" ]]; then
+        echo "[distill]   Stored: ${LEARN_CONTENT:0:60}..."
+        [[ -n "$EPISODE_ID" ]] && "$CHITTA_BIN" connect --subject "wisdom:$WISDOM_ID" --predicate "derived_from" --object "episode:$EPISODE_ID" 2>/dev/null || true
+    fi
+fi
 
 # Extract and store [TRIPLET] lines
 echo "$RESULT" | grep '^\[TRIPLET\]' | while read -r line; do
