@@ -11,7 +11,8 @@ DuckDBStore::~DuckDBStore() {
 }
 
 bool DuckDBStore::open(const std::string& path) {
-    std::lock_guard lock(mutex_);
+    // No lock here - write_execute/write_query handle their own locking
+    // open() is single-threaded (called once at startup)
 
     if (db_) {
         std::cerr << "[DuckDBStore] Already open\n";
@@ -26,7 +27,10 @@ bool DuckDBStore::open(const std::string& path) {
         config.SetOption("enable_external_access", duckdb::Value(true));
 
         db_ = std::make_unique<duckdb::DuckDB>(path_, &config);
-        conn_ = std::make_unique<duckdb::Connection>(*db_);
+        write_conn_ = std::make_unique<duckdb::Connection>(*db_);
+
+        // Initialize connection pool for concurrent reads (8 connections max)
+        read_pool_ = std::make_unique<ConnectionPool>(*db_, 8);
 
         // Load extensions
         if (!load_extensions()) {
@@ -51,23 +55,25 @@ bool DuckDBStore::open(const std::string& path) {
     } catch (const std::exception& e) {
         std::cerr << "[DuckDBStore] Failed to open: " << e.what() << "\n";
         db_.reset();
-        conn_.reset();
+        write_conn_.reset();
         return false;
     }
 }
 
 void DuckDBStore::close() {
-    std::lock_guard lock(mutex_);
-    conn_.reset();
+    std::lock_guard lock(write_mutex_);
+    read_pool_.reset();
+    write_conn_.reset();
     db_.reset();
     vss_loaded_ = false;
     pgq_loaded_ = false;
+    fts_loaded_ = false;
 }
 
 bool DuckDBStore::load_extensions() {
     // Try to load VSS extension for vector search
     try {
-        conn_->Query("INSTALL vss; LOAD vss;");
+        write_conn_->Query("INSTALL vss; LOAD vss;");
         vss_loaded_ = true;
         std::cerr << "[DuckDBStore] VSS extension loaded\n";
     } catch (...) {
@@ -76,7 +82,7 @@ bool DuckDBStore::load_extensions() {
 
     // Try to load DuckPGQ for graph queries
     try {
-        conn_->Query("INSTALL duckpgq FROM community; LOAD duckpgq;");
+        write_conn_->Query("INSTALL duckpgq FROM community; LOAD duckpgq;");
         pgq_loaded_ = true;
         std::cerr << "[DuckDBStore] DuckPGQ extension loaded\n";
     } catch (...) {
@@ -85,7 +91,7 @@ bool DuckDBStore::load_extensions() {
 
     // Try to load FTS extension for full-text search with BM25
     try {
-        conn_->Query("INSTALL fts; LOAD fts;");
+        write_conn_->Query("INSTALL fts; LOAD fts;");
         fts_loaded_ = true;
         std::cerr << "[DuckDBStore] FTS extension loaded\n";
     } catch (...) {
@@ -97,7 +103,7 @@ bool DuckDBStore::load_extensions() {
 
 bool DuckDBStore::create_schema() {
     // Memory table with ARRAY for embeddings
-    if (!execute(R"(
+    if (!write_execute(R"(
         CREATE TABLE IF NOT EXISTS memory (
             id BIGINT PRIMARY KEY,
             kind VARCHAR,
@@ -115,7 +121,7 @@ bool DuckDBStore::create_schema() {
     }
 
     // Realm membership table for multi-realm support
-    if (!execute(R"(
+    if (!write_execute(R"(
         CREATE TABLE IF NOT EXISTS realm_membership (
             memory_id BIGINT,
             realm VARCHAR,
@@ -126,11 +132,11 @@ bool DuckDBStore::create_schema() {
     }
 
     // Index for realm filtering
-    execute("CREATE INDEX IF NOT EXISTS idx_memory_realm ON memory(realm)");
-    execute("CREATE INDEX IF NOT EXISTS idx_realm_membership ON realm_membership(realm)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_memory_realm ON memory(realm)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_realm_membership ON realm_membership(realm)");
 
     // Triplet table for graph relationships
-    if (!execute(R"(
+    if (!write_execute(R"(
         CREATE TABLE IF NOT EXISTS triplet (
             id BIGINT PRIMARY KEY,
             subject VARCHAR,
@@ -145,16 +151,16 @@ bool DuckDBStore::create_schema() {
     }
 
     // Migration: add source_file column if missing (for databases created before v3.3.0)
-    execute("ALTER TABLE triplet ADD COLUMN IF NOT EXISTS source_file VARCHAR DEFAULT ''");
+    write_execute("ALTER TABLE triplet ADD COLUMN IF NOT EXISTS source_file VARCHAR DEFAULT ''");
 
     // Indexes for triplet queries
-    execute("CREATE INDEX IF NOT EXISTS idx_triplet_subject ON triplet(subject)");
-    execute("CREATE INDEX IF NOT EXISTS idx_triplet_object ON triplet(object)");
-    execute("CREATE INDEX IF NOT EXISTS idx_triplet_predicate ON triplet(predicate)");
-    execute("CREATE INDEX IF NOT EXISTS idx_triplet_source_file ON triplet(source_file)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_triplet_subject ON triplet(subject)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_triplet_object ON triplet(object)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_triplet_predicate ON triplet(predicate)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_triplet_source_file ON triplet(source_file)");
 
     // Symbol table for code intelligence
-    if (!execute(R"(
+    if (!write_execute(R"(
         CREATE TABLE IF NOT EXISTS symbol (
             id BIGINT PRIMARY KEY,
             kind VARCHAR,
@@ -171,7 +177,7 @@ bool DuckDBStore::create_schema() {
     }
 
     // Call graph table
-    if (!execute(R"(
+    if (!write_execute(R"(
         CREATE TABLE IF NOT EXISTS call_edge (
             caller_id BIGINT,
             callee_id BIGINT,
@@ -182,14 +188,14 @@ bool DuckDBStore::create_schema() {
     }
 
     // Index for symbol lookup
-    execute("CREATE INDEX IF NOT EXISTS idx_symbol_name ON symbol(name)");
-    execute("CREATE INDEX IF NOT EXISTS idx_symbol_kind ON symbol(kind)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_symbol_name ON symbol(name)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_symbol_kind ON symbol(kind)");
 
     // FTS index for BM25 search on symbols (if FTS extension loaded)
     if (fts_loaded_) {
         try {
             // Create FTS index on symbol name and signature for keyword search
-            execute("PRAGMA create_fts_index('symbol', 'id', 'name', 'signature', 'file_path', overwrite=1)");
+            write_execute("PRAGMA create_fts_index('symbol', 'id', 'name', 'signature', 'file_path', overwrite=1)");
             std::cerr << "[DuckDBStore] Created FTS index on symbol table\n";
         } catch (...) {
             std::cerr << "[DuckDBStore] FTS index creation failed\n";
@@ -197,7 +203,7 @@ bool DuckDBStore::create_schema() {
     }
 
     // Ledger table for session continuity
-    if (!execute(R"(
+    if (!write_execute(R"(
         CREATE TABLE IF NOT EXISTS ledger (
             id BIGINT PRIMARY KEY,
             session_id VARCHAR NOT NULL,
@@ -219,12 +225,12 @@ bool DuckDBStore::create_schema() {
     }
 
     // Indexes for ledger queries
-    execute("CREATE INDEX IF NOT EXISTS idx_ledger_session ON ledger(session_id)");
-    execute("CREATE INDEX IF NOT EXISTS idx_ledger_project ON ledger(project)");
-    execute("CREATE INDEX IF NOT EXISTS idx_ledger_created ON ledger(created_at DESC)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_ledger_session ON ledger(session_id)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_ledger_project ON ledger(project)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_ledger_created ON ledger(created_at DESC)");
 
     // Code files table for incremental indexing
-    if (!execute(R"(
+    if (!write_execute(R"(
         CREATE TABLE IF NOT EXISTS code_file (
             path VARCHAR PRIMARY KEY,
             project VARCHAR NOT NULL,
@@ -239,11 +245,11 @@ bool DuckDBStore::create_schema() {
     }
 
     // Indexes for code file queries
-    execute("CREATE INDEX IF NOT EXISTS idx_code_file_project ON code_file(project)");
-    execute("CREATE INDEX IF NOT EXISTS idx_code_file_mtime ON code_file(mtime)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_code_file_project ON code_file(project)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_code_file_mtime ON code_file(mtime)");
 
     // Transcript state table for distillation (reads JSONL directly)
-    if (!execute(R"(
+    if (!write_execute(R"(
         CREATE TABLE IF NOT EXISTS transcript_state (
             session_id VARCHAR PRIMARY KEY,
             transcript_path VARCHAR NOT NULL,
@@ -257,13 +263,13 @@ bool DuckDBStore::create_schema() {
     }
 
     // Indexes for transcript queries
-    execute("CREATE INDEX IF NOT EXISTS idx_transcript_realm ON transcript_state(realm)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_transcript_realm ON transcript_state(realm)");
 
     // Sequence for IDs
-    execute("CREATE SEQUENCE IF NOT EXISTS memory_seq START 1");
-    execute("CREATE SEQUENCE IF NOT EXISTS triplet_seq START 1");
-    execute("CREATE SEQUENCE IF NOT EXISTS symbol_seq START 1");
-    execute("CREATE SEQUENCE IF NOT EXISTS ledger_seq START 1");
+    write_execute("CREATE SEQUENCE IF NOT EXISTS memory_seq START 1");
+    write_execute("CREATE SEQUENCE IF NOT EXISTS triplet_seq START 1");
+    write_execute("CREATE SEQUENCE IF NOT EXISTS symbol_seq START 1");
+    write_execute("CREATE SEQUENCE IF NOT EXISTS ledger_seq START 1");
 
     return true;
 }
@@ -272,11 +278,11 @@ bool DuckDBStore::create_vector_index() {
     if (!vss_loaded_) return false;
 
     // Enable experimental persistence for HNSW
-    execute("SET hnsw_enable_experimental_persistence = true");
+    write_execute("SET hnsw_enable_experimental_persistence = true");
 
     // Create HNSW index on memory embeddings
     try {
-        execute(R"(
+        write_execute(R"(
             CREATE INDEX IF NOT EXISTS memory_embedding_idx
             ON memory USING HNSW (embedding)
             WITH (metric = 'cosine')
@@ -289,9 +295,11 @@ bool DuckDBStore::create_vector_index() {
     }
 }
 
-bool DuckDBStore::execute(const std::string& sql) {
+// Write operations - use dedicated connection with mutex (serialized)
+bool DuckDBStore::write_execute(const std::string& sql) {
+    std::lock_guard lock(write_mutex_);
     try {
-        auto result = conn_->Query(sql);
+        auto result = write_conn_->Query(sql);
         if (result->HasError()) {
             std::cerr << "[DuckDBStore] Query error: " << result->GetError() << "\n";
             return false;
@@ -303,11 +311,23 @@ bool DuckDBStore::execute(const std::string& sql) {
     }
 }
 
-std::unique_ptr<duckdb::QueryResult> DuckDBStore::query(const std::string& sql) {
+std::unique_ptr<duckdb::QueryResult> DuckDBStore::write_query(const std::string& sql) {
+    std::lock_guard lock(write_mutex_);
     try {
-        return conn_->Query(sql);
+        return write_conn_->Query(sql);
     } catch (const std::exception& e) {
         std::cerr << "[DuckDBStore] Query exception: " << e.what() << "\n";
+        return nullptr;
+    }
+}
+
+// Read operations - use connection pool for concurrency (no mutex needed)
+std::unique_ptr<duckdb::QueryResult> DuckDBStore::read_query(const std::string& sql) const {
+    try {
+        auto conn = read_pool_->acquire();
+        return conn->Query(sql);
+    } catch (const std::exception& e) {
+        std::cerr << "[DuckDBStore] Read query exception: " << e.what() << "\n";
         return nullptr;
     }
 }
@@ -333,7 +353,7 @@ int64_t DuckDBStore::remember(
     RealmVisibility visibility,
     const std::vector<std::string>& shared_realms
 ) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_) return -1;
 
     Timestamp now_ts = now();
@@ -358,7 +378,7 @@ int64_t DuckDBStore::remember(
         << embedding_to_sql(embedding) << ", '" << escaped_realm << "', "
         << static_cast<int>(visibility) << ") RETURNING id";
 
-    auto result = query(sql.str());
+    auto result = read_query(sql.str());
     if (!result || result->HasError()) {
         return -1;
     }
@@ -380,7 +400,7 @@ int64_t DuckDBStore::remember(
         std::ostringstream membership_sql;
         membership_sql << "INSERT INTO realm_membership (memory_id, realm) VALUES ("
                        << id << ", '" << escaped_shared << "')";
-        execute(membership_sql.str());
+        write_execute(membership_sql.str());
     }
 
     return id;
@@ -392,7 +412,7 @@ std::vector<MemoryResult> DuckDBStore::recall(
     const std::string& realm,
     bool include_global
 ) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     std::vector<MemoryResult> results;
     if (!db_) return results;
 
@@ -429,7 +449,7 @@ std::vector<MemoryResult> DuckDBStore::recall(
     }
     sql << "LIMIT " << k;
 
-    auto result = query(sql.str());
+    auto result = read_query(sql.str());
     if (!result || result->HasError()) {
         return results;
     }
@@ -457,7 +477,7 @@ std::vector<MemoryResult> DuckDBStore::recall(
     for (auto& r : results) {
         std::ostringstream membership_sql;
         membership_sql << "SELECT realm FROM realm_membership WHERE memory_id = " << r.id;
-        auto membership_result = query(membership_sql.str());
+        auto membership_result = read_query(membership_sql.str());
         if (membership_result && !membership_result->HasError()) {
             while (true) {
                 auto chunk = membership_result->Fetch();
@@ -473,56 +493,56 @@ std::vector<MemoryResult> DuckDBStore::recall(
 }
 
 bool DuckDBStore::strengthen(int64_t id, float amount) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_) return false;
 
     std::ostringstream sql;
     sql << "UPDATE memory SET confidence = LEAST(confidence + " << amount << ", 1.0), "
         << "accessed_at = " << now() << " WHERE id = " << id;
 
-    return execute(sql.str());
+    return write_execute(sql.str());
 }
 
 bool DuckDBStore::weaken(int64_t id, float amount) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_) return false;
 
     std::ostringstream sql;
     sql << "UPDATE memory SET confidence = GREATEST(confidence - " << amount << ", 0.0) "
         << "WHERE id = " << id;
 
-    return execute(sql.str());
+    return write_execute(sql.str());
 }
 
 bool DuckDBStore::forget(int64_t id) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_) return false;
 
     std::ostringstream sql;
     sql << "DELETE FROM memory WHERE id = " << id;
 
-    return execute(sql.str());
+    return write_execute(sql.str());
 }
 
 bool DuckDBStore::touch(int64_t id) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_) return false;
 
     std::ostringstream sql;
     sql << "UPDATE memory SET accessed_at = " << now() << " WHERE id = " << id;
 
-    return execute(sql.str());
+    return write_execute(sql.str());
 }
 
 std::optional<MemoryResult> DuckDBStore::get_memory(int64_t id) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_) return std::nullopt;
 
     std::ostringstream sql;
     sql << "SELECT id, kind, content, confidence, created_at, accessed_at, realm, visibility "
         << "FROM memory WHERE id = " << id;
 
-    auto result = query(sql.str());
+    auto result = read_query(sql.str());
     if (!result || result->HasError()) {
         return std::nullopt;
     }
@@ -546,7 +566,7 @@ std::optional<MemoryResult> DuckDBStore::get_memory(int64_t id) {
     // Load shared realms
     std::ostringstream membership_sql;
     membership_sql << "SELECT realm FROM realm_membership WHERE memory_id = " << id;
-    auto membership_result = query(membership_sql.str());
+    auto membership_result = read_query(membership_sql.str());
     if (membership_result && !membership_result->HasError()) {
         while (true) {
             auto mchunk = membership_result->Fetch();
@@ -561,7 +581,7 @@ std::optional<MemoryResult> DuckDBStore::get_memory(int64_t id) {
 }
 
 bool DuckDBStore::update_content(int64_t id, const std::string& new_content) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_) return false;
 
     // Escape content for SQL
@@ -576,15 +596,15 @@ bool DuckDBStore::update_content(int64_t id, const std::string& new_content) {
     sql << "UPDATE memory SET content = '" << escaped << "', "
         << "accessed_at = " << now() << " WHERE id = " << id;
 
-    return execute(sql.str());
+    return write_execute(sql.str());
 }
 
 bool DuckDBStore::add_tag(int64_t id, const std::string& tag) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_) return false;
 
     // Check if tags table exists, create if not
-    execute("CREATE TABLE IF NOT EXISTS memory_tags ("
+    write_execute("CREATE TABLE IF NOT EXISTS memory_tags ("
             "memory_id BIGINT, tag VARCHAR, "
             "PRIMARY KEY (memory_id, tag))");
 
@@ -600,11 +620,11 @@ bool DuckDBStore::add_tag(int64_t id, const std::string& tag) {
     sql << "INSERT OR IGNORE INTO memory_tags (memory_id, tag) VALUES ("
         << id << ", '" << escaped << "')";
 
-    return execute(sql.str());
+    return write_execute(sql.str());
 }
 
 bool DuckDBStore::remove_tag(int64_t id, const std::string& tag) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_) return false;
 
     std::string escaped = tag;
@@ -618,18 +638,18 @@ bool DuckDBStore::remove_tag(int64_t id, const std::string& tag) {
     sql << "DELETE FROM memory_tags WHERE memory_id = " << id
         << " AND tag = '" << escaped << "'";
 
-    return execute(sql.str());
+    return write_execute(sql.str());
 }
 
 std::vector<std::string> DuckDBStore::get_tags(int64_t id) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     std::vector<std::string> tags;
     if (!db_) return tags;
 
     std::ostringstream sql;
     sql << "SELECT tag FROM memory_tags WHERE memory_id = " << id;
 
-    auto result = query(sql.str());
+    auto result = read_query(sql.str());
     if (!result || result->HasError()) return tags;
 
     while (true) {
@@ -647,7 +667,7 @@ std::vector<std::string> DuckDBStore::get_tags(int64_t id) {
 // Realm management methods
 
 bool DuckDBStore::set_realm(int64_t id, const std::string& realm) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_) return false;
 
     std::string escaped;
@@ -658,21 +678,21 @@ bool DuckDBStore::set_realm(int64_t id, const std::string& realm) {
 
     std::ostringstream sql;
     sql << "UPDATE memory SET realm = '" << escaped << "' WHERE id = " << id;
-    return execute(sql.str());
+    return write_execute(sql.str());
 }
 
 bool DuckDBStore::set_visibility(int64_t id, RealmVisibility visibility) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_) return false;
 
     std::ostringstream sql;
     sql << "UPDATE memory SET visibility = " << static_cast<int>(visibility)
         << " WHERE id = " << id;
-    return execute(sql.str());
+    return write_execute(sql.str());
 }
 
 bool DuckDBStore::add_to_realm(int64_t id, const std::string& realm) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_) return false;
 
     std::string escaped;
@@ -684,11 +704,11 @@ bool DuckDBStore::add_to_realm(int64_t id, const std::string& realm) {
     std::ostringstream sql;
     sql << "INSERT OR IGNORE INTO realm_membership (memory_id, realm) VALUES ("
         << id << ", '" << escaped << "')";
-    return execute(sql.str());
+    return write_execute(sql.str());
 }
 
 bool DuckDBStore::remove_from_realm(int64_t id, const std::string& realm) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_) return false;
 
     std::string escaped;
@@ -700,18 +720,18 @@ bool DuckDBStore::remove_from_realm(int64_t id, const std::string& realm) {
     std::ostringstream sql;
     sql << "DELETE FROM realm_membership WHERE memory_id = " << id
         << " AND realm = '" << escaped << "'";
-    return execute(sql.str());
+    return write_execute(sql.str());
 }
 
 std::vector<std::string> DuckDBStore::get_realms(int64_t id) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     std::vector<std::string> realms;
     if (!db_) return realms;
 
     // First get primary realm
     std::ostringstream primary_sql;
     primary_sql << "SELECT realm FROM memory WHERE id = " << id;
-    auto result = query(primary_sql.str());
+    auto result = read_query(primary_sql.str());
     if (result && !result->HasError()) {
         auto chunk = result->Fetch();
         if (chunk && chunk->size() > 0) {
@@ -722,7 +742,7 @@ std::vector<std::string> DuckDBStore::get_realms(int64_t id) {
     // Then get shared realms
     std::ostringstream shared_sql;
     shared_sql << "SELECT realm FROM realm_membership WHERE memory_id = " << id;
-    result = query(shared_sql.str());
+    result = read_query(shared_sql.str());
     if (result && !result->HasError()) {
         while (true) {
             auto chunk = result->Fetch();
@@ -737,12 +757,12 @@ std::vector<std::string> DuckDBStore::get_realms(int64_t id) {
 }
 
 std::vector<std::string> DuckDBStore::list_realms() {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     std::vector<std::string> realms;
     if (!db_) return realms;
 
     // Get all unique realms from both memory and realm_membership tables
-    auto result = query(
+    auto result = read_query(
         "SELECT DISTINCT realm FROM ("
         "  SELECT realm FROM memory "
         "  UNION "
@@ -776,10 +796,10 @@ size_t DuckDBStore::apply_decay() {
         << "(" << current << " - accessed_at) / 86400000.0) "
         << "WHERE decay_rate > 0 AND accessed_at < " << (current - 60000);  // Only decay if >1min since access
 
-    execute(sql.str());
+    write_execute(sql.str());
 
     // Return count of memories with decay
-    auto result = query("SELECT COUNT(*) FROM memory WHERE decay_rate > 0");
+    auto result = read_query("SELECT COUNT(*) FROM memory WHERE decay_rate > 0");
     if (result && !result->HasError()) {
         auto chunk = result->Fetch();
         if (chunk && chunk->size() > 0) {
@@ -809,7 +829,7 @@ size_t DuckDBStore::prune(float threshold, float min_age_days) {
               << " AND created_at < " << min_created;
 
     size_t count = 0;
-    auto result = query(count_sql.str());
+    auto result = read_query(count_sql.str());
     if (result && !result->HasError()) {
         auto chunk = result->Fetch();
         if (chunk && chunk->size() > 0) {
@@ -822,7 +842,7 @@ size_t DuckDBStore::prune(float threshold, float min_age_days) {
         std::ostringstream del_sql;
         del_sql << "DELETE FROM memory WHERE confidence < " << threshold
                 << " AND created_at < " << min_created;
-        execute(del_sql.str());
+        write_execute(del_sql.str());
     }
 
     return count;
@@ -834,7 +854,7 @@ bool DuckDBStore::connect(
     const std::string& object,
     float weight
 ) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_) return false;
 
     // Normalize to lowercase for consistent querying
@@ -865,7 +885,7 @@ bool DuckDBStore::connect(
         << "'" << escape(norm_object) << "', "
         << weight << ", " << now() << ", '')";
 
-    return execute(sql.str());
+    return write_execute(sql.str());
 }
 
 bool DuckDBStore::connect_with_source(
@@ -875,7 +895,7 @@ bool DuckDBStore::connect_with_source(
     const std::string& source_file,
     float weight
 ) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_) return false;
 
     auto to_lower = [](const std::string& s) {
@@ -905,7 +925,7 @@ bool DuckDBStore::connect_with_source(
         << weight << ", " << now() << ", "
         << "'" << escape(source_file) << "')";
 
-    return execute(sql.str());
+    return write_execute(sql.str());
 }
 
 size_t DuckDBStore::connect_batch(
@@ -913,7 +933,7 @@ size_t DuckDBStore::connect_batch(
     float weight
 ) {
     // Use SQL batch insert (Appender has issues with locks)
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_ || triplets.empty()) return 0;
     return connect_batch_sql(triplets, weight);
 }
@@ -947,7 +967,7 @@ size_t DuckDBStore::connect_batch_sql(
         sql += temp;
     };
 
-    execute("BEGIN TRANSACTION");
+    write_execute("BEGIN TRANSACTION");
 
     int64_t ts = now();
     char ts_buf[32];
@@ -985,21 +1005,21 @@ size_t DuckDBStore::connect_batch_sql(
         inserted++;
 
         if (batch_count >= BATCH_SIZE) {
-            execute(sql);
+            write_execute(sql);
             batch_count = 0;
         }
     }
 
     if (batch_count > 0) {
-        execute(sql);
+        write_execute(sql);
     }
 
-    execute("COMMIT");
+    write_execute("COMMIT");
     return inserted;
 }
 
 std::vector<StringTriplet> DuckDBStore::query_subject(const std::string& subject) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     std::vector<StringTriplet> results;
     if (!db_) return results;
 
@@ -1015,7 +1035,7 @@ std::vector<StringTriplet> DuckDBStore::query_subject(const std::string& subject
     sql << "SELECT subject, predicate, object, weight FROM triplet "
         << "WHERE subject = '" << escaped << "'";
 
-    auto result = query(sql.str());
+    auto result = read_query(sql.str());
     if (!result || result->HasError()) return results;
 
     while (true) {
@@ -1036,7 +1056,7 @@ std::vector<StringTriplet> DuckDBStore::query_subject(const std::string& subject
 }
 
 std::vector<StringTriplet> DuckDBStore::query_object(const std::string& object) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     std::vector<StringTriplet> results;
     if (!db_) return results;
 
@@ -1052,7 +1072,7 @@ std::vector<StringTriplet> DuckDBStore::query_object(const std::string& object) 
     sql << "SELECT subject, predicate, object, weight FROM triplet "
         << "WHERE object = '" << escaped << "'";
 
-    auto result = query(sql.str());
+    auto result = read_query(sql.str());
     if (!result || result->HasError()) return results;
 
     while (true) {
@@ -1073,7 +1093,7 @@ std::vector<StringTriplet> DuckDBStore::query_object(const std::string& object) 
 }
 
 std::vector<StringTriplet> DuckDBStore::query_predicate(const std::string& predicate) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     std::vector<StringTriplet> results;
     if (!db_) return results;
 
@@ -1087,7 +1107,7 @@ std::vector<StringTriplet> DuckDBStore::query_predicate(const std::string& predi
     sql << "SELECT subject, predicate, object, weight FROM triplet "
         << "WHERE predicate = '" << escaped << "'";
 
-    auto result = query(sql.str());
+    auto result = read_query(sql.str());
     if (!result || result->HasError()) return results;
 
     while (true) {
@@ -1108,7 +1128,7 @@ std::vector<StringTriplet> DuckDBStore::query_predicate(const std::string& predi
 }
 
 int64_t DuckDBStore::add_symbol(const Symbol& sym, const std::vector<float>& embedding) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_) return -1;
 
     auto escape = [](const std::string& s) {
@@ -1138,7 +1158,7 @@ int64_t DuckDBStore::add_symbol(const Symbol& sym, const std::vector<float>& emb
         << sym.repo_id << ", "
         << embedding_to_sql(embed) << ") RETURNING id";
 
-    auto result = query(sql.str());
+    auto result = read_query(sql.str());
     if (!result || result->HasError()) {
         return -1;
     }
@@ -1152,7 +1172,7 @@ int64_t DuckDBStore::add_symbol(const Symbol& sym, const std::vector<float>& emb
 }
 
 std::vector<Symbol> DuckDBStore::find_symbol(const std::string& name, const std::string& kind) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     std::vector<Symbol> results;
     if (!db_) return results;
 
@@ -1175,7 +1195,7 @@ std::vector<Symbol> DuckDBStore::find_symbol(const std::string& name, const std:
         sql << " AND kind = '" << escaped_kind << "'";
     }
 
-    auto result = query(sql.str());
+    auto result = read_query(sql.str());
     if (!result || result->HasError()) return results;
 
     while (true) {
@@ -1200,14 +1220,14 @@ std::vector<Symbol> DuckDBStore::find_symbol(const std::string& name, const std:
 }
 
 std::vector<int64_t> DuckDBStore::callers(int64_t symbol_id) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     std::vector<int64_t> results;
     if (!db_) return results;
 
     std::ostringstream sql;
     sql << "SELECT caller_id FROM call_edge WHERE callee_id = " << symbol_id;
 
-    auto result = query(sql.str());
+    auto result = read_query(sql.str());
     if (!result || result->HasError()) return results;
 
     while (true) {
@@ -1223,14 +1243,14 @@ std::vector<int64_t> DuckDBStore::callers(int64_t symbol_id) {
 }
 
 std::vector<int64_t> DuckDBStore::callees(int64_t symbol_id) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     std::vector<int64_t> results;
     if (!db_) return results;
 
     std::ostringstream sql;
     sql << "SELECT callee_id FROM call_edge WHERE caller_id = " << symbol_id;
 
-    auto result = query(sql.str());
+    auto result = read_query(sql.str());
     if (!result || result->HasError()) return results;
 
     while (true) {
@@ -1246,25 +1266,25 @@ std::vector<int64_t> DuckDBStore::callees(int64_t symbol_id) {
 }
 
 bool DuckDBStore::add_call(int64_t caller_id, int64_t callee_id) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_) return false;
 
     std::ostringstream sql;
     sql << "INSERT OR IGNORE INTO call_edge (caller_id, callee_id) VALUES ("
         << caller_id << ", " << callee_id << ")";
 
-    return execute(sql.str());
+    return write_execute(sql.str());
 }
 
 StoreHealth DuckDBStore::health() {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     StoreHealth h;
     h.is_open = (db_ != nullptr);
 
     if (!db_) return h;
 
     // Count memories and avg confidence
-    auto result = query("SELECT COUNT(*), AVG(confidence) FROM memory");
+    auto result = read_query("SELECT COUNT(*), AVG(confidence) FROM memory");
     if (result && !result->HasError()) {
         auto chunk = result->Fetch();
         if (chunk && chunk->size() > 0) {
@@ -1276,7 +1296,7 @@ StoreHealth DuckDBStore::health() {
     }
 
     // Count symbols
-    result = query("SELECT COUNT(*) FROM symbol");
+    result = read_query("SELECT COUNT(*) FROM symbol");
     if (result && !result->HasError()) {
         auto chunk = result->Fetch();
         if (chunk && chunk->size() > 0) {
@@ -1285,7 +1305,7 @@ StoreHealth DuckDBStore::health() {
     }
 
     // Count triplets
-    result = query("SELECT COUNT(*) FROM triplet");
+    result = read_query("SELECT COUNT(*) FROM triplet");
     if (result && !result->HasError()) {
         auto chunk = result->Fetch();
         if (chunk && chunk->size() > 0) {
@@ -1297,10 +1317,10 @@ StoreHealth DuckDBStore::health() {
 }
 
 size_t DuckDBStore::memory_count() {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_) return 0;
 
-    auto result = query("SELECT COUNT(*) FROM memory");
+    auto result = read_query("SELECT COUNT(*) FROM memory");
     if (result && !result->HasError()) {
         auto chunk = result->Fetch();
         if (chunk && chunk->size() > 0) {
@@ -1311,10 +1331,10 @@ size_t DuckDBStore::memory_count() {
 }
 
 size_t DuckDBStore::triplet_count() {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_) return 0;
 
-    auto result = query("SELECT COUNT(*) FROM triplet");
+    auto result = read_query("SELECT COUNT(*) FROM triplet");
     if (result && !result->HasError()) {
         auto chunk = result->Fetch();
         if (chunk && chunk->size() > 0) {
@@ -1325,10 +1345,10 @@ size_t DuckDBStore::triplet_count() {
 }
 
 size_t DuckDBStore::symbol_count() {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_) return 0;
 
-    auto result = query("SELECT COUNT(*) FROM symbol");
+    auto result = read_query("SELECT COUNT(*) FROM symbol");
     if (result && !result->HasError()) {
         auto chunk = result->Fetch();
         if (chunk && chunk->size() > 0) {
@@ -1339,7 +1359,7 @@ size_t DuckDBStore::symbol_count() {
 }
 
 std::vector<std::pair<std::string, size_t>> DuckDBStore::get_top_connected_entities(size_t limit) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     std::vector<std::pair<std::string, size_t>> results;
     if (!db_) return results;
 
@@ -1359,7 +1379,7 @@ std::vector<std::pair<std::string, size_t>> DuckDBStore::get_top_connected_entit
         << ") SELECT entity, total FROM entity_counts "
         << "WHERE total >= 3 ORDER BY total DESC LIMIT " << limit;
 
-    auto result = query(sql.str());
+    auto result = read_query(sql.str());
     if (!result || result->HasError()) return results;
 
     while (true) {
@@ -1376,7 +1396,7 @@ std::vector<std::pair<std::string, size_t>> DuckDBStore::get_top_connected_entit
 }
 
 std::vector<Symbol> DuckDBStore::bm25_search_symbols(const std::string& search_query, size_t limit) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     std::vector<Symbol> results;
     if (!db_ || !fts_loaded_) return results;
 
@@ -1397,7 +1417,7 @@ std::vector<Symbol> DuckDBStore::bm25_search_symbols(const std::string& search_q
         << "ORDER BY score DESC "
         << "LIMIT " << limit;
 
-    auto result = query(sql.str());
+    auto result = read_query(sql.str());
     if (!result || result->HasError()) {
         // Fallback to LIKE search if FTS fails
         std::ostringstream fallback;
@@ -1406,7 +1426,7 @@ std::vector<Symbol> DuckDBStore::bm25_search_symbols(const std::string& search_q
                  << "FROM symbol WHERE name ILIKE '%" << escaped << "%' "
                  << "OR signature ILIKE '%" << escaped << "%' "
                  << "LIMIT " << limit;
-        result = this->query(fallback.str());
+        result = this->read_query(fallback.str());
         if (!result || result->HasError()) return results;
     }
 
@@ -1459,7 +1479,7 @@ NodeType DuckDBStore::string_to_kind(const std::string& kind) {
 // Ledger operations
 
 int64_t DuckDBStore::save_ledger(const LedgerEntry& entry) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_) return -1;
 
     auto escape = [](const std::string& s) {
@@ -1491,7 +1511,7 @@ int64_t DuckDBStore::save_ledger(const LedgerEntry& entry) {
         << "'" << escape(entry.discoveries) << "', "
         << "'" << escape(entry.snapshot) << "') RETURNING id";
 
-    auto result = query(sql.str());
+    auto result = read_query(sql.str());
     if (!result || result->HasError()) {
         return -1;
     }
@@ -1505,7 +1525,7 @@ int64_t DuckDBStore::save_ledger(const LedgerEntry& entry) {
 }
 
 std::optional<LedgerEntry> DuckDBStore::load_ledger(const std::string& session_id, const std::string& project) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_) return std::nullopt;
 
     auto escape = [](const std::string& s) {
@@ -1531,7 +1551,7 @@ std::optional<LedgerEntry> DuckDBStore::load_ledger(const std::string& session_i
 
     sql << "ORDER BY created_at DESC LIMIT 1";
 
-    auto result = query(sql.str());
+    auto result = read_query(sql.str());
     if (!result || result->HasError()) {
         return std::nullopt;
     }
@@ -1561,7 +1581,7 @@ std::optional<LedgerEntry> DuckDBStore::load_ledger(const std::string& session_i
 }
 
 std::vector<LedgerEntry> DuckDBStore::list_ledgers(const std::string& project, size_t limit) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     std::vector<LedgerEntry> entries;
     if (!db_) return entries;
 
@@ -1585,7 +1605,7 @@ std::vector<LedgerEntry> DuckDBStore::list_ledgers(const std::string& project, s
 
     sql << "ORDER BY created_at DESC LIMIT " << limit;
 
-    auto result = query(sql.str());
+    auto result = read_query(sql.str());
     if (!result || result->HasError()) {
         return entries;
     }
@@ -1618,7 +1638,7 @@ std::vector<LedgerEntry> DuckDBStore::list_ledgers(const std::string& project, s
 }
 
 std::optional<LedgerEntry> DuckDBStore::get_ledger(int64_t id) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_) return std::nullopt;
 
     std::ostringstream sql;
@@ -1626,7 +1646,7 @@ std::optional<LedgerEntry> DuckDBStore::get_ledger(int64_t id) {
         << "todos, active_files, decisions, next_steps, blockers, discoveries, snapshot "
         << "FROM ledger WHERE id = " << id;
 
-    auto result = query(sql.str());
+    auto result = read_query(sql.str());
     if (!result || result->HasError()) {
         return std::nullopt;
     }
@@ -1656,13 +1676,13 @@ std::optional<LedgerEntry> DuckDBStore::get_ledger(int64_t id) {
 }
 
 bool DuckDBStore::delete_ledger(int64_t id) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_) return false;
 
     std::ostringstream sql;
     sql << "DELETE FROM ledger WHERE id = " << id;
 
-    return execute(sql.str());
+    return write_execute(sql.str());
 }
 
 // ============================================================================
@@ -1670,7 +1690,7 @@ bool DuckDBStore::delete_ledger(int64_t id) {
 // ============================================================================
 
 bool DuckDBStore::set_file_metadata(const CodeFile& file) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_) return false;
 
     // Escape strings
@@ -1696,11 +1716,11 @@ bool DuckDBStore::set_file_metadata(const CodeFile& file) {
         << file.callsites_count << ", '"
         << escape(file.file_hash) << "')";
 
-    return execute(sql.str());
+    return write_execute(sql.str());
 }
 
 std::optional<CodeFile> DuckDBStore::get_file_metadata(const std::string& path) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_) return std::nullopt;
 
     auto escape = [](const std::string& s) {
@@ -1716,7 +1736,7 @@ std::optional<CodeFile> DuckDBStore::get_file_metadata(const std::string& path) 
     sql << "SELECT path, project, mtime, indexed_at, symbols_count, callsites_count, file_hash "
         << "FROM code_file WHERE path = '" << escape(path) << "'";
 
-    auto result = query(sql.str());
+    auto result = read_query(sql.str());
     if (!result || result->HasError()) return std::nullopt;
 
     auto chunk = result->Fetch();
@@ -1735,7 +1755,7 @@ std::optional<CodeFile> DuckDBStore::get_file_metadata(const std::string& path) 
 }
 
 std::vector<CodeFile> DuckDBStore::list_project_files(const std::string& project) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     std::vector<CodeFile> files;
     if (!db_) return files;
 
@@ -1753,7 +1773,7 @@ std::vector<CodeFile> DuckDBStore::list_project_files(const std::string& project
         << "FROM code_file WHERE project = '" << escape(project) << "' "
         << "ORDER BY path";
 
-    auto result = query(sql.str());
+    auto result = read_query(sql.str());
     if (!result || result->HasError()) return files;
 
     while (true) {
@@ -1777,7 +1797,7 @@ std::vector<CodeFile> DuckDBStore::list_project_files(const std::string& project
 }
 
 bool DuckDBStore::delete_file_metadata(const std::string& path) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_) return false;
 
     auto escape = [](const std::string& s) {
@@ -1792,11 +1812,11 @@ bool DuckDBStore::delete_file_metadata(const std::string& path) {
     std::ostringstream sql;
     sql << "DELETE FROM code_file WHERE path = '" << escape(path) << "'";
 
-    return execute(sql.str());
+    return write_execute(sql.str());
 }
 
 bool DuckDBStore::delete_project_files(const std::string& project) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_) return false;
 
     auto escape = [](const std::string& s) {
@@ -1811,11 +1831,11 @@ bool DuckDBStore::delete_project_files(const std::string& project) {
     std::ostringstream sql;
     sql << "DELETE FROM code_file WHERE project = '" << escape(project) << "'";
 
-    return execute(sql.str());
+    return write_execute(sql.str());
 }
 
 size_t DuckDBStore::delete_file_symbols(const std::string& file_path) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_) return 0;
 
     auto escape = [](const std::string& s) {
@@ -1830,7 +1850,7 @@ size_t DuckDBStore::delete_file_symbols(const std::string& file_path) {
     // Get count first
     std::ostringstream count_sql;
     count_sql << "SELECT COUNT(*) FROM symbol WHERE file_path = '" << escape(file_path) << "'";
-    auto result = query(count_sql.str());
+    auto result = read_query(count_sql.str());
     size_t count = 0;
     if (result && !result->HasError()) {
         auto chunk = result->Fetch();
@@ -1842,13 +1862,13 @@ size_t DuckDBStore::delete_file_symbols(const std::string& file_path) {
     // Delete
     std::ostringstream sql;
     sql << "DELETE FROM symbol WHERE file_path = '" << escape(file_path) << "'";
-    execute(sql.str());
+    write_execute(sql.str());
 
     return count;
 }
 
 size_t DuckDBStore::delete_file_triplets(const std::string& file_path) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_) return 0;
 
     auto escape = [](const std::string& s) {
@@ -1863,7 +1883,7 @@ size_t DuckDBStore::delete_file_triplets(const std::string& file_path) {
     // Fast deletion using indexed source_file column
     std::ostringstream count_sql;
     count_sql << "SELECT COUNT(*) FROM triplet WHERE source_file = '" << escape(file_path) << "'";
-    auto result = query(count_sql.str());
+    auto result = read_query(count_sql.str());
     size_t count = 0;
     if (result && !result->HasError()) {
         auto chunk = result->Fetch();
@@ -1874,7 +1894,7 @@ size_t DuckDBStore::delete_file_triplets(const std::string& file_path) {
 
     std::ostringstream sql;
     sql << "DELETE FROM triplet WHERE source_file = '" << escape(file_path) << "'";
-    execute(sql.str());
+    write_execute(sql.str());
 
     return count;
 }
@@ -1885,7 +1905,7 @@ size_t DuckDBStore::delete_file_triplets(const std::string& file_path) {
 
 bool DuckDBStore::register_transcript(const std::string& session_id, const std::string& transcript_path,
                                        const std::string& realm) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_) return false;
 
     auto escape = [](const std::string& s) {
@@ -1910,11 +1930,11 @@ bool DuckDBStore::register_transcript(const std::string& session_id, const std::
         << "'" << escape(realm.empty() ? "default" : realm) << "', "
         << "0, 0, " << now_ts << ")";
 
-    return execute(sql.str());
+    return write_execute(sql.str());
 }
 
 std::optional<TranscriptState> DuckDBStore::get_transcript(const std::string& session_id) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_) return std::nullopt;
 
     auto escape = [](const std::string& s) {
@@ -1930,7 +1950,7 @@ std::optional<TranscriptState> DuckDBStore::get_transcript(const std::string& se
     sql << "SELECT session_id, transcript_path, realm, last_processed_line, last_distilled_at, created_at "
         << "FROM transcript_state WHERE session_id = '" << escape(session_id) << "'";
 
-    auto result = query(sql.str());
+    auto result = read_query(sql.str());
     if (!result || result->HasError()) {
         return std::nullopt;
     }
@@ -1952,12 +1972,12 @@ std::optional<TranscriptState> DuckDBStore::get_transcript(const std::string& se
 }
 
 std::vector<TranscriptState> DuckDBStore::get_pending_transcripts() {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     std::vector<TranscriptState> states;
     if (!db_) return states;
 
     // Get all transcripts - daemon will check file sizes
-    auto result = query(
+    auto result = read_query(
         "SELECT session_id, transcript_path, realm, last_processed_line, last_distilled_at, created_at "
         "FROM transcript_state ORDER BY created_at"
     );
@@ -1986,7 +2006,7 @@ std::vector<TranscriptState> DuckDBStore::get_pending_transcripts() {
 }
 
 bool DuckDBStore::update_transcript_progress(const std::string& session_id, int64_t last_line) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_) return false;
 
     auto escape = [](const std::string& s) {
@@ -2002,11 +2022,11 @@ bool DuckDBStore::update_transcript_progress(const std::string& session_id, int6
     sql << "UPDATE transcript_state SET last_processed_line = " << last_line
         << " WHERE session_id = '" << escape(session_id) << "'";
 
-    return execute(sql.str());
+    return write_execute(sql.str());
 }
 
 bool DuckDBStore::mark_transcript_distilled(const std::string& session_id) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_) return false;
 
     auto escape = [](const std::string& s) {
@@ -2024,11 +2044,11 @@ bool DuckDBStore::mark_transcript_distilled(const std::string& session_id) {
     sql << "UPDATE transcript_state SET last_distilled_at = " << now_ts
         << " WHERE session_id = '" << escape(session_id) << "'";
 
-    return execute(sql.str());
+    return write_execute(sql.str());
 }
 
 bool DuckDBStore::remove_transcript(const std::string& session_id) {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_) return false;
 
     auto escape = [](const std::string& s) {
@@ -2043,14 +2063,14 @@ bool DuckDBStore::remove_transcript(const std::string& session_id) {
     std::ostringstream sql;
     sql << "DELETE FROM transcript_state WHERE session_id = '" << escape(session_id) << "'";
 
-    return execute(sql.str());
+    return write_execute(sql.str());
 }
 
 size_t DuckDBStore::transcript_count() {
-    std::lock_guard lock(mutex_);
+    // Lock handled in write_execute/write_query/read_query
     if (!db_) return 0;
 
-    auto result = query("SELECT COUNT(*) FROM transcript_state");
+    auto result = read_query("SELECT COUNT(*) FROM transcript_state");
     if (!result || result->HasError()) {
         return 0;
     }

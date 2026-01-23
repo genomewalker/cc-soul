@@ -13,8 +13,80 @@
 #include <vector>
 #include <optional>
 #include <mutex>
+#include <queue>
+#include <condition_variable>
 
 namespace chitta {
+
+// Connection pool for concurrent reads
+// DuckDB Database is thread-safe, but Connection is not
+// Multiple connections can execute concurrent reads via MVCC
+class ConnectionPool {
+public:
+    ConnectionPool(duckdb::DuckDB& db, size_t max_size = 8)
+        : db_(db), max_size_(max_size), created_(0) {}
+
+    // RAII wrapper for borrowed connection
+    class ScopedConnection {
+    public:
+        ScopedConnection(ConnectionPool& pool, std::unique_ptr<duckdb::Connection> conn)
+            : pool_(pool), conn_(std::move(conn)) {}
+
+        ~ScopedConnection() {
+            if (conn_) pool_.release(std::move(conn_));
+        }
+
+        // Non-copyable, movable
+        ScopedConnection(const ScopedConnection&) = delete;
+        ScopedConnection& operator=(const ScopedConnection&) = delete;
+        ScopedConnection(ScopedConnection&& other) noexcept
+            : pool_(other.pool_), conn_(std::move(other.conn_)) {}
+
+        duckdb::Connection& operator*() { return *conn_; }
+        duckdb::Connection* operator->() { return conn_.get(); }
+
+    private:
+        ConnectionPool& pool_;
+        std::unique_ptr<duckdb::Connection> conn_;
+    };
+
+    // Acquire a connection (creates new if pool empty and under limit)
+    ScopedConnection acquire() {
+        std::unique_lock lock(mutex_);
+
+        if (!pool_.empty()) {
+            auto conn = std::move(pool_.front());
+            pool_.pop();
+            return ScopedConnection(*this, std::move(conn));
+        }
+
+        if (created_ < max_size_) {
+            created_++;
+            lock.unlock();
+            return ScopedConnection(*this, std::make_unique<duckdb::Connection>(db_));
+        }
+
+        // Wait for a connection to be returned
+        cv_.wait(lock, [this] { return !pool_.empty(); });
+        auto conn = std::move(pool_.front());
+        pool_.pop();
+        return ScopedConnection(*this, std::move(conn));
+    }
+
+private:
+    void release(std::unique_ptr<duckdb::Connection> conn) {
+        std::lock_guard lock(mutex_);
+        pool_.push(std::move(conn));
+        cv_.notify_one();
+    }
+
+    duckdb::DuckDB& db_;
+    size_t max_size_;
+    size_t created_;
+    std::queue<std::unique_ptr<duckdb::Connection>> pool_;
+    std::mutex mutex_;
+    std::condition_variable cv_;
+};
 
 // Realm visibility levels
 enum class RealmVisibility : uint8_t {
@@ -264,9 +336,10 @@ public:
 
 private:
     std::unique_ptr<duckdb::DuckDB> db_;
-    std::unique_ptr<duckdb::Connection> conn_;
+    std::unique_ptr<duckdb::Connection> write_conn_;  // Dedicated write connection
+    std::unique_ptr<ConnectionPool> read_pool_;       // Pool for concurrent reads
     std::string path_;
-    mutable std::mutex mutex_;
+    mutable std::mutex write_mutex_;                  // Only for write operations
     bool vss_loaded_ = false;
     bool pgq_loaded_ = false;
     bool fts_loaded_ = false;
@@ -276,9 +349,12 @@ private:
     bool load_extensions();
     bool create_vector_index();
 
-    // Helper to execute a query
-    bool execute(const std::string& sql);
-    std::unique_ptr<duckdb::QueryResult> query(const std::string& sql);
+    // Helper to execute queries
+    // write_execute/write_query: use write connection with mutex (for INSERT/UPDATE/DELETE)
+    // read_query: use pool connection (for SELECT) - concurrent safe
+    bool write_execute(const std::string& sql);
+    std::unique_ptr<duckdb::QueryResult> write_query(const std::string& sql);
+    std::unique_ptr<duckdb::QueryResult> read_query(const std::string& sql) const;
 
     // Convert between types
     static std::string kind_to_string(NodeType type);
