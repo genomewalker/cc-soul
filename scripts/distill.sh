@@ -26,10 +26,10 @@ if [[ -z "$TEMP_FILE" || ! -f "$TEMP_FILE" ]]; then
     exit 1
 fi
 
-# Parse header
-SESSION_ID=$(grep '^SESSION_ID=' "$TEMP_FILE" | cut -d= -f2)
-REALM=$(grep '^REALM=' "$TEMP_FILE" | cut -d= -f2)
-MODEL=$(grep '^MODEL=' "$TEMP_FILE" | cut -d= -f2)
+# Parse header (only from first 5 lines before ---)
+SESSION_ID=$(head -5 "$TEMP_FILE" | grep '^SESSION_ID=' | cut -d= -f2)
+REALM=$(head -5 "$TEMP_FILE" | grep '^REALM=' | cut -d= -f2)
+MODEL=$(head -5 "$TEMP_FILE" | grep '^MODEL=' | cut -d= -f2)
 
 # Extract conversation (everything after ---)
 CONVERSATION=$(sed -n '/^---$/,$ p' "$TEMP_FILE" | tail -n +2)
@@ -39,8 +39,20 @@ if [[ -z "$CONVERSATION" ]]; then
     exit 0
 fi
 
-# Create distillation prompt with SSL v0.2 format and epiplexity tuning
-PROMPT="Extract learnings from this conversation in SSL v0.2 format.
+# Call OpenCode to distill the conversation
+echo "[distill] Session $SESSION_ID: Calling OpenCode for distillation"
+
+CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
+
+# Truncate conversation if too long (keep last ~80k chars for model context)
+MAX_CONV_CHARS=80000
+if [[ ${#CONVERSATION} -gt $MAX_CONV_CHARS ]]; then
+    echo "[distill] Truncating conversation from ${#CONVERSATION} to $MAX_CONV_CHARS chars"
+    CONVERSATION="${CONVERSATION: -$MAX_CONV_CHARS}"
+fi
+
+# Build combined prompt with conversation inline (opencode -f doesn't work reliably)
+FULL_PROMPT="Extract learnings from this conversation in SSL v0.2 format.
 
 SSL Format:
 [LEARN] [domain] subject→action→result @location
@@ -49,57 +61,16 @@ SSL Format:
 
 Symbols: → (produces) | (or) + (and) @ (location) ! (negation) ? (uncertainty)
 
-EPIPLEXITY (ε) - Reconstruction Quality:
-Seeds scored on 4 dimensions (geometric mean, so all must be decent):
-- S (semantic): embedding similarity original↔reconstructed (usually 0.9+)
-- K (entities): F1 of key terms in seed vs original (CRITICAL - include key words!)
-- D (density): concepts per token (40%+ target, arrows/symbols help)
-- C (compression): reward 2-5x compression (β=0.7 saturation)
+Focus on: Technical decisions, patterns learned, bugs fixed, architecture insights.
+Goal: High epiplexity (ε ≥ 0.6). Include key terms verbatim for reconstruction.
 
-Goal: ε ≥ 0.6 (Good) or ε ≥ 0.8 (Excellent)
-
-K is usually the bottleneck! To boost K:
-- INCLUDE original terms: "token bucket" not "token_bucket", "100 tokens" not "100"
-- Keep technical terms verbatim: "rate limiter", "burst protection", "refill"
-- Don't over-abbreviate: "capacity" not "cap", "seconds" not "s"
-
-Balance K and C:
-- 2-3x compression is sweet spot (C≈0.5-0.65)
-- Preserve ~60-70% of key terms (K≈0.6-0.7)
-- Use [ε] for exact values without bloating seed
-
-ENCODING EXAMPLES (with ε scores):
-
-BAD (ε=0.36): Over-compressed, lost key terms
-[LEARN] [rate] bucket→cap+refill→protect
-❌ K=0.07 (lost: "token", "limiter", "100", "burst", "throughput")
-
-FAIR (ε=0.57): Good compression but missing terms
-[LEARN] [rate-limiting] token_bucket→capacity:100+refill:10/s→burst_protection
-❌ K=0.44 (lost: "tokens", "per second", "throughput")
-
-GOOD (ε=0.75): Balanced - key terms preserved, good compression
-[LEARN] [rate-limiting] token bucket implemented→capacity 100 tokens+refills 10 per second→protects burst+sustained throughput
-[ε] rate limiter using token bucket algorithm
-[TRIPLET] token_bucket implements rate_limiting
-✓ K=0.74, C=0.35, S=0.99
-
-DECODING RULE: I expand seeds by:
-1. Reading the pattern: subject→action→result
-2. Using [ε] for exact values
-3. Reconstructing prose that includes ALL seed terms
-
-Conversation:
+CONVERSATION:
 $CONVERSATION
 
-Output only SSL format, optimized for high ε:"
+Output only SSL format:"
 
-# Call OpenCode to distill the conversation
-echo "[distill] Session $SESSION_ID: Calling OpenCode for distillation"
-
-CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
-
-RESULT=$(opencode run -m "$MODEL" "$PROMPT" 2>/dev/null)
+# Use stdin to pass the prompt (handles long content better than args)
+RESULT=$(echo "$FULL_PROMPT" | opencode run -m "$MODEL" 2>/dev/null)
 
 if [[ -z "$RESULT" ]]; then
     echo "[distill] No result from OpenCode" >&2

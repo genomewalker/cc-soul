@@ -125,40 +125,6 @@ json_escape() {
     echo -n "$text" | jq -Rs '.' | sed 's/^"//;s/"$//'
 }
 
-# Auto-register transcript for distillation (on first meaningful work)
-register_transcript_if_needed() {
-    local realm="$1"
-    local chitta_bin="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
-
-    # Derive project slug from CWD (same logic Claude uses: replace / with -)
-    local cwd="${PWD:-$(pwd)}"
-    local project_slug=$(echo "$cwd" | sed 's|/|-|g')
-    local project_dir="$HOME/.claude/projects/$project_slug"
-
-    # Find most recent transcript
-    local transcript=$(ls -t "$project_dir"/*.jsonl 2>/dev/null | head -1)
-    if [[ -z "$transcript" ]]; then
-        return 0  # No transcript found
-    fi
-
-    # Extract session ID from filename
-    local session_id=$(basename "$transcript" .jsonl)
-
-    # Check if already registered (fast path)
-    local existing=$("$chitta_bin" transcript_get --session_id "$session_id" --json 2>/dev/null | jq -r '.found // false')
-    if [[ "$existing" == "true" ]]; then
-        return 0  # Already registered
-    fi
-
-    # Register for distillation
-    if "$chitta_bin" transcript_register \
-        --session_id "$session_id" \
-        --transcript_path "$transcript" \
-        --realm "$realm" >/dev/null 2>&1; then
-        echo "[cc-soul] Transcript registered for distillation"
-    fi
-}
-
 case "$HOOK_TYPE" in
     start|SessionStart)
         # Ensure daemon is running before any RPC calls
@@ -172,25 +138,58 @@ case "$HOOK_TYPE" in
             REALM="brahman"
         fi
 
-        # Get soul context (compact: just node count and status)
-        response=$(rpc_call "soul_context" '{}')
-        context=$(extract_text "$response")
-        if [[ -n "$context" ]]; then
-            nodes=$(echo "$context" | grep -oE 'Nodes: [0-9]+' | grep -oE '[0-9]+' || echo "0")
-            status=$(echo "$context" | grep -oE 'Status: [a-z]+' | cut -d' ' -f2 || echo "unknown")
-            echo "[soul] $nodes nodes, $status"
+        # Auto-register transcript for distillation
+        # Find the most recent .jsonl transcript in the project directory
+        if [[ -n "${CLAUDE_PROJECT_DIR:-}" ]]; then
+            PROJECT_DIR="$CLAUDE_PROJECT_DIR"
+        else
+            # Derive from cwd - Claude Code stores transcripts in ~/.claude/projects/<slug>/
+            PROJECT_SLUG=$(echo "$PWD" | tr '/' '-' | sed 's/^-//')
+            PROJECT_DIR="$HOME/.claude/projects/$PROJECT_SLUG"
         fi
 
-        # Load ledger checkpoint (compact: one line)
+        if [[ -d "$PROJECT_DIR" ]]; then
+            TRANSCRIPT=$(ls -t "$PROJECT_DIR"/*.jsonl 2>/dev/null | head -1)
+            if [[ -n "$TRANSCRIPT" && -f "$TRANSCRIPT" ]]; then
+                SESSION_ID=$(basename "$TRANSCRIPT" .jsonl)
+                escaped_session=$(json_escape "$SESSION_ID")
+                escaped_path=$(json_escape "$TRANSCRIPT")
+                escaped_realm=$(json_escape "$REALM")
+                rpc_call "transcript_register" "{\"session_id\":\"$escaped_session\",\"transcript_path\":\"$escaped_path\",\"realm\":\"$escaped_realm\"}" >/dev/null 2>&1 || true
+            fi
+        fi
+
+        # Get soul context - compact format
+        response=$(rpc_call "soul_context" '{}')
+        # Extract just key metrics from structured response
+        structured=$(echo "$response" | jq -r '.result.structured // empty' 2>/dev/null)
+        if [[ -n "$structured" ]]; then
+            nodes=$(echo "$structured" | jq -r '.total_nodes // 0')
+            triplets=$(echo "$structured" | jq -r '.triplet_count // 0')
+            conf=$(echo "$structured" | jq -r '.avg_confidence // 0' | cut -c1-4)
+            status=$(echo "$structured" | jq -r '.status // "unknown"')
+            echo "[soul] n=$nodes t=$triplets c=$conf $status"
+        fi
+
+        # Load ledger checkpoint for current realm
         escaped_realm=$(json_escape "$REALM")
         response=$(rpc_call "ledger_load" "{\"project\":\"$escaped_realm\"}")
+        ledger_text=$(extract_text "$response")
+
+        # Check if checkpoint was found (structured response has "found" field)
         ledger_json=$(echo "$response" | jq -r '.result.structured // empty' 2>/dev/null)
         ledger_found=$(echo "$ledger_json" | jq -r '.found // false' 2>/dev/null)
 
         if [[ "$ledger_found" == "true" ]]; then
-            snapshot=$(echo "$ledger_json" | jq -r '.snapshot // ""' 2>/dev/null)
-            [[ -n "$snapshot" && "$snapshot" != "null" ]] && echo "[last] $snapshot" | head -c 100
-            echo ""
+            # Ultra-compact: just next step and pending count
+            todos=$(echo "$ledger_json" | jq -r '.todos // []' 2>/dev/null)
+            pending=$(echo "$todos" | jq '[.[] | select(.status != "completed")] | length' 2>/dev/null || echo "0")
+            next=$(echo "$ledger_json" | jq -r '.next_steps[0] // ""' 2>/dev/null)
+
+            output=""
+            [[ "$pending" -gt 0 ]] && output="[$pending pending]"
+            [[ -n "$next" && "$next" != "null" ]] && output="$output next: ${next:0:80}"
+            [[ -n "$output" ]] && echo "$output"
         fi
 
         ;;
@@ -221,15 +220,17 @@ case "$HOOK_TYPE" in
         ESCAPED_QUERY=$(json_escape "$QUERY")
         ESCAPED_REALM=$(json_escape "$REALM")
 
-        # Get relevant memories filtered by realm (includes global memories)
-        response=$(rpc_call "full_resonate" "{\"query\":\"$ESCAPED_QUERY\",\"k\":5,\"realm\":\"$ESCAPED_REALM\",\"include_global\":true}")
+        # Get relevant memories - minimal k to save tokens
+        response=$(rpc_call "full_resonate" "{\"query\":\"$ESCAPED_QUERY\",\"k\":3,\"realm\":\"$ESCAPED_REALM\",\"include_global\":true}")
         memories=$(extract_text "$response")
 
         if [[ -n "$memories" && "$memories" != *"No memories"* ]]; then
-            # Extract just the score lines for compact output (max 3)
-            compact=$(echo "$memories" | grep -E '^\[[0-9]+%\]' | head -3 | sed 's/^\(\[[0-9]*%\]\) \[[^]]*\] /\1 /')
+            # Ultra-compact: just content, no headers, max 2 lines (~100 chars each)
+            compact=$(echo "$memories" | grep -E '^\[[0-9]+%\]' | head -2 | \
+                sed 's/^\[[0-9]*%\] \[[^]]*\] //' | \
+                cut -c1-100 | \
+                sed 's/$/.../')
             if [[ -n "$compact" ]]; then
-                echo "[I recall]"
                 echo "$compact"
             fi
         fi
@@ -284,9 +285,6 @@ case "$HOOK_TYPE" in
             else
                 REALM="brahman"
             fi
-
-            # Auto-register transcript for distillation (first meaningful work)
-            register_transcript_if_needed "$REALM"
 
             # Generate session ID from timestamp
             SESSION_ID="auto-$(date +%Y%m%d-%H%M%S)"

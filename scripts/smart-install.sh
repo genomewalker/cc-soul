@@ -260,266 +260,10 @@ configure_permissions() {
     fi
 }
 
-# Configure MCP server in settings.json
-configure_mcp() {
-    local settings_file="${HOME}/.claude/settings.json"
-
-    # Check if jq is available
-    if ! command -v jq &> /dev/null; then
-        echo "[cc-soul] jq not found, skipping MCP config" >&2
-        return 0
-    fi
-
-    # Ensure settings file exists
-    mkdir -p "${HOME}/.claude"
-    if [[ ! -f "$settings_file" ]]; then
-        echo '{}' > "$settings_file"
-    fi
-
-    # Read current settings
-    local current
-    current=$(cat "$settings_file")
-
-    # Ensure mcpServers object exists
-    if ! echo "$current" | jq -e '.mcpServers' &>/dev/null; then
-        current=$(echo "$current" | jq '.mcpServers = {}')
-    fi
-
-    # Check if chitta MCP is already configured
-    if echo "$current" | jq -e '.mcpServers.chitta' &>/dev/null; then
-        # Update command path if needed
-        local current_cmd
-        current_cmd=$(echo "$current" | jq -r '.mcpServers.chitta.command // ""')
-        if [[ "$current_cmd" != "$BIN_DIR/chitta" && "$current_cmd" != "chitta" ]]; then
-            current=$(echo "$current" | jq --arg cmd "$BIN_DIR/chitta" \
-                '.mcpServers.chitta.command = $cmd')
-            echo "$current" | jq '.' > "$settings_file"
-            echo "[cc-soul] Updated MCP server path"
-        fi
-        return 0
-    fi
-
-    # Add chitta MCP server
-    current=$(echo "$current" | jq --arg cmd "$BIN_DIR/chitta" \
-        '.mcpServers.chitta = {"command": $cmd, "args": ["mcp"]}')
-
-    echo "$current" | jq '.' > "$settings_file"
-    echo "[cc-soul] Configured chitta MCP server"
-}
-
-# Configure MCP tool permissions in settings.json
-configure_mcp_permissions() {
-    local settings_file="${HOME}/.claude/settings.json"
-
-    # Check if jq is available
-    if ! command -v jq &> /dev/null; then
-        echo "[cc-soul] jq not found, skipping MCP permissions" >&2
-        return 0
-    fi
-
-    # MCP tool permissions to add
-    local mcp_perms=(
-        'mcp__chitta__*'
-    )
-
-    # Read current settings
-    local current
-    current=$(cat "$settings_file")
-
-    # Ensure permissions.allow exists
-    if ! echo "$current" | jq -e '.permissions.allow' &>/dev/null; then
-        current=$(echo "$current" | jq '.permissions = {"allow": []}')
-    fi
-
-    # Add MCP permissions if not already present
-    local updated="$current"
-    local added=0
-    for perm in "${mcp_perms[@]}"; do
-        if ! echo "$updated" | jq -e --arg p "$perm" '.permissions.allow | index($p)' &>/dev/null; then
-            updated=$(echo "$updated" | jq --arg p "$perm" '.permissions.allow += [$p]')
-            ((added++)) || true
-        fi
-    done
-
-    # Write back if changed
-    if [[ $added -gt 0 ]]; then
-        echo "$updated" | jq '.' > "$settings_file"
-        echo "[cc-soul] Added MCP tool permissions (mcp__chitta__*)"
-    fi
-}
-
-# Configure hooks in settings.json (merges plugin hooks.json into user settings)
-configure_hooks() {
-    local settings_file="${HOME}/.claude/settings.json"
-    local hooks_file="$PLUGIN_DIR/.claude-plugin/hooks.json"
-
-    # Check if hooks.json exists
-    if [[ ! -f "$hooks_file" ]]; then
-        hooks_file="$PLUGIN_DIR/hooks/hooks.json"
-    fi
-    if [[ ! -f "$hooks_file" ]]; then
-        echo "[cc-soul] No hooks.json found, skipping hooks config" >&2
-        return 0
-    fi
-
-    # Check if jq is available
-    if ! command -v jq &> /dev/null; then
-        echo "[cc-soul] jq not found, skipping hooks config" >&2
-        return 0
-    fi
-
-    # Ensure settings file exists
-    mkdir -p "${HOME}/.claude"
-    if [[ ! -f "$settings_file" ]]; then
-        echo '{}' > "$settings_file"
-    fi
-
-    # Read current settings and plugin hooks
-    local current plugin_hooks
-    current=$(cat "$settings_file")
-    plugin_hooks=$(jq '.hooks' "$hooks_file")
-
-    # Ensure hooks object exists in settings
-    if ! echo "$current" | jq -e '.hooks' &>/dev/null; then
-        current=$(echo "$current" | jq '.hooks = {}')
-    fi
-
-    # Merge plugin hooks into settings (plugin hooks take precedence for cc-soul events)
-    # We merge each hook event, replacing commands that reference CLAUDE_PLUGIN_ROOT
-    local updated="$current"
-    local added=0
-
-    # Get list of hook events from plugin
-    local events
-    events=$(echo "$plugin_hooks" | jq -r 'keys[]')
-
-    for event in $events; do
-        # Get plugin hooks for this event (with CLAUDE_PLUGIN_ROOT expanded)
-        local event_hooks
-        event_hooks=$(echo "$plugin_hooks" | jq --arg e "$event" --arg root "$PLUGIN_DIR" \
-            '.[$e] | walk(if type == "string" then gsub("\\$\\{CLAUDE_PLUGIN_ROOT\\}"; $root) else . end)')
-
-        # Check if this event already has cc-soul hooks
-        local existing
-        existing=$(echo "$updated" | jq --arg e "$event" '.hooks[$e] // []')
-
-        # Remove any existing cc-soul hooks (identified by plugin path)
-        local filtered
-        filtered=$(echo "$existing" | jq --arg root "$PLUGIN_DIR" \
-            '[.[] | select(.hooks | all(.command | contains($root) | not))]')
-
-        # Merge: existing non-cc-soul hooks + new cc-soul hooks
-        local merged
-        merged=$(echo "$filtered" "$event_hooks" | jq -s 'add')
-
-        # Update settings
-        updated=$(echo "$updated" | jq --arg e "$event" --argjson h "$merged" '.hooks[$e] = $h')
-        ((added++)) || true
-    done
-
-    # Write back
-    if [[ $added -gt 0 ]]; then
-        echo "$updated" | jq '.' > "$settings_file"
-        echo "[cc-soul] Configured $added hook events in settings.json"
-    fi
-}
-
 # Create directories (symlinks no longer needed - mind is at ~/.claude/mind)
 create_directories() {
     mkdir -p "${HOME}/.claude/mind"
     mkdir -p "${HOME}/.claude/bin"
-    mkdir -p "${HOME}/.claude/hooks"
-}
-
-# Install a config file, checking for user modifications
-# Sets global: INSTALL_RESULT (new|updated|unchanged|skipped)
-install_file() {
-    local src="$1"
-    local dst="$2"
-    local make_exec="${3:-false}"
-
-    if [[ ! -f "$dst" ]]; then
-        cp -f "$src" "$dst"
-        [[ "$make_exec" == "true" ]] && chmod +x "$dst"
-        INSTALL_RESULT="new"
-        return 0
-    fi
-
-    if diff -q "$src" "$dst" &>/dev/null; then
-        INSTALL_RESULT="unchanged"
-        return 0
-    fi
-
-    # File differs - check if it's a user modification or old version
-    # If dst is older than src, it's likely an old version we should update
-    if [[ "$src" -nt "$dst" ]]; then
-        cp -f "$src" "$dst"
-        [[ "$make_exec" == "true" ]] && chmod +x "$dst"
-        INSTALL_RESULT="updated"
-        return 0
-    fi
-
-    # dst is newer - user likely modified it, skip
-    INSTALL_RESULT="skipped"
-    return 0
-}
-
-# Install hooks, skills, and commands from plugin directory
-install_config_files() {
-    local base_dst="${HOME}/.claude"
-
-    # Install hooks
-    if [[ -d "$PLUGIN_DIR/hooks" ]]; then
-        local installed=0 skipped=0
-        for f in "$PLUGIN_DIR/hooks"/*.sh; do
-            [[ -f "$f" ]] || continue
-            install_file "$f" "$base_dst/hooks/$(basename "$f")" true
-            case "$INSTALL_RESULT" in
-                new|updated) ((installed++)) || true ;;
-                skipped) ((skipped++)) || true ;;
-            esac
-        done
-        if [[ $installed -gt 0 ]]; then echo "[cc-soul] Installed $installed hooks"; fi
-        if [[ $skipped -gt 0 ]]; then echo "[cc-soul] Skipped $skipped hooks (user modified)"; fi
-    fi
-
-    # Install skills (each skill is a directory with SKILL.md inside)
-    if [[ -d "$PLUGIN_DIR/skills" ]]; then
-        mkdir -p "$base_dst/skills"
-        local installed=0 skipped=0
-        for skill_dir in "$PLUGIN_DIR/skills"/*/; do
-            [[ -d "$skill_dir" ]] || continue
-            local skill_name=$(basename "$skill_dir")
-            [[ "$skill_name" == _* ]] && continue  # Skip convention dirs
-            local skill_file="$skill_dir/SKILL.md"
-            [[ -f "$skill_file" ]] || continue
-            local dst_dir="$base_dst/skills/$skill_name"
-            mkdir -p "$dst_dir"
-            install_file "$skill_file" "$dst_dir/SKILL.md" false
-            case "$INSTALL_RESULT" in
-                new|updated) ((installed++)) || true ;;
-                skipped) ((skipped++)) || true ;;
-            esac
-        done
-        if [[ $installed -gt 0 ]]; then echo "[cc-soul] Installed $installed skills"; fi
-        if [[ $skipped -gt 0 ]]; then echo "[cc-soul] Skipped $skipped skills (user modified)"; fi
-    fi
-
-    # Install commands
-    if [[ -d "$PLUGIN_DIR/commands" ]]; then
-        mkdir -p "$base_dst/commands"
-        local installed=0 skipped=0
-        for f in "$PLUGIN_DIR/commands"/*.md; do
-            [[ -f "$f" ]] || continue
-            install_file "$f" "$base_dst/commands/$(basename "$f")" false
-            case "$INSTALL_RESULT" in
-                new|updated) ((installed++)) || true ;;
-                skipped) ((skipped++)) || true ;;
-            esac
-        done
-        if [[ $installed -gt 0 ]]; then echo "[cc-soul] Installed $installed commands"; fi
-        if [[ $skipped -gt 0 ]]; then echo "[cc-soul] Skipped $skipped commands (user modified)"; fi
-    fi
 }
 
 # Stop any running daemon (gracefully via chittad shutdown, fallback to signals)
@@ -563,79 +307,49 @@ validate_binaries() {
     fi
 }
 
-# Compare semantic versions: returns 0 if v1 > v2, 1 otherwise
-version_gt() {
-    local v1="$1" v2="$2"
-    # Split on dots and compare numerically
-    local IFS=.
-    local i v1_parts=($v1) v2_parts=($v2)
-    for ((i=0; i<${#v1_parts[@]} || i<${#v2_parts[@]}; i++)); do
-        local n1=${v1_parts[i]:-0}
-        local n2=${v2_parts[i]:-0}
-        ((n1 > n2)) && return 0
-        ((n1 < n2)) && return 1
-    done
-    return 1  # Equal
-}
-
 # Main
 main() {
-    # Get plugin version (what we want to install)
-    local plugin_version
+    # Check if already installed
+    local current_version
     if command -v jq &>/dev/null; then
-        plugin_version=$(jq -r '.version // "0.0.0"' "$PLUGIN_DIR/.claude-plugin/plugin.json" 2>/dev/null || echo "0.0.0")
+        current_version=$(jq -r '.version // "0.0.0"' "$PLUGIN_DIR/.claude-plugin/plugin.json" 2>/dev/null || echo "0.0.0")
     else
-        plugin_version=$(grep '"version"' "$PLUGIN_DIR/.claude-plugin/plugin.json" 2>/dev/null | head -1 | sed 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || echo "0.0.0")
+        current_version=$(grep '"version"' "$PLUGIN_DIR/.claude-plugin/plugin.json" 2>/dev/null | head -1 | sed 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || echo "0.0.0")
+    fi
+    local installed_version=$(cat "$MARKER" 2>/dev/null || echo "")
+
+    if [[ "$current_version" == "$installed_version" && -x "$BIN_DIR/chitta" && -f "$MODELS_DIR/model.onnx" ]]; then
+        exit 0  # Already installed
     fi
 
-    # Get installed binary version (if binary exists and runs)
-    local installed_version="0.0.0"
-    if [[ -x "$BIN_DIR/chitta" ]]; then
-        installed_version=$("$BIN_DIR/chitta" --version 2>/dev/null | awk '{print $2}' || echo "0.0.0")
-    fi
-
-    # Check if models exist
-    local have_models=false
-    [[ -f "$MODELS_DIR/model.onnx" && -f "$MODELS_DIR/vocab.txt" ]] && have_models=true
-
-    # Skip if binary works and version >= plugin version
-    if [[ "$installed_version" != "0.0.0" ]] && ! version_gt "$plugin_version" "$installed_version" && $have_models; then
-        exit 0  # Already installed with same or newer version
-    fi
-
-    # If binary is a working symlink, don't replace it
-    if [[ -L "$BIN_DIR/chitta" && "$installed_version" != "0.0.0" ]]; then
-        # Symlink to working binary - just ensure models exist
-        if ! $have_models; then
-            download_models
-        fi
-        echo "$installed_version" > "$MARKER"
-        exit 0
-    fi
-
-    # Stop daemon before updating binaries
+    # Stop daemon before updating binaries (version mismatch can cause issues)
     stop_daemon
 
-    echo "[cc-soul] Installing v$plugin_version (have: $installed_version)..."
+    echo "[cc-soul] Installing v$current_version..."
 
-    # Download models if needed
-    if ! $have_models; then
-        download_models
-    fi
+    # Download models
+    download_models
 
     # Install binaries (try pre-built first, then build)
     local platform=$(detect_platform)
+    local need_binaries=false
 
-    if [[ "$platform" != "unknown" ]]; then
-        download_binaries "$plugin_version" "$platform" || build_from_source || {
-            echo "[cc-soul] ERROR: Installation failed" >&2
-            exit 1
-        }
-    else
-        build_from_source || {
-            echo "[cc-soul] ERROR: Build failed and no pre-built binaries for this platform" >&2
-            exit 1
-        }
+    if [[ ! -x "$BIN_DIR/chitta" || "$current_version" != "$installed_version" ]]; then
+        need_binaries=true
+    fi
+
+    if $need_binaries; then
+        if [[ "$platform" != "unknown" ]]; then
+            download_binaries "$current_version" "$platform" || build_from_source || {
+                echo "[cc-soul] ERROR: Installation failed" >&2
+                exit 1
+            }
+        else
+            build_from_source || {
+                echo "[cc-soul] ERROR: Build failed and no pre-built binaries for this platform" >&2
+                exit 1
+            }
+        fi
     fi
 
     # Create directories
@@ -644,29 +358,19 @@ main() {
     # Configure bash permissions for chitta commands
     configure_permissions
 
-    # Configure MCP server and permissions
-    configure_mcp
-    configure_mcp_permissions
-
-    # Hooks are loaded automatically from .claude-plugin/hooks.json by plugin system
-    # configure_hooks  # Don't duplicate - causes hooks to run twice
-
-    # Install hooks, skills, and commands
-    install_config_files
-
     if ! validate_binaries; then
         echo "[cc-soul] ERROR: Installation incomplete (invalid binaries)" >&2
         exit 1
     fi
 
     # Version change notification
-    if [[ -n "$installed_version" && "$installed_version" != "0.0.0" && "$installed_version" != "$plugin_version" ]]; then
-        echo "[cc-soul] Updated: $installed_version → $plugin_version"
+    if [[ -n "$installed_version" && "$installed_version" != "$current_version" ]]; then
+        echo "[cc-soul] Updated: $installed_version → $current_version"
     fi
 
     # Mark as installed
-    echo "$plugin_version" > "$MARKER"
-    echo "[cc-soul] Installation complete (v$plugin_version)"
+    echo "$current_version" > "$MARKER"
+    echo "[cc-soul] Installation complete (v$current_version)"
 }
 
 main "$@"
