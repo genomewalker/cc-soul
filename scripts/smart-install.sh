@@ -205,18 +205,18 @@ download_models() {
     echo "[cc-soul] Models downloaded"
 }
 
-# Configure bash permissions for chitta commands (global settings)
+# Configure bash permissions and MCP server for chitta (global settings)
 configure_permissions() {
     local settings_file="${HOME}/.claude/settings.json"
 
     # Permissions to add (global - applies to all projects)
-    # Binaries install to ~/.claude/bin, so we only need those paths
     local perms=(
         'Bash(~/.claude/bin/chitta:*)'
         'Bash(~/.claude/bin/chittad:*)'
         'Bash(chitta:*)'
         'Bash(chittad:*)'
         'Bash(pkill -f "chittad daemon":*)'
+        'mcp__chitta__*'
     )
 
     # Always use global settings.json
@@ -246,17 +246,25 @@ configure_permissions() {
     local updated="$current"
     local added=0
     for perm in "${perms[@]}"; do
-        # Use --arg to safely escape permission strings (handles embedded quotes)
         if ! echo "$updated" | jq -e --arg p "$perm" '.permissions.allow | index($p)' &>/dev/null; then
             updated=$(echo "$updated" | jq --arg p "$perm" '.permissions.allow += [$p]')
             ((added++)) || true
         fi
     done
 
+    # Configure MCP server for chitta
+    local chitta_bin="${HOME}/.claude/bin/chitta"
+    if ! echo "$updated" | jq -e '.mcpServers.chitta' &>/dev/null; then
+        updated=$(echo "$updated" | jq --arg cmd "$chitta_bin" '.mcpServers.chitta = {"command": $cmd, "args": ["mcp"]}')
+        echo "[cc-soul] Added chitta MCP server"
+    fi
+
     # Write back if changed
-    if [[ $added -gt 0 ]]; then
+    if [[ $added -gt 0 ]] || ! echo "$current" | jq -e '.mcpServers.chitta' &>/dev/null; then
         echo "$updated" | jq '.' > "$settings_file"
-        echo "[cc-soul] Added $added bash permissions for chitta (global)"
+        if [[ $added -gt 0 ]]; then
+            echo "[cc-soul] Added $added permissions for chitta (global)"
+        fi
     fi
 }
 

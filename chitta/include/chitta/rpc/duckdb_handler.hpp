@@ -218,6 +218,20 @@ private:
         });
         handlers_["forget"] = [this](const json& p) { return tool_forget(p); };
 
+        // batch_forget - Bulk delete multiple nodes
+        tools_.push_back({
+            {"name", "batch_forget"},
+            {"description", "Delete multiple nodes by ID (batch deletion)"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"ids", {{"type", "array"}, {"items", {{"type", "string"}}}, {"description", "Array of node IDs (UUID strings)"}}},
+                    {"pattern", {{"type", "string"}, {"description", "Search pattern to find and delete matching nodes (alternative to ids)"}}}
+                }}
+            }}
+        });
+        handlers_["batch_forget"] = [this](const json& p) { return tool_batch_forget(p); };
+
         // observe
         tools_.push_back({
             {"name", "observe"},
@@ -1010,6 +1024,59 @@ private:
         }
 
         return DuckDBToolResult::ok("Forgot node " + id_str);
+    }
+
+    DuckDBToolResult tool_batch_forget(const json& params) {
+        std::vector<std::string> ids_to_delete;
+        size_t deleted = 0;
+        size_t not_found = 0;
+
+        // Mode 1: Delete by explicit IDs
+        if (params.contains("ids") && params["ids"].is_array()) {
+            for (const auto& id_val : params["ids"]) {
+                if (id_val.is_string()) {
+                    ids_to_delete.push_back(id_val.get<std::string>());
+                }
+            }
+        }
+
+        // Mode 2: Delete by pattern (search and delete matching)
+        if (params.contains("pattern") && params["pattern"].is_string()) {
+            std::string pattern = params["pattern"].get<std::string>();
+            auto results = mind_->recall(pattern, 100);  // Find up to 100 matching
+            for (const auto& r : results) {
+                // Check if content contains the pattern (case-insensitive would be better)
+                if (r.text.find(pattern) != std::string::npos) {
+                    ids_to_delete.push_back(r.id.to_string());
+                }
+            }
+        }
+
+        if (ids_to_delete.empty()) {
+            return DuckDBToolResult::error("No IDs provided (use 'ids' array or 'pattern' string)");
+        }
+
+        // Delete each one
+        for (const auto& id_str : ids_to_delete) {
+            NodeId nid = NodeId::from_string(id_str);
+            if (mind_->remove(nid)) {
+                deleted++;
+            } else {
+                not_found++;
+            }
+        }
+
+        std::ostringstream ss;
+        ss << "Batch forget complete: " << deleted << " deleted";
+        if (not_found > 0) {
+            ss << ", " << not_found << " not found";
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"deleted", deleted},
+            {"not_found", not_found},
+            {"total_requested", ids_to_delete.size()}
+        });
     }
 
     DuckDBToolResult tool_observe(const json& params) {

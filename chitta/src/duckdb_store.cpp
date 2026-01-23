@@ -518,10 +518,42 @@ bool DuckDBStore::forget(int64_t id) {
     // Lock handled in write_execute/write_query/read_query
     if (!db_) return false;
 
+    // First verify the row exists
+    std::ostringstream check_sql;
+    check_sql << "SELECT COUNT(*) FROM memory WHERE id = " << id;
+    auto check_result = read_query(check_sql.str());
+    int64_t count_before = 0;
+    if (check_result && !check_result->HasError()) {
+        auto chunk = check_result->Fetch();
+        if (chunk && chunk->size() > 0) {
+            count_before = chunk->GetValue(0, 0).GetValue<int64_t>();
+        }
+    }
+    std::cerr << "[DuckDBStore::forget] id=" << id << " count_before=" << count_before << "\n";
+
+    // Delete from memory table
     std::ostringstream sql;
     sql << "DELETE FROM memory WHERE id = " << id;
+    bool ok = write_execute(sql.str());
+    std::cerr << "[DuckDBStore::forget] DELETE result=" << (ok ? "success" : "failed") << "\n";
 
-    return write_execute(sql.str());
+    // Also delete from realm_membership
+    std::ostringstream membership_sql;
+    membership_sql << "DELETE FROM realm_membership WHERE memory_id = " << id;
+    write_execute(membership_sql.str());
+
+    // Verify deletion
+    auto verify_result = read_query(check_sql.str());
+    int64_t count_after = 0;
+    if (verify_result && !verify_result->HasError()) {
+        auto chunk = verify_result->Fetch();
+        if (chunk && chunk->size() > 0) {
+            count_after = chunk->GetValue(0, 0).GetValue<int64_t>();
+        }
+    }
+    std::cerr << "[DuckDBStore::forget] count_after=" << count_after << "\n";
+
+    return ok && (count_before > 0) && (count_after == 0);
 }
 
 bool DuckDBStore::touch(int64_t id) {
