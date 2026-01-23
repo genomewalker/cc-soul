@@ -146,9 +146,14 @@ std::string default_vocab_path() {
 }
 
 std::string default_distill_script() {
+    // Check plugin root first if set and file exists
     if (const char* plugin_root = std::getenv("CLAUDE_PLUGIN_ROOT")) {
-        return std::string(plugin_root) + "/scripts/distill.sh";
+        std::string plugin_path = std::string(plugin_root) + "/scripts/distill.sh";
+        if (std::ifstream(plugin_path).good()) {
+            return plugin_path;
+        }
     }
+    // Fall back to user hooks directory
     const char* home = std::getenv("HOME");
     return std::string(home ? home : ".") + "/.claude/hooks/distill.sh";
 }
