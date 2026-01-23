@@ -352,6 +352,23 @@ public:
     size_t count_undescribed_symbols();
     size_t count_total_symbols();
 
+    // Fast embedding: embed symbol metadata directly (no LLM needed)
+    bool set_symbol_embedding(int64_t symbol_id, const std::vector<float>& embedding);
+    std::vector<UndescribedSymbol> get_unembedded_symbols(size_t limit = 100);
+    size_t count_unembedded_symbols();
+
+    // Semantic symbol search: find symbols by embedding similarity
+    struct SymbolMatch {
+        Symbol symbol;
+        float score;
+    };
+    std::vector<SymbolMatch> search_symbols_by_embedding(const std::vector<float>& query_embedding,
+                                                          size_t limit = 10,
+                                                          const std::string& kind_filter = "");
+
+    // Raw SQL execution (for maintenance operations)
+    bool execute_raw(const std::string& sql);
+
     // Transcript state operations (for distillation)
     bool register_transcript(const std::string& session_id, const std::string& transcript_path,
                              const std::string& realm = "default");

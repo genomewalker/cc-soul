@@ -2089,6 +2089,131 @@ size_t DuckDBStore::count_total_symbols() {
     return 0;
 }
 
+bool DuckDBStore::set_symbol_embedding(int64_t symbol_id, const std::vector<float>& embedding) {
+    if (!db_ || embedding.size() != 384) return false;
+
+    std::ostringstream sql;
+    sql << "UPDATE symbol SET embedding = [";
+    for (size_t i = 0; i < embedding.size(); ++i) {
+        if (i > 0) sql << ",";
+        sql << embedding[i];
+    }
+    sql << "], described_at = " << now() << " WHERE id = " << symbol_id;
+
+    return write_execute(sql.str());
+}
+
+std::vector<DuckDBStore::UndescribedSymbol> DuckDBStore::get_unembedded_symbols(size_t limit) {
+    std::vector<UndescribedSymbol> result;
+    if (!db_) return result;
+
+    // Get symbols with NULL or zero embedding
+    std::ostringstream sql;
+    sql << "SELECT id, kind, name, signature, file_path, line_start, line_end, "
+        << "CASE kind "
+        << "  WHEN 'class' THEN 0 "
+        << "  WHEN 'struct' THEN 0 "
+        << "  WHEN 'function' THEN 1 "
+        << "  WHEN 'method' THEN 2 "
+        << "  ELSE 3 "
+        << "END as priority "
+        << "FROM symbol "
+        << "WHERE embedding IS NULL OR described_at = 0 "
+        << "ORDER BY priority, id "
+        << "LIMIT " << limit;
+
+    auto query_result = read_query(sql.str());
+    if (!query_result || query_result->HasError()) return result;
+
+    while (true) {
+        auto chunk = query_result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            UndescribedSymbol sym;
+            sym.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            sym.kind = chunk->GetValue(1, i).ToString();
+            sym.name = chunk->GetValue(2, i).ToString();
+            sym.signature = chunk->GetValue(3, i).ToString();
+            sym.file_path = chunk->GetValue(4, i).ToString();
+            sym.line_start = chunk->GetValue(5, i).GetValue<int32_t>();
+            sym.line_end = chunk->GetValue(6, i).GetValue<int32_t>();
+            sym.priority = chunk->GetValue(7, i).GetValue<int32_t>();
+            result.push_back(sym);
+        }
+    }
+
+    return result;
+}
+
+size_t DuckDBStore::count_unembedded_symbols() {
+    if (!db_) return 0;
+
+    auto result = read_query("SELECT COUNT(*) FROM symbol WHERE embedding IS NULL OR described_at = 0");
+    if (result && !result->HasError()) {
+        auto chunk = result->Fetch();
+        if (chunk && chunk->size() > 0) {
+            return chunk->GetValue(0, 0).GetValue<int64_t>();
+        }
+    }
+    return 0;
+}
+
+std::vector<DuckDBStore::SymbolMatch> DuckDBStore::search_symbols_by_embedding(
+    const std::vector<float>& query_embedding, size_t limit, const std::string& kind_filter) {
+
+    std::vector<SymbolMatch> results;
+    if (!db_ || query_embedding.size() != 384) return results;
+
+    // Build query embedding array literal
+    std::ostringstream emb_str;
+    emb_str << "[";
+    for (size_t i = 0; i < query_embedding.size(); ++i) {
+        if (i > 0) emb_str << ",";
+        emb_str << query_embedding[i];
+    }
+    emb_str << "]::FLOAT[384]";
+
+    // Use cosine similarity: 1 - (a <=> b) gives similarity score
+    std::ostringstream sql;
+    sql << "SELECT id, kind, name, signature, file_path, line_start, line_end, repo_id, "
+        << "(1 - list_cosine_distance(embedding, " << emb_str.str() << ")) as score "
+        << "FROM symbol "
+        << "WHERE embedding IS NOT NULL AND described_at > 0 ";
+
+    if (!kind_filter.empty()) {
+        sql << "AND kind = '" << kind_filter << "' ";
+    }
+
+    sql << "ORDER BY score DESC "
+        << "LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) return results;
+
+    while (auto chunk = result->Fetch()) {
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            SymbolMatch match;
+            match.symbol.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            match.symbol.kind = chunk->GetValue(1, i).ToString();
+            match.symbol.name = chunk->GetValue(2, i).ToString();
+            match.symbol.signature = chunk->GetValue(3, i).IsNull() ? "" : chunk->GetValue(3, i).ToString();
+            match.symbol.file_path = chunk->GetValue(4, i).ToString();
+            match.symbol.line_start = chunk->GetValue(5, i).GetValue<int32_t>();
+            match.symbol.line_end = chunk->GetValue(6, i).GetValue<int32_t>();
+            match.symbol.repo_id = chunk->GetValue(7, i).IsNull() ? 0 : chunk->GetValue(7, i).GetValue<int64_t>();
+            match.score = chunk->GetValue(8, i).GetValue<float>();
+            results.push_back(match);
+        }
+    }
+
+    return results;
+}
+
+bool DuckDBStore::execute_raw(const std::string& sql) {
+    return write_execute(sql);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Transcript State Operations (for distillation)
 // ═══════════════════════════════════════════════════════════════════════════

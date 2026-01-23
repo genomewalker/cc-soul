@@ -334,7 +334,7 @@ void print_usage(const char* prog) {
               << "  Context:     soul_context, health_check, version_check\n"
               << "  Maintenance: cycle, cleanup\n"
               << "  Import/Export: import_soul, export_soul\n"
-              << "  Code Intel:  extract_symbols, learn_codebase, find_symbol, code_context\n"
+              << "  Code Intel:  extract_symbols, learn_codebase, find_symbol, search_symbols, code_context\n"
               << "  Realm:       realm_detect, realm_list, realm_get, realm_set, realm_add, realm_remove, realm_visibility\n"
               << "  Ledger:      ledger_save, ledger_load, ledger_list, ledger_get, ledger_delete\n"
               << "  Transcript:  transcript_register, transcript_get, transcript_list, transcript_update, transcript_remove\n"

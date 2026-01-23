@@ -181,6 +181,25 @@ private:
         });
         handlers_["enrichment_status"] = [this](const json& p) { return tool_enrichment_status(p); };
 
+        tools_.push_back({
+            {"name", "embed_symbols"},
+            {"description", "Fast embed symbol metadata (no LLM needed, ~100/sec)"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"batch_size", {{"type", "integer"}, {"description", "Symbols per batch (default: 100)"}}}
+                }}
+            }}
+        });
+        handlers_["embed_symbols"] = [this](const json& p) { return tool_embed_symbols(p); };
+
+        tools_.push_back({
+            {"name", "dedupe_symbols"},
+            {"description", "Remove duplicate symbols from the database"},
+            {"inputSchema", {{"type", "object"}, {"properties", json::object()}}}
+        });
+        handlers_["dedupe_symbols"] = [this](const json& p) { return tool_dedupe_symbols(p); };
+
         // strengthen
         tools_.push_back({
             {"name", "strengthen"},
@@ -318,6 +337,21 @@ private:
             }}
         });
         handlers_["find_symbol"] = [this](const json& p) { return tool_find_symbol(p); };
+
+        tools_.push_back({
+            {"name", "search_symbols"},
+            {"description", "Semantic search for code symbols by natural language query. Returns symbols ranked by embedding similarity."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"query", {{"type", "string"}, {"description", "Natural language query to find symbols"}}},
+                    {"kind", {{"type", "string"}, {"description", "Filter by symbol kind (class, function, method)"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Max results (default 10)"}}}
+                }},
+                {"required", {"query"}}
+            }}
+        });
+        handlers_["search_symbols"] = [this](const json& p) { return tool_search_symbols(p); };
 
         tools_.push_back({
             {"name", "code_context"},
@@ -1025,12 +1059,16 @@ private:
         ss << "  Pending: " << pending << "\n";
         ss << "  Coverage: " << std::fixed << std::setprecision(1) << coverage << "%\n";
 
-        if (pending > 0) {
-            // Estimate time at 10 symbols per 2 minutes
-            size_t minutes_remaining = (pending / 10) * 2;
+        if (pending > 0 && described_symbols > 0) {
+            // Dynamic estimate based on current rate (symbols per minute)
+            // Assume ~20 symbols per minute at batch=20, interval=1m
+            size_t rate_per_min = 20;  // Conservative estimate
+            size_t minutes_remaining = pending / rate_per_min;
             size_t hours = minutes_remaining / 60;
             size_t mins = minutes_remaining % 60;
-            ss << "  Est. remaining: " << hours << "h " << mins << "m\n";
+            ss << "  Est. remaining: ~" << hours << "h " << mins << "m (at " << rate_per_min << "/min)\n";
+        } else if (pending > 0) {
+            ss << "  Est. remaining: calculating...\n";
         }
 
         return DuckDBToolResult::ok(ss.str(), {
@@ -1038,6 +1076,92 @@ private:
             {"described", described_symbols},
             {"pending", pending},
             {"coverage_percent", coverage}
+        });
+    }
+
+    DuckDBToolResult tool_embed_symbols(const json& params) {
+        if (!mind_->has_yantra()) {
+            return DuckDBToolResult::error("Yantra (embedder) not attached");
+        }
+
+        size_t batch_size = params.value("batch_size", 100);
+        auto symbols = mind_->store().get_unembedded_symbols(batch_size);
+
+        if (symbols.empty()) {
+            return DuckDBToolResult::ok("All symbols embedded", {{"embedded", 0}, {"remaining", 0}});
+        }
+
+        size_t embedded = 0;
+        auto start = std::chrono::steady_clock::now();
+
+        for (const auto& sym : symbols) {
+            // Build searchable text from metadata
+            std::string basename = sym.file_path;
+            size_t pos = basename.rfind('/');
+            if (pos != std::string::npos) basename = basename.substr(pos + 1);
+
+            std::ostringstream text;
+            text << sym.kind << " " << sym.name << " in " << basename;
+            if (!sym.signature.empty() && sym.signature != sym.name) {
+                text << ": " << sym.signature;
+            }
+
+            // Embed using Yantra
+            auto artha = mind_->embedder().transform(text.str());
+            if (!artha.nu.is_zero()) {
+                if (mind_->store().set_symbol_embedding(sym.id, artha.nu.data)) {
+                    embedded++;
+                }
+            }
+        }
+
+        auto elapsed = std::chrono::steady_clock::now() - start;
+        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+        float rate = ms > 0 ? (float)embedded * 1000.0f / ms : 0;
+
+        size_t remaining = mind_->store().count_unembedded_symbols();
+
+        std::ostringstream ss;
+        ss << "Embedded " << embedded << " symbols in " << ms << "ms";
+        ss << " (" << std::fixed << std::setprecision(1) << rate << "/sec)\n";
+        ss << "Remaining: " << remaining;
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"embedded", embedded},
+            {"remaining", remaining},
+            {"elapsed_ms", ms},
+            {"rate_per_sec", rate}
+        });
+    }
+
+    DuckDBToolResult tool_dedupe_symbols(const json& /*params*/) {
+        // Delete duplicate symbols, keeping the one with lowest id
+        size_t before = mind_->store().count_total_symbols();
+
+        // Use a subquery to find duplicates and delete them
+        std::string sql = R"(
+            DELETE FROM symbol
+            WHERE id NOT IN (
+                SELECT MIN(id) FROM symbol
+                GROUP BY kind, name, file_path, line_start
+            )
+        )";
+
+        if (!mind_->store().execute_raw(sql)) {
+            return DuckDBToolResult::error("Failed to dedupe symbols");
+        }
+
+        size_t after = mind_->store().count_total_symbols();
+        size_t removed = before - after;
+
+        std::ostringstream ss;
+        ss << "Removed " << removed << " duplicate symbols\n";
+        ss << "Before: " << before << ", After: " << after;
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"before", before},
+            {"after", after},
+            {"removed", removed}
         });
     }
 
@@ -1568,6 +1692,61 @@ private:
         }
 
         return DuckDBToolResult::ok(ss.str(), {{"symbols", symbols_json}, {"count", symbols.size()}});
+    }
+
+    DuckDBToolResult tool_search_symbols(const json& params) {
+        std::string query = params.value("query", "");
+        if (query.empty()) {
+            return DuckDBToolResult::error("Query is required");
+        }
+
+        if (!mind_->has_yantra()) {
+            return DuckDBToolResult::error("Yantra (embedder) not attached - cannot perform semantic search");
+        }
+
+        std::string kind = params.value("kind", "");
+        size_t limit = params.value("limit", 10);
+
+        // Embed the query
+        auto artha = mind_->embedder().transform(query);
+        if (artha.nu.is_zero()) {
+            return DuckDBToolResult::error("Failed to embed query");
+        }
+
+        // Search symbols by embedding
+        auto matches = mind_->store().search_symbols_by_embedding(artha.nu.data, limit, kind);
+
+        if (matches.empty()) {
+            return DuckDBToolResult::ok("No symbols found for query: " + query, {{"symbols", json::array()}});
+        }
+
+        std::ostringstream ss;
+        ss << "Found " << matches.size() << " symbols for '" << query << "':\n";
+
+        json symbols_json = json::array();
+        for (const auto& m : matches) {
+            // Extract basename for cleaner display
+            std::string basename = m.symbol.file_path;
+            size_t pos = basename.rfind('/');
+            if (pos != std::string::npos) basename = basename.substr(pos + 1);
+
+            ss << "  [" << std::fixed << std::setprecision(0) << (m.score * 100) << "%] "
+               << m.symbol.kind << " " << m.symbol.name
+               << " @" << basename << ":" << m.symbol.line_start << "\n";
+
+            symbols_json.push_back({
+                {"id", m.symbol.id},
+                {"kind", m.symbol.kind},
+                {"name", m.symbol.name},
+                {"file", m.symbol.file_path},
+                {"line_start", m.symbol.line_start},
+                {"line_end", m.symbol.line_end},
+                {"signature", m.symbol.signature},
+                {"score", m.score}
+            });
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {{"symbols", symbols_json}, {"count", matches.size()}});
     }
 
     DuckDBToolResult tool_code_context(const json& params) {
