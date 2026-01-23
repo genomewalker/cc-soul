@@ -75,16 +75,60 @@ is_running() {
     return 1
 }
 
+# Check if daemon actually responds to commands (not just running)
+is_responsive() {
+    if [[ ! -S "$SOCKET_PATH" ]]; then
+        return 1
+    fi
+
+    # Try to get stats with short timeout
+    local response
+    response=$(echo "stats" | timeout 3 nc -U "$SOCKET_PATH" 2>/dev/null || true)
+    if [[ -n "$response" && "$response" == *"nodes"* ]]; then
+        return 0
+    fi
+    return 1
+}
+
+# Kill unresponsive daemon(s) and clean up
+kill_unresponsive() {
+    echo "[subconscious] Daemon unresponsive, killing..." >&2
+
+    # Get all daemon PIDs
+    local pids=""
+    if [[ -f "$PID_FILE" ]]; then
+        pids=$(cat "$PID_FILE" 2>/dev/null || true)
+    fi
+    local other_pids
+    other_pids=$(pgrep -f "chittad daemon" 2>/dev/null || true)
+    if [[ -n "$other_pids" ]]; then
+        pids="$pids $other_pids"
+    fi
+    pids=$(echo "$pids" | tr ' ' '\n' | sort -u | grep -v '^$' | tr '\n' ' ')
+
+    # Force kill all
+    for pid in $pids; do
+        kill -9 "$pid" 2>/dev/null || true
+    done
+
+    # Clean up socket/lock/pid files
+    rm -f "$SOCKET_PATH" "$LOCK_FILE" "$PID_FILE" 2>/dev/null || true
+
+    sleep 1
+    echo "[subconscious] Cleaned up stale daemon" >&2
+}
+
 cmd_start() {
     if is_running; then
-        local pid
-        if [[ -f "$PID_FILE" ]]; then
-            pid=$(cat "$PID_FILE")
+        # Process exists, but is it responsive?
+        if is_responsive; then
+            # Healthy daemon, nothing to do
+            return 0
         else
-            pid=$(pgrep -f "chittad daemon" | head -1)
+            # Process running but not responding - kill it
+            kill_unresponsive
+            # Fall through to start fresh
         fi
-        # Silent when already running - don't spam on every session
-        return 0
     fi
 
     if [[ ! -x "$CHITTA_CLI" ]]; then
@@ -226,13 +270,40 @@ cmd_status() {
     fi
 }
 
+cmd_health() {
+    if ! is_running; then
+        echo "[subconscious] UNHEALTHY: Not running"
+        return 1
+    fi
+
+    if ! is_responsive; then
+        echo "[subconscious] UNHEALTHY: Running but not responding"
+        echo "[subconscious] Attempting recovery..."
+        kill_unresponsive
+        cmd_start
+        if is_responsive; then
+            echo "[subconscious] RECOVERED: Daemon restarted successfully"
+            return 0
+        else
+            echo "[subconscious] FAILED: Could not recover daemon"
+            return 1
+        fi
+    fi
+
+    local pid
+    pid=$(cat "$PID_FILE" 2>/dev/null || pgrep -f "chittad daemon" | head -1)
+    echo "[subconscious] HEALTHY: pid=$pid, responsive"
+    return 0
+}
+
 case "${1:-status}" in
     start)   cmd_start ;;
     stop)    cmd_stop ;;
     restart) cmd_stop; cmd_start ;;
     status)  cmd_status ;;
+    health)  cmd_health ;;
     *)
-        echo "Usage: subconscious.sh <start|stop|restart|status>"
+        echo "Usage: subconscious.sh <start|stop|restart|status|health>"
         exit 1
         ;;
 esac
