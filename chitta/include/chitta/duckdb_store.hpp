@@ -324,6 +324,33 @@ public:
     size_t delete_file_symbols(const std::string& file_path);
     size_t delete_file_triplets(const std::string& file_path);
 
+    // Clear entire project codebase (symbols, triplets, file metadata)
+    struct ClearProjectResult {
+        size_t files_deleted = 0;
+        size_t symbols_deleted = 0;
+        size_t triplets_deleted = 0;
+    };
+    ClearProjectResult clear_project_codebase(const std::string& project);
+
+    // Delete triplets by subject pattern (SQL LIKE)
+    size_t count_triplets_by_pattern(const std::string& pattern);
+    size_t delete_triplets_by_pattern(const std::string& pattern);
+
+    // Semantic enrichment for code symbols
+    struct UndescribedSymbol {
+        int64_t id;
+        std::string kind;
+        std::string name;
+        std::string signature;
+        std::string file_path;
+        int line_start;
+        int line_end;
+        int priority;  // Lower = more important (class=0, function=1, method=2)
+    };
+    std::vector<UndescribedSymbol> get_undescribed_symbols(size_t limit = 10);
+    bool set_symbol_memory(int64_t symbol_id, int64_t memory_id);
+    size_t count_undescribed_symbols();
+
     // Transcript state operations (for distillation)
     bool register_transcript(const std::string& session_id, const std::string& transcript_path,
                              const std::string& realm = "default");

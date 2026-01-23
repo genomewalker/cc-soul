@@ -338,6 +338,34 @@ private:
         });
         handlers_["codebase_overview"] = [this](const json& p) { return tool_codebase_overview(p); };
 
+        tools_.push_back({
+            {"name", "clear_codebase"},
+            {"description", "Remove all code intelligence data (symbols, triplets) for a project"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"project", {{"type", "string"}, {"description", "Project name to clear"}}},
+                    {"dry_run", {{"type", "boolean"}, {"description", "Preview only (default: false)"}}}
+                }},
+                {"required", {"project"}}
+            }}
+        });
+        handlers_["clear_codebase"] = [this](const json& p) { return tool_clear_codebase(p); };
+
+        tools_.push_back({
+            {"name", "clear_triplets"},
+            {"description", "Delete triplets by subject pattern (e.g., '%.cpp' for all C++ file triplets)"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"pattern", {{"type", "string"}, {"description", "SQL LIKE pattern for subject (e.g., '%.cpp', '%.hpp', 'chitta/%')"}}},
+                    {"dry_run", {{"type", "boolean"}, {"description", "Preview only (default: false)"}}}
+                }},
+                {"required", {"pattern"}}
+            }}
+        });
+        handlers_["clear_triplets"] = [this](const json& p) { return tool_clear_triplets(p); };
+
         // Essential memory tools
         tools_.push_back({
             {"name", "grow"},
@@ -1604,6 +1632,97 @@ private:
         result["project"] = project;
 
         return DuckDBToolResult::ok(ss.str(), result);
+    }
+
+    DuckDBToolResult tool_clear_codebase(const json& params) {
+        std::string project = params.value("project", "");
+        if (project.empty()) {
+            return DuckDBToolResult::error("Project name is required");
+        }
+
+        bool dry_run = params.value("dry_run", false);
+
+        // Get current stats for preview
+        auto files = mind_->store().list_project_files(project);
+        if (files.empty()) {
+            return DuckDBToolResult::ok("No code intelligence data found for project: " + project,
+                {{"project", project}, {"files", 0}});
+        }
+
+        if (dry_run) {
+            // Count what would be deleted
+            size_t total_symbols = 0, total_callsites = 0;
+            for (const auto& f : files) {
+                total_symbols += f.symbols_count;
+                total_callsites += f.callsites_count;
+            }
+
+            std::ostringstream ss;
+            ss << "Would clear codebase: " << project << "\n";
+            ss << "  Files: " << files.size() << "\n";
+            ss << "  Symbols: " << total_symbols << "\n";
+            ss << "  Callsites: " << total_callsites << "\n";
+
+            return DuckDBToolResult::ok(ss.str(), {
+                {"project", project},
+                {"dry_run", true},
+                {"files", files.size()},
+                {"symbols", total_symbols},
+                {"callsites", total_callsites}
+            });
+        }
+
+        // Actually clear
+        auto result = mind_->store().clear_project_codebase(project);
+
+        std::ostringstream ss;
+        ss << "Cleared codebase: " << project << "\n";
+        ss << "  Files deleted: " << result.files_deleted << "\n";
+        ss << "  Symbols deleted: " << result.symbols_deleted << "\n";
+        ss << "  Triplets deleted: " << result.triplets_deleted << "\n";
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"project", project},
+            {"files_deleted", result.files_deleted},
+            {"symbols_deleted", result.symbols_deleted},
+            {"triplets_deleted", result.triplets_deleted}
+        });
+    }
+
+    DuckDBToolResult tool_clear_triplets(const json& params) {
+        std::string pattern = params.value("pattern", "");
+        if (pattern.empty()) {
+            return DuckDBToolResult::error("Pattern is required (e.g., '%.cpp', '%.hpp')");
+        }
+
+        bool dry_run = params.value("dry_run", false);
+
+        size_t count = mind_->store().count_triplets_by_pattern(pattern);
+
+        if (count == 0) {
+            return DuckDBToolResult::ok("No triplets match pattern: " + pattern,
+                {{"pattern", pattern}, {"count", 0}});
+        }
+
+        if (dry_run) {
+            std::ostringstream ss;
+            ss << "Would delete " << count << " triplets matching: " << pattern;
+            return DuckDBToolResult::ok(ss.str(), {
+                {"pattern", pattern},
+                {"dry_run", true},
+                {"count", count}
+            });
+        }
+
+        // Actually delete
+        size_t deleted = mind_->store().delete_triplets_by_pattern(pattern);
+
+        std::ostringstream ss;
+        ss << "Deleted " << deleted << " triplets matching: " << pattern;
+        return DuckDBToolResult::ok(ss.str(), {
+            {"pattern", pattern},
+            {"deleted", deleted}
+        });
     }
 
     // Essential memory tool implementations

@@ -51,6 +51,15 @@ struct DistillConfig {
     bool enabled = true;
 };
 
+// Code enrichment configuration (semantic descriptions for symbols)
+struct EnrichConfig {
+    int interval_minutes = 2;       // How often to process batches
+    int batch_size = 10;            // Symbols per batch
+    std::string script_path;        // Path to enrichment script
+    std::string model = "github-copilot/gpt-5-mini";  // OpenCode model
+    bool enabled = true;
+};
+
 void daemon_signal_handler(int sig) {
     std::cerr << "[daemon] Signal " << sig << " received, shutting down\n";
     daemon_running = false;
@@ -180,6 +189,19 @@ std::string default_distill_script() {
     // Fall back to user hooks directory
     const char* home = std::getenv("HOME");
     return std::string(home ? home : ".") + "/.claude/hooks/distill.sh";
+}
+
+std::string default_enrich_script() {
+    // Check plugin root first if set and file exists
+    if (const char* plugin_root = std::getenv("CLAUDE_PLUGIN_ROOT")) {
+        std::string plugin_path = std::string(plugin_root) + "/scripts/enrich-code.sh";
+        if (std::ifstream(plugin_path).good()) {
+            return plugin_path;
+        }
+    }
+    // Fall back to user hooks directory
+    const char* home = std::getenv("HOME");
+    return std::string(home ? home : ".") + "/.claude/hooks/enrich-code.sh";
 }
 
 // Run distillation for a single transcript
@@ -314,7 +336,7 @@ std::string generate_stats(DuckDBMind& mind) {
 
 int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                const std::string& mind_path, const std::string& pid_file,
-               const DistillConfig& distill_config) {
+               const DistillConfig& distill_config, EnrichConfig& enrich_config) {
     DaemonLock lock;
     if (!acquire_lock(mind_path, lock)) {
         std::cerr << "[daemon] Another daemon is running\n";
@@ -333,6 +355,24 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
         std::cerr << "[daemon] Distillation enabled (interval=" << distill_config.interval_minutes
                   << "m, min_turns=" << distill_config.min_turns
                   << ", model=" << distill_config.model << ")\n";
+    }
+
+    // Check for enrichment (uses same opencode)
+    if (enrich_config.enabled) {
+        // opencode already checked above if distillation enabled; check here if only enrichment
+        if (!distill_config.enabled) {
+            int result = std::system("command -v opencode >/dev/null 2>&1");
+            if (result != 0) {
+                std::cerr << "[daemon] WARNING: opencode not found, disabling code enrichment\n";
+                enrich_config.enabled = false;
+            }
+        }
+        if (enrich_config.enabled) {
+            size_t pending = mind.store().count_undescribed_symbols();
+            std::cerr << "[daemon] Code enrichment enabled (interval=" << enrich_config.interval_minutes
+                      << "m, batch=" << enrich_config.batch_size
+                      << ", pending=" << pending << ")\n";
+        }
     }
 
     if (!pid_file.empty()) {
@@ -435,6 +475,99 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
         }
     });
 
+    // Code enrichment thread - generate semantic descriptions for symbols
+    std::atomic<size_t> enrich_count{0};
+    std::thread enrichment([&]() {
+        if (!enrich_config.enabled) return;
+
+        auto interval_mins = std::chrono::minutes(enrich_config.interval_minutes);
+        auto last_enrich = std::chrono::steady_clock::now();
+
+        // Initial delay to let things settle (after distillation starts)
+        std::this_thread::sleep_for(std::chrono::seconds(60));
+
+        while (daemon_running) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+
+            auto now_time = std::chrono::steady_clock::now();
+            if (now_time - last_enrich >= interval_mins) {
+                last_enrich = now_time;
+
+                try {
+                    // Get undescribed symbols (prioritized by importance)
+                    auto symbols = mind.store().get_undescribed_symbols(enrich_config.batch_size);
+
+                    if (symbols.empty()) {
+                        if (verbose_mode) {
+                            std::cerr << "[enrich] No symbols pending description\n";
+                        }
+                        continue;
+                    }
+
+                    size_t processed = 0;
+                    for (const auto& sym : symbols) {
+                        if (!daemon_running) break;
+
+                        // Create temp file with symbol info
+                        std::string tmp_file = "/tmp/enrich-" + std::to_string(getpid())
+                                             + "-" + std::to_string(sym.id) + ".txt";
+                        {
+                            std::ofstream ofs(tmp_file);
+                            ofs << "SYMBOL_ID=" << sym.id << "\n";
+                            ofs << "KIND=" << sym.kind << "\n";
+                            ofs << "NAME=" << sym.name << "\n";
+                            ofs << "FILE_PATH=" << sym.file_path << "\n";
+                            ofs << "LINE_START=" << sym.line_start << "\n";
+                            ofs << "LINE_END=" << sym.line_end << "\n";
+                            ofs << "MODEL=" << enrich_config.model << "\n";
+                        }
+
+                        // Run enrichment script
+                        std::string cmd = enrich_config.script_path + " " + tmp_file + " 2>&1";
+                        FILE* pipe = popen(cmd.c_str(), "r");
+                        if (pipe) {
+                            char buffer[256];
+                            std::string output;
+                            while (fgets(buffer, sizeof(buffer), pipe)) {
+                                output += buffer;
+                            }
+                            int status = pclose(pipe);
+
+                            // Parse memory ID from output
+                            size_t pos = output.find("MEMORY_ID=");
+                            if (pos != std::string::npos && status == 0) {
+                                std::string id_str = output.substr(pos + 10);
+                                size_t nl = id_str.find('\n');
+                                if (nl != std::string::npos) id_str = id_str.substr(0, nl);
+
+                                try {
+                                    int64_t memory_id = std::stoll(id_str);
+                                    mind.store().set_symbol_memory(sym.id, memory_id);
+                                    processed++;
+                                    enrich_count++;
+                                } catch (...) {}
+                            }
+
+                            if (verbose_mode) {
+                                std::cerr << output;
+                            }
+                        }
+
+                        // Clean up
+                        std::remove(tmp_file.c_str());
+                    }
+
+                    if (processed > 0) {
+                        std::cerr << "[enrich] Described " << processed << " symbol(s), total="
+                                  << enrich_count << "\n";
+                    }
+                } catch (const std::exception& e) {
+                    std::cerr << "[enrich] Error: " << e.what() << "\n";
+                }
+            }
+        }
+    });
+
     // Main loop - handle socket I/O
     while (daemon_running) {
         auto requests = server.poll(100);
@@ -467,13 +600,15 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
 
     maintenance.join();
     if (distillation.joinable()) distillation.join();
+    if (enrichment.joinable()) enrichment.join();
     server.stop();
 
     if (!pid_file.empty()) std::remove(pid_file.c_str());
     release_lock(lock);
 
     std::cerr << "[daemon] Stopped (cycles=" << cycle_count
-              << ", distilled=" << distill_count << ")\n";
+              << ", distilled=" << distill_count
+              << ", enriched=" << enrich_count << ")\n";
     return 0;
 }
 
@@ -534,6 +669,11 @@ void print_usage(const char* prog) {
               << "  --distill-script PATH    Distillation script path\n"
               << "  --distill-model MODEL    OpenCode model (default: github-copilot/gpt-5-mini)\n"
               << "  --no-distill             Disable automatic distillation\n"
+              << "\nCode Enrichment (semantic descriptions):\n"
+              << "  --enrich-interval MINS   Enrichment interval (default: 2)\n"
+              << "  --enrich-batch N         Symbols per batch (default: 10)\n"
+              << "  --enrich-model MODEL     OpenCode model (default: github-copilot/gpt-5-mini)\n"
+              << "  --no-enrich              Disable code enrichment\n"
 #ifdef CHITTA_WITH_POSTGRES
               << "\nPostgreSQL backend (for HPC multi-writer):\n"
               << "  --backend postgres Use PostgreSQL instead of DuckDB\n"
@@ -556,6 +696,10 @@ int main(int argc, char* argv[]) {
     // Distillation config
     DistillConfig distill_config;
     distill_config.script_path = default_distill_script();
+
+    // Code enrichment config
+    EnrichConfig enrich_config;
+    enrich_config.script_path = default_enrich_script();
 
 #ifdef CHITTA_WITH_POSTGRES
     // PostgreSQL options
@@ -599,6 +743,14 @@ int main(int argc, char* argv[]) {
             distill_config.model = argv[++i];
         } else if (strcmp(argv[i], "--no-distill") == 0) {
             distill_config.enabled = false;
+        } else if (strcmp(argv[i], "--enrich-interval") == 0 && i + 1 < argc) {
+            enrich_config.interval_minutes = std::stoi(argv[++i]);
+        } else if (strcmp(argv[i], "--enrich-batch") == 0 && i + 1 < argc) {
+            enrich_config.batch_size = std::stoi(argv[++i]);
+        } else if (strcmp(argv[i], "--enrich-model") == 0 && i + 1 < argc) {
+            enrich_config.model = argv[++i];
+        } else if (strcmp(argv[i], "--no-enrich") == 0) {
+            enrich_config.enabled = false;
         } else if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--version") == 0) {
             std::cout << "chittad " << CHITTA_VERSION << "\n";
             return 0;
@@ -792,7 +944,7 @@ int main(int argc, char* argv[]) {
 
     int result = 0;
     if (command == "daemon") {
-        result = cmd_daemon(mind, interval, sock_path, mind_path, pid_file, distill_config);
+        result = cmd_daemon(mind, interval, sock_path, mind_path, pid_file, distill_config, enrich_config);
     } else if (command == "stats") {
         result = cmd_stats(mind);
     } else {

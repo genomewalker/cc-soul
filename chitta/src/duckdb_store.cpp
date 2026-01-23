@@ -176,6 +176,10 @@ bool DuckDBStore::create_schema() {
         return false;
     }
 
+    // Migration: add memory_id for semantic descriptions (v3.7.5+)
+    write_execute("ALTER TABLE symbol ADD COLUMN IF NOT EXISTS memory_id BIGINT DEFAULT NULL");
+    write_execute("ALTER TABLE symbol ADD COLUMN IF NOT EXISTS described_at BIGINT DEFAULT 0");
+
     // Call graph table
     if (!write_execute(R"(
         CREATE TABLE IF NOT EXISTS call_edge (
@@ -1929,6 +1933,147 @@ size_t DuckDBStore::delete_file_triplets(const std::string& file_path) {
     write_execute(sql.str());
 
     return count;
+}
+
+DuckDBStore::ClearProjectResult DuckDBStore::clear_project_codebase(const std::string& project) {
+    ClearProjectResult result;
+    if (!db_ || project.empty()) return result;
+
+    // Get all files for this project
+    auto files = list_project_files(project);
+    result.files_deleted = files.size();
+
+    // Delete symbols and triplets for each file
+    for (const auto& file : files) {
+        result.symbols_deleted += delete_file_symbols(file.path);
+        result.triplets_deleted += delete_file_triplets(file.path);
+    }
+
+    // Delete file metadata
+    delete_project_files(project);
+
+    return result;
+}
+
+size_t DuckDBStore::count_triplets_by_pattern(const std::string& pattern) {
+    if (!db_ || pattern.empty()) return 0;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    std::ostringstream sql;
+    sql << "SELECT COUNT(*) FROM triplet WHERE subject LIKE '" << escape(pattern) << "'";
+
+    auto result = read_query(sql.str());
+    if (result && !result->HasError()) {
+        auto chunk = result->Fetch();
+        if (chunk && chunk->size() > 0) {
+            return chunk->GetValue(0, 0).GetValue<int64_t>();
+        }
+    }
+    return 0;
+}
+
+size_t DuckDBStore::delete_triplets_by_pattern(const std::string& pattern) {
+    if (!db_ || pattern.empty()) return 0;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    // Count first
+    size_t count = count_triplets_by_pattern(pattern);
+    if (count == 0) return 0;
+
+    // Delete
+    std::ostringstream sql;
+    sql << "DELETE FROM triplet WHERE subject LIKE '" << escape(pattern) << "'";
+    write_execute(sql.str());
+
+    return count;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Semantic Enrichment for Code Symbols
+// ═══════════════════════════════════════════════════════════════════════════
+
+std::vector<DuckDBStore::UndescribedSymbol> DuckDBStore::get_undescribed_symbols(size_t limit) {
+    std::vector<UndescribedSymbol> result;
+    if (!db_) return result;
+
+    // Priority: class=0, function=1, method=2, other=3
+    // Get symbols without memory_id, ordered by priority
+    std::ostringstream sql;
+    sql << "SELECT id, kind, name, signature, file_path, line_start, line_end, "
+        << "CASE kind "
+        << "  WHEN 'class' THEN 0 "
+        << "  WHEN 'struct' THEN 0 "
+        << "  WHEN 'function' THEN 1 "
+        << "  WHEN 'method' THEN 2 "
+        << "  ELSE 3 "
+        << "END as priority "
+        << "FROM symbol "
+        << "WHERE memory_id IS NULL "
+        << "ORDER BY priority, id "
+        << "LIMIT " << limit;
+
+    auto query_result = read_query(sql.str());
+    if (!query_result || query_result->HasError()) return result;
+
+    while (true) {
+        auto chunk = query_result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            UndescribedSymbol sym;
+            sym.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            sym.kind = chunk->GetValue(1, i).ToString();
+            sym.name = chunk->GetValue(2, i).ToString();
+            sym.signature = chunk->GetValue(3, i).ToString();
+            sym.file_path = chunk->GetValue(4, i).ToString();
+            sym.line_start = chunk->GetValue(5, i).GetValue<int32_t>();
+            sym.line_end = chunk->GetValue(6, i).GetValue<int32_t>();
+            sym.priority = chunk->GetValue(7, i).GetValue<int32_t>();
+            result.push_back(sym);
+        }
+    }
+
+    return result;
+}
+
+bool DuckDBStore::set_symbol_memory(int64_t symbol_id, int64_t memory_id) {
+    if (!db_) return false;
+
+    std::ostringstream sql;
+    sql << "UPDATE symbol SET memory_id = " << memory_id
+        << ", described_at = " << now()
+        << " WHERE id = " << symbol_id;
+
+    return write_execute(sql.str());
+}
+
+size_t DuckDBStore::count_undescribed_symbols() {
+    if (!db_) return 0;
+
+    auto result = read_query("SELECT COUNT(*) FROM symbol WHERE memory_id IS NULL");
+    if (result && !result->HasError()) {
+        auto chunk = result->Fetch();
+        if (chunk && chunk->size() > 0) {
+            return chunk->GetValue(0, 0).GetValue<int64_t>();
+        }
+    }
+    return 0;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
