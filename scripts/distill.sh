@@ -79,9 +79,9 @@ fi
 
 echo "[distill] Processing OpenCode result..."
 
-# First, save the conversation as an episode and get its ID
-EPISODE_SUMMARY=$(echo "$CONVERSATION" | head -c 500 | tr '\n' ' ')
-EPISODE_RESPONSE=$("$CHITTA_BIN" grow --type episode --content "[session:$SESSION_ID] $EPISODE_SUMMARY" --realm "$REALM" --json 2>/dev/null || echo "{}")
+# Create a minimal episode marker (not the raw content - that has XML/system noise)
+# The episode is just a reference point; extracted SSL learnings are the real content
+EPISODE_RESPONSE=$("$CHITTA_BIN" grow --type episode --content "Session $SESSION_ID distilled" --realm "$REALM" --json 2>/dev/null || echo "{}")
 EPISODE_ID=$(echo "$EPISODE_RESPONSE" | grep -oP '"id"\s*:\s*"\K[^"]+' | head -1)
 
 if [[ -n "$EPISODE_ID" ]]; then

@@ -363,7 +363,7 @@ case "$HOOK_TYPE" in
             --mood "pre-compact" \
             --next_steps '["Review previous work","Continue from checkpoint"]' \
             --snapshot "Context compacted - review ledger for continuation" >/dev/null 2>&1 || true
-        echo "[checkpoint] cc-soul v3.1.0 DuckDB $REALM"
+        echo "[checkpoint] $REALM"
         ;;
 
     *)
