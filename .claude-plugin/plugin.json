@@ -15,6 +15,5 @@
     "continuity",
     "soul"
   ],
-  "commands": "./commands/",
   "skills": "./skills/"
 }

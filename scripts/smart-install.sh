@@ -132,7 +132,11 @@ build_from_source() {
     fi
 
     local plugin_bin="$PLUGIN_DIR/bin"
-    mkdir -p "$BUILD_DIR" "$BIN_DIR" "$plugin_bin"
+    mkdir -p "$BIN_DIR" "$plugin_bin"
+
+    # Clean build directory to avoid CMake cache conflicts
+    rm -rf "$BUILD_DIR"
+    mkdir -p "$BUILD_DIR"
     cd "$BUILD_DIR"
 
     # Configure - show errors now for debugging
