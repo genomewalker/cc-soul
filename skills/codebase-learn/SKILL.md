@@ -140,12 +140,37 @@ chitta learn_codebase --path /path/to/cc-soul/chitta --project cc-soul
 [TRIPLET] provenance tracks staleness
 ```
 
+## Semantic Enrichment (Background)
+
+The daemon automatically generates semantic descriptions for symbols using OpenCode:
+
+```bash
+# Check enrichment status
+chitta soul_context  # Shows pending count at startup
+
+# Query described symbols
+chitta recall --query "memory storage class" --tag code-intel
+```
+
+**Enrichment progress:**
+- Daemon processes ~10 symbols every 2 minutes
+- Priority: classes → functions → methods
+- Each symbol gets a 1-2 sentence description
+- Enables semantic search: "persistent storage" → `DuckDBStore @duckdb_store.hpp:45`
+
+**Daemon options:**
+```bash
+chittad daemon --enrich-interval 2 --enrich-batch 10  # defaults
+chittad daemon --no-enrich  # disable enrichment
+```
+
 ## Benefits
 
 After running:
 - `recall("Mind architecture")` → finds Symbol nodes AND architectural SSL
+- `recall("memory storage")` → finds enriched code descriptions
 - `hierarchical_state` → token-efficient context ready for injection
 - `staleness_stats` → know when re-indexing needed
 - `query --subject Mind` → find all Mind relationships
 
-The soul knows both structure (symbols) and meaning (SSL).
+The soul knows both structure (symbols) and meaning (SSL + semantic descriptions).
