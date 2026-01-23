@@ -331,6 +331,7 @@ void print_usage(const char* prog) {
               << "  Memory:      remember, recall, grow, get, update, forget, strengthen, weaken, tag\n"
               << "  Triplets:    connect, query, query_graph\n"
               << "  Hooks:       observe, full_resonate\n"
+              << "  Explore:     explore_recall, explore_peek, explore_expand, explore_neighbors\n"
               << "  Context:     soul_context, health_check, version_check\n"
               << "  Maintenance: cycle, cleanup\n"
               << "  Import/Export: import_soul, export_soul\n"

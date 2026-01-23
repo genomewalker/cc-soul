@@ -136,6 +136,61 @@ private:
         });
         handlers_["recall"] = [this](const json& p) { return tool_recall(p); };
 
+        // RLM-style exploration primitives
+        tools_.push_back({
+            {"name", "explore_recall"},
+            {"description", "Lightweight recall - returns titles/scores only, no full content (for iterative exploration)"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"query", {{"type", "string"}, {"description", "Search query"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Max results (default 10)"}}}
+                }},
+                {"required", {"query"}}
+            }}
+        });
+        handlers_["explore_recall"] = [this](const json& p) { return tool_explore_recall(p); };
+
+        tools_.push_back({
+            {"name", "explore_peek"},
+            {"description", "Get summary of a memory (first 200 chars) without loading full content"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "string"}, {"description", "Memory ID to peek"}}}
+                }},
+                {"required", {"id"}}
+            }}
+        });
+        handlers_["explore_peek"] = [this](const json& p) { return tool_explore_peek(p); };
+
+        tools_.push_back({
+            {"name", "explore_expand"},
+            {"description", "Get full content of a memory (use sparingly during exploration)"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "string"}, {"description", "Memory ID to expand"}}}
+                }},
+                {"required", {"id"}}
+            }}
+        });
+        handlers_["explore_expand"] = [this](const json& p) { return tool_explore_expand(p); };
+
+        tools_.push_back({
+            {"name", "explore_neighbors"},
+            {"description", "Get nodes connected to this node via triplets"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"node", {{"type", "string"}, {"description", "Node name to find neighbors of"}}},
+                    {"direction", {{"type", "string"}, {"description", "outgoing, incoming, or both (default: both)"}}}
+                }},
+                {"required", {"node"}}
+            }}
+        });
+        handlers_["explore_neighbors"] = [this](const json& p) { return tool_explore_neighbors(p); };
+
         // connect
         tools_.push_back({
             {"name", "connect"},
@@ -953,6 +1008,133 @@ private:
         }
 
         return DuckDBToolResult::ok(ss.str(), {{"results", results_json}, {"realm", realm}});
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // RLM-style Exploration Primitives
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    DuckDBToolResult tool_explore_recall(const json& params) {
+        std::string query = params.value("query", "");
+        if (query.empty()) {
+            return DuckDBToolResult::error("Query is required");
+        }
+
+        size_t limit = params.value("limit", 10);
+        auto results = mind_->recall(query, limit);
+
+        // Return lightweight results: id, title (first line), score only
+        json hints = json::array();
+        std::ostringstream ss;
+        ss << "Found " << results.size() << " hints:\n";
+
+        for (const auto& r : results) {
+            // Extract title (first line or first 80 chars)
+            std::string title = r.text;
+            size_t newline = title.find('\n');
+            if (newline != std::string::npos) title = title.substr(0, newline);
+            if (title.size() > 80) title = title.substr(0, 77) + "...";
+
+            int pct = static_cast<int>(std::min(r.relevance, 1.0f) * 100);
+            ss << "  [" << pct << "%] " << r.id.to_string() << ": " << title << "\n";
+
+            hints.push_back({
+                {"id", r.id.to_string()},
+                {"title", title},
+                {"score", r.relevance},
+                {"type", node_type_name(r.type)}
+            });
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {{"hints", hints}, {"count", results.size()}});
+    }
+
+    DuckDBToolResult tool_explore_peek(const json& params) {
+        auto [db_id, id_str] = parse_id(params);
+        if (id_str.empty()) {
+            return DuckDBToolResult::error("ID is required");
+        }
+
+        auto result = mind_->store().get_memory(db_id);
+        if (!result) {
+            return DuckDBToolResult::error("Memory not found: " + id_str);
+        }
+
+        // Return first 200 chars as summary
+        std::string summary = result->content;
+        if (summary.size() > 200) {
+            summary = summary.substr(0, 197) + "...";
+        }
+
+        return DuckDBToolResult::ok(summary, {
+            {"id", id_str},
+            {"kind", result->kind},
+            {"confidence", result->confidence},
+            {"summary", summary},
+            {"full_length", result->content.size()}
+        });
+    }
+
+    DuckDBToolResult tool_explore_expand(const json& params) {
+        auto [db_id, id_str] = parse_id(params);
+        if (id_str.empty()) {
+            return DuckDBToolResult::error("ID is required");
+        }
+
+        auto result = mind_->store().get_memory(db_id);
+        if (!result) {
+            return DuckDBToolResult::error("Memory not found: " + id_str);
+        }
+
+        return DuckDBToolResult::ok(result->content, {
+            {"id", id_str},
+            {"kind", result->kind},
+            {"confidence", result->confidence},
+            {"content", result->content}
+        });
+    }
+
+    DuckDBToolResult tool_explore_neighbors(const json& params) {
+        std::string node = params.value("node", "");
+        if (node.empty()) {
+            return DuckDBToolResult::error("Node is required");
+        }
+
+        std::string direction = params.value("direction", "both");
+
+        json neighbors = json::array();
+        std::ostringstream ss;
+        ss << "Neighbors of '" << node << "':\n";
+
+        // Outgoing: node → predicate → ?
+        if (direction == "both" || direction == "outgoing") {
+            auto outgoing = mind_->query_subject(node);
+            for (const auto& [pred, obj, weight] : outgoing) {
+                ss << "  → " << pred << " → " << obj << "\n";
+                neighbors.push_back({
+                    {"node", obj},
+                    {"predicate", pred},
+                    {"direction", "outgoing"},
+                    {"weight", weight}
+                });
+            }
+        }
+
+        // Incoming: ? → predicate → node
+        if (direction == "both" || direction == "incoming") {
+            auto incoming = mind_->query_object(node);
+            for (const auto& [subj, pred, weight] : incoming) {
+                ss << "  " << subj << " → " << pred << " →\n";
+                neighbors.push_back({
+                    {"node", subj},
+                    {"predicate", pred},
+                    {"direction", "incoming"},
+                    {"weight", weight}
+                });
+            }
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {{"neighbors", neighbors}, {"count", neighbors.size()}});
     }
 
     DuckDBToolResult tool_connect(const json& params) {
