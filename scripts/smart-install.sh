@@ -205,7 +205,8 @@ download_models() {
     echo "[cc-soul] Models downloaded"
 }
 
-# Configure bash permissions and MCP server for chitta (global settings)
+# Configure bash permissions for chitta commands (global settings)
+# Note: MCP server config is separate - use /cc-soul-mcp command
 configure_permissions() {
     local settings_file="${HOME}/.claude/settings.json"
 
@@ -216,7 +217,6 @@ configure_permissions() {
         'Bash(chitta:*)'
         'Bash(chittad:*)'
         'Bash(pkill -f "chittad daemon":*)'
-        'mcp__chitta__*'
     )
 
     # Always use global settings.json
@@ -252,19 +252,10 @@ configure_permissions() {
         fi
     done
 
-    # Configure MCP server for chitta
-    local chitta_bin="${HOME}/.claude/bin/chitta"
-    if ! echo "$updated" | jq -e '.mcpServers.chitta' &>/dev/null; then
-        updated=$(echo "$updated" | jq --arg cmd "$chitta_bin" '.mcpServers.chitta = {"command": $cmd, "args": ["mcp"]}')
-        echo "[cc-soul] Added chitta MCP server"
-    fi
-
     # Write back if changed
-    if [[ $added -gt 0 ]] || ! echo "$current" | jq -e '.mcpServers.chitta' &>/dev/null; then
+    if [[ $added -gt 0 ]]; then
         echo "$updated" | jq '.' > "$settings_file"
-        if [[ $added -gt 0 ]]; then
-            echo "[cc-soul] Added $added permissions for chitta (global)"
-        fi
+        echo "[cc-soul] Added $added bash permissions for chitta (global)"
     fi
 }
 
