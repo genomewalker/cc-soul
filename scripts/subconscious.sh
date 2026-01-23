@@ -83,13 +83,13 @@ cmd_start() {
         else
             pid=$(pgrep -f "chittad daemon" | head -1)
         fi
-        echo "[subconscious] Already running (pid=$pid)"
+        # Silent when already running - don't spam on every session
         return 0
     fi
 
     if [[ ! -x "$CHITTA_CLI" ]]; then
-        echo "[subconscious] chittad not found" >&2
-        return 1
+        echo "[cc-soul] Not installed. Run /cc-soul-setup or /cc-soul-update first." >&2
+        return 0  # Don't block session, just warn
     fi
 
     # Daemon handles its own locking via fcntl - no need for flock here
@@ -227,11 +227,12 @@ cmd_status() {
 }
 
 case "${1:-status}" in
-    start)  cmd_start ;;
-    stop)   cmd_stop ;;
-    status) cmd_status ;;
+    start)   cmd_start ;;
+    stop)    cmd_stop ;;
+    restart) cmd_stop; cmd_start ;;
+    status)  cmd_status ;;
     *)
-        echo "Usage: subconscious.sh <start|stop|status>"
+        echo "Usage: subconscious.sh <start|stop|restart|status>"
         exit 1
         ;;
 esac
