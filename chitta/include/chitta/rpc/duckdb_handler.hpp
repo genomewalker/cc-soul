@@ -174,6 +174,13 @@ private:
         });
         handlers_["soul_context"] = [this](const json& p) { return tool_soul_context(p); };
 
+        tools_.push_back({
+            {"name", "enrichment_status"},
+            {"description", "Get code enrichment progress (semantic descriptions for symbols)"},
+            {"inputSchema", {{"type", "object"}, {"properties", json::object()}}}
+        });
+        handlers_["enrichment_status"] = [this](const json& p) { return tool_enrichment_status(p); };
+
         // strengthen
         tools_.push_back({
             {"name", "strengthen"},
@@ -1002,6 +1009,35 @@ private:
             {"triplet_count", mind_->triplet_count()},
             {"yantra_ready", mind_->has_yantra()},
             {"status", h.status()}
+        });
+    }
+
+    DuckDBToolResult tool_enrichment_status(const json&) {
+        size_t total_symbols = mind_->store().count_total_symbols();
+        size_t pending = mind_->store().count_undescribed_symbols();
+        size_t described_symbols = total_symbols - pending;
+        float coverage = total_symbols > 0 ? (float)described_symbols / total_symbols * 100.0f : 0.0f;
+
+        std::ostringstream ss;
+        ss << "Code Enrichment Status:\n";
+        ss << "  Total symbols: " << total_symbols << "\n";
+        ss << "  Described: " << described_symbols << "\n";
+        ss << "  Pending: " << pending << "\n";
+        ss << "  Coverage: " << std::fixed << std::setprecision(1) << coverage << "%\n";
+
+        if (pending > 0) {
+            // Estimate time at 10 symbols per 2 minutes
+            size_t minutes_remaining = (pending / 10) * 2;
+            size_t hours = minutes_remaining / 60;
+            size_t mins = minutes_remaining % 60;
+            ss << "  Est. remaining: " << hours << "h " << mins << "m\n";
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"total_symbols", total_symbols},
+            {"described", described_symbols},
+            {"pending", pending},
+            {"coverage_percent", coverage}
         });
     }
 

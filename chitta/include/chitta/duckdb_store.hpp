@@ -350,6 +350,7 @@ public:
     std::vector<UndescribedSymbol> get_undescribed_symbols(size_t limit = 10);
     bool set_symbol_memory(int64_t symbol_id, int64_t memory_id);
     size_t count_undescribed_symbols();
+    size_t count_total_symbols();
 
     // Transcript state operations (for distillation)
     bool register_transcript(const std::string& session_id, const std::string& transcript_path,

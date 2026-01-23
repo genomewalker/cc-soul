@@ -2076,6 +2076,19 @@ size_t DuckDBStore::count_undescribed_symbols() {
     return 0;
 }
 
+size_t DuckDBStore::count_total_symbols() {
+    if (!db_) return 0;
+
+    auto result = read_query("SELECT COUNT(*) FROM symbol");
+    if (result && !result->HasError()) {
+        auto chunk = result->Fetch();
+        if (chunk && chunk->size() > 0) {
+            return chunk->GetValue(0, 0).GetValue<int64_t>();
+        }
+    }
+    return 0;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Transcript State Operations (for distillation)
 // ═══════════════════════════════════════════════════════════════════════════
