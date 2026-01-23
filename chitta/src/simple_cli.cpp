@@ -130,19 +130,43 @@ std::string default_mind_path() {
 }
 
 std::string default_model_path() {
-    if (const char* plugin_root = std::getenv("CLAUDE_PLUGIN_ROOT")) {
-        return std::string(plugin_root) + "/chitta/models/model.onnx";
-    }
     const char* home = std::getenv("HOME");
-    return std::string(home ? home : ".") + "/.claude/mind/model.onnx";
+    std::string home_str = home ? home : ".";
+
+    // Check plugin path first if set
+    if (const char* plugin_root = std::getenv("CLAUDE_PLUGIN_ROOT")) {
+        std::string plugin_path = std::string(plugin_root) + "/chitta/models/model.onnx";
+        if (std::ifstream(plugin_path).good()) {
+            return plugin_path;
+        }
+    }
+    // Fall back to ~/.claude/models (where smart-install puts it)
+    std::string models_path = home_str + "/.claude/models/model.onnx";
+    if (std::ifstream(models_path).good()) {
+        return models_path;
+    }
+    // Legacy path
+    return home_str + "/.claude/mind/model.onnx";
 }
 
 std::string default_vocab_path() {
-    if (const char* plugin_root = std::getenv("CLAUDE_PLUGIN_ROOT")) {
-        return std::string(plugin_root) + "/chitta/models/vocab.txt";
-    }
     const char* home = std::getenv("HOME");
-    return std::string(home ? home : ".") + "/.claude/mind/vocab.txt";
+    std::string home_str = home ? home : ".";
+
+    // Check plugin path first if set
+    if (const char* plugin_root = std::getenv("CLAUDE_PLUGIN_ROOT")) {
+        std::string plugin_path = std::string(plugin_root) + "/chitta/models/vocab.txt";
+        if (std::ifstream(plugin_path).good()) {
+            return plugin_path;
+        }
+    }
+    // Fall back to ~/.claude/models (where smart-install puts it)
+    std::string models_path = home_str + "/.claude/models/vocab.txt";
+    if (std::ifstream(models_path).good()) {
+        return models_path;
+    }
+    // Legacy path
+    return home_str + "/.claude/mind/vocab.txt";
 }
 
 std::string default_distill_script() {
