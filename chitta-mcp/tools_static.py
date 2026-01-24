@@ -1119,3 +1119,117 @@ TOOLS = [
         }
     ),
 ]
+
+# Composite tools - handled in Python MCP layer for token efficiency
+COMPOSITE_TOOLS = [
+    Tool(
+        name="read_symbol",
+        description="Read just a symbol's code, not entire file. ~10x token savings vs full file read. Returns [kind name @ file:line-line] + code.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Symbol name to read (e.g., 'DuckDBStore', 'daemon_call')"
+                },
+                "kind": {
+                    "type": "string",
+                    "description": "Symbol kind filter: class, function, method (optional)"
+                },
+                "context": {
+                    "type": "integer",
+                    "description": "Lines of context before symbol (default: 3)"
+                },
+                "project": {
+                    "type": "string",
+                    "description": "Project name filter (optional)"
+                }
+            },
+            "required": ["name"]
+        }
+    ),
+    Tool(
+        name="read_function",
+        description="Read a function's code. Convenience wrapper for read_symbol with kind=function.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Function name to read"
+                },
+                "context": {
+                    "type": "integer",
+                    "description": "Lines of context before function (default: 3)"
+                },
+                "project": {
+                    "type": "string",
+                    "description": "Project name filter (optional)"
+                }
+            },
+            "required": ["name"]
+        }
+    ),
+    Tool(
+        name="symbol_callers",
+        description="Find all callers of a symbol without grep. Queries triplets where predicate=calls and object=symbol.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Symbol name to find callers for"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max results (default: 20)"
+                }
+            },
+            "required": ["name"]
+        }
+    ),
+    Tool(
+        name="symbol_callees",
+        description="Find all symbols that a symbol calls. Queries triplets where predicate=calls and subject=symbol.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Symbol name to find callees for"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max results (default: 20)"
+                }
+            },
+            "required": ["name"]
+        }
+    ),
+    Tool(
+        name="smart_context",
+        description="Build minimal context for a task. Combines code symbols + memories, compressed to token limit.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "task": {
+                    "type": "string",
+                    "description": "Task description to find relevant context for"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Token limit for output (default: 500)"
+                },
+                "memories": {
+                    "type": "boolean",
+                    "description": "Include relevant memories (default: true)"
+                },
+                "code": {
+                    "type": "boolean",
+                    "description": "Include relevant code symbols (default: true)"
+                }
+            },
+            "required": ["task"]
+        }
+    ),
+]

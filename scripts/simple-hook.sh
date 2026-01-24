@@ -214,6 +214,8 @@ case "$HOOK_TYPE" in
         ESCAPED_QUERY=$(json_escape "$QUERY")
         ESCAPED_REALM=$(json_escape "$REALM")
 
+        output=""
+
         # Get relevant memories - minimal k to save tokens
         response=$(rpc_call "full_resonate" "{\"query\":\"$ESCAPED_QUERY\",\"k\":3,\"realm\":\"$ESCAPED_REALM\",\"include_global\":true}")
         memories=$(extract_text "$response")
@@ -225,8 +227,38 @@ case "$HOOK_TYPE" in
                 cut -c1-100 | \
                 sed 's/$/.../')
             if [[ -n "$compact" ]]; then
-                echo "$compact"
+                output="$compact"
             fi
+        fi
+
+        # Code context injection: if query mentions code concepts, inject relevant symbols
+        # Detect code-related queries (function names, class names, implementation, refactor, etc.)
+        if echo "$QUERY" | grep -qiE '(function|class|method|implement|refactor|fix|bug|error|call|define|where is|find|search.*code|how does|what does)'; then
+            # Get relevant code symbols (top 2 for compactness)
+            code_response=$(rpc_call "search_symbols" "{\"query\":\"$ESCAPED_QUERY\",\"limit\":2}")
+            code_text=$(extract_text "$code_response")
+
+            if [[ -n "$code_text" && "$code_text" != *"No symbols"* && "$code_text" != *"Error"* ]]; then
+                # Parse JSON output if available, otherwise use text
+                symbols=$(echo "$code_text" | jq -r '.[] | "\(.kind) \(.name) @ \(.file):\(.line_start)"' 2>/dev/null | head -2)
+                if [[ -z "$symbols" ]]; then
+                    # Fallback: extract from text format
+                    symbols=$(echo "$code_text" | grep -oE '(class|function|method)\s+\S+\s+@\s+[^:]+:\d+' | head -2)
+                fi
+
+                if [[ -n "$symbols" ]]; then
+                    if [[ -n "$output" ]]; then
+                        output="$output"$'\n'"[code] $symbols"
+                    else
+                        output="[code] $symbols"
+                    fi
+                fi
+            fi
+        fi
+
+        # Output combined context if any
+        if [[ -n "$output" ]]; then
+            echo "$output"
         fi
         ;;
 
