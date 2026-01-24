@@ -16,6 +16,8 @@
 #include <iomanip>
 #include <filesystem>
 #include <algorithm>
+#include <unordered_set>
+#include <cctype>
 
 namespace chitta {
 
@@ -69,6 +71,57 @@ private:
     DuckDBMind* mind_;
     std::vector<json> tools_;
     std::unordered_map<std::string, std::function<DuckDBToolResult(const json&)>> handlers_;
+
+    // Heuristic: detect code-like queries (use BM25) vs natural language (use semantic)
+    static std::string_view trim_view(std::string_view s) {
+        while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) s.remove_prefix(1);
+        while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) s.remove_suffix(1);
+        return s;
+    }
+
+    static bool starts_with_ci(std::string_view s, std::string_view prefix) {
+        if (s.size() < prefix.size()) return false;
+        for (size_t i = 0; i < prefix.size(); ++i) {
+            unsigned char a = static_cast<unsigned char>(s[i]);
+            unsigned char b = static_cast<unsigned char>(prefix[i]);
+            if (std::tolower(a) != std::tolower(b)) return false;
+        }
+        return true;
+    }
+
+    static bool looks_like_code_query(const std::string& q) {
+        std::string_view s = trim_view(q);
+        if (s.empty()) return false;
+
+        // Strong NL prefixes - use semantic search
+        if (starts_with_ci(s, "how ") || starts_with_ci(s, "why ") || starts_with_ci(s, "what ") ||
+            starts_with_ci(s, "where ") || starts_with_ci(s, "explain ") || starts_with_ci(s, "describe ") ||
+            starts_with_ci(s, "find ") || starts_with_ci(s, "show ")) {
+            return false;
+        }
+
+        // Strong code punctuation - use BM25
+        if (s.find("::") != std::string_view::npos || s.find("->") != std::string_view::npos ||
+            s.find('(') != std::string_view::npos || s.find(')') != std::string_view::npos ||
+            s.find('_') != std::string_view::npos || s.find('/') != std::string_view::npos ||
+            s.find('\\') != std::string_view::npos || s.find('#') != std::string_view::npos ||
+            s.find('.') != std::string_view::npos) {
+            return true;
+        }
+
+        // Single-token identifier-ish (no spaces, mostly identifier chars)
+        bool has_space = s.find_first_of(" \t\n") != std::string_view::npos;
+        if (!has_space && s.size() <= 80) {
+            size_t ok = 0;
+            for (char c : s) {
+                unsigned char uc = static_cast<unsigned char>(c);
+                if (std::isalnum(uc) || c == ':' || c == '.' || c == '-') ok++;
+            }
+            if (ok == s.size()) return true;
+        }
+
+        return false;
+    }
 
     // Helper to parse ID from JSON (accepts both string and number)
     static std::pair<int64_t, std::string> parse_id(const json& params, const std::string& key = "id") {
@@ -1887,53 +1940,99 @@ private:
             return DuckDBToolResult::error("Query is required");
         }
 
-        if (!mind_->has_yantra()) {
-            return DuckDBToolResult::error("Yantra (embedder) not attached - cannot perform semantic search");
-        }
-
         std::string kind = params.value("kind", "");
         size_t limit = params.value("limit", 10);
+        std::string mode = params.value("mode", "auto");  // auto, bm25, semantic
 
-        // Embed the query
-        auto artha = mind_->embedder().transform(query);
-        if (artha.nu.is_zero()) {
-            return DuckDBToolResult::error("Failed to embed query");
+        bool is_code_query = looks_like_code_query(query);
+        bool use_bm25 = (mode == "bm25") || (mode == "auto" && is_code_query);
+        bool use_semantic = (mode == "semantic") || (mode == "auto" && !is_code_query);
+
+        // If semantic requested but no yantra, fall back to BM25
+        if (use_semantic && !mind_->has_yantra()) {
+            use_bm25 = true;
+            use_semantic = false;
         }
 
-        // Search symbols by embedding
-        auto matches = mind_->store().search_symbols_by_embedding(artha.nu.data, limit, kind);
+        std::vector<DuckDBStore::SymbolMatch> semantic_matches;
+        std::vector<Symbol> bm25_matches;
+        std::string search_mode;
 
-        if (matches.empty()) {
-            return DuckDBToolResult::ok("No symbols found for query: " + query, {{"symbols", json::array()}});
+        // BM25 search (fast, ~50ms)
+        if (use_bm25) {
+            bm25_matches = mind_->store().bm25_search_symbols(query, limit);
+            search_mode = "bm25";
         }
 
-        std::ostringstream ss;
-        ss << "Found " << matches.size() << " symbols for '" << query << "':\n";
+        // Semantic search (slow, ~2-5s on CPU)
+        if (use_semantic && mind_->has_yantra()) {
+            auto artha = mind_->embedder().transform(query);
+            if (!artha.nu.is_zero()) {
+                semantic_matches = mind_->store().search_symbols_by_embedding(artha.nu.data, limit, kind);
+                search_mode = use_bm25 ? "hybrid" : "semantic";
+            }
+        }
 
+        // Merge results: semantic first for NL queries, BM25 first for code queries
         json symbols_json = json::array();
-        for (const auto& m : matches) {
-            // Extract basename for cleaner display
-            std::string basename = m.symbol.file_path;
+        std::unordered_set<int64_t> seen_ids;
+        std::ostringstream ss;
+
+        auto add_symbol = [&](const Symbol& sym, float score, const std::string& source) {
+            if (seen_ids.count(sym.id) || symbols_json.size() >= limit) return;
+            seen_ids.insert(sym.id);
+
+            std::string basename = sym.file_path;
             size_t pos = basename.rfind('/');
             if (pos != std::string::npos) basename = basename.substr(pos + 1);
 
-            ss << "  [" << std::fixed << std::setprecision(0) << (m.score * 100) << "%] "
-               << m.symbol.kind << " " << m.symbol.name
-               << " @" << basename << ":" << m.symbol.line_start << "\n";
+            // Filter by kind if specified
+            if (!kind.empty() && sym.kind != kind) return;
 
-            symbols_json.push_back({
-                {"id", m.symbol.id},
-                {"kind", m.symbol.kind},
-                {"name", m.symbol.name},
-                {"file", m.symbol.file_path},
-                {"line_start", m.symbol.line_start},
-                {"line_end", m.symbol.line_end},
-                {"signature", m.symbol.signature},
-                {"score", m.score}
-            });
+            if (score > 0) {
+                ss << "  [" << std::fixed << std::setprecision(0) << (score * 100) << "%] ";
+            } else {
+                ss << "  ";
+            }
+            ss << sym.kind << " " << sym.name << " @" << basename << ":" << sym.line_start
+               << " (" << source << ")\n";
+
+            json sym_json = {
+                {"id", sym.id},
+                {"kind", sym.kind},
+                {"name", sym.name},
+                {"file", sym.file_path},
+                {"line_start", sym.line_start},
+                {"line_end", sym.line_end},
+                {"signature", sym.signature},
+                {"source", source}
+            };
+            if (score > 0) sym_json["score"] = score;
+            symbols_json.push_back(sym_json);
+        };
+
+        // Order depends on query type
+        if (is_code_query) {
+            // Code query: BM25 first
+            for (const auto& sym : bm25_matches) add_symbol(sym, 0, "bm25");
+            for (const auto& m : semantic_matches) add_symbol(m.symbol, m.score, "semantic");
+        } else {
+            // NL query: semantic first
+            for (const auto& m : semantic_matches) add_symbol(m.symbol, m.score, "semantic");
+            for (const auto& sym : bm25_matches) add_symbol(sym, 0, "bm25");
         }
 
-        return DuckDBToolResult::ok(ss.str(), {{"symbols", symbols_json}, {"count", matches.size()}});
+        if (symbols_json.empty()) {
+            return DuckDBToolResult::ok("No symbols found for query: " + query,
+                {{"symbols", json::array()}, {"mode", search_mode}});
+        }
+
+        std::ostringstream header;
+        header << "Found " << symbols_json.size() << " symbols for '" << query
+               << "' (" << search_mode << ", " << (is_code_query ? "code" : "NL") << " query):\n";
+
+        return DuckDBToolResult::ok(header.str() + ss.str(),
+            {{"symbols", symbols_json}, {"count", symbols_json.size()}, {"mode", search_mode}});
     }
 
     DuckDBToolResult tool_code_context(const json& params) {
