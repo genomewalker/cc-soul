@@ -742,10 +742,13 @@ int main(int argc, char* argv[]) {
 
                 // Handle MCP protocol methods
                 if (method == "initialize") {
-                    // MCP initialization response
+                    // MCP initialization response - match client's protocol version
+                    auto params = mcp_request.value("params", nlohmann::json::object());
+                    std::string client_version = params.value("protocolVersion", "2024-11-05");
+
                     nlohmann::json response;
                     response["jsonrpc"] = "2.0";
-                    response["result"]["protocolVersion"] = "2024-11-05";
+                    response["result"]["protocolVersion"] = client_version;  // Echo client's version
                     response["result"]["capabilities"]["tools"] = nlohmann::json::object();
                     response["result"]["serverInfo"]["name"] = "chitta";
                     response["result"]["serverInfo"]["version"] = CHITTA_VERSION;
