@@ -1,0 +1,15 @@
+{
+  "name": "chitta-mcp",
+  "version": "0.1.0",
+  "description": "Soul memory and code intelligence tools for Claude Code",
+  "author": "Antonio Fernandez-Guerra",
+  "repository": "https://github.com/genomewalker/cc-soul",
+  "license": "MIT",
+  "keywords": ["memory", "soul", "chitta", "code-intelligence", "mcp"],
+  "mcpServers": {
+    "chitta": {
+      "command": "chitta-mcp",
+      "description": "Soul memory and code intelligence daemon"
+    }
+  }
+}
