@@ -1217,6 +1217,7 @@ private:
         ss << "  Status: " << h.status() << "\n";
 
         return DuckDBToolResult::ok(ss.str(), {
+            {"version", CHITTA_VERSION},
             {"total_nodes", h.total_nodes},
             {"active_nodes", h.active_nodes},
             {"weak_nodes", h.weak_nodes},
