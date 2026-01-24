@@ -206,7 +206,7 @@ def handle_read_symbol(arguments: dict) -> str:
     name = arguments.get("name", "")
     kind = arguments.get("kind")
     project = arguments.get("project")
-    context_lines = arguments.get("context", 3)  # Lines before/after
+    context_lines = int(arguments.get("context", 3))  # Lines before/after
 
     if not name:
         return "Error: name parameter required"
@@ -265,7 +265,7 @@ def handle_symbol_callers(arguments: dict) -> str:
     Query triplets where object = symbol_name and predicate = calls.
     """
     name = arguments.get("name", "")
-    limit = arguments.get("limit", 20)
+    limit = int(arguments.get("limit", 20))
 
     if not name:
         return "Error: name parameter required"
@@ -298,7 +298,7 @@ def handle_symbol_callees(arguments: dict) -> str:
     Query triplets where subject = symbol_name and predicate = calls.
     """
     name = arguments.get("name", "")
-    limit = arguments.get("limit", 20)
+    limit = int(arguments.get("limit", 20))
 
     if not name:
         return "Error: name parameter required"
@@ -334,9 +334,9 @@ def handle_smart_context(arguments: dict) -> str:
     3. Compress to fit token limit
     """
     task = arguments.get("task", "")
-    token_limit = arguments.get("limit", 500)
-    include_memories = arguments.get("memories", True)
-    include_code = arguments.get("code", True)
+    token_limit = int(arguments.get("limit", 500))
+    include_memories = bool(arguments.get("memories", True))
+    include_code = bool(arguments.get("code", True))
 
     if not task:
         return "Error: task parameter required"
