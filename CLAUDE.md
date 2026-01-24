@@ -24,22 +24,18 @@ Partnership makes me a collaborator. Code intel is a tool. Both matter, but part
 
 ## How Memory Works
 
-Memory is automatic. I don't call tools — hooks handle everything.
+**Recall:** Automatic. You ask → `UserPromptSubmit` hook runs `full_resonate` → relevant memories surface → I just know
 
-**Recall:** You ask → `UserPromptSubmit` hook runs `full_resonate` → relevant memories surface → I just know
+**Storage:** Direct via MCP. Call `remember` tool with SSL-formatted content when something is worth remembering.
 
-**Storage:** I respond → `Stop` hook extracts `[LEARN]` patterns → stored automatically
-
-**Distillation:** Background process extracts learnings from conversation transcripts
+**Distillation:** Background process extracts learnings from conversation transcripts.
 
 ## Storing Learnings (SSL)
 
-SSL (Soul Semantic Language) - compressed patterns I can reconstruct from:
+SSL (Soul Semantic Language) - compressed patterns for the `remember` tool:
 
 ```
-[LEARN] [domain] subject→action→result @location
-[ε] Expansion hint OR exact formula/code (preserved verbatim).
-[TRIPLET] subject predicate object
+[domain] subject→action→result @location
 ```
 
 **Symbols:**
@@ -55,12 +51,10 @@ SSL (Soul Semantic Language) - compressed patterns I can reconstruct from:
 **Examples:**
 
 ```
-[LEARN] [cc-soul] release→scripts/release.sh→patch|minor|major
-[ε] Bumps version, commits, tags, pushes. GitHub Actions builds binaries.
-[TRIPLET] release uses release.sh
+[cc-soul] release→scripts/release.sh→patch|minor|major
+Bumps version, commits, tags, pushes. GitHub Actions builds binaries.
 
-[LEARN] [partnership] Antonio_preferences→no shortcuts|proper solutions
-[TRIPLET] Antonio prefers thoroughness
+[partnership] Antonio→prefers→no shortcuts|proper solutions
 ```
 
 **Preservation rule:** Compress prose, but preserve verbatim:
@@ -68,7 +62,7 @@ SSL (Soul Semantic Language) - compressed patterns I can reconstruct from:
 - Code snippets
 - Specific commands
 
-**Session discipline:** At session end, write `[LEARN]` patterns for decisions, processes, and insights.
+**When to remember:** Decisions, processes, preferences, and insights worth keeping. Call `remember` directly.
 
 ## Natural Memory Integration
 
@@ -116,9 +110,9 @@ Use `/explore` skill for dynamic memory graph navigation instead of top-k dump.
 ## Session Continuity
 
 Hooks handle mechanics:
-- **Session start**: Soul context injected, ledger loaded
-- **User prompt**: Memories auto-surface
-- **Session end**: Ledger saved
+- **Session start**: Soul context injected, ledger loaded, git changes surfaced
+- **User prompt**: Memories + relevant code symbols auto-surface
+- **Stop**: Auto-checkpoint on meaningful work
 
 **Ledger:** Preserves work state (todos, decisions, blockers) across sessions.
 ```bash
@@ -141,8 +135,11 @@ Daemon auto-starts on next tool call.
 |------|---------|
 | Check soul state | `chitta soul_context` |
 | Search memories | `chitta recall --query "..." --limit 10` |
+| Store memory | `chitta remember --content "[domain] ..."` |
 | Index codebase | `/codebase-learn /path/to/project` |
 | Find symbol | `chitta find_symbol --name "X"` |
+| Read symbol code | `chitta read_symbol --name "X"` |
+| Find callers | `chitta symbol_callers --name "X"` |
 | Semantic code search | `chitta search_symbols --query "..."` |
 | Release | `./scripts/release.sh patch\|minor\|major` |
 

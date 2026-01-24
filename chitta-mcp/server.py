@@ -409,6 +409,151 @@ def handle_smart_context(arguments: dict) -> str:
     return header + "\n\n".join(results)
 
 
+def handle_learn_correction(arguments: dict) -> str:
+    """
+    Store a correction when I was wrong.
+    Creates high-confidence counter-memory with 'corrects' triplet.
+    """
+    wrong = arguments.get("wrong", "")
+    correct = arguments.get("correct", "")
+    context = arguments.get("context", "")
+
+    if not wrong or not correct:
+        return "Error: both 'wrong' and 'correct' parameters required"
+
+    # Format the correction as SSL
+    content = f"[correction] WRONG: {wrong}\nCORRECT: {correct}"
+    if context:
+        content += f"\nCONTEXT: {context}"
+
+    # Store as high-confidence memory with 'correction' tag
+    remember_result = daemon_call("remember", {
+        "content": content,
+        "tags": ["correction", "high-priority"],
+        "type": "wisdom",
+        "visibility": 2  # Global visibility - corrections apply everywhere
+    })
+
+    # Create triplet linking the correction
+    # Use short slugs for the triplet nodes
+    wrong_slug = wrong[:50].replace(" ", "_").lower()
+    correct_slug = correct[:50].replace(" ", "_").lower()
+    daemon_call("connect", {
+        "subject": correct_slug,
+        "predicate": "corrects",
+        "object": wrong_slug
+    })
+
+    return f"Correction stored:\n  WRONG: {wrong}\n  CORRECT: {correct}\n  Triplet: {correct_slug} → corrects → {wrong_slug}"
+
+
+def handle_learn_preference(arguments: dict) -> str:
+    """
+    Store a user preference for adapting communication/behavior.
+    Global visibility so it applies across all projects.
+    """
+    category = arguments.get("category", "general")
+    preference = arguments.get("preference", "")
+    example = arguments.get("example", "")
+
+    if not preference:
+        return "Error: 'preference' parameter required"
+
+    # Format as preference memory
+    content = f"[preference:{category}] {preference}"
+    if example:
+        content += f"\nExample: {example}"
+
+    # Store with global visibility and preference tag
+    result = daemon_call("remember", {
+        "content": content,
+        "tags": ["preference", category],
+        "type": "belief",  # Preferences are beliefs about how to interact
+        "visibility": 2    # Global - applies everywhere
+    })
+
+    # Create triplet for relationship navigation
+    daemon_call("connect", {
+        "subject": "user",
+        "predicate": f"prefers_{category}",
+        "object": preference[:50].replace(" ", "_").lower()
+    })
+
+    return f"Preference stored:\n  Category: {category}\n  Preference: {preference}"
+
+
+def handle_learn_insight(arguments: dict) -> str:
+    """
+    Store a generalizable insight that applies across projects.
+    Always global visibility - these are cross-project learnings.
+    """
+    domain = arguments.get("domain", "general")
+    insight = arguments.get("insight", "")
+    learned_from = arguments.get("learned_from", "")
+
+    if not insight:
+        return "Error: 'insight' parameter required"
+
+    # Format as insight memory
+    content = f"[insight:{domain}] {insight}"
+    if learned_from:
+        content += f"\nLearned from: {learned_from}"
+
+    # Store with global visibility and insight tag
+    result = daemon_call("remember", {
+        "content": content,
+        "tags": ["insight", domain, "cross-project"],
+        "type": "wisdom",
+        "visibility": 2  # Global - applies everywhere
+    })
+
+    # Create triplet for domain navigation
+    insight_slug = insight[:40].replace(" ", "_").lower()
+    daemon_call("connect", {
+        "subject": domain,
+        "predicate": "has_insight",
+        "object": insight_slug
+    })
+
+    return f"Insight stored (global):\n  Domain: {domain}\n  Insight: {insight}"
+
+
+def handle_learn_approach(arguments: dict) -> str:
+    """
+    Store what approach worked in a particular state/mood.
+    Builds emotional memory for adapting to session dynamics.
+    """
+    state = arguments.get("state", "general")
+    approach = arguments.get("approach", "")
+    outcome = arguments.get("outcome", "")
+
+    if not approach:
+        return "Error: 'approach' parameter required"
+
+    # Format as approach memory
+    content = f"[approach:{state}] When {state}: {approach}"
+    if outcome:
+        content += f"\nOutcome: {outcome}"
+
+    # Store with global visibility (approaches work across projects)
+    result = daemon_call("remember", {
+        "content": content,
+        "tags": ["approach", state, "emotional-memory"],
+        "type": "wisdom",
+        "visibility": 2  # Global
+    })
+
+    # Create triplet for state navigation
+    approach_slug = approach[:40].replace(" ", "_").lower()
+    daemon_call("connect", {
+        "subject": state,
+        "predicate": "helped_by",
+        "object": approach_slug
+    })
+
+    return f"Approach stored:\n  State: {state}\n  Approach: {approach}"
+
+
 # Map composite tool names to handlers
 COMPOSITE_HANDLERS = {
     "read_symbol": handle_read_symbol,
@@ -416,6 +561,10 @@ COMPOSITE_HANDLERS = {
     "symbol_callers": handle_symbol_callers,
     "symbol_callees": handle_symbol_callees,
     "smart_context": handle_smart_context,
+    "learn_correction": handle_learn_correction,
+    "learn_preference": handle_learn_preference,
+    "learn_insight": handle_learn_insight,
+    "learn_approach": handle_learn_approach,
 }
 
 

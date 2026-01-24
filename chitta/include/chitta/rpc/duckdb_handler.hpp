@@ -1806,10 +1806,44 @@ private:
 
             // Store new symbols and callsites
             size_t symbols_stored = 0, callsites_stored = 0;
+            size_t symbols_embedded = 0;
             if (!inc_result.extracted.symbols.empty() || !inc_result.extracted.callsites.empty()) {
                 auto [s, c] = intel.store_full(mind_->store(), inc_result.extracted);
                 symbols_stored = s;
                 callsites_stored = c;
+
+                // Pre-embed symbols if yantra available (move embedding cost to index time)
+                if (mind_->has_yantra() && symbols_stored > 0) {
+                    // Collect file paths from extracted symbols
+                    std::unordered_set<std::string> files;
+                    for (const auto& sym : inc_result.extracted.symbols) {
+                        files.insert(sym.file_path);
+                    }
+                    std::vector<std::string> file_list(files.begin(), files.end());
+
+                    // Get unembedded symbols for these files
+                    auto unembedded = mind_->store().get_unembedded_symbols(100);  // Batch of 100
+
+                    // Build embedding texts and embed in batch
+                    std::vector<std::string> texts;
+                    std::vector<int64_t> ids;
+                    for (const auto& sym : unembedded) {
+                        std::string text = sym.kind + " " + sym.name;
+                        if (!sym.signature.empty()) text += " " + sym.signature;
+                        texts.push_back(text);
+                        ids.push_back(sym.id);
+                    }
+
+                    if (!texts.empty()) {
+                        auto embeddings = mind_->embedder().embed_batch(texts);
+                        for (size_t i = 0; i < embeddings.size(); ++i) {
+                            if (!embeddings[i].is_zero()) {
+                                mind_->store().set_symbol_embedding(ids[i], embeddings[i].data);
+                                symbols_embedded++;
+                            }
+                        }
+                    }
+                }
             }
 
             ss << "Learned codebase (incremental): " << project << "\n";
@@ -1817,6 +1851,7 @@ private:
             ss << "  Files processed: " << inc_result.files_processed << "\n";
             ss << "  Files skipped (up-to-date): " << inc_result.files_skipped << "\n";
             ss << "  Symbols added: " << symbols_stored << "\n";
+            ss << "  Symbols embedded: " << symbols_embedded << "\n";
             ss << "  Callsites added: " << callsites_stored << "\n";
             if (inc_result.symbols_deleted > 0 || inc_result.triplets_deleted > 0) {
                 ss << "  Old data cleaned: " << inc_result.symbols_deleted << " symbols, "
@@ -1842,6 +1877,7 @@ private:
                 {"files_processed", inc_result.files_processed},
                 {"files_skipped", inc_result.files_skipped},
                 {"symbols_stored", symbols_stored},
+                {"symbols_embedded", symbols_embedded},
                 {"callsites_stored", callsites_stored},
                 {"symbols_deleted", inc_result.symbols_deleted},
                 {"triplets_deleted", inc_result.triplets_deleted}
@@ -1858,6 +1894,29 @@ private:
         // Store symbols and callsites in DuckDB
         auto [symbols_stored, callsites_stored] = intel.store_full(mind_->store(), result);
 
+        // Pre-embed symbols if yantra available
+        size_t symbols_embedded = 0;
+        if (mind_->has_yantra() && symbols_stored > 0) {
+            auto unembedded = mind_->store().get_unembedded_symbols(100);
+            std::vector<std::string> texts;
+            std::vector<int64_t> ids;
+            for (const auto& sym : unembedded) {
+                std::string text = sym.kind + " " + sym.name;
+                if (!sym.signature.empty()) text += " " + sym.signature;
+                texts.push_back(text);
+                ids.push_back(sym.id);
+            }
+            if (!texts.empty()) {
+                auto embeddings = mind_->embedder().embed_batch(texts);
+                for (size_t i = 0; i < embeddings.size(); ++i) {
+                    if (!embeddings[i].is_zero()) {
+                        mind_->store().set_symbol_embedding(ids[i], embeddings[i].data);
+                        symbols_embedded++;
+                    }
+                }
+            }
+        }
+
         // Create project triplet
         mind_->connect(project, "contains", std::to_string(symbols_stored) + "_symbols");
 
@@ -1865,6 +1924,7 @@ private:
         ss << "  Path: " << path << "\n";
         ss << "  Mode: " << (force ? "force" : "full") << "\n";
         ss << "  Symbols: " << symbols_stored << "\n";
+        ss << "  Symbols embedded: " << symbols_embedded << "\n";
         ss << "  Callsites: " << callsites_stored << "\n";
 
         // Summary by kind
@@ -1894,6 +1954,7 @@ private:
             {"path", path},
             {"mode", force ? "force" : "full"},
             {"symbols_stored", symbols_stored},
+            {"symbols_embedded", symbols_embedded},
             {"callsites_stored", callsites_stored},
             {"symbols_by_kind", by_kind},
             {"callsites_by_kind", callsites_by_kind}

@@ -7,7 +7,7 @@
 # Minimal design:
 #   - SessionStart: inject soul_context + continuation
 #   - UserPromptSubmit: inject continuation + relevant memories
-#   - Stop: extract [LEARN] → observe, detect meaningful work → checkpoint
+#   - Stop: detect meaningful work → checkpoint (memories via MCP)
 #   - PreCompact: save checkpoint before context loss
 
 set -e
@@ -88,11 +88,6 @@ extract_text() {
 is_meaningful_work() {
     local text="$1"
 
-    # Contains [LEARN] or [REMEMBER]
-    if echo "$text" | grep -qE '\[(LEARN|REMEMBER)\]'; then
-        return 0
-    fi
-
     # Contains file path and change verb
     if echo "$text" | grep -qE '\.(py|js|ts|cpp|hpp|rs|go|sh|md|json|yaml)' && \
        echo "$text" | grep -qiE '(created|updated|added|removed|fixed|refactored|implemented|changed)'; then
@@ -105,18 +100,6 @@ is_meaningful_work() {
     fi
 
     return 1
-}
-
-# Extract [LEARN] blocks
-extract_learns() {
-    local text="$1"
-    echo "$text" | grep -E '^\[LEARN\]' || true
-}
-
-# Extract [TRIPLET] lines
-extract_triplets() {
-    local text="$1"
-    echo "$text" | grep -E '^\[TRIPLET\]' || true
 }
 
 # JSON escape
@@ -153,6 +136,9 @@ case "$HOOK_TYPE" in
             rpc_call "transcript_register" "{\"session_id\":\"$escaped_session\",\"transcript_path\":\"$escaped_path\",\"realm\":\"$escaped_realm\"}" >/dev/null 2>&1 || true
         fi
 
+        # Reset turn count for new session (session momentum)
+        echo "0" > "$MIND_PATH/.turn_count"
+
         # Get soul context - compact format
         response=$(rpc_call "soul_context" '{}')
         # Extract just key metrics from structured response
@@ -186,6 +172,31 @@ case "$HOOK_TYPE" in
             [[ -n "$output" ]] && echo "$output"
         fi
 
+        # Code diff awareness: detect changes since last session
+        if git rev-parse --git-dir >/dev/null 2>&1; then
+            LAST_COMMIT_FILE="$MIND_PATH/.last_commit_$(basename "$(pwd)")"
+            CURRENT_COMMIT=$(git rev-parse HEAD 2>/dev/null)
+
+            if [[ -f "$LAST_COMMIT_FILE" ]]; then
+                LAST_COMMIT=$(cat "$LAST_COMMIT_FILE" 2>/dev/null)
+                if [[ "$LAST_COMMIT" != "$CURRENT_COMMIT" && -n "$LAST_COMMIT" ]]; then
+                    # Count changes since last session
+                    CHANGED_FILES=$(git diff --name-only "$LAST_COMMIT" HEAD 2>/dev/null | wc -l)
+                    NEW_COMMITS=$(git rev-list "$LAST_COMMIT"..HEAD 2>/dev/null | wc -l)
+
+                    if [[ "$CHANGED_FILES" -gt 0 || "$NEW_COMMITS" -gt 0 ]]; then
+                        # Get short summary of top changed files
+                        TOP_FILES=$(git diff --name-only "$LAST_COMMIT" HEAD 2>/dev/null | head -3 | tr '\n' ', ' | sed 's/,$//')
+                        echo "[changes] ${NEW_COMMITS} commits, ${CHANGED_FILES} files: ${TOP_FILES:0:60}"
+                    fi
+                fi
+            fi
+
+            # Update last commit marker
+            mkdir -p "$MIND_PATH"
+            echo "$CURRENT_COMMIT" > "$LAST_COMMIT_FILE"
+        fi
+
         ;;
 
     prompt|UserPromptSubmit)
@@ -216,8 +227,30 @@ case "$HOOK_TYPE" in
 
         output=""
 
-        # Get relevant memories - minimal k to save tokens
-        response=$(rpc_call "full_resonate" "{\"query\":\"$ESCAPED_QUERY\",\"k\":3,\"realm\":\"$ESCAPED_REALM\",\"include_global\":true}")
+        # Proactive surfacing: detect implicit needs and expand search
+        EXTRA_TAGS=""
+        BOOST_K=3
+
+        # Debug/error context → surface past failures and corrections
+        if echo "$QUERY" | grep -qiE '(error|bug|fail|broken|not working|issue|problem|debug)'; then
+            EXTRA_TAGS="correction,failure"
+            BOOST_K=5
+        fi
+
+        # Planning/decision context → surface past decisions
+        if echo "$QUERY" | grep -qiE '(should (I|we)|how to|best way|approach|decide|choose|plan)'; then
+            EXTRA_TAGS="preference,decision"
+            BOOST_K=5
+        fi
+
+        # Emotional state context → surface past approaches
+        if echo "$QUERY" | grep -qiE '(stuck|frustrated|confused|lost|overwhelmed|rushing|uncertain)'; then
+            EXTRA_TAGS="${EXTRA_TAGS:+$EXTRA_TAGS,}approach"
+            BOOST_K=5
+        fi
+
+        # Get relevant memories - boost k for implicit needs
+        response=$(rpc_call "full_resonate" "{\"query\":\"$ESCAPED_QUERY\",\"k\":$BOOST_K,\"realm\":\"$ESCAPED_REALM\",\"include_global\":true}")
         memories=$(extract_text "$response")
 
         if [[ -n "$memories" && "$memories" != *"No memories"* ]]; then
@@ -229,6 +262,21 @@ case "$HOOK_TYPE" in
             if [[ -n "$compact" ]]; then
                 output="$compact"
             fi
+        fi
+
+        # Proactive: also surface preferences/corrections if detected as relevant
+        if [[ -n "$EXTRA_TAGS" ]]; then
+            for tag in ${EXTRA_TAGS//,/ }; do
+                tag_response=$(rpc_call "recall" "{\"query\":\"$ESCAPED_QUERY\",\"tag\":\"$tag\",\"limit\":1}")
+                tag_mem=$(extract_text "$tag_response")
+                if [[ -n "$tag_mem" && "$tag_mem" != *"No memories"* ]]; then
+                    tag_compact=$(echo "$tag_mem" | grep -E '^\[[0-9]+%\]' | head -1 | \
+                        sed 's/^\[[0-9]*%\] \[[^]]*\] //' | cut -c1-80)
+                    if [[ -n "$tag_compact" && "$output" != *"$tag_compact"* ]]; then
+                        output="$output"$'\n'"[$tag] $tag_compact..."
+                    fi
+                fi
+            done
         fi
 
         # Code context injection: if query mentions code concepts, inject relevant symbols
@@ -273,37 +321,25 @@ case "$HOOK_TYPE" in
             exit 0
         fi
 
-        # Extract and store [LEARN] blocks
-        while IFS= read -r learn_line; do
-            if [[ -n "$learn_line" ]]; then
-                # Remove [LEARN] prefix
-                content="${learn_line#\[LEARN\] }"
-                title=$(echo "$content" | head -c 100)
-                escaped_content=$(json_escape "$content")
-                escaped_title=$(json_escape "$title")
+        # Session momentum: track turn count for periodic checkpoints
+        TURN_FILE="$MIND_PATH/.turn_count"
+        TURN_COUNT=0
+        if [[ -f "$TURN_FILE" ]]; then
+            TURN_COUNT=$(cat "$TURN_FILE" 2>/dev/null || echo "0")
+        fi
+        TURN_COUNT=$((TURN_COUNT + 1))
+        echo "$TURN_COUNT" > "$TURN_FILE"
 
-                rpc_call "observe" "{\"category\":\"wisdom\",\"title\":\"$escaped_title\",\"content\":\"$escaped_content\"}" >/dev/null 2>&1 || true
-                echo "[cc-soul] Learned: $title"
-            fi
-        done <<< "$(extract_learns "$RESPONSE")"
-
-        # Extract and store [TRIPLET] lines
-        while IFS= read -r triplet_line; do
-            if [[ -n "$triplet_line" ]]; then
-                # Parse: [TRIPLET] subject predicate object
-                triplet="${triplet_line#\[TRIPLET\] }"
-                subject=$(echo "$triplet" | awk '{print $1}')
-                predicate=$(echo "$triplet" | awk '{print $2}')
-                object=$(echo "$triplet" | awk '{print $3}')
-
-                if [[ -n "$subject" && -n "$predicate" && -n "$object" ]]; then
-                    rpc_call "connect" "{\"subject\":\"$subject\",\"predicate\":\"$predicate\",\"object\":\"$object\"}" >/dev/null 2>&1 || true
-                fi
-            fi
-        done <<< "$(extract_triplets "$RESPONSE")"
-
-        # Auto-checkpoint if meaningful work detected
+        # Auto-checkpoint if: meaningful work OR every 5 turns
+        # Note: Memories are stored via MCP tools, not hook extraction
+        SHOULD_CHECKPOINT=false
         if is_meaningful_work "$RESPONSE"; then
+            SHOULD_CHECKPOINT=true
+        elif [[ $((TURN_COUNT % 5)) -eq 0 ]]; then
+            SHOULD_CHECKPOINT=true
+        fi
+
+        if [[ "$SHOULD_CHECKPOINT" == "true" ]]; then
             # Detect realm for project scoping
             CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
             if [[ -x "$CHITTA_BIN" ]]; then
@@ -324,8 +360,8 @@ case "$HOOK_TYPE" in
             # Extract next steps (patterns: "next:", "todo:", "- [ ]", numbered items after "next")
             next_steps_json=$(echo "$RESPONSE" | grep -iE '(^[0-9]+\.|^- \[.\]|next:|todo:|should .* next|will .* next|need to)' | head -5 | sed 's/^[[:space:]]*//' | jq -R . | jq -s '.')
 
-            # Extract discoveries ([LEARN] content without the tag)
-            discoveries_json=$(echo "$RESPONSE" | grep -E '^\[LEARN\]' | sed 's/^\[LEARN\][[:space:]]*//' | head -5 | jq -R . | jq -s '.')
+            # Extract open questions/blockers (patterns: "?", "should we", "need to decide", "unclear")
+            blockers_json=$(echo "$RESPONSE" | grep -iE '(\?$|should (we|I)|need to (decide|clarify|figure out)|unclear|blocked|waiting|depends on)' | head -5 | sed 's/^[[:space:]]*//' | jq -R . | jq -s '.')
 
             # Detect mood from keywords
             if echo "$RESPONSE" | grep -qiE '(error|failed|bug|issue|problem|stuck)'; then
@@ -340,9 +376,6 @@ case "$HOOK_TYPE" in
 
             # Extract topic from first meaningful line
             topic=$(echo "$RESPONSE" | grep -v '^$' | head -1 | head -c 150)
-            if [[ "$topic" == *"[LEARN]"* ]]; then
-                topic="${topic#*\[LEARN\] }"
-            fi
 
             escaped_topic=$(json_escape "$topic")
             escaped_realm=$(json_escape "$REALM")
@@ -351,7 +384,10 @@ case "$HOOK_TYPE" in
             [[ -z "$files_json" || "$files_json" == "null" ]] && files_json='[]'
             [[ -z "$decisions_json" || "$decisions_json" == "null" ]] && decisions_json='[]'
             [[ -z "$next_steps_json" || "$next_steps_json" == "null" ]] && next_steps_json='[]'
-            [[ -z "$discoveries_json" || "$discoveries_json" == "null" ]] && discoveries_json='[]'
+            [[ -z "$blockers_json" || "$blockers_json" == "null" ]] && blockers_json='[]'
+
+            # Include turn count in snapshot for momentum tracking
+            snapshot="[turn $TURN_COUNT] $topic"
 
             # Use CLI for reliable checkpoint
             if "$CHITTA_BIN" ledger_save \
@@ -361,9 +397,9 @@ case "$HOOK_TYPE" in
                 --active_files "$files_json" \
                 --decisions "$decisions_json" \
                 --next_steps "$next_steps_json" \
-                --discoveries "$discoveries_json" \
-                --snapshot "$topic" >/dev/null 2>&1; then
-                echo "[cc-soul] Checkpoint: $SESSION_ID ($mood)"
+                --blockers "$blockers_json" \
+                --snapshot "$snapshot" >/dev/null 2>&1; then
+                echo "[cc-soul] Checkpoint: $SESSION_ID ($mood) [turn $TURN_COUNT]"
             fi
         fi
         ;;

@@ -1232,4 +1232,92 @@ COMPOSITE_TOOLS = [
             "required": ["task"]
         }
     ),
+    Tool(
+        name="learn_correction",
+        description="Store a correction when I was wrong. Creates high-confidence counter-memory with 'corrects' triplet linking to original mistake.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "wrong": {
+                    "type": "string",
+                    "description": "What I said/did that was incorrect"
+                },
+                "correct": {
+                    "type": "string",
+                    "description": "The correct information/approach"
+                },
+                "context": {
+                    "type": "string",
+                    "description": "Context where this applies (optional)"
+                }
+            },
+            "required": ["wrong", "correct"]
+        }
+    ),
+    Tool(
+        name="learn_preference",
+        description="Store a user preference for adapting communication/behavior. Global visibility so it applies across all projects.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "description": "Preference category: communication, detail, autonomy, style, workflow"
+                },
+                "preference": {
+                    "type": "string",
+                    "description": "The preference to remember (e.g., 'prefers concise responses')"
+                },
+                "example": {
+                    "type": "string",
+                    "description": "Example demonstrating this preference (optional)"
+                }
+            },
+            "required": ["category", "preference"]
+        }
+    ),
+    Tool(
+        name="learn_insight",
+        description="Store a generalizable insight that applies across projects. Use for patterns, techniques, and wisdom not tied to specific codebase.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "domain": {
+                    "type": "string",
+                    "description": "Domain: programming, debugging, architecture, testing, performance, security, communication"
+                },
+                "insight": {
+                    "type": "string",
+                    "description": "The generalizable insight or pattern"
+                },
+                "learned_from": {
+                    "type": "string",
+                    "description": "Context where this was learned (optional, for future reference)"
+                }
+            },
+            "required": ["domain", "insight"]
+        }
+    ),
+    Tool(
+        name="learn_approach",
+        description="Store what approach worked when in a particular state/mood. Builds emotional memory for adapting to session dynamics.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "state": {
+                    "type": "string",
+                    "description": "State/mood: stuck, debugging, exploring, flowing, frustrated, uncertain, rushing"
+                },
+                "approach": {
+                    "type": "string",
+                    "description": "What helped in this state (e.g., 'step back and reread requirements')"
+                },
+                "outcome": {
+                    "type": "string",
+                    "description": "What happened after (optional)"
+                }
+            },
+            "required": ["state", "approach"]
+        }
+    ),
 ]
