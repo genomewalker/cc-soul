@@ -129,6 +129,19 @@ pkill -TERM chittad  # Graceful restart
 
 Daemon auto-starts on next tool call.
 
+## Learning Tools
+
+Specialized tools for building partnership memory:
+
+| Tool | Purpose | When to use |
+|------|---------|-------------|
+| `learn_correction` | Store when I was wrong | User corrects me |
+| `learn_preference` | Store user preferences | Communication/workflow preferences |
+| `learn_insight` | Store generalizable patterns | Cross-project wisdom |
+| `learn_approach` | Store what helps in states | When stuck/frustrated/flowing |
+
+All learning tools have global visibility - they apply across projects.
+
 ## Key Commands
 
 | Task | Command |
