@@ -127,6 +127,9 @@ json_escape() {
 
 case "$HOOK_TYPE" in
     start|SessionStart)
+        # Read stdin for session data (contains transcript_path)
+        STDIN_DATA=$(cat)
+
         # Ensure daemon is running before any RPC calls
         ensure_daemon || exit 0  # Soft fail - don't block session
 
@@ -139,24 +142,15 @@ case "$HOOK_TYPE" in
         fi
 
         # Auto-register transcript for distillation
-        # Find the most recent .jsonl transcript in the project directory
-        if [[ -n "${CLAUDE_PROJECT_DIR:-}" ]]; then
-            PROJECT_DIR="$CLAUDE_PROJECT_DIR"
-        else
-            # Derive from cwd - Claude Code stores transcripts in ~/.claude/projects/<slug>/
-            PROJECT_SLUG=$(echo "$PWD" | tr '/' '-' | sed 's/^-//')
-            PROJECT_DIR="$HOME/.claude/projects/$PROJECT_SLUG"
-        fi
+        # Get transcript_path from stdin (Claude Code provides this)
+        TRANSCRIPT=$(echo "$STDIN_DATA" | jq -r '.transcript_path // empty' 2>/dev/null)
 
-        if [[ -d "$PROJECT_DIR" ]]; then
-            TRANSCRIPT=$(ls -t "$PROJECT_DIR"/*.jsonl 2>/dev/null | head -1)
-            if [[ -n "$TRANSCRIPT" && -f "$TRANSCRIPT" ]]; then
-                SESSION_ID=$(basename "$TRANSCRIPT" .jsonl)
-                escaped_session=$(json_escape "$SESSION_ID")
-                escaped_path=$(json_escape "$TRANSCRIPT")
-                escaped_realm=$(json_escape "$REALM")
-                rpc_call "transcript_register" "{\"session_id\":\"$escaped_session\",\"transcript_path\":\"$escaped_path\",\"realm\":\"$escaped_realm\"}" >/dev/null 2>&1 || true
-            fi
+        if [[ -n "$TRANSCRIPT" && -f "$TRANSCRIPT" ]]; then
+            SESSION_ID=$(basename "$TRANSCRIPT" .jsonl)
+            escaped_session=$(json_escape "$SESSION_ID")
+            escaped_path=$(json_escape "$TRANSCRIPT")
+            escaped_realm=$(json_escape "$REALM")
+            rpc_call "transcript_register" "{\"session_id\":\"$escaped_session\",\"transcript_path\":\"$escaped_path\",\"realm\":\"$escaped_realm\"}" >/dev/null 2>&1 || true
         fi
 
         # Get soul context - compact format

@@ -1216,6 +1216,9 @@ private:
         ss << "  Yantra: " << (mind_->has_yantra() ? "ready" : "not attached") << "\n";
         ss << "  Status: " << h.status() << "\n";
 
+        // Get transcript tracking info
+        size_t transcripts = mind_->store().transcript_count();
+
         return DuckDBToolResult::ok(ss.str(), {
             {"version", CHITTA_VERSION},
             {"total_nodes", h.total_nodes},
@@ -1225,7 +1228,8 @@ private:
             {"avg_confidence", h.avg_confidence},
             {"triplet_count", mind_->triplet_count()},
             {"yantra_ready", mind_->has_yantra()},
-            {"status", h.status()}
+            {"status", h.status()},
+            {"transcripts_tracked", transcripts}
         });
     }
 
