@@ -86,7 +86,7 @@ class ChittaClient:
 
 # Global client and server
 client: Optional[ChittaClient] = None
-server = Server("chitta")
+server = Server("chitta-mcp")
 
 
 def ensure_daemon() -> bool:
@@ -169,7 +169,7 @@ async def call_tool(name: str, arguments: dict):
 def main():
     async def run():
         init_options = InitializationOptions(
-            server_name="chitta",
+            server_name="chitta-mcp",
             server_version="0.1.0",
             capabilities=ServerCapabilities(tools=ToolsCapability())
         )

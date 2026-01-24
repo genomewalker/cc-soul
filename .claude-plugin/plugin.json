@@ -15,11 +15,5 @@
     "continuity",
     "soul"
   ],
-  "skills": "./skills/",
-  "mcpServers": {
-    "chitta": {
-      "command": "chitta-mcp",
-      "description": "Soul memory and code intelligence daemon"
-    }
-  }
+  "skills": "./skills/"
 }

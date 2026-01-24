@@ -86,9 +86,11 @@ def generate_static_file(tools: list[dict]) -> str:
         desc = t["description"].replace('"', '\\"')
         schema = json.dumps(t["inputSchema"], indent=8)
         # Convert JSON literals to Python
-        schema = schema.replace(': null', ': None')
         schema = schema.replace(': true', ': True')
         schema = schema.replace(': false', ': False')
+        # Fix null properties (invalid JSON Schema) - must be empty object
+        schema = schema.replace('"properties": null', '"properties": {}')
+        schema = schema.replace(': null', ': None')
         # Indent the schema properly
         schema_lines = schema.split('\n')
         schema_formatted = schema_lines[0]

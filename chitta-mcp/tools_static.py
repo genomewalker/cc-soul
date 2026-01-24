@@ -1023,7 +1023,7 @@ TOOLS = [
         name="transcript_list",
         description="List all registered transcripts",
         inputSchema={
-                "properties": None,
+                "properties": {},
                 "type": "object"
         }
     ),
@@ -1088,7 +1088,7 @@ TOOLS = [
         name="distill_status",
         description="Get distillation system status: transcripts, realms, pending work",
         inputSchema={
-                "properties": None,
+                "properties": {},
                 "type": "object"
         }
     ),
