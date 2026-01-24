@@ -271,20 +271,25 @@ def handle_symbol_callers(arguments: dict) -> str:
         return "Error: name parameter required"
 
     # Query triplets where this symbol is called
-    response = daemon_call("query", {"object": name, "predicate": "calls"})
+    response = daemon_call("query", {"object": name, "predicate": "calls"}, structured=True)
 
     try:
         data = json.loads(response)
-        triplets = data if isinstance(data, list) else data.get("triplets", [])
+        triplets = data.get("triplets", []) if isinstance(data, dict) else data
 
         if not triplets:
             return f"No callers found for: {name}"
 
-        # Format results
+        # Format results (dedupe by caller)
+        seen = set()
         results = []
-        for t in triplets[:limit]:
+        for t in triplets:
             caller = t.get("subject", "unknown")
-            results.append(f"  {caller} → {name}")
+            if caller not in seen:
+                seen.add(caller)
+                results.append(f"  {caller} → {name}")
+                if len(results) >= limit:
+                    break
 
         return f"Callers of {name} ({len(results)} found):\n" + "\n".join(results)
 
@@ -304,20 +309,25 @@ def handle_symbol_callees(arguments: dict) -> str:
         return "Error: name parameter required"
 
     # Query triplets where this symbol calls others
-    response = daemon_call("query", {"subject": name, "predicate": "calls"})
+    response = daemon_call("query", {"subject": name, "predicate": "calls"}, structured=True)
 
     try:
         data = json.loads(response)
-        triplets = data if isinstance(data, list) else data.get("triplets", [])
+        triplets = data.get("triplets", []) if isinstance(data, dict) else data
 
         if not triplets:
             return f"No callees found for: {name}"
 
-        # Format results
+        # Format results (dedupe by callee)
+        seen = set()
         results = []
-        for t in triplets[:limit]:
+        for t in triplets:
             callee = t.get("object", "unknown")
-            results.append(f"  {name} → {callee}")
+            if callee not in seen:
+                seen.add(callee)
+                results.append(f"  {name} → {callee}")
+                if len(results) >= limit:
+                    break
 
         return f"{name} calls ({len(results)} found):\n" + "\n".join(results)
 
