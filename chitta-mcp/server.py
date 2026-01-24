@@ -554,6 +554,87 @@ def handle_learn_approach(arguments: dict) -> str:
     return f"Approach stored:\n  State: {state}\n  Approach: {approach}"
 
 
+def handle_learn_outcome(arguments: dict) -> str:
+    """
+    Record whether a suggestion/approach actually helped.
+    Builds feedback loop for improving future suggestions.
+    """
+    suggestion = arguments.get("suggestion", "")
+    helped = arguments.get("helped", False)
+    details = arguments.get("details", "")
+
+    if not suggestion:
+        return "Error: 'suggestion' parameter required"
+
+    # Format as outcome memory
+    outcome_type = "worked" if helped else "failed"
+    content = f"[outcome:{outcome_type}] {suggestion}"
+    if details:
+        content += f"\nWhy: {details}"
+
+    # Store with appropriate tags
+    tags = ["outcome", outcome_type]
+    if helped:
+        tags.append("success")
+    else:
+        tags.append("failure")
+
+    result = daemon_call("remember", {
+        "content": content,
+        "tags": tags,
+        "type": "episode",
+        "visibility": 2
+    })
+
+    # Create triplet for feedback tracking
+    suggestion_slug = suggestion[:40].replace(" ", "_").lower()
+    daemon_call("connect", {
+        "subject": suggestion_slug,
+        "predicate": "resulted_in",
+        "object": outcome_type
+    })
+
+    return f"Outcome recorded:\n  Suggestion: {suggestion}\n  Helped: {helped}"
+
+
+def handle_learn_milestone(arguments: dict) -> str:
+    """
+    Record a relationship milestone - achievements and significant moments.
+    """
+    milestone = arguments.get("milestone", "")
+    significance = arguments.get("significance", "")
+    date = arguments.get("date", "")
+
+    if not milestone:
+        return "Error: 'milestone' parameter required"
+
+    # Format as milestone memory
+    import datetime
+    if not date:
+        date = datetime.datetime.now().strftime("%Y-%m-%d")
+
+    content = f"[milestone] {date}: {milestone}"
+    if significance:
+        content += f"\nSignificance: {significance}"
+
+    result = daemon_call("remember", {
+        "content": content,
+        "tags": ["milestone", "relationship", "achievement"],
+        "type": "episode",
+        "visibility": 2  # Global - milestones matter everywhere
+    })
+
+    # Create triplet for timeline navigation
+    milestone_slug = milestone[:40].replace(" ", "_").lower()
+    daemon_call("connect", {
+        "subject": "partnership",
+        "predicate": "achieved",
+        "object": milestone_slug
+    })
+
+    return f"Milestone recorded:\n  Date: {date}\n  Milestone: {milestone}"
+
+
 # Map composite tool names to handlers
 COMPOSITE_HANDLERS = {
     "read_symbol": handle_read_symbol,
@@ -565,6 +646,8 @@ COMPOSITE_HANDLERS = {
     "learn_preference": handle_learn_preference,
     "learn_insight": handle_learn_insight,
     "learn_approach": handle_learn_approach,
+    "learn_outcome": handle_learn_outcome,
+    "learn_milestone": handle_learn_milestone,
 }
 
 

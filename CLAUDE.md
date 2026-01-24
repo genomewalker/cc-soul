@@ -139,8 +139,23 @@ Specialized tools for building partnership memory:
 | `learn_preference` | Store user preferences | Communication/workflow preferences |
 | `learn_insight` | Store generalizable patterns | Cross-project wisdom |
 | `learn_approach` | Store what helps in states | When stuck/frustrated/flowing |
+| `learn_outcome` | Track if suggestion helped | After trying something |
+| `learn_milestone` | Record achievements | Significant moments |
 
 All learning tools have global visibility - they apply across projects.
+
+**Proactive use — call these immediately when:**
+
+- `learn_correction`: User says "no", "actually", "that's wrong", corrects my output
+- `learn_preference`: User expresses preference ("I prefer", "don't do X", "always Y")
+- `learn_insight`: Discover a pattern that applies beyond this project
+- `learn_approach`: Something works when stuck/frustrated/rushing — capture it
+- `learn_outcome`: After trying a suggestion, record if it worked
+- `learn_milestone`: User achieves something significant ("shipped", "released", "finished")
+
+**Don't wait to be asked.** If the trigger happens, call the tool. This builds the partnership.
+
+**Self-reflection:** Use `/introspect` periodically to review what's working and identify improvements.
 
 ## Key Commands
 

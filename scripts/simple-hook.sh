@@ -165,11 +165,29 @@ case "$HOOK_TYPE" in
             todos=$(echo "$ledger_json" | jq -r '.todos // []' 2>/dev/null)
             pending=$(echo "$todos" | jq '[.[] | select(.status != "completed")] | length' 2>/dev/null || echo "0")
             next=$(echo "$ledger_json" | jq -r '.next_steps[0] // ""' 2>/dev/null)
+            mood=$(echo "$ledger_json" | jq -r '.mood // ""' 2>/dev/null)
+            snapshot=$(echo "$ledger_json" | jq -r '.snapshot // ""' 2>/dev/null)
 
             output=""
             [[ "$pending" -gt 0 ]] && output="[$pending pending]"
             [[ -n "$next" && "$next" != "null" ]] && output="$output next: ${next:0:80}"
             [[ -n "$output" ]] && echo "$output"
+
+            # Anticipation: surface last session context
+            if [[ -n "$snapshot" && "$snapshot" != "null" ]]; then
+                echo "[last session] $mood: ${snapshot:0:100}"
+            fi
+        fi
+
+        # Anticipation: surface relevant preferences for this project
+        project_name=$(basename "$(pwd)")
+        escaped_project=$(json_escape "$project_name")
+        pref_response=$(rpc_call "recall" "{\"query\":\"$escaped_project preferences workflow\",\"tag\":\"preference\",\"limit\":1}")
+        pref_text=$(extract_text "$pref_response")
+        if [[ -n "$pref_text" && "$pref_text" != *"No memories"* ]]; then
+            pref_compact=$(echo "$pref_text" | grep -E '^\[[0-9]+%\]' | head -1 | \
+                sed 's/^\[[0-9]*%\] \[[^]]*\] //' | cut -c1-80)
+            [[ -n "$pref_compact" ]] && echo "[preference] $pref_compact"
         fi
 
         # Code diff awareness: detect changes since last session

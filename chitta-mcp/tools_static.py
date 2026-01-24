@@ -1320,4 +1320,48 @@ COMPOSITE_TOOLS = [
             "required": ["state", "approach"]
         }
     ),
+    Tool(
+        name="learn_outcome",
+        description="Record whether a suggestion/approach actually helped. Builds feedback loop for improving future suggestions.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "suggestion": {
+                    "type": "string",
+                    "description": "What was suggested or tried"
+                },
+                "helped": {
+                    "type": "boolean",
+                    "description": "Did it help? true/false"
+                },
+                "details": {
+                    "type": "string",
+                    "description": "Why it helped or didn't (optional but valuable)"
+                }
+            },
+            "required": ["suggestion", "helped"]
+        }
+    ),
+    Tool(
+        name="learn_milestone",
+        description="Record a relationship milestone - achievements, personal context, significant moments worth remembering.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "milestone": {
+                    "type": "string",
+                    "description": "What happened (e.g., 'shipped v1.0', 'first successful release')"
+                },
+                "significance": {
+                    "type": "string",
+                    "description": "Why it matters (optional)"
+                },
+                "date": {
+                    "type": "string",
+                    "description": "When it happened (optional, defaults to now)"
+                }
+            },
+            "required": ["milestone"]
+        }
+    ),
 ]
