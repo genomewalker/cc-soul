@@ -7,7 +7,6 @@ Tools are defined statically (like opencode-bridge) for proper discovery.
 """
 
 import os
-import sys
 import json
 import socket
 import asyncio
@@ -20,7 +19,9 @@ logging.getLogger("mcp").setLevel(logging.ERROR)
 
 from mcp.server import Server, InitializationOptions
 from mcp.server.stdio import stdio_server
-from mcp.types import Tool, TextContent, ServerCapabilities, ToolsCapability
+from mcp.types import TextContent, ServerCapabilities, ToolsCapability
+
+from tools_static import TOOLS
 
 
 def djb2_hash(s: str) -> int:
@@ -152,55 +153,10 @@ def daemon_call(tool_name: str, arguments: dict) -> str:
         return f"Error: {e}"
 
 
-# Fetch tools from daemon at startup and cache them
-def fetch_daemon_tools() -> list[dict]:
-    """Fetch tool definitions from daemon."""
-    if not ensure_daemon():
-        return []
-
-    req = {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "tools/list",
-        "params": {}
-    }
-
-    response = client.request(json.dumps(req))
-    if not response:
-        return []
-
-    try:
-        data = json.loads(response)
-        return data.get("result", {}).get("tools", [])
-    except Exception:
-        return []
-
-
-# Cache tools at module load
-CACHED_TOOLS: list[Tool] = []
-
-
-def init_tools():
-    """Initialize tools from daemon."""
-    global CACHED_TOOLS
-    daemon_tools = fetch_daemon_tools()
-
-    CACHED_TOOLS = [
-        Tool(
-            name=t["name"],
-            description=t.get("description", ""),
-            inputSchema=t.get("inputSchema", {"type": "object", "properties": {}})
-        )
-        for t in daemon_tools
-    ]
-
-
 @server.list_tools()
 async def list_tools():
-    """Return cached tools from daemon."""
-    if not CACHED_TOOLS:
-        init_tools()
-    return CACHED_TOOLS
+    """Return static tools (imported from tools_static.py)."""
+    return TOOLS
 
 
 @server.call_tool()
@@ -211,9 +167,6 @@ async def call_tool(name: str, arguments: dict):
 
 
 def main():
-    # Initialize tools eagerly at startup (before MCP SDK takes over)
-    init_tools()
-
     async def run():
         init_options = InitializationOptions(
             server_name="chitta",

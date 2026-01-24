@@ -16,6 +16,7 @@ dependencies = [
 chitta-mcp = "server:main"
 chitta-mcp-install = "install:install"
 chitta-mcp-uninstall = "install:uninstall"
+chitta-mcp-sync = "sync_tools:sync"
 
 [tool.setuptools]
-py-modules = ["server", "install"]
+py-modules = ["server", "install", "sync_tools", "tools_static"]
