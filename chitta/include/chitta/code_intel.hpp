@@ -568,6 +568,10 @@ public:
             }
             if (!cs.callee_leaf.empty()) {
                 triplets.emplace_back(callsite_id, "callee_leaf", cs.callee_leaf, src);
+                // Direct caller → calls → callee triplet for easy querying
+                if (!cs.caller_symbol.empty()) {
+                    triplets.emplace_back(cs.caller_symbol, "calls", cs.callee_leaf, src);
+                }
             }
             if (!cs.scope_text.empty()) {
                 triplets.emplace_back(callsite_id, "scope_text", cs.scope_text, src);
