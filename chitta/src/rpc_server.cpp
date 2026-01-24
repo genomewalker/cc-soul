@@ -700,14 +700,34 @@ int main(int argc, char* argv[]) {
         chitta::SocketClient client(socket_path);
 
         if (!client.connect()) {
-            // Daemon not running - output MCP error
-            nlohmann::json error;
-            error["jsonrpc"] = "2.0";
-            error["error"]["code"] = -32603;
-            error["error"]["message"] = "Daemon not running. Start with: chittad daemon";
-            error["id"] = nullptr;
-            std::cout << error.dump() << std::endl;
-            return 1;
+            // Try to auto-start the daemon
+            std::string chittad_path;
+            if (const char* home = std::getenv("HOME")) {
+                chittad_path = std::string(home) + "/.claude/bin/chittad";
+            } else {
+                chittad_path = "chittad";
+            }
+
+            // Start daemon in background
+            std::string cmd = chittad_path + " daemon >/dev/null 2>&1 &";
+            std::system(cmd.c_str());
+
+            // Wait for daemon to start (up to 5 seconds)
+            for (int i = 0; i < 50; ++i) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                if (client.connect()) break;
+            }
+
+            if (!client.connected()) {
+                // Still can't connect - output MCP error
+                nlohmann::json error;
+                error["jsonrpc"] = "2.0";
+                error["error"]["code"] = -32603;
+                error["error"]["message"] = "Failed to start daemon";
+                error["id"] = nullptr;
+                std::cout << error.dump() << std::endl;
+                return 1;
+            }
         }
 
         // Read JSON-RPC from stdin, forward to daemon, write response to stdout
@@ -728,7 +748,7 @@ int main(int argc, char* argv[]) {
                     response["result"]["protocolVersion"] = "2024-11-05";
                     response["result"]["capabilities"]["tools"] = nlohmann::json::object();
                     response["result"]["serverInfo"]["name"] = "chitta";
-                    response["result"]["serverInfo"]["version"] = "3.2.0";
+                    response["result"]["serverInfo"]["version"] = CHITTA_VERSION;
                     response["id"] = request_id;
                     std::cout << response.dump() << std::endl;
                 } else if (method == "notifications/initialized") {
