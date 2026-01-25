@@ -109,6 +109,20 @@ def generate_static_file(tools: list[dict]) -> str:
     return '\n'.join(lines)
 
 
+def extract_composite_tools(filepath: Path) -> str:
+    """Extract COMPOSITE_TOOLS section from existing file."""
+    if not filepath.exists():
+        return ""
+
+    content = filepath.read_text()
+    marker = "\nCOMPOSITE_TOOLS = ["
+    idx = content.find(marker)
+    if idx == -1:
+        return ""
+
+    return content[idx:]
+
+
 def sync():
     """Sync tools from daemon and regenerate tools_static.py."""
     print("Fetching tools from daemon...")
@@ -120,11 +134,21 @@ def sync():
 
     print(f"Found {len(tools)} tools")
 
+    static_path = Path(__file__).parent / "tools_static.py"
+
+    # Preserve COMPOSITE_TOOLS from existing file
+    composite_section = extract_composite_tools(static_path)
+    if composite_section:
+        print("Preserving COMPOSITE_TOOLS section")
+
     # Generate the static file
     content = generate_static_file(tools)
 
+    # Append COMPOSITE_TOOLS if it existed
+    if composite_section:
+        content += composite_section
+
     # Write to tools_static.py
-    static_path = Path(__file__).parent / "tools_static.py"
     static_path.write_text(content)
 
     print(f"Written to {static_path}")
