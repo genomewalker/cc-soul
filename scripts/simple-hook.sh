@@ -124,6 +124,18 @@ case "$HOOK_TYPE" in
             REALM="brahman"
         fi
 
+        # Incremental code re-indexing (only changed files)
+        if [[ -d ".git" ]]; then
+            PROJECT_NAME=$(basename "$PWD")
+            escaped_path=$(json_escape "$PWD")
+            escaped_project=$(json_escape "$PROJECT_NAME")
+            index_response=$(rpc_call "learn_codebase" "{\"path\":\"$escaped_path\",\"project\":\"$escaped_project\"}" 2>/dev/null)
+            files_processed=$(echo "$index_response" | jq -r '.result.structured.files_processed // 0' 2>/dev/null)
+            if [[ "$files_processed" -gt 0 ]]; then
+                echo "[code] indexed $files_processed changed files"
+            fi
+        fi
+
         # Auto-register transcript for distillation
         # Get transcript_path from stdin (Claude Code provides this)
         TRANSCRIPT=$(echo "$STDIN_DATA" | jq -r '.transcript_path // empty' 2>/dev/null)
@@ -297,6 +309,18 @@ case "$HOOK_TYPE" in
             if [[ -n "$behavior_text" && "$behavior_text" != *"No memories"* ]]; then
                 corrections=$(echo "$behavior_text" | grep -oP 'CORRECT: \K[^\n]+' | head -3 | tr '\n' '; ')
                 [[ -n "$corrections" ]] && output="$output"$'\n'"[rules] $corrections"
+            fi
+
+            # Incremental code re-indexing after /clear (context recovery)
+            if [[ -d ".git" ]]; then
+                PROJECT_NAME=$(basename "$PWD")
+                escaped_path=$(json_escape "$PWD")
+                escaped_project=$(json_escape "$PROJECT_NAME")
+                index_response=$(rpc_call "learn_codebase" "{\"path\":\"$escaped_path\",\"project\":\"$escaped_project\"}" 2>/dev/null)
+                files_processed=$(echo "$index_response" | jq -r '.result.structured.files_processed // 0' 2>/dev/null)
+                if [[ "$files_processed" -gt 0 ]]; then
+                    output="$output"$'\n'"[code] indexed $files_processed changed files"
+                fi
             fi
 
             # Output context and exit early - don't also do memory recall
