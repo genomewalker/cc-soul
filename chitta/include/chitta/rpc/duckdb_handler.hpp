@@ -1537,6 +1537,32 @@ private:
         });
         handlers_["calibration_score"] = [this](const json& p) { return tool_calibration_score(p); };
 
+        // Memory Hygiene: keep memory bounded and healthy
+        tools_.push_back({
+            {"name", "hygiene_stats"},
+            {"description", "Get memory hygiene statistics - confidence distribution, growth rate, stale memories."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {}}
+            }}
+        });
+        handlers_["hygiene_stats"] = [this](const json& p) { return tool_hygiene_stats(p); };
+
+        tools_.push_back({
+            {"name", "hygiene_run"},
+            {"description", "Run memory hygiene: decay, prune low-confidence old memories, consolidate similar."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"prune_threshold", {{"type", "number"}, {"description", "Confidence below which to prune (default: 0.1)"}}},
+                    {"min_age_days", {{"type", "number"}, {"description", "Minimum age in days for pruning (default: 7)"}}},
+                    {"consolidation_threshold", {{"type", "number"}, {"description", "Similarity threshold for consolidation (default: 0.85)"}}},
+                    {"max_consolidations", {{"type", "integer"}, {"description", "Max consolidations per run (default: 10)"}}}
+                }}
+            }}
+        });
+        handlers_["hygiene_run"] = [this](const json& p) { return tool_hygiene_run(p); };
+
     }
 
     // Tool implementations
@@ -5523,6 +5549,56 @@ private:
         }
 
         return DuckDBToolResult::ok(ss.str(), {{"count", scores.size()}, {"scores", scores_json}});
+    }
+
+    // ========================================================================
+    // Hygiene Tool Implementations
+    // ========================================================================
+
+    DuckDBToolResult tool_hygiene_stats(const json&) {
+        auto stats = mind_->store().hygiene_stats();
+
+        std::ostringstream ss;
+        ss << "Memory Hygiene Stats:\n"
+           << "  Total: " << stats.total_memories << " memories\n"
+           << "  Confidence: " << stats.high_confidence << " high, "
+           << stats.medium_confidence << " medium, "
+           << stats.low_confidence << " low\n"
+           << "  Avg confidence: " << std::fixed << std::setprecision(2) << stats.avg_confidence << "\n"
+           << "  Stale (30+ days): " << stats.old_unaccessed << "\n"
+           << "  Growth rate: " << std::setprecision(1) << stats.growth_rate_per_day << "/day\n";
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"total", stats.total_memories},
+            {"high_confidence", stats.high_confidence},
+            {"medium_confidence", stats.medium_confidence},
+            {"low_confidence", stats.low_confidence},
+            {"avg_confidence", stats.avg_confidence},
+            {"stale", stats.old_unaccessed},
+            {"growth_rate", stats.growth_rate_per_day}
+        });
+    }
+
+    DuckDBToolResult tool_hygiene_run(const json& params) {
+        float prune_threshold = params.value("prune_threshold", 0.1f);
+        float min_age_days = params.value("min_age_days", 7.0f);
+        float consolidation_threshold = params.value("consolidation_threshold", 0.85f);
+        size_t max_consolidations = params.value("max_consolidations", 10);
+
+        auto result = mind_->store().hygiene_run(prune_threshold, min_age_days,
+                                                  consolidation_threshold, max_consolidations);
+
+        std::ostringstream ss;
+        ss << "Hygiene run complete:\n"
+           << "  Decayed: " << result.decayed << " memories\n"
+           << "  Pruned: " << result.pruned << " memories\n"
+           << "  Consolidated: " << result.consolidated << " pairs\n";
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"decayed", result.decayed},
+            {"pruned", result.pruned},
+            {"consolidated", result.consolidated}
+        });
     }
 };
 

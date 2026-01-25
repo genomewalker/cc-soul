@@ -2042,6 +2042,39 @@ TOOLS = [
                 "type": "object"
         }
     ),
+    Tool(
+        name="hygiene_stats",
+        description="Get memory hygiene statistics - confidence distribution, growth rate, stale memories.",
+        inputSchema={
+                "properties": {},
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="hygiene_run",
+        description="Run memory hygiene: decay, prune low-confidence old memories, consolidate similar.",
+        inputSchema={
+                "properties": {
+                        "consolidation_threshold": {
+                                "description": "Similarity threshold for consolidation (default: 0.85)",
+                                "type": "number"
+                        },
+                        "max_consolidations": {
+                                "description": "Max consolidations per run (default: 10)",
+                                "type": "integer"
+                        },
+                        "min_age_days": {
+                                "description": "Minimum age in days for pruning (default: 7)",
+                                "type": "number"
+                        },
+                        "prune_threshold": {
+                                "description": "Confidence below which to prune (default: 0.1)",
+                                "type": "number"
+                        }
+                },
+                "type": "object"
+        }
+    ),
 ]
 
 COMPOSITE_TOOLS = [

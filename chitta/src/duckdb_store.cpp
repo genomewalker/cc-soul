@@ -4340,4 +4340,99 @@ float DuckDBStore::calibration_adjustment(const std::string& domain) {
     return score->confidence_adjustment;
 }
 
+// ============================================================================
+// Hygiene Methods
+// ============================================================================
+
+HygieneStats DuckDBStore::hygiene_stats() {
+    HygieneStats stats;
+    if (!db_) return stats;
+
+    // Get confidence distribution
+    auto result = read_query(
+        "SELECT "
+        "  COUNT(*) as total, "
+        "  SUM(CASE WHEN confidence < 0.3 THEN 1 ELSE 0 END) as low, "
+        "  SUM(CASE WHEN confidence >= 0.3 AND confidence <= 0.7 THEN 1 ELSE 0 END) as medium, "
+        "  SUM(CASE WHEN confidence > 0.7 THEN 1 ELSE 0 END) as high, "
+        "  AVG(confidence) as avg_conf "
+        "FROM memory"
+    );
+
+    if (result) {
+        auto chunk = result->Fetch();
+        if (chunk && chunk->size() > 0) {
+            auto total_val = chunk->GetValue(0, 0);
+            if (!total_val.IsNull()) {
+                stats.total_memories = total_val.GetValue<int64_t>();
+            }
+            auto low_val = chunk->GetValue(1, 0);
+            if (!low_val.IsNull()) {
+                stats.low_confidence = low_val.GetValue<int64_t>();
+            }
+            auto med_val = chunk->GetValue(2, 0);
+            if (!med_val.IsNull()) {
+                stats.medium_confidence = med_val.GetValue<int64_t>();
+            }
+            auto high_val = chunk->GetValue(3, 0);
+            if (!high_val.IsNull()) {
+                stats.high_confidence = high_val.GetValue<int64_t>();
+            }
+            auto avg_val = chunk->GetValue(4, 0);
+            if (!avg_val.IsNull()) {
+                stats.avg_confidence = avg_val.GetValue<float>();
+            }
+        }
+    }
+
+    // Get old unaccessed memories (30+ days)
+    Timestamp current = now();
+    Timestamp thirty_days_ago = current - (30LL * 24 * 60 * 60 * 1000);
+    std::ostringstream sql;
+    sql << "SELECT COUNT(*) FROM memory WHERE accessed_at < " << thirty_days_ago;
+    result = read_query(sql.str());
+    if (result) {
+        auto chunk = result->Fetch();
+        if (chunk && chunk->size() > 0) {
+            stats.old_unaccessed = chunk->GetValue(0, 0).GetValue<int64_t>();
+        }
+    }
+
+    // Get growth rate (memories created in last 7 days / 7)
+    Timestamp seven_days_ago = current - (7LL * 24 * 60 * 60 * 1000);
+    sql.str("");
+    sql << "SELECT COUNT(*) FROM memory WHERE created_at > " << seven_days_ago;
+    result = read_query(sql.str());
+    if (result) {
+        auto chunk = result->Fetch();
+        if (chunk && chunk->size() > 0) {
+            size_t recent = chunk->GetValue(0, 0).GetValue<int64_t>();
+            stats.growth_rate_per_day = (float)recent / 7.0f;
+        }
+    }
+
+    // Get consolidation candidates (approximate - would need embedding comparison)
+    // For now, use a simple heuristic: count memories with very similar lengths in same realm
+    stats.consolidation_candidates = 0;  // TODO: implement proper similarity check
+
+    return stats;
+}
+
+DuckDBStore::HygieneResult DuckDBStore::hygiene_run(float prune_threshold, float min_age_days,
+                                                     float consolidation_threshold, size_t max_consolidations) {
+    HygieneResult result;
+    if (!db_) return result;
+
+    // 1. Apply decay
+    result.decayed = apply_decay();
+
+    // 2. Prune low-confidence old memories
+    result.pruned = prune(prune_threshold, min_age_days);
+
+    // 3. Auto-consolidate similar memories
+    result.consolidated = consolidation_auto(consolidation_threshold, max_consolidations);
+
+    return result;
+}
+
 }  // namespace chitta

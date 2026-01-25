@@ -321,6 +321,18 @@ struct CalibrationScore {
     int64_t updated_at = 0;
 };
 
+// Memory hygiene: stats about memory health
+struct HygieneStats {
+    size_t total_memories = 0;
+    size_t low_confidence = 0;       // Below 0.3
+    size_t medium_confidence = 0;    // 0.3-0.7
+    size_t high_confidence = 0;      // Above 0.7
+    size_t old_unaccessed = 0;       // Not accessed in 30+ days
+    size_t consolidation_candidates = 0;  // Similar memories
+    float avg_confidence = 0.0f;
+    float growth_rate_per_day = 0.0f;  // Recent memory growth
+};
+
 // DuckDBStore: unified storage using DuckDB embedded database
 class DuckDBStore {
 public:
@@ -611,6 +623,16 @@ public:
     std::optional<CalibrationScore> calibration_get(const std::string& domain);
     std::vector<CalibrationScore> calibration_all();
     float calibration_adjustment(const std::string& domain);  // Get confidence adjustment for domain
+
+    // Memory hygiene: keep memory bounded and healthy
+    HygieneStats hygiene_stats();
+    struct HygieneResult {
+        size_t decayed = 0;
+        size_t pruned = 0;
+        size_t consolidated = 0;
+    };
+    HygieneResult hygiene_run(float prune_threshold = 0.1f, float min_age_days = 7.0f,
+                               float consolidation_threshold = 0.85f, size_t max_consolidations = 10);
 
     // Error tracking
     std::string last_error() const { return last_error_; }
