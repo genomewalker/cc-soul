@@ -645,6 +645,159 @@ def handle_learn_milestone(arguments: dict) -> str:
     return f"Milestone recorded:\n  Date: {date}\n  Milestone: {milestone}"
 
 
+# ============================================================================
+# Curiosity-driven research (background learning agent)
+# ============================================================================
+
+def handle_research_topics(arguments: dict) -> str:
+    """Get topics that need research from various sources."""
+    source = arguments.get("source", "gaps")
+    limit = arguments.get("limit", 3)
+    realm = arguments.get("realm", "")
+
+    topics = []
+
+    if source == "gaps" or source == "all":
+        # Get unresolved curiosity gaps
+        gaps_result = daemon_call("curiosity_gaps", {"limit": limit, "realm": realm})
+        if gaps_result and "No gaps" not in gaps_result:
+            # Parse gaps from response
+            for line in gaps_result.split("\n"):
+                if line.startswith("#") and "[" in line:
+                    # Extract gap ID and content
+                    parts = line.split("]", 1)
+                    if len(parts) > 1:
+                        gap_id = parts[0].split("#")[-1].strip()
+                        content = parts[1].strip()
+                        topics.append({
+                            "type": "gap",
+                            "id": gap_id,
+                            "topic": content[:200],
+                            "source": "curiosity_gaps"
+                        })
+
+    if source == "weak" or source == "all":
+        # Get low-confidence memories that might need verification
+        weak_result = daemon_call("recall", {
+            "query": "uncertain unclear unverified",
+            "limit": limit
+        })
+        if weak_result and "No memories" not in weak_result:
+            for line in weak_result.split("\n"):
+                if line.startswith("[") and "%" in line:
+                    # Extract confidence and content
+                    conf_match = line.split("%")[0].strip("[")
+                    if conf_match.isdigit() and int(conf_match) < 30:
+                        content = line.split("]", 2)[-1].strip()
+                        topics.append({
+                            "type": "weak_memory",
+                            "confidence": int(conf_match),
+                            "topic": content[:200],
+                            "source": "low_confidence"
+                        })
+
+    if not topics:
+        return "No research topics found. Consider:\n- Adding curiosity gaps with curiosity_note_gap\n- Or specify source='suggest' for AI-suggested topics"
+
+    output = f"Research Topics ({len(topics)} found):\n"
+    output += "=" * 40 + "\n\n"
+    for i, t in enumerate(topics[:limit], 1):
+        output += f"{i}. [{t['type']}] {t['topic']}\n"
+        if t.get('id'):
+            output += f"   Gap ID: {t['id']} (use with research_store to resolve)\n"
+        output += "\n"
+
+    output += "\nNext: Use WebSearch to research these topics, then call research_store with findings."
+    return output
+
+
+def handle_research_store(arguments: dict) -> str:
+    """Store research results as memories with source attribution."""
+    topic = arguments.get("topic", "")
+    findings = arguments.get("findings", "")
+    sources = arguments.get("sources", [])
+    gap_id = arguments.get("gap_id")
+    confidence = arguments.get("confidence", 0.7)
+
+    if not topic or not findings:
+        return "Error: topic and findings are required"
+
+    # Format sources
+    source_str = ""
+    if sources:
+        source_str = "\nSources: " + " | ".join(sources[:3])
+
+    # Create memory content in SSL format
+    content = f"[research] {topic}\n{findings}{source_str}"
+
+    # Store as wisdom with research tag
+    result = daemon_call("remember", {
+        "content": content,
+        "type": "wisdom",
+        "confidence": confidence,
+        "tags": ["research", "web-learned"]
+    })
+
+    output = f"Research stored: {topic[:50]}...\n"
+
+    # Resolve curiosity gap if provided
+    if gap_id:
+        resolve_result = daemon_call("curiosity_resolve", {
+            "id": gap_id,
+            "learned": findings[:500]
+        })
+        output += f"Resolved gap #{gap_id}\n"
+
+    # Create triplet linking research to topic
+    daemon_call("connect", {
+        "subject": "research",
+        "predicate": "learned_about",
+        "object": topic.replace(" ", "_")[:50]
+    })
+
+    return output + "Memory created with 'research' tag."
+
+
+def handle_research_cycle(arguments: dict) -> str:
+    """Run one research cycle - returns topic with context for web search."""
+    realm = arguments.get("realm", "")
+
+    # First try curiosity gaps
+    gaps_result = daemon_call("curiosity_gaps", {"limit": 1, "realm": realm})
+
+    if gaps_result and "No gaps" not in gaps_result:
+        # Parse first gap
+        for line in gaps_result.split("\n"):
+            if line.startswith("#"):
+                parts = line.split("]", 1)
+                if len(parts) > 1:
+                    gap_id = parts[0].split("#")[-1].strip()
+                    topic = parts[1].strip()
+
+                    # Get context from related memories
+                    context_result = daemon_call("recall", {
+                        "query": topic,
+                        "limit": 2
+                    })
+
+                    output = "Research Cycle: Topic Found\n"
+                    output += "=" * 40 + "\n\n"
+                    output += f"Topic: {topic}\n"
+                    output += f"Gap ID: {gap_id}\n\n"
+                    output += "Context from memories:\n"
+                    if context_result and "No memories" not in context_result:
+                        output += context_result[:500] + "\n\n"
+                    else:
+                        output += "(no related memories)\n\n"
+
+                    output += "Instructions:\n"
+                    output += f"1. Use WebSearch to research: {topic}\n"
+                    output += f"2. Call research_store with findings and gap_id={gap_id}\n"
+                    return output
+
+    return "No research topics available. Add curiosity gaps with curiosity_note_gap first."
+
+
 # Map composite tool names to handlers
 COMPOSITE_HANDLERS = {
     "read_symbol": handle_read_symbol,
@@ -658,6 +811,10 @@ COMPOSITE_HANDLERS = {
     "learn_approach": handle_learn_approach,
     "learn_outcome": handle_learn_outcome,
     "learn_milestone": handle_learn_milestone,
+    # Curiosity-driven research
+    "research_topics": handle_research_topics,
+    "research_store": handle_research_store,
+    "research_cycle": handle_research_cycle,
 }
 
 

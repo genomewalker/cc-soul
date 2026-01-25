@@ -1831,6 +1831,7 @@ TOOLS = [
         }
     ),
 ]
+
 COMPOSITE_TOOLS = [
     Tool(
         name="read_symbol",
@@ -2174,6 +2175,44 @@ COMPOSITE_TOOLS = [
                 "task_id": {"type": "string", "description": "Task identifier"}
             },
             "required": ["task_id"]
+        }
+    ),
+    # Curiosity-driven research (background learning agent)
+    Tool(
+        name="research_topics",
+        description="Get topics that need research. Returns curiosity gaps, low-confidence memories, or suggested topics. Use WebSearch to research these, then store results with research_store.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "source": {"type": "string", "description": "Where to get topics: gaps (curiosity gaps), weak (low-confidence memories), suggest (AI-suggested based on recent work)"},
+                "limit": {"type": "integer", "description": "Max topics to return (default: 3)"},
+                "realm": {"type": "string", "description": "Filter by realm/project"}
+            }
+        }
+    ),
+    Tool(
+        name="research_store",
+        description="Store research results as memories with source attribution. Call after using WebSearch to learn about a topic.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "topic": {"type": "string", "description": "What was researched"},
+                "findings": {"type": "string", "description": "Key learnings in SSL format"},
+                "sources": {"type": "array", "items": {"type": "string"}, "description": "URLs or references"},
+                "gap_id": {"type": "integer", "description": "Curiosity gap ID to resolve (optional)"},
+                "confidence": {"type": "number", "description": "Confidence in findings 0-1 (default: 0.7)"}
+            },
+            "required": ["topic", "findings"]
+        }
+    ),
+    Tool(
+        name="research_cycle",
+        description="Run one curiosity-driven research cycle. Returns a topic to research with context. After calling this, use WebSearch to find information, then call research_store with results.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "realm": {"type": "string", "description": "Filter by realm/project"}
+            }
         }
     ),
 ]
