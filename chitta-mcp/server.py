@@ -130,6 +130,8 @@ def daemon_call(tool_name: str, arguments: dict, structured: bool = False) -> st
         arguments: Tool arguments
         structured: If True, return structured JSON data instead of text
     """
+    global client
+
     if not ensure_daemon():
         return "Error: Failed to connect to daemon"
 
@@ -141,6 +143,14 @@ def daemon_call(tool_name: str, arguments: dict, structured: bool = False) -> st
     }
 
     response = client.request(json.dumps(req))
+
+    # If no response, connection might be stale - try reconnecting once
+    if not response:
+        client.close()
+        client = None
+        if ensure_daemon():
+            response = client.request(json.dumps(req))
+
     if not response:
         return "Error: No response from daemon"
 

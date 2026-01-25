@@ -185,6 +185,48 @@ struct TranscriptState {
     int64_t created_at = 0;
 };
 
+// Long-running task for mind-powered persistence (elegant Ralph Wiggum)
+struct LongTask {
+    int64_t id = 0;
+    std::string task_id;            // User-provided identifier
+    std::string goal;               // What we're trying to achieve
+    std::string realm;              // Project scope
+    std::string status;             // active, paused, completed, blocked, abandoned
+
+    // Definition of Done (JSON)
+    std::string hard_checks;        // Deterministic: ["tests pass", "build succeeds"]
+    std::string soft_checks;        // Semantic: ["docs accurate", "edge cases handled"]
+
+    // Work tracking (JSON arrays)
+    std::string work_items;         // Subtasks with status
+    std::string completed_summary;  // What's been achieved (synthesized)
+    std::string blockers;           // Current blockers
+
+    // Multi-agent support
+    std::string agent_id;           // Current agent (for leases)
+    int64_t lease_until = 0;        // Lease expiry timestamp
+
+    // Metrics
+    int32_t iterations = 0;         // How many times resumed
+    int64_t started_at = 0;
+    int64_t updated_at = 0;
+    int64_t completed_at = 0;
+
+    // Outcome
+    std::string outcome;            // Final result description
+};
+
+// Append-only event log for task execution
+struct TaskEvent {
+    int64_t id = 0;
+    std::string task_id;            // Links to LongTask
+    std::string kind;               // tool_result, decision, observation, error, checkpoint
+    std::string payload;            // JSON: command, output, etc.
+    std::string tags;               // JSON array for filtering
+    std::string related_entities;   // JSON array: files, functions mentioned
+    int64_t created_at = 0;
+};
+
 // Parsed conversation turn from JSONL
 struct TranscriptTurn {
     std::string role;       // "user" or "assistant"
@@ -379,7 +421,27 @@ public:
     bool remove_transcript(const std::string& session_id);
     size_t transcript_count();
 
+    // Long-running tasks (mind-powered Ralph Wiggum)
+    int64_t task_start(const LongTask& task);
+    bool task_update(const std::string& task_id, const LongTask& updates);
+    std::optional<LongTask> task_get(const std::string& task_id);
+    std::optional<LongTask> task_get_active(const std::string& realm = "");
+    std::vector<LongTask> task_list(const std::string& realm = "", const std::string& status = "");
+    bool task_complete(const std::string& task_id, const std::string& outcome);
+    bool task_abandon(const std::string& task_id, const std::string& reason);
+    bool task_claim(const std::string& task_id, const std::string& agent_id, int64_t lease_seconds = 300);
+    bool task_heartbeat(const std::string& task_id, const std::string& agent_id);
+
+    // Task events (append-only log)
+    int64_t event_append(const TaskEvent& event);
+    std::vector<TaskEvent> event_list(const std::string& task_id, size_t limit = 100);
+    std::vector<TaskEvent> event_get_recent(const std::string& task_id, const std::string& kind = "", size_t limit = 20);
+
+    // Error tracking
+    std::string last_error() const { return last_error_; }
+
 private:
+    mutable std::string last_error_;  // Last error message for debugging
     std::unique_ptr<duckdb::DuckDB> db_;
     std::unique_ptr<duckdb::Connection> write_conn_;  // Dedicated write connection
     std::unique_ptr<ConnectionPool> read_pool_;       // Pool for concurrent reads
@@ -393,6 +455,7 @@ private:
     bool create_schema();
     bool load_extensions();
     bool create_vector_index();
+    void fix_sequences();
 
     // Helper to execute queries
     // write_execute/write_query: use write connection with mutex (for INSERT/UPDATE/DELETE)

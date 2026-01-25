@@ -49,6 +49,9 @@ bool DuckDBStore::open(const std::string& path) {
             create_vector_index();
         }
 
+        // Fix sequences if out of sync (e.g., after restore or manual modification)
+        fix_sequences();
+
         std::cerr << "[DuckDBStore] Opened database at " << path_ << "\n";
         return true;
 
@@ -68,6 +71,28 @@ void DuckDBStore::close() {
     vss_loaded_ = false;
     pgq_loaded_ = false;
     fts_loaded_ = false;
+}
+
+void DuckDBStore::fix_sequences() {
+    // Helper to fix a sequence from a table
+    auto fix_seq = [this](const std::string& table, const std::string& seq_name) {
+        auto result = read_query("SELECT COALESCE(MAX(id), 0) as max_id FROM " + table);
+        if (result && !result->HasError()) {
+            auto chunk = result->Fetch();
+            if (chunk && chunk->size() > 0) {
+                int64_t max_id = chunk->GetValue(0, 0).GetValue<int64_t>();
+                write_execute("DROP SEQUENCE IF EXISTS " + seq_name);
+                write_execute("CREATE SEQUENCE " + seq_name + " START " + std::to_string(max_id + 1));
+                std::cerr << "[DuckDBStore] Fixed " << seq_name << " to start at " << (max_id + 1) << "\n";
+            }
+        }
+    };
+
+    fix_seq("memory", "memory_seq");
+    fix_seq("symbols", "symbol_seq");
+    fix_seq("ledger", "ledger_seq");
+    fix_seq("long_task", "task_seq");
+    fix_seq("task_event", "event_seq");
 }
 
 bool DuckDBStore::load_extensions() {
@@ -269,11 +294,63 @@ bool DuckDBStore::create_schema() {
     // Indexes for transcript queries
     write_execute("CREATE INDEX IF NOT EXISTS idx_transcript_realm ON transcript_state(realm)");
 
+    // Long-running tasks (mind-powered Ralph Wiggum)
+    if (!write_execute(R"(
+        CREATE TABLE IF NOT EXISTS long_task (
+            id BIGINT PRIMARY KEY,
+            task_id VARCHAR UNIQUE NOT NULL,
+            goal TEXT NOT NULL,
+            realm VARCHAR DEFAULT 'brahman',
+            status VARCHAR DEFAULT 'active',
+            hard_checks TEXT,
+            soft_checks TEXT,
+            work_items TEXT,
+            completed_summary TEXT,
+            blockers TEXT,
+            agent_id VARCHAR,
+            lease_until BIGINT DEFAULT 0,
+            iterations INTEGER DEFAULT 0,
+            started_at BIGINT NOT NULL,
+            updated_at BIGINT NOT NULL,
+            completed_at BIGINT DEFAULT 0,
+            outcome TEXT
+        )
+    )")) {
+        return false;
+    }
+
+    // Indexes for task queries
+    write_execute("CREATE INDEX IF NOT EXISTS idx_task_realm ON long_task(realm)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_task_status ON long_task(status)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_task_agent ON long_task(agent_id)");
+
+    // Task events (append-only log)
+    if (!write_execute(R"(
+        CREATE TABLE IF NOT EXISTS task_event (
+            id BIGINT PRIMARY KEY,
+            task_id VARCHAR NOT NULL,
+            kind VARCHAR NOT NULL,
+            payload TEXT,
+            tags TEXT,
+            related_entities TEXT,
+            created_at BIGINT NOT NULL
+        )
+    )")) {
+        return false;
+    }
+
+    // Indexes for event queries
+    write_execute("CREATE INDEX IF NOT EXISTS idx_event_task ON task_event(task_id)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_event_kind ON task_event(kind)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_event_created ON task_event(created_at DESC)");
+
     // Sequence for IDs
     write_execute("CREATE SEQUENCE IF NOT EXISTS memory_seq START 1");
     write_execute("CREATE SEQUENCE IF NOT EXISTS triplet_seq START 1");
     write_execute("CREATE SEQUENCE IF NOT EXISTS symbol_seq START 1");
     write_execute("CREATE SEQUENCE IF NOT EXISTS ledger_seq START 1");
+    write_execute("CREATE SEQUENCE IF NOT EXISTS task_seq START 1");
+    write_execute("CREATE SEQUENCE IF NOT EXISTS event_seq START 1");
 
     return true;
 }
@@ -383,7 +460,12 @@ int64_t DuckDBStore::remember(
         << static_cast<int>(visibility) << ") RETURNING id";
 
     auto result = read_query(sql.str());
-    if (!result || result->HasError()) {
+    if (!result) {
+        last_error_ = "No result from INSERT query";
+        return -1;
+    }
+    if (result->HasError()) {
+        last_error_ = "INSERT error: " + result->GetError();
         return -1;
     }
 
@@ -2396,6 +2478,451 @@ size_t DuckDBStore::transcript_count() {
     }
 
     return chunk->GetValue(0, 0).GetValue<int64_t>();
+}
+
+// ============================================================================
+// Long-running tasks (mind-powered Ralph Wiggum)
+// ============================================================================
+
+int64_t DuckDBStore::task_start(const LongTask& task) {
+    if (!db_ || task.task_id.empty() || task.goal.empty()) return -1;
+
+    Timestamp now_ts = now();
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    std::ostringstream sql;
+    sql << "INSERT INTO long_task (id, task_id, goal, realm, status, "
+        << "hard_checks, soft_checks, work_items, completed_summary, blockers, "
+        << "agent_id, lease_until, iterations, started_at, updated_at, completed_at, outcome) "
+        << "VALUES (nextval('task_seq'), '" << escape(task.task_id) << "', "
+        << "'" << escape(task.goal) << "', "
+        << "'" << escape(task.realm.empty() ? "brahman" : task.realm) << "', "
+        << "'active', "
+        << "'" << escape(task.hard_checks) << "', "
+        << "'" << escape(task.soft_checks) << "', "
+        << "'" << escape(task.work_items) << "', "
+        << "'', '', '', 0, 0, " << now_ts << ", " << now_ts << ", 0, '') "
+        << "RETURNING id";
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) {
+        last_error_ = result ? result->GetError() : "No result";
+        return -1;
+    }
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return -1;
+
+    return chunk->GetValue(0, 0).GetValue<int64_t>();
+}
+
+bool DuckDBStore::task_update(const std::string& task_id, const LongTask& updates) {
+    if (!db_ || task_id.empty()) return false;
+
+    Timestamp now_ts = now();
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    std::ostringstream sql;
+    sql << "UPDATE long_task SET updated_at = " << now_ts;
+
+    if (!updates.status.empty()) sql << ", status = '" << escape(updates.status) << "'";
+    if (!updates.work_items.empty()) sql << ", work_items = '" << escape(updates.work_items) << "'";
+    if (!updates.completed_summary.empty()) sql << ", completed_summary = '" << escape(updates.completed_summary) << "'";
+    if (!updates.blockers.empty()) sql << ", blockers = '" << escape(updates.blockers) << "'";
+    if (!updates.agent_id.empty()) sql << ", agent_id = '" << escape(updates.agent_id) << "'";
+    if (updates.lease_until > 0) sql << ", lease_until = " << updates.lease_until;
+    if (updates.iterations > 0) sql << ", iterations = iterations + 1";
+
+    sql << " WHERE task_id = '" << escape(task_id) << "'";
+
+    return write_execute(sql.str());
+}
+
+std::optional<LongTask> DuckDBStore::task_get(const std::string& task_id) {
+    if (!db_ || task_id.empty()) return std::nullopt;
+
+    std::string escaped;
+    for (char c : task_id) {
+        if (c == '\'') escaped += "''";
+        else escaped += c;
+    }
+
+    auto result = read_query(
+        "SELECT id, task_id, goal, realm, status, hard_checks, soft_checks, "
+        "work_items, completed_summary, blockers, agent_id, lease_until, "
+        "iterations, started_at, updated_at, completed_at, outcome "
+        "FROM long_task WHERE task_id = '" + escaped + "'"
+    );
+
+    if (!result || result->HasError()) return std::nullopt;
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return std::nullopt;
+
+    LongTask task;
+    task.id = chunk->GetValue(0, 0).GetValue<int64_t>();
+    task.task_id = chunk->GetValue(1, 0).ToString();
+    task.goal = chunk->GetValue(2, 0).ToString();
+    task.realm = chunk->GetValue(3, 0).ToString();
+    task.status = chunk->GetValue(4, 0).ToString();
+    task.hard_checks = chunk->GetValue(5, 0).ToString();
+    task.soft_checks = chunk->GetValue(6, 0).ToString();
+    task.work_items = chunk->GetValue(7, 0).ToString();
+    task.completed_summary = chunk->GetValue(8, 0).ToString();
+    task.blockers = chunk->GetValue(9, 0).ToString();
+    task.agent_id = chunk->GetValue(10, 0).ToString();
+    task.lease_until = chunk->GetValue(11, 0).GetValue<int64_t>();
+    task.iterations = chunk->GetValue(12, 0).GetValue<int32_t>();
+    task.started_at = chunk->GetValue(13, 0).GetValue<int64_t>();
+    task.updated_at = chunk->GetValue(14, 0).GetValue<int64_t>();
+    task.completed_at = chunk->GetValue(15, 0).GetValue<int64_t>();
+    task.outcome = chunk->GetValue(16, 0).ToString();
+
+    return task;
+}
+
+std::optional<LongTask> DuckDBStore::task_get_active(const std::string& realm) {
+    if (!db_) return std::nullopt;
+
+    std::string sql = "SELECT id, task_id, goal, realm, status, hard_checks, soft_checks, "
+        "work_items, completed_summary, blockers, agent_id, lease_until, "
+        "iterations, started_at, updated_at, completed_at, outcome "
+        "FROM long_task WHERE status = 'active'";
+
+    if (!realm.empty()) {
+        std::string escaped;
+        for (char c : realm) {
+            if (c == '\'') escaped += "''";
+            else escaped += c;
+        }
+        sql += " AND realm = '" + escaped + "'";
+    }
+
+    sql += " ORDER BY updated_at DESC LIMIT 1";
+
+    auto result = read_query(sql);
+    if (!result || result->HasError()) return std::nullopt;
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return std::nullopt;
+
+    LongTask task;
+    task.id = chunk->GetValue(0, 0).GetValue<int64_t>();
+    task.task_id = chunk->GetValue(1, 0).ToString();
+    task.goal = chunk->GetValue(2, 0).ToString();
+    task.realm = chunk->GetValue(3, 0).ToString();
+    task.status = chunk->GetValue(4, 0).ToString();
+    task.hard_checks = chunk->GetValue(5, 0).ToString();
+    task.soft_checks = chunk->GetValue(6, 0).ToString();
+    task.work_items = chunk->GetValue(7, 0).ToString();
+    task.completed_summary = chunk->GetValue(8, 0).ToString();
+    task.blockers = chunk->GetValue(9, 0).ToString();
+    task.agent_id = chunk->GetValue(10, 0).ToString();
+    task.lease_until = chunk->GetValue(11, 0).GetValue<int64_t>();
+    task.iterations = chunk->GetValue(12, 0).GetValue<int32_t>();
+    task.started_at = chunk->GetValue(13, 0).GetValue<int64_t>();
+    task.updated_at = chunk->GetValue(14, 0).GetValue<int64_t>();
+    task.completed_at = chunk->GetValue(15, 0).GetValue<int64_t>();
+    task.outcome = chunk->GetValue(16, 0).ToString();
+
+    return task;
+}
+
+std::vector<LongTask> DuckDBStore::task_list(const std::string& realm, const std::string& status) {
+    std::vector<LongTask> tasks;
+    if (!db_) return tasks;
+
+    std::string sql = "SELECT id, task_id, goal, realm, status, hard_checks, soft_checks, "
+        "work_items, completed_summary, blockers, agent_id, lease_until, "
+        "iterations, started_at, updated_at, completed_at, outcome "
+        "FROM long_task WHERE 1=1";
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    if (!realm.empty()) sql += " AND realm = '" + escape(realm) + "'";
+    if (!status.empty()) sql += " AND status = '" + escape(status) + "'";
+
+    sql += " ORDER BY updated_at DESC LIMIT 50";
+
+    auto result = read_query(sql);
+    if (!result || result->HasError()) return tasks;
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); i++) {
+            LongTask task;
+            task.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            task.task_id = chunk->GetValue(1, i).ToString();
+            task.goal = chunk->GetValue(2, i).ToString();
+            task.realm = chunk->GetValue(3, i).ToString();
+            task.status = chunk->GetValue(4, i).ToString();
+            task.hard_checks = chunk->GetValue(5, i).ToString();
+            task.soft_checks = chunk->GetValue(6, i).ToString();
+            task.work_items = chunk->GetValue(7, i).ToString();
+            task.completed_summary = chunk->GetValue(8, i).ToString();
+            task.blockers = chunk->GetValue(9, i).ToString();
+            task.agent_id = chunk->GetValue(10, i).ToString();
+            task.lease_until = chunk->GetValue(11, i).GetValue<int64_t>();
+            task.iterations = chunk->GetValue(12, i).GetValue<int32_t>();
+            task.started_at = chunk->GetValue(13, i).GetValue<int64_t>();
+            task.updated_at = chunk->GetValue(14, i).GetValue<int64_t>();
+            task.completed_at = chunk->GetValue(15, i).GetValue<int64_t>();
+            task.outcome = chunk->GetValue(16, i).ToString();
+            tasks.push_back(task);
+        }
+    }
+
+    return tasks;
+}
+
+bool DuckDBStore::task_complete(const std::string& task_id, const std::string& outcome) {
+    if (!db_ || task_id.empty()) return false;
+
+    Timestamp now_ts = now();
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    std::ostringstream sql;
+    sql << "UPDATE long_task SET status = 'completed', "
+        << "completed_at = " << now_ts << ", "
+        << "updated_at = " << now_ts << ", "
+        << "outcome = '" << escape(outcome) << "' "
+        << "WHERE task_id = '" << escape(task_id) << "'";
+
+    return write_execute(sql.str());
+}
+
+bool DuckDBStore::task_abandon(const std::string& task_id, const std::string& reason) {
+    if (!db_ || task_id.empty()) return false;
+
+    Timestamp now_ts = now();
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    std::ostringstream sql;
+    sql << "UPDATE long_task SET status = 'abandoned', "
+        << "updated_at = " << now_ts << ", "
+        << "outcome = '" << escape(reason) << "' "
+        << "WHERE task_id = '" << escape(task_id) << "'";
+
+    return write_execute(sql.str());
+}
+
+bool DuckDBStore::task_claim(const std::string& task_id, const std::string& agent_id, int64_t lease_seconds) {
+    if (!db_ || task_id.empty() || agent_id.empty()) return false;
+
+    Timestamp now_ts = now();
+    int64_t lease_until = now_ts + (lease_seconds * 1000);  // Convert to ms
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    // Claim only if unclaimed or lease expired
+    std::ostringstream sql;
+    sql << "UPDATE long_task SET "
+        << "agent_id = '" << escape(agent_id) << "', "
+        << "lease_until = " << lease_until << ", "
+        << "updated_at = " << now_ts
+        << " WHERE task_id = '" << escape(task_id) << "' "
+        << "AND status = 'active' "
+        << "AND (agent_id = '' OR agent_id IS NULL OR lease_until < " << now_ts << ")";
+
+    return write_execute(sql.str());
+}
+
+bool DuckDBStore::task_heartbeat(const std::string& task_id, const std::string& agent_id) {
+    if (!db_ || task_id.empty() || agent_id.empty()) return false;
+
+    Timestamp now_ts = now();
+    int64_t lease_until = now_ts + 300000;  // 5 minutes
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    // Only extend if we own the lease
+    std::ostringstream sql;
+    sql << "UPDATE long_task SET "
+        << "lease_until = " << lease_until << ", "
+        << "updated_at = " << now_ts
+        << " WHERE task_id = '" << escape(task_id) << "' "
+        << "AND agent_id = '" << escape(agent_id) << "'";
+
+    return write_execute(sql.str());
+}
+
+// ============================================================================
+// Task events (append-only log)
+// ============================================================================
+
+int64_t DuckDBStore::event_append(const TaskEvent& event) {
+    if (!db_ || event.task_id.empty() || event.kind.empty()) return -1;
+
+    Timestamp now_ts = now();
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    std::ostringstream sql;
+    sql << "INSERT INTO task_event (id, task_id, kind, payload, tags, related_entities, created_at) "
+        << "VALUES (nextval('event_seq'), "
+        << "'" << escape(event.task_id) << "', "
+        << "'" << escape(event.kind) << "', "
+        << "'" << escape(event.payload) << "', "
+        << "'" << escape(event.tags) << "', "
+        << "'" << escape(event.related_entities) << "', "
+        << now_ts << ") RETURNING id";
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) {
+        last_error_ = result ? result->GetError() : "No result";
+        return -1;
+    }
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return -1;
+
+    return chunk->GetValue(0, 0).GetValue<int64_t>();
+}
+
+std::vector<TaskEvent> DuckDBStore::event_list(const std::string& task_id, size_t limit) {
+    std::vector<TaskEvent> events;
+    if (!db_ || task_id.empty()) return events;
+
+    std::string escaped;
+    for (char c : task_id) {
+        if (c == '\'') escaped += "''";
+        else escaped += c;
+    }
+
+    std::ostringstream sql;
+    sql << "SELECT id, task_id, kind, payload, tags, related_entities, created_at "
+        << "FROM task_event WHERE task_id = '" << escaped << "' "
+        << "ORDER BY created_at ASC LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) return events;
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); i++) {
+            TaskEvent event;
+            event.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            event.task_id = chunk->GetValue(1, i).ToString();
+            event.kind = chunk->GetValue(2, i).ToString();
+            event.payload = chunk->GetValue(3, i).ToString();
+            event.tags = chunk->GetValue(4, i).ToString();
+            event.related_entities = chunk->GetValue(5, i).ToString();
+            event.created_at = chunk->GetValue(6, i).GetValue<int64_t>();
+            events.push_back(event);
+        }
+    }
+
+    return events;
+}
+
+std::vector<TaskEvent> DuckDBStore::event_get_recent(const std::string& task_id, const std::string& kind, size_t limit) {
+    std::vector<TaskEvent> events;
+    if (!db_ || task_id.empty()) return events;
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    std::ostringstream sql;
+    sql << "SELECT id, task_id, kind, payload, tags, related_entities, created_at "
+        << "FROM task_event WHERE task_id = '" << escape(task_id) << "'";
+
+    if (!kind.empty()) {
+        sql << " AND kind = '" << escape(kind) << "'";
+    }
+
+    sql << " ORDER BY created_at DESC LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) return events;
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); i++) {
+            TaskEvent event;
+            event.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            event.task_id = chunk->GetValue(1, i).ToString();
+            event.kind = chunk->GetValue(2, i).ToString();
+            event.payload = chunk->GetValue(3, i).ToString();
+            event.tags = chunk->GetValue(4, i).ToString();
+            event.related_entities = chunk->GetValue(5, i).ToString();
+            event.created_at = chunk->GetValue(6, i).GetValue<int64_t>();
+            events.push_back(event);
+        }
+    }
+
+    return events;
 }
 
 }  // namespace chitta

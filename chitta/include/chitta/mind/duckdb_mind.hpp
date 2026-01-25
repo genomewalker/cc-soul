@@ -537,6 +537,15 @@ public:
         return embedder_.ready();
     }
 
+    // Public accessors for diagnostics
+    bool embedder_ready() const {
+        return embedder_.ready();
+    }
+
+    bool passes_quality_gate_public(const std::string& text) const {
+        return passes_quality_gate(text);
+    }
+
     // Remember - store with embedding
     NodeId remember(const std::string& text, NodeType type = NodeType::Wisdom,
                     const std::string& realm = "brahman",
