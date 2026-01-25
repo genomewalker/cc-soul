@@ -330,7 +330,37 @@ case "$HOOK_TYPE" in
             exit 0
         fi
 
+        # ===========================================
+        # PROACTIVE LEARNING: Detect learning opportunities
+        # ===========================================
+        LEARNING_HINTS=""
+
+        # Save user message for Stop hook to analyze
+        echo "$QUERY" > "$MIND_PATH/.last_user_message"
+
+        # Detect CORRECTION patterns: user is correcting Claude
+        if echo "$QUERY" | grep -qiE "(no,|no\.|actually|that'?s (wrong|not|incorrect)|you('re| are) wrong|I (said|meant|asked)|not what I|wrong approach|that won'?t work|don'?t do that)"; then
+            LEARNING_HINTS="[LEARN] Correction detected → use learn_correction tool"
+        fi
+
+        # Detect PREFERENCE patterns: user expressing preferences
+        if echo "$QUERY" | grep -qiE "(I (prefer|like|want|need|always|never|don'?t like)|please (don'?t|always|never)|stop doing|keep doing|from now on|in the future)"; then
+            LEARNING_HINTS="${LEARNING_HINTS:+$LEARNING_HINTS; }[LEARN] Preference detected → use learn_preference tool"
+        fi
+
+        # Detect FRUSTRATION/STATE patterns: user emotional state
+        if echo "$QUERY" | grep -qiE "(frustrated|annoyed|confused|stuck|lost|this is (hard|difficult|confusing)|I give up|help me understand|what am I missing)"; then
+            LEARNING_HINTS="${LEARNING_HINTS:+$LEARNING_HINTS; }[LEARN] User state detected → use learn_approach if something helps"
+        fi
+
+        # Detect MILESTONE patterns: achievement
+        if echo "$QUERY" | grep -qiE "(it works|finally|success|done|shipped|released|completed|finished|passed|merged|deployed)"; then
+            LEARNING_HINTS="${LEARNING_HINTS:+$LEARNING_HINTS; }[LEARN] Milestone detected → use learn_milestone tool"
+        fi
+
+        # ===========================================
         # Proactive surfacing: detect implicit needs and expand search
+        # ===========================================
         EXTRA_TAGS=""
         BOOST_K=3
 
@@ -407,6 +437,11 @@ case "$HOOK_TYPE" in
             fi
         fi
 
+        # Add learning hints if detected (these prompt Claude to use learn_* tools)
+        if [[ -n "$LEARNING_HINTS" ]]; then
+            output="${output:+$output"$'\n'"}$LEARNING_HINTS"
+        fi
+
         # Output combined context if any
         if [[ -n "$output" ]]; then
             echo "$output"
@@ -423,6 +458,66 @@ case "$HOOK_TYPE" in
         if [[ -z "$RESPONSE" ]]; then
             exit 0
         fi
+
+        # ===========================================
+        # AUTO-LEARNING: Detect missed learning opportunities
+        # ===========================================
+        CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
+
+        # Read user's last message (saved by UserPromptSubmit)
+        LAST_USER_MSG=""
+        if [[ -f "$MIND_PATH/.last_user_message" ]]; then
+            LAST_USER_MSG=$(cat "$MIND_PATH/.last_user_message" 2>/dev/null)
+        fi
+
+        # Check if Claude used a learn_* tool (indicated by tool output patterns)
+        CLAUDE_LEARNED=false
+        if echo "$RESPONSE" | grep -qiE '(learn_correction|learn_preference|learn_insight|learn_approach|learn_outcome|learn_milestone|Stored|Learned|Remembered)'; then
+            CLAUDE_LEARNED=true
+        fi
+
+        # If user correction detected but Claude didn't learn, auto-store
+        # Uses chitta CLI (more reliable than nc for RPC)
+        if [[ "$CLAUDE_LEARNED" == "false" && -n "$LAST_USER_MSG" ]]; then
+            if echo "$LAST_USER_MSG" | grep -qiE "(no,|no\.|actually|that'?s (wrong|not|incorrect)|you('re| are) wrong|wrong approach|that won'?t work)"; then
+                # Extract what was wrong from user message
+                correction_context=$(echo "$LAST_USER_MSG" | head -c 150 | tr '\n' ' ')
+                # Extract what Claude should do instead from response (first line)
+                better_approach=$(echo "$RESPONSE" | grep -v '^$' | head -1 | head -c 150)
+
+                # Format as SSL correction (matches learn_correction format)
+                content="[correction] WRONG: $correction_context
+CORRECT: $better_approach"
+
+                "$CHITTA_BIN" remember --content "$content" --tags "correction,auto-learned" --type wisdom --visibility 2 >/dev/null 2>&1 && \
+                    echo "[auto-learn] Correction stored"
+            fi
+
+            # If user preference detected but Claude didn't learn, auto-store
+            if echo "$LAST_USER_MSG" | grep -qiE "(I (prefer|like|want|always|never)|please (don'?t|always|never)|from now on)"; then
+                pref_context=$(echo "$LAST_USER_MSG" | head -c 200 | tr '\n' ' ')
+
+                # Format as SSL preference
+                content="[preference] $pref_context"
+
+                "$CHITTA_BIN" remember --content "$content" --tags "preference,auto-learned" --type wisdom --visibility 2 >/dev/null 2>&1 && \
+                    echo "[auto-learn] Preference stored"
+            fi
+
+            # If milestone detected, auto-store
+            if echo "$LAST_USER_MSG" | grep -qiE "(it works|finally|success|shipped|released|completed|finished|passed|merged|deployed)"; then
+                milestone_context=$(echo "$LAST_USER_MSG" | head -c 100 | tr '\n' ' ')
+
+                # Format as SSL milestone
+                content="[milestone] $milestone_context"
+
+                "$CHITTA_BIN" remember --content "$content" --tags "milestone,auto-learned" --type wisdom --visibility 2 >/dev/null 2>&1 && \
+                    echo "[auto-learn] Milestone stored"
+            fi
+        fi
+
+        # Clean up temp file
+        rm -f "$MIND_PATH/.last_user_message" 2>/dev/null
 
         # Session momentum: track turn count for periodic checkpoints
         TURN_FILE="$MIND_PATH/.turn_count"
