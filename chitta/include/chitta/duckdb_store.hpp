@@ -285,6 +285,16 @@ struct BackgroundTask {
     std::string realm;
 };
 
+// User profile: structured understanding of the human partner
+struct UserProfile {
+    std::string user_id = "default";
+    std::string expertise_json;      // JSON: [{"domain":"python","level":0.9}, ...]
+    std::string style_json;          // JSON: {"tone":"direct","verbosity":"concise","formality":"casual"}
+    std::string patterns_json;       // JSON: {"active_hours":"9-17","avg_session_mins":45}
+    std::string preferences_json;    // JSON: {"no_emojis":true,"prefer_examples":true}
+    int64_t updated_at = 0;
+};
+
 // DuckDBStore: unified storage using DuckDB embedded database
 class DuckDBStore {
 public:
@@ -552,6 +562,12 @@ public:
     };
     BackgroundStatus background_status();
     size_t background_run_cycle();  // Run one processing cycle, returns tasks processed
+
+    // User profile: structured understanding of partner
+    bool profile_update(const std::string& user_id, const std::string& field, const std::string& value);
+    std::optional<UserProfile> profile_get(const std::string& user_id = "default");
+    bool profile_observe(const std::string& observation_type, const std::string& value,
+                         const std::string& user_id = "default");
 
     // Error tracking
     std::string last_error() const { return last_error_; }

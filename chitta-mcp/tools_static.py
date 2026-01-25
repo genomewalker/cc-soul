@@ -1830,6 +1830,69 @@ TOOLS = [
                 "type": "object"
         }
     ),
+    Tool(
+        name="profile_get",
+        description="Get user profile - expertise, communication style, work patterns, preferences.",
+        inputSchema={
+                "properties": {
+                        "user_id": {
+                                "description": "User ID (default: 'default')",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="profile_update",
+        description="Update a specific profile field (expertise_json, style_json, patterns_json, preferences_json).",
+        inputSchema={
+                "properties": {
+                        "field": {
+                                "description": "Field to update: expertise_json, style_json, patterns_json, preferences_json",
+                                "type": "string"
+                        },
+                        "user_id": {
+                                "description": "User ID (default: 'default')",
+                                "type": "string"
+                        },
+                        "value": {
+                                "description": "JSON value for the field",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "field",
+                        "value"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="profile_observe",
+        description="Record an observation about the user (expertise, style, pattern, preference).",
+        inputSchema={
+                "properties": {
+                        "observation_type": {
+                                "description": "Type: expertise, style, pattern, preference",
+                                "type": "string"
+                        },
+                        "user_id": {
+                                "description": "User ID (default: 'default')",
+                                "type": "string"
+                        },
+                        "value": {
+                                "description": "For expertise: 'domain:level'. For others: JSON object",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "observation_type",
+                        "value"
+                ],
+                "type": "object"
+        }
+    ),
 ]
 
 COMPOSITE_TOOLS = [

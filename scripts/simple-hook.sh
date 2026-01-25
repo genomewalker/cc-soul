@@ -163,6 +163,26 @@ case "$HOOK_TYPE" in
             echo "[soul] n=$nodes t=$triplets c=$conf $status"
         fi
 
+        # User profile: surface partner understanding
+        profile_response=$(rpc_call "profile_get" '{"user_id":"default"}')
+        profile_found=$(echo "$profile_response" | jq -r '.result.structured.found // false' 2>/dev/null)
+        if [[ "$profile_found" == "true" ]]; then
+            expertise=$(echo "$profile_response" | jq -r '.result.structured.expertise // "[]"' 2>/dev/null)
+            prefs=$(echo "$profile_response" | jq -r '.result.structured.preferences // "{}"' 2>/dev/null)
+            style=$(echo "$profile_response" | jq -r '.result.structured.style // "{}"' 2>/dev/null)
+
+            # Compact display: domains and key preferences
+            domains=$(echo "$expertise" | jq -r '[.[]?.domain] | join(", ")' 2>/dev/null)
+            [[ -n "$domains" && "$domains" != "null" ]] && echo "[expertise] $domains"
+
+            # Key preferences as flags
+            pref_flags=""
+            [[ $(echo "$prefs" | jq -r '.no_emojis // false') == "true" ]] && pref_flags="${pref_flags}no-emoji "
+            [[ $(echo "$prefs" | jq -r '.prefer_examples // false') == "true" ]] && pref_flags="${pref_flags}examples "
+            [[ $(echo "$style" | jq -r '.verbosity // ""') == "concise" ]] && pref_flags="${pref_flags}concise "
+            [[ -n "$pref_flags" ]] && echo "[style] $pref_flags"
+        fi
+
         # Behavioral layer: inject learned corrections and preferences
         # This replaces growing CLAUDE.md - behaviors live in soul memory
         behavior_response=$(rpc_call "recall" '{"query":"behavior correction preference rule","tag":"correction","limit":3}')

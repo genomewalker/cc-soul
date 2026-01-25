@@ -1393,6 +1393,49 @@ private:
         });
         handlers_["background_run_cycle"] = [this](const json& p) { return tool_background_run_cycle(p); };
 
+        // User Profile: structured understanding of partner
+        tools_.push_back({
+            {"name", "profile_get"},
+            {"description", "Get user profile - expertise, communication style, work patterns, preferences."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"user_id", {{"type", "string"}, {"description", "User ID (default: 'default')"}}}
+                }}
+            }}
+        });
+        handlers_["profile_get"] = [this](const json& p) { return tool_profile_get(p); };
+
+        tools_.push_back({
+            {"name", "profile_update"},
+            {"description", "Update a specific profile field (expertise_json, style_json, patterns_json, preferences_json)."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"user_id", {{"type", "string"}, {"description", "User ID (default: 'default')"}}},
+                    {"field", {{"type", "string"}, {"description", "Field to update: expertise_json, style_json, patterns_json, preferences_json"}}},
+                    {"value", {{"type", "string"}, {"description", "JSON value for the field"}}}
+                }},
+                {"required", {"field", "value"}}
+            }}
+        });
+        handlers_["profile_update"] = [this](const json& p) { return tool_profile_update(p); };
+
+        tools_.push_back({
+            {"name", "profile_observe"},
+            {"description", "Record an observation about the user (expertise, style, pattern, preference)."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"observation_type", {{"type", "string"}, {"description", "Type: expertise, style, pattern, preference"}}},
+                    {"value", {{"type", "string"}, {"description", "For expertise: 'domain:level'. For others: JSON object"}}},
+                    {"user_id", {{"type", "string"}, {"description", "User ID (default: 'default')"}}}
+                }},
+                {"required", {"observation_type", "value"}}
+            }}
+        });
+        handlers_["profile_observe"] = [this](const json& p) { return tool_profile_observe(p); };
+
     }
 
     // Tool implementations
@@ -5055,6 +5098,84 @@ private:
             case NodeType::Question: return "question";
             default: return "unknown";
         }
+    }
+
+    // ========================================================================
+    // Profile Tool Implementations
+    // ========================================================================
+
+    DuckDBToolResult tool_profile_get(const json& params) {
+        std::string user_id = params.value("user_id", "default");
+
+        auto profile = mind_->store().profile_get(user_id);
+        if (!profile) {
+            return DuckDBToolResult::ok("No profile found for user: " + user_id, {{"found", false}});
+        }
+
+        std::ostringstream ss;
+        ss << "User Profile: " << profile->user_id << "\n";
+        ss << "  Expertise: " << profile->expertise_json << "\n";
+        ss << "  Style: " << profile->style_json << "\n";
+        ss << "  Patterns: " << profile->patterns_json << "\n";
+        ss << "  Preferences: " << profile->preferences_json << "\n";
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"found", true},
+            {"user_id", profile->user_id},
+            {"expertise", profile->expertise_json},
+            {"style", profile->style_json},
+            {"patterns", profile->patterns_json},
+            {"preferences", profile->preferences_json},
+            {"updated_at", profile->updated_at}
+        });
+    }
+
+    DuckDBToolResult tool_profile_update(const json& params) {
+        std::string user_id = params.value("user_id", "default");
+        std::string field = params.value("field", "");
+        std::string value = params.value("value", "");
+
+        if (field.empty()) {
+            return DuckDBToolResult::error("field is required");
+        }
+        if (value.empty()) {
+            return DuckDBToolResult::error("value is required");
+        }
+
+        bool success = mind_->store().profile_update(user_id, field, value);
+        if (!success) {
+            return DuckDBToolResult::error("Failed to update profile: " + mind_->store().last_error());
+        }
+
+        return DuckDBToolResult::ok("Updated " + field + " for user " + user_id, {
+            {"user_id", user_id},
+            {"field", field},
+            {"success", true}
+        });
+    }
+
+    DuckDBToolResult tool_profile_observe(const json& params) {
+        std::string observation_type = params.value("observation_type", "");
+        std::string value = params.value("value", "");
+        std::string user_id = params.value("user_id", "default");
+
+        if (observation_type.empty()) {
+            return DuckDBToolResult::error("observation_type is required");
+        }
+        if (value.empty()) {
+            return DuckDBToolResult::error("value is required");
+        }
+
+        bool success = mind_->store().profile_observe(observation_type, value, user_id);
+        if (!success) {
+            return DuckDBToolResult::error("Failed to observe: " + mind_->store().last_error());
+        }
+
+        return DuckDBToolResult::ok("Observed " + observation_type + ": " + value.substr(0, 50), {
+            {"user_id", user_id},
+            {"observation_type", observation_type},
+            {"success", true}
+        });
     }
 };
 
