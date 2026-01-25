@@ -472,6 +472,19 @@ bool DuckDBStore::create_schema() {
     write_execute("CREATE INDEX IF NOT EXISTS idx_goal_realm ON goal(realm)");
     write_execute("CREATE SEQUENCE IF NOT EXISTS goal_seq START 1");
 
+    // Calibration table: tracking prediction accuracy by domain
+    if (!write_execute(R"(
+        CREATE TABLE IF NOT EXISTS calibration (
+            domain VARCHAR PRIMARY KEY,
+            predictions INTEGER DEFAULT 0,
+            successes INTEGER DEFAULT 0,
+            failures INTEGER DEFAULT 0,
+            updated_at BIGINT NOT NULL
+        )
+    )")) {
+        return false;
+    }
+
     // Sequence for IDs
     write_execute("CREATE SEQUENCE IF NOT EXISTS memory_seq START 1");
     write_execute("CREATE SEQUENCE IF NOT EXISTS triplet_seq START 1");
@@ -4204,6 +4217,127 @@ bool DuckDBStore::goal_update_status(int64_t id, const std::string& status) {
         << " WHERE id = " << id;
 
     return write_execute(sql.str());
+}
+
+// ============================================================================
+// Calibration Methods
+// ============================================================================
+
+bool DuckDBStore::calibration_record(const std::string& domain, bool success) {
+    if (!db_) return false;
+
+    auto now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+
+    std::string escaped_domain = domain;
+    size_t pos = 0;
+    while ((pos = escaped_domain.find('\'', pos)) != std::string::npos) {
+        escaped_domain.replace(pos, 1, "''");
+        pos += 2;
+    }
+
+    // Upsert: insert or update
+    std::ostringstream sql;
+    if (success) {
+        sql << "INSERT INTO calibration (domain, predictions, successes, failures, updated_at) "
+            << "VALUES ('" << escaped_domain << "', 1, 1, 0, " << now << ") "
+            << "ON CONFLICT (domain) DO UPDATE SET "
+            << "predictions = calibration.predictions + 1, "
+            << "successes = calibration.successes + 1, "
+            << "updated_at = " << now;
+    } else {
+        sql << "INSERT INTO calibration (domain, predictions, successes, failures, updated_at) "
+            << "VALUES ('" << escaped_domain << "', 1, 0, 1, " << now << ") "
+            << "ON CONFLICT (domain) DO UPDATE SET "
+            << "predictions = calibration.predictions + 1, "
+            << "failures = calibration.failures + 1, "
+            << "updated_at = " << now;
+    }
+
+    return write_execute(sql.str());
+}
+
+std::optional<CalibrationScore> DuckDBStore::calibration_get(const std::string& domain) {
+    if (!db_) return std::nullopt;
+
+    std::string escaped_domain = domain;
+    size_t pos = 0;
+    while ((pos = escaped_domain.find('\'', pos)) != std::string::npos) {
+        escaped_domain.replace(pos, 1, "''");
+        pos += 2;
+    }
+
+    std::string sql = "SELECT domain, predictions, successes, failures, updated_at "
+                      "FROM calibration WHERE domain = '" + escaped_domain + "'";
+
+    auto result = read_query(sql);
+    if (!result) return std::nullopt;
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return std::nullopt;
+
+    CalibrationScore score;
+    score.domain = chunk->GetValue(0, 0).ToString();
+    score.predictions = chunk->GetValue(1, 0).GetValue<int32_t>();
+    score.successes = chunk->GetValue(2, 0).GetValue<int32_t>();
+    score.failures = chunk->GetValue(3, 0).GetValue<int32_t>();
+    score.updated_at = chunk->GetValue(4, 0).GetValue<int64_t>();
+
+    // Calculate accuracy and adjustment
+    if (score.predictions > 0) {
+        score.accuracy = (float)score.successes / score.predictions;
+        // Adjustment: if accuracy < 0.5, reduce confidence; if > 0.7, increase
+        if (score.accuracy < 0.5f) {
+            score.confidence_adjustment = -0.2f * (0.5f - score.accuracy) / 0.5f;
+        } else if (score.accuracy > 0.7f) {
+            score.confidence_adjustment = 0.2f * (score.accuracy - 0.7f) / 0.3f;
+        }
+    }
+
+    return score;
+}
+
+std::vector<CalibrationScore> DuckDBStore::calibration_all() {
+    std::vector<CalibrationScore> scores;
+    if (!db_) return scores;
+
+    std::string sql = "SELECT domain, predictions, successes, failures, updated_at "
+                      "FROM calibration ORDER BY predictions DESC";
+
+    auto result = read_query(sql);
+    if (!result) return scores;
+
+    auto chunk = result->Fetch();
+    while (chunk && chunk->size() > 0) {
+        for (size_t i = 0; i < chunk->size(); i++) {
+            CalibrationScore score;
+            score.domain = chunk->GetValue(0, i).ToString();
+            score.predictions = chunk->GetValue(1, i).GetValue<int32_t>();
+            score.successes = chunk->GetValue(2, i).GetValue<int32_t>();
+            score.failures = chunk->GetValue(3, i).GetValue<int32_t>();
+            score.updated_at = chunk->GetValue(4, i).GetValue<int64_t>();
+
+            if (score.predictions > 0) {
+                score.accuracy = (float)score.successes / score.predictions;
+                if (score.accuracy < 0.5f) {
+                    score.confidence_adjustment = -0.2f * (0.5f - score.accuracy) / 0.5f;
+                } else if (score.accuracy > 0.7f) {
+                    score.confidence_adjustment = 0.2f * (score.accuracy - 0.7f) / 0.3f;
+                }
+            }
+
+            scores.push_back(score);
+        }
+        chunk = result->Fetch();
+    }
+
+    return scores;
+}
+
+float DuckDBStore::calibration_adjustment(const std::string& domain) {
+    auto score = calibration_get(domain);
+    if (!score) return 0.0f;
+    return score->confidence_adjustment;
 }
 
 }  // namespace chitta

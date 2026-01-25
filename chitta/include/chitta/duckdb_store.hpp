@@ -310,6 +310,17 @@ struct Goal {
     int64_t updated_at = 0;
 };
 
+// Calibration: tracking prediction accuracy by domain
+struct CalibrationScore {
+    std::string domain;              // Domain (e.g., "code", "architecture", "debugging")
+    int32_t predictions = 0;         // Total predictions
+    int32_t successes = 0;           // Correct predictions
+    int32_t failures = 0;            // Incorrect predictions
+    float accuracy = 0.0f;           // successes / predictions
+    float confidence_adjustment = 0.0f;  // Suggested adjustment (-0.2 to +0.2)
+    int64_t updated_at = 0;
+};
+
 // DuckDBStore: unified storage using DuckDB embedded database
 class DuckDBStore {
 public:
@@ -594,6 +605,12 @@ public:
     bool goal_progress(int64_t id, float progress, const std::string& milestone_completed = "");
     bool goal_complete(int64_t id, const std::string& outcome);
     bool goal_update_status(int64_t id, const std::string& status);
+
+    // Confidence calibration: tracking prediction accuracy
+    bool calibration_record(const std::string& domain, bool success);
+    std::optional<CalibrationScore> calibration_get(const std::string& domain);
+    std::vector<CalibrationScore> calibration_all();
+    float calibration_adjustment(const std::string& domain);  // Get confidence adjustment for domain
 
     // Error tracking
     std::string last_error() const { return last_error_; }

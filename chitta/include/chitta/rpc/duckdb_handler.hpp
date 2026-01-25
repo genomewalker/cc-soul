@@ -1510,6 +1510,33 @@ private:
         });
         handlers_["goal_complete"] = [this](const json& p) { return tool_goal_complete(p); };
 
+        // Confidence Calibration: tracking prediction accuracy
+        tools_.push_back({
+            {"name", "calibration_record"},
+            {"description", "Record a prediction outcome (success/failure) for a domain to track accuracy."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"domain", {{"type", "string"}, {"description", "Domain (e.g., 'code', 'architecture', 'debugging')"}}},
+                    {"success", {{"type", "boolean"}, {"description", "Was the prediction correct?"}}}
+                }},
+                {"required", {"domain", "success"}}
+            }}
+        });
+        handlers_["calibration_record"] = [this](const json& p) { return tool_calibration_record(p); };
+
+        tools_.push_back({
+            {"name", "calibration_score"},
+            {"description", "Get accuracy score for a domain or all domains."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"domain", {{"type", "string"}, {"description", "Specific domain (optional - omit for all)"}}}
+                }}
+            }}
+        });
+        handlers_["calibration_score"] = [this](const json& p) { return tool_calibration_score(p); };
+
     }
 
     // Tool implementations
@@ -1877,6 +1904,22 @@ private:
         // Get transcript tracking info
         size_t transcripts = mind_->store().transcript_count();
 
+        // Get calibration summary
+        auto calibration = mind_->store().calibration_all();
+        json calibration_json = json::array();
+        if (!calibration.empty()) {
+            ss << "  Calibration: ";
+            for (size_t i = 0; i < calibration.size() && i < 3; i++) {
+                if (i > 0) ss << ", ";
+                ss << calibration[i].domain << "=" << (int)(calibration[i].accuracy * 100) << "%";
+                calibration_json.push_back({
+                    {"domain", calibration[i].domain},
+                    {"accuracy", calibration[i].accuracy}
+                });
+            }
+            ss << "\n";
+        }
+
         return DuckDBToolResult::ok(ss.str(), {
             {"version", CHITTA_VERSION},
             {"total_nodes", h.total_nodes},
@@ -1887,7 +1930,8 @@ private:
             {"triplet_count", mind_->triplet_count()},
             {"yantra_ready", mind_->has_yantra()},
             {"status", h.status()},
-            {"transcripts_tracked", transcripts}
+            {"transcripts_tracked", transcripts},
+            {"calibration", calibration_json}
         });
     }
 
@@ -5385,6 +5429,100 @@ private:
             {"outcome", outcome},
             {"status", "completed"}
         });
+    }
+
+    // ========================================================================
+    // Calibration Tool Implementations
+    // ========================================================================
+
+    DuckDBToolResult tool_calibration_record(const json& params) {
+        std::string domain = params.value("domain", "");
+        if (domain.empty()) {
+            return DuckDBToolResult::error("domain is required");
+        }
+
+        bool success = params.value("success", false);
+
+        bool recorded = mind_->store().calibration_record(domain, success);
+        if (!recorded) {
+            return DuckDBToolResult::error("Failed to record calibration");
+        }
+
+        std::string msg = "Recorded " + std::string(success ? "success" : "failure") + " for domain: " + domain;
+
+        // Get updated score
+        auto score = mind_->store().calibration_get(domain);
+        if (score) {
+            msg += " (accuracy: " + std::to_string((int)(score->accuracy * 100)) + "%)";
+        }
+
+        return DuckDBToolResult::ok(msg, {
+            {"domain", domain},
+            {"success", success},
+            {"recorded", true}
+        });
+    }
+
+    DuckDBToolResult tool_calibration_score(const json& params) {
+        std::string domain = params.value("domain", "");
+
+        if (!domain.empty()) {
+            // Get specific domain
+            auto score = mind_->store().calibration_get(domain);
+            if (!score) {
+                return DuckDBToolResult::ok("No calibration data for domain: " + domain, {
+                    {"found", false},
+                    {"domain", domain}
+                });
+            }
+
+            std::ostringstream ss;
+            ss << "Calibration for " << domain << ":\n"
+               << "  Predictions: " << score->predictions << "\n"
+               << "  Successes: " << score->successes << " (" << (int)(score->accuracy * 100) << "%)\n"
+               << "  Failures: " << score->failures << "\n"
+               << "  Confidence adjustment: " << std::showpos << std::fixed << std::setprecision(2)
+               << score->confidence_adjustment;
+
+            return DuckDBToolResult::ok(ss.str(), {
+                {"found", true},
+                {"domain", score->domain},
+                {"predictions", score->predictions},
+                {"successes", score->successes},
+                {"failures", score->failures},
+                {"accuracy", score->accuracy},
+                {"confidence_adjustment", score->confidence_adjustment}
+            });
+        }
+
+        // Get all domains
+        auto scores = mind_->store().calibration_all();
+        if (scores.empty()) {
+            return DuckDBToolResult::ok("No calibration data yet", {{"count", 0}});
+        }
+
+        std::ostringstream ss;
+        ss << "Calibration scores:\n";
+        json scores_json = json::array();
+
+        for (const auto& s : scores) {
+            ss << "  " << s.domain << ": " << (int)(s.accuracy * 100) << "% "
+               << "(" << s.successes << "/" << s.predictions << ")";
+            if (s.confidence_adjustment != 0.0f) {
+                ss << " [adj: " << std::showpos << std::fixed << std::setprecision(2)
+                   << s.confidence_adjustment << "]";
+            }
+            ss << "\n";
+
+            scores_json.push_back({
+                {"domain", s.domain},
+                {"accuracy", s.accuracy},
+                {"predictions", s.predictions},
+                {"adjustment", s.confidence_adjustment}
+            });
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {{"count", scores.size()}, {"scores", scores_json}});
     }
 };
 

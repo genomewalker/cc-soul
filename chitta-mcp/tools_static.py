@@ -2008,6 +2008,40 @@ TOOLS = [
                 "type": "object"
         }
     ),
+    Tool(
+        name="calibration_record",
+        description="Record a prediction outcome (success/failure) for a domain to track accuracy.",
+        inputSchema={
+                "properties": {
+                        "domain": {
+                                "description": "Domain (e.g., 'code', 'architecture', 'debugging')",
+                                "type": "string"
+                        },
+                        "success": {
+                                "description": "Was the prediction correct?",
+                                "type": "boolean"
+                        }
+                },
+                "required": [
+                        "domain",
+                        "success"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="calibration_score",
+        description="Get accuracy score for a domain or all domains.",
+        inputSchema={
+                "properties": {
+                        "domain": {
+                                "description": "Specific domain (optional - omit for all)",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
 ]
 
 COMPOSITE_TOOLS = [
