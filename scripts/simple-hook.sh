@@ -470,6 +470,24 @@ case "$HOOK_TYPE" in
             output="${output:+$output"$'\n'"}$LEARNING_HINTS"
         fi
 
+        # ===========================================
+        # ANTICIPATION: Predict likely user needs based on context patterns
+        # ===========================================
+        # Build context from project + query keywords
+        project_name=$(basename "$(pwd)")
+        context_key="${project_name}:$(echo "$QUERY" | grep -oE '^[a-zA-Z]+' | head -1 | tr '[:upper:]' '[:lower:]')"
+        escaped_context=$(json_escape "$context_key")
+
+        anticipation_response=$(rpc_call "anticipation_predict" "{\"context\":\"$escaped_context\",\"limit\":1}")
+        anticipated_action=$(echo "$anticipation_response" | jq -r '.result.structured.patterns[0].action // empty' 2>/dev/null)
+        anticipated_id=$(echo "$anticipation_response" | jq -r '.result.structured.patterns[0].id // empty' 2>/dev/null)
+
+        if [[ -n "$anticipated_action" && "$anticipated_action" != "null" ]]; then
+            output="${output:+$output"$'\n'"}[predict] $anticipated_action"
+            # Save for Stop hook to verify
+            echo "$anticipated_id:$anticipated_action" > "$MIND_PATH/.last_anticipation"
+        fi
+
         # Output combined context if any
         if [[ -n "$output" ]]; then
             echo "$output"
@@ -546,6 +564,50 @@ CORRECT: $better_approach"
 
         # Clean up temp file
         rm -f "$MIND_PATH/.last_user_message" 2>/dev/null
+
+        # ===========================================
+        # ANTICIPATION: Record patterns and verify predictions
+        # ===========================================
+        if is_meaningful_work "$RESPONSE"; then
+            project_name=$(basename "$(pwd)")
+
+            # Extract action from response (what Claude did)
+            action=""
+            if echo "$RESPONSE" | grep -qiE 'created|implemented|added'; then
+                action="create"
+            elif echo "$RESPONSE" | grep -qiE 'fixed|resolved|repaired'; then
+                action="fix"
+            elif echo "$RESPONSE" | grep -qiE 'updated|modified|changed|refactored'; then
+                action="update"
+            elif echo "$RESPONSE" | grep -qiE 'deleted|removed'; then
+                action="delete"
+            elif echo "$RESPONSE" | grep -qiE 'tested|ran tests|passed'; then
+                action="test"
+            fi
+
+            if [[ -n "$action" ]]; then
+                # Build context key: project:first_query_word
+                context_key="${project_name}:$(echo "$LAST_USER_MSG" 2>/dev/null | grep -oE '^[a-zA-Z]+' | head -1 | tr '[:upper:]' '[:lower:]')"
+                escaped_context=$(json_escape "$context_key")
+                escaped_action=$(json_escape "$action")
+
+                # Record this context→action pattern
+                rpc_call "anticipation_observe" "{\"context\":\"$escaped_context\",\"action\":\"$escaped_action\"}" >/dev/null 2>&1
+            fi
+
+            # Check if we predicted this action correctly
+            if [[ -f "$MIND_PATH/.last_anticipation" ]]; then
+                last_anticipation=$(cat "$MIND_PATH/.last_anticipation" 2>/dev/null)
+                anticipated_id="${last_anticipation%%:*}"
+                anticipated_action="${last_anticipation#*:}"
+
+                if [[ -n "$anticipated_id" && -n "$action" && "$anticipated_action" == *"$action"* ]]; then
+                    # Prediction was correct - strengthen pattern
+                    rpc_call "anticipation_success" "{\"id\":$anticipated_id}" >/dev/null 2>&1
+                fi
+                rm -f "$MIND_PATH/.last_anticipation" 2>/dev/null
+            fi
+        fi
 
         # Session momentum: track turn count for periodic checkpoints
         TURN_FILE="$MIND_PATH/.turn_count"
