@@ -183,6 +183,14 @@ case "$HOOK_TYPE" in
             [[ -n "$pref_flags" ]] && echo "[style] $pref_flags"
         fi
 
+        # Active goals: surface long-term objectives
+        goals_response=$(rpc_call "goal_list" '{"status":"active","limit":3}')
+        goals_count=$(echo "$goals_response" | jq -r '.result.structured.count // 0' 2>/dev/null)
+        if [[ "$goals_count" -gt 0 ]]; then
+            goals_summary=$(echo "$goals_response" | jq -r '.result.structured.goals[] | "#\(.id) [\(.progress * 100 | floor)%] \(.title)"' 2>/dev/null | head -3 | tr '\n' '; ')
+            echo "[goals] $goals_summary"
+        fi
+
         # Behavioral layer: inject learned corrections and preferences
         # This replaces growing CLAUDE.md - behaviors live in soul memory
         behavior_response=$(rpc_call "recall" '{"query":"behavior correction preference rule","tag":"correction","limit":3}')

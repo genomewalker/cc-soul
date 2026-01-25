@@ -1436,6 +1436,80 @@ private:
         });
         handlers_["profile_observe"] = [this](const json& p) { return tool_profile_observe(p); };
 
+        // Long-term Goals: objectives spanning weeks/months
+        tools_.push_back({
+            {"name", "goal_set"},
+            {"description", "Define a new long-term goal with optional milestones and deadline."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"title", {{"type", "string"}, {"description", "Short goal name (e.g., 'Ship v4.0')"}}},
+                    {"description", {{"type", "string"}, {"description", "Detailed description"}}},
+                    {"milestones", {{"type", "string"}, {"description", "JSON array: [{\"name\":\"v1\",\"done\":false}, ...]"}}},
+                    {"deadline", {{"type", "integer"}, {"description", "Unix timestamp deadline (optional)"}}},
+                    {"realm", {{"type", "string"}, {"description", "Project scope (default: brahman)"}}}
+                }},
+                {"required", {"title"}}
+            }}
+        });
+        handlers_["goal_set"] = [this](const json& p) { return tool_goal_set(p); };
+
+        tools_.push_back({
+            {"name", "goal_get"},
+            {"description", "Get details of a specific goal by ID."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "integer"}, {"description", "Goal ID"}}}
+                }},
+                {"required", {"id"}}
+            }}
+        });
+        handlers_["goal_get"] = [this](const json& p) { return tool_goal_get(p); };
+
+        tools_.push_back({
+            {"name", "goal_list"},
+            {"description", "List goals, optionally filtered by status and realm."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"status", {{"type", "string"}, {"description", "Filter: active, paused, completed, abandoned (default: active)"}}},
+                    {"realm", {{"type", "string"}, {"description", "Filter by realm"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Max results (default: 20)"}}}
+                }}
+            }}
+        });
+        handlers_["goal_list"] = [this](const json& p) { return tool_goal_list(p); };
+
+        tools_.push_back({
+            {"name", "goal_progress"},
+            {"description", "Update goal progress (0-1) and optionally mark a milestone complete."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "integer"}, {"description", "Goal ID"}}},
+                    {"progress", {{"type", "number"}, {"description", "Progress 0-1 (e.g., 0.5 = 50%)"}}},
+                    {"milestone", {{"type", "string"}, {"description", "Milestone name to mark complete (optional)"}}}
+                }},
+                {"required", {"id", "progress"}}
+            }}
+        });
+        handlers_["goal_progress"] = [this](const json& p) { return tool_goal_progress(p); };
+
+        tools_.push_back({
+            {"name", "goal_complete"},
+            {"description", "Mark a goal as completed with an outcome summary."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "integer"}, {"description", "Goal ID"}}},
+                    {"outcome", {{"type", "string"}, {"description", "Summary of what was achieved"}}}
+                }},
+                {"required", {"id", "outcome"}}
+            }}
+        });
+        handlers_["goal_complete"] = [this](const json& p) { return tool_goal_complete(p); };
+
     }
 
     // Tool implementations
@@ -5175,6 +5249,141 @@ private:
             {"user_id", user_id},
             {"observation_type", observation_type},
             {"success", true}
+        });
+    }
+
+    // ========================================================================
+    // Goal Tool Implementations
+    // ========================================================================
+
+    DuckDBToolResult tool_goal_set(const json& params) {
+        std::string title = params.value("title", "");
+        if (title.empty()) {
+            return DuckDBToolResult::error("title is required");
+        }
+
+        std::string description = params.value("description", "");
+        std::string milestones = params.value("milestones", "[]");
+        int64_t deadline = params.value("deadline", 0);
+        std::string realm = params.value("realm", "brahman");
+
+        int64_t id = mind_->store().goal_set(title, description, milestones, deadline, realm);
+        if (id < 0) {
+            return DuckDBToolResult::error("Failed to create goal");
+        }
+
+        return DuckDBToolResult::ok("Goal created: #" + std::to_string(id) + " " + title, {
+            {"id", id},
+            {"title", title}
+        });
+    }
+
+    DuckDBToolResult tool_goal_get(const json& params) {
+        int64_t id = params.value("id", 0);
+        if (id == 0) {
+            return DuckDBToolResult::error("id is required");
+        }
+
+        auto goal = mind_->store().goal_get(id);
+        if (!goal) {
+            return DuckDBToolResult::ok("Goal not found: #" + std::to_string(id), {{"found", false}});
+        }
+
+        std::ostringstream ss;
+        ss << "Goal #" << goal->id << ": " << goal->title << "\n";
+        ss << "  Status: " << goal->status << " (" << (int)(goal->progress * 100) << "%)\n";
+        if (!goal->description.empty()) {
+            ss << "  Description: " << goal->description.substr(0, 100) << "\n";
+        }
+        ss << "  Milestones: " << goal->milestones_json << "\n";
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"found", true},
+            {"id", goal->id},
+            {"title", goal->title},
+            {"description", goal->description},
+            {"status", goal->status},
+            {"progress", goal->progress},
+            {"milestones", goal->milestones_json},
+            {"deadline", goal->deadline},
+            {"realm", goal->realm}
+        });
+    }
+
+    DuckDBToolResult tool_goal_list(const json& params) {
+        std::string status = params.value("status", "active");
+        std::string realm = params.value("realm", "");
+        size_t limit = params.value("limit", 20);
+
+        auto goals = mind_->store().goal_list(status, realm, limit);
+
+        if (goals.empty()) {
+            return DuckDBToolResult::ok("No " + status + " goals", {{"count", 0}, {"goals", json::array()}});
+        }
+
+        std::ostringstream ss;
+        ss << "Goals (" << status << "):\n";
+        json goals_json = json::array();
+
+        for (const auto& g : goals) {
+            ss << "  #" << g.id << " [" << (int)(g.progress * 100) << "%] " << g.title << "\n";
+            goals_json.push_back({
+                {"id", g.id},
+                {"title", g.title},
+                {"progress", g.progress},
+                {"status", g.status}
+            });
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {{"count", goals.size()}, {"goals", goals_json}});
+    }
+
+    DuckDBToolResult tool_goal_progress(const json& params) {
+        int64_t id = params.value("id", 0);
+        if (id == 0) {
+            return DuckDBToolResult::error("id is required");
+        }
+
+        float progress = params.value("progress", 0.0f);
+        std::string milestone = params.value("milestone", "");
+
+        bool success = mind_->store().goal_progress(id, progress, milestone);
+        if (!success) {
+            return DuckDBToolResult::error("Failed to update progress");
+        }
+
+        std::string msg = "Goal #" + std::to_string(id) + " progress: " + std::to_string((int)(progress * 100)) + "%";
+        if (!milestone.empty()) {
+            msg += " (completed: " + milestone + ")";
+        }
+
+        return DuckDBToolResult::ok(msg, {
+            {"id", id},
+            {"progress", progress},
+            {"milestone_completed", milestone}
+        });
+    }
+
+    DuckDBToolResult tool_goal_complete(const json& params) {
+        int64_t id = params.value("id", 0);
+        if (id == 0) {
+            return DuckDBToolResult::error("id is required");
+        }
+
+        std::string outcome = params.value("outcome", "");
+        if (outcome.empty()) {
+            return DuckDBToolResult::error("outcome is required");
+        }
+
+        bool success = mind_->store().goal_complete(id, outcome);
+        if (!success) {
+            return DuckDBToolResult::error("Failed to complete goal");
+        }
+
+        return DuckDBToolResult::ok("Goal #" + std::to_string(id) + " completed: " + outcome.substr(0, 50), {
+            {"id", id},
+            {"outcome", outcome},
+            {"status", "completed"}
         });
     }
 };

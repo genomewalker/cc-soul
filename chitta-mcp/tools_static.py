@@ -1893,6 +1893,121 @@ TOOLS = [
                 "type": "object"
         }
     ),
+    Tool(
+        name="goal_set",
+        description="Define a new long-term goal with optional milestones and deadline.",
+        inputSchema={
+                "properties": {
+                        "deadline": {
+                                "description": "Unix timestamp deadline (optional)",
+                                "type": "integer"
+                        },
+                        "description": {
+                                "description": "Detailed description",
+                                "type": "string"
+                        },
+                        "milestones": {
+                                "description": "JSON array: [{\"name\":\"v1\",\"done\":false}, ...]",
+                                "type": "string"
+                        },
+                        "realm": {
+                                "description": "Project scope (default: brahman)",
+                                "type": "string"
+                        },
+                        "title": {
+                                "description": "Short goal name (e.g., 'Ship v4.0')",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "title"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="goal_get",
+        description="Get details of a specific goal by ID.",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "description": "Goal ID",
+                                "type": "integer"
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="goal_list",
+        description="List goals, optionally filtered by status and realm.",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "description": "Max results (default: 20)",
+                                "type": "integer"
+                        },
+                        "realm": {
+                                "description": "Filter by realm",
+                                "type": "string"
+                        },
+                        "status": {
+                                "description": "Filter: active, paused, completed, abandoned (default: active)",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="goal_progress",
+        description="Update goal progress (0-1) and optionally mark a milestone complete.",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "description": "Goal ID",
+                                "type": "integer"
+                        },
+                        "milestone": {
+                                "description": "Milestone name to mark complete (optional)",
+                                "type": "string"
+                        },
+                        "progress": {
+                                "description": "Progress 0-1 (e.g., 0.5 = 50%)",
+                                "type": "number"
+                        }
+                },
+                "required": [
+                        "id",
+                        "progress"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="goal_complete",
+        description="Mark a goal as completed with an outcome summary.",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "description": "Goal ID",
+                                "type": "integer"
+                        },
+                        "outcome": {
+                                "description": "Summary of what was achieved",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "id",
+                        "outcome"
+                ],
+                "type": "object"
+        }
+    ),
 ]
 
 COMPOSITE_TOOLS = [

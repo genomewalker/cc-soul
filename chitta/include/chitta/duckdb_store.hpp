@@ -295,6 +295,21 @@ struct UserProfile {
     int64_t updated_at = 0;
 };
 
+// Long-term goal: objectives spanning weeks/months
+struct Goal {
+    int64_t id = 0;
+    std::string title;               // Short goal name
+    std::string description;         // Detailed description
+    std::string milestones_json;     // JSON: [{"name":"v1","done":false}, ...]
+    std::string status;              // active, paused, completed, abandoned
+    float progress = 0.0f;           // 0-1 completion
+    int64_t deadline = 0;            // Optional deadline (unix timestamp)
+    std::string outcome;             // Final outcome when completed
+    std::string realm;
+    int64_t created_at = 0;
+    int64_t updated_at = 0;
+};
+
 // DuckDBStore: unified storage using DuckDB embedded database
 class DuckDBStore {
 public:
@@ -568,6 +583,17 @@ public:
     std::optional<UserProfile> profile_get(const std::string& user_id = "default");
     bool profile_observe(const std::string& observation_type, const std::string& value,
                          const std::string& user_id = "default");
+
+    // Long-term goals: objectives spanning weeks/months
+    int64_t goal_set(const std::string& title, const std::string& description,
+                     const std::string& milestones_json = "[]", int64_t deadline = 0,
+                     const std::string& realm = "brahman");
+    std::optional<Goal> goal_get(int64_t id);
+    std::vector<Goal> goal_list(const std::string& status = "active", const std::string& realm = "",
+                                 size_t limit = 20);
+    bool goal_progress(int64_t id, float progress, const std::string& milestone_completed = "");
+    bool goal_complete(int64_t id, const std::string& outcome);
+    bool goal_update_status(int64_t id, const std::string& status);
 
     // Error tracking
     std::string last_error() const { return last_error_; }

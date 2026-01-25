@@ -448,6 +448,30 @@ bool DuckDBStore::create_schema() {
         return false;
     }
 
+    // Goal table: long-term objectives spanning weeks/months
+    if (!write_execute(R"(
+        CREATE TABLE IF NOT EXISTS goal (
+            id BIGINT PRIMARY KEY,
+            title TEXT NOT NULL,
+            description TEXT,
+            milestones_json TEXT DEFAULT '[]',
+            status VARCHAR DEFAULT 'active',
+            progress FLOAT DEFAULT 0.0,
+            deadline BIGINT DEFAULT 0,
+            outcome TEXT,
+            realm VARCHAR DEFAULT 'brahman',
+            created_at BIGINT NOT NULL,
+            updated_at BIGINT NOT NULL
+        )
+    )")) {
+        return false;
+    }
+
+    // Indexes for goal queries
+    write_execute("CREATE INDEX IF NOT EXISTS idx_goal_status ON goal(status)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_goal_realm ON goal(realm)");
+    write_execute("CREATE SEQUENCE IF NOT EXISTS goal_seq START 1");
+
     // Sequence for IDs
     write_execute("CREATE SEQUENCE IF NOT EXISTS memory_seq START 1");
     write_execute("CREATE SEQUENCE IF NOT EXISTS triplet_seq START 1");
@@ -3986,6 +4010,200 @@ bool DuckDBStore::profile_observe(const std::string& observation_type, const std
 
     last_error_ = "Unknown observation type: " + observation_type;
     return false;
+}
+
+// ============================================================================
+// Goal Methods
+// ============================================================================
+
+int64_t DuckDBStore::goal_set(const std::string& title, const std::string& description,
+                               const std::string& milestones_json, int64_t deadline,
+                               const std::string& realm) {
+    if (!db_) return -1;
+
+    auto now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+
+    // Get next ID
+    auto id_result = write_query("SELECT nextval('goal_seq')");
+    if (!id_result) return -1;
+    auto chunk = id_result->Fetch();
+    if (!chunk || chunk->size() == 0) return -1;
+    int64_t id = chunk->GetValue(0, 0).GetValue<int64_t>();
+
+    // Escape strings
+    auto escape = [](const std::string& s) {
+        std::string escaped = s;
+        size_t pos = 0;
+        while ((pos = escaped.find('\'', pos)) != std::string::npos) {
+            escaped.replace(pos, 1, "''");
+            pos += 2;
+        }
+        return escaped;
+    };
+
+    std::ostringstream sql;
+    sql << "INSERT INTO goal (id, title, description, milestones_json, status, progress, "
+        << "deadline, realm, created_at, updated_at) VALUES ("
+        << id << ", '" << escape(title) << "', '" << escape(description) << "', '"
+        << escape(milestones_json) << "', 'active', 0.0, " << deadline << ", '"
+        << escape(realm) << "', " << now << ", " << now << ")";
+
+    if (!write_execute(sql.str())) return -1;
+    return id;
+}
+
+std::optional<Goal> DuckDBStore::goal_get(int64_t id) {
+    if (!db_) return std::nullopt;
+
+    std::string sql = "SELECT id, title, description, milestones_json, status, progress, "
+                      "deadline, outcome, realm, created_at, updated_at FROM goal WHERE id = " +
+                      std::to_string(id);
+
+    auto result = read_query(sql);
+    if (!result) return std::nullopt;
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return std::nullopt;
+
+    Goal goal;
+    goal.id = chunk->GetValue(0, 0).GetValue<int64_t>();
+    goal.title = chunk->GetValue(1, 0).ToString();
+    goal.description = chunk->GetValue(2, 0).ToString();
+    goal.milestones_json = chunk->GetValue(3, 0).ToString();
+    goal.status = chunk->GetValue(4, 0).ToString();
+    goal.progress = chunk->GetValue(5, 0).GetValue<float>();
+    goal.deadline = chunk->GetValue(6, 0).GetValue<int64_t>();
+    goal.outcome = chunk->GetValue(7, 0).ToString();
+    goal.realm = chunk->GetValue(8, 0).ToString();
+    goal.created_at = chunk->GetValue(9, 0).GetValue<int64_t>();
+    goal.updated_at = chunk->GetValue(10, 0).GetValue<int64_t>();
+
+    return goal;
+}
+
+std::vector<Goal> DuckDBStore::goal_list(const std::string& status, const std::string& realm,
+                                          size_t limit) {
+    std::vector<Goal> goals;
+    if (!db_) return goals;
+
+    std::ostringstream sql;
+    sql << "SELECT id, title, description, milestones_json, status, progress, "
+        << "deadline, outcome, realm, created_at, updated_at FROM goal WHERE 1=1";
+
+    if (!status.empty()) {
+        sql << " AND status = '" << status << "'";
+    }
+    if (!realm.empty()) {
+        sql << " AND realm = '" << realm << "'";
+    }
+    sql << " ORDER BY created_at DESC LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    if (!result) return goals;
+
+    auto chunk = result->Fetch();
+    while (chunk && chunk->size() > 0) {
+        for (size_t i = 0; i < chunk->size(); i++) {
+            Goal goal;
+            goal.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            goal.title = chunk->GetValue(1, i).ToString();
+            goal.description = chunk->GetValue(2, i).ToString();
+            goal.milestones_json = chunk->GetValue(3, i).ToString();
+            goal.status = chunk->GetValue(4, i).ToString();
+            goal.progress = chunk->GetValue(5, i).GetValue<float>();
+            goal.deadline = chunk->GetValue(6, i).GetValue<int64_t>();
+            goal.outcome = chunk->GetValue(7, i).ToString();
+            goal.realm = chunk->GetValue(8, i).ToString();
+            goal.created_at = chunk->GetValue(9, i).GetValue<int64_t>();
+            goal.updated_at = chunk->GetValue(10, i).GetValue<int64_t>();
+            goals.push_back(goal);
+        }
+        chunk = result->Fetch();
+    }
+
+    return goals;
+}
+
+bool DuckDBStore::goal_progress(int64_t id, float progress, const std::string& milestone_completed) {
+    if (!db_) return false;
+
+    auto now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+
+    // Clamp progress to 0-1
+    progress = std::max(0.0f, std::min(1.0f, progress));
+
+    std::ostringstream sql;
+    sql << "UPDATE goal SET progress = " << progress << ", updated_at = " << now
+        << " WHERE id = " << id;
+
+    if (!write_execute(sql.str())) return false;
+
+    // If milestone specified, mark it as done in the JSON
+    // This is a simple approach - for robustness, use JSON functions
+    if (!milestone_completed.empty()) {
+        auto goal = goal_get(id);
+        if (goal) {
+            std::string milestones = goal->milestones_json;
+            // Simple string replacement: "name":"X","done":false -> "name":"X","done":true
+            std::string search = "\"name\":\"" + milestone_completed + "\",\"done\":false";
+            std::string replace = "\"name\":\"" + milestone_completed + "\",\"done\":true";
+            size_t pos = milestones.find(search);
+            if (pos != std::string::npos) {
+                milestones.replace(pos, search.length(), replace);
+                std::string escaped = milestones;
+                size_t p = 0;
+                while ((p = escaped.find('\'', p)) != std::string::npos) {
+                    escaped.replace(p, 1, "''");
+                    p += 2;
+                }
+                write_execute("UPDATE goal SET milestones_json = '" + escaped +
+                             "', updated_at = " + std::to_string(now) + " WHERE id = " + std::to_string(id));
+            }
+        }
+    }
+
+    return true;
+}
+
+bool DuckDBStore::goal_complete(int64_t id, const std::string& outcome) {
+    if (!db_) return false;
+
+    auto now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+
+    std::string escaped = outcome;
+    size_t pos = 0;
+    while ((pos = escaped.find('\'', pos)) != std::string::npos) {
+        escaped.replace(pos, 1, "''");
+        pos += 2;
+    }
+
+    std::ostringstream sql;
+    sql << "UPDATE goal SET status = 'completed', progress = 1.0, outcome = '"
+        << escaped << "', updated_at = " << now << " WHERE id = " << id;
+
+    return write_execute(sql.str());
+}
+
+bool DuckDBStore::goal_update_status(int64_t id, const std::string& status) {
+    if (!db_) return false;
+
+    // Validate status
+    if (status != "active" && status != "paused" && status != "completed" && status != "abandoned") {
+        last_error_ = "Invalid status: " + status;
+        return false;
+    }
+
+    auto now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+
+    std::ostringstream sql;
+    sql << "UPDATE goal SET status = '" << status << "', updated_at = " << now
+        << " WHERE id = " << id;
+
+    return write_execute(sql.str());
 }
 
 }  // namespace chitta
