@@ -829,8 +829,8 @@ bool DuckDBStore::add_tag(int64_t id, const std::string& tag) {
     }
 
     std::ostringstream sql;
-    sql << "INSERT OR IGNORE INTO memory_tags (memory_id, tag) VALUES ("
-        << id << ", '" << escaped << "')";
+    sql << "INSERT INTO memory_tags (memory_id, tag) VALUES ("
+        << id << ", '" << escaped << "') ON CONFLICT DO NOTHING";
 
     return write_execute(sql.str());
 }
