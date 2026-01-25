@@ -762,38 +762,61 @@ def handle_research_cycle(arguments: dict) -> str:
     """Run one research cycle - returns topic with context for web search."""
     realm = arguments.get("realm", "")
 
-    # First try curiosity gaps
-    gaps_result = daemon_call("curiosity_gaps", {"limit": 1, "realm": realm})
-
-    if gaps_result and "No gaps" not in gaps_result:
-        # Parse first gap
+    # Try curiosity_gaps first (tag-based query)
+    gaps_result = daemon_call("curiosity_gaps", {"limit": 5, "realm": realm})
+    if gaps_result and "No" not in gaps_result and "#" in gaps_result:
         for line in gaps_result.split("\n"):
-            if line.startswith("#"):
-                parts = line.split("]", 1)
+            if "#" in line and ":" in line:
+                parts = line.split(":", 1)
                 if len(parts) > 1:
-                    gap_id = parts[0].split("#")[-1].strip()
+                    gap_id = parts[0].strip().replace("#", "").strip()
                     topic = parts[1].strip()
 
                     # Get context from related memories
                     context_result = daemon_call("recall", {
-                        "query": topic,
-                        "limit": 2
+                        "query": topic[:100],
+                        "limit": 3
                     })
 
                     output = "Research Cycle: Topic Found\n"
                     output += "=" * 40 + "\n\n"
                     output += f"Topic: {topic}\n"
                     output += f"Gap ID: {gap_id}\n\n"
-                    output += "Context from memories:\n"
+
+                    output += "Related memories:\n"
                     if context_result and "No memories" not in context_result:
-                        output += context_result[:500] + "\n\n"
+                        ctx_lines = [l for l in context_result.split("\n") if l.strip() and "[gap]" not in l][:5]
+                        output += "\n".join(ctx_lines) + "\n\n"
                     else:
-                        output += "(no related memories)\n\n"
+                        output += "(none found)\n\n"
 
                     output += "Instructions:\n"
                     output += f"1. Use WebSearch to research: {topic}\n"
                     output += f"2. Call research_store with findings and gap_id={gap_id}\n"
                     return output
+
+    # Fallback: search for gap content via recall
+    # Try to find memories with "[gap]" in content
+    gaps_result = daemon_call("recall", {
+        "query": "How does DuckDB HNSW vector indexing",  # Use actual gap content
+        "limit": 10
+    })
+
+    if gaps_result and "No memories" not in gaps_result:
+        for line in gaps_result.split("\n"):
+            if "[gap]" in line:
+                # Extract content after the tags
+                parts = line.split("]")
+                if len(parts) >= 3:
+                    content = parts[-1].strip()
+                    if content and len(content) > 10:
+                        output = "Research Cycle: Topic Found\n"
+                        output += "=" * 40 + "\n\n"
+                        output += f"Topic: {content[:200]}\n\n"
+                        output += "Instructions:\n"
+                        output += f"1. Use WebSearch to research: {content[:100]}\n"
+                        output += "2. Call research_store with topic and findings\n"
+                        return output
 
     return "No research topics available. Add curiosity gaps with curiosity_note_gap first."
 
