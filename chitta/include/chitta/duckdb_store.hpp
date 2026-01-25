@@ -382,6 +382,12 @@ public:
     // Update memory content
     bool update_content(int64_t id, const std::string& new_content);
 
+    // Update memory visibility (for cross-project promotion)
+    bool update_visibility(int64_t id, RealmVisibility visibility);
+
+    // List global memories (cross-project insights)
+    std::vector<MemoryResult> list_global_memories(size_t limit = 20, const std::string& kind = "");
+
     // Tag management
     bool add_tag(int64_t id, const std::string& tag);
     bool remove_tag(int64_t id, const std::string& tag);

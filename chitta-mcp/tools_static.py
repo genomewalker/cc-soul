@@ -2075,6 +2075,41 @@ TOOLS = [
                 "type": "object"
         }
     ),
+    Tool(
+        name="insight_promote",
+        description="Promote a memory to global visibility so it applies across all projects. Use for cross-project learnings.",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "description": "Memory ID to promote",
+                                "type": "integer"
+                        },
+                        "reason": {
+                                "description": "Why this insight is cross-project worthy",
+                                "type": "string"
+                        }
+                },
+                "required": ["id"],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="insight_global",
+        description="List all global memories (cross-project insights). These apply regardless of current realm.",
+        inputSchema={
+                "properties": {
+                        "kind": {
+                                "description": "Filter by memory kind (wisdom, belief, episode)",
+                                "type": "string"
+                        },
+                        "limit": {
+                                "description": "Max memories to return (default: 20)",
+                                "type": "integer"
+                        }
+                },
+                "type": "object"
+        }
+    ),
 ]
 
 COMPOSITE_TOOLS = [

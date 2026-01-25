@@ -1563,6 +1563,34 @@ private:
         });
         handlers_["hygiene_run"] = [this](const json& p) { return tool_hygiene_run(p); };
 
+        // Cross-Project Learning: transfer insights across realms
+        tools_.push_back({
+            {"name", "insight_promote"},
+            {"description", "Promote a memory to global visibility so it applies across all projects."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "integer"}, {"description", "Memory ID to promote"}}},
+                    {"reason", {{"type", "string"}, {"description", "Why this insight is cross-project"}}}
+                }},
+                {"required", {"id"}}
+            }}
+        });
+        handlers_["insight_promote"] = [this](const json& p) { return tool_insight_promote(p); };
+
+        tools_.push_back({
+            {"name", "insight_global"},
+            {"description", "List all global insights that apply across projects."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"limit", {{"type", "integer"}, {"description", "Max results (default: 20)"}}},
+                    {"tag", {{"type", "string"}, {"description", "Filter by tag (optional)"}}}
+                }}
+            }}
+        });
+        handlers_["insight_global"] = [this](const json& p) { return tool_insight_global(p); };
+
     }
 
     // Tool implementations
@@ -5598,6 +5626,87 @@ private:
             {"decayed", result.decayed},
             {"pruned", result.pruned},
             {"consolidated", result.consolidated}
+        });
+    }
+
+    // ========================================================================
+    // Cross-Project Learning: insight promotion across realms
+    // ========================================================================
+
+    DuckDBToolResult tool_insight_promote(const json& params) {
+        auto [id, id_str] = parse_id(params);
+        std::string reason = params.value("reason", "");
+
+        if (id <= 0) {
+            return DuckDBToolResult::error("id is required");
+        }
+
+        // Get the memory
+        auto mem = mind_->store().get_memory(id);
+        if (!mem) {
+            return DuckDBToolResult::error("Memory not found: " + id_str);
+        }
+
+        // Update visibility to global
+        bool ok = mind_->store().update_visibility(id, RealmVisibility::Global);
+        if (!ok) {
+            return DuckDBToolResult::error("Failed to promote memory");
+        }
+
+        // Add promotion triplet for tracking
+        std::string slug = "memory_" + std::to_string(id);
+        mind_->store().connect(slug, "promoted_to", "global");
+        if (!reason.empty()) {
+            mind_->store().connect(slug, "promotion_reason", reason);
+        }
+
+        std::ostringstream ss;
+        ss << "Promoted memory #" << id << " to global visibility\n";
+        ss << "Content: " << mem->content.substr(0, 100) << (mem->content.size() > 100 ? "..." : "") << "\n";
+        if (!reason.empty()) {
+            ss << "Reason: " << reason;
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"id", id},
+            {"visibility", 2},
+            {"reason", reason}
+        });
+    }
+
+    DuckDBToolResult tool_insight_global(const json& params) {
+        size_t limit = params.value("limit", 20);
+        std::string kind = params.value("kind", "");
+
+        auto memories = mind_->store().list_global_memories(limit, kind);
+
+        if (memories.empty()) {
+            return DuckDBToolResult::ok("No global memories found", {{"count", 0}});
+        }
+
+        std::ostringstream ss;
+        ss << "Global Insights (" << memories.size() << "):\n";
+        ss << "══════════════════════════════\n\n";
+
+        json items = json::array();
+        for (const auto& m : memories) {
+            ss << "#" << m.id << " [" << m.kind << "] ";
+            ss << m.content.substr(0, 80) << (m.content.size() > 80 ? "..." : "") << "\n";
+            ss << "  Confidence: " << std::fixed << std::setprecision(2) << m.confidence;
+            ss << " | Source: " << m.realm << "\n\n";
+
+            items.push_back({
+                {"id", m.id},
+                {"kind", m.kind},
+                {"content", m.content},
+                {"confidence", m.confidence},
+                {"realm", m.realm}
+            });
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"count", memories.size()},
+            {"memories", items}
         });
     }
 };

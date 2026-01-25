@@ -862,6 +862,55 @@ bool DuckDBStore::update_content(int64_t id, const std::string& new_content) {
     return write_execute(sql.str());
 }
 
+bool DuckDBStore::update_visibility(int64_t id, RealmVisibility visibility) {
+    if (!db_) return false;
+
+    std::ostringstream sql;
+    sql << "UPDATE memory SET visibility = " << static_cast<int>(visibility)
+        << ", accessed_at = " << now() << " WHERE id = " << id;
+
+    return write_execute(sql.str());
+}
+
+std::vector<MemoryResult> DuckDBStore::list_global_memories(size_t limit, const std::string& kind) {
+    std::vector<MemoryResult> results;
+    if (!db_) return results;
+
+    std::ostringstream sql;
+    sql << "SELECT id, content, kind, confidence, realm, visibility, created_at, accessed_at "
+        << "FROM memory WHERE visibility = " << static_cast<int>(RealmVisibility::Global);
+
+    if (!kind.empty()) {
+        // Escape kind
+        std::string escaped = kind;
+        size_t pos = 0;
+        while ((pos = escaped.find('\'', pos)) != std::string::npos) {
+            escaped.replace(pos, 1, "''");
+            pos += 2;
+        }
+        sql << " AND kind = '" << escaped << "'";
+    }
+
+    sql << " ORDER BY confidence DESC, accessed_at DESC LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    if (!result) return results;
+
+    while (auto chunk = result->Fetch()) {
+        for (size_t i = 0; i < chunk->size(); i++) {
+            MemoryResult mem;
+            mem.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            mem.content = chunk->GetValue(1, i).GetValue<std::string>();
+            mem.kind = chunk->GetValue(2, i).GetValue<std::string>();
+            mem.confidence = chunk->GetValue(3, i).GetValue<float>();
+            mem.realm = chunk->GetValue(4, i).GetValue<std::string>();
+            results.push_back(mem);
+        }
+    }
+
+    return results;
+}
+
 bool DuckDBStore::add_tag(int64_t id, const std::string& tag) {
     // Lock handled in write_execute/write_query/read_query
     if (!db_) return false;
