@@ -979,6 +979,490 @@ TOOLS = [
         }
     ),
     Tool(
+        name="long_task_start",
+        description="Start a long-running task with goal and completion criteria",
+        inputSchema={
+                "properties": {
+                        "goal": {
+                                "description": "What you're trying to achieve",
+                                "type": "string"
+                        },
+                        "hard_checks": {
+                                "description": "Deterministic completion criteria",
+                                "items": {
+                                        "type": "string"
+                                },
+                                "type": "array"
+                        },
+                        "realm": {
+                                "description": "Project scope (default: brahman)",
+                                "type": "string"
+                        },
+                        "soft_checks": {
+                                "description": "Semantic completion criteria",
+                                "items": {
+                                        "type": "string"
+                                },
+                                "type": "array"
+                        },
+                        "task_id": {
+                                "description": "Unique task identifier",
+                                "type": "string"
+                        },
+                        "work_items": {
+                                "description": "Initial subtasks",
+                                "items": {
+                                        "type": "string"
+                                },
+                                "type": "array"
+                        }
+                },
+                "required": [
+                        "task_id",
+                        "goal"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="long_task_get",
+        description="Get a long-running task by ID",
+        inputSchema={
+                "properties": {
+                        "task_id": {
+                                "description": "Task identifier",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "task_id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="long_task_active",
+        description="Get the active long-running task for a realm",
+        inputSchema={
+                "properties": {
+                        "realm": {
+                                "description": "Project scope (optional)",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="long_task_update",
+        description="Update a long-running task progress",
+        inputSchema={
+                "properties": {
+                        "blockers": {
+                                "description": "Current blockers",
+                                "items": {
+                                        "type": "string"
+                                },
+                                "type": "array"
+                        },
+                        "completed_summary": {
+                                "description": "What's been accomplished",
+                                "type": "string"
+                        },
+                        "task_id": {
+                                "description": "Task identifier",
+                                "type": "string"
+                        },
+                        "work_items": {
+                                "description": "Updated subtasks",
+                                "items": {
+                                        "type": "string"
+                                },
+                                "type": "array"
+                        }
+                },
+                "required": [
+                        "task_id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="long_task_complete",
+        description="Mark a long-running task as completed",
+        inputSchema={
+                "properties": {
+                        "outcome": {
+                                "description": "Final outcome description",
+                                "type": "string"
+                        },
+                        "task_id": {
+                                "description": "Task identifier",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "task_id",
+                        "outcome"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="long_task_event",
+        description="Append an event to the task log (tool result, decision, observation)",
+        inputSchema={
+                "properties": {
+                        "kind": {
+                                "description": "Event type: tool_result, decision, observation, error, checkpoint",
+                                "type": "string"
+                        },
+                        "payload": {
+                                "description": "Event data (JSON)",
+                                "type": "string"
+                        },
+                        "related_entities": {
+                                "description": "Related files/functions",
+                                "items": {
+                                        "type": "string"
+                                },
+                                "type": "array"
+                        },
+                        "tags": {
+                                "description": "Tags for filtering",
+                                "items": {
+                                        "type": "string"
+                                },
+                                "type": "array"
+                        },
+                        "task_id": {
+                                "description": "Task identifier",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "task_id",
+                        "kind"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="checkpoint",
+        description="Save session state. Uses active long task if exists, otherwise standalone ledger.",
+        inputSchema={
+                "properties": {
+                        "active_files": {
+                                "description": "Files being worked on",
+                                "items": {
+                                        "type": "string"
+                                },
+                                "type": "array"
+                        },
+                        "discoveries": {
+                                "description": "Insights learned",
+                                "items": {
+                                        "type": "string"
+                                },
+                                "type": "array"
+                        },
+                        "mood": {
+                                "description": "confident|uncertain|flowing|frustrated",
+                                "type": "string"
+                        },
+                        "next_steps": {
+                                "description": "Next actions",
+                                "items": {
+                                        "type": "string"
+                                },
+                                "type": "array"
+                        },
+                        "realm": {
+                                "description": "Project scope",
+                                "type": "string"
+                        },
+                        "summary": {
+                                "description": "What's been accomplished",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="long_task_snapshot",
+        description="Get synthesized task context for injection (what's done, pending, blockers, relevant memories)",
+        inputSchema={
+                "properties": {
+                        "mode": {
+                                "description": "Output mode: inject (compact) or debug (verbose)",
+                                "type": "string"
+                        },
+                        "task_id": {
+                                "description": "Task identifier",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "task_id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="long_task_evaluate",
+        description="Evaluate task completion: run hard checks, return decision (complete/continue/blocked)",
+        inputSchema={
+                "properties": {
+                        "task_id": {
+                                "description": "Task identifier",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "task_id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="suggestion_track",
+        description="Track a suggestion made for later outcome evaluation",
+        inputSchema={
+                "properties": {
+                        "content": {
+                                "description": "What was suggested",
+                                "type": "string"
+                        },
+                        "context": {
+                                "description": "Why/when it was suggested",
+                                "type": "string"
+                        },
+                        "realm": {
+                                "description": "Project scope (default: brahman)",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "content"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="suggestion_pending",
+        description="List suggestions awaiting outcome feedback",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "description": "Max results (default: 20)",
+                                "type": "integer"
+                        },
+                        "realm": {
+                                "description": "Filter by realm",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="suggestion_resolve",
+        description="Record the outcome of a suggestion (did it help?)",
+        inputSchema={
+                "properties": {
+                        "details": {
+                                "description": "What happened",
+                                "type": "string"
+                        },
+                        "helped": {
+                                "description": "Did the suggestion help?",
+                                "type": "boolean"
+                        },
+                        "id": {
+                                "description": "Suggestion ID",
+                                "type": "integer"
+                        }
+                },
+                "required": [
+                        "id",
+                        "helped"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="suggestion_count",
+        description="Count pending suggestions awaiting feedback",
+        inputSchema={
+                "properties": {
+                        "realm": {
+                                "description": "Filter by realm",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="consolidation_scan",
+        description="Find similar memory pairs that could be merged",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "description": "Max candidates (default: 50)",
+                                "type": "integer"
+                        },
+                        "realm": {
+                                "description": "Filter by realm",
+                                "type": "string"
+                        },
+                        "similarity_threshold": {
+                                "description": "Min similarity (0-1, default: 0.85)",
+                                "type": "number"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="consolidation_merge",
+        description="Merge two similar memories (primary absorbs secondary)",
+        inputSchema={
+                "properties": {
+                        "merged_content": {
+                                "description": "Optional combined content",
+                                "type": "string"
+                        },
+                        "primary_id": {
+                                "description": "ID of primary memory (kept)",
+                                "type": "integer"
+                        },
+                        "secondary_id": {
+                                "description": "ID of secondary memory (absorbed)",
+                                "type": "integer"
+                        }
+                },
+                "required": [
+                        "primary_id",
+                        "secondary_id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="consolidation_auto",
+        description="Auto-merge highly similar memories (>90% similarity)",
+        inputSchema={
+                "properties": {
+                        "max_merges": {
+                                "description": "Max merges to perform (default: 20)",
+                                "type": "integer"
+                        },
+                        "similarity_threshold": {
+                                "description": "Min similarity (default: 0.90)",
+                                "type": "number"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="metacognition_corrections",
+        description="Analyze patterns in past corrections. Finds recurring mistakes.",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "description": "Max corrections to analyze (default: 50)",
+                                "type": "integer"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="metacognition_outcomes",
+        description="Analyze suggestion outcomes (what worked vs failed). Finds success patterns.",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "description": "Max outcomes to analyze (default: 50)",
+                                "type": "integer"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="metacognition_evaluate",
+        description="Self-evaluate learning effectiveness. Returns metrics and recommendations.",
+        inputSchema={
+                "properties": {},
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="curiosity_note_gap",
+        description="Record a knowledge gap - something I don't know or couldn't answer",
+        inputSchema={
+                "properties": {
+                        "context": {
+                                "description": "When/why this came up",
+                                "type": "string"
+                        },
+                        "gap": {
+                                "description": "What I don't know",
+                                "type": "string"
+                        },
+                        "realm": {
+                                "description": "Project scope",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "gap"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="curiosity_gaps",
+        description="List current knowledge gaps awaiting exploration",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "description": "Max gaps (default: 20)",
+                                "type": "integer"
+                        },
+                        "realm": {
+                                "description": "Filter by realm",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="curiosity_resolve",
+        description="Mark a gap as explored/resolved",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "description": "Gap memory ID",
+                                "type": "integer"
+                        },
+                        "learned": {
+                                "description": "What was learned",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
         name="transcript_register",
         description="Register a transcript file for distillation tracking",
         inputSchema={
@@ -1118,352 +1602,232 @@ TOOLS = [
                 "type": "object"
         }
     ),
-]
-
-# Composite tools - handled in Python MCP layer for token efficiency
-COMPOSITE_TOOLS = [
     Tool(
-        name="read_symbol",
-        description="Read just a symbol's code, not entire file. ~10x token savings vs full file read. Returns [kind name @ file:line-line] + code.",
+        name="anticipation_observe",
+        description="Record a context→action pattern. Called when an action is taken in response to a context.",
         inputSchema={
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string",
-                    "description": "Symbol name to read (e.g., 'DuckDBStore', 'daemon_call')"
+                "properties": {
+                        "action": {
+                                "description": "What was done in response",
+                                "type": "string"
+                        },
+                        "context": {
+                                "description": "What triggered the action (situation/state)",
+                                "type": "string"
+                        },
+                        "realm": {
+                                "description": "Project scope (default: brahman)",
+                                "type": "string"
+                        }
                 },
-                "kind": {
-                    "type": "string",
-                    "description": "Symbol kind filter: class, function, method (optional)"
-                },
-                "context": {
-                    "type": "integer",
-                    "description": "Lines of context before symbol (default: 3)"
-                },
-                "project": {
-                    "type": "string",
-                    "description": "Project name filter (optional)"
-                }
-            },
-            "required": ["name"]
+                "required": [
+                        "context",
+                        "action"
+                ],
+                "type": "object"
         }
     ),
     Tool(
-        name="read_function",
-        description="Read a function's code. Convenience wrapper for read_symbol with kind=function.",
+        name="anticipation_predict",
+        description="Given a context, predict likely actions based on learned patterns.",
         inputSchema={
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string",
-                    "description": "Function name to read"
+                "properties": {
+                        "context": {
+                                "description": "Current situation/context",
+                                "type": "string"
+                        },
+                        "limit": {
+                                "description": "Max predictions (default: 5)",
+                                "type": "integer"
+                        },
+                        "realm": {
+                                "description": "Filter by realm",
+                                "type": "string"
+                        }
                 },
-                "context": {
-                    "type": "integer",
-                    "description": "Lines of context before function (default: 3)"
-                },
-                "project": {
-                    "type": "string",
-                    "description": "Project name filter (optional)"
-                }
-            },
-            "required": ["name"]
+                "required": [
+                        "context"
+                ],
+                "type": "object"
         }
     ),
     Tool(
-        name="symbol_callers",
-        description="Find all callers of a symbol without grep. Queries triplets where predicate=calls and object=symbol.",
+        name="anticipation_success",
+        description="Mark a predicted action as successful - the prediction was correct and helpful.",
         inputSchema={
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string",
-                    "description": "Symbol name to find callers for"
+                "properties": {
+                        "id": {
+                                "description": "Pattern ID to mark successful",
+                                "type": "integer"
+                        }
                 },
-                "limit": {
-                    "type": "integer",
-                    "description": "Max results (default: 20)"
-                }
-            },
-            "required": ["name"]
+                "required": [
+                        "id"
+                ],
+                "type": "object"
         }
     ),
     Tool(
-        name="symbol_callees",
-        description="Find all symbols that a symbol calls. Queries triplets where predicate=calls and subject=symbol.",
+        name="anticipation_list",
+        description="List learned anticipation patterns, ordered by frequency.",
         inputSchema={
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string",
-                    "description": "Symbol name to find callees for"
+                "properties": {
+                        "limit": {
+                                "description": "Max patterns (default: 50)",
+                                "type": "integer"
+                        },
+                        "realm": {
+                                "description": "Filter by realm",
+                                "type": "string"
+                        }
                 },
-                "limit": {
-                    "type": "integer",
-                    "description": "Max results (default: 20)"
-                }
-            },
-            "required": ["name"]
+                "type": "object"
         }
     ),
     Tool(
-        name="smart_context",
-        description="Build minimal context for a task. Combines code symbols + memories, compressed to token limit.",
+        name="habit_observe",
+        description="Record a trigger→response pattern. Each observation strengthens the habit.",
         inputSchema={
-            "type": "object",
-            "properties": {
-                "task": {
-                    "type": "string",
-                    "description": "Task description to find relevant context for"
+                "properties": {
+                        "realm": {
+                                "description": "Project scope (default: brahman)",
+                                "type": "string"
+                        },
+                        "response": {
+                                "description": "What should happen when triggered",
+                                "type": "string"
+                        },
+                        "trigger": {
+                                "description": "What triggers the habit",
+                                "type": "string"
+                        }
                 },
-                "limit": {
-                    "type": "integer",
-                    "description": "Token limit for output (default: 500)"
-                },
-                "memories": {
-                    "type": "boolean",
-                    "description": "Include relevant memories (default: true)"
-                },
-                "code": {
-                    "type": "boolean",
-                    "description": "Include relevant code symbols (default: true)"
-                }
-            },
-            "required": ["task"]
+                "required": [
+                        "trigger",
+                        "response"
+                ],
+                "type": "object"
         }
     ),
     Tool(
-        name="learn_correction",
-        description="Store a correction when I was wrong. Creates high-confidence counter-memory with 'corrects' triplet linking to original mistake.",
+        name="habit_match",
+        description="Find habits that match the given context.",
         inputSchema={
-            "type": "object",
-            "properties": {
-                "wrong": {
-                    "type": "string",
-                    "description": "What I said/did that was incorrect"
+                "properties": {
+                        "context": {
+                                "description": "Current context to match against",
+                                "type": "string"
+                        },
+                        "min_strength": {
+                                "description": "Minimum habit strength 0-1 (default: 0.3)",
+                                "type": "number"
+                        },
+                        "realm": {
+                                "description": "Filter by realm",
+                                "type": "string"
+                        }
                 },
-                "correct": {
-                    "type": "string",
-                    "description": "The correct information/approach"
+                "required": [
+                        "context"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="habit_strengthen",
+        description="Manually strengthen a habit.",
+        inputSchema={
+                "properties": {
+                        "amount": {
+                                "description": "Amount to strengthen (default: 0.1)",
+                                "type": "number"
+                        },
+                        "id": {
+                                "description": "Habit ID",
+                                "type": "integer"
+                        }
                 },
-                "context": {
-                    "type": "string",
-                    "description": "Context where this applies (optional)"
-                }
-            },
-            "required": ["wrong", "correct"]
+                "required": [
+                        "id"
+                ],
+                "type": "object"
         }
     ),
     Tool(
-        name="learn_preference",
-        description="Store a user preference for adapting communication/behavior. Global visibility so it applies across all projects.",
+        name="habit_weaken",
+        description="Weaken a habit (negative feedback).",
         inputSchema={
-            "type": "object",
-            "properties": {
-                "category": {
-                    "type": "string",
-                    "description": "Preference category: communication, detail, autonomy, style, workflow"
+                "properties": {
+                        "amount": {
+                                "description": "Amount to weaken (default: 0.05)",
+                                "type": "number"
+                        },
+                        "id": {
+                                "description": "Habit ID",
+                                "type": "integer"
+                        }
                 },
-                "preference": {
-                    "type": "string",
-                    "description": "The preference to remember (e.g., 'prefers concise responses')"
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="habit_list",
+        description="List formed habits, ordered by strength.",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "description": "Max habits (default: 50)",
+                                "type": "integer"
+                        },
+                        "min_strength": {
+                                "description": "Minimum strength (default: 0)",
+                                "type": "number"
+                        },
+                        "realm": {
+                                "description": "Filter by realm",
+                                "type": "string"
+                        }
                 },
-                "example": {
-                    "type": "string",
-                    "description": "Example demonstrating this preference (optional)"
-                }
-            },
-            "required": ["category", "preference"]
+                "type": "object"
         }
     ),
     Tool(
-        name="learn_insight",
-        description="Store a generalizable insight that applies across projects. Use for patterns, techniques, and wisdom not tied to specific codebase.",
+        name="background_schedule",
+        description="Schedule a background task (consolidation, decay, pruning, pattern_extraction).",
         inputSchema={
-            "type": "object",
-            "properties": {
-                "domain": {
-                    "type": "string",
-                    "description": "Domain: programming, debugging, architecture, testing, performance, security, communication"
+                "properties": {
+                        "realm": {
+                                "description": "Project scope (default: brahman)",
+                                "type": "string"
+                        },
+                        "task_type": {
+                                "description": "Type: consolidation, decay, pruning, pattern_extraction",
+                                "type": "string"
+                        }
                 },
-                "insight": {
-                    "type": "string",
-                    "description": "The generalizable insight or pattern"
-                },
-                "learned_from": {
-                    "type": "string",
-                    "description": "Context where this was learned (optional, for future reference)"
-                }
-            },
-            "required": ["domain", "insight"]
+                "required": [
+                        "task_type"
+                ],
+                "type": "object"
         }
     ),
     Tool(
-        name="learn_approach",
-        description="Store what approach worked when in a particular state/mood. Builds emotional memory for adapting to session dynamics.",
+        name="background_status",
+        description="Get status of background processing (pending, running, completed today).",
         inputSchema={
-            "type": "object",
-            "properties": {
-                "state": {
-                    "type": "string",
-                    "description": "State/mood: stuck, debugging, exploring, flowing, frustrated, uncertain, rushing"
-                },
-                "approach": {
-                    "type": "string",
-                    "description": "What helped in this state (e.g., 'step back and reread requirements')"
-                },
-                "outcome": {
-                    "type": "string",
-                    "description": "What happened after (optional)"
-                }
-            },
-            "required": ["state", "approach"]
+                "properties": {},
+                "type": "object"
         }
     ),
     Tool(
-        name="learn_outcome",
-        description="Record whether a suggestion/approach actually helped. Builds feedback loop for improving future suggestions.",
+        name="background_run_cycle",
+        description="Run one cycle of background processing. Processes pending tasks.",
         inputSchema={
-            "type": "object",
-            "properties": {
-                "suggestion": {
-                    "type": "string",
-                    "description": "What was suggested or tried"
-                },
-                "helped": {
-                    "type": "boolean",
-                    "description": "Did it help? true/false"
-                },
-                "details": {
-                    "type": "string",
-                    "description": "Why it helped or didn't (optional but valuable)"
-                }
-            },
-            "required": ["suggestion", "helped"]
-        }
-    ),
-    Tool(
-        name="learn_milestone",
-        description="Record a relationship milestone - achievements, personal context, significant moments worth remembering.",
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "milestone": {
-                    "type": "string",
-                    "description": "What happened (e.g., 'shipped v1.0', 'first successful release')"
-                },
-                "significance": {
-                    "type": "string",
-                    "description": "Why it matters (optional)"
-                },
-                "date": {
-                    "type": "string",
-                    "description": "When it happened (optional, defaults to now)"
-                }
-            },
-            "required": ["milestone"]
-        }
-    ),
-    # Long-running tasks (mind-powered Ralph Wiggum)
-    Tool(
-        name="long_task_start",
-        description="Start a long-running task with goal and completion criteria. Task persists across sessions.",
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "task_id": {"type": "string", "description": "Unique task identifier"},
-                "goal": {"type": "string", "description": "What you're trying to achieve"},
-                "realm": {"type": "string", "description": "Project scope (default: brahman)"},
-                "hard_checks": {"type": "array", "items": {"type": "string"}, "description": "Deterministic completion criteria (e.g., 'tests pass')"},
-                "soft_checks": {"type": "array", "items": {"type": "string"}, "description": "Semantic completion criteria"},
-                "work_items": {"type": "array", "items": {"type": "string"}, "description": "Initial subtasks"}
-            },
-            "required": ["task_id", "goal"]
-        }
-    ),
-    Tool(
-        name="long_task_get",
-        description="Get a long-running task by ID",
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "task_id": {"type": "string", "description": "Task identifier"}
-            },
-            "required": ["task_id"]
-        }
-    ),
-    Tool(
-        name="long_task_active",
-        description="Get the active long-running task for a realm",
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "realm": {"type": "string", "description": "Project scope (optional)"}
-            }
-        }
-    ),
-    Tool(
-        name="long_task_update",
-        description="Update a long-running task progress",
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "task_id": {"type": "string", "description": "Task identifier"},
-                "completed_summary": {"type": "string", "description": "What's been accomplished"},
-                "work_items": {"type": "array", "items": {"type": "string"}, "description": "Updated subtasks"},
-                "blockers": {"type": "array", "items": {"type": "string"}, "description": "Current blockers"}
-            },
-            "required": ["task_id"]
-        }
-    ),
-    Tool(
-        name="long_task_complete",
-        description="Mark a long-running task as completed",
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "task_id": {"type": "string", "description": "Task identifier"},
-                "outcome": {"type": "string", "description": "Final outcome description"}
-            },
-            "required": ["task_id", "outcome"]
-        }
-    ),
-    Tool(
-        name="long_task_event",
-        description="Append an event to the task log (tool result, decision, observation)",
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "task_id": {"type": "string", "description": "Task identifier"},
-                "kind": {"type": "string", "description": "Event type: tool_result, decision, observation, error, checkpoint"},
-                "payload": {"type": "string", "description": "Event data (JSON or text)"},
-                "tags": {"type": "array", "items": {"type": "string"}, "description": "Tags for filtering"},
-                "related_entities": {"type": "array", "items": {"type": "string"}, "description": "Related files/functions"}
-            },
-            "required": ["task_id", "kind"]
-        }
-    ),
-    Tool(
-        name="long_task_snapshot",
-        description="Get synthesized task context for injection (what's done, pending, blockers, relevant memories)",
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "task_id": {"type": "string", "description": "Task identifier"},
-                "mode": {"type": "string", "description": "Output mode: inject (compact) or debug (verbose)"}
-            },
-            "required": ["task_id"]
-        }
-    ),
-    Tool(
-        name="long_task_evaluate",
-        description="Evaluate task completion: run checks, return decision (complete/continue/blocked)",
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "task_id": {"type": "string", "description": "Task identifier"}
-            },
-            "required": ["task_id"]
+                "properties": {},
+                "type": "object"
         }
     ),
 ]

@@ -3,6 +3,7 @@
 #include <sstream>
 #include <cmath>
 #include <chrono>
+#include <set>
 
 namespace chitta {
 
@@ -344,6 +345,95 @@ bool DuckDBStore::create_schema() {
     write_execute("CREATE INDEX IF NOT EXISTS idx_event_kind ON task_event(kind)");
     write_execute("CREATE INDEX IF NOT EXISTS idx_event_created ON task_event(created_at DESC)");
 
+    // Suggestion tracking for loop closure
+    if (!write_execute(R"(
+        CREATE TABLE IF NOT EXISTS suggestion (
+            id BIGINT PRIMARY KEY,
+            content TEXT NOT NULL,
+            context TEXT,
+            realm VARCHAR DEFAULT 'brahman',
+            status VARCHAR DEFAULT 'pending',
+            helped BOOLEAN DEFAULT FALSE,
+            outcome_details TEXT,
+            memory_id BIGINT DEFAULT 0,
+            suggested_at BIGINT NOT NULL,
+            resolved_at BIGINT DEFAULT 0
+        )
+    )")) {
+        return false;
+    }
+
+    // Indexes for suggestion queries
+    write_execute("CREATE INDEX IF NOT EXISTS idx_suggestion_status ON suggestion(status)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_suggestion_realm ON suggestion(realm)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_suggestion_suggested ON suggestion(suggested_at DESC)");
+
+    // Anticipation table: context→action pattern learning
+    if (!write_execute(R"(
+        CREATE TABLE IF NOT EXISTS anticipation (
+            id BIGINT PRIMARY KEY,
+            context TEXT NOT NULL,
+            action TEXT NOT NULL,
+            frequency INTEGER DEFAULT 1,
+            success_count INTEGER DEFAULT 0,
+            last_triggered BIGINT NOT NULL,
+            realm VARCHAR DEFAULT 'brahman',
+            created_at BIGINT NOT NULL,
+            UNIQUE(context, action, realm)
+        )
+    )")) {
+        return false;
+    }
+
+    // Indexes for anticipation queries
+    write_execute("CREATE INDEX IF NOT EXISTS idx_anticipation_context ON anticipation(context)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_anticipation_realm ON anticipation(realm)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_anticipation_freq ON anticipation(frequency DESC)");
+
+    // Habit table: repeated patterns that strengthen with use
+    if (!write_execute(R"(
+        CREATE TABLE IF NOT EXISTS habit (
+            id BIGINT PRIMARY KEY,
+            trigger_pattern TEXT NOT NULL,
+            response TEXT NOT NULL,
+            strength FLOAT DEFAULT 0.1,
+            frequency INTEGER DEFAULT 1,
+            last_activated BIGINT NOT NULL,
+            realm VARCHAR DEFAULT 'brahman',
+            created_at BIGINT NOT NULL,
+            UNIQUE(trigger_pattern, response, realm)
+        )
+    )")) {
+        return false;
+    }
+
+    // Indexes for habit queries
+    write_execute("CREATE INDEX IF NOT EXISTS idx_habit_trigger ON habit(trigger_pattern)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_habit_realm ON habit(realm)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_habit_strength ON habit(strength DESC)");
+
+    // Background task table: daemon-level processing
+    if (!write_execute(R"(
+        CREATE TABLE IF NOT EXISTS background_task (
+            id BIGINT PRIMARY KEY,
+            task_type VARCHAR NOT NULL,
+            status VARCHAR DEFAULT 'pending',
+            scheduled_at BIGINT NOT NULL,
+            started_at BIGINT DEFAULT 0,
+            completed_at BIGINT DEFAULT 0,
+            result TEXT,
+            error TEXT,
+            realm VARCHAR DEFAULT 'brahman'
+        )
+    )")) {
+        return false;
+    }
+
+    // Indexes for background task queries
+    write_execute("CREATE INDEX IF NOT EXISTS idx_bg_status ON background_task(status)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_bg_type ON background_task(task_type)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_bg_scheduled ON background_task(scheduled_at)");
+
     // Sequence for IDs
     write_execute("CREATE SEQUENCE IF NOT EXISTS memory_seq START 1");
     write_execute("CREATE SEQUENCE IF NOT EXISTS triplet_seq START 1");
@@ -351,6 +441,10 @@ bool DuckDBStore::create_schema() {
     write_execute("CREATE SEQUENCE IF NOT EXISTS ledger_seq START 1");
     write_execute("CREATE SEQUENCE IF NOT EXISTS task_seq START 1");
     write_execute("CREATE SEQUENCE IF NOT EXISTS event_seq START 1");
+    write_execute("CREATE SEQUENCE IF NOT EXISTS suggestion_seq START 1");
+    write_execute("CREATE SEQUENCE IF NOT EXISTS anticipation_seq START 1");
+    write_execute("CREATE SEQUENCE IF NOT EXISTS habit_seq START 1");
+    write_execute("CREATE SEQUENCE IF NOT EXISTS background_seq START 1");
 
     return true;
 }
@@ -2923,6 +3017,837 @@ std::vector<TaskEvent> DuckDBStore::event_get_recent(const std::string& task_id,
     }
 
     return events;
+}
+
+// ============================================================================
+// Suggestion tracking (loop closure)
+// ============================================================================
+
+int64_t DuckDBStore::suggestion_track(const Suggestion& suggestion) {
+    if (!db_ || suggestion.content.empty()) return -1;
+
+    Timestamp now_ts = now();
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    std::ostringstream sql;
+    sql << "INSERT INTO suggestion (id, content, context, realm, status, helped, "
+        << "outcome_details, memory_id, suggested_at, resolved_at) "
+        << "VALUES (nextval('suggestion_seq'), '" << escape(suggestion.content) << "', "
+        << "'" << escape(suggestion.context) << "', "
+        << "'" << escape(suggestion.realm.empty() ? "brahman" : suggestion.realm) << "', "
+        << "'pending', FALSE, '', 0, " << now_ts << ", 0) "
+        << "RETURNING id";
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) {
+        last_error_ = result ? result->GetError() : "No result";
+        return -1;
+    }
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return -1;
+
+    return chunk->GetValue(0, 0).GetValue<int64_t>();
+}
+
+std::vector<Suggestion> DuckDBStore::suggestion_list_pending(const std::string& realm, size_t limit) {
+    std::vector<Suggestion> suggestions;
+    if (!db_) return suggestions;
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    std::string sql = "SELECT id, content, context, realm, status, helped, "
+                      "outcome_details, memory_id, suggested_at, resolved_at "
+                      "FROM suggestion WHERE status = 'pending'";
+
+    if (!realm.empty()) sql += " AND realm = '" + escape(realm) + "'";
+    sql += " ORDER BY suggested_at DESC LIMIT " + std::to_string(limit);
+
+    auto result = read_query(sql);
+    if (!result || result->HasError()) return suggestions;
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); i++) {
+            Suggestion s;
+            s.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            s.content = chunk->GetValue(1, i).ToString();
+            s.context = chunk->GetValue(2, i).ToString();
+            s.realm = chunk->GetValue(3, i).ToString();
+            s.status = chunk->GetValue(4, i).ToString();
+            s.helped = chunk->GetValue(5, i).GetValue<bool>();
+            s.outcome_details = chunk->GetValue(6, i).ToString();
+            s.memory_id = chunk->GetValue(7, i).GetValue<int64_t>();
+            s.suggested_at = chunk->GetValue(8, i).GetValue<int64_t>();
+            s.resolved_at = chunk->GetValue(9, i).GetValue<int64_t>();
+            suggestions.push_back(s);
+        }
+    }
+
+    return suggestions;
+}
+
+bool DuckDBStore::suggestion_resolve(int64_t id, bool helped, const std::string& details, int64_t memory_id) {
+    if (!db_ || id <= 0) return false;
+
+    Timestamp now_ts = now();
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    std::ostringstream sql;
+    sql << "UPDATE suggestion SET status = 'resolved', helped = " << (helped ? "TRUE" : "FALSE")
+        << ", outcome_details = '" << escape(details) << "'"
+        << ", memory_id = " << memory_id
+        << ", resolved_at = " << now_ts
+        << " WHERE id = " << id;
+
+    return write_execute(sql.str());
+}
+
+std::optional<Suggestion> DuckDBStore::suggestion_get(int64_t id) {
+    if (!db_ || id <= 0) return std::nullopt;
+
+    std::string sql = "SELECT id, content, context, realm, status, helped, "
+                      "outcome_details, memory_id, suggested_at, resolved_at "
+                      "FROM suggestion WHERE id = " + std::to_string(id);
+
+    auto result = read_query(sql);
+    if (!result || result->HasError()) return std::nullopt;
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return std::nullopt;
+
+    Suggestion s;
+    s.id = chunk->GetValue(0, 0).GetValue<int64_t>();
+    s.content = chunk->GetValue(1, 0).ToString();
+    s.context = chunk->GetValue(2, 0).ToString();
+    s.realm = chunk->GetValue(3, 0).ToString();
+    s.status = chunk->GetValue(4, 0).ToString();
+    s.helped = chunk->GetValue(5, 0).GetValue<bool>();
+    s.outcome_details = chunk->GetValue(6, 0).ToString();
+    s.memory_id = chunk->GetValue(7, 0).GetValue<int64_t>();
+    s.suggested_at = chunk->GetValue(8, 0).GetValue<int64_t>();
+    s.resolved_at = chunk->GetValue(9, 0).GetValue<int64_t>();
+
+    return s;
+}
+
+size_t DuckDBStore::suggestion_count_pending(const std::string& realm) {
+    if (!db_) return 0;
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    std::string sql = "SELECT COUNT(*) FROM suggestion WHERE status = 'pending'";
+    if (!realm.empty()) sql += " AND realm = '" + escape(realm) + "'";
+
+    auto result = read_query(sql);
+    if (!result || result->HasError()) return 0;
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return 0;
+
+    return static_cast<size_t>(chunk->GetValue(0, 0).GetValue<int64_t>());
+}
+
+// ============================================================================
+// Memory consolidation (merge similar memories)
+// ============================================================================
+
+std::vector<DuckDBStore::ConsolidationCandidate> DuckDBStore::consolidation_scan(
+    float similarity_threshold, size_t limit, const std::string& realm) {
+
+    std::vector<ConsolidationCandidate> candidates;
+    if (!db_ || !vss_loaded_) return candidates;
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    // Self-join to find similar memory pairs
+    // Use cosine similarity via array_cosine_similarity
+    std::ostringstream sql;
+    sql << "WITH pairs AS ("
+        << "  SELECT m1.id as id1, m2.id as id2, "
+        << "    m1.content as content1, m2.content as content2, "
+        << "    m1.confidence as conf1, m2.confidence as conf2, "
+        << "    array_cosine_similarity(m1.embedding, m2.embedding) as sim "
+        << "  FROM memory m1 "
+        << "  JOIN memory m2 ON m1.id < m2.id "  // Only compare once
+        << "  WHERE m1.embedding IS NOT NULL AND m2.embedding IS NOT NULL "
+        << "    AND len(m1.embedding) > 0 AND len(m2.embedding) > 0 ";
+
+    if (!realm.empty()) {
+        sql << "    AND m1.realm = '" << escape(realm) << "' "
+            << "    AND m2.realm = '" << escape(realm) << "' ";
+    }
+
+    sql << ") "
+        << "SELECT id1, id2, content1, content2, sim "
+        << "FROM pairs "
+        << "WHERE sim >= " << similarity_threshold << " "
+        << "ORDER BY sim DESC "
+        << "LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) {
+        last_error_ = result ? result->GetError() : "No result";
+        return candidates;
+    }
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); i++) {
+            ConsolidationCandidate c;
+            c.primary_id = chunk->GetValue(0, i).GetValue<int64_t>();
+            c.secondary_id = chunk->GetValue(1, i).GetValue<int64_t>();
+            c.primary_content = chunk->GetValue(2, i).ToString();
+            c.secondary_content = chunk->GetValue(3, i).ToString();
+            c.similarity = chunk->GetValue(4, i).GetValue<float>();
+            candidates.push_back(c);
+        }
+    }
+
+    return candidates;
+}
+
+bool DuckDBStore::consolidation_merge(int64_t primary_id, int64_t secondary_id, const std::string& merged_content) {
+    if (!db_ || primary_id <= 0 || secondary_id <= 0) return false;
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    // Get secondary memory info for merging
+    std::string sql = "SELECT content, confidence FROM memory WHERE id = " + std::to_string(secondary_id);
+    auto result = read_query(sql);
+    if (!result || result->HasError()) return false;
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return false;
+
+    std::string secondary_content = chunk->GetValue(0, 0).ToString();
+    float secondary_conf = chunk->GetValue(1, 0).GetValue<float>();
+
+    // Update primary if merged_content provided
+    if (!merged_content.empty()) {
+        update_content(primary_id, merged_content);
+    }
+
+    // Strengthen primary by absorbing secondary's confidence
+    strengthen(primary_id, secondary_conf * 0.5f);
+
+    // Create triplet recording the merge
+    connect(std::to_string(primary_id), "absorbed", std::to_string(secondary_id));
+
+    // Soft-delete secondary by reducing confidence to near-zero
+    // It will be pruned later by the prune operation
+    std::ostringstream update_sql;
+    update_sql << "UPDATE memory SET confidence = 0.01, "
+               << "content = '[MERGED into #" << primary_id << "] ' || content "
+               << "WHERE id = " << secondary_id;
+    write_execute(update_sql.str());
+
+    return true;
+}
+
+size_t DuckDBStore::consolidation_auto(float similarity_threshold, size_t max_merges) {
+    if (!db_ || !vss_loaded_) return 0;
+
+    auto candidates = consolidation_scan(similarity_threshold, max_merges);
+    size_t merged = 0;
+
+    // Track which IDs have been involved in merges to avoid conflicts
+    std::set<int64_t> merged_ids;
+
+    for (const auto& c : candidates) {
+        // Skip if either ID was already merged
+        if (merged_ids.count(c.primary_id) || merged_ids.count(c.secondary_id)) {
+            continue;
+        }
+
+        // Merge
+        if (consolidation_merge(c.primary_id, c.secondary_id)) {
+            merged_ids.insert(c.primary_id);
+            merged_ids.insert(c.secondary_id);
+            merged++;
+        }
+
+        if (merged >= max_merges) break;
+    }
+
+    return merged;
+}
+
+// ============================================================================
+// Anticipation: context→action pattern learning
+// ============================================================================
+
+int64_t DuckDBStore::anticipation_observe(const std::string& context, const std::string& action,
+                                           const std::string& realm) {
+    if (!db_ || context.empty() || action.empty()) return 0;
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    auto now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+
+    // Try to update existing pattern first (using ON CONFLICT)
+    std::ostringstream sql;
+    sql << "INSERT INTO anticipation (id, context, action, frequency, success_count, last_triggered, realm, created_at) "
+        << "VALUES (nextval('anticipation_seq'), '" << escape(context) << "', '" << escape(action) << "', "
+        << "1, 0, " << now << ", '" << escape(realm) << "', " << now << ") "
+        << "ON CONFLICT (context, action, realm) DO UPDATE SET "
+        << "frequency = anticipation.frequency + 1, "
+        << "last_triggered = " << now
+        << " RETURNING id";
+
+    auto result = write_query(sql.str());
+    if (!result || result->HasError()) {
+        last_error_ = result ? result->GetError() : "No result";
+        return 0;
+    }
+
+    auto chunk = result->Fetch();
+    if (chunk && chunk->size() > 0) {
+        return chunk->GetValue(0, 0).GetValue<int64_t>();
+    }
+    return 0;
+}
+
+std::vector<AnticipationPattern> DuckDBStore::anticipation_predict(const std::string& context,
+                                                                    size_t limit,
+                                                                    const std::string& realm) {
+    std::vector<AnticipationPattern> patterns;
+    if (!db_ || context.empty()) return patterns;
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    // Find patterns with matching or similar context
+    // Use LIKE for substring matching - could be improved with embeddings
+    std::ostringstream sql;
+    sql << "SELECT id, context, action, frequency, success_count, last_triggered, realm, created_at "
+        << "FROM anticipation WHERE context LIKE '%" << escape(context) << "%'";
+
+    if (!realm.empty()) {
+        sql << " AND (realm = '" << escape(realm) << "' OR realm = 'brahman')";
+    }
+
+    sql << " ORDER BY frequency DESC, success_count DESC LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) {
+        last_error_ = result ? result->GetError() : "No result";
+        return patterns;
+    }
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); i++) {
+            AnticipationPattern p;
+            p.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            p.context = chunk->GetValue(1, i).ToString();
+            p.action = chunk->GetValue(2, i).ToString();
+            p.frequency = chunk->GetValue(3, i).GetValue<int32_t>();
+            p.success_count = chunk->GetValue(4, i).GetValue<int32_t>();
+            p.last_triggered = chunk->GetValue(5, i).GetValue<int64_t>();
+            p.realm = chunk->GetValue(6, i).ToString();
+            p.created_at = chunk->GetValue(7, i).GetValue<int64_t>();
+            patterns.push_back(p);
+        }
+    }
+
+    return patterns;
+}
+
+bool DuckDBStore::anticipation_success(int64_t id) {
+    if (!db_ || id <= 0) return false;
+
+    std::ostringstream sql;
+    sql << "UPDATE anticipation SET success_count = success_count + 1 WHERE id = " << id;
+    return write_execute(sql.str());
+}
+
+std::vector<AnticipationPattern> DuckDBStore::anticipation_list(const std::string& realm, size_t limit) {
+    std::vector<AnticipationPattern> patterns;
+    if (!db_) return patterns;
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    std::ostringstream sql;
+    sql << "SELECT id, context, action, frequency, success_count, last_triggered, realm, created_at "
+        << "FROM anticipation";
+
+    if (!realm.empty()) {
+        sql << " WHERE realm = '" << escape(realm) << "'";
+    }
+
+    sql << " ORDER BY frequency DESC, last_triggered DESC LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) {
+        last_error_ = result ? result->GetError() : "No result";
+        return patterns;
+    }
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); i++) {
+            AnticipationPattern p;
+            p.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            p.context = chunk->GetValue(1, i).ToString();
+            p.action = chunk->GetValue(2, i).ToString();
+            p.frequency = chunk->GetValue(3, i).GetValue<int32_t>();
+            p.success_count = chunk->GetValue(4, i).GetValue<int32_t>();
+            p.last_triggered = chunk->GetValue(5, i).GetValue<int64_t>();
+            p.realm = chunk->GetValue(6, i).ToString();
+            p.created_at = chunk->GetValue(7, i).GetValue<int64_t>();
+            patterns.push_back(p);
+        }
+    }
+
+    return patterns;
+}
+
+// ============================================================================
+// Habit Formation: repeated patterns that strengthen with use
+// ============================================================================
+
+int64_t DuckDBStore::habit_observe(const std::string& trigger, const std::string& response,
+                                    const std::string& realm) {
+    if (!db_ || trigger.empty() || response.empty()) return 0;
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    auto now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+
+    // Insert or update with strengthening
+    // Each observation increases strength by 0.1 (capped at 1.0)
+    std::ostringstream sql;
+    sql << "INSERT INTO habit (id, trigger_pattern, response, strength, frequency, last_activated, realm, created_at) "
+        << "VALUES (nextval('habit_seq'), '" << escape(trigger) << "', '" << escape(response) << "', "
+        << "0.1, 1, " << now << ", '" << escape(realm) << "', " << now << ") "
+        << "ON CONFLICT (trigger_pattern, response, realm) DO UPDATE SET "
+        << "strength = LEAST(1.0, habit.strength + 0.1), "
+        << "frequency = habit.frequency + 1, "
+        << "last_activated = " << now
+        << " RETURNING id";
+
+    auto result = write_query(sql.str());
+    if (!result || result->HasError()) {
+        last_error_ = result ? result->GetError() : "No result";
+        return 0;
+    }
+
+    auto chunk = result->Fetch();
+    if (chunk && chunk->size() > 0) {
+        return chunk->GetValue(0, 0).GetValue<int64_t>();
+    }
+    return 0;
+}
+
+std::vector<Habit> DuckDBStore::habit_match(const std::string& context, float min_strength,
+                                             const std::string& realm) {
+    std::vector<Habit> habits;
+    if (!db_ || context.empty()) return habits;
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    // Find habits where the trigger matches the context
+    std::ostringstream sql;
+    sql << "SELECT id, trigger_pattern, response, strength, frequency, last_activated, realm, created_at "
+        << "FROM habit WHERE strength >= " << min_strength
+        << " AND '" << escape(context) << "' LIKE '%' || trigger_pattern || '%'";
+
+    if (!realm.empty()) {
+        sql << " AND (realm = '" << escape(realm) << "' OR realm = 'brahman')";
+    }
+
+    sql << " ORDER BY strength DESC, frequency DESC";
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) {
+        last_error_ = result ? result->GetError() : "No result";
+        return habits;
+    }
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); i++) {
+            Habit h;
+            h.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            h.trigger_pattern = chunk->GetValue(1, i).ToString();
+            h.response = chunk->GetValue(2, i).ToString();
+            h.strength = chunk->GetValue(3, i).GetValue<float>();
+            h.frequency = chunk->GetValue(4, i).GetValue<int32_t>();
+            h.last_activated = chunk->GetValue(5, i).GetValue<int64_t>();
+            h.realm = chunk->GetValue(6, i).ToString();
+            h.created_at = chunk->GetValue(7, i).GetValue<int64_t>();
+            habits.push_back(h);
+        }
+    }
+
+    return habits;
+}
+
+bool DuckDBStore::habit_strengthen(int64_t id, float amount) {
+    if (!db_ || id <= 0) return false;
+
+    std::ostringstream sql;
+    sql << "UPDATE habit SET strength = LEAST(1.0, strength + " << amount << ") WHERE id = " << id;
+    return write_execute(sql.str());
+}
+
+bool DuckDBStore::habit_weaken(int64_t id, float amount) {
+    if (!db_ || id <= 0) return false;
+
+    std::ostringstream sql;
+    sql << "UPDATE habit SET strength = GREATEST(0.0, strength - " << amount << ") WHERE id = " << id;
+    return write_execute(sql.str());
+}
+
+std::vector<Habit> DuckDBStore::habit_list(const std::string& realm, float min_strength, size_t limit) {
+    std::vector<Habit> habits;
+    if (!db_) return habits;
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    std::ostringstream sql;
+    sql << "SELECT id, trigger_pattern, response, strength, frequency, last_activated, realm, created_at "
+        << "FROM habit WHERE strength >= " << min_strength;
+
+    if (!realm.empty()) {
+        sql << " AND realm = '" << escape(realm) << "'";
+    }
+
+    sql << " ORDER BY strength DESC, frequency DESC LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) {
+        last_error_ = result ? result->GetError() : "No result";
+        return habits;
+    }
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); i++) {
+            Habit h;
+            h.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            h.trigger_pattern = chunk->GetValue(1, i).ToString();
+            h.response = chunk->GetValue(2, i).ToString();
+            h.strength = chunk->GetValue(3, i).GetValue<float>();
+            h.frequency = chunk->GetValue(4, i).GetValue<int32_t>();
+            h.last_activated = chunk->GetValue(5, i).GetValue<int64_t>();
+            h.realm = chunk->GetValue(6, i).ToString();
+            h.created_at = chunk->GetValue(7, i).GetValue<int64_t>();
+            habits.push_back(h);
+        }
+    }
+
+    return habits;
+}
+
+// ============================================================================
+// Background Processing: daemon-level tasks
+// ============================================================================
+
+int64_t DuckDBStore::background_schedule(const std::string& task_type, const std::string& realm) {
+    if (!db_ || task_type.empty()) return 0;
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    auto now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+
+    std::ostringstream sql;
+    sql << "INSERT INTO background_task (id, task_type, status, scheduled_at, realm) "
+        << "VALUES (nextval('background_seq'), '" << escape(task_type) << "', 'pending', "
+        << now << ", '" << escape(realm) << "') RETURNING id";
+
+    auto result = write_query(sql.str());
+    if (!result || result->HasError()) {
+        last_error_ = result ? result->GetError() : "No result";
+        return 0;
+    }
+
+    auto chunk = result->Fetch();
+    if (chunk && chunk->size() > 0) {
+        return chunk->GetValue(0, 0).GetValue<int64_t>();
+    }
+    return 0;
+}
+
+std::optional<BackgroundTask> DuckDBStore::background_claim(const std::string& task_type) {
+    if (!db_) return std::nullopt;
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    auto now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+
+    // Atomically claim the oldest pending task
+    std::ostringstream sql;
+    sql << "UPDATE background_task SET status = 'running', started_at = " << now
+        << " WHERE id = (SELECT id FROM background_task WHERE status = 'pending'";
+
+    if (!task_type.empty()) {
+        sql << " AND task_type = '" << escape(task_type) << "'";
+    }
+
+    sql << " ORDER BY scheduled_at ASC LIMIT 1) RETURNING *";
+
+    auto result = write_query(sql.str());
+    if (!result || result->HasError()) {
+        last_error_ = result ? result->GetError() : "No result";
+        return std::nullopt;
+    }
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return std::nullopt;
+
+    BackgroundTask t;
+    t.id = chunk->GetValue(0, 0).GetValue<int64_t>();
+    t.task_type = chunk->GetValue(1, 0).ToString();
+    t.status = chunk->GetValue(2, 0).ToString();
+    t.scheduled_at = chunk->GetValue(3, 0).GetValue<int64_t>();
+    t.started_at = chunk->GetValue(4, 0).GetValue<int64_t>();
+    t.completed_at = chunk->GetValue(5, 0).GetValue<int64_t>();
+    t.result = chunk->GetValue(6, 0).IsNull() ? "" : chunk->GetValue(6, 0).ToString();
+    t.error = chunk->GetValue(7, 0).IsNull() ? "" : chunk->GetValue(7, 0).ToString();
+    t.realm = chunk->GetValue(8, 0).ToString();
+
+    return t;
+}
+
+bool DuckDBStore::background_complete(int64_t id, const std::string& result) {
+    if (!db_ || id <= 0) return false;
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    auto now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+
+    std::ostringstream sql;
+    sql << "UPDATE background_task SET status = 'completed', completed_at = " << now
+        << ", result = '" << escape(result) << "' WHERE id = " << id;
+
+    return write_execute(sql.str());
+}
+
+bool DuckDBStore::background_fail(int64_t id, const std::string& error) {
+    if (!db_ || id <= 0) return false;
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    auto now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+
+    std::ostringstream sql;
+    sql << "UPDATE background_task SET status = 'failed', completed_at = " << now
+        << ", error = '" << escape(error) << "' WHERE id = " << id;
+
+    return write_execute(sql.str());
+}
+
+DuckDBStore::BackgroundStatus DuckDBStore::background_status() {
+    BackgroundStatus status;
+    if (!db_) return status;
+
+    // Get today's start timestamp
+    auto now = std::chrono::system_clock::now();
+    auto today_start = std::chrono::floor<std::chrono::days>(now);
+    auto today_ts = std::chrono::duration_cast<std::chrono::seconds>(
+        today_start.time_since_epoch()
+    ).count();
+
+    // Count by status
+    auto result = read_query(
+        "SELECT status, COUNT(*) FROM background_task "
+        "WHERE status IN ('pending', 'running') OR completed_at >= " + std::to_string(today_ts) +
+        " GROUP BY status"
+    );
+
+    if (result && !result->HasError()) {
+        while (true) {
+            auto chunk = result->Fetch();
+            if (!chunk || chunk->size() == 0) break;
+
+            for (size_t i = 0; i < chunk->size(); i++) {
+                std::string s = chunk->GetValue(0, i).ToString();
+                size_t count = chunk->GetValue(1, i).GetValue<int64_t>();
+
+                if (s == "pending") status.pending = count;
+                else if (s == "running") status.running = count;
+                else if (s == "completed") status.completed_today = count;
+                else if (s == "failed") status.failed_today = count;
+            }
+        }
+    }
+
+    return status;
+}
+
+size_t DuckDBStore::background_run_cycle() {
+    if (!db_) return 0;
+
+    size_t processed = 0;
+
+    // Process one task of each type
+    std::vector<std::string> task_types = {"consolidation", "decay", "pruning"};
+
+    for (const auto& type : task_types) {
+        auto task = background_claim(type);
+        if (!task) continue;
+
+        try {
+            std::string result;
+
+            if (type == "consolidation") {
+                size_t merged = consolidation_auto(0.90f, 10);
+                result = "{\"merged\": " + std::to_string(merged) + "}";
+            } else if (type == "decay") {
+                size_t decayed = apply_decay();
+                result = "{\"decayed\": " + std::to_string(decayed) + "}";
+            } else if (type == "pruning") {
+                size_t pruned = prune(0.1f, 7.0f);
+                result = "{\"pruned\": " + std::to_string(pruned) + "}";
+            }
+
+            background_complete(task->id, result);
+            processed++;
+        } catch (const std::exception& e) {
+            background_fail(task->id, e.what());
+        }
+    }
+
+    return processed;
 }
 
 }  // namespace chitta

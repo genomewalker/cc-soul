@@ -227,11 +227,62 @@ struct TaskEvent {
     int64_t created_at = 0;
 };
 
+// Suggestion tracking for loop closure (did it help?)
+struct Suggestion {
+    int64_t id = 0;
+    std::string content;            // What was suggested
+    std::string context;            // Why/when it was suggested
+    std::string realm;              // Project scope
+    std::string status;             // pending, resolved
+    bool helped = false;            // Did it work?
+    std::string outcome_details;    // What happened
+    int64_t memory_id = 0;          // Link to outcome memory (if resolved)
+    int64_t suggested_at = 0;
+    int64_t resolved_at = 0;
+};
+
 // Parsed conversation turn from JSONL
 struct TranscriptTurn {
     std::string role;       // "user" or "assistant"
     std::string content;    // Message content
     int64_t line_number;    // Line in JSONL file
+};
+
+// Anticipation pattern: context→action predictions
+struct AnticipationPattern {
+    int64_t id = 0;
+    std::string context;           // Context trigger (what situation)
+    std::string action;            // Action taken (what was done)
+    int32_t frequency = 1;         // How many times observed
+    int32_t success_count = 0;     // How often it worked
+    int64_t last_triggered = 0;
+    std::string realm;
+    int64_t created_at = 0;
+};
+
+// Habit: repeated pattern that strengthens with use
+struct Habit {
+    int64_t id = 0;
+    std::string trigger_pattern;   // What triggers the habit
+    std::string response;          // What to do when triggered
+    float strength = 0.1f;         // 0-1, increases with use
+    int32_t frequency = 1;         // Times activated
+    int64_t last_activated = 0;
+    std::string realm;
+    int64_t created_at = 0;
+};
+
+// Background task: daemon-level processing
+struct BackgroundTask {
+    int64_t id = 0;
+    std::string task_type;         // consolidation, decay, pruning, pattern_extraction
+    std::string status;            // pending, running, completed, failed
+    int64_t scheduled_at = 0;
+    int64_t started_at = 0;
+    int64_t completed_at = 0;
+    std::string result;            // JSON result
+    std::string error;             // Error if failed
+    std::string realm;
 };
 
 // DuckDBStore: unified storage using DuckDB embedded database
@@ -436,6 +487,71 @@ public:
     int64_t event_append(const TaskEvent& event);
     std::vector<TaskEvent> event_list(const std::string& task_id, size_t limit = 100);
     std::vector<TaskEvent> event_get_recent(const std::string& task_id, const std::string& kind = "", size_t limit = 20);
+
+    // Suggestion tracking (loop closure)
+    int64_t suggestion_track(const Suggestion& suggestion);
+    std::vector<Suggestion> suggestion_list_pending(const std::string& realm = "", size_t limit = 20);
+    bool suggestion_resolve(int64_t id, bool helped, const std::string& details, int64_t memory_id = 0);
+    std::optional<Suggestion> suggestion_get(int64_t id);
+    size_t suggestion_count_pending(const std::string& realm = "");
+
+    // Memory consolidation (merge similar memories)
+    struct ConsolidationCandidate {
+        int64_t primary_id;
+        int64_t secondary_id;
+        float similarity;
+        std::string primary_content;
+        std::string secondary_content;
+    };
+
+    std::vector<ConsolidationCandidate> consolidation_scan(
+        float similarity_threshold = 0.85f,
+        size_t limit = 50,
+        const std::string& realm = ""
+    );
+
+    bool consolidation_merge(int64_t primary_id, int64_t secondary_id, const std::string& merged_content = "");
+
+    size_t consolidation_auto(float similarity_threshold = 0.90f, size_t max_merges = 20);
+
+    // Meta-cognition support
+    std::unique_ptr<duckdb::QueryResult> raw_query(const std::string& sql) const {
+        return read_query(sql);
+    }
+
+    // Anticipation: context→action pattern learning
+    int64_t anticipation_observe(const std::string& context, const std::string& action,
+                                  const std::string& realm = "brahman");
+    std::vector<AnticipationPattern> anticipation_predict(const std::string& context,
+                                                           size_t limit = 5,
+                                                           const std::string& realm = "");
+    bool anticipation_success(int64_t id);
+    std::vector<AnticipationPattern> anticipation_list(const std::string& realm = "",
+                                                        size_t limit = 50);
+
+    // Habit formation: repeated patterns that strengthen
+    int64_t habit_observe(const std::string& trigger, const std::string& response,
+                          const std::string& realm = "brahman");
+    std::vector<Habit> habit_match(const std::string& context, float min_strength = 0.3f,
+                                    const std::string& realm = "");
+    bool habit_strengthen(int64_t id, float amount = 0.1f);
+    bool habit_weaken(int64_t id, float amount = 0.05f);
+    std::vector<Habit> habit_list(const std::string& realm = "", float min_strength = 0.0f,
+                                   size_t limit = 50);
+
+    // Background processing: daemon-level tasks
+    int64_t background_schedule(const std::string& task_type, const std::string& realm = "brahman");
+    std::optional<BackgroundTask> background_claim(const std::string& task_type = "");
+    bool background_complete(int64_t id, const std::string& result);
+    bool background_fail(int64_t id, const std::string& error);
+    struct BackgroundStatus {
+        size_t pending = 0;
+        size_t running = 0;
+        size_t completed_today = 0;
+        size_t failed_today = 0;
+    };
+    BackgroundStatus background_status();
+    size_t background_run_cycle();  // Run one processing cycle, returns tasks processed
 
     // Error tracking
     std::string last_error() const { return last_error_; }

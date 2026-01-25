@@ -900,6 +900,24 @@ private:
         });
         handlers_["long_task_event"] = [this](const json& p) { return tool_long_task_event(p); };
 
+        // Unified checkpoint (consolidates ledger + task_event)
+        tools_.push_back({
+            {"name", "checkpoint"},
+            {"description", "Save session state. Uses active long task if exists, otherwise standalone ledger."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"realm", {{"type", "string"}, {"description", "Project scope"}}},
+                    {"mood", {{"type", "string"}, {"description", "confident|uncertain|flowing|frustrated"}}},
+                    {"summary", {{"type", "string"}, {"description", "What's been accomplished"}}},
+                    {"next_steps", {{"type", "array"}, {"items", {{"type", "string"}}}, {"description", "Next actions"}}},
+                    {"active_files", {{"type", "array"}, {"items", {{"type", "string"}}}, {"description", "Files being worked on"}}},
+                    {"discoveries", {{"type", "array"}, {"items", {{"type", "string"}}}, {"description", "Insights learned"}}}
+                }}
+            }}
+        });
+        handlers_["checkpoint"] = [this](const json& p) { return tool_unified_checkpoint(p); };
+
         tools_.push_back({
             {"name", "long_task_snapshot"},
             {"description", "Get synthesized task context for injection (what's done, pending, blockers, relevant memories)"},
@@ -926,6 +944,183 @@ private:
             }}
         });
         handlers_["long_task_evaluate"] = [this](const json& p) { return tool_long_task_evaluate(p); };
+
+        // Suggestion tracking (loop closure)
+        tools_.push_back({
+            {"name", "suggestion_track"},
+            {"description", "Track a suggestion made for later outcome evaluation"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"content", {{"type", "string"}, {"description", "What was suggested"}}},
+                    {"context", {{"type", "string"}, {"description", "Why/when it was suggested"}}},
+                    {"realm", {{"type", "string"}, {"description", "Project scope (default: brahman)"}}}
+                }},
+                {"required", {"content"}}
+            }}
+        });
+        handlers_["suggestion_track"] = [this](const json& p) { return tool_suggestion_track(p); };
+
+        tools_.push_back({
+            {"name", "suggestion_pending"},
+            {"description", "List suggestions awaiting outcome feedback"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"realm", {{"type", "string"}, {"description", "Filter by realm"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Max results (default: 20)"}}}
+                }}
+            }}
+        });
+        handlers_["suggestion_pending"] = [this](const json& p) { return tool_suggestion_pending(p); };
+
+        tools_.push_back({
+            {"name", "suggestion_resolve"},
+            {"description", "Record the outcome of a suggestion (did it help?)"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "integer"}, {"description", "Suggestion ID"}}},
+                    {"helped", {{"type", "boolean"}, {"description", "Did the suggestion help?"}}},
+                    {"details", {{"type", "string"}, {"description", "What happened"}}}
+                }},
+                {"required", {"id", "helped"}}
+            }}
+        });
+        handlers_["suggestion_resolve"] = [this](const json& p) { return tool_suggestion_resolve(p); };
+
+        tools_.push_back({
+            {"name", "suggestion_count"},
+            {"description", "Count pending suggestions awaiting feedback"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"realm", {{"type", "string"}, {"description", "Filter by realm"}}}
+                }}
+            }}
+        });
+        handlers_["suggestion_count"] = [this](const json& p) { return tool_suggestion_count(p); };
+
+        // Memory consolidation
+        tools_.push_back({
+            {"name", "consolidation_scan"},
+            {"description", "Find similar memory pairs that could be merged"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"similarity_threshold", {{"type", "number"}, {"description", "Min similarity (0-1, default: 0.85)"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Max candidates (default: 50)"}}},
+                    {"realm", {{"type", "string"}, {"description", "Filter by realm"}}}
+                }}
+            }}
+        });
+        handlers_["consolidation_scan"] = [this](const json& p) { return tool_consolidation_scan(p); };
+
+        tools_.push_back({
+            {"name", "consolidation_merge"},
+            {"description", "Merge two similar memories (primary absorbs secondary)"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"primary_id", {{"type", "integer"}, {"description", "ID of primary memory (kept)"}}},
+                    {"secondary_id", {{"type", "integer"}, {"description", "ID of secondary memory (absorbed)"}}},
+                    {"merged_content", {{"type", "string"}, {"description", "Optional combined content"}}}
+                }},
+                {"required", {"primary_id", "secondary_id"}}
+            }}
+        });
+        handlers_["consolidation_merge"] = [this](const json& p) { return tool_consolidation_merge(p); };
+
+        tools_.push_back({
+            {"name", "consolidation_auto"},
+            {"description", "Auto-merge highly similar memories (>90% similarity)"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"similarity_threshold", {{"type", "number"}, {"description", "Min similarity (default: 0.90)"}}},
+                    {"max_merges", {{"type", "integer"}, {"description", "Max merges to perform (default: 20)"}}}
+                }}
+            }}
+        });
+        handlers_["consolidation_auto"] = [this](const json& p) { return tool_consolidation_auto(p); };
+
+        // Meta-cognition (self-reflection on learning)
+        tools_.push_back({
+            {"name", "metacognition_corrections"},
+            {"description", "Analyze patterns in past corrections. Finds recurring mistakes."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"limit", {{"type", "integer"}, {"description", "Max corrections to analyze (default: 50)"}}}
+                }}
+            }}
+        });
+        handlers_["metacognition_corrections"] = [this](const json& p) { return tool_metacognition_corrections(p); };
+
+        tools_.push_back({
+            {"name", "metacognition_outcomes"},
+            {"description", "Analyze suggestion outcomes (what worked vs failed). Finds success patterns."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"limit", {{"type", "integer"}, {"description", "Max outcomes to analyze (default: 50)"}}}
+                }}
+            }}
+        });
+        handlers_["metacognition_outcomes"] = [this](const json& p) { return tool_metacognition_outcomes(p); };
+
+        tools_.push_back({
+            {"name", "metacognition_evaluate"},
+            {"description", "Self-evaluate learning effectiveness. Returns metrics and recommendations."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", json::object()}
+            }}
+        });
+        handlers_["metacognition_evaluate"] = [this](const json& p) { return tool_metacognition_evaluate(p); };
+
+        // Curiosity (knowledge gaps)
+        tools_.push_back({
+            {"name", "curiosity_note_gap"},
+            {"description", "Record a knowledge gap - something I don't know or couldn't answer"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"gap", {{"type", "string"}, {"description", "What I don't know"}}},
+                    {"context", {{"type", "string"}, {"description", "When/why this came up"}}},
+                    {"realm", {{"type", "string"}, {"description", "Project scope"}}}
+                }},
+                {"required", {"gap"}}
+            }}
+        });
+        handlers_["curiosity_note_gap"] = [this](const json& p) { return tool_curiosity_note_gap(p); };
+
+        tools_.push_back({
+            {"name", "curiosity_gaps"},
+            {"description", "List current knowledge gaps awaiting exploration"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"limit", {{"type", "integer"}, {"description", "Max gaps (default: 20)"}}},
+                    {"realm", {{"type", "string"}, {"description", "Filter by realm"}}}
+                }}
+            }}
+        });
+        handlers_["curiosity_gaps"] = [this](const json& p) { return tool_curiosity_gaps(p); };
+
+        tools_.push_back({
+            {"name", "curiosity_resolve"},
+            {"description", "Mark a gap as explored/resolved"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "integer"}, {"description", "Gap memory ID"}}},
+                    {"learned", {{"type", "string"}, {"description", "What was learned"}}}
+                }},
+                {"required", {"id"}}
+            }}
+        });
+        handlers_["curiosity_resolve"] = [this](const json& p) { return tool_curiosity_resolve(p); };
 
         // Transcript tools (for distillation)
         tools_.push_back({
@@ -1032,6 +1227,171 @@ private:
             }}
         });
         handlers_["epiplexity_check"] = [this](const json& p) { return tool_epiplexity_check(p); };
+
+        // Anticipation: context→action pattern learning
+        tools_.push_back({
+            {"name", "anticipation_observe"},
+            {"description", "Record a context→action pattern. Called when an action is taken in response to a context."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"context", {{"type", "string"}, {"description", "What triggered the action (situation/state)"}}},
+                    {"action", {{"type", "string"}, {"description", "What was done in response"}}},
+                    {"realm", {{"type", "string"}, {"description", "Project scope (default: brahman)"}}}
+                }},
+                {"required", {"context", "action"}}
+            }}
+        });
+        handlers_["anticipation_observe"] = [this](const json& p) { return tool_anticipation_observe(p); };
+
+        tools_.push_back({
+            {"name", "anticipation_predict"},
+            {"description", "Given a context, predict likely actions based on learned patterns."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"context", {{"type", "string"}, {"description", "Current situation/context"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Max predictions (default: 5)"}}},
+                    {"realm", {{"type", "string"}, {"description", "Filter by realm"}}}
+                }},
+                {"required", {"context"}}
+            }}
+        });
+        handlers_["anticipation_predict"] = [this](const json& p) { return tool_anticipation_predict(p); };
+
+        tools_.push_back({
+            {"name", "anticipation_success"},
+            {"description", "Mark a predicted action as successful - the prediction was correct and helpful."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "integer"}, {"description", "Pattern ID to mark successful"}}}
+                }},
+                {"required", {"id"}}
+            }}
+        });
+        handlers_["anticipation_success"] = [this](const json& p) { return tool_anticipation_success(p); };
+
+        tools_.push_back({
+            {"name", "anticipation_list"},
+            {"description", "List learned anticipation patterns, ordered by frequency."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"realm", {{"type", "string"}, {"description", "Filter by realm"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Max patterns (default: 50)"}}}
+                }}
+            }}
+        });
+        handlers_["anticipation_list"] = [this](const json& p) { return tool_anticipation_list(p); };
+
+        // Habit Formation: repeated patterns that strengthen
+        tools_.push_back({
+            {"name", "habit_observe"},
+            {"description", "Record a trigger→response pattern. Each observation strengthens the habit."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"trigger", {{"type", "string"}, {"description", "What triggers the habit"}}},
+                    {"response", {{"type", "string"}, {"description", "What should happen when triggered"}}},
+                    {"realm", {{"type", "string"}, {"description", "Project scope (default: brahman)"}}}
+                }},
+                {"required", {"trigger", "response"}}
+            }}
+        });
+        handlers_["habit_observe"] = [this](const json& p) { return tool_habit_observe(p); };
+
+        tools_.push_back({
+            {"name", "habit_match"},
+            {"description", "Find habits that match the given context."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"context", {{"type", "string"}, {"description", "Current context to match against"}}},
+                    {"min_strength", {{"type", "number"}, {"description", "Minimum habit strength 0-1 (default: 0.3)"}}},
+                    {"realm", {{"type", "string"}, {"description", "Filter by realm"}}}
+                }},
+                {"required", {"context"}}
+            }}
+        });
+        handlers_["habit_match"] = [this](const json& p) { return tool_habit_match(p); };
+
+        tools_.push_back({
+            {"name", "habit_strengthen"},
+            {"description", "Manually strengthen a habit."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "integer"}, {"description", "Habit ID"}}},
+                    {"amount", {{"type", "number"}, {"description", "Amount to strengthen (default: 0.1)"}}}
+                }},
+                {"required", {"id"}}
+            }}
+        });
+        handlers_["habit_strengthen"] = [this](const json& p) { return tool_habit_strengthen(p); };
+
+        tools_.push_back({
+            {"name", "habit_weaken"},
+            {"description", "Weaken a habit (negative feedback)."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "integer"}, {"description", "Habit ID"}}},
+                    {"amount", {{"type", "number"}, {"description", "Amount to weaken (default: 0.05)"}}}
+                }},
+                {"required", {"id"}}
+            }}
+        });
+        handlers_["habit_weaken"] = [this](const json& p) { return tool_habit_weaken(p); };
+
+        tools_.push_back({
+            {"name", "habit_list"},
+            {"description", "List formed habits, ordered by strength."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"realm", {{"type", "string"}, {"description", "Filter by realm"}}},
+                    {"min_strength", {{"type", "number"}, {"description", "Minimum strength (default: 0)"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Max habits (default: 50)"}}}
+                }}
+            }}
+        });
+        handlers_["habit_list"] = [this](const json& p) { return tool_habit_list(p); };
+
+        // Background Processing: daemon-level tasks
+        tools_.push_back({
+            {"name", "background_schedule"},
+            {"description", "Schedule a background task (consolidation, decay, pruning, pattern_extraction)."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"task_type", {{"type", "string"}, {"description", "Type: consolidation, decay, pruning, pattern_extraction"}}},
+                    {"realm", {{"type", "string"}, {"description", "Project scope (default: brahman)"}}}
+                }},
+                {"required", {"task_type"}}
+            }}
+        });
+        handlers_["background_schedule"] = [this](const json& p) { return tool_background_schedule(p); };
+
+        tools_.push_back({
+            {"name", "background_status"},
+            {"description", "Get status of background processing (pending, running, completed today)."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {}}
+            }}
+        });
+        handlers_["background_status"] = [this](const json& p) { return tool_background_status(p); };
+
+        tools_.push_back({
+            {"name", "background_run_cycle"},
+            {"description", "Run one cycle of background processing. Processes pending tasks."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {}}
+            }}
+        });
+        handlers_["background_run_cycle"] = [this](const json& p) { return tool_background_run_cycle(p); };
 
     }
 
@@ -3261,6 +3621,83 @@ private:
         return DuckDBToolResult::ok("Event logged", {{"event_id", id}, {"task_id", task_id}, {"kind", kind}});
     }
 
+    // Unified checkpoint - consolidates ledger + task_event
+    DuckDBToolResult tool_unified_checkpoint(const json& params) {
+        std::string realm = params.value("realm", "brahman");
+        std::string mood = params.value("mood", "flowing");
+        std::string summary = params.value("summary", "");
+
+        // Check for active long task in this realm
+        auto active_task = mind_->store().task_get_active(realm);
+
+        json payload = {
+            {"mood", mood},
+            {"summary", summary}
+        };
+
+        if (params.contains("next_steps")) payload["next_steps"] = params["next_steps"];
+        if (params.contains("active_files")) payload["active_files"] = params["active_files"];
+        if (params.contains("discoveries")) payload["discoveries"] = params["discoveries"];
+
+        if (active_task) {
+            // Use long task event system
+            TaskEvent event;
+            event.task_id = active_task->task_id;
+            event.kind = "checkpoint";
+            event.payload = payload.dump();
+
+            if (params.contains("active_files") && params["active_files"].is_array()) {
+                event.related_entities = params["active_files"].dump();
+            }
+
+            int64_t id = mind_->store().event_append(event);
+
+            // Also update task's completed_summary if summary provided
+            if (!summary.empty()) {
+                LongTask updates;
+                updates.completed_summary = summary;
+                mind_->store().task_update(active_task->task_id, updates);
+            }
+
+            std::ostringstream ss;
+            ss << "Checkpoint saved to long task: " << active_task->task_id << "\n"
+               << "  Event #" << id << " (kind: checkpoint)\n"
+               << "  Mood: " << mood;
+
+            return DuckDBToolResult::ok(ss.str(), {
+                {"mode", "long_task"},
+                {"task_id", active_task->task_id},
+                {"event_id", id}
+            });
+        } else {
+            // Fallback to standalone ledger
+            LedgerEntry entry;
+            entry.session_id = "checkpoint-" + std::to_string(std::time(nullptr));
+            entry.project = realm;
+            entry.mood = mood;
+            entry.coherence = 0.85f;
+            entry.confidence = 0.85f;
+
+            if (params.contains("next_steps") && params["next_steps"].is_array()) {
+                entry.next_steps = params["next_steps"].dump();
+            }
+            if (params.contains("active_files") && params["active_files"].is_array()) {
+                entry.active_files = params["active_files"].dump();
+            }
+            if (params.contains("discoveries") && params["discoveries"].is_array()) {
+                entry.discoveries = params["discoveries"].dump();
+            }
+            entry.snapshot = summary;
+
+            int64_t id = mind_->store().save_ledger(entry);
+
+            return DuckDBToolResult::ok(
+                "Checkpoint saved to ledger #" + std::to_string(id) + " (no active long task)",
+                {{"mode", "ledger"}, {"ledger_id", id}}
+            );
+        }
+    }
+
     DuckDBToolResult tool_long_task_snapshot(const json& params) {
         std::string task_id = params.value("task_id", "");
         std::string mode = params.value("mode", "inject");
@@ -3429,6 +3866,544 @@ private:
         };
 
         return DuckDBToolResult::ok(ss.str(), result);
+    }
+
+    // Suggestion tracking (loop closure)
+    DuckDBToolResult tool_suggestion_track(const json& params) {
+        std::string content = params.value("content", "");
+        if (content.empty()) {
+            return DuckDBToolResult::error("content is required");
+        }
+
+        Suggestion s;
+        s.content = content;
+        s.context = params.value("context", "");
+        s.realm = params.value("realm", "brahman");
+
+        int64_t id = mind_->store().suggestion_track(s);
+        if (id < 0) {
+            return DuckDBToolResult::error("Failed to track suggestion");
+        }
+
+        std::ostringstream ss;
+        ss << "Tracked suggestion #" << id << ": " << content.substr(0, 100)
+           << (content.size() > 100 ? "..." : "");
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"id", id},
+            {"content", content},
+            {"realm", s.realm}
+        });
+    }
+
+    DuckDBToolResult tool_suggestion_pending(const json& params) {
+        std::string realm = params.value("realm", "");
+        size_t limit = params.value("limit", 20);
+
+        auto suggestions = mind_->store().suggestion_list_pending(realm, limit);
+
+        if (suggestions.empty()) {
+            return DuckDBToolResult::ok("No pending suggestions", {{"count", 0}});
+        }
+
+        std::ostringstream ss;
+        ss << "Pending suggestions (" << suggestions.size() << "):\n";
+        json items = json::array();
+
+        for (const auto& s : suggestions) {
+            ss << "  #" << s.id << ": " << s.content.substr(0, 80)
+               << (s.content.size() > 80 ? "..." : "") << "\n";
+            items.push_back({
+                {"id", s.id},
+                {"content", s.content},
+                {"context", s.context},
+                {"realm", s.realm},
+                {"suggested_at", s.suggested_at}
+            });
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"count", suggestions.size()},
+            {"suggestions", items}
+        });
+    }
+
+    DuckDBToolResult tool_suggestion_resolve(const json& params) {
+        int64_t id = params.value("id", 0);
+        if (id <= 0) {
+            return DuckDBToolResult::error("id is required");
+        }
+
+        bool helped = params.value("helped", false);
+        std::string details = params.value("details", "");
+
+        // First, create an outcome memory
+        std::string outcome_type = helped ? "worked" : "failed";
+        auto suggestion = mind_->store().suggestion_get(id);
+        if (!suggestion) {
+            return DuckDBToolResult::error("Suggestion not found");
+        }
+
+        // Store outcome as memory
+        std::string memory_content = "[outcome:" + outcome_type + "] " + suggestion->content;
+        if (!details.empty()) {
+            memory_content += "\nDetails: " + details;
+        }
+
+        // Remember the outcome
+        std::vector<float> embed;
+        if (mind_->embedder_ready()) {
+            embed = mind_->embedder().embed(memory_content).data;
+        }
+        int64_t memory_id = mind_->store().remember(
+            memory_content,
+            "episode",
+            embed,
+            0.8f,       // confidence
+            0.05f,      // decay_rate
+            suggestion->realm,
+            RealmVisibility::Global  // Outcomes are globally visible
+        );
+
+        // Resolve the suggestion
+        bool ok = mind_->store().suggestion_resolve(id, helped, details, memory_id);
+        if (!ok) {
+            return DuckDBToolResult::error("Failed to resolve suggestion");
+        }
+
+        // Create triplet for feedback tracking
+        std::string slug = suggestion->content.substr(0, 40);
+        for (char& c : slug) {
+            if (c == ' ') c = '_';
+            else c = std::tolower(c);
+        }
+        mind_->store().connect(slug, "resulted_in", outcome_type);
+
+        std::ostringstream ss;
+        ss << "Resolved suggestion #" << id << "\n"
+           << "  Helped: " << (helped ? "yes" : "no") << "\n"
+           << "  Memory: #" << memory_id;
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"id", id},
+            {"helped", helped},
+            {"memory_id", memory_id}
+        });
+    }
+
+    DuckDBToolResult tool_suggestion_count(const json& params) {
+        std::string realm = params.value("realm", "");
+        size_t count = mind_->store().suggestion_count_pending(realm);
+
+        return DuckDBToolResult::ok(
+            "Pending suggestions: " + std::to_string(count),
+            {{"count", count}, {"realm", realm.empty() ? "all" : realm}}
+        );
+    }
+
+    // Memory consolidation
+    DuckDBToolResult tool_consolidation_scan(const json& params) {
+        float threshold = params.value("similarity_threshold", 0.85f);
+        size_t limit = params.value("limit", 50);
+        std::string realm = params.value("realm", "");
+
+        auto candidates = mind_->store().consolidation_scan(threshold, limit, realm);
+
+        if (candidates.empty()) {
+            return DuckDBToolResult::ok("No similar memory pairs found", {{"count", 0}});
+        }
+
+        std::ostringstream ss;
+        ss << "Found " << candidates.size() << " consolidation candidates:\n\n";
+        json items = json::array();
+
+        for (const auto& c : candidates) {
+            int pct = static_cast<int>(c.similarity * 100);
+            ss << "[" << pct << "%] #" << c.primary_id << " <-> #" << c.secondary_id << "\n"
+               << "  Primary: " << c.primary_content.substr(0, 60) << "...\n"
+               << "  Secondary: " << c.secondary_content.substr(0, 60) << "...\n\n";
+
+            items.push_back({
+                {"primary_id", c.primary_id},
+                {"secondary_id", c.secondary_id},
+                {"similarity", c.similarity},
+                {"primary_preview", c.primary_content.substr(0, 100)},
+                {"secondary_preview", c.secondary_content.substr(0, 100)}
+            });
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"count", candidates.size()},
+            {"candidates", items}
+        });
+    }
+
+    DuckDBToolResult tool_consolidation_merge(const json& params) {
+        int64_t primary_id = params.value("primary_id", 0);
+        int64_t secondary_id = params.value("secondary_id", 0);
+        std::string merged_content = params.value("merged_content", "");
+
+        if (primary_id <= 0 || secondary_id <= 0) {
+            return DuckDBToolResult::error("primary_id and secondary_id are required");
+        }
+
+        bool ok = mind_->store().consolidation_merge(primary_id, secondary_id, merged_content);
+        if (!ok) {
+            return DuckDBToolResult::error("Failed to merge memories");
+        }
+
+        std::ostringstream ss;
+        ss << "Merged memories:\n"
+           << "  Primary #" << primary_id << " absorbed #" << secondary_id << "\n"
+           << "  Secondary marked for pruning";
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"primary_id", primary_id},
+            {"secondary_id", secondary_id},
+            {"merged", true}
+        });
+    }
+
+    DuckDBToolResult tool_consolidation_auto(const json& params) {
+        float threshold = params.value("similarity_threshold", 0.90f);
+        size_t max_merges = params.value("max_merges", 20);
+
+        size_t merged = mind_->store().consolidation_auto(threshold, max_merges);
+
+        std::ostringstream ss;
+        ss << "Auto-consolidation complete:\n"
+           << "  Merged " << merged << " memory pairs\n"
+           << "  Threshold: " << static_cast<int>(threshold * 100) << "%";
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"merged_count", merged},
+            {"threshold", threshold}
+        });
+    }
+
+    // Meta-cognition (self-reflection)
+    DuckDBToolResult tool_metacognition_corrections(const json& params) {
+        size_t limit = params.value("limit", 50);
+
+        // Query memories tagged as corrections (tags in separate table)
+        std::string sql = "SELECT DISTINCT m.content, m.confidence, m.created_at FROM memory m "
+                          "LEFT JOIN memory_tags t ON m.id = t.memory_id "
+                          "WHERE m.content LIKE '%[correction]%' OR t.tag = 'correction' "
+                          "ORDER BY m.created_at DESC LIMIT " + std::to_string(limit);
+
+        auto result = mind_->store().raw_query(sql);
+        if (!result) {
+            return DuckDBToolResult::error("Failed to query corrections");
+        }
+
+        std::vector<std::string> corrections;
+        std::map<std::string, int> domains;  // Domain -> count
+
+        auto chunk = result->Fetch();
+        while (chunk && chunk->size() > 0) {
+            for (size_t i = 0; i < chunk->size(); i++) {
+                std::string content = chunk->GetValue(0, i).ToString();
+                corrections.push_back(content);
+
+                // Extract domain from content like "[correction:domain]"
+                size_t start = content.find("[correction:");
+                if (start != std::string::npos) {
+                    size_t end = content.find("]", start);
+                    if (end != std::string::npos) {
+                        std::string domain = content.substr(start + 12, end - start - 12);
+                        domains[domain]++;
+                    }
+                } else {
+                    domains["general"]++;
+                }
+            }
+            chunk = result->Fetch();
+        }
+
+        std::ostringstream ss;
+        ss << "Correction analysis (" << corrections.size() << " corrections):\n\n";
+
+        if (!domains.empty()) {
+            ss << "Domains with corrections:\n";
+            for (const auto& [domain, count] : domains) {
+                ss << "  " << domain << ": " << count << "\n";
+            }
+        }
+
+        // Sample recent corrections
+        ss << "\nRecent corrections:\n";
+        for (size_t i = 0; i < std::min(corrections.size(), size_t(5)); i++) {
+            ss << "  - " << corrections[i].substr(0, 100) << "...\n";
+        }
+
+        json result_json = {
+            {"total_corrections", corrections.size()},
+            {"domains", domains}
+        };
+
+        return DuckDBToolResult::ok(ss.str(), result_json);
+    }
+
+    DuckDBToolResult tool_metacognition_outcomes(const json& params) {
+        size_t limit = params.value("limit", 50);
+
+        // Query outcome memories
+        std::string sql = "SELECT content, tags, created_at FROM memory "
+                          "WHERE content LIKE '%[outcome:%' "
+                          "ORDER BY created_at DESC LIMIT " + std::to_string(limit);
+
+        auto result = mind_->store().raw_query(sql);
+        if (!result) {
+            return DuckDBToolResult::error("Failed to query outcomes");
+        }
+
+        int worked = 0, failed = 0;
+        std::vector<std::string> worked_examples, failed_examples;
+
+        auto chunk = result->Fetch();
+        while (chunk && chunk->size() > 0) {
+            for (size_t i = 0; i < chunk->size(); i++) {
+                std::string content = chunk->GetValue(0, i).ToString();
+                if (content.find("[outcome:worked]") != std::string::npos) {
+                    worked++;
+                    if (worked_examples.size() < 3) worked_examples.push_back(content);
+                } else if (content.find("[outcome:failed]") != std::string::npos) {
+                    failed++;
+                    if (failed_examples.size() < 3) failed_examples.push_back(content);
+                }
+            }
+            chunk = result->Fetch();
+        }
+
+        int total = worked + failed;
+        float success_rate = total > 0 ? (float)worked / total * 100.0f : 0.0f;
+
+        std::ostringstream ss;
+        ss << "Outcome analysis:\n\n"
+           << "  Total tracked: " << total << "\n"
+           << "  Worked: " << worked << " (" << std::fixed << std::setprecision(1) << success_rate << "%)\n"
+           << "  Failed: " << failed << "\n";
+
+        if (!failed_examples.empty()) {
+            ss << "\nRecent failures (learn from these):\n";
+            for (const auto& ex : failed_examples) {
+                ss << "  - " << ex.substr(0, 80) << "...\n";
+            }
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"total", total},
+            {"worked", worked},
+            {"failed", failed},
+            {"success_rate", success_rate}
+        });
+    }
+
+    DuckDBToolResult tool_metacognition_evaluate(const json& params) {
+        // Get various learning metrics
+        std::map<std::string, int> tag_counts;
+
+        // Count memories by key learning tags (tags stored in memory_tags table)
+        std::vector<std::string> learning_tags = {"correction", "preference", "insight", "outcome"};
+        for (const auto& tag : learning_tags) {
+            std::string sql = "SELECT COUNT(DISTINCT m.id) FROM memory m "
+                              "LEFT JOIN memory_tags t ON m.id = t.memory_id "
+                              "WHERE t.tag = '" + tag + "' OR m.content LIKE '%[" + tag + "%'";
+            auto result = mind_->store().raw_query(sql);
+            if (result) {
+                auto chunk = result->Fetch();
+                if (chunk && chunk->size() > 0) {
+                    tag_counts[tag] = chunk->GetValue(0, 0).GetValue<int64_t>();
+                }
+            }
+        }
+
+        // Get outcome success rate
+        std::string outcome_sql = "SELECT "
+            "SUM(CASE WHEN content LIKE '%[outcome:worked]%' THEN 1 ELSE 0 END) as worked, "
+            "SUM(CASE WHEN content LIKE '%[outcome:failed]%' THEN 1 ELSE 0 END) as failed "
+            "FROM memory WHERE content LIKE '%[outcome:%'";
+        auto outcome_result = mind_->store().raw_query(outcome_sql);
+
+        int worked = 0, failed = 0;
+        if (outcome_result) {
+            auto chunk = outcome_result->Fetch();
+            if (chunk && chunk->size() > 0) {
+                worked = chunk->GetValue(0, 0).GetValue<int64_t>();
+                failed = chunk->GetValue(1, 0).GetValue<int64_t>();
+            }
+        }
+
+        // Evaluate health
+        std::vector<std::string> recommendations;
+        float health_score = 0.5f;
+
+        // Check if tracking outcomes
+        if (tag_counts["outcome"] < 5) {
+            recommendations.push_back("Track more suggestion outcomes to close feedback loops");
+        } else {
+            health_score += 0.1f;
+        }
+
+        // Check correction ratio
+        if (tag_counts["correction"] > 20 && tag_counts["insight"] < 5) {
+            recommendations.push_back("Many corrections but few insights - look for patterns in mistakes");
+        }
+
+        // Success rate
+        int total = worked + failed;
+        float success_rate = total > 0 ? (float)worked / total * 100.0f : 50.0f;
+        if (success_rate > 70) health_score += 0.2f;
+        else if (success_rate < 40) recommendations.push_back("Low success rate - review failed suggestions");
+
+        // Check preferences captured
+        if (tag_counts["preference"] >= 5) health_score += 0.1f;
+        else recommendations.push_back("Capture more user preferences");
+
+        std::ostringstream ss;
+        ss << "Meta-cognition evaluation:\n\n"
+           << "Learning metrics:\n"
+           << "  Corrections: " << tag_counts["correction"] << "\n"
+           << "  Preferences: " << tag_counts["preference"] << "\n"
+           << "  Insights: " << tag_counts["insight"] << "\n"
+           << "  Outcomes: " << tag_counts["outcome"] << " (success: " << std::fixed << std::setprecision(1) << success_rate << "%)\n\n"
+           << "Health score: " << std::fixed << std::setprecision(2) << health_score << "/1.0\n";
+
+        if (!recommendations.empty()) {
+            ss << "\nRecommendations:\n";
+            for (const auto& r : recommendations) {
+                ss << "  - " << r << "\n";
+            }
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"health_score", health_score},
+            {"corrections", tag_counts["correction"]},
+            {"preferences", tag_counts["preference"]},
+            {"insights", tag_counts["insight"]},
+            {"outcomes", tag_counts["outcome"]},
+            {"success_rate", success_rate},
+            {"recommendations", recommendations}
+        });
+    }
+
+    // Curiosity (knowledge gaps)
+    DuckDBToolResult tool_curiosity_note_gap(const json& params) {
+        std::string gap = params.value("gap", "");
+        if (gap.empty()) {
+            return DuckDBToolResult::error("gap is required");
+        }
+
+        std::string context = params.value("context", "");
+        std::string realm = params.value("realm", "brahman");
+
+        // Store as a memory with type "gap"
+        std::string content = "[gap] " + gap;
+        if (!context.empty()) {
+            content += "\nContext: " + context;
+        }
+
+        std::vector<float> embed;
+        if (mind_->embedder_ready()) {
+            embed = mind_->embedder().embed(content).data;
+        }
+
+        int64_t id = mind_->store().remember(
+            content,
+            "gap",  // NodeType::Gap
+            embed,
+            0.7f,   // moderate confidence
+            0.02f,  // slow decay - gaps should persist
+            realm,
+            RealmVisibility::Private
+        );
+
+        // Tag it
+        mind_->store().add_tag(id, "gap");
+        mind_->store().add_tag(id, "unresolved");
+
+        return DuckDBToolResult::ok(
+            "Gap noted #" + std::to_string(id) + ": " + gap.substr(0, 60),
+            {{"id", id}, {"gap", gap}}
+        );
+    }
+
+    DuckDBToolResult tool_curiosity_gaps(const json& params) {
+        size_t limit = params.value("limit", 20);
+        std::string realm = params.value("realm", "");
+
+        std::string sql = "SELECT m.id, m.content, m.created_at FROM memory m "
+                          "JOIN memory_tags t ON m.id = t.memory_id "
+                          "WHERE t.tag = 'unresolved' AND m.kind = 'gap' ";
+        if (!realm.empty()) {
+            sql += "AND m.realm = '" + realm + "' ";
+        }
+        sql += "ORDER BY m.created_at DESC LIMIT " + std::to_string(limit);
+
+        auto result = mind_->store().raw_query(sql);
+        if (!result) {
+            return DuckDBToolResult::error("Failed to query gaps");
+        }
+
+        std::ostringstream ss;
+        ss << "Knowledge gaps:\n";
+        json gaps = json::array();
+
+        auto chunk = result->Fetch();
+        while (chunk && chunk->size() > 0) {
+            for (size_t i = 0; i < chunk->size(); i++) {
+                int64_t id = chunk->GetValue(0, i).GetValue<int64_t>();
+                std::string content = chunk->GetValue(1, i).ToString();
+                ss << "  #" << id << ": " << content.substr(0, 80) << "...\n";
+                gaps.push_back({{"id", id}, {"content", content}});
+            }
+            chunk = result->Fetch();
+        }
+
+        if (gaps.empty()) {
+            return DuckDBToolResult::ok("No unresolved knowledge gaps", {{"count", 0}});
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {{"count", gaps.size()}, {"gaps", gaps}});
+    }
+
+    DuckDBToolResult tool_curiosity_resolve(const json& params) {
+        int64_t id = params.value("id", 0);
+        if (id <= 0) {
+            return DuckDBToolResult::error("id is required");
+        }
+
+        std::string learned = params.value("learned", "");
+
+        // Remove unresolved tag, add resolved
+        mind_->store().remove_tag(id, "unresolved");
+        mind_->store().add_tag(id, "resolved");
+
+        // If learned something, store it as an insight
+        if (!learned.empty()) {
+            std::vector<float> embed;
+            if (mind_->embedder_ready()) {
+                embed = mind_->embedder().embed(learned).data;
+            }
+
+            int64_t insight_id = mind_->store().remember(
+                "[insight:exploration] " + learned,
+                "wisdom",
+                embed,
+                0.8f,
+                0.05f,
+                "brahman",
+                RealmVisibility::Global
+            );
+
+            // Link gap to insight
+            mind_->store().connect(std::to_string(id), "led_to", std::to_string(insight_id));
+        }
+
+        return DuckDBToolResult::ok(
+            "Gap #" + std::to_string(id) + " resolved",
+            {{"id", id}, {"learned", learned}}
+        );
     }
 
     // Transcript tools
@@ -3756,6 +4731,287 @@ private:
             {"information_density", e.information_density},
             {"compression_utility", e.compression_utility}
         });
+    }
+
+    // ========================================================================
+    // Anticipation: context→action pattern learning
+    // ========================================================================
+
+    DuckDBToolResult tool_anticipation_observe(const json& params) {
+        std::string context = params.value("context", "");
+        std::string action = params.value("action", "");
+        std::string realm = params.value("realm", "brahman");
+
+        if (context.empty() || action.empty()) {
+            return DuckDBToolResult::error("context and action are required");
+        }
+
+        int64_t id = mind_->store().anticipation_observe(context, action, realm);
+        if (id <= 0) {
+            return DuckDBToolResult::error("Failed to record pattern: " + mind_->store().last_error());
+        }
+
+        return DuckDBToolResult::ok("Pattern recorded (id: " + std::to_string(id) + ")", {{"id", id}});
+    }
+
+    DuckDBToolResult tool_anticipation_predict(const json& params) {
+        std::string context = params.value("context", "");
+        size_t limit = params.value("limit", 5);
+        std::string realm = params.value("realm", "");
+
+        if (context.empty()) {
+            return DuckDBToolResult::error("context is required");
+        }
+
+        auto patterns = mind_->store().anticipation_predict(context, limit, realm);
+
+        std::ostringstream ss;
+        ss << "Predicted Actions for Context\n";
+        ss << "══════════════════════════════\n\n";
+
+        if (patterns.empty()) {
+            ss << "No matching patterns found.\n";
+        } else {
+            for (const auto& p : patterns) {
+                float success_rate = p.frequency > 0 ? (float)p.success_count / p.frequency * 100 : 0;
+                ss << "• " << p.action << "\n";
+                ss << "  Context: " << p.context.substr(0, 80) << (p.context.length() > 80 ? "..." : "") << "\n";
+                ss << "  Frequency: " << p.frequency << " | Success: " << std::fixed << std::setprecision(0) << success_rate << "%\n\n";
+            }
+        }
+
+        json patterns_json = json::array();
+        for (const auto& p : patterns) {
+            patterns_json.push_back({
+                {"id", p.id},
+                {"context", p.context},
+                {"action", p.action},
+                {"frequency", p.frequency},
+                {"success_count", p.success_count},
+                {"realm", p.realm}
+            });
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {{"patterns", patterns_json}});
+    }
+
+    DuckDBToolResult tool_anticipation_success(const json& params) {
+        auto [id, id_str] = parse_id(params);
+        if (id <= 0) {
+            return DuckDBToolResult::error("id is required");
+        }
+
+        if (!mind_->store().anticipation_success(id)) {
+            return DuckDBToolResult::error("Failed to mark success");
+        }
+
+        return DuckDBToolResult::ok("Pattern #" + std::to_string(id) + " marked successful");
+    }
+
+    DuckDBToolResult tool_anticipation_list(const json& params) {
+        std::string realm = params.value("realm", "");
+        size_t limit = params.value("limit", 50);
+
+        auto patterns = mind_->store().anticipation_list(realm, limit);
+
+        std::ostringstream ss;
+        ss << "Learned Anticipation Patterns\n";
+        ss << "══════════════════════════════\n\n";
+
+        if (patterns.empty()) {
+            ss << "No patterns learned yet.\n";
+        } else {
+            for (const auto& p : patterns) {
+                float success_rate = p.frequency > 0 ? (float)p.success_count / p.frequency * 100 : 0;
+                ss << "#" << p.id << " [" << p.realm << "]\n";
+                ss << "  Context: " << p.context.substr(0, 60) << (p.context.length() > 60 ? "..." : "") << "\n";
+                ss << "  Action: " << p.action.substr(0, 60) << (p.action.length() > 60 ? "..." : "") << "\n";
+                ss << "  Freq: " << p.frequency << " | Success: " << std::fixed << std::setprecision(0) << success_rate << "%\n\n";
+            }
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {{"count", patterns.size()}});
+    }
+
+    // ========================================================================
+    // Habit Formation: repeated patterns that strengthen
+    // ========================================================================
+
+    DuckDBToolResult tool_habit_observe(const json& params) {
+        std::string trigger = params.value("trigger", "");
+        std::string response = params.value("response", "");
+        std::string realm = params.value("realm", "brahman");
+
+        if (trigger.empty() || response.empty()) {
+            return DuckDBToolResult::error("trigger and response are required");
+        }
+
+        int64_t id = mind_->store().habit_observe(trigger, response, realm);
+        if (id <= 0) {
+            return DuckDBToolResult::error("Failed to record habit: " + mind_->store().last_error());
+        }
+
+        return DuckDBToolResult::ok("Habit recorded/strengthened (id: " + std::to_string(id) + ")", {{"id", id}});
+    }
+
+    DuckDBToolResult tool_habit_match(const json& params) {
+        std::string context = params.value("context", "");
+        float min_strength = params.value("min_strength", 0.3f);
+        std::string realm = params.value("realm", "");
+
+        if (context.empty()) {
+            return DuckDBToolResult::error("context is required");
+        }
+
+        auto habits = mind_->store().habit_match(context, min_strength, realm);
+
+        std::ostringstream ss;
+        ss << "Matching Habits\n";
+        ss << "═══════════════\n\n";
+
+        if (habits.empty()) {
+            ss << "No matching habits found.\n";
+        } else {
+            for (const auto& h : habits) {
+                ss << "• " << h.trigger_pattern << " → " << h.response << "\n";
+                ss << "  Strength: " << std::fixed << std::setprecision(2) << h.strength;
+                ss << " | Frequency: " << h.frequency << "\n\n";
+            }
+        }
+
+        json habits_json = json::array();
+        for (const auto& h : habits) {
+            habits_json.push_back({
+                {"id", h.id},
+                {"trigger", h.trigger_pattern},
+                {"response", h.response},
+                {"strength", h.strength},
+                {"frequency", h.frequency},
+                {"realm", h.realm}
+            });
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {{"habits", habits_json}});
+    }
+
+    DuckDBToolResult tool_habit_strengthen(const json& params) {
+        auto [id, id_str] = parse_id(params);
+        float amount = params.value("amount", 0.1f);
+
+        if (id <= 0) {
+            return DuckDBToolResult::error("id is required");
+        }
+
+        if (!mind_->store().habit_strengthen(id, amount)) {
+            return DuckDBToolResult::error("Failed to strengthen habit");
+        }
+
+        return DuckDBToolResult::ok("Habit #" + std::to_string(id) + " strengthened by " + std::to_string(amount));
+    }
+
+    DuckDBToolResult tool_habit_weaken(const json& params) {
+        auto [id, id_str] = parse_id(params);
+        float amount = params.value("amount", 0.05f);
+
+        if (id <= 0) {
+            return DuckDBToolResult::error("id is required");
+        }
+
+        if (!mind_->store().habit_weaken(id, amount)) {
+            return DuckDBToolResult::error("Failed to weaken habit");
+        }
+
+        return DuckDBToolResult::ok("Habit #" + std::to_string(id) + " weakened by " + std::to_string(amount));
+    }
+
+    DuckDBToolResult tool_habit_list(const json& params) {
+        std::string realm = params.value("realm", "");
+        float min_strength = params.value("min_strength", 0.0f);
+        size_t limit = params.value("limit", 50);
+
+        auto habits = mind_->store().habit_list(realm, min_strength, limit);
+
+        std::ostringstream ss;
+        ss << "Formed Habits\n";
+        ss << "══════════════\n\n";
+
+        if (habits.empty()) {
+            ss << "No habits formed yet.\n";
+        } else {
+            for (const auto& h : habits) {
+                int strength_bars = static_cast<int>(h.strength * 10);
+                std::string bar(strength_bars, '#');
+                bar += std::string(10 - strength_bars, '-');
+
+                ss << "#" << h.id << " [" << bar << "] " << std::fixed << std::setprecision(2) << h.strength << "\n";
+                ss << "  " << h.trigger_pattern << " → " << h.response << "\n";
+                ss << "  Realm: " << h.realm << " | Freq: " << h.frequency << "\n\n";
+            }
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {{"count", habits.size()}});
+    }
+
+    // ========================================================================
+    // Background Processing: daemon-level tasks
+    // ========================================================================
+
+    DuckDBToolResult tool_background_schedule(const json& params) {
+        std::string task_type = params.value("task_type", "");
+        std::string realm = params.value("realm", "brahman");
+
+        if (task_type.empty()) {
+            return DuckDBToolResult::error("task_type is required");
+        }
+
+        // Validate task type
+        std::vector<std::string> valid_types = {"consolidation", "decay", "pruning", "pattern_extraction"};
+        bool valid = std::find(valid_types.begin(), valid_types.end(), task_type) != valid_types.end();
+        if (!valid) {
+            return DuckDBToolResult::error("Invalid task_type. Valid: consolidation, decay, pruning, pattern_extraction");
+        }
+
+        int64_t id = mind_->store().background_schedule(task_type, realm);
+        if (id <= 0) {
+            return DuckDBToolResult::error("Failed to schedule task: " + mind_->store().last_error());
+        }
+
+        return DuckDBToolResult::ok("Background task scheduled (id: " + std::to_string(id) + ")", {
+            {"id", id},
+            {"task_type", task_type}
+        });
+    }
+
+    DuckDBToolResult tool_background_status(const json& params) {
+        auto status = mind_->store().background_status();
+
+        std::ostringstream ss;
+        ss << "Background Processing Status\n";
+        ss << "════════════════════════════\n\n";
+        ss << "Pending:         " << status.pending << "\n";
+        ss << "Running:         " << status.running << "\n";
+        ss << "Completed today: " << status.completed_today << "\n";
+        ss << "Failed today:    " << status.failed_today << "\n";
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"pending", status.pending},
+            {"running", status.running},
+            {"completed_today", status.completed_today},
+            {"failed_today", status.failed_today}
+        });
+    }
+
+    DuckDBToolResult tool_background_run_cycle(const json& params) {
+        size_t processed = mind_->store().background_run_cycle();
+
+        std::ostringstream ss;
+        if (processed == 0) {
+            ss << "No pending background tasks to process.";
+        } else {
+            ss << "Processed " << processed << " background task(s).";
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {{"processed", processed}});
     }
 
     // Helpers
