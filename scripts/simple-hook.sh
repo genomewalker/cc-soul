@@ -151,6 +151,16 @@ case "$HOOK_TYPE" in
             echo "[soul] n=$nodes t=$triplets c=$conf $status"
         fi
 
+        # Behavioral layer: inject learned corrections and preferences
+        # This replaces growing CLAUDE.md - behaviors live in soul memory
+        behavior_response=$(rpc_call "recall" '{"query":"behavior correction preference rule","tag":"correction","limit":3}')
+        behavior_text=$(extract_text "$behavior_response")
+        if [[ -n "$behavior_text" && "$behavior_text" != *"No memories"* ]]; then
+            # Extract just the correction content, ultra-compact
+            corrections=$(echo "$behavior_text" | grep -oP 'CORRECT: \K[^\n]+' | head -3 | tr '\n' '; ')
+            [[ -n "$corrections" ]] && echo "[rules] $corrections"
+        fi
+
         # Load ledger checkpoint for current realm
         escaped_realm=$(json_escape "$REALM")
         response=$(rpc_call "ledger_load" "{\"project\":\"$escaped_realm\"}")
