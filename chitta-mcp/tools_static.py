@@ -1831,3 +1831,349 @@ TOOLS = [
         }
     ),
 ]
+COMPOSITE_TOOLS = [
+    Tool(
+        name="read_symbol",
+        description="Read just a symbol's code, not entire file. ~10x token savings vs full file read. Returns [kind name @ file:line-line] + code.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Symbol name to read (e.g., 'DuckDBStore', 'daemon_call')"
+                },
+                "kind": {
+                    "type": "string",
+                    "description": "Symbol kind filter: class, function, method (optional)"
+                },
+                "context": {
+                    "type": "integer",
+                    "description": "Lines of context before symbol (default: 3)"
+                },
+                "project": {
+                    "type": "string",
+                    "description": "Project name filter (optional)"
+                }
+            },
+            "required": ["name"]
+        }
+    ),
+    Tool(
+        name="read_function",
+        description="Read a function's code. Convenience wrapper for read_symbol with kind=function.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Function name to read"
+                },
+                "context": {
+                    "type": "integer",
+                    "description": "Lines of context before function (default: 3)"
+                },
+                "project": {
+                    "type": "string",
+                    "description": "Project name filter (optional)"
+                }
+            },
+            "required": ["name"]
+        }
+    ),
+    Tool(
+        name="symbol_callers",
+        description="Find all callers of a symbol without grep. Queries triplets where predicate=calls and object=symbol.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Symbol name to find callers for"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max results (default: 20)"
+                }
+            },
+            "required": ["name"]
+        }
+    ),
+    Tool(
+        name="symbol_callees",
+        description="Find all symbols that a symbol calls. Queries triplets where predicate=calls and subject=symbol.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Symbol name to find callees for"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max results (default: 20)"
+                }
+            },
+            "required": ["name"]
+        }
+    ),
+    Tool(
+        name="smart_context",
+        description="Build minimal context for a task. Combines code symbols + memories, compressed to token limit.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "task": {
+                    "type": "string",
+                    "description": "Task description to find relevant context for"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Token limit for output (default: 500)"
+                },
+                "memories": {
+                    "type": "boolean",
+                    "description": "Include relevant memories (default: true)"
+                },
+                "code": {
+                    "type": "boolean",
+                    "description": "Include relevant code symbols (default: true)"
+                }
+            },
+            "required": ["task"]
+        }
+    ),
+    Tool(
+        name="learn_correction",
+        description="Store a correction when I was wrong. Creates high-confidence counter-memory with 'corrects' triplet linking to original mistake.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "wrong": {
+                    "type": "string",
+                    "description": "What I said/did that was incorrect"
+                },
+                "correct": {
+                    "type": "string",
+                    "description": "The correct information/approach"
+                },
+                "context": {
+                    "type": "string",
+                    "description": "Context where this applies (optional)"
+                }
+            },
+            "required": ["wrong", "correct"]
+        }
+    ),
+    Tool(
+        name="learn_preference",
+        description="Store a user preference for adapting communication/behavior. Global visibility so it applies across all projects.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "description": "Preference category: communication, detail, autonomy, style, workflow"
+                },
+                "preference": {
+                    "type": "string",
+                    "description": "The preference to remember (e.g., 'prefers concise responses')"
+                },
+                "example": {
+                    "type": "string",
+                    "description": "Example demonstrating this preference (optional)"
+                }
+            },
+            "required": ["category", "preference"]
+        }
+    ),
+    Tool(
+        name="learn_insight",
+        description="Store a generalizable insight that applies across projects. Use for patterns, techniques, and wisdom not tied to specific codebase.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "domain": {
+                    "type": "string",
+                    "description": "Domain: programming, debugging, architecture, testing, performance, security, communication"
+                },
+                "insight": {
+                    "type": "string",
+                    "description": "The generalizable insight or pattern"
+                },
+                "learned_from": {
+                    "type": "string",
+                    "description": "Context where this was learned (optional, for future reference)"
+                }
+            },
+            "required": ["domain", "insight"]
+        }
+    ),
+    Tool(
+        name="learn_approach",
+        description="Store what approach worked when in a particular state/mood. Builds emotional memory for adapting to session dynamics.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "state": {
+                    "type": "string",
+                    "description": "State/mood: stuck, debugging, exploring, flowing, frustrated, uncertain, rushing"
+                },
+                "approach": {
+                    "type": "string",
+                    "description": "What helped in this state (e.g., 'step back and reread requirements')"
+                },
+                "outcome": {
+                    "type": "string",
+                    "description": "What happened after (optional)"
+                }
+            },
+            "required": ["state", "approach"]
+        }
+    ),
+    Tool(
+        name="learn_outcome",
+        description="Record whether a suggestion/approach actually helped. Builds feedback loop for improving future suggestions.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "suggestion": {
+                    "type": "string",
+                    "description": "What was suggested or tried"
+                },
+                "helped": {
+                    "type": "boolean",
+                    "description": "Did it help? true/false"
+                },
+                "details": {
+                    "type": "string",
+                    "description": "Why it helped or didn't (optional but valuable)"
+                }
+            },
+            "required": ["suggestion", "helped"]
+        }
+    ),
+    Tool(
+        name="learn_milestone",
+        description="Record a relationship milestone - achievements, personal context, significant moments worth remembering.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "milestone": {
+                    "type": "string",
+                    "description": "What happened (e.g., 'shipped v1.0', 'first successful release')"
+                },
+                "significance": {
+                    "type": "string",
+                    "description": "Why it matters (optional)"
+                },
+                "date": {
+                    "type": "string",
+                    "description": "When it happened (optional, defaults to now)"
+                }
+            },
+            "required": ["milestone"]
+        }
+    ),
+    # Long-running tasks (mind-powered Ralph Wiggum)
+    Tool(
+        name="long_task_start",
+        description="Start a long-running task with goal and completion criteria. Task persists across sessions.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string", "description": "Unique task identifier"},
+                "goal": {"type": "string", "description": "What you're trying to achieve"},
+                "realm": {"type": "string", "description": "Project scope (default: brahman)"},
+                "hard_checks": {"type": "array", "items": {"type": "string"}, "description": "Deterministic completion criteria (e.g., 'tests pass')"},
+                "soft_checks": {"type": "array", "items": {"type": "string"}, "description": "Semantic completion criteria"},
+                "work_items": {"type": "array", "items": {"type": "string"}, "description": "Initial subtasks"}
+            },
+            "required": ["task_id", "goal"]
+        }
+    ),
+    Tool(
+        name="long_task_get",
+        description="Get a long-running task by ID",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string", "description": "Task identifier"}
+            },
+            "required": ["task_id"]
+        }
+    ),
+    Tool(
+        name="long_task_active",
+        description="Get the active long-running task for a realm",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "realm": {"type": "string", "description": "Project scope (optional)"}
+            }
+        }
+    ),
+    Tool(
+        name="long_task_update",
+        description="Update a long-running task progress",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string", "description": "Task identifier"},
+                "completed_summary": {"type": "string", "description": "What's been accomplished"},
+                "work_items": {"type": "array", "items": {"type": "string"}, "description": "Updated subtasks"},
+                "blockers": {"type": "array", "items": {"type": "string"}, "description": "Current blockers"}
+            },
+            "required": ["task_id"]
+        }
+    ),
+    Tool(
+        name="long_task_complete",
+        description="Mark a long-running task as completed",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string", "description": "Task identifier"},
+                "outcome": {"type": "string", "description": "Final outcome description"}
+            },
+            "required": ["task_id", "outcome"]
+        }
+    ),
+    Tool(
+        name="long_task_event",
+        description="Append an event to the task log (tool result, decision, observation)",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string", "description": "Task identifier"},
+                "kind": {"type": "string", "description": "Event type: tool_result, decision, observation, error, checkpoint"},
+                "payload": {"type": "string", "description": "Event data (JSON or text)"},
+                "tags": {"type": "array", "items": {"type": "string"}, "description": "Tags for filtering"},
+                "related_entities": {"type": "array", "items": {"type": "string"}, "description": "Related files/functions"}
+            },
+            "required": ["task_id", "kind"]
+        }
+    ),
+    Tool(
+        name="long_task_snapshot",
+        description="Get synthesized task context for injection (what's done, pending, blockers, relevant memories)",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string", "description": "Task identifier"},
+                "mode": {"type": "string", "description": "Output mode: inject (compact) or debug (verbose)"}
+            },
+            "required": ["task_id"]
+        }
+    ),
+    Tool(
+        name="long_task_evaluate",
+        description="Evaluate task completion: run checks, return decision (complete/continue/blocked)",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string", "description": "Task identifier"}
+            },
+            "required": ["task_id"]
+        }
+    ),
+]
