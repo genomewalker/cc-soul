@@ -23,13 +23,14 @@
 namespace chitta {
 
 // Default decay rates by node type (per day)
+// Lower rates to preserve memories longer - decay was outpacing recall
 inline float default_decay_rate(NodeType type) {
     switch (type) {
-        case NodeType::Wisdom:    return 0.02f;  // Slow - hard-won insights
+        case NodeType::Wisdom:    return 0.005f; // Very slow - insights should last months
         case NodeType::Belief:    return 0.0f;   // Never decays
         case NodeType::Invariant: return 0.0f;   // Never decays
-        case NodeType::Episode:   return 0.10f;  // Medium - conversation context
-        default:                  return 0.05f;  // Default
+        case NodeType::Episode:   return 0.03f;  // Slower - context fades but not in days
+        default:                  return 0.01f;  // Slow default - most things should persist
     }
 }
 
@@ -49,7 +50,7 @@ struct SimpleMindConfig {
     // Decay and pruning
     float prune_threshold = 0.1f;      // Remove nodes below this confidence
     float prune_min_age_days = 7.0f;   // Don't prune recently created nodes
-    float reinforce_amount = 0.05f;    // How much to strengthen on recall
+    float reinforce_amount = 0.15f;    // How much to strengthen on recall (3x previous)
 };
 
 // Simple health status for SimpleMind

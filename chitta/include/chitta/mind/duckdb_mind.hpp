@@ -436,7 +436,7 @@ struct DuckDBMindConfig {
     // Decay and pruning
     float prune_threshold = 0.1f;
     float prune_min_age_days = 7.0f;
-    float reinforce_amount = 0.05f;
+    float reinforce_amount = 0.15f;  // 3x previous - recalls should matter
 };
 
 // Health status compatible with SimpleMind
@@ -1443,12 +1443,13 @@ private:
     }
 
     static float default_decay_rate(NodeType type) {
+        // Lower rates to preserve memories longer
         switch (type) {
-            case NodeType::Wisdom: return 0.02f;
-            case NodeType::Belief: return 0.0f;
-            case NodeType::Invariant: return 0.0f;
-            case NodeType::Episode: return 0.10f;
-            default: return 0.05f;
+            case NodeType::Wisdom: return 0.005f;    // Very slow - insights last months
+            case NodeType::Belief: return 0.0f;      // Never decays
+            case NodeType::Invariant: return 0.0f;   // Never decays
+            case NodeType::Episode: return 0.03f;    // Slower - context fades but not in days
+            default: return 0.01f;                   // Slow default
         }
     }
 
