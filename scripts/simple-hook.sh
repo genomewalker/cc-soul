@@ -255,6 +255,57 @@ case "$HOOK_TYPE" in
 
         output=""
 
+        # Context recovery: detect /clear or continuation patterns and re-inject full context
+        # This handles the case where /clear was used but SessionStart doesn't re-run
+        if echo "$QUERY" | grep -qiE '^(continue|resume|pick up|where were we|what were we|let.?s continue)|(/clear|after clear)'; then
+            # Re-inject soul context like SessionStart
+            response=$(rpc_call "soul_context" '{}')
+            structured=$(echo "$response" | jq -r '.result.structured // empty' 2>/dev/null)
+            if [[ -n "$structured" ]]; then
+                nodes=$(echo "$structured" | jq -r '.total_nodes // 0')
+                triplets=$(echo "$structured" | jq -r '.triplet_count // 0')
+                conf=$(echo "$structured" | jq -r '.avg_confidence // 0' | cut -c1-4)
+                status=$(echo "$structured" | jq -r '.status // "unknown"')
+                output="[soul] n=$nodes t=$triplets c=$conf $status"
+            fi
+
+            # Load ledger checkpoint
+            ledger_response=$(rpc_call "ledger_load" "{\"project\":\"$ESCAPED_REALM\"}")
+            ledger_json=$(echo "$ledger_response" | jq -r '.result.structured // empty' 2>/dev/null)
+            ledger_found=$(echo "$ledger_json" | jq -r '.found // false' 2>/dev/null)
+
+            if [[ "$ledger_found" == "true" ]]; then
+                todos=$(echo "$ledger_json" | jq -r '.todos // []' 2>/dev/null)
+                pending=$(echo "$todos" | jq '[.[] | select(.status != "completed")] | length' 2>/dev/null || echo "0")
+                next=$(echo "$ledger_json" | jq -r '.next_steps[0] // ""' 2>/dev/null)
+                snapshot=$(echo "$ledger_json" | jq -r '.snapshot // ""' 2>/dev/null)
+                mood=$(echo "$ledger_json" | jq -r '.mood // ""' 2>/dev/null)
+
+                ledger_out=""
+                [[ "$pending" -gt 0 ]] && ledger_out="[$pending pending]"
+                [[ -n "$next" && "$next" != "null" ]] && ledger_out="$ledger_out next: ${next:0:80}"
+                [[ -n "$ledger_out" ]] && output="$output"$'\n'"$ledger_out"
+
+                if [[ -n "$snapshot" && "$snapshot" != "null" ]]; then
+                    output="$output"$'\n'"[last session] $mood: ${snapshot:0:100}"
+                fi
+            fi
+
+            # Behavioral corrections
+            behavior_response=$(rpc_call "recall" '{"query":"behavior correction preference rule","tag":"correction","limit":3}')
+            behavior_text=$(extract_text "$behavior_response")
+            if [[ -n "$behavior_text" && "$behavior_text" != *"No memories"* ]]; then
+                corrections=$(echo "$behavior_text" | grep -oP 'CORRECT: \K[^\n]+' | head -3 | tr '\n' '; ')
+                [[ -n "$corrections" ]] && output="$output"$'\n'"[rules] $corrections"
+            fi
+
+            # Output context and exit early - don't also do memory recall
+            if [[ -n "$output" ]]; then
+                echo "$output"
+            fi
+            exit 0
+        fi
+
         # Proactive surfacing: detect implicit needs and expand search
         EXTRA_TAGS=""
         BOOST_K=3
