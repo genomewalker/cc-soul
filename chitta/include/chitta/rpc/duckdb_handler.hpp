@@ -302,6 +302,21 @@ private:
         handlers_["subconscious_stats"] = [this](const json& p) { return tool_subconscious_stats(p); };
 
         tools_.push_back({
+            {"name", "reembed_memories"},
+            {"description", "Re-embed memories with proper embeddings. Use to fix memories stored with zero embeddings."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"kind", {{"type", "string"}, {"description", "Filter by kind: belief, wisdom, episode, correction, preference"}}},
+                    {"min_confidence", {{"type", "number"}, {"description", "Min confidence threshold (default: 0)"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Max memories to process (default: 100)"}}},
+                    {"dry_run", {{"type", "boolean"}, {"description", "Preview without updating (default: false)"}}}
+                }}
+            }}
+        });
+        handlers_["reembed_memories"] = [this](const json& p) { return tool_reembed_memories(p); };
+
+        tools_.push_back({
             {"name", "embed_symbols"},
             {"description", "Fast embed symbol metadata (no LLM needed, ~100/sec)"},
             {"inputSchema", {
@@ -2094,6 +2109,104 @@ private:
         });
     }
 
+    DuckDBToolResult tool_reembed_memories(const json& params) {
+        if (!mind_->has_yantra()) {
+            return DuckDBToolResult::error("Yantra (embedder) not attached");
+        }
+
+        std::string kind_filter = params.value("kind", "");
+        float min_confidence = params.value("min_confidence", 0.0f);
+        int limit = params.value("limit", 100);
+        bool dry_run = params.value("dry_run", false);
+
+        // Get global memories (these are the partnership memories we care most about)
+        auto memories = mind_->store().list_global_memories(limit, kind_filter);
+
+        // Filter to those that might have zero embeddings (check by recalling with their own content)
+        std::vector<std::pair<int64_t, std::string>> to_reembed;
+
+        for (const auto& mem : memories) {
+            if (min_confidence > 0 && mem.confidence < min_confidence) continue;
+
+            // Check if memory has meaningful embedding by recalling it
+            // If a memory with its own content doesn't recall itself well, it likely has zero embedding
+            auto recalls = mind_->store().recall(
+                mind_->embedder().transform(mem.content).nu.data,
+                5, "", true
+            );
+
+            bool found_self = false;
+            for (const auto& r : recalls) {
+                if (r.id == mem.id && r.similarity > 0.9f) {
+                    found_self = true;
+                    break;
+                }
+            }
+
+            if (!found_self) {
+                to_reembed.push_back({mem.id, mem.content});
+            }
+        }
+
+        size_t zero_embed_count = to_reembed.size();
+        size_t total_checked = memories.size();
+
+        if (dry_run) {
+            std::ostringstream ss;
+            ss << "Dry run - found " << zero_embed_count << " memories likely needing re-embedding out of "
+               << total_checked << " checked.\n";
+            if (!to_reembed.empty()) {
+                ss << "\nWould re-embed:\n";
+                for (size_t i = 0; i < std::min(to_reembed.size(), size_t(10)); ++i) {
+                    ss << "  #" << to_reembed[i].first << ": "
+                       << to_reembed[i].second.substr(0, 60) << "...\n";
+                }
+                if (to_reembed.size() > 10) {
+                    ss << "  ... and " << (to_reembed.size() - 10) << " more\n";
+                }
+            }
+            return DuckDBToolResult::ok(ss.str(), {
+                {"dry_run", true},
+                {"total_checked", total_checked},
+                {"zero_embed_count", zero_embed_count}
+            });
+        }
+
+        // Actually re-embed
+        size_t reembedded = 0;
+        size_t failed = 0;
+
+        for (const auto& [id, content] : to_reembed) {
+            try {
+                // Generate new embedding
+                Artha artha = mind_->embedder().transform(content);
+
+                // Update the memory with new embedding
+                if (mind_->store().set_memory_embedding(id, artha.nu.data)) {
+                    reembedded++;
+                } else {
+                    failed++;
+                }
+            } catch (...) {
+                failed++;
+            }
+        }
+
+        std::ostringstream ss;
+        ss << "Re-embedded " << reembedded << " memories";
+        if (failed > 0) {
+            ss << " (" << failed << " failed)";
+        }
+        ss << " out of " << zero_embed_count << " needing re-embedding.";
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"total_checked", total_checked},
+            {"zero_embed_count", zero_embed_count},
+            {"reembedded", reembedded},
+            {"failed", failed}
+        });
+    }
+
     DuckDBToolResult tool_embed_symbols(const json& params) {
         if (!mind_->has_yantra()) {
             return DuckDBToolResult::error("Yantra (embedder) not attached");
@@ -2342,13 +2455,67 @@ private:
         std::string realm = params.value("realm", "");
         bool include_global = params.value("include_global", true);
 
-        // Use full resonance architecture:
+        // PARTNERSHIP FIRST: Query partnership memories (beliefs, preferences) separately
+        // These are the memories that make Claude feel personalized
+        std::vector<Recall> partnership_results;
+        if (mind_->embedder_ready()) {
+            Artha artha = mind_->embedder().transform(query);
+            // Get global partnership memories directly
+            auto globals = mind_->store().list_global_memories(k, "");
+            for (const auto& mem : globals) {
+                // Calculate similarity if we have embeddings
+                auto recalls = mind_->store().recall(artha.nu.data, 50, "", true);
+                for (const auto& r : recalls) {
+                    if (r.id == mem.id) {
+                        Recall recall;
+                        recall.id.high = 0;
+                        recall.id.low = static_cast<uint64_t>(r.id);
+                        recall.text = r.content;
+                        recall.similarity = r.similarity;
+                        recall.relevance = r.similarity * r.confidence * 1.5f;  // 1.5x boost for partnership
+                        // Inline string_to_node_type
+                        if (r.kind == "belief") recall.type = NodeType::Belief;
+                        else if (r.kind == "wisdom") recall.type = NodeType::Wisdom;
+                        else if (r.kind == "episode") recall.type = NodeType::Episode;
+                        else if (r.kind == "intention") recall.type = NodeType::Intention;
+                        else recall.type = NodeType::Episode;
+                        recall.confidence = Confidence(r.confidence);
+                        partnership_results.push_back(recall);
+                        break;
+                    }
+                }
+            }
+            // Sort by boosted relevance
+            std::sort(partnership_results.begin(), partnership_results.end(),
+                [](const Recall& a, const Recall& b) { return a.relevance > b.relevance; });
+        }
+
+        // Use full resonance architecture for general memories:
         // 1. Session Priming - context biases retrieval
         // 2. Spreading Activation - flows through triplet graph
         // 3. Attractor Dynamics - results pulled toward conceptual gravity wells
         // 4. Lateral Inhibition - similar patterns compete
         // 5. Hebbian Learning - co-activated nodes strengthen connections
-        auto results = mind_->full_resonate(query, realm.empty() ? k : k * 2);
+        auto general_results = mind_->full_resonate(query, realm.empty() ? k : k * 2);
+
+        // Merge: partnership memories first, then general
+        std::vector<Recall> results;
+        std::unordered_set<uint64_t> seen_ids;
+
+        // Add partnership memories first (up to k/2)
+        size_t partnership_limit = std::min(partnership_results.size(), k / 2);
+        for (size_t i = 0; i < partnership_limit; ++i) {
+            results.push_back(partnership_results[i]);
+            seen_ids.insert(partnership_results[i].id.low);
+        }
+
+        // Add general results (avoiding duplicates)
+        for (const auto& r : general_results) {
+            if (seen_ids.find(r.id.low) == seen_ids.end()) {
+                results.push_back(r);
+                seen_ids.insert(r.id.low);
+            }
+        }
 
         std::ostringstream ss;
         json results_json = json::array();

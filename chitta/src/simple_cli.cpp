@@ -391,7 +391,7 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
     DuckDBRpcHandler handler(&mind);
 
     // Start subconscious background processor
-    Subconscious subconscious(&mind.store());
+    Subconscious subconscious(&mind);
     subconscious.start();
     handler.set_subconscious(&subconscious);
 

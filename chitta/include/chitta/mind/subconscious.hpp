@@ -5,7 +5,7 @@
 // user/assistant messages and closing feedback loops automatically.
 //
 // Architecture:
-//   DuckDBStore ← Subconscious (background thread) ← Event Queue ← Hooks/RPC
+//   DuckDBMind ← Subconscious (background thread) ← Event Queue ← Hooks/RPC
 //
 // Capabilities:
 //   - Pattern detection (correction, preference, frustration, milestone)
@@ -13,7 +13,7 @@
 //   - Anticipation pattern learning
 //   - Periodic hygiene (memory consolidation)
 
-#include "../duckdb_store.hpp"
+#include "duckdb_mind.hpp"
 #include <string>
 #include <deque>
 #include <thread>
@@ -81,7 +81,7 @@ struct TrackedSuggestion {
 
 class Subconscious {
 public:
-    explicit Subconscious(DuckDBStore* store, SubconsciousConfig config = {});
+    explicit Subconscious(DuckDBMind* mind, SubconsciousConfig config = {});
     ~Subconscious();
 
     // Lifecycle
@@ -99,7 +99,7 @@ public:
     const SubconsciousConfig& config() const { return config_; }
 
 private:
-    DuckDBStore* store_;
+    DuckDBMind* mind_;
     SubconsciousConfig config_;
     SubconsciousStats stats_;
 

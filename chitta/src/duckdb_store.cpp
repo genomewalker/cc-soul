@@ -872,6 +872,17 @@ bool DuckDBStore::update_visibility(int64_t id, RealmVisibility visibility) {
     return write_execute(sql.str());
 }
 
+bool DuckDBStore::set_memory_embedding(int64_t id, const std::vector<float>& embedding) {
+    if (!db_) return false;
+    if (embedding.size() != 384) return false;
+
+    std::ostringstream sql;
+    sql << "UPDATE memory SET embedding = " << embedding_to_sql(embedding)
+        << ", accessed_at = " << now() << " WHERE id = " << id;
+
+    return write_execute(sql.str());
+}
+
 std::vector<MemoryResult> DuckDBStore::list_global_memories(size_t limit, const std::string& kind) {
     std::vector<MemoryResult> results;
     if (!db_) return results;

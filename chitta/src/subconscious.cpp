@@ -9,8 +9,8 @@
 
 namespace chitta {
 
-Subconscious::Subconscious(DuckDBStore* store, SubconsciousConfig config)
-    : store_(store)
+Subconscious::Subconscious(DuckDBMind* mind, SubconsciousConfig config)
+    : mind_(mind)
     , config_(std::move(config))
 {
     // Compile pattern matchers
@@ -245,6 +245,7 @@ void Subconscious::detect_milestone(const std::string& content, const std::strin
 }
 
 // Auto-learning Storage
+// Uses mind_->remember() to generate proper embeddings via yantra
 
 void Subconscious::store_correction(const std::string& context, const std::string& correction,
                                      const std::string& realm) {
@@ -255,36 +256,27 @@ void Subconscious::store_correction(const std::string& context, const std::strin
     }
     content << "Correction: " << correction;
 
-    // Use zero embedding (384 dims) - memories without embeddings can't be stored
-    static const std::vector<float> zero_embedding(384, 0.0f);
-
-    store_->remember(
-        content.str(),
-        "correction",
-        zero_embedding,
-        config_.correction_confidence,
-        0.01f,  // Slow decay
-        realm.empty() ? "default" : realm,
-        RealmVisibility::Private
-    );
+    // Use mind->remember which generates proper embeddings
+    auto id = mind_->remember(content.str(), NodeType::Wisdom,
+                              realm.empty() ? "brahman" : realm,
+                              RealmVisibility::Global);  // Corrections are global
+    if (id != NodeId{}) {
+        // Set visibility to global
+        mind_->store().set_visibility(static_cast<int64_t>(id.low), RealmVisibility::Global);
+    }
 }
 
 void Subconscious::store_preference(const std::string& preference, const std::string& realm) {
     std::ostringstream content;
     content << "[preference] " << preference;
 
-    static const std::vector<float> zero_embedding(384, 0.0f);
-
-    // Preferences are global (apply across projects)
-    store_->remember(
-        content.str(),
-        "preference",
-        zero_embedding,
-        config_.correction_confidence,
-        0.005f,  // Very slow decay
-        "brahman",  // Global realm
-        RealmVisibility::Global
-    );
+    // Preferences are global beliefs
+    auto id = mind_->remember(content.str(), NodeType::Belief,
+                              "brahman",  // Global realm
+                              RealmVisibility::Global);
+    if (id != NodeId{}) {
+        mind_->store().set_visibility(static_cast<int64_t>(id.low), RealmVisibility::Global);
+    }
 }
 
 void Subconscious::store_frustration(const std::string& context, const std::string& realm) {
@@ -292,34 +284,21 @@ void Subconscious::store_frustration(const std::string& context, const std::stri
     content << "[approach] User was frustrated/stuck\n";
     content << "Context: " << context;
 
-    static const std::vector<float> zero_embedding(384, 0.0f);
-
-    store_->remember(
-        content.str(),
-        "approach",
-        zero_embedding,
-        0.7f,  // Lower initial confidence
-        0.02f,  // Moderate decay
-        realm.empty() ? "default" : realm,
-        RealmVisibility::Private
-    );
+    mind_->remember(content.str(), NodeType::Episode,
+                    realm.empty() ? "default" : realm,
+                    RealmVisibility::Private);
 }
 
 void Subconscious::store_milestone(const std::string& achievement, const std::string& realm) {
     std::ostringstream content;
     content << "[milestone] " << achievement;
 
-    static const std::vector<float> zero_embedding(384, 0.0f);
-
-    store_->remember(
-        content.str(),
-        "milestone",
-        zero_embedding,
-        0.9f,  // High confidence for achievements
-        0.005f,  // Very slow decay
-        realm.empty() ? "default" : realm,
-        RealmVisibility::Shared
-    );
+    auto id = mind_->remember(content.str(), NodeType::Wisdom,
+                              realm.empty() ? "default" : realm,
+                              RealmVisibility::Shared);
+    if (id != NodeId{}) {
+        mind_->store().set_visibility(static_cast<int64_t>(id.low), RealmVisibility::Shared);
+    }
 }
 
 // Suggestion Tracking
@@ -333,7 +312,7 @@ void Subconscious::track_suggestion(const std::string& content, const std::strin
     suggestion.status = "pending";
     suggestion.suggested_at = now_ms();
 
-    int64_t id = store_->suggestion_track(suggestion);
+    int64_t id = mind_->store().suggestion_track(suggestion);
 
     if (id > 0) {
         std::lock_guard<std::mutex> lock(suggestions_mutex_);
@@ -361,7 +340,7 @@ void Subconscious::check_outcomes(const std::string& user_message, const std::st
     for (auto it = pending_suggestions_.begin(); it != pending_suggestions_.end(); ) {
         if (it->realm == realm || realm.empty()) {
             // Resolve the suggestion
-            store_->suggestion_resolve(it->db_id, indicates_success, user_message, 0);
+            mind_->store().suggestion_resolve(it->db_id, indicates_success, user_message, 0);
             stats_.outcomes_verified++;
 
             it = pending_suggestions_.erase(it);
@@ -376,7 +355,7 @@ void Subconscious::check_outcomes(const std::string& user_message, const std::st
 void Subconscious::observe_pattern(const std::string& context, const std::string& action,
                                     const std::string& realm) {
     // Simplified pattern: store what action was taken in what context
-    store_->anticipation_observe(context, action, realm);
+    mind_->store().anticipation_observe(context, action, realm);
 }
 
 void Subconscious::verify_prediction(const std::string& actual_action, const std::string& realm) {
@@ -402,9 +381,9 @@ void Subconscious::verify_prediction(const std::string& actual_action, const std
 
     if (total > 0 && (static_cast<float>(matches) / total) > 0.3f) {
         // Prediction was roughly correct
-        auto patterns = store_->anticipation_predict(last_context_, 1, realm);
+        auto patterns = mind_->store().anticipation_predict(last_context_, 1, realm);
         for (const auto& p : patterns) {
-            store_->anticipation_success(p.id);
+            mind_->store().anticipation_success(p.id);
         }
     }
 
@@ -414,7 +393,7 @@ void Subconscious::verify_prediction(const std::string& actual_action, const std
 // Periodic Tasks
 
 void Subconscious::run_hygiene() {
-    auto result = store_->hygiene_run(
+    auto result = mind_->store().hygiene_run(
         0.1f,   // prune_threshold
         7.0f,   // min_age_days
         0.85f,  // consolidation_threshold
