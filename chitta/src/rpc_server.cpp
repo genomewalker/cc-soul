@@ -24,6 +24,7 @@
 #endif
 #include <fstream>
 #include <array>
+#include <thread>
 #include <chitta/version.hpp>
 #include <set>
 #include <iostream>
