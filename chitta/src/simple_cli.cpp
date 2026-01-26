@@ -9,6 +9,7 @@
 //   stats      Show soul statistics
 
 #include <chitta/mind/duckdb_mind.hpp>
+#include <chitta/mind/subconscious.hpp>
 #include <chitta/rpc/duckdb_handler.hpp>
 #ifdef CHITTA_WITH_POSTGRES
 #include <chitta/mind/postgres_mind.hpp>
@@ -389,6 +390,11 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
 
     DuckDBRpcHandler handler(&mind);
 
+    // Start subconscious background processor
+    Subconscious subconscious(&mind.store());
+    subconscious.start();
+    handler.set_subconscious(&subconscious);
+
     std::signal(SIGTERM, daemon_signal_handler);
     std::signal(SIGINT, daemon_signal_handler);
     std::signal(SIGPIPE, SIG_IGN);
@@ -601,14 +607,19 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
     maintenance.join();
     if (distillation.joinable()) distillation.join();
     if (enrichment.joinable()) enrichment.join();
+    subconscious.stop();
     server.stop();
 
     if (!pid_file.empty()) std::remove(pid_file.c_str());
     release_lock(lock);
 
+    const auto& sc_stats = subconscious.stats();
     std::cerr << "[daemon] Stopped (cycles=" << cycle_count
               << ", distilled=" << distill_count
-              << ", enriched=" << enrich_count << ")\n";
+              << ", enriched=" << enrich_count
+              << ", subconscious_events=" << sc_stats.events_processed.load()
+              << ", corrections=" << sc_stats.corrections_detected.load()
+              << ", preferences=" << sc_stats.preferences_detected.load() << ")\n";
     return 0;
 }
 

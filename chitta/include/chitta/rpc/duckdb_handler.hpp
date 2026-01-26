@@ -4,6 +4,7 @@
 // Same interface as SimpleRpcHandler but uses DuckDBMind backend.
 
 #include "../mind/duckdb_mind.hpp"
+#include "../mind/subconscious.hpp"
 #include "../mind/payload.hpp"
 #include "../code_intel.hpp"
 #include "../version.hpp"
@@ -38,9 +39,12 @@ struct DuckDBToolResult {
 
 class DuckDBRpcHandler {
 public:
-    explicit DuckDBRpcHandler(DuckDBMind* mind) : mind_(mind) {
+    explicit DuckDBRpcHandler(DuckDBMind* mind) : mind_(mind), subconscious_(nullptr) {
         register_tools();
     }
+
+    // Connect subconscious for event pushing
+    void set_subconscious(Subconscious* s) { subconscious_ = s; }
 
     json handle(const json& request) {
         std::string method = request.value("method", "");
@@ -69,6 +73,7 @@ public:
 
 private:
     DuckDBMind* mind_;
+    Subconscious* subconscious_;
     std::vector<json> tools_;
     std::unordered_map<std::string, std::function<DuckDBToolResult(const json&)>> handlers_;
 
@@ -288,6 +293,13 @@ private:
             {"inputSchema", {{"type", "object"}, {"properties", json::object()}}}
         });
         handlers_["enrichment_status"] = [this](const json& p) { return tool_enrichment_status(p); };
+
+        tools_.push_back({
+            {"name", "subconscious_stats"},
+            {"description", "Get subconscious background processor statistics"},
+            {"inputSchema", {{"type", "object"}, {"properties", json::object()}}}
+        });
+        handlers_["subconscious_stats"] = [this](const json& p) { return tool_subconscious_stats(p); };
 
         tools_.push_back({
             {"name", "embed_symbols"},
@@ -2022,6 +2034,66 @@ private:
         });
     }
 
+    DuckDBToolResult tool_subconscious_stats(const json&) {
+        if (!subconscious_) {
+            return DuckDBToolResult::ok("Subconscious not attached", {{"attached", false}});
+        }
+
+        const auto& stats = subconscious_->stats();
+        const auto& config = subconscious_->config();
+
+        // Calculate uptime
+        int64_t uptime_ms = 0;
+        if (stats.started_at > 0) {
+            auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()
+            ).count();
+            uptime_ms = now - stats.started_at;
+        }
+        int64_t uptime_mins = uptime_ms / 60000;
+
+        std::ostringstream ss;
+        ss << "Subconscious Status:\n";
+        ss << "  Running: " << (subconscious_->is_running() ? "yes" : "no") << "\n";
+        ss << "  Uptime: " << uptime_mins << " minutes\n";
+        ss << "\nEvents:\n";
+        ss << "  Processed: " << stats.events_processed.load() << "\n";
+        ss << "\nPattern Detection:\n";
+        ss << "  Corrections: " << stats.corrections_detected.load() << "\n";
+        ss << "  Preferences: " << stats.preferences_detected.load() << "\n";
+        ss << "  Frustrations: " << stats.frustrations_detected.load() << "\n";
+        ss << "  Milestones: " << stats.milestones_detected.load() << "\n";
+        ss << "\nFeedback Loops:\n";
+        ss << "  Suggestions tracked: " << stats.suggestions_tracked.load() << "\n";
+        ss << "  Outcomes verified: " << stats.outcomes_verified.load() << "\n";
+        ss << "\nMaintenance:\n";
+        ss << "  Hygiene runs: " << stats.hygiene_runs.load() << "\n";
+        if (stats.last_hygiene_at > 0) {
+            int64_t mins_since_hygiene = (std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()
+            ).count() - stats.last_hygiene_at) / 60000;
+            ss << "  Last hygiene: " << mins_since_hygiene << " minutes ago\n";
+        }
+        ss << "\nConfig:\n";
+        ss << "  Hygiene enabled: " << (config.enable_hygiene ? "yes" : "no") << "\n";
+        ss << "  Anticipation enabled: " << (config.enable_anticipation ? "yes" : "no") << "\n";
+        ss << "  Pattern detection enabled: " << (config.enable_pattern_detection ? "yes" : "no") << "\n";
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"running", subconscious_->is_running()},
+            {"uptime_minutes", uptime_mins},
+            {"events_processed", stats.events_processed.load()},
+            {"corrections_detected", stats.corrections_detected.load()},
+            {"preferences_detected", stats.preferences_detected.load()},
+            {"frustrations_detected", stats.frustrations_detected.load()},
+            {"milestones_detected", stats.milestones_detected.load()},
+            {"suggestions_tracked", stats.suggestions_tracked.load()},
+            {"outcomes_verified", stats.outcomes_verified.load()},
+            {"hygiene_runs", stats.hygiene_runs.load()},
+            {"last_hygiene_at", stats.last_hygiene_at.load()}
+        });
+    }
+
     DuckDBToolResult tool_embed_symbols(const json& params) {
         if (!mind_->has_yantra()) {
             return DuckDBToolResult::error("Yantra (embedder) not attached");
@@ -2398,6 +2470,19 @@ private:
                          t["predicate"].get<std::string>() + " → " +
                          t["object"].get<std::string>() + "\n";
             }
+        }
+
+        // Push event to subconscious for pattern detection (always, even if no results)
+        if (subconscious_) {
+            auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()
+            ).count();
+            subconscious_->push_event({
+                SubconsciousEventType::UserMessage,
+                query,
+                realm,
+                now
+            });
         }
 
         if (results_json.empty() && triplets_json.empty()) {

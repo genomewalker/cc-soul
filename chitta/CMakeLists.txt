@@ -344,6 +344,7 @@ add_executable(chittad
     src/simple_cli.cpp
     src/socket_server.cpp
     src/socket_client.cpp
+    src/subconscious.cpp
 )
 target_link_libraries(chittad PRIVATE chitta duckdb_store)
 if(CHITTA_WITH_POSTGRES)

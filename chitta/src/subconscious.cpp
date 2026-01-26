@@ -1,0 +1,469 @@
+// Subconscious: Background processor for autonomous learning
+//
+// Detects patterns in user/assistant messages and automatically stores
+// learnings without requiring explicit calls.
+
+#include <chitta/mind/subconscious.hpp>
+#include <iostream>
+#include <sstream>
+
+namespace chitta {
+
+Subconscious::Subconscious(DuckDBStore* store, SubconsciousConfig config)
+    : store_(store)
+    , config_(std::move(config))
+{
+    // Compile pattern matchers
+    // Correction patterns: "no", "wrong", "actually", "that's not", "not X, Y"
+    correction_pattern_ = std::regex(
+        R"(\b(no[,.]?\s|wrong|actually|that's not|that is not|not\s+\w+[,]\s+)\b)",
+        std::regex_constants::icase
+    );
+
+    // Preference patterns: "I prefer", "always", "never", "don't"
+    preference_pattern_ = std::regex(
+        R"(\b(i prefer|always\s+\w+|never\s+\w+|don't\s+\w+|do not\s+\w+|please\s+always|please\s+don't)\b)",
+        std::regex_constants::icase
+    );
+
+    // Frustration patterns: "stuck", "frustrated", "not working", "broken"
+    frustration_pattern_ = std::regex(
+        R"(\b(stuck|frustrated|frustrating|not working|doesn't work|broken|confused|lost)\b)",
+        std::regex_constants::icase
+    );
+
+    // Milestone patterns: "done", "shipped", "working", "success", "finished"
+    milestone_pattern_ = std::regex(
+        R"(\b(done|shipped|working now|success|finished|completed|fixed|solved|resolved)\b)",
+        std::regex_constants::icase
+    );
+
+    // Suggestion patterns in assistant messages: "try", "consider", "you could"
+    suggestion_pattern_ = std::regex(
+        R"(\b(try\s+\w+|consider\s+\w+|you could|you might|perhaps|maybe try|suggest)\b)",
+        std::regex_constants::icase
+    );
+}
+
+Subconscious::~Subconscious() {
+    stop();
+}
+
+void Subconscious::start() {
+    if (running_.load()) return;
+
+    running_ = true;
+    stats_.started_at = now_ms();
+
+    process_thread_ = std::thread([this]() {
+        process_loop();
+    });
+
+    std::cerr << "[subconscious] Started background processor\n";
+}
+
+void Subconscious::stop() {
+    if (!running_.load()) return;
+
+    running_ = false;
+    queue_cv_.notify_all();
+
+    if (process_thread_.joinable()) {
+        process_thread_.join();
+    }
+
+    std::cerr << "[subconscious] Stopped (processed=" << stats_.events_processed
+              << ", corrections=" << stats_.corrections_detected
+              << ", preferences=" << stats_.preferences_detected
+              << ", hygiene_runs=" << stats_.hygiene_runs << ")\n";
+}
+
+void Subconscious::push_event(SubconsciousEvent event) {
+    {
+        std::lock_guard<std::mutex> lock(queue_mutex_);
+        if (event_queue_.size() >= config_.max_queue_size) {
+            event_queue_.pop_front();
+        }
+        event_queue_.push_back(std::move(event));
+    }
+    queue_cv_.notify_one();
+}
+
+void Subconscious::process_loop() {
+    auto last_hygiene = std::chrono::steady_clock::now();
+
+    while (running_.load()) {
+        auto event_opt = pop_event_with_timeout(config_.process_interval);
+
+        if (event_opt) {
+            stats_.events_processed++;
+
+            switch (event_opt->type) {
+                case SubconsciousEventType::UserMessage:
+                    process_user_message(*event_opt);
+                    break;
+                case SubconsciousEventType::AssistantMessage:
+                    process_assistant_message(*event_opt);
+                    break;
+                case SubconsciousEventType::ToolResult:
+                    process_tool_result(*event_opt);
+                    break;
+            }
+        }
+
+        // Check for periodic hygiene
+        if (config_.enable_hygiene && time_for_hygiene()) {
+            run_hygiene();
+            last_hygiene = std::chrono::steady_clock::now();
+        }
+    }
+}
+
+void Subconscious::process_user_message(const SubconsciousEvent& event) {
+    if (config_.enable_pattern_detection) {
+        detect_correction(event.content, event.realm);
+        detect_preference(event.content, event.realm);
+        detect_frustration(event.content, event.realm);
+        detect_milestone(event.content, event.realm);
+    }
+
+    if (config_.enable_suggestion_tracking) {
+        check_outcomes(event.content, event.realm);
+    }
+
+    if (config_.enable_anticipation) {
+        // User message can verify a prediction about what they would ask/do
+        verify_prediction(event.content, event.realm);
+    }
+}
+
+void Subconscious::process_assistant_message(const SubconsciousEvent& event) {
+    if (config_.enable_suggestion_tracking) {
+        // Look for suggestions in assistant output
+        std::smatch match;
+        if (std::regex_search(event.content, match, suggestion_pattern_)) {
+            // Extract context (first 200 chars before the suggestion)
+            size_t pos = match.position();
+            size_t start = (pos > 200) ? (pos - 200) : 0;
+            std::string context = event.content.substr(start, pos - start);
+
+            // Extract suggestion (the matching part plus 100 chars after)
+            size_t end = std::min(pos + match.length() + 100, event.content.size());
+            std::string suggestion = event.content.substr(pos, end - pos);
+
+            track_suggestion(suggestion, context, event.realm);
+        }
+    }
+
+    if (config_.enable_anticipation) {
+        // Assistant messages represent actions taken - observe patterns
+        // Context = what was being discussed, Action = what assistant did
+        // This is simplified - in practice, would track more context
+        std::lock_guard<std::mutex> lock(anticipation_mutex_);
+        if (!last_context_.empty()) {
+            observe_pattern(last_context_, event.content.substr(0, 200), event.realm);
+        }
+        // Update context for next observation
+        last_context_ = event.content.substr(0, 200);
+    }
+}
+
+void Subconscious::process_tool_result(const SubconsciousEvent& event) {
+    if (config_.enable_anticipation) {
+        verify_prediction(event.content, event.realm);
+    }
+}
+
+// Pattern Detection
+
+void Subconscious::detect_correction(const std::string& content, const std::string& realm) {
+    std::smatch match;
+    if (std::regex_search(content, match, correction_pattern_)) {
+        // Extract the correction context (what comes after the correction word)
+        size_t pos = match.position() + match.length();
+        std::string correction;
+        if (pos < content.size()) {
+            size_t end = std::min(pos + 200, content.size());
+            correction = content.substr(pos, end - pos);
+        }
+
+        // Extract what was being corrected (what comes before)
+        std::string context;
+        if (match.position() > 0) {
+            size_t start = (match.position() > 100) ? (match.position() - 100) : 0;
+            context = content.substr(start, match.position() - start);
+        }
+
+        store_correction(context, correction, realm);
+        stats_.corrections_detected++;
+    }
+}
+
+void Subconscious::detect_preference(const std::string& content, const std::string& realm) {
+    std::smatch match;
+    if (std::regex_search(content, match, preference_pattern_)) {
+        // Extract the preference statement (surrounding text)
+        size_t pos = static_cast<size_t>(match.position());
+        size_t len = static_cast<size_t>(match.length());
+        size_t start = (pos > 50) ? (pos - 50) : 0;
+        size_t end = std::min(pos + len + 100, content.size());
+        std::string preference = content.substr(start, end - start);
+
+        store_preference(preference, realm);
+        stats_.preferences_detected++;
+    }
+}
+
+void Subconscious::detect_frustration(const std::string& content, const std::string& realm) {
+    std::smatch match;
+    if (std::regex_search(content, match, frustration_pattern_)) {
+        // Extract frustration context
+        size_t pos = static_cast<size_t>(match.position());
+        size_t len = static_cast<size_t>(match.length());
+        size_t start = (pos > 100) ? (pos - 100) : 0;
+        size_t end = std::min(pos + len + 100, content.size());
+        std::string context = content.substr(start, end - start);
+
+        store_frustration(context, realm);
+        stats_.frustrations_detected++;
+    }
+}
+
+void Subconscious::detect_milestone(const std::string& content, const std::string& realm) {
+    std::smatch match;
+    if (std::regex_search(content, match, milestone_pattern_)) {
+        // Extract milestone achievement
+        size_t pos = static_cast<size_t>(match.position());
+        size_t len = static_cast<size_t>(match.length());
+        size_t start = (pos > 50) ? (pos - 50) : 0;
+        size_t end = std::min(pos + len + 100, content.size());
+        std::string achievement = content.substr(start, end - start);
+
+        store_milestone(achievement, realm);
+        stats_.milestones_detected++;
+    }
+}
+
+// Auto-learning Storage
+
+void Subconscious::store_correction(const std::string& context, const std::string& correction,
+                                     const std::string& realm) {
+    std::ostringstream content;
+    content << "[correction] User corrected me\n";
+    if (!context.empty()) {
+        content << "Context: " << context << "\n";
+    }
+    content << "Correction: " << correction;
+
+    // Use zero embedding (384 dims) - memories without embeddings can't be stored
+    static const std::vector<float> zero_embedding(384, 0.0f);
+
+    store_->remember(
+        content.str(),
+        "correction",
+        zero_embedding,
+        config_.correction_confidence,
+        0.01f,  // Slow decay
+        realm.empty() ? "default" : realm,
+        RealmVisibility::Private
+    );
+}
+
+void Subconscious::store_preference(const std::string& preference, const std::string& realm) {
+    std::ostringstream content;
+    content << "[preference] " << preference;
+
+    static const std::vector<float> zero_embedding(384, 0.0f);
+
+    // Preferences are global (apply across projects)
+    store_->remember(
+        content.str(),
+        "preference",
+        zero_embedding,
+        config_.correction_confidence,
+        0.005f,  // Very slow decay
+        "brahman",  // Global realm
+        RealmVisibility::Global
+    );
+}
+
+void Subconscious::store_frustration(const std::string& context, const std::string& realm) {
+    std::ostringstream content;
+    content << "[approach] User was frustrated/stuck\n";
+    content << "Context: " << context;
+
+    static const std::vector<float> zero_embedding(384, 0.0f);
+
+    store_->remember(
+        content.str(),
+        "approach",
+        zero_embedding,
+        0.7f,  // Lower initial confidence
+        0.02f,  // Moderate decay
+        realm.empty() ? "default" : realm,
+        RealmVisibility::Private
+    );
+}
+
+void Subconscious::store_milestone(const std::string& achievement, const std::string& realm) {
+    std::ostringstream content;
+    content << "[milestone] " << achievement;
+
+    static const std::vector<float> zero_embedding(384, 0.0f);
+
+    store_->remember(
+        content.str(),
+        "milestone",
+        zero_embedding,
+        0.9f,  // High confidence for achievements
+        0.005f,  // Very slow decay
+        realm.empty() ? "default" : realm,
+        RealmVisibility::Shared
+    );
+}
+
+// Suggestion Tracking
+
+void Subconscious::track_suggestion(const std::string& content, const std::string& context,
+                                     const std::string& realm) {
+    Suggestion suggestion;
+    suggestion.content = content;
+    suggestion.context = context;
+    suggestion.realm = realm;
+    suggestion.status = "pending";
+    suggestion.suggested_at = now_ms();
+
+    int64_t id = store_->suggestion_track(suggestion);
+
+    if (id > 0) {
+        std::lock_guard<std::mutex> lock(suggestions_mutex_);
+        pending_suggestions_.push_back({content, context, realm, suggestion.suggested_at, id});
+
+        // Limit pending suggestions
+        if (pending_suggestions_.size() > MAX_PENDING_SUGGESTIONS) {
+            pending_suggestions_.erase(pending_suggestions_.begin());
+        }
+
+        stats_.suggestions_tracked++;
+    }
+}
+
+void Subconscious::check_outcomes(const std::string& user_message, const std::string& realm) {
+    std::lock_guard<std::mutex> lock(suggestions_mutex_);
+
+    // Check if user message indicates success or failure of a suggestion
+    bool indicates_success = std::regex_search(user_message, milestone_pattern_);
+    bool indicates_failure = std::regex_search(user_message, frustration_pattern_);
+
+    if (!indicates_success && !indicates_failure) return;
+
+    // Look for pending suggestions in the same realm
+    for (auto it = pending_suggestions_.begin(); it != pending_suggestions_.end(); ) {
+        if (it->realm == realm || realm.empty()) {
+            // Resolve the suggestion
+            store_->suggestion_resolve(it->db_id, indicates_success, user_message, 0);
+            stats_.outcomes_verified++;
+
+            it = pending_suggestions_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+// Anticipation
+
+void Subconscious::observe_pattern(const std::string& context, const std::string& action,
+                                    const std::string& realm) {
+    // Simplified pattern: store what action was taken in what context
+    store_->anticipation_observe(context, action, realm);
+}
+
+void Subconscious::verify_prediction(const std::string& actual_action, const std::string& realm) {
+    std::lock_guard<std::mutex> lock(anticipation_mutex_);
+
+    if (last_predicted_action_.empty()) return;
+
+    // Simple similarity check: does actual action contain key words from prediction?
+    // This is a heuristic - production would use embedding similarity
+    bool match = false;
+    std::istringstream iss(last_predicted_action_);
+    std::string word;
+    int matches = 0;
+    int total = 0;
+    while (iss >> word) {
+        if (word.length() >= 4) {
+            total++;
+            if (actual_action.find(word) != std::string::npos) {
+                matches++;
+            }
+        }
+    }
+
+    if (total > 0 && (static_cast<float>(matches) / total) > 0.3f) {
+        // Prediction was roughly correct
+        auto patterns = store_->anticipation_predict(last_context_, 1, realm);
+        for (const auto& p : patterns) {
+            store_->anticipation_success(p.id);
+        }
+    }
+
+    last_predicted_action_.clear();
+}
+
+// Periodic Tasks
+
+void Subconscious::run_hygiene() {
+    auto result = store_->hygiene_run(
+        0.1f,   // prune_threshold
+        7.0f,   // min_age_days
+        0.85f,  // consolidation_threshold
+        10      // max_consolidations
+    );
+
+    stats_.hygiene_runs++;
+    stats_.last_hygiene_at = now_ms();
+
+    std::cerr << "[subconscious] Hygiene run: decayed=" << result.decayed
+              << ", pruned=" << result.pruned
+              << ", consolidated=" << result.consolidated << "\n";
+}
+
+bool Subconscious::time_for_hygiene() const {
+    auto last = stats_.last_hygiene_at.load();
+    if (last == 0) return true;  // Never run
+
+    auto now = now_ms();
+    auto interval_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        config_.hygiene_interval
+    ).count();
+
+    return (now - last) >= interval_ms;
+}
+
+// Helpers
+
+int64_t Subconscious::now_ms() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+}
+
+std::optional<SubconsciousEvent> Subconscious::pop_event_with_timeout(std::chrono::seconds timeout) {
+    std::unique_lock<std::mutex> lock(queue_mutex_);
+
+    if (queue_cv_.wait_for(lock, timeout, [this] {
+        return !event_queue_.empty() || !running_.load();
+    })) {
+        if (!running_.load()) return std::nullopt;
+        if (event_queue_.empty()) return std::nullopt;
+
+        auto event = std::move(event_queue_.front());
+        event_queue_.pop_front();
+        return event;
+    }
+
+    return std::nullopt;
+}
+
+}  // namespace chitta
