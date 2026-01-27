@@ -41,13 +41,16 @@ CC-Soul is a persistent identity system for Claude Code. It provides:
 
 | Type | Description | Decay Rate |
 |------|-------------|------------|
-| **Wisdom** | Patterns that proved true. Insights earned through experience. | Slow (0.02/day) |
-| **Beliefs** | Principles that guide decisions. Not imposed, discovered. | Very slow (0.01/day) |
-| **Failures** | Gold. What went wrong and why. | Slow (0.02/day) |
-| **Episodes** | Decisions, discoveries, the texture of experience. | Medium (0.05/day) |
-| **Dreams** | Visions of what could be. Aspirations. | Slow (0.03/day) |
-| **Entities** | Named things: code files, projects, concepts. Connected in graph. | Default (0.05/day) |
-| **Signals** | Transient observations. Session notes. | Fast (0.15/day) |
+| **Wisdom** | Patterns that proved true. Insights earned through experience. | Slow (0.005/day) |
+| **Beliefs** | Principles that guide decisions. Not imposed, discovered. | Never (0.0) |
+| **Episodes** | Decisions, discoveries, the texture of experience. | Slow (0.03/day) |
+| **Symbols** | Code intelligence: functions, classes, modules. | Never (0.0) |
+| **ProjectEssence** | High-level project understanding. | Never (0.0) |
+| **ModuleState** | Module-level architectural knowledge. | Never (0.0) |
+
+**Two distinct concerns:**
+- **Partnership memory** — Wisdom, beliefs, episodes (what makes me a collaborator)
+- **Code intelligence** — Symbols, triplets, call graphs (structural understanding)
 
 ---
 
@@ -209,8 +212,8 @@ cc-soul/
 │   └── smart-install.sh    # Auto-installation
 ├── commands/               # Plugin commands
 ├── bin/                    # Compiled binaries
-│   ├── chitta          # MCP server
-│   ├── chittad          # CLI tool
+│   ├── chitta              # CLI tool (JSON-RPC client)
+│   ├── chittad             # Daemon (background server)
 │   └── ...
 └── docs/                   # Documentation
 ```
@@ -261,15 +264,21 @@ struct Coherence {
 };
 ```
 
-### Storage Tiers
+### Storage Backend
 
-| Tier | Location | Access | Use Case |
-|------|----------|--------|----------|
-| **Hot** | RAM | O(1) | Frequently accessed, recent |
-| **Warm** | Memory-mapped | Fast | Less frequent, still quick |
-| **Cold** | Disk | Slow | Archival, rarely accessed |
+**DuckDB** — High-performance embedded analytics database
+- MVCC for concurrent access
+- Vector similarity search via HNSW index
+- Write-ahead logging for durability
+- Memory-mapped for fast access
 
-Nodes automatically migrate between tiers based on access patterns.
+**Tables:**
+| Table | Contents |
+|-------|----------|
+| `memory` | All memory nodes with embeddings |
+| `symbol` | Code symbols (functions, classes) |
+| `triplet` | Semantic relationships |
+| `transcript_state` | Distillation tracking |
 
 ### Embedding Model
 
@@ -288,13 +297,35 @@ The soul exposes tools through the Model Context Protocol:
 
 | Tool | Description |
 |------|-------------|
-| `soul_context` | Get current state (coherence, statistics, ledger) |
-| `grow` | Add wisdom, beliefs, failures, aspirations, dreams |
-| `observe` | Record episodic memory with decay category |
-| `recall` | Semantic search with zoom levels (sparse/normal/dense/full) |
-| `recall_by_tag` | Exact-match tag filtering |
-| `resonate` | Spreading activation + Hebbian learning |
-| `full_resonate` | All 6 phases combined (Phase 6) |
+| `soul_context` | Get current state (health, statistics) |
+| `remember` | Store memory in SSL format (auto-converts raw text) |
+| `recall` | Semantic search with realm filtering |
+| `grow` | Add wisdom, beliefs, episodes |
+| `full_resonate` | Combined recall + graph traversal |
+
+### Code Intelligence
+
+| Tool | Description |
+|------|-------------|
+| `learn_codebase` | Index codebase symbols and call graphs |
+| `find_symbol` | Search symbols by name/kind |
+| `read_symbol` | Get symbol source code by name |
+| `read_function` | Get function source code |
+| `search_symbols` | Semantic search for symbols |
+| `symbol_callers` | Find what calls a symbol |
+| `symbol_callees` | Find what a symbol calls |
+| `code_context` | Smart context for current file |
+
+### Learning Tools
+
+| Tool | Description |
+|------|-------------|
+| `learn_correction` | Store when I was wrong |
+| `learn_preference` | Store user preferences |
+| `learn_insight` | Store generalizable patterns |
+| `learn_approach` | Store what helps in states |
+| `learn_outcome` | Track if suggestion helped |
+| `learn_milestone` | Record achievements |
 
 ### Intentions & Questions
 
@@ -595,17 +626,41 @@ curl -L -o chitta/models/vocab.txt \
 
 ---
 
+## SSL (Soul Semantic Language)
+
+Memories are stored in SSL format for optimal recall:
+
+```
+[domain] subject→action→result @location
+```
+
+**Symbols:**
+| Symbol | Meaning | Example |
+|--------|---------|---------|
+| `→` | produces/leads to | `input→output` |
+| `\|` | or/alternative | `pass\|fail` |
+| `+` | with/and | `result+guidance` |
+| `@` | location | `@mind.hpp:42` |
+
+**Examples:**
+```
+[cc-soul] release→scripts/release.sh→patch|minor|major
+[partnership] Antonio→prefers→no shortcuts|proper solutions
+[code] function calculateCost @cost.ts:15
+```
+
+The `remember` tool auto-converts raw text to SSL as fallback, but proper SSL gives better recall.
+
+---
+
 ## Version History
 
 | Version | Features |
 |---------|----------|
-| 2.25.0 | Transparent soul, subconscious daemon, multi-instance |
-| 2.24.0 | Phase 6: Full resonance |
-| 2.23.0 | Phase 5: Lateral inhibition |
-| 2.22.0 | Phase 4: Session priming |
-| 2.21.0 | Phase 3: Hebbian learning |
-| 2.20.0 | Phase 2: Attractor dynamics |
-| 2.0.0 | C++ rewrite (Chitta engine) |
+| 3.17.x | SSL enforcement, code intel protection, cost tracking |
+| 3.16.x | Background distillation, code enrichment |
+| 3.x | DuckDB backend, tree-sitter parsing, call graphs |
+| 2.x | C++ rewrite (Chitta engine) |
 | 1.x | Python implementation |
 
 ---
