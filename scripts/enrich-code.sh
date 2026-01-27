@@ -102,7 +102,7 @@ CONTENT="[code] $KIND $NAME @$BASENAME:$LINE_START
 $DESCRIPTION"
 
 # Store and get memory ID
-MEMORY_RESPONSE=$("$CHITTA_BIN" grow --type wisdom --content "$CONTENT" --tags "code-intel,$KIND" --json 2>/dev/null || echo "{}")
+MEMORY_RESPONSE=$("$CHITTA_BIN" grow --type symbol --content "$CONTENT" --tags "code-intel,$KIND" --json 2>/dev/null || echo "{}")
 MEMORY_ID=$(echo "$MEMORY_RESPONSE" | grep -oP '"id"\s*:\s*"\K[^"]+' | head -1)
 
 if [[ -z "$MEMORY_ID" ]]; then

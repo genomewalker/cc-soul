@@ -11,6 +11,7 @@
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
+#include <map>
 #include <functional>
 #include <sstream>
 #include <chrono>
@@ -1589,6 +1590,19 @@ private:
             }}
         });
         handlers_["hygiene_run"] = [this](const json& p) { return tool_hygiene_run(p); };
+
+        tools_.push_back({
+            {"name", "restore_code_intel_confidence"},
+            {"description", "Restore confidence and fix decay_rate for code intel memories (symbol, projectessence, modulestate, patternstate). Run this once to fix memories that were incorrectly decayed."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"confidence", {{"type", "number"}, {"description", "Confidence to restore (default: 0.8)"}}},
+                    {"dry_run", {{"type", "boolean"}, {"description", "Preview changes without applying (default: false)"}}}
+                }}
+            }}
+        });
+        handlers_["restore_code_intel_confidence"] = [this](const json& p) { return tool_restore_code_intel_confidence(p); };
 
         // Cross-Project Learning: transfer insights across realms
         tools_.push_back({
@@ -3259,6 +3273,10 @@ private:
         else if (type_str == "failure" || type_str == "episode") type = NodeType::Episode;
         else if (type_str == "aspiration") type = NodeType::Aspiration;
         else if (type_str == "dream") type = NodeType::Dream;
+        else if (type_str == "symbol") type = NodeType::Symbol;
+        else if (type_str == "projectessence") type = NodeType::ProjectEssence;
+        else if (type_str == "modulestate") type = NodeType::ModuleState;
+        else if (type_str == "patternstate") type = NodeType::PatternState;
 
         std::string full_content = title.empty() ? content : title + "\n" + content;
         NodeId id = mind_->remember(full_content, type, realm, static_cast<RealmVisibility>(visibility));
@@ -5879,6 +5897,48 @@ private:
             {"pruned", result.pruned},
             {"consolidated", result.consolidated}
         });
+    }
+
+    DuckDBToolResult tool_restore_code_intel_confidence(const json& params) {
+        float confidence = params.value("confidence", 0.8f);
+        bool dry_run = params.value("dry_run", false);
+
+        auto result = mind_->store().restore_code_intel_confidence(confidence, dry_run);
+
+        std::ostringstream ss;
+        ss << "Code intel confidence restoration " << (dry_run ? "(DRY RUN)" : "complete") << ":\n";
+        for (size_t i = 0; i < result.counts_by_kind.size(); ++i) {
+            const auto& [kind, count] = result.counts_by_kind[i];
+            float avg_before = i < result.avg_confidence_before.size()
+                ? result.avg_confidence_before[i].second : 0.0f;
+            ss << "  " << kind << ": " << count << " memories"
+               << " (avg conf before: " << std::fixed << std::setprecision(2) << avg_before;
+            if (!dry_run) {
+                ss << " → " << confidence;
+            }
+            ss << ")\n";
+        }
+        if (!dry_run) {
+            ss << "Total updated: " << result.total_updated << " memories\n";
+            ss << "Decay rate set to 0.0 (never decay)\n";
+        }
+
+        json result_json = {
+            {"dry_run", dry_run},
+            {"confidence", confidence},
+            {"total_updated", result.total_updated}
+        };
+        for (size_t i = 0; i < result.counts_by_kind.size(); ++i) {
+            const auto& [kind, count] = result.counts_by_kind[i];
+            float avg_before = i < result.avg_confidence_before.size()
+                ? result.avg_confidence_before[i].second : 0.0f;
+            result_json[kind] = {
+                {"count", count},
+                {"avg_confidence_before", avg_before}
+            };
+        }
+
+        return DuckDBToolResult::ok(ss.str(), result_json);
     }
 
     // ========================================================================

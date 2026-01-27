@@ -643,6 +643,14 @@ public:
     HygieneResult hygiene_run(float prune_threshold = 0.1f, float min_age_days = 7.0f,
                                float consolidation_threshold = 0.85f, size_t max_consolidations = 10);
 
+    // Code intel confidence restoration: fix memories that were incorrectly decayed
+    struct CodeIntelRestoreResult {
+        size_t total_updated = 0;
+        std::vector<std::pair<std::string, size_t>> counts_by_kind;  // kind -> count
+        std::vector<std::pair<std::string, float>> avg_confidence_before;  // kind -> avg
+    };
+    CodeIntelRestoreResult restore_code_intel_confidence(float target_confidence = 0.8f, bool dry_run = false);
+
     // Error tracking
     std::string last_error() const { return last_error_; }
 

@@ -23,14 +23,24 @@
 namespace chitta {
 
 // Default decay rates by node type (per day)
-// Lower rates to preserve memories longer - decay was outpacing recall
+// Partnership memories decay slowly; code intelligence never decays
 inline float default_decay_rate(NodeType type) {
     switch (type) {
-        case NodeType::Wisdom:    return 0.005f; // Very slow - insights should last months
-        case NodeType::Belief:    return 0.0f;   // Never decays
-        case NodeType::Invariant: return 0.0f;   // Never decays
-        case NodeType::Episode:   return 0.03f;  // Slower - context fades but not in days
-        default:                  return 0.01f;  // Slow default - most things should persist
+        // Partnership memories - slow decay preserves context
+        case NodeType::Wisdom:    return 0.005f;  // Insights last months
+        case NodeType::Episode:   return 0.03f;   // Context fades slowly
+
+        // Immutable - never decay
+        case NodeType::Belief:    return 0.0f;
+        case NodeType::Invariant: return 0.0f;
+
+        // Code intelligence - never decay (structural knowledge)
+        case NodeType::Symbol:         return 0.0f;
+        case NodeType::ProjectEssence: return 0.0f;
+        case NodeType::ModuleState:    return 0.0f;
+        case NodeType::PatternState:   return 0.0f;
+
+        default:                  return 0.01f;   // Slow default
     }
 }
 

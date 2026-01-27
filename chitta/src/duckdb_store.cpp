@@ -1139,17 +1139,16 @@ size_t DuckDBStore::prune(float threshold, float min_age_days) {
     Timestamp current = now();
     Timestamp min_created = current - static_cast<int64_t>(min_age_days * 86400000.0);
 
-    // Use a single transaction for count + delete to ensure consistency
-    std::ostringstream sql;
-    sql << "BEGIN TRANSACTION; "
-        << "DELETE FROM memory WHERE confidence < " << threshold
-        << " AND created_at < " << min_created << "; "
-        << "COMMIT;";
+    // Protected types: code intelligence memories should never be pruned
+    // These have structural value and don't lose relevance over time
+    std::string protected_kinds =
+        "'symbol', 'projectessence', 'modulestate', 'patternstate'";
 
     // Get count before delete (approximate is fine for maintenance)
     std::ostringstream count_sql;
     count_sql << "SELECT COUNT(*) FROM memory WHERE confidence < " << threshold
-              << " AND created_at < " << min_created;
+              << " AND created_at < " << min_created
+              << " AND kind NOT IN (" << protected_kinds << ")";
 
     size_t count = 0;
     auto result = read_query(count_sql.str());
@@ -1164,7 +1163,8 @@ size_t DuckDBStore::prune(float threshold, float min_age_days) {
         // Only execute delete if there's something to prune
         std::ostringstream del_sql;
         del_sql << "DELETE FROM memory WHERE confidence < " << threshold
-                << " AND created_at < " << min_created;
+                << " AND created_at < " << min_created
+                << " AND kind NOT IN (" << protected_kinds << ")";
         write_execute(del_sql.str());
     }
 
@@ -4491,6 +4491,57 @@ DuckDBStore::HygieneResult DuckDBStore::hygiene_run(float prune_threshold, float
 
     // 3. Auto-consolidate similar memories
     result.consolidated = consolidation_auto(consolidation_threshold, max_consolidations);
+
+    return result;
+}
+
+DuckDBStore::CodeIntelRestoreResult DuckDBStore::restore_code_intel_confidence(float target_confidence, bool dry_run) {
+    CodeIntelRestoreResult result;
+    if (!db_) return result;
+
+    // Code intel kinds that should never decay
+    std::string protected_kinds = "'symbol', 'projectessence', 'modulestate', 'patternstate'";
+
+    // Get stats before update
+    std::ostringstream stats_sql;
+    stats_sql << "SELECT kind, COUNT(*) as cnt, AVG(confidence) as avg_conf "
+              << "FROM memory WHERE kind IN (" << protected_kinds << ") "
+              << "GROUP BY kind";
+
+    auto stats_result = read_query(stats_sql.str());
+    if (stats_result && !stats_result->HasError()) {
+        auto chunk = stats_result->Fetch();
+        while (chunk && chunk->size() > 0) {
+            for (size_t i = 0; i < chunk->size(); ++i) {
+                std::string kind = chunk->GetValue(0, i).GetValue<std::string>();
+                int64_t count = chunk->GetValue(1, i).GetValue<int64_t>();
+                float avg = chunk->GetValue(2, i).GetValue<float>();
+                result.counts_by_kind.push_back({kind, static_cast<size_t>(count)});
+                result.avg_confidence_before.push_back({kind, avg});
+            }
+            chunk = stats_result->Fetch();
+        }
+    }
+
+    if (!dry_run) {
+        // Update confidence and decay_rate for code intel memories
+        std::ostringstream update_sql;
+        update_sql << "UPDATE memory SET confidence = " << target_confidence
+                   << ", decay_rate = 0.0 "
+                   << "WHERE kind IN (" << protected_kinds << ")";
+        write_execute(update_sql.str());
+
+        // Count total updated
+        std::ostringstream count_sql;
+        count_sql << "SELECT COUNT(*) FROM memory WHERE kind IN (" << protected_kinds << ")";
+        auto count_result = read_query(count_sql.str());
+        if (count_result && !count_result->HasError()) {
+            auto chunk = count_result->Fetch();
+            if (chunk && chunk->size() > 0) {
+                result.total_updated = static_cast<size_t>(chunk->GetValue(0, 0).GetValue<int64_t>());
+            }
+        }
+    }
 
     return result;
 }

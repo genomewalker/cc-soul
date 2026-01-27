@@ -1452,13 +1452,22 @@ private:
     }
 
     static float default_decay_rate(NodeType type) {
-        // Lower rates to preserve memories longer
         switch (type) {
-            case NodeType::Wisdom: return 0.005f;    // Very slow - insights last months
-            case NodeType::Belief: return 0.0f;      // Never decays
-            case NodeType::Invariant: return 0.0f;   // Never decays
-            case NodeType::Episode: return 0.03f;    // Slower - context fades but not in days
-            default: return 0.01f;                   // Slow default
+            // Partnership memories - slow decay preserves context
+            case NodeType::Wisdom:    return 0.005f;  // Insights last months
+            case NodeType::Episode:   return 0.03f;   // Context fades slowly
+
+            // Immutable - never decay
+            case NodeType::Belief:    return 0.0f;
+            case NodeType::Invariant: return 0.0f;
+
+            // Code intelligence - never decay (structural knowledge)
+            case NodeType::Symbol:         return 0.0f;
+            case NodeType::ProjectEssence: return 0.0f;
+            case NodeType::ModuleState:    return 0.0f;
+            case NodeType::PatternState:   return 0.0f;
+
+            default: return 0.01f;  // Slow default
         }
     }
 
@@ -1470,6 +1479,9 @@ private:
             case NodeType::Episode: return "episode";
             case NodeType::Symbol: return "symbol";
             case NodeType::Dream: return "dream";
+            case NodeType::ProjectEssence: return "projectessence";
+            case NodeType::ModuleState: return "modulestate";
+            case NodeType::PatternState: return "patternstate";
             default: return "unknown";
         }
     }
@@ -1481,6 +1493,9 @@ private:
         if (s == "episode") return NodeType::Episode;
         if (s == "symbol") return NodeType::Symbol;
         if (s == "dream") return NodeType::Dream;
+        if (s == "projectessence") return NodeType::ProjectEssence;
+        if (s == "modulestate") return NodeType::ModuleState;
+        if (s == "patternstate") return NodeType::PatternState;
         return NodeType::Episode;
     }
 
