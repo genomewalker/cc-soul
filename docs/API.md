@@ -11,6 +11,7 @@ This document provides a complete reference for all MCP tools exposed by CC-Soul
 - [Search Tools](#search-tools)
 - [Intention Tools](#intention-tools)
 - [Learning Tools](#learning-tools)
+- [Code Intelligence Tools](#code-intelligence-tools)
 - [Graph Tools](#graph-tools)
 - [Multi-Voice Tools](#multi-voice-tools)
 - [Session Tools](#session-tools)
@@ -514,6 +515,129 @@ Found 5 attractors:
 3. [0.79] "Error handling strategies"
    Basin: 31 nodes
 ```
+
+---
+
+## Code Intelligence Tools
+
+Tools for indexing, navigating, and understanding codebases.
+
+### learn_codebase
+
+Index a codebase incrementally using tree-sitter parsing.
+
+**Parameters:**
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `path` | string | Yes | - | Directory path to analyze |
+| `project` | string | No | dirname | Project name |
+| `max_files` | integer | No | 500 | Maximum files to process |
+| `incremental` | boolean | No | true | Only process changed files |
+| `force` | boolean | No | false | Force full re-index |
+
+**Example:**
+```json
+{
+  "name": "learn_codebase",
+  "arguments": {
+    "path": "/path/to/project",
+    "project": "my-app"
+  }
+}
+```
+
+### find_symbol
+
+Search for symbols by name.
+
+**Parameters:**
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `name` | string | Yes | - | Symbol name to search |
+| `kind` | string | No | - | Filter by kind (function, class, method) |
+| `project` | string | No | - | Filter by project |
+
+**Example:**
+```json
+{
+  "name": "find_symbol",
+  "arguments": {
+    "name": "calculateCost",
+    "kind": "function"
+  }
+}
+```
+
+### read_symbol
+
+Get source code for a symbol by name.
+
+**Parameters:**
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `name` | string | Yes | - | Symbol name |
+| `kind` | string | No | - | Symbol kind filter |
+
+### read_function
+
+Get source code for a function by name.
+
+**Parameters:**
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `name` | string | Yes | - | Function name |
+
+### search_symbols
+
+Semantic search for symbols using embeddings.
+
+**Parameters:**
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `query` | string | Yes | - | Natural language query |
+| `limit` | integer | No | 10 | Maximum results |
+
+**Example:**
+```json
+{
+  "name": "search_symbols",
+  "arguments": {
+    "query": "render status line display",
+    "limit": 5
+  }
+}
+```
+
+### symbol_callers
+
+Find what calls a symbol.
+
+**Parameters:**
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `name` | string | Yes | - | Symbol name |
+| `limit` | integer | No | 20 | Maximum results |
+
+### symbol_callees
+
+Find what a symbol calls.
+
+**Parameters:**
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `name` | string | Yes | - | Symbol name |
+| `limit` | integer | No | 20 | Maximum results |
+
+### code_context
+
+Get smart context for current file (relevant symbols and relationships).
+
+**Parameters:**
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `file` | string | Yes | - | File path |
+| `line` | integer | No | - | Focus on line |
+| `limit` | integer | No | 10 | Maximum symbols |
 
 ---
 
