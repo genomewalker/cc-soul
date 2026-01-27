@@ -42,7 +42,7 @@ def djb2_hash(s: str) -> int:
 def get_socket_path() -> str:
     """Get the daemon socket path."""
     home = os.environ.get("HOME", "")
-    mind_path = os.path.join(home, ".claude", "mind", "chitta")
+    mind_path = os.path.join(home, ".claude", "mind")
     hash_val = djb2_hash(mind_path)
     return f"/tmp/chitta-{hash_val}.sock"
 
