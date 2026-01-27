@@ -55,7 +55,7 @@ void print_usage(const char* prog) {
 std::string default_target() {
     const char* home = std::getenv("HOME");
     if (!home) home = ".";
-    return std::string(home) + "/.claude/mind/chitta";
+    return std::string(home) + "/.claude/mind";
 }
 
 const char* node_type_name(NodeType type) {

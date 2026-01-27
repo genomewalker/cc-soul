@@ -41,7 +41,7 @@ public:
             return db_path;
         }
         if (const char* home = std::getenv("HOME")) {
-            return std::string(home) + "/.claude/mind/chitta";
+            return std::string(home) + "/.claude/mind";
         }
         return "";
     }

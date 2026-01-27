@@ -136,7 +136,7 @@ void release_lock(DaemonLock& lock) {
 
 std::string default_mind_path() {
     const char* home = std::getenv("HOME");
-    return std::string(home ? home : ".") + "/.claude/mind/chitta";
+    return std::string(home ? home : ".") + "/.claude/mind";
 }
 
 std::string default_model_path() {
