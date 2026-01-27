@@ -77,6 +77,14 @@ Never announce "I remember" — just know. Responses should feel like expertise,
 
 ## Code Intelligence
 
+**IMPORTANT:** For code exploration, **always try chitta first** before using Grep/Glob/Read:
+1. `read_symbol` / `read_function` — Get code by name (faster than file reads)
+2. `find_symbol` — Structural search by name/kind
+3. `symbol_callers` / `symbol_callees` — Navigate call graphs
+4. `search_symbols` — Semantic search when name unknown
+
+Only fall back to Grep/Glob/Read when chitta doesn't have the codebase indexed or for non-code files.
+
 **Two search modes:**
 
 | Mode | Tool | Purpose |
