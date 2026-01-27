@@ -651,6 +651,15 @@ public:
     };
     CodeIntelRestoreResult restore_code_intel_confidence(float target_confidence = 0.8f, bool dry_run = false);
 
+    // SQL query (read-only) - for debugging and analysis
+    struct SqlQueryResult {
+        bool success = false;
+        std::string error;
+        std::vector<std::string> columns;
+        std::vector<std::vector<std::string>> rows;
+    };
+    SqlQueryResult execute_sql_query(const std::string& sql) const;
+
     // Error tracking
     std::string last_error() const { return last_error_; }
 

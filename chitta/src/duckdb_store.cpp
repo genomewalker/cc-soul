@@ -4546,4 +4546,40 @@ DuckDBStore::CodeIntelRestoreResult DuckDBStore::restore_code_intel_confidence(f
     return result;
 }
 
+DuckDBStore::SqlQueryResult DuckDBStore::execute_sql_query(const std::string& sql) const {
+    SqlQueryResult result;
+    if (!db_) {
+        result.error = "Database not initialized";
+        return result;
+    }
+
+    auto query_result = read_query(sql);
+    if (!query_result || query_result->HasError()) {
+        result.error = query_result ? query_result->GetError() : "Query failed";
+        return result;
+    }
+
+    // Get column names
+    for (const auto& name : query_result->names) {
+        result.columns.push_back(name);
+    }
+
+    // Get rows
+    auto chunk = query_result->Fetch();
+    while (chunk && chunk->size() > 0) {
+        for (size_t row = 0; row < chunk->size(); ++row) {
+            std::vector<std::string> row_data;
+            for (size_t col = 0; col < chunk->ColumnCount(); ++col) {
+                auto val = chunk->GetValue(col, row);
+                row_data.push_back(val.IsNull() ? "NULL" : val.ToString());
+            }
+            result.rows.push_back(std::move(row_data));
+        }
+        chunk = query_result->Fetch();
+    }
+
+    result.success = true;
+    return result;
+}
+
 }  // namespace chitta

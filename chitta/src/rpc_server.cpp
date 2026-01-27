@@ -248,6 +248,11 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
      {{"original", "Original full text", true, nullptr},
       {"seed", "Compressed SSL seed", true, nullptr},
       {"reconstructed", "Text reconstructed from seed", true, nullptr}}},
+
+    // Debug/analysis tools
+    {"sql_query", "Run read-only SQL query against the soul database",
+     {{"query", "SQL SELECT query", true, nullptr},
+      {"limit", "Max rows to return", false, "100"}}},
 };
 
 // Build set of known tools from specs
@@ -340,6 +345,7 @@ void print_usage(const char* prog) {
               << "  Realm:       realm_detect, realm_list, realm_get, realm_set, realm_add, realm_remove, realm_visibility\n"
               << "  Ledger:      ledger_save, ledger_load, ledger_list, ledger_get, ledger_delete\n"
               << "  Transcript:  transcript_register, transcript_get, transcript_list, transcript_update, transcript_remove\n"
+              << "  Debug:       sql_query\n"
               << "\n"
               << "Global options:\n"
               << "  --socket-path PATH  Unix socket path\n"

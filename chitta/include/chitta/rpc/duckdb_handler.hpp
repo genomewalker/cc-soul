@@ -1604,6 +1604,21 @@ private:
         });
         handlers_["restore_code_intel_confidence"] = [this](const json& p) { return tool_restore_code_intel_confidence(p); };
 
+        // SQL query tool for advanced debugging and analysis
+        tools_.push_back({
+            {"name", "sql_query"},
+            {"description", "Execute a read-only SQL query against the soul database. Use for debugging, analysis, and complex queries."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"query", {{"type", "string"}, {"description", "SQL query to execute (SELECT only)"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Max rows to return (default: 100)"}}}
+                }},
+                {"required", {"query"}}
+            }}
+        });
+        handlers_["sql_query"] = [this](const json& p) { return tool_sql_query(p); };
+
         // Cross-Project Learning: transfer insights across realms
         tools_.push_back({
             {"name", "insight_promote"},
@@ -6009,6 +6024,70 @@ private:
         }
 
         return DuckDBToolResult::ok(ss.str(), result_json);
+    }
+
+    DuckDBToolResult tool_sql_query(const json& params) {
+        std::string query = params.value("query", "");
+        size_t limit = params.value("limit", 100);
+
+        if (query.empty()) {
+            return DuckDBToolResult::error("Query is required");
+        }
+
+        // Safety: only allow SELECT queries
+        std::string upper_query = query;
+        std::transform(upper_query.begin(), upper_query.end(), upper_query.begin(), ::toupper);
+        if (upper_query.find("SELECT") != 0 && upper_query.find("WITH") != 0 &&
+            upper_query.find("SHOW") != 0 && upper_query.find("DESCRIBE") != 0) {
+            return DuckDBToolResult::error("Only SELECT/WITH/SHOW/DESCRIBE queries allowed");
+        }
+
+        // Add LIMIT if not present
+        if (upper_query.find("LIMIT") == std::string::npos) {
+            query += " LIMIT " + std::to_string(limit);
+        }
+
+        auto result = mind_->store().execute_sql_query(query);
+        if (!result.success) {
+            return DuckDBToolResult::error("SQL error: " + result.error);
+        }
+
+        if (result.rows.empty()) {
+            return DuckDBToolResult::ok("Query returned 0 rows", {{"rows", json::array()}, {"count", 0}});
+        }
+
+        std::ostringstream ss;
+        json rows_json = json::array();
+
+        // Format as table header
+        ss << "| ";
+        for (const auto& col : result.columns) {
+            ss << col << " | ";
+        }
+        ss << "\n|";
+        for (size_t i = 0; i < result.columns.size(); ++i) {
+            ss << "---|";
+        }
+        ss << "\n";
+
+        // Format rows
+        size_t displayed = 0;
+        for (const auto& row : result.rows) {
+            if (displayed >= limit) break;
+            json row_obj;
+            ss << "| ";
+            for (size_t col = 0; col < row.size() && col < result.columns.size(); ++col) {
+                row_obj[result.columns[col]] = row[col];
+                ss << row[col] << " | ";
+            }
+            ss << "\n";
+            rows_json.push_back(row_obj);
+            ++displayed;
+        }
+
+        ss << "\n" << displayed << " row(s)";
+
+        return DuckDBToolResult::ok(ss.str(), {{"rows", rows_json}, {"count", displayed}});
     }
 
     // ========================================================================
