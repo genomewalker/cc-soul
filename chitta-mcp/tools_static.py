@@ -2110,6 +2110,24 @@ TOOLS = [
                 "type": "object"
         }
     ),
+    Tool(
+        name="sql_query",
+        description="Run read-only SQL query against the soul database. For debugging and analysis.",
+        inputSchema={
+                "properties": {
+                        "query": {
+                                "description": "SQL SELECT query (SELECT, WITH, SHOW, DESCRIBE only)",
+                                "type": "string"
+                        },
+                        "limit": {
+                                "description": "Max rows to return (default: 100)",
+                                "type": "integer"
+                        }
+                },
+                "required": ["query"],
+                "type": "object"
+        }
+    ),
 ]
 
 COMPOSITE_TOOLS = [
