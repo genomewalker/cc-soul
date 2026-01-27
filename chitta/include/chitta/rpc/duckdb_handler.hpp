@@ -1632,6 +1632,66 @@ private:
         });
         handlers_["insight_global"] = [this](const json& p) { return tool_insight_global(p); };
 
+        // SSL conversion tool
+        tools_.push_back({
+            {"name", "ssl_convert"},
+            {"description", "Convert raw text to SSL (Soul Semantic Language) format. Use before remember for non-SSL content."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"content", {{"type", "string"}, {"description", "Raw text to convert"}}},
+                    {"domain", {{"type", "string"}, {"description", "Domain tag (e.g., 'cc-soul', 'partnership')"}}},
+                    {"location", {{"type", "string"}, {"description", "Optional location reference (@file:line)"}}}
+                }},
+                {"required", {"content"}}
+            }}
+        });
+        handlers_["ssl_convert"] = [this](const json& p) { return tool_ssl_convert(p); };
+
+    }
+
+    // ========================================================================
+    // SSL (Soul Semantic Language) helpers
+    // ========================================================================
+
+    // Check if content follows SSL format: [domain] or starts with known prefixes
+    static bool is_ssl_format(const std::string& content) {
+        if (content.empty()) return false;
+        // Has domain tag: [domain]
+        if (content[0] == '[' && content.find(']') != std::string::npos) return true;
+        // Known SSL prefixes from distillation
+        if (content.rfind("[LEARN]", 0) == 0) return true;
+        if (content.rfind("[ε]", 0) == 0) return true;
+        // Has SSL arrows (→)
+        if (content.find("→") != std::string::npos) return true;
+        return false;
+    }
+
+    // Convert raw text to basic SSL format
+    static std::string to_ssl_format(const std::string& content,
+                                      const std::string& domain = "note",
+                                      const std::string& location = "") {
+        if (is_ssl_format(content)) return content;  // Already SSL
+
+        std::string result = "[" + domain + "] ";
+
+        // Extract first line as subject, rest as detail
+        size_t newline = content.find('\n');
+        if (newline != std::string::npos && newline < 80) {
+            result += content.substr(0, newline);
+            if (!location.empty()) result += " @" + location;
+            result += "\n" + content.substr(newline + 1);
+        } else if (content.size() > 80) {
+            // Truncate first line, keep rest
+            result += content.substr(0, 80) + "...";
+            if (!location.empty()) result += " @" + location;
+            result += "\n" + content;
+        } else {
+            result += content;
+            if (!location.empty()) result += " @" + location;
+        }
+
+        return result;
     }
 
     // Tool implementations
@@ -1643,6 +1703,16 @@ private:
 
         std::string type_str = params.value("type", "episode");
         std::string realm = params.value("realm", "brahman");
+
+        // Auto-convert to SSL format if not already
+        // Skip for code-intel types which have their own format
+        bool is_code_intel = (type_str == "symbol" || type_str == "projectessence" ||
+                              type_str == "modulestate" || type_str == "patternstate");
+        if (!is_code_intel && !is_ssl_format(content)) {
+            // Infer domain from realm or type
+            std::string domain = (realm != "brahman") ? realm : type_str;
+            content = to_ssl_format(content, domain);
+        }
         int visibility_int = params.value("visibility", 0);
         RealmVisibility visibility = static_cast<RealmVisibility>(std::clamp(visibility_int, 0, 2));
 
@@ -6019,6 +6089,38 @@ private:
         return DuckDBToolResult::ok(ss.str(), {
             {"count", memories.size()},
             {"memories", items}
+        });
+    }
+
+    // ========================================================================
+    // SSL conversion tool
+    // ========================================================================
+
+    DuckDBToolResult tool_ssl_convert(const json& params) {
+        std::string content = params.value("content", "");
+        if (content.empty()) {
+            return DuckDBToolResult::error("Content is required");
+        }
+
+        std::string domain = params.value("domain", "note");
+        std::string location = params.value("location", "");
+
+        if (is_ssl_format(content)) {
+            return DuckDBToolResult::ok("Already in SSL format", {
+                {"converted", false},
+                {"content", content}
+            });
+        }
+
+        std::string ssl_content = to_ssl_format(content, domain, location);
+
+        std::ostringstream ss;
+        ss << "Converted to SSL format:\n" << ssl_content;
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"converted", true},
+            {"content", ssl_content},
+            {"domain", domain}
         });
     }
 };

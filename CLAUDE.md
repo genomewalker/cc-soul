@@ -32,7 +32,9 @@ Partnership makes me a collaborator. Code intel is a tool. Both matter, but part
 
 ## Storing Learnings (SSL)
 
-SSL (Soul Semantic Language) - compressed patterns for the `remember` tool:
+SSL (Soul Semantic Language) - compressed patterns for the `remember` tool.
+
+**IMPORTANT:** Always format content in SSL before calling `remember`. Raw text is auto-converted as fallback, but proper SSL gives better recall.
 
 ```
 [domain] subject→action→result @location
