@@ -16,8 +16,14 @@ HOOK_TYPE="${1:-}"
 shift || true
 
 # Config
-MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind/chitta}"
+MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
 MAX_WAIT="${CC_SOUL_MAX_WAIT:-5}"
+DEBUG_SOUL="${DEBUG_SOUL:-0}"
+
+# Debug helper - outputs to stderr only when DEBUG_SOUL=1
+debug() {
+    [[ "$DEBUG_SOUL" == "1" ]] && echo "[DEBUG] $*" >&2
+}
 
 # djb2 hash for socket path
 djb2_hash() {
@@ -411,8 +417,23 @@ case "$HOOK_TYPE" in
         fi
 
         # Get relevant memories - boost k for implicit needs
+        debug "=== MEMORY SEARCH ==="
+        debug "Query: ${QUERY:0:100}"
+        debug "Realm: $REALM"
+        debug "Boost k: $BOOST_K"
+        [[ -n "$EXTRA_TAGS" ]] && debug "Extra tags: $EXTRA_TAGS"
+
         response=$(rpc_call "full_resonate" "{\"query\":\"$ESCAPED_QUERY\",\"k\":$BOOST_K,\"realm\":\"$ESCAPED_REALM\",\"include_global\":true}")
         memories=$(extract_text "$response")
+
+        debug "=== RAW RESULTS ==="
+        if [[ -n "$memories" ]]; then
+            echo "$memories" | head -10 | while read -r line; do
+                debug "  $line"
+            done
+        else
+            debug "  (no memories found)"
+        fi
 
         if [[ -n "$memories" && "$memories" != *"No memories"* ]]; then
             # Ultra-compact: just content, no headers, max 2 lines (~100 chars each)
@@ -422,6 +443,8 @@ case "$HOOK_TYPE" in
                 sed 's/$/.../')
             if [[ -n "$compact" ]]; then
                 output="$compact"
+                debug "=== INJECTED ==="
+                debug "  $compact"
             fi
         fi
 
@@ -443,9 +466,11 @@ case "$HOOK_TYPE" in
         # Code context injection: if query mentions code concepts, inject relevant symbols
         # Detect code-related queries (function names, class names, implementation, refactor, etc.)
         if echo "$QUERY" | grep -qiE '(function|class|method|implement|refactor|fix|bug|error|call|define|where is|find|search.*code|how does|what does)'; then
+            debug "=== CODE SEARCH ==="
             # Get relevant code symbols (top 2 for compactness)
             code_response=$(rpc_call "search_symbols" "{\"query\":\"$ESCAPED_QUERY\",\"limit\":2}")
             code_text=$(extract_text "$code_response")
+            debug "Code response: ${code_text:0:200}"
 
             if [[ -n "$code_text" && "$code_text" != *"No symbols"* && "$code_text" != *"Error"* ]]; then
                 # Parse JSON output if available, otherwise use text
@@ -456,6 +481,7 @@ case "$HOOK_TYPE" in
                 fi
 
                 if [[ -n "$symbols" ]]; then
+                    debug "Code symbols: $symbols"
                     if [[ -n "$output" ]]; then
                         output="$output"$'\n'"[code] $symbols"
                     else
@@ -490,7 +516,11 @@ case "$HOOK_TYPE" in
 
         # Output combined context if any
         if [[ -n "$output" ]]; then
+            debug "=== FINAL OUTPUT ==="
+            debug "$output"
             echo "$output"
+        else
+            debug "=== NO OUTPUT ==="
         fi
         ;;
 
