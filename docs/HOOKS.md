@@ -565,6 +565,40 @@ Hooks have timeouts. If they're slow:
 
 3. Look for errors in Claude Code output
 
+### Debug Mode
+
+Enable debug mode to see exactly what the hooks are doing:
+
+```bash
+# Set environment variable before running Claude Code
+export DEBUG_SOUL=1
+claude
+```
+
+Debug output (to stderr) shows:
+- **Memory search**: Query, realm, boost k, extra tags
+- **Raw results**: Full response from `full_resonate` with relevance scores
+- **Code search**: Symbol search results when triggered
+- **Final output**: What actually gets injected into context
+
+Example debug output:
+```
+[DEBUG] === MEMORY SEARCH ===
+[DEBUG] Query: how does memory recall work
+[DEBUG] Realm: project:cc-soul
+[DEBUG] Boost k: 3
+[DEBUG] === RAW RESULTS ===
+[DEBUG]   [85%] [wisdom] Memory recall uses vector similarity...
+[DEBUG]   [72%] [episode] Fixed confidence decay issue...
+[DEBUG] === INJECTED ===
+[DEBUG]   Memory recall uses vector similarity...
+```
+
+To test manually:
+```bash
+DEBUG_SOUL=1 ./scripts/simple-hook.sh prompt "your test query"
+```
+
 ---
 
 *Hooks are the nervous system connecting soul to body.*
