@@ -1711,6 +1711,9 @@ private:
 
     // Tool implementations
     DuckDBToolResult tool_remember(const json& params) {
+        // Notify subconscious of DB activity (idle scheduling)
+        if (subconscious_) subconscious_->notify_query();
+
         std::string content = params.value("content", "");
         if (content.empty()) {
             return DuckDBToolResult::error("Content is required");
@@ -2006,6 +2009,9 @@ private:
     }
 
     DuckDBToolResult tool_connect(const json& params) {
+        // Notify subconscious of DB activity (idle scheduling)
+        if (subconscious_) subconscious_->notify_query();
+
         std::string subject = params.value("subject", "");
         std::string predicate = params.value("predicate", "");
         std::string object = params.value("object", "");
@@ -2310,6 +2316,9 @@ private:
     }
 
     DuckDBToolResult tool_embed_symbols(const json& params) {
+        // Notify subconscious of DB activity (idle scheduling)
+        if (subconscious_) subconscious_->notify_query();
+
         if (!mind_->has_yantra()) {
             return DuckDBToolResult::error("Yantra (embedder) not attached");
         }
@@ -2396,6 +2405,9 @@ private:
     }
 
     DuckDBToolResult tool_strengthen(const json& params) {
+        // Notify subconscious of DB activity (idle scheduling)
+        if (subconscious_) subconscious_->notify_query();
+
         auto [db_id, id_str] = parse_id(params);
         if (id_str.empty()) {
             return DuckDBToolResult::error("ID is required");
@@ -2413,6 +2425,9 @@ private:
     }
 
     DuckDBToolResult tool_weaken(const json& params) {
+        // Notify subconscious of DB activity (idle scheduling)
+        if (subconscious_) subconscious_->notify_query();
+
         auto [db_id, id_str] = parse_id(params);
         if (id_str.empty()) {
             return DuckDBToolResult::error("ID is required");
@@ -2430,6 +2445,9 @@ private:
     }
 
     DuckDBToolResult tool_forget(const json& params) {
+        // Notify subconscious of DB activity (idle scheduling)
+        if (subconscious_) subconscious_->notify_query();
+
         auto [db_id, id_str] = parse_id(params);
         if (id_str.empty()) {
             return DuckDBToolResult::error("ID is required");
@@ -2445,6 +2463,9 @@ private:
     }
 
     DuckDBToolResult tool_batch_forget(const json& params) {
+        // Notify subconscious of DB activity (idle scheduling)
+        if (subconscious_) subconscious_->notify_query();
+
         std::vector<std::string> ids_to_delete;
         size_t deleted = 0;
         size_t not_found = 0;
@@ -2498,6 +2519,9 @@ private:
     }
 
     DuckDBToolResult tool_observe(const json& params) {
+        // Notify subconscious of DB activity (idle scheduling)
+        if (subconscious_) subconscious_->notify_query();
+
         std::string title = params.value("title", "");
         std::string content = params.value("content", "");
         std::string category = params.value("category", "episode");
@@ -2816,6 +2840,9 @@ private:
     }
 
     DuckDBToolResult tool_learn_codebase(const json& params) {
+        // Notify subconscious of DB activity (idle scheduling)
+        if (subconscious_) subconscious_->notify_query();
+
         std::string path = params.value("path", "");
         if (path.empty()) {
             return DuckDBToolResult::error("Path is required");
@@ -3358,6 +3385,9 @@ private:
 
     // Essential memory tool implementations
     DuckDBToolResult tool_grow(const json& params) {
+        // Notify subconscious of DB activity (idle scheduling)
+        if (subconscious_) subconscious_->notify_query();
+
         std::string type_str = params.value("type", "");
         std::string content = params.value("content", "");
         std::string title = params.value("title", "");
@@ -3418,6 +3448,9 @@ private:
     }
 
     DuckDBToolResult tool_update(const json& params) {
+        // Notify subconscious of DB activity (idle scheduling)
+        if (subconscious_) subconscious_->notify_query();
+
         auto [db_id, id_str] = parse_id(params);
         std::string content = params.value("content", "");
 
@@ -3491,6 +3524,9 @@ private:
     }
 
     DuckDBToolResult tool_tag(const json& params) {
+        // Notify subconscious of DB activity (idle scheduling)
+        if (subconscious_) subconscious_->notify_query();
+
         auto [db_id, id_str] = parse_id(params);
         std::string add_tag = params.value("add", "");
         std::string remove_tag = params.value("remove", "");
