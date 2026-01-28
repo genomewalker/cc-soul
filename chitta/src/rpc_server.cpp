@@ -15,6 +15,7 @@
 // Options:
 //   --socket-path PATH  Unix socket path
 //   --json              CLI mode: output raw JSON instead of text
+//   --toon              CLI mode: output TOON format (compact, shell-friendly)
 
 #include <chitta/socket_client.hpp>
 #include <chitta/mind/duckdb_mind.hpp>
@@ -32,6 +33,126 @@
 #include <cstring>
 #include <cstdlib>
 #include <nlohmann/json.hpp>
+
+// TOON (Token-Oriented Object Notation) encoder
+// Compact format for LLM inputs: ~40% fewer tokens than JSON
+// Spec: https://github.com/toon-format/toon
+namespace toon {
+
+// Escape value for TOON (only escape commas and newlines in array values)
+std::string escape_value(const std::string& s) {
+    bool needs_quote = false;
+    for (char c : s) {
+        if (c == ',' || c == '\n' || c == '\r') {
+            needs_quote = true;
+            break;
+        }
+    }
+    if (!needs_quote) return s;
+
+    // Quote the value and escape internal quotes
+    std::string result = "\"";
+    for (char c : s) {
+        if (c == '"') result += "\"\"";
+        else if (c == '\n') result += "\\n";
+        else if (c == '\r') result += "\\r";
+        else result += c;
+    }
+    result += "\"";
+    return result;
+}
+
+// Convert JSON value to TOON string representation
+std::string value_to_string(const nlohmann::json& v) {
+    if (v.is_null()) return "";
+    if (v.is_boolean()) return v.get<bool>() ? "true" : "false";
+    if (v.is_number_integer()) return std::to_string(v.get<int64_t>());
+    if (v.is_number_float()) {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%.6g", v.get<double>());
+        return buf;
+    }
+    if (v.is_string()) return escape_value(v.get<std::string>());
+    // For nested objects/arrays, fall back to compact JSON
+    return v.dump();
+}
+
+// Encode JSON to TOON format
+std::string encode(const nlohmann::json& j, int indent = 0) {
+    std::string result;
+    std::string prefix(indent, ' ');
+
+    if (j.is_object()) {
+        for (auto it = j.begin(); it != j.end(); ++it) {
+            const auto& key = it.key();
+            const auto& val = it.value();
+
+            if (val.is_object()) {
+                result += prefix + key + ":\n";
+                result += encode(val, indent + 1);
+            } else if (val.is_array() && !val.empty()) {
+                // Check if uniform array of objects (tabular)
+                bool is_tabular = true;
+                std::vector<std::string> fields;
+                for (const auto& item : val) {
+                    if (!item.is_object()) {
+                        is_tabular = false;
+                        break;
+                    }
+                    if (fields.empty()) {
+                        for (auto& [k, v] : item.items()) {
+                            fields.push_back(k);
+                        }
+                    }
+                }
+
+                if (is_tabular && !fields.empty()) {
+                    // Tabular format: array[N]{field1,field2}:\n val1,val2\n
+                    result += prefix + key + "[" + std::to_string(val.size()) + "]{";
+                    for (size_t i = 0; i < fields.size(); ++i) {
+                        if (i > 0) result += ",";
+                        result += fields[i];
+                    }
+                    result += "}:\n";
+                    for (const auto& item : val) {
+                        result += prefix + " ";
+                        for (size_t i = 0; i < fields.size(); ++i) {
+                            if (i > 0) result += ",";
+                            if (item.contains(fields[i])) {
+                                result += value_to_string(item[fields[i]]);
+                            }
+                        }
+                        result += "\n";
+                    }
+                } else if (!val.empty() && val[0].is_primitive()) {
+                    // Simple array: array[N]: val1,val2,val3
+                    result += prefix + key + "[" + std::to_string(val.size()) + "]: ";
+                    for (size_t i = 0; i < val.size(); ++i) {
+                        if (i > 0) result += ",";
+                        result += value_to_string(val[i]);
+                    }
+                    result += "\n";
+                } else {
+                    // Mixed array - fall back to JSON
+                    result += prefix + key + ": " + val.dump() + "\n";
+                }
+            } else {
+                result += prefix + key + ": " + value_to_string(val) + "\n";
+            }
+        }
+    } else if (j.is_array()) {
+        // Top-level array
+        nlohmann::json wrapper;
+        wrapper["results"] = j;
+        return encode(wrapper, indent);
+    } else {
+        result = value_to_string(j);
+    }
+
+    return result;
+}
+
+}  // namespace toon
 
 // Tool parameter specification
 struct ToolParam {
@@ -358,12 +479,17 @@ void print_usage(const char* prog) {
               << "Global options:\n"
               << "  --socket-path PATH  Unix socket path\n"
               << "  --json              Output raw JSON instead of text\n"
+              << "  --toon              Output TOON format (compact, ~40% fewer tokens)\n"
+              << "  --text-only         Output only text content (for piping/hooks)\n"
               << "  --help              Show this help message\n";
 }
 
+// Output format enum
+enum class OutputFormat { Text, Json, Toon, TextOnly };
+
 // CLI mode: invoke tool directly
 int run_cli(const std::string& socket_path, const std::string& tool,
-            int argc, char* argv[], int arg_start, bool json_output) {
+            int argc, char* argv[], int arg_start, OutputFormat output_format) {
     using json = nlohmann::json;
 
     // Check for --help first
@@ -505,21 +631,53 @@ int run_cli(const std::string& socket_path, const std::string& tool,
             return 1;
         }
 
-        if (json_output) {
-            // Raw JSON output
-            if (result.contains("result") && result["result"].contains("structured")) {
-                std::cout << result["result"]["structured"].dump(2) << "\n";
-            } else {
-                std::cout << result.dump(2) << "\n";
-            }
-        } else {
-            // Text output
-            if (result.contains("result") && result["result"].contains("content")) {
-                auto& content = result["result"]["content"];
-                if (content.is_array() && !content.empty() && content[0].contains("text")) {
-                    std::cout << content[0]["text"].get<std::string>() << "\n";
+        switch (output_format) {
+            case OutputFormat::Json:
+                // Raw JSON output
+                if (result.contains("result") && result["result"].contains("structured")) {
+                    std::cout << result["result"]["structured"].dump(2) << "\n";
+                } else {
+                    std::cout << result.dump(2) << "\n";
                 }
-            }
+                break;
+
+            case OutputFormat::Toon:
+                // TOON format (compact, shell-friendly)
+                if (result.contains("result") && result["result"].contains("structured")) {
+                    std::cout << toon::encode(result["result"]["structured"]);
+                } else if (result.contains("result")) {
+                    std::cout << toon::encode(result["result"]);
+                } else {
+                    std::cout << toon::encode(result);
+                }
+                break;
+
+            case OutputFormat::TextOnly:
+                // Just the text content from results (for hooks/piping)
+                if (result.contains("result") && result["result"].contains("structured")) {
+                    auto& structured = result["result"]["structured"];
+                    if (structured.contains("results") && structured["results"].is_array()) {
+                        for (const auto& item : structured["results"]) {
+                            if (item.contains("text")) {
+                                std::cout << item["text"].get<std::string>() << "\n";
+                            }
+                        }
+                    } else if (structured.contains("text")) {
+                        std::cout << structured["text"].get<std::string>() << "\n";
+                    }
+                }
+                break;
+
+            case OutputFormat::Text:
+            default:
+                // Human-readable text output
+                if (result.contains("result") && result["result"].contains("content")) {
+                    auto& content = result["result"]["content"];
+                    if (content.is_array() && !content.empty() && content[0].contains("text")) {
+                        std::cout << content[0]["text"].get<std::string>() << "\n";
+                    }
+                }
+                break;
         }
     } catch (const std::exception& e) {
         std::cerr << "Error parsing response: " << e.what() << "\n";
@@ -631,11 +789,11 @@ static std::string detect_realm() {
 
 int main(int argc, char* argv[]) {
     std::string socket_path = chitta::SocketClient::default_socket_path();
-    bool json_output = false;
+    OutputFormat output_format = OutputFormat::Text;
     std::string tool;
     int tool_arg_index = 0;
 
-    // Pre-scan for --socket-path and --json flags, find tool name
+    // Pre-scan for --socket-path, --json, --toon flags, find tool name
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--version") == 0 || std::strcmp(argv[i], "-v") == 0) {
             std::cout << "chitta " << CHITTA_VERSION << "\n";
@@ -643,7 +801,11 @@ int main(int argc, char* argv[]) {
         } else if (std::strcmp(argv[i], "--socket-path") == 0 && i + 1 < argc) {
             socket_path = argv[++i];
         } else if (std::strcmp(argv[i], "--json") == 0) {
-            json_output = true;
+            output_format = OutputFormat::Json;
+        } else if (std::strcmp(argv[i], "--toon") == 0) {
+            output_format = OutputFormat::Toon;
+        } else if (std::strcmp(argv[i], "--text-only") == 0) {
+            output_format = OutputFormat::TextOnly;
         } else if (tool.empty() && argv[i][0] != '-') {
             tool = argv[i];
             tool_arg_index = i;
@@ -653,10 +815,16 @@ int main(int argc, char* argv[]) {
     // Handle realm_detect command (client-side, no daemon needed)
     if (tool == "realm_detect") {
         std::string realm = detect_realm();
-        if (json_output) {
-            std::cout << "{\"realm\":\"" << realm << "\"}\n";
-        } else {
-            std::cout << realm << "\n";
+        switch (output_format) {
+            case OutputFormat::Json:
+                std::cout << "{\"realm\":\"" << realm << "\"}\n";
+                break;
+            case OutputFormat::Toon:
+                std::cout << "realm: " << realm << "\n";
+                break;
+            default:
+                std::cout << realm << "\n";
+                break;
         }
         return 0;
     }
@@ -841,7 +1009,7 @@ int main(int argc, char* argv[]) {
 
     // Check for CLI mode: tool is a known tool name
     if (!tool.empty() && KNOWN_TOOLS.count(tool)) {
-        return run_cli(socket_path, tool, argc, argv, tool_arg_index + 1, json_output);
+        return run_cli(socket_path, tool, argc, argv, tool_arg_index + 1, output_format);
     }
 
     // No tool specified - run interactive mode or show usage

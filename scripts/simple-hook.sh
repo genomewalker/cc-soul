@@ -770,7 +770,7 @@ CORRECT: $better_approach"
                 escaped_query=$(json_escape "file:$filename")
 
                 # Quick recall - timeout 2s to not block
-                memories=$(timeout 2 "$CHITTA_BIN" recall --query "$escaped_query" --limit 1 --json 2>/dev/null | jq -r '.[0].content // empty' | head -c 200)
+                memories=$(timeout 2 "$CHITTA_BIN" recall --query "$escaped_query" --limit 1 --text-only 2>/dev/null | head -c 200)
 
                 if [[ -n "$memories" ]]; then
                     escaped_mem=$(json_escape "$memories")
@@ -786,8 +786,8 @@ CORRECT: $better_approach"
                 filename=$(basename "$file_path")
                 escaped_query=$(json_escape "editing $filename decision preference")
 
-                # Quick recall - timeout 2s
-                memories=$(timeout 2 "$CHITTA_BIN" recall --query "$escaped_query" --limit 1 --json 2>/dev/null | jq -r '.[0].content // empty' | head -c 200)
+                # Quick recall - timeout 2s to not block
+                memories=$(timeout 2 "$CHITTA_BIN" recall --query "$escaped_query" --limit 1 --text-only 2>/dev/null | head -c 200)
 
                 if [[ -n "$memories" ]]; then
                     escaped_mem=$(json_escape "$memories")
