@@ -429,6 +429,12 @@ void Subconscious::run_background_embedding() {
     // Always update timestamp to prevent tight loop
     stats_.last_embedding_at = now_ms();
 
+    // Skip if daemon is busy with queries (idle-based scheduling)
+    if (!is_idle()) {
+        stats_.embedding_skips++;
+        return;
+    }
+
     if (!mind_->has_yantra()) return;
 
     try {
@@ -497,6 +503,22 @@ size_t Subconscious::flush_embedding_queue() {
 size_t Subconscious::embedding_queue_size() const {
     std::lock_guard<std::mutex> lock(embedding_queue_mutex_);
     return embedding_queue_.size();
+}
+
+void Subconscious::notify_query() {
+    stats_.last_query_at = now_ms();
+}
+
+bool Subconscious::is_idle() const {
+    auto last_query = stats_.last_query_at.load();
+    if (last_query == 0) return true;  // Never queried = idle
+
+    auto now = now_ms();
+    auto threshold_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        config_.idle_threshold
+    ).count();
+
+    return (now - last_query) >= threshold_ms;
 }
 
 bool Subconscious::time_for_embedding() const {

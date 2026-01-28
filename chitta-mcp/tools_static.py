@@ -215,6 +215,39 @@ TOOLS = [
         }
     ),
     Tool(
+        name="subconscious_stats",
+        description="Get subconscious background processor statistics",
+        inputSchema={
+                "properties": {},
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="reembed_memories",
+        description="Re-embed memories with proper embeddings. Use to fix memories stored with zero embeddings.",
+        inputSchema={
+                "properties": {
+                        "dry_run": {
+                                "description": "Preview without updating (default: False)",
+                                "type": "boolean"
+                        },
+                        "kind": {
+                                "description": "Filter by kind: belief, wisdom, episode, correction, preference",
+                                "type": "string"
+                        },
+                        "limit": {
+                                "description": "Max memories to process (default: 100)",
+                                "type": "integer"
+                        },
+                        "min_confidence": {
+                                "description": "Min confidence threshold (default: 0)",
+                                "type": "number"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
         name="embed_symbols",
         description="Fast embed symbol metadata (no LLM needed, ~100/sec)",
         inputSchema={
@@ -2076,35 +2109,17 @@ TOOLS = [
         }
     ),
     Tool(
-        name="insight_promote",
-        description="Promote a memory to global visibility so it applies across all projects. Use for cross-project learnings.",
+        name="restore_code_intel_confidence",
+        description="Restore confidence and fix decay_rate for code intel memories (symbol, projectessence, modulestate, patternstate). Run this once to fix memories that were incorrectly decayed.",
         inputSchema={
                 "properties": {
-                        "id": {
-                                "description": "Memory ID to promote",
-                                "type": "integer"
+                        "confidence": {
+                                "description": "Confidence to restore (default: 0.8)",
+                                "type": "number"
                         },
-                        "reason": {
-                                "description": "Why this insight is cross-project worthy",
-                                "type": "string"
-                        }
-                },
-                "required": ["id"],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="insight_global",
-        description="List all global memories (cross-project insights). These apply regardless of current realm.",
-        inputSchema={
-                "properties": {
-                        "kind": {
-                                "description": "Filter by memory kind (wisdom, belief, episode)",
-                                "type": "string"
-                        },
-                        "limit": {
-                                "description": "Max memories to return (default: 20)",
-                                "type": "integer"
+                        "dry_run": {
+                                "description": "Preview changes without applying (default: False)",
+                                "type": "boolean"
                         }
                 },
                 "type": "object"
@@ -2112,19 +2127,82 @@ TOOLS = [
     ),
     Tool(
         name="sql_query",
-        description="Run read-only SQL query against the soul database. For debugging and analysis.",
+        description="Execute a read-only SQL query against the soul database. Use for debugging, analysis, and complex queries.",
         inputSchema={
                 "properties": {
-                        "query": {
-                                "description": "SQL SELECT query (SELECT, WITH, SHOW, DESCRIBE only)",
-                                "type": "string"
-                        },
                         "limit": {
                                 "description": "Max rows to return (default: 100)",
                                 "type": "integer"
+                        },
+                        "query": {
+                                "description": "SQL query to execute (SELECT only)",
+                                "type": "string"
                         }
                 },
-                "required": ["query"],
+                "required": [
+                        "query"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="insight_promote",
+        description="Promote a memory to global visibility so it applies across all projects.",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "description": "Memory ID to promote",
+                                "type": "integer"
+                        },
+                        "reason": {
+                                "description": "Why this insight is cross-project",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="insight_global",
+        description="List all global insights that apply across projects.",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "description": "Max results (default: 20)",
+                                "type": "integer"
+                        },
+                        "tag": {
+                                "description": "Filter by tag (optional)",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="ssl_convert",
+        description="Convert raw text to SSL (Soul Semantic Language) format. Use before remember for non-SSL content.",
+        inputSchema={
+                "properties": {
+                        "content": {
+                                "description": "Raw text to convert",
+                                "type": "string"
+                        },
+                        "domain": {
+                                "description": "Domain tag (e.g., 'cc-soul', 'partnership')",
+                                "type": "string"
+                        },
+                        "location": {
+                                "description": "Optional location reference (@file:line)",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "content"
+                ],
                 "type": "object"
         }
     ),

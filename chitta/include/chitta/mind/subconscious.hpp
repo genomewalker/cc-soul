@@ -49,6 +49,7 @@ struct SubconsciousConfig {
     std::chrono::seconds process_interval{1};
     std::chrono::minutes hygiene_interval{30};
     std::chrono::seconds embedding_interval{30};  // Background embedding interval (30s to reduce CPU)
+    std::chrono::seconds idle_threshold{30};      // Only embed when no queries for this long
     size_t max_queue_size{1000};
     size_t embedding_batch_size{20};              // Small batches to avoid blocking
     float correction_confidence{0.8f};
@@ -56,7 +57,7 @@ struct SubconsciousConfig {
     bool enable_anticipation{true};
     bool enable_pattern_detection{true};
     bool enable_suggestion_tracking{true};
-    bool enable_background_embedding{true};       // Async: generates embeddings in background, flushes on main thread
+    bool enable_background_embedding{false};      // Disabled by default - use embed_symbols tool
 };
 
 // Queued embedding result (computed in background, flushed by main thread)
@@ -77,8 +78,10 @@ struct SubconsciousStats {
     std::atomic<size_t> hygiene_runs{0};
     std::atomic<size_t> symbols_embedded{0};
     std::atomic<size_t> embeddings_queued{0};
+    std::atomic<size_t> embedding_skips{0};       // Skipped due to busy state
     std::atomic<int64_t> last_hygiene_at{0};
     std::atomic<int64_t> last_embedding_at{0};
+    std::atomic<int64_t> last_query_at{0};        // Last RPC query timestamp
     std::atomic<int64_t> started_at{0};
 };
 
@@ -113,6 +116,10 @@ public:
     // Embedding queue (call from main thread to flush queued embeddings to DB)
     size_t flush_embedding_queue();
     size_t embedding_queue_size() const;
+
+    // Query notification (call from RPC handlers to signal daemon is busy)
+    void notify_query();
+    bool is_idle() const;
 
 private:
     DuckDBMind* mind_;

@@ -253,6 +253,14 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
     {"sql_query", "Run read-only SQL query against the soul database",
      {{"query", "SQL SELECT query", true, nullptr},
       {"limit", "Max rows to return", false, "100"}}},
+
+    // Background processing tools
+    {"background_status", "Get background processing and embedding scheduler status",
+     {}},
+
+    {"background_schedule", "Schedule background task",
+     {{"task_type", "Task type to schedule", true, nullptr},
+      {"params", "JSON params for task", false, nullptr}}},
 };
 
 // Build set of known tools from specs

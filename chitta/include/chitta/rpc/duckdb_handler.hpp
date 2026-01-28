@@ -1796,6 +1796,9 @@ private:
     }
 
     DuckDBToolResult tool_recall(const json& params) {
+        // Notify subconscious that we're handling a query (idle scheduling)
+        if (subconscious_) subconscious_->notify_query();
+
         std::string query = params.value("query", "");
         if (query.empty()) {
             return DuckDBToolResult::error("Query is required");
@@ -2545,6 +2548,9 @@ private:
     }
 
     DuckDBToolResult tool_full_resonate(const json& params) {
+        // Notify subconscious that we're handling a query (idle scheduling)
+        if (subconscious_) subconscious_->notify_query();
+
         std::string query = params.value("query", "");
         if (query.empty()) {
             return DuckDBToolResult::error("Query is required");
@@ -3016,6 +3022,9 @@ private:
     }
 
     DuckDBToolResult tool_find_symbol(const json& params) {
+        // Notify subconscious that we're handling a query (idle scheduling)
+        if (subconscious_) subconscious_->notify_query();
+
         std::string name = params.value("name", "");
         if (name.empty()) {
             return DuckDBToolResult::error("Name is required");
@@ -3050,6 +3059,9 @@ private:
     }
 
     DuckDBToolResult tool_search_symbols(const json& params) {
+        // Notify subconscious that we're handling a query (idle scheduling)
+        if (subconscious_) subconscious_->notify_query();
+
         std::string query = params.value("query", "");
         if (query.empty()) {
             return DuckDBToolResult::error("Query is required");
@@ -3151,6 +3163,9 @@ private:
     }
 
     DuckDBToolResult tool_code_context(const json& params) {
+        // Notify subconscious that we're handling a query (idle scheduling)
+        if (subconscious_) subconscious_->notify_query();
+
         std::string path = params.value("path", "");
 
         // Get symbol counts
@@ -5558,17 +5573,51 @@ private:
         std::ostringstream ss;
         ss << "Background Processing Status\n";
         ss << "════════════════════════════\n\n";
-        ss << "Pending:         " << status.pending << "\n";
-        ss << "Running:         " << status.running << "\n";
-        ss << "Completed today: " << status.completed_today << "\n";
-        ss << "Failed today:    " << status.failed_today << "\n";
+        ss << "Task Queue:\n";
+        ss << "  Pending:         " << status.pending << "\n";
+        ss << "  Running:         " << status.running << "\n";
+        ss << "  Completed today: " << status.completed_today << "\n";
+        ss << "  Failed today:    " << status.failed_today << "\n";
 
-        return DuckDBToolResult::ok(ss.str(), {
+        json result = {
             {"pending", status.pending},
             {"running", status.running},
             {"completed_today", status.completed_today},
             {"failed_today", status.failed_today}
-        });
+        };
+
+        // Add subconscious stats if available
+        if (subconscious_) {
+            const auto& stats = subconscious_->stats();
+            const auto& config = subconscious_->config();
+            bool idle = subconscious_->is_idle();
+            int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            int64_t idle_for = stats.last_query_at > 0 ? (now - stats.last_query_at) / 1000 : -1;
+
+            ss << "\nEmbedding Scheduler:\n";
+            ss << "  Enabled:          " << (config.enable_background_embedding ? "yes" : "no") << "\n";
+            ss << "  Status:           " << (idle ? "IDLE (will embed)" : "BUSY (queries active)") << "\n";
+            ss << "  Idle threshold:   " << config.idle_threshold.count() << "s\n";
+            if (idle_for >= 0) {
+                ss << "  Idle for:         " << idle_for << "s\n";
+            }
+            ss << "  Queue size:       " << subconscious_->embedding_queue_size() << "\n";
+            ss << "  Embedded total:   " << stats.symbols_embedded.load() << "\n";
+            ss << "  Skipped (busy):   " << stats.embedding_skips.load() << "\n";
+
+            result["embedding"] = {
+                {"enabled", config.enable_background_embedding},
+                {"is_idle", idle},
+                {"idle_threshold_s", config.idle_threshold.count()},
+                {"idle_for_s", idle_for},
+                {"queue_size", subconscious_->embedding_queue_size()},
+                {"embedded_total", stats.symbols_embedded.load()},
+                {"skipped_busy", stats.embedding_skips.load()}
+            };
+        }
+
+        return DuckDBToolResult::ok(ss.str(), result);
     }
 
     DuckDBToolResult tool_background_run_cycle(const json& params) {
