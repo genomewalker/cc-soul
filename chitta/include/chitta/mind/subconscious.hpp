@@ -48,7 +48,7 @@ struct SubconsciousEvent {
 struct SubconsciousConfig {
     std::chrono::seconds process_interval{1};
     std::chrono::minutes hygiene_interval{30};
-    std::chrono::seconds embedding_interval{10};  // Background embedding interval
+    std::chrono::seconds embedding_interval{30};  // Background embedding interval (30s to reduce CPU)
     size_t max_queue_size{1000};
     size_t embedding_batch_size{20};              // Small batches to avoid blocking
     float correction_confidence{0.8f};
