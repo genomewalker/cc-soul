@@ -426,6 +426,9 @@ bool Subconscious::time_for_hygiene() const {
 }
 
 void Subconscious::run_background_embedding() {
+    // Always update timestamp to prevent tight loop
+    stats_.last_embedding_at = now_ms();
+
     if (!mind_->has_yantra()) return;
 
     try {
@@ -463,8 +466,6 @@ void Subconscious::run_background_embedding() {
     } catch (const std::exception& e) {
         std::cerr << "[subconscious] Embedding error: " << e.what() << "\n";
     }
-
-    stats_.last_embedding_at = now_ms();
 }
 
 bool Subconscious::time_for_embedding() const {
