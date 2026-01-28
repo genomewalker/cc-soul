@@ -746,8 +746,112 @@ CORRECT: $better_approach"
         echo "[checkpoint] $REALM"
         ;;
 
+    pre-tool|PreToolUse)
+        # PreToolUse: Inject context before tool execution
+        # Usage: simple-hook.sh pre-tool <matcher>
+        # Matcher: Read, Edit, Write, Bash, etc.
+        MATCHER="${1:-}"
+        STDIN_DATA=$(cat)
+
+        # Quick exit if no matcher or no daemon
+        [[ -z "$MATCHER" ]] && exit 0
+        ensure_daemon || exit 0
+
+        CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
+
+        case "$MATCHER" in
+            Read)
+                # Before reading file: inject relevant memories about that file
+                file_path=$(echo "$STDIN_DATA" | jq -r '.tool_input.file_path // empty')
+                [[ -z "$file_path" ]] && exit 0
+
+                # Extract filename for query
+                filename=$(basename "$file_path")
+                escaped_query=$(json_escape "file:$filename")
+
+                # Quick recall - timeout 2s to not block
+                memories=$(timeout 2 "$CHITTA_BIN" recall --query "$escaped_query" --limit 1 --json 2>/dev/null | jq -r '.[0].content // empty' | head -c 200)
+
+                if [[ -n "$memories" ]]; then
+                    escaped_mem=$(json_escape "$memories")
+                    echo "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"[past] $escaped_mem\"}}"
+                fi
+                ;;
+
+            Edit|Write)
+                # Before editing: surface past decisions about this file
+                file_path=$(echo "$STDIN_DATA" | jq -r '.tool_input.file_path // empty')
+                [[ -z "$file_path" ]] && exit 0
+
+                filename=$(basename "$file_path")
+                escaped_query=$(json_escape "editing $filename decision preference")
+
+                # Quick recall - timeout 2s
+                memories=$(timeout 2 "$CHITTA_BIN" recall --query "$escaped_query" --limit 1 --json 2>/dev/null | jq -r '.[0].content // empty' | head -c 200)
+
+                if [[ -n "$memories" ]]; then
+                    escaped_mem=$(json_escape "$memories")
+                    echo "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"[past] $escaped_mem\"}}"
+                fi
+                ;;
+
+            Bash)
+                # Before bash: recall command preferences (optional, often too slow)
+                # Skip for now - most bash commands are quick
+                ;;
+        esac
+        ;;
+
+    post-tool|PostToolUse)
+        # PostToolUse: Learn from tool execution
+        # Usage: simple-hook.sh post-tool <matcher>
+        MATCHER="${1:-}"
+        STDIN_DATA=$(cat)
+
+        [[ -z "$MATCHER" ]] && exit 0
+
+        CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
+
+        case "$MATCHER" in
+            Edit|Write)
+                # After edit: capture pattern for learning (background, non-blocking)
+                file_path=$(echo "$STDIN_DATA" | jq -r '.tool_input.file_path // empty')
+                old_string=$(echo "$STDIN_DATA" | jq -r '.tool_input.old_string // empty' | head -c 100)
+                new_string=$(echo "$STDIN_DATA" | jq -r '.tool_input.new_string // .tool_input.content // empty' | head -c 100)
+
+                # Only record significant changes
+                if [[ ${#new_string} -gt 30 && -n "$file_path" ]]; then
+                    filename=$(basename "$file_path")
+                    content="[signal] Edit: $filename
+$old_string → $new_string"
+                    # Background: don't block Claude
+                    "$CHITTA_BIN" observe --title "Edit: $filename" --content "$content" --category signal >/dev/null 2>&1 &
+                fi
+                ;;
+        esac
+        ;;
+
+    post-failure|PostToolUseFailure)
+        # PostToolUseFailure: Record failures for future avoidance
+        # Usage: simple-hook.sh post-failure
+        STDIN_DATA=$(cat)
+
+        CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
+
+        tool_name=$(echo "$STDIN_DATA" | jq -r '.tool_name // empty')
+        error=$(echo "$STDIN_DATA" | jq -r '.tool_response.error // .tool_response.stderr // empty' | head -c 200)
+
+        # Record failure if we have meaningful error info
+        if [[ -n "$error" && -n "$tool_name" ]]; then
+            content="[failure] Tool: $tool_name
+Error: $error"
+            # Background: don't block
+            "$CHITTA_BIN" remember --content "$content" --tags "failure,tool-error" --type episode >/dev/null 2>&1 &
+        fi
+        ;;
+
     *)
-        echo "Usage: simple-hook.sh <start|prompt|stop|pre-compact>" >&2
+        echo "Usage: simple-hook.sh <start|prompt|stop|pre-compact|pre-tool|post-tool|post-failure> [matcher]" >&2
         exit 1
         ;;
 esac
