@@ -674,11 +674,22 @@ private:
     bool pgq_loaded_ = false;
     bool fts_loaded_ = false;
 
+    // Separate embeddings database (no write contention with main DB)
+    std::unique_ptr<duckdb::DuckDB> emb_db_;
+    std::unique_ptr<duckdb::Connection> emb_conn_;    // Dedicated embedding connection
+    mutable std::mutex emb_mutex_;                    // Separate mutex for embeddings
+    bool emb_attached_ = false;                       // Whether embeddings DB is attached to main
+
     // Schema creation
     bool create_schema();
     bool load_extensions();
     bool create_vector_index();
     void fix_sequences();
+
+    // Embeddings database management
+    bool open_embeddings_db(const std::string& path);
+    bool create_embeddings_schema();
+    bool attach_embeddings_db();
 
     // Helper to execute queries
     // write_execute/write_query: use write connection with mutex (for INSERT/UPDATE/DELETE)

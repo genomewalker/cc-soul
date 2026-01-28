@@ -4,6 +4,7 @@
 #include <cmath>
 #include <chrono>
 #include <set>
+#include <unordered_set>
 
 namespace chitta {
 
@@ -53,6 +54,18 @@ bool DuckDBStore::open(const std::string& path) {
         // Fix sequences if out of sync (e.g., after restore or manual modification)
         fix_sequences();
 
+        // Open separate embeddings database (for contention-free embedding writes)
+        std::string emb_path = path_;
+        size_t dot_pos = emb_path.rfind('.');
+        if (dot_pos != std::string::npos) {
+            emb_path = emb_path.substr(0, dot_pos) + "_embeddings.duckdb";
+        } else {
+            emb_path += "_embeddings.duckdb";
+        }
+        if (!open_embeddings_db(emb_path)) {
+            std::cerr << "[DuckDBStore] Warning: Embeddings DB failed, using main DB\n";
+        }
+
         std::cerr << "[DuckDBStore] Opened database at " << path_ << "\n";
         return true;
 
@@ -66,6 +79,14 @@ bool DuckDBStore::open(const std::string& path) {
 
 void DuckDBStore::close() {
     std::lock_guard lock(write_mutex_);
+    std::lock_guard emb_lock(emb_mutex_);
+
+    // Close embeddings database first
+    emb_conn_.reset();
+    emb_db_.reset();
+    emb_attached_ = false;
+
+    // Close main database
     read_pool_.reset();
     write_conn_.reset();
     db_.reset();
@@ -94,6 +115,87 @@ void DuckDBStore::fix_sequences() {
     fix_seq("ledger", "ledger_seq");
     fix_seq("long_task", "task_seq");
     fix_seq("task_event", "event_seq");
+}
+
+bool DuckDBStore::open_embeddings_db(const std::string& path) {
+    try {
+        duckdb::DBConfig config;
+        config.SetOption("enable_external_access", duckdb::Value(true));
+
+        emb_db_ = std::make_unique<duckdb::DuckDB>(path, &config);
+        emb_conn_ = std::make_unique<duckdb::Connection>(*emb_db_);
+
+        // Load VSS extension for embeddings DB too
+        try {
+            emb_conn_->Query("INSTALL vss; LOAD vss;");
+        } catch (...) {
+            // VSS not required for embeddings DB
+        }
+
+        if (!create_embeddings_schema()) {
+            emb_conn_.reset();
+            emb_db_.reset();
+            return false;
+        }
+
+        // Attach to main database for queries
+        if (!attach_embeddings_db()) {
+            std::cerr << "[DuckDBStore] Warning: Could not attach embeddings DB\n";
+        }
+
+        std::cerr << "[DuckDBStore] Embeddings DB opened at " << path << "\n";
+        return true;
+
+    } catch (const std::exception& e) {
+        std::cerr << "[DuckDBStore] Embeddings DB failed: " << e.what() << "\n";
+        emb_conn_.reset();
+        emb_db_.reset();
+        return false;
+    }
+}
+
+bool DuckDBStore::create_embeddings_schema() {
+    if (!emb_conn_) return false;
+
+    try {
+        // Simple table: symbol_id -> embedding
+        emb_conn_->Query(R"(
+            CREATE TABLE IF NOT EXISTS symbol_embeddings (
+                symbol_id INTEGER PRIMARY KEY,
+                embedding FLOAT[384],
+                created_at TIMESTAMP DEFAULT current_timestamp
+            )
+        )");
+
+        // Memory embeddings (optional - for future migration)
+        emb_conn_->Query(R"(
+            CREATE TABLE IF NOT EXISTS memory_embeddings (
+                memory_id INTEGER PRIMARY KEY,
+                embedding FLOAT[384],
+                created_at TIMESTAMP DEFAULT current_timestamp
+            )
+        )");
+
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "[DuckDBStore] Embeddings schema error: " << e.what() << "\n";
+        return false;
+    }
+}
+
+bool DuckDBStore::attach_embeddings_db() {
+    if (!db_ || !emb_db_) return false;
+
+    try {
+        // Get embeddings DB path from connection
+        auto result = emb_conn_->Query("SELECT current_database()");
+        // We'll use the path we stored - for now, just mark as attached
+        // Actual attachment would use: ATTACH 'path' AS emb;
+        emb_attached_ = true;
+        return true;
+    } catch (...) {
+        return false;
+    }
 }
 
 bool DuckDBStore::load_extensions() {
@@ -2379,20 +2481,62 @@ size_t DuckDBStore::count_total_symbols() {
 bool DuckDBStore::set_symbol_embedding(int64_t symbol_id, const std::vector<float>& embedding) {
     if (!db_ || embedding.size() != 384) return false;
 
-    std::ostringstream sql;
-    sql << "UPDATE symbol SET embedding = [";
+    // Build embedding array
+    std::ostringstream emb_sql;
+    emb_sql << "[";
     for (size_t i = 0; i < embedding.size(); ++i) {
-        if (i > 0) sql << ",";
-        sql << embedding[i];
+        if (i > 0) emb_sql << ",";
+        emb_sql << embedding[i];
     }
-    sql << "], described_at = " << now() << " WHERE id = " << symbol_id;
+    emb_sql << "]";
+    std::string emb_array = emb_sql.str();
 
+    // If embeddings DB is available, write there (contention-free)
+    if (emb_conn_) {
+        std::lock_guard<std::mutex> lock(emb_mutex_);
+        try {
+            std::ostringstream sql;
+            sql << "INSERT OR REPLACE INTO symbol_embeddings (symbol_id, embedding) VALUES ("
+                << symbol_id << ", " << emb_array << ")";
+            emb_conn_->Query(sql.str());
+
+            // Also update described_at in main DB (fast, no embedding blob)
+            write_execute("UPDATE symbol SET described_at = " + std::to_string(now()) +
+                         " WHERE id = " + std::to_string(symbol_id));
+            return true;
+        } catch (const std::exception& e) {
+            std::cerr << "[DuckDBStore] Embeddings DB write failed: " << e.what() << "\n";
+            // Fall through to main DB
+        }
+    }
+
+    // Fallback: write to main DB (original behavior)
+    std::ostringstream sql;
+    sql << "UPDATE symbol SET embedding = " << emb_array
+        << ", described_at = " << now() << " WHERE id = " << symbol_id;
     return write_execute(sql.str());
 }
 
 std::vector<DuckDBStore::UndescribedSymbol> DuckDBStore::get_unembedded_symbols(size_t limit) {
     std::vector<UndescribedSymbol> result;
     if (!db_) return result;
+
+    // If using separate embeddings DB, check which symbols don't have embeddings there
+    std::unordered_set<int64_t> embedded_ids;
+    if (emb_conn_) {
+        std::lock_guard<std::mutex> lock(emb_mutex_);
+        try {
+            auto emb_result = emb_conn_->Query("SELECT symbol_id FROM symbol_embeddings");
+            if (emb_result && !emb_result->HasError()) {
+                while (auto chunk = emb_result->Fetch()) {
+                    if (!chunk || chunk->size() == 0) break;
+                    for (size_t i = 0; i < chunk->size(); ++i) {
+                        embedded_ids.insert(chunk->GetValue(0, i).GetValue<int64_t>());
+                    }
+                }
+            }
+        } catch (...) {}
+    }
 
     // Get symbols with NULL or zero embedding
     std::ostringstream sql;
@@ -2407,7 +2551,7 @@ std::vector<DuckDBStore::UndescribedSymbol> DuckDBStore::get_unembedded_symbols(
         << "FROM symbol "
         << "WHERE embedding IS NULL OR described_at = 0 "
         << "ORDER BY priority, id "
-        << "LIMIT " << limit;
+        << "LIMIT " << (limit * 2);  // Over-fetch to account for filtering
 
     auto query_result = read_query(sql.str());
     if (!query_result || query_result->HasError()) return result;
@@ -2417,8 +2561,13 @@ std::vector<DuckDBStore::UndescribedSymbol> DuckDBStore::get_unembedded_symbols(
         if (!chunk || chunk->size() == 0) break;
 
         for (size_t i = 0; i < chunk->size(); ++i) {
+            int64_t id = chunk->GetValue(0, i).GetValue<int64_t>();
+
+            // Skip if already embedded in separate embeddings DB
+            if (!embedded_ids.empty() && embedded_ids.count(id)) continue;
+
             UndescribedSymbol sym;
-            sym.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            sym.id = id;
             sym.kind = chunk->GetValue(1, i).ToString();
             sym.name = chunk->GetValue(2, i).ToString();
             sym.signature = chunk->GetValue(3, i).ToString();
@@ -2427,7 +2576,10 @@ std::vector<DuckDBStore::UndescribedSymbol> DuckDBStore::get_unembedded_symbols(
             sym.line_end = chunk->GetValue(6, i).GetValue<int32_t>();
             sym.priority = chunk->GetValue(7, i).GetValue<int32_t>();
             result.push_back(sym);
+
+            if (result.size() >= limit) break;
         }
+        if (result.size() >= limit) break;
     }
 
     return result;

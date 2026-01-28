@@ -432,7 +432,7 @@ void Subconscious::run_background_embedding() {
     if (!mind_->has_yantra()) return;
 
     try {
-        // Get small batch of unembedded symbols
+        // Get small batch of unembedded symbols (quick DB read)
         auto symbols = mind_->store().get_unembedded_symbols(config_.embedding_batch_size);
         if (symbols.empty()) return;
 
@@ -446,26 +446,57 @@ void Subconscious::run_background_embedding() {
             ids.push_back(sym.id);
         }
 
-        // Embed in batch
+        // Generate embeddings (CPU-bound, no DB access)
         auto embeddings = mind_->embedder().embed_batch(texts);
-        size_t embedded = 0;
-        for (size_t i = 0; i < embeddings.size(); ++i) {
-            if (!embeddings[i].is_zero()) {
-                if (mind_->store().set_symbol_embedding(ids[i], embeddings[i].data)) {
-                    embedded++;
+
+        // Queue results for main thread to flush (no DB write here)
+        {
+            std::lock_guard<std::mutex> lock(embedding_queue_mutex_);
+            for (size_t i = 0; i < embeddings.size(); ++i) {
+                if (!embeddings[i].is_zero()) {
+                    embedding_queue_.push_back({ids[i], embeddings[i].data});
+                    stats_.embeddings_queued++;
                 }
             }
         }
 
-        if (embedded > 0) {
-            stats_.symbols_embedded += embedded;
-            size_t remaining = mind_->store().count_unembedded_symbols();
-            std::cerr << "[subconscious] Embedded " << embedded << " symbols, "
-                      << remaining << " remaining\n";
+        if (!embeddings.empty()) {
+            std::cerr << "[subconscious] Queued " << embeddings.size() << " embeddings for flush\n";
         }
     } catch (const std::exception& e) {
         std::cerr << "[subconscious] Embedding error: " << e.what() << "\n";
     }
+}
+
+size_t Subconscious::flush_embedding_queue() {
+    std::vector<QueuedEmbedding> to_flush;
+
+    // Quickly grab queued embeddings
+    {
+        std::lock_guard<std::mutex> lock(embedding_queue_mutex_);
+        if (embedding_queue_.empty()) return 0;
+        to_flush.swap(embedding_queue_);
+    }
+
+    // Write to DB (on main thread, no contention)
+    size_t flushed = 0;
+    for (const auto& qe : to_flush) {
+        if (mind_->store().set_symbol_embedding(qe.symbol_id, qe.embedding)) {
+            flushed++;
+        }
+    }
+
+    if (flushed > 0) {
+        stats_.symbols_embedded += flushed;
+        std::cerr << "[subconscious] Flushed " << flushed << " embeddings to DB\n";
+    }
+
+    return flushed;
+}
+
+size_t Subconscious::embedding_queue_size() const {
+    std::lock_guard<std::mutex> lock(embedding_queue_mutex_);
+    return embedding_queue_.size();
 }
 
 bool Subconscious::time_for_embedding() const {

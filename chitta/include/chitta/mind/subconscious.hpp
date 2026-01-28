@@ -56,7 +56,13 @@ struct SubconsciousConfig {
     bool enable_anticipation{true};
     bool enable_pattern_detection{true};
     bool enable_suggestion_tracking{true};
-    bool enable_background_embedding{false};      // Disabled by default - use embed_symbols tool instead
+    bool enable_background_embedding{true};       // Async: generates embeddings in background, flushes on main thread
+};
+
+// Queued embedding result (computed in background, flushed by main thread)
+struct QueuedEmbedding {
+    int64_t symbol_id;
+    std::vector<float> embedding;
 };
 
 // Runtime statistics
@@ -70,6 +76,7 @@ struct SubconsciousStats {
     std::atomic<size_t> outcomes_verified{0};
     std::atomic<size_t> hygiene_runs{0};
     std::atomic<size_t> symbols_embedded{0};
+    std::atomic<size_t> embeddings_queued{0};
     std::atomic<int64_t> last_hygiene_at{0};
     std::atomic<int64_t> last_embedding_at{0};
     std::atomic<int64_t> started_at{0};
@@ -103,6 +110,10 @@ public:
     // Access to config (for RPC stats)
     const SubconsciousConfig& config() const { return config_; }
 
+    // Embedding queue (call from main thread to flush queued embeddings to DB)
+    size_t flush_embedding_queue();
+    size_t embedding_queue_size() const;
+
 private:
     DuckDBMind* mind_;
     SubconsciousConfig config_;
@@ -114,6 +125,10 @@ private:
     std::mutex queue_mutex_;
     std::condition_variable queue_cv_;
     std::deque<SubconsciousEvent> event_queue_;
+
+    // Embedding queue (filled by background thread, flushed by main thread)
+    mutable std::mutex embedding_queue_mutex_;
+    std::vector<QueuedEmbedding> embedding_queue_;
 
     // Pattern matchers (compiled regexes)
     std::regex correction_pattern_;

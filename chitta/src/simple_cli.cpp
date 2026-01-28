@@ -407,11 +407,24 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
     std::thread maintenance([&]() {
         auto interval_secs = std::chrono::seconds(interval);
         auto last_sync = std::chrono::steady_clock::now();
+        auto last_embedding_flush = std::chrono::steady_clock::now();
+        auto embedding_flush_interval = std::chrono::seconds(5);  // Flush queued embeddings every 5s
 
         while (daemon_running) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
             auto now_time = std::chrono::steady_clock::now();
+
+            // Flush embedding queue frequently (non-blocking if empty)
+            if (now_time - last_embedding_flush >= embedding_flush_interval) {
+                last_embedding_flush = now_time;
+                try {
+                    subconscious.flush_embedding_queue();
+                } catch (const std::exception& e) {
+                    std::cerr << "[maint] Embedding flush failed: " << e.what() << "\n";
+                }
+            }
+
             if (now_time - last_sync >= interval_secs) {
                 last_sync = now_time;
                 cycle_count++;
