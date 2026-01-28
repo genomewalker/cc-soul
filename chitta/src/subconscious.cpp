@@ -116,6 +116,11 @@ void Subconscious::process_loop() {
             run_hygiene();
             last_hygiene = std::chrono::steady_clock::now();
         }
+
+        // Check for background embedding
+        if (config_.enable_background_embedding && time_for_embedding()) {
+            run_background_embedding();
+        }
     }
 }
 
@@ -415,6 +420,60 @@ bool Subconscious::time_for_hygiene() const {
     auto now = now_ms();
     auto interval_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         config_.hygiene_interval
+    ).count();
+
+    return (now - last) >= interval_ms;
+}
+
+void Subconscious::run_background_embedding() {
+    if (!mind_->has_yantra()) return;
+
+    try {
+        // Get small batch of unembedded symbols
+        auto symbols = mind_->store().get_unembedded_symbols(config_.embedding_batch_size);
+        if (symbols.empty()) return;
+
+        // Build embedding texts
+        std::vector<std::string> texts;
+        std::vector<int64_t> ids;
+        for (const auto& sym : symbols) {
+            std::string text = sym.kind + " " + sym.name;
+            if (!sym.signature.empty()) text += " " + sym.signature;
+            texts.push_back(text);
+            ids.push_back(sym.id);
+        }
+
+        // Embed in batch
+        auto embeddings = mind_->embedder().embed_batch(texts);
+        size_t embedded = 0;
+        for (size_t i = 0; i < embeddings.size(); ++i) {
+            if (!embeddings[i].is_zero()) {
+                if (mind_->store().set_symbol_embedding(ids[i], embeddings[i].data)) {
+                    embedded++;
+                }
+            }
+        }
+
+        if (embedded > 0) {
+            stats_.symbols_embedded += embedded;
+            size_t remaining = mind_->store().count_unembedded_symbols();
+            std::cerr << "[subconscious] Embedded " << embedded << " symbols, "
+                      << remaining << " remaining\n";
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "[subconscious] Embedding error: " << e.what() << "\n";
+    }
+
+    stats_.last_embedding_at = now_ms();
+}
+
+bool Subconscious::time_for_embedding() const {
+    auto last = stats_.last_embedding_at.load();
+    if (last == 0) return true;  // Never run
+
+    auto now = now_ms();
+    auto interval_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        config_.embedding_interval
     ).count();
 
     return (now - last) >= interval_ms;

@@ -48,12 +48,15 @@ struct SubconsciousEvent {
 struct SubconsciousConfig {
     std::chrono::seconds process_interval{1};
     std::chrono::minutes hygiene_interval{30};
+    std::chrono::seconds embedding_interval{10};  // Background embedding interval
     size_t max_queue_size{1000};
+    size_t embedding_batch_size{20};              // Small batches to avoid blocking
     float correction_confidence{0.8f};
     bool enable_hygiene{true};
     bool enable_anticipation{true};
     bool enable_pattern_detection{true};
     bool enable_suggestion_tracking{true};
+    bool enable_background_embedding{true};       // Process unembedded symbols
 };
 
 // Runtime statistics
@@ -66,7 +69,9 @@ struct SubconsciousStats {
     std::atomic<size_t> suggestions_tracked{0};
     std::atomic<size_t> outcomes_verified{0};
     std::atomic<size_t> hygiene_runs{0};
+    std::atomic<size_t> symbols_embedded{0};
     std::atomic<int64_t> last_hygiene_at{0};
+    std::atomic<int64_t> last_embedding_at{0};
     std::atomic<int64_t> started_at{0};
 };
 
@@ -161,6 +166,8 @@ private:
     // Periodic tasks
     void run_hygiene();
     bool time_for_hygiene() const;
+    void run_background_embedding();
+    bool time_for_embedding() const;
 
     // Helpers
     static int64_t now_ms();
