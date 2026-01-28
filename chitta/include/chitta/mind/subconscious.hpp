@@ -56,7 +56,7 @@ struct SubconsciousConfig {
     bool enable_anticipation{true};
     bool enable_pattern_detection{true};
     bool enable_suggestion_tracking{true};
-    bool enable_background_embedding{true};       // Process unembedded symbols
+    bool enable_background_embedding{false};      // Disabled by default - use embed_symbols tool instead
 };
 
 // Runtime statistics
