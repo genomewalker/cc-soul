@@ -29,8 +29,10 @@ jobs:
           cd /tmp
           wget -q https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ONNX_VERSION }}/onnxruntime-linux-x64-${{ env.ONNX_VERSION }}.tgz
           tar xzf onnxruntime-linux-x64-${{ env.ONNX_VERSION }}.tgz
-          mkdir -p /opt/onnxruntime
-          cp -r onnxruntime-linux-x64-${{ env.ONNX_VERSION }}/* /opt/onnxruntime/
+          mkdir -p /opt/onnxruntime/{include/onnxruntime/core/session,lib}
+          # Pre-built package has flat headers, reorganize to match expected structure
+          cp onnxruntime-linux-x64-${{ env.ONNX_VERSION }}/include/*.h /opt/onnxruntime/include/onnxruntime/core/session/
+          cp onnxruntime-linux-x64-${{ env.ONNX_VERSION }}/lib/* /opt/onnxruntime/lib/
 
       - name: Build DuckDB from source
         run: |
