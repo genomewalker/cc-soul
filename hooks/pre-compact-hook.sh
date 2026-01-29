@@ -12,9 +12,7 @@
 
 set -e
 
-MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind/chitta}"
 CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
-CHITTAD_BIN="${CHITTAD_BIN:-$HOME/.claude/bin/chittad}"
 MAX_WAIT="${CC_SOUL_MAX_WAIT:-5}"
 
 # Parse JSON input
@@ -22,47 +20,11 @@ INPUT=$(cat)
 TRIGGER=$(echo "$INPUT" | jq -r '.trigger // "auto"')
 TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty')
 
-djb2_hash() {
-    local str="$1" hash=5381 i c
-    for ((i=0; i<${#str}; i++)); do
-        c=$(printf '%d' "'${str:$i:1}")
-        hash=$(( ((hash << 5) + hash) + c ))
-        hash=$((hash & 0xFFFFFFFF))
-    done
-    echo "$hash"
-}
-
-SOCKET="/tmp/chitta-$(djb2_hash "$MIND_PATH").sock"
-
-json_escape() {
-    echo -n "$1" | jq -Rs '.' | sed 's/^"//;s/"$//'
-}
-
-ensure_daemon() {
-    [[ -S "$SOCKET" ]] && return 0
-    [[ ! -x "$CHITTAD_BIN" ]] && return 1
-
-    "$CHITTAD_BIN" daemon &
-    disown
-
-    local waited=0
-    while [[ ! -S "$SOCKET" && $waited -lt 50 ]]; do
-        sleep 0.1
-        ((waited++))
-    done
-    [[ -S "$SOCKET" ]]
-}
-
-ensure_daemon || {
-    echo "[pre-compact] WARNING: daemon not running, checkpoint may fail" >&2
-}
+# Check chitta CLI exists
+[[ ! -x "$CHITTA_BIN" ]] && exit 0
 
 # Detect realm
-if [[ -x "$CHITTA_BIN" ]]; then
-    REALM=$("$CHITTA_BIN" realm_detect 2>/dev/null || echo "brahman")
-else
-    REALM="brahman"
-fi
+REALM=$(timeout "$MAX_WAIT" "$CHITTA_BIN" realm_detect 2>/dev/null || echo "brahman")
 
 SESSION_ID="compact-$(date +%Y%m%d-%H%M%S)"
 
@@ -95,32 +57,15 @@ fi
 [[ -z "$files_json" || "$files_json" == "null" ]] && files_json='[]'
 [[ -z "$next_steps_json" || "$next_steps_json" == "null" ]] && next_steps_json='["Review previous work"]'
 
-# Save with retry
-SAVED=false
-
-# Try CLI first
-if [[ -x "$CHITTA_BIN" ]]; then
-    if "$CHITTA_BIN" ledger_save \
-        --session_id "$SESSION_ID" \
-        --project "$REALM" \
-        --mood "pre-compact" \
-        --active_files "$files_json" \
-        --decisions "$decisions_json" \
-        --next_steps "$next_steps_json" \
-        --snapshot "$snapshot" 2>/dev/null; then
-        SAVED=true
-    fi
-fi
-
-# Fallback to RPC
-if [[ "$SAVED" != "true" && -S "$SOCKET" ]]; then
-    request="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"ledger_save\",\"arguments\":{\"session_id\":\"$SESSION_ID\",\"project\":\"$(json_escape "$REALM")\",\"mood\":\"pre-compact\",\"snapshot\":\"$(json_escape "$snapshot")\"}}}"
-    if echo "$request" | timeout "$MAX_WAIT" nc -U "$SOCKET" 2>/dev/null | grep -q '"result"'; then
-        SAVED=true
-    fi
-fi
-
-if [[ "$SAVED" == "true" ]]; then
+# Save via CLI
+if timeout "$MAX_WAIT" "$CHITTA_BIN" ledger_save \
+    --session_id "$SESSION_ID" \
+    --project "$REALM" \
+    --mood "pre-compact" \
+    --active_files "$files_json" \
+    --decisions "$decisions_json" \
+    --next_steps "$next_steps_json" \
+    --snapshot "$snapshot" 2>/dev/null; then
     echo "[checkpoint] $REALM: $SESSION_ID ($TRIGGER)" >&2
 else
     echo "[checkpoint] FAILED - state may be lost!" >&2
