@@ -2,12 +2,10 @@
 # Stop hook: Extract typed learnings, handle feedback, checkpoint
 #
 # HIGH PERFORMANCE: Uses queue for write ops (no blocking)
+# STORES IN SSL FORMAT for better recall
 #
 # Learning types extracted:
 #   [SOLUTION], [GOTCHA], [PREFERENCE], [DECISION], [FAILURE], [PATTERN], [LEARN]
-#
-# Feedback markers:
-#   [USED:uuid] - memory was helpful (strengthens)
 
 set -e
 
@@ -29,6 +27,58 @@ SESSION_ID_INPUT=$(echo "$INPUT" | jq -r '.session_id // empty')
 queue_write() {
     local tool="$1" args="$2"
     echo "{\"tool\":\"$tool\",\"args\":$args,\"ts\":$(date +%s)}" >> "$QUEUE_FILE"
+}
+
+# Convert to SSL format
+# Input: category, raw content
+# Output: SSL formatted string
+to_ssl() {
+    local category="$1"
+    local content="$2"
+
+    # Detect realm/domain from content or use default
+    local domain="partnership"
+    if echo "$content" | grep -qiE '(code|function|class|file|build|compile)'; then
+        domain="code"
+    elif echo "$content" | grep -qiE '(hook|daemon|queue|rpc|socket)'; then
+        domain="cc-soul"
+    fi
+
+    # Extract key parts using → notation
+    # Try to find pattern: subject verb/action object/result
+    local ssl_content
+
+    case "$category" in
+        solution)
+            # [domain] problem→solution @location
+            ssl_content="[$domain:sol] $content"
+            ;;
+        gotcha)
+            # [domain] trap→consequence
+            ssl_content="[$domain:gotcha] $content"
+            ;;
+        preference)
+            # [partnership] user→prefers→X
+            ssl_content="[partnership:pref] Antonio→$content"
+            ;;
+        decision)
+            # [domain] chose→X over Y→because Z
+            ssl_content="[$domain:dec] $content"
+            ;;
+        failure)
+            # [domain] tried→X→failed because Y
+            ssl_content="[$domain:fail] $content"
+            ;;
+        pattern)
+            # [domain] when X→do Y
+            ssl_content="[$domain:pat] $content"
+            ;;
+        *)
+            ssl_content="[$domain] $content"
+            ;;
+    esac
+
+    echo "$ssl_content"
 }
 
 # Map learning type to category
@@ -53,17 +103,20 @@ RESPONSE=$(tac "$TRANSCRIPT_PATH" | grep -m1 '"role":"assistant"' | \
 # Detect realm (quick CLI call with short timeout)
 REALM=$(timeout "$MAX_WAIT" "$CHITTA_BIN" realm_detect 2>/dev/null || echo "brahman")
 
-# Extract typed learnings → queue (no waiting)
+# Extract typed learnings → convert to SSL → queue
 LEARNED=0
 while IFS= read -r line; do
     if [[ "$line" =~ ^\[(SOLUTION|GOTCHA|PREFERENCE|DECISION|FAILURE|PATTERN|LEARN)\] ]]; then
         type="${BASH_REMATCH[1]}"
-        content="${line#\[$type\] }"
+        raw_content="${line#\[$type\] }"
         category=$(map_category "$type")
-        title=$(echo "$content" | head -c 100)
 
-        # Queue observe (fire-and-forget)
-        queue_write "observe" "{\"category\":\"$category\",\"title\":$(echo "$title" | jq -Rs .),\"content\":$(echo "$content" | jq -Rs .)}"
+        # Convert to SSL format
+        ssl_content=$(to_ssl "$category" "$raw_content")
+        title=$(echo "$ssl_content" | head -c 100)
+
+        # Queue observe with SSL-formatted content
+        queue_write "observe" "{\"category\":\"$category\",\"title\":$(echo "$title" | jq -Rs .),\"content\":$(echo "$ssl_content" | jq -Rs .)}"
         echo "[soul] +${type,,}: ${title:0:60}" >&2
         ((LEARNED++)) || true
     fi
