@@ -7,15 +7,19 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/subconscious.sh start"
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/subconscious.sh start",
+            "statusMessage": "awakening…"
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/simple-hook.sh start"
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/simple-hook.sh start",
+            "statusMessage": "recalling context…"
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/auto-index.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/auto-index.sh",
+            "statusMessage": "sensing codebase…",
+            "async": true
           }
         ]
       }
@@ -26,7 +30,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/simple-hook.sh prompt"
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/simple-hook.sh prompt",
+            "statusMessage": "resonating…"
           }
         ]
       }
@@ -37,7 +42,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/simple-hook.sh stop"
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/simple-hook.sh stop",
+            "statusMessage": "preserving state…"
           }
         ]
       }
@@ -48,7 +54,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/simple-hook.sh pre-compact"
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/simple-hook.sh pre-compact",
+            "statusMessage": "consolidating memory…"
           }
         ]
       }
@@ -60,7 +67,8 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/scripts/simple-hook.sh pre-tool Read",
-            "timeout": 5
+            "timeout": 5,
+            "statusMessage": "gathering context…"
           }
         ]
       },
@@ -70,7 +78,8 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/scripts/simple-hook.sh pre-tool Edit",
-            "timeout": 5
+            "timeout": 5,
+            "statusMessage": "checking patterns…"
           }
         ]
       }
@@ -82,7 +91,9 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/scripts/simple-hook.sh post-tool Edit",
-            "timeout": 5
+            "timeout": 5,
+            "statusMessage": "noting changes…",
+            "async": true
           }
         ]
       }
@@ -94,7 +105,8 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/scripts/simple-hook.sh post-failure",
-            "timeout": 5
+            "timeout": 5,
+            "statusMessage": "learning from error…"
           }
         ]
       }
