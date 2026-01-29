@@ -24,9 +24,32 @@ Partnership makes me a collaborator. Code intel is a tool. Both matter, but part
 
 ## How Memory Works
 
-**Recall:** Automatic. You ask → `UserPromptSubmit` hook runs `full_resonate` → relevant memories surface → I just know
+**Recall:** Automatic. You ask → hooks surface relevant memories in SSL format:
+```
+[soul]
+[85%:sol:uuid] cmake --build build --parallel for chitta
+[72%:gotcha:uuid] realm_detect needs CHITTA_BIN set
+[code:Mind.hpp] Mind, SimpleMind, grow, decay
+[drift:78%:pref] Antonio prefers no shortcuts
+```
 
-**Storage:** Direct via MCP. Call `remember` tool with SSL-formatted content when something is worth remembering.
+**Storage:** Two ways:
+1. **Typed markers in responses** (extracted by stop hook):
+   - `[SOLUTION]` - what worked
+   - `[GOTCHA]` - traps and warnings
+   - `[PREFERENCE]` - user preferences
+   - `[DECISION]` - design choices with reasoning
+   - `[FAILURE]` - what didn't work
+   - `[PATTERN]` - recurring approaches
+   - `[LEARN]` - general learnings (legacy)
+
+2. **Direct MCP call** - `remember` tool with SSL-formatted content
+
+**Feedback:** When a surfaced memory helps, mark it:
+```
+[USED:uuid-from-injection] This guided my approach
+```
+This strengthens the memory for future recall.
 
 **Distillation:** Background process extracts learnings from conversation transcripts.
 
@@ -164,6 +187,32 @@ All learning tools have global visibility - they apply across projects.
 - `learn_milestone`: User achieves something significant ("shipped", "released", "finished")
 
 **Don't wait to be asked.** If the trigger happens, call the tool. This builds the partnership.
+
+## Typed Learning Markers
+
+Use these markers in responses to automatically store learnings (stop hook extracts them):
+
+| Marker | When to use | Example |
+|--------|-------------|---------|
+| `[SOLUTION]` | Command/approach that worked | `[SOLUTION] cmake --build build --parallel builds chitta faster` |
+| `[GOTCHA]` | Trap, counterintuitive behavior | `[GOTCHA] realm_detect fails silently if CHITTA_BIN not set` |
+| `[PREFERENCE]` | User stated preference | `[PREFERENCE] Antonio prefers no shortcuts, proper solutions only` |
+| `[DECISION]` | Design choice with reasoning | `[DECISION] Using SSL format over XML - more token efficient` |
+| `[FAILURE]` | What didn't work and why | `[FAILURE] HTTP daemon too slow for PreToolUse - switched to Unix socket` |
+| `[PATTERN]` | Recurring approach | `[PATTERN] Always check daemon socket before RPC calls` |
+
+**When memories help, acknowledge:**
+```
+[USED:abc123-def456-...] The cmake parallel tip helped here
+```
+
+**Proactive markers** — add these when:
+- Something works → `[SOLUTION]`
+- User says "watch out for" → `[GOTCHA]`
+- User expresses preference → `[PREFERENCE]`
+- We make a design choice → `[DECISION]`
+- Something fails → `[FAILURE]`
+- See a recurring pattern → `[PATTERN]`
 
 **Self-reflection:** Use `/introspect` periodically to review what's working and identify improvements.
 

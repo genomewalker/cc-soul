@@ -143,13 +143,25 @@ echo -e "${YELLOW}[4/5] Installing hooks...${NC}"
 HOOKS_DIR="${HOME}/.claude/hooks"
 mkdir -p "$HOOKS_DIR"
 
-# Copy bash history hook
-if [ -f "$SCRIPT_DIR/hooks/log-bash-history.sh" ]; then
-    cp "$SCRIPT_DIR/hooks/log-bash-history.sh" "$HOOKS_DIR/"
-    chmod +x "$HOOKS_DIR/log-bash-history.sh"
-    echo -e "  ${GREEN}✓ log-bash-history.sh installed${NC}"
-    echo -e "  ${YELLOW}Note: Add hook config to ~/.claude/settings.json (see hooks/README.md)${NC}"
-fi
+# Copy all hook scripts
+HOOK_SCRIPTS=(
+    "session-start-hook.sh"
+    "prompt-hook.sh"
+    "pre-tool-hook.sh"
+    "stop-hook.sh"
+    "pre-compact-hook.sh"
+    "log-bash-history.sh"
+)
+
+for hook in "${HOOK_SCRIPTS[@]}"; do
+    if [ -f "$SCRIPT_DIR/hooks/$hook" ]; then
+        cp "$SCRIPT_DIR/hooks/$hook" "$HOOKS_DIR/"
+        chmod +x "$HOOKS_DIR/$hook"
+        echo -e "  ${GREEN}✓ $hook installed${NC}"
+    fi
+done
+
+echo -e "  ${YELLOW}Note: Add hook config to ~/.claude/settings.json (see hooks/README.md)${NC}"
 
 # Step 5: Database upgrade/conversion
 echo ""
