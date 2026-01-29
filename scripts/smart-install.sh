@@ -307,7 +307,7 @@ configure_hooks() {
     fi
 
     # Add hook configuration
-    local hook_config='{"matcher":"Bash","hooks":[{"type":"command","command":"~/.claude/hooks/log-bash-history.sh \"$CLAUDE_TOOL_INPUT_command\"","async":true}]}'
+    local hook_config='{"matcher":"Bash","hooks":[{"type":"command","command":"~/.claude/hooks/log-bash-history.sh \"$CLAUDE_TOOL_INPUT_command\" >/dev/null 2>&1","async":true,"statusMessage":"remembering…"}]}'
 
     local updated
     if echo "$current" | jq -e '.hooks.PostToolUse' &>/dev/null; then
