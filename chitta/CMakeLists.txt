@@ -251,14 +251,25 @@ if(nlohmann_json_FOUND)
     target_compile_definitions(chitta INTERFACE CHITTA_WITH_JSON=1)
     message(STATUS "nlohmann_json found via CONFIG")
 else()
-    # Try to find in conda environment
-    if(DEFINED ENV{CONDA_PREFIX})
+    # Check user-specified path first, then conda
+    if(NOT JSON_INCLUDE_DIR AND DEFINED ENV{CONDA_PREFIX})
         set(JSON_INCLUDE_DIR "$ENV{CONDA_PREFIX}/include")
-        if(EXISTS "${JSON_INCLUDE_DIR}/nlohmann/json.hpp")
-            target_include_directories(chitta INTERFACE ${JSON_INCLUDE_DIR})
-            target_compile_definitions(chitta INTERFACE CHITTA_WITH_JSON=1)
-            message(STATUS "nlohmann_json found at ${JSON_INCLUDE_DIR}")
-        endif()
+    endif()
+    if(JSON_INCLUDE_DIR AND EXISTS "${JSON_INCLUDE_DIR}/nlohmann/json.hpp")
+        target_include_directories(chitta INTERFACE ${JSON_INCLUDE_DIR})
+        target_compile_definitions(chitta INTERFACE CHITTA_WITH_JSON=1)
+        message(STATUS "nlohmann_json found at ${JSON_INCLUDE_DIR}")
+    else()
+        # Download via CPM as last resort
+        CPMAddPackage(
+            NAME nlohmann_json
+            VERSION 3.11.3
+            GITHUB_REPOSITORY nlohmann/json
+            OPTIONS "JSON_BuildTests OFF"
+        )
+        target_link_libraries(chitta INTERFACE nlohmann_json::nlohmann_json)
+        target_compile_definitions(chitta INTERFACE CHITTA_WITH_JSON=1)
+        message(STATUS "nlohmann_json downloaded via CPM")
     endif()
 endif()
 
