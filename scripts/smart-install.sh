@@ -267,6 +267,62 @@ configure_permissions() {
 create_directories() {
     mkdir -p "${HOME}/.claude/mind"
     mkdir -p "${HOME}/.claude/bin"
+    mkdir -p "${HOME}/.claude/hooks"
+}
+
+# Install hooks
+install_hooks() {
+    local hooks_src="$PLUGIN_DIR/hooks"
+    local hooks_dst="${HOME}/.claude/hooks"
+
+    # Copy bash history hook if not already installed
+    if [[ -f "$hooks_src/log-bash-history.sh" ]]; then
+        if [[ ! -f "$hooks_dst/log-bash-history.sh" ]] || \
+           ! cmp -s "$hooks_src/log-bash-history.sh" "$hooks_dst/log-bash-history.sh"; then
+            cp "$hooks_src/log-bash-history.sh" "$hooks_dst/"
+            chmod +x "$hooks_dst/log-bash-history.sh"
+            echo "[cc-soul] Installed log-bash-history.sh hook"
+        fi
+    fi
+}
+
+# Configure hooks in settings.json
+configure_hooks() {
+    local settings_file="${HOME}/.claude/settings.json"
+
+    # Needs jq for JSON manipulation
+    if ! command -v jq &> /dev/null; then
+        return 0
+    fi
+
+    # Skip if settings file doesn't exist
+    [[ ! -f "$settings_file" ]] && return 0
+
+    local current
+    current=$(cat "$settings_file")
+
+    # Check if bash history hook is already configured
+    if echo "$current" | jq -e '.hooks.PostToolUse[]? | select(.matcher == "Bash") | .hooks[]? | select(.command | contains("log-bash-history"))' &>/dev/null; then
+        return 0  # Already configured
+    fi
+
+    # Add hook configuration
+    local hook_config='{"matcher":"Bash","hooks":[{"type":"command","command":"~/.claude/hooks/log-bash-history.sh \"$CLAUDE_TOOL_INPUT_command\"","async":true}]}'
+
+    local updated
+    if echo "$current" | jq -e '.hooks.PostToolUse' &>/dev/null; then
+        # Append to existing PostToolUse array
+        updated=$(echo "$current" | jq --argjson hook "$hook_config" '.hooks.PostToolUse += [$hook]')
+    elif echo "$current" | jq -e '.hooks' &>/dev/null; then
+        # Add PostToolUse to existing hooks object
+        updated=$(echo "$current" | jq --argjson hook "$hook_config" '.hooks.PostToolUse = [$hook]')
+    else
+        # Create hooks object
+        updated=$(echo "$current" | jq --argjson hook "$hook_config" '.hooks = {"PostToolUse": [$hook]}')
+    fi
+
+    echo "$updated" | jq '.' > "$settings_file"
+    echo "[cc-soul] Configured bash history hook in settings.json"
 }
 
 # Stop any running daemon (gracefully via chittad shutdown, fallback to signals)
@@ -358,8 +414,14 @@ main() {
     # Create directories
     create_directories
 
+    # Install hooks
+    install_hooks
+
     # Configure bash permissions for chitta commands
     configure_permissions
+
+    # Configure hooks in settings.json
+    configure_hooks
 
     if ! validate_binaries; then
         echo "[cc-soul] ERROR: Installation incomplete (invalid binaries)" >&2

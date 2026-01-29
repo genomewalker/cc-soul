@@ -11,9 +11,11 @@
 #include <string>
 #include <vector>
 #include <atomic>
+#include <mutex>
 #include <cstddef>
 #include <cstdint>
 #include <unistd.h>
+#include <sys/eventfd.h>
 
 namespace chitta {
 
@@ -41,6 +43,12 @@ inline std::string pid_path_for_mind(const std::string& mind_path) {
 
 // Represents a pending request from a client
 struct ClientRequest {
+    int client_fd;
+    std::string data;
+};
+
+// Represents a pending response to send back
+struct PendingResponse {
     int client_fd;
     std::string data;
 };
@@ -90,6 +98,10 @@ public:
     // Send response back to client (queues for async write)
     void respond(int client_fd, const std::string& response);
 
+    // Thread-safe response queue (for async RPC completion)
+    void queue_response(int client_fd, std::string data);
+    std::vector<PendingResponse> drain_responses();
+
     // Statistics
     size_t connection_count() const { return connections_.size(); }
     size_t pending_writes() const;
@@ -100,7 +112,12 @@ public:
 private:
     std::string socket_path_;
     int server_fd_ = -1;
+    int wake_fd_ = -1;  // eventfd for waking poll() when responses ready
     std::vector<ClientConnection> connections_;
+
+    // Thread-safe response queue for async RPC
+    mutable std::mutex response_mutex_;
+    std::vector<PendingResponse> response_queue_;
 
     // Internal operations
     bool create_socket();

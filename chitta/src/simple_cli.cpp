@@ -11,6 +11,7 @@
 #include <chitta/mind/duckdb_mind.hpp>
 #include <chitta/mind/subconscious.hpp>
 #include <chitta/rpc/duckdb_handler.hpp>
+#include <chitta/rpc/thread_pool.hpp>
 #ifdef CHITTA_WITH_POSTGRES
 #include <chitta/mind/postgres_mind.hpp>
 #include <chitta/rpc/postgres_handler.hpp>
@@ -587,12 +588,19 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
         }
     });
 
-    // Main loop - handle socket I/O
-    while (daemon_running) {
-        auto requests = server.poll(100);
+    // Thread pool for async RPC handling (4 workers)
+    ThreadPool pool(4);
+    std::cerr << "[daemon] Thread pool started (" << pool.worker_count() << " workers)\n";
 
+    // Main loop - handle socket I/O (never blocks on RPC)
+    auto last_stats = std::chrono::steady_clock::now();
+    while (daemon_running) {
+        // 1. Poll for I/O (fast, non-blocking)
+        auto requests = server.poll(50);  // 50ms timeout for responsiveness
+
+        // 2. Dispatch RPC requests to thread pool
         for (const auto& req : requests) {
-            // Special commands
+            // Special commands (fast, handle directly)
             if (req.data == "stats") {
                 server.respond(req.client_fd, generate_stats(mind));
                 continue;
@@ -604,15 +612,66 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                 continue;
             }
 
-            // JSON-RPC requests
-            try {
-                auto request = json::parse(req.data);
-                auto response = handler.handle(request);
-                server.respond(req.client_fd, response.dump());
-            } catch (const std::exception& e) {
-                std::string error = R"({"jsonrpc":"2.0","error":{"code":-32700,"message":")"
-                                  + std::string(e.what()) + R"("},"id":null})";
+            // Parse request to extract method for tracing
+            auto parsed = json::parse(req.data, nullptr, false);
+            if (parsed.is_discarded()) {
+                std::string error = R"({"jsonrpc":"2.0","error":{"code":-32700,"message":"Parse error"},"id":null})";
                 server.respond(req.client_fd, error);
+                continue;
+            }
+
+            std::string method = parsed.value("method", "unknown");
+            std::string tool_name = method;
+
+            // Extract tool name for better tracing
+            if (method == "tools/call" && parsed.contains("params")) {
+                tool_name = parsed["params"].value("name", "unknown");
+            }
+
+            // Fast-path: health_check stays on main thread (always responsive)
+            if (tool_name == "health_check") {
+                auto response = handler.handle(parsed);
+                // Add pool stats to health_check
+                if (response.contains("result") && response["result"].contains("structured")) {
+                    response["result"]["structured"]["pool_workers"] = pool.worker_count();
+                    response["result"]["structured"]["pool_active"] = pool.active_count();
+                    response["result"]["structured"]["pool_pending"] = pool.pending();
+                }
+                server.respond(req.client_fd, response.dump());
+                continue;
+            }
+
+            // All other requests go to thread pool
+            pool.submit(req.client_fd, tool_name,
+                [&handler, data = req.data]() {
+                    auto request = json::parse(data);
+                    auto response = handler.handle(request);
+                    return response.dump();
+                },
+                [&server](int fd, std::string response) {
+                    server.queue_response(fd, std::move(response));
+                }
+            );
+        }
+
+        // 3. Write queued responses from thread pool (non-blocking)
+        for (const auto& resp : server.drain_responses()) {
+            server.respond(resp.client_fd, resp.data);
+        }
+
+        // 4. Log pool stats periodically (every 30s if there's activity)
+        auto now = std::chrono::steady_clock::now();
+        if (now - last_stats > std::chrono::seconds(30)) {
+            last_stats = now;
+            auto active = pool.get_active();
+            if (!active.empty() || pool.pending() > 0) {
+                std::cerr << "[pool] " << active.size() << " active, "
+                          << pool.pending() << " pending\n";
+                for (const auto& [method, ms] : active) {
+                    if (ms > 1000) {
+                        std::cerr << "[pool]   " << method << ": " << ms << "ms\n";
+                    }
+                }
             }
         }
     }

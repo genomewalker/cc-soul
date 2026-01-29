@@ -136,9 +136,24 @@ else
     echo -e "  ${GREEN}✓ Storage already linked${NC}"
 fi
 
-# Step 4: Database upgrade/conversion
+# Step 4: Install hooks
 echo ""
-echo -e "${YELLOW}[4/4] Checking database...${NC}"
+echo -e "${YELLOW}[4/5] Installing hooks...${NC}"
+
+HOOKS_DIR="${HOME}/.claude/hooks"
+mkdir -p "$HOOKS_DIR"
+
+# Copy bash history hook
+if [ -f "$SCRIPT_DIR/hooks/log-bash-history.sh" ]; then
+    cp "$SCRIPT_DIR/hooks/log-bash-history.sh" "$HOOKS_DIR/"
+    chmod +x "$HOOKS_DIR/log-bash-history.sh"
+    echo -e "  ${GREEN}✓ log-bash-history.sh installed${NC}"
+    echo -e "  ${YELLOW}Note: Add hook config to ~/.claude/settings.json (see hooks/README.md)${NC}"
+fi
+
+# Step 5: Database upgrade/conversion
+echo ""
+echo -e "${YELLOW}[5/5] Checking database...${NC}"
 
 # Upgrade to current version if needed
 if [ -f "${HOME}/.claude/mind/chitta.hot" ]; then
