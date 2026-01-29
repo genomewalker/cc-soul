@@ -588,9 +588,114 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
         }
     });
 
+    // Queue processor thread - handles fire-and-forget writes from hooks
+    std::atomic<size_t> queue_count{0};
+    std::string queue_path = "/tmp/chitta-queue.jsonl";
+    std::thread queue_processor([&]() {
+        while (daemon_running) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+            // Check if queue file exists
+            std::ifstream check(queue_path);
+            if (!check.good()) continue;
+            check.close();
+
+            // Atomically read and truncate queue
+            std::vector<std::string> lines;
+            {
+                std::ifstream in(queue_path);
+                std::string line;
+                while (std::getline(in, line)) {
+                    if (!line.empty()) lines.push_back(line);
+                }
+            }
+
+            if (lines.empty()) continue;
+
+            // Truncate file
+            std::ofstream(queue_path, std::ios::trunc).close();
+
+            // Process each queued request
+            for (const auto& line : lines) {
+                if (!daemon_running) break;
+
+                try {
+                    auto j = json::parse(line);
+                    std::string tool = j.value("tool", "");
+                    auto args = j.value("args", json::object());
+
+                    if (tool == "observe") {
+                        std::string category = args.value("category", "wisdom");
+                        std::string title = args.value("title", "");
+                        std::string content = args.value("content", "");
+                        if (!content.empty()) {
+                            NodeType type = NodeType::Wisdom;
+                            if (category == "episode") type = NodeType::Episode;
+                            else if (category == "belief") type = NodeType::Belief;
+                            std::string full_text = title.empty() ? content : title + "\n" + content;
+                            mind.remember(full_text, type);
+                            queue_count++;
+                        }
+                    } else if (tool == "strengthen") {
+                        std::string id_str = args.value("id", "");
+                        double amount = args.value("amount", 0.1);
+                        if (!id_str.empty()) {
+                            try {
+                                int64_t db_id = std::stoll(id_str);
+                                mind.store().strengthen(db_id, static_cast<float>(amount));
+                                queue_count++;
+                            } catch (...) {
+                                // Skip invalid IDs (UUIDs not yet supported in queue)
+                            }
+                        }
+                    } else if (tool == "ledger_save") {
+                        std::string session_id = args.value("session_id", "");
+                        std::string project = args.value("project", "");
+                        std::string mood = args.value("mood", "working");
+                        std::string snapshot = args.value("snapshot", "");
+                        if (!session_id.empty()) {
+                            LedgerEntry entry;
+                            entry.session_id = session_id;
+                            entry.project = project;
+                            entry.mood = mood;
+                            entry.snapshot = snapshot;
+                            mind.store().save_ledger(entry);
+                            queue_count++;
+                        }
+                    } else if (tool == "connect") {
+                        std::string subj = args.value("subject", "");
+                        std::string pred = args.value("predicate", "");
+                        std::string obj = args.value("object", "");
+                        if (!subj.empty() && !pred.empty() && !obj.empty()) {
+                            mind.connect(subj, pred, obj);
+                            queue_count++;
+                        }
+                    } else if (tool == "transcript_register") {
+                        std::string session_id = args.value("session_id", "");
+                        std::string path = args.value("transcript_path", "");
+                        std::string realm = args.value("realm", "brahman");
+                        if (!path.empty()) {
+                            mind.store().register_transcript(session_id, path, realm);
+                            queue_count++;
+                        }
+                    }
+                } catch (const std::exception& e) {
+                    if (verbose_mode) {
+                        std::cerr << "[queue] Error processing: " << e.what() << "\n";
+                    }
+                }
+            }
+
+            if (verbose_mode && !lines.empty()) {
+                std::cerr << "[queue] Processed " << lines.size() << " items, total=" << queue_count << "\n";
+            }
+        }
+    });
+
     // Thread pool for async RPC handling (4 workers)
     ThreadPool pool(4);
     std::cerr << "[daemon] Thread pool started (" << pool.worker_count() << " workers)\n";
+    std::cerr << "[daemon] Queue processor started (path=" << queue_path << ")\n";
 
     // Main loop - handle socket I/O (never blocks on RPC)
     auto last_stats = std::chrono::steady_clock::now();
@@ -679,6 +784,7 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
     maintenance.join();
     if (distillation.joinable()) distillation.join();
     if (enrichment.joinable()) enrichment.join();
+    if (queue_processor.joinable()) queue_processor.join();
     subconscious.stop();
     server.stop();
 
@@ -689,6 +795,7 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
     std::cerr << "[daemon] Stopped (cycles=" << cycle_count
               << ", distilled=" << distill_count
               << ", enriched=" << enrich_count
+              << ", queued=" << queue_count
               << ", subconscious_events=" << sc_stats.events_processed.load()
               << ", corrections=" << sc_stats.corrections_detected.load()
               << ", preferences=" << sc_stats.preferences_detected.load() << ")\n";
