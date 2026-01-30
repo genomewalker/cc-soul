@@ -394,6 +394,42 @@ bool DuckDBStore::create_schema() {
         return false;
     }
 
+    // Migration: Ensure transcript_state has PRIMARY KEY on session_id
+    // Old tables might exist without the constraint
+    {
+        auto result = read_query(
+            "SELECT constraint_type FROM information_schema.table_constraints "
+            "WHERE table_name = 'transcript_state' AND constraint_type = 'PRIMARY KEY'"
+        );
+        bool has_pk = false;
+        if (result && !result->HasError()) {
+            auto chunk = result->Fetch();
+            has_pk = chunk && chunk->size() > 0;
+        }
+        if (!has_pk) {
+            std::cerr << "[DuckDBStore] Migrating transcript_state to add PRIMARY KEY\n";
+            // Backup existing data
+            write_execute("CREATE TABLE transcript_state_backup AS SELECT * FROM transcript_state");
+            // Drop old table
+            write_execute("DROP TABLE transcript_state");
+            // Recreate with PRIMARY KEY
+            write_execute(R"(
+                CREATE TABLE transcript_state (
+                    session_id VARCHAR PRIMARY KEY,
+                    transcript_path VARCHAR NOT NULL,
+                    realm VARCHAR DEFAULT 'default',
+                    last_processed_line BIGINT DEFAULT 0,
+                    last_distilled_at BIGINT DEFAULT 0,
+                    created_at BIGINT NOT NULL
+                )
+            )");
+            // Restore data
+            write_execute("INSERT INTO transcript_state SELECT * FROM transcript_state_backup");
+            write_execute("DROP TABLE transcript_state_backup");
+            std::cerr << "[DuckDBStore] Migration complete\n";
+        }
+    }
+
     // Indexes for transcript queries
     write_execute("CREATE INDEX IF NOT EXISTS idx_transcript_realm ON transcript_state(realm)");
 
@@ -627,14 +663,20 @@ bool DuckDBStore::create_vector_index() {
 bool DuckDBStore::write_execute(const std::string& sql) {
     std::lock_guard lock(write_mutex_);
     try {
+        if (!write_conn_) {
+            std::cerr << "[DuckDBStore] write_conn_ is null!\n";
+            return false;
+        }
         auto result = write_conn_->Query(sql);
         if (result->HasError()) {
             std::cerr << "[DuckDBStore] Query error: " << result->GetError() << "\n";
+            std::cerr << "[DuckDBStore] SQL: " << sql.substr(0, 200) << "\n";
             return false;
         }
         return true;
     } catch (const std::exception& e) {
         std::cerr << "[DuckDBStore] Exception: " << e.what() << "\n";
+        std::cerr << "[DuckDBStore] SQL: " << sql.substr(0, 200) << "\n";
         return false;
     }
 }
@@ -2674,15 +2716,18 @@ bool DuckDBStore::register_transcript(const std::string& session_id, const std::
 
     Timestamp now_ts = now();
 
-    // Use INSERT OR REPLACE to update if exists
+    // Use ON CONFLICT for upsert (more reliable than INSERT OR REPLACE)
     std::ostringstream sql;
-    sql << "INSERT OR REPLACE INTO transcript_state "
+    sql << "INSERT INTO transcript_state "
         << "(session_id, transcript_path, realm, last_processed_line, last_distilled_at, created_at) "
         << "VALUES ("
         << "'" << escape(session_id) << "', "
         << "'" << escape(transcript_path) << "', "
         << "'" << escape(realm.empty() ? "default" : realm) << "', "
-        << "0, 0, " << now_ts << ")";
+        << "0, 0, " << now_ts << ") "
+        << "ON CONFLICT (session_id) DO UPDATE SET "
+        << "transcript_path = EXCLUDED.transcript_path, "
+        << "realm = EXCLUDED.realm";
 
     return write_execute(sql.str());
 }

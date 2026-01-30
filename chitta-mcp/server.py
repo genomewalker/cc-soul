@@ -109,12 +109,34 @@ def ensure_daemon() -> bool:
     if client.connect():
         return True
 
-    # Try to start daemon
+    # Only try to start daemon if socket doesn't exist (no other daemon running)
+    # This prevents multiple spawn attempts from different MCP servers
+    if os.path.exists(socket_path):
+        # Socket exists but can't connect - daemon might be busy or starting
+        # Wait and retry instead of spawning new daemon
+        import time
+        for _ in range(30):
+            time.sleep(0.1)
+            if client.connect():
+                return True
+        return False
+
+    # No socket - safe to start daemon
+    lock_path = socket_path.replace(".sock", ".lock")
+    if os.path.exists(lock_path):
+        # Lock exists - another process is starting daemon
+        import time
+        for _ in range(50):
+            time.sleep(0.1)
+            if client.connect():
+                return True
+        return False
+
     chittad = os.path.join(os.environ.get("HOME", ""), ".claude", "bin", "chittad")
     if os.path.exists(chittad):
         os.system(f"{chittad} daemon >/dev/null 2>&1 &")
+        import time
         for _ in range(50):
-            import time
             time.sleep(0.1)
             if client.connect():
                 return True

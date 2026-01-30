@@ -248,10 +248,18 @@ bool run_distillation(DuckDBMind& mind, const TranscriptState& state,
                         content = msg_content.get<std::string>();
                     } else if (msg_content.is_array()) {
                         for (const auto& block : msg_content) {
-                            if (block.contains("text")) {
+                            std::string block_type = block.value("type", "");
+                            // Extract text blocks
+                            if (block_type == "text" && block.contains("text")) {
                                 if (!content.empty()) content += "\n";
                                 content += block["text"].get<std::string>();
                             }
+                            // Extract thinking blocks (valuable reasoning)
+                            else if (block_type == "thinking" && block.contains("thinking")) {
+                                if (!content.empty()) content += "\n";
+                                content += "<thinking>\n" + block["thinking"].get<std::string>() + "\n</thinking>";
+                            }
+                            // Skip tool_use, tool_result - just noise for distillation
                         }
                     }
                 }
