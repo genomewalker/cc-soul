@@ -749,8 +749,8 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
         }
     });
 
-    // Thread pool for async RPC handling (4 workers)
-    ThreadPool pool(4);
+    // Thread pool for async RPC handling (scales 2-16 workers based on load)
+    ThreadPool pool(2, 16);
     std::cerr << "[daemon] Thread pool started (" << pool.worker_count() << " workers)\n";
     std::cerr << "[daemon] Queue processor started (path=" << queue_path << ")\n";
 

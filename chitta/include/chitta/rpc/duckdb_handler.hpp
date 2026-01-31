@@ -3555,27 +3555,33 @@ private:
 
     // Maintenance tool implementations
     DuckDBToolResult tool_health_check(const json&) {
-        auto health = mind_->store().health();
+        // Fast health check - no database queries to avoid blocking
+        // Uses cached stats from last update (updated every maintenance cycle)
+        bool is_open = mind_->store().is_open();
+        bool yantra = mind_->has_yantra();
+
+        // Get cached stats (non-blocking)
+        auto cached = mind_->store().cached_health();
 
         std::ostringstream ss;
         ss << "Health Check:\n";
-        ss << "  Status: " << (health.is_open ? "OK" : "ERROR") << "\n";
-        ss << "  Memories: " << health.total_memories << "\n";
-        ss << "  Symbols: " << health.total_symbols << "\n";
-        ss << "  Triplets: " << health.total_triplets << "\n";
-        ss << "  Avg Confidence: " << health.avg_confidence << "\n";
-        ss << "  Yantra: " << (mind_->has_yantra() ? "ready" : "not attached") << "\n";
+        ss << "  Status: " << (is_open ? "OK" : "ERROR") << "\n";
+        ss << "  Memories: " << cached.total_memories << "\n";
+        ss << "  Symbols: " << cached.total_symbols << "\n";
+        ss << "  Triplets: " << cached.total_triplets << "\n";
+        ss << "  Avg Confidence: " << cached.avg_confidence << "\n";
+        ss << "  Yantra: " << (yantra ? "ready" : "not attached") << "\n";
 
         return DuckDBToolResult::ok(ss.str(), {
-            {"status", health.is_open ? "ok" : "error"},
+            {"status", is_open ? "ok" : "error"},
             {"software_version", CHITTA_VERSION},
             {"protocol_major", CHITTA_PROTOCOL_VERSION_MAJOR},
             {"protocol_minor", CHITTA_PROTOCOL_VERSION_MINOR},
-            {"memories", health.total_memories},
-            {"symbols", health.total_symbols},
-            {"triplets", health.total_triplets},
-            {"avg_confidence", health.avg_confidence},
-            {"yantra_ready", mind_->has_yantra()}
+            {"memories", cached.total_memories},
+            {"symbols", cached.total_symbols},
+            {"triplets", cached.total_triplets},
+            {"avg_confidence", cached.avg_confidence},
+            {"yantra_ready", yantra}
         });
     }
 

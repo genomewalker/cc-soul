@@ -18,7 +18,9 @@
         "./skills/health",
         "./skills/init",
         "./skills/introspect",
+        "./skills/long-task",
         "./skills/migrate",
+        "./skills/ralph",
         "./skills/resume",
         "./skills/ultrathink",
         "./skills/yajña"

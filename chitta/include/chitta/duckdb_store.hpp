@@ -51,7 +51,8 @@ public:
     };
 
     // Acquire a connection (creates new if pool empty and under limit)
-    ScopedConnection acquire() {
+    // Returns connection or throws if timeout (prevents infinite blocking)
+    ScopedConnection acquire(std::chrono::milliseconds timeout = std::chrono::milliseconds(5000)) {
         std::unique_lock lock(mutex_);
 
         if (!pool_.empty()) {
@@ -66,8 +67,14 @@ public:
             return ScopedConnection(*this, std::make_unique<duckdb::Connection>(db_));
         }
 
-        // Wait for a connection to be returned
-        cv_.wait(lock, [this] { return !pool_.empty(); });
+        // Wait for a connection with timeout (prevents indefinite blocking)
+        if (!cv_.wait_for(lock, timeout, [this] { return !pool_.empty(); })) {
+            // Timeout - create emergency connection to prevent deadlock
+            // This temporarily exceeds max_size but prevents complete stall
+            created_++;
+            lock.unlock();
+            return ScopedConnection(*this, std::make_unique<duckdb::Connection>(db_));
+        }
         auto conn = std::move(pool_.front());
         pool_.pop();
         return ScopedConnection(*this, std::move(conn));
@@ -136,6 +143,7 @@ struct StoreHealth {
     size_t total_triplets = 0;
     float avg_confidence = 0.0f;
     bool is_open = false;
+    int64_t cached_at = 0;  // Timestamp when cached (0 = never)
 };
 
 // Ledger entry for session continuity
@@ -444,7 +452,9 @@ public:
     bool add_call(int64_t caller_id, int64_t callee_id);
 
     // Health and stats
-    StoreHealth health();
+    StoreHealth health();           // Full health check (runs queries, may block)
+    StoreHealth cached_health();    // Non-blocking: returns cached stats
+    void update_health_cache();     // Update the cache (call periodically)
     size_t memory_count();
     size_t triplet_count();
     size_t symbol_count();
@@ -673,6 +683,10 @@ private:
     bool vss_loaded_ = false;
     bool pgq_loaded_ = false;
     bool fts_loaded_ = false;
+
+    // Cached health for non-blocking health_check
+    mutable StoreHealth cached_health_;
+    mutable std::mutex health_cache_mutex_;
 
     // Separate embeddings database (no write contention with main DB)
     std::unique_ptr<duckdb::DuckDB> emb_db_;

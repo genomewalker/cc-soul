@@ -32,9 +32,10 @@ struct RequestTrace {
 
 class ThreadPool {
 public:
-    explicit ThreadPool(size_t num_threads = 4) : stop_(false) {
-        for (size_t i = 0; i < num_threads; ++i) {
-            workers_.emplace_back([this] { worker_loop(); });
+    explicit ThreadPool(size_t min_threads = 2, size_t max_threads = 16)
+        : stop_(false), min_workers_(min_threads), max_workers_(max_threads) {
+        for (size_t i = 0; i < min_threads; ++i) {
+            spawn_worker();
         }
         watchdog_ = std::thread([this] { watchdog_loop(); });
     }
@@ -70,11 +71,21 @@ public:
             active_[id] = {id, method, std::chrono::steady_clock::now()};
         }
 
+        size_t queue_size;
+        size_t worker_count;
         {
             std::lock_guard<std::mutex> lock(queue_mutex_);
             tasks_.push({id, client_fd, std::move(task), std::move(on_complete)});
+            queue_size = tasks_.size();
+            worker_count = num_workers_.load();
         }
         condition_.notify_one();
+
+        // Scale up if queue is growing (more pending than workers)
+        if (queue_size > worker_count && worker_count < max_workers_) {
+            spawn_worker();
+        }
+
         return id;
     }
 
@@ -103,10 +114,21 @@ public:
     }
 
     size_t worker_count() const {
-        return workers_.size();
+        return num_workers_.load();
+    }
+
+    size_t max_workers() const {
+        return max_workers_;
     }
 
 private:
+    void spawn_worker() {
+        std::lock_guard<std::mutex> lock(workers_mutex_);
+        if (num_workers_.load() >= max_workers_) return;
+
+        workers_.emplace_back([this] { worker_loop(); });
+        num_workers_.fetch_add(1);
+    }
     struct Task {
         uint64_t id;
         int client_fd;
@@ -177,9 +199,13 @@ private:
     std::thread watchdog_;
     std::queue<Task> tasks_;
     mutable std::mutex queue_mutex_;
+    mutable std::mutex workers_mutex_;
     std::condition_variable condition_;
     std::atomic<bool> stop_;
     std::atomic<uint64_t> next_id_{1};
+    std::atomic<size_t> num_workers_{0};
+    size_t min_workers_;
+    size_t max_workers_;
 
     mutable std::mutex trace_mutex_;
     std::unordered_map<uint64_t, RequestTrace> active_;
