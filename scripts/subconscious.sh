@@ -10,7 +10,7 @@ PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
 
 # Binaries are installed to ~/.claude/bin/ by setup.sh
 CHITTA_CLI="${HOME}/.claude/bin/chittad"
-MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind/chitta}"
+MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
 MODEL_PATH="${HOME}/.claude/bin/model.onnx"
 VOCAB_PATH="${HOME}/.claude/bin/vocab.txt"
 LOG_FILE="${HOME}/.claude/mind/.subconscious.log"
@@ -119,16 +119,27 @@ kill_unresponsive() {
 }
 
 cmd_start() {
-    if is_running; then
-        # Process exists, but is it responsive?
-        if is_responsive; then
-            # Healthy daemon, nothing to do
-            return 0
-        else
-            # Process running but not responding - kill it
-            kill_unresponsive
-            # Fall through to start fresh
+    # First: kill ALL existing daemon processes to ensure clean state
+    # This prevents multiple daemons from accumulating
+    local existing_pids
+    existing_pids=$(pgrep -f "chittad daemon" 2>/dev/null || true)
+    if [[ -n "$existing_pids" ]]; then
+        # Check if any are responsive
+        if [[ -S "$SOCKET_PATH" ]]; then
+            local response
+            response=$(echo "stats" | timeout 2 nc -U "$SOCKET_PATH" 2>/dev/null || true)
+            if [[ -n "$response" && "$response" == *"nodes"* ]]; then
+                # Healthy daemon exists, nothing to do
+                return 0
+            fi
         fi
+        # Kill all existing daemons (stale/unresponsive)
+        echo "[subconscious] Cleaning up existing daemon(s): $existing_pids" >&2
+        for pid in $existing_pids; do
+            kill -9 "$pid" 2>/dev/null || true
+        done
+        rm -f "$SOCKET_PATH" "$PID_FILE" "$LOCK_FILE" 2>/dev/null || true
+        sleep 1
     fi
 
     if [[ ! -x "$CHITTA_CLI" ]]; then
@@ -136,7 +147,35 @@ cmd_start() {
         return 0  # Don't block session, just warn
     fi
 
-    # Daemon handles its own locking via fcntl - no need for flock here
+    # Atomic lock to prevent race conditions
+    # Use mkdir which is atomic on POSIX systems
+    local lock_dir="/tmp/chitta-${MIND_HASH}.startlock"
+    if ! mkdir "$lock_dir" 2>/dev/null; then
+        # Another process is starting - wait for it
+        echo "[subconscious] Another process is starting daemon, waiting..." >&2
+        for _ in {1..50}; do
+            sleep 0.1
+            if [[ -S "$SOCKET_PATH" ]]; then
+                local response
+                response=$(echo "stats" | timeout 2 nc -U "$SOCKET_PATH" 2>/dev/null || true)
+                if [[ -n "$response" && "$response" == *"nodes"* ]]; then
+                    return 0
+                fi
+            fi
+        done
+        # Timed out waiting, clean stale lock if old
+        if [[ -d "$lock_dir" ]]; then
+            local lock_age
+            lock_age=$(( $(date +%s) - $(stat -c %Y "$lock_dir" 2>/dev/null || echo 0) ))
+            if (( lock_age > 30 )); then
+                rmdir "$lock_dir" 2>/dev/null || true
+            fi
+        fi
+        return 1
+    fi
+
+    # We hold the lock - ensure cleanup on exit
+    trap 'rmdir "$lock_dir" 2>/dev/null || true' EXIT
 
     # Detect supported daemon flags (avoid incompatible binaries)
     local daemon_help
@@ -154,8 +193,6 @@ cmd_start() {
     if [[ "$support_interval" == "true" ]]; then
         daemon_args+=("--interval" "$INTERVAL")
     fi
-    # Daemon self-daemonizes and logs to ~/.claude/mind/.subconscious.log by default
-    # No need for nohup wrapper or --pid-file (PID is written to /tmp/chitta-HASH.pid)
 
     # Start daemon - it will fork and return immediately
     "$CHITTA_CLI" "${daemon_args[@]}" 2>>"$LOG_FILE"
@@ -193,6 +230,10 @@ cmd_start() {
         sleep 0.1
     done
 
+    # Release lock
+    rmdir "$lock_dir" 2>/dev/null || true
+    trap - EXIT
+
     if $daemon_ready && is_running; then
         local pid=$(cat "$PID_FILE" 2>/dev/null || pgrep -f "chittad daemon" | head -1)
         echo "[subconscious] Started (pid=$pid, socket=$SOCKET_PATH, heartbeat=ok)"
@@ -203,8 +244,14 @@ cmd_start() {
 }
 
 cmd_stop() {
+    # Clean up any stale lock directories first
+    local lock_dir="/tmp/chitta-${MIND_HASH}.startlock"
+    rmdir "$lock_dir" 2>/dev/null || true
+
     if ! is_running; then
-        echo "[subconscious] Not running"
+        # Also clean up sockets/files even if not running
+        rm -f "$SOCKET_PATH" "$PID_FILE" "$LOCK_FILE" 2>/dev/null || true
+        echo "[subconscious] Not running (cleaned up stale files)"
         return 0
     fi
 
@@ -230,7 +277,7 @@ cmd_stop() {
     for i in {1..10}; do
         if ! is_running; then
             echo "[subconscious] Stopped"
-            rm -f "$PID_FILE"
+            rm -f "$PID_FILE" "$SOCKET_PATH" "$LOCK_FILE" 2>/dev/null || true
             return 0
         fi
         sleep 0.5
@@ -240,7 +287,7 @@ cmd_stop() {
     for pid in $pids; do
         kill -9 "$pid" 2>/dev/null || true
     done
-    rm -f "$PID_FILE"
+    rm -f "$PID_FILE" "$SOCKET_PATH" "$LOCK_FILE" 2>/dev/null || true
     echo "[subconscious] Force stopped"
 }
 
