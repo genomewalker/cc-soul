@@ -1610,6 +1610,34 @@ TOOLS = [
         }
     ),
     Tool(
+        name="transcript_search",
+        description="Semantic search across transcript content not yet in memory. Finds relevant passages using embedding similarity.",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "description": "Max results (default: 10)",
+                                "type": "integer"
+                        },
+                        "min_similarity": {
+                                "description": "Minimum cosine similarity 0-1 (default: 0.3)",
+                                "type": "number"
+                        },
+                        "query": {
+                                "description": "Search query",
+                                "type": "string"
+                        },
+                        "session_id": {
+                                "description": "Specific session to search (optional, searches all if omitted)",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "query"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
         name="distill_status",
         description="Get distillation system status: transcripts, realms, pending work",
         inputSchema={

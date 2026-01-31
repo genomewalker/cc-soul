@@ -1239,6 +1239,22 @@ private:
         handlers_["transcript_parse"] = [this](const json& p) { return tool_transcript_parse(p); };
 
         tools_.push_back({
+            {"name", "transcript_search"},
+            {"description", "Semantic search across transcript content not yet in memory. Finds relevant passages using embedding similarity."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"query", {{"type", "string"}, {"description", "Search query"}}},
+                    {"session_id", {{"type", "string"}, {"description", "Specific session to search (optional, searches all if omitted)"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Max results (default: 10)"}}},
+                    {"min_similarity", {{"type", "number"}, {"description", "Minimum cosine similarity 0-1 (default: 0.3)"}}}
+                }},
+                {"required", {"query"}}
+            }}
+        });
+        handlers_["transcript_search"] = [this](const json& p) { return tool_transcript_search(p); };
+
+        tools_.push_back({
             {"name", "distill_status"},
             {"description", "Get distillation system status: transcripts, realms, pending work"},
             {"inputSchema", {
@@ -5247,6 +5263,163 @@ private:
             {"turns_count", turns_json.size()},
             {"last_line", last_line},
             {"ready", true}
+        });
+    }
+
+    DuckDBToolResult tool_transcript_search(const json& params) {
+        std::string query = params.value("query", "");
+        std::string session_id = params.value("session_id", "");
+        size_t limit = params.value("limit", 10);
+        float min_similarity = params.value("min_similarity", 0.3f);
+
+        if (query.empty()) {
+            return DuckDBToolResult::error("query is required");
+        }
+
+        // Check embedder is ready
+        if (!mind_->embedder_ready()) {
+            return DuckDBToolResult::error("Embedder not ready");
+        }
+
+        // Generate embedding for query
+        Artha query_artha = mind_->embedder().transform(query);
+        const std::vector<float>& query_embedding = query_artha.nu.data;
+
+        // Helper to compute cosine similarity
+        auto cosine_similarity = [](const std::vector<float>& a, const std::vector<float>& b) -> float {
+            if (a.size() != b.size() || a.empty()) return 0.0f;
+            float dot = 0, norm_a = 0, norm_b = 0;
+            for (size_t i = 0; i < a.size(); ++i) {
+                dot += a[i] * b[i];
+                norm_a += a[i] * a[i];
+                norm_b += b[i] * b[i];
+            }
+            float denom = std::sqrt(norm_a) * std::sqrt(norm_b);
+            return denom > 0 ? dot / denom : 0.0f;
+        };
+
+        // Get transcripts to search
+        std::vector<TranscriptState> transcripts;
+        if (!session_id.empty()) {
+            auto state = mind_->store().get_transcript(session_id);
+            if (state) transcripts.push_back(*state);
+        } else {
+            transcripts = mind_->store().get_pending_transcripts();
+        }
+
+        if (transcripts.empty()) {
+            return DuckDBToolResult::error("No transcripts found");
+        }
+
+        // Structure to hold search results
+        struct SearchResult {
+            std::string session_id;
+            std::string realm;
+            std::string role;
+            std::string content;
+            int64_t line;
+            float similarity;
+        };
+        std::vector<SearchResult> results;
+
+        // Search each transcript
+        for (const auto& state : transcripts) {
+            std::ifstream file(state.transcript_path);
+            if (!file) continue;
+
+            std::string line;
+            int64_t current_line = 0;
+
+            while (std::getline(file, line)) {
+                current_line++;
+                if (line.empty()) continue;
+
+                try {
+                    auto entry = json::parse(line);
+                    std::string type = entry.value("type", "");
+                    if (type != "user" && type != "assistant") continue;
+
+                    std::string content;
+                    if (entry.contains("message")) {
+                        auto& msg = entry["message"];
+                        if (msg.contains("content")) {
+                            auto& msg_content = msg["content"];
+                            if (msg_content.is_string()) {
+                                content = msg_content.get<std::string>();
+                            } else if (msg_content.is_array()) {
+                                for (const auto& block : msg_content) {
+                                    if (block.contains("text")) {
+                                        if (!content.empty()) content += "\n";
+                                        content += block["text"].get<std::string>();
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (content.empty() || content.size() < 20) continue;
+
+                    // Truncate very long content for embedding
+                    std::string embed_content = content;
+                    if (embed_content.size() > 2000) {
+                        embed_content = embed_content.substr(0, 2000);
+                    }
+
+                    // Generate embedding and compute similarity
+                    Artha content_artha = mind_->embedder().transform(embed_content);
+                    const std::vector<float>& content_embedding = content_artha.nu.data;
+
+                    float sim = cosine_similarity(query_embedding, content_embedding);
+                    if (sim >= min_similarity) {
+                        results.push_back({
+                            state.session_id,
+                            state.realm,
+                            type,
+                            content.size() > 500 ? content.substr(0, 500) + "..." : content,
+                            current_line,
+                            sim
+                        });
+                    }
+                } catch (...) {
+                    continue;
+                }
+            }
+        }
+
+        // Sort by similarity (descending)
+        std::sort(results.begin(), results.end(),
+            [](const SearchResult& a, const SearchResult& b) { return a.similarity > b.similarity; });
+
+        // Limit results
+        if (results.size() > limit) {
+            results.resize(limit);
+        }
+
+        // Build response
+        json results_json = json::array();
+        for (const auto& r : results) {
+            results_json.push_back({
+                {"session_id", r.session_id},
+                {"realm", r.realm},
+                {"role", r.role},
+                {"content", r.content},
+                {"line", r.line},
+                {"similarity", r.similarity}
+            });
+        }
+
+        std::ostringstream ss;
+        ss << "Found " << results.size() << " matching passages\n";
+        if (!results.empty()) {
+            ss << "Top match: " << results[0].content.substr(0, 100) << "...\n";
+            ss << "  Similarity: " << std::fixed << std::setprecision(2) << results[0].similarity;
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"query", query},
+            {"results", results_json},
+            {"count", results.size()},
+            {"transcripts_searched", transcripts.size()}
         });
     }
 
