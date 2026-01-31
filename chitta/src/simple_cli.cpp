@@ -36,6 +36,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 
 using namespace chitta;
 using json = nlohmann::json;
@@ -322,19 +323,24 @@ bool run_distillation(DuckDBMind& mind, const TranscriptState& state,
             }
         }
 
-        // Execute script
-        std::string cmd = config.script_path + " " + temp_path + " 2>&1";
-        int result = std::system(cmd.c_str());
-
-        // Cleanup
-        std::remove(temp_path.c_str());
-
-        if (result != 0) {
+        // Execute script non-blocking (fire and forget)
+        // Script is responsible for cleanup of temp file
+        pid_t pid = fork();
+        if (pid == 0) {
+            // Child process - detach and run script
+            setsid();
+            std::string cmd = config.script_path + " " + temp_path + " >/dev/null 2>&1; rm -f " + temp_path;
+            execl("/bin/sh", "sh", "-c", cmd.c_str(), nullptr);
+            _exit(1);
+        } else if (pid < 0) {
+            // Fork failed, cleanup
+            std::remove(temp_path.c_str());
             if (verbose_mode) {
-                std::cerr << "[distill] Script failed for " << state.session_id << "\n";
+                std::cerr << "[distill] Fork failed for " << state.session_id << "\n";
             }
             return false;
         }
+        // Parent continues immediately - don't wait
     }
 
     // Update progress (using thread-safe methods)
@@ -567,38 +573,64 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                             ofs << "MODEL=" << enrich_config.model << "\n";
                         }
 
-                        // Run enrichment script
-                        std::string cmd = enrich_config.script_path + " " + tmp_file + " 2>&1";
-                        FILE* pipe = popen(cmd.c_str(), "r");
-                        if (pipe) {
-                            char buffer[256];
-                            std::string output;
-                            while (fgets(buffer, sizeof(buffer), pipe)) {
-                                output += buffer;
-                            }
-                            int status = pclose(pipe);
-
-                            // Parse memory ID from output
-                            size_t pos = output.find("MEMORY_ID=");
-                            if (pos != std::string::npos && status == 0) {
-                                std::string id_str = output.substr(pos + 10);
-                                size_t nl = id_str.find('\n');
-                                if (nl != std::string::npos) id_str = id_str.substr(0, nl);
-
-                                try {
-                                    int64_t memory_id = std::stoll(id_str);
-                                    mind.store().set_symbol_memory(sym.id, memory_id);
-                                    processed++;
-                                    enrich_count++;
-                                } catch (...) {}
+                        // Run enrichment script non-blocking with timeout
+                        std::string out_file = tmp_file + ".out";
+                        pid_t pid = fork();
+                        if (pid == 0) {
+                            // Child - run script with output capture
+                            std::string cmd = enrich_config.script_path + " " + tmp_file + " > " + out_file + " 2>&1";
+                            execl("/bin/sh", "sh", "-c", cmd.c_str(), nullptr);
+                            _exit(1);
+                        } else if (pid > 0) {
+                            // Parent - wait with timeout (30 seconds max)
+                            int status = 0;
+                            bool finished = false;
+                            for (int i = 0; i < 30 && daemon_running; i++) {
+                                int result = waitpid(pid, &status, WNOHANG);
+                                if (result > 0) {
+                                    finished = true;
+                                    break;
+                                }
+                                std::this_thread::sleep_for(std::chrono::seconds(1));
                             }
 
-                            if (verbose_mode) {
-                                std::cerr << output;
+                            if (!finished) {
+                                // Timeout - kill child
+                                kill(pid, SIGKILL);
+                                waitpid(pid, &status, 0);
+                                if (verbose_mode) {
+                                    std::cerr << "[enrich] Timeout for symbol " << sym.id << "\n";
+                                }
+                            } else if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+                                // Read output file
+                                std::ifstream ifs(out_file);
+                                if (ifs) {
+                                    std::string output((std::istreambuf_iterator<char>(ifs)),
+                                                       std::istreambuf_iterator<char>());
+
+                                    size_t pos = output.find("MEMORY_ID=");
+                                    if (pos != std::string::npos) {
+                                        std::string id_str = output.substr(pos + 10);
+                                        size_t nl = id_str.find('\n');
+                                        if (nl != std::string::npos) id_str = id_str.substr(0, nl);
+
+                                        try {
+                                            int64_t memory_id = std::stoll(id_str);
+                                            mind.store().set_symbol_memory(sym.id, memory_id);
+                                            processed++;
+                                            enrich_count++;
+                                        } catch (...) {}
+                                    }
+
+                                    if (verbose_mode) {
+                                        std::cerr << output;
+                                    }
+                                }
                             }
+
+                            // Cleanup
+                            std::remove(out_file.c_str());
                         }
-
-                        // Clean up
                         std::remove(tmp_file.c_str());
                     }
 
