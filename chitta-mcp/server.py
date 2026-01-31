@@ -97,8 +97,14 @@ server = Server("chitta-mcp")
 
 
 def ensure_daemon() -> bool:
-    """Ensure daemon is running and connected."""
+    """Ensure daemon is running and connected.
+
+    Uses atomic lock file creation to prevent race conditions.
+    Only ONE process should spawn the daemon - others wait.
+    """
     global client
+    import time
+    import fcntl
 
     socket_path = get_socket_path()
 
@@ -109,37 +115,56 @@ def ensure_daemon() -> bool:
     if client.connect():
         return True
 
-    # Only try to start daemon if socket doesn't exist (no other daemon running)
-    # This prevents multiple spawn attempts from different MCP servers
-    if os.path.exists(socket_path):
-        # Socket exists but can't connect - daemon might be busy or starting
-        # Wait and retry instead of spawning new daemon
-        import time
-        for _ in range(30):
-            time.sleep(0.1)
-            if client.connect():
-                return True
-        return False
+    # Socket doesn't exist or can't connect - wait for daemon
+    # First, just wait - subconscious.sh hook usually starts daemon
+    for _ in range(30):
+        time.sleep(0.1)
+        if client.connect():
+            return True
 
-    # No socket - safe to start daemon
+    # Still no daemon - try to start it with atomic lock
     lock_path = socket_path.replace(".sock", ".lock")
-    if os.path.exists(lock_path):
-        # Lock exists - another process is starting daemon
-        import time
+    lock_fd = None
+    we_hold_lock = False
+
+    # Clean stale lock files (older than 60 seconds)
+    try:
+        if os.path.exists(lock_path):
+            lock_age = time.time() - os.path.getmtime(lock_path)
+            if lock_age > 60:
+                os.unlink(lock_path)
+    except:
+        pass
+
+    try:
+        # Try to create lock file atomically (O_EXCL fails if exists)
+        lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        we_hold_lock = True
+    except FileExistsError:
+        # Another process is starting daemon - wait for it
         for _ in range(50):
             time.sleep(0.1)
             if client.connect():
                 return True
         return False
 
-    chittad = os.path.join(os.environ.get("HOME", ""), ".claude", "bin", "chittad")
-    if os.path.exists(chittad):
-        os.system(f"{chittad} daemon >/dev/null 2>&1 &")
-        import time
-        for _ in range(50):
-            time.sleep(0.1)
-            if client.connect():
-                return True
+    if we_hold_lock and lock_fd is not None:
+        try:
+            # We hold the lock - start daemon
+            chittad = os.path.join(os.environ.get("HOME", ""), ".claude", "bin", "chittad")
+            if os.path.exists(chittad):
+                os.system(f"{chittad} daemon >/dev/null 2>&1 &")
+                for _ in range(50):
+                    time.sleep(0.1)
+                    if client.connect():
+                        return True
+        finally:
+            # Release lock
+            os.close(lock_fd)
+            try:
+                os.unlink(lock_path)
+            except:
+                pass
 
     return False
 

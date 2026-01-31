@@ -39,33 +39,24 @@ djb2_hash() {
 SOCKET="/tmp/chitta-$(djb2_hash "$MIND_PATH").sock"
 CHITTAD_BIN="${CHITTAD_BIN:-$HOME/.claude/bin/chittad}"
 
-# Ensure daemon is running
+# Check if daemon is available (DO NOT spawn - subconscious.sh handles that)
+# This prevents race conditions when multiple hooks try to start daemon
 ensure_daemon() {
     if [[ -S "$SOCKET" ]]; then
         return 0  # Already running
     fi
 
-    if [[ ! -x "$CHITTAD_BIN" ]]; then
-        echo "[simple-hook] chittad not found at $CHITTAD_BIN" >&2
-        return 1
-    fi
-
-    # Start daemon in background
-    "$CHITTAD_BIN" daemon &
-    disown
-
-    # Wait for socket (max 5 seconds)
+    # Wait briefly for socket (subconscious.sh may be starting daemon)
     local waited=0
-    while [[ ! -S "$SOCKET" && $waited -lt 50 ]]; do
+    while [[ ! -S "$SOCKET" && $waited -lt 30 ]]; do
         sleep 0.1
         ((waited++))
     done
 
     if [[ -S "$SOCKET" ]]; then
-        echo "[simple-hook] Daemon started"
         return 0
     else
-        echo "[simple-hook] Daemon failed to start" >&2
+        # Daemon not available - don't try to spawn (let subconscious.sh handle it)
         return 1
     fi
 }
