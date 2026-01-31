@@ -1611,9 +1611,13 @@ TOOLS = [
     ),
     Tool(
         name="transcript_search",
-        description="Semantic search across transcript content not yet in memory. Finds relevant passages using embedding similarity.",
+        description="Search transcript content. Defaults to current session. Use keyword_only=true for fast search.",
         inputSchema={
                 "properties": {
+                        "keyword_only": {
+                                "description": "Fast keyword match without embeddings (default: false)",
+                                "type": "boolean"
+                        },
                         "limit": {
                                 "description": "Max results (default: 10)",
                                 "type": "integer"
@@ -1627,7 +1631,7 @@ TOOLS = [
                                 "type": "string"
                         },
                         "session_id": {
-                                "description": "Specific session to search (optional, searches all if omitted)",
+                                "description": "Session to search (default: current, '*' for all)",
                                 "type": "string"
                         }
                 },

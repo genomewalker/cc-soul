@@ -1240,14 +1240,15 @@ private:
 
         tools_.push_back({
             {"name", "transcript_search"},
-            {"description", "Semantic search across transcript content not yet in memory. Finds relevant passages using embedding similarity."},
+            {"description", "Semantic search across transcript content. Defaults to current session. Use keyword_only=true for fast search."},
             {"inputSchema", {
                 {"type", "object"},
                 {"properties", {
                     {"query", {{"type", "string"}, {"description", "Search query"}}},
-                    {"session_id", {{"type", "string"}, {"description", "Specific session to search (optional, searches all if omitted)"}}},
+                    {"session_id", {{"type", "string"}, {"description", "Session to search (default: current, '*' for all)"}}},
                     {"limit", {{"type", "integer"}, {"description", "Max results (default: 10)"}}},
-                    {"min_similarity", {{"type", "number"}, {"description", "Minimum cosine similarity 0-1 (default: 0.3)"}}}
+                    {"min_similarity", {{"type", "number"}, {"description", "Minimum cosine similarity 0-1 (default: 0.3)"}}},
+                    {"keyword_only", {{"type", "boolean"}, {"description", "Fast keyword match without embeddings (default: false)"}}}
                 }},
                 {"required", {"query"}}
             }}
@@ -5271,19 +5272,42 @@ private:
         std::string session_id = params.value("session_id", "");
         size_t limit = params.value("limit", 10);
         float min_similarity = params.value("min_similarity", 0.3f);
+        size_t max_candidates = params.value("max_candidates", 100);  // Pre-filter limit
+        bool keyword_only = params.value("keyword_only", false);  // Skip embedding, keyword match only
 
         if (query.empty()) {
             return DuckDBToolResult::error("query is required");
         }
 
-        // Check embedder is ready
-        if (!mind_->embedder_ready()) {
+        // Check embedder is ready (unless keyword_only)
+        if (!keyword_only && !mind_->embedder_ready()) {
             return DuckDBToolResult::error("Embedder not ready");
         }
 
-        // Generate embedding for query
-        Artha query_artha = mind_->embedder().transform(query);
-        const std::vector<float>& query_embedding = query_artha.nu.data;
+        // Extract keywords from query (lowercase, split on spaces)
+        std::vector<std::string> keywords;
+        {
+            std::string lower_query = query;
+            std::transform(lower_query.begin(), lower_query.end(), lower_query.begin(), ::tolower);
+            std::istringstream iss(lower_query);
+            std::string word;
+            while (iss >> word) {
+                if (word.size() >= 3) {  // Skip very short words
+                    keywords.push_back(word);
+                }
+            }
+        }
+
+        // Helper to check if content contains any keyword
+        auto contains_keyword = [&keywords](const std::string& content) -> bool {
+            if (keywords.empty()) return true;  // No keywords = match all
+            std::string lower = content;
+            std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+            for (const auto& kw : keywords) {
+                if (lower.find(kw) != std::string::npos) return true;
+            }
+            return false;
+        };
 
         // Helper to compute cosine similarity
         auto cosine_similarity = [](const std::vector<float>& a, const std::vector<float>& b) -> float {
@@ -5311,18 +5335,17 @@ private:
             return DuckDBToolResult::error("No transcripts found");
         }
 
-        // Structure to hold search results
-        struct SearchResult {
+        // Structure to hold candidates (pre-filtered by keyword)
+        struct Candidate {
             std::string session_id;
             std::string realm;
             std::string role;
             std::string content;
             int64_t line;
-            float similarity;
         };
-        std::vector<SearchResult> results;
+        std::vector<Candidate> candidates;
 
-        // Search each transcript
+        // Phase 1: Keyword pre-filter (fast, no embeddings)
         for (const auto& state : transcripts) {
             std::ifstream file(state.transcript_path);
             if (!file) continue;
@@ -5330,7 +5353,7 @@ private:
             std::string line;
             int64_t current_line = 0;
 
-            while (std::getline(file, line)) {
+            while (std::getline(file, line) && candidates.size() < max_candidates * 2) {
                 current_line++;
                 if (line.empty()) continue;
 
@@ -5359,29 +5382,93 @@ private:
 
                     if (content.empty() || content.size() < 20) continue;
 
-                    // Truncate very long content for embedding
-                    std::string embed_content = content;
+                    // Keyword pre-filter
+                    if (!contains_keyword(content)) continue;
+
+                    candidates.push_back({
+                        state.session_id,
+                        state.realm,
+                        type,
+                        content,
+                        current_line
+                    });
+                } catch (...) {
+                    continue;
+                }
+            }
+        }
+
+        // Limit candidates before embedding
+        if (candidates.size() > max_candidates) {
+            candidates.resize(max_candidates);
+        }
+
+        // Phase 2: Semantic ranking (only on filtered candidates)
+        struct SearchResult {
+            std::string session_id;
+            std::string realm;
+            std::string role;
+            std::string content;
+            int64_t line;
+            float similarity;
+        };
+        std::vector<SearchResult> results;
+
+        if (!candidates.empty()) {
+            if (keyword_only) {
+                // Keyword-only mode: rank by keyword density (fast, no embedding)
+                auto count_keywords = [&keywords](const std::string& content) -> float {
+                    if (keywords.empty()) return 1.0f;
+                    std::string lower = content;
+                    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                    int count = 0;
+                    for (const auto& kw : keywords) {
+                        size_t pos = 0;
+                        while ((pos = lower.find(kw, pos)) != std::string::npos) {
+                            count++;
+                            pos += kw.size();
+                        }
+                    }
+                    return static_cast<float>(count) / keywords.size();
+                };
+
+                for (const auto& c : candidates) {
+                    float density = count_keywords(c.content);
+                    results.push_back({
+                        c.session_id,
+                        c.realm,
+                        c.role,
+                        c.content.size() > 500 ? c.content.substr(0, 500) + "..." : c.content,
+                        c.line,
+                        density
+                    });
+                }
+            } else {
+                // Full semantic search with embeddings
+                // Generate query embedding once
+                Artha query_artha = mind_->embedder().transform(query);
+                const std::vector<float>& query_embedding = query_artha.nu.data;
+
+                for (const auto& c : candidates) {
+                    std::string embed_content = c.content;
                     if (embed_content.size() > 2000) {
                         embed_content = embed_content.substr(0, 2000);
                     }
 
-                    // Generate embedding and compute similarity
                     Artha content_artha = mind_->embedder().transform(embed_content);
                     const std::vector<float>& content_embedding = content_artha.nu.data;
 
                     float sim = cosine_similarity(query_embedding, content_embedding);
                     if (sim >= min_similarity) {
                         results.push_back({
-                            state.session_id,
-                            state.realm,
-                            type,
-                            content.size() > 500 ? content.substr(0, 500) + "..." : content,
-                            current_line,
+                            c.session_id,
+                            c.realm,
+                            c.role,
+                            c.content.size() > 500 ? c.content.substr(0, 500) + "..." : c.content,
+                            c.line,
                             sim
                         });
                     }
-                } catch (...) {
-                    continue;
                 }
             }
         }

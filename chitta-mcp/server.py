@@ -94,6 +94,7 @@ class ChittaClient:
 # Global client and server
 client: Optional[ChittaClient] = None
 server = Server("chitta-mcp")
+current_session_id: Optional[str] = None  # Track current session for auto-defaults
 
 
 def ensure_daemon() -> bool:
@@ -868,6 +869,115 @@ def handle_research_cycle(arguments: dict) -> str:
     return "No research topics available. Add curiosity gaps with curiosity_note_gap first."
 
 
+def handle_transcript_search(arguments: dict) -> str:
+    """
+    Search transcript content directly in Python (fast, no daemon).
+    Keyword-based search - ranks by keyword density.
+    """
+    query = arguments.get("query", "")
+    session_id = arguments.get("session_id", "")
+    limit = int(arguments.get("limit", 10))
+
+    if not query:
+        return "Error: query parameter required"
+
+    # Extract keywords (3+ chars)
+    keywords = [w.lower() for w in query.split() if len(w) >= 3]
+    if not keywords:
+        return "Error: query must contain words with 3+ characters"
+
+    # Get transcript path(s)
+    transcript_paths = []
+    if session_id:
+        # Get specific session's transcript
+        result = daemon_call("transcript_get", {"session_id": session_id}, structured=True)
+        try:
+            data = json.loads(result)
+            if "transcript_path" in data:
+                transcript_paths.append((session_id, data["transcript_path"]))
+        except:
+            pass
+    else:
+        # Get all pending transcripts
+        result = daemon_call("transcript_list", {}, structured=True)
+        try:
+            data = json.loads(result)
+            for t in data.get("transcripts", []):
+                transcript_paths.append((t.get("session_id", ""), t.get("transcript_path", "")))
+        except:
+            pass
+
+    if not transcript_paths:
+        return "No transcripts found"
+
+    # Search transcripts
+    results = []
+    for sid, path in transcript_paths:
+        if not path or not os.path.exists(path):
+            continue
+
+        try:
+            with open(path, 'r', encoding='utf-8', errors='replace') as f:
+                for line_num, line in enumerate(f, 1):
+                    if not line.strip():
+                        continue
+                    try:
+                        entry = json.loads(line)
+                        msg_type = entry.get("type", "")
+                        if msg_type not in ("user", "assistant"):
+                            continue
+
+                        content = ""
+                        msg = entry.get("message", {})
+                        msg_content = msg.get("content", "")
+                        if isinstance(msg_content, str):
+                            content = msg_content
+                        elif isinstance(msg_content, list):
+                            for block in msg_content:
+                                if isinstance(block, dict) and "text" in block:
+                                    content += block["text"] + "\n"
+
+                        if len(content) < 20:
+                            continue
+
+                        # Count keyword matches
+                        content_lower = content.lower()
+                        match_count = sum(1 for kw in keywords if kw in content_lower)
+                        if match_count == 0:
+                            continue
+
+                        # Score by keyword density
+                        score = match_count / len(keywords)
+                        results.append({
+                            "session_id": sid,
+                            "line": line_num,
+                            "role": msg_type,
+                            "content": content[:500] + ("..." if len(content) > 500 else ""),
+                            "score": score,
+                            "matches": match_count
+                        })
+                    except:
+                        continue
+        except:
+            continue
+
+    # Sort by score descending
+    results.sort(key=lambda x: x["score"], reverse=True)
+    results = results[:limit]
+
+    if not results:
+        return f"No matches found for: {query}"
+
+    # Format output
+    output = f"Found {len(results)} matches for: {query}\n"
+    output += "=" * 50 + "\n\n"
+    for i, r in enumerate(results, 1):
+        output += f"{i}. [{r['role']}] (line {r['line']}, score: {r['score']:.2f})\n"
+        output += f"   {r['content'][:200]}...\n\n"
+
+    return output
+
+
 # Map composite tool names to handlers
 COMPOSITE_HANDLERS = {
     "read_symbol": handle_read_symbol,
@@ -885,12 +995,27 @@ COMPOSITE_HANDLERS = {
     "research_topics": handle_research_topics,
     "research_store": handle_research_store,
     "research_cycle": handle_research_cycle,
+    # Transcript search (fast, local)
+    "transcript_search": handle_transcript_search,
 }
 
 
 @server.call_tool()
 async def call_tool(name: str, arguments: dict):
     """Handle tool calls - composite tools handled locally, others forwarded to daemon."""
+    global current_session_id
+
+    # Track session_id from transcript_register for auto-defaults
+    if name == "transcript_register" and "session_id" in arguments:
+        current_session_id = arguments["session_id"]
+
+    # Auto-inject session_id for transcript_search if not provided
+    # Pass session_id="*" to explicitly search all transcripts
+    if name == "transcript_search":
+        if arguments.get("session_id") == "*":
+            arguments["session_id"] = ""  # Empty = search all
+        elif current_session_id and not arguments.get("session_id"):
+            arguments["session_id"] = current_session_id
 
     # Check if this is a composite tool
     if name in COMPOSITE_HANDLERS:
