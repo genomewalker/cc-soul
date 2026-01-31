@@ -461,6 +461,7 @@ public:
     void mark_needs_reindex() { needs_reindex_.store(true); }
     bool rebuild_vector_index();    // DROP + CREATE index (call during maintenance)
     bool has_vector_index() const { return index_exists_.load(); }
+    size_t migrate_embeddings_to_vss();  // Copy embeddings from main DB to VSS DB
 
     size_t memory_count();
     size_t triplet_count();

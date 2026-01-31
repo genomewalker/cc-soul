@@ -710,6 +710,68 @@ bool DuckDBStore::rebuild_vector_index() {
     }
 }
 
+size_t DuckDBStore::migrate_embeddings_to_vss() {
+    // Copy embeddings from main DB to VSS DB (for existing memories)
+    if (!emb_conn_ || !db_) {
+        std::cerr << "[DuckDBStore] Cannot migrate: embeddings DB not available\n";
+        return 0;
+    }
+
+    std::cerr << "[DuckDBStore] Migrating embeddings to VSS DB...\n";
+    auto start = std::chrono::steady_clock::now();
+    size_t migrated = 0;
+
+    try {
+        // Get all memories with embeddings from main DB
+        auto result = read_query(R"(
+            SELECT id, embedding FROM memory
+            WHERE embedding IS NOT NULL
+            AND array_length(embedding) = 384
+        )");
+
+        if (!result || result->HasError()) {
+            std::cerr << "[DuckDBStore] Migration query failed\n";
+            return 0;
+        }
+
+        std::lock_guard<std::mutex> lock(emb_mutex_);
+
+        while (true) {
+            auto chunk = result->Fetch();
+            if (!chunk || chunk->size() == 0) break;
+
+            for (size_t i = 0; i < chunk->size(); ++i) {
+                int64_t mem_id = chunk->GetValue(0, i).GetValue<int64_t>();
+                auto emb_val = chunk->GetValue(1, i);
+
+                // Extract embedding values
+                std::vector<float> embedding;
+                auto list = duckdb::ListValue::GetChildren(emb_val);
+                for (const auto& v : list) {
+                    embedding.push_back(v.GetValue<float>());
+                }
+
+                if (embedding.size() == 384) {
+                    std::ostringstream sql;
+                    sql << "INSERT OR REPLACE INTO memory_embeddings (memory_id, embedding, created_at) VALUES ("
+                        << mem_id << ", " << embedding_to_sql(embedding) << ", current_timestamp)";
+                    emb_conn_->Query(sql.str());
+                    migrated++;
+                }
+            }
+        }
+
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start).count();
+        std::cerr << "[DuckDBStore] Migrated " << migrated << " embeddings in " << elapsed << "ms\n";
+
+    } catch (const std::exception& e) {
+        std::cerr << "[DuckDBStore] Migration error: " << e.what() << "\n";
+    }
+
+    return migrated;
+}
+
 // Write operations - use dedicated connection with mutex (serialized)
 bool DuckDBStore::write_execute(const std::string& sql) {
     std::lock_guard lock(write_mutex_);

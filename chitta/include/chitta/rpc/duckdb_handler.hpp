@@ -336,6 +336,14 @@ private:
         });
         handlers_["dedupe_symbols"] = [this](const json& p) { return tool_dedupe_symbols(p); };
 
+        // Migrate embeddings to VSS database
+        tools_.push_back({
+            {"name", "migrate_vss"},
+            {"description", "Migrate embeddings from main DB to separate VSS database for HNSW stability"},
+            {"inputSchema", {{"type", "object"}, {"properties", json::object()}}}
+        });
+        handlers_["migrate_vss"] = [this](const json& p) { return tool_migrate_vss(p); };
+
         // strengthen
         tools_.push_back({
             {"name", "strengthen"},
@@ -2380,6 +2388,19 @@ private:
             {"before", before},
             {"after", after},
             {"removed", removed}
+        });
+    }
+
+    DuckDBToolResult tool_migrate_vss(const json& /*params*/) {
+        // Migrate embeddings from main DB to separate VSS database
+        size_t migrated = mind_->store().migrate_embeddings_to_vss();
+
+        std::ostringstream ss;
+        ss << "Migrated " << migrated << " embeddings to VSS database\n";
+        ss << "HNSW index is now isolated from main database";
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"migrated", migrated}
         });
     }
 
