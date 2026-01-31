@@ -181,17 +181,9 @@ bool DuckDBStore::create_embeddings_schema() {
             )
         )");
 
-        // Create HNSW index on memory_embeddings (safe - separate from main DB)
-        try {
-            emb_conn_->Query(R"(
-                CREATE INDEX IF NOT EXISTS memory_emb_hnsw_idx
-                ON memory_embeddings USING HNSW (embedding)
-                WITH (metric = 'cosine')
-            )");
-            std::cerr << "[DuckDBStore] HNSW index created on embeddings DB\n";
-        } catch (const std::exception& e) {
-            std::cerr << "[DuckDBStore] HNSW index creation deferred: " << e.what() << "\n";
-        }
+        // HNSW index creation deferred to rebuild_vector_index() to avoid startup hang
+        // The index will be created during maintenance cycle
+        std::cerr << "[DuckDBStore] HNSW index deferred to maintenance\n";
 
         return true;
     } catch (const std::exception& e) {

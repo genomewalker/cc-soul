@@ -270,7 +270,7 @@ TOOLS = [
     ),
     Tool(
         name="migrate_vss",
-        description="Migrate embeddings from main DB to separate VSS database for HNSW stability. Run once after upgrade to isolate vector index.",
+        description="Migrate embeddings from main DB to separate VSS database for HNSW stability",
         inputSchema={
                 "properties": {},
                 "type": "object"
