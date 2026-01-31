@@ -5,6 +5,8 @@
 #include <chrono>
 #include <set>
 #include <unordered_set>
+#include <unordered_map>
+#include <algorithm>
 
 namespace chitta {
 
@@ -158,7 +160,10 @@ bool DuckDBStore::create_embeddings_schema() {
     if (!emb_conn_) return false;
 
     try {
-        // Simple table: symbol_id -> embedding
+        // Enable experimental persistence for HNSW in embeddings DB
+        emb_conn_->Query("SET hnsw_enable_experimental_persistence = true");
+
+        // Symbol embeddings table
         emb_conn_->Query(R"(
             CREATE TABLE IF NOT EXISTS symbol_embeddings (
                 symbol_id INTEGER PRIMARY KEY,
@@ -167,7 +172,7 @@ bool DuckDBStore::create_embeddings_schema() {
             )
         )");
 
-        // Memory embeddings (optional - for future migration)
+        // Memory embeddings table - HNSW index lives here (isolated from main DB)
         emb_conn_->Query(R"(
             CREATE TABLE IF NOT EXISTS memory_embeddings (
                 memory_id INTEGER PRIMARY KEY,
@@ -175,6 +180,18 @@ bool DuckDBStore::create_embeddings_schema() {
                 created_at TIMESTAMP DEFAULT current_timestamp
             )
         )");
+
+        // Create HNSW index on memory_embeddings (safe - separate from main DB)
+        try {
+            emb_conn_->Query(R"(
+                CREATE INDEX IF NOT EXISTS memory_emb_hnsw_idx
+                ON memory_embeddings USING HNSW (embedding)
+                WITH (metric = 'cosine')
+            )");
+            std::cerr << "[DuckDBStore] HNSW index created on embeddings DB\n";
+        } catch (const std::exception& e) {
+            std::cerr << "[DuckDBStore] HNSW index creation deferred: " << e.what() << "\n";
+        }
 
         return true;
     } catch (const std::exception& e) {
@@ -639,37 +656,45 @@ bool DuckDBStore::create_schema() {
 }
 
 bool DuckDBStore::create_vector_index() {
-    if (!vss_loaded_) return false;
+    // HNSW index now lives in separate embeddings DB (created in create_embeddings_schema)
+    // This prevents corruption issues with main database
+    if (emb_conn_) {
+        index_exists_.store(true);  // Index is in embeddings DB
+        needs_reindex_.store(false);
+        std::cerr << "[DuckDBStore] HNSW index managed by embeddings DB\n";
+        return true;
+    }
 
-    // Enable experimental persistence for HNSW
-    write_execute("SET hnsw_enable_experimental_persistence = true");
-
-    // Don't create index on startup - let maintenance cycle do it
-    // This avoids corruption from concurrent writes during startup
+    // Fallback: no index (brute-force will be used)
     index_exists_.store(false);
-    needs_reindex_.store(true);
-    std::cerr << "[DuckDBStore] HNSW index deferred to maintenance cycle\n";
-    return true;
+    needs_reindex_.store(false);
+    std::cerr << "[DuckDBStore] No HNSW index (embeddings DB not available)\n";
+    return false;
 }
 
 bool DuckDBStore::rebuild_vector_index() {
-    if (!vss_loaded_) return false;
+    // Rebuild HNSW index in embeddings DB (isolated from main DB)
+    if (!emb_conn_) {
+        std::cerr << "[DuckDBStore] Cannot rebuild index: embeddings DB not available\n";
+        return false;
+    }
 
-    std::cerr << "[DuckDBStore] Rebuilding HNSW index...\n";
+    std::cerr << "[DuckDBStore] Rebuilding HNSW index in embeddings DB...\n";
     auto start = std::chrono::steady_clock::now();
 
+    std::lock_guard<std::mutex> lock(emb_mutex_);
     try {
-        // Drop existing index (if any)
-        write_execute("DROP INDEX IF EXISTS memory_embedding_idx");
-        index_exists_.store(false);
-
-        // Rebuild from scratch - this is safe because no concurrent modifications
-        write_execute("SET hnsw_enable_experimental_persistence = true");
-        write_execute(R"(
-            CREATE INDEX memory_embedding_idx
-            ON memory USING HNSW (embedding)
+        // Drop and recreate index in embeddings DB
+        emb_conn_->Query("DROP INDEX IF EXISTS memory_emb_hnsw_idx");
+        emb_conn_->Query("SET hnsw_enable_experimental_persistence = true");
+        emb_conn_->Query(R"(
+            CREATE INDEX memory_emb_hnsw_idx
+            ON memory_embeddings USING HNSW (embedding)
             WITH (metric = 'cosine')
         )");
+
+        // Compact to remove deleted entries
+        emb_conn_->Query("PRAGMA hnsw_compact_index('memory_emb_hnsw_idx')");
 
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - start).count();
@@ -804,8 +829,19 @@ int64_t DuckDBStore::remember(
         write_execute(membership_sql.str());
     }
 
-    // Mark that vector index needs rebuild (deferred to maintenance cycle)
-    needs_reindex_.store(true);
+    // Store embedding in separate VSS database (for HNSW index isolation)
+    if (emb_conn_ && !embedding.empty()) {
+        std::lock_guard<std::mutex> lock(emb_mutex_);
+        try {
+            std::ostringstream emb_sql;
+            emb_sql << "INSERT OR REPLACE INTO memory_embeddings (memory_id, embedding, created_at) VALUES ("
+                    << id << ", " << embedding_to_sql(embedding) << ", current_timestamp)";
+            emb_conn_->Query(emb_sql.str());
+        } catch (const std::exception& e) {
+            // Non-fatal - main DB still has embedding as backup
+            std::cerr << "[DuckDBStore] VSS DB insert warning: " << e.what() << "\n";
+        }
+    }
 
     return id;
 }
@@ -816,7 +852,6 @@ std::vector<MemoryResult> DuckDBStore::recall(
     const std::string& realm,
     bool include_global
 ) {
-    // Lock handled in write_execute/write_query/read_query
     std::vector<MemoryResult> results;
     if (!db_) return results;
 
@@ -827,54 +862,143 @@ std::vector<MemoryResult> DuckDBStore::recall(
         else escaped_realm += c;
     }
 
-    // Build WHERE clause for realm filtering
-    std::ostringstream where_clause;
-    if (!realm.empty()) {
-        // Filter by realm: primary realm OR shared via membership OR global
-        where_clause << "WHERE (m.realm = '" << escaped_realm << "' ";
-        where_clause << "OR m.id IN (SELECT memory_id FROM realm_membership WHERE realm = '" << escaped_realm << "') ";
-        if (include_global) {
-            where_clause << "OR m.visibility = 2 ";  // Global visibility
+    // Strategy: Use embeddings DB (with HNSW) if available, else fall back to main DB brute-force
+    std::vector<std::pair<int64_t, float>> candidate_ids;  // (memory_id, similarity)
+
+    // Phase 1: Get candidate IDs from embeddings DB (fast HNSW lookup)
+    if (emb_conn_) {
+        std::lock_guard<std::mutex> lock(emb_mutex_);
+        try {
+            // Query embeddings DB for top candidates (get more than k to allow filtering)
+            std::ostringstream emb_sql;
+            emb_sql << "SELECT memory_id, "
+                    << "array_cosine_similarity(embedding, " << embedding_to_sql(query_embedding) << ") AS similarity "
+                    << "FROM memory_embeddings "
+                    << "ORDER BY array_distance(embedding, " << embedding_to_sql(query_embedding) << ") "
+                    << "LIMIT " << (k * 3);  // Get extra candidates for realm filtering
+
+            auto emb_result = emb_conn_->Query(emb_sql.str());
+            if (emb_result && !emb_result->HasError()) {
+                while (true) {
+                    auto chunk = emb_result->Fetch();
+                    if (!chunk || chunk->size() == 0) break;
+                    for (size_t i = 0; i < chunk->size(); ++i) {
+                        int64_t mem_id = chunk->GetValue(0, i).GetValue<int64_t>();
+                        float sim = chunk->GetValue(1, i).GetValue<float>();
+                        candidate_ids.push_back({mem_id, sim});
+                    }
+                }
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "[DuckDBStore] Embeddings DB query failed: " << e.what() << "\n";
+            candidate_ids.clear();  // Fall back to main DB
         }
-        where_clause << ") ";
     }
 
-    std::ostringstream sql;
-    sql << "SELECT m.id, m.kind, m.content, m.confidence, m.created_at, m.accessed_at, "
-        << "m.realm, m.visibility, "
-        << "array_cosine_similarity(m.embedding, " << embedding_to_sql(query_embedding) << ") AS similarity "
-        << "FROM memory m "
-        << where_clause.str();
+    // Phase 2: Fetch full memory data from main DB
+    if (!candidate_ids.empty()) {
+        // Build IN clause with candidate IDs
+        std::ostringstream id_list;
+        for (size_t i = 0; i < candidate_ids.size(); ++i) {
+            if (i > 0) id_list << ",";
+            id_list << candidate_ids[i].first;
+        }
 
-    // Use HNSW index if available, otherwise brute-force cosine similarity
-    if (index_exists_.load()) {
-        sql << "ORDER BY array_distance(m.embedding, " << embedding_to_sql(query_embedding) << ") ";
+        // Build realm filter
+        std::ostringstream where_clause;
+        where_clause << "WHERE m.id IN (" << id_list.str() << ") ";
+        if (!realm.empty()) {
+            where_clause << "AND (m.realm = '" << escaped_realm << "' ";
+            where_clause << "OR m.id IN (SELECT memory_id FROM realm_membership WHERE realm = '" << escaped_realm << "') ";
+            if (include_global) {
+                where_clause << "OR m.visibility = 2 ";
+            }
+            where_clause << ") ";
+        }
+
+        std::ostringstream sql;
+        sql << "SELECT m.id, m.kind, m.content, m.confidence, m.created_at, m.accessed_at, "
+            << "m.realm, m.visibility "
+            << "FROM memory m "
+            << where_clause.str();
+
+        auto result = read_query(sql.str());
+        if (result && !result->HasError()) {
+            // Build id->similarity map
+            std::unordered_map<int64_t, float> sim_map;
+            for (const auto& [id, sim] : candidate_ids) {
+                sim_map[id] = sim;
+            }
+
+            while (true) {
+                auto chunk = result->Fetch();
+                if (!chunk || chunk->size() == 0) break;
+
+                for (size_t i = 0; i < chunk->size(); ++i) {
+                    MemoryResult r;
+                    r.id = chunk->GetValue(0, i).GetValue<int64_t>();
+                    r.kind = chunk->GetValue(1, i).ToString();
+                    r.content = chunk->GetValue(2, i).ToString();
+                    r.confidence = chunk->GetValue(3, i).GetValue<float>();
+                    r.created_at = chunk->GetValue(4, i).GetValue<int64_t>();
+                    r.accessed_at = chunk->GetValue(5, i).GetValue<int64_t>();
+                    r.realm = chunk->GetValue(6, i).ToString();
+                    r.visibility = static_cast<RealmVisibility>(chunk->GetValue(7, i).GetValue<int32_t>());
+                    r.similarity = sim_map[r.id];
+                    results.push_back(r);
+                }
+            }
+
+            // Sort by similarity and limit to k
+            std::sort(results.begin(), results.end(),
+                [](const MemoryResult& a, const MemoryResult& b) {
+                    return a.similarity > b.similarity;
+                });
+            if (results.size() > k) {
+                results.resize(k);
+            }
+        }
     } else {
-        sql << "ORDER BY similarity DESC ";
-    }
-    sql << "LIMIT " << k;
+        // Fallback: brute-force on main DB (when embeddings DB not available)
+        std::ostringstream where_clause;
+        if (!realm.empty()) {
+            where_clause << "WHERE (m.realm = '" << escaped_realm << "' ";
+            where_clause << "OR m.id IN (SELECT memory_id FROM realm_membership WHERE realm = '" << escaped_realm << "') ";
+            if (include_global) {
+                where_clause << "OR m.visibility = 2 ";
+            }
+            where_clause << ") ";
+        }
 
-    auto result = read_query(sql.str());
-    if (!result || result->HasError()) {
-        return results;
-    }
+        std::ostringstream sql;
+        sql << "SELECT m.id, m.kind, m.content, m.confidence, m.created_at, m.accessed_at, "
+            << "m.realm, m.visibility, "
+            << "array_cosine_similarity(m.embedding, " << embedding_to_sql(query_embedding) << ") AS similarity "
+            << "FROM memory m "
+            << where_clause.str()
+            << "ORDER BY similarity DESC "
+            << "LIMIT " << k;
 
-    while (true) {
-        auto chunk = result->Fetch();
-        if (!chunk || chunk->size() == 0) break;
+        auto result = read_query(sql.str());
+        if (result && !result->HasError()) {
+            while (true) {
+                auto chunk = result->Fetch();
+                if (!chunk || chunk->size() == 0) break;
 
-        for (size_t i = 0; i < chunk->size(); ++i) {
-            MemoryResult r;
-            r.id = chunk->GetValue(0, i).GetValue<int64_t>();
-            r.kind = chunk->GetValue(1, i).ToString();
-            r.content = chunk->GetValue(2, i).ToString();
-            r.confidence = chunk->GetValue(3, i).GetValue<float>();
-            r.created_at = chunk->GetValue(4, i).GetValue<int64_t>();
-            r.accessed_at = chunk->GetValue(5, i).GetValue<int64_t>();
-            r.realm = chunk->GetValue(6, i).ToString();
-            r.visibility = static_cast<RealmVisibility>(chunk->GetValue(7, i).GetValue<int32_t>());
-            r.similarity = chunk->GetValue(8, i).GetValue<float>();
-            results.push_back(r);
+                for (size_t i = 0; i < chunk->size(); ++i) {
+                    MemoryResult r;
+                    r.id = chunk->GetValue(0, i).GetValue<int64_t>();
+                    r.kind = chunk->GetValue(1, i).ToString();
+                    r.content = chunk->GetValue(2, i).ToString();
+                    r.confidence = chunk->GetValue(3, i).GetValue<float>();
+                    r.created_at = chunk->GetValue(4, i).GetValue<int64_t>();
+                    r.accessed_at = chunk->GetValue(5, i).GetValue<int64_t>();
+                    r.realm = chunk->GetValue(6, i).ToString();
+                    r.visibility = static_cast<RealmVisibility>(chunk->GetValue(7, i).GetValue<int32_t>());
+                    r.similarity = chunk->GetValue(8, i).GetValue<float>();
+                    results.push_back(r);
+                }
+            }
         }
     }
 
@@ -1050,6 +1174,20 @@ bool DuckDBStore::set_memory_embedding(int64_t id, const std::vector<float>& emb
     if (!db_) return false;
     if (embedding.size() != 384) return false;
 
+    // Store in embeddings DB (for HNSW index) if available
+    if (emb_conn_) {
+        std::lock_guard<std::mutex> lock(emb_mutex_);
+        try {
+            std::ostringstream emb_sql;
+            emb_sql << "INSERT OR REPLACE INTO memory_embeddings (memory_id, embedding, created_at) VALUES ("
+                    << id << ", " << embedding_to_sql(embedding) << ", current_timestamp)";
+            emb_conn_->Query(emb_sql.str());
+        } catch (const std::exception& e) {
+            std::cerr << "[DuckDBStore] Embeddings DB insert failed: " << e.what() << "\n";
+        }
+    }
+
+    // Also update main DB (for backwards compatibility during migration)
     std::ostringstream sql;
     sql << "UPDATE memory SET embedding = " << embedding_to_sql(embedding)
         << ", accessed_at = " << now() << " WHERE id = " << id;
