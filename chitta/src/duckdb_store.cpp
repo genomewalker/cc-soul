@@ -744,8 +744,13 @@ size_t DuckDBStore::migrate_embeddings_to_vss() {
                 }
 
                 if (embedding.size() == 384) {
+                    // Delete first to avoid HNSW duplicate key errors
+                    std::ostringstream del_sql;
+                    del_sql << "DELETE FROM memory_embeddings WHERE memory_id = " << mem_id;
+                    emb_conn_->Query(del_sql.str());
+
                     std::ostringstream sql;
-                    sql << "INSERT OR REPLACE INTO memory_embeddings (memory_id, embedding, created_at) VALUES ("
+                    sql << "INSERT INTO memory_embeddings (memory_id, embedding, created_at) VALUES ("
                         << mem_id << ", " << embedding_to_sql(embedding) << ", current_timestamp)";
                     emb_conn_->Query(sql.str());
                     migrated++;
@@ -887,8 +892,13 @@ int64_t DuckDBStore::remember(
     if (emb_conn_ && !embedding.empty()) {
         std::lock_guard<std::mutex> lock(emb_mutex_);
         try {
+            // Delete first to avoid HNSW duplicate key errors
+            std::ostringstream del_sql;
+            del_sql << "DELETE FROM memory_embeddings WHERE memory_id = " << id;
+            emb_conn_->Query(del_sql.str());
+
             std::ostringstream emb_sql;
-            emb_sql << "INSERT OR REPLACE INTO memory_embeddings (memory_id, embedding, created_at) VALUES ("
+            emb_sql << "INSERT INTO memory_embeddings (memory_id, embedding, created_at) VALUES ("
                     << id << ", " << embedding_to_sql(embedding) << ", current_timestamp)";
             emb_conn_->Query(emb_sql.str());
         } catch (const std::exception& e) {
@@ -1232,8 +1242,13 @@ bool DuckDBStore::set_memory_embedding(int64_t id, const std::vector<float>& emb
     if (emb_conn_) {
         std::lock_guard<std::mutex> lock(emb_mutex_);
         try {
+            // Delete first to avoid HNSW duplicate key errors
+            std::ostringstream del_sql;
+            del_sql << "DELETE FROM memory_embeddings WHERE memory_id = " << id;
+            emb_conn_->Query(del_sql.str());
+
             std::ostringstream emb_sql;
-            emb_sql << "INSERT OR REPLACE INTO memory_embeddings (memory_id, embedding, created_at) VALUES ("
+            emb_sql << "INSERT INTO memory_embeddings (memory_id, embedding, created_at) VALUES ("
                     << id << ", " << embedding_to_sql(embedding) << ", current_timestamp)";
             emb_conn_->Query(emb_sql.str());
         } catch (const std::exception& e) {
@@ -2780,8 +2795,13 @@ bool DuckDBStore::set_symbol_embedding(int64_t symbol_id, const std::vector<floa
     if (emb_conn_) {
         std::lock_guard<std::mutex> lock(emb_mutex_);
         try {
+            // Delete first to avoid HNSW duplicate key errors
+            std::ostringstream del_sql;
+            del_sql << "DELETE FROM symbol_embeddings WHERE symbol_id = " << symbol_id;
+            emb_conn_->Query(del_sql.str());
+
             std::ostringstream sql;
-            sql << "INSERT OR REPLACE INTO symbol_embeddings (symbol_id, embedding) VALUES ("
+            sql << "INSERT INTO symbol_embeddings (symbol_id, embedding) VALUES ("
                 << symbol_id << ", " << emb_array << ")";
             emb_conn_->Query(sql.str());
 
