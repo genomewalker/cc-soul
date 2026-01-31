@@ -2074,51 +2074,30 @@ private:
     }
 
     DuckDBToolResult tool_soul_context(const json&) {
-        DuckDBHealth h = mind_->health();
+        // Use cached health for fast response (updated by maintenance cycle)
+        auto cached = mind_->store().cached_health();
 
         std::ostringstream ss;
         ss << "Soul State (DuckDB):\n";
-        ss << "  Nodes: " << h.total_nodes << " total";
-        if (h.total_nodes > 0) {
-            ss << ", " << h.active_nodes << " active";
-            if (h.weak_nodes > 0) ss << ", " << h.weak_nodes << " weak";
-            if (h.stale_nodes > 0) ss << ", " << h.stale_nodes << " stale";
-        }
-        ss << "\n";
-        ss << "  Confidence: " << std::fixed << std::setprecision(2) << h.avg_confidence << " avg\n";
-        ss << "  Triplets: " << mind_->triplet_count() << "\n";
+        ss << "  Nodes: " << cached.total_memories << " total\n";
+        ss << "  Confidence: " << std::fixed << std::setprecision(2) << cached.avg_confidence << " avg\n";
+        ss << "  Triplets: " << cached.total_triplets << "\n";
+        ss << "  Symbols: " << cached.total_symbols << "\n";
         ss << "  Yantra: " << (mind_->has_yantra() ? "ready" : "not attached") << "\n";
-        ss << "  Status: " << h.status() << "\n";
+        ss << "  Status: " << (cached.is_open ? "OK" : "ERROR") << "\n";
 
-        // Get transcript tracking info
-        size_t transcripts = mind_->store().transcript_count();
-
-        // Get calibration summary
-        auto calibration = mind_->store().calibration_all();
-        json calibration_json = json::array();
-        if (!calibration.empty()) {
-            ss << "  Calibration: ";
-            for (size_t i = 0; i < calibration.size() && i < 3; i++) {
-                if (i > 0) ss << ", ";
-                ss << calibration[i].domain << "=" << (int)(calibration[i].accuracy * 100) << "%";
-                calibration_json.push_back({
-                    {"domain", calibration[i].domain},
-                    {"accuracy", calibration[i].accuracy}
-                });
-            }
-            ss << "\n";
-        }
+        // Skip expensive queries - use cached values
+        size_t transcripts = 0;  // Skip transcript_count() query
+        json calibration_json = json::array();  // Skip calibration query
 
         return DuckDBToolResult::ok(ss.str(), {
             {"version", CHITTA_VERSION},
-            {"total_nodes", h.total_nodes},
-            {"active_nodes", h.active_nodes},
-            {"weak_nodes", h.weak_nodes},
-            {"stale_nodes", h.stale_nodes},
-            {"avg_confidence", h.avg_confidence},
-            {"triplet_count", mind_->triplet_count()},
+            {"total_nodes", cached.total_memories},
+            {"total_symbols", cached.total_symbols},
+            {"avg_confidence", cached.avg_confidence},
+            {"triplet_count", cached.total_triplets},
             {"yantra_ready", mind_->has_yantra()},
-            {"status", h.status()},
+            {"status", cached.is_open ? "OK" : "ERROR"},
             {"transcripts_tracked", transcripts},
             {"calibration", calibration_json}
         });

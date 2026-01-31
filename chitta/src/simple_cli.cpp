@@ -434,6 +434,11 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
     std::cerr << "[daemon] Started (socket=" << socket_path
               << ", interval=" << interval << "s, pid=" << getpid() << ")\n";
 
+    // Initial health check to populate cache
+    auto initial_health = mind.health();
+    std::cerr << "[daemon] Initial stats: " << initial_health.total_nodes << " memories, "
+              << mind.triplet_count() << " triplets\n";
+
     // Maintenance thread - sync and apply decay periodically
     std::atomic<size_t> cycle_count{0};
     std::thread maintenance([&]() {
@@ -468,8 +473,10 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                     // Sync to disk
                     mind.sync();
 
+                    // Update health cache (for fast health_check/soul_context)
+                    auto health = mind.health();
+
                     if (verbose_mode) {
-                        auto health = mind.health();
                         std::cerr << "[maint] Cycle " << cycle_count
                                   << ": " << health.total_nodes << " nodes"
                                   << ", " << health.active_nodes << " active"
