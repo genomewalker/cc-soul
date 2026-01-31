@@ -644,17 +644,34 @@ bool DuckDBStore::create_vector_index() {
     // Enable experimental persistence for HNSW
     write_execute("SET hnsw_enable_experimental_persistence = true");
 
-    // Create HNSW index on memory embeddings
+    // Create HNSW index - drop first if corrupted
     try {
         write_execute(R"(
             CREATE INDEX IF NOT EXISTS memory_embedding_idx
             ON memory USING HNSW (embedding)
             WITH (metric = 'cosine')
         )");
-        std::cerr << "[DuckDBStore] Created HNSW index on memory.embedding\n";
+        std::cerr << "[DuckDBStore] HNSW index ready\n";
         return true;
-    } catch (...) {
-        std::cerr << "[DuckDBStore] Failed to create HNSW index\n";
+    } catch (const std::exception& e) {
+        std::string err = e.what();
+        if (err.find("Duplicate") != std::string::npos || err.find("HNSW") != std::string::npos) {
+            std::cerr << "[DuckDBStore] HNSW index corrupted, rebuilding...\n";
+            try {
+                write_execute("DROP INDEX IF EXISTS memory_embedding_idx");
+                write_execute(R"(
+                    CREATE INDEX memory_embedding_idx
+                    ON memory USING HNSW (embedding)
+                    WITH (metric = 'cosine')
+                )");
+                std::cerr << "[DuckDBStore] HNSW index rebuilt\n";
+                return true;
+            } catch (const std::exception& e2) {
+                std::cerr << "[DuckDBStore] HNSW rebuild failed: " << e2.what() << "\n";
+                return false;
+            }
+        }
+        std::cerr << "[DuckDBStore] HNSW index failed: " << err << "\n";
         return false;
     }
 }
@@ -1780,7 +1797,28 @@ StoreHealth DuckDBStore::health() {
         }
     }
 
+    // Update cache
+    {
+        std::lock_guard<std::mutex> lock(health_cache_mutex_);
+        h.cached_at = now();
+        cached_health_ = h;
+    }
+
     return h;
+}
+
+StoreHealth DuckDBStore::cached_health() {
+    std::lock_guard<std::mutex> lock(health_cache_mutex_);
+    // If cache is empty, just return minimal info
+    if (cached_health_.cached_at == 0) {
+        cached_health_.is_open = (db_ != nullptr);
+    }
+    return cached_health_;
+}
+
+void DuckDBStore::update_health_cache() {
+    // Run health() which updates the cache
+    health();
 }
 
 size_t DuckDBStore::memory_count() {

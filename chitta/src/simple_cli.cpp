@@ -251,13 +251,30 @@ bool run_distillation(DuckDBMind& mind, const TranscriptState& state,
                             std::string block_type = block.value("type", "");
                             // Extract text blocks
                             if (block_type == "text" && block.contains("text")) {
+                                std::string text = block["text"].get<std::string>();
+                                // Filter out system-reminder noise
+                                size_t pos;
+                                while ((pos = text.find("<system-reminder>")) != std::string::npos) {
+                                    size_t end = text.find("</system-reminder>", pos);
+                                    if (end != std::string::npos) {
+                                        text.erase(pos, end - pos + 18);
+                                    } else {
+                                        text.erase(pos);
+                                    }
+                                }
+                                // Skip if only whitespace remains
+                                if (text.find_first_not_of(" \t\n\r") == std::string::npos) continue;
                                 if (!content.empty()) content += "\n";
-                                content += block["text"].get<std::string>();
+                                content += text;
                             }
                             // Extract thinking blocks (valuable reasoning)
                             else if (block_type == "thinking" && block.contains("thinking")) {
-                                if (!content.empty()) content += "\n";
-                                content += "<thinking>\n" + block["thinking"].get<std::string>() + "\n</thinking>";
+                                std::string thinking = block["thinking"].get<std::string>();
+                                // Only include substantial thinking (>100 chars)
+                                if (thinking.size() > 100) {
+                                    if (!content.empty()) content += "\n";
+                                    content += "<thinking>\n" + thinking + "\n</thinking>";
+                                }
                             }
                             // Skip tool_use, tool_result - just noise for distillation
                         }
