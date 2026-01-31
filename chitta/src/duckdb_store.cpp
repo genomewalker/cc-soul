@@ -644,34 +644,43 @@ bool DuckDBStore::create_vector_index() {
     // Enable experimental persistence for HNSW
     write_execute("SET hnsw_enable_experimental_persistence = true");
 
-    // Create HNSW index - drop first if corrupted
+    // Don't create index on startup - let maintenance cycle do it
+    // This avoids corruption from concurrent writes during startup
+    index_exists_.store(false);
+    needs_reindex_.store(true);
+    std::cerr << "[DuckDBStore] HNSW index deferred to maintenance cycle\n";
+    return true;
+}
+
+bool DuckDBStore::rebuild_vector_index() {
+    if (!vss_loaded_) return false;
+
+    std::cerr << "[DuckDBStore] Rebuilding HNSW index...\n";
+    auto start = std::chrono::steady_clock::now();
+
     try {
+        // Drop existing index (if any)
+        write_execute("DROP INDEX IF EXISTS memory_embedding_idx");
+        index_exists_.store(false);
+
+        // Rebuild from scratch - this is safe because no concurrent modifications
+        write_execute("SET hnsw_enable_experimental_persistence = true");
         write_execute(R"(
-            CREATE INDEX IF NOT EXISTS memory_embedding_idx
+            CREATE INDEX memory_embedding_idx
             ON memory USING HNSW (embedding)
             WITH (metric = 'cosine')
         )");
-        std::cerr << "[DuckDBStore] HNSW index ready\n";
+
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start).count();
+
+        index_exists_.store(true);
+        needs_reindex_.store(false);
+        std::cerr << "[DuckDBStore] HNSW index rebuilt in " << elapsed << "ms\n";
         return true;
     } catch (const std::exception& e) {
-        std::string err = e.what();
-        if (err.find("Duplicate") != std::string::npos || err.find("HNSW") != std::string::npos) {
-            std::cerr << "[DuckDBStore] HNSW index corrupted, rebuilding...\n";
-            try {
-                write_execute("DROP INDEX IF EXISTS memory_embedding_idx");
-                write_execute(R"(
-                    CREATE INDEX memory_embedding_idx
-                    ON memory USING HNSW (embedding)
-                    WITH (metric = 'cosine')
-                )");
-                std::cerr << "[DuckDBStore] HNSW index rebuilt\n";
-                return true;
-            } catch (const std::exception& e2) {
-                std::cerr << "[DuckDBStore] HNSW rebuild failed: " << e2.what() << "\n";
-                return false;
-            }
-        }
-        std::cerr << "[DuckDBStore] HNSW index failed: " << err << "\n";
+        std::cerr << "[DuckDBStore] HNSW rebuild failed: " << e.what() << "\n";
+        index_exists_.store(false);
         return false;
     }
 }
@@ -795,6 +804,9 @@ int64_t DuckDBStore::remember(
         write_execute(membership_sql.str());
     }
 
+    // Mark that vector index needs rebuild (deferred to maintenance cycle)
+    needs_reindex_.store(true);
+
     return id;
 }
 
@@ -834,7 +846,8 @@ std::vector<MemoryResult> DuckDBStore::recall(
         << "FROM memory m "
         << where_clause.str();
 
-    if (vss_loaded_) {
+    // Use HNSW index if available, otherwise brute-force cosine similarity
+    if (index_exists_.load()) {
         sql << "ORDER BY array_distance(m.embedding, " << embedding_to_sql(query_embedding) << ") ";
     } else {
         sql << "ORDER BY similarity DESC ";

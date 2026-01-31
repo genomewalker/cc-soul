@@ -473,6 +473,12 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                     // Sync to disk
                     mind.sync();
 
+                    // Rebuild vector index if needed (deferred rebuild for stability)
+                    if (mind.store().needs_reindex()) {
+                        std::cerr << "[maint] Rebuilding vector index...\n";
+                        mind.store().rebuild_vector_index();
+                    }
+
                     // Update health cache (for fast health_check/soul_context)
                     auto health = mind.health();
 

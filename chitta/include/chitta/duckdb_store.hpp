@@ -455,6 +455,13 @@ public:
     StoreHealth health();           // Full health check (runs queries, may block)
     StoreHealth cached_health();    // Non-blocking: returns cached stats
     void update_health_cache();     // Update the cache (call periodically)
+
+    // Vector index management (deferred rebuild for stability)
+    bool needs_reindex() const { return needs_reindex_.load(); }
+    void mark_needs_reindex() { needs_reindex_.store(true); }
+    bool rebuild_vector_index();    // DROP + CREATE index (call during maintenance)
+    bool has_vector_index() const { return index_exists_.load(); }
+
     size_t memory_count();
     size_t triplet_count();
     size_t symbol_count();
@@ -683,6 +690,8 @@ private:
     bool vss_loaded_ = false;
     bool pgq_loaded_ = false;
     bool fts_loaded_ = false;
+    std::atomic<bool> needs_reindex_{false};  // Flag for deferred index rebuild
+    std::atomic<bool> index_exists_{false};   // Track if HNSW index is present
 
     // Cached health for non-blocking health_check
     mutable StoreHealth cached_health_;
