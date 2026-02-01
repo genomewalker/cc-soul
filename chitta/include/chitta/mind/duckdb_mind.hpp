@@ -23,6 +23,7 @@
 #include <deque>
 #include <unordered_set>
 #include <unordered_map>
+#include <chrono>
 #include <map>
 #include <algorithm>
 #include <cctype>
@@ -1100,23 +1101,33 @@ private:
     }
 
     // Find attractors: entities with high triplet connectivity
-    // Uses efficient SQL query that excludes code intel triplets
+    // OPTIMIZED: Uses cache with 5-minute TTL to avoid expensive query
     std::vector<DuckDBAttractor> find_attractors_unlocked() const {
-        // Use efficient SQL-based counting (excludes code intel predicates)
+        auto now = std::chrono::steady_clock::now();
+
+        // Return cached attractors if still valid
+        if (!attractor_cache_.empty() &&
+            (now - attractor_cache_time_) < ATTRACTOR_CACHE_TTL) {
+            return attractor_cache_;
+        }
+
+        // Cache miss or expired - compute fresh
         auto top_entities = store_.get_top_connected_entities(resonance_config_.max_attractors);
 
-        std::vector<DuckDBAttractor> attractors;
-        attractors.reserve(top_entities.size());
+        attractor_cache_.clear();
+        attractor_cache_.reserve(top_entities.size());
 
         for (const auto& [entity, count] : top_entities) {
             float strength = std::min(std::log2(1.0f + count) / 4.0f, 1.0f);
-            attractors.push_back({entity, strength, count});
+            attractor_cache_.push_back({entity, strength, count});
         }
+        attractor_cache_time_ = now;
 
-        return attractors;
+        return attractor_cache_;
     }
 
     // Extract query context for contextual bandit
+    // OPTIMIZED: Removed expensive triplet queries - uses heuristics instead
     QueryContext extract_query_context_unlocked(const std::string& query) const {
         QueryContext ctx;
         ctx.query_length = query.length();
@@ -1139,19 +1150,15 @@ private:
             }
         }
 
-        // Calculate average term frequency in triplets
-        float total_freq = 0.0f;
-        for (const auto& term : terms) {
-            auto subj = store_.query_subject(term);
-            auto obj = store_.query_object(term);
-            total_freq += subj.size() + obj.size();
-        }
-        ctx.avg_term_frequency = terms.empty() ? 0.0f : total_freq / terms.size();
+        // OPTIMIZATION: Skip expensive triplet frequency calculation
+        // Use heuristic based on term count instead
+        ctx.avg_term_frequency = static_cast<float>(terms.size() * 10);
 
         return ctx;
     }
 
     // Spread activation through triplet graph (with config parameter)
+    // OPTIMIZED: Limited iterations to prevent runaway on large graphs
     void spread_activation_unlocked(const std::vector<std::string>& seed_terms,
                                      std::unordered_map<int64_t, float>& activation,
                                      const DuckDBResonanceConfig& config) {
@@ -1163,7 +1170,13 @@ private:
             frontier.push({term, config.spread_strength, 0});
         }
 
-        while (!frontier.empty()) {
+        // CRITICAL: Limit total iterations to prevent runaway on large graphs
+        // With 945K triplets, unbounded BFS causes hangs
+        constexpr size_t MAX_ITERATIONS = 50;
+        constexpr size_t MAX_TRIPLETS_PER_ENTITY = 100;
+        size_t iterations = 0;
+
+        while (!frontier.empty() && iterations < MAX_ITERATIONS) {
             auto [entity, strength, hop] = frontier.front();
             frontier.pop();
 
@@ -1171,29 +1184,32 @@ private:
             if (strength < config.min_activation) continue;
             if (visited.count(entity)) continue;
             visited.insert(entity);
+            iterations++;
 
-            // Get connected entities via triplets
+            // Get connected entities via triplets (limited to prevent explosion)
             auto subject_triplets = store_.query_subject(entity);
             auto object_triplets = store_.query_object(entity);
 
+            // Limit triplets processed per entity
+            size_t subj_limit = std::min(subject_triplets.size(), MAX_TRIPLETS_PER_ENTITY);
+            size_t obj_limit = std::min(object_triplets.size(), MAX_TRIPLETS_PER_ENTITY);
+
             // Propagate to connected objects
-            for (const auto& t : subject_triplets) {
+            for (size_t i = 0; i < subj_limit; ++i) {
+                const auto& t = subject_triplets[i];
                 float propagated = strength * config.spread_decay * t.weight;
                 if (propagated >= config.min_activation) {
                     frontier.push({t.object, propagated, hop + 1});
-
-                    // Find memories mentioning this object and boost their activation
-                    boost_memories_by_term_unlocked(t.object, propagated, activation);
+                    // NOTE: Removed boost_memories_by_term_unlocked - too expensive O(n*m)
                 }
             }
 
             // Propagate to connected subjects
-            for (const auto& t : object_triplets) {
+            for (size_t i = 0; i < obj_limit; ++i) {
+                const auto& t = object_triplets[i];
                 float propagated = strength * config.spread_decay * t.weight;
                 if (propagated >= config.min_activation) {
                     frontier.push({t.subject, propagated, hop + 1});
-
-                    boost_memories_by_term_unlocked(t.subject, propagated, activation);
                 }
             }
         }
@@ -1424,6 +1440,11 @@ private:
     Embedder embedder_;
     mutable std::shared_mutex mutex_;
     bool running_;
+
+    // Attractor cache (expensive to compute, changes slowly)
+    mutable std::vector<DuckDBAttractor> attractor_cache_;
+    mutable std::chrono::steady_clock::time_point attractor_cache_time_;
+    static constexpr auto ATTRACTOR_CACHE_TTL = std::chrono::minutes(5);
 
     bool passes_quality_gate(const std::string& text) const {
         if (!config_.enable_quality_gate) return true;

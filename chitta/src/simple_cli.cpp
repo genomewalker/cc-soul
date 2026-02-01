@@ -1044,6 +1044,15 @@ void print_usage(const char* prog) {
 }
 
 int main(int argc, char* argv[]) {
+    // CRITICAL: Set thread limits BEFORE any ONNX/OpenMP code loads
+    // Must be at the very start of main() to take effect
+    setenv("OMP_NUM_THREADS", "4", 1);
+    setenv("MKL_NUM_THREADS", "4", 1);
+    setenv("OPENBLAS_NUM_THREADS", "4", 1);
+    setenv("ORT_NUM_THREADS", "4", 1);
+    setenv("OMP_WAIT_POLICY", "PASSIVE", 1);  // Reduce busy-waiting
+    setenv("KMP_BLOCKTIME", "0", 1);          // Intel OpenMP: don't spin
+
     std::string mind_path = default_mind_path();
     std::string command;
     int interval = 60;
@@ -1146,14 +1155,8 @@ int main(int argc, char* argv[]) {
 
     // Create yantra for embeddings
 #ifdef CHITTA_WITH_ONNX
-    // Hard cap ONNX/OpenMP threads via environment variables
-    // CRITICAL: Must be set BEFORE ORT session is created
+    // Thread limits already set at main() start
     const int max_onnx_threads = 4;
-    std::string thread_str = std::to_string(max_onnx_threads);
-    setenv("OMP_NUM_THREADS", thread_str.c_str(), 1);
-    setenv("MKL_NUM_THREADS", thread_str.c_str(), 1);
-    setenv("OPENBLAS_NUM_THREADS", thread_str.c_str(), 1);
-    setenv("ORT_NUM_THREADS", thread_str.c_str(), 1);
 
     std::string model_path = default_model_path();
     std::string vocab_path = default_vocab_path();

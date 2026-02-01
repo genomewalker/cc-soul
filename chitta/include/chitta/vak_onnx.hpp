@@ -319,7 +319,7 @@ public:
         size_t max_seq_length = 128;
         size_t batch_size = 32;       // Max batch for efficiency
         bool normalize_embeddings = true;
-        int num_threads = 0;          // 0 = auto
+        int num_threads = 4;          // Default to 4 threads (not auto)
     };
 
     AntahkaranaYantra() : env_(ORT_LOGGING_LEVEL_WARNING, "chitta") {}
@@ -336,11 +336,16 @@ public:
                 return false;
             }
 
-            // Session options
+            // Session options with strict thread limits
+            // Use per-session pools (not global) to avoid deadlocks
             Ort::SessionOptions opts;
-            if (config_.num_threads > 0) {
-                opts.SetIntraOpNumThreads(config_.num_threads);
-            }
+
+            // Limit intra-op threads (parallelism within operators)
+            opts.SetIntraOpNumThreads(config_.num_threads > 0 ? config_.num_threads : 4);
+
+            // Limit inter-op threads to 1 (no parallelism between operators)
+            opts.SetInterOpNumThreads(1);
+
             opts.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
 
             // Create session
