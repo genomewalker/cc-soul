@@ -56,8 +56,9 @@ struct DistillConfig {
 
 // Code enrichment configuration (semantic descriptions for symbols)
 struct EnrichConfig {
-    int interval_minutes = 2;       // How often to process batches
-    int batch_size = 10;            // Symbols per batch
+    int interval_minutes = 10;      // How often to process batches (was 2, increased to reduce load)
+    int batch_size = 3;             // Symbols per batch (was 10, reduced to minimize blocking)
+    int idle_seconds = 30;          // Only run if no queries for this long
     std::string script_path;        // Path to enrichment script
     std::string model = "github-copilot/gpt-5-mini";  // OpenCode model
     bool enabled = true;
@@ -404,6 +405,7 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
             size_t pending = mind.store().count_undescribed_symbols();
             std::cerr << "[daemon] Code enrichment enabled (interval=" << enrich_config.interval_minutes
                       << "m, batch=" << enrich_config.batch_size
+                      << ", idle=" << enrich_config.idle_seconds << "s"
                       << ", pending=" << pending << ")\n";
         }
     }
@@ -512,6 +514,14 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
 
             auto now_time = std::chrono::steady_clock::now();
             if (now_time - last_distill >= interval_mins) {
+                // Skip if daemon is actively handling queries (prevent blocking)
+                if (!subconscious.is_idle()) {
+                    if (verbose_mode) {
+                        std::cerr << "[distill] Skipping - daemon is busy\n";
+                    }
+                    continue;  // Don't update last_distill, try again next second
+                }
+
                 last_distill = now_time;
 
                 try {
@@ -555,6 +565,14 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
 
             auto now_time = std::chrono::steady_clock::now();
             if (now_time - last_enrich >= interval_mins) {
+                // Skip if daemon is actively handling queries (prevent blocking)
+                if (!subconscious.is_idle()) {
+                    if (verbose_mode) {
+                        std::cerr << "[enrich] Skipping - daemon is busy\n";
+                    }
+                    continue;  // Don't update last_enrich, try again next second
+                }
+
                 last_enrich = now_time;
 
                 try {
@@ -1007,6 +1025,8 @@ int main(int argc, char* argv[]) {
             enrich_config.interval_minutes = std::stoi(argv[++i]);
         } else if (strcmp(argv[i], "--enrich-batch") == 0 && i + 1 < argc) {
             enrich_config.batch_size = std::stoi(argv[++i]);
+        } else if (strcmp(argv[i], "--enrich-idle") == 0 && i + 1 < argc) {
+            enrich_config.idle_seconds = std::stoi(argv[++i]);
         } else if (strcmp(argv[i], "--enrich-model") == 0 && i + 1 < argc) {
             enrich_config.model = argv[++i];
         } else if (strcmp(argv[i], "--no-enrich") == 0) {
