@@ -395,76 +395,14 @@ def handle_symbol_callees(arguments: dict) -> str:
 
 def handle_smart_context(arguments: dict) -> str:
     """
-    Build minimal context for a task.
+    Build intelligent context combining memories, code symbols, and graph relationships.
 
-    1. search_symbols(task) for code matches
-    2. full_resonate(task) for memories
-    3. Compress to fit token limit
+    Delegates entirely to C++ daemon for single-RPC-call performance:
+    - fast mode (<80ms): vector recall + BM25 symbols + 1 neighbor
+    - full mode (<200ms): full_resonate + semantic symbols + 3 neighbors
     """
-    task = arguments.get("task", "")
-    token_limit = int(arguments.get("limit", 500))
-    include_memories = bool(arguments.get("memories", True))
-    include_code = bool(arguments.get("code", True))
-
-    if not task:
-        return "Error: task parameter required"
-
-    results = []
-    tokens_used = 0
-    char_limit = token_limit * 4  # Rough: 4 chars per token
-
-    # Get relevant code symbols
-    if include_code:
-        code_response = daemon_call("search_symbols", {"query": task, "limit": 5})
-        try:
-            code_data = json.loads(code_response)
-            symbols = code_data if isinstance(code_data, list) else code_data.get("symbols", [])
-
-            if symbols:
-                code_section = ["## Code Context"]
-                for sym in symbols[:3]:  # Top 3 most relevant
-                    name = sym.get("name", "?")
-                    kind = sym.get("kind", "?")
-                    file_path = sym.get("file", "?")
-                    line = sym.get("line_start", "?")
-                    score = sym.get("score", 0)
-                    code_section.append(f"- {kind} `{name}` @ {file_path}:{line} (score: {score:.2f})")
-
-                section_text = "\n".join(code_section)
-                if tokens_used + len(section_text)//4 < token_limit:
-                    results.append(section_text)
-                    tokens_used += len(section_text) // 4
-
-        except json.JSONDecodeError:
-            pass
-
-    # Get relevant memories
-    if include_memories:
-        mem_response = daemon_call("full_resonate", {"query": task, "k": 5})
-
-        # Extract just the memory content, not the full formatted output
-        if mem_response and "No memories" not in mem_response:
-            mem_section = ["## Memory Context"]
-
-            # Parse memory format: [score%] [type] content
-            for line in mem_response.split("\n"):
-                if line.startswith("[") and "%" in line:
-                    # Extract content after type tag
-                    match = re.match(r'\[\d+%\]\s*\[[^\]]+\]\s*(.+)', line)
-                    if match:
-                        content = match.group(1)[:100]  # Truncate
-                        if tokens_used + len(content)//4 < token_limit:
-                            mem_section.append(f"- {content}")
-                            tokens_used += len(content) // 4
-
-            if len(mem_section) > 1:
-                results.append("\n".join(mem_section))
-
-    if not results:
-        return f"No relevant context found for: {task}"
-
-    header = f"## Smart Context (~{tokens_used} tokens)\nTask: {task}\n"
-    return header + "\n\n".join(results)
+    # Delegate to daemon's C++ implementation (single RPC call)
+    return daemon_call("smart_context", arguments)
 
 
 def handle_learn_correction(arguments: dict) -> str:

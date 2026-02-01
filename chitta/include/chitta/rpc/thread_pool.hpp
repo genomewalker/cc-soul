@@ -7,7 +7,7 @@
 // Features:
 // - Configurable worker count
 // - Request tracing with timing
-// - Watchdog for slow request detection
+// - Watchdog for slow request detection with escalation callback
 // - Thread-safe response queue integration
 
 #include <thread>
@@ -18,11 +18,15 @@
 #include <atomic>
 #include <chrono>
 #include <unordered_map>
+#include <set>
 #include <vector>
 #include <string>
 #include <iostream>
 
 namespace chitta {
+
+// Callback for watchdog escalation (method, duration_seconds)
+using WatchdogCallback = std::function<void(const std::string&, int64_t)>;
 
 struct RequestTrace {
     uint64_t id;
@@ -121,6 +125,17 @@ public:
         return max_workers_;
     }
 
+    // Set callback for watchdog escalation (called when operation exceeds critical threshold)
+    void set_watchdog_callback(WatchdogCallback cb) {
+        std::lock_guard<std::mutex> lock(watchdog_mutex_);
+        watchdog_callback_ = std::move(cb);
+    }
+
+    // Set escalation threshold (default: 60 seconds)
+    void set_escalation_threshold(std::chrono::seconds threshold) {
+        escalation_threshold_ = threshold;
+    }
+
 private:
     void spawn_worker() {
         std::lock_guard<std::mutex> lock(workers_mutex_);
@@ -173,23 +188,45 @@ private:
 
     void watchdog_loop() {
         while (true) {
+            WatchdogCallback callback;
             {
                 std::unique_lock<std::mutex> lock(watchdog_mutex_);
                 watchdog_cv_.wait_for(lock, std::chrono::seconds(5), [this] {
                     return stop_.load();
                 });
                 if (stop_) return;
+                callback = watchdog_callback_;  // Copy callback under lock
             }
 
             std::lock_guard<std::mutex> lock(trace_mutex_);
             auto now = std::chrono::steady_clock::now();
+            auto threshold_secs = escalation_threshold_.count();
 
             for (const auto& [id, trace] : active_) {
                 auto secs = std::chrono::duration_cast<std::chrono::seconds>(
                     now - trace.start).count();
-                if (secs > 10) {
+
+                // Critical threshold - escalate if callback is set
+                if (secs > threshold_secs && callback) {
+                    // Only escalate once per request
+                    if (escalated_.find(id) == escalated_.end()) {
+                        escalated_.insert(id);
+                        std::cerr << "[watchdog] CRITICAL: " << trace.method
+                                  << " stuck for " << secs << "s - escalating\n";
+                        callback(trace.method, secs);
+                    }
+                } else if (secs > 10) {
                     std::cerr << "[watchdog] SLOW: " << trace.method
                               << " running for " << secs << "s\n";
+                }
+            }
+
+            // Clean up escalated set for completed requests
+            for (auto it = escalated_.begin(); it != escalated_.end(); ) {
+                if (active_.find(*it) == active_.end()) {
+                    it = escalated_.erase(it);
+                } else {
+                    ++it;
                 }
             }
         }
@@ -212,6 +249,9 @@ private:
 
     std::mutex watchdog_mutex_;
     std::condition_variable watchdog_cv_;
+    WatchdogCallback watchdog_callback_;
+    std::chrono::seconds escalation_threshold_{60};  // Default 60s
+    std::set<uint64_t> escalated_;  // Requests already escalated (prevent spam)
 };
 
 } // namespace chitta

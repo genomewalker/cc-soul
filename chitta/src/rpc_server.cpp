@@ -287,6 +287,15 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
     {"code_context", "Get code context summary",
      {{"path", "Limit to files under this path", false, nullptr}}},
 
+    {"smart_context", "Build intelligent context combining memories, code symbols, and graph relationships",
+     {{"task", "Query to find context for", true, nullptr},
+      {"mode", "fast: <80ms, full: <200ms", false, "full"},
+      {"limit", "Token limit", false, "300"},
+      {"memories", "Include semantic memories", false, "true"},
+      {"code", "Include code symbols", false, "true"},
+      {"neighbors", "Include triplet neighbors", false, "true"},
+      {"realm", "Filter by realm", false, nullptr}}},
+
     // Realm tools
     {"realm_list", "List all known realms",
      {}},

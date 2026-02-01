@@ -2335,25 +2335,38 @@ COMPOSITE_TOOLS = [
     ),
     Tool(
         name="smart_context",
-        description="Build minimal context for a task. Combines code symbols + memories, compressed to token limit.",
+        description="Build intelligent context combining memories, code symbols, and graph relationships. Two modes: fast (<80ms) for PreToolUse hooks, full (<200ms) for UserPromptSubmit hooks.",
         inputSchema={
             "type": "object",
             "properties": {
                 "task": {
                     "type": "string",
-                    "description": "Task description to find relevant context for"
+                    "description": "Query to find context for"
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["fast", "full"],
+                    "description": "fast: <80ms (vector + BM25), full: <200ms (full_resonate + semantic)"
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "Token limit for output (default: 500)"
+                    "description": "Token limit (default: 300)"
                 },
                 "memories": {
                     "type": "boolean",
-                    "description": "Include relevant memories (default: true)"
+                    "description": "Include semantic memories (default: true)"
                 },
                 "code": {
                     "type": "boolean",
-                    "description": "Include relevant code symbols (default: true)"
+                    "description": "Include code symbols (default: true)"
+                },
+                "neighbors": {
+                    "type": "boolean",
+                    "description": "Include triplet neighbors (default: true)"
+                },
+                "realm": {
+                    "type": "string",
+                    "description": "Filter by realm"
                 }
             },
             "required": ["task"]

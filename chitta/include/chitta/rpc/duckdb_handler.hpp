@@ -509,6 +509,26 @@ private:
         });
         handlers_["code_context"] = [this](const json& p) { return tool_code_context(p); };
 
+        // Unified smart context for agentic search
+        tools_.push_back({
+            {"name", "smart_context"},
+            {"description", "Build intelligent context combining memories, code symbols, and graph relationships. Two modes: fast (<80ms) for PreToolUse hooks, full (<200ms) for UserPromptSubmit hooks."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"task", {{"type", "string"}, {"description", "Query to find context for"}}},
+                    {"mode", {{"type", "string"}, {"description", "fast: <80ms (vector + BM25), full: <200ms (full_resonate + semantic)"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Token limit (default: 300)"}}},
+                    {"memories", {{"type", "boolean"}, {"description", "Include semantic memories (default: true)"}}},
+                    {"code", {{"type", "boolean"}, {"description", "Include code symbols (default: true)"}}},
+                    {"neighbors", {{"type", "boolean"}, {"description", "Include triplet neighbors (default: true)"}}},
+                    {"realm", {{"type", "string"}, {"description", "Filter by realm"}}}
+                }},
+                {"required", {"task"}}
+            }}
+        });
+        handlers_["smart_context"] = [this](const json& p) { return tool_smart_context(p); };
+
         tools_.push_back({
             {"name", "codebase_overview"},
             {"description", "Get full indexed codebase structure: files, classes, functions, relationships"},
@@ -3237,6 +3257,237 @@ private:
         }
 
         return DuckDBToolResult::ok(ss.str(), result);
+    }
+
+    // ========================================================================
+    // Smart Context - Unified agentic search combining all search capabilities
+    // ========================================================================
+
+    DuckDBToolResult tool_smart_context(const json& params) {
+        // Notify subconscious that we're handling a query (idle scheduling)
+        if (subconscious_) subconscious_->notify_query();
+
+        std::string task = params.value("task", "");
+        if (task.empty()) {
+            return DuckDBToolResult::error("task is required");
+        }
+
+        std::string mode = params.value("mode", "full");
+        size_t token_limit = params.value("limit", 300);
+        bool include_memories = params.value("memories", true);
+        bool include_code = params.value("code", true);
+        bool include_neighbors = params.value("neighbors", true);
+        std::string realm = params.value("realm", "");
+
+        bool fast = (mode == "fast");
+        std::ostringstream ss;
+        json result;
+
+        // Performance budgets:
+        // fast: 3 memories (vector), 3 symbols (BM25), 1 neighbor expansion
+        // full: 5 memories (full_resonate), 5 symbols (semantic), 3 neighbor expansions
+        size_t mem_limit = fast ? 3 : 5;
+        size_t sym_limit = fast ? 3 : 5;
+        size_t neighbor_limit = fast ? 1 : 3;
+
+        // 1. MEMORIES
+        std::vector<Recall> memories;
+        json memories_json = json::array();
+
+        if (include_memories) {
+            if (fast) {
+                // Fast: simple vector recall
+                memories = mind_->recall(task, mem_limit);
+            } else {
+                // Full: full resonance with spreading activation
+                memories = mind_->full_resonate(task, mem_limit);
+            }
+
+            ss << "[mem]\n";
+            for (const auto& m : memories) {
+                // Post-hoc realm filtering if specified
+                if (!realm.empty()) {
+                    auto realms = mind_->store().get_realms(static_cast<int64_t>(m.id.low));
+                    bool in_realm = false;
+                    for (const auto& rm : realms) {
+                        if (rm == realm) { in_realm = true; break; }
+                    }
+                    // Also include global memories
+                    auto mem = mind_->store().get_memory(static_cast<int64_t>(m.id.low));
+                    if (mem && mem->visibility == RealmVisibility::Global) {
+                        in_realm = true;
+                    }
+                    if (!in_realm) continue;
+                }
+
+                int pct = static_cast<int>(std::min(m.relevance, 1.0f) * 100);
+                std::string type_name = node_type_name(m.type);
+                // Short type code
+                std::string type_short = type_name.substr(0, 3);
+                if (type_name == "wisdom") type_short = "wis";
+                else if (type_name == "belief") type_short = "bel";
+                else if (type_name == "episode") type_short = "epi";
+
+                // Extract title (first line or first ~60 chars)
+                std::string title = m.text.substr(0, 60);
+                size_t newline = title.find('\n');
+                if (newline != std::string::npos) {
+                    title = title.substr(0, newline);
+                }
+
+                ss << "[" << pct << "%:" << type_short << ":" << m.id.to_string().substr(0, 8)
+                   << "] " << title << "\n";
+
+                json mem_entry;
+                mem_entry["id"] = m.id.to_string();
+                mem_entry["relevance"] = m.relevance;
+                mem_entry["type"] = type_name;
+                mem_entry["text"] = m.text;
+                memories_json.push_back(mem_entry);
+            }
+        }
+
+        // 2. CODE SYMBOLS
+        json symbols_json = json::array();
+
+        if (include_code) {
+            bool is_code_query = looks_like_code_query(task);
+
+            if (fast || is_code_query) {
+                // Fast mode or code-like query: BM25 search
+                auto bm25_results = mind_->store().bm25_search_symbols(task, sym_limit);
+
+                if (!bm25_results.empty()) {
+                    ss << "\n[code]\n";
+                    for (const auto& sym : bm25_results) {
+                        ss << sym.file_path << ":" << sym.line_start
+                           << " " << sym.kind << " " << sym.name << "\n";
+
+                        json sym_entry;
+                        sym_entry["name"] = sym.name;
+                        sym_entry["kind"] = sym.kind;
+                        sym_entry["file"] = sym.file_path;
+                        sym_entry["line_start"] = sym.line_start;
+                        sym_entry["line_end"] = sym.line_end;
+                        symbols_json.push_back(sym_entry);
+                    }
+                }
+            } else {
+                // Full mode with natural language: semantic search
+                if (mind_->has_yantra()) {
+                    auto artha = mind_->embedder().transform(task);
+                    if (!artha.nu.is_zero()) {
+                        auto semantic_results = mind_->store().search_symbols_by_embedding(
+                            artha.nu.data, sym_limit, "");
+
+                        if (!semantic_results.empty()) {
+                            ss << "\n[code]\n";
+                            for (const auto& match : semantic_results) {
+                                const auto& sym = match.symbol;
+                                ss << sym.file_path << ":" << sym.line_start
+                                   << " " << sym.kind << " " << sym.name
+                                   << " (" << static_cast<int>(match.score * 100) << "%)\n";
+
+                                json sym_entry;
+                                sym_entry["name"] = sym.name;
+                                sym_entry["kind"] = sym.kind;
+                                sym_entry["file"] = sym.file_path;
+                                sym_entry["line_start"] = sym.line_start;
+                                sym_entry["similarity"] = match.score;
+                                symbols_json.push_back(sym_entry);
+                            }
+                        }
+                    }
+                } else {
+                    // Fallback to BM25 if no embedder
+                    auto bm25_results = mind_->store().bm25_search_symbols(task, sym_limit);
+                    if (!bm25_results.empty()) {
+                        ss << "\n[code]\n";
+                        for (const auto& sym : bm25_results) {
+                            ss << sym.file_path << ":" << sym.line_start
+                               << " " << sym.kind << " " << sym.name << "\n";
+                            json sym_entry;
+                            sym_entry["name"] = sym.name;
+                            sym_entry["kind"] = sym.kind;
+                            sym_entry["file"] = sym.file_path;
+                            sym_entry["line_start"] = sym.line_start;
+                            symbols_json.push_back(sym_entry);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. TRIPLET NEIGHBORS (from top memory terms)
+        json triplets_json = json::array();
+
+        if (include_neighbors && !memories.empty()) {
+            ss << "\n[graph]\n";
+            std::set<std::string> seen_triplets;
+            size_t processed = 0;
+
+            for (const auto& m : memories) {
+                if (processed >= neighbor_limit) break;
+
+                // Extract key terms from memory content
+                auto terms = extract_terms(m.text);
+                if (terms.empty()) continue;
+
+                // Query triplets for the first significant term
+                for (const auto& term : terms) {
+                    if (term.length() < 4) continue;  // Skip short terms
+
+                    auto subj_triplets = mind_->store().query_subject(term);
+                    auto obj_triplets = mind_->store().query_object(term);
+
+                    for (const auto& t : subj_triplets) {
+                        std::string key = t.subject + "→" + t.predicate + "→" + t.object;
+                        if (seen_triplets.find(key) == seen_triplets.end()) {
+                            seen_triplets.insert(key);
+                            ss << t.subject << "→" << t.predicate << "→" << t.object << "\n";
+                            json triplet_entry;
+                            triplet_entry["subject"] = t.subject;
+                            triplet_entry["predicate"] = t.predicate;
+                            triplet_entry["object"] = t.object;
+                            triplets_json.push_back(triplet_entry);
+                        }
+                        if (triplets_json.size() >= 5) break;  // Limit triplets
+                    }
+
+                    for (const auto& t : obj_triplets) {
+                        std::string key = t.subject + "→" + t.predicate + "→" + t.object;
+                        if (seen_triplets.find(key) == seen_triplets.end()) {
+                            seen_triplets.insert(key);
+                            ss << t.subject << "→" << t.predicate << "→" << t.object << "\n";
+                            json triplet_entry;
+                            triplet_entry["subject"] = t.subject;
+                            triplet_entry["predicate"] = t.predicate;
+                            triplet_entry["object"] = t.object;
+                            triplets_json.push_back(triplet_entry);
+                        }
+                        if (triplets_json.size() >= 5) break;
+                    }
+
+                    if (triplets_json.size() >= 3) break;  // Found enough
+                }
+
+                processed++;
+            }
+        }
+
+        // Build result
+        result["memories"] = memories_json;
+        result["symbols"] = symbols_json;
+        result["triplets"] = triplets_json;
+        result["mode"] = mode;
+        result["task"] = task;
+
+        std::string output = ss.str();
+        if (output.empty()) {
+            output = "No context found for: " + task;
+        }
+
+        return DuckDBToolResult::ok(output, result);
     }
 
     DuckDBToolResult tool_codebase_overview(const json& params) {

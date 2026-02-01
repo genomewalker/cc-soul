@@ -3,6 +3,7 @@
 //
 // Simple interface for embedding text using ONNX models.
 // Includes LRU cache for query embeddings (~10x speedup on cache hits).
+// Includes circuit breaker for graceful degradation when embedder fails.
 
 #include "../vak.hpp"
 #include "../types.hpp"
@@ -10,8 +11,17 @@
 #include <shared_mutex>
 #include <unordered_map>
 #include <list>
+#include <chrono>
+#include <atomic>
+#include <iostream>
 
 namespace chitta {
+
+// Circuit breaker configuration
+struct CircuitBreakerConfig {
+    size_t failure_threshold = 3;       // Trip after N consecutive failures
+    std::chrono::seconds cooldown{60};  // Wait before retry (half-open state)
+};
 
 // Simple LRU cache for embeddings
 template<typename K, typename V>
@@ -80,8 +90,63 @@ public:
         return yantra_ && yantra_->ready();
     }
 
-    // Embed single text (with caching)
+    // Circuit breaker configuration
+    void configure_circuit_breaker(CircuitBreakerConfig cfg) {
+        std::unique_lock lock(mutex_);
+        breaker_config_ = cfg;
+    }
+
+    // Check if circuit is open (embedder disabled)
+    bool is_circuit_open() const {
+        return circuit_open_.load();
+    }
+
+    // Record an embedding failure (timeout, error, etc.)
+    void record_failure() {
+        size_t failures = ++consecutive_failures_;
+        if (failures >= breaker_config_.failure_threshold && !circuit_open_.load()) {
+            circuit_open_ = true;
+            circuit_opened_at_ = std::chrono::steady_clock::now();
+            std::cerr << "[Embedder] Circuit breaker OPEN after " << failures
+                      << " failures - falling back to BM25\n";
+        }
+    }
+
+    // Record successful embedding (resets failure count)
+    void record_success() {
+        consecutive_failures_ = 0;
+        if (circuit_open_.load()) {
+            circuit_open_ = false;
+            std::cerr << "[Embedder] Circuit breaker CLOSED - embeddings restored\n";
+        }
+    }
+
+    // Force circuit breaker trip (used by watchdog)
+    void force_trip() {
+        circuit_open_ = true;
+        circuit_opened_at_ = std::chrono::steady_clock::now();
+        std::cerr << "[Embedder] Circuit breaker FORCED OPEN by watchdog\n";
+    }
+
+    // Check if we should skip embedding (circuit open and not in half-open state)
+    bool should_skip_embedding() const {
+        if (!circuit_open_.load()) return false;
+
+        // Check if cooldown has elapsed (half-open state - allow retry)
+        auto elapsed = std::chrono::steady_clock::now() - circuit_opened_at_;
+        if (elapsed >= breaker_config_.cooldown) {
+            return false;  // Allow retry
+        }
+        return true;
+    }
+
+    // Embed single text (with caching and circuit breaker)
     Vector embed(const std::string& text) {
+        // Check circuit breaker first
+        if (should_skip_embedding()) {
+            return Vector::zeros();
+        }
+
         // Check cache first
         {
             std::shared_lock lock(mutex_);
@@ -107,6 +172,14 @@ public:
         }
 
         auto artha = yantra_->transform(text);
+
+        // Check if embedding failed (zero vector indicates timeout/failure)
+        if (artha.nu.is_zero()) {
+            record_failure();
+            return Vector::zeros();
+        }
+
+        record_success();
         cache_.put(text, artha.nu);
         return artha.nu;
     }
@@ -129,8 +202,16 @@ public:
         return results;
     }
 
-    // Full Artha (embedding + metadata) - with caching
+    // Full Artha (embedding + metadata) - with caching and circuit breaker
     Artha transform(const std::string& text) {
+        // Check circuit breaker first
+        if (should_skip_embedding()) {
+            Artha artha;
+            artha.nu = Vector::zeros();
+            artha.source = text;
+            return artha;
+        }
+
         // Check cache first
         {
             std::shared_lock lock(mutex_);
@@ -162,6 +243,14 @@ public:
         }
 
         auto artha = yantra_->transform(text);
+
+        // Check if embedding failed (zero vector indicates timeout/failure)
+        if (artha.nu.is_zero()) {
+            record_failure();
+            return artha;
+        }
+
+        record_success();
         cache_.put(text, artha.nu);
         return artha;
     }
@@ -205,6 +294,12 @@ private:
     mutable std::shared_mutex mutex_;
     std::shared_ptr<VakYantra> yantra_;
     mutable LRUCache<std::string, Vector> cache_{1000};  // Default 1000 entries
+
+    // Circuit breaker state
+    CircuitBreakerConfig breaker_config_;
+    std::atomic<bool> circuit_open_{false};
+    std::atomic<size_t> consecutive_failures_{0};
+    mutable std::chrono::steady_clock::time_point circuit_opened_at_;
 };
 
 }  // namespace chitta

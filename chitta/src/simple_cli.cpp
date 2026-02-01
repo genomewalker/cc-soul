@@ -21,6 +21,7 @@
 #include <chitta/version.hpp>
 #ifdef CHITTA_WITH_ONNX
 #include <chitta/vak_onnx.hpp>
+#include <chitta/vak_timeout.hpp>
 #endif
 #include <iostream>
 #include <string>
@@ -135,6 +136,39 @@ void release_lock(DaemonLock& lock) {
         close(lock.fd);
         unlink(lock.path.c_str());
     }
+}
+
+// Check if a process is alive
+bool is_pid_alive(pid_t pid) {
+    return kill(pid, 0) == 0 || errno == EPERM;
+}
+
+// Clean up stale daemon files from crashed daemon
+// Returns true if cleanup succeeded or nothing to clean, false if daemon is alive
+bool cleanup_stale_daemon(const std::string& mind_path) {
+    std::string pid_path = pid_path_for_mind(mind_path);
+    std::string sock_path = socket_path_for_mind(mind_path);
+    std::string lock_path = lock_path_for_mind(mind_path);
+
+    // Check if PID file exists
+    std::ifstream pf(pid_path);
+    if (!pf) return true;  // No PID file, nothing to clean
+
+    pid_t old_pid;
+    if (!(pf >> old_pid)) return true;  // Invalid PID file
+    pf.close();
+
+    // Check if that process is still alive
+    if (is_pid_alive(old_pid)) {
+        return false;  // Process exists, don't clean
+    }
+
+    // Process is dead, clean up stale files
+    std::cerr << "[daemon] Cleaning stale files from dead PID " << old_pid << "\n";
+    unlink(sock_path.c_str());
+    unlink(pid_path.c_str());
+    unlink(lock_path.c_str());
+    return true;
 }
 
 std::string default_mind_path() {
@@ -371,9 +405,15 @@ std::string generate_stats(DuckDBMind& mind) {
 int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                const std::string& mind_path, const std::string& pid_file,
                const DistillConfig& distill_config, EnrichConfig& enrich_config) {
+    // Clean up stale files from crashed daemon
+    if (!cleanup_stale_daemon(mind_path)) {
+        std::cerr << "[daemon] Another daemon is running (PID alive)\n";
+        return 1;
+    }
+
     DaemonLock lock;
     if (!acquire_lock(mind_path, lock)) {
-        std::cerr << "[daemon] Another daemon is running\n";
+        std::cerr << "[daemon] Another daemon is running (lock held)\n";
         return 1;
     }
 
@@ -801,6 +841,26 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
 
     // Thread pool for async RPC handling (scales 2-16 workers based on load)
     ThreadPool pool(2, 16);
+
+    // Configure circuit breaker for embedder
+    mind.embedder().configure_circuit_breaker({
+        .failure_threshold = 3,
+        .cooldown = std::chrono::seconds(60)
+    });
+
+    // Watchdog callback - trip circuit breaker on stuck embedding operations
+    pool.set_watchdog_callback([&mind](const std::string& method, int64_t secs) {
+        // Only trip circuit breaker for embedding-related operations
+        if (method.find("search_symbols") != std::string::npos ||
+            method.find("smart_context") != std::string::npos ||
+            method.find("recall") != std::string::npos ||
+            method.find("full_resonate") != std::string::npos) {
+            std::cerr << "[watchdog] Forcing circuit breaker trip due to stuck " << method << "\n";
+            mind.embedder().force_trip();
+        }
+    });
+    pool.set_escalation_threshold(std::chrono::seconds(30));  // Trip after 30s
+
     std::cerr << "[daemon] Thread pool started (" << pool.worker_count() << " workers)\n";
     std::cerr << "[daemon] Queue processor started (path=" << queue_path << ")\n";
 
@@ -1086,17 +1146,30 @@ int main(int argc, char* argv[]) {
 
     // Create yantra for embeddings
 #ifdef CHITTA_WITH_ONNX
+    // Hard cap ONNX/OpenMP threads via environment variables
+    // CRITICAL: Must be set BEFORE ORT session is created
+    const int max_onnx_threads = 4;
+    std::string thread_str = std::to_string(max_onnx_threads);
+    setenv("OMP_NUM_THREADS", thread_str.c_str(), 1);
+    setenv("MKL_NUM_THREADS", thread_str.c_str(), 1);
+    setenv("OPENBLAS_NUM_THREADS", thread_str.c_str(), 1);
+    setenv("ORT_NUM_THREADS", thread_str.c_str(), 1);
+
     std::string model_path = default_model_path();
     std::string vocab_path = default_vocab_path();
     AntahkaranaYantra::Config yantra_config;
     yantra_config.pooling = PoolingStrategy::Mean;
     yantra_config.normalize_embeddings = true;
-    auto yantra = std::make_shared<AntahkaranaYantra>(yantra_config);
-    if (yantra->awaken(model_path, vocab_path)) {
-        std::cerr << "[Yantra] Awakened\n";
+    yantra_config.num_threads = max_onnx_threads;
+    auto inner_yantra = std::make_shared<AntahkaranaYantra>(yantra_config);
+    std::shared_ptr<VakYantra> yantra;
+    if (inner_yantra->awaken(model_path, vocab_path)) {
+        // Wrap with timeout protection (5s default timeout)
+        yantra = std::make_shared<TimeoutYantra>(inner_yantra, std::chrono::milliseconds(5000));
+        std::cerr << "[Yantra] Awakened (timeout-protected)\n";
     } else {
-        std::cerr << "[Yantra] Failed: " << yantra->error() << "\n";
-        yantra.reset();
+        std::cerr << "[Yantra] Failed: " << inner_yantra->error() << "\n";
+        // yantra stays nullptr
     }
 #endif
 
