@@ -46,48 +46,42 @@ NEXT_STEPS="[]"
 SNAPSHOT=""
 
 if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
-    # Extract files read (from Read tool calls)
-    # Format: file_path:start-end or just file_path
+    # Extract assistant message text content (properly unescaped via jq)
+    # This gives us clean text without JSON escaping
+    ASSISTANT_TEXT=$(cat "$TRANSCRIPT_PATH" | \
+        jq -r 'select(.type=="assistant") | .message.content[]? | select(.type=="text") | .text' 2>/dev/null | \
+        tail -10000)
+
+    # Extract files read (from Read tool calls in raw JSON)
     FILES_RAW=$(grep -oE '"file_path"\s*:\s*"[^"]+"' "$TRANSCRIPT_PATH" 2>/dev/null | \
         sed 's/"file_path"\s*:\s*"//' | sed 's/"$//' | sort -u | tail -20)
     if [[ -n "$FILES_RAW" ]]; then
         ACTIVE_FILES=$(echo "$FILES_RAW" | jq -R . | jq -s .)
     fi
 
-    # Extract decisions from [DECISION] markers in assistant messages
-    DECISIONS_RAW=$(grep -oE '\[DECISION\][^"]*' "$TRANSCRIPT_PATH" 2>/dev/null | \
-        sed 's/\[DECISION\]\s*//' | head -10)
+    # Extract typed markers from clean assistant text
+    # [DECISION] - design choices
+    DECISIONS_RAW=$(echo "$ASSISTANT_TEXT" | grep -oE '^\[DECISION\].*$' | sed 's/\[DECISION\]\s*//' | head -10)
     if [[ -n "$DECISIONS_RAW" ]]; then
         DECISIONS=$(echo "$DECISIONS_RAW" | jq -R . | jq -s .)
     fi
 
-    # Extract current task context from last few messages
-    # Look for task descriptions, current work
-    LAST_MESSAGES=$(tac "$TRANSCRIPT_PATH" | head -50)
-
-    # Look for task markers or "currently working on" patterns
-    CURRENT_WORK=$(echo "$LAST_MESSAGES" | grep -oE '(working on|implementing|fixing|adding|updating)[^.]*\.' | head -3)
-
-    # Extract blockers from [BLOCKER] or error patterns
-    BLOCKERS_RAW=$(grep -oE '\[BLOCKER\][^"]*' "$TRANSCRIPT_PATH" 2>/dev/null | \
-        sed 's/\[BLOCKER\]\s*//' | head -5)
+    # [BLOCKER] - things blocking progress
+    BLOCKERS_RAW=$(echo "$ASSISTANT_TEXT" | grep -oE '^\[BLOCKER\].*$' | sed 's/\[BLOCKER\]\s*//' | head -5)
     if [[ -n "$BLOCKERS_RAW" ]]; then
         BLOCKERS=$(echo "$BLOCKERS_RAW" | jq -R . | jq -s .)
     fi
 
-    # Extract discoveries from [SOLUTION] and [GOTCHA]
-    DISCOVERIES_RAW=$(grep -oE '\[(SOLUTION|GOTCHA)\][^"]*' "$TRANSCRIPT_PATH" 2>/dev/null | \
-        sed 's/\[(SOLUTION|GOTCHA)\]\s*//' | head -10)
+    # [SOLUTION] and [GOTCHA] - discoveries
+    DISCOVERIES_RAW=$(echo "$ASSISTANT_TEXT" | grep -oE '^\[(SOLUTION|GOTCHA)\].*$' | head -10)
     if [[ -n "$DISCOVERIES_RAW" ]]; then
         DISCOVERIES=$(echo "$DISCOVERIES_RAW" | jq -R . | jq -s .)
     fi
 
-    # Build snapshot: last significant assistant message
-    SNAPSHOT=$(tac "$TRANSCRIPT_PATH" | grep -m1 '"role":"assistant"' | \
-        jq -r '.message.content[] | select(.type=="text") | .text' 2>/dev/null | \
-        head -c 2000 || echo "")
+    # Build snapshot: last significant chunk of assistant text
+    SNAPSHOT=$(echo "$ASSISTANT_TEXT" | tail -100 | grep -v '^$' | tail -20 | head -c 2000)
 
-    # If snapshot is too short, try to get more context
+    # If snapshot is too short, add file context
     if [[ ${#SNAPSHOT} -lt 100 ]]; then
         SNAPSHOT="Context compacted ($TRIGGER). Files: $(echo "$ACTIVE_FILES" | jq -r '.[:5] | join(", ")')"
     fi
