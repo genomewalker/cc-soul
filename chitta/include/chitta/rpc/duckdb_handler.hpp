@@ -17,9 +17,12 @@
 #include <chrono>
 #include <iomanip>
 #include <filesystem>
+#include <fstream>
 #include <algorithm>
 #include <unordered_set>
 #include <cctype>
+#include <array>
+#include <cstdio>
 
 namespace chitta {
 
@@ -787,6 +790,13 @@ private:
             }}
         });
         handlers_["realm_visibility"] = [this](const json& p) { return tool_realm_visibility(p); };
+
+        tools_.push_back({
+            {"name", "realm_detect"},
+            {"description", "Detect current realm from environment, .cc-soul-realm file, or git repository"},
+            {"inputSchema", {{"type", "object"}, {"properties", json::object()}}}
+        });
+        handlers_["realm_detect"] = [this](const json&) { return tool_realm_detect(); };
 
         // Ledger tools (session continuity)
         tools_.push_back({
@@ -4122,6 +4132,59 @@ private:
 
         std::string vis_name = visibility == 0 ? "Private" : (visibility == 1 ? "Shared" : "Global");
         return DuckDBToolResult::ok("Set visibility to " + vis_name + " for memory " + id_str);
+    }
+
+    DuckDBToolResult tool_realm_detect() {
+        // Detect realm from environment/git/config
+        // Priority: CHITTA_REALM env > .cc-soul-realm file > git repo name > "brahman"
+
+        // 1. Environment variable
+        if (const char* env_realm = std::getenv("CHITTA_REALM")) {
+            std::string realm = env_realm;
+            return DuckDBToolResult::ok("Realm detected from environment: " + realm, {{"realm", realm}, {"source", "env"}});
+        }
+
+        // 2. Config file in current directory
+        std::ifstream realm_file(".cc-soul-realm");
+        if (realm_file.good()) {
+            std::string realm;
+            std::getline(realm_file, realm);
+            // Trim whitespace
+            realm.erase(0, realm.find_first_not_of(" \t\n\r"));
+            realm.erase(realm.find_last_not_of(" \t\n\r") + 1);
+            if (!realm.empty()) {
+                return DuckDBToolResult::ok("Realm detected from .cc-soul-realm file: " + realm, {{"realm", realm}, {"source", "file"}});
+            }
+        }
+
+        // 3. Git repository name
+        std::array<char, 256> buffer;
+        std::string git_root;
+        FILE* pipe = popen("git rev-parse --show-toplevel 2>/dev/null", "r");
+        if (pipe) {
+            if (fgets(buffer.data(), buffer.size(), pipe)) {
+                git_root = buffer.data();
+                // Remove trailing newline
+                if (!git_root.empty() && git_root.back() == '\n') {
+                    git_root.pop_back();
+                }
+            }
+            pclose(pipe);
+        }
+
+        if (!git_root.empty()) {
+            // Extract repo name from path
+            size_t last_slash = git_root.rfind('/');
+            std::string repo_name = (last_slash != std::string::npos)
+                ? git_root.substr(last_slash + 1)
+                : git_root;
+            std::string realm = "project:" + repo_name;
+            return DuckDBToolResult::ok("Realm detected from git repository: " + realm, {{"realm", realm}, {"source", "git"}});
+        }
+
+        // 4. Default
+        std::string realm = "brahman";
+        return DuckDBToolResult::ok("Realm defaulted to: " + realm, {{"realm", realm}, {"source", "default"}});
     }
 
     // Ledger tool implementations

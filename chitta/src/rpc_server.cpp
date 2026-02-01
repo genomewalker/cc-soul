@@ -319,6 +319,9 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
      {{"id", "Memory ID", true, nullptr},
       {"visibility", "Visibility: private|shared|global", true, nullptr}}},
 
+    {"realm_detect", "Detect current realm from environment, .cc-soul-realm file, or git repository",
+     {}},
+
     // Ledger tools (session continuity)
     {"ledger_save", "Save session checkpoint for continuity",
      {{"session_id", "Session identifier", true, nullptr},
