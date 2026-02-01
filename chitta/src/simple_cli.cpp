@@ -747,6 +747,25 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                             entry.project = project;
                             entry.mood = mood;
                             entry.snapshot = snapshot;
+                            // Extract all session state fields (JSON arrays → strings)
+                            if (args.contains("active_files")) {
+                                entry.active_files = args["active_files"].dump();
+                            }
+                            if (args.contains("decisions")) {
+                                entry.decisions = args["decisions"].dump();
+                            }
+                            if (args.contains("todos")) {
+                                entry.todos = args["todos"].dump();
+                            }
+                            if (args.contains("blockers")) {
+                                entry.blockers = args["blockers"].dump();
+                            }
+                            if (args.contains("discoveries")) {
+                                entry.discoveries = args["discoveries"].dump();
+                            }
+                            if (args.contains("next_steps")) {
+                                entry.next_steps = args["next_steps"].dump();
+                            }
                             mind.store().save_ledger(entry);
                             queue_count++;
                         }

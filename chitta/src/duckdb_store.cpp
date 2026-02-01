@@ -2237,7 +2237,8 @@ int64_t DuckDBStore::save_ledger(const LedgerEntry& entry) {
         << "'" << escape(entry.discoveries) << "', "
         << "'" << escape(entry.snapshot) << "') RETURNING id";
 
-    auto result = read_query(sql.str());
+    // Use write_query for INSERT (not read_query) to ensure proper transaction handling
+    auto result = write_query(sql.str());
     if (!result || result->HasError()) {
         return -1;
     }
