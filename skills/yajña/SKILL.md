@@ -7,357 +7,229 @@ execution: direct
 
 # Yajña (यज्ञ) - Autonomous Development Ritual
 
-**Truly autonomous** development loop with Vedic role-based coordination. Multiple hands, one purpose - works continuously until done.
+**Truly autonomous** development loop. Runs continuously until done. NO manual coordination.
 
-## Quick Start
+## Critical Rules
 
-```bash
-/yajna                    # Start ritual (runs until done)
-/yajna init [goal]        # Initialize with explicit goal
-/yajna status             # Show progress
-/yajna pause              # Stop after current iteration
-```
+1. **NEVER ask user for routine decisions** - just do it
+2. **NEVER pause between iterations** - loop automatically
+3. **STOP ONLY for**: Blockers | Completion | User interrupt
+4. **Blockers require user**: Daemon down, permissions, unresolvable errors
 
-## The Four Priests (ṛtvij)
+## Pre-Flight Check (REQUIRED)
 
-| Role | Sanskrit | Function | Agent Type |
-|------|----------|----------|------------|
-| **Hotṛ** | होतृ | Research, exploration, information gathering | Explore agent |
-| **Adhvaryu** | अध्वर्यु | Implementation, actual code changes | General-purpose |
-| **Udgātṛ** | उद्गातृ | Testing, validation, quality assurance | General-purpose |
-| **Brahman** | ब्रह्मन् | Coordinator (main Claude) - synthesizes, decides | You |
-
-## How It Works
-
-```
-╔══════════════════════════════════════════════════════════════╗
-║                    YAJÑA RITUAL LOOP                         ║
-╠══════════════════════════════════════════════════════════════╣
-║  1. ĀHUTI (Offering) - Load context                          ║
-║     • long_task_snapshot → previous state                    ║
-║     • recall → relevant memories                             ║
-║     • Read fix_plan.md → remaining tasks                     ║
-║                                                              ║
-║  2. HOTṚ INVOCATION - Research phase                         ║
-║     • What do we need to know?                               ║
-║     • Explore codebase, read docs, understand context        ║
-║     • Store findings to memory                               ║
-║                                                              ║
-║  3. ADHVARYU WORK - Implementation phase                     ║
-║     • Implement the task (parallel if independent)           ║
-║     • Update fix_plan.md: [ ] → [x]                          ║
-║     • Use [SOLUTION]/[GOTCHA]/[DECISION] markers             ║
-║                                                              ║
-║  4. UDGĀTṚ CHANT - Validation phase                          ║
-║     • Run tests                                              ║
-║     • Verify implementation                                  ║
-║     • Report quality                                         ║
-║                                                              ║
-║  5. BRAHMAN SYNTHESIS - Checkpoint                           ║
-║     • long_task_update → progress                            ║
-║     • Evaluate: complete? stagnant? continue?                ║
-║     • If tasks remain → goto step 1                          ║
-║                                                              ║
-║  EXIT: All tasks done | Stagnation | User interrupt          ║
-╚══════════════════════════════════════════════════════════════╝
-```
-
-## Execution Process
-
-**IMPORTANT**: This is a LOOP. Execute repeatedly until exit condition.
-
-### Phase 1: Āhuti (Initialize/Load)
+Before EVERY iteration, verify daemon is alive:
 
 ```javascript
-// First iteration only
-if (!active_task) {
-  goal = ask_user_or_infer();
-  mkdir(".yajna/specs");
-  generate_fix_plan(goal);
-  long_task_start({ task_id: `yajna-${project}-${ts}`, goal, realm: project });
-  remember(`[yajña] ${project}→started\ngoal: ${goal}`);
+health = mcp__chitta-mcp__health_check();
+if (health.error || health.status !== "OK") {
+  // BLOCKER - stop and report
+  output("[BLOCKER] Daemon unreachable. Run: pkill -9 chittad && chittad daemon");
+  long_task_event({ event_type: "blocker", description: "Daemon down" });
+  STOP;  // Do not continue
+}
+```
+
+## The Loop (Execute Without Pausing)
+
+```
+WHILE tasks_remain AND no_blocker:
+
+  1. PRE-FLIGHT
+     health_check → if fail → STOP with blocker
+
+  2. LOAD CONTEXT (silent, no output)
+     long_task_snapshot
+     read fix_plan.md
+     count remaining tasks
+
+  3. HOTṚ - Research (if needed)
+     Task(Explore) for complex tasks
+     VALIDATE: Did agent find correct files?
+     If wrong files → retry with explicit paths
+
+  4. ADHVARYU - Implement
+     Task(general-purpose) with EXPLICIT file paths
+     Prompt MUST include: "Edit file X at path Y"
+     VALIDATE: Check file was actually modified
+     If not modified → retry or mark blocker
+
+  5. UDGĀTṚ - Test
+     Task(general-purpose) for validation
+     Syntax checks, tests, verification
+     If FAIL → log, continue (not a blocker)
+
+  6. CHECKPOINT (silent)
+     long_task_update
+     Update fix_plan.md
+
+  7. EVALUATE
+     All done? → COMPLETION
+     Same error 3x? → STAGNATION (blocker)
+     Else → continue loop (NO pause, NO output)
+```
+
+## Agent Prompts Must Be Explicit
+
+**BAD** (vague, leads to wrong files):
+```
+"Add pattern detection to the hooks"
+```
+
+**GOOD** (explicit paths, clear instructions):
+```
+"Edit /home/user/.claude/hooks/prompt-hook.sh
+Add these lines after line 25:
+[exact code]
+Verify the file exists first with: ls -la /home/user/.claude/hooks/"
+```
+
+## Validation After Each Agent
+
+```javascript
+// After Adhvaryu returns
+result = Task({ ... });
+
+// Validate the work
+if (result.includes("Error") || result.includes("not found")) {
+  // Retry with more explicit instructions
+  retry_count++;
+  if (retry_count >= 3) {
+    // BLOCKER
+    long_task_event({ event_type: "blocker", description: result });
+    STOP;
+  }
+  continue;  // Retry this iteration
 }
 
-// Every iteration
-long_task_snapshot({ mode: "brief" });
-recall({ query: `${project} decisions solutions gotchas blockers` });
-fix_plan = read(".yajna/fix_plan.md");
+// Check file was actually modified
+file_check = Bash(`ls -la ${target_file}`);
+if (file_check.error) {
+  // File doesn't exist - agent edited wrong path
+  retry_count++;
+  continue;
+}
 ```
 
-### Phase 2: Hotṛ (Research)
+## Output Rules
 
-For complex tasks, spawn research agent first:
-
-```javascript
-Task({
-  subagent_type: "Explore",
-  description: "Research for implementation",
-  prompt: `Research what's needed for: ${next_task}
-    - Find relevant code patterns
-    - Identify dependencies
-    - Note potential gotchas
-    Store findings with [INSIGHT] markers.`,
-  model: "haiku"
-});
+**During loop**: Minimal output. Just status lines:
+```
+━━━ ITERATION 3 ━━━
+[HOTṚ] ✓ Found 2 patterns
+[ADHVARYU] ✓ Modified 3 files
+[UDGĀTṚ] ✓ Tests passing
+[4/7 tasks done]
 ```
 
-Skip if task is straightforward.
-
-### Phase 3: Adhvaryu (Implement)
-
-**Parallel** (independent tasks):
-```javascript
-// Spawn multiple in ONE tool call
-Task({
-  subagent_type: "general-purpose",
-  description: "Implement task 1",
-  prompt: "Implement [task 1]. Update fix_plan.md when done.",
-  model: "haiku"
-});
-Task({
-  subagent_type: "general-purpose",
-  description: "Implement task 2",
-  prompt: "Implement [task 2]. Update fix_plan.md when done.",
-  model: "haiku"
-});
+**On blocker**: Full details + stop:
+```
+━━━ BLOCKER ━━━
+[ERROR] Daemon not responding
+[ACTION] Run: pkill -9 chittad && chittad daemon
+[STATUS] Yajna paused at iteration 3
 ```
 
-**Sequential** (dependent tasks):
+**On completion**: Summary only:
 ```
-1. Implement the task directly
-2. Update fix_plan.md: [ ] → [x]
-3. Use markers: [SOLUTION], [GOTCHA], [DECISION], [FAILURE]
-```
-
-### Phase 4: Udgātṛ (Validate)
-
-```javascript
-Task({
-  subagent_type: "general-purpose",
-  description: "Run tests",
-  prompt: `Validate the implementation:
-    1. Run relevant tests
-    2. Check for regressions
-    3. Report: PASSING | FAILING | SKIPPED`,
-  model: "haiku"
-});
-```
-
-### Phase 5: Brahman (Synthesize)
-
-```javascript
-// Checkpoint
-long_task_update({
-  completed_summary: "Iteration N: [tasks completed]",
-  add_work_items: ["Discovered task"],  // if any
-  add_blockers: ["Blocker found"]       // if any
-});
-
-long_task_event({
-  event_type: "checkpoint",
-  description: `Iteration ${n}: ${tasks_done.join(", ")}`
-});
-
-// Evaluate
-if (all_tasks_complete) → COMPLETION
-if (same_error_3x) → STAGNATION
-if (iteration > MAX_LOOPS) → TIMEOUT
-else → continue to Phase 1
-```
-
-### COMPLETION (Pūrṇāhuti - Final Offering)
-
-```javascript
-long_task_complete({
-  task_id,
-  outcome: "Completed: [summary]"
-});
-
-remember(`[yajña] ${project}→completed
-goal: ${goal}
-outcome: ${summary}
-iterations: ${count}`);
-
-learn_milestone({
-  milestone: `Yajña: ${project} complete`,
-  details: summary
-});
-```
-
-### STAGNATION
-
-```javascript
-long_task_event({
-  event_type: "error",
-  description: "Stagnation: [pattern]"
-});
-
-remember(`[yajña] ${project}→stagnated
-pattern: ${repeated_error}`);
-```
-
-Ask user for guidance (ONLY time to prompt).
-
-## File Structure
-
-```
-project/
-├── .yajna/
-│   ├── fix_plan.md        # Prioritized tasks (checkboxes)
-│   ├── AGENT.md           # Build/run/test instructions
-│   └── specs/             # Specifications
-└── ...
-```
-
-## fix_plan.md Format
-
-```markdown
-# Yajña: [Goal]
-
-## Priority 1 - Critical
-- [ ] First critical task
-- [x] Completed task
-
-## Priority 2 - Important
-- [ ] Important task
-
-## Priority 3 - Nice to Have
-- [ ] Optional task
-
-## Blockers
-- [ ] [BLOCKER] Thing preventing progress
-
-## Discovered
-- [ ] [NEW] Task found during work
-```
-
-## Status Output
-
-```
-━━━ ITERATION [N] ━━━
-[HOTṚ] Researched: [findings]
-[ADHVARYU] Implemented: [tasks]
-[UDGĀTṚ] Tests: PASSING|FAILING
-[CHECKPOINT] X/Y tasks done
-
 ━━━ PŪRṆĀHUTI ━━━
-Ritual complete. [summary]
+Complete in 5 iterations.
+Files: 8 | Tests: passing | Learnings: 3
 ```
 
-## Multi-Session Continuity
+## Blocker Conditions
 
-Tasks persist via long_task:
+These STOP the loop and require user:
 
+| Condition | Action |
+|-----------|--------|
+| Daemon health_check fails | Stop, show restart command |
+| File not found after 3 retries | Stop, ask user for correct path |
+| Same error 3 consecutive times | Stop, show stagnation |
+| Build/compile fails critically | Stop, show error |
+| Permission denied | Stop, ask user |
+
+## NOT Blockers (Continue Automatically)
+
+| Condition | Action |
+|-----------|--------|
+| Test fails | Log, continue to next task |
+| Agent returns partial result | Use what's there, retry rest |
+| Minor validation warning | Log, continue |
+| Task takes long | Wait, don't timeout |
+
+## Spawn Agents Correctly
+
+**Parallel** (independent tasks, ONE tool call):
+```javascript
+// Send ALL parallel agents in SINGLE message
+Task({ description: "Task 1", prompt: "..." });
+Task({ description: "Task 2", prompt: "..." });
+Task({ description: "Task 3", prompt: "..." });
+// Wait for all, then continue
 ```
-Session 1: /yajna init "Build API"
-  → 3/5 tasks done, context fills
-  → Auto-checkpoint
 
-Session 2: /yajna
-  → Detects active task
-  → Loads snapshot
-  → Continues from 4/5
+**Sequential** (dependent):
+```javascript
+result1 = Task({ description: "Task 1", prompt: "..." });
+// Validate result1
+result2 = Task({ description: "Task 2", prompt: `Using ${result1}...` });
+// Validate result2
 ```
 
-## Configuration (.yajnarc)
+## Quick Reference
 
 ```bash
-MAX_LOOPS=50              # Max iterations
-SKIP_TESTS=false          # Skip udgātṛ phase
-PARALLEL_TASKS=true       # Allow parallel adhvaryu
+/yajna              # Start/continue (runs until done)
+/yajna init GOAL    # New ritual with explicit goal
+/yajna status       # Check progress without running
+/yajna pause        # Stop after current iteration
 ```
 
-## Inter-Agent Communication
-
-Agents communicate through memory:
-
-```javascript
-// Agent writes
-remember({
-  content: "[yajña:hotṛ] Found pattern: singleton used for DB",
-  tags: ["thread:yajna-123", "research"]
-});
-
-// Brahman reads
-recall({
-  query: "thread:yajna-123 research findings"
-});
-```
-
-## Example Session
+## Example: Correct Autonomous Flow
 
 ```
-User: /yajna init "Add user authentication"
+User: /yajna init "Add dark mode"
 
-╔══════════════════════════════════════════════════════════════╗
-║  YAJÑA: Autonomous Development Ritual                        ║
-║  Project: myapp | Goal: Add user authentication              ║
-╚══════════════════════════════════════════════════════════════╝
-
-[RECALL] 2 relevant memories:
-  • JWT tokens preferred over sessions
-  • Always hash passwords with bcrypt
-
-[INIT] Task: yajna-myapp-1706700000
-[PLAN] Generated fix_plan.md (5 tasks)
+[PRE-FLIGHT] Daemon OK
+[INIT] yajna-myapp-1234
+[PLAN] 4 tasks generated
 
 ━━━ ITERATION 1 ━━━
-[HOTṚ] Research: existing auth patterns in codebase
-  → Found: middleware pattern, User model exists
-[ADHVARYU] Implementing auth routes + middleware
-  ✓ src/routes/auth.ts
-  ✓ src/middleware/authenticate.ts
-[UDGĀTṚ] Tests: 4 passing
-[SOLUTION] JWT with refresh tokens works well
-
-[CHECKPOINT] 2/5 done
+[HOTṚ] ✓ Found ThemeProvider, CSS variables
+[ADHVARYU] ✓ src/theme/dark.css, src/context/Theme.tsx
+[UDGĀTṚ] ✓ Builds, renders
+[2/4 done]
 
 ━━━ ITERATION 2 ━━━
-[ADHVARYU] Password hashing + validation
-  ✓ src/utils/password.ts
-  ✓ Updated User model
-[UDGĀTṚ] Tests: 8 passing
-[GOTCHA] bcrypt.compare is async - must await
-
-[CHECKPOINT] 4/5 done
-
-━━━ ITERATION 3 ━━━
-[ADHVARYU] Protected routes + docs
-  ✓ Applied middleware to routes
-  ✓ Updated API docs
-[UDGĀTṚ] Tests: 12 passing
+[ADHVARYU] ✓ Toggle component, localStorage
+[UDGĀTṚ] ✓ Tests passing
+[4/4 done]
 
 ━━━ PŪRṆĀHUTI ━━━
-Ritual complete in 3 iterations.
-Files: 6 | Tests: 12 passing | Learnings: 2
+Complete in 2 iterations.
+Files: 4 | Tests: 6 passing
 
-[yajña] myapp→completed
+[NO USER INTERACTION NEEDED - FULLY AUTONOMOUS]
 ```
 
-## When to Use
+## Anti-Patterns (NEVER DO)
 
-**Good for:**
-- Multi-step implementation
-- Projects needing research → implement → test cycle
-- Work spanning sessions
-- Tasks benefiting from role separation
-
-**Not ideal for:**
-- Quick questions
-- Pure research → `/explore`
-- Design decisions → `/antahkarana`
-- Single file edits
+❌ "Let me check with you before proceeding..."
+❌ "Should I continue to the next task?"
+❌ "I'll wait for your confirmation..."
+❌ Outputting between every agent call
+❌ Asking which file to edit
+❌ Pausing after each iteration
 
 ## MCP Tools
 
-| Tool | When |
-|------|------|
+| Tool | Purpose |
+|------|---------|
+| `health_check` | Pre-flight daemon check |
 | `long_task_start` | Initialize ritual |
 | `long_task_active` | Check for existing |
 | `long_task_snapshot` | Load context |
 | `long_task_update` | Record progress |
-| `long_task_event` | Log checkpoints |
+| `long_task_event` | Log blockers/checkpoints |
 | `long_task_complete` | Mark done |
-| `recall` | Surface memories |
-| `remember` | Store learnings |
-| `learn_milestone` | Record achievements |
