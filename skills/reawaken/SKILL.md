@@ -1,10 +1,10 @@
 ---
-name: resume
+name: reawaken
 description: Restore context and momentum via Pratyabhijñā (recognition)
 execution: direct
 ---
 
-# Resume: Pratyabhijñā
+# Reawaken: Pratyabhijñā
 
 ```ssl
 [pratyabhijñā] re-cognition = recognizing what was known | not loading state→becoming aware
