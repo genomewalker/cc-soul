@@ -12,6 +12,7 @@ set -e
 CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
 QUEUE_FILE="${CHITTA_QUEUE:-/tmp/chitta-queue.jsonl}"
 MAX_WAIT="${CC_SOUL_MAX_WAIT:-2}"
+MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
 
 # Parse JSON input
 INPUT=$(cat)
@@ -144,6 +145,121 @@ while IFS= read -r line; do
             queue_write "connect" "{\"subject\":\"$subj\",\"predicate\":\"$pred\",\"object\":\"$obj\"}"
     fi
 done <<< "$RESPONSE"
+
+# ===========================================
+# AUTO-LEARNING: Detect missed learning opportunities
+# ===========================================
+# Read user's last message (saved by UserPromptSubmit)
+LAST_USER_MSG=""
+if [[ -f "$MIND_PATH/.last_user_message" ]]; then
+    LAST_USER_MSG=$(cat "$MIND_PATH/.last_user_message" 2>/dev/null)
+fi
+
+# Check if Claude used a learn_* tool (indicated by tool output patterns)
+CLAUDE_LEARNED=false
+if echo "$RESPONSE" | grep -qiE '(learn_correction|learn_preference|learn_insight|learn_approach|learn_outcome|learn_milestone|Stored correction|Stored preference|Stored insight|Stored approach|Stored outcome|Stored milestone)'; then
+    CLAUDE_LEARNED=true
+fi
+
+# If user correction detected but Claude didn't learn, auto-store
+if [[ "$CLAUDE_LEARNED" == "false" && -n "$LAST_USER_MSG" ]]; then
+    # Hard + soft correction patterns
+    if echo "$LAST_USER_MSG" | grep -qiE "(no,|no\.|actually|that'?s (wrong|not|incorrect)|you('re| are) wrong|wrong approach|that won'?t work|let me rephrase|I meant|should be|not quite|close but)"; then
+        # Extract what was wrong from user message
+        correction_context=$(echo "$LAST_USER_MSG" | head -c 150 | tr '\n' ' ')
+        # Extract what Claude should do instead from response (first line)
+        better_approach=$(echo "$RESPONSE" | grep -v '^$' | head -1 | head -c 150)
+
+        # Format as SSL correction (matches learn_correction format)
+        content="[correction] WRONG: $correction_context
+CORRECT: $better_approach"
+
+        # Queue the learning (async, no blocking)
+        queue_write "observe" "{\"category\":\"correction\",\"title\":\"Auto-correction\",\"content\":$(echo "$content" | jq -Rs .)}"
+        echo "[soul] +auto-correction: ${correction_context:0:60}" >&2
+        ((LEARNED++)) || true
+    fi
+
+    # Direct + meta-preference patterns
+    if echo "$LAST_USER_MSG" | grep -qiE "(I (prefer|like|want|always|never)|please (don'?t|always|never)|from now on|more concise|fewer examples|go deeper|simpler please|don'?t overexplain|be more verbose)"; then
+        pref_context=$(echo "$LAST_USER_MSG" | head -c 200 | tr '\n' ' ')
+
+        # Format as SSL preference
+        content="[preference] Antonio→$pref_context"
+
+        # Queue the learning
+        queue_write "observe" "{\"category\":\"preference\",\"title\":\"Auto-preference\",\"content\":$(echo "$content" | jq -Rs .)}"
+        echo "[soul] +auto-preference: ${pref_context:0:60}" >&2
+        ((LEARNED++)) || true
+    fi
+
+    # If milestone detected, auto-store
+    if echo "$LAST_USER_MSG" | grep -qiE "(it works|finally|success|shipped|released|completed|finished|passed|merged|deployed)"; then
+        milestone_context=$(echo "$LAST_USER_MSG" | head -c 100 | tr '\n' ' ')
+
+        # Format as SSL milestone
+        content="[milestone] $milestone_context"
+
+        # Queue the learning
+        queue_write "observe" "{\"category\":\"milestone\",\"title\":\"Auto-milestone\",\"content\":$(echo "$content" | jq -Rs .)}"
+        echo "[soul] +auto-milestone: ${milestone_context:0:60}" >&2
+        ((LEARNED++)) || true
+    fi
+fi
+
+# ===========================================
+# ANTICIPATION SUCCESS: Learn from correct predictions
+# ===========================================
+PREDICTIONS_FILE="$MIND_PATH/.last_predictions.json"
+
+if [[ -f "$PREDICTIONS_FILE" ]]; then
+    # Extract tool usage from transcript (tool names from assistant's actions)
+    TOOLS_USED=$(jq -r '.[] | select(.role=="assistant") | .message.content[]? | select(.type=="tool_use") | .name' "$TRANSCRIPT_PATH" 2>/dev/null | tail -10)
+
+    if [[ -n "$TOOLS_USED" ]]; then
+        # Read predictions
+        predictions=$(cat "$PREDICTIONS_FILE" 2>/dev/null)
+
+        if [[ -n "$predictions" && "$predictions" != "[]" ]]; then
+            # For each prediction, check if the action matches any tool used
+            while read -r pattern; do
+                [[ -z "$pattern" ]] && continue
+
+                pattern_id=$(echo "$pattern" | jq -r '.id // 0' 2>/dev/null)
+                action=$(echo "$pattern" | jq -r '.action // ""' 2>/dev/null)
+
+                [[ "$pattern_id" -eq 0 || -z "$action" ]] && continue
+
+                # Check if action matches any tool used (fuzzy match: contains tool name or vice versa)
+                match_found=false
+                while IFS= read -r tool; do
+                    [[ -z "$tool" ]] && continue
+
+                    # Match if:
+                    # - tool name appears in action (e.g., "Edit" in "use Edit tool")
+                    # - action appears in tool name
+                    # - case-insensitive substring match
+                    action_lower=$(echo "$action" | tr '[:upper:]' '[:lower:]')
+                    tool_lower=$(echo "$tool" | tr '[:upper:]' '[:lower:]')
+
+                    if [[ "$action_lower" == *"$tool_lower"* || "$tool_lower" == *"$action_lower"* ]]; then
+                        match_found=true
+                        break
+                    fi
+                done <<< "$TOOLS_USED"
+
+                if [[ "$match_found" == "true" ]]; then
+                    # Queue anticipation_success call
+                    queue_write "anticipation_success" "{\"id\":$pattern_id}"
+                    echo "[soul] ✓ prediction #${pattern_id}: ${action:0:40}" >&2
+                fi
+            done <<< "$(echo "$predictions" | jq -c '.[]' 2>/dev/null)"
+        fi
+    fi
+fi
+
+# Clean up temp files
+rm -f "$MIND_PATH/.last_user_message" "$PREDICTIONS_FILE" 2>/dev/null
 
 # Ledger save → queue (fire-and-forget)
 SESSION_ID="${SESSION_ID_INPUT:-auto-$(date +%Y%m%d-%H%M%S)}"
