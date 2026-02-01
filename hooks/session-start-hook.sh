@@ -27,8 +27,41 @@ queue_write() {
     echo "{\"tool\":\"$tool\",\"args\":$args,\"ts\":$(date +%s)}" >> "$QUEUE_FILE"
 }
 
-# Detect realm (quick, cached in CLI)
-REALM=$(timeout "$MAX_WAIT" "$CHITTA_BIN" realm_detect 2>/dev/null || echo "brahman")
+# Derive project directory from transcript path
+# Transcript path: ~/.claude/projects/-maps-projects-X-Y-Z/session.jsonl
+# Encoded path uses dashes, but dir names can have hyphens too (e.g., cc-soul)
+decode_project_path() {
+    local encoded="${1:1}"  # Skip leading dash
+    local path_so_far=""
+    IFS='-' read -ra PARTS <<< "$encoded"
+    for part in "${PARTS[@]}"; do
+        local test_path="$path_so_far/$part"
+        if [[ -d "$test_path" ]]; then
+            path_so_far="$test_path"
+        else
+            local alt_path="$path_so_far-$part"
+            if [[ -d "$alt_path" ]]; then
+                path_so_far="$alt_path"
+            else
+                path_so_far="$test_path"
+            fi
+        fi
+    done
+    echo "$path_so_far"
+}
+
+PROJECT_DIR=""
+if [[ -n "$TRANSCRIPT_PATH" ]]; then
+    PROJECT_ENCODED=$(dirname "$TRANSCRIPT_PATH" | xargs basename)
+    PROJECT_DIR=$(decode_project_path "$PROJECT_ENCODED")
+fi
+
+# Detect realm from project directory
+if [[ -n "$PROJECT_DIR" && -d "$PROJECT_DIR" ]]; then
+    REALM=$(cd "$PROJECT_DIR" && timeout "$MAX_WAIT" "$CHITTA_BIN" realm_detect 2>/dev/null || echo "brahman")
+else
+    REALM=$(timeout "$MAX_WAIT" "$CHITTA_BIN" realm_detect 2>/dev/null || echo "brahman")
+fi
 
 # Queue transcript registration (fire-and-forget)
 if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
