@@ -7,6 +7,7 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <algorithm>
+#include <nlohmann/json.hpp>
 
 namespace chitta {
 
@@ -4510,23 +4511,42 @@ bool DuckDBStore::profile_observe(const std::string& observation_type, const std
         std::string domain = value.substr(0, colon);
         float level = std::stof(value.substr(colon + 1));
 
-        // Update expertise JSON array
-        std::string expertise = profile ? profile->expertise_json : "[]";
-        // Simple JSON manipulation: check if domain exists, update or append
-        // For robustness, we'd use a proper JSON library, but keep it simple
-        if (expertise.find("\"" + domain + "\"") != std::string::npos) {
-            // Domain exists - complex update, skip for simplicity
-            // Could use nlohmann::json if needed
-        } else {
-            // Append new domain
-            if (expertise == "[]") {
-                expertise = "[{\"domain\":\"" + domain + "\",\"level\":" + std::to_string(level) + "}]";
-            } else {
-                expertise.pop_back(); // Remove ]
-                expertise += ",{\"domain\":\"" + domain + "\",\"level\":" + std::to_string(level) + "}]";
+        // Update expertise JSON array using proper JSON parsing
+        std::string expertise_str = profile ? profile->expertise_json : "[]";
+
+        nlohmann::json expertise_array;
+        try {
+            expertise_array = nlohmann::json::parse(expertise_str);
+            if (!expertise_array.is_array()) {
+                expertise_array = nlohmann::json::array();
+            }
+        } catch (...) {
+            expertise_array = nlohmann::json::array();
+        }
+
+        // Search for existing domain entry
+        bool found = false;
+        for (auto& entry : expertise_array) {
+            if (entry.is_object() && entry.contains("domain") && entry["domain"] == domain) {
+                // Domain exists - update level to max of old and new
+                float old_level = entry.value("level", 0.0f);
+                entry["level"] = std::max(old_level, level);
+                found = true;
+                break;
             }
         }
-        return profile_update(user_id, "expertise_json", expertise);
+
+        // If domain doesn't exist, append new entry
+        if (!found) {
+            nlohmann::json new_entry;
+            new_entry["domain"] = domain;
+            new_entry["level"] = level;
+            expertise_array.push_back(new_entry);
+        }
+
+        // Serialize back to string
+        std::string updated_expertise = expertise_array.dump();
+        return profile_update(user_id, "expertise_json", updated_expertise);
 
     } else if (observation_type == "style") {
         // Value should be JSON object like {"tone":"direct"}
