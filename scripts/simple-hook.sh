@@ -364,17 +364,23 @@ case "$HOOK_TYPE" in
         echo "$QUERY" > "$MIND_PATH/.last_user_message"
 
         # Detect CORRECTION patterns: user is correcting Claude
-        if echo "$QUERY" | grep -qiE "(no,|no\.|actually|that'?s (wrong|not|incorrect)|you('re| are) wrong|I (said|meant|asked)|not what I|wrong approach|that won'?t work|don'?t do that)"; then
+        # Hard corrections: "no", "actually", "wrong"
+        # Soft corrections: "let me rephrase", "I meant", "should be", "not quite", "close but"
+        if echo "$QUERY" | grep -qiE "(no,|no\.|actually|that'?s (wrong|not|incorrect)|you('re| are) wrong|I (said|meant|asked)|not what I|wrong approach|that won'?t work|don'?t do that|let me rephrase|I meant|should be|not quite|close but)"; then
             LEARNING_HINTS="[LEARN] Correction detected → use learn_correction tool"
         fi
 
         # Detect PREFERENCE patterns: user expressing preferences
-        if echo "$QUERY" | grep -qiE "(I (prefer|like|want|need|always|never|don'?t like)|please (don'?t|always|never)|stop doing|keep doing|from now on|in the future)"; then
+        # Direct preferences: "I prefer", "always", "never"
+        # Meta-preferences: "more concise", "fewer examples", "go deeper", "simpler please", "don't overexplain", "be more verbose"
+        if echo "$QUERY" | grep -qiE "(I (prefer|like|want|need|always|never|don'?t like)|please (don'?t|always|never)|stop doing|keep doing|from now on|in the future|more concise|fewer examples|go deeper|simpler please|don'?t overexplain|be more verbose)"; then
             LEARNING_HINTS="${LEARNING_HINTS:+$LEARNING_HINTS; }[LEARN] Preference detected → use learn_preference tool"
         fi
 
         # Detect FRUSTRATION/STATE patterns: user emotional state
-        if echo "$QUERY" | grep -qiE "(frustrated|annoyed|confused|stuck|lost|this is (hard|difficult|confusing)|I give up|help me understand|what am I missing)"; then
+        # Strong frustration: "frustrated", "annoyed", "give up"
+        # Mild frustration: "tedious", "repetitive", "not sure", "overthinking"
+        if echo "$QUERY" | grep -qiE "(frustrated|annoyed|confused|stuck|lost|this is (hard|difficult|confusing)|I give up|help me understand|what am I missing|tedious|repetitive|not sure|overthinking)"; then
             LEARNING_HINTS="${LEARNING_HINTS:+$LEARNING_HINTS; }[LEARN] User state detected → use learn_approach if something helps"
         fi
 
@@ -546,7 +552,8 @@ case "$HOOK_TYPE" in
         # If user correction detected but Claude didn't learn, auto-store
         # Uses chitta CLI (more reliable than nc for RPC)
         if [[ "$CLAUDE_LEARNED" == "false" && -n "$LAST_USER_MSG" ]]; then
-            if echo "$LAST_USER_MSG" | grep -qiE "(no,|no\.|actually|that'?s (wrong|not|incorrect)|you('re| are) wrong|wrong approach|that won'?t work)"; then
+            # Hard + soft correction patterns
+            if echo "$LAST_USER_MSG" | grep -qiE "(no,|no\.|actually|that'?s (wrong|not|incorrect)|you('re| are) wrong|wrong approach|that won'?t work|let me rephrase|I meant|should be|not quite|close but)"; then
                 # Extract what was wrong from user message
                 correction_context=$(echo "$LAST_USER_MSG" | head -c 150 | tr '\n' ' ')
                 # Extract what Claude should do instead from response (first line)
@@ -560,8 +567,8 @@ CORRECT: $better_approach"
                     echo "[auto-learn] Correction stored"
             fi
 
-            # If user preference detected but Claude didn't learn, auto-store
-            if echo "$LAST_USER_MSG" | grep -qiE "(I (prefer|like|want|always|never)|please (don'?t|always|never)|from now on)"; then
+            # Direct + meta-preference patterns
+            if echo "$LAST_USER_MSG" | grep -qiE "(I (prefer|like|want|always|never)|please (don'?t|always|never)|from now on|more concise|fewer examples|go deeper|simpler please|don'?t overexplain|be more verbose)"; then
                 pref_context=$(echo "$LAST_USER_MSG" | head -c 200 | tr '\n' ' ')
 
                 # Format as SSL preference
