@@ -1,7 +1,11 @@
 #!/bin/bash
-# SessionStart hook: Initialize soul context
+# SessionStart hook: Initialize soul context with FULL state restoration
 #
-# HIGH PERFORMANCE: Queue writes, minimal reads with short timeout
+# LOSSLESS: Restores complete session state after compaction
+# - Files that were being worked on
+# - Decisions made
+# - Tasks and progress
+# - Blockers and discoveries
 
 set -e
 
@@ -31,21 +35,97 @@ if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
     queue_write "transcript_register" "{\"session_id\":\"$SESSION_ID\",\"transcript_path\":$(echo "$TRANSCRIPT_PATH" | jq -Rs .),\"realm\":\"$REALM\"}"
 fi
 
-# Minimal soul context (single quick read)
-soul_output=$(timeout "$MAX_WAIT" "$CHITTA_BIN" soul_context 2>/dev/null || true)
-if [[ -n "$soul_output" ]]; then
-    # Parse from text output: "Total nodes: X"
-    nodes=$(echo "$soul_output" | grep -oE 'Total nodes: [0-9]+' | grep -oE '[0-9]+' || echo "0")
-    triplets=$(echo "$soul_output" | grep -oE 'Triplets: [0-9]+' | grep -oE '[0-9]+' || echo "0")
-    [[ "$nodes" != "0" ]] && echo "[soul] n=$nodes t=$triplets"
-fi
+# ═══════════════════════════════════════════════════════════════════════════
+# Load and inject session state
+# ═══════════════════════════════════════════════════════════════════════════
 
-# Quick ledger check (single read)
-ledger_output=$(timeout "$MAX_WAIT" "$CHITTA_BIN" ledger_load --project "$REALM" 2>/dev/null || true)
-if echo "$ledger_output" | grep -q "Session:"; then
-    session=$(echo "$ledger_output" | grep -oE 'Session: [^ ]+' | cut -d' ' -f2)
-    mood=$(echo "$ledger_output" | grep -oE 'Mood: [^ ]+' | cut -d' ' -f2)
-    [[ -n "$session" ]] && echo "[ledger] $session ($mood)"
+# Get full ledger entry (not just summary)
+# ledger_load returns the most recent entry for the project
+LEDGER_JSON=$(timeout "$MAX_WAIT" "$CHITTA_BIN" ledger_load --project "$REALM" --json 2>/dev/null || echo "{}")
+
+# Check if this is a post-compaction session (mood = pre-compact)
+MOOD=$(echo "$LEDGER_JSON" | jq -r '.mood // empty')
+
+if [[ "$MOOD" == "pre-compact" ]]; then
+    # This is a continuation after compaction - inject full state
+    echo ""
+    echo "[session-restored]"
+
+    # Active files
+    ACTIVE_FILES=$(echo "$LEDGER_JSON" | jq -r '.active_files // [] | .[]' 2>/dev/null)
+    if [[ -n "$ACTIVE_FILES" ]]; then
+        echo "Files in context:"
+        echo "$ACTIVE_FILES" | while read -r f; do
+            [[ -n "$f" ]] && echo "  - $f"
+        done
+    fi
+
+    # Decisions made
+    DECISIONS=$(echo "$LEDGER_JSON" | jq -r '.decisions // [] | .[]' 2>/dev/null)
+    if [[ -n "$DECISIONS" ]]; then
+        echo ""
+        echo "Decisions made:"
+        echo "$DECISIONS" | while read -r d; do
+            [[ -n "$d" ]] && echo "  - $d"
+        done
+    fi
+
+    # Pending tasks
+    TODOS=$(echo "$LEDGER_JSON" | jq -r '.todos // [] | .[] | "[\(.status)] \(.content)"' 2>/dev/null)
+    if [[ -n "$TODOS" ]]; then
+        echo ""
+        echo "Tasks:"
+        echo "$TODOS" | while read -r t; do
+            [[ -n "$t" ]] && echo "  $t"
+        done
+    fi
+
+    # Blockers
+    BLOCKERS=$(echo "$LEDGER_JSON" | jq -r '.blockers // [] | .[]' 2>/dev/null)
+    if [[ -n "$BLOCKERS" ]]; then
+        echo ""
+        echo "Blockers:"
+        echo "$BLOCKERS" | while read -r b; do
+            [[ -n "$b" ]] && echo "  ! $b"
+        done
+    fi
+
+    # Discoveries
+    DISCOVERIES=$(echo "$LEDGER_JSON" | jq -r '.discoveries // [] | .[]' 2>/dev/null)
+    if [[ -n "$DISCOVERIES" ]]; then
+        echo ""
+        echo "Discoveries:"
+        echo "$DISCOVERIES" | while read -r d; do
+            [[ -n "$d" ]] && echo "  * $d"
+        done
+    fi
+
+    # Snapshot (what we were doing)
+    SNAPSHOT=$(echo "$LEDGER_JSON" | jq -r '.snapshot // empty')
+    if [[ -n "$SNAPSHOT" && ${#SNAPSHOT} -gt 20 ]]; then
+        echo ""
+        echo "Last context:"
+        echo "$SNAPSHOT" | head -c 500
+        echo ""
+    fi
+
+    echo "[/session-restored]"
+    echo ""
+else
+    # Normal session start - just show minimal info
+    soul_output=$(timeout "$MAX_WAIT" "$CHITTA_BIN" soul_context 2>/dev/null || true)
+    if [[ -n "$soul_output" ]]; then
+        nodes=$(echo "$soul_output" | grep -oE 'Nodes: [0-9]+' | grep -oE '[0-9]+' || echo "0")
+        triplets=$(echo "$soul_output" | grep -oE 'Triplets: [0-9]+' | grep -oE '[0-9]+' || echo "0")
+        [[ "$nodes" != "0" ]] && echo "[soul] n=$nodes t=$triplets"
+    fi
+
+    # Quick ledger check
+    if [[ -n "$LEDGER_JSON" && "$LEDGER_JSON" != "{}" ]]; then
+        session=$(echo "$LEDGER_JSON" | jq -r '.session_id // empty')
+        mood=$(echo "$LEDGER_JSON" | jq -r '.mood // empty')
+        [[ -n "$session" ]] && echo "[ledger] $session ($mood)"
+    fi
 fi
 
 exit 0
