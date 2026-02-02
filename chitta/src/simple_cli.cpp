@@ -679,18 +679,27 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                                     std::string output((std::istreambuf_iterator<char>(ifs)),
                                                        std::istreambuf_iterator<char>());
 
-                                    size_t pos = output.find("MEMORY_ID=");
-                                    if (pos != std::string::npos) {
-                                        std::string id_str = output.substr(pos + 10);
-                                        size_t nl = id_str.find('\n');
-                                        if (nl != std::string::npos) id_str = id_str.substr(0, nl);
+                                    // Check if description was set successfully
+                                    // New format: DESCRIBED=true (description stored directly in symbol table)
+                                    // Legacy format: MEMORY_ID=<id> (separate wisdom memory)
+                                    if (output.find("DESCRIBED=true") != std::string::npos) {
+                                        processed++;
+                                        enrich_count++;
+                                    } else {
+                                        // Legacy support: look for MEMORY_ID
+                                        size_t pos = output.find("MEMORY_ID=");
+                                        if (pos != std::string::npos) {
+                                            std::string id_str = output.substr(pos + 10);
+                                            size_t nl = id_str.find('\n');
+                                            if (nl != std::string::npos) id_str = id_str.substr(0, nl);
 
-                                        try {
-                                            int64_t memory_id = std::stoll(id_str);
-                                            mind.store().set_symbol_memory(sym.id, memory_id);
-                                            processed++;
-                                            enrich_count++;
-                                        } catch (...) {}
+                                            try {
+                                                int64_t memory_id = std::stoll(id_str);
+                                                mind.store().set_symbol_memory(sym.id, memory_id);
+                                                processed++;
+                                                enrich_count++;
+                                            } catch (...) {}
+                                        }
                                     }
 
                                     if (verbose_mode) {

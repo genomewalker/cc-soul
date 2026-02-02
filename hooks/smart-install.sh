@@ -275,15 +275,29 @@ install_hooks() {
     local hooks_src="$PLUGIN_DIR/hooks"
     local hooks_dst="${HOME}/.claude/hooks"
 
-    # Copy bash history hook if not already installed
-    if [[ -f "$hooks_src/log-bash-history.sh" ]]; then
-        if [[ ! -f "$hooks_dst/log-bash-history.sh" ]] || \
-           ! cmp -s "$hooks_src/log-bash-history.sh" "$hooks_dst/log-bash-history.sh"; then
-            cp "$hooks_src/log-bash-history.sh" "$hooks_dst/"
-            chmod +x "$hooks_dst/log-bash-history.sh"
-            echo "[cc-soul] Installed log-bash-history.sh hook"
+    mkdir -p "$hooks_dst"
+
+    # Individual hook scripts
+    local hooks=(
+        subconscious.sh
+        session-start-hook.sh
+        prompt-hook.sh
+        stop-hook.sh
+        pre-compact-hook.sh
+        pre-tool-hook.sh
+        log-bash-history.sh
+    )
+
+    for script in "${hooks[@]}"; do
+        if [[ -f "$hooks_src/$script" ]]; then
+            if [[ ! -f "$hooks_dst/$script" ]] || \
+               ! cmp -s "$hooks_src/$script" "$hooks_dst/$script"; then
+                cp "$hooks_src/$script" "$hooks_dst/"
+                chmod +x "$hooks_dst/$script"
+                echo "[cc-soul] Installed $script"
+            fi
         fi
-    fi
+    done
 }
 
 # Configure hooks in settings.json
@@ -292,6 +306,7 @@ configure_hooks() {
 
     # Needs jq for JSON manipulation
     if ! command -v jq &> /dev/null; then
+        echo "[cc-soul] jq not found, skipping hook config" >&2
         return 0
     fi
 
@@ -301,28 +316,69 @@ configure_hooks() {
     local current
     current=$(cat "$settings_file")
 
-    # Check if bash history hook is already configured
-    if echo "$current" | jq -e '.hooks.PostToolUse[]? | select(.matcher == "Bash") | .hooks[]? | select(.command | contains("log-bash-history"))' &>/dev/null; then
-        return 0  # Already configured
+    # Ensure hooks object exists
+    if ! echo "$current" | jq -e '.hooks' &>/dev/null; then
+        current=$(echo "$current" | jq '.hooks = {}')
     fi
 
-    # Add hook configuration
-    local hook_config='{"matcher":"Bash","hooks":[{"type":"command","command":"~/.claude/hooks/log-bash-history.sh \"$CLAUDE_TOOL_INPUT_command\" >/dev/null 2>&1","async":true,"statusMessage":"remembering…"}]}'
+    local updated="$current"
+    local added=0
+    local hooks_dir="${HOME}/.claude/hooks"
 
-    local updated
-    if echo "$current" | jq -e '.hooks.PostToolUse' &>/dev/null; then
-        # Append to existing PostToolUse array
-        updated=$(echo "$current" | jq --argjson hook "$hook_config" '.hooks.PostToolUse += [$hook]')
-    elif echo "$current" | jq -e '.hooks' &>/dev/null; then
-        # Add PostToolUse to existing hooks object
-        updated=$(echo "$current" | jq --argjson hook "$hook_config" '.hooks.PostToolUse = [$hook]')
-    else
-        # Create hooks object
-        updated=$(echo "$current" | jq --argjson hook "$hook_config" '.hooks = {"PostToolUse": [$hook]}')
+    # ============================================================
+    # cc-soul hooks - memory injection and learning
+    # Uses ~/.claude/hooks/ for portability (independent of plugin location)
+    # ============================================================
+
+    # SessionStart: awakening + context injection
+    if ! echo "$updated" | jq -e '.hooks.SessionStart[]? | select(.hooks[]?.command | contains("session-start-hook.sh"))' &>/dev/null; then
+        local session_start_hook='{"matcher":"*","hooks":[{"type":"command","command":"~/.claude/hooks/subconscious.sh start","statusMessage":"awakening…"},{"type":"command","command":"~/.claude/hooks/session-start-hook.sh","statusMessage":"recalling context…"}]}'
+        updated=$(echo "$updated" | jq --argjson hook "$session_start_hook" '.hooks.SessionStart = ((.hooks.SessionStart // []) + [$hook])')
+        ((added++)) || true
     fi
 
-    echo "$updated" | jq '.' > "$settings_file"
-    echo "[cc-soul] Configured bash history hook in settings.json"
+    # UserPromptSubmit: memory resonance on each message
+    if ! echo "$updated" | jq -e '.hooks.UserPromptSubmit[]? | select(.hooks[]?.command | contains("prompt-hook.sh"))' &>/dev/null; then
+        local prompt_hook='{"matcher":"*","hooks":[{"type":"command","command":"~/.claude/hooks/prompt-hook.sh","statusMessage":"resonating…"}]}'
+        updated=$(echo "$updated" | jq --argjson hook "$prompt_hook" '.hooks.UserPromptSubmit = ((.hooks.UserPromptSubmit // []) + [$hook])')
+        ((added++)) || true
+    fi
+
+    # Stop: preserve state and auto-learn
+    if ! echo "$updated" | jq -e '.hooks.Stop[]? | select(.hooks[]?.command | contains("stop-hook.sh"))' &>/dev/null; then
+        local stop_hook='{"matcher":"*","hooks":[{"type":"command","command":"~/.claude/hooks/stop-hook.sh","statusMessage":"preserving state…"}]}'
+        updated=$(echo "$updated" | jq --argjson hook "$stop_hook" '.hooks.Stop = ((.hooks.Stop // []) + [$hook])')
+        ((added++)) || true
+    fi
+
+    # PreCompact: checkpoint before context loss
+    if ! echo "$updated" | jq -e '.hooks.PreCompact[]? | select(.hooks[]?.command | contains("pre-compact-hook.sh"))' &>/dev/null; then
+        local precompact_hook='{"matcher":"*","hooks":[{"type":"command","command":"~/.claude/hooks/pre-compact-hook.sh","statusMessage":"consolidating memory…"}]}'
+        updated=$(echo "$updated" | jq --argjson hook "$precompact_hook" '.hooks.PreCompact = ((.hooks.PreCompact // []) + [$hook])')
+        ((added++)) || true
+    fi
+
+    # PreToolUse (Read|Edit|Write): inject file context
+    if ! echo "$updated" | jq -e '.hooks.PreToolUse[]? | select(.hooks[]?.command | contains("pre-tool-hook.sh"))' &>/dev/null; then
+        local pretool_hook='{"matcher":"Read|Edit|Write","hooks":[{"type":"command","command":"~/.claude/hooks/pre-tool-hook.sh","timeout":5,"statusMessage":"gathering context…"}]}'
+        updated=$(echo "$updated" | jq --argjson hook "$pretool_hook" '.hooks.PreToolUse = ((.hooks.PreToolUse // []) + [$hook])')
+        ((added++)) || true
+    fi
+
+    # ============================================================
+    # Bash history hook (existing functionality)
+    # ============================================================
+    if ! echo "$updated" | jq -e '.hooks.PostToolUse[]? | select(.matcher == "Bash") | .hooks[]? | select(.command | contains("log-bash-history"))' &>/dev/null; then
+        local bash_hook='{"matcher":"Bash","hooks":[{"type":"command","command":"~/.claude/hooks/log-bash-history.sh \"$CLAUDE_TOOL_INPUT_command\" >/dev/null 2>&1","timeout":5,"statusMessage":"logging command…"}]}'
+        updated=$(echo "$updated" | jq --argjson hook "$bash_hook" '.hooks.PostToolUse = ((.hooks.PostToolUse // []) + [$hook])')
+        ((added++)) || true
+    fi
+
+    # Write back if changed
+    if [[ $added -gt 0 ]]; then
+        echo "$updated" | jq '.' > "$settings_file"
+        echo "[cc-soul] Configured $added hooks in settings.json"
+    fi
 }
 
 # Stop any running daemon (gracefully via chittad shutdown, fallback to signals)

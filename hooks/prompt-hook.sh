@@ -14,9 +14,8 @@ MAX_WAIT="${CC_SOUL_MAX_WAIT:-2}"
 MIN_CONFIDENCE=30
 MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
 
-# Parse JSON input
-INPUT=$(cat)
-QUERY=$(echo "$INPUT" | jq -r '.prompt // empty')
+# Parse input (plain text from Claude Code, not JSON)
+QUERY=$(cat)
 
 [[ -z "$QUERY" ]] && exit 0
 [[ ! -x "$CHITTA_BIN" ]] && exit 0
@@ -32,7 +31,12 @@ if echo "$QUERY" | grep -qiE '(function|class|method|implement|code|file|\.py|\.
 fi
 
 # Use full_resonate for better semantic matching
-memories=$(timeout "$MAX_WAIT" "$CHITTA_BIN" full_resonate --query "$QUERY" --k 6 2>/dev/null || true)
+# For non-code queries, use --partnership-only to exclude code intel kinds
+if [[ "$IS_CODE_QUERY" == "false" ]]; then
+    memories=$(timeout "$MAX_WAIT" "$CHITTA_BIN" full_resonate --query "$QUERY" --k 6 --partnership-only true 2>/dev/null || true)
+else
+    memories=$(timeout "$MAX_WAIT" "$CHITTA_BIN" full_resonate --query "$QUERY" --k 6 2>/dev/null || true)
+fi
 
 if [[ -z "$memories" || "$memories" == *"No memories"* ]]; then
     exit 0
@@ -52,10 +56,7 @@ while IFS= read -r line; do
     # Skip low confidence
     [[ "$conf" -lt "$MIN_CONFIDENCE" ]] && continue
 
-    # Skip code symbols for non-code queries
-    if [[ "$IS_CODE_QUERY" == "false" ]] && echo "$line" | grep -qE '\[symbol\]|\[code\]'; then
-        continue
-    fi
+    # Code symbol filtering is now done server-side via --partnership-only flag
 
     # Truncate and add
     OUTPUT="$OUTPUT${line:0:150}

@@ -299,6 +299,32 @@ private:
         handlers_["enrichment_status"] = [this](const json& p) { return tool_enrichment_status(p); };
 
         tools_.push_back({
+            {"name", "describe_symbol"},
+            {"description", "Set description for a code symbol (stores directly in symbol table, not as wisdom)"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"symbol_id", {{"type", "integer"}, {"description", "Symbol ID to describe"}}},
+                    {"description", {{"type", "string"}, {"description", "Semantic description of the symbol"}}}
+                }},
+                {"required", {"symbol_id", "description"}}
+            }}
+        });
+        handlers_["describe_symbol"] = [this](const json& p) { return tool_describe_symbol(p); };
+
+        tools_.push_back({
+            {"name", "cleanup_code_wisdom"},
+            {"description", "Migration: delete [code] wisdom memories and clear orphaned symbol.memory_id references"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"dry_run", {{"type", "boolean"}, {"description", "Preview only without changes (default: true)"}}}
+                }}
+            }}
+        });
+        handlers_["cleanup_code_wisdom"] = [this](const json& p) { return tool_cleanup_code_wisdom(p); };
+
+        tools_.push_back({
             {"name", "subconscious_stats"},
             {"description", "Get subconscious background processor statistics"},
             {"inputSchema", {{"type", "object"}, {"properties", json::object()}}}
@@ -432,7 +458,9 @@ private:
                     {"query", {{"type", "string"}, {"description", "Search query"}}},
                     {"k", {{"type", "integer"}, {"description", "Max results"}}},
                     {"realm", {{"type", "string"}, {"description", "Filter by realm (e.g., 'project:my-project')"}}},
-                    {"include_global", {{"type", "boolean"}, {"description", "Include global memories (default true)"}}}
+                    {"include_global", {{"type", "boolean"}, {"description", "Include global memories (default true)"}}},
+                    {"exclude_kinds", {{"type", "array"}, {"items", {{"type", "string"}}}, {"description", "Memory kinds to exclude from results"}}},
+                    {"partnership_only", {{"type", "boolean"}, {"description", "Exclude code intel (symbol, projectessence, modulestate, patternstate)"}}}
                 }},
                 {"required", {"query"}}
             }}
@@ -2191,6 +2219,90 @@ private:
         });
     }
 
+    DuckDBToolResult tool_describe_symbol(const json& params) {
+        int64_t symbol_id = params.value("symbol_id", static_cast<int64_t>(0));
+        std::string description = params.value("description", "");
+
+        if (symbol_id == 0) {
+            return DuckDBToolResult::error("symbol_id is required");
+        }
+        if (description.empty()) {
+            return DuckDBToolResult::error("description is required");
+        }
+
+        bool success = mind_->store().set_symbol_description(symbol_id, description);
+        if (!success) {
+            return DuckDBToolResult::error("Failed to set symbol description");
+        }
+
+        return DuckDBToolResult::ok("Symbol description set", {
+            {"symbol_id", symbol_id},
+            {"description_length", description.size()}
+        });
+    }
+
+    DuckDBToolResult tool_cleanup_code_wisdom(const json& params) {
+        // Migration tool: delete [code] wisdom memories and clear orphaned symbol.memory_id
+        // Accept both hyphen and underscore conventions
+        bool dry_run = params.value("dry_run", params.value("dry-run", true));
+
+        // Count what would be deleted
+        auto count_result = mind_->store().raw_query(
+            "SELECT COUNT(*) FROM memory WHERE kind = 'wisdom' AND content LIKE '[code]%'");
+        size_t wisdom_count = 0;
+        if (count_result && !count_result->HasError()) {
+            auto chunk = count_result->Fetch();
+            if (chunk && chunk->size() > 0) {
+                wisdom_count = chunk->GetValue(0, 0).GetValue<int64_t>();
+            }
+        }
+
+        // Count orphaned memory_id references
+        auto orphan_result = mind_->store().raw_query(
+            "SELECT COUNT(*) FROM symbol WHERE memory_id IS NOT NULL AND memory_id NOT IN (SELECT id FROM memory)");
+        size_t orphan_count = 0;
+        if (orphan_result && !orphan_result->HasError()) {
+            auto chunk = orphan_result->Fetch();
+            if (chunk && chunk->size() > 0) {
+                orphan_count = chunk->GetValue(0, 0).GetValue<int64_t>();
+            }
+        }
+
+        if (dry_run) {
+            std::ostringstream ss;
+            ss << "Cleanup preview (dry_run=true):\n";
+            ss << "  [code] wisdom memories to delete: " << wisdom_count << "\n";
+            ss << "  Orphaned symbol.memory_id to clear: " << orphan_count << "\n";
+            ss << "\nRun with dry_run=false to execute.";
+            return DuckDBToolResult::ok(ss.str(), {
+                {"dry_run", true},
+                {"wisdom_to_delete", wisdom_count},
+                {"orphans_to_clear", orphan_count}
+            });
+        }
+
+        // Execute cleanup
+        bool ok1 = mind_->store().execute_raw(
+            "DELETE FROM memory WHERE kind = 'wisdom' AND content LIKE '[code]%'");
+        bool ok2 = mind_->store().execute_raw(
+            "UPDATE symbol SET memory_id = NULL WHERE memory_id IS NOT NULL AND memory_id NOT IN (SELECT id FROM memory)");
+
+        if (!ok1 || !ok2) {
+            return DuckDBToolResult::error("Cleanup failed");
+        }
+
+        std::ostringstream ss;
+        ss << "Cleanup complete:\n";
+        ss << "  [code] wisdom memories deleted: " << wisdom_count << "\n";
+        ss << "  Orphaned symbol.memory_id cleared: " << orphan_count << "\n";
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"dry_run", false},
+            {"wisdom_deleted", wisdom_count},
+            {"orphans_cleared", orphan_count}
+        });
+    }
+
     DuckDBToolResult tool_subconscious_stats(const json&) {
         if (!subconscious_) {
             return DuckDBToolResult::ok("Subconscious not attached", {{"attached", false}});
@@ -2631,6 +2743,43 @@ private:
         std::string realm = params.value("realm", "");
         bool include_global = params.value("include_global", true);
 
+        // Parse exclude_kinds parameter (accept both underscore and hyphen conventions)
+        std::vector<std::string> exclude_kinds;
+        const json* kinds_array = nullptr;
+        if (params.contains("exclude_kinds") && params["exclude_kinds"].is_array()) {
+            kinds_array = &params["exclude_kinds"];
+        } else if (params.contains("exclude-kinds") && params["exclude-kinds"].is_array()) {
+            kinds_array = &params["exclude-kinds"];
+        } else if (params.contains("exclude-kinds") && params["exclude-kinds"].is_string()) {
+            // CLI passes comma-separated string
+            std::string kinds_str = params["exclude-kinds"].get<std::string>();
+            std::istringstream iss(kinds_str);
+            std::string kind;
+            while (std::getline(iss, kind, ',')) {
+                // Trim whitespace
+                size_t start = kind.find_first_not_of(" \t");
+                size_t end = kind.find_last_not_of(" \t");
+                if (start != std::string::npos && end != std::string::npos) {
+                    exclude_kinds.push_back(kind.substr(start, end - start + 1));
+                }
+            }
+        }
+        if (kinds_array) {
+            for (const auto& kind : *kinds_array) {
+                if (kind.is_string()) {
+                    exclude_kinds.push_back(kind.get<std::string>());
+                }
+            }
+        }
+
+        // partnership_only flag: exclude all code intel kinds and code-tagged wisdom
+        // Accept both underscore (JSON convention) and hyphen (CLI convention)
+        bool partnership_only = params.value("partnership_only", false) ||
+                                params.value("partnership-only", false);
+        if (partnership_only) {
+            exclude_kinds = {"symbol", "projectessence", "modulestate", "patternstate"};
+        }
+
         // PARTNERSHIP FIRST: Query partnership memories (beliefs, preferences) separately
         // These are the memories that make Claude feel personalized
         std::vector<Recall> partnership_results;
@@ -2672,7 +2821,7 @@ private:
         // 3. Attractor Dynamics - results pulled toward conceptual gravity wells
         // 4. Lateral Inhibition - similar patterns compete
         // 5. Hebbian Learning - co-activated nodes strengthen connections
-        auto general_results = mind_->full_resonate(query, realm.empty() ? k : k * 2);
+        auto general_results = mind_->full_resonate(query, realm.empty() ? k : k * 2, exclude_kinds);
 
         // Merge: partnership memories first, then general
         std::vector<Recall> results;
@@ -2688,6 +2837,10 @@ private:
         // Add general results (avoiding duplicates)
         for (const auto& r : general_results) {
             if (seen_ids.find(r.id.low) == seen_ids.end()) {
+                // Skip code-tagged wisdom when partnership_only is true
+                if (partnership_only && r.text.rfind("[code]", 0) == 0) {
+                    continue;
+                }
                 results.push_back(r);
                 seen_ids.insert(r.id.low);
             }

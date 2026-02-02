@@ -368,7 +368,8 @@ public:
         const std::vector<float>& query_embedding,
         size_t k = 10,
         const std::string& realm = "",      // Empty = all realms
-        bool include_global = true          // Include brahman/global memories
+        bool include_global = true,         // Include brahman/global memories
+        const std::vector<std::string>& exclude_kinds = {}  // Filter out these kinds
     );
 
     // Realm management
@@ -517,6 +518,7 @@ public:
     };
     std::vector<UndescribedSymbol> get_undescribed_symbols(size_t limit = 10);
     bool set_symbol_memory(int64_t symbol_id, int64_t memory_id);
+    bool set_symbol_description(int64_t symbol_id, const std::string& description);
     size_t count_undescribed_symbols();
     size_t count_total_symbols();
 

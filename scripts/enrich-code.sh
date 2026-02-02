@@ -96,30 +96,17 @@ fi
 # Clean up result - take first line, remove any markdown
 DESCRIPTION=$(echo "$RESULT" | head -1 | sed 's/^[`*#]*//; s/[`*#]*$//')
 
-# Store as memory with code-intel tag
-BASENAME=$(basename "$FILE_PATH")
-CONTENT="[code] $KIND $NAME @$BASENAME:$LINE_START
-$DESCRIPTION"
+# Store description directly in symbol table (no separate wisdom entry)
+# Format: "Name: description" for the description column
+FULL_DESCRIPTION="$DESCRIPTION"
 
-# Store and get memory ID
-MEMORY_RESPONSE=$("$CHITTA_BIN" grow --type symbol --content "$CONTENT" --tags "code-intel,$KIND" --json 2>/dev/null || echo "{}")
-MEMORY_ID=$(echo "$MEMORY_RESPONSE" | grep -oP '"id"\s*:\s*"\K[^"]+' | head -1)
+# Use describe_symbol to store directly in symbol.description column
+RESULT=$("$CHITTA_BIN" describe_symbol --symbol-id "$SYMBOL_ID" --description "$FULL_DESCRIPTION" 2>&1 || true)
 
-if [[ -z "$MEMORY_ID" ]]; then
-    # Try to parse as integer
-    MEMORY_ID=$(echo "$MEMORY_RESPONSE" | grep -oP '"id"\s*:\s*\K[0-9]+' | head -1)
-fi
-
-if [[ -n "$MEMORY_ID" ]]; then
-    # Link memory to symbol (convert UUID to int if needed)
-    # The chitta CLI will handle this
-    echo "[enrich] $NAME: $DESCRIPTION (memory=$MEMORY_ID)"
-
-    # Create triplet linking symbol to memory
-    "$CHITTA_BIN" connect --subject "$NAME" --predicate "described_by" --object "memory:$MEMORY_ID" 2>/dev/null || true
-
-    # Output the memory ID for daemon to update symbol
-    echo "MEMORY_ID=$MEMORY_ID"
+if echo "$RESULT" | grep -q "Symbol description set"; then
+    echo "[enrich] $NAME: $DESCRIPTION"
+    # Output success marker for daemon (no MEMORY_ID needed anymore)
+    echo "DESCRIBED=true"
 else
-    echo "[enrich] Warning: Could not store memory for $NAME" >&2
+    echo "[enrich] Warning: Could not set description for $NAME: $RESULT" >&2
 fi

@@ -330,6 +330,10 @@ bool DuckDBStore::create_schema() {
     write_execute("ALTER TABLE symbol ADD COLUMN IF NOT EXISTS memory_id BIGINT DEFAULT NULL");
     write_execute("ALTER TABLE symbol ADD COLUMN IF NOT EXISTS described_at BIGINT DEFAULT 0");
 
+    // Migration: add description column to store descriptions directly in symbol table (v3.24+)
+    // This replaces the previous approach of creating separate wisdom memories
+    write_execute("ALTER TABLE symbol ADD COLUMN IF NOT EXISTS description VARCHAR DEFAULT NULL");
+
     // Call graph table
     if (!write_execute(R"(
         CREATE TABLE IF NOT EXISTS call_edge (
@@ -927,7 +931,8 @@ std::vector<MemoryResult> DuckDBStore::recall(
     const std::vector<float>& query_embedding,
     size_t k,
     const std::string& realm,
-    bool include_global
+    bool include_global,
+    const std::vector<std::string>& exclude_kinds
 ) {
     std::vector<MemoryResult> results;
     if (!db_) return results;
@@ -993,6 +998,22 @@ std::vector<MemoryResult> DuckDBStore::recall(
             where_clause << ") ";
         }
 
+        // Add kind exclusion filter (for partnership-only queries)
+        if (!exclude_kinds.empty()) {
+            where_clause << "AND m.kind NOT IN (";
+            for (size_t i = 0; i < exclude_kinds.size(); ++i) {
+                if (i > 0) where_clause << ",";
+                // Escape single quotes in kind names
+                std::string escaped_kind;
+                for (char c : exclude_kinds[i]) {
+                    if (c == '\'') escaped_kind += "''";
+                    else escaped_kind += c;
+                }
+                where_clause << "'" << escaped_kind << "'";
+            }
+            where_clause << ") ";
+        }
+
         std::ostringstream sql;
         sql << "SELECT m.id, m.kind, m.content, m.confidence, m.created_at, m.accessed_at, "
             << "m.realm, m.visibility "
@@ -1038,11 +1059,30 @@ std::vector<MemoryResult> DuckDBStore::recall(
     } else {
         // Fallback: brute-force on main DB (when embeddings DB not available)
         std::ostringstream where_clause;
+        bool has_where = false;
         if (!realm.empty()) {
             where_clause << "WHERE (m.realm = '" << escaped_realm << "' ";
             where_clause << "OR m.id IN (SELECT memory_id FROM realm_membership WHERE realm = '" << escaped_realm << "') ";
             if (include_global) {
                 where_clause << "OR m.visibility = 2 ";
+            }
+            where_clause << ") ";
+            has_where = true;
+        }
+
+        // Add kind exclusion filter (for partnership-only queries)
+        if (!exclude_kinds.empty()) {
+            where_clause << (has_where ? "AND " : "WHERE ");
+            where_clause << "m.kind NOT IN (";
+            for (size_t i = 0; i < exclude_kinds.size(); ++i) {
+                if (i > 0) where_clause << ",";
+                // Escape single quotes in kind names
+                std::string escaped_kind;
+                for (char c : exclude_kinds[i]) {
+                    if (c == '\'') escaped_kind += "''";
+                    else escaped_kind += c;
+                }
+                where_clause << "'" << escaped_kind << "'";
             }
             where_clause << ") ";
         }
@@ -2716,7 +2756,7 @@ std::vector<DuckDBStore::UndescribedSymbol> DuckDBStore::get_undescribed_symbols
     if (!db_) return result;
 
     // Priority: class=0, function=1, method=2, other=3
-    // Get symbols without memory_id, ordered by priority
+    // Get symbols without description (new) or memory_id (legacy), ordered by priority
     std::ostringstream sql;
     sql << "SELECT id, kind, name, signature, file_path, line_start, line_end, "
         << "CASE kind "
@@ -2727,7 +2767,7 @@ std::vector<DuckDBStore::UndescribedSymbol> DuckDBStore::get_undescribed_symbols
         << "  ELSE 3 "
         << "END as priority "
         << "FROM symbol "
-        << "WHERE memory_id IS NULL "
+        << "WHERE description IS NULL AND memory_id IS NULL "
         << "ORDER BY priority, id "
         << "LIMIT " << limit;
 
@@ -2766,10 +2806,29 @@ bool DuckDBStore::set_symbol_memory(int64_t symbol_id, int64_t memory_id) {
     return write_execute(sql.str());
 }
 
+bool DuckDBStore::set_symbol_description(int64_t symbol_id, const std::string& description) {
+    if (!db_) return false;
+
+    // Escape single quotes in description
+    std::string escaped;
+    for (char c : description) {
+        if (c == '\'') escaped += "''";
+        else escaped += c;
+    }
+
+    std::ostringstream sql;
+    sql << "UPDATE symbol SET description = '" << escaped << "'"
+        << ", described_at = " << now()
+        << " WHERE id = " << symbol_id;
+
+    return write_execute(sql.str());
+}
+
 size_t DuckDBStore::count_undescribed_symbols() {
     if (!db_) return 0;
 
-    auto result = read_query("SELECT COUNT(*) FROM symbol WHERE memory_id IS NULL");
+    // Count symbols without description (new) or memory_id (legacy)
+    auto result = read_query("SELECT COUNT(*) FROM symbol WHERE description IS NULL AND memory_id IS NULL");
     if (result && !result->HasError()) {
         auto chunk = result->Fetch();
         if (chunk && chunk->size() > 0) {

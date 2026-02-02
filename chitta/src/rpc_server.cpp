@@ -241,7 +241,9 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
     {"full_resonate", "Semantic search with full context (for hooks)",
      {{"query", "Search query", true, nullptr},
       {"k", "Max results", false, "10"},
-      {"realm", "Filter by realm (empty = all visible)", false, nullptr}}},
+      {"realm", "Filter by realm (empty = all visible)", false, nullptr},
+      {"exclude-kinds", "Comma-separated kinds to exclude", false, nullptr},
+      {"partnership-only", "Exclude code intel (symbol, projectessence, modulestate, patternstate)", false, "false"}}},
 
     // Context tools
     {"soul_context", "Get current soul state and statistics",
@@ -283,6 +285,13 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
     {"find_symbol", "Search for symbols by name",
      {{"name", "Symbol name to search", true, nullptr},
       {"kind", "Symbol kind filter (function, class, method)", false, nullptr}}},
+
+    {"describe_symbol", "Set description for a code symbol (stores directly in symbol table)",
+     {{"symbol-id", "Symbol ID to describe", true, nullptr},
+      {"description", "Semantic description of the symbol", true, nullptr}}},
+
+    {"cleanup_code_wisdom", "Migration: delete [code] wisdom memories and clear orphaned symbol.memory_id",
+     {{"dry-run", "Preview only without changes (default: true)", false, "true"}}},
 
     {"code_context", "Get code context summary",
      {{"path", "Limit to files under this path", false, nullptr}}},
