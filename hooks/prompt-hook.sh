@@ -14,8 +14,11 @@ MAX_WAIT="${CC_SOUL_MAX_WAIT:-2}"
 MIN_CONFIDENCE=30
 MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
 
-# Parse input (plain text from Claude Code, not JSON)
-QUERY=$(cat)
+# Parse input - Claude Code sends JSON with session_id and prompt
+INPUT=$(cat)
+# Try to extract prompt from JSON, fall back to raw input if not JSON
+QUERY=$(echo "$INPUT" | jq -r '.prompt // empty' 2>/dev/null)
+[[ -z "$QUERY" ]] && QUERY="$INPUT"
 
 [[ -z "$QUERY" ]] && exit 0
 [[ ! -x "$CHITTA_BIN" ]] && exit 0
