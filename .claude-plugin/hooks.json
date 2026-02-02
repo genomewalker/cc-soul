@@ -82,6 +82,17 @@
             "statusMessage": "checking patterns…"
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/simple-hook.sh pre-tool Bash",
+            "timeout": 3,
+            "statusMessage": "checking command patterns…"
+          }
+        ]
       }
     ],
     "PostToolUse": [

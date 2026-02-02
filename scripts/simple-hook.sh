@@ -794,8 +794,32 @@ CORRECT: $better_approach"
                 ;;
 
             Bash)
-                # Before bash: recall command preferences (optional, often too slow)
-                # Skip for now - most bash commands are quick
+                # Before bash: detect command patterns and surface relevant corrections
+                command=$(echo "$STDIN_DATA" | jq -r '.tool_input.command // empty')
+                [[ -z "$command" ]] && exit 0
+
+                query=""
+                # Detect R commands - high priority correction
+                if echo "$command" | grep -qiE '(Rscript|R --vanilla|R -e|module.*load.*R)'; then
+                    query="R conda environment activation correction"
+                # Detect Python commands
+                elif echo "$command" | grep -qiE '(python|pip|conda)'; then
+                    query="python conda environment activation"
+                # Detect git commands
+                elif echo "$command" | grep -qiE '(git push|git commit|git rebase)'; then
+                    query="git workflow preference correction"
+                fi
+
+                if [[ -n "$query" ]]; then
+                    escaped_query=$(json_escape "$query")
+                    # Search for corrections with high priority
+                    memories=$(timeout 2 "$CHITTA_BIN" recall --query "$escaped_query" --tag "correction" --limit 1 --text-only 2>/dev/null | head -c 300)
+
+                    if [[ -n "$memories" ]]; then
+                        escaped_mem=$(json_escape "$memories")
+                        echo "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"[CORRECTION] $escaped_mem\"}}"
+                    fi
+                fi
                 ;;
         esac
         ;;
