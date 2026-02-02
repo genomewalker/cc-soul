@@ -475,6 +475,18 @@ public:
     std::vector<Symbol> bm25_search_symbols(const std::string& query, size_t limit = 10);
     bool has_fts() const;
 
+    // BM25 full-text search on memory content for hybrid recall
+    // Returns (memory_id, bm25_score) pairs sorted by score descending
+    std::vector<std::pair<int64_t, float>> bm25_search_memory(
+        const std::string& query,
+        size_t limit = 10,
+        const std::string& realm = "",
+        bool include_global = true,
+        const std::vector<std::string>& exclude_kinds = {}) const;
+
+    // Get memory IDs that have tags matching any of the given terms
+    std::unordered_set<int64_t> tag_hits(const std::vector<std::string>& terms) const;
+
     // Ledger operations (session continuity)
     int64_t save_ledger(const LedgerEntry& entry);
     std::optional<LedgerEntry> load_ledger(const std::string& session_id = "", const std::string& project = "");

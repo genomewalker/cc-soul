@@ -589,7 +589,8 @@ public:
         return remember(text, type, "brahman", RealmVisibility::Private);
     }
 
-    // Recall - search with auto-reinforcement
+    // Recall - hybrid search with semantic + BM25 + tag matching
+    // Formula: relevance = (w_sem * similarity + w_bm25 * bm25 + tag_boost) * (0.5 + 0.5 * confidence)
     std::vector<Recall> recall(const std::string& query, size_t limit = 10) {
         std::unique_lock lock(mutex_);
 
@@ -597,22 +598,90 @@ public:
             return {};
         }
 
+        // Hybrid scoring weights
+        constexpr float w_sem = 0.6f;
+        constexpr float w_bm25 = 0.4f;
+        constexpr float tag_boost = 0.05f;
+
+        // Phase 1: Semantic search
         Artha artha = embedder_.transform(query);
-        auto results = store_.recall(artha.nu.data, limit);
+        auto sem_results = store_.recall(artha.nu.data, limit * 2);
 
-        std::vector<Recall> recalls;
-        for (const auto& r : results) {
-            // Touch each recalled memory
-            store_.touch(r.id);
-            store_.strengthen(r.id, config_.reinforce_amount);
+        // Phase 2: BM25 keyword search (if FTS available)
+        std::unordered_map<int64_t, float> bm25_scores;
+        if (store_.has_fts() && !query.empty()) {
+            auto bm25_results = store_.bm25_search_memory(query, limit * 3);
+            // Normalize BM25 scores to [0,1]
+            float bm25_max = 0.0f;
+            for (const auto& [id, score] : bm25_results) {
+                bm25_max = std::max(bm25_max, score);
+            }
+            if (bm25_max > 0.0f) {
+                for (const auto& [id, score] : bm25_results) {
+                    bm25_scores[id] = score / bm25_max;
+                }
+            }
+        }
 
+        // Phase 3: Tag hits
+        auto query_terms = extract_terms_unlocked(query);
+        auto tag_hit_ids = store_.tag_hits(query_terms);
+
+        // Phase 4: Merge scores
+        std::unordered_map<int64_t, Recall> merged;
+        for (const auto& r : sem_results) {
             Recall recall;
             recall.id = int64_to_nodeid(r.id);
             recall.text = r.content;
             recall.similarity = r.similarity;
-            recall.relevance = r.similarity * r.confidence;
             recall.type = string_to_node_type(r.kind);
-            recalls.push_back(recall);
+
+            // Hybrid relevance formula
+            float sem_score = r.similarity;
+            float bm25_score = bm25_scores.count(r.id) ? bm25_scores[r.id] : 0.0f;
+            float tag_bonus = tag_hit_ids.count(r.id) ? tag_boost : 0.0f;
+            float confidence_factor = 0.5f + 0.5f * r.confidence;
+
+            recall.relevance = (w_sem * sem_score + w_bm25 * bm25_score + tag_bonus) * confidence_factor;
+            merged[r.id] = recall;
+        }
+
+        // Add BM25-only results (may have low semantic similarity but high keyword match)
+        for (const auto& [id, bm25_score] : bm25_scores) {
+            if (merged.count(id) == 0) {
+                auto mem = store_.get_memory(id);
+                if (mem) {
+                    Recall recall;
+                    recall.id = int64_to_nodeid(id);
+                    recall.text = mem->content;
+                    recall.similarity = 0.0f;  // No semantic match
+                    recall.type = string_to_node_type(mem->kind);
+
+                    float tag_bonus = tag_hit_ids.count(id) ? tag_boost : 0.0f;
+                    float confidence_factor = 0.5f + 0.5f * mem->confidence;
+                    recall.relevance = (w_bm25 * bm25_score + tag_bonus) * confidence_factor;
+                    merged[id] = recall;
+                }
+            }
+        }
+
+        // Convert to vector and sort by relevance
+        std::vector<Recall> recalls;
+        recalls.reserve(merged.size());
+        for (auto& [id, recall] : merged) {
+            recalls.push_back(std::move(recall));
+        }
+        std::sort(recalls.begin(), recalls.end(),
+                  [](const Recall& a, const Recall& b) { return a.relevance > b.relevance; });
+
+        // Limit results and apply reinforcement
+        if (recalls.size() > limit) {
+            recalls.resize(limit);
+        }
+        for (const auto& recall : recalls) {
+            int64_t id = nodeid_to_int64(recall.id);
+            store_.touch(id);
+            store_.strengthen(id, config_.reinforce_amount);
         }
 
         return recalls;
@@ -861,16 +930,35 @@ public:
         Artha artha = embedder_.transform(query);
         if (artha.nu.size() == 0) return {};
 
-        // Phase 1: Get semantic seeds (initial candidates)
+        // Phase 1a: Get semantic seeds (initial candidates)
         auto seeds = store_.recall(artha.nu.data, k * 2, "", true, exclude_kinds);
         if (seeds.empty()) return {};
+
+        // Phase 1b: BM25 keyword search for hybrid scoring
+        constexpr float w_bm25 = 0.3f;  // BM25 weight (lower than simple recall since we have activation)
+        constexpr float tag_boost = 0.05f;
+        std::unordered_map<int64_t, float> bm25_scores;
+        if (store_.has_fts() && !query.empty()) {
+            auto bm25_results = store_.bm25_search_memory(query, k * 3, "", true, exclude_kinds);
+            float bm25_max = 0.0f;
+            for (const auto& [id, score] : bm25_results) {
+                bm25_max = std::max(bm25_max, score);
+            }
+            if (bm25_max > 0.0f) {
+                for (const auto& [id, score] : bm25_results) {
+                    bm25_scores[id] = score / bm25_max;
+                }
+            }
+        }
+
+        // Phase 1c: Tag hits for query terms
+        auto query_terms = extract_terms_unlocked(query);
+        auto tag_hit_ids = store_.tag_hits(query_terms);
 
         // Phase 2: Find attractors (conceptual gravity wells)
         auto attractors = find_attractors_unlocked();
 
         // Phase 3: Spread activation through triplet graph
-        // Extract terms from query for graph traversal
-        auto query_terms = extract_terms_unlocked(query);
         std::unordered_map<int64_t, float> activation;
 
         // Initialize activation from seeds (using sampled params)
@@ -895,10 +983,18 @@ public:
             recall.created = seed.created_at;
             recall.accessed = seed.accessed_at;
 
-            // Combine semantic relevance with activation (using sampled weights)
+            // Combine semantic relevance with activation + BM25 hybrid (using sampled weights)
             float act = activation.count(seed.id) ? activation[seed.id] : 0.0f;
-            recall.relevance = seed.similarity * seed.confidence * active_config.semantic_weight
-                             + act * active_config.activation_weight;
+            float bm25 = bm25_scores.count(seed.id) ? bm25_scores[seed.id] : 0.0f;
+            float tag_bonus = tag_hit_ids.count(seed.id) ? tag_boost : 0.0f;
+
+            // Hybrid formula: semantic + BM25 + activation + tag boost
+            // Using soft confidence (0.5 + 0.5 * conf) instead of hard multiplication
+            float confidence_factor = 0.5f + 0.5f * seed.confidence;
+            recall.relevance = (seed.similarity * active_config.semantic_weight
+                             + bm25 * w_bm25
+                             + act * active_config.activation_weight
+                             + tag_bonus) * confidence_factor;
 
             // Session priming boost
             if (session_context_.recent_observations.count(seed.id)) {

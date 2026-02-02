@@ -358,6 +358,14 @@ bool DuckDBStore::create_schema() {
         } catch (...) {
             std::cerr << "[DuckDBStore] FTS index creation failed\n";
         }
+
+        // FTS index on memory content for hybrid recall (semantic + keyword)
+        try {
+            write_execute("PRAGMA create_fts_index('memory', 'id', 'content', overwrite=1)");
+            std::cerr << "[DuckDBStore] Created FTS index on memory table\n";
+        } catch (...) {
+            std::cerr << "[DuckDBStore] Memory FTS index creation failed\n";
+        }
     }
 
     // Ledger table for session continuity
@@ -2230,6 +2238,113 @@ std::vector<Symbol> DuckDBStore::bm25_search_symbols(const std::string& search_q
 
 bool DuckDBStore::has_fts() const {
     return fts_loaded_;
+}
+
+std::vector<std::pair<int64_t, float>> DuckDBStore::bm25_search_memory(
+    const std::string& query,
+    size_t limit,
+    const std::string& realm,
+    bool include_global,
+    const std::vector<std::string>& exclude_kinds) const {
+
+    std::vector<std::pair<int64_t, float>> results;
+    if (!db_ || !fts_loaded_ || query.empty()) return results;
+
+    // Escape query for SQL
+    std::string escaped;
+    for (char c : query) {
+        if (c == '\'') escaped += "''";
+        else escaped += c;
+    }
+
+    // Build SQL with FTS match_bm25
+    std::ostringstream sql;
+    sql << "SELECT m.id, fts_main_memory.match_bm25(m.id, '" << escaped << "') as score "
+        << "FROM memory m "
+        << "WHERE score IS NOT NULL ";
+
+    // Realm filter
+    if (!realm.empty()) {
+        std::string escaped_realm;
+        for (char c : realm) {
+            if (c == '\'') escaped_realm += "''";
+            else escaped_realm += c;
+        }
+        if (include_global) {
+            sql << "AND (m.realm = '" << escaped_realm << "' OR m.visibility = 2 "
+                << "OR m.id IN (SELECT memory_id FROM realm_membership WHERE realm = '" << escaped_realm << "')) ";
+        } else {
+            sql << "AND (m.realm = '" << escaped_realm << "' "
+                << "OR m.id IN (SELECT memory_id FROM realm_membership WHERE realm = '" << escaped_realm << "')) ";
+        }
+    }
+
+    // Exclude kinds
+    if (!exclude_kinds.empty()) {
+        sql << "AND m.kind NOT IN (";
+        for (size_t i = 0; i < exclude_kinds.size(); ++i) {
+            if (i > 0) sql << ", ";
+            sql << "'" << exclude_kinds[i] << "'";
+        }
+        sql << ") ";
+    }
+
+    sql << "ORDER BY score DESC LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) {
+        // Fallback to LIKE search if FTS fails
+        std::ostringstream fallback;
+        fallback << "SELECT id, 0.5 as score FROM memory "
+                 << "WHERE content ILIKE '%" << escaped << "%' "
+                 << "LIMIT " << limit;
+        result = const_cast<DuckDBStore*>(this)->read_query(fallback.str());
+        if (!result || result->HasError()) return results;
+    }
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); i++) {
+            int64_t id = chunk->GetValue(0, i).GetValue<int64_t>();
+            float score = chunk->GetValue(1, i).GetValue<float>();
+            results.emplace_back(id, score);
+        }
+    }
+    return results;
+}
+
+std::unordered_set<int64_t> DuckDBStore::tag_hits(const std::vector<std::string>& terms) const {
+    std::unordered_set<int64_t> results;
+    if (!db_ || terms.empty()) return results;
+
+    // Build IN clause with escaped terms
+    std::ostringstream sql;
+    sql << "SELECT DISTINCT memory_id FROM memory_tags WHERE tag IN (";
+    for (size_t i = 0; i < terms.size(); ++i) {
+        if (i > 0) sql << ", ";
+        sql << "'";
+        for (char c : terms[i]) {
+            if (c == '\'') sql << "''";
+            else sql << c;
+        }
+        sql << "'";
+    }
+    sql << ")";
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) return results;
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); i++) {
+            results.insert(chunk->GetValue(0, i).GetValue<int64_t>());
+        }
+    }
+    return results;
 }
 
 std::string DuckDBStore::kind_to_string(NodeType type) {
