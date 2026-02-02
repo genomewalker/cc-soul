@@ -346,6 +346,13 @@ public:
             // Limit inter-op threads to 1 (no parallelism between operators)
             opts.SetInterOpNumThreads(1);
 
+            // Force sequential execution to prevent thread explosion on high-core systems
+            opts.SetExecutionMode(ExecutionMode::ORT_SEQUENTIAL);
+
+            // Disable per-session threads to use a single controlled global pool
+            // This prevents ONNX from creating 205+ threads on 96-core systems
+            opts.DisablePerSessionThreads();
+
             opts.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
 
             // Create session
