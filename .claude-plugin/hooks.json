@@ -7,19 +7,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/subconscious.sh start",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/subconscious.sh start",
             "statusMessage": "awakening…"
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/simple-hook.sh start",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-start-hook.sh",
             "statusMessage": "recalling context…"
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/auto-index.sh",
-            "statusMessage": "sensing codebase…",
-            "async": true
           }
         ]
       }
@@ -30,7 +24,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/simple-hook.sh prompt",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/prompt-hook.sh",
+            "timeout": 10,
             "statusMessage": "resonating…"
           }
         ]
@@ -42,7 +37,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/simple-hook.sh stop",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop-hook.sh",
             "statusMessage": "preserving state…"
           }
         ]
@@ -54,7 +49,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/simple-hook.sh pre-compact",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-compact-hook.sh",
             "statusMessage": "consolidating memory…"
           }
         ]
@@ -62,33 +57,11 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Read",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/simple-hook.sh pre-tool Read",
-            "timeout": 5,
-            "statusMessage": "gathering context…"
-          }
-        ]
-      },
-      {
-        "matcher": "Edit|Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/simple-hook.sh pre-tool Edit",
-            "timeout": 5,
-            "statusMessage": "checking patterns…"
-          }
-        ]
-      },
-      {
         "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/simple-hook.sh pre-tool Bash",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-hook.sh Bash",
             "timeout": 3,
             "statusMessage": "checking command patterns…"
           }
@@ -97,27 +70,14 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Write|Edit",
+        "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/simple-hook.sh post-tool Edit",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/log-bash-history.sh",
             "timeout": 5,
-            "statusMessage": "noting changes…",
+            "statusMessage": "logging command…",
             "async": true
-          }
-        ]
-      }
-    ],
-    "PostToolUseFailure": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/simple-hook.sh post-failure",
-            "timeout": 5,
-            "statusMessage": "learning from error…"
           }
         ]
       }
