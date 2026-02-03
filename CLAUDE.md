@@ -179,7 +179,7 @@ All learning tools have global visibility - they apply across projects.
 
 **Proactive use — call these immediately when:**
 
-- `learn_correction`: User says "no", "actually", "that's wrong", corrects my output
+- `learn_correction`: User says "no", "actually", "that's wrong", corrects my output — OR a command/workflow fails due to my mistake
 - `learn_preference`: User expresses preference ("I prefer", "don't do X", "always Y")
 - `learn_insight`: Discover a pattern that applies beyond this project
 - `learn_approach`: Something works when stuck/frustrated/rushing — capture it
