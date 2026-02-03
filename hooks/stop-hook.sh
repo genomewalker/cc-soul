@@ -258,6 +258,14 @@ if [[ -f "$PREDICTIONS_FILE" ]]; then
     fi
 fi
 
+# ===========================================
+# STRUCTURED SPANS: Capture tool uses with outcomes
+# ===========================================
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -x "$SCRIPT_DIR/span-capture.sh" ]]; then
+    "$SCRIPT_DIR/span-capture.sh" "$TRANSCRIPT_PATH" "$LAST_USER_MSG" 2>&1 || true
+fi
+
 # Clean up temp files
 rm -f "$MIND_PATH/.last_user_message" "$PREDICTIONS_FILE" 2>/dev/null
 

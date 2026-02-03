@@ -1,0 +1,151 @@
+#!/bin/bash
+# Structured span capture for agent learning
+# Inspired by Microsoft's agent-lightning approach
+#
+# Captures tool uses with outcomes and reward signals
+# Outputs JSONL spans to ~/.claude/mind/spans/
+
+set -e
+
+MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
+SPANS_DIR="$MIND_PATH/spans"
+QUEUE_FILE="${CHITTA_QUEUE:-/tmp/chitta-queue.jsonl}"
+
+# Input: transcript path and last user message
+TRANSCRIPT_PATH="$1"
+LAST_USER_MSG="$2"
+
+[[ -z "$TRANSCRIPT_PATH" || ! -f "$TRANSCRIPT_PATH" ]] && exit 0
+
+mkdir -p "$SPANS_DIR"
+
+# Generate span file for this exchange
+TIMESTAMP=$(date +%s)
+SESSION_ID=$(basename "$TRANSCRIPT_PATH" .json)
+SPAN_FILE="$SPANS_DIR/${SESSION_ID}-${TIMESTAMP}.jsonl"
+
+# Extract tool uses and results from transcript
+# Format: array of {tool_use_id, tool_name, input} and {tool_use_id, output, is_error}
+
+TOOL_USES=$(jq -c '
+  [.[] | select(.role == "assistant") | .message.content[]? |
+   select(.type == "tool_use") |
+   {id: .id, tool: .name, input: .input}]
+' "$TRANSCRIPT_PATH" 2>/dev/null || echo "[]")
+
+TOOL_RESULTS=$(jq -c '
+  [.[] | select(.role == "user") | .message.content[]? |
+   select(.type == "tool_result") |
+   {id: .tool_use_id, output: (.content // .text // "" | tostring | .[0:500]), is_error: (.is_error // false)}]
+' "$TRANSCRIPT_PATH" 2>/dev/null || echo "[]")
+
+# Detect reward signal from user's next message
+detect_reward() {
+    local msg="$1"
+    [[ -z "$msg" ]] && echo "0" && return
+
+    local msg_lower=$(echo "$msg" | tr '[:upper:]' '[:lower:]')
+
+    # Strong positive signals
+    if echo "$msg_lower" | grep -qE '^(yes|perfect|great|thanks|exactly|good|nice|awesome|that works)'; then
+        echo "1"
+        return
+    fi
+
+    # Strong negative signals
+    if echo "$msg_lower" | grep -qE '^(no[,. ]|wrong|that.s not|incorrect|actually|fix|error|bug|doesn.t work)'; then
+        echo "-1"
+        return
+    fi
+
+    # Neutral
+    echo "0"
+}
+
+REWARD=$(detect_reward "$LAST_USER_MSG")
+
+# Match tool uses with results and emit spans
+echo "$TOOL_USES" | jq -c '.[]' 2>/dev/null | while read -r tool_use; do
+    [[ -z "$tool_use" || "$tool_use" == "null" ]] && continue
+
+    TOOL_ID=$(echo "$tool_use" | jq -r '.id')
+    TOOL_NAME=$(echo "$tool_use" | jq -r '.tool')
+    TOOL_INPUT=$(echo "$tool_use" | jq -c '.input')
+
+    # Find matching result
+    RESULT=$(echo "$TOOL_RESULTS" | jq -c --arg id "$TOOL_ID" '.[] | select(.id == $id)' 2>/dev/null)
+
+    if [[ -n "$RESULT" && "$RESULT" != "null" ]]; then
+        IS_ERROR=$(echo "$RESULT" | jq -r '.is_error')
+        OUTPUT=$(echo "$RESULT" | jq -r '.output')
+
+        # Determine success: not an error AND no negative reward
+        SUCCESS="true"
+        [[ "$IS_ERROR" == "true" ]] && SUCCESS="false"
+        [[ "$REWARD" == "-1" ]] && SUCCESS="false"
+
+        # Emit span
+        SPAN=$(jq -nc \
+            --arg ts "$TIMESTAMP" \
+            --arg session "$SESSION_ID" \
+            --arg tool "$TOOL_NAME" \
+            --argjson input "$TOOL_INPUT" \
+            --arg output "${OUTPUT:0:500}" \
+            --arg success "$SUCCESS" \
+            --arg reward "$REWARD" \
+            --arg is_error "$IS_ERROR" \
+            '{
+                type: "tool_span",
+                timestamp: ($ts | tonumber),
+                session_id: $session,
+                tool: $tool,
+                input: $input,
+                output: $output,
+                success: ($success == "true"),
+                reward: ($reward | tonumber),
+                is_error: ($is_error == "true")
+            }')
+
+        echo "$SPAN" >> "$SPAN_FILE"
+
+        # If this was a failure, learn from it
+        if [[ "$SUCCESS" == "false" ]]; then
+            # Queue a failure learning
+            FAILURE_CONTENT="[tool:$TOOL_NAME] failed with: ${OUTPUT:0:100}"
+            echo "{\"tool\":\"observe\",\"args\":{\"category\":\"failure\",\"content\":$(echo "$FAILURE_CONTENT" | jq -Rs .)},\"ts\":$TIMESTAMP}" >> "$QUEUE_FILE"
+        fi
+
+        # If strong positive reward, learn the successful pattern
+        if [[ "$REWARD" == "1" && "$SUCCESS" == "true" ]]; then
+            # Extract key from input for learning
+            INPUT_SUMMARY=$(echo "$TOOL_INPUT" | jq -r 'to_entries | map("\(.key)=\(.value | tostring | .[0:30])") | join(", ")' 2>/dev/null | head -c 100)
+            SUCCESS_CONTENT="[tool:$TOOL_NAME] success: $INPUT_SUMMARY"
+            echo "{\"tool\":\"observe\",\"args\":{\"category\":\"solution\",\"content\":$(echo "$SUCCESS_CONTENT" | jq -Rs .)},\"ts\":$TIMESTAMP}" >> "$QUEUE_FILE"
+        fi
+    fi
+done
+
+# Count spans captured
+SPAN_COUNT=0
+[[ -f "$SPAN_FILE" ]] && SPAN_COUNT=$(wc -l < "$SPAN_FILE")
+
+# Emit summary span for the exchange
+if [[ $SPAN_COUNT -gt 0 ]]; then
+    SUMMARY=$(jq -nc \
+        --arg ts "$TIMESTAMP" \
+        --arg session "$SESSION_ID" \
+        --arg reward "$REWARD" \
+        --arg tool_count "$SPAN_COUNT" \
+        '{
+            type: "exchange_span",
+            timestamp: ($ts | tonumber),
+            session_id: $session,
+            tool_count: ($tool_count | tonumber),
+            reward: ($reward | tonumber)
+        }')
+    echo "$SUMMARY" >> "$SPAN_FILE"
+
+    echo "[spans] +$SPAN_COUNT tools (reward=$REWARD)" >&2
+fi
+
+exit 0
