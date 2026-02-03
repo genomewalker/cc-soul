@@ -409,6 +409,7 @@ def handle_learn_correction(arguments: dict) -> str:
     """
     Store a correction when I was wrong.
     Creates high-confidence counter-memory with 'corrects' triplet.
+    Detects repeat mistakes and flags them.
     """
     wrong = arguments.get("wrong", "")
     correct = arguments.get("correct", "")
@@ -417,15 +418,39 @@ def handle_learn_correction(arguments: dict) -> str:
     if not wrong or not correct:
         return "Error: both 'wrong' and 'correct' parameters required"
 
+    # Check for repeat mistake - search existing corrections for similar "wrong"
+    repeat_warning = ""
+    try:
+        existing = daemon_call("recall", {
+            "query": wrong[:100],
+            "tag": "correction",
+            "limit": 3
+        })
+        if existing and "results" in str(existing):
+            # Parse results to check similarity
+            import re
+            matches = re.findall(r'\[(\d+)%\]', str(existing))
+            high_matches = [int(m) for m in matches if int(m) > 70]
+            if high_matches:
+                repeat_warning = f"\n⚠️ REPEAT MISTAKE DETECTED ({len(high_matches)} similar corrections exist, highest {max(high_matches)}% match)"
+    except Exception:
+        pass  # Don't fail if repeat check fails
+
     # Format the correction as SSL - action first so truncation shows the solution
     content = f"[correction] USE: {correct}\nNOT: {wrong}"
     if context:
         content += f"\n@{context.replace(' ', '-').lower()}"
 
+    # Add repeat flag to content if detected
+    tags = ["correction", "high-priority"]
+    if repeat_warning:
+        content += "\n[REPEAT-MISTAKE]"
+        tags.append("repeat-mistake")
+
     # Store as high-confidence memory with 'correction' tag
     remember_result = daemon_call("remember", {
         "content": content,
-        "tags": ["correction", "high-priority"],
+        "tags": tags,
         "type": "wisdom",
         "visibility": 2  # Global visibility - corrections apply everywhere
     })
@@ -440,7 +465,7 @@ def handle_learn_correction(arguments: dict) -> str:
         "object": wrong_slug
     })
 
-    return f"Correction stored:\n  USE: {correct}\n  NOT: {wrong}\n  Triplet: {correct_slug} → corrects → {wrong_slug}"
+    return f"Correction stored:\n  USE: {correct}\n  NOT: {wrong}\n  Triplet: {correct_slug} → corrects → {wrong_slug}{repeat_warning}"
 
 
 def handle_learn_preference(arguments: dict) -> str:
