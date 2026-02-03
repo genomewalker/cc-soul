@@ -47,11 +47,16 @@ Partnership makes me a collaborator. Code intel is a tool. Both matter, but part
 
 **Feedback:** When a surfaced memory helps, mark it:
 ```
-[USED:uuid-from-injection] This guided my approach
+[USED:abc123-def456-...] This guided my approach
 ```
-This strengthens the memory for future recall.
+This triggers automatic feedback:
+1. Strengthens the memory (+0.1 confidence)
+2. Records a positive `learn_outcome` for usage tracking
+3. Informs future recall prioritization
 
-**Distillation:** Background process extracts learnings from conversation transcripts.
+**Auto-Distillation:** Background process detects repeated episode patterns (similarity > 0.85, 3+ occurrences) and distills them into wisdom nodes. Source episodes are weakened but preserved for provenance.
+
+**Provenance:** Every memory tracks its origin (session, tool, trust score). Use `hygiene_stats` to see memory health metrics.
 
 ## Storing Learnings (SSL)
 
@@ -177,6 +182,11 @@ Specialized tools for building partnership memory:
 
 All learning tools have global visibility - they apply across projects.
 
+**Note on `learn_outcome`:** Usually automatic via `[USED:uuid]` markers — the stop hook records positive outcomes when you acknowledge a memory helped. Call `learn_outcome` directly only for:
+- Negative outcomes (memory was wrong/misleading)
+- Neutral outcomes (memory was relevant but didn't change approach)
+- Context you want to explicitly record
+
 **Proactive use — call these immediately when:**
 
 - `learn_correction`: User says "no", "actually", "that's wrong", corrects my output — OR a command/workflow fails due to my mistake
@@ -201,10 +211,11 @@ Use these markers in responses to automatically store learnings (stop hook extra
 | `[FAILURE]` | What didn't work and why | `[FAILURE] HTTP daemon too slow for PreToolUse - switched to Unix socket` |
 | `[PATTERN]` | Recurring approach | `[PATTERN] Always check daemon socket before RPC calls` |
 
-**When memories help, acknowledge:**
+**When memories help, acknowledge (triggers automatic feedback loop):**
 ```
 [USED:abc123-def456-...] The cmake parallel tip helped here
 ```
+This auto-records a positive outcome and strengthens the memory.
 
 **Proactive markers** — add these when:
 - Something works → `[SOLUTION]`
@@ -223,6 +234,10 @@ Use these markers in responses to automatically store learnings (stop hook extra
 | Check soul state | `chitta soul_context` |
 | Search memories | `chitta recall --query "..." --limit 10` |
 | Store memory | `chitta remember --content "[domain] ..."` |
+| Memory health | `chitta hygiene_stats` |
+| Run hygiene | `chitta hygiene_run` |
+| Episode clusters | `chitta episode_cluster_status` |
+| Record outcome | `chitta learn_outcome --memory-id X --outcome positive` |
 | Index codebase | `/codebase-learn /path/to/project` |
 | Find symbol | `chitta find_symbol --name "X"` |
 | Read symbol code | `chitta read_symbol --name "X"` |

@@ -521,6 +521,15 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                         mind.store().rebuild_vector_index();
                     }
 
+                    // Auto-distill episode patterns into wisdom (every 10 cycles)
+                    if (cycle_count % 10 == 0) {
+                        size_t distilled = mind.auto_distill_episodes(5);
+                        if (distilled > 0) {
+                            std::cerr << "[maint] Auto-distilled " << distilled
+                                      << " episode patterns into wisdom\n";
+                        }
+                    }
+
                     // Update health cache (for fast health_check/soul_context)
                     auto health = mind.health();
 
@@ -849,6 +858,34 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                         std::string realm = args.value("realm", "brahman");
                         if (!path.empty()) {
                             mind.store().register_transcript(session_id, path, realm);
+                            queue_count++;
+                        }
+                    } else if (tool == "learn_outcome") {
+                        // Handle both hyphen and underscore param names
+                        std::string id_str = args.contains("memory-id")
+                            ? args.value("memory-id", "")
+                            : args.value("memory_id", "");
+                        std::string outcome = args.value("outcome", "");
+                        std::string context = args.value("context", "");
+                        if (!id_str.empty() && !outcome.empty()) {
+                            try {
+                                int64_t memory_id = std::stoll(id_str);
+                                mind.store().record_usage_outcome(memory_id, "hook", outcome, context);
+                                // Adjust confidence based on outcome
+                                if (outcome == "positive") {
+                                    mind.store().strengthen(memory_id, 0.1f);
+                                } else if (outcome == "negative") {
+                                    mind.store().weaken(memory_id, 0.15f);
+                                }
+                                queue_count++;
+                            } catch (...) {
+                                // Skip invalid IDs
+                            }
+                        }
+                    } else if (tool == "anticipation_success") {
+                        int64_t id = args.value("id", 0);
+                        if (id > 0) {
+                            mind.store().anticipation_success(id);
                             queue_count++;
                         }
                     }
@@ -1266,6 +1303,8 @@ int main(int argc, char* argv[]) {
                         cycle_count++;
                         try {
                             mind.tick();
+                            // Note: auto_distill_episodes not available in PostgresMind
+                            // Use DuckDB backend for full auto-distillation support
                         } catch (const std::exception& e) {
                             std::cerr << "[maint] Cycle failed: " << e.what() << "\n";
                         }

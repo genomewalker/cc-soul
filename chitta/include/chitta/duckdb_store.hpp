@@ -114,6 +114,16 @@ struct MemoryResult {
     std::string realm;                      // Primary realm
     RealmVisibility visibility = RealmVisibility::Private;
     std::vector<std::string> shared_realms; // For Shared visibility
+
+    // Provenance (optional, populated when enable_provenance=true)
+    std::optional<std::string> source_session;
+    std::optional<std::string> source_tool;
+    std::optional<float> trust_score;
+    std::optional<int64_t> derived_from;
+
+    // Conflict info (optional, populated by truth maintenance)
+    bool has_conflict = false;
+    std::vector<int64_t> conflicting_ids;
 };
 
 // String-based triplet for DuckDB (different from NodeId-based Triplet in types.hpp)
@@ -327,6 +337,24 @@ struct CalibrationScore {
     float accuracy = 0.0f;           // successes / predictions
     float confidence_adjustment = 0.0f;  // Suggested adjustment (-0.2 to +0.2)
     int64_t updated_at = 0;
+};
+
+// Usage outcome: tracks whether surfaced memories actually helped
+struct UsageOutcome {
+    int64_t id = 0;
+    int64_t memory_id = 0;           // Memory that was surfaced
+    std::string session_id;          // Session where used
+    std::string outcome;             // positive, negative, neutral
+    std::string context;             // What task triggered recall
+    int64_t created_at = 0;
+};
+
+// Distillation candidate: cluster of similar episodes for wisdom extraction
+struct DistillCandidate {
+    std::vector<int64_t> episode_ids;  // Source episodes
+    std::string pattern_content;        // Common pattern
+    float avg_confidence = 0.0f;
+    float avg_similarity = 0.0f;        // Average pairwise similarity
 };
 
 // Memory hygiene: stats about memory health
@@ -674,6 +702,41 @@ public:
     };
     HygieneResult hygiene_run(float prune_threshold = 0.1f, float min_age_days = 7.0f,
                                float consolidation_threshold = 0.85f, size_t max_consolidations = 10);
+
+    // Usage outcome tracking: did surfaced memories actually help?
+    int64_t record_usage_outcome(int64_t memory_id, const std::string& session_id,
+                                  const std::string& outcome, const std::string& context = "");
+    std::vector<UsageOutcome> get_usage_outcomes(int64_t memory_id, size_t limit = 10);
+    struct UsageStats {
+        int64_t positive = 0;
+        int64_t negative = 0;
+        int64_t neutral = 0;
+        float positive_rate = 0.0f;
+    };
+    UsageStats get_usage_stats(int64_t memory_id);
+
+    // Episode pattern detection for auto-distillation
+    std::vector<DistillCandidate> find_distill_candidates(
+        float similarity_threshold = 0.85f,
+        size_t min_occurrences = 3,
+        size_t limit = 20
+    );
+
+    // Provenance tracking: where did knowledge come from?
+    bool set_provenance(int64_t memory_id, const std::string& session_id,
+                        const std::string& tool_name = "", float trust_score = 0.8f,
+                        int64_t derived_from = 0);
+    bool get_provenance(int64_t memory_id, std::string& session_id, std::string& tool_name,
+                        float& trust_score, int64_t& derived_from);
+
+    // Recall with provenance (extends base recall)
+    std::vector<MemoryResult> recall_with_provenance(
+        const std::vector<float>& query_embedding,
+        size_t k = 10,
+        const std::string& realm = "",
+        bool include_global = true,
+        const std::vector<std::string>& exclude_kinds = {}
+    );
 
     // Code intel confidence restoration: fix memories that were incorrectly decayed
     struct CodeIntelRestoreResult {

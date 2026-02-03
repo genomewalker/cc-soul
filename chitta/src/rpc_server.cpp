@@ -403,6 +403,34 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
     {"background_schedule", "Schedule background task",
      {{"task_type", "Task type to schedule", true, nullptr},
       {"params", "JSON params for task", false, nullptr}}},
+
+    // Usage outcome tracking
+    {"learn_outcome", "Record whether a surfaced memory helped (positive/negative/neutral)",
+     {{"memory-id", "Memory ID that was surfaced", true, nullptr},
+      {"outcome", "Did it help? positive|negative|neutral", true, nullptr},
+      {"context", "What task triggered recall", false, nullptr}}},
+
+    // Episode auto-distillation
+    {"episode_cluster_status", "Find clusters of similar episodes for distillation into wisdom",
+     {{"similarity-threshold", "Minimum similarity for cluster", false, "0.85"},
+      {"min-occurrences", "Minimum episodes in cluster", false, "3"}}},
+
+    // Hygiene and calibration
+    {"hygiene_stats", "Get memory health statistics",
+     {}},
+
+    {"hygiene_run", "Run memory hygiene: decay, prune, consolidate",
+     {{"prune-threshold", "Confidence below which to prune", false, "0.1"},
+      {"min-age-days", "Minimum age for pruning", false, "7"},
+      {"consolidation-threshold", "Similarity threshold for consolidation", false, "0.85"},
+      {"max-consolidations", "Max consolidations per run", false, "10"}}},
+
+    {"calibration_record", "Record a prediction outcome for calibration",
+     {{"domain", "Domain: code|architecture|debugging|etc", true, nullptr},
+      {"success", "Did the prediction succeed? true|false", true, nullptr}}},
+
+    {"calibration_score", "Get calibration score for a domain",
+     {{"domain", "Domain to check", true, nullptr}}},
 };
 
 // Build set of known tools from specs
@@ -489,12 +517,13 @@ void print_usage(const char* prog) {
               << "  Hooks:       observe, full_resonate\n"
               << "  Explore:     explore_recall, explore_peek, explore_expand, explore_neighbors\n"
               << "  Context:     soul_context, health_check, version_check\n"
-              << "  Maintenance: cycle, cleanup\n"
+              << "  Maintenance: cycle, cleanup, hygiene_stats, hygiene_run\n"
               << "  Import/Export: import_soul, export_soul\n"
               << "  Code Intel:  extract_symbols, learn_codebase, find_symbol, search_symbols, code_context\n"
               << "  Realm:       realm_detect, realm_list, realm_get, realm_set, realm_add, realm_remove, realm_visibility\n"
               << "  Ledger:      ledger_save, ledger_load, ledger_list, ledger_get, ledger_delete\n"
               << "  Transcript:  transcript_register, transcript_get, transcript_list, transcript_update, transcript_remove\n"
+              << "  Learning:    learn_outcome, episode_cluster_status, calibration_record, calibration_score\n"
               << "  Debug:       sql_query\n"
               << "\n"
               << "Global options:\n"

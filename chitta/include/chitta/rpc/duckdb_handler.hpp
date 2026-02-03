@@ -1688,6 +1688,36 @@ private:
         });
         handlers_["hygiene_run"] = [this](const json& p) { return tool_hygiene_run(p); };
 
+        // Usage outcome tracking: did surfaced memories help?
+        tools_.push_back({
+            {"name", "learn_outcome"},
+            {"description", "Record whether a previously surfaced memory helped or hurt. Adjusts confidence based on outcome."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"memory_id", {{"type", "string"}, {"description", "Memory ID or UUID that was surfaced"}}},
+                    {"outcome", {{"type", "string"}, {"enum", {"positive", "negative", "neutral"}}, {"description", "Did it help?"}}},
+                    {"context", {{"type", "string"}, {"description", "What you were trying to do when this memory was surfaced"}}}
+                }},
+                {"required", {"memory_id", "outcome"}}
+            }}
+        });
+        handlers_["learn_outcome"] = [this](const json& p) { return tool_learn_outcome(p); };
+
+        // Episode auto-distillation status (clusters of similar episodes for wisdom extraction)
+        tools_.push_back({
+            {"name", "episode_cluster_status"},
+            {"description", "Find clusters of similar episodes that could be distilled into wisdom."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"similarity_threshold", {{"type", "number"}, {"description", "Minimum similarity for cluster (default: 0.85)"}}},
+                    {"min_occurrences", {{"type", "integer"}, {"description", "Minimum episodes in cluster (default: 3)"}}}
+                }}
+            }}
+        });
+        handlers_["episode_cluster_status"] = [this](const json& p) { return tool_episode_cluster_status(p); };
+
         tools_.push_back({
             {"name", "restore_code_intel_confidence"},
             {"description", "Restore confidence and fix decay_rate for code intel memories (symbol, projectessence, modulestate, patternstate). Run this once to fix memories that were incorrectly decayed."},
@@ -6820,6 +6850,132 @@ private:
             {"pruned", result.pruned},
             {"consolidated", result.consolidated}
         });
+    }
+
+    DuckDBToolResult tool_learn_outcome(const json& params) {
+        // Parse memory ID (can be integer or UUID string)
+        // Try both "memory_id" (RPC) and "memory-id" (CLI)
+        auto [memory_id, id_str] = parse_id(params, "memory_id");
+        if (memory_id == 0) {
+            std::tie(memory_id, id_str) = parse_id(params, "memory-id");
+        }
+        if (memory_id == 0) {
+            return DuckDBToolResult::error("Invalid memory_id");
+        }
+
+        std::string outcome = params.value("outcome", "");
+        if (outcome != "positive" && outcome != "negative" && outcome != "neutral") {
+            return DuckDBToolResult::error("outcome must be positive, negative, or neutral");
+        }
+
+        std::string context = params.value("context", "");
+
+        // Get session ID (if available from environment or use default)
+        std::string session_id = "current_session";
+
+        // Record the outcome
+        int64_t outcome_id = mind_->store().record_usage_outcome(memory_id, session_id, outcome, context);
+        if (outcome_id < 0) {
+            return DuckDBToolResult::error("Failed to record outcome");
+        }
+
+        // Adjust confidence based on outcome
+        // Construct NodeId from int64
+        NodeId nid;
+        nid.high = 0;
+        nid.low = static_cast<uint64_t>(memory_id);
+
+        if (outcome == "positive") {
+            mind_->strengthen(nid, 0.1f);
+        } else if (outcome == "negative") {
+            mind_->weaken(nid, 0.15f);
+            // Flag high-value categories for review if negative
+            auto mem = mind_->store().get_memory(memory_id);
+            if (mem && (mem->kind == "correction" || mem->kind == "preference" ||
+                        mem->kind == "solution" || mem->kind == "gotcha")) {
+                // Could add to synthesis queue for review
+            }
+        }
+
+        // Get updated stats
+        auto stats = mind_->store().get_usage_stats(memory_id);
+
+        std::ostringstream ss;
+        ss << "Recorded " << outcome << " outcome for memory " << memory_id << "\n"
+           << "Stats: " << stats.positive << " positive, "
+           << stats.negative << " negative, "
+           << stats.neutral << " neutral "
+           << "(positive rate: " << std::fixed << std::setprecision(1)
+           << (stats.positive_rate * 100) << "%)\n";
+
+        if (outcome == "positive") {
+            ss << "Confidence boosted by 0.1";
+        } else if (outcome == "negative") {
+            ss << "Confidence reduced by 0.15";
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"outcome_id", outcome_id},
+            {"memory_id", memory_id},
+            {"outcome", outcome},
+            {"stats", {
+                {"positive", stats.positive},
+                {"negative", stats.negative},
+                {"neutral", stats.neutral},
+                {"positive_rate", stats.positive_rate}
+            }}
+        });
+    }
+
+    DuckDBToolResult tool_episode_cluster_status(const json& params) {
+        // Accept both underscore and hyphen versions of params
+        float similarity_threshold = params.contains("similarity_threshold")
+            ? params.value("similarity_threshold", 0.85f)
+            : params.value("similarity-threshold", 0.85f);
+        size_t min_occurrences = params.contains("min_occurrences")
+            ? params.value("min_occurrences", 3)
+            : params.value("min-occurrences", 3);
+
+        auto candidates = mind_->store().find_distill_candidates(
+            similarity_threshold, min_occurrences, 20);
+
+        std::ostringstream ss;
+        ss << "Episode Cluster Status (for Auto-Distillation)\n"
+           << "Similarity threshold: " << similarity_threshold << "\n"
+           << "Minimum occurrences: " << min_occurrences << "\n\n";
+
+        if (candidates.empty()) {
+            ss << "No episode clusters found for distillation.\n";
+        } else {
+            ss << "Found " << candidates.size() << " candidate clusters:\n\n";
+            for (size_t i = 0; i < candidates.size(); ++i) {
+                const auto& c = candidates[i];
+                ss << "Cluster " << (i + 1) << ":\n"
+                   << "  Episodes: " << c.episode_ids.size() << "\n"
+                   << "  Avg similarity: " << std::fixed << std::setprecision(2)
+                   << c.avg_similarity << "\n"
+                   << "  Avg confidence: " << c.avg_confidence << "\n"
+                   << "  Pattern: " << c.pattern_content.substr(0, 100)
+                   << (c.pattern_content.size() > 100 ? "..." : "") << "\n\n";
+            }
+        }
+
+        json result = {
+            {"similarity_threshold", similarity_threshold},
+            {"min_occurrences", min_occurrences},
+            {"cluster_count", candidates.size()},
+            {"clusters", json::array()}
+        };
+        for (const auto& c : candidates) {
+            result["clusters"].push_back({
+                {"episode_count", c.episode_ids.size()},
+                {"avg_similarity", c.avg_similarity},
+                {"avg_confidence", c.avg_confidence},
+                {"pattern_preview", c.pattern_content.substr(0, 200)}
+            });
+        }
+
+        return DuckDBToolResult::ok(ss.str(), result);
     }
 
     DuckDBToolResult tool_restore_code_intel_confidence(const json& params) {

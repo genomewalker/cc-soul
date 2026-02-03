@@ -123,15 +123,18 @@ while IFS= read -r line; do
     fi
 done <<< "$RESPONSE"
 
-# Extract [USED:uuid] feedback → queue strengthen
+# Extract [USED:uuid] feedback → queue strengthen + learn_outcome
 while IFS= read -r marker; do
     [[ -z "$marker" ]] && continue
     uuid="${marker#\[USED:}"
     uuid="${uuid%\]}"
     [[ -z "$uuid" || ${#uuid} -lt 30 ]] && continue
 
+    # Strengthen the memory (existing behavior)
     queue_write "strengthen" "{\"id\":\"$uuid\",\"amount\":0.1}"
-    echo "[soul] ↑ ${uuid:0:8}..." >&2
+    # Record positive usage outcome (new: closes feedback loop)
+    queue_write "learn_outcome" "{\"memory-id\":\"$uuid\",\"outcome\":\"positive\",\"context\":\"Memory explicitly marked as helpful via [USED] marker\"}"
+    echo "[soul] ↑+ ${uuid:0:8}..." >&2
 done <<< "$(echo "$RESPONSE" | grep -oE '\[USED:[a-f0-9-]+\]')"
 
 # Extract [TRIPLET] → queue connect

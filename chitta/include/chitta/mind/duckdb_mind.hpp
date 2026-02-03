@@ -725,6 +725,68 @@ public:
         return decayed;
     }
 
+    // Auto-distill repeated episode patterns into wisdom
+    // Returns number of wisdom nodes created
+    size_t auto_distill_episodes(size_t max_distillations = 5,
+                                  float similarity_threshold = 0.85f,
+                                  size_t min_occurrences = 3) {
+        std::unique_lock lock(mutex_);
+
+        if (!embedder_.ready()) {
+            return 0;
+        }
+
+        auto candidates = store_.find_distill_candidates(
+            similarity_threshold, min_occurrences, max_distillations);
+
+        size_t created = 0;
+        for (const auto& c : candidates) {
+            if (c.episode_ids.empty()) continue;
+
+            // Create wisdom node with distilled content
+            // Format: "[distilled] Pattern from N episodes: <content>"
+            std::ostringstream wisdom_content;
+            wisdom_content << "[distilled] Pattern from " << c.episode_ids.size()
+                          << " episodes (avg sim=" << std::fixed << std::setprecision(2)
+                          << c.avg_similarity << "): " << c.pattern_content;
+
+            std::string content = wisdom_content.str();
+            Artha artha = embedder_.transform(content);
+
+            int64_t wisdom_id = store_.remember(
+                content,
+                "wisdom",
+                artha.nu.data,
+                c.avg_confidence,  // Use average confidence from episodes
+                0.005f,            // Wisdom decays very slowly
+                "brahman",
+                RealmVisibility::Private
+            );
+
+            if (wisdom_id < 0) continue;
+
+            // Set provenance: derived from first episode
+            store_.set_provenance(wisdom_id, "auto_distill", "auto_distill_episodes",
+                                   c.avg_confidence, c.episode_ids[0]);
+
+            // Create "EvolvedFrom" triplets linking wisdom to source episodes
+            for (int64_t ep_id : c.episode_ids) {
+                std::string wisdom_node = "wisdom:" + std::to_string(wisdom_id);
+                std::string episode_node = "episode:" + std::to_string(ep_id);
+                store_.connect(wisdom_node, "EvolvedFrom", episode_node);
+            }
+
+            // Weaken source episodes (don't delete, preserve provenance)
+            for (int64_t ep_id : c.episode_ids) {
+                store_.weaken(ep_id, 0.3f);
+            }
+
+            created++;
+        }
+
+        return created;
+    }
+
     void touch(NodeId id) {
         std::unique_lock lock(mutex_);
         store_.touch(nodeid_to_int64(id));

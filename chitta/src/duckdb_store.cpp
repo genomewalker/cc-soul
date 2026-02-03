@@ -657,6 +657,36 @@ bool DuckDBStore::create_schema() {
         return false;
     }
 
+    // Usage outcomes table: tracks whether surfaced memories actually helped
+    if (!write_execute(R"(
+        CREATE TABLE IF NOT EXISTS usage_outcomes (
+            id BIGINT PRIMARY KEY,
+            memory_id BIGINT NOT NULL,
+            session_id VARCHAR,
+            outcome VARCHAR NOT NULL,
+            context VARCHAR,
+            created_at BIGINT NOT NULL
+        )
+    )")) {
+        return false;
+    }
+    write_execute("CREATE INDEX IF NOT EXISTS idx_usage_memory ON usage_outcomes(memory_id)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_usage_outcome ON usage_outcomes(outcome)");
+    write_execute("CREATE SEQUENCE IF NOT EXISTS usage_outcomes_seq START 1");
+
+    // Provenance table: tracks where knowledge came from
+    if (!write_execute(R"(
+        CREATE TABLE IF NOT EXISTS provenance (
+            node_id BIGINT PRIMARY KEY,
+            session_id VARCHAR,
+            tool_name VARCHAR,
+            trust_score FLOAT DEFAULT 0.8,
+            derived_from BIGINT DEFAULT 0
+        )
+    )")) {
+        return false;
+    }
+
     // Sequence for IDs
     write_execute("CREATE SEQUENCE IF NOT EXISTS memory_seq START 1");
     write_execute("CREATE SEQUENCE IF NOT EXISTS triplet_seq START 1");
@@ -5247,6 +5277,331 @@ DuckDBStore::SqlQueryResult DuckDBStore::execute_sql_query(const std::string& sq
 
     result.success = true;
     return result;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Usage Outcome Tracking
+// ═══════════════════════════════════════════════════════════════════════════
+
+int64_t DuckDBStore::record_usage_outcome(int64_t memory_id, const std::string& session_id,
+                                           const std::string& outcome, const std::string& context) {
+    if (!db_) return -1;
+
+    auto now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+
+    // Escape strings
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    std::ostringstream sql;
+    sql << "INSERT INTO usage_outcomes (id, memory_id, session_id, outcome, context, created_at) "
+        << "VALUES (nextval('usage_outcomes_seq'), " << memory_id
+        << ", '" << escape(session_id) << "'"
+        << ", '" << escape(outcome) << "'"
+        << ", '" << escape(context) << "'"
+        << ", " << now << ") RETURNING id";
+
+    auto result = write_query(sql.str());
+    if (!result || result->HasError()) {
+        return -1;
+    }
+
+    auto chunk = result->Fetch();
+    if (chunk && chunk->size() > 0) {
+        return chunk->GetValue(0, 0).GetValue<int64_t>();
+    }
+    return -1;
+}
+
+std::vector<UsageOutcome> DuckDBStore::get_usage_outcomes(int64_t memory_id, size_t limit) {
+    std::vector<UsageOutcome> outcomes;
+    if (!db_) return outcomes;
+
+    std::ostringstream sql;
+    sql << "SELECT id, memory_id, session_id, outcome, context, created_at "
+        << "FROM usage_outcomes WHERE memory_id = " << memory_id
+        << " ORDER BY created_at DESC LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) return outcomes;
+
+    auto chunk = result->Fetch();
+    while (chunk && chunk->size() > 0) {
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            UsageOutcome o;
+            o.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            o.memory_id = chunk->GetValue(1, i).GetValue<int64_t>();
+            auto session_val = chunk->GetValue(2, i);
+            o.session_id = session_val.IsNull() ? "" : session_val.GetValue<std::string>();
+            o.outcome = chunk->GetValue(3, i).GetValue<std::string>();
+            auto ctx_val = chunk->GetValue(4, i);
+            o.context = ctx_val.IsNull() ? "" : ctx_val.GetValue<std::string>();
+            o.created_at = chunk->GetValue(5, i).GetValue<int64_t>();
+            outcomes.push_back(std::move(o));
+        }
+        chunk = result->Fetch();
+    }
+    return outcomes;
+}
+
+DuckDBStore::UsageStats DuckDBStore::get_usage_stats(int64_t memory_id) {
+    UsageStats stats;
+    if (!db_) return stats;
+
+    std::ostringstream sql;
+    sql << "SELECT outcome, COUNT(*) as cnt FROM usage_outcomes "
+        << "WHERE memory_id = " << memory_id << " GROUP BY outcome";
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) return stats;
+
+    auto chunk = result->Fetch();
+    while (chunk && chunk->size() > 0) {
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            std::string outcome = chunk->GetValue(0, i).GetValue<std::string>();
+            int64_t count = chunk->GetValue(1, i).GetValue<int64_t>();
+            if (outcome == "positive") stats.positive = count;
+            else if (outcome == "negative") stats.negative = count;
+            else if (outcome == "neutral") stats.neutral = count;
+        }
+        chunk = result->Fetch();
+    }
+
+    int64_t total = stats.positive + stats.negative + stats.neutral;
+    if (total > 0) {
+        stats.positive_rate = static_cast<float>(stats.positive) / total;
+    }
+    return stats;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Episode Pattern Detection for Auto-Distillation
+// ═══════════════════════════════════════════════════════════════════════════
+
+std::vector<DistillCandidate> DuckDBStore::find_distill_candidates(
+    float similarity_threshold, size_t min_occurrences, size_t limit) {
+
+    std::vector<DistillCandidate> candidates;
+    if (!db_ || !emb_conn_) return candidates;
+
+    // Step 1: Get all episode memories with embeddings
+    auto episodes_result = read_query(
+        "SELECT id, content, confidence FROM memory WHERE kind = 'episode' ORDER BY id");
+    if (!episodes_result || episodes_result->HasError()) return candidates;
+
+    struct EpisodeInfo {
+        int64_t id;
+        std::string content;
+        float confidence;
+    };
+    std::vector<EpisodeInfo> episodes;
+
+    auto chunk = episodes_result->Fetch();
+    while (chunk && chunk->size() > 0) {
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            EpisodeInfo ep;
+            ep.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            ep.content = chunk->GetValue(1, i).GetValue<std::string>();
+            ep.confidence = chunk->GetValue(2, i).GetValue<float>();
+            episodes.push_back(std::move(ep));
+        }
+        chunk = episodes_result->Fetch();
+    }
+
+    if (episodes.size() < min_occurrences) return candidates;
+
+    // Step 2: Find clusters using vector similarity in embeddings DB
+    // For each episode, find similar episodes
+    std::vector<bool> clustered(episodes.size(), false);
+
+    for (size_t i = 0; i < episodes.size() && candidates.size() < limit; ++i) {
+        if (clustered[i]) continue;
+
+        // Get embedding for this episode
+        std::ostringstream emb_sql;
+        emb_sql << "SELECT embedding FROM memory_embeddings WHERE memory_id = " << episodes[i].id;
+
+        std::vector<float> anchor_emb;
+        {
+            std::lock_guard<std::mutex> lock(emb_mutex_);
+            auto emb_result = emb_conn_->Query(emb_sql.str());
+            if (emb_result && !emb_result->HasError()) {
+                auto emb_chunk = emb_result->Fetch();
+                if (emb_chunk && emb_chunk->size() > 0) {
+                    auto arr = emb_chunk->GetValue(0, 0);
+                    if (!arr.IsNull()) {
+                        auto& list_val = duckdb::ListValue::GetChildren(arr);
+                        anchor_emb.reserve(list_val.size());
+                        for (const auto& v : list_val) {
+                            anchor_emb.push_back(v.GetValue<float>());
+                        }
+                    }
+                }
+            }
+        }
+
+        if (anchor_emb.empty()) continue;
+
+        // Find similar episodes using HNSW
+        std::vector<int64_t> cluster_ids;
+        cluster_ids.push_back(episodes[i].id);
+        float total_confidence = episodes[i].confidence;
+        float total_similarity = 1.0f;
+
+        // Build embedding literal for query
+        std::ostringstream emb_literal;
+        emb_literal << "[";
+        for (size_t k = 0; k < anchor_emb.size(); ++k) {
+            if (k > 0) emb_literal << ",";
+            emb_literal << anchor_emb[k];
+        }
+        emb_literal << "]::FLOAT[384]";
+
+        std::ostringstream sim_sql;
+        sim_sql << "SELECT memory_id, array_cosine_similarity(embedding, "
+                << emb_literal.str() << ") as sim "
+                << "FROM memory_embeddings "
+                << "WHERE memory_id != " << episodes[i].id
+                << " ORDER BY sim DESC LIMIT 50";
+
+        {
+            std::lock_guard<std::mutex> lock(emb_mutex_);
+            auto sim_result = emb_conn_->Query(sim_sql.str());
+            if (sim_result && !sim_result->HasError()) {
+                auto sim_chunk = sim_result->Fetch();
+                while (sim_chunk && sim_chunk->size() > 0) {
+                    for (size_t j = 0; j < sim_chunk->size(); ++j) {
+                        int64_t mem_id = sim_chunk->GetValue(0, j).GetValue<int64_t>();
+                        float sim = sim_chunk->GetValue(1, j).GetValue<float>();
+
+                        if (sim < similarity_threshold) break;
+
+                        // Check if this memory is an episode
+                        for (size_t k = 0; k < episodes.size(); ++k) {
+                            if (episodes[k].id == mem_id && !clustered[k]) {
+                                cluster_ids.push_back(mem_id);
+                                total_confidence += episodes[k].confidence;
+                                total_similarity += sim;
+                                clustered[k] = true;
+                            }
+                        }
+                    }
+                    sim_chunk = sim_result->Fetch();
+                }
+            }
+        }
+
+        // Only keep clusters with enough members
+        if (cluster_ids.size() >= min_occurrences) {
+            clustered[i] = true;
+
+            DistillCandidate candidate;
+            candidate.episode_ids = std::move(cluster_ids);
+            candidate.avg_confidence = total_confidence / candidate.episode_ids.size();
+            candidate.avg_similarity = total_similarity / candidate.episode_ids.size();
+
+            // Extract common pattern from content (simplified: use first episode as basis)
+            candidate.pattern_content = episodes[i].content;
+
+            candidates.push_back(std::move(candidate));
+        }
+    }
+
+    return candidates;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Provenance Tracking
+// ═══════════════════════════════════════════════════════════════════════════
+
+bool DuckDBStore::set_provenance(int64_t memory_id, const std::string& session_id,
+                                  const std::string& tool_name, float trust_score,
+                                  int64_t derived_from) {
+    if (!db_) return false;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    std::ostringstream sql;
+    sql << "INSERT INTO provenance (node_id, session_id, tool_name, trust_score, derived_from) "
+        << "VALUES (" << memory_id
+        << ", '" << escape(session_id) << "'"
+        << ", '" << escape(tool_name) << "'"
+        << ", " << trust_score
+        << ", " << derived_from << ") "
+        << "ON CONFLICT (node_id) DO UPDATE SET "
+        << "session_id = EXCLUDED.session_id, "
+        << "tool_name = EXCLUDED.tool_name, "
+        << "trust_score = EXCLUDED.trust_score, "
+        << "derived_from = EXCLUDED.derived_from";
+
+    return write_execute(sql.str());
+}
+
+bool DuckDBStore::get_provenance(int64_t memory_id, std::string& session_id, std::string& tool_name,
+                                  float& trust_score, int64_t& derived_from) {
+    if (!db_) return false;
+
+    std::ostringstream sql;
+    sql << "SELECT session_id, tool_name, trust_score, derived_from "
+        << "FROM provenance WHERE node_id = " << memory_id;
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) return false;
+
+    auto chunk = result->Fetch();
+    if (chunk && chunk->size() > 0) {
+        auto sess_val = chunk->GetValue(0, 0);
+        session_id = sess_val.IsNull() ? "" : sess_val.GetValue<std::string>();
+        auto tool_val = chunk->GetValue(1, 0);
+        tool_name = tool_val.IsNull() ? "" : tool_val.GetValue<std::string>();
+        trust_score = chunk->GetValue(2, 0).GetValue<float>();
+        derived_from = chunk->GetValue(3, 0).GetValue<int64_t>();
+        return true;
+    }
+    return false;
+}
+
+std::vector<MemoryResult> DuckDBStore::recall_with_provenance(
+    const std::vector<float>& query_embedding,
+    size_t k,
+    const std::string& realm,
+    bool include_global,
+    const std::vector<std::string>& exclude_kinds) {
+
+    // First get base recall results
+    auto results = recall(query_embedding, k, realm, include_global, exclude_kinds);
+
+    // Then enrich with provenance data
+    for (auto& r : results) {
+        std::string session_id, tool_name;
+        float trust_score;
+        int64_t derived_from;
+
+        if (get_provenance(r.id, session_id, tool_name, trust_score, derived_from)) {
+            r.source_session = session_id;
+            r.source_tool = tool_name;
+            r.trust_score = trust_score;
+            if (derived_from > 0) {
+                r.derived_from = derived_from;
+            }
+        }
+    }
+
+    return results;
 }
 
 }  // namespace chitta
