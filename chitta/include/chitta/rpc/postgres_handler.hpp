@@ -58,6 +58,17 @@ private:
     std::vector<json> tools_;
     std::unordered_map<std::string, std::function<std::tuple<bool, std::string, json>(const json&)>> handlers_;
 
+    // Category to confidence mapping for high-value learnings
+    static float category_to_confidence(const std::string& category) {
+        if (category == "correction") return 0.95f;
+        if (category == "preference") return 0.90f;
+        if (category == "solution")   return 0.90f;
+        if (category == "decision")   return 0.85f;
+        if (category == "failure")    return 0.85f;
+        if (category == "episode")    return 0.70f;
+        return 0.80f;  // wisdom, insight, belief, etc.
+    }
+
     void register_tools() {
         // remember
         tools_.push_back({
@@ -159,21 +170,32 @@ private:
             {"inputSchema", {{"type", "object"}, {"properties", {
                 {"title", {{"type", "string"}}},
                 {"content", {{"type", "string"}}},
-                {"category", {{"type", "string"}}}
+                {"category", {{"type", "string"}, {"description", "Category: correction, preference, solution, decision, failure, wisdom, episode"}}},
+                {"confidence", {{"type", "number"}, {"description", "Optional confidence override (0.0-1.0)"}}}
             }}, {"required", {"title", "content"}}}}
         });
         handlers_["observe"] = [this](const json& p) {
             std::string title = p.value("title", "");
             std::string content = p.value("content", "");
-            std::string cat = p.value("category", "episode");
+            std::string cat = p.value("category", "wisdom");
             if (title.empty() || content.empty())
                 return std::make_tuple(true, std::string("Title and content required"), json());
 
-            NodeType type = (cat == "wisdom" || cat == "insight") ? NodeType::Wisdom : NodeType::Episode;
-            NodeId id = mind_->remember(title + "\n" + content, type);
+            // Derive confidence from category (or use explicit override)
+            float confidence = p.contains("confidence")
+                ? p.value("confidence", 0.8f)
+                : category_to_confidence(cat);
+
+            // Map category to NodeType
+            NodeType type = NodeType::Wisdom;
+            if (cat == "episode") type = NodeType::Episode;
+            else if (cat == "belief") type = NodeType::Belief;
+
+            NodeId id = mind_->remember(title + "\n" + content, type, confidence);
             if (!id.valid()) return std::make_tuple(true, std::string("Failed"), json());
 
-            return std::make_tuple(false, "Observed: " + title.substr(0, 50), json{{"id", id.to_string()}});
+            return std::make_tuple(false, "Observed: " + title.substr(0, 50),
+                json{{"id", id.to_string()}, {"category", cat}, {"confidence", confidence}});
         };
 
         // full_resonate (for hooks)

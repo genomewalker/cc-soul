@@ -114,7 +114,8 @@ public:
     }
 
     // Remember
-    NodeId remember(const std::string& text, NodeType type = NodeType::Wisdom) {
+    NodeId remember(const std::string& text, NodeType type = NodeType::Wisdom,
+                    float confidence = 0.8f) {
         std::unique_lock lock(mutex_);
 
         if (!passes_quality_gate(text)) {
@@ -140,7 +141,7 @@ public:
         std::string kind = node_type_to_string(type);
         float decay_rate = default_decay_rate(type);
 
-        int64_t id = store_.remember(text, kind, artha.nu.data, 0.8f, decay_rate);
+        int64_t id = store_.remember(text, kind, artha.nu.data, confidence, decay_rate);
         if (id < 0) {
             return NodeId{};
         }

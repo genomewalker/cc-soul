@@ -66,6 +66,17 @@ private:
     std::vector<json> tools_;
     std::unordered_map<std::string, std::function<SimpleToolResult(const json&)>> handlers_;
 
+    // Category to confidence mapping for high-value learnings
+    static float category_to_confidence(const std::string& category) {
+        if (category == "correction") return 0.95f;
+        if (category == "preference") return 0.90f;
+        if (category == "solution")   return 0.90f;
+        if (category == "decision")   return 0.85f;
+        if (category == "failure")    return 0.85f;
+        if (category == "episode")    return 0.70f;
+        return 0.80f;  // wisdom, insight, belief, etc.
+    }
+
     void register_tools() {
         // remember
         tools_.push_back({
@@ -188,10 +199,11 @@ private:
             {"inputSchema", {
                 {"type", "object"},
                 {"properties", {
-                    {"category", {{"type", "string"}, {"description", "Category: wisdom, insight, signal, episode"}}},
+                    {"category", {{"type", "string"}, {"description", "Category: correction, preference, solution, decision, failure, wisdom, episode"}}},
                     {"title", {{"type", "string"}, {"description", "Title/summary"}}},
                     {"content", {{"type", "string"}, {"description", "Full content"}}},
-                    {"tags", {{"type", "string"}, {"description", "Comma-separated tags"}}}
+                    {"tags", {{"type", "string"}, {"description", "Comma-separated tags"}}},
+                    {"confidence", {{"type", "number"}, {"description", "Optional confidence override (0.0-1.0). If not set, derived from category."}}}
                 }},
                 {"required", {"title", "content"}}
             }}
@@ -460,44 +472,28 @@ private:
     SimpleToolResult tool_observe(const json& params) {
         std::string title = params.value("title", "");
         std::string content = params.value("content", "");
-        std::string category = params.value("category", "episode");
+        std::string category = params.value("category", "wisdom");
         std::string tags_str = params.value("tags", "");
 
         if (title.empty() || content.empty()) {
             return SimpleToolResult::error("Title and content are required");
         }
 
-        // Map category to NodeType
-        NodeType type = NodeType::Episode;
-        if (category == "wisdom" || category == "insight") type = NodeType::Wisdom;
-        else if (category == "belief") type = NodeType::Belief;
-        else if (category == "decision") type = NodeType::Wisdom;
-        else if (category == "signal") type = NodeType::Episode;
+        // Derive confidence from category (or use explicit override)
+        float conf = params.contains("confidence")
+            ? params.value("confidence", 0.8f)
+            : category_to_confidence(category);
 
-        // Parse tags
-        std::vector<std::string> tags;
-        if (!tags_str.empty()) {
-            std::stringstream ss(tags_str);
-            std::string tag;
-            while (std::getline(ss, tag, ',')) {
-                // Trim whitespace
-                size_t start = tag.find_first_not_of(" \t");
-                size_t end = tag.find_last_not_of(" \t");
-                if (start != std::string::npos) {
-                    tags.push_back(tag.substr(start, end - start + 1));
-                }
-            }
-        }
+        // Map category to NodeType
+        NodeType type = NodeType::Wisdom;
+        if (category == "episode") type = NodeType::Episode;
+        else if (category == "belief") type = NodeType::Belief;
+        // correction, preference, solution, decision, failure, wisdom, insight all use Wisdom
 
         // Store: title + newline + content
         std::string full_text = title + "\n" + content;
 
-        NodeId id;
-        if (!tags.empty()) {
-            id = mind_->remember(full_text, type, tags);
-        } else {
-            id = mind_->remember(full_text, type);
-        }
+        NodeId id = mind_->remember(full_text, type, Confidence(conf));
 
         static const NodeId null_id{};
         if (id == null_id) {
@@ -506,7 +502,7 @@ private:
 
         return SimpleToolResult::ok(
             "Observed: " + title.substr(0, 50),
-            {{"id", id.to_string()}, {"category", category}}
+            {{"id", id.to_string()}, {"category", category}, {"confidence", conf}}
         );
     }
 
