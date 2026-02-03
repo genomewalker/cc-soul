@@ -63,10 +63,12 @@ private:
         if (category == "correction") return 0.95f;
         if (category == "preference") return 0.90f;
         if (category == "solution")   return 0.90f;
+        if (category == "milestone")  return 0.90f;
         if (category == "decision")   return 0.85f;
         if (category == "failure")    return 0.85f;
+        if (category == "gotcha")     return 0.85f;
         if (category == "episode")    return 0.70f;
-        return 0.80f;  // wisdom, insight, belief, etc.
+        return 0.80f;  // wisdom, pattern, insight, belief, etc.
     }
 
     void register_tools() {
