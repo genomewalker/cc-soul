@@ -417,10 +417,10 @@ def handle_learn_correction(arguments: dict) -> str:
     if not wrong or not correct:
         return "Error: both 'wrong' and 'correct' parameters required"
 
-    # Format the correction as SSL
-    content = f"[correction] WRONG: {wrong}\nCORRECT: {correct}"
+    # Format the correction as SSL - action first so truncation shows the solution
+    content = f"[correction] USE: {correct}\nNOT: {wrong}"
     if context:
-        content += f"\nCONTEXT: {context}"
+        content += f"\n@{context.replace(' ', '-').lower()}"
 
     # Store as high-confidence memory with 'correction' tag
     remember_result = daemon_call("remember", {
@@ -440,7 +440,7 @@ def handle_learn_correction(arguments: dict) -> str:
         "object": wrong_slug
     })
 
-    return f"Correction stored:\n  WRONG: {wrong}\n  CORRECT: {correct}\n  Triplet: {correct_slug} → corrects → {wrong_slug}"
+    return f"Correction stored:\n  USE: {correct}\n  NOT: {wrong}\n  Triplet: {correct_slug} → corrects → {wrong_slug}"
 
 
 def handle_learn_preference(arguments: dict) -> str:
