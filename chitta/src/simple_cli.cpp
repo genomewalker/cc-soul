@@ -725,6 +725,17 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
         }
     });
 
+    // Category to confidence mapping for high-value learnings
+    auto category_to_confidence = [](const std::string& category) -> float {
+        if (category == "correction") return 0.95f;
+        if (category == "preference") return 0.90f;
+        if (category == "solution")   return 0.90f;
+        if (category == "decision")   return 0.85f;
+        if (category == "failure")    return 0.85f;
+        if (category == "episode")    return 0.70f;
+        return 0.80f;  // wisdom, insight, belief, etc.
+    };
+
     // Queue processor thread - handles fire-and-forget writes from hooks
     std::atomic<size_t> queue_count{0};
     std::string queue_path = "/tmp/chitta-queue.jsonl";
@@ -769,8 +780,12 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                             NodeType type = NodeType::Wisdom;
                             if (category == "episode") type = NodeType::Episode;
                             else if (category == "belief") type = NodeType::Belief;
+                            // Derive confidence from category (or use explicit override)
+                            float confidence = args.contains("confidence")
+                                ? args.value("confidence", 0.8f)
+                                : category_to_confidence(category);
                             std::string full_text = title.empty() ? content : title + "\n" + content;
-                            mind.remember(full_text, type);
+                            mind.remember(full_text, type, "brahman", RealmVisibility::Private, confidence);
                             queue_count++;
                         }
                     } else if (tool == "strengthen") {

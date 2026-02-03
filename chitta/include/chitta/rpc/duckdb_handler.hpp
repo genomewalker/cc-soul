@@ -81,6 +81,17 @@ private:
     std::vector<json> tools_;
     std::unordered_map<std::string, std::function<DuckDBToolResult(const json&)>> handlers_;
 
+    // Category to confidence mapping for high-value learnings
+    static float category_to_confidence(const std::string& category) {
+        if (category == "correction") return 0.95f;
+        if (category == "preference") return 0.90f;
+        if (category == "solution")   return 0.90f;
+        if (category == "decision")   return 0.85f;
+        if (category == "failure")    return 0.85f;
+        if (category == "episode")    return 0.70f;
+        return 0.80f;  // wisdom, insight, belief, etc.
+    }
+
     // Heuristic: detect code-like queries (use BM25) vs natural language (use semantic)
     static std::string_view trim_view(std::string_view s) {
         while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) s.remove_prefix(1);
@@ -438,10 +449,11 @@ private:
             {"inputSchema", {
                 {"type", "object"},
                 {"properties", {
-                    {"category", {{"type", "string"}, {"description", "Category: wisdom, insight, signal, episode"}}},
+                    {"category", {{"type", "string"}, {"description", "Category: correction, preference, solution, decision, failure, wisdom, episode"}}},
                     {"title", {{"type", "string"}, {"description", "Title/summary"}}},
                     {"content", {{"type", "string"}, {"description", "Full content"}}},
-                    {"tags", {{"type", "string"}, {"description", "Comma-separated tags"}}}
+                    {"tags", {{"type", "string"}, {"description", "Comma-separated tags"}}},
+                    {"confidence", {{"type", "number"}, {"description", "Optional confidence override (0.0-1.0). If not set, derived from category."}}}
                 }},
                 {"required", {"title", "content"}}
             }}
@@ -2683,19 +2695,25 @@ private:
 
         std::string title = params.value("title", "");
         std::string content = params.value("content", "");
-        std::string category = params.value("category", "episode");
+        std::string category = params.value("category", "wisdom");
 
         if (title.empty() || content.empty()) {
             return DuckDBToolResult::error("Title and content are required");
         }
 
-        NodeType type = NodeType::Episode;
-        if (category == "wisdom" || category == "insight") type = NodeType::Wisdom;
+        // Derive confidence from category (or use explicit override)
+        float confidence = params.contains("confidence")
+            ? params.value("confidence", 0.8f)
+            : category_to_confidence(category);
+
+        // Map category to NodeType
+        NodeType type = NodeType::Wisdom;
+        if (category == "episode") type = NodeType::Episode;
         else if (category == "belief") type = NodeType::Belief;
-        else if (category == "decision") type = NodeType::Wisdom;
+        // correction, preference, solution, decision, failure, wisdom, insight all use Wisdom
 
         std::string full_text = title + "\n" + content;
-        NodeId id = mind_->remember(full_text, type);
+        NodeId id = mind_->remember(full_text, type, "brahman", RealmVisibility::Private, confidence);
 
         static const NodeId null_id{};
         if (id == null_id) {
@@ -2704,7 +2722,7 @@ private:
 
         return DuckDBToolResult::ok(
             "Observed: " + title.substr(0, 50),
-            {{"id", id.to_string()}, {"category", category}}
+            {{"id", id.to_string()}, {"category", category}, {"confidence", confidence}}
         );
     }
 
