@@ -74,10 +74,10 @@ done <<< "$memories"
 LEARNING_HINTS=""
 
 # Detect CORRECTION patterns: user is correcting Claude
-# Hard corrections: "no", "actually", "wrong"
-# Soft corrections: "let me rephrase", "I meant", "should be", "not quite", "close but"
-if echo "$QUERY" | grep -qiE "(no,|no\.|actually|that'?s (wrong|not|incorrect)|you('re| are) wrong|I (said|meant|asked)|not what I|wrong approach|that won'?t work|don'?t do that|let me rephrase|I meant|should be|not quite|close but)"; then
-    LEARNING_HINTS="[LEARN] Correction detected → use learn_correction tool"
+# Direct: "wrong", "mistake", "not working", "incorrect"
+# Implicit: "actually", "should be", "not what I"
+if echo "$QUERY" | grep -qiE "(wrong|mistake|not working|incorrect|actually[, ]|that'?s not|you('re| are) (wrong|missing)|I (said|meant|asked)|not what I|won'?t work|should be|not quite|use your memory|check.*memory|did you forget)"; then
+    LEARNING_HINTS="[LEARN] ⚠️ CORRECTION - call learn_correction NOW with what was wrong and what's right"
 fi
 
 # Detect PREFERENCE patterns: user expressing preferences
@@ -148,20 +148,20 @@ if [[ -S "$SOCKET_PATH" ]]; then
 fi
 
 # ===========================================
-# OUTPUT
+# OUTPUT - Learning hints FIRST (so Claude sees them immediately)
 # ===========================================
-# Output memories if we have them
+# Learning hints at top - these are action items for Claude
+if [[ -n "$LEARNING_HINTS" ]]; then
+    echo "$LEARNING_HINTS"
+fi
+
+# Then memories
 if [[ -n "$OUTPUT" && $COUNT -gt 0 ]]; then
     echo "[soul]"
     echo -n "$OUTPUT"
 fi
 
-# Add learning hints if detected (prompt Claude to use learn_* tools)
-if [[ -n "$LEARNING_HINTS" ]]; then
-    echo "$LEARNING_HINTS"
-fi
-
-# Add anticipations if any
+# Anticipations last
 if [[ -n "$ANTICIPATIONS" ]]; then
     echo "$ANTICIPATIONS"
 fi

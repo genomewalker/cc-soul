@@ -286,6 +286,7 @@ install_hooks() {
         pre-compact-hook.sh
         pre-tool-hook.sh
         log-bash-history.sh
+        post-bash-hook.sh
     )
 
     for script in "${hooks[@]}"; do
@@ -366,11 +367,14 @@ configure_hooks() {
     fi
 
     # ============================================================
-    # Bash history hook (existing functionality)
+    # PostToolUse hooks: bash history logging + failed command learning
     # ============================================================
-    if ! echo "$updated" | jq -e '.hooks.PostToolUse[]? | select(.matcher == "Bash") | .hooks[]? | select(.command | contains("log-bash-history"))' &>/dev/null; then
-        local bash_hook='{"matcher":"Bash","hooks":[{"type":"command","command":"~/.claude/hooks/log-bash-history.sh \"$CLAUDE_TOOL_INPUT_command\" >/dev/null 2>&1","timeout":5,"statusMessage":"logging command…"}]}'
-        updated=$(echo "$updated" | jq --argjson hook "$bash_hook" '.hooks.PostToolUse = ((.hooks.PostToolUse // []) + [$hook])')
+    if ! echo "$updated" | jq -e '.hooks.PostToolUse[]? | select(.matcher == "Bash") | .hooks[]? | select(.command | contains("post-bash-hook"))' &>/dev/null; then
+        # Install both hooks together in one Bash matcher
+        local posttool_hook='{"matcher":"Bash","hooks":[{"type":"command","command":"~/.claude/hooks/log-bash-history.sh \"$CLAUDE_TOOL_INPUT_command\" >/dev/null 2>&1","timeout":5,"statusMessage":"logging command…"},{"type":"command","command":"~/.claude/hooks/post-bash-hook.sh","timeout":3,"statusMessage":"checking result…"}]}'
+        # Remove old Bash PostToolUse entries first
+        updated=$(echo "$updated" | jq 'del(.hooks.PostToolUse[]? | select(.matcher == "Bash"))')
+        updated=$(echo "$updated" | jq --argjson hook "$posttool_hook" '.hooks.PostToolUse = ((.hooks.PostToolUse // []) + [$hook])')
         ((added++)) || true
     fi
 

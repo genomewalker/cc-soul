@@ -166,21 +166,21 @@ fi
 
 # If user correction detected but Claude didn't learn, auto-store
 if [[ "$CLAUDE_LEARNED" == "false" && -n "$LAST_USER_MSG" ]]; then
-    # Hard + soft correction patterns
-    if echo "$LAST_USER_MSG" | grep -qiE "(no,|no\.|actually|that'?s (wrong|not|incorrect)|you('re| are) wrong|wrong approach|that won'?t work|let me rephrase|I meant|should be|not quite|close but)"; then
-        # Extract what was wrong from user message
-        correction_context=$(echo "$LAST_USER_MSG" | head -c 150 | tr '\n' ' ')
-        # Extract what Claude should do instead from response (first line)
-        better_approach=$(echo "$RESPONSE" | grep -v '^$' | head -1 | head -c 150)
+    # ===========================================
+    # COMPLIANCE TRACKING: Did Claude learn when prompted?
+    # ===========================================
+    # Check if prompt-hook detected a correction opportunity
+    CORRECTION_DETECTED=false
+    if echo "$LAST_USER_MSG" | grep -qiE "(wrong|mistake|not working|incorrect|actually[, ]|that'?s not|you('re| are) (wrong|missing)|not what I|won'?t work|should be|use your memory|check.*memory|did you forget)"; then
+        CORRECTION_DETECTED=true
+    fi
 
-        # Format as SSL correction (matches learn_correction format)
-        content="[correction] WRONG: $correction_context
-CORRECT: $better_approach"
-
-        # Queue the learning (async, no blocking)
-        queue_write "observe" "{\"category\":\"correction\",\"title\":\"Auto-correction\",\"content\":$(echo "$content" | jq -Rs .)}"
-        echo "[soul] +auto-correction: ${correction_context:0:60}" >&2
-        ((LEARNED++)) || true
+    # If correction was detected but Claude didn't call learn_correction, log compliance failure
+    if [[ "$CORRECTION_DETECTED" == "true" && "$CLAUDE_LEARNED" == "false" ]]; then
+        # Store compliance failure for tracking
+        failure_context=$(echo "$LAST_USER_MSG" | head -c 100 | tr '\n' ' ')
+        queue_write "observe" "{\"category\":\"compliance\",\"title\":\"Missed correction\",\"content\":$(echo "[compliance:fail] Correction detected but learn_correction not called: $failure_context" | jq -Rs .)}"
+        echo "[soul] ⚠️ COMPLIANCE FAIL: Correction detected but learn_correction not called" >&2
     fi
 
     # Direct + meta-preference patterns

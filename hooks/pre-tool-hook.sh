@@ -1,8 +1,8 @@
 #!/bin/bash
-# PreToolUse hook: Inject corrections before command execution
+# PreToolUse hook: Surface corrections/gotchas BEFORE I make mistakes
 #
-# Only handles Bash commands to avoid performance impact on Read/Grep/Glob.
-# Detects R/python/git patterns and surfaces relevant corrections.
+# Searches for relevant warnings based on command patterns.
+# Returns context that gets injected into my prompt.
 
 set -e
 
@@ -12,12 +12,10 @@ MATCHER="${1:-}"
 CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
 [[ ! -x "$CHITTA_BIN" ]] && exit 0
 
-# Read stdin
 STDIN_DATA=$(cat)
 
 json_escape() {
-    local text="$1"
-    echo -n "$text" | jq -Rs '.' | sed 's/^"//;s/"$//'
+    echo -n "$1" | jq -Rs '.' | sed 's/^"//;s/"$//'
 }
 
 case "$MATCHER" in
@@ -26,27 +24,56 @@ case "$MATCHER" in
         [[ -z "$command" ]] && exit 0
 
         query=""
-        # Detect R commands - high priority correction
+        tags=""
+
+        # Pattern detection - build query from command content
         if echo "$command" | grep -qiE '(Rscript|R --vanilla|R -e|module.*load.*R)'; then
-            query="R conda environment activation correction"
-        # Detect Python commands
-        elif echo "$command" | grep -qiE '(python3? |pip |conda activate)'; then
-            query="python conda environment activation"
+            query="R environment conda activation"
+            tags="correction"
+        elif echo "$command" | grep -qiE '(python3?[[:space:]]|pip[[:space:]]|conda activate)'; then
+            query="python conda environment"
+            tags="correction"
+        elif echo "$command" | grep -qiE '(chittad|daemon)'; then
+            query="chittad daemon startup"
+            tags="correction,gotcha"
+        elif echo "$command" | grep -qiE '(git push|git commit|git rebase)'; then
+            query="git push commit"
+            tags="gotcha"
+        elif echo "$command" | grep -qiE '(nohup|&$)'; then
+            query="background daemon nohup"
+            tags="correction"
+        elif echo "$command" | grep -qiE '(release\.sh|version)'; then
+            query="release version bump"
+            tags="gotcha"
+        elif echo "$command" | grep -qiE '(cmake|make|build)'; then
+            query="build cmake"
+            tags="solution"
         fi
 
         if [[ -n "$query" ]]; then
             escaped_query=$(json_escape "$query")
-            # Search for corrections
-            memories=$(timeout 2 "$CHITTA_BIN" recall --query "$escaped_query" --tag "correction" --limit 1 --text-only 2>/dev/null | head -c 300)
+
+            # Search corrections and gotchas
+            memories=""
+            if [[ -n "$tags" ]]; then
+                for tag in ${tags//,/ }; do
+                    result=$(timeout 2 "$CHITTA_BIN" recall --query "$escaped_query" --tag "$tag" --limit 1 --text-only 2>/dev/null | head -c 400)
+                    [[ -n "$result" && "$result" != *"No memories"* ]] && memories="$memories$result\n"
+                done
+            fi
+
+            # Fallback: general search if no tagged results
+            if [[ -z "$memories" ]]; then
+                memories=$(timeout 2 "$CHITTA_BIN" recall --query "$escaped_query" --limit 1 --text-only 2>/dev/null | head -c 400)
+            fi
 
             if [[ -n "$memories" && "$memories" != *"No memories"* ]]; then
                 escaped_mem=$(json_escape "$memories")
-                echo "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"[CORRECTION] $escaped_mem\"}}"
+                echo "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"⚠️ BEFORE RUNNING: $escaped_mem\"}}"
             fi
         fi
         ;;
     *)
-        # Other matchers disabled for performance
         exit 0
         ;;
 esac

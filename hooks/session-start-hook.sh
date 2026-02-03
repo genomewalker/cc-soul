@@ -159,6 +159,24 @@ else
         mood=$(echo "$LEDGER_JSON" | jq -r '.mood // empty')
         [[ -n "$session" ]] && echo "[ledger] $session ($mood)"
     fi
+
+    # ===========================================
+    # CORRECTIONS RECAP: Surface recent high-priority corrections
+    # ===========================================
+    corrections=$(timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "correction" --tag "correction" --limit 3 --text-only 2>/dev/null | head -c 600 || true)
+    if [[ -n "$corrections" && "$corrections" != *"No memories"* ]]; then
+        echo ""
+        echo "[recent-corrections]"
+        echo "$corrections" | head -5
+        echo "[/recent-corrections]"
+    fi
+
+    # Check for compliance failures (missed learning opportunities)
+    compliance=$(timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "compliance fail" --tag "compliance" --limit 2 --text-only 2>/dev/null | head -c 300 || true)
+    if [[ -n "$compliance" && "$compliance" != *"No memories"* ]]; then
+        echo ""
+        echo "⚠️ [compliance-issues] Recent missed corrections - be more proactive!"
+    fi
 fi
 
 exit 0
