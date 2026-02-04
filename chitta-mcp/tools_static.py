@@ -215,6 +215,40 @@ TOOLS = [
         }
     ),
     Tool(
+        name="describe_symbol",
+        description="Set description for a code symbol (stores directly in symbol table, not as wisdom)",
+        inputSchema={
+                "properties": {
+                        "description": {
+                                "description": "Semantic description of the symbol",
+                                "type": "string"
+                        },
+                        "symbol_id": {
+                                "description": "Symbol ID to describe",
+                                "type": "integer"
+                        }
+                },
+                "required": [
+                        "symbol_id",
+                        "description"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="cleanup_code_wisdom",
+        description="Migration: delete [code] wisdom memories and clear orphaned symbol.memory_id references",
+        inputSchema={
+                "properties": {
+                        "dry_run": {
+                                "description": "Preview only without changes (default: True)",
+                                "type": "boolean"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
         name="subconscious_stats",
         description="Get subconscious background processor statistics",
         inputSchema={
@@ -358,8 +392,12 @@ TOOLS = [
         inputSchema={
                 "properties": {
                         "category": {
-                                "description": "Category: wisdom, insight, signal, episode",
+                                "description": "Category: correction, preference, solution, decision, failure, wisdom, episode",
                                 "type": "string"
+                        },
+                        "confidence": {
+                                "description": "Optional confidence override (0.0-1.0). If not set, derived from category.",
+                                "type": "number"
                         },
                         "content": {
                                 "description": "Full content",
@@ -386,6 +424,13 @@ TOOLS = [
         description="Semantic search with full context (for hooks)",
         inputSchema={
                 "properties": {
+                        "exclude_kinds": {
+                                "description": "Memory kinds to exclude from results",
+                                "items": {
+                                        "type": "string"
+                                },
+                                "type": "array"
+                        },
                         "include_global": {
                                 "description": "Include global memories (default true)",
                                 "type": "boolean"
@@ -393,6 +438,10 @@ TOOLS = [
                         "k": {
                                 "description": "Max results",
                                 "type": "integer"
+                        },
+                        "partnership_only": {
+                                "description": "Exclude code intel (symbol, projectessence, modulestate, patternstate)",
+                                "type": "boolean"
                         },
                         "query": {
                                 "description": "Search query",
@@ -482,6 +531,85 @@ TOOLS = [
         }
     ),
     Tool(
+        name="symbol_callers",
+        description="Find all symbols that call the given symbol (reverse call graph)",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "description": "Symbol ID (alternative to name)",
+                                "type": "integer"
+                        },
+                        "kind": {
+                                "description": "Filter by symbol kind when using name",
+                                "type": "string"
+                        },
+                        "name": {
+                                "description": "Symbol name to find callers for",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="symbol_callees",
+        description="Find all symbols that the given symbol calls (forward call graph)",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "description": "Symbol ID (alternative to name)",
+                                "type": "integer"
+                        },
+                        "kind": {
+                                "description": "Filter by symbol kind when using name",
+                                "type": "string"
+                        },
+                        "name": {
+                                "description": "Symbol name to find callees for",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="read_symbol",
+        description="Read the actual source code for a symbol by name or ID",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "description": "Symbol ID (alternative to name)",
+                                "type": "integer"
+                        },
+                        "kind": {
+                                "description": "Filter by symbol kind (function, class, method)",
+                                "type": "string"
+                        },
+                        "name": {
+                                "description": "Symbol name to read",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="read_function",
+        description="Read the source code of a function/method by name (shorthand for read_symbol with kind=function|method)",
+        inputSchema={
+                "properties": {
+                        "name": {
+                                "description": "Function name to read",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "name"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
         name="search_symbols",
         description="Semantic search for code symbols by natural language query. Returns symbols ranked by embedding similarity.",
         inputSchema={
@@ -515,6 +643,46 @@ TOOLS = [
                                 "type": "string"
                         }
                 },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="smart_context",
+        description="Build intelligent context combining memories, code symbols, and graph relationships. Two modes: fast (<80ms) for PreToolUse hooks, full (<200ms) for UserPromptSubmit hooks.",
+        inputSchema={
+                "properties": {
+                        "code": {
+                                "description": "Include code symbols (default: True)",
+                                "type": "boolean"
+                        },
+                        "limit": {
+                                "description": "Token limit (default: 300)",
+                                "type": "integer"
+                        },
+                        "memories": {
+                                "description": "Include semantic memories (default: True)",
+                                "type": "boolean"
+                        },
+                        "mode": {
+                                "description": "fast: <80ms (vector + BM25), full: <200ms (full_resonate + semantic)",
+                                "type": "string"
+                        },
+                        "neighbors": {
+                                "description": "Include triplet neighbors (default: True)",
+                                "type": "boolean"
+                        },
+                        "realm": {
+                                "description": "Filter by realm",
+                                "type": "string"
+                        },
+                        "task": {
+                                "description": "Query to find context for",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "task"
+                ],
                 "type": "object"
         }
     ),
@@ -575,6 +743,71 @@ TOOLS = [
                 },
                 "required": [
                         "pattern"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="resolve_callsites",
+        description="Resolve callsites to symbols and populate call_edge table for call graph queries",
+        inputSchema={
+                "properties": {
+                        "project": {
+                                "description": "Filter to specific project path (optional)",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="type_hierarchy",
+        description="Get type hierarchy (base classes, implemented interfaces) for a type",
+        inputSchema={
+                "properties": {
+                        "direction": {
+                                "description": "ancestors, descendants, or both (default: both)",
+                                "type": "string"
+                        },
+                        "name": {
+                                "description": "Type name to query",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "name"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="file_imports",
+        description="Get all imports for a file",
+        inputSchema={
+                "properties": {
+                        "path": {
+                                "description": "File path or filename to query imports for",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "path"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="file_dependents",
+        description="Get files that import a given module/file",
+        inputSchema={
+                "properties": {
+                        "module": {
+                                "description": "Module or file name to find dependents of",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "module"
                 ],
                 "type": "object"
         }
@@ -875,6 +1108,14 @@ TOOLS = [
                         "id",
                         "visibility"
                 ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="realm_detect",
+        description="Detect current realm from environment, .cc-soul-realm file, or git repository",
+        inputSchema={
+                "properties": {},
                 "type": "object"
         }
     ),
@@ -1611,11 +1852,11 @@ TOOLS = [
     ),
     Tool(
         name="transcript_search",
-        description="Search transcript content. Defaults to current session. Use keyword_only=true for fast search.",
+        description="Semantic search across transcript content. Defaults to current session. Use keyword_only=true for fast search.",
         inputSchema={
                 "properties": {
                         "keyword_only": {
-                                "description": "Fast keyword match without embeddings (default: false)",
+                                "description": "Fast keyword match without embeddings (default: False)",
                                 "type": "boolean"
                         },
                         "limit": {
@@ -2142,6 +2383,53 @@ TOOLS = [
                         },
                         "prune_threshold": {
                                 "description": "Confidence below which to prune (default: 0.1)",
+                                "type": "number"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="learn_outcome",
+        description="Record whether a previously surfaced memory helped or hurt. Adjusts confidence based on outcome.",
+        inputSchema={
+                "properties": {
+                        "context": {
+                                "description": "What you were trying to do when this memory was surfaced",
+                                "type": "string"
+                        },
+                        "memory_id": {
+                                "description": "Memory ID or UUID that was surfaced",
+                                "type": "string"
+                        },
+                        "outcome": {
+                                "description": "Did it help?",
+                                "enum": [
+                                        "positive",
+                                        "negative",
+                                        "neutral"
+                                ],
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "memory_id",
+                        "outcome"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="episode_cluster_status",
+        description="Find clusters of similar episodes that could be distilled into wisdom.",
+        inputSchema={
+                "properties": {
+                        "min_occurrences": {
+                                "description": "Minimum episodes in cluster (default: 3)",
+                                "type": "integer"
+                        },
+                        "similarity_threshold": {
+                                "description": "Minimum similarity for cluster (default: 0.85)",
                                 "type": "number"
                         }
                 },

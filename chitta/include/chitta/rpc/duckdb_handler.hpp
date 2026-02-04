@@ -7,6 +7,7 @@
 #include "../mind/subconscious.hpp"
 #include "../mind/payload.hpp"
 #include "../code_intel.hpp"
+#include "../symbol_resolver.hpp"
 #include "../version.hpp"
 #include <nlohmann/json.hpp>
 #include <string>
@@ -527,6 +528,62 @@ private:
         });
         handlers_["find_symbol"] = [this](const json& p) { return tool_find_symbol(p); };
 
+        // Call graph tools
+        tools_.push_back({
+            {"name", "symbol_callers"},
+            {"description", "Find all symbols that call the given symbol (reverse call graph)"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"name", {{"type", "string"}, {"description", "Symbol name to find callers for"}}},
+                    {"id", {{"type", "integer"}, {"description", "Symbol ID (alternative to name)"}}},
+                    {"kind", {{"type", "string"}, {"description", "Filter by symbol kind when using name"}}}
+                }}
+            }}
+        });
+        handlers_["symbol_callers"] = [this](const json& p) { return tool_symbol_callers(p); };
+
+        tools_.push_back({
+            {"name", "symbol_callees"},
+            {"description", "Find all symbols that the given symbol calls (forward call graph)"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"name", {{"type", "string"}, {"description", "Symbol name to find callees for"}}},
+                    {"id", {{"type", "integer"}, {"description", "Symbol ID (alternative to name)"}}},
+                    {"kind", {{"type", "string"}, {"description", "Filter by symbol kind when using name"}}}
+                }}
+            }}
+        });
+        handlers_["symbol_callees"] = [this](const json& p) { return tool_symbol_callees(p); };
+
+        tools_.push_back({
+            {"name", "read_symbol"},
+            {"description", "Read the actual source code for a symbol by name or ID"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"name", {{"type", "string"}, {"description", "Symbol name to read"}}},
+                    {"id", {{"type", "integer"}, {"description", "Symbol ID (alternative to name)"}}},
+                    {"kind", {{"type", "string"}, {"description", "Filter by symbol kind (function, class, method)"}}}
+                }}
+            }}
+        });
+        handlers_["read_symbol"] = [this](const json& p) { return tool_read_symbol(p); };
+
+        tools_.push_back({
+            {"name", "read_function"},
+            {"description", "Read the source code of a function/method by name (shorthand for read_symbol with kind=function|method)"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"name", {{"type", "string"}, {"description", "Function name to read"}}}
+                }},
+                {"required", {"name"}}
+            }}
+        });
+        handlers_["read_function"] = [this](const json& p) { return tool_read_function(p); };
+
         tools_.push_back({
             {"name", "search_symbols"},
             {"description", "Semantic search for code symbols by natural language query. Returns symbols ranked by embedding similarity."},
@@ -615,6 +672,62 @@ private:
             }}
         });
         handlers_["clear_triplets"] = [this](const json& p) { return tool_clear_triplets(p); };
+
+        // Cross-file symbol resolution
+        tools_.push_back({
+            {"name", "resolve_callsites"},
+            {"description", "Resolve callsites to symbols and populate call_edge table for call graph queries"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"project", {{"type", "string"}, {"description", "Filter to specific project path (optional)"}}}
+                }}
+            }}
+        });
+        handlers_["resolve_callsites"] = [this](const json& p) { return tool_resolve_callsites(p); };
+
+        // Type hierarchy queries
+        tools_.push_back({
+            {"name", "type_hierarchy"},
+            {"description", "Get type hierarchy (base classes, implemented interfaces) for a type"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"name", {{"type", "string"}, {"description", "Type name to query"}}},
+                    {"direction", {{"type", "string"}, {"description", "ancestors, descendants, or both (default: both)"}}}
+                }},
+                {"required", {"name"}}
+            }}
+        });
+        handlers_["type_hierarchy"] = [this](const json& p) { return tool_type_hierarchy(p); };
+
+        // File imports query
+        tools_.push_back({
+            {"name", "file_imports"},
+            {"description", "Get all imports for a file"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"path", {{"type", "string"}, {"description", "File path or filename to query imports for"}}}
+                }},
+                {"required", {"path"}}
+            }}
+        });
+        handlers_["file_imports"] = [this](const json& p) { return tool_file_imports(p); };
+
+        // File dependents query
+        tools_.push_back({
+            {"name", "file_dependents"},
+            {"description", "Get files that import a given module/file"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"module", {{"type", "string"}, {"description", "Module or file name to find dependents of"}}}
+                }},
+                {"required", {"module"}}
+            }}
+        });
+        handlers_["file_dependents"] = [this](const json& p) { return tool_file_dependents(p); };
 
         // Essential memory tools
         tools_.push_back({
@@ -3335,6 +3448,228 @@ private:
         return DuckDBToolResult::ok(ss.str(), {{"symbols", symbols_json}, {"count", symbols.size()}});
     }
 
+    // Helper to resolve symbol by name or ID
+    std::optional<Symbol> resolve_symbol(const json& params) {
+        // Try ID first (more specific)
+        if (params.contains("id") && params["id"].is_number_integer()) {
+            int64_t id = params["id"].get<int64_t>();
+            return mind_->store().get_symbol_by_id(id);
+        }
+
+        // Fall back to name search
+        std::string name = params.value("name", "");
+        if (name.empty()) return std::nullopt;
+
+        std::string kind = params.value("kind", "");
+        auto symbols = mind_->store().find_symbol(name, kind);
+        if (symbols.empty()) return std::nullopt;
+
+        // Return first match (exact match preferred)
+        for (const auto& s : symbols) {
+            if (s.name == name) return s;
+        }
+        return symbols[0];
+    }
+
+    DuckDBToolResult tool_symbol_callers(const json& params) {
+        if (subconscious_) subconscious_->notify_query();
+
+        auto sym_opt = resolve_symbol(params);
+        if (!sym_opt) {
+            return DuckDBToolResult::error("Symbol not found. Provide 'name' or 'id'.");
+        }
+        const auto& sym = *sym_opt;
+
+        auto caller_ids = mind_->store().callers(sym.id);
+
+        if (caller_ids.empty()) {
+            return DuckDBToolResult::ok(
+                "No callers found for " + sym.kind + " " + sym.name,
+                {{"symbol", sym.name}, {"callers", json::array()}}
+            );
+        }
+
+        std::ostringstream ss;
+        ss << "Found " << caller_ids.size() << " callers for " << sym.kind << " " << sym.name << ":\n";
+
+        json callers_json = json::array();
+        for (int64_t cid : caller_ids) {
+            auto caller_opt = mind_->store().get_symbol_by_id(cid);
+            if (caller_opt) {
+                const auto& c = *caller_opt;
+                ss << "  " << c.kind << " " << c.name << " @" << c.file_path << ":" << c.line_start << "\n";
+                callers_json.push_back({
+                    {"id", c.id},
+                    {"kind", c.kind},
+                    {"name", c.name},
+                    {"file", c.file_path},
+                    {"line_start", c.line_start},
+                    {"line_end", c.line_end}
+                });
+            }
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"symbol", sym.name},
+            {"symbol_id", sym.id},
+            {"callers", callers_json},
+            {"count", callers_json.size()}
+        });
+    }
+
+    DuckDBToolResult tool_symbol_callees(const json& params) {
+        if (subconscious_) subconscious_->notify_query();
+
+        auto sym_opt = resolve_symbol(params);
+        if (!sym_opt) {
+            return DuckDBToolResult::error("Symbol not found. Provide 'name' or 'id'.");
+        }
+        const auto& sym = *sym_opt;
+
+        auto callee_ids = mind_->store().callees(sym.id);
+
+        if (callee_ids.empty()) {
+            return DuckDBToolResult::ok(
+                "No callees found for " + sym.kind + " " + sym.name,
+                {{"symbol", sym.name}, {"callees", json::array()}}
+            );
+        }
+
+        std::ostringstream ss;
+        ss << "Found " << callee_ids.size() << " callees for " << sym.kind << " " << sym.name << ":\n";
+
+        json callees_json = json::array();
+        for (int64_t cid : callee_ids) {
+            auto callee_opt = mind_->store().get_symbol_by_id(cid);
+            if (callee_opt) {
+                const auto& c = *callee_opt;
+                ss << "  " << c.kind << " " << c.name << " @" << c.file_path << ":" << c.line_start << "\n";
+                callees_json.push_back({
+                    {"id", c.id},
+                    {"kind", c.kind},
+                    {"name", c.name},
+                    {"file", c.file_path},
+                    {"line_start", c.line_start},
+                    {"line_end", c.line_end}
+                });
+            }
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"symbol", sym.name},
+            {"symbol_id", sym.id},
+            {"callees", callees_json},
+            {"count", callees_json.size()}
+        });
+    }
+
+    DuckDBToolResult tool_read_symbol(const json& params) {
+        if (subconscious_) subconscious_->notify_query();
+
+        auto sym_opt = resolve_symbol(params);
+        if (!sym_opt) {
+            return DuckDBToolResult::error("Symbol not found. Provide 'name' or 'id'.");
+        }
+        const auto& sym = *sym_opt;
+
+        // Read the source file
+        std::ifstream file(sym.file_path);
+        if (!file) {
+            return DuckDBToolResult::error("Cannot open file: " + sym.file_path);
+        }
+
+        // Read lines from line_start to line_end
+        std::ostringstream source;
+        std::string line;
+        int line_num = 1;
+        while (std::getline(file, line)) {
+            if (line_num >= sym.line_start && line_num <= sym.line_end) {
+                source << line << "\n";
+            }
+            if (line_num > sym.line_end) break;
+            line_num++;
+        }
+
+        std::string code = source.str();
+        if (code.empty()) {
+            return DuckDBToolResult::error("No code found at " + sym.file_path + ":" +
+                                          std::to_string(sym.line_start) + "-" +
+                                          std::to_string(sym.line_end));
+        }
+
+        std::ostringstream ss;
+        ss << sym.kind << " " << sym.name << " @" << sym.file_path << ":"
+           << sym.line_start << "-" << sym.line_end << "\n\n" << code;
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"symbol", sym.name},
+            {"kind", sym.kind},
+            {"file", sym.file_path},
+            {"line_start", sym.line_start},
+            {"line_end", sym.line_end},
+            {"code", code}
+        });
+    }
+
+    DuckDBToolResult tool_read_function(const json& params) {
+        // Shorthand for read_symbol with kind = function or method
+        std::string name = params.value("name", "");
+        if (name.empty()) {
+            return DuckDBToolResult::error("Function name is required");
+        }
+
+        // Try function first, then method
+        auto symbols = mind_->store().find_symbol(name, "function");
+        if (symbols.empty()) {
+            symbols = mind_->store().find_symbol(name, "method");
+        }
+
+        if (symbols.empty()) {
+            return DuckDBToolResult::error("Function/method '" + name + "' not found");
+        }
+
+        // Find exact match
+        const Symbol* best = nullptr;
+        for (const auto& s : symbols) {
+            if (s.name == name) {
+                best = &s;
+                break;
+            }
+        }
+        if (!best) best = &symbols[0];
+
+        // Read the source file
+        std::ifstream file(best->file_path);
+        if (!file) {
+            return DuckDBToolResult::error("Cannot open file: " + best->file_path);
+        }
+
+        std::ostringstream source;
+        std::string line;
+        int line_num = 1;
+        while (std::getline(file, line)) {
+            if (line_num >= best->line_start && line_num <= best->line_end) {
+                source << line << "\n";
+            }
+            if (line_num > best->line_end) break;
+            line_num++;
+        }
+
+        std::string code = source.str();
+        std::ostringstream ss;
+        ss << best->kind << " " << best->name << " @" << best->file_path << ":"
+           << best->line_start << "-" << best->line_end << "\n\n" << code;
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"symbol", best->name},
+            {"kind", best->kind},
+            {"file", best->file_path},
+            {"line_start", best->line_start},
+            {"line_end", best->line_end},
+            {"code", code}
+        });
+    }
+
     DuckDBToolResult tool_search_symbols(const json& params) {
         // Notify subconscious that we're handling a query (idle scheduling)
         if (subconscious_) subconscious_->notify_query();
@@ -3861,6 +4196,191 @@ private:
         return DuckDBToolResult::ok(ss.str(), {
             {"pattern", pattern},
             {"deleted", deleted}
+        });
+    }
+
+    DuckDBToolResult tool_resolve_callsites(const json& params) {
+        if (subconscious_) subconscious_->notify_query();
+
+        std::string project = params.value("project", "");
+
+        SymbolResolver resolver(mind_->store());
+        auto stats = resolver.resolve_project(project);
+
+        std::ostringstream ss;
+        ss << "Resolved " << stats.resolved << "/" << stats.total_callsites << " callsites\n";
+        ss << "  Resolved (high confidence): " << stats.resolved << "\n";
+        ss << "  Ambiguous (low confidence): " << stats.ambiguous << "\n";
+        ss << "  Unresolved: " << stats.unresolved << "\n";
+        ss << "  Indirect/skipped: " << stats.indirect << "\n";
+        ss << "  Avg confidence: " << std::fixed << std::setprecision(2) << stats.avg_confidence;
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"total", stats.total_callsites},
+            {"resolved", stats.resolved},
+            {"ambiguous", stats.ambiguous},
+            {"unresolved", stats.unresolved},
+            {"indirect", stats.indirect},
+            {"avg_confidence", stats.avg_confidence}
+        });
+    }
+
+    DuckDBToolResult tool_type_hierarchy(const json& params) {
+        if (subconscious_) subconscious_->notify_query();
+
+        std::string name = params.value("name", "");
+        if (name.empty()) {
+            return DuckDBToolResult::error("Type name is required");
+        }
+
+        std::string direction = params.value("direction", "both");
+
+        json ancestors = json::array();
+        json descendants = json::array();
+
+        // Query ancestors (what this type extends/implements)
+        if (direction == "ancestors" || direction == "both") {
+            auto triplets = mind_->store().query_subject(name);
+            for (const auto& t : triplets) {
+                if (t.predicate == "extends" || t.predicate == "implements" || t.predicate == "embeds") {
+                    ancestors.push_back({
+                        {"name", t.object},
+                        {"relationship", t.predicate}
+                    });
+                }
+            }
+        }
+
+        // Query descendants (what extends/implements this type)
+        if (direction == "descendants" || direction == "both") {
+            auto triplets = mind_->store().query_object(name);
+            for (const auto& t : triplets) {
+                if (t.predicate == "extends" || t.predicate == "implements" || t.predicate == "embeds") {
+                    descendants.push_back({
+                        {"name", t.subject},
+                        {"relationship", t.predicate}
+                    });
+                }
+            }
+        }
+
+        std::ostringstream ss;
+        ss << "Type hierarchy for " << name << ":\n";
+
+        if (!ancestors.empty()) {
+            ss << "  Ancestors (" << ancestors.size() << "):\n";
+            for (const auto& a : ancestors) {
+                ss << "    " << a["relationship"].get<std::string>() << " " << a["name"].get<std::string>() << "\n";
+            }
+        }
+
+        if (!descendants.empty()) {
+            ss << "  Descendants (" << descendants.size() << "):\n";
+            for (const auto& d : descendants) {
+                ss << "    " << d["name"].get<std::string>() << " " << d["relationship"].get<std::string>() << " " << name << "\n";
+            }
+        }
+
+        if (ancestors.empty() && descendants.empty()) {
+            ss << "  (no type relationships found)";
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"type", name},
+            {"ancestors", ancestors},
+            {"descendants", descendants}
+        });
+    }
+
+    DuckDBToolResult tool_file_imports(const json& params) {
+        if (subconscious_) subconscious_->notify_query();
+
+        std::string path = params.value("path", "");
+        if (path.empty()) {
+            return DuckDBToolResult::error("File path is required");
+        }
+
+        // Get just the filename if a full path is provided
+        std::filesystem::path p(path);
+        std::string filename = p.filename().string();
+
+        json imports = json::array();
+
+        // Query imports triplets
+        auto triplets = mind_->store().query_subject(filename);
+        for (const auto& t : triplets) {
+            if (t.predicate == "imports") {
+                imports.push_back({
+                    {"module", t.object},
+                    {"type", "module"}
+                });
+            } else if (t.predicate == "imports_name") {
+                imports.push_back({
+                    {"module", t.object},
+                    {"type", "name"}
+                });
+            } else if (t.predicate == "imports_as") {
+                imports.push_back({
+                    {"alias", t.object},
+                    {"type", "alias"}
+                });
+            }
+        }
+
+        std::ostringstream ss;
+        ss << "Imports for " << filename << ":\n";
+        for (const auto& imp : imports) {
+            if (imp["type"] == "module") {
+                ss << "  import " << imp["module"].get<std::string>() << "\n";
+            } else if (imp["type"] == "name") {
+                ss << "  from ... import " << imp["module"].get<std::string>() << "\n";
+            }
+        }
+
+        if (imports.empty()) {
+            ss << "  (no imports found)";
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"file", filename},
+            {"imports", imports}
+        });
+    }
+
+    DuckDBToolResult tool_file_dependents(const json& params) {
+        if (subconscious_) subconscious_->notify_query();
+
+        std::string module = params.value("module", "");
+        if (module.empty()) {
+            return DuckDBToolResult::error("Module name is required");
+        }
+
+        json dependents = json::array();
+
+        // Query files that import this module
+        auto triplets = mind_->store().query_object(module);
+        for (const auto& t : triplets) {
+            if (t.predicate == "imports" || t.predicate == "imports_name") {
+                dependents.push_back({
+                    {"file", t.subject},
+                    {"source_file", t.weight}  // Note: weight is reused, may not be useful
+                });
+            }
+        }
+
+        std::ostringstream ss;
+        ss << "Files that import " << module << ":\n";
+        for (const auto& d : dependents) {
+            ss << "  " << d["file"].get<std::string>() << "\n";
+        }
+
+        if (dependents.empty()) {
+            ss << "  (no dependents found)";
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"module", module},
+            {"dependents", dependents}
         });
     }
 

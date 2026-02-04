@@ -476,6 +476,7 @@ public:
     // Code intelligence
     int64_t add_symbol(const Symbol& sym, const std::vector<float>& embedding = {});
     std::vector<Symbol> find_symbol(const std::string& name, const std::string& kind = "");
+    std::optional<Symbol> get_symbol_by_id(int64_t symbol_id);
     std::vector<int64_t> callers(int64_t symbol_id);
     std::vector<int64_t> callees(int64_t symbol_id);
     bool add_call(int64_t caller_id, int64_t callee_id);

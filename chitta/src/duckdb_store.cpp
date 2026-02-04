@@ -2014,6 +2014,32 @@ std::vector<Symbol> DuckDBStore::find_symbol(const std::string& name, const std:
     return results;
 }
 
+std::optional<Symbol> DuckDBStore::get_symbol_by_id(int64_t symbol_id) {
+    if (!db_) return std::nullopt;
+
+    std::ostringstream sql;
+    sql << "SELECT id, kind, name, signature, file_path, line_start, line_end, repo_id "
+        << "FROM symbol WHERE id = " << symbol_id;
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) return std::nullopt;
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return std::nullopt;
+
+    Symbol s;
+    s.id = chunk->GetValue(0, 0).GetValue<int64_t>();
+    s.kind = chunk->GetValue(1, 0).ToString();
+    s.name = chunk->GetValue(2, 0).ToString();
+    s.signature = chunk->GetValue(3, 0).ToString();
+    s.file_path = chunk->GetValue(4, 0).ToString();
+    s.line_start = chunk->GetValue(5, 0).GetValue<int32_t>();
+    s.line_end = chunk->GetValue(6, 0).GetValue<int32_t>();
+    s.repo_id = chunk->GetValue(7, 0).GetValue<int64_t>();
+
+    return s;
+}
+
 std::vector<int64_t> DuckDBStore::callers(int64_t symbol_id) {
     // Lock handled in write_execute/write_query/read_query
     std::vector<int64_t> results;
