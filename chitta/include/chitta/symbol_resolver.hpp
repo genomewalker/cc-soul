@@ -161,34 +161,63 @@ public:
             int64_t callee_id = 0;
             float confidence = 0.0f;
 
+            // Skip very common names that are too ambiguous (>50 matches)
+            if (callee_ids.size() > 50) {
+                stats.indirect++;  // Count as indirect/skipped
+                continue;
+            }
+
             if (callee_ids.size() == 1) {
                 // Unique match
                 callee_id = callee_ids[0];
                 confidence = 0.85f;
             } else {
-                // Multiple matches - prefer same file
+                // Extract project directory from source file (first 3 path components)
+                std::string source_project;
+                size_t slash_count = 0;
+                for (size_t i = 0; i < source_file.size() && slash_count < 4; i++) {
+                    if (source_file[i] == '/') slash_count++;
+                    source_project += source_file[i];
+                }
+
+                // 1. Prefer same file
                 for (int64_t id : callee_ids) {
                     auto& info = symbol_info_[id];
                     if (info.file_path == source_file) {
                         callee_id = id;
-                        confidence = 0.90f;
+                        confidence = 0.95f;
                         break;
                     }
                 }
+
+                // 2. Prefer same project
                 if (callee_id == 0) {
-                    // Prefer functions over methods for bare calls
                     for (int64_t id : callee_ids) {
                         auto& info = symbol_info_[id];
-                        if (info.kind == "function") {
+                        if (info.file_path.substr(0, source_project.size()) == source_project) {
                             callee_id = id;
-                            confidence = 0.70f;
+                            confidence = 0.80f;
                             break;
                         }
                     }
                 }
+
+                // 3. Prefer functions over methods for bare calls
+                if (callee_id == 0) {
+                    for (int64_t id : callee_ids) {
+                        auto& info = symbol_info_[id];
+                        if (info.kind == "function") {
+                            callee_id = id;
+                            confidence = 0.60f;
+                            break;
+                        }
+                    }
+                }
+
+                // 4. Fallback to first match with low confidence
                 if (callee_id == 0) {
                     callee_id = callee_ids[0];
-                    confidence = 0.50f;
+                    confidence = 0.40f;
                 }
             }
 

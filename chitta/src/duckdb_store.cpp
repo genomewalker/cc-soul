@@ -310,6 +310,21 @@ bool DuckDBStore::create_schema() {
     write_execute("CREATE INDEX IF NOT EXISTS idx_triplet_predicate ON triplet(predicate)");
     write_execute("CREATE INDEX IF NOT EXISTS idx_triplet_source_file ON triplet(source_file)");
 
+    // Unique index for deduplication (migration: dedupe first, then create)
+    // First remove duplicates keeping the one with highest weight
+    write_execute(R"(
+        DELETE FROM triplet WHERE id IN (
+            SELECT id FROM (
+                SELECT id, ROW_NUMBER() OVER (
+                    PARTITION BY subject, predicate, object
+                    ORDER BY weight DESC, id
+                ) as rn
+                FROM triplet
+            ) WHERE rn > 1
+        )
+    )");
+    write_execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_triplet_unique ON triplet(subject, predicate, object)");
+
     // Symbol table for code intelligence
     if (!write_execute(R"(
         CREATE TABLE IF NOT EXISTS symbol (
@@ -1848,12 +1863,14 @@ size_t DuckDBStore::connect_batch_sql(
         inserted++;
 
         if (batch_count >= BATCH_SIZE) {
+            sql += " ON CONFLICT (subject, predicate, object) DO NOTHING";
             write_execute(sql);
             batch_count = 0;
         }
     }
 
     if (batch_count > 0) {
+        sql += " ON CONFLICT (subject, predicate, object) DO NOTHING";
         write_execute(sql);
     }
 
