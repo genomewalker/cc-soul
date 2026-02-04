@@ -313,6 +313,12 @@ configure_hooks() {
     # Skip if settings file doesn't exist
     [[ ! -f "$settings_file" ]] && return 0
 
+    # Skip if cc-soul plugin is enabled (plugin manages its own hooks via hooks.json)
+    if jq -e '.enabledPlugins["cc-soul@genomewalker-cc-soul"] == true' "$settings_file" &>/dev/null; then
+        echo "[cc-soul] Plugin enabled, skipping hook config (plugin manages hooks)"
+        return 0
+    fi
+
     local current
     current=$(cat "$settings_file")
 
