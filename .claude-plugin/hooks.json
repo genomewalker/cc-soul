@@ -78,6 +78,12 @@
             "timeout": 5,
             "statusMessage": "logging command…",
             "async": true
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-bash-hook.sh",
+            "timeout": 5,
+            "statusMessage": "checking result…"
           }
         ]
       }
