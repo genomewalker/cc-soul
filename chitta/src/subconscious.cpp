@@ -117,6 +117,11 @@ void Subconscious::process_loop() {
             last_hygiene = std::chrono::steady_clock::now();
         }
 
+        // Check for theme maintenance (xMemory)
+        if (config_.enable_theme_maintenance && time_for_theme_maintenance()) {
+            run_theme_maintenance();
+        }
+
         // Check for background embedding
         if (config_.enable_background_embedding && time_for_embedding()) {
             run_background_embedding();
@@ -420,6 +425,39 @@ bool Subconscious::time_for_hygiene() const {
     auto now = now_ms();
     auto interval_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         config_.hygiene_interval
+    ).count();
+
+    return (now - last) >= interval_ms;
+}
+
+void Subconscious::run_theme_maintenance() {
+    // Skip if daemon is busy with queries
+    if (!is_idle()) {
+        return;
+    }
+
+    auto result = mind_->run_theme_maintenance();
+
+    stats_.theme_maintenance_runs++;
+    stats_.themes_split += result.themes_split;
+    stats_.themes_merged += result.themes_merged;
+    stats_.memories_reassigned += result.memories_reassigned;
+    stats_.last_theme_maintenance_at = now_ms();
+
+    std::cerr << "[subconscious] Theme maintenance: split=" << result.themes_split
+              << ", merged=" << result.themes_merged
+              << ", reassigned=" << result.memories_reassigned
+              << ", reps_updated=" << result.representatives_updated
+              << ", centroids=" << result.centroids_recomputed << "\n";
+}
+
+bool Subconscious::time_for_theme_maintenance() const {
+    auto last = stats_.last_theme_maintenance_at.load();
+    if (last == 0) return true;  // Never run
+
+    auto now = now_ms();
+    auto interval_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        config_.theme_maintenance_interval
     ).count();
 
     return (now - last) >= interval_ms;

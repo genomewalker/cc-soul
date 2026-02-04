@@ -124,6 +124,7 @@ void DuckDBStore::fix_sequences() {
     fix_seq("ledger", "ledger_seq");
     fix_seq("long_task", "task_seq");
     fix_seq("task_event", "event_seq");
+    fix_seq("theme", "theme_seq");
 }
 
 bool DuckDBStore::open_embeddings_db(const std::string& path) {
@@ -687,6 +688,52 @@ bool DuckDBStore::create_schema() {
         return false;
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // xMemory Theme System
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Theme table: semantic groupings of memories
+    if (!write_execute(R"(
+        CREATE TABLE IF NOT EXISTS theme (
+            id BIGINT PRIMARY KEY,
+            name VARCHAR NOT NULL,
+            centroid FLOAT[384],
+            coherence FLOAT DEFAULT 1.0,
+            sparsity FLOAT DEFAULT 0.5,
+            memory_count INTEGER DEFAULT 0,
+            representative_id BIGINT DEFAULT 0,
+            realm VARCHAR DEFAULT 'brahman',
+            created_at BIGINT NOT NULL,
+            updated_at BIGINT NOT NULL
+        )
+    )")) {
+        return false;
+    }
+
+    // Theme membership: many-to-many between memories and themes
+    if (!write_execute(R"(
+        CREATE TABLE IF NOT EXISTS theme_membership (
+            memory_id BIGINT NOT NULL,
+            theme_id BIGINT NOT NULL,
+            strength FLOAT DEFAULT 1.0,
+            is_representative BOOLEAN DEFAULT FALSE,
+            assigned_at BIGINT NOT NULL,
+            PRIMARY KEY (memory_id, theme_id)
+        )
+    )")) {
+        return false;
+    }
+
+    // Indexes for theme queries
+    write_execute("CREATE INDEX IF NOT EXISTS idx_theme_realm ON theme(realm)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_theme_coherence ON theme(coherence)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_theme_membership_theme ON theme_membership(theme_id)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_theme_membership_memory ON theme_membership(memory_id)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_theme_membership_rep ON theme_membership(is_representative) WHERE is_representative = TRUE");
+
+    // Add primary_theme_id column to memory table (migration)
+    write_execute("ALTER TABLE memory ADD COLUMN IF NOT EXISTS primary_theme_id BIGINT DEFAULT NULL");
+
     // Sequence for IDs
     write_execute("CREATE SEQUENCE IF NOT EXISTS memory_seq START 1");
     write_execute("CREATE SEQUENCE IF NOT EXISTS triplet_seq START 1");
@@ -698,6 +745,7 @@ bool DuckDBStore::create_schema() {
     write_execute("CREATE SEQUENCE IF NOT EXISTS anticipation_seq START 1");
     write_execute("CREATE SEQUENCE IF NOT EXISTS habit_seq START 1");
     write_execute("CREATE SEQUENCE IF NOT EXISTS background_seq START 1");
+    write_execute("CREATE SEQUENCE IF NOT EXISTS theme_seq START 1");
 
     return true;
 }
@@ -5628,6 +5676,650 @@ std::vector<MemoryResult> DuckDBStore::recall_with_provenance(
     }
 
     return results;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// xMemory Theme System Implementation
+// ═══════════════════════════════════════════════════════════════════════════
+
+int64_t DuckDBStore::theme_create(const std::string& name, const std::vector<float>& centroid,
+                                   const std::string& realm) {
+    if (name.empty()) {
+        last_error_ = "Theme name cannot be empty";
+        return -1;
+    }
+
+    int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+
+    std::string centroid_sql = embedding_to_sql(centroid);
+    if (centroid_sql.empty()) {
+        centroid_sql = "NULL";
+    }
+
+    std::ostringstream sql;
+    sql << "INSERT INTO theme (id, name, centroid, coherence, sparsity, memory_count, "
+        << "representative_id, realm, created_at, updated_at) "
+        << "VALUES (nextval('theme_seq'), '" << name << "', " << centroid_sql << ", "
+        << "1.0, 0.5, 0, 0, '" << realm << "', " << now << ", " << now << ") "
+        << "RETURNING id";
+
+    auto result = write_query(sql.str());
+    if (!result || result->HasError()) {
+        last_error_ = "Failed to create theme";
+        return -1;
+    }
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) {
+        return -1;
+    }
+    return chunk->GetValue(0, 0).GetValue<int64_t>();
+}
+
+std::optional<Theme> DuckDBStore::theme_get(int64_t theme_id) {
+    std::ostringstream sql;
+    sql << "SELECT id, name, centroid, coherence, sparsity, memory_count, "
+        << "representative_id, realm, created_at, updated_at "
+        << "FROM theme WHERE id = " << theme_id;
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) {
+        return std::nullopt;
+    }
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) {
+        return std::nullopt;
+    }
+
+    Theme t;
+    t.id = chunk->GetValue(0, 0).GetValue<int64_t>();
+    t.name = chunk->GetValue(1, 0).ToString();
+
+    // Extract centroid embedding
+    auto centroid_val = chunk->GetValue(2, 0);
+    if (!centroid_val.IsNull()) {
+        auto list = duckdb::ListValue::GetChildren(centroid_val);
+        t.centroid.reserve(list.size());
+        for (const auto& v : list) {
+            t.centroid.push_back(v.GetValue<float>());
+        }
+    }
+
+    t.coherence = chunk->GetValue(3, 0).GetValue<float>();
+    t.sparsity = chunk->GetValue(4, 0).GetValue<float>();
+    t.memory_count = chunk->GetValue(5, 0).GetValue<int32_t>();
+    t.representative_id = chunk->GetValue(6, 0).GetValue<int64_t>();
+    t.realm = chunk->GetValue(7, 0).ToString();
+    t.created_at = chunk->GetValue(8, 0).GetValue<int64_t>();
+    t.updated_at = chunk->GetValue(9, 0).GetValue<int64_t>();
+
+    return t;
+}
+
+std::vector<Theme> DuckDBStore::theme_list(const std::string& realm, size_t limit) {
+    std::ostringstream sql;
+    sql << "SELECT id, name, centroid, coherence, sparsity, memory_count, "
+        << "representative_id, realm, created_at, updated_at FROM theme";
+
+    if (!realm.empty()) {
+        sql << " WHERE realm = '" << realm << "'";
+    }
+    sql << " ORDER BY memory_count DESC, created_at DESC LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    std::vector<Theme> themes;
+    if (!result || result->HasError()) {
+        return themes;
+    }
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            Theme t;
+            t.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            t.name = chunk->GetValue(1, i).ToString();
+
+            auto centroid_val = chunk->GetValue(2, i);
+            if (!centroid_val.IsNull()) {
+                auto list = duckdb::ListValue::GetChildren(centroid_val);
+                t.centroid.reserve(list.size());
+                for (const auto& v : list) {
+                    t.centroid.push_back(v.GetValue<float>());
+                }
+            }
+
+            t.coherence = chunk->GetValue(3, i).GetValue<float>();
+            t.sparsity = chunk->GetValue(4, i).GetValue<float>();
+            t.memory_count = chunk->GetValue(5, i).GetValue<int32_t>();
+            t.representative_id = chunk->GetValue(6, i).GetValue<int64_t>();
+            t.realm = chunk->GetValue(7, i).ToString();
+            t.created_at = chunk->GetValue(8, i).GetValue<int64_t>();
+            t.updated_at = chunk->GetValue(9, i).GetValue<int64_t>();
+            themes.push_back(std::move(t));
+        }
+    }
+    return themes;
+}
+
+bool DuckDBStore::theme_update(int64_t theme_id, const std::optional<std::string>& name,
+                               const std::optional<std::vector<float>>& centroid,
+                               const std::optional<float>& coherence,
+                               const std::optional<int64_t>& representative_id) {
+    std::vector<std::string> updates;
+
+    if (name) {
+        updates.push_back("name = '" + *name + "'");
+    }
+    if (centroid) {
+        updates.push_back("centroid = " + embedding_to_sql(*centroid));
+    }
+    if (coherence) {
+        updates.push_back("coherence = " + std::to_string(*coherence));
+    }
+    if (representative_id) {
+        updates.push_back("representative_id = " + std::to_string(*representative_id));
+    }
+
+    if (updates.empty()) {
+        return true;  // Nothing to update
+    }
+
+    int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    updates.push_back("updated_at = " + std::to_string(now));
+
+    std::ostringstream sql;
+    sql << "UPDATE theme SET ";
+    for (size_t i = 0; i < updates.size(); ++i) {
+        if (i > 0) sql << ", ";
+        sql << updates[i];
+    }
+    sql << " WHERE id = " << theme_id;
+
+    return write_execute(sql.str());
+}
+
+bool DuckDBStore::theme_delete(int64_t theme_id) {
+    // First delete all memberships
+    std::ostringstream sql1;
+    sql1 << "DELETE FROM theme_membership WHERE theme_id = " << theme_id;
+    write_execute(sql1.str());
+
+    // Clear primary_theme_id references
+    std::ostringstream sql2;
+    sql2 << "UPDATE memory SET primary_theme_id = NULL WHERE primary_theme_id = " << theme_id;
+    write_execute(sql2.str());
+
+    // Delete the theme
+    std::ostringstream sql3;
+    sql3 << "DELETE FROM theme WHERE id = " << theme_id;
+    return write_execute(sql3.str());
+}
+
+size_t DuckDBStore::theme_count(const std::string& realm) {
+    std::ostringstream sql;
+    sql << "SELECT COUNT(*) FROM theme";
+    if (!realm.empty()) {
+        sql << " WHERE realm = '" << realm << "'";
+    }
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) return 0;
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return 0;
+
+    return static_cast<size_t>(chunk->GetValue(0, 0).GetValue<int64_t>());
+}
+
+bool DuckDBStore::theme_assign(int64_t memory_id, int64_t theme_id, float strength,
+                               bool is_representative) {
+    int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+
+    std::ostringstream sql;
+    sql << "INSERT INTO theme_membership (memory_id, theme_id, strength, is_representative, assigned_at) "
+        << "VALUES (" << memory_id << ", " << theme_id << ", " << strength << ", "
+        << (is_representative ? "TRUE" : "FALSE") << ", " << now << ") "
+        << "ON CONFLICT (memory_id, theme_id) DO UPDATE SET "
+        << "strength = " << strength << ", "
+        << "is_representative = " << (is_representative ? "TRUE" : "FALSE") << ", "
+        << "assigned_at = " << now;
+
+    if (!write_execute(sql.str())) {
+        return false;
+    }
+
+    // Update theme memory count
+    std::ostringstream count_sql;
+    count_sql << "UPDATE theme SET memory_count = "
+              << "(SELECT COUNT(*) FROM theme_membership WHERE theme_id = " << theme_id << "), "
+              << "updated_at = " << now
+              << " WHERE id = " << theme_id;
+    write_execute(count_sql.str());
+
+    return true;
+}
+
+bool DuckDBStore::theme_unassign(int64_t memory_id, int64_t theme_id) {
+    std::ostringstream sql;
+    sql << "DELETE FROM theme_membership WHERE memory_id = " << memory_id
+        << " AND theme_id = " << theme_id;
+
+    if (!write_execute(sql.str())) {
+        return false;
+    }
+
+    // Update theme memory count
+    int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    std::ostringstream count_sql;
+    count_sql << "UPDATE theme SET memory_count = "
+              << "(SELECT COUNT(*) FROM theme_membership WHERE theme_id = " << theme_id << "), "
+              << "updated_at = " << now
+              << " WHERE id = " << theme_id;
+    write_execute(count_sql.str());
+
+    // Clear primary theme if it was this theme
+    std::ostringstream clear_sql;
+    clear_sql << "UPDATE memory SET primary_theme_id = NULL "
+              << "WHERE id = " << memory_id << " AND primary_theme_id = " << theme_id;
+    write_execute(clear_sql.str());
+
+    return true;
+}
+
+bool DuckDBStore::theme_set_representative(int64_t memory_id, int64_t theme_id, bool is_rep) {
+    std::ostringstream sql;
+    sql << "UPDATE theme_membership SET is_representative = " << (is_rep ? "TRUE" : "FALSE")
+        << " WHERE memory_id = " << memory_id << " AND theme_id = " << theme_id;
+
+    if (!write_execute(sql.str())) {
+        return false;
+    }
+
+    // If setting as representative, also update theme's representative_id
+    if (is_rep) {
+        std::ostringstream update_sql;
+        update_sql << "UPDATE theme SET representative_id = " << memory_id
+                   << " WHERE id = " << theme_id;
+        write_execute(update_sql.str());
+    }
+
+    return true;
+}
+
+std::vector<ThemeMembership> DuckDBStore::theme_memberships(int64_t theme_id, size_t limit) {
+    std::ostringstream sql;
+    sql << "SELECT memory_id, theme_id, strength, is_representative, assigned_at "
+        << "FROM theme_membership WHERE theme_id = " << theme_id
+        << " ORDER BY strength DESC, assigned_at DESC LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    std::vector<ThemeMembership> memberships;
+    if (!result || result->HasError()) return memberships;
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            ThemeMembership m;
+            m.memory_id = chunk->GetValue(0, i).GetValue<int64_t>();
+            m.theme_id = chunk->GetValue(1, i).GetValue<int64_t>();
+            m.strength = chunk->GetValue(2, i).GetValue<float>();
+            m.is_representative = chunk->GetValue(3, i).GetValue<bool>();
+            m.assigned_at = chunk->GetValue(4, i).GetValue<int64_t>();
+            memberships.push_back(m);
+        }
+    }
+    return memberships;
+}
+
+std::vector<ThemeMembership> DuckDBStore::memory_themes(int64_t memory_id) {
+    std::ostringstream sql;
+    sql << "SELECT memory_id, theme_id, strength, is_representative, assigned_at "
+        << "FROM theme_membership WHERE memory_id = " << memory_id
+        << " ORDER BY strength DESC";
+
+    auto result = read_query(sql.str());
+    std::vector<ThemeMembership> memberships;
+    if (!result || result->HasError()) return memberships;
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            ThemeMembership m;
+            m.memory_id = chunk->GetValue(0, i).GetValue<int64_t>();
+            m.theme_id = chunk->GetValue(1, i).GetValue<int64_t>();
+            m.strength = chunk->GetValue(2, i).GetValue<float>();
+            m.is_representative = chunk->GetValue(3, i).GetValue<bool>();
+            m.assigned_at = chunk->GetValue(4, i).GetValue<int64_t>();
+            memberships.push_back(m);
+        }
+    }
+    return memberships;
+}
+
+std::optional<int64_t> DuckDBStore::memory_primary_theme(int64_t memory_id) {
+    std::ostringstream sql;
+    sql << "SELECT primary_theme_id FROM memory WHERE id = " << memory_id;
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) return std::nullopt;
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return std::nullopt;
+
+    auto val = chunk->GetValue(0, 0);
+    if (val.IsNull()) return std::nullopt;
+    return val.GetValue<int64_t>();
+}
+
+bool DuckDBStore::set_primary_theme(int64_t memory_id, int64_t theme_id) {
+    std::ostringstream sql;
+    sql << "UPDATE memory SET primary_theme_id = " << theme_id
+        << " WHERE id = " << memory_id;
+    return write_execute(sql.str());
+}
+
+std::vector<MemoryResult> DuckDBStore::theme_members(int64_t theme_id, size_t limit) {
+    std::ostringstream sql;
+    sql << "SELECT m.id, m.kind, m.content, m.confidence, m.created_at, m.accessed_at, "
+        << "m.realm, m.visibility, tm.strength "
+        << "FROM memory m "
+        << "JOIN theme_membership tm ON m.id = tm.memory_id "
+        << "WHERE tm.theme_id = " << theme_id
+        << " ORDER BY tm.strength DESC, m.confidence DESC LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    std::vector<MemoryResult> members;
+    if (!result || result->HasError()) return members;
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            MemoryResult r;
+            r.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            r.kind = chunk->GetValue(1, i).ToString();
+            r.content = chunk->GetValue(2, i).ToString();
+            r.confidence = chunk->GetValue(3, i).GetValue<float>();
+            r.created_at = chunk->GetValue(4, i).GetValue<int64_t>();
+            r.accessed_at = chunk->GetValue(5, i).GetValue<int64_t>();
+            r.realm = chunk->GetValue(6, i).ToString();
+            r.visibility = static_cast<RealmVisibility>(chunk->GetValue(7, i).GetValue<int32_t>());
+            r.similarity = chunk->GetValue(8, i).GetValue<float>();  // Use strength as similarity
+            members.push_back(std::move(r));
+        }
+    }
+    return members;
+}
+
+std::vector<MemoryResult> DuckDBStore::theme_representatives(int64_t theme_id, size_t limit) {
+    std::ostringstream sql;
+    sql << "SELECT m.id, m.kind, m.content, m.confidence, m.created_at, m.accessed_at, "
+        << "m.realm, m.visibility, tm.strength "
+        << "FROM memory m "
+        << "JOIN theme_membership tm ON m.id = tm.memory_id "
+        << "WHERE tm.theme_id = " << theme_id << " AND tm.is_representative = TRUE "
+        << "ORDER BY tm.strength DESC LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    std::vector<MemoryResult> reps;
+    if (!result || result->HasError()) return reps;
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            MemoryResult r;
+            r.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            r.kind = chunk->GetValue(1, i).ToString();
+            r.content = chunk->GetValue(2, i).ToString();
+            r.confidence = chunk->GetValue(3, i).GetValue<float>();
+            r.created_at = chunk->GetValue(4, i).GetValue<int64_t>();
+            r.accessed_at = chunk->GetValue(5, i).GetValue<int64_t>();
+            r.realm = chunk->GetValue(6, i).ToString();
+            r.visibility = static_cast<RealmVisibility>(chunk->GetValue(7, i).GetValue<int32_t>());
+            r.similarity = chunk->GetValue(8, i).GetValue<float>();
+            reps.push_back(std::move(r));
+        }
+    }
+    return reps;
+}
+
+std::vector<Theme> DuckDBStore::themes_by_relevance(const std::vector<float>& query_embedding,
+                                                     size_t limit,
+                                                     const std::string& realm) {
+    if (query_embedding.empty()) {
+        return theme_list(realm, limit);
+    }
+
+    // Use cosine similarity on theme centroids
+    std::string emb_sql = embedding_to_sql(query_embedding);
+
+    std::ostringstream sql;
+    sql << "SELECT id, name, centroid, coherence, sparsity, memory_count, "
+        << "representative_id, realm, created_at, updated_at, "
+        << "1 - array_cosine_distance(centroid, " << emb_sql << ") AS relevance "
+        << "FROM theme WHERE centroid IS NOT NULL";
+
+    if (!realm.empty()) {
+        sql << " AND realm = '" << realm << "'";
+    }
+    sql << " ORDER BY relevance DESC LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    std::vector<Theme> themes;
+    if (!result || result->HasError()) {
+        // Fallback to simple list
+        return theme_list(realm, limit);
+    }
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            Theme t;
+            t.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            t.name = chunk->GetValue(1, i).ToString();
+
+            auto centroid_val = chunk->GetValue(2, i);
+            if (!centroid_val.IsNull()) {
+                auto list = duckdb::ListValue::GetChildren(centroid_val);
+                t.centroid.reserve(list.size());
+                for (const auto& v : list) {
+                    t.centroid.push_back(v.GetValue<float>());
+                }
+            }
+
+            t.coherence = chunk->GetValue(3, i).GetValue<float>();
+            t.sparsity = chunk->GetValue(4, i).GetValue<float>();
+            t.memory_count = chunk->GetValue(5, i).GetValue<int32_t>();
+            t.representative_id = chunk->GetValue(6, i).GetValue<int64_t>();
+            t.realm = chunk->GetValue(7, i).ToString();
+            t.created_at = chunk->GetValue(8, i).GetValue<int64_t>();
+            t.updated_at = chunk->GetValue(9, i).GetValue<int64_t>();
+            themes.push_back(std::move(t));
+        }
+    }
+    return themes;
+}
+
+ThemeStats DuckDBStore::theme_stats(const std::string& realm) {
+    ThemeStats stats;
+
+    // Get theme statistics
+    std::ostringstream sql;
+    sql << "SELECT COUNT(*), AVG(memory_count), AVG(coherence), VARIANCE(memory_count) FROM theme";
+    if (!realm.empty()) {
+        sql << " WHERE realm = '" << realm << "'";
+    }
+
+    auto result = read_query(sql.str());
+    if (result && !result->HasError()) {
+        auto chunk = result->Fetch();
+        if (chunk && chunk->size() > 0) {
+            stats.total_themes = static_cast<size_t>(chunk->GetValue(0, 0).GetValue<int64_t>());
+            auto avg_size = chunk->GetValue(1, 0);
+            stats.avg_theme_size = avg_size.IsNull() ? 0.0f : avg_size.GetValue<double>();
+            auto avg_coh = chunk->GetValue(2, 0);
+            stats.avg_coherence = avg_coh.IsNull() ? 0.0f : avg_coh.GetValue<double>();
+            auto variance = chunk->GetValue(3, 0);
+            stats.size_variance = variance.IsNull() ? 0.0f : variance.GetValue<double>();
+        }
+    }
+
+    // Count total memberships
+    std::ostringstream sql2;
+    sql2 << "SELECT COUNT(*) FROM theme_membership";
+    if (!realm.empty()) {
+        sql2 << " tm JOIN theme t ON tm.theme_id = t.id WHERE t.realm = '" << realm << "'";
+    }
+    result = read_query(sql2.str());
+    if (result && !result->HasError()) {
+        auto chunk = result->Fetch();
+        if (chunk && chunk->size() > 0) {
+            stats.total_memberships = static_cast<size_t>(chunk->GetValue(0, 0).GetValue<int64_t>());
+        }
+    }
+
+    // Count orphan memories (not in any theme)
+    stats.orphan_memories = count_orphan_memories(realm);
+
+    // Count undersized/oversized themes
+    std::ostringstream sql3;
+    sql3 << "SELECT SUM(CASE WHEN memory_count < 3 THEN 1 ELSE 0 END), "
+         << "SUM(CASE WHEN memory_count > 100 THEN 1 ELSE 0 END) FROM theme";
+    if (!realm.empty()) {
+        sql3 << " WHERE realm = '" << realm << "'";
+    }
+    result = read_query(sql3.str());
+    if (result && !result->HasError()) {
+        auto chunk = result->Fetch();
+        if (chunk && chunk->size() > 0) {
+            auto under = chunk->GetValue(0, 0);
+            stats.undersized_themes = under.IsNull() ? 0 : static_cast<size_t>(under.GetValue<int64_t>());
+            auto over = chunk->GetValue(1, 0);
+            stats.oversized_themes = over.IsNull() ? 0 : static_cast<size_t>(over.GetValue<int64_t>());
+        }
+    }
+
+    return stats;
+}
+
+size_t DuckDBStore::count_orphan_memories(const std::string& realm) {
+    std::ostringstream sql;
+    sql << "SELECT COUNT(*) FROM memory m "
+        << "WHERE NOT EXISTS (SELECT 1 FROM theme_membership tm WHERE tm.memory_id = m.id)";
+    if (!realm.empty()) {
+        sql << " AND m.realm = '" << realm << "'";
+    }
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) return 0;
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return 0;
+
+    return static_cast<size_t>(chunk->GetValue(0, 0).GetValue<int64_t>());
+}
+
+std::vector<int64_t> DuckDBStore::get_orphan_memories(size_t limit, const std::string& realm) {
+    std::ostringstream sql;
+    sql << "SELECT m.id FROM memory m "
+        << "WHERE NOT EXISTS (SELECT 1 FROM theme_membership tm WHERE tm.memory_id = m.id)";
+    if (!realm.empty()) {
+        sql << " AND m.realm = '" << realm << "'";
+    }
+    sql << " ORDER BY m.created_at DESC LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    std::vector<int64_t> orphans;
+    if (!result || result->HasError()) return orphans;
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            orphans.push_back(chunk->GetValue(0, i).GetValue<int64_t>());
+        }
+    }
+    return orphans;
+}
+
+std::vector<DuckDBStore::OrphanMemory> DuckDBStore::get_orphan_memories_with_embeddings(
+    size_t limit, const std::string& realm) {
+
+    std::ostringstream sql;
+    sql << "SELECT m.id, m.content, m.kind, m.realm, m.embedding FROM memory m "
+        << "WHERE NOT EXISTS (SELECT 1 FROM theme_membership tm WHERE tm.memory_id = m.id) "
+        << "AND m.embedding IS NOT NULL AND array_length(m.embedding) = 384";
+    if (!realm.empty()) {
+        sql << " AND m.realm = '" << realm << "'";
+    }
+    sql << " ORDER BY m.confidence DESC, m.created_at DESC LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    std::vector<OrphanMemory> orphans;
+    if (!result || result->HasError()) return orphans;
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            OrphanMemory om;
+            om.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            om.content = chunk->GetValue(1, i).ToString();
+            om.kind = chunk->GetValue(2, i).ToString();
+            om.realm = chunk->GetValue(3, i).ToString();
+
+            // Extract embedding
+            auto emb_val = chunk->GetValue(4, i);
+            if (!emb_val.IsNull()) {
+                auto list = duckdb::ListValue::GetChildren(emb_val);
+                om.embedding.reserve(list.size());
+                for (const auto& v : list) {
+                    om.embedding.push_back(v.GetValue<float>());
+                }
+            }
+
+            if (!om.embedding.empty()) {
+                orphans.push_back(std::move(om));
+            }
+        }
+    }
+    return orphans;
+}
+
+size_t DuckDBStore::count_orphan_memories(const std::string& realm) const {
+    std::ostringstream sql;
+    sql << "SELECT COUNT(*) FROM memory m "
+        << "WHERE NOT EXISTS (SELECT 1 FROM theme_membership tm WHERE tm.memory_id = m.id) "
+        << "AND m.embedding IS NOT NULL AND array_length(m.embedding) = 384";
+    if (!realm.empty()) {
+        sql << " AND m.realm = '" << realm << "'";
+    }
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) return 0;
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return 0;
+
+    return chunk->GetValue(0, 0).GetValue<int64_t>();
 }
 
 }  // namespace chitta

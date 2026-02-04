@@ -12,6 +12,7 @@
 // 5. Hebbian Learning: Co-activated nodes strengthen connections
 
 #include "../duckdb_store.hpp"
+#include "../theme_manager.hpp"
 #include "embedder.hpp"
 #include "types.hpp"
 #include "../types.hpp"
@@ -513,6 +514,8 @@ public:
         running_ = true;
         // Auto-load learner state on startup
         load_learner_state_unlocked();
+        // Initialize theme manager
+        theme_manager_ = std::make_unique<ThemeManager>(&store_, &embedder_, theme_config_);
         return true;
     }
 
@@ -1166,6 +1169,114 @@ public:
         return results;
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // xMemory THEME-BASED RETRIEVAL
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Two-stage theme recall (xMemory architecture)
+    // Stage 1: Find relevant themes, select representatives
+    // Stage 2: Adaptive expansion from high-relevance themes
+    std::vector<Recall> theme_recall(const std::string& query, size_t k = 10,
+                                      const std::string& realm = "",
+                                      const std::vector<std::string>& exclude_kinds = {}) {
+        std::unique_lock lock(mutex_);
+
+        if (!theme_manager_ || !embedder_.ready()) {
+            // Fall back to full_resonate if theme manager not initialized
+            return {};
+        }
+
+        // Transform query to embedding
+        Artha artha = embedder_.transform(query);
+        if (artha.nu.size() == 0) return {};
+
+        // Two-stage retrieval
+        auto memory_results = theme_manager_->two_stage_recall(artha.nu.data, k, realm);
+
+        // Convert to Recall format
+        std::vector<Recall> recalls;
+        recalls.reserve(memory_results.size());
+
+        for (const auto& mr : memory_results) {
+            Recall recall;
+            recall.id = int64_to_nodeid(mr.id);
+            recall.text = mr.content;
+            recall.similarity = mr.similarity;
+            recall.type = string_to_node_type(mr.kind);
+            recall.confidence = Confidence(mr.confidence);
+            recall.relevance = mr.similarity;  // Theme-based relevance
+            recall.created = mr.created_at;
+            recall.accessed = mr.accessed_at;
+            recalls.push_back(std::move(recall));
+        }
+
+        // Touch retrieved memories
+        for (const auto& recall : recalls) {
+            int64_t id = nodeid_to_int64(recall.id);
+            store_.touch(id);
+            store_.strengthen(id, config_.reinforce_amount);
+        }
+
+        return recalls;
+    }
+
+    // Get theme retrieval results (full detail with theme info)
+    std::vector<ThemeResult> theme_recall_detailed(const std::string& query,
+                                                    size_t max_themes = 5,
+                                                    const std::string& realm = "") {
+        std::unique_lock lock(mutex_);
+
+        if (!theme_manager_ || !embedder_.ready()) {
+            return {};
+        }
+
+        Artha artha = embedder_.transform(query);
+        if (artha.nu.size() == 0) return {};
+
+        return theme_manager_->retrieve_representatives(artha.nu.data, max_themes, realm);
+    }
+
+    // Assign a memory to a theme (manual override)
+    bool assign_to_theme(NodeId memory_id, int64_t theme_id) {
+        std::unique_lock lock(mutex_);
+        if (!theme_manager_) return false;
+
+        return store_.theme_assign(nodeid_to_int64(memory_id), theme_id);
+    }
+
+    // Create a new theme
+    int64_t create_theme(const std::string& name, const std::string& realm = "brahman") {
+        std::unique_lock lock(mutex_);
+        return store_.theme_create(name, {}, realm);
+    }
+
+    // Get theme statistics
+    ThemeStats get_theme_stats(const std::string& realm = "") {
+        std::shared_lock lock(mutex_);
+        return store_.theme_stats(realm);
+    }
+
+    // Run theme maintenance
+    DuckDBStore::ThemeMaintenanceResult run_theme_maintenance(const std::string& realm = "") {
+        std::unique_lock lock(mutex_);
+        if (!theme_manager_) {
+            return {};
+        }
+        return theme_manager_->run_maintenance(realm);
+    }
+
+    // Access to theme manager
+    ThemeManager* theme_manager() { return theme_manager_.get(); }
+    const ThemeManager* theme_manager() const { return theme_manager_.get(); }
+
+    // Access to theme config
+    ThemeConfig& theme_config() { return theme_config_; }
+    const ThemeConfig& theme_config() const { return theme_config_; }
+
+    // Enable/disable theme-based recall
+    void set_theme_recall_enabled(bool enabled) { enable_theme_recall_ = enabled; }
+    bool is_theme_recall_enabled() const { return enable_theme_recall_; }
+
     // Access to session context
     DuckDBSessionContext& session_context() { return session_context_; }
     const DuckDBSessionContext& session_context() const { return session_context_; }
@@ -1604,6 +1715,11 @@ private:
     Embedder embedder_;
     mutable std::shared_mutex mutex_;
     bool running_;
+
+    // xMemory Theme System
+    ThemeConfig theme_config_;
+    mutable std::unique_ptr<ThemeManager> theme_manager_;
+    bool enable_theme_recall_ = true;  // Use theme-based retrieval
 
     // Attractor cache (expensive to compute, changes slowly)
     mutable std::vector<DuckDBAttractor> attractor_cache_;

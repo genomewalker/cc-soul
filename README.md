@@ -278,6 +278,8 @@ struct Coherence {
 | `memory` | All memory nodes with embeddings |
 | `symbol` | Code symbols (functions, classes) |
 | `triplet` | Semantic relationships |
+| `theme` | Semantic groupings (xMemory-style hierarchical organization) |
+| `theme_membership` | Memory-to-theme assignments with strength scores |
 | `transcript_state` | Distillation tracking |
 
 ### Embedding Model
@@ -326,6 +328,19 @@ The soul exposes tools through the Model Context Protocol:
 | `learn_approach` | Store what helps in states |
 | `learn_outcome` | Track if suggestion helped |
 | `learn_milestone` | Record achievements |
+
+### Theme Tools (xMemory-inspired)
+
+Hierarchical memory organization preventing redundant context and dense retrieval collapse:
+
+| Tool | Description |
+|------|-------------|
+| `theme_list` | List themes with size and coherence stats |
+| `theme_get` | Get theme details with representative memories |
+| `theme_recall` | Two-stage retrieval: representatives first, then adaptive expansion |
+| `theme_stats` | Organization statistics (theme count, balance, orphans) |
+| `theme_maintain` | Force maintenance: split oversized, merge similar, reassign |
+| `theme_assign_orphans` | Batch assign orphan memories to themes |
 
 ### Intentions & Questions
 
@@ -657,6 +672,7 @@ The `remember` tool auto-converts raw text to SSL as fallback, but proper SSL gi
 
 | Version | Features |
 |---------|----------|
+| 3.27.x | xMemory-inspired theme system: hierarchical organization, two-stage retrieval |
 | 3.17.x | SSL enforcement, code intel protection, cost tracking |
 | 3.16.x | Background distillation, code enrichment |
 | 3.x | DuckDB backend, tree-sitter parsing, call graphs |

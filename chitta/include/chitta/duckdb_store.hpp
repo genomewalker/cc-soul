@@ -369,6 +369,69 @@ struct HygieneStats {
     float growth_rate_per_day = 0.0f;  // Recent memory growth
 };
 
+// ═══════════════════════════════════════════════════════════════════════════
+// xMemory-Inspired Theme System
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Theme: semantic grouping of memories (xMemory layer)
+struct Theme {
+    int64_t id = 0;
+    std::string name;
+    std::vector<float> centroid;  // 384-dim average embedding
+    float coherence = 1.0f;       // How tightly grouped (lower = consider split)
+    float sparsity = 0.5f;        // Current sparsity score
+    int32_t memory_count = 0;
+    int64_t representative_id = 0; // Most central memory
+    std::string realm;
+    int64_t created_at = 0;
+    int64_t updated_at = 0;
+};
+
+// Theme membership: many-to-many between memories and themes
+struct ThemeMembership {
+    int64_t memory_id = 0;
+    int64_t theme_id = 0;
+    float strength = 1.0f;        // Membership strength (0-1)
+    bool is_representative = false;
+    int64_t assigned_at = 0;
+};
+
+// Theme configuration (xMemory tuning)
+struct ThemeConfig {
+    float semantic_weight = 0.6f;     // Weight for embedding similarity
+    float sparsity_weight = 0.4f;     // Weight for balanced distribution
+    float assignment_threshold = 0.5f; // Minimum score to assign to theme
+    size_t min_theme_size = 3;        // Minimum memories for a theme
+    size_t max_theme_size = 100;      // Maximum before split considered
+    size_t ideal_theme_size = 20;     // Target size for sparsity scoring
+    float coherence_split_threshold = 0.6f;  // Below this, consider split
+    float coherence_merge_threshold = 0.9f;  // Above this, consider merge
+    float expansion_threshold = 0.7f;        // Min relevance for expansion
+    size_t max_representatives = 3;          // Representatives per theme
+    float reassignment_improvement = 0.1f;   // Score improvement to trigger move
+};
+
+// Theme retrieval result (for two-stage recall)
+struct ThemeResult {
+    int64_t theme_id = 0;
+    std::string theme_name;
+    float theme_relevance = 0.0f;  // How relevant is this theme to query
+    std::vector<MemoryResult> representatives;
+    std::vector<MemoryResult> expanded;  // Additional members from expansion
+};
+
+// Theme statistics
+struct ThemeStats {
+    size_t total_themes = 0;
+    size_t total_memberships = 0;
+    size_t orphan_memories = 0;      // Memories not in any theme
+    float avg_theme_size = 0.0f;
+    float avg_coherence = 0.0f;
+    float size_variance = 0.0f;       // How balanced are theme sizes
+    size_t undersized_themes = 0;     // Below min_theme_size
+    size_t oversized_themes = 0;      // Above max_theme_size
+};
+
 // DuckDBStore: unified storage using DuckDB embedded database
 class DuckDBStore {
 public:
@@ -755,6 +818,67 @@ public:
         std::vector<std::vector<std::string>> rows;
     };
     SqlQueryResult execute_sql_query(const std::string& sql) const;
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // xMemory Theme System: Hierarchical Memory Organization
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Theme CRUD
+    int64_t theme_create(const std::string& name, const std::vector<float>& centroid,
+                         const std::string& realm = "brahman");
+    std::optional<Theme> theme_get(int64_t theme_id);
+    std::vector<Theme> theme_list(const std::string& realm = "", size_t limit = 100);
+    bool theme_update(int64_t theme_id, const std::optional<std::string>& name = std::nullopt,
+                      const std::optional<std::vector<float>>& centroid = std::nullopt,
+                      const std::optional<float>& coherence = std::nullopt,
+                      const std::optional<int64_t>& representative_id = std::nullopt);
+    bool theme_delete(int64_t theme_id);
+    size_t theme_count(const std::string& realm = "");
+
+    // Theme membership
+    bool theme_assign(int64_t memory_id, int64_t theme_id, float strength = 1.0f,
+                      bool is_representative = false);
+    bool theme_unassign(int64_t memory_id, int64_t theme_id);
+    bool theme_set_representative(int64_t memory_id, int64_t theme_id, bool is_rep);
+    std::vector<ThemeMembership> theme_memberships(int64_t theme_id, size_t limit = 100);
+    std::vector<ThemeMembership> memory_themes(int64_t memory_id);
+    std::optional<int64_t> memory_primary_theme(int64_t memory_id);
+    bool set_primary_theme(int64_t memory_id, int64_t theme_id);
+
+    // Theme queries
+    std::vector<MemoryResult> theme_members(int64_t theme_id, size_t limit = 50);
+    std::vector<MemoryResult> theme_representatives(int64_t theme_id, size_t limit = 3);
+    std::vector<Theme> themes_by_relevance(const std::vector<float>& query_embedding,
+                                            size_t limit = 5,
+                                            const std::string& realm = "");
+
+    // Theme statistics and maintenance
+    ThemeStats theme_stats(const std::string& realm = "");
+    size_t count_orphan_memories(const std::string& realm = "");
+    std::vector<int64_t> get_orphan_memories(size_t limit = 100, const std::string& realm = "");
+
+    // Theme maintenance results
+    struct ThemeMaintenanceResult {
+        size_t themes_split = 0;
+        size_t themes_merged = 0;
+        size_t memories_reassigned = 0;
+        size_t representatives_updated = 0;
+        size_t centroids_recomputed = 0;
+    };
+
+    // Orphan memory with embedding (for batch theme assignment)
+    struct OrphanMemory {
+        int64_t id;
+        std::string content;
+        std::string kind;
+        std::string realm;
+        std::vector<float> embedding;
+    };
+    std::vector<OrphanMemory> get_orphan_memories_with_embeddings(size_t limit = 100,
+                                                                   const std::string& realm = "");
+
+    // Count orphan memories (not in any theme)
+    size_t count_orphan_memories(const std::string& realm = "") const;
 
     // Error tracking
     std::string last_error() const { return last_error_; }

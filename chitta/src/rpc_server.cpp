@@ -431,6 +431,28 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
 
     {"calibration_score", "Get calibration score for a domain",
      {{"domain", "Domain to check", true, nullptr}}},
+
+    // Theme tools (xMemory-inspired hierarchical memory)
+    {"theme_list", "List all themes with stats",
+     {{"realm", "Filter by realm", false, nullptr}}},
+
+    {"theme_get", "Get theme details with representatives",
+     {{"id", "Theme ID", true, nullptr}}},
+
+    {"theme_recall", "Two-stage retrieval: representatives then expansion",
+     {{"query", "Search query", true, nullptr},
+      {"limit", "Max results", false, "10"},
+      {"realm", "Filter by realm", false, nullptr}}},
+
+    {"theme_stats", "Get theme organization statistics",
+     {{"realm", "Filter by realm", false, nullptr}}},
+
+    {"theme_maintain", "Force theme maintenance: split, merge, reassign",
+     {{"realm", "Filter by realm", false, nullptr}}},
+
+    {"theme_assign_orphans", "Assign orphan memories to themes in batches",
+     {{"batch_size", "Memories per batch", false, "100"},
+      {"realm", "Filter by realm", false, nullptr}}},
 };
 
 // Build set of known tools from specs
@@ -524,6 +546,7 @@ void print_usage(const char* prog) {
               << "  Ledger:      ledger_save, ledger_load, ledger_list, ledger_get, ledger_delete\n"
               << "  Transcript:  transcript_register, transcript_get, transcript_list, transcript_update, transcript_remove\n"
               << "  Learning:    learn_outcome, episode_cluster_status, calibration_record, calibration_score\n"
+              << "  Theme:       theme_list, theme_get, theme_recall, theme_stats, theme_maintain, theme_assign_orphans\n"
               << "  Debug:       sql_query\n"
               << "\n"
               << "Global options:\n"

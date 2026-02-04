@@ -48,12 +48,14 @@ struct SubconsciousEvent {
 struct SubconsciousConfig {
     std::chrono::seconds process_interval{1};
     std::chrono::minutes hygiene_interval{30};
+    std::chrono::minutes theme_maintenance_interval{60};  // Theme maintenance every hour
     std::chrono::seconds embedding_interval{30};  // Background embedding interval (30s to reduce CPU)
     std::chrono::seconds idle_threshold{30};      // Only embed when no queries for this long
     size_t max_queue_size{1000};
     size_t embedding_batch_size{20};              // Small batches to avoid blocking
     float correction_confidence{0.8f};
     bool enable_hygiene{true};
+    bool enable_theme_maintenance{true};          // xMemory theme maintenance
     bool enable_anticipation{true};
     bool enable_pattern_detection{true};
     bool enable_suggestion_tracking{true};
@@ -76,10 +78,15 @@ struct SubconsciousStats {
     std::atomic<size_t> suggestions_tracked{0};
     std::atomic<size_t> outcomes_verified{0};
     std::atomic<size_t> hygiene_runs{0};
+    std::atomic<size_t> theme_maintenance_runs{0};    // xMemory theme maintenance
+    std::atomic<size_t> themes_split{0};
+    std::atomic<size_t> themes_merged{0};
+    std::atomic<size_t> memories_reassigned{0};
     std::atomic<size_t> symbols_embedded{0};
     std::atomic<size_t> embeddings_queued{0};
     std::atomic<size_t> embedding_skips{0};       // Skipped due to busy state
     std::atomic<int64_t> last_hygiene_at{0};
+    std::atomic<int64_t> last_theme_maintenance_at{0};
     std::atomic<int64_t> last_embedding_at{0};
     std::atomic<int64_t> last_query_at{0};        // Last RPC query timestamp
     std::atomic<int64_t> started_at{0};
@@ -188,6 +195,8 @@ private:
     // Periodic tasks
     void run_hygiene();
     bool time_for_hygiene() const;
+    void run_theme_maintenance();
+    bool time_for_theme_maintenance() const;
     void run_background_embedding();
     bool time_for_embedding() const;
 
