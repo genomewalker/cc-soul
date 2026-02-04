@@ -1545,8 +1545,8 @@ bool DuckDBStore::add_to_realm(int64_t id, const std::string& realm) {
     }
 
     std::ostringstream sql;
-    sql << "INSERT OR IGNORE INTO realm_membership (memory_id, realm) VALUES ("
-        << id << ", '" << escaped << "')";
+    sql << "INSERT INTO realm_membership (memory_id, realm) VALUES ("
+        << id << ", '" << escaped << "') ON CONFLICT DO NOTHING";
     return write_execute(sql.str());
 }
 
@@ -2138,8 +2138,20 @@ bool DuckDBStore::add_call(int64_t caller_id, int64_t callee_id) {
     // Lock handled in write_execute/write_query/read_query
     if (!db_) return false;
 
+    // First check if edge already exists
+    std::ostringstream check;
+    check << "SELECT 1 FROM call_edge WHERE caller_id = " << caller_id
+          << " AND callee_id = " << callee_id;
+    auto result = read_query(check.str());
+    if (result) {
+        auto chunk = result->Fetch();
+        if (chunk && chunk->size() > 0) {
+            return true;  // Already exists
+        }
+    }
+
     std::ostringstream sql;
-    sql << "INSERT OR IGNORE INTO call_edge (caller_id, callee_id) VALUES ("
+    sql << "INSERT INTO call_edge (caller_id, callee_id) VALUES ("
         << caller_id << ", " << callee_id << ")";
 
     return write_execute(sql.str());

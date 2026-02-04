@@ -36,6 +36,21 @@ class SymbolResolver {
 public:
     explicit SymbolResolver(DuckDBStore& store) : store_(store) {}
 
+    // Extract leaf name from triplet subject like "cpp:method:class::name" -> "name"
+    static std::string extract_leaf_name(const std::string& subject) {
+        // Find last :: separator
+        size_t pos = subject.rfind("::");
+        if (pos != std::string::npos && pos + 2 < subject.size()) {
+            return subject.substr(pos + 2);
+        }
+        // Try last : for format like "cpp:function:name"
+        pos = subject.rfind(':');
+        if (pos != std::string::npos && pos + 1 < subject.size()) {
+            return subject.substr(pos + 1);
+        }
+        return subject;
+    }
+
     // Build name index from all symbols in the store
     void build_index() {
         name_to_ids_.clear();
@@ -106,9 +121,12 @@ public:
 
             stats.total_callsites++;
 
-            std::string caller_name = row[0];
+            std::string caller_subject = row[0];
             std::string callee_name = row[1];
             std::string source_file = row[2];
+
+            // Extract leaf name from caller subject (e.g., "cpp:method:class::foo" -> "foo")
+            std::string caller_name = extract_leaf_name(caller_subject);
 
             // Resolve caller to symbol ID
             int64_t caller_id = 0;

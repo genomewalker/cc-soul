@@ -286,6 +286,37 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
      {{"name", "Symbol name to search", true, nullptr},
       {"kind", "Symbol kind filter (function, class, method)", false, nullptr}}},
 
+    {"symbol_callers", "Find all symbols that call the given symbol (reverse call graph)",
+     {{"name", "Symbol name to find callers for", false, nullptr},
+      {"id", "Symbol ID (alternative to name)", false, nullptr},
+      {"kind", "Filter by symbol kind when using name", false, nullptr}}},
+
+    {"symbol_callees", "Find all symbols that the given symbol calls (forward call graph)",
+     {{"name", "Symbol name to find callees for", false, nullptr},
+      {"id", "Symbol ID (alternative to name)", false, nullptr},
+      {"kind", "Filter by symbol kind when using name", false, nullptr}}},
+
+    {"read_symbol", "Read the actual source code for a symbol by name or ID",
+     {{"name", "Symbol name to read", false, nullptr},
+      {"id", "Symbol ID (alternative to name)", false, nullptr},
+      {"kind", "Filter by symbol kind (function, class, method)", false, nullptr}}},
+
+    {"read_function", "Read source code of a function/method by name",
+     {{"name", "Function name to read", true, nullptr}}},
+
+    {"type_hierarchy", "Get type hierarchy (base classes, implemented interfaces) for a type",
+     {{"name", "Type name to query", true, nullptr},
+      {"direction", "ancestors, descendants, or both (default: both)", false, "both"}}},
+
+    {"file_imports", "Get all imports/includes for a source file",
+     {{"path", "File path to get imports for", true, nullptr}}},
+
+    {"file_dependents", "Get all files that import/include the given module",
+     {{"name", "Module/file name to find dependents for", true, nullptr}}},
+
+    {"resolve_callsites", "Resolve callsites to symbols and populate call_edge table",
+     {{"project", "Filter to specific project path", false, nullptr}}},
+
     {"describe_symbol", "Set description for a code symbol (stores directly in symbol table)",
      {{"symbol-id", "Symbol ID to describe", true, nullptr},
       {"description", "Semantic description of the symbol", true, nullptr}}},
@@ -542,6 +573,8 @@ void print_usage(const char* prog) {
               << "  Maintenance: cycle, cleanup, hygiene_stats, hygiene_run\n"
               << "  Import/Export: import_soul, export_soul\n"
               << "  Code Intel:  extract_symbols, learn_codebase, find_symbol, search_symbols, code_context\n"
+              << "  Call Graph:  symbol_callers, symbol_callees, resolve_callsites\n"
+              << "  Type/Import: type_hierarchy, file_imports, file_dependents, read_symbol, read_function\n"
               << "  Realm:       realm_detect, realm_list, realm_get, realm_set, realm_add, realm_remove, realm_visibility\n"
               << "  Ledger:      ledger_save, ledger_load, ledger_list, ledger_get, ledger_delete\n"
               << "  Transcript:  transcript_register, transcript_get, transcript_list, transcript_update, transcript_remove\n"
