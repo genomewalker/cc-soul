@@ -159,6 +159,18 @@ if(NOT tree-sitter-c-sharp_POPULATED)
     FetchContent_Populate(tree-sitter-c-sharp)
 endif()
 
+# Tree-sitter Swift grammar (alex-pinkus maintained fork)
+FetchContent_Declare(
+    tree-sitter-swift
+    GIT_REPOSITORY https://github.com/alex-pinkus/tree-sitter-swift.git
+    GIT_TAG 0.7.1-with-generated-files
+    GIT_SHALLOW TRUE
+)
+FetchContent_GetProperties(tree-sitter-swift)
+if(NOT tree-sitter-swift_POPULATED)
+    FetchContent_Populate(tree-sitter-swift)
+endif()
+
 # Build tree-sitter parsers as static library
 add_library(tree-sitter-parsers STATIC
     ${tree-sitter-cpp_SOURCE_DIR}/src/parser.c
@@ -177,6 +189,8 @@ add_library(tree-sitter-parsers STATIC
     ${tree-sitter-ruby_SOURCE_DIR}/src/scanner.c
     ${tree-sitter-c-sharp_SOURCE_DIR}/src/parser.c
     ${tree-sitter-c-sharp_SOURCE_DIR}/src/scanner.c
+    ${tree-sitter-swift_SOURCE_DIR}/src/parser.c
+    ${tree-sitter-swift_SOURCE_DIR}/src/scanner.c
 )
 target_include_directories(tree-sitter-parsers PUBLIC
     ${tree-sitter_SOURCE_DIR}/lib/include
@@ -189,6 +203,7 @@ target_include_directories(tree-sitter-parsers PUBLIC
     ${tree-sitter-java_SOURCE_DIR}/src
     ${tree-sitter-ruby_SOURCE_DIR}/src
     ${tree-sitter-c-sharp_SOURCE_DIR}/src
+    ${tree-sitter-swift_SOURCE_DIR}/src
 )
 target_link_libraries(tree-sitter-parsers PUBLIC tree-sitter)
 

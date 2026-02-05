@@ -2,7 +2,7 @@
 // CodeIntel: Tree-sitter based symbol extraction
 //
 // Extracts functions, classes, methods from source files.
-// Supports: C/C++, Python, JavaScript/TypeScript, Go, Rust, Java, Ruby, C#
+// Supports: C/C++, Python, JavaScript/TypeScript, Go, Rust, Java, Ruby, C#, Swift
 
 #include "duckdb_store.hpp"
 #include <tree_sitter/api.h>
@@ -26,6 +26,7 @@ extern "C" {
     TSLanguage* tree_sitter_java();
     TSLanguage* tree_sitter_ruby();
     TSLanguage* tree_sitter_c_sharp();
+    TSLanguage* tree_sitter_swift();
 }
 
 namespace chitta {
@@ -171,6 +172,9 @@ public:
 
         parsers_["csharp"] = ts_parser_new();
         ts_parser_set_language(parsers_["csharp"], tree_sitter_c_sharp());
+
+        parsers_["swift"] = ts_parser_new();
+        ts_parser_set_language(parsers_["swift"], tree_sitter_swift());
     }
 
     ~CodeIntel() {
@@ -196,6 +200,7 @@ public:
         if (ext == ".java") return "java";
         if (ext == ".rb") return "ruby";
         if (ext == ".cs") return "csharp";
+        if (ext == ".swift") return "swift";
 
         return "";
     }
@@ -244,6 +249,8 @@ public:
             extract_ruby(root, source, path, symbols);
         } else if (lang == "csharp") {
             extract_csharp(root, source, path, symbols);
+        } else if (lang == "swift") {
+            extract_swift(root, source, path, symbols);
         }
 
         ts_tree_delete(tree);
@@ -301,6 +308,8 @@ public:
                 extract_ruby(root, source, path, result.symbols);
             } else if (lang == "csharp") {
                 extract_csharp(root, source, path, result.symbols);
+            } else if (lang == "swift") {
+                extract_swift(root, source, path, result.symbols);
             }
         }
 
@@ -2334,6 +2343,133 @@ private:
         uint32_t count = ts_node_child_count(node);
         for (uint32_t i = 0; i < count; i++) {
             extract_csharp(ts_node_child(node, i), source, path, symbols, parent);
+        }
+    }
+
+    // Swift extraction
+    // Node types from alex-pinkus/tree-sitter-swift:
+    //   class_declaration (covers class, struct, enum, actor via keyword child)
+    //   protocol_declaration, function_declaration, init_declaration, property_declaration
+    void extract_swift(TSNode node, const std::string& source,
+                       const std::string& path, std::vector<ExtractedSymbol>& symbols,
+                       const std::string& parent = "") {
+        const char* type = ts_node_type(node);
+
+        if (strcmp(type, "function_declaration") == 0 ||
+            strcmp(type, "protocol_function_declaration") == 0) {
+            TSNode name_node = find_child(node, "simple_identifier");
+            if (!ts_node_is_null(name_node)) {
+                ExtractedSymbol sym;
+                sym.kind = parent.empty() ? "function" : "method";
+                sym.name = node_text(name_node, source);
+                sym.file_path = path;
+                sym.line_start = node_line(node);
+                sym.line_end = node_end_line(node);
+                sym.parent = parent;
+                symbols.push_back(sym);
+            }
+            return;  // Don't recurse into function bodies (local let/var are property_declaration)
+        } else if (strcmp(type, "init_declaration") == 0) {
+            ExtractedSymbol sym;
+            sym.kind = "method";
+            sym.name = "init";
+            sym.file_path = path;
+            sym.line_start = node_line(node);
+            sym.line_end = node_end_line(node);
+            sym.parent = parent;
+            symbols.push_back(sym);
+            return;  // Don't recurse into init bodies
+        } else if (strcmp(type, "class_declaration") == 0) {
+            // class_declaration covers class, struct, enum, actor
+            // The first keyword child determines which kind
+            TSNode name_node = find_child(node, "type_identifier");
+            if (!ts_node_is_null(name_node)) {
+                std::string decl_name = node_text(name_node, source);
+
+                // Determine kind from the keyword child
+                std::string kind = "class";
+                uint32_t child_count = ts_node_child_count(node);
+                for (uint32_t i = 0; i < child_count; i++) {
+                    TSNode child = ts_node_child(node, i);
+                    std::string child_text = node_text(child, source);
+                    if (child_text == "struct") { kind = "struct"; break; }
+                    if (child_text == "enum") { kind = "enum"; break; }
+                    if (child_text == "actor") { kind = "class"; break; }
+                    if (child_text == "class") { kind = "class"; break; }
+                    // Stop at body
+                    if (strcmp(ts_node_type(child), "class_body") == 0) break;
+                }
+
+                ExtractedSymbol sym;
+                sym.kind = kind;
+                sym.name = decl_name;
+                sym.file_path = path;
+                sym.line_start = node_line(node);
+                sym.line_end = node_end_line(node);
+                symbols.push_back(sym);
+
+                // class/struct/actor use class_body, enum uses enum_class_body
+                TSNode body = find_child(node, "class_body");
+                if (ts_node_is_null(body)) {
+                    body = find_child(node, "enum_class_body");
+                }
+                if (!ts_node_is_null(body)) {
+                    uint32_t count = ts_node_child_count(body);
+                    for (uint32_t i = 0; i < count; i++) {
+                        extract_swift(ts_node_child(body, i), source, path, symbols, decl_name);
+                    }
+                }
+                return;
+            }
+        } else if (strcmp(type, "protocol_declaration") == 0) {
+            TSNode name_node = find_child(node, "type_identifier");
+            if (!ts_node_is_null(name_node)) {
+                std::string proto_name = node_text(name_node, source);
+                ExtractedSymbol sym;
+                sym.kind = "interface";
+                sym.name = proto_name;
+                sym.file_path = path;
+                sym.line_start = node_line(node);
+                sym.line_end = node_end_line(node);
+                symbols.push_back(sym);
+
+                TSNode body = find_child(node, "protocol_body");
+                if (!ts_node_is_null(body)) {
+                    uint32_t count = ts_node_child_count(body);
+                    for (uint32_t i = 0; i < count; i++) {
+                        extract_swift(ts_node_child(body, i), source, path, symbols, proto_name);
+                    }
+                }
+                return;
+            }
+        } else if (strcmp(type, "property_declaration") == 0 ||
+                   strcmp(type, "protocol_property_declaration") == 0) {
+            // Properties: look for pattern -> simple_identifier
+            TSNode pattern = find_child(node, "pattern");
+            if (!ts_node_is_null(pattern)) {
+                TSNode name_node = find_child(pattern, "simple_identifier");
+                if (ts_node_is_null(name_node)) {
+                    // Pattern might be the identifier itself
+                    if (strcmp(ts_node_type(pattern), "simple_identifier") == 0) {
+                        name_node = pattern;
+                    }
+                }
+                if (!ts_node_is_null(name_node)) {
+                    ExtractedSymbol sym;
+                    sym.kind = "variable";
+                    sym.name = node_text(name_node, source);
+                    sym.file_path = path;
+                    sym.line_start = node_line(node);
+                    sym.line_end = node_end_line(node);
+                    sym.parent = parent;
+                    symbols.push_back(sym);
+                }
+            }
+        }
+
+        uint32_t count = ts_node_child_count(node);
+        for (uint32_t i = 0; i < count; i++) {
+            extract_swift(ts_node_child(node, i), source, path, symbols, parent);
         }
     }
 };
