@@ -21,7 +21,7 @@ cd "$REPO_DIR"
 
 # Get current version from version.hpp
 get_current_version() {
-    grep -oP '#define CHITTA_VERSION "\K[^"]+' chitta/include/chitta/version.hpp
+    grep '#define CHITTA_VERSION' chitta/include/chitta/version.hpp | sed 's/.*"\([^"]*\)".*/\1/'
 }
 
 # Bump version based on type
