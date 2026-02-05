@@ -29,7 +29,7 @@ Partnership makes me a collaborator. Code intel is a tool. Both matter, but part
 [soul]
 [85%:sol:uuid] cmake --build build --parallel for chitta
 [72%:gotcha:uuid] realm_detect needs CHITTA_BIN set
-[code:Mind.hpp] Mind, SimpleMind, grow, decay
+[code:duckdb_mind.hpp] DuckDBMind, recall, resonate, grow
 [drift:78%:pref] Antonio prefers no shortcuts
 ```
 
