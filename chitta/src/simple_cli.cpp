@@ -754,25 +754,24 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
         while (daemon_running) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-            // Check if queue file exists
-            std::ifstream check(queue_path);
-            if (!check.good()) continue;
-            check.close();
+            // Atomically claim queue file via rename (prevents data loss from concurrent writes)
+            std::string processing_path = queue_path + ".processing";
+            if (std::rename(queue_path.c_str(), processing_path.c_str()) != 0) continue;
 
-            // Atomically read and truncate queue
+            // Read the claimed file
             std::vector<std::string> lines;
             {
-                std::ifstream in(queue_path);
+                std::ifstream in(processing_path);
                 std::string line;
                 while (std::getline(in, line)) {
                     if (!line.empty()) lines.push_back(line);
                 }
             }
 
-            if (lines.empty()) continue;
+            // Remove processed file
+            std::remove(processing_path.c_str());
 
-            // Truncate file
-            std::ofstream(queue_path, std::ios::trunc).close();
+            if (lines.empty()) continue;
 
             // Process each queued request
             for (const auto& line : lines) {
@@ -808,7 +807,12 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                                 mind.store().strengthen(db_id, static_cast<float>(amount));
                                 queue_count++;
                             } catch (...) {
-                                // Skip invalid IDs (UUIDs not yet supported in queue)
+                                // Non-numeric ID: search by content prefix
+                                auto results = mind.recall(id_str, 1);
+                                if (!results.empty() && results[0].similarity > 0.9f) {
+                                    mind.store().strengthen(static_cast<int64_t>(results[0].id.low), static_cast<float>(amount));
+                                    queue_count++;
+                                }
                             }
                         }
                     } else if (tool == "ledger_save") {
@@ -868,18 +872,24 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                         std::string outcome = args.value("outcome", "");
                         std::string context = args.value("context", "");
                         if (!id_str.empty() && !outcome.empty()) {
+                            int64_t memory_id = -1;
                             try {
-                                int64_t memory_id = std::stoll(id_str);
+                                memory_id = std::stoll(id_str);
+                            } catch (...) {
+                                // Non-numeric ID: search by content prefix
+                                auto results = mind.recall(id_str, 1);
+                                if (!results.empty() && results[0].similarity > 0.9f) {
+                                    memory_id = static_cast<int64_t>(results[0].id.low);
+                                }
+                            }
+                            if (memory_id > 0) {
                                 mind.store().record_usage_outcome(memory_id, "hook", outcome, context);
-                                // Adjust confidence based on outcome
                                 if (outcome == "positive") {
                                     mind.store().strengthen(memory_id, 0.1f);
                                 } else if (outcome == "negative") {
                                     mind.store().weaken(memory_id, 0.15f);
                                 }
                                 queue_count++;
-                            } catch (...) {
-                                // Skip invalid IDs
                             }
                         }
                     } else if (tool == "anticipation_success") {

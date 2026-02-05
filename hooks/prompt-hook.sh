@@ -14,6 +14,21 @@ MAX_WAIT="${CC_SOUL_MAX_WAIT:-2}"
 MIN_CONFIDENCE=30
 MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
 
+# djb2 hash - must match C++ implementation in socket_server.hpp
+djb2_hash() {
+    local str="$1"
+    local hash=5381
+    local i c
+    for ((i=0; i<${#str}; i++)); do
+        c=$(printf '%d' "'${str:$i:1}")
+        hash=$(( ((hash << 5) + hash) + c ))
+        hash=$((hash & 0xFFFFFFFF))
+    done
+    echo "$hash"
+}
+
+MIND_HASH=$(djb2_hash "$MIND_PATH")
+
 # Parse input - Claude Code sends JSON with session_id and prompt
 INPUT=$(cat)
 # Try to extract prompt from JSON, fall back to raw input if not JSON
@@ -103,7 +118,7 @@ fi
 # ANTICIPATION: Predict likely next actions
 # ===========================================
 ANTICIPATIONS=""
-SOCKET_PATH="${CHITTA_SOCKET:-/tmp/chittad.sock}"
+SOCKET_PATH="${CHITTA_SOCKET:-/tmp/chitta-${MIND_HASH}.sock}"
 PREDICTIONS_FILE="$MIND_PATH/.last_predictions.json"
 
 # Clear old predictions

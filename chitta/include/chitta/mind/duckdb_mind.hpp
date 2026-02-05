@@ -589,8 +589,13 @@ public:
     }
 
     NodeId remember(const std::string& text, NodeType type, const std::vector<std::string>& tags) {
-        // For now, tags are stored in the content (DuckDB doesn't have native tag support yet)
-        return remember(text, type, "brahman", RealmVisibility::Private);
+        auto id = remember(text, type, "brahman", RealmVisibility::Private);
+        if (id.low != 0) {
+            for (const auto& tag : tags) {
+                store_.add_tag(nodeid_to_int64(id), tag);
+            }
+        }
+        return id;
     }
 
     // Recall - hybrid search with semantic + BM25 + tag matching
@@ -849,8 +854,11 @@ public:
     Embedder& embedder() { return embedder_; }
     const Embedder& embedder() const { return embedder_; }
 
-    // Tags (stub for compatibility)
-    std::vector<std::string> get_tags(NodeId) const { return {}; }
+    // Tags
+    std::vector<std::string> get_tags(NodeId id) const {
+        std::shared_lock lock(mutex_);
+        return store_.get_tags(nodeid_to_int64(id));
+    }
 
     // Triplet count
     size_t triplet_count() const {
@@ -1224,7 +1232,7 @@ public:
     std::vector<ThemeResult> theme_recall_detailed(const std::string& query,
                                                     size_t max_themes = 5,
                                                     const std::string& realm = "") {
-        std::unique_lock lock(mutex_);
+        std::shared_lock lock(mutex_);
 
         if (!theme_manager_ || !embedder_.ready()) {
             return {};

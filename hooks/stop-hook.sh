@@ -123,19 +123,20 @@ while IFS= read -r line; do
     fi
 done <<< "$RESPONSE"
 
-# Extract [USED:uuid] feedback → queue strengthen + learn_outcome
+# Extract [USED:id] feedback → queue strengthen + learn_outcome
+# Accepts both numeric IDs and UUID-like strings
 while IFS= read -r marker; do
     [[ -z "$marker" ]] && continue
-    uuid="${marker#\[USED:}"
-    uuid="${uuid%\]}"
-    [[ -z "$uuid" || ${#uuid} -lt 30 ]] && continue
+    mem_id="${marker#\[USED:}"
+    mem_id="${mem_id%\]}"
+    [[ -z "$mem_id" ]] && continue
 
     # Strengthen the memory (existing behavior)
-    queue_write "strengthen" "{\"id\":\"$uuid\",\"amount\":0.1}"
-    # Record positive usage outcome (new: closes feedback loop)
-    queue_write "learn_outcome" "{\"memory-id\":\"$uuid\",\"outcome\":\"positive\",\"context\":\"Memory explicitly marked as helpful via [USED] marker\"}"
-    echo "[soul] ↑+ ${uuid:0:8}..." >&2
-done <<< "$(echo "$RESPONSE" | grep -oE '\[USED:[a-f0-9-]+\]')"
+    queue_write "strengthen" "{\"id\":\"$mem_id\",\"amount\":0.1}"
+    # Record positive usage outcome (closes feedback loop)
+    queue_write "learn_outcome" "{\"memory-id\":\"$mem_id\",\"outcome\":\"positive\",\"context\":\"Memory explicitly marked as helpful via [USED] marker\"}"
+    echo "[soul] ↑+ ${mem_id:0:12}..." >&2
+done <<< "$(echo "$RESPONSE" | grep -oE '\[USED:[a-zA-Z0-9_-]+\]')"
 
 # Extract [TRIPLET] → queue connect
 while IFS= read -r line; do

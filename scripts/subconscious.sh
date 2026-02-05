@@ -68,7 +68,7 @@ is_running() {
     fi
 
     # Also check for any running daemon process (covers MCP-spawned daemons)
-    if pgrep -f "chittad daemon" >/dev/null 2>&1; then
+    if pgrep -f "chittad daemon.*--path $MIND_PATH" >/dev/null 2>&1; then
         return 0
     fi
 
@@ -100,7 +100,7 @@ kill_unresponsive() {
         pids=$(cat "$PID_FILE" 2>/dev/null || true)
     fi
     local other_pids
-    other_pids=$(pgrep -f "chittad daemon" 2>/dev/null || true)
+    other_pids=$(pgrep -f "chittad daemon.*--path $MIND_PATH" 2>/dev/null || true)
     if [[ -n "$other_pids" ]]; then
         pids="$pids $other_pids"
     fi
@@ -122,7 +122,7 @@ cmd_start() {
     # First: kill ALL existing daemon processes to ensure clean state
     # This prevents multiple daemons from accumulating
     local existing_pids
-    existing_pids=$(pgrep -f "chittad daemon" 2>/dev/null || true)
+    existing_pids=$(pgrep -f "chittad daemon.*--path $MIND_PATH" 2>/dev/null || true)
     if [[ -n "$existing_pids" ]]; then
         # Check if any are responsive
         if [[ -S "$SOCKET_PATH" ]]; then
@@ -235,7 +235,7 @@ cmd_start() {
     trap - EXIT
 
     if $daemon_ready && is_running; then
-        local pid=$(cat "$PID_FILE" 2>/dev/null || pgrep -f "chittad daemon" | head -1)
+        local pid=$(cat "$PID_FILE" 2>/dev/null || pgrep -f "chittad daemon.*--path $MIND_PATH" | head -1)
         echo "[subconscious] Started (pid=$pid, socket=$SOCKET_PATH, heartbeat=ok)"
     else
         echo "[subconscious] Failed to start (daemon not responding)" >&2
@@ -262,7 +262,7 @@ cmd_stop() {
     fi
     # Also find any MCP-spawned daemons
     local other_pids
-    other_pids=$(pgrep -f "chittad daemon" 2>/dev/null || true)
+    other_pids=$(pgrep -f "chittad daemon.*--path $MIND_PATH" 2>/dev/null || true)
     if [[ -n "$other_pids" ]]; then
         pids="$pids $other_pids"
     fi
@@ -298,7 +298,7 @@ cmd_status() {
             pid=$(cat "$PID_FILE")
             echo "[subconscious] Running (pid=$pid, managed)"
         else
-            pid=$(pgrep -f "chittad daemon" | head -1)
+            pid=$(pgrep -f "chittad daemon.*--path $MIND_PATH" | head -1)
             echo "[subconscious] Running (pid=$pid, MCP-spawned)"
         fi
         # Show socket info
@@ -338,7 +338,7 @@ cmd_health() {
     fi
 
     local pid
-    pid=$(cat "$PID_FILE" 2>/dev/null || pgrep -f "chittad daemon" | head -1)
+    pid=$(cat "$PID_FILE" 2>/dev/null || pgrep -f "chittad daemon.*--path $MIND_PATH" | head -1)
     echo "[subconscious] HEALTHY: pid=$pid, responsive"
     return 0
 }

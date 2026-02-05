@@ -120,7 +120,7 @@ void DuckDBStore::fix_sequences() {
     };
 
     fix_seq("memory", "memory_seq");
-    fix_seq("symbols", "symbol_seq");
+    fix_seq("symbol", "symbol_seq");
     fix_seq("ledger", "ledger_seq");
     fix_seq("long_task", "task_seq");
     fix_seq("task_event", "event_seq");
@@ -323,7 +323,9 @@ bool DuckDBStore::create_schema() {
             ) WHERE rn > 1
         )
     )");
-    write_execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_triplet_unique ON triplet(subject, predicate, object)");
+    // Migration: drop old unique index without source_file
+    write_execute("DROP INDEX IF EXISTS idx_triplet_unique");
+    write_execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_triplet_unique ON triplet(subject, predicate, object, source_file)");
 
     // Symbol table for code intelligence
     if (!write_execute(R"(
@@ -749,6 +751,11 @@ bool DuckDBStore::create_schema() {
     // Add primary_theme_id column to memory table (migration)
     write_execute("ALTER TABLE memory ADD COLUMN IF NOT EXISTS primary_theme_id BIGINT DEFAULT NULL");
 
+    // Memory tags table (many-to-many)
+    write_execute("CREATE TABLE IF NOT EXISTS memory_tags ("
+        "memory_id BIGINT, tag VARCHAR, "
+        "PRIMARY KEY (memory_id, tag))");
+
     // Sequence for IDs
     write_execute("CREATE SEQUENCE IF NOT EXISTS memory_seq START 1");
     write_execute("CREATE SEQUENCE IF NOT EXISTS triplet_seq START 1");
@@ -951,7 +958,6 @@ int64_t DuckDBStore::remember(
     RealmVisibility visibility,
     const std::vector<std::string>& shared_realms
 ) {
-    // Lock handled in write_execute/write_query/read_query
     if (!db_) return -1;
 
     Timestamp now_ts = now();
@@ -976,7 +982,7 @@ int64_t DuckDBStore::remember(
         << embedding_to_sql(embedding) << ", '" << escaped_realm << "', "
         << static_cast<int>(visibility) << ") RETURNING id";
 
-    auto result = read_query(sql.str());
+    auto result = write_query(sql.str());
     if (!result) {
         last_error_ = "No result from INSERT query";
         return -1;
@@ -1461,11 +1467,6 @@ bool DuckDBStore::add_tag(int64_t id, const std::string& tag) {
     // Lock handled in write_execute/write_query/read_query
     if (!db_) return false;
 
-    // Check if tags table exists, create if not
-    write_execute("CREATE TABLE IF NOT EXISTS memory_tags ("
-            "memory_id BIGINT, tag VARCHAR, "
-            "PRIMARY KEY (memory_id, tag))");
-
     // Escape tag
     std::string escaped = tag;
     size_t pos = 0;
@@ -1741,7 +1742,8 @@ bool DuckDBStore::connect(
         << "'" << escape(norm_subject) << "', "
         << "'" << escape(predicate) << "', "
         << "'" << escape(norm_object) << "', "
-        << weight << ", " << now() << ", '')";
+        << weight << ", " << now() << ", '')"
+        << " ON CONFLICT (subject, predicate, object, source_file) DO UPDATE SET weight = " << weight;
 
     return write_execute(sql.str());
 }
@@ -1781,7 +1783,8 @@ bool DuckDBStore::connect_with_source(
         << "'" << escape(predicate) << "', "
         << "'" << escape(norm_object) << "', "
         << weight << ", " << now() << ", "
-        << "'" << escape(source_file) << "')";
+        << "'" << escape(source_file) << "')"
+        << " ON CONFLICT (subject, predicate, object, source_file) DO UPDATE SET weight = " << weight;
 
     return write_execute(sql.str());
 }
@@ -1863,14 +1866,14 @@ size_t DuckDBStore::connect_batch_sql(
         inserted++;
 
         if (batch_count >= BATCH_SIZE) {
-            sql += " ON CONFLICT (subject, predicate, object) DO NOTHING";
+            sql += " ON CONFLICT (subject, predicate, object, source_file) DO UPDATE SET weight = EXCLUDED.weight";
             write_execute(sql);
             batch_count = 0;
         }
     }
 
     if (batch_count > 0) {
-        sql += " ON CONFLICT (subject, predicate, object) DO NOTHING";
+        sql += " ON CONFLICT (subject, predicate, object, source_file) DO UPDATE SET weight = EXCLUDED.weight";
         write_execute(sql);
     }
 
@@ -2018,7 +2021,7 @@ int64_t DuckDBStore::add_symbol(const Symbol& sym, const std::vector<float>& emb
         << sym.repo_id << ", "
         << embedding_to_sql(embed) << ") RETURNING id";
 
-    auto result = read_query(sql.str());
+    auto result = write_query(sql.str());
     if (!result || result->HasError()) {
         return -1;
     }
@@ -3498,7 +3501,7 @@ int64_t DuckDBStore::task_start(const LongTask& task) {
         << "'', '', '', 0, 0, " << now_ts << ", " << now_ts << ", 0, '') "
         << "RETURNING id";
 
-    auto result = read_query(sql.str());
+    auto result = write_query(sql.str());
     if (!result || result->HasError()) {
         last_error_ = result ? result->GetError() : "No result";
         return -1;
@@ -3815,7 +3818,7 @@ int64_t DuckDBStore::event_append(const TaskEvent& event) {
         << "'" << escape(event.related_entities) << "', "
         << now_ts << ") RETURNING id";
 
-    auto result = read_query(sql.str());
+    auto result = write_query(sql.str());
     if (!result || result->HasError()) {
         last_error_ = result ? result->GetError() : "No result";
         return -1;
@@ -3938,7 +3941,7 @@ int64_t DuckDBStore::suggestion_track(const Suggestion& suggestion) {
         << "'pending', FALSE, '', 0, " << now_ts << ", 0) "
         << "RETURNING id";
 
-    auto result = read_query(sql.str());
+    auto result = write_query(sql.str());
     if (!result || result->HasError()) {
         last_error_ = result ? result->GetError() : "No result";
         return -1;

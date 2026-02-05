@@ -317,15 +317,6 @@ endif()
 if(CHITTA_BUILD_TESTS)
     enable_testing()
 
-    # Old mmap-based tests (disabled - using DuckDB now)
-    # add_executable(chitta_test src/test.cpp)
-    # target_link_libraries(chitta_test PRIVATE chitta)
-    # add_test(NAME chitta_test COMMAND chitta_test)
-
-    # SimpleMind test (disabled - using DuckDBMind now)
-    # add_executable(simple_test src/simple_test.cpp)
-    # target_link_libraries(simple_test PRIVATE chitta)
-
     # DuckDB store test
     add_executable(duckdb_test src/duckdb_test.cpp)
     target_link_libraries(duckdb_test PRIVATE duckdb_store duckdb)
@@ -378,19 +369,6 @@ if(CHITTA_BUILD_RPC)
     endif()
 endif()
 
-# Migration tool (from SQLite soul.db)
-find_package(SQLite3)
-if(SQLite3_FOUND)
-    add_executable(chitta_migrate src/migrate.cpp)
-    target_link_libraries(chitta_migrate PRIVATE chitta SQLite::SQLite3)
-    message(STATUS "SQLite3 found: ${SQLite3_VERSION}")
-else()
-    message(STATUS "SQLite3 not found, migration tool disabled")
-endif()
-
-# Import tool (from chitta files - incremental merge)
-add_executable(chitta_import src/import.cpp)
-target_link_libraries(chitta_import PRIVATE chitta)
 
 # RPATH configuration for runtime library discovery
 # Collects library directories from DuckDB and ONNX Runtime
@@ -421,7 +399,7 @@ else()
 endif()
 
 # Apply RPATH to all executables
-foreach(exe chittad chitta_import)
+foreach(exe chittad)
     if(TARGET ${exe})
         set_target_properties(${exe} PROPERTIES
             BUILD_RPATH "${CHITTA_RPATH}"
@@ -432,13 +410,6 @@ endforeach()
 
 if(TARGET chitta_tool)
     set_target_properties(chitta_tool PROPERTIES
-        BUILD_RPATH "${CHITTA_RPATH}"
-        INSTALL_RPATH "${CHITTA_RPATH}"
-    )
-endif()
-
-if(TARGET chitta_migrate)
-    set_target_properties(chitta_migrate PROPERTIES
         BUILD_RPATH "${CHITTA_RPATH}"
         INSTALL_RPATH "${CHITTA_RPATH}"
     )
