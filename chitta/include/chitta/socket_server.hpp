@@ -15,7 +15,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <unistd.h>
-#include <sys/eventfd.h>
 
 namespace chitta {
 
@@ -112,7 +111,7 @@ public:
 private:
     std::string socket_path_;
     int server_fd_ = -1;
-    int wake_fd_ = -1;  // eventfd for waking poll() when responses ready
+    int wake_pipe_[2] = {-1, -1};  // self-pipe for waking poll() when responses ready
     std::vector<ClientConnection> connections_;
 
     // Thread-safe response queue for async RPC

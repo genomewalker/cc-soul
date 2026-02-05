@@ -77,16 +77,20 @@ SocketServer::~SocketServer() {
 bool SocketServer::start() {
     if (server_fd_ >= 0) return true;  // Already running
 
-    // Create eventfd for waking poll() when async responses are ready
-    wake_fd_ = eventfd(0, EFD_NONBLOCK);
-    if (wake_fd_ < 0) {
-        std::cerr << "[socket_server] eventfd() failed: " << strerror(errno) << "\n";
+    // Create self-pipe for waking poll() when async responses are ready
+    if (pipe(wake_pipe_) < 0) {
+        std::cerr << "[socket_server] pipe() failed: " << strerror(errno) << "\n";
         return false;
+    }
+    // Set both ends non-blocking
+    for (int i = 0; i < 2; ++i) {
+        int flags = fcntl(wake_pipe_[i], F_GETFL, 0);
+        if (flags >= 0) fcntl(wake_pipe_[i], F_SETFL, flags | O_NONBLOCK);
     }
 
     if (!create_socket()) {
-        close(wake_fd_);
-        wake_fd_ = -1;
+        close(wake_pipe_[0]); close(wake_pipe_[1]);
+        wake_pipe_[0] = wake_pipe_[1] = -1;
         return false;
     }
 
@@ -109,10 +113,12 @@ void SocketServer::stop() {
         server_fd_ = -1;
     }
 
-    // Close wake eventfd
-    if (wake_fd_ >= 0) {
-        close(wake_fd_);
-        wake_fd_ = -1;
+    // Close wake pipe
+    for (int i = 0; i < 2; ++i) {
+        if (wake_pipe_[i] >= 0) {
+            close(wake_pipe_[i]);
+            wake_pipe_[i] = -1;
+        }
     }
 
     // Remove socket file
@@ -185,9 +191,9 @@ std::vector<ClientRequest> SocketServer::poll(int timeout_ms) {
     // Server socket - watch for new connections
     fds.push_back({server_fd_, POLLIN, 0});
 
-    // Wake eventfd - allows thread pool to wake us when responses ready
-    if (wake_fd_ >= 0) {
-        fds.push_back({wake_fd_, POLLIN, 0});
+    // Wake pipe read end - allows thread pool to wake us when responses ready
+    if (wake_pipe_[0] >= 0) {
+        fds.push_back({wake_pipe_[0], POLLIN, 0});
     }
 
     // Client sockets
@@ -214,11 +220,11 @@ std::vector<ClientRequest> SocketServer::poll(int timeout_ms) {
         accept_new_connections();
     }
 
-    // Check wake eventfd - consume to reset
-    size_t wake_idx = (wake_fd_ >= 0) ? 1 : 0;
-    if (wake_fd_ >= 0 && fds[1].revents & POLLIN) {
-        uint64_t val;
-        [[maybe_unused]] auto _ = read(wake_fd_, &val, sizeof(val));  // Consume to reset
+    // Check wake pipe - drain to reset
+    size_t wake_idx = (wake_pipe_[0] >= 0) ? 1 : 0;
+    if (wake_pipe_[0] >= 0 && fds[1].revents & POLLIN) {
+        char buf[64];
+        while (read(wake_pipe_[0], buf, sizeof(buf)) > 0) {}  // Drain
     }
     size_t client_offset = wake_idx + 1;
 
@@ -289,9 +295,9 @@ void SocketServer::queue_response(int client_fd, std::string data) {
         response_queue_.push_back({client_fd, std::move(data)});
     }
     // Wake up poll() to send response immediately
-    if (wake_fd_ >= 0) {
-        uint64_t val = 1;
-        [[maybe_unused]] auto _ = write(wake_fd_, &val, sizeof(val));
+    if (wake_pipe_[1] >= 0) {
+        char byte = 1;
+        [[maybe_unused]] auto _ = write(wake_pipe_[1], &byte, 1);
     }
 }
 
