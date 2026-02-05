@@ -12,10 +12,6 @@
 #include <chitta/mind/subconscious.hpp>
 #include <chitta/rpc/duckdb_handler.hpp>
 #include <chitta/rpc/thread_pool.hpp>
-#ifdef CHITTA_WITH_POSTGRES
-#include <chitta/mind/postgres_mind.hpp>
-#include <chitta/rpc/postgres_handler.hpp>
-#endif
 #include <chitta/socket_server.hpp>
 #include <chitta/socket_client.hpp>
 #include <chitta/version.hpp>
@@ -1104,15 +1100,6 @@ void print_usage(const char* prog) {
               << "  --enrich-batch N         Symbols per batch (default: 10)\n"
               << "  --enrich-model MODEL     OpenCode model (default: github-copilot/gpt-5-mini)\n"
               << "  --no-enrich              Disable code enrichment\n"
-#ifdef CHITTA_WITH_POSTGRES
-              << "\nPostgreSQL backend (for HPC multi-writer):\n"
-              << "  --backend postgres Use PostgreSQL instead of DuckDB\n"
-              << "  --pg-host HOST     PostgreSQL host (default: localhost)\n"
-              << "  --pg-port PORT     PostgreSQL port (default: 5432)\n"
-              << "  --pg-db NAME       Database name (default: soul)\n"
-              << "  --pg-user USER     Database user (default: soul)\n"
-              << "  --pg-pass PASS     Database password\n"
-#endif
               ;
 }
 
@@ -1130,7 +1117,6 @@ int main(int argc, char* argv[]) {
     std::string command;
     int interval = 60;
     bool foreground = false;
-    std::string backend = "duckdb";
 
     // Distillation config
     DistillConfig distill_config;
@@ -1139,15 +1125,6 @@ int main(int argc, char* argv[]) {
     // Code enrichment config
     EnrichConfig enrich_config;
     enrich_config.script_path = default_enrich_script();
-
-#ifdef CHITTA_WITH_POSTGRES
-    // PostgreSQL options
-    std::string pg_host = "localhost";
-    int pg_port = 5432;
-    std::string pg_db = "soul";
-    std::string pg_user = "soul";
-    std::string pg_pass = "";
-#endif
 
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--path") == 0 && i + 1 < argc) {
@@ -1158,20 +1135,6 @@ int main(int argc, char* argv[]) {
             foreground = true;
         } else if (strcmp(argv[i], "--verbose") == 0) {
             verbose_mode = true;
-        } else if (strcmp(argv[i], "--backend") == 0 && i + 1 < argc) {
-            backend = argv[++i];
-#ifdef CHITTA_WITH_POSTGRES
-        } else if (strcmp(argv[i], "--pg-host") == 0 && i + 1 < argc) {
-            pg_host = argv[++i];
-        } else if (strcmp(argv[i], "--pg-port") == 0 && i + 1 < argc) {
-            pg_port = std::stoi(argv[++i]);
-        } else if (strcmp(argv[i], "--pg-db") == 0 && i + 1 < argc) {
-            pg_db = argv[++i];
-        } else if (strcmp(argv[i], "--pg-user") == 0 && i + 1 < argc) {
-            pg_user = argv[++i];
-        } else if (strcmp(argv[i], "--pg-pass") == 0 && i + 1 < argc) {
-            pg_pass = argv[++i];
-#endif
         } else if (strcmp(argv[i], "--distill-interval") == 0 && i + 1 < argc) {
             distill_config.interval_minutes = std::stoi(argv[++i]);
         } else if (strcmp(argv[i], "--distill-min-turns") == 0 && i + 1 < argc) {
@@ -1249,134 +1212,7 @@ int main(int argc, char* argv[]) {
     }
 #endif
 
-#ifdef CHITTA_WITH_POSTGRES
-    // PostgreSQL backend
-    if (backend == "postgres" || backend == "postgresql" || backend == "pg") {
-        PostgresMindConfig config;
-        config.host = pg_host;
-        config.port = pg_port;
-        config.dbname = pg_db;
-        config.user = pg_user;
-        config.password = pg_pass;
-
-        PostgresMind mind(config);
-
-#ifdef CHITTA_WITH_ONNX
-        if (yantra) mind.attach_yantra(yantra);
-#endif
-
-        if (!mind.open()) {
-            std::cerr << "Failed to connect to PostgreSQL at " << pg_host << ":" << pg_port << "\n";
-            return 1;
-        }
-
-        std::cerr << "[Backend] PostgreSQL (" << pg_host << ":" << pg_port << "/" << pg_db << ")\n";
-
-        int result = 0;
-        if (command == "daemon") {
-            // Use PostgresRpcHandler
-            DaemonLock lock;
-            if (!acquire_lock(mind_path, lock)) {
-                std::cerr << "[daemon] Another daemon is running\n";
-                return 1;
-            }
-
-            if (!pid_file.empty()) {
-                std::ofstream pf(pid_file);
-                if (pf) pf << getpid() << "\n";
-            }
-
-            SocketServer server(sock_path);
-            if (!server.start()) {
-                std::cerr << "[daemon] Failed to start socket server\n";
-                release_lock(lock);
-                return 1;
-            }
-
-            PostgresRpcHandler handler(&mind);
-
-            std::signal(SIGTERM, daemon_signal_handler);
-            std::signal(SIGINT, daemon_signal_handler);
-            std::signal(SIGPIPE, SIG_IGN);
-
-            std::cerr << "[daemon] Started PostgreSQL backend (socket=" << sock_path << ")\n";
-
-            std::atomic<size_t> cycle_count{0};
-            std::thread maintenance([&]() {
-                auto interval_secs = std::chrono::seconds(interval);
-                auto last_sync = std::chrono::steady_clock::now();
-                while (daemon_running) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                    auto now_time = std::chrono::steady_clock::now();
-                    if (now_time - last_sync >= interval_secs) {
-                        last_sync = now_time;
-                        cycle_count++;
-                        try {
-                            mind.tick();
-                            // Note: auto_distill_episodes not available in PostgresMind
-                            // Use DuckDB backend for full auto-distillation support
-                        } catch (const std::exception& e) {
-                            std::cerr << "[maint] Cycle failed: " << e.what() << "\n";
-                        }
-                    }
-                }
-            });
-
-            while (daemon_running) {
-                auto requests = server.poll(100);
-                for (const auto& req : requests) {
-                    if (req.data == "stats") {
-                        std::ostringstream oss;
-                        oss << "{\"version\":\"" << CHITTA_VERSION << "\","
-                            << "\"backend\":\"postgres\","
-                            << "\"nodes\":" << mind.size() << ","
-                            << "\"triplets\":" << mind.triplet_count() << "}";
-                        server.respond(req.client_fd, oss.str());
-                        continue;
-                    }
-                    if (req.data == "shutdown") {
-                        server.respond(req.client_fd, R"({"status":"shutting_down"})");
-                        daemon_running = false;
-                        continue;
-                    }
-                    try {
-                        auto request = json::parse(req.data);
-                        auto response = handler.handle(request);
-                        server.respond(req.client_fd, response.dump());
-                    } catch (const std::exception& e) {
-                        std::string error = R"({"jsonrpc":"2.0","error":{"code":-32700,"message":")"
-                                          + std::string(e.what()) + R"("},"id":null})";
-                        server.respond(req.client_fd, error);
-                    }
-                }
-            }
-
-            maintenance.join();
-            server.stop();
-            if (!pid_file.empty()) std::remove(pid_file.c_str());
-            release_lock(lock);
-            std::cerr << "[daemon] Stopped\n";
-        } else if (command == "stats") {
-            auto h = mind.health();
-            std::cout << "Soul Statistics (PostgreSQL)\n";
-            std::cout << "═══════════════════════════════\n";
-            std::cout << "  Backend:  PostgreSQL\n";
-            std::cout << "  Host:     " << pg_host << ":" << pg_port << "\n";
-            std::cout << "  Database: " << pg_db << "\n";
-            std::cout << "  Nodes:    " << mind.size() << "\n";
-            std::cout << "  Triplets: " << mind.triplet_count() << "\n";
-            std::cout << "  Yantra:   " << (mind.has_yantra() ? "ready" : "not attached") << "\n";
-        } else {
-            std::cerr << "Unknown command: " << command << "\n";
-            result = 1;
-        }
-
-        mind.close();
-        return result;
-    }
-#endif
-
-    // Default: DuckDB backend
+    // DuckDB backend
     DuckDBMindConfig config;
     config.path = mind_path;
     DuckDBMind mind(config);

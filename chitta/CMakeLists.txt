@@ -36,22 +36,6 @@ else()
     message(FATAL_ERROR "DuckDB not found. Install with: mamba install libduckdb-devel")
 endif()
 
-# PostgreSQL - for multi-writer HPC deployments
-find_library(LIBPQ_LIB pq HINTS "$ENV{CONDA_PREFIX}/lib")
-find_path(LIBPQ_INCLUDE libpq-fe.h HINTS "$ENV{CONDA_PREFIX}/include")
-if(LIBPQ_LIB AND LIBPQ_INCLUDE)
-    add_library(libpq SHARED IMPORTED)
-    set_target_properties(libpq PROPERTIES
-        IMPORTED_LOCATION "${LIBPQ_LIB}"
-        INTERFACE_INCLUDE_DIRECTORIES "${LIBPQ_INCLUDE}"
-    )
-    set(CHITTA_WITH_POSTGRES ON)
-    message(STATUS "PostgreSQL (libpq) found: ${LIBPQ_LIB}")
-else()
-    set(CHITTA_WITH_POSTGRES OFF)
-    message(STATUS "PostgreSQL (libpq) not found - PostgresStore disabled")
-endif()
-
 # Tree-sitter - incremental parsing for code intelligence
 FetchContent_Declare(
     tree-sitter
@@ -330,18 +314,7 @@ target_include_directories(duckdb_store PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
 )
 
-# PostgresStore library (optional, for HPC multi-writer)
-if(CHITTA_WITH_POSTGRES)
-    add_library(postgres_store STATIC src/postgres_store.cpp)
-    target_link_libraries(postgres_store PUBLIC chitta libpq)
-    target_include_directories(postgres_store PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    )
-    target_compile_definitions(postgres_store PUBLIC CHITTA_WITH_POSTGRES=1)
-    message(STATUS "PostgresStore enabled")
-endif()
-
-# Daemon/admin tool (uses DuckDBMind or PostgresMind)
+# Daemon/admin tool
 add_executable(chittad
     src/simple_cli.cpp
     src/socket_server.cpp
@@ -349,10 +322,6 @@ add_executable(chittad
     src/subconscious.cpp
 )
 target_link_libraries(chittad PRIVATE chitta duckdb_store)
-if(CHITTA_WITH_POSTGRES)
-    target_link_libraries(chittad PRIVATE postgres_store)
-    target_compile_definitions(chittad PRIVATE CHITTA_WITH_POSTGRES=1)
-endif()
 
 # CLI tool for memory operations (thin client + MCP server)
 # Output as 'chitta' binary (target named chitta_tool to avoid library conflict)
