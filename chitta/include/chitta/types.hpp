@@ -5,6 +5,7 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cinttypes>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -35,9 +36,9 @@ struct NodeId {
     uint64_t low = 0;
 
     static NodeId generate() {
-        static std::random_device rd;
-        static std::mt19937_64 gen(rd());
-        static std::uniform_int_distribution<uint64_t> dis;
+        thread_local static std::random_device rd;
+        thread_local static std::mt19937_64 gen(rd());
+        thread_local static std::uniform_int_distribution<uint64_t> dis;
         return {dis(gen), dis(gen)};
     }
 
@@ -55,12 +56,12 @@ struct NodeId {
 
     std::string to_string() const {
         char buf[37];
-        snprintf(buf, sizeof(buf), "%08x-%04x-%04x-%04x-%012llx",
-                 (uint32_t)(high >> 32),
-                 (uint16_t)(high >> 16),
-                 (uint16_t)high,
-                 (uint16_t)(low >> 48),
-                 (unsigned long long)(low & 0xFFFFFFFFFFFFULL));
+        snprintf(buf, sizeof(buf), "%08x-%04x-%04x-%04x-%012" PRIx64,
+                 static_cast<uint32_t>(high >> 32),
+                 static_cast<uint16_t>(high >> 16),
+                 static_cast<uint16_t>(high),
+                 static_cast<uint16_t>(low >> 48),
+                 static_cast<uint64_t>(low & 0xFFFFFFFFFFFFULL));
         return buf;
     }
 
@@ -73,10 +74,10 @@ struct NodeId {
         uint16_t b, c, d;
         uint64_t e;
 
-        if (sscanf(s.c_str(), "%8x-%4hx-%4hx-%4hx-%12llx",
-                   &a, &b, &c, &d, (unsigned long long*)&e) == 5) {
-            id.high = ((uint64_t)a << 32) | ((uint64_t)b << 16) | c;
-            id.low = ((uint64_t)d << 48) | e;
+        if (sscanf(s.c_str(), "%8x-%4hx-%4hx-%4hx-%12" SCNx64,
+                   &a, &b, &c, &d, &e) == 5) {
+            id.high = (static_cast<uint64_t>(a) << 32) | (static_cast<uint64_t>(b) << 16) | c;
+            id.low = (static_cast<uint64_t>(d) << 48) | e;
         }
         return id;
     }
@@ -156,6 +157,20 @@ public:
         return sum;
     }
 };
+
+// Free function: cosine similarity for std::vector<float>
+// Consolidates duplicate implementations across codebase
+inline float cosine_similarity(const std::vector<float>& a, const std::vector<float>& b) {
+    if (a.size() != b.size() || a.empty()) return 0.0f;
+    float dot = 0.0f, norm_a = 0.0f, norm_b = 0.0f;
+    for (size_t i = 0; i < a.size(); ++i) {
+        dot += a[i] * b[i];
+        norm_a += a[i] * a[i];
+        norm_b += b[i] * b[i];
+    }
+    float denom = std::sqrt(norm_a) * std::sqrt(norm_b);
+    return denom > 0.0f ? dot / denom : 0.0f;
+}
 
 // Confidence: not a float, a distribution
 // Distinguishes "90% sure, very confident" from

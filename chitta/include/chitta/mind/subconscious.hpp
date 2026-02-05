@@ -145,6 +145,10 @@ private:
     std::vector<QueuedEmbedding> embedding_queue_;
 
     // Pattern matchers (compiled regexes)
+    // Known limitation: std::regex is slow (~10-100x slower than RE2 or manual
+    // string matching). Acceptable here because pattern detection runs on a
+    // background thread with low frequency. If this becomes a hot path,
+    // consider replacing with RE2 or simple string::find-based matching.
     std::regex correction_pattern_;
     std::regex preference_pattern_;
     std::regex frustration_pattern_;

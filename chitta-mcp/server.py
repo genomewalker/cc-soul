@@ -231,8 +231,10 @@ def daemon_call(tool_name: str, arguments: dict, structured: bool = False) -> st
 
 @server.list_tools()
 async def list_tools():
-    """Return static tools (imported from tools_static.py)."""
-    return TOOLS + COMPOSITE_TOOLS
+    """Return static tools. Composite tools override daemon tools with same name."""
+    composite_names = {t.name for t in COMPOSITE_TOOLS}
+    filtered = [t for t in TOOLS if t.name not in composite_names]
+    return filtered + COMPOSITE_TOOLS
 
 
 # Composite tool handlers for token-efficient code intelligence

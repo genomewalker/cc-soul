@@ -34,8 +34,7 @@ bool SocketClient::connect() {
         return false;
     }
 
-    struct sockaddr_un addr;
-    memset(&addr, 0, sizeof(addr));
+    struct sockaddr_un addr = {};
     addr.sun_family = AF_UNIX;
     strncpy(addr.sun_path, socket_path_.c_str(), sizeof(addr.sun_path) - 1);
 
@@ -108,8 +107,10 @@ std::optional<DaemonVersion> SocketClient::check_version() {
         if (ver.protocol_major > 0 || !ver.software.empty()) {
             return ver;
         }
+    } catch (const std::exception& e) {
+        std::cerr << "check_version failed: " << e.what() << std::endl;
     } catch (...) {
-        // JSON parse failed
+        std::cerr << "check_version failed: unknown error" << std::endl;
     }
 
     return std::nullopt;
@@ -144,8 +145,10 @@ std::optional<DaemonHealth> SocketClient::check_health() {
         if (health.protocol_major > 0 || !health.software.empty()) {
             return health;
         }
+    } catch (const std::exception& e) {
+        std::cerr << "check_health failed: " << e.what() << std::endl;
     } catch (...) {
-        // JSON parse failed
+        std::cerr << "check_health failed: unknown error" << std::endl;
     }
 
     return std::nullopt;

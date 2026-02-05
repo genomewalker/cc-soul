@@ -73,4 +73,5 @@ inline std::string node_type_to_string(int type) {
     return node_type_to_string_impl(type);
 }
 
+
 } // namespace chitta::rpc

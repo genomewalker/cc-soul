@@ -96,18 +96,22 @@ public:
 
         if (!index_built_) build_index();
 
-        // Query calls triplets: subject (caller) → "calls" → object (callee name)
+        // Query calls triplets: subject (caller) -> "calls" -> object (callee name)
         std::string query = "SELECT subject, object, source_file "
                            "FROM triplet "
                            "WHERE predicate = 'calls'";
         if (!project.empty()) {
-            // Escape single quotes in project name
+            // Escape for SQL string literal: single quotes and LIKE metacharacters
             std::string escaped_project;
+            escaped_project.reserve(project.size());
             for (char c : project) {
                 if (c == '\'') escaped_project += "''";
+                else if (c == '%') escaped_project += "\\%";
+                else if (c == '_') escaped_project += "\\_";
+                else if (c == '\\') escaped_project += "\\\\";
                 else escaped_project += c;
             }
-            query += " AND source_file LIKE '%" + escaped_project + "%'";
+            query += " AND source_file LIKE '%" + escaped_project + "%' ESCAPE '\\'";
         }
 
         auto result = store_.execute_sql_query(query);

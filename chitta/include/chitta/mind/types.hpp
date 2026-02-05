@@ -194,8 +194,8 @@ struct MindHealth {
             case Action::ScheduleBackup: return "degraded";
             case Action::ForceRepair: return "repair_needed";
             case Action::Emergency: return "critical";
+            default: return "unknown";
         }
-        return "unknown";
     }
 };
 

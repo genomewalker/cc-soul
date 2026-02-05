@@ -8,6 +8,7 @@
 #include <tree_sitter/api.h>
 #include <string>
 #include <vector>
+#include <iterator>
 #include <unordered_map>
 #include <filesystem>
 #include <fstream>
@@ -314,6 +315,9 @@ public:
         size_t max_files = 1000
     ) {
         ExtractionResult result;
+        // Pre-reserve with reasonable estimate to reduce reallocations
+        result.symbols.reserve(max_files * 20);
+        result.callsites.reserve(max_files * 10);
         size_t file_count = 0;
 
         std::function<void(const std::filesystem::path&)> traverse;
@@ -336,17 +340,17 @@ public:
                     if (!lang.empty()) {
                         auto file_result = extract_file_full(entry.path().string());
                         result.symbols.insert(result.symbols.end(),
-                                             file_result.symbols.begin(),
-                                             file_result.symbols.end());
+                                             std::make_move_iterator(file_result.symbols.begin()),
+                                             std::make_move_iterator(file_result.symbols.end()));
                         result.callsites.insert(result.callsites.end(),
-                                               file_result.callsites.begin(),
-                                               file_result.callsites.end());
+                                               std::make_move_iterator(file_result.callsites.begin()),
+                                               std::make_move_iterator(file_result.callsites.end()));
                         result.type_relationships.insert(result.type_relationships.end(),
-                                                        file_result.type_relationships.begin(),
-                                                        file_result.type_relationships.end());
+                                                        std::make_move_iterator(file_result.type_relationships.begin()),
+                                                        std::make_move_iterator(file_result.type_relationships.end()));
                         result.imports.insert(result.imports.end(),
-                                             file_result.imports.begin(),
-                                             file_result.imports.end());
+                                             std::make_move_iterator(file_result.imports.begin()),
+                                             std::make_move_iterator(file_result.imports.end()));
                         file_count++;
                     }
                 }

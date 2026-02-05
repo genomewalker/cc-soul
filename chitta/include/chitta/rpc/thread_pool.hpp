@@ -34,6 +34,11 @@ struct RequestTrace {
     std::chrono::steady_clock::time_point start;
 };
 
+// Lock ordering: watchdog_mutex_ must always be acquired before trace_mutex_
+// to prevent deadlocks. All code paths follow this order:
+//   watchdog_loop(): locks watchdog_mutex_ first, then trace_mutex_
+//   submit()/get_active()/active_count(): only locks trace_mutex_
+// Never acquire watchdog_mutex_ while holding trace_mutex_.
 class ThreadPool {
 public:
     explicit ThreadPool(size_t min_threads = 2, size_t max_threads = 16)

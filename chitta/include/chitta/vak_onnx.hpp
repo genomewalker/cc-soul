@@ -217,21 +217,21 @@ private:
 
             if (c < 0x80) {
                 // ASCII
-                if (std::isspace(c)) {
+                if (std::isspace(static_cast<unsigned char>(c))) {
                     if (!current.empty()) {
                         words.push_back(current);
                         current.clear();
                     }
                     i++;
-                } else if (std::ispunct(c)) {
+                } else if (std::ispunct(static_cast<unsigned char>(c))) {
                     if (!current.empty()) {
                         words.push_back(current);
                         current.clear();
                     }
-                    words.push_back(std::string(1, c));
+                    words.push_back(std::string(1, static_cast<char>(c)));
                     i++;
                 } else {
-                    current += std::tolower(c);
+                    current += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
                     i++;
                 }
             } else {

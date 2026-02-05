@@ -937,15 +937,20 @@ std::unique_ptr<duckdb::QueryResult> DuckDBStore::read_query(const std::string& 
     }
 }
 
+// Note: Could be cached per-embedding if profiling shows this is a bottleneck,
+// but embeddings differ each call so caching requires a map. Using std::string
+// with reserve() to avoid repeated allocations in the ostringstream.
 std::string DuckDBStore::embedding_to_sql(const std::vector<float>& embedding) {
-    std::ostringstream ss;
-    ss << "[";
+    // ~12 chars per float (e.g. "-0.12345678,") * 384 dims + overhead
+    std::string result;
+    result.reserve(384 * 12 + 20);
+    result += "[";
     for (size_t i = 0; i < embedding.size(); ++i) {
-        if (i > 0) ss << ",";
-        ss << embedding[i];
+        if (i > 0) result += ",";
+        result += std::to_string(embedding[i]);
     }
-    ss << "]::FLOAT[384]";
-    return ss.str();
+    result += "]::FLOAT[384]";
+    return result;
 }
 
 int64_t DuckDBStore::remember(
@@ -1226,17 +1231,34 @@ std::vector<MemoryResult> DuckDBStore::recall(
         }
     }
 
-    // Load shared realms for each result
-    for (auto& r : results) {
+    // Load shared realms for all results in a single batch query (avoids N+1)
+    if (!results.empty()) {
         std::ostringstream membership_sql;
-        membership_sql << "SELECT realm FROM realm_membership WHERE memory_id = " << r.id;
+        membership_sql << "SELECT memory_id, realm FROM realm_membership WHERE memory_id IN (";
+        for (size_t idx = 0; idx < results.size(); ++idx) {
+            if (idx > 0) membership_sql << ",";
+            membership_sql << results[idx].id;
+        }
+        membership_sql << ")";
+
+        // Build a map from memory_id to result index for fast distribution
+        std::unordered_map<int64_t, size_t> id_to_idx;
+        for (size_t idx = 0; idx < results.size(); ++idx) {
+            id_to_idx[results[idx].id] = idx;
+        }
+
         auto membership_result = read_query(membership_sql.str());
         if (membership_result && !membership_result->HasError()) {
             while (true) {
                 auto chunk = membership_result->Fetch();
                 if (!chunk || chunk->size() == 0) break;
                 for (size_t i = 0; i < chunk->size(); ++i) {
-                    r.shared_realms.push_back(chunk->GetValue(0, i).ToString());
+                    int64_t mem_id = chunk->GetValue(0, i).GetValue<int64_t>();
+                    std::string realm_name = chunk->GetValue(1, i).ToString();
+                    auto it = id_to_idx.find(mem_id);
+                    if (it != id_to_idx.end()) {
+                        results[it->second].shared_realms.push_back(std::move(realm_name));
+                    }
                 }
             }
         }
@@ -1648,6 +1670,13 @@ size_t DuckDBStore::apply_decay() {
 
     Timestamp current = now();
 
+    // DESIGN NOTE: apply_decay is idempotent. It recomputes confidence from the
+    // elapsed time since last access using: confidence * exp(-decay_rate * dt).
+    // Calling it multiple times in succession produces the same result because
+    // the formula is based on absolute time difference, not incremental reduction.
+    // This means it's safe to call from cron jobs, background tasks, or multiple
+    // sessions without risk of double-decaying memories.
+    //
     // Apply exponential decay based on time since last access
     // Single atomic UPDATE - DuckDB handles locking internally
     std::ostringstream sql;
@@ -1707,6 +1736,48 @@ size_t DuckDBStore::prune(float threshold, float min_age_days) {
     return count;
 }
 
+// Shared helpers for connect() and connect_with_source() to avoid duplicating
+// the lowercase normalization, SQL escaping, and INSERT ON CONFLICT logic.
+namespace {
+    std::string triplet_to_lower(const std::string& s) {
+        std::string result;
+        result.reserve(s.size());
+        for (char c : s) result += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return result;
+    }
+
+    std::string triplet_escape(const std::string& s) {
+        std::string result;
+        result.reserve(s.size());
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    }
+
+    std::string build_triplet_upsert_sql(const std::string& subject,
+                                          const std::string& predicate,
+                                          const std::string& object,
+                                          const std::string& source_file,
+                                          float weight,
+                                          int64_t timestamp) {
+        std::string norm_subject = triplet_to_lower(subject);
+        std::string norm_object = triplet_to_lower(object);
+
+        std::ostringstream sql;
+        sql << "INSERT INTO triplet (id, subject, predicate, object, weight, created_at, source_file) VALUES ("
+            << "nextval('triplet_seq'), "
+            << "'" << triplet_escape(norm_subject) << "', "
+            << "'" << triplet_escape(predicate) << "', "
+            << "'" << triplet_escape(norm_object) << "', "
+            << weight << ", " << timestamp << ", "
+            << "'" << triplet_escape(source_file) << "')"
+            << " ON CONFLICT (subject, predicate, object, source_file) DO UPDATE SET weight = " << weight;
+        return sql.str();
+    }
+}  // anonymous namespace
+
 bool DuckDBStore::connect(
     const std::string& subject,
     const std::string& predicate,
@@ -1716,36 +1787,7 @@ bool DuckDBStore::connect(
     // Lock handled in write_execute/write_query/read_query
     if (!db_) return false;
 
-    // Normalize to lowercase for consistent querying
-    auto to_lower = [](const std::string& s) {
-        std::string result;
-        for (char c : s) result += std::tolower(c);
-        return result;
-    };
-
-    // Escape strings
-    auto escape = [](const std::string& s) {
-        std::string result;
-        for (char c : s) {
-            if (c == '\'') result += "''";
-            else result += c;
-        }
-        return result;
-    };
-
-    std::string norm_subject = to_lower(subject);
-    std::string norm_object = to_lower(object);
-
-    std::ostringstream sql;
-    sql << "INSERT INTO triplet (id, subject, predicate, object, weight, created_at, source_file) VALUES ("
-        << "nextval('triplet_seq'), "
-        << "'" << escape(norm_subject) << "', "
-        << "'" << escape(predicate) << "', "
-        << "'" << escape(norm_object) << "', "
-        << weight << ", " << now() << ", '')"
-        << " ON CONFLICT (subject, predicate, object, source_file) DO UPDATE SET weight = " << weight;
-
-    return write_execute(sql.str());
+    return write_execute(build_triplet_upsert_sql(subject, predicate, object, "", weight, now()));
 }
 
 bool DuckDBStore::connect_with_source(
@@ -1758,35 +1800,7 @@ bool DuckDBStore::connect_with_source(
     // Lock handled in write_execute/write_query/read_query
     if (!db_) return false;
 
-    auto to_lower = [](const std::string& s) {
-        std::string result;
-        for (char c : s) result += std::tolower(c);
-        return result;
-    };
-
-    auto escape = [](const std::string& s) {
-        std::string result;
-        for (char c : s) {
-            if (c == '\'') result += "''";
-            else result += c;
-        }
-        return result;
-    };
-
-    std::string norm_subject = to_lower(subject);
-    std::string norm_object = to_lower(object);
-
-    std::ostringstream sql;
-    sql << "INSERT INTO triplet (id, subject, predicate, object, weight, created_at, source_file) VALUES ("
-        << "nextval('triplet_seq'), "
-        << "'" << escape(norm_subject) << "', "
-        << "'" << escape(predicate) << "', "
-        << "'" << escape(norm_object) << "', "
-        << weight << ", " << now() << ", "
-        << "'" << escape(source_file) << "')"
-        << " ON CONFLICT (subject, predicate, object, source_file) DO UPDATE SET weight = " << weight;
-
-    return write_execute(sql.str());
+    return write_execute(build_triplet_upsert_sql(subject, predicate, object, source_file, weight, now()));
 }
 
 size_t DuckDBStore::connect_batch(
@@ -1886,10 +1900,10 @@ std::vector<StringTriplet> DuckDBStore::query_subject(const std::string& subject
     std::vector<StringTriplet> results;
     if (!db_) return results;
 
-    // Normalize to lowercase
+    // Normalize to lowercase (cast to unsigned char to avoid signed char UB)
     std::string escaped;
     for (char c : subject) {
-        char lc = std::tolower(c);
+        char lc = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         if (lc == '\'') escaped += "''";
         else escaped += lc;
     }
@@ -1923,10 +1937,10 @@ std::vector<StringTriplet> DuckDBStore::query_object(const std::string& object) 
     std::vector<StringTriplet> results;
     if (!db_) return results;
 
-    // Normalize to lowercase
+    // Normalize to lowercase (cast to unsigned char to avoid signed char UB)
     std::string escaped;
     for (char c : object) {
-        char lc = std::tolower(c);
+        char lc = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         if (lc == '\'') escaped += "''";
         else escaped += lc;
     }
@@ -2158,21 +2172,11 @@ bool DuckDBStore::add_call(int64_t caller_id, int64_t callee_id) {
     // Lock handled in write_execute/write_query/read_query
     if (!db_) return false;
 
-    // First check if edge already exists
-    std::ostringstream check;
-    check << "SELECT 1 FROM call_edge WHERE caller_id = " << caller_id
-          << " AND callee_id = " << callee_id;
-    auto result = read_query(check.str());
-    if (result) {
-        auto chunk = result->Fetch();
-        if (chunk && chunk->size() > 0) {
-            return true;  // Already exists
-        }
-    }
-
+    // Single upsert — avoids separate SELECT + INSERT round-trip
     std::ostringstream sql;
     sql << "INSERT INTO call_edge (caller_id, callee_id) VALUES ("
-        << caller_id << ", " << callee_id << ")";
+        << caller_id << ", " << callee_id << ")"
+        << " ON CONFLICT DO NOTHING";
 
     return write_execute(sql.str());
 }
@@ -6250,22 +6254,6 @@ ThemeStats DuckDBStore::theme_stats(const std::string& realm) {
     return stats;
 }
 
-size_t DuckDBStore::count_orphan_memories(const std::string& realm) {
-    std::ostringstream sql;
-    sql << "SELECT COUNT(*) FROM memory m "
-        << "WHERE NOT EXISTS (SELECT 1 FROM theme_membership tm WHERE tm.memory_id = m.id)";
-    if (!realm.empty()) {
-        sql << " AND m.realm = '" << realm << "'";
-    }
-
-    auto result = read_query(sql.str());
-    if (!result || result->HasError()) return 0;
-
-    auto chunk = result->Fetch();
-    if (!chunk || chunk->size() == 0) return 0;
-
-    return static_cast<size_t>(chunk->GetValue(0, 0).GetValue<int64_t>());
-}
 
 std::vector<int64_t> DuckDBStore::get_orphan_memories(size_t limit, const std::string& realm) {
     std::ostringstream sql;

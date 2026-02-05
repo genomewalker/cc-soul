@@ -14,6 +14,7 @@
 
 #include "duckdb_store.hpp"
 #include "mind/embedder.hpp"
+#include "rpc/types.hpp"
 #include <vector>
 #include <string>
 #include <unordered_map>
@@ -43,7 +44,7 @@ public:
                                    const Theme& theme) const {
         float semantic_score = 0.0f;
         if (!memory_embedding.empty() && !theme.centroid.empty()) {
-            semantic_score = cosine_similarity(memory_embedding, theme.centroid);
+            semantic_score = chitta::cosine_similarity(memory_embedding, theme.centroid);
         }
 
         float sparsity = compute_sparsity_score(theme);
@@ -100,9 +101,6 @@ public:
         store_->theme_assign(memory_id, best_theme_id, best_score, is_rep);
         store_->set_primary_theme(memory_id, best_theme_id);
 
-        // Update theme centroid
-        recompute_centroid(best_theme_id);
-
         return best_theme_id;
     }
 
@@ -129,7 +127,7 @@ public:
 
             // Compute theme relevance
             if (!query_embedding.empty() && !theme.centroid.empty()) {
-                result.theme_relevance = cosine_similarity(query_embedding, theme.centroid);
+                result.theme_relevance = chitta::cosine_similarity(query_embedding, theme.centroid);
             }
 
             // Get representatives (up to max_representatives)
@@ -230,28 +228,6 @@ public:
     // Theme Maintenance
     // ═══════════════════════════════════════════════════════════════════════
 
-    // Recompute theme centroid as average of member embeddings
-    bool recompute_centroid(int64_t theme_id) {
-        // Get all member embeddings
-        auto members = store_->theme_members(theme_id, 1000);
-        if (members.empty()) return false;
-
-        // Get embeddings from memory table
-        std::vector<float> centroid(384, 0.0f);
-        size_t count = 0;
-
-        for (const auto& member : members) {
-            auto mem = store_->get_memory(member.id);
-            // Would need to access embedding from memory
-            // For now, skip centroid recomputation
-            count++;
-        }
-
-        // Note: Proper implementation would average member embeddings
-        // This requires storing/retrieving embeddings from memory table
-        return true;
-    }
-
     // Compute coherence of a theme (how tightly grouped are members)
     float compute_coherence(int64_t theme_id) {
         auto theme = store_->theme_get(theme_id);
@@ -274,7 +250,7 @@ public:
     // Should these themes be merged? (high centroid similarity)
     bool should_merge(const Theme& a, const Theme& b) const {
         if (a.centroid.empty() || b.centroid.empty()) return false;
-        float sim = cosine_similarity(a.centroid, b.centroid);
+        float sim = chitta::cosine_similarity(a.centroid, b.centroid);
         return sim >= config_.coherence_merge_threshold;
     }
 
@@ -307,10 +283,6 @@ public:
         // Delete old theme
         store_->theme_delete(theme_id);
 
-        // Recompute centroids
-        recompute_centroid(theme1);
-        recompute_centroid(theme2);
-
         return {theme1, theme2};
     }
 
@@ -334,9 +306,6 @@ public:
 
         // Delete absorbed theme
         store_->theme_delete(absorbed);
-
-        // Recompute centroid
-        recompute_centroid(keeper);
 
         return keeper;
     }
@@ -450,13 +419,6 @@ public:
             result.representatives_updated += update_representatives(theme.id);
         }
 
-        // Recompute centroids
-        for (const auto& theme : themes) {
-            if (recompute_centroid(theme.id)) {
-                result.centroids_recomputed++;
-            }
-        }
-
         return result;
     }
 
@@ -520,26 +482,13 @@ public:
     const ThemeConfig& config() const { return config_; }
 
 private:
+    // Non-owning pointers. Callers must ensure that the DuckDBStore and Embedder
+    // instances outlive this ThemeManager. Typically both are owned by DuckDBMind,
+    // which creates and destroys the ThemeManager within its own lifetime.
     DuckDBStore* store_;
     Embedder* embedder_;
     ThemeConfig config_;
     mutable std::mt19937 rng_;
-
-    // Cosine similarity between two vectors
-    static float cosine_similarity(const std::vector<float>& a,
-                                   const std::vector<float>& b) {
-        if (a.size() != b.size() || a.empty()) return 0.0f;
-
-        float dot = 0.0f, norm_a = 0.0f, norm_b = 0.0f;
-        for (size_t i = 0; i < a.size(); ++i) {
-            dot += a[i] * b[i];
-            norm_a += a[i] * a[i];
-            norm_b += b[i] * b[i];
-        }
-
-        float denom = std::sqrt(norm_a) * std::sqrt(norm_b);
-        return denom > 0.0f ? dot / denom : 0.0f;
-    }
 
     // Determine if a memory should be a representative
     bool should_be_representative(int64_t memory_id, int64_t theme_id,

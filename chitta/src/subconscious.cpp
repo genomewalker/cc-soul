@@ -14,6 +14,10 @@ Subconscious::Subconscious(DuckDBMind* mind, SubconsciousConfig config)
     , config_(std::move(config))
 {
     // Compile pattern matchers
+    // NOTE: std::regex compilation is expensive (~ms each) but only happens once
+    // at construction. Runtime matching is also slow compared to RE2 or string
+    // matching, but acceptable on the background thread at low event rates.
+    //
     // Correction patterns: "no", "wrong", "actually", "that's not", "not X, Y"
     correction_pattern_ = std::regex(
         R"(\b(no[,.]?\s|wrong|actually|that's not|that is not|not\s+\w+[,]\s+)\b)",

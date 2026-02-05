@@ -24,7 +24,7 @@ namespace chitta {
 class ConnectionPool {
 public:
     ConnectionPool(duckdb::DuckDB& db, size_t max_size = 8)
-        : db_(db), max_size_(max_size), created_(0) {}
+        : db_(db), max_size_(max_size), created_(0), emergency_count_(0) {}
 
     // RAII wrapper for borrowed connection
     class ScopedConnection {
@@ -41,6 +41,13 @@ public:
         ScopedConnection& operator=(const ScopedConnection&) = delete;
         ScopedConnection(ScopedConnection&& other) noexcept
             : pool_(other.pool_), conn_(std::move(other.conn_)) {}
+        ScopedConnection& operator=(ScopedConnection&& other) noexcept {
+            if (this != &other) {
+                if (conn_) pool_.release(std::move(conn_));
+                conn_ = std::move(other.conn_);
+            }
+            return *this;
+        }
 
         duckdb::Connection& operator*() { return *conn_; }
         duckdb::Connection* operator->() { return conn_.get(); }
@@ -70,8 +77,11 @@ public:
         // Wait for a connection with timeout (prevents indefinite blocking)
         if (!cv_.wait_for(lock, timeout, [this] { return !pool_.empty(); })) {
             // Timeout - create emergency connection to prevent deadlock
-            // This temporarily exceeds max_size but prevents complete stall
+            // This temporarily exceeds max_size but prevents complete stall.
+            // Emergency connections are destroyed on release rather than returned
+            // to the pool, so the pool shrinks back to max_size_ over time.
             created_++;
+            emergency_count_++;
             lock.unlock();
             return ScopedConnection(*this, std::make_unique<duckdb::Connection>(db_));
         }
@@ -83,13 +93,21 @@ public:
 private:
     void release(std::unique_ptr<duckdb::Connection> conn) {
         std::lock_guard lock(mutex_);
-        pool_.push(std::move(conn));
-        cv_.notify_one();
+        if (created_ > max_size_ && emergency_count_ > 0) {
+            // Over capacity due to emergency connections — destroy instead of returning
+            emergency_count_--;
+            created_--;
+            // conn is destroyed when it goes out of scope
+        } else {
+            pool_.push(std::move(conn));
+            cv_.notify_one();
+        }
     }
 
     duckdb::DuckDB& db_;
     size_t max_size_;
     size_t created_;
+    size_t emergency_count_;  // Track emergency connections created beyond max_size_
     std::queue<std::unique_ptr<duckdb::Connection>> pool_;
     std::mutex mutex_;
     std::condition_variable cv_;
@@ -854,7 +872,6 @@ public:
 
     // Theme statistics and maintenance
     ThemeStats theme_stats(const std::string& realm = "");
-    size_t count_orphan_memories(const std::string& realm = "");
     std::vector<int64_t> get_orphan_memories(size_t limit = 100, const std::string& realm = "");
 
     // Theme maintenance results
