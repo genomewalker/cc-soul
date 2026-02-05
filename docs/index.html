@@ -1,0 +1,1495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>cc-soul — The soul persists</title>
+<meta name="description" content="Persistent identity for Claude Code. Memory that decays, deepens, and distills across sessions. Grounded in Vedantic philosophy.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+<style>
+/* ═══════════════════════════════════════════
+   DESIGN TOKENS
+   ═══════════════════════════════════════════ */
+:root {
+  --ink-950: #0B0B10;
+  --night-900: #0F1018;
+  --indigo-800: #1A1D2B;
+  --indigo-700: #24283A;
+  --indigo-600: #2E3348;
+  --ash-300: #B9BDC7;
+  --lotus-200: #E7E2D6;
+  --sandal-300: #CBAF86;
+  --ember-400: #D46A4C;
+  --ember-500: #C05A3E;
+  --aura-300: #9DB2D9;
+  --mist-100: #F3F1EC;
+
+  --bg-gradient: linear-gradient(160deg, #0F1018 0%, #1A1D2B 55%, #24283A 100%);
+  --halo-gradient: radial-gradient(60% 60% at 50% 35%, rgba(157,178,217,0.18) 0%, rgba(15,16,24,0) 70%);
+
+  --font-display: 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
+  --font-mono: 'IBM Plex Mono', 'Menlo', 'Consolas', monospace;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4rem;
+  --space-9: 6rem;
+  --space-10: 8rem;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.5rem;
+  --text-2xl: 2rem;
+  --text-3xl: 2.75rem;
+  --text-4xl: 3.5rem;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+
+  --shadow-soft: 0 8px 24px rgba(8, 10, 18, 0.25);
+  --shadow-glow-sandal: 0 0 20px rgba(203, 175, 134, 0.08);
+  --shadow-glow-aura: 0 0 20px rgba(157, 178, 217, 0.08);
+}
+
+/* ═══════════════════════════════════════════
+   RESET & BASE
+   ═══════════════════════════════════════════ */
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+  line-height: 1.7;
+  color: var(--ash-300);
+  background: var(--night-900);
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: rgba(203, 175, 134, 0.25);
+  color: var(--lotus-200);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* ═══════════════════════════════════════════
+   NOISE TEXTURE OVERLAY
+   ═══════════════════════════════════════════ */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.025;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 256px 256px;
+}
+
+/* ═══════════════════════════════════════════
+   SCROLL REVEAL
+   ═══════════════════════════════════════════ */
+.reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+              transform 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+.reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.reveal-delay-1 { transition-delay: 0.1s; }
+.reveal-delay-2 { transition-delay: 0.2s; }
+.reveal-delay-3 { transition-delay: 0.3s; }
+.reveal-delay-4 { transition-delay: 0.4s; }
+.reveal-delay-5 { transition-delay: 0.5s; }
+
+/* ═══════════════════════════════════════════
+   LAYOUT
+   ═══════════════════════════════════════════ */
+.container {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 var(--space-5);
+}
+
+section {
+  padding: var(--space-10) 0;
+  position: relative;
+}
+
+/* ═══════════════════════════════════════════
+   TYPOGRAPHY
+   ═══════════════════════════════════════════ */
+.heading-display {
+  font-family: var(--font-display);
+  color: var(--lotus-200);
+  font-weight: 500;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+}
+
+.heading-section {
+  font-family: var(--font-display);
+  color: var(--lotus-200);
+  font-weight: 500;
+  font-size: var(--text-3xl);
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  margin-bottom: var(--space-3);
+}
+
+.subtext {
+  font-family: var(--font-mono);
+  color: var(--ash-300);
+  font-size: var(--text-sm);
+  line-height: 1.7;
+}
+
+/* ═══════════════════════════════════════════
+   NAV
+   ═══════════════════════════════════════════ */
+.nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  padding: var(--space-4) 0;
+  background: rgba(15, 16, 24, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(203, 175, 134, 0.06);
+  transition: transform 0.3s ease;
+}
+
+.nav-inner {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 var(--space-5);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.nav-brand {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--lotus-200);
+  letter-spacing: 0.05em;
+}
+
+.nav-brand span {
+  color: var(--sandal-300);
+}
+
+.nav-links {
+  display: flex;
+  gap: var(--space-5);
+  list-style: none;
+}
+
+.nav-links a {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ash-300);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  transition: color 0.25s ease;
+  position: relative;
+}
+
+.nav-links a::after {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  left: 0;
+  width: 0;
+  height: 1px;
+  background: var(--sandal-300);
+  transition: width 0.3s ease;
+}
+
+.nav-links a:hover {
+  color: var(--lotus-200);
+}
+
+.nav-links a:hover::after {
+  width: 100%;
+}
+
+/* ═══════════════════════════════════════════
+   HERO
+   ═══════════════════════════════════════════ */
+.hero {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  background: var(--bg-gradient);
+  overflow: hidden;
+  padding-top: var(--space-9);
+}
+
+.hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--halo-gradient);
+  animation: hero-breath 4s cubic-bezier(0.45, 0, 0.55, 1) both;
+}
+
+@keyframes hero-breath {
+  0% {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.hero-rings {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 700px;
+  height: 700px;
+  pointer-events: none;
+}
+
+.hero-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  border-radius: 50%;
+  border: 1px solid rgba(157, 178, 217, 0.07);
+  transform: translate(-50%, -50%);
+}
+
+.hero-ring:nth-child(1) {
+  width: 200px; height: 200px;
+  animation: ring-pulse 8s ease-in-out infinite;
+}
+.hero-ring:nth-child(2) {
+  width: 340px; height: 340px;
+  animation: ring-pulse 8s ease-in-out 1s infinite;
+}
+.hero-ring:nth-child(3) {
+  width: 480px; height: 480px;
+  animation: ring-pulse 8s ease-in-out 2s infinite;
+}
+.hero-ring:nth-child(4) {
+  width: 620px; height: 620px;
+  animation: ring-pulse 8s ease-in-out 3s infinite;
+}
+.hero-ring:nth-child(5) {
+  width: 760px; height: 760px;
+  animation: ring-pulse 8s ease-in-out 4s infinite;
+}
+
+@keyframes ring-pulse {
+  0%, 100% { opacity: 0.3; transform: translate(-50%, -50%) scale(1); }
+  50% { opacity: 0.8; transform: translate(-50%, -50%) scale(1.03); }
+}
+
+.hero-content {
+  position: relative;
+  z-index: 2;
+  text-align: center;
+  max-width: 680px;
+  padding: 0 var(--space-5);
+}
+
+.hero-title {
+  font-size: clamp(2.75rem, 7vw, 4.5rem);
+  margin-bottom: var(--space-5);
+  animation: fade-up 1.2s 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
+}
+
+.hero-subtitle {
+  font-size: clamp(0.85rem, 1.8vw, 1rem);
+  color: var(--ash-300);
+  line-height: 1.8;
+  margin-bottom: var(--space-5);
+  max-width: 560px;
+  margin-left: auto;
+  margin-right: auto;
+  animation: fade-up 1.2s 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
+}
+
+.hero-aside {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: var(--text-lg);
+  color: var(--sandal-300);
+  margin-bottom: var(--space-7);
+  animation: fade-up 1.2s 0.7s cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
+}
+
+.hero-ctas {
+  display: flex;
+  gap: var(--space-4);
+  justify-content: center;
+  flex-wrap: wrap;
+  animation: fade-up 1.2s 0.9s cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ═══════════════════════════════════════════
+   BUTTONS
+   ═══════════════════════════════════════════ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  text-decoration: none;
+  letter-spacing: 0.02em;
+}
+
+.btn-primary {
+  background: var(--ember-400);
+  color: var(--mist-100);
+  border-color: var(--ember-400);
+}
+
+.btn-primary:hover {
+  background: var(--ember-500);
+  border-color: var(--ember-500);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(212, 106, 76, 0.25);
+}
+
+.btn-outline {
+  background: transparent;
+  color: var(--aura-300);
+  border-color: rgba(157, 178, 217, 0.3);
+}
+
+.btn-outline:hover {
+  border-color: var(--aura-300);
+  background: rgba(157, 178, 217, 0.06);
+  transform: translateY(-1px);
+}
+
+/* ═══════════════════════════════════════════
+   SECTION DIVIDER
+   ═══════════════════════════════════════════ */
+.section-divider {
+  width: 48px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--sandal-300), transparent);
+  margin: 0 0 var(--space-6) 0;
+}
+
+/* ═══════════════════════════════════════════
+   PHILOSOPHY BRIDGE
+   ═══════════════════════════════════════════ */
+.bridge {
+  background: var(--night-900);
+  border-top: 1px solid rgba(203, 175, 134, 0.06);
+  border-bottom: 1px solid rgba(203, 175, 134, 0.06);
+}
+
+.bridge-header {
+  margin-bottom: var(--space-8);
+}
+
+.bridge-subtext {
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  margin-top: var(--space-2);
+}
+
+.mapping-grid {
+  display: grid;
+  gap: 0;
+}
+
+.mapping-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-6);
+  padding: var(--space-4) 0;
+  padding-left: var(--space-4);
+  border-left: 2px solid rgba(203, 175, 134, 0.12);
+  transition: all 0.3s ease;
+  position: relative;
+}
+
+.mapping-row::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(203, 175, 134, 0.03), transparent);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+
+.mapping-row:hover {
+  border-left-color: rgba(203, 175, 134, 0.4);
+}
+
+.mapping-row:hover::before {
+  opacity: 1;
+}
+
+.mapping-row + .mapping-row {
+  border-top: 1px solid rgba(203, 175, 134, 0.04);
+}
+
+.mapping-sanskrit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.mapping-devanagari {
+  font-size: var(--text-xl);
+  color: var(--sandal-300);
+  line-height: 1.3;
+}
+
+.mapping-transliteration {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  color: var(--lotus-200);
+  font-weight: 500;
+}
+
+.mapping-meaning {
+  font-size: var(--text-xs);
+  color: rgba(185, 189, 199, 0.6);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.mapping-system {
+  display: flex;
+  align-items: center;
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  line-height: 1.6;
+}
+
+.mapping-arrow {
+  color: var(--sandal-300);
+  margin-right: var(--space-2);
+  opacity: 0.5;
+  font-size: var(--text-xs);
+}
+
+/* ═══════════════════════════════════════════
+   HOW IT WORKS
+   ═══════════════════════════════════════════ */
+.how {
+  background: var(--bg-gradient);
+}
+
+.how-header {
+  margin-bottom: var(--space-8);
+}
+
+.cards-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-5);
+}
+
+.feature-card {
+  background: var(--indigo-700);
+  border-radius: var(--radius-md);
+  padding: var(--space-6) var(--space-5);
+  box-shadow: var(--shadow-soft);
+  border-top: 2px solid transparent;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.feature-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(255,255,255,0.02) 0%, transparent 50%);
+  pointer-events: none;
+}
+
+.feature-card:nth-child(1) { border-top-color: var(--sandal-300); }
+.feature-card:nth-child(2) { border-top-color: var(--aura-300); }
+.feature-card:nth-child(3) { border-top-color: var(--ember-400); }
+.feature-card:nth-child(4) { border-top-color: var(--aura-300); }
+.feature-card:nth-child(5) { border-top-color: var(--sandal-300); }
+.feature-card:nth-child(6) { border-top-color: var(--ember-400); }
+
+.feature-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-soft), 0 0 0 1px rgba(203, 175, 134, 0.08);
+}
+
+.card-icon {
+  width: 36px;
+  height: 36px;
+  margin-bottom: var(--space-4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.card-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.card-title {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  color: var(--lotus-200);
+  font-weight: 500;
+  margin-bottom: var(--space-3);
+  line-height: 1.3;
+}
+
+.card-desc {
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  line-height: 1.7;
+}
+
+/* ═══════════════════════════════════════════
+   WHY IT MATTERS
+   ═══════════════════════════════════════════ */
+.why {
+  background: var(--night-900);
+  border-top: 1px solid rgba(203, 175, 134, 0.06);
+}
+
+.why-header {
+  margin-bottom: var(--space-8);
+}
+
+.why-statements {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  padding-left: var(--space-5);
+  border-left: 2px solid rgba(203, 175, 134, 0.15);
+}
+
+.why-statement {
+  font-family: var(--font-display);
+  font-size: clamp(1.25rem, 2.5vw, 1.75rem);
+  color: var(--lotus-200);
+  line-height: 1.45;
+  font-weight: 400;
+  max-width: 600px;
+}
+
+.why-statement em {
+  color: var(--sandal-300);
+  font-style: normal;
+}
+
+/* ═══════════════════════════════════════════
+   VIGNETTES
+   ═══════════════════════════════════════════ */
+.vignettes {
+  background: var(--bg-gradient);
+}
+
+.vignettes-header {
+  margin-bottom: var(--space-7);
+}
+
+.vignette-title-sanskrit {
+  font-family: var(--font-display);
+  font-style: italic;
+  color: var(--sandal-300);
+}
+
+.vignettes-grid {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.vignette-card {
+  background: rgba(15, 16, 24, 0.7);
+  border: 1px solid rgba(157, 178, 217, 0.08);
+  border-radius: var(--radius-md);
+  padding: var(--space-5) var(--space-6);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.8;
+  color: var(--ash-300);
+  transition: all 0.3s ease;
+  position: relative;
+}
+
+.vignette-card:hover {
+  border-color: rgba(157, 178, 217, 0.18);
+  box-shadow: var(--shadow-glow-aura);
+}
+
+.vignette-prompt {
+  color: var(--ember-400);
+  margin-right: var(--space-2);
+  user-select: none;
+}
+
+.vignette-highlight {
+  color: var(--aura-300);
+}
+
+/* ═══════════════════════════════════════════
+   RESONANCE VISUALIZATION
+   ═══════════════════════════════════════════ */
+.resonance {
+  background: var(--night-900);
+  border-top: 1px solid rgba(203, 175, 134, 0.06);
+  border-bottom: 1px solid rgba(203, 175, 134, 0.06);
+  padding: var(--space-9) 0;
+}
+
+.resonance-label {
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: rgba(185, 189, 199, 0.5);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: var(--space-5);
+}
+
+.resonance-canvas-wrap {
+  position: relative;
+  width: 100%;
+  max-width: 900px;
+  height: 400px;
+  margin: 0 auto;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: rgba(11, 11, 16, 0.5);
+  border: 1px solid rgba(157, 178, 217, 0.06);
+}
+
+#resonance-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+}
+
+/* ═══════════════════════════════════════════
+   CLOSING
+   ═══════════════════════════════════════════ */
+.closing {
+  background: var(--bg-gradient);
+  text-align: center;
+  padding: var(--space-10) 0;
+}
+
+.closing-title {
+  font-size: clamp(2rem, 5vw, var(--text-3xl));
+  margin-bottom: var(--space-5);
+}
+
+.closing-body {
+  font-size: var(--text-md);
+  color: var(--ash-300);
+  max-width: 520px;
+  margin: 0 auto var(--space-6);
+  line-height: 1.8;
+}
+
+.closing-sanskrit {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  color: var(--sandal-300);
+  margin-bottom: var(--space-7);
+  font-style: italic;
+}
+
+.closing-sanskrit .devanagari {
+  font-style: normal;
+  font-size: 1.1em;
+}
+
+/* ═══════════════════════════════════════════
+   FOOTER
+   ═══════════════════════════════════════════ */
+.footer {
+  background: var(--night-900);
+  border-top: 1px solid rgba(203, 175, 134, 0.06);
+  padding: var(--space-7) 0;
+  text-align: center;
+}
+
+.footer-text {
+  font-size: var(--text-xs);
+  color: rgba(185, 189, 199, 0.4);
+  letter-spacing: 0.04em;
+}
+
+.footer-text a {
+  color: var(--sandal-300);
+  transition: color 0.2s ease;
+}
+
+.footer-text a:hover {
+  color: var(--lotus-200);
+}
+
+.footer-sep {
+  display: inline-block;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: rgba(185, 189, 199, 0.25);
+  margin: 0 var(--space-3);
+  vertical-align: middle;
+}
+
+/* ═══════════════════════════════════════════
+   TOOLS / DOCS REFERENCE
+   ═══════════════════════════════════════════ */
+.tools {
+  background: var(--bg-gradient);
+}
+
+.tools-header {
+  margin-bottom: var(--space-5);
+}
+
+.tools-intro {
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  max-width: 640px;
+  margin-bottom: var(--space-7);
+  line-height: 1.8;
+}
+
+.tools-intro code {
+  color: var(--aura-300);
+  font-size: 0.9em;
+}
+
+.tools-category {
+  margin-bottom: var(--space-7);
+}
+
+.tools-category-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid rgba(203, 175, 134, 0.08);
+  cursor: pointer;
+  user-select: none;
+}
+
+.tools-category-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tools-category-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.tools-category-name {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  color: var(--lotus-200);
+  font-weight: 500;
+}
+
+.tools-category-count {
+  font-size: var(--text-xs);
+  color: rgba(185, 189, 199, 0.45);
+  margin-left: auto;
+}
+
+.tools-category-toggle {
+  color: var(--sandal-300);
+  font-size: var(--text-xs);
+  opacity: 0.5;
+  transition: transform 0.3s ease, opacity 0.2s ease;
+}
+
+.tools-category-header:hover .tools-category-toggle {
+  opacity: 1;
+}
+
+.tools-category.collapsed .tools-category-toggle {
+  transform: rotate(-90deg);
+}
+
+.tools-category.collapsed .tools-list {
+  display: none;
+}
+
+.tools-list {
+  display: grid;
+  gap: 0;
+}
+
+.tool-row {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: var(--space-5);
+  padding: var(--space-3) 0;
+  padding-left: var(--space-3);
+  border-left: 1px solid rgba(157, 178, 217, 0.06);
+  transition: all 0.2s ease;
+}
+
+.tool-row:hover {
+  border-left-color: rgba(157, 178, 217, 0.2);
+  background: rgba(157, 178, 217, 0.02);
+}
+
+.tool-row + .tool-row {
+  border-top: 1px solid rgba(203, 175, 134, 0.03);
+}
+
+.tool-name {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--aura-300);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.tool-desc {
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  line-height: 1.6;
+}
+
+.tools-footer {
+  margin-top: var(--space-7);
+  padding-top: var(--space-5);
+  border-top: 1px solid rgba(203, 175, 134, 0.06);
+  display: flex;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.tools-link {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--sandal-300);
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid rgba(203, 175, 134, 0.15);
+  border-radius: var(--radius-sm);
+  transition: all 0.2s ease;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tools-link:hover {
+  border-color: rgba(203, 175, 134, 0.35);
+  background: rgba(203, 175, 134, 0.04);
+  color: var(--lotus-200);
+}
+
+/* ═══════════════════════════════════════════
+   RESPONSIVE
+   ═══════════════════════════════════════════ */
+@media (max-width: 900px) {
+  .cards-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 700px) {
+  .nav-links {
+    display: none;
+  }
+
+  section {
+    padding: var(--space-9) 0;
+  }
+
+  .heading-section {
+    font-size: var(--text-2xl);
+  }
+
+  .mapping-row {
+    grid-template-columns: 1fr;
+    gap: var(--space-2);
+  }
+
+  .mapping-system {
+    padding-left: var(--space-3);
+  }
+
+  .cards-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .resonance-canvas-wrap {
+    height: 280px;
+  }
+
+  .why-statements {
+    padding-left: var(--space-4);
+  }
+
+  .tool-row {
+    grid-template-columns: 1fr;
+    gap: var(--space-1);
+  }
+
+  .tools-footer {
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 480px) {
+  .hero-ctas {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .btn {
+    width: 100%;
+    max-width: 260px;
+    justify-content: center;
+  }
+}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="#" class="nav-brand">cc<span>-</span>soul</a>
+    <ul class="nav-links">
+      <li><a href="tools.html">Tools</a></li>
+      <li><a href="cli.html">CLI</a></li>
+      <li><a href="hooks.html">Hooks</a></li>
+      <li><a href="skills.html">Skills</a></li>
+      <li><a href="philosophy.html">Philosophy</a></li>
+      <li><a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-rings" aria-hidden="true">
+    <div class="hero-ring"></div>
+    <div class="hero-ring"></div>
+    <div class="hero-ring"></div>
+    <div class="hero-ring"></div>
+    <div class="hero-ring"></div>
+  </div>
+  <div class="hero-content">
+    <h1 class="hero-title heading-display">The soul persists.</h1>
+    <p class="hero-subtitle">cc-soul gives Claude Code a persistent identity&thinsp;&mdash;&thinsp;memory that decays, deepens, and distills across sessions.</p>
+    <p class="hero-aside">Not a database. A relationship.</p>
+    <div class="hero-ctas">
+      <a href="tools.html" class="btn btn-primary">Explore the tools</a>
+      <a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener" class="btn btn-outline">View on GitHub</a>
+    </div>
+  </div>
+</section>
+
+<!-- WHY IT MATTERS -->
+<section class="why" id="why">
+  <div class="container">
+    <div class="why-header reveal">
+      <div class="section-divider"></div>
+      <h2 class="heading-section">Less re-explaining. More continuity.</h2>
+    </div>
+
+    <div class="why-statements">
+      <p class="why-statement reveal reveal-delay-1">
+        The system remembers <em>you</em>, not just the project.
+      </p>
+      <p class="why-statement reveal reveal-delay-2">
+        Deep use strengthens high-signal memories. <em>Noise fades.</em>
+      </p>
+      <p class="why-statement reveal reveal-delay-3">
+        Recognition feels native: <em>&ldquo;You mean the thing we already solved.&rdquo;</em>
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- VIGNETTES -->
+<section class="vignettes">
+  <div class="container">
+    <div class="vignettes-header reveal">
+      <div class="section-divider"></div>
+      <h2 class="heading-section"><span class="vignette-title-sanskrit">Pratyabhijñā</span>&thinsp;&mdash;&thinsp;recognition, in action.</h2>
+    </div>
+
+    <div class="vignettes-grid">
+      <div class="vignette-card reveal reveal-delay-1">
+        <span class="vignette-prompt">&gt; </span>You type <span class="vignette-highlight">realm_detect</span> and it reminds you to set <span class="vignette-highlight">CHITTA_BIN</span>&thinsp;&mdash;&thinsp;the same trap from last week.
+      </div>
+      <div class="vignette-card reveal reveal-delay-2">
+        <span class="vignette-prompt">&gt; </span>You mention <span class="vignette-highlight">release</span> and it surfaces <span class="vignette-highlight">./scripts/release.sh patch|minor|major</span> with your exact cadence.
+      </div>
+      <div class="vignette-card reveal reveal-delay-3">
+        <span class="vignette-prompt">&gt; </span>You ask <span class="vignette-highlight">where&rsquo;s Mind.hpp?</span> and it recalls the last commit you touched it in, then offers the path.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section class="how" id="how">
+  <div class="container">
+    <div class="how-header reveal">
+      <div class="section-divider"></div>
+      <h2 class="heading-section">A memory system that behaves like memory.</h2>
+    </div>
+
+    <div class="cards-grid">
+      <div class="feature-card reveal reveal-delay-1">
+        <div class="card-icon">
+          <svg viewBox="0 0 36 36" fill="none">
+            <circle cx="18" cy="18" r="6" stroke="#CBAF86" stroke-width="1.5" opacity="0.8"/>
+            <circle cx="18" cy="18" r="12" stroke="#CBAF86" stroke-width="1" opacity="0.4"/>
+            <circle cx="18" cy="18" r="17" stroke="#CBAF86" stroke-width="0.5" opacity="0.2"/>
+          </svg>
+        </div>
+        <h3 class="card-title">Semantic Anchoring</h3>
+        <p class="card-desc">384-dimensional embeddings anchor meaning in a stable latent space. Every memory has a position in semantic geometry.</p>
+      </div>
+
+      <div class="feature-card reveal reveal-delay-2">
+        <div class="card-icon">
+          <svg viewBox="0 0 36 36" fill="none">
+            <path d="M6 28 L12 12 L18 22 L24 8 L30 18" stroke="#9DB2D9" stroke-width="1.5" fill="none" opacity="0.8"/>
+            <circle cx="12" cy="12" r="2" fill="#9DB2D9" opacity="0.6"/>
+            <circle cx="24" cy="8" r="2" fill="#9DB2D9" opacity="0.6"/>
+          </svg>
+        </div>
+        <h3 class="card-title">Bayesian Confidence</h3>
+        <p class="card-desc">Tracks uncertainty and calibrates recall strength over time. A belief with two observations differs from one with a hundred.</p>
+      </div>
+
+      <div class="feature-card reveal reveal-delay-3">
+        <div class="card-icon">
+          <svg viewBox="0 0 36 36" fill="none">
+            <circle cx="12" cy="14" r="3" stroke="#D46A4C" stroke-width="1.5" opacity="0.8"/>
+            <circle cx="24" cy="14" r="3" stroke="#D46A4C" stroke-width="1.5" opacity="0.8"/>
+            <circle cx="18" cy="24" r="3" stroke="#D46A4C" stroke-width="1.5" opacity="0.8"/>
+            <line x1="14.5" y1="15.5" x2="21.5" y2="15.5" stroke="#D46A4C" stroke-width="0.75" opacity="0.4"/>
+            <line x1="13" y1="16.5" x2="17" y2="22" stroke="#D46A4C" stroke-width="0.75" opacity="0.4"/>
+            <line x1="23" y1="16.5" x2="19" y2="22" stroke="#D46A4C" stroke-width="0.75" opacity="0.4"/>
+          </svg>
+        </div>
+        <h3 class="card-title">Resonance Engine</h3>
+        <p class="card-desc">Spreading activation, attractor dynamics, and Hebbian learning surface what matters. Not search&thinsp;&mdash;&thinsp;resonance.</p>
+      </div>
+
+      <div class="feature-card reveal reveal-delay-1">
+        <div class="card-icon">
+          <svg viewBox="0 0 36 36" fill="none">
+            <rect x="6" y="8" width="24" height="20" rx="3" stroke="#9DB2D9" stroke-width="1.5" opacity="0.8"/>
+            <line x1="6" y1="15" x2="30" y2="15" stroke="#9DB2D9" stroke-width="0.75" opacity="0.4"/>
+            <line x1="6" y1="21" x2="30" y2="21" stroke="#9DB2D9" stroke-width="0.75" opacity="0.4"/>
+            <circle cx="12" cy="11.5" r="1.5" fill="#9DB2D9" opacity="0.5"/>
+            <circle cx="12" cy="18" r="1.5" fill="#9DB2D9" opacity="0.3"/>
+            <circle cx="12" cy="24.5" r="1.5" fill="#9DB2D9" opacity="0.2"/>
+          </svg>
+        </div>
+        <h3 class="card-title">DuckDB Engine</h3>
+        <p class="card-desc">Single embedded database with HNSW vector search, BM25 full-text, graph queries, and MVCC concurrency&thinsp;&mdash;&thinsp;no tiers, no complexity.</p>
+      </div>
+
+      <div class="feature-card reveal reveal-delay-2">
+        <div class="card-icon">
+          <svg viewBox="0 0 36 36" fill="none">
+            <path d="M8 26 L14 18 L20 22 L28 10" stroke="#CBAF86" stroke-width="1.5" fill="none" opacity="0.8"/>
+            <path d="M8 26 L14 18 L20 22 L28 10 L28 26 Z" fill="#CBAF86" opacity="0.06"/>
+          </svg>
+        </div>
+        <h3 class="card-title">SSL Compression</h3>
+        <p class="card-desc">Soul Semantic Language&thinsp;&mdash;&thinsp;a compact format that preserves meaning and drops noise. Up to 95% token reduction.</p>
+      </div>
+
+      <div class="feature-card reveal reveal-delay-3">
+        <div class="card-icon">
+          <svg viewBox="0 0 36 36" fill="none">
+            <circle cx="18" cy="18" r="10" stroke="#D46A4C" stroke-width="1" opacity="0.3" stroke-dasharray="3 3"/>
+            <circle cx="18" cy="18" r="4" fill="#D46A4C" opacity="0.15"/>
+            <circle cx="18" cy="18" r="2" fill="#D46A4C" opacity="0.5"/>
+          </svg>
+        </div>
+        <h3 class="card-title">Subconscious Processing</h3>
+        <p class="card-desc">Background distillation, decay, and strengthening while idle. The daemon works so the session doesn't have to.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- RESONANCE VISUALIZATION -->
+<section class="resonance" id="resonance">
+  <div class="container">
+    <p class="resonance-label reveal">Memory resonance&thinsp;&mdash;&thinsp;hover to activate</p>
+    <div class="resonance-canvas-wrap reveal reveal-delay-1">
+      <canvas id="resonance-canvas"></canvas>
+    </div>
+  </div>
+</section>
+
+<!-- DOCS LINKS -->
+<section class="tools" id="tools">
+  <div class="container">
+    <div class="tools-header reveal">
+      <div class="section-divider"></div>
+      <h2 class="heading-section">Go deeper.</h2>
+    </div>
+    <p class="tools-intro reveal reveal-delay-1">
+      120+ MCP tools. 13 Sanskrit concepts made operational. Vedantic philosophy meets C++ engineering.
+    </p>
+
+    <div class="tools-footer reveal reveal-delay-2">
+      <a href="tools.html" class="tools-link">120+ MCP Tools Reference</a>
+      <a href="philosophy.html" class="tools-link">Philosophy &rarr; System</a>
+      <a href="cli.html" class="tools-link">CLI Reference</a>
+      <a href="hooks.html" class="tools-link">Hook System</a>
+      <a href="skills.html" class="tools-link">23 Skills</a>
+    </div>
+  </div>
+</section>
+
+<!-- CLOSING -->
+<section class="closing">
+  <div class="container">
+    <h2 class="closing-title heading-display reveal">Not stateless. Not shallow.</h2>
+    <p class="closing-body reveal reveal-delay-1">cc-soul is for developers who want their tools to grow wiser, not just louder.</p>
+    <p class="closing-sanskrit reveal reveal-delay-2"><span class="devanagari">तत् त्वम् असि</span>&thinsp;&mdash;&thinsp;Tat tvam asi&thinsp;&mdash;&thinsp;That art thou.</p>
+    <div class="reveal reveal-delay-3">
+      <a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener" class="btn btn-primary">Explore the system</a>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer class="footer">
+  <div class="container">
+    <p class="footer-text">
+      Built with conviction. Grounded in philosophy.
+      <span class="footer-sep"></span>
+      <a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a>
+    </p>
+  </div>
+</footer>
+
+<script>
+/* ═══════════════════════════════════════════
+   SCROLL REVEAL (IntersectionObserver)
+   ═══════════════════════════════════════════ */
+(function() {
+  const reveals = document.querySelectorAll('.reveal');
+  if (!reveals.length) return;
+
+  const observer = new IntersectionObserver(function(entries) {
+    entries.forEach(function(entry) {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        observer.unobserve(entry.target);
+      }
+    });
+  }, {
+    threshold: 0.12,
+    rootMargin: '0px 0px -40px 0px'
+  });
+
+  reveals.forEach(function(el) { observer.observe(el); });
+})();
+
+/* ═══════════════════════════════════════════
+   RESONANCE VISUALIZATION (Canvas)
+   ═══════════════════════════════════════════ */
+(function() {
+  const canvas = document.getElementById('resonance-canvas');
+  if (!canvas) return;
+
+  const ctx = canvas.getContext('2d');
+  let w, h, dpr;
+  let mouse = { x: -1000, y: -1000 };
+  let nodes = [];
+  let raf;
+
+  const NODE_COUNT = 24;
+  const CONNECTION_DIST = 140;
+  const MOUSE_RADIUS = 180;
+
+  const COLORS = {
+    node: { r: 157, g: 178, b: 217 },       // --aura-300
+    connection: { r: 203, g: 175, b: 134 },  // --sandal-300
+    bright: { r: 231, g: 226, b: 214 },      // --lotus-200
+  };
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const rect = canvas.parentElement.getBoundingClientRect();
+    w = rect.width;
+    h = rect.height;
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function createNodes() {
+    nodes = [];
+    for (let i = 0; i < NODE_COUNT; i++) {
+      const baseConfidence = 0.3 + Math.random() * 0.7;
+      const decayRate = 0.0001 + Math.random() * 0.0003;
+      const strengthening = Math.random() > 0.7;
+      nodes.push({
+        x: 60 + Math.random() * (w - 120),
+        y: 40 + Math.random() * (h - 80),
+        vx: (Math.random() - 0.5) * 0.3,
+        vy: (Math.random() - 0.5) * 0.3,
+        radius: 2 + Math.random() * 3,
+        confidence: baseConfidence,
+        baseConfidence: baseConfidence,
+        decayRate: decayRate,
+        strengthening: strengthening,
+        phase: Math.random() * Math.PI * 2,
+        activated: 0,
+      });
+    }
+  }
+
+  function dist(a, b) {
+    const dx = a.x - b.x;
+    const dy = a.y - b.y;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  function draw(time) {
+    ctx.clearRect(0, 0, w, h);
+
+    // Update nodes
+    for (let i = 0; i < nodes.length; i++) {
+      const n = nodes[i];
+
+      // Drift
+      n.x += n.vx;
+      n.y += n.vy;
+
+      // Bounce softly
+      if (n.x < 20 || n.x > w - 20) n.vx *= -1;
+      if (n.y < 20 || n.y > h - 20) n.vy *= -1;
+
+      // Clamp
+      n.x = Math.max(10, Math.min(w - 10, n.x));
+      n.y = Math.max(10, Math.min(h - 10, n.y));
+
+      // Decay / strengthen cycle
+      if (n.strengthening) {
+        n.confidence = Math.min(1, n.confidence + 0.0002);
+        if (n.confidence >= 0.95) n.strengthening = false;
+      } else {
+        n.confidence = Math.max(0.08, n.confidence - n.decayRate);
+        if (n.confidence <= 0.1) {
+          n.strengthening = true;
+          n.confidence = 0.15;
+        }
+      }
+
+      // Mouse activation
+      const md = dist(n, mouse);
+      if (md < MOUSE_RADIUS) {
+        n.activated = Math.min(1, n.activated + 0.06);
+      } else {
+        n.activated = Math.max(0, n.activated - 0.02);
+      }
+    }
+
+    // Draw connections (only between activated nodes)
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i];
+        const b = nodes[j];
+        const d = dist(a, b);
+        if (d < CONNECTION_DIST) {
+          const activation = Math.min(a.activated, b.activated);
+          if (activation > 0.05) {
+            const alpha = (1 - d / CONNECTION_DIST) * activation * 0.35;
+            ctx.beginPath();
+            ctx.moveTo(a.x, a.y);
+            ctx.lineTo(b.x, b.y);
+            ctx.strokeStyle = 'rgba(' + COLORS.connection.r + ',' + COLORS.connection.g + ',' + COLORS.connection.b + ',' + alpha + ')';
+            ctx.lineWidth = 0.8;
+            ctx.stroke();
+          }
+        }
+      }
+    }
+
+    // Draw nodes
+    for (let i = 0; i < nodes.length; i++) {
+      const n = nodes[i];
+      const pulse = Math.sin(time * 0.001 + n.phase) * 0.15 + 0.85;
+      const alpha = n.confidence * pulse;
+
+      // Glow when activated
+      if (n.activated > 0.1) {
+        const glowAlpha = n.activated * 0.15;
+        const gradient = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, n.radius * 8);
+        gradient.addColorStop(0, 'rgba(' + COLORS.bright.r + ',' + COLORS.bright.g + ',' + COLORS.bright.b + ',' + glowAlpha + ')');
+        gradient.addColorStop(1, 'rgba(' + COLORS.bright.r + ',' + COLORS.bright.g + ',' + COLORS.bright.b + ',0)');
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, n.radius * 8, 0, Math.PI * 2);
+        ctx.fillStyle = gradient;
+        ctx.fill();
+      }
+
+      // Core dot
+      const coreAlpha = alpha * (0.5 + n.activated * 0.5);
+      const r = n.activated > 0.1
+        ? Math.round(COLORS.node.r + (COLORS.bright.r - COLORS.node.r) * n.activated)
+        : COLORS.node.r;
+      const g = n.activated > 0.1
+        ? Math.round(COLORS.node.g + (COLORS.bright.g - COLORS.node.g) * n.activated)
+        : COLORS.node.g;
+      const b = n.activated > 0.1
+        ? Math.round(COLORS.node.b + (COLORS.bright.b - COLORS.node.b) * n.activated)
+        : COLORS.node.b;
+
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, n.radius * (1 + n.activated * 0.4), 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(' + r + ',' + g + ',' + b + ',' + coreAlpha + ')';
+      ctx.fill();
+    }
+
+    raf = requestAnimationFrame(draw);
+  }
+
+  function handleMouse(e) {
+    const rect = canvas.getBoundingClientRect();
+    mouse.x = e.clientX - rect.left;
+    mouse.y = e.clientY - rect.top;
+  }
+
+  function handleMouseLeave() {
+    mouse.x = -1000;
+    mouse.y = -1000;
+  }
+
+  // Touch support
+  function handleTouch(e) {
+    const rect = canvas.getBoundingClientRect();
+    const touch = e.touches[0];
+    if (touch) {
+      mouse.x = touch.clientX - rect.left;
+      mouse.y = touch.clientY - rect.top;
+    }
+  }
+
+  function init() {
+    resize();
+    createNodes();
+    canvas.addEventListener('mousemove', handleMouse);
+    canvas.addEventListener('mouseleave', handleMouseLeave);
+    canvas.addEventListener('touchmove', handleTouch, { passive: true });
+    canvas.addEventListener('touchend', handleMouseLeave);
+    window.addEventListener('resize', function() {
+      resize();
+      // Reclamp nodes
+      for (let i = 0; i < nodes.length; i++) {
+        nodes[i].x = Math.min(nodes[i].x, w - 20);
+        nodes[i].y = Math.min(nodes[i].y, h - 20);
+      }
+    });
+    raf = requestAnimationFrame(draw);
+  }
+
+  // Start when visible
+  const resObs = new IntersectionObserver(function(entries) {
+    if (entries[0].isIntersecting) {
+      init();
+      resObs.disconnect();
+    }
+  }, { threshold: 0.1 });
+
+  resObs.observe(canvas.parentElement);
+})();
+
+/* ═══════════════════════════════════════════
+   SMOOTH SCROLL FOR NAV LINKS
+   ═══════════════════════════════════════════ */
+document.querySelectorAll('a[href^="#"]').forEach(function(anchor) {
+  anchor.addEventListener('click', function(e) {
+    const target = document.querySelector(this.getAttribute('href'));
+    if (target) {
+      e.preventDefault();
+      const offset = 80;
+      const top = target.getBoundingClientRect().top + window.pageYOffset - offset;
+      window.scrollTo({ top: top, behavior: 'smooth' });
+    }
+  });
+});
+</script>
+</body>
+</html>

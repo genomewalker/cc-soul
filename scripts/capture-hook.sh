@@ -22,7 +22,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
 
-# Binaries installed to ~/.claude/bin/ by setup.sh
+# Binaries installed to ~/.claude/bin/ by smart-install.sh
 CHITTA_BIN="${HOME}/.claude/bin/chitta"
 MIND_PATH="${HOME}/.claude/mind/chitta"
 CAPTURE_WARNED=false

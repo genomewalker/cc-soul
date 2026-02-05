@@ -1,0 +1,939 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CLI Reference — cc-soul</title>
+<meta name="description" content="CLI reference for cc-soul's two binaries: chittad (daemon) and chitta (client). Unix socket communication, TOON output, environment variables, and daemon internals.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink-950: #0B0B10;
+  --night-900: #0F1018;
+  --indigo-800: #1A1D2B;
+  --indigo-700: #24283A;
+  --indigo-600: #2E3348;
+  --ash-300: #B9BDC7;
+  --lotus-200: #E7E2D6;
+  --sandal-300: #CBAF86;
+  --ember-400: #D46A4C;
+  --ember-500: #C05A3E;
+  --aura-300: #9DB2D9;
+  --mist-100: #F3F1EC;
+
+  --bg-gradient: linear-gradient(160deg, #0F1018 0%, #1A1D2B 55%, #24283A 100%);
+  --halo-gradient: radial-gradient(60% 60% at 50% 35%, rgba(157,178,217,0.18) 0%, rgba(15,16,24,0) 70%);
+
+  --font-display: 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
+  --font-mono: 'IBM Plex Mono', 'Menlo', 'Consolas', monospace;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4rem;
+  --space-9: 6rem;
+  --space-10: 8rem;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.5rem;
+  --text-2xl: 2rem;
+  --text-3xl: 2.75rem;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+
+  --shadow-soft: 0 8px 24px rgba(8, 10, 18, 0.25);
+}
+
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+
+body {
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+  line-height: 1.7;
+  color: var(--ash-300);
+  background: var(--night-900);
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection { background: rgba(203, 175, 134, 0.25); color: var(--lotus-200); }
+a { color: inherit; text-decoration: none; }
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.025;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 256px 256px;
+}
+
+/* ═══ REVEAL ═══ */
+.reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+              transform 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+.reveal.visible { opacity: 1; transform: translateY(0); }
+.reveal-delay-1 { transition-delay: 0.1s; }
+.reveal-delay-2 { transition-delay: 0.2s; }
+
+/* ═══ LAYOUT ═══ */
+.container {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 var(--space-5);
+}
+
+/* ═══ NAV ═══ */
+.nav {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 100;
+  padding: var(--space-4) 0;
+  background: rgba(15, 16, 24, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(203, 175, 134, 0.06);
+}
+.nav-inner {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 var(--space-5);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.nav-brand {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--lotus-200);
+  letter-spacing: 0.05em;
+}
+.nav-brand span { color: var(--sandal-300); }
+.nav-links { display: flex; gap: var(--space-5); list-style: none; }
+.nav-links a {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ash-300);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  transition: color 0.25s ease;
+  position: relative;
+}
+.nav-links a::after {
+  content: '';
+  position: absolute;
+  bottom: -4px; left: 0;
+  width: 0; height: 1px;
+  background: var(--sandal-300);
+  transition: width 0.3s ease;
+}
+.nav-links a:hover { color: var(--lotus-200); }
+.nav-links a:hover::after { width: 100%; }
+.nav-links a.active { color: var(--sandal-300); }
+.nav-links a.active::after { width: 100%; }
+
+/* ═══ PAGE HEADER ═══ */
+.page-header {
+  padding: calc(var(--space-10) + 60px) 0 var(--space-9);
+  background: var(--bg-gradient);
+  position: relative;
+  overflow: hidden;
+}
+.page-header::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--halo-gradient);
+  opacity: 0.5;
+}
+.page-header .container { position: relative; z-index: 1; }
+.page-header-badge {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--sandal-300);
+  margin-bottom: var(--space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.page-header-badge::before {
+  content: '';
+  width: 32px;
+  height: 1px;
+  background: var(--sandal-300);
+  opacity: 0.5;
+}
+.page-header h1 {
+  font-family: var(--font-display);
+  color: var(--lotus-200);
+  font-weight: 500;
+  font-size: clamp(2rem, 5vw, var(--text-3xl));
+  line-height: 1.15;
+  margin-bottom: var(--space-5);
+}
+.page-header-sub {
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  max-width: 600px;
+  line-height: 1.8;
+}
+
+/* ═══ CATEGORY TOC ═══ */
+.toc {
+  padding: var(--space-7) 0;
+  border-bottom: 1px solid rgba(203, 175, 134, 0.06);
+}
+.toc-label {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(185, 189, 199, 0.5);
+  margin-bottom: var(--space-4);
+}
+.toc-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.toc-chip {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ash-300);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid rgba(157, 178, 217, 0.12);
+  border-radius: var(--radius-sm);
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+.toc-chip:hover {
+  border-color: rgba(157, 178, 217, 0.3);
+  color: var(--lotus-200);
+  background: rgba(157, 178, 217, 0.04);
+}
+
+/* ═══ TOOLS CATEGORIES (reused for CLI sections) ═══ */
+.tools-section {
+  padding: var(--space-8) 0;
+}
+
+.tools-category {
+  margin-bottom: var(--space-8);
+}
+
+.tools-category-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid rgba(203, 175, 134, 0.08);
+  cursor: pointer;
+  user-select: none;
+}
+.tools-category-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.tools-category-icon svg { width: 100%; height: 100%; }
+.tools-category-name {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  color: var(--lotus-200);
+  font-weight: 500;
+}
+.tools-category-count {
+  font-size: var(--text-xs);
+  color: rgba(185, 189, 199, 0.45);
+  margin-left: auto;
+}
+.tools-category-toggle {
+  color: var(--sandal-300);
+  font-size: var(--text-xs);
+  opacity: 0.5;
+  transition: transform 0.3s ease, opacity 0.2s ease;
+}
+.tools-category-header:hover .tools-category-toggle { opacity: 1; }
+.tools-category.collapsed .tools-category-toggle { transform: rotate(-90deg); }
+.tools-category.collapsed .tools-list,
+.tools-category.collapsed .category-body { display: none; }
+
+.tools-list { display: grid; gap: 0; }
+
+.tool-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-2);
+  padding: var(--space-4) 0;
+  padding-left: var(--space-3);
+  border-left: 1px solid rgba(157, 178, 217, 0.06);
+  transition: all 0.2s ease;
+}
+.tool-row:hover {
+  border-left-color: rgba(157, 178, 217, 0.2);
+  background: rgba(157, 178, 217, 0.02);
+}
+.tool-row + .tool-row {
+  border-top: 1px solid rgba(203, 175, 134, 0.03);
+}
+.tool-name {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--aura-300);
+  font-weight: 500;
+}
+.tool-desc {
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  line-height: 1.6;
+}
+
+/* ═══ CODE BLOCKS ═══ */
+.code-block {
+  background: rgba(15, 16, 24, 0.7);
+  border: 1px solid rgba(157, 178, 217, 0.08);
+  border-radius: var(--radius-md);
+  padding: var(--space-5) var(--space-6);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.8;
+  color: var(--ash-300);
+  overflow-x: auto;
+  margin: var(--space-4) 0;
+  transition: all 0.3s ease;
+}
+.code-block:hover {
+  border-color: rgba(157, 178, 217, 0.18);
+}
+.code-block .prompt {
+  color: var(--ember-400);
+  user-select: none;
+}
+.code-block .cmd {
+  color: var(--lotus-200);
+}
+.code-block .flag {
+  color: var(--aura-300);
+}
+.code-block .comment {
+  color: rgba(185, 189, 199, 0.4);
+}
+.code-block .string {
+  color: var(--sandal-300);
+}
+.code-block .key {
+  color: var(--aura-300);
+}
+.code-block .value {
+  color: var(--sandal-300);
+}
+.code-block .brace {
+  color: rgba(185, 189, 199, 0.5);
+}
+
+/* ═══ SECTION INTRO TEXT ═══ */
+.section-intro {
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  line-height: 1.8;
+  margin-bottom: var(--space-5);
+  max-width: 700px;
+}
+.section-intro code {
+  color: var(--aura-300);
+  font-size: 0.9em;
+}
+
+/* ═══ ENV TABLE ═══ */
+.env-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: var(--space-4) 0;
+}
+.env-table th,
+.env-table td {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  padding: var(--space-3) var(--space-4);
+  text-align: left;
+  border-bottom: 1px solid rgba(203, 175, 134, 0.06);
+}
+.env-table th {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(185, 189, 199, 0.5);
+  font-weight: 500;
+}
+.env-table td:first-child {
+  color: var(--aura-300);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.env-table td:last-child {
+  color: rgba(185, 189, 199, 0.6);
+  font-size: var(--text-xs);
+}
+.env-table tr:hover td {
+  background: rgba(157, 178, 217, 0.02);
+}
+
+/* ═══ INTERNALS LIST ═══ */
+.internals-list {
+  list-style: none;
+  padding: 0;
+  margin: var(--space-4) 0;
+}
+.internals-list li {
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  line-height: 1.7;
+  padding: var(--space-2) 0;
+  padding-left: var(--space-4);
+  border-left: 1px solid rgba(157, 178, 217, 0.06);
+  transition: border-color 0.2s ease;
+}
+.internals-list li:hover {
+  border-left-color: rgba(157, 178, 217, 0.2);
+}
+.internals-list li + li {
+  border-top: 1px solid rgba(203, 175, 134, 0.03);
+}
+.internals-list li code {
+  color: var(--aura-300);
+  font-size: 0.9em;
+}
+
+/* ═══ SCHEDULE GRID ═══ */
+.schedule-grid {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 0;
+  margin: var(--space-4) 0;
+}
+.schedule-interval {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--sandal-300);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid rgba(203, 175, 134, 0.04);
+  font-weight: 500;
+}
+.schedule-task {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid rgba(203, 175, 134, 0.04);
+}
+
+/* ═══ TOON COMPARISON ═══ */
+.toon-compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+  margin: var(--space-4) 0;
+}
+.toon-compare-label {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(185, 189, 199, 0.5);
+  margin-bottom: var(--space-2);
+}
+
+/* ═══ MODEL PATH ═══ */
+.path-chain {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin: var(--space-4) 0;
+  padding: var(--space-4) var(--space-5);
+  background: rgba(15, 16, 24, 0.5);
+  border: 1px solid rgba(157, 178, 217, 0.06);
+  border-radius: var(--radius-md);
+}
+.path-step {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--aura-300);
+}
+.path-arrow {
+  color: var(--sandal-300);
+  opacity: 0.5;
+  font-size: var(--text-xs);
+}
+.path-fallback {
+  font-size: var(--text-xs);
+  color: rgba(185, 189, 199, 0.4);
+}
+
+/* ═══ BACK LINK ═══ */
+.back-section {
+  padding: var(--space-8) 0;
+  text-align: center;
+}
+.back-link {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--sandal-300);
+  padding: var(--space-3) var(--space-5);
+  border: 1px solid rgba(203, 175, 134, 0.2);
+  border-radius: var(--radius-sm);
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.back-link:hover {
+  border-color: rgba(203, 175, 134, 0.4);
+  background: rgba(203, 175, 134, 0.04);
+  color: var(--lotus-200);
+}
+
+/* ═══ FOOTER ═══ */
+.footer {
+  background: var(--night-900);
+  border-top: 1px solid rgba(203, 175, 134, 0.06);
+  padding: var(--space-7) 0;
+  text-align: center;
+}
+.footer-text {
+  font-size: var(--text-xs);
+  color: rgba(185, 189, 199, 0.4);
+  letter-spacing: 0.04em;
+}
+.footer-text a { color: var(--sandal-300); transition: color 0.2s ease; }
+.footer-text a:hover { color: var(--lotus-200); }
+.footer-sep {
+  display: inline-block;
+  width: 3px; height: 3px;
+  border-radius: 50%;
+  background: rgba(185, 189, 199, 0.25);
+  margin: 0 var(--space-3);
+  vertical-align: middle;
+}
+
+/* ═══ RESPONSIVE ═══ */
+@media (max-width: 700px) {
+  .nav-links { display: none; }
+  .page-header h1 { font-size: var(--text-2xl); }
+  .toon-compare {
+    grid-template-columns: 1fr;
+  }
+  .schedule-grid {
+    grid-template-columns: 1fr;
+  }
+  .schedule-interval {
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+  .path-chain {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .path-arrow {
+    transform: rotate(90deg);
+  }
+  .env-table th:last-child,
+  .env-table td:last-child {
+    display: none;
+  }
+}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="index.html" class="nav-brand">cc<span>-</span>soul</a>
+    <ul class="nav-links">
+      <li><a href="index.html">Home</a></li>
+      <li><a href="tools.html">Tools</a></li>
+      <li><a href="cli.html" class="active">CLI</a></li>
+      <li><a href="hooks.html">Hooks</a></li>
+      <li><a href="skills.html">Skills</a></li>
+      <li><a href="philosophy.html">Philosophy</a></li>
+      <li><a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+  </div>
+</nav>
+
+<!-- PAGE HEADER -->
+<header class="page-header">
+  <div class="container">
+    <div class="page-header-badge reveal">CLI Reference</div>
+    <h1 class="reveal reveal-delay-1">Two binaries. One soul.</h1>
+    <p class="page-header-sub reveal reveal-delay-2"><code style="color: var(--aura-300);">chittad</code> runs the daemon. <code style="color: var(--aura-300);">chitta</code> talks to it. Both compiled from C++, communicating over Unix domain socket.</p>
+  </div>
+</header>
+
+<!-- TABLE OF CONTENTS -->
+<section class="toc">
+  <div class="container">
+    <p class="toc-label">Jump to section</p>
+    <div class="toc-grid">
+      <a href="#cat-daemon" class="toc-chip">chittad &mdash; Daemon</a>
+      <a href="#cat-client" class="toc-chip">chitta &mdash; CLI Mode</a>
+      <a href="#cat-thin" class="toc-chip">Thin Client Mode</a>
+      <a href="#cat-toon" class="toc-chip">TOON Output</a>
+      <a href="#cat-env" class="toc-chip">Environment Variables</a>
+      <a href="#cat-model" class="toc-chip">Model Path Resolution</a>
+      <a href="#cat-internals" class="toc-chip">Daemon Internals</a>
+    </div>
+  </div>
+</section>
+
+<!-- CLI SECTIONS -->
+<section class="tools-section">
+  <div class="container">
+
+    <!-- 1. CHITTAD — DAEMON -->
+    <div class="tools-category" id="cat-daemon">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="#CBAF86" stroke-width="1" opacity="0.4" stroke-dasharray="3 3"/><circle cx="10" cy="10" r="3" fill="#CBAF86" opacity="0.2"/><circle cx="10" cy="10" r="1.5" fill="#CBAF86" opacity="0.5"/></svg>
+        </div>
+        <span class="tools-category-name">chittad &mdash; Daemon</span>
+        <span class="tools-category-count">4 commands</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="category-body">
+        <div class="tools-list">
+          <div class="tool-row">
+            <span class="tool-name">chittad daemon [--foreground] [--path PATH] [--interval SECS]</span>
+            <span class="tool-desc">Run background daemon. Self-daemonizes by default (double-fork). Opens DuckDB, loads ONNX model, creates Unix socket, starts thread pool.</span>
+          </div>
+          <div class="tool-row">
+            <span class="tool-name">chittad shutdown</span>
+            <span class="tool-desc">Gracefully stop the running daemon via Unix socket.</span>
+          </div>
+          <div class="tool-row">
+            <span class="tool-name">chittad status</span>
+            <span class="tool-desc">Check if daemon is running and responsive.</span>
+          </div>
+          <div class="tool-row">
+            <span class="tool-name">chittad stats [--json] [--fast]</span>
+            <span class="tool-desc">Show soul statistics &mdash; nodes, coherence, ojas, yantra status.</span>
+          </div>
+        </div>
+        <div class="code-block">
+          <span class="comment"># Start daemon in foreground with custom path</span><br>
+          <span class="prompt">$ </span><span class="cmd">chittad</span> <span class="flag">daemon</span> <span class="flag">--foreground</span> <span class="flag">--path</span> <span class="string">~/.claude/mind</span><br><br>
+          <span class="comment"># Check status</span><br>
+          <span class="prompt">$ </span><span class="cmd">chittad</span> <span class="flag">status</span><br>
+          <span class="comment">chittad running (pid 41823, socket /tmp/chitta-a3f1.sock)</span><br><br>
+          <span class="comment"># Show stats in JSON</span><br>
+          <span class="prompt">$ </span><span class="cmd">chittad</span> <span class="flag">stats</span> <span class="flag">--json</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. CHITTA — CLIENT (CLI MODE) -->
+    <div class="tools-category" id="cat-client">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M7 5 L3 10 L7 15" stroke="#9DB2D9" stroke-width="1.2"/><path d="M13 5 L17 10 L13 15" stroke="#9DB2D9" stroke-width="1.2"/><line x1="11" y1="4" x2="9" y2="16" stroke="#9DB2D9" stroke-width="0.75" opacity="0.5"/></svg>
+        </div>
+        <span class="tools-category-name">chitta &mdash; Client (CLI Mode)</span>
+        <span class="tools-category-count">7 examples</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="category-body">
+        <p class="section-intro">Direct tool invocation with named arguments. The client connects to the running daemon via Unix socket and returns the result.</p>
+        <div class="code-block">
+          <span class="cmd">chitta</span> <span class="flag">&lt;tool-name&gt;</span> [<span class="flag">--param</span> <span class="string">value</span> ...]
+        </div>
+        <p class="section-intro" style="margin-top: var(--space-4);">Global options: <code>--socket-path</code>, <code>--json</code>, <code>--toon</code>, <code>--version</code>, <code>--help</code></p>
+        <div class="tools-list">
+          <div class="tool-row">
+            <span class="tool-name">chitta soul_context</span>
+            <span class="tool-desc">Check soul health &mdash; memory count, confidence distribution, realm info, uptime.</span>
+          </div>
+          <div class="tool-row">
+            <span class="tool-name">chitta recall --query "auth" --limit 5</span>
+            <span class="tool-desc">Semantic search &mdash; finds memories by meaning, not keyword match.</span>
+          </div>
+          <div class="tool-row">
+            <span class="tool-name">chitta full_resonate --query "caching" --k 5</span>
+            <span class="tool-desc">8-phase resonance &mdash; spreading activation, attractor dynamics, Hebbian recall.</span>
+          </div>
+          <div class="tool-row">
+            <span class="tool-name">chitta learn_codebase --path . --project "my-app"</span>
+            <span class="tool-desc">Index codebase &mdash; extract symbols, relationships, and call graphs via tree-sitter.</span>
+          </div>
+          <div class="tool-row">
+            <span class="tool-name">chitta read_symbol --name "Mind"</span>
+            <span class="tool-desc">Read symbol source code directly by name &mdash; avoids full file reads.</span>
+          </div>
+          <div class="tool-row">
+            <span class="tool-name">chitta find_symbol --name "UserService" --kind class</span>
+            <span class="tool-desc">Structural symbol search with optional kind filter (function, class, method).</span>
+          </div>
+          <div class="tool-row">
+            <span class="tool-name">chitta remember --content "[domain] pattern&rarr;insight"</span>
+            <span class="tool-desc">Store a memory in SSL format with automatic embedding and realm detection.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. THIN CLIENT MODE -->
+    <div class="tools-category" id="cat-thin">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M4 4 L10 4 L10 8 L16 8 L16 16 L4 16 Z" stroke="#D46A4C" stroke-width="1.2"/><line x1="7" y1="11" x2="13" y2="11" stroke="#D46A4C" stroke-width="0.75" opacity="0.5"/><line x1="7" y1="13" x2="11" y2="13" stroke="#D46A4C" stroke-width="0.75" opacity="0.5"/></svg>
+        </div>
+        <span class="tools-category-name">chitta &mdash; Thin Client Mode</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="category-body">
+        <p class="section-intro">When stdin is not a terminal, <code>chitta</code> forwards raw JSON-RPC to the daemon. This enables programmatic integration from scripts, hooks, and other tools.</p>
+        <div class="code-block">
+          <span class="prompt">$ </span><span class="cmd">echo</span> <span class="string">'{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"recall","arguments":{"query":"test"}}}'</span> | <span class="cmd">chitta</span>
+        </div>
+        <div class="code-block">
+          <span class="comment"># Response (JSON-RPC)</span><br>
+          <span class="brace">{</span><br>
+          &nbsp;&nbsp;<span class="key">"jsonrpc"</span>: <span class="string">"2.0"</span>,<br>
+          &nbsp;&nbsp;<span class="key">"id"</span>: <span class="value">1</span>,<br>
+          &nbsp;&nbsp;<span class="key">"result"</span>: <span class="brace">{</span><br>
+          &nbsp;&nbsp;&nbsp;&nbsp;<span class="key">"content"</span>: [<span class="brace">{</span><span class="key">"type"</span>: <span class="string">"text"</span>, <span class="key">"text"</span>: <span class="string">"..."</span><span class="brace">}</span>]<br>
+          &nbsp;&nbsp;<span class="brace">}</span><br>
+          <span class="brace">}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. TOON OUTPUT FORMAT -->
+    <div class="tools-category" id="cat-toon">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><rect x="3" y="3" width="14" height="14" rx="2" stroke="#CBAF86" stroke-width="1.2"/><line x1="7" y1="7" x2="13" y2="7" stroke="#CBAF86" stroke-width="0.75" opacity="0.6"/><line x1="7" y1="10" x2="13" y2="10" stroke="#CBAF86" stroke-width="0.75" opacity="0.6"/><line x1="7" y1="13" x2="10" y2="13" stroke="#CBAF86" stroke-width="0.75" opacity="0.6"/></svg>
+        </div>
+        <span class="tools-category-name">TOON Output Format</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="category-body">
+        <p class="section-intro">Token-Oriented Object Notation &mdash; ~40% fewer tokens than JSON, optimized for LLM consumption. Use <code>--toon</code> flag to enable.</p>
+        <div class="toon-compare">
+          <div>
+            <p class="toon-compare-label">--json</p>
+            <div class="code-block">
+              <span class="brace">{</span><br>
+              &nbsp;&nbsp;<span class="key">"memories"</span>: [<br>
+              &nbsp;&nbsp;&nbsp;&nbsp;<span class="brace">{</span><br>
+              &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="key">"id"</span>: <span class="string">"a3f1..."</span>,<br>
+              &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="key">"content"</span>: <span class="string">"cmake tip"</span>,<br>
+              &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="key">"confidence"</span>: <span class="value">0.85</span>,<br>
+              &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="key">"type"</span>: <span class="string">"solution"</span><br>
+              &nbsp;&nbsp;&nbsp;&nbsp;<span class="brace">}</span><br>
+              &nbsp;&nbsp;]<br>
+              <span class="brace">}</span>
+            </div>
+          </div>
+          <div>
+            <p class="toon-compare-label">--toon</p>
+            <div class="code-block">
+              <span class="flag">memories</span>:<br>
+              &nbsp;&nbsp;<span class="key">id</span>=<span class="string">a3f1...</span><br>
+              &nbsp;&nbsp;<span class="key">content</span>=<span class="string">cmake tip</span><br>
+              &nbsp;&nbsp;<span class="key">confidence</span>=<span class="value">0.85</span><br>
+              &nbsp;&nbsp;<span class="key">type</span>=<span class="value">solution</span><br>
+              <span class="flag">---</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5. ENVIRONMENT VARIABLES -->
+    <div class="tools-category" id="cat-env">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><rect x="4" y="3" width="12" height="14" rx="1.5" stroke="#9DB2D9" stroke-width="1.2"/><line x1="7" y1="6" x2="13" y2="6" stroke="#9DB2D9" stroke-width="0.75" opacity="0.5"/><line x1="7" y1="9" x2="13" y2="9" stroke="#9DB2D9" stroke-width="0.75" opacity="0.5"/><line x1="7" y1="12" x2="11" y2="12" stroke="#9DB2D9" stroke-width="0.75" opacity="0.5"/></svg>
+        </div>
+        <span class="tools-category-name">Environment Variables</span>
+        <span class="tools-category-count">5 variables</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="category-body">
+        <table class="env-table">
+          <thead>
+            <tr>
+              <th>Variable</th>
+              <th>Description</th>
+              <th>Default</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>CHITTA_DB_PATH</td>
+              <td>Mind storage directory</td>
+              <td>~/.claude/mind</td>
+            </tr>
+            <tr>
+              <td>CLAUDE_PLUGIN_ROOT</td>
+              <td>Plugin root for model paths</td>
+              <td>&mdash;</td>
+            </tr>
+            <tr>
+              <td>SUBCONSCIOUS_INTERVAL</td>
+              <td>Daemon cycle interval in seconds</td>
+              <td>60</td>
+            </tr>
+            <tr>
+              <td>CHITTAD_BIN</td>
+              <td>Path to chittad binary</td>
+              <td>~/.claude/bin/chittad</td>
+            </tr>
+            <tr>
+              <td>CHITTA_BIN</td>
+              <td>Path to chitta binary</td>
+              <td>~/.claude/bin/chitta</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 6. MODEL PATH RESOLUTION -->
+    <div class="tools-category" id="cat-model">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M5 10 L10 5 L15 10" stroke="#D46A4C" stroke-width="1.2"/><line x1="10" y1="5" x2="10" y2="15" stroke="#D46A4C" stroke-width="1.2"/><line x1="4" y1="17" x2="16" y2="17" stroke="#D46A4C" stroke-width="0.75" opacity="0.4"/></svg>
+        </div>
+        <span class="tools-category-name">Model Path Resolution</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="category-body">
+        <p class="section-intro">The daemon searches for the ONNX model (all-MiniLM-L6-v2) in this order:</p>
+        <div class="path-chain">
+          <span class="path-step">$CLAUDE_PLUGIN_ROOT/chitta/models/</span>
+          <span class="path-arrow">&rarr;</span>
+          <span class="path-step">~/.claude/models/</span>
+          <span class="path-arrow">&rarr;</span>
+          <span class="path-step">~/.claude/mind/</span>
+          <span class="path-fallback">(legacy)</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 7. DAEMON INTERNALS -->
+    <div class="tools-category" id="cat-internals">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="#CBAF86" stroke-width="1" stroke-dasharray="2 2"/><path d="M10 6 L10 10 L13 13" stroke="#CBAF86" stroke-width="1.2"/></svg>
+        </div>
+        <span class="tools-category-name">Daemon Internals</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="category-body">
+        <p class="section-intro">What happens when <code>chittad daemon</code> starts:</p>
+        <ul class="internals-list">
+          <li>Opens DuckDB at <code>{path}/chitta.duckdb</code></li>
+          <li>Loads ONNX model (<code>all-MiniLM-L6-v2</code>, 384 dimensions)</li>
+          <li>Creates Unix socket at <code>/tmp/chitta-{hash}.sock</code></li>
+          <li>Starts thread pool (2&ndash;16 workers)</li>
+          <li>Begins subconscious processing loop</li>
+        </ul>
+
+        <p class="section-intro" style="margin-top: var(--space-6);">Subconscious schedule:</p>
+        <div class="schedule-grid">
+          <span class="schedule-interval">Every 1s</span>
+          <span class="schedule-task">Check for work</span>
+          <span class="schedule-interval">Every 30s</span>
+          <span class="schedule-task">Process embedding queue (batch of 20)</span>
+          <span class="schedule-interval">Every 30min</span>
+          <span class="schedule-task">Hygiene cycle &mdash; decay, prune, consolidate</span>
+          <span class="schedule-interval">Every 60min</span>
+          <span class="schedule-task">Theme maintenance</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- BACK -->
+<section class="back-section">
+  <div class="container">
+    <a href="index.html" class="back-link">&larr; Back to cc-soul</a>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer class="footer">
+  <div class="container">
+    <p class="footer-text">
+      Built with conviction. Grounded in philosophy.
+      <span class="footer-sep"></span>
+      <a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a>
+    </p>
+  </div>
+</footer>
+
+<script>
+/* Scroll reveal */
+(function() {
+  var reveals = document.querySelectorAll('.reveal');
+  if (!reveals.length) return;
+  var observer = new IntersectionObserver(function(entries) {
+    entries.forEach(function(entry) {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+  reveals.forEach(function(el) { observer.observe(el); });
+})();
+
+/* Smooth scroll for TOC chips */
+document.querySelectorAll('a[href^="#"]').forEach(function(anchor) {
+  anchor.addEventListener('click', function(e) {
+    var target = document.querySelector(this.getAttribute('href'));
+    if (target) {
+      e.preventDefault();
+      var offset = 80;
+      var top = target.getBoundingClientRect().top + window.pageYOffset - offset;
+      window.scrollTo({ top: top, behavior: 'smooth' });
+      /* Expand the category if collapsed */
+      if (target.classList.contains('collapsed')) {
+        target.classList.remove('collapsed');
+      }
+    }
+  });
+});
+</script>
+</body>
+</html>

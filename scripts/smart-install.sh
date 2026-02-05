@@ -165,7 +165,7 @@ build_from_source() {
     done
 
     # Copy shared libraries if present
-    for lib in libonnxruntime.so libonnxruntime.so.1.16.3 libsqlite3.so; do
+    for lib in libonnxruntime.so libonnxruntime.so.1.16.3; do
         if [[ -f "$plugin_bin/$lib" ]]; then
             cp -f "$plugin_bin/$lib" "$BIN_DIR/$lib"
         fi
@@ -488,6 +488,11 @@ main() {
     if ! validate_binaries; then
         echo "[cc-soul] ERROR: Installation incomplete (invalid binaries)" >&2
         exit 1
+    fi
+
+    # Run database migrations if needed
+    if [[ -f "${HOME}/.claude/mind/chitta.duckdb" && -x "$BIN_DIR/chittad" ]]; then
+        "$BIN_DIR/chittad" upgrade --path "${HOME}/.claude/mind" 2>/dev/null | grep -E "^\[migrations\]|Already at" || true
     fi
 
     # Version change notification

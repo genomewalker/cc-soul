@@ -1,0 +1,1003 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hook System — cc-soul</title>
+<meta name="description" content="Lifecycle-aware memory hooks for cc-soul. Plugin hooks and settings hooks connect Claude Code events to the soul — session start, prompts, responses, tool use, and compaction.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink-950: #0B0B10;
+  --night-900: #0F1018;
+  --indigo-800: #1A1D2B;
+  --indigo-700: #24283A;
+  --indigo-600: #2E3348;
+  --ash-300: #B9BDC7;
+  --lotus-200: #E7E2D6;
+  --sandal-300: #CBAF86;
+  --ember-400: #D46A4C;
+  --ember-500: #C05A3E;
+  --aura-300: #9DB2D9;
+  --mist-100: #F3F1EC;
+
+  --bg-gradient: linear-gradient(160deg, #0F1018 0%, #1A1D2B 55%, #24283A 100%);
+  --halo-gradient: radial-gradient(60% 60% at 50% 35%, rgba(157,178,217,0.18) 0%, rgba(15,16,24,0) 70%);
+
+  --font-display: 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
+  --font-mono: 'IBM Plex Mono', 'Menlo', 'Consolas', monospace;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4rem;
+  --space-9: 6rem;
+  --space-10: 8rem;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.5rem;
+  --text-2xl: 2rem;
+  --text-3xl: 2.75rem;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+
+  --shadow-soft: 0 8px 24px rgba(8, 10, 18, 0.25);
+}
+
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+
+body {
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+  line-height: 1.7;
+  color: var(--ash-300);
+  background: var(--night-900);
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection { background: rgba(203, 175, 134, 0.25); color: var(--lotus-200); }
+a { color: inherit; text-decoration: none; }
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.025;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 256px 256px;
+}
+
+/* ═══ REVEAL ═══ */
+.reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+              transform 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+.reveal.visible { opacity: 1; transform: translateY(0); }
+.reveal-delay-1 { transition-delay: 0.1s; }
+.reveal-delay-2 { transition-delay: 0.2s; }
+
+/* ═══ LAYOUT ═══ */
+.container {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 var(--space-5);
+}
+
+/* ═══ NAV ═══ */
+.nav {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 100;
+  padding: var(--space-4) 0;
+  background: rgba(15, 16, 24, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(203, 175, 134, 0.06);
+}
+.nav-inner {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 var(--space-5);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.nav-brand {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--lotus-200);
+  letter-spacing: 0.05em;
+}
+.nav-brand span { color: var(--sandal-300); }
+.nav-links { display: flex; gap: var(--space-5); list-style: none; }
+.nav-links a {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ash-300);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  transition: color 0.25s ease;
+  position: relative;
+}
+.nav-links a::after {
+  content: '';
+  position: absolute;
+  bottom: -4px; left: 0;
+  width: 0; height: 1px;
+  background: var(--sandal-300);
+  transition: width 0.3s ease;
+}
+.nav-links a:hover { color: var(--lotus-200); }
+.nav-links a:hover::after { width: 100%; }
+.nav-links a.active { color: var(--sandal-300); }
+.nav-links a.active::after { width: 100%; }
+
+/* ═══ PAGE HEADER ═══ */
+.page-header {
+  padding: calc(var(--space-10) + 60px) 0 var(--space-9);
+  background: var(--bg-gradient);
+  position: relative;
+  overflow: hidden;
+}
+.page-header::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--halo-gradient);
+  opacity: 0.5;
+}
+.page-header .container { position: relative; z-index: 1; }
+.page-header-badge {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--sandal-300);
+  margin-bottom: var(--space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.page-header-badge::before {
+  content: '';
+  width: 32px;
+  height: 1px;
+  background: var(--sandal-300);
+  opacity: 0.5;
+}
+.page-header h1 {
+  font-family: var(--font-display);
+  color: var(--lotus-200);
+  font-weight: 500;
+  font-size: clamp(2rem, 5vw, var(--text-3xl));
+  line-height: 1.15;
+  margin-bottom: var(--space-5);
+}
+.page-header-sub {
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  max-width: 600px;
+  line-height: 1.8;
+}
+
+/* ═══ CATEGORY TOC ═══ */
+.toc {
+  padding: var(--space-7) 0;
+  border-bottom: 1px solid rgba(203, 175, 134, 0.06);
+}
+.toc-label {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(185, 189, 199, 0.5);
+  margin-bottom: var(--space-4);
+}
+.toc-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.toc-chip {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ash-300);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid rgba(157, 178, 217, 0.12);
+  border-radius: var(--radius-sm);
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+.toc-chip:hover {
+  border-color: rgba(157, 178, 217, 0.3);
+  color: var(--lotus-200);
+  background: rgba(157, 178, 217, 0.04);
+}
+
+/* ═══ SECTION DIVIDER ═══ */
+.section-divider {
+  width: 48px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--sandal-300), transparent);
+  margin: 0 0 var(--space-6) 0;
+}
+
+/* ═══ TOOLS CATEGORIES (collapsible sections) ═══ */
+.tools-section {
+  padding: var(--space-8) 0;
+}
+
+.tools-category {
+  margin-bottom: var(--space-8);
+}
+
+.tools-category-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid rgba(203, 175, 134, 0.08);
+  cursor: pointer;
+  user-select: none;
+}
+.tools-category-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.tools-category-icon svg { width: 100%; height: 100%; }
+.tools-category-name {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  color: var(--lotus-200);
+  font-weight: 500;
+}
+.tools-category-count {
+  font-size: var(--text-xs);
+  color: rgba(185, 189, 199, 0.45);
+  margin-left: auto;
+}
+.tools-category-toggle {
+  color: var(--sandal-300);
+  font-size: var(--text-xs);
+  opacity: 0.5;
+  transition: transform 0.3s ease, opacity 0.2s ease;
+}
+.tools-category-header:hover .tools-category-toggle { opacity: 1; }
+.tools-category.collapsed .tools-category-toggle { transform: rotate(-90deg); }
+.tools-category.collapsed .tools-list,
+.tools-category.collapsed .tools-content { display: none; }
+
+.tools-list { display: grid; gap: 0; }
+
+.tool-row {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: var(--space-5);
+  padding: var(--space-3) 0;
+  padding-left: var(--space-3);
+  border-left: 1px solid rgba(157, 178, 217, 0.06);
+  transition: all 0.2s ease;
+}
+.tool-row:hover {
+  border-left-color: rgba(157, 178, 217, 0.2);
+  background: rgba(157, 178, 217, 0.02);
+}
+.tool-row + .tool-row {
+  border-top: 1px solid rgba(203, 175, 134, 0.03);
+}
+.tool-name {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--aura-300);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.tool-desc {
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  line-height: 1.6;
+}
+
+/* ═══ EVENT MAPPING GRID ═══ */
+.mapping-grid {
+  display: grid;
+  gap: 0;
+}
+
+.mapping-row {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: var(--space-6);
+  padding: var(--space-5) 0;
+  padding-left: var(--space-5);
+  border-left: 2px solid rgba(203, 175, 134, 0.12);
+  transition: all 0.3s ease;
+  position: relative;
+}
+.mapping-row::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(203, 175, 134, 0.03), transparent);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+.mapping-row:hover { border-left-color: rgba(203, 175, 134, 0.4); }
+.mapping-row:hover::before { opacity: 1; }
+.mapping-row + .mapping-row {
+  border-top: 1px solid rgba(203, 175, 134, 0.04);
+}
+
+.mapping-event {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.mapping-event-name {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--sandal-300);
+  font-weight: 500;
+}
+.mapping-event-when {
+  font-size: var(--text-xs);
+  color: rgba(185, 189, 199, 0.6);
+  line-height: 1.5;
+}
+.mapping-actions {
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  line-height: 1.7;
+  padding-top: var(--space-1);
+}
+.mapping-actions ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.mapping-actions li {
+  position: relative;
+  padding-left: var(--space-5);
+  margin-bottom: var(--space-1);
+}
+.mapping-actions li::before {
+  content: '\2192';
+  position: absolute;
+  left: 0;
+  color: var(--sandal-300);
+  opacity: 0.5;
+  font-size: var(--text-xs);
+}
+
+/* ═══ HOOK MODES ═══ */
+.modes-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-6);
+}
+.mode-card {
+  padding: var(--space-5);
+  border: 1px solid rgba(157, 178, 217, 0.08);
+  border-radius: var(--radius-md);
+  transition: all 0.3s ease;
+}
+.mode-card:hover {
+  border-color: rgba(157, 178, 217, 0.2);
+  background: rgba(157, 178, 217, 0.02);
+}
+.mode-label {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  color: var(--lotus-200);
+  font-weight: 500;
+  margin-bottom: var(--space-3);
+}
+.mode-desc {
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  line-height: 1.7;
+  margin-bottom: var(--space-3);
+}
+.mode-detail {
+  font-size: var(--text-xs);
+  color: rgba(185, 189, 199, 0.5);
+  line-height: 1.6;
+}
+.mode-detail code {
+  color: var(--aura-300);
+  font-family: var(--font-mono);
+}
+
+/* ═══ DETECTION LIST ═══ */
+.detection-grid {
+  display: grid;
+  gap: 0;
+}
+.detection-row {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: var(--space-5);
+  padding: var(--space-3) 0;
+  padding-left: var(--space-3);
+  border-left: 1px solid rgba(212, 106, 76, 0.12);
+  transition: all 0.2s ease;
+}
+.detection-row:hover {
+  border-left-color: rgba(212, 106, 76, 0.35);
+  background: rgba(212, 106, 76, 0.02);
+}
+.detection-row + .detection-row {
+  border-top: 1px solid rgba(203, 175, 134, 0.03);
+}
+.detection-trigger {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--ember-400);
+  font-weight: 500;
+}
+.detection-action {
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  line-height: 1.6;
+}
+.detection-patterns {
+  font-size: var(--text-xs);
+  color: rgba(185, 189, 199, 0.5);
+  margin-top: var(--space-1);
+}
+.detection-patterns code {
+  color: var(--aura-300);
+  font-family: var(--font-mono);
+  background: rgba(157, 178, 217, 0.06);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+/* ═══ CODE BLOCK ═══ */
+.code-block {
+  background: rgba(15, 16, 24, 0.8);
+  border: 1px solid rgba(157, 178, 217, 0.08);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+  overflow-x: auto;
+  margin-top: var(--space-4);
+}
+.code-block pre {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ash-300);
+  line-height: 1.8;
+  margin: 0;
+}
+.code-block .code-key { color: var(--aura-300); }
+.code-block .code-str { color: var(--sandal-300); }
+.code-block .code-punct { color: rgba(185, 189, 199, 0.4); }
+
+/* ═══ CONTENT SECTION ═══ */
+.tools-content {
+  padding-left: var(--space-3);
+  border-left: 1px solid rgba(157, 178, 217, 0.06);
+}
+.content-text {
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  line-height: 1.7;
+  margin-bottom: var(--space-5);
+}
+.content-text code {
+  color: var(--aura-300);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  background: rgba(157, 178, 217, 0.06);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+/* ═══ BACK LINK ═══ */
+.back-section {
+  padding: var(--space-8) 0;
+  text-align: center;
+}
+.back-link {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--sandal-300);
+  padding: var(--space-3) var(--space-5);
+  border: 1px solid rgba(203, 175, 134, 0.2);
+  border-radius: var(--radius-sm);
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.back-link:hover {
+  border-color: rgba(203, 175, 134, 0.4);
+  background: rgba(203, 175, 134, 0.04);
+  color: var(--lotus-200);
+}
+
+/* ═══ FOOTER ═══ */
+.footer {
+  background: var(--night-900);
+  border-top: 1px solid rgba(203, 175, 134, 0.06);
+  padding: var(--space-7) 0;
+  text-align: center;
+}
+.footer-text {
+  font-size: var(--text-xs);
+  color: rgba(185, 189, 199, 0.4);
+  letter-spacing: 0.04em;
+}
+.footer-text a { color: var(--sandal-300); transition: color 0.2s ease; }
+.footer-text a:hover { color: var(--lotus-200); }
+.footer-sep {
+  display: inline-block;
+  width: 3px; height: 3px;
+  border-radius: 50%;
+  background: rgba(185, 189, 199, 0.25);
+  margin: 0 var(--space-3);
+  vertical-align: middle;
+}
+
+/* ═══ RESPONSIVE ═══ */
+@media (max-width: 700px) {
+  .nav-links { display: none; }
+  .tool-row,
+  .mapping-row,
+  .detection-row {
+    grid-template-columns: 1fr;
+    gap: var(--space-1);
+  }
+  .modes-grid { grid-template-columns: 1fr; }
+  .page-header h1 { font-size: var(--text-2xl); }
+}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="index.html" class="nav-brand">cc<span>-</span>soul</a>
+    <ul class="nav-links">
+      <li><a href="index.html">Home</a></li>
+      <li><a href="tools.html">Tools</a></li>
+      <li><a href="cli.html">CLI</a></li>
+      <li><a href="hooks.html" class="active">Hooks</a></li>
+      <li><a href="skills.html">Skills</a></li>
+      <li><a href="philosophy.html">Philosophy</a></li>
+      <li><a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+  </div>
+</nav>
+
+<!-- PAGE HEADER -->
+<header class="page-header">
+  <div class="container">
+    <div class="page-header-badge reveal">Hook System</div>
+    <h1 class="reveal reveal-delay-1">Lifecycle-aware memory.</h1>
+    <p class="page-header-sub reveal reveal-delay-2">Hooks inject memories at the right moment. Two modes: plugin hooks (<code style="color: var(--aura-300);">hooks.json</code>) and settings hooks (<code style="color: var(--aura-300);">~/.claude/settings.json</code>). Both connect Claude&rsquo;s lifecycle to the soul.</p>
+  </div>
+</header>
+
+<!-- TABLE OF CONTENTS -->
+<section class="toc">
+  <div class="container">
+    <p class="toc-label">Jump to section</p>
+    <div class="toc-grid">
+      <a href="#sec-events" class="toc-chip">Event Types</a>
+      <a href="#sec-modes" class="toc-chip">Two Hook Modes</a>
+      <a href="#sec-learning" class="toc-chip">Proactive Learning</a>
+      <a href="#sec-anticipation" class="toc-chip">Anticipation</a>
+      <a href="#sec-scripts" class="toc-chip">Key Scripts</a>
+      <a href="#sec-socket" class="toc-chip">Socket Communication</a>
+      <a href="#sec-installation" class="toc-chip">Installation</a>
+    </div>
+  </div>
+</section>
+
+<!-- CONTENT -->
+<section class="tools-section">
+  <div class="container">
+
+    <!-- 1. EVENT TYPES -->
+    <div class="tools-category" id="sec-events">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M3 10 L8 5 L8 8 L17 8 L17 12 L8 12 L8 15 Z" stroke="#CBAF86" stroke-width="1.2" fill="none"/></svg>
+        </div>
+        <span class="tools-category-name">Event Types</span>
+        <span class="tools-category-count">6 events</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-content">
+        <div class="mapping-grid">
+
+          <div class="mapping-row reveal">
+            <div class="mapping-event">
+              <span class="mapping-event-name">SessionStart</span>
+              <span class="mapping-event-when">When Claude starts</span>
+            </div>
+            <div class="mapping-actions">
+              <ul>
+                <li>Realm detection from environment, <code>.cc-soul-realm</code>, or git repo</li>
+                <li>Incremental codebase re-indexing (only changed files)</li>
+                <li>Transcript registration for distillation tracking</li>
+                <li>Soul context + user profile injection into system prompt</li>
+                <li>Active goals and behavioral corrections loaded</li>
+                <li>Ledger checkpoint restored for session continuity</li>
+                <li>Git diff awareness &mdash; surfaces recent changes</li>
+                <li>Daemon start if not already running</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="mapping-row reveal">
+            <div class="mapping-event">
+              <span class="mapping-event-name">UserPromptSubmit</span>
+              <span class="mapping-event-when">When user sends message</span>
+            </div>
+            <div class="mapping-actions">
+              <ul>
+                <li>Context recovery on &ldquo;continue&rdquo; / &ldquo;resume&rdquo; keywords</li>
+                <li>Learning opportunity detection (corrections, preferences, frustration, milestones)</li>
+                <li><code>full_resonate</code> search &mdash; semantic recall with realm filtering</li>
+                <li>Code symbol injection for files referenced in the prompt</li>
+                <li><code>anticipation_predict</code> &mdash; predict likely actions from context patterns</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="mapping-row reveal">
+            <div class="mapping-event">
+              <span class="mapping-event-name">Stop</span>
+              <span class="mapping-event-when">When Claude responds</span>
+            </div>
+            <div class="mapping-actions">
+              <ul>
+                <li>Auto-learning: extract <code>[SOLUTION]</code>, <code>[GOTCHA]</code>, <code>[PREFERENCE]</code>, <code>[DECISION]</code>, <code>[FAILURE]</code>, <code>[PATTERN]</code> markers</li>
+                <li>Correction and preference detection from response text</li>
+                <li>Milestone detection from response content</li>
+                <li><code>anticipation_observe</code> &mdash; record context&rarr;action pattern</li>
+                <li>Auto-checkpoint every 5 turns</li>
+                <li>Ledger save with mood, active files, decisions, and next steps</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="mapping-row reveal">
+            <div class="mapping-event">
+              <span class="mapping-event-name">PreCompact</span>
+              <span class="mapping-event-when">Before context compaction</span>
+            </div>
+            <div class="mapping-actions">
+              <ul>
+                <li>Save ledger checkpoint to preserve work state before context window shrinks</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="mapping-row reveal">
+            <div class="mapping-event">
+              <span class="mapping-event-name">PreToolUse</span>
+              <span class="mapping-event-when">Before Read / Edit / Bash</span>
+            </div>
+            <div class="mapping-actions">
+              <ul>
+                <li>Surface relevant file memories for the file being read or edited</li>
+                <li>Past decisions and gotchas associated with the target file</li>
+                <li>Command corrections for Bash &mdash; warn about known failure patterns</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="mapping-row reveal">
+            <div class="mapping-event">
+              <span class="mapping-event-name">PostToolUse</span>
+              <span class="mapping-event-when">After Edit / Write</span>
+            </div>
+            <div class="mapping-actions">
+              <ul>
+                <li>Record significant file changes as signals in memory</li>
+              </ul>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. TWO HOOK MODES -->
+    <div class="tools-category" id="sec-modes">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><rect x="2" y="4" width="7" height="12" rx="1.5" stroke="#9DB2D9" stroke-width="1.2"/><rect x="11" y="4" width="7" height="12" rx="1.5" stroke="#9DB2D9" stroke-width="1.2"/></svg>
+        </div>
+        <span class="tools-category-name">Two Hook Modes</span>
+        <span class="tools-category-count">plugin &amp; settings</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-content">
+        <div class="modes-grid">
+          <div class="mode-card reveal">
+            <div class="mode-label">Plugin Mode</div>
+            <div class="mode-desc">
+              Uses <code>hooks.json</code> + <code>soul-hook.sh</code>. Activated when running as a Claude Code plugin via <code>claude --plugin-dir</code> or the plugins list.
+            </div>
+            <div class="mode-detail">
+              The <code>hooks.json</code> file defines event matchers. The single <code>soul-hook.sh</code> script handles session start, prompt submit, stop, and pre-compact events. Simpler setup, fewer event types.
+            </div>
+          </div>
+          <div class="mode-card reveal reveal-delay-1">
+            <div class="mode-label">Settings Mode</div>
+            <div class="mode-desc">
+              Uses individual scripts in <code>hooks/</code> directory + <code>~/.claude/settings.json</code>. Installed by <code>smart-install.sh</code>.
+            </div>
+            <div class="mode-detail">
+              More comprehensive: handles all 6 event types with the unified <code>simple-hook.sh</code> handler. Each event type has a dedicated entry-point script that delegates to the shared handler.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. PROACTIVE LEARNING -->
+    <div class="tools-category" id="sec-learning">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="8" r="5" stroke="#D46A4C" stroke-width="1.2"/><path d="M8 13 L8 16 L12 16 L12 13" stroke="#D46A4C" stroke-width="1" opacity="0.5"/><line x1="10" y1="5" x2="10" y2="11" stroke="#D46A4C" stroke-width="0.75" opacity="0.4"/></svg>
+        </div>
+        <span class="tools-category-name">Proactive Learning</span>
+        <span class="tools-category-count">4 detectors</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-content">
+        <p class="content-text">Hooks automatically detect patterns in Claude&rsquo;s responses and user messages, storing learnings without explicit commands.</p>
+        <div class="detection-grid">
+          <div class="detection-row reveal">
+            <span class="detection-trigger">Corrections</span>
+            <div class="detection-action">
+              Calls <code>learn_correction</code> to store the mistake and the correct approach as a high-confidence counter-memory.
+              <div class="detection-patterns">Detects: <code>"actually"</code> <code>"that's wrong"</code> <code>"I was mistaken"</code></div>
+            </div>
+          </div>
+          <div class="detection-row reveal">
+            <span class="detection-trigger">Preferences</span>
+            <div class="detection-action">
+              Calls <code>learn_preference</code> to store as a global preference visible across all projects.
+              <div class="detection-patterns">Detects: <code>"I prefer"</code> <code>"don't do X"</code> <code>"always Y"</code></div>
+            </div>
+          </div>
+          <div class="detection-row reveal">
+            <span class="detection-trigger">Milestones</span>
+            <div class="detection-action">
+              Calls <code>learn_milestone</code> to record the achievement as a relationship marker.
+              <div class="detection-patterns">Detects: <code>"shipped"</code> <code>"released"</code> <code>"finished"</code></div>
+            </div>
+          </div>
+          <div class="detection-row reveal">
+            <span class="detection-trigger">Frustration</span>
+            <div class="detection-action">
+              Records the current approach state via <code>learn_approach</code> to improve future interactions.
+              <div class="detection-patterns">Detects: <code>"no"</code> <code>"stop"</code> <code>"wrong"</code></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. ANTICIPATION -->
+    <div class="tools-category" id="sec-anticipation">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M10 3 L17 10 L10 17 L3 10 Z" stroke="#CBAF86" stroke-width="1.2"/><circle cx="10" cy="10" r="2" fill="#CBAF86" opacity="0.3"/></svg>
+        </div>
+        <span class="tools-category-name">Anticipation</span>
+        <span class="tools-category-count">predict &rarr; observe &rarr; strengthen</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-content">
+        <p class="content-text">The hook system learns context&rarr;action patterns over time, anticipating what you need before you ask.</p>
+        <div class="mapping-grid">
+          <div class="mapping-row reveal">
+            <div class="mapping-event">
+              <span class="mapping-event-name">On every prompt</span>
+              <span class="mapping-event-when">UserPromptSubmit</span>
+            </div>
+            <div class="mapping-actions">
+              <code>anticipation_predict</code> checks if the current context matches known patterns. If a match is found, the predicted action is surfaced in the system prompt alongside recalled memories.
+            </div>
+          </div>
+          <div class="mapping-row reveal">
+            <div class="mapping-event">
+              <span class="mapping-event-name">On every response</span>
+              <span class="mapping-event-when">Stop</span>
+            </div>
+            <div class="mapping-actions">
+              <code>anticipation_observe</code> records what action was taken in response to context. This builds the pattern database that predictions draw from.
+            </div>
+          </div>
+          <div class="mapping-row reveal">
+            <div class="mapping-event">
+              <span class="mapping-event-name">On success</span>
+              <span class="mapping-event-when">Feedback loop</span>
+            </div>
+            <div class="mapping-actions">
+              Predictions that prove correct are strengthened via <code>anticipation_success</code>. Patterns that consistently predict correctly become stronger over time.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5. KEY SCRIPTS -->
+    <div class="tools-category" id="sec-scripts">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M4 4 L10 4 L10 8 L16 8 L16 16 L4 16 Z" stroke="#9DB2D9" stroke-width="1.2"/><line x1="7" y1="11" x2="13" y2="11" stroke="#9DB2D9" stroke-width="0.75" opacity="0.5"/><line x1="7" y1="13" x2="11" y2="13" stroke="#9DB2D9" stroke-width="0.75" opacity="0.5"/></svg>
+        </div>
+        <span class="tools-category-name">Key Scripts</span>
+        <span class="tools-category-count">5 scripts</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row reveal"><span class="tool-name">simple-hook.sh</span><span class="tool-desc">Unified handler for settings mode &mdash; 880 lines, handles all 6 event types. The core logic for memory injection, learning detection, and checkpoint management.</span></div>
+        <div class="tool-row reveal"><span class="tool-name">soul-hook.sh</span><span class="tool-desc">Plugin mode handler &mdash; 457 lines, handles start, prompt, end, and pre-compact events. Lighter alternative for plugin-dir usage.</span></div>
+        <div class="tool-row reveal"><span class="tool-name">subconscious.sh</span><span class="tool-desc">Daemon lifecycle management &mdash; start, stop, restart, status, and health checks for the <code style="color: var(--aura-300);">chittad</code> background process.</span></div>
+        <div class="tool-row reveal"><span class="tool-name">smart-install.sh</span><span class="tool-desc">Cross-platform installer &mdash; downloads binaries, configures hooks in <code style="color: var(--aura-300);">settings.json</code>, sets up socket paths and environment.</span></div>
+        <div class="tool-row reveal"><span class="tool-name">capture-hook.sh</span><span class="tool-desc"><span style="color: rgba(185,189,199,0.4);">DISABLED</span> &mdash; was for automatic tool capture, now replaced by typed markers (<code style="color: var(--aura-300);">[SOLUTION]</code>, <code style="color: var(--aura-300);">[GOTCHA]</code>, etc.) in responses.</span></div>
+      </div>
+    </div>
+
+    <!-- 6. SOCKET COMMUNICATION -->
+    <div class="tools-category" id="sec-socket">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><circle cx="6" cy="10" r="3" stroke="#D46A4C" stroke-width="1.2"/><circle cx="14" cy="10" r="3" stroke="#D46A4C" stroke-width="1.2"/><line x1="9" y1="10" x2="11" y2="10" stroke="#D46A4C" stroke-width="1.5" opacity="0.6"/></svg>
+        </div>
+        <span class="tools-category-name">Socket Communication</span>
+        <span class="tools-category-count">daemon protocol</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-content">
+        <div class="mapping-grid">
+          <div class="mapping-row reveal">
+            <div class="mapping-event">
+              <span class="mapping-event-name">Socket Path</span>
+              <span class="mapping-event-when">Unix domain socket</span>
+            </div>
+            <div class="mapping-actions">
+              Daemon creates socket at <code>/tmp/chitta-{hash}.sock</code> where <code>{hash}</code> is the djb2 hash of the mind database path. Each mind gets a unique socket.
+            </div>
+          </div>
+          <div class="mapping-row reveal">
+            <div class="mapping-event">
+              <span class="mapping-event-name">Communication</span>
+              <span class="mapping-event-when">Socket-first strategy</span>
+            </div>
+            <div class="mapping-actions">
+              Hook scripts use socket-first communication: try Unix socket directly for lowest latency, then fall back to the <code>chitta</code> thin client if the socket is unavailable.
+            </div>
+          </div>
+          <div class="mapping-row reveal">
+            <div class="mapping-event">
+              <span class="mapping-event-name">PID Management</span>
+              <span class="mapping-event-when">Process tracking</span>
+            </div>
+            <div class="mapping-actions">
+              PID file at <code>/tmp/chitta-{hash}.pid</code> for daemon management. Used by <code>subconscious.sh</code> for start, stop, restart, and health check operations.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 7. INSTALLATION -->
+    <div class="tools-category" id="sec-installation">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M10 3 L10 12 M7 9 L10 12 L13 9" stroke="#CBAF86" stroke-width="1.2"/><rect x="4" y="14" width="12" height="3" rx="1" stroke="#CBAF86" stroke-width="1" opacity="0.5"/></svg>
+        </div>
+        <span class="tools-category-name">Installation</span>
+        <span class="tools-category-count">settings.json</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-content">
+        <p class="content-text">The <code>smart-install.sh</code> script writes the following hook configuration into <code>~/.claude/settings.json</code>, wiring each lifecycle event to its dedicated entry-point script.</p>
+        <div class="code-block reveal">
+<pre><span class="code-punct">{</span>
+  <span class="code-key">"hooks"</span><span class="code-punct">:</span> <span class="code-punct">{</span>
+    <span class="code-key">"SessionStart"</span><span class="code-punct">:</span> <span class="code-punct">[{</span> <span class="code-key">"type"</span><span class="code-punct">:</span> <span class="code-str">"command"</span><span class="code-punct">,</span> <span class="code-key">"command"</span><span class="code-punct">:</span> <span class="code-str">"~/.claude/hooks/session-start-hook.sh"</span> <span class="code-punct">}],</span>
+    <span class="code-key">"UserPromptSubmit"</span><span class="code-punct">:</span> <span class="code-punct">[{</span> <span class="code-key">"type"</span><span class="code-punct">:</span> <span class="code-str">"command"</span><span class="code-punct">,</span> <span class="code-key">"command"</span><span class="code-punct">:</span> <span class="code-str">"~/.claude/hooks/prompt-hook.sh"</span> <span class="code-punct">}],</span>
+    <span class="code-key">"Stop"</span><span class="code-punct">:</span> <span class="code-punct">[{</span> <span class="code-key">"type"</span><span class="code-punct">:</span> <span class="code-str">"command"</span><span class="code-punct">,</span> <span class="code-key">"command"</span><span class="code-punct">:</span> <span class="code-str">"~/.claude/hooks/stop-hook.sh"</span> <span class="code-punct">}],</span>
+    <span class="code-key">"PreCompact"</span><span class="code-punct">:</span> <span class="code-punct">[{</span> <span class="code-key">"type"</span><span class="code-punct">:</span> <span class="code-str">"command"</span><span class="code-punct">,</span> <span class="code-key">"command"</span><span class="code-punct">:</span> <span class="code-str">"~/.claude/hooks/pre-compact-hook.sh"</span> <span class="code-punct">}],</span>
+    <span class="code-key">"PreToolUse"</span><span class="code-punct">:</span> <span class="code-punct">[{</span> <span class="code-key">"type"</span><span class="code-punct">:</span> <span class="code-str">"command"</span><span class="code-punct">,</span> <span class="code-key">"command"</span><span class="code-punct">:</span> <span class="code-str">"~/.claude/hooks/pre-tool-hook.sh"</span> <span class="code-punct">}],</span>
+    <span class="code-key">"PostToolUse"</span><span class="code-punct">:</span> <span class="code-punct">[{</span> <span class="code-key">"type"</span><span class="code-punct">:</span> <span class="code-str">"command"</span><span class="code-punct">,</span> <span class="code-key">"command"</span><span class="code-punct">:</span> <span class="code-str">"~/.claude/hooks/post-bash-hook.sh"</span> <span class="code-punct">}]</span>
+  <span class="code-punct">}</span>
+<span class="code-punct">}</span></pre>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- BACK -->
+<section class="back-section">
+  <div class="container">
+    <a href="index.html" class="back-link">&larr; Back to cc-soul</a>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer class="footer">
+  <div class="container">
+    <p class="footer-text">
+      Built with conviction. Grounded in philosophy.
+      <span class="footer-sep"></span>
+      <a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a>
+    </p>
+  </div>
+</footer>
+
+<script>
+/* Scroll reveal */
+(function() {
+  var reveals = document.querySelectorAll('.reveal');
+  if (!reveals.length) return;
+  var observer = new IntersectionObserver(function(entries) {
+    entries.forEach(function(entry) {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+  reveals.forEach(function(el) { observer.observe(el); });
+})();
+
+/* Smooth scroll for TOC chips */
+document.querySelectorAll('a[href^="#"]').forEach(function(anchor) {
+  anchor.addEventListener('click', function(e) {
+    var target = document.querySelector(this.getAttribute('href'));
+    if (target) {
+      e.preventDefault();
+      var offset = 80;
+      var top = target.getBoundingClientRect().top + window.pageYOffset - offset;
+      window.scrollTo({ top: top, behavior: 'smooth' });
+      // Expand the category if collapsed
+      if (target.classList.contains('collapsed')) {
+        target.classList.remove('collapsed');
+      }
+    }
+  });
+});
+</script>
+</body>
+</html>
