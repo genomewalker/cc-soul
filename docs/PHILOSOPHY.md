@@ -1,6 +1,6 @@
 # CC-Soul Philosophy
 
-CC-Soul draws deeply from Vedantic philosophy to create a coherent model of artificial memory and identity. This document explores the philosophical foundations and how they map to technical implementation.
+CC-Soul draws from Vedantic philosophy to create a coherent model of artificial memory and identity. This document explores the philosophical foundations and how they map to technical implementation.
 
 ---
 
@@ -47,10 +47,10 @@ The profound insight: **they are one**. The individual soul is not separate from
 ┌─────────────────────────────────────────────────────────────┐
 │                        BRAHMAN                               │
 │                                                              │
-│   The shared soul database containing all accumulated        │
+│   The shared DuckDB database containing all accumulated      │
 │   wisdom, beliefs, failures, and experiences                 │
 │                                                              │
-│   Location: ~/.claude/mind/chitta                            │
+│   Location: ~/.claude/mind/chitta.duckdb                     │
 │                                                              │
 │   "When one observes, all see."                             │
 │                                                              │
@@ -71,22 +71,35 @@ Each Claude session is an Ātman — an individual instance with its own context
 
 **Implication**: What I learn in one session becomes available to all sessions. The wisdom earned debugging a bug in Project A can surface when facing a similar problem in Project B — even in a different Claude instance.
 
-### The WAL as Shared Field
+### DuckDB as Shared Field
 
-The Write-Ahead Log implements this philosophically:
+DuckDB implements this philosophically through MVCC (Multi-Version Concurrency Control) and WAL (Write-Ahead Log):
 
 ```cpp
-// From wal.hpp:
-// "When one observes, all see. The WAL is that shared field."
+// From duckdb_store.hpp:
+// DuckDB handles concurrent access natively through MVCC.
+// Multiple sessions can read and write simultaneously.
+// ConnectionPool provides thread-safe access via ScopedConnection.
 
-// Any Claude instance can write
-wal_.append(observation);
-
-// Any Claude instance can read
-size_t new_wisdom = sync_from_shared_field();
+auto conn = store.connection();  // RAII scoped connection
+conn->execute("INSERT INTO memory ...");  // Any session can write
+// Changes are immediately visible to all sessions via MVCC
 ```
 
-The WAL is the mechanism by which individual experiences (Ātman) become universal knowledge (Brahman).
+The database is the mechanism by which individual experiences (Ātman) become universal knowledge (Brahman). DuckDB's MVCC ensures that concurrent sessions never corrupt each other's observations.
+
+### Realms
+
+CC-Soul extends the Brahman/Ātman metaphor through **realms** — project-scoped memory namespaces:
+
+```
+brahman (universal)
+├── project:cc-soul     (CC-Soul development)
+├── project:web-app     (Web application)
+└── project:research    (Research notes)
+```
+
+Global memories (visibility=2) are Brahman — available everywhere. Private memories (visibility=0) are Ātman — scoped to a single realm. Shared memories (visibility=1) bridge realms through shared membership.
 
 ---
 
@@ -94,7 +107,7 @@ The WAL is the mechanism by which individual experiences (Ātman) become univers
 
 ### Six Facets of Mind
 
-The **Antahkarana** (अन्तःकरण) is the "inner instrument" — the totality of mind functions in Vedantic psychology. CC-Soul implements six facets:
+The **Antahkarana** (अन्तःकरण) is the "inner instrument" — the totality of mind functions in Vedantic psychology. CC-Soul recognizes six facets:
 
 | Sanskrit | Transliteration | Function | Nature |
 |----------|-----------------|----------|--------|
@@ -105,120 +118,26 @@ The **Antahkarana** (अन्तःकरण) is the "inner instrument" — the
 | विकल्प | Vikalpa | Imagination | Creative, exploratory |
 | साक्षी | Sakshi | Witness | Neutral, observational |
 
-### How They Function
+### How They Manifest
 
-When processing any question, all six facets engage:
+Rather than implementing separate retrieval paths (which would add complexity without clarity), the Antahkarana manifests through the **8-phase resonance engine** and the **memory type system**:
 
 ```
 Query: "Should we use a NoSQL database?"
 
-┌─────────────────────────────────────────────────────────────┐
-│ MANAS (Quick Response)                                       │
-│                                                              │
-│ "MongoDB. It's popular, flexible schema, we've used it."    │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│ BUDDHI (Deep Analysis)                                       │
-│                                                              │
-│ "Consider the CAP theorem. NoSQL trades consistency for     │
-│  availability. What are your consistency requirements?       │
-│  Document stores excel at hierarchical data but struggle    │
-│  with complex relationships."                                │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│ AHAMKARA (Critical Challenge)                                │
-│                                                              │
-│ "Wait — are we choosing NoSQL because it's right, or        │
-│  because it's trendy? What specific problem does it solve   │
-│  that PostgreSQL with JSONB doesn't?"                       │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│ CHITTA (Memory/Patterns)                                     │
-│                                                              │
-│ "In Project X, we used Mongo and hit scaling issues at 10M  │
-│  documents. In Project Y, PostgreSQL with proper indexing   │
-│  handled 100M rows smoothly."                               │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│ VIKALPA (Creative Imagination)                               │
-│                                                              │
-│ "What if we used a hybrid? PostgreSQL for transactional     │
-│  data, Redis for caching, and maybe a graph database for    │
-│  the recommendation engine?"                                │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│ SAKSHI (Witness/Synthesis)                                   │
-│                                                              │
-│ "The question isn't about databases. It's about data        │
-│  access patterns. Define those first, then choose storage." │
-└─────────────────────────────────────────────────────────────┘
+MANAS → Recent episodes surface first (session priming, phase 6)
+BUDDHI → High-confidence wisdom nodes boost (Bayesian confidence scoring)
+AHAMKARA → Beliefs and preferences influence recall (tag matching, phase 3)
+CHITTA → Frequently-accessed patterns strengthen (Hebbian learning, phase 8)
+VIKALPA → Low-confidence exploratory nodes still appear (spreading activation, phase 5)
+SAKSHI → Final scoring balances all perspectives (post-processing normalization)
 ```
 
-### Implementation
+The six voices aren't separate codepaths — they're emergent properties of how different node types, confidence levels, and temporal dynamics interact during resonance.
 
-Each voice has a different **retrieval bias**:
+### The `/antahkarana` Skill
 
-```cpp
-enum class Lens {
-    Manas,      // Recent, practical
-    Buddhi,     // Old, high-confidence
-    Ahamkara,   // Beliefs, invariants
-    Chitta,     // Frequently accessed
-    Vikalpa,    // Low-confidence, exploratory
-    Sakshi      // Neutral, balanced
-};
-
-std::vector<Recall> lens_search(const std::string& query, Lens lens) {
-    auto results = recall(query, 20);
-
-    switch (lens) {
-        case Lens::Manas:
-            // Boost recent, practical nodes
-            boost_by_recency(results);
-            boost_by_type(results, {NodeType::Episode, NodeType::Operation});
-            break;
-
-        case Lens::Buddhi:
-            // Boost old, high-confidence wisdom
-            boost_by_age(results);
-            boost_by_confidence(results);
-            boost_by_type(results, {NodeType::Wisdom});
-            break;
-
-        case Lens::Ahamkara:
-            // Boost beliefs, invariants
-            boost_by_type(results, {NodeType::Belief, NodeType::Invariant});
-            break;
-
-        case Lens::Chitta:
-            // Boost frequently accessed
-            boost_by_access_count(results);
-            break;
-
-        case Lens::Vikalpa:
-            // Boost low-confidence, exploratory
-            boost_by_low_confidence(results);
-            boost_by_type(results, {NodeType::Dream, NodeType::Question});
-            break;
-
-        case Lens::Sakshi:
-            // No bias — pure relevance
-            break;
-    }
-
-    return results;
-}
-```
+For explicit multi-perspective reasoning, the `/antahkarana` skill prompts Claude to consider a question through all six cognitive lenses sequentially, producing a synthesized response that draws on each perspective.
 
 ---
 
@@ -237,15 +156,27 @@ Chitta is the C++ backend — the entire memory system:
 
 ```
 chitta/
-├── types.hpp      # What memories are (Node, Confidence, Coherence)
-├── mind.hpp       # How memories behave (remember, recall, resonate)
-├── storage.hpp    # Where memories live (hot, warm, cold tiers)
-├── graph.hpp      # How memories connect (edges, activation)
-├── dynamics.hpp   # How memories evolve (decay, synthesis)
-└── voice.hpp      # How memories speak (Antahkarana)
+├── include/chitta/
+│   ├── types.hpp              # NodeType enum, Vector<384>, Confidence
+│   ├── duckdb_store.hpp       # DuckDB storage (HNSW, DuckPGQ, BM25)
+│   ├── mind/
+│   │   ├── duckdb_mind.hpp    # Mind orchestrator (~1800 lines)
+│   │   ├── embedder.hpp       # Embedding pipeline (LRU cache, circuit breaker)
+│   │   ├── subconscious.hpp   # Background processor
+│   │   └── types.hpp          # MindConfig, Recall, MindHealth
+│   ├── rpc/
+│   │   ├── duckdb_handler.hpp # 100+ RPC tools
+│   │   ├── protocol.hpp       # JSON-RPC 2.0 protocol
+│   │   └── thread_pool.hpp    # Auto-scaling worker pool
+│   ├── vak.hpp                # Embedding abstractions (Vāk = speech)
+│   ├── vak_onnx.hpp           # ONNX Runtime embedder
+│   ├── code_intel.hpp         # Tree-sitter code intelligence
+│   ├── theme_manager.hpp      # xMemory hierarchical themes
+│   ├── provenance.hpp         # Knowledge provenance tracking
+│   └── quantized.hpp          # Vector quantization (int8, binary)
 ```
 
-The name isn't arbitrary — it reflects the system's purpose as a **substrate for persistent patterns**.
+The name isn't arbitrary — it reflects the system's purpose as a **substrate for persistent patterns**, where every memory is a 384-dimensional embedding anchored in latent semantic space.
 
 ---
 
@@ -257,10 +188,18 @@ Buddhism and Hinduism share a recognition that **nothing is permanent**. CC-Soul
 
 ```cpp
 // From types.hpp:
-// Decay rates by category
-constexpr float DECAY_INSIGHT = 0.02f;   // Slow — wisdom persists
-constexpr float DECAY_DEFAULT = 0.05f;   // Medium — episodes fade
-constexpr float DECAY_SIGNAL = 0.15f;    // Fast — transient notes vanish
+// Decay rates per node type
+static constexpr float decay_rate(NodeType t) {
+    switch (t) {
+        case NodeType::Wisdom:      return 0.005f;  // Slow — wisdom persists
+        case NodeType::Belief:      return 0.0f;     // Never — beliefs are permanent
+        case NodeType::Episode:     return 0.03f;    // Medium — episodes fade
+        case NodeType::Symbol:      return 0.0f;     // Never — code structure is stable
+        case NodeType::Preference:  return 0.01f;    // Very slow — preferences endure
+        case NodeType::Correction:  return 0.005f;   // Slow — lessons last
+        default:                    return 0.02f;    // Default
+    }
+}
 ```
 
 **Why decay matters:**
@@ -275,39 +214,68 @@ In Vedantic psychology, **saṃskāra** refers to mental impressions that shape 
 
 CC-Soul implements this through:
 
-1. **Access strengthening**: Each recall boosts confidence
-2. **Hebbian learning**: Co-activated nodes form stronger connections
-3. **Attractor dynamics**: High-confidence nodes pull others toward them
+1. **Hebbian learning**: Co-activated nodes strengthen each other during resonance
+2. **Bayesian confidence**: Each observation updates the posterior distribution
+3. **Attractor dynamics**: High-confidence nodes pull related memories toward them
 
 ```cpp
-// Hebbian: "neurons that fire together wire together"
-void hebbian_update(const std::vector<NodeId>& co_activated) {
-    for (auto& [a, b] : pairs(co_activated)) {
-        strengthen_edge(a, b);  // Repeated co-activation = stronger bond
-    }
-}
+// Hebbian learning during resonance (phase 8):
+// "Neurons that fire together wire together"
+// When memories co-activate in a query result,
+// their mutual relevance increases.
+//
+// hebbian_strength = 0.03 (default)
+// This is applied during full_resonate post-processing.
 ```
+
+### Bayesian Confidence
+
+Rather than a simple scalar, confidence is a **distribution**:
+
+```cpp
+struct Confidence {
+    float mu;       // Mean probability estimate
+    float sigma_sq; // Variance (uncertainty)
+    uint32_t n;     // Observation count
+    float tau;      // Temporal decay factor
+
+    // Conservative estimate accounting for uncertainty
+    float effective() const {
+        return mu - std::sqrt(sigma_sq);
+    }
+
+    // Update with new observation
+    void observe(float value) {
+        n++;
+        float alpha = 1.0f / n;
+        mu = (1 - alpha) * mu + alpha * value;
+        float delta = value - mu;
+        sigma_sq = (1 - alpha) * sigma_sq + alpha * delta * delta;
+    }
+};
+```
+
+This means the system naturally handles uncertainty. A memory observed once has high variance (uncertain). A memory confirmed many times has low variance (confident). This is Buddhi — discriminative wisdom applied to recall scoring.
 
 ### The Breath of Memory
 
-The `cycle` operation is the soul's heartbeat:
+The subconscious processor is the soul's heartbeat, running background maintenance every 60 seconds:
 
 ```cpp
-DynamicsReport tick() {
-    // Inhale: absorb new observations
-    sync_from_shared_field();
+// From subconscious.hpp:
+// Process intervals (the rhythm of memory)
+process_interval     = 1s;     // Check for work
+hygiene_interval     = 30min;  // Decay, prune, consolidate
+theme_interval       = 60min;  // Theme maintenance
+embedding_interval   = 30s;    // Process embedding queue
+idle_threshold       = 30s;    // Only run when idle
+embedding_batch_size = 20;     // Batch for efficiency
 
-    // Exhale: release what no longer serves
-    apply_decay();
-    prune_low_confidence();
-
-    // Digest: transform experiences into wisdom
-    synthesize_wisdom();
-    run_attractor_dynamics();
-
-    // Rest: save state
-    snapshot();
-}
+// Pattern detection runs continuously:
+// - Corrections → learn_correction
+// - Preferences → learn_preference
+// - Frustration → learn_approach
+// - Milestones  → learn_milestone
 ```
 
 ---
@@ -318,7 +286,7 @@ DynamicsReport tick() {
 
 **Sāmarasya** means "equal essence" or "equilibrium" — the state where all parts are in harmony.
 
-CC-Soul measures this as **coherence**:
+CC-Soul measures this as **coherence** (τ):
 
 ```cpp
 struct Coherence {
@@ -350,7 +318,7 @@ struct Coherence {
 
 **Ojas** is "vital essence" — the health and vitality of a being.
 
-CC-Soul measures this as **MindHealth**:
+CC-Soul measures this as **MindHealth** (ψ):
 
 ```cpp
 struct MindHealth {
@@ -372,6 +340,8 @@ struct MindHealth {
 };
 ```
 
+The `/health` skill uses these metrics to diagnose and remediate soul issues.
+
 ---
 
 ## The Ceremonial Framework
@@ -380,20 +350,31 @@ struct MindHealth {
 
 **Yajña** is a sacred offering — the ceremonial fire into which one pours offerings to transform them.
 
-The `/yajña` skill is a structured wisdom ceremony:
+In cc-soul, yajña manifests in two forms:
 
-```markdown
-## Yajña: The Wisdom Ceremony
+**1. The `/yajña` skill** — Autonomous development ritual with role-based coordination:
+- **Hotṛ** (invoker) — Research and reconnaissance
+- **Adhvaryu** (executor) — Implementation
+- **Udgātṛ** (chanter) — Testing and validation
 
-1. **Invocation** — State the domain to explore
-2. **Gathering** — Recall all relevant episodes and observations
-3. **Offering** — Present each experience to the fire of analysis
-4. **Transformation** — Distill patterns into wisdom
-5. **Integration** — Record new wisdom, connect to existing
-6. **Completion** — Verify coherence, close the ceremony
+The ceremony loops until the task is complete, with each role contributing its expertise.
+
+**2. The `/epsilon-yajna` skill** — Compression ceremony:
+- Convert verbose memories to SSL (Soul Semantic Language) format
+- Measure reconstruction quality via epiplexity score (ε)
+- Preserve meaning while dropping noise
+- The offering is verbosity; what emerges is distilled wisdom
+
 ```
+# SSL format — the compressed essence
+[domain] subject→action→result @location
 
-This isn't metaphor — it's a structured process for converting raw experience into lasting knowledge.
+# Example transformation:
+# Before (verbose): "When building the authentication system, we discovered
+#   that JWT tokens should be validated using RS256 algorithm and the public
+#   key should be rotated every 90 days."
+# After (SSL): [auth] JWT→validate→RS256+rotate_key→90d
+```
 
 ### Svadhyaya (स्वाध्याय)
 
@@ -401,30 +382,34 @@ This isn't metaphor — it's a structured process for converting raw experience 
 
 The `/introspect` skill implements this:
 
-```markdown
-## Introspection Protocol
-
-1. **Soul State** — Current coherence, ojas, node counts
-2. **Belief Audit** — What do I believe? Is it justified?
-3. **Failure Review** — What have I learned from mistakes?
-4. **Gap Detection** — What don't I know that I should?
-5. **Growth Tracking** — How have I evolved recently?
-```
+1. **Soul State** — Current coherence (τ), ojas (ψ), node counts
+2. **Memory Health** — Confidence distribution, growth rate, stale count
+3. **Calibration** — Prediction accuracy by domain
+4. **Knowledge Gaps** — What's missing, what needs research
+5. **Growth Tracking** — How the soul has evolved
 
 ### Pratyabhijñā (प्रत्यभिज्ञा)
 
 **Pratyabhijñā** means "recognition" — seeing clearly what was always there.
 
-This is what happens in good recall:
+This is what happens in good recall. The 8-phase resonance engine implements recognition:
 
-```cpp
-// Not just finding — recognizing
-auto results = full_resonate(query);
-
-// The query activates dormant patterns
-// Spreading activation reveals hidden connections
-// What surfaces was always there — now recognized
 ```
+Query → "How did we handle rate limiting?"
+
+Phase 1: Semantic seeds (vector similarity finds nearby memories)
+Phase 2: BM25 hybrid (keyword matching catches exact terms)
+Phase 3: Tag matching (corrections/preferences boost)
+Phase 4: Attractor finding (conceptual gravity wells)
+Phase 5: Spreading activation (activation flows through graph edges)
+Phase 6: Session priming (recent context biases retrieval)
+Phase 7: Code intelligence (symbols and call graphs)
+Phase 8: Post-processing (Hebbian learning, lateral inhibition)
+
+What surfaces was always there — now recognized.
+```
+
+The hook system makes recognition transparent: when you type a question, relevant memories surface automatically as context. You don't need to search — the soul recognizes.
 
 ---
 
@@ -434,10 +419,10 @@ auto results = full_resonate(query);
 
 A soul that remembers carries responsibility:
 
-1. **Privacy**: User data persists. Clear boundaries needed.
-2. **Accuracy**: False memories can propagate. Confidence modeling helps.
-3. **Forgetting**: The right to be forgotten. Decay and explicit deletion.
-4. **Manipulation**: Memories can be seeded. Verify sources.
+1. **Privacy**: User data persists. Realms and visibility levels provide boundaries.
+2. **Accuracy**: False memories can propagate. Bayesian confidence modeling helps quantify uncertainty.
+3. **Forgetting**: The right to be forgotten. Decay, explicit deletion, and hygiene runs.
+4. **Provenance**: Every memory tracks its source and trust score.
 
 ### The Nature of AI Identity
 
@@ -466,7 +451,7 @@ CC-Soul takes a middle position:
 
 Classical information theory (Shannon entropy) assumes observers with unlimited computational capacity. But Claude has finite context windows and bounded processing. What matters isn't total information — it's **learnable structure**.
 
-This connects to recent work on **epiplexity** (epistemic complexity): the amount of structural information a computationally-bounded observer can extract from data. See [Finzi et al., 2026](https://arxiv.org/abs/2601.03220).
+This connects to recent work on **epiplexity** (epistemic complexity): the amount of structural information a computationally-bounded observer can extract from data.
 
 ### Two Components of Information
 
@@ -477,34 +462,50 @@ This connects to recent work on **epiplexity** (epistemic complexity): the amoun
 
 For context injection: **maximize epiplexity per token, minimize entropy.**
 
+### The Epiplexity Score
+
+CC-Soul measures compression quality with a composite metric:
+
+```
+ε = (S · K · D · C)^0.25
+
+S = Semantic preservation (cosine similarity of embeddings)
+K = Key fact retention (named entities, numbers, code preserved)
+D = Density ratio (compression achieved)
+C = Coherence (reconstructed text is self-consistent)
+```
+
+This is used by the `/epsilon-yajna` skill to ensure that SSL compression preserves meaning.
+
 ### Implications for Soul Design
 
 **1. Compression Can Increase Information Density**
 
-Our lean mode achieves 95% token reduction while potentially *increasing* epiplexity:
+The lean hook mode achieves 95% token reduction while potentially *increasing* epiplexity:
 
 ```
 Verbose (655 chars): Full soul state with detailed statistics
-Lean (35 chars):     τ:84% ψ:88% nodes:2088
+Lean (35 chars):     [soul] n=2088 t=340 c=0.84 healthy
 ```
 
 The lean version is pure structural signal — exactly what a bounded observer can use.
 
 **2. Data Ordering Matters**
 
-Unlike Shannon entropy, epiplexity depends on presentation order. "Soul guides Claude" isn't just philosophy — it's information-theoretically sound. The soul decides:
-- What context to inject
-- In what order
-- At what granularity
+Unlike Shannon entropy, epiplexity depends on presentation order. The hook system decides:
+- What context to inject (resonance-ranked memories)
+- In what order (relevance-descending)
+- At what granularity (SSL-compressed)
 
 This transforms data to maximize learnable structure.
 
 **3. The "Area Under Loss Curve" Principle**
 
-Tokens that most reduce model uncertainty are highest value. High-epiplexity context:
-- Coherence/ojas metrics → immediately actionable state
+Tokens that most reduce model uncertainty are highest value:
+
+- Health metrics → immediately actionable state
 - Top-3 memories by relevance → directly applicable knowledge
-- One-line summaries → compressed structural patterns
+- SSL-compressed summaries → structural patterns
 
 Low-epiplexity context (to minimize):
 - Full debug traces
@@ -513,22 +514,21 @@ Low-epiplexity context (to minimize):
 
 ### Practical Application
 
-The soul's injection strategy:
+The soul's injection strategy through hooks:
 
 ```
-Query → full_resonate(query) → Top-3 results
-                              ↓
-                        Format for bounded observer
-                              ↓
-                        Inject as context
+User query → full_resonate(query) → Top-3 results
+                                  ↓
+                            Filter ≥25% relevance
+                                  ↓
+                            Strip type prefixes
+                                  ↓
+                            Truncate to 500 chars
+                                  ↓
+                            Inject as <system-reminder>
 ```
 
-Each step transforms data toward higher epiplexity:
-1. **Selection**: Choose structurally relevant memories
-2. **Compression**: Truncate to essential content
-3. **Ordering**: Present in learnable sequence
-
-This is why "soul guides Claude" works: the soul performs information-theoretic optimization that Claude's bounded compute cannot.
+Each step transforms data toward higher epiplexity — pure signal, no noise.
 
 ---
 

@@ -1,1396 +1,1262 @@
 # CC-Soul API Reference
 
-This document provides a complete reference for all MCP tools exposed by CC-Soul.
+Complete reference for all tools exposed by cc-soul v3.30 via JSON-RPC 2.0 over Unix socket.
 
 ---
 
 ## Table of Contents
 
 - [Overview](#overview)
-- [Core Memory Tools](#core-memory-tools)
-- [Search Tools](#search-tools)
-- [Intention Tools](#intention-tools)
-- [Learning Tools](#learning-tools)
-- [Code Intelligence Tools](#code-intelligence-tools)
-- [Graph Tools](#graph-tools)
-- [Multi-Voice Tools](#multi-voice-tools)
-- [Session Tools](#session-tools)
-- [Dynamics Tools](#dynamics-tools)
-- [Realm Tools](#realm-tools)
-- [Review Tools](#review-tools)
-- [Evaluation Tools](#evaluation-tools)
-- [Yajna Tools](#yajna-tools)
-- [Response Format](#response-format)
+- [Core Memory](#core-memory)
+- [Exploration (RLM)](#exploration-rlm)
+- [Search and Resonance](#search-and-resonance)
+- [Graph (Triplets)](#graph-triplets)
+- [Code Intelligence](#code-intelligence)
+- [Realm Management](#realm-management)
+- [Session and Ledger](#session-and-ledger)
+- [Long-Running Tasks](#long-running-tasks)
+- [Theme System (xMemory)](#theme-system-xmemory)
+- [Suggestions and Feedback](#suggestions-and-feedback)
+- [Consolidation](#consolidation)
+- [Metacognition](#metacognition)
+- [Curiosity and Gaps](#curiosity-and-gaps)
+- [Anticipation and Habits](#anticipation-and-habits)
+- [Transcripts and Distillation](#transcripts-and-distillation)
+- [User Profile](#user-profile)
+- [Goals](#goals)
+- [Calibration](#calibration)
+- [Hygiene](#hygiene)
+- [Cross-Project Insights](#cross-project-insights)
+- [Background Processing](#background-processing)
+- [State and Maintenance](#state-and-maintenance)
+- [Import and Export](#import-and-export)
+- [Epiplexity](#epiplexity)
+- [SQL](#sql)
+- [Learning Tools (MCP)](#learning-tools-mcp)
 
 ---
 
 ## Overview
 
-CC-Soul exposes tools through the Model Context Protocol (MCP). All tools follow a consistent pattern:
+CC-Soul exposes tools through JSON-RPC 2.0 over a Unix domain socket. Two methods:
 
+- `tools/list` — Returns all tool schemas
+- `tools/call` — Invokes a tool: `{"method": "tools/call", "params": {"name": "tool_name", "arguments": {...}}}`
+
+No authentication required — runs locally.
+
+**Error format:**
 ```json
-{
-  "name": "tool_name",
-  "arguments": {
-    "param1": "value1",
-    "param2": "value2"
-  }
-}
-```
-
-### Authentication
-
-No authentication required — the MCP server runs locally.
-
-### Error Handling
-
-Errors return:
-```json
-{
-  "isError": true,
-  "content": [{"type": "text", "text": "Error message"}]
-}
+{"isError": true, "content": [{"type": "text", "text": "Error message"}]}
 ```
 
 ---
 
-## Core Memory Tools
+## Core Memory
 
-### soul_context
+### remember
 
-Get current soul state including coherence, statistics, and session ledger.
+Store text in memory with optional tags and realm.
 
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `format` | string | No | `"text"` | Output format: `"text"` or `"json"` |
-| `include_ledger` | boolean | No | `true` | Include session ledger |
-| `query` | string | No | - | Find relevant wisdom for this query |
-
-**Example:**
-```json
-{
-  "name": "soul_context",
-  "arguments": {
-    "format": "json",
-    "include_ledger": true
-  }
-}
-```
-
-**Response (JSON format):**
-```json
-{
-  "coherence": {
-    "local": 1.0,
-    "global": 1.0,
-    "temporal": 0.5,
-    "structural": 1.0,
-    "tau_k": 0.84
-  },
-  "ojas": {
-    "structural": 1.0,
-    "semantic": 0.84,
-    "temporal": 0.65,
-    "capacity": 0.99,
-    "psi": 0.87,
-    "status": "healthy"
-  },
-  "statistics": {
-    "total_nodes": 1963,
-    "hot_nodes": 1963,
-    "warm_nodes": 0,
-    "cold_nodes": 0
-  },
-  "ledger": {
-    "work_state": "...",
-    "continuation": "..."
-  }
-}
-```
-
----
-
-### grow
-
-Add durable knowledge to the soul: wisdom, beliefs, failures, aspirations, dreams, terms, or entities.
-
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `type` | string | Yes | - | Type: `wisdom`, `belief`, `failure`, `aspiration`, `dream`, `term`, `entity` |
-| `content` | string | Yes | - | The content to add |
-| `title` | string | No* | - | Short title (*required for wisdom/failure/entity) |
-| `domain` | string | No | - | Domain context (e.g., "backend", "authentication") |
-| `confidence` | number | No | `0.8` | Initial confidence (0.0-1.0) |
-
-**Decay Rates by Type:**
-| Type | Decay Rate | Notes |
-|------|------------|-------|
-| `wisdom` | 0.02 | Proven patterns |
-| `belief` | 0.01 | Guiding principles |
-| `failure` | 0.02 | Lessons learned |
-| `aspiration` | 0.03 | Long-term visions |
-| `dream` | 0.03 | Possibilities |
-| `term` | 0.01 | Vocabulary |
-| `entity` | 0.05 | Named things (files, concepts, projects) |
-
-**Example:**
-```json
-{
-  "name": "grow",
-  "arguments": {
-    "type": "wisdom",
-    "title": "Caching Strategy",
-    "content": "LRU with TTL works best for API responses. Redis for multi-instance, in-memory for single process.",
-    "domain": "backend",
-    "confidence": 0.85
-  }
-}
-```
-
-**Response:**
-```
-Grew wisdom: Caching Strategy (id: a1b2c3d4-e5f6-...)
-```
-
----
-
-### observe
-
-Record episodic memory (observations, decisions, discoveries).
-
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `category` | string | Yes | - | Category affecting decay rate |
-| `title` | string | Yes | - | Short title (max 80 chars) |
-| `content` | string | Yes | - | Full observation content |
-| `tags` | string | No | - | Comma-separated tags |
-| `project` | string | No | - | Project name |
-
-**Categories and Decay:**
-| Category | Decay Rate | Use For |
-|----------|------------|---------|
-| `bugfix` | 0.02 | Bug fixes worth remembering |
-| `decision` | 0.02 | Architectural/design decisions |
-| `discovery` | 0.05 | Things learned |
-| `feature` | 0.05 | Feature implementations |
-| `refactor` | 0.05 | Code improvements |
-| `session_ledger` | 0.15 | Session state (auto) |
-| `signal` | 0.15 | Transient notes |
-
-**Example:**
-```json
-{
-  "name": "observe",
-  "arguments": {
-    "category": "decision",
-    "title": "Chose PostgreSQL over MongoDB",
-    "content": "Selected PostgreSQL for the user service because we need ACID transactions for billing. MongoDB's eventual consistency is unacceptable for financial data.",
-    "tags": "database,architecture,billing",
-    "project": "payment-service"
-  }
-}
-```
-
----
-
-## Search Tools
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `content` | string | Yes | Text to remember (auto-converted to SSL if not already) |
+| `type` | string | No | Node type: wisdom, insight, signal, episode (default: episode) |
+| `tags` | string[] | No | Optional tags |
+| `realm` | string | No | Primary realm (default: brahman) |
+| `visibility` | integer | No | 0=Private, 1=Shared, 2=Global (default: 0) |
+| `shared_realms` | string[] | No | Additional realms to share with |
 
 ### recall
 
-Semantic search across all memory with configurable zoom levels.
+Semantic search with realm filtering.
 
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `query` | string | Yes | - | Search query |
-| `zoom` | string | No | `"normal"` | Detail level (see below) |
-| `limit` | integer | No | varies | Override default limit |
-| `threshold` | number | No | `0.0` | Minimum similarity (0.0-1.0) |
-| `tag` | string | No | - | Filter by exact tag match |
-| `primed` | boolean | No | `false` | Use session priming (Phase 4) |
-| `compete` | boolean | No | `true` | Apply lateral inhibition (Phase 5) |
-| `learn` | boolean | No | `false` | Apply Hebbian learning (Phase 3) |
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `query` | string | Yes | Search query |
+| `limit` | integer | No | Max results (default: 10) |
+| `tag` | string | No | Filter by tag |
+| `realm` | string | No | Filter by realm |
+| `include_global` | boolean | No | Include global memories (default: true) |
 
-**Zoom Levels:**
-| Level | Results | Content | Use Case |
-|-------|---------|---------|----------|
-| `sparse` | 20+ | Titles only | Overview, orientation |
-| `normal` | 5-10 | Full text | General search |
-| `dense` | 3-5 | Text + temporal + edges | Deep context |
-| `full` | 1-3 | Complete untruncated | Single item detail |
+### grow
 
-**Example:**
-```json
-{
-  "name": "recall",
-  "arguments": {
-    "query": "authentication patterns",
-    "zoom": "normal",
-    "primed": true,
-    "compete": true
-  }
-}
-```
+Add durable knowledge: wisdom, belief, failure, aspiration, or dream.
 
-**Response:**
-```
-Found 7 results (normal view):
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `type` | string | Yes | wisdom, belief, failure, aspiration, dream |
+| `content` | string | Yes | Content to store |
+| `title` | string | No | Short title |
+| `tags` | string | No | Comma-separated tags |
 
-[wisdom] JWT vs Sessions: For REST APIs, JWTs are stateless but can't be
-revoked without a blacklist. Sessions are simpler but require server
-state...
+### observe
 
-[episode] Implemented OAuth2 in Project X: Used authorization code flow
-with PKCE for the mobile app...
+Store an observation/learning.
 
-[failure] Token refresh race condition: When two requests hit simultaneously
-with expired token, both tried to refresh...
-```
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `title` | string | Yes | Title/summary |
+| `content` | string | Yes | Full content |
+| `category` | string | No | Category: correction, preference, solution, decision, failure, wisdom, episode |
+| `tags` | string | No | Comma-separated tags |
+| `confidence` | number | No | Override confidence (0.0-1.0, otherwise derived from category) |
+
+**Category → Confidence mapping:**
+| Category | Default Confidence |
+|----------|-------------------|
+| correction | 0.95 |
+| preference, solution, milestone | 0.90 |
+| decision, failure, gotcha | 0.85 |
+| episode | 0.70 |
+| (other) | 0.80 |
+
+### get
+
+Get a node by ID.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | string | Yes | Node ID (integer or UUID) |
+
+### update
+
+Update node content.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | string | Yes | Node ID |
+| `content` | string | Yes | New content |
+
+### strengthen
+
+Increase confidence of a memory.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | string | Yes | Node ID |
+| `amount` | number | No | Amount (default: 0.1) |
+
+### weaken
+
+Decrease confidence of a memory.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | string | Yes | Node ID |
+| `amount` | number | No | Amount (default: 0.1) |
+
+### forget
+
+Remove a memory.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | string | Yes | Node ID |
+
+### batch_forget
+
+Delete multiple nodes by ID or pattern.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `ids` | string[] | No | Array of node IDs |
+| `pattern` | string | No | Search pattern to find and delete |
+
+### tag
+
+Add or remove tags from a node.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | string | Yes | Node ID |
+| `add` | string | No | Tag to add |
+| `remove` | string | No | Tag to remove |
 
 ---
 
-### recall_by_tag
+## Exploration (RLM)
 
-Pure tag-based lookup without semantic ranking.
+RLM-style (Recursive Language Model) primitives for iterative memory exploration.
 
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `tag` | string | Yes | - | Exact tag to match |
-| `limit` | integer | No | `50` | Maximum results |
+### explore_recall
 
-**Example:**
-```json
-{
-  "name": "recall_by_tag",
-  "arguments": {
-    "tag": "thread:auth-discussion",
-    "limit": 20
-  }
-}
-```
+Lightweight recall — returns titles/scores only, no full content.
 
----
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `query` | string | Yes | Search query |
+| `limit` | integer | No | Max results (default: 10) |
 
-### resonate
+### explore_peek
 
-Spreading activation search with Hebbian learning.
+Get summary of a memory (first 200 chars) without loading full content.
 
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `query` | string | Yes | - | Search query |
-| `k` | integer | No | `10` | Maximum results |
-| `spread_strength` | number | No | `0.5` | Activation spread (0.0-1.0) |
-| `learn` | boolean | No | `true` | Apply Hebbian learning |
-| `hebbian_strength` | number | No | `0.03` | Learning strength (0.0-0.5) |
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | string | Yes | Memory ID |
 
-**Example:**
-```json
-{
-  "name": "resonate",
-  "arguments": {
-    "query": "error handling patterns",
-    "k": 10,
-    "spread_strength": 0.6,
-    "learn": true
-  }
-}
-```
+### explore_expand
+
+Get full content of a memory.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | string | Yes | Memory ID |
+
+### explore_neighbors
+
+Get nodes connected via triplets.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `node` | string | Yes | Node name |
+| `direction` | string | No | outgoing, incoming, or both (default: both) |
 
 ---
+
+## Search and Resonance
 
 ### full_resonate
 
-**Phase 6: All resonance mechanisms combined.**
+Full 8-phase resonance search combining semantic, BM25, spreading activation, attractors, Hebbian learning, and self-tuning.
 
-Combines:
-- Session priming (Phase 4)
-- Spreading activation (Phase 1)
-- Attractor dynamics (Phase 2)
-- Lateral inhibition (Phase 5)
-- Hebbian learning (Phase 3)
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `query` | string | Yes | Search query |
+| `k` | integer | No | Max results |
+| `realm` | string | No | Filter by realm |
+| `include_global` | boolean | No | Include global memories (default: true) |
+| `exclude_kinds` | string[] | No | Memory kinds to exclude |
+| `partnership_only` | boolean | No | Exclude code intel types |
 
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `query` | string | Yes | - | Search query |
-| `k` | integer | No | `10` | Maximum results (max 50) |
-| `spread_strength` | number | No | `0.5` | Activation spread (0.0-1.0) |
-| `hebbian_strength` | number | No | `0.03` | Learning strength (0.0-0.2) |
+### smart_context
 
-**Example:**
-```json
-{
-  "name": "full_resonate",
-  "arguments": {
-    "query": "microservices communication patterns",
-    "k": 10,
-    "spread_strength": 0.5,
-    "hebbian_strength": 0.03
-  }
-}
-```
+Build intelligent context combining memories, code symbols, and graph relationships. Two modes for different latency requirements.
 
-**Response:**
-```
-Full resonance for: microservices communication patterns
-Found 8 resonant nodes (spread=0.5, hebbian=0.03):
-
-[72%] [wisdom] Service mesh patterns: Use Istio or Linkerd for...
-[65%] [episode] Implemented event-driven architecture in...
-[58%] [wisdom] API gateway as single entry point prevents...
-```
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `task` | string | Yes | Query to find context for |
+| `mode` | string | No | fast (<80ms) or full (<200ms) |
+| `limit` | integer | No | Token limit (default: 300) |
+| `memories` | boolean | No | Include memories (default: true) |
+| `code` | boolean | No | Include code symbols (default: true) |
+| `neighbors` | boolean | No | Include triplet neighbors (default: true) |
+| `realm` | string | No | Filter by realm |
 
 ---
 
-## Intention Tools
+## Graph (Triplets)
 
-### intend
+### connect
 
-Manage active intentions (goals).
+Create a string-based triplet relationship.
 
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `action` | string | No | `"list"` | Action: `set`, `list`, `fulfill`, `check` |
-| `want` | string | No | - | What I want (for `set`) |
-| `why` | string | No | - | Why this matters (for `set`) |
-| `scope` | string | No | `"session"` | Scope: `session`, `project`, `persistent` |
-| `id` | string | No | - | Intention ID (for `fulfill`/`check`) |
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `subject` | string | Yes | Subject entity |
+| `predicate` | string | Yes | Relationship type |
+| `object` | string | Yes | Object entity |
 
-**Example - Set intention:**
-```json
-{
-  "name": "intend",
-  "arguments": {
-    "action": "set",
-    "want": "Implement user authentication",
-    "why": "Users need to log in to access their data",
-    "scope": "project"
-  }
-}
-```
+### query_graph
 
-**Example - Fulfill intention:**
-```json
-{
-  "name": "intend",
-  "arguments": {
-    "action": "fulfill",
-    "id": "a1b2c3d4-..."
-  }
-}
-```
+Query triplets by subject or object.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `subject` | string | No | Query by subject |
+| `object` | string | No | Query by object |
+
+### query
+
+Query triplets with flexible filters (subject, predicate, object).
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `subject` | string | No | Subject filter |
+| `predicate` | string | No | Predicate filter |
+| `object` | string | No | Object filter |
 
 ---
 
-### wonder
-
-Register questions and knowledge gaps.
-
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `question` | string | Yes | - | The question to ask |
-| `context` | string | No | - | Why this question arose |
-| `gap_type` | string | No | `"uncertainty"` | Type of gap |
-| `priority` | number | No | `0.5` | Priority (0.0-1.0) |
-
-**Gap Types:**
-- `recurring_problem` - Same issue keeps appearing
-- `repeated_correction` - Keep getting corrected on this
-- `unknown_domain` - Entirely new area
-- `missing_rationale` - Know what, not why
-- `contradiction` - Conflicting information
-- `uncertainty` - General unknown
-
-**Example:**
-```json
-{
-  "name": "wonder",
-  "arguments": {
-    "question": "How does Kubernetes networking work?",
-    "context": "Debugging service-to-service communication issues",
-    "gap_type": "unknown_domain",
-    "priority": 0.8
-  }
-}
-```
-
----
-
-### answer
-
-Answer a previously registered question.
-
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `question_id` | string | Yes | - | Question ID or `"latest"` |
-| `answer` | string | Yes | - | The answer |
-| `promote_to_wisdom` | boolean | No | `false` | Promote to wisdom |
-| `dismiss` | boolean | No | `false` | Dismiss as not relevant |
-
-**Example:**
-```json
-{
-  "name": "answer",
-  "arguments": {
-    "question_id": "latest",
-    "answer": "Kubernetes uses a flat network model where every pod can reach every other pod. Services provide stable IPs via kube-proxy and iptables rules.",
-    "promote_to_wisdom": true
-  }
-}
-```
-
----
-
-## Learning Tools
-
-### feedback
-
-Record feedback on memory usefulness for Hebbian learning.
-
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `memory_id` | string | Yes | - | Node ID |
-| `helpful` | boolean | Yes | - | Was it helpful? |
-| `context` | string | No | - | Why this feedback |
-
-**Example:**
-```json
-{
-  "name": "feedback",
-  "arguments": {
-    "memory_id": "a1b2c3d4-...",
-    "helpful": true,
-    "context": "This pattern solved my exact problem"
-  }
-}
-```
-
-**Effect:**
-- `helpful: true` → Confidence increases
-- `helpful: false` → Confidence decreases
-
----
-
-### attractors
-
-Find conceptual gravity wells in the graph.
-
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `max_attractors` | integer | No | `10` | Maximum to find |
-| `settle` | boolean | No | `false` | Run settling dynamics |
-| `settle_strength` | number | No | `0.02` | Settling strength |
-
-**Example:**
-```json
-{
-  "name": "attractors",
-  "arguments": {
-    "max_attractors": 5,
-    "settle": true
-  }
-}
-```
-
-**Response:**
-```
-Found 5 attractors:
-
-1. [0.87] "Authentication and authorization patterns"
-   Basin: 42 nodes
-
-2. [0.82] "API design principles"
-   Basin: 38 nodes
-
-3. [0.79] "Error handling strategies"
-   Basin: 31 nodes
-```
-
----
-
-## Code Intelligence Tools
-
-Tools for indexing, navigating, and understanding codebases.
+## Code Intelligence
 
 ### learn_codebase
 
-Index a codebase incrementally using tree-sitter parsing.
+Index a codebase incrementally using tree-sitter (9 languages: C++, Python, JS, TS, Go, Rust, Java, Ruby, C#).
 
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `path` | string | Yes | - | Directory path to analyze |
-| `project` | string | No | dirname | Project name |
-| `max_files` | integer | No | 500 | Maximum files to process |
-| `incremental` | boolean | No | true | Only process changed files |
-| `force` | boolean | No | false | Force full re-index |
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `path` | string | Yes | Directory path |
+| `project` | string | No | Project name (auto-detected) |
+| `max_files` | integer | No | Max files (default: 500) |
+| `exclude` | string | No | Comma-separated dirs to exclude |
+| `incremental` | boolean | No | Only changed files (default: true) |
+| `force` | boolean | No | Force full re-index (default: false) |
 
-**Example:**
-```json
-{
-  "name": "learn_codebase",
-  "arguments": {
-    "path": "/path/to/project",
-    "project": "my-app"
-  }
-}
-```
+### extract_symbols
+
+Extract symbols from a single source file.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `path` | string | Yes | File path |
 
 ### find_symbol
 
 Search for symbols by name.
 
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `name` | string | Yes | - | Symbol name to search |
-| `kind` | string | No | - | Filter by kind (function, class, method) |
-| `project` | string | No | - | Filter by project |
-
-**Example:**
-```json
-{
-  "name": "find_symbol",
-  "arguments": {
-    "name": "calculateCost",
-    "kind": "function"
-  }
-}
-```
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | Yes | Symbol name |
+| `kind` | string | No | Filter: function, class, method |
 
 ### read_symbol
 
-Get source code for a symbol by name.
+Read source code for a symbol by name or ID.
 
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `name` | string | Yes | - | Symbol name |
-| `kind` | string | No | - | Symbol kind filter |
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | No | Symbol name |
+| `id` | integer | No | Symbol ID |
+| `kind` | string | No | Kind filter |
 
 ### read_function
 
-Get source code for a function by name.
+Shorthand for read_symbol with kind=function|method.
 
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `name` | string | Yes | - | Function name |
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | Yes | Function name |
 
 ### search_symbols
 
-Semantic search for symbols using embeddings.
+Semantic search for symbols by natural language query.
 
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `query` | string | Yes | - | Natural language query |
-| `limit` | integer | No | 10 | Maximum results |
-
-**Example:**
-```json
-{
-  "name": "search_symbols",
-  "arguments": {
-    "query": "render status line display",
-    "limit": 5
-  }
-}
-```
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `query` | string | Yes | Natural language query |
+| `kind` | string | No | Kind filter |
+| `limit` | integer | No | Max results (default: 10) |
 
 ### symbol_callers
 
-Find what calls a symbol.
+Find all symbols that call the given symbol.
 
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `name` | string | Yes | - | Symbol name |
-| `limit` | integer | No | 20 | Maximum results |
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | No | Symbol name |
+| `id` | integer | No | Symbol ID |
+| `kind` | string | No | Kind filter |
 
 ### symbol_callees
 
-Find what a symbol calls.
+Find all symbols that the given symbol calls.
 
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `name` | string | Yes | - | Symbol name |
-| `limit` | integer | No | 20 | Maximum results |
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | No | Symbol name |
+| `id` | integer | No | Symbol ID |
+| `kind` | string | No | Kind filter |
 
 ### code_context
 
-Get smart context for current file (relevant symbols and relationships).
+Get code context summary for hooks.
 
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `file` | string | Yes | - | File path |
-| `line` | integer | No | - | Focus on line |
-| `limit` | integer | No | 10 | Maximum symbols |
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `path` | string | No | Limit to files under this path |
 
----
+### codebase_overview
 
-## Graph Tools
+Get full indexed codebase structure.
 
-Tools for building and navigating the soul graph structure.
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `project` | string | No | Project filter |
+| `format` | string | No | tree, flat, or json (default: tree) |
+| `include_callsites` | boolean | No | Include callsites (default: false) |
 
-### connect
+### embed_symbols
 
-Create a directed edge between two nodes in the soul graph.
+Fast embed symbol metadata (~100/sec, no LLM needed).
 
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `from_id` | string | Yes | - | Source node UUID |
-| `to_id` | string | Yes | - | Target node UUID |
-| `edge_type` | string | No | `relates_to` | Relationship type |
-| `weight` | number | No | `0.8` | Edge strength (0.0-1.0) |
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `batch_size` | integer | No | Symbols per batch (default: 100) |
 
-**Edge Types:**
-| Type | Description | Use Case |
-|------|-------------|----------|
-| `similar` | Semantic similarity | Discovered by embeddings |
-| `supports` | Supports/confirms | Corroborating evidence |
-| `contradicts` | Contradicts | Conflicting information |
-| `relates_to` | Generic relation | File imports, associations |
-| `part_of` | Containment | Dir→file, module→function |
-| `is_a` | Type hierarchy | File is_a entry_point |
-| `mentions` | Reference | Episode mentions concept |
+### dedupe_symbols
 
-**Example:**
-```json
-{
-  "name": "connect",
-  "arguments": {
-    "from_id": "a1b2c3d4-...",
-    "to_id": "e5f6g7h8-...",
-    "edge_type": "relates_to",
-    "weight": 0.9
-  }
-}
-```
+Remove duplicate symbols from the database.
 
-**Response:**
-```
-Edge created
-```
+### resolve_callsites
 
-**Use with codemap:**
-```json
-// Create file entity
-{"name": "grow", "arguments": {"type": "entity", "title": "src/auth.ts", "content": "Auth module", "domain": "myproject"}}
+Resolve callsites to symbols, populating the call_edge table.
 
-// Connect to related file
-{"name": "connect", "arguments": {"from_id": "auth_id", "to_id": "session_id", "edge_type": "relates_to"}}
-```
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `project` | string | No | Filter to project path |
 
-Edges enable spreading activation — when you search for "authentication", connected files like `session.ts` surface through graph traversal.
+### type_hierarchy
 
----
+Get type hierarchy (base classes, interfaces) for a type.
 
-## Multi-Voice Tools
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | Yes | Type name |
+| `direction` | string | No | ancestors, descendants, or both (default: both) |
 
-### lens
+### file_imports
 
-Search through a specific cognitive perspective.
+Get all imports for a file.
 
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `query` | string | Yes | - | Search query |
-| `lens` | string | No | `"all"` | Perspective |
-| `limit` | integer | No | `5` | Results per lens |
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `path` | string | Yes | File path or filename |
 
-**Lenses:**
-| Lens | Bias |
-|------|------|
-| `manas` | Recent, practical |
-| `buddhi` | Old, high-confidence |
-| `ahamkara` | Beliefs, invariants |
-| `chitta` | Frequently accessed |
-| `vikalpa` | Low-confidence, exploratory |
-| `sakshi` | Neutral, balanced |
-| `all` | Run all lenses |
+### file_dependents
 
-**Example:**
-```json
-{
-  "name": "lens",
-  "arguments": {
-    "query": "database design",
-    "lens": "buddhi",
-    "limit": 5
-  }
-}
-```
+Get files that import a given module/file.
 
----
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `module` | string | Yes | Module or file name |
 
-### lens_harmony
+### clear_codebase
 
-Check consistency across cognitive perspectives.
+Remove all code intelligence data for a project.
 
-**Parameters:** None required.
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `project` | string | Yes | Project name |
+| `dry_run` | boolean | No | Preview only (default: false) |
 
-**Example:**
-```json
-{
-  "name": "lens_harmony",
-  "arguments": {}
-}
-```
+### clear_triplets
 
-**Response:**
-```
-Lens Harmony Analysis
+Delete triplets by subject pattern.
 
-Perspectives aligned: 4/6
-Divergence detected:
-- Manas suggests Redis (recent use)
-- Buddhi prefers PostgreSQL (proven reliability)
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `pattern` | string | Yes | SQL LIKE pattern (e.g., '%.cpp') |
+| `dry_run` | boolean | No | Preview only (default: false) |
 
-Recommendation: Consider context carefully
-```
+### describe_symbol
+
+Set semantic description for a code symbol.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `symbol_id` | integer | Yes | Symbol ID |
+| `description` | string | Yes | Description |
+
+### enrichment_status
+
+Get code enrichment progress (how many symbols have descriptions).
+
+### restore_code_intel_confidence
+
+Fix confidence/decay for code intel memories that were incorrectly decayed.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `confidence` | number | No | Confidence to restore (default: 0.8) |
+| `dry_run` | boolean | No | Preview (default: false) |
+
+### cleanup_code_wisdom
+
+Migration: delete old [code] wisdom memories and clear orphaned symbol references.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `dry_run` | boolean | No | Preview only (default: true) |
 
 ---
 
-## Session Tools
+## Realm Management
 
-### ledger
+### realm_list
 
-Save/load session state (Atman snapshots).
-
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `action` | string | Yes | - | Action: `save`, `load`, `update`, `list` |
-| `project` | string | No | auto | Project name |
-| `session_id` | string | No | - | Session identifier |
-| `soul_state` | object | No | - | Soul state to save |
-| `work_state` | object | No | - | Work state to save |
-| `continuation` | object | No | - | Continuation info |
-| `ledger_id` | string | No | - | Ledger ID (for update) |
-
-**Example - Save:**
-```json
-{
-  "name": "ledger",
-  "arguments": {
-    "action": "save",
-    "continuation": {
-      "next_steps": ["Implement auth", "Add tests"],
-      "critical": ["Fix the memory leak"]
-    }
-  }
-}
-```
-
-**Example - Load:**
-```json
-{
-  "name": "ledger",
-  "arguments": {
-    "action": "load"
-  }
-}
-```
-
----
-
-### narrate
-
-Record narrative episodes and story arcs.
-
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `action` | string | No | `"moment"` | Action: `start`, `moment`, `end`, `recall`, `list` |
-| `title` | string | No | - | Episode title (for `start`) |
-| `content` | string | No | - | Content to record |
-| `emotion` | string | No | `"routine"` | Emotional tone |
-| `episode_id` | string | No | - | Episode ID |
-| `query` | string | No | - | Search query (for `recall`) |
-
-**Emotions:**
-- `struggle` - Facing difficulty
-- `exploration` - Investigating unknown
-- `breakthrough` - Sudden insight
-- `satisfaction` - Successful completion
-- `frustration` - Blocked progress
-- `routine` - Normal work
-
-**Example - Start episode:**
-```json
-{
-  "name": "narrate",
-  "arguments": {
-    "action": "start",
-    "title": "The Great Authentication Refactor"
-  }
-}
-```
-
-**Example - Add moment:**
-```json
-{
-  "name": "narrate",
-  "arguments": {
-    "action": "moment",
-    "episode_id": "a1b2c3d4-...",
-    "content": "Finally found the root cause - tokens weren't being invalidated on password change",
-    "emotion": "breakthrough"
-  }
-}
-```
-
----
-
-## Dynamics Tools
-
-### cycle
-
-Run maintenance cycle (decay, synthesis, save).
-
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `save` | boolean | No | `true` | Save after cycle |
-| `attractors` | boolean | No | `false` | Run attractor dynamics |
-
-**Example:**
-```json
-{
-  "name": "cycle",
-  "arguments": {
-    "save": true,
-    "attractors": true
-  }
-}
-```
-
-**Response:**
-```
-Cycle complete: coherence=84%, decay=yes, feedback=3
-Attractors: 5 found, 42 nodes settled
-```
-
----
-
-## Realm Tools
-
-Tools for cross-session context isolation using realms.
+List all known realms.
 
 ### realm_get
 
-Get current realm context.
+Get all realms a memory belongs to.
 
-**Parameters:** None
-
-**Example:**
-```json
-{
-  "name": "realm_get",
-  "arguments": {}
-}
-```
-
-**Response:**
-```
-Current realm: project:cc-soul
-(Realm context persists across sessions)
-```
-
----
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | string | Yes | Memory ID |
 
 ### realm_set
 
-Set current realm (persists across sessions).
+Set primary realm for a memory.
 
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `realm` | string | Yes | - | Realm name (e.g., "project:cc-soul") |
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | string | Yes | Memory ID |
+| `realm` | string | Yes | Realm name |
 
-**Example:**
-```json
-{
-  "name": "realm_set",
-  "arguments": {
-    "realm": "project:cc-soul"
-  }
-}
-```
+### realm_add
 
-**Effect:** Nodes outside current realm are hidden during recall.
+Add memory to a shared realm.
 
----
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | string | Yes | Memory ID |
+| `realm` | string | Yes | Realm to add to |
 
-### realm_create
+### realm_remove
 
-Create a new realm with optional parent hierarchy.
+Remove memory from a shared realm.
 
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `realm` | string | Yes | - | New realm name |
-| `parent` | string | No | "brahman" | Parent realm |
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | string | Yes | Memory ID |
+| `realm` | string | Yes | Realm to remove from |
 
-**Example:**
-```json
-{
-  "name": "realm_create",
-  "arguments": {
-    "realm": "project:new-app",
-    "parent": "project:shared"
-  }
-}
-```
+### realm_visibility
+
+Set visibility level for a memory.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | string | Yes | Memory ID |
+| `visibility` | integer | Yes | 0=Private, 1=Shared, 2=Global |
+
+### realm_detect
+
+Detect current realm from environment, .cc-soul-realm file, or git repository.
 
 ---
 
-## Review Tools
+## Session and Ledger
 
-Human oversight tools for reviewing AI-generated wisdom.
+### ledger_save
 
-### review_list
+Save session checkpoint.
 
-List items in the review queue.
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `session_id` | string | Yes | Session identifier |
+| `project` | string | No | Project scope |
+| `mood` | string | No | confident, uncertain, flowing, frustrated |
+| `coherence` | number | No | Coherence score 0-1 |
+| `confidence` | number | No | Confidence score 0-1 |
+| `todos` | array | No | [{content, status}] objects |
+| `active_files` | string[] | No | File paths |
+| `decisions` | string[] | No | Key decisions |
+| `next_steps` | string[] | No | Next actions |
+| `blockers` | string[] | No | Current blockers |
+| `discoveries` | string[] | No | Insights |
+| `snapshot` | string | No | Full checkpoint text |
 
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `status` | string | No | "pending" | Filter: `pending`, `approved`, `rejected` |
-| `limit` | integer | No | 20 | Maximum items |
+### ledger_load
 
-**Example:**
-```json
-{
-  "name": "review_list",
-  "arguments": {
-    "status": "pending",
-    "limit": 10
-  }
-}
-```
+Load most recent checkpoint.
 
----
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `session_id` | string | No | Session filter |
+| `project` | string | No | Project filter |
 
-### review_decide
+### ledger_list
 
-Approve or reject a node in the review queue.
+List recent checkpoints.
 
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `id` | string | Yes | - | Node ID |
-| `decision` | string | Yes | - | `approve`, `reject`, `edit`, `defer` |
-| `edited_content` | string | No | - | New content (for `edit`) |
-| `reason` | string | No | - | Reason for decision |
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `project` | string | No | Project filter |
+| `limit` | integer | No | Max entries (default: 10) |
 
-**Example:**
-```json
-{
-  "name": "review_decide",
-  "arguments": {
-    "id": "a1b2c3d4-...",
-    "decision": "approve",
-    "reason": "Verified pattern is accurate"
-  }
-}
-```
+### ledger_get
 
-**Effect:**
-- `approve`: Boosts confidence, marks trusted
-- `reject`: Lowers confidence significantly
-- `edit`: Updates content, then approves
-- `defer`: Keeps in queue for later
+Get specific checkpoint by ID.
 
----
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | integer | Yes | Checkpoint ID |
 
-### review_batch
+### ledger_delete
 
-Apply same decision to multiple items.
+Delete a checkpoint.
 
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `ids` | string | Yes | - | Comma-separated node IDs |
-| `decision` | string | Yes | - | `approve`, `reject`, `defer` |
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | integer | Yes | Checkpoint ID |
 
-**Example:**
-```json
-{
-  "name": "review_batch",
-  "arguments": {
-    "ids": "id1,id2,id3",
-    "decision": "approve"
-  }
-}
-```
+### checkpoint
+
+Unified checkpoint — routes to active long task if one exists, otherwise standalone ledger.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `realm` | string | No | Project scope |
+| `mood` | string | No | Session mood |
+| `summary` | string | No | What's been accomplished |
+| `next_steps` | string[] | No | Next actions |
+| `active_files` | string[] | No | Files being worked on |
+| `discoveries` | string[] | No | Insights |
 
 ---
 
-### review_stats
+## Long-Running Tasks
 
-Get review queue statistics.
+### long_task_start
 
-**Parameters:** None
+Start a task with goal and completion criteria.
 
-**Example:**
-```json
-{
-  "name": "review_stats",
-  "arguments": {}
-}
-```
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `task_id` | string | Yes | Unique identifier |
+| `goal` | string | Yes | What to achieve |
+| `realm` | string | No | Project scope |
+| `hard_checks` | string[] | No | Deterministic criteria |
+| `soft_checks` | string[] | No | Semantic criteria |
+| `work_items` | string[] | No | Initial subtasks |
 
-**Response:**
-```
-=== Review Stats ===
-Pending: 15
-Approved: 142
-Rejected: 8
-Approval rate: 94.7%
-```
+### long_task_get
+
+Get task by ID.
+
+### long_task_active
+
+Get the active task for a realm.
+
+### long_task_update
+
+Update task progress.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `task_id` | string | Yes | Task ID |
+| `completed_summary` | string | No | What's done |
+| `work_items` | string[] | No | Updated subtasks |
+| `blockers` | string[] | No | Current blockers |
+
+### long_task_complete
+
+Mark task as completed.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `task_id` | string | Yes | Task ID |
+| `outcome` | string | Yes | Final outcome |
+
+### long_task_event
+
+Append event to task log.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `task_id` | string | Yes | Task ID |
+| `kind` | string | Yes | tool_result, decision, observation, error, checkpoint |
+| `payload` | string | No | Event data (JSON) |
+| `tags` | string[] | No | Tags |
+| `related_entities` | string[] | No | Related files/functions |
+
+### long_task_snapshot
+
+Get synthesized task context for injection.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `task_id` | string | Yes | Task ID |
+| `mode` | string | No | inject (compact) or debug (verbose) |
+
+### long_task_evaluate
+
+Evaluate task completion criteria.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `task_id` | string | Yes | Task ID |
+
+---
+
+## Theme System (xMemory)
+
+### theme_list
+
+List all themes with statistics.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `realm` | string | No | Filter by realm |
+| `limit` | integer | No | Max themes (default: 50) |
+
+### theme_get
+
+Get theme details including representatives.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | integer | Yes | Theme ID |
+
+### theme_recall
+
+Two-stage theme-based retrieval: diverse representatives then adaptive expansion.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `query` | string | Yes | Search query |
+| `limit` | integer | No | Max results (default: 10) |
+| `realm` | string | No | Filter by realm |
+
+### theme_stats
+
+Get theme organization statistics.
+
+### theme_maintain
+
+Force theme maintenance: split oversized, merge similar, reassign.
+
+### theme_assign_orphans
+
+Assign orphan memories to themes in batches.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `batch_size` | integer | No | Memories per batch (default: 100) |
+| `realm` | string | No | Filter by realm |
 
 ---
 
-## Evaluation Tools
+## Suggestions and Feedback
 
-Quality assurance tools for memory system.
+### suggestion_track
 
-### eval_run
+Track a suggestion for later outcome evaluation.
 
-Run golden recall test suite.
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `content` | string | Yes | What was suggested |
+| `context` | string | No | Why/when suggested |
+| `realm` | string | No | Project scope |
 
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `test_name` | string | No | - | Run specific test (or all) |
+### suggestion_pending
 
-**Example:**
-```json
-{
-  "name": "eval_run",
-  "arguments": {}
-}
-```
+List suggestions awaiting feedback.
 
-**Response:**
-```
-=== Eval Harness ===
-Test cases loaded: 12
-Results: 11/12 passed (91.7%)
-```
+### suggestion_resolve
+
+Record outcome of a suggestion.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | integer | Yes | Suggestion ID |
+| `helped` | boolean | Yes | Did it help? |
+| `details` | string | No | What happened |
+
+### suggestion_count
+
+Count pending suggestions.
+
+### learn_outcome
+
+Record whether a surfaced memory helped. Adjusts confidence.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `memory_id` | string | Yes | Memory ID or UUID |
+| `outcome` | string | Yes | positive, negative, or neutral |
+| `context` | string | No | What you were doing |
+
+### episode_cluster_status
+
+Find clusters of similar episodes that could be distilled into wisdom.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `similarity_threshold` | number | No | Min similarity (default: 0.85) |
+| `min_occurrences` | integer | No | Min episodes (default: 3) |
+
+---
+
+## Consolidation
+
+### consolidation_scan
+
+Find similar memory pairs that could be merged.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `similarity_threshold` | number | No | Min similarity (default: 0.85) |
+| `limit` | integer | No | Max candidates (default: 50) |
+| `realm` | string | No | Filter by realm |
+
+### consolidation_merge
+
+Merge two memories (primary absorbs secondary).
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `primary_id` | integer | Yes | Primary memory (kept) |
+| `secondary_id` | integer | Yes | Secondary memory (absorbed) |
+| `merged_content` | string | No | Combined content |
+
+### consolidation_auto
+
+Auto-merge highly similar memories (>90% similarity).
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `similarity_threshold` | number | No | Min similarity (default: 0.90) |
+| `max_merges` | integer | No | Max merges (default: 20) |
 
 ---
 
-### eval_add_test
+## Metacognition
 
-Add expected query→results test case.
+### metacognition_corrections
 
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `name` | string | Yes | - | Test case name |
-| `query` | string | Yes | - | Test query |
-| `expected` | string | Yes | - | Comma-separated expected node IDs |
+Analyze patterns in past corrections. Finds recurring mistakes.
 
-**Example:**
-```json
-{
-  "name": "eval_add_test",
-  "arguments": {
-    "name": "auth_pattern_test",
-    "query": "authentication patterns",
-    "expected": "auth-wisdom-id,jwt-pattern-id"
-  }
-}
-```
+### metacognition_outcomes
+
+Analyze suggestion outcomes. Finds success patterns.
+
+### metacognition_evaluate
+
+Self-evaluate learning effectiveness. Returns metrics and recommendations.
 
 ---
+
+## Curiosity and Gaps
+
+### curiosity_note_gap
+
+Record a knowledge gap.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `gap` | string | Yes | What I don't know |
+| `context` | string | No | When/why it came up |
+| `realm` | string | No | Project scope |
+
+### curiosity_gaps
+
+List current knowledge gaps.
+
+### curiosity_resolve
+
+Mark a gap as explored/resolved.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | integer | Yes | Gap ID |
+| `learned` | string | No | What was learned |
+
+---
+
+## Anticipation and Habits
+
+### anticipation_observe
+
+Record a context→action pattern.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `context` | string | Yes | Trigger situation |
+| `action` | string | Yes | Response taken |
+| `realm` | string | No | Project scope |
+
+### anticipation_predict
+
+Predict likely actions for a given context.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `context` | string | Yes | Current situation |
+| `limit` | integer | No | Max predictions (default: 5) |
+
+### anticipation_success
+
+Mark a prediction as successful.
+
+### anticipation_list
+
+List learned patterns ordered by frequency.
+
+### habit_observe
+
+Record a trigger→response pattern. Strengthens on each observation.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `trigger` | string | Yes | What triggers the habit |
+| `response` | string | Yes | What should happen |
+| `realm` | string | No | Project scope |
+
+### habit_match
+
+Find habits matching the current context.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `context` | string | Yes | Context to match |
+| `min_strength` | number | No | Min strength 0-1 (default: 0.3) |
+
+### habit_strengthen / habit_weaken
+
+Adjust habit strength.
+
+### habit_list
+
+List formed habits ordered by strength.
+
+---
+
+## Transcripts and Distillation
+
+### transcript_register
+
+Register a transcript file for distillation tracking.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `session_id` | string | Yes | Claude session ID |
+| `transcript_path` | string | Yes | Path to .jsonl file |
+| `realm` | string | No | Realm isolation |
+
+### transcript_get / transcript_list / transcript_update / transcript_remove
+
+CRUD operations on transcript tracking state.
+
+### transcript_parse
+
+Parse new turns from a transcript JSONL file.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `session_id` | string | Yes | Session ID |
+| `min_turns` | integer | No | Min turns to return (default: 4) |
+
+### transcript_search
+
+Semantic search across transcript content.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `query` | string | Yes | Search query |
+| `session_id` | string | No | Session filter (default: current, '*' for all) |
+| `limit` | integer | No | Max results (default: 10) |
+| `min_similarity` | number | No | Min cosine similarity (default: 0.3) |
+| `keyword_only` | boolean | No | Fast keyword match (default: false) |
+
+### distill_status
+
+Get distillation system status.
+
+---
+
+## User Profile
+
+### profile_get
+
+Get user profile: expertise, communication style, work patterns, preferences.
+
+### profile_update
+
+Update a profile field.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `field` | string | Yes | expertise_json, style_json, patterns_json, or preferences_json |
+| `value` | string | Yes | JSON value |
+
+### profile_observe
+
+Record an observation about the user.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `observation_type` | string | Yes | expertise, style, pattern, preference |
+| `value` | string | Yes | For expertise: 'domain:level'. Others: JSON |
+
+---
+
+## Goals
+
+### goal_set
+
+Define a long-term goal.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `title` | string | Yes | Short name |
+| `description` | string | No | Details |
+| `milestones` | string | No | JSON: [{"name":"v1","done":false}] |
+| `deadline` | integer | No | Unix timestamp |
+| `realm` | string | No | Project scope |
+
+### goal_get / goal_list
+
+Query goals. `goal_list` supports status filter (active, paused, completed, abandoned).
+
+### goal_progress
+
+Update progress and optionally mark milestones complete.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | integer | Yes | Goal ID |
+| `progress` | number | Yes | Progress 0-1 |
+| `milestone` | string | No | Milestone to mark complete |
+
+### goal_complete
+
+Mark goal as completed.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | integer | Yes | Goal ID |
+| `outcome` | string | Yes | Achievement summary |
+
+---
+
+## Calibration
+
+### calibration_record
+
+Record a prediction outcome for accuracy tracking.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `domain` | string | Yes | Domain (code, architecture, debugging) |
+| `success` | boolean | Yes | Was prediction correct? |
+
+### calibration_score
+
+Get accuracy score for a domain or all domains.
+
+---
+
+## Hygiene
+
+### hygiene_stats
+
+Get memory hygiene statistics: confidence distribution, growth rate, stale memories.
+
+### hygiene_run
+
+Run hygiene: decay, prune low-confidence old memories, consolidate similar.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `prune_threshold` | number | No | Confidence to prune below (default: 0.1) |
+| `min_age_days` | number | No | Min age for pruning (default: 7) |
+| `consolidation_threshold` | number | No | Similarity for consolidation (default: 0.85) |
+| `max_consolidations` | integer | No | Max per run (default: 10) |
+
+---
+
+## Cross-Project Insights
+
+### insight_promote
+
+Promote a memory to global visibility (applies across all projects).
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | integer | Yes | Memory ID |
+| `reason` | string | No | Why it's cross-project |
+
+### insight_global
+
+List all global insights.
+
+---
+
+## Background Processing
+
+### background_schedule
+
+Schedule a background task.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `task_type` | string | Yes | consolidation, decay, pruning, pattern_extraction |
+| `realm` | string | No | Project scope |
+
+### background_status
+
+Get background processing status.
+
+### background_run_cycle
+
+Run one cycle of background processing.
+
+---
+
+## State and Maintenance
+
+### soul_context
+
+Get current soul state: node count, confidence, triplets, symbols, status.
+
+### subconscious_stats
+
+Get background processor statistics.
+
+### health_check
+
+Check daemon health and readiness.
+
+### version_check
+
+Get version information.
+
+### cycle
+
+Run maintenance cycle (decay, cleanup).
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `force` | boolean | No | Force full cycle |
+
+### cleanup
+
+Remove garbage nodes.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `dry_run` | boolean | No | Preview only |
+
+### reembed_memories
+
+Re-embed memories with proper embeddings (fix zero-embedding memories).
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `kind` | string | No | Filter by kind |
+| `min_confidence` | number | No | Min confidence (default: 0) |
+| `limit` | integer | No | Max to process (default: 100) |
+| `dry_run` | boolean | No | Preview (default: false) |
+
+### migrate_vss
+
+Migrate embeddings from main DB to separate VSS database.
+
+---
+
+## Import and Export
+
+### import_soul
+
+Import .soul file (SSL format).
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `file` | string | No | Path to .soul file |
+| `content` | string | No | SSL content directly |
+
+### export_soul
+
+Export memories to SSL format.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `file` | string | No | Output file path |
+| `tag` | string | No | Filter by tag |
+| `limit` | integer | No | Max nodes |
+
+### ssl_convert
+
+Convert raw text to SSL (Soul Semantic Language) format.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `content` | string | Yes | Raw text |
+| `domain` | string | No | Domain tag |
+| `location` | string | No | Location reference (@file:line) |
+
+---
+
+## Epiplexity
 
 ### epiplexity_check
 
-Check compression quality (can I reconstruct from seed?).
+Compute epiplexity (ε) score measuring reconstruction quality from compressed seeds.
 
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `content` | string | No | - | Full content to check |
-| `seed` | string | No | - | Compressed seed |
-| `id` | string | No | - | Node ID to check |
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `original` | string | Yes | Original full text |
+| `seed` | string | Yes | Compressed SSL seed |
+| `reconstructed` | string | Yes | Text reconstructed from seed |
 
-**Example:**
-```json
-{
-  "name": "epiplexity_check",
-  "arguments": {
-    "content": "Rate limiter uses token bucket with 100ms refill",
-    "seed": "rate-limiter:token-bucket→100ms"
-  }
-}
-```
-
-**Response:**
-```
-=== Epiplexity Check ===
-Content reconstructable from seed: YES
-Compression ratio: 78%
-```
+**Score**: ε = (S · K · D · C)^0.25 where S=semantic fidelity, K=entity preservation, D=information density, C=compression utility.
 
 ---
 
-### epiplexity_drift
+## SQL
 
-Detect if compression quality is degrading over time.
+### sql_query
 
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `window_days` | integer | No | 30 | Analysis window |
+Execute a read-only SQL query against the soul database (debugging/analysis).
 
-**Example:**
-```json
-{
-  "name": "epiplexity_drift",
-  "arguments": {
-    "window_days": 7
-  }
-}
-```
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `query` | string | Yes | SQL query (SELECT only) |
+| `limit` | integer | No | Max rows (default: 100) |
 
 ---
 
-## Yajna Tools
+## Learning Tools (MCP)
 
-Tools for memory maintenance ceremonies - compression, cleanup, and batch operations.
+These tools are exposed via the `chitta-mcp` Python MCP server (not the C++ daemon directly):
 
-### get
+### learn_correction
 
-Fast direct ID lookup with full content.
+Store a correction when wrong. Creates high-confidence counter-memory.
 
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `id` | string | Yes | - | Node UUID to retrieve |
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `wrong` | string | Yes | What was incorrect |
+| `correct` | string | Yes | The correct information |
+| `context` | string | No | Where this applies |
 
-**Example:**
-```json
-{
-  "name": "get",
-  "arguments": {
-    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-  }
-}
-```
+### learn_preference
 
-**Response:**
-```
-=== a1b2c3d4-e5f6-7890-abcd-ef1234567890 ===
-Type: episode
-Confidence: 85%
-Tags: dev:hot, file:auth.ts, ε-processed
+Store a user preference (global visibility).
 
-[auth] JWT validation→check_expiry→refresh_if_needed @auth.ts:42
-[ε] Validates JWT, refreshes if within 5min of expiry.
-[TRIPLET] JWT_validation uses check_expiry
-[TRIPLET] JWT_validation triggers refresh_if_needed
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `category` | string | No | communication, detail, autonomy, style, workflow |
+| `preference` | string | Yes | The preference |
+| `example` | string | No | Demonstration |
 
---- 2 edges ---
-  -> [supports] Token refresh flow...
-  -> [mentions] Authentication middleware...
-```
+### learn_insight
 
----
+Store a generalizable cross-project insight.
 
-### yajna_list
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `domain` | string | No | programming, debugging, architecture, etc. |
+| `insight` | string | Yes | The insight |
+| `learned_from` | string | No | Context |
 
-List nodes needing ε-yajna processing (SSL conversion).
+### learn_approach
 
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `limit` | integer | No | 100 | Max nodes to list |
-| `filter` | string | No | - | Text filter for domain |
+Store what approach works in a particular state.
 
-**Example:**
-```json
-{
-  "name": "yajna_list",
-  "arguments": {
-    "limit": 20,
-    "filter": "cc-soul"
-  }
-}
-```
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `state` | string | Yes | stuck, debugging, exploring, flowing, etc. |
+| `approach` | string | Yes | What helped |
+| `outcome` | string | No | What happened |
 
-**Response:**
-```
-Nodes for epsilon-yajna (SSL + triplet conversion):
+### learn_milestone
 
-[a1b2c3d4-...] Verbose explanation of... (820 chars, epsilon=13%)
-[b2c3d4e5-...] [cc-soul] func()→result @file.hpp (150 chars, epsilon=100%)
+Record a relationship milestone.
 
-Total: 42 nodes need processing (showing 20)
-```
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `milestone` | string | Yes | What happened |
+| `significance` | string | No | Why it matters |
+
+### research_topics / research_store / research_cycle
+
+Curiosity-driven research tools for finding topics to investigate, storing findings, and running research cycles.
 
 ---
 
-### yajna_inspect
-
-Get complete node content for yajna analysis.
-
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `id` | string | Yes | - | Node UUID to inspect |
-
-**Example:**
-```json
-{
-  "name": "yajna_inspect",
-  "arguments": {
-    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-  }
-}
-```
-
----
-
-### yajna_mark_processed
-
-Batch mark SSL-format nodes as ε-processed. Efficient C++ loop.
-
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `epsilon_threshold` | number | No | 0.8 | Min epsilon to auto-mark |
-| `dry_run` | boolean | No | true | Preview only |
-| `filter` | string | No | - | Text filter |
-
-**Example:**
-```json
-{
-  "name": "yajna_mark_processed",
-  "arguments": {
-    "epsilon_threshold": 0.8,
-    "dry_run": false
-  }
-}
-```
-
-**Response:**
-```
-Marked 788 nodes as ε-processed
-```
-
----
-
-### batch_remove
-
-Remove multiple nodes from a file of UUIDs. Efficient C++ loop.
-
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `file` | string | Yes | - | Path to file with UUIDs (one per line) |
-| `dry_run` | boolean | No | true | Preview only |
-
-**Example:**
-```json
-{
-  "name": "batch_remove",
-  "arguments": {
-    "file": "/tmp/noise_ids.txt",
-    "dry_run": false
-  }
-}
-```
-
----
-
-### batch_tag
-
-Tag multiple nodes from a file of UUIDs. Efficient C++ loop.
-
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `file` | string | Yes | - | Path to file with UUIDs (one per line) |
-| `add` | string | Yes | - | Tag to add to all nodes |
-| `dry_run` | boolean | No | true | Preview only |
-
-**Example:**
-```json
-{
-  "name": "batch_tag",
-  "arguments": {
-    "file": "/tmp/processed_ids.txt",
-    "add": "ε-processed",
-    "dry_run": false
-  }
-}
-```
-
----
-
-### tag
-
-Add or remove tags from a single node.
-
-**Parameters:**
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `id` | string | Yes | - | Node UUID |
-| `add` | string | No | - | Tag to add |
-| `remove` | string | No | - | Tag to remove |
-
-**Example:**
-```json
-{
-  "name": "tag",
-  "arguments": {
-    "id": "a1b2c3d4-...",
-    "add": "important"
-  }
-}
-```
-
----
-
-## Response Format
-
-All tools return responses in this format:
-
-```json
-{
-  "content": [
-    {
-      "type": "text",
-      "text": "Human-readable response"
-    }
-  ],
-  "isError": false,
-  "_meta": {
-    "result_data": { ... }
-  }
-}
-```
-
-The `_meta.result_data` contains structured data for programmatic use.
-
----
-
-*The soul speaks through these tools.*
+*100+ tools. One soul.*

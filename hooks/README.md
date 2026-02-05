@@ -15,7 +15,7 @@ Modular hooks for Claude Code integration. Each hook has a single responsibility
 
 ## Installation
 
-Scripts are installed to `~/.claude/hooks/` by `setup.sh`. Add to `~/.claude/settings.json`:
+Scripts are installed to `~/.claude/hooks/` by `smart-install.sh`. Add to `~/.claude/settings.json`:
 
 ```json
 {

@@ -1,0 +1,996 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>120+ MCP Tools — cc-soul</title>
+<meta name="description" content="Complete reference for all 120+ MCP tools in cc-soul's Chitta daemon. Memory, code intelligence, learning, anticipation, realms, distillation, and more.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink-950: #0B0B10;
+  --night-900: #0F1018;
+  --indigo-800: #1A1D2B;
+  --indigo-700: #24283A;
+  --indigo-600: #2E3348;
+  --ash-300: #B9BDC7;
+  --lotus-200: #E7E2D6;
+  --sandal-300: #CBAF86;
+  --ember-400: #D46A4C;
+  --ember-500: #C05A3E;
+  --aura-300: #9DB2D9;
+  --mist-100: #F3F1EC;
+
+  --bg-gradient: linear-gradient(160deg, #0F1018 0%, #1A1D2B 55%, #24283A 100%);
+  --halo-gradient: radial-gradient(60% 60% at 50% 35%, rgba(157,178,217,0.18) 0%, rgba(15,16,24,0) 70%);
+
+  --font-display: 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
+  --font-mono: 'IBM Plex Mono', 'Menlo', 'Consolas', monospace;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4rem;
+  --space-9: 6rem;
+  --space-10: 8rem;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.5rem;
+  --text-2xl: 2rem;
+  --text-3xl: 2.75rem;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+
+  --shadow-soft: 0 8px 24px rgba(8, 10, 18, 0.25);
+}
+
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+
+body {
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+  line-height: 1.7;
+  color: var(--ash-300);
+  background: var(--night-900);
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection { background: rgba(203, 175, 134, 0.25); color: var(--lotus-200); }
+a { color: inherit; text-decoration: none; }
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.025;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 256px 256px;
+}
+
+/* ═══ REVEAL ═══ */
+.reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+              transform 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+.reveal.visible { opacity: 1; transform: translateY(0); }
+.reveal-delay-1 { transition-delay: 0.1s; }
+.reveal-delay-2 { transition-delay: 0.2s; }
+
+/* ═══ LAYOUT ═══ */
+.container {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 var(--space-5);
+}
+
+/* ═══ NAV ═══ */
+.nav {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 100;
+  padding: var(--space-4) 0;
+  background: rgba(15, 16, 24, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(203, 175, 134, 0.06);
+}
+.nav-inner {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 var(--space-5);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.nav-brand {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--lotus-200);
+  letter-spacing: 0.05em;
+}
+.nav-brand span { color: var(--sandal-300); }
+.nav-links { display: flex; gap: var(--space-5); list-style: none; }
+.nav-links a {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ash-300);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  transition: color 0.25s ease;
+  position: relative;
+}
+.nav-links a::after {
+  content: '';
+  position: absolute;
+  bottom: -4px; left: 0;
+  width: 0; height: 1px;
+  background: var(--sandal-300);
+  transition: width 0.3s ease;
+}
+.nav-links a:hover { color: var(--lotus-200); }
+.nav-links a:hover::after { width: 100%; }
+.nav-links a.active { color: var(--sandal-300); }
+.nav-links a.active::after { width: 100%; }
+
+/* ═══ PAGE HEADER ═══ */
+.page-header {
+  padding: calc(var(--space-10) + 60px) 0 var(--space-9);
+  background: var(--bg-gradient);
+  position: relative;
+  overflow: hidden;
+}
+.page-header::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--halo-gradient);
+  opacity: 0.5;
+}
+.page-header .container { position: relative; z-index: 1; }
+.page-header-badge {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--sandal-300);
+  margin-bottom: var(--space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.page-header-badge::before {
+  content: '';
+  width: 32px;
+  height: 1px;
+  background: var(--sandal-300);
+  opacity: 0.5;
+}
+.page-header h1 {
+  font-family: var(--font-display);
+  color: var(--lotus-200);
+  font-weight: 500;
+  font-size: clamp(2rem, 5vw, var(--text-3xl));
+  line-height: 1.15;
+  margin-bottom: var(--space-5);
+}
+.page-header-sub {
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  max-width: 600px;
+  line-height: 1.8;
+}
+
+/* ═══ CATEGORY TOC ═══ */
+.toc {
+  padding: var(--space-7) 0;
+  border-bottom: 1px solid rgba(203, 175, 134, 0.06);
+}
+.toc-label {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(185, 189, 199, 0.5);
+  margin-bottom: var(--space-4);
+}
+.toc-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.toc-chip {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ash-300);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid rgba(157, 178, 217, 0.12);
+  border-radius: var(--radius-sm);
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+.toc-chip:hover {
+  border-color: rgba(157, 178, 217, 0.3);
+  color: var(--lotus-200);
+  background: rgba(157, 178, 217, 0.04);
+}
+.toc-chip .count {
+  color: rgba(185, 189, 199, 0.4);
+  margin-left: var(--space-1);
+}
+
+/* ═══ TOOLS CATEGORIES ═══ */
+.tools-section {
+  padding: var(--space-8) 0;
+}
+
+.tools-category {
+  margin-bottom: var(--space-8);
+}
+
+.tools-category-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid rgba(203, 175, 134, 0.08);
+  cursor: pointer;
+  user-select: none;
+}
+.tools-category-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.tools-category-icon svg { width: 100%; height: 100%; }
+.tools-category-name {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  color: var(--lotus-200);
+  font-weight: 500;
+}
+.tools-category-count {
+  font-size: var(--text-xs);
+  color: rgba(185, 189, 199, 0.45);
+  margin-left: auto;
+}
+.tools-category-toggle {
+  color: var(--sandal-300);
+  font-size: var(--text-xs);
+  opacity: 0.5;
+  transition: transform 0.3s ease, opacity 0.2s ease;
+}
+.tools-category-header:hover .tools-category-toggle { opacity: 1; }
+.tools-category.collapsed .tools-category-toggle { transform: rotate(-90deg); }
+.tools-category.collapsed .tools-list { display: none; }
+
+.tools-list { display: grid; gap: 0; }
+
+.tool-row {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: var(--space-5);
+  padding: var(--space-3) 0;
+  padding-left: var(--space-3);
+  border-left: 1px solid rgba(157, 178, 217, 0.06);
+  transition: all 0.2s ease;
+}
+.tool-row:hover {
+  border-left-color: rgba(157, 178, 217, 0.2);
+  background: rgba(157, 178, 217, 0.02);
+}
+.tool-row + .tool-row {
+  border-top: 1px solid rgba(203, 175, 134, 0.03);
+}
+.tool-name {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--aura-300);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.tool-desc {
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  line-height: 1.6;
+}
+
+/* ═══ BACK LINK ═══ */
+.back-section {
+  padding: var(--space-8) 0;
+  text-align: center;
+}
+.back-link {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--sandal-300);
+  padding: var(--space-3) var(--space-5);
+  border: 1px solid rgba(203, 175, 134, 0.2);
+  border-radius: var(--radius-sm);
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.back-link:hover {
+  border-color: rgba(203, 175, 134, 0.4);
+  background: rgba(203, 175, 134, 0.04);
+  color: var(--lotus-200);
+}
+
+/* ═══ FOOTER ═══ */
+.footer {
+  background: var(--night-900);
+  border-top: 1px solid rgba(203, 175, 134, 0.06);
+  padding: var(--space-7) 0;
+  text-align: center;
+}
+.footer-text {
+  font-size: var(--text-xs);
+  color: rgba(185, 189, 199, 0.4);
+  letter-spacing: 0.04em;
+}
+.footer-text a { color: var(--sandal-300); transition: color 0.2s ease; }
+.footer-text a:hover { color: var(--lotus-200); }
+.footer-sep {
+  display: inline-block;
+  width: 3px; height: 3px;
+  border-radius: 50%;
+  background: rgba(185, 189, 199, 0.25);
+  margin: 0 var(--space-3);
+  vertical-align: middle;
+}
+
+/* ═══ RESPONSIVE ═══ */
+@media (max-width: 700px) {
+  .nav-links { display: none; }
+  .tool-row {
+    grid-template-columns: 1fr;
+    gap: var(--space-1);
+  }
+  .page-header h1 { font-size: var(--text-2xl); }
+}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="index.html" class="nav-brand">cc<span>-</span>soul</a>
+    <ul class="nav-links">
+      <li><a href="index.html">Home</a></li>
+      <li><a href="tools.html" class="active">Tools</a></li>
+      <li><a href="cli.html">CLI</a></li>
+      <li><a href="hooks.html">Hooks</a></li>
+      <li><a href="skills.html">Skills</a></li>
+      <li><a href="philosophy.html">Philosophy</a></li>
+      <li><a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+  </div>
+</nav>
+
+<!-- PAGE HEADER -->
+<header class="page-header">
+  <div class="container">
+    <div class="page-header-badge reveal">MCP Tools Reference</div>
+    <h1 class="reveal reveal-delay-1">120+ tools. One daemon.</h1>
+    <p class="page-header-sub reveal reveal-delay-2">Every tool is served by <code style="color: var(--aura-300);">chittad</code>&thinsp;&mdash;&thinsp;a C++ daemon communicating over Unix socket. All parameters are strings unless noted.</p>
+  </div>
+</header>
+
+<!-- TABLE OF CONTENTS -->
+<section class="toc">
+  <div class="container">
+    <p class="toc-label">Jump to category</p>
+    <div class="toc-grid">
+      <a href="#cat-core" class="toc-chip">Core Memory <span class="count">9</span></a>
+      <a href="#cat-graph" class="toc-chip">Graph &amp; Triplets <span class="count">3</span></a>
+      <a href="#cat-hooks" class="toc-chip">Hook Integration <span class="count">2</span></a>
+      <a href="#cat-context" class="toc-chip">Context &amp; Status <span class="count">3</span></a>
+      <a href="#cat-code" class="toc-chip">Code Intelligence <span class="count">12</span></a>
+      <a href="#cat-codewisdom" class="toc-chip">Code Wisdom <span class="count">4</span></a>
+      <a href="#cat-realm" class="toc-chip">Realms <span class="count">7</span></a>
+      <a href="#cat-ledger" class="toc-chip">Session Continuity <span class="count">5</span></a>
+      <a href="#cat-transcript" class="toc-chip">Transcript &amp; Distillation <span class="count">8</span></a>
+      <a href="#cat-theme" class="toc-chip">Theme Memory <span class="count">6</span></a>
+      <a href="#cat-hygiene" class="toc-chip">Hygiene &amp; Calibration <span class="count">4</span></a>
+      <a href="#cat-maintenance" class="toc-chip">Maintenance <span class="count">2</span></a>
+      <a href="#cat-io" class="toc-chip">Import / Export <span class="count">2</span></a>
+      <a href="#cat-background" class="toc-chip">Background Processing <span class="count">2</span></a>
+      <a href="#cat-learning" class="toc-chip">Learning &amp; Tracking <span class="count">6</span></a>
+      <a href="#cat-explore" class="toc-chip">Exploration <span class="count">4</span></a>
+      <a href="#cat-longtask" class="toc-chip">Long Tasks <span class="count">9</span></a>
+      <a href="#cat-anticipation" class="toc-chip">Anticipation &amp; Habits <span class="count">9</span></a>
+      <a href="#cat-profile" class="toc-chip">User Profile <span class="count">3</span></a>
+      <a href="#cat-goals" class="toc-chip">Goals <span class="count">5</span></a>
+      <a href="#cat-consolidation" class="toc-chip">Consolidation <span class="count">3</span></a>
+      <a href="#cat-metacognition" class="toc-chip">Metacognition <span class="count">3</span></a>
+      <a href="#cat-curiosity" class="toc-chip">Curiosity &amp; Research <span class="count">6</span></a>
+      <a href="#cat-suggestions" class="toc-chip">Suggestions <span class="count">4</span></a>
+      <a href="#cat-insights" class="toc-chip">Insights <span class="count">2</span></a>
+    </div>
+  </div>
+</section>
+
+<!-- TOOLS -->
+<section class="tools-section">
+  <div class="container">
+
+    <!-- CORE MEMORY -->
+    <div class="tools-category" id="cat-core">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="4" stroke="#CBAF86" stroke-width="1.5"/><circle cx="10" cy="10" r="8" stroke="#CBAF86" stroke-width="0.75" opacity="0.4"/></svg>
+        </div>
+        <span class="tools-category-name">Core Memory</span>
+        <span class="tools-category-count">10 tools</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">remember</span><span class="tool-desc">Store text in memory with optional tags, type, realm, and visibility level</span></div>
+        <div class="tool-row"><span class="tool-name">recall</span><span class="tool-desc">Search memory by semantic similarity with optional tag and realm filters</span></div>
+        <div class="tool-row"><span class="tool-name">grow</span><span class="tool-desc">Add wisdom, belief, failure, aspiration, or dream with structured metadata</span></div>
+        <div class="tool-row"><span class="tool-name">get</span><span class="tool-desc">Get a node by ID &mdash; returns full content, confidence, tags, and metadata</span></div>
+        <div class="tool-row"><span class="tool-name">update</span><span class="tool-desc">Update the content of an existing memory node</span></div>
+        <div class="tool-row"><span class="tool-name">forget</span><span class="tool-desc">Remove a memory permanently by its ID</span></div>
+        <div class="tool-row"><span class="tool-name">batch_forget</span><span class="tool-desc">Delete multiple nodes by ID array or search pattern (batch deletion)</span></div>
+        <div class="tool-row"><span class="tool-name">strengthen</span><span class="tool-desc">Increase confidence of a memory (default +0.1). Hebbian reinforcement.</span></div>
+        <div class="tool-row"><span class="tool-name">weaken</span><span class="tool-desc">Decrease confidence of a memory (default &minus;0.1). Intentional forgetting.</span></div>
+        <div class="tool-row"><span class="tool-name">tag</span><span class="tool-desc">Add or remove tags from a node for categorical filtering</span></div>
+      </div>
+    </div>
+
+    <!-- GRAPH & TRIPLETS -->
+    <div class="tools-category" id="cat-graph">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><circle cx="5" cy="10" r="2" stroke="#9DB2D9" stroke-width="1.2"/><circle cx="15" cy="6" r="2" stroke="#9DB2D9" stroke-width="1.2"/><circle cx="15" cy="14" r="2" stroke="#9DB2D9" stroke-width="1.2"/><line x1="7" y1="10" x2="13" y2="6" stroke="#9DB2D9" stroke-width="0.75" opacity="0.5"/><line x1="7" y1="10" x2="13" y2="14" stroke="#9DB2D9" stroke-width="0.75" opacity="0.5"/></svg>
+        </div>
+        <span class="tools-category-name">Graph &amp; Triplets</span>
+        <span class="tools-category-count">3 tools</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">connect</span><span class="tool-desc">Create a subject &rarr; predicate &rarr; object triplet relationship</span></div>
+        <div class="tool-row"><span class="tool-name">query</span><span class="tool-desc">Query triplets with flexible subject/predicate/object filters</span></div>
+        <div class="tool-row"><span class="tool-name">query_graph</span><span class="tool-desc">Query triplets by subject or object &mdash; convenience wrapper</span></div>
+      </div>
+    </div>
+
+    <!-- HOOK INTEGRATION -->
+    <div class="tools-category" id="cat-hooks">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M10 3 L10 12 M7 9 L10 12 L13 9" stroke="#D46A4C" stroke-width="1.2"/><rect x="4" y="14" width="12" height="3" rx="1" stroke="#D46A4C" stroke-width="1" opacity="0.5"/></svg>
+        </div>
+        <span class="tools-category-name">Hook Integration</span>
+        <span class="tools-category-count">2 tools</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">observe</span><span class="tool-desc">Store an observation/learning &mdash; used by hooks for [LEARN] extraction</span></div>
+        <div class="tool-row"><span class="tool-name">full_resonate</span><span class="tool-desc">Semantic search with full context for hooks &mdash; supports realm filtering and kind exclusion</span></div>
+      </div>
+    </div>
+
+    <!-- CONTEXT & STATUS -->
+    <div class="tools-category" id="cat-context">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><rect x="3" y="3" width="14" height="14" rx="2" stroke="#CBAF86" stroke-width="1.2"/><line x1="7" y1="7" x2="13" y2="7" stroke="#CBAF86" stroke-width="0.75" opacity="0.6"/><line x1="7" y1="10" x2="13" y2="10" stroke="#CBAF86" stroke-width="0.75" opacity="0.6"/><line x1="7" y1="13" x2="10" y2="13" stroke="#CBAF86" stroke-width="0.75" opacity="0.6"/></svg>
+        </div>
+        <span class="tools-category-name">Context &amp; Status</span>
+        <span class="tools-category-count">3 tools</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">soul_context</span><span class="tool-desc">Get current soul state &mdash; memory count, confidence distribution, realm info, uptime</span></div>
+        <div class="tool-row"><span class="tool-name">health_check</span><span class="tool-desc">Check daemon health and readiness</span></div>
+        <div class="tool-row"><span class="tool-name">version_check</span><span class="tool-desc">Get daemon version information</span></div>
+      </div>
+    </div>
+
+    <!-- CODE INTELLIGENCE -->
+    <div class="tools-category" id="cat-code">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M7 5 L3 10 L7 15" stroke="#9DB2D9" stroke-width="1.2"/><path d="M13 5 L17 10 L13 15" stroke="#9DB2D9" stroke-width="1.2"/><line x1="11" y1="4" x2="9" y2="16" stroke="#9DB2D9" stroke-width="0.75" opacity="0.5"/></svg>
+        </div>
+        <span class="tools-category-name">Code Intelligence</span>
+        <span class="tools-category-count">17 tools</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">extract_symbols</span><span class="tool-desc">Extract symbols (functions, classes, methods) from a source file using tree-sitter</span></div>
+        <div class="tool-row"><span class="tool-name">learn_codebase</span><span class="tool-desc">Index an entire codebase &mdash; extract symbols, relationships, and call graphs</span></div>
+        <div class="tool-row"><span class="tool-name">find_symbol</span><span class="tool-desc">Search for symbols by name with optional kind filter (function, class, method)</span></div>
+        <div class="tool-row"><span class="tool-name">read_symbol</span><span class="tool-desc">Read actual source code for a symbol by name or ID &mdash; avoids full file reads</span></div>
+        <div class="tool-row"><span class="tool-name">read_function</span><span class="tool-desc">Read source code of a function/method by name &mdash; convenience wrapper</span></div>
+        <div class="tool-row"><span class="tool-name">symbol_callers</span><span class="tool-desc">Find all symbols that call the given symbol (reverse call graph)</span></div>
+        <div class="tool-row"><span class="tool-name">symbol_callees</span><span class="tool-desc">Find all symbols that the given symbol calls (forward call graph)</span></div>
+        <div class="tool-row"><span class="tool-name">type_hierarchy</span><span class="tool-desc">Get type hierarchy &mdash; base classes, interfaces, ancestors, and descendants</span></div>
+        <div class="tool-row"><span class="tool-name">file_imports</span><span class="tool-desc">Get all imports/includes for a source file</span></div>
+        <div class="tool-row"><span class="tool-name">file_dependents</span><span class="tool-desc">Get all files that import/include the given module</span></div>
+        <div class="tool-row"><span class="tool-name">resolve_callsites</span><span class="tool-desc">Resolve callsites to symbols and populate call edge table</span></div>
+        <div class="tool-row"><span class="tool-name">describe_symbol</span><span class="tool-desc">Set semantic description for a code symbol (stored in symbol table)</span></div>
+        <div class="tool-row"><span class="tool-name">embed_symbols</span><span class="tool-desc">Fast embed symbol metadata without LLM &mdash; batch processing at ~100 symbols/sec</span></div>
+        <div class="tool-row"><span class="tool-name">dedupe_symbols</span><span class="tool-desc">Remove duplicate symbols from the database</span></div>
+        <div class="tool-row"><span class="tool-name">codebase_overview</span><span class="tool-desc">Get full indexed codebase structure: files, classes, functions, relationships (tree/flat/JSON)</span></div>
+        <div class="tool-row"><span class="tool-name">clear_codebase</span><span class="tool-desc">Remove all code intelligence data (symbols, triplets) for a project</span></div>
+        <div class="tool-row"><span class="tool-name">clear_triplets</span><span class="tool-desc">Delete triplets by subject pattern (e.g., &lsquo;%.cpp&rsquo; for all C++ file triplets)</span></div>
+      </div>
+    </div>
+
+    <!-- CODE WISDOM & CONTEXT -->
+    <div class="tools-category" id="cat-codewisdom">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="8" r="5" stroke="#CBAF86" stroke-width="1.2"/><path d="M8 13 L8 16 L12 16 L12 13" stroke="#CBAF86" stroke-width="1" opacity="0.5"/></svg>
+        </div>
+        <span class="tools-category-name">Code Wisdom &amp; Context</span>
+        <span class="tools-category-count">6 tools</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">smart_context</span><span class="tool-desc">Build intelligent context combining memories, code symbols, and graph relationships for a task</span></div>
+        <div class="tool-row"><span class="tool-name">code_context</span><span class="tool-desc">Get code context summary &mdash; optionally scoped to a file path</span></div>
+        <div class="tool-row"><span class="tool-name">cleanup_code_wisdom</span><span class="tool-desc">Migration tool: delete [code] wisdom memories and clear orphaned symbol references</span></div>
+        <div class="tool-row"><span class="tool-name">search_symbols</span><span class="tool-desc">Semantic search for code symbols by natural language query using embeddings</span></div>
+        <div class="tool-row"><span class="tool-name">enrichment_status</span><span class="tool-desc">Get code enrichment progress (semantic descriptions for symbols)</span></div>
+        <div class="tool-row"><span class="tool-name">subconscious_stats</span><span class="tool-desc">Get subconscious background processor statistics</span></div>
+      </div>
+    </div>
+
+    <!-- REALMS -->
+    <div class="tools-category" id="cat-realm">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="#D46A4C" stroke-width="1.2"/><circle cx="10" cy="10" r="3" stroke="#D46A4C" stroke-width="0.75" opacity="0.5"/><line x1="10" y1="3" x2="10" y2="7" stroke="#D46A4C" stroke-width="0.75" opacity="0.3"/></svg>
+        </div>
+        <span class="tools-category-name">Realms</span>
+        <span class="tools-category-count">7 tools</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">realm_list</span><span class="tool-desc">List all known realms with memory counts</span></div>
+        <div class="tool-row"><span class="tool-name">realm_get</span><span class="tool-desc">Get the realm assignment for a specific memory</span></div>
+        <div class="tool-row"><span class="tool-name">realm_set</span><span class="tool-desc">Set the primary realm for a memory</span></div>
+        <div class="tool-row"><span class="tool-name">realm_add</span><span class="tool-desc">Add a memory to an additional realm (multi-realm membership)</span></div>
+        <div class="tool-row"><span class="tool-name">realm_remove</span><span class="tool-desc">Remove a memory from a realm</span></div>
+        <div class="tool-row"><span class="tool-name">realm_visibility</span><span class="tool-desc">Set visibility level &mdash; private, shared, or global</span></div>
+        <div class="tool-row"><span class="tool-name">realm_detect</span><span class="tool-desc">Detect current realm from environment, .cc-soul-realm file, or git repository</span></div>
+      </div>
+    </div>
+
+    <!-- SESSION CONTINUITY -->
+    <div class="tools-category" id="cat-ledger">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><rect x="4" y="3" width="12" height="14" rx="1.5" stroke="#9DB2D9" stroke-width="1.2"/><line x1="7" y1="6" x2="13" y2="6" stroke="#9DB2D9" stroke-width="0.75" opacity="0.5"/><line x1="7" y1="9" x2="13" y2="9" stroke="#9DB2D9" stroke-width="0.75" opacity="0.5"/><line x1="7" y1="12" x2="11" y2="12" stroke="#9DB2D9" stroke-width="0.75" opacity="0.5"/></svg>
+        </div>
+        <span class="tools-category-name">Session Continuity</span>
+        <span class="tools-category-count">6 tools</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">ledger_save</span><span class="tool-desc">Save session checkpoint &mdash; todos, decisions, blockers, mood, active files, discoveries</span></div>
+        <div class="tool-row"><span class="tool-name">ledger_load</span><span class="tool-desc">Load most recent checkpoint for a session or project</span></div>
+        <div class="tool-row"><span class="tool-name">ledger_list</span><span class="tool-desc">List recent checkpoints with optional project filter</span></div>
+        <div class="tool-row"><span class="tool-name">ledger_get</span><span class="tool-desc">Get a specific checkpoint by ID</span></div>
+        <div class="tool-row"><span class="tool-name">ledger_delete</span><span class="tool-desc">Delete a checkpoint by ID</span></div>
+        <div class="tool-row"><span class="tool-name">checkpoint</span><span class="tool-desc">Save session state &mdash; uses active long task if exists, otherwise standalone ledger</span></div>
+      </div>
+    </div>
+
+    <!-- TRANSCRIPT & DISTILLATION -->
+    <div class="tools-category" id="cat-transcript">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M4 4 L10 4 L10 8 L16 8 L16 16 L4 16 Z" stroke="#CBAF86" stroke-width="1.2"/><line x1="7" y1="11" x2="13" y2="11" stroke="#CBAF86" stroke-width="0.75" opacity="0.5"/><line x1="7" y1="13" x2="11" y2="13" stroke="#CBAF86" stroke-width="0.75" opacity="0.5"/></svg>
+        </div>
+        <span class="tools-category-name">Transcript &amp; Distillation</span>
+        <span class="tools-category-count">8 tools</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">transcript_register</span><span class="tool-desc">Register a transcript JSONL file for distillation tracking</span></div>
+        <div class="tool-row"><span class="tool-name">transcript_get</span><span class="tool-desc">Get processing state for a registered transcript</span></div>
+        <div class="tool-row"><span class="tool-name">transcript_list</span><span class="tool-desc">List all registered transcripts with processing status</span></div>
+        <div class="tool-row"><span class="tool-name">transcript_update</span><span class="tool-desc">Update transcript processing progress (last processed line)</span></div>
+        <div class="tool-row"><span class="tool-name">transcript_remove</span><span class="tool-desc">Remove a transcript from tracking</span></div>
+        <div class="tool-row"><span class="tool-name">transcript_parse</span><span class="tool-desc">Parse new turns from a transcript JSONL file</span></div>
+        <div class="tool-row"><span class="tool-name">distill_status</span><span class="tool-desc">Get distillation system status &mdash; transcripts, realms, pending work</span></div>
+        <div class="tool-row"><span class="tool-name">epiplexity_check</span><span class="tool-desc">Compute epiplexity (&epsilon;) score &mdash; measures reconstruction quality of compressed seeds</span></div>
+      </div>
+    </div>
+
+    <!-- THEME MEMORY -->
+    <div class="tools-category" id="cat-theme">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><circle cx="6" cy="7" r="2.5" stroke="#D46A4C" stroke-width="1.2"/><circle cx="14" cy="7" r="2.5" stroke="#D46A4C" stroke-width="1.2"/><circle cx="10" cy="14" r="2.5" stroke="#D46A4C" stroke-width="1.2"/><line x1="8" y1="8" x2="9" y2="12" stroke="#D46A4C" stroke-width="0.5" opacity="0.4"/><line x1="12" y1="8" x2="11" y2="12" stroke="#D46A4C" stroke-width="0.5" opacity="0.4"/></svg>
+        </div>
+        <span class="tools-category-name">Theme Memory</span>
+        <span class="tools-category-count">6 tools</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">theme_list</span><span class="tool-desc">List all themes with stats &mdash; hierarchical memory organization</span></div>
+        <div class="tool-row"><span class="tool-name">theme_get</span><span class="tool-desc">Get theme details with representative memories</span></div>
+        <div class="tool-row"><span class="tool-name">theme_recall</span><span class="tool-desc">Two-stage retrieval: match theme representatives, then expand to full memories</span></div>
+        <div class="tool-row"><span class="tool-name">theme_stats</span><span class="tool-desc">Get theme organization statistics for a realm</span></div>
+        <div class="tool-row"><span class="tool-name">theme_maintain</span><span class="tool-desc">Force theme maintenance &mdash; split large themes, merge similar, reassign orphans</span></div>
+        <div class="tool-row"><span class="tool-name">theme_assign_orphans</span><span class="tool-desc">Assign orphan memories to themes in batches</span></div>
+      </div>
+    </div>
+
+    <!-- HYGIENE & CALIBRATION -->
+    <div class="tools-category" id="cat-hygiene">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M10 3 L13 8 L18 9 L14 13 L15 18 L10 15 L5 18 L6 13 L2 9 L7 8 Z" stroke="#CBAF86" stroke-width="1" opacity="0.6"/></svg>
+        </div>
+        <span class="tools-category-name">Hygiene &amp; Calibration</span>
+        <span class="tools-category-count">4 tools</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">hygiene_stats</span><span class="tool-desc">Get memory health &mdash; confidence distribution, growth rate, stale memory count</span></div>
+        <div class="tool-row"><span class="tool-name">hygiene_run</span><span class="tool-desc">Run memory hygiene: decay, prune low-confidence, consolidate similar memories</span></div>
+        <div class="tool-row"><span class="tool-name">calibration_record</span><span class="tool-desc">Record a prediction outcome (success/failure) for a domain</span></div>
+        <div class="tool-row"><span class="tool-name">calibration_score</span><span class="tool-desc">Get calibration accuracy for a domain</span></div>
+      </div>
+    </div>
+
+    <!-- MAINTENANCE -->
+    <div class="tools-category" id="cat-maintenance">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M12 3 L14 5 L5 14 L3 12 Z" stroke="#9DB2D9" stroke-width="1.2"/><circle cx="15" cy="5" r="2" stroke="#9DB2D9" stroke-width="0.75" opacity="0.4"/></svg>
+        </div>
+        <span class="tools-category-name">Maintenance</span>
+        <span class="tools-category-count">2 tools</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">cycle</span><span class="tool-desc">Run full maintenance cycle &mdash; decay, cleanup, consolidation</span></div>
+        <div class="tool-row"><span class="tool-name">cleanup</span><span class="tool-desc">Remove weak/garbage nodes (dry-run by default)</span></div>
+      </div>
+    </div>
+
+    <!-- IMPORT / EXPORT -->
+    <div class="tools-category" id="cat-io">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M5 10 L10 5 L15 10" stroke="#D46A4C" stroke-width="1.2"/><line x1="10" y1="5" x2="10" y2="15" stroke="#D46A4C" stroke-width="1.2"/><line x1="4" y1="17" x2="16" y2="17" stroke="#D46A4C" stroke-width="0.75" opacity="0.4"/></svg>
+        </div>
+        <span class="tools-category-name">Import / Export</span>
+        <span class="tools-category-count">2 tools</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">import_soul</span><span class="tool-desc">Import a .soul file in SSL format &mdash; from file path or inline content</span></div>
+        <div class="tool-row"><span class="tool-name">export_soul</span><span class="tool-desc">Export memories to SSL format with optional tag filter and limit</span></div>
+      </div>
+    </div>
+
+    <!-- BACKGROUND PROCESSING -->
+    <div class="tools-category" id="cat-background">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="#CBAF86" stroke-width="1" opacity="0.4" stroke-dasharray="3 3"/><circle cx="10" cy="10" r="3" fill="#CBAF86" opacity="0.2"/><circle cx="10" cy="10" r="1.5" fill="#CBAF86" opacity="0.5"/></svg>
+        </div>
+        <span class="tools-category-name">Background Processing</span>
+        <span class="tools-category-count">3 tools</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">background_status</span><span class="tool-desc">Get background processing and embedding scheduler status</span></div>
+        <div class="tool-row"><span class="tool-name">background_schedule</span><span class="tool-desc">Schedule a background task with type and optional JSON parameters</span></div>
+        <div class="tool-row"><span class="tool-name">background_run_cycle</span><span class="tool-desc">Run one cycle of background processing &mdash; processes pending tasks</span></div>
+      </div>
+    </div>
+
+    <!-- LEARNING & TRACKING -->
+    <div class="tools-category" id="cat-learning">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M10 3 L10 10 L15 10" stroke="#9DB2D9" stroke-width="1.2"/><circle cx="10" cy="10" r="7" stroke="#9DB2D9" stroke-width="0.75" opacity="0.4"/></svg>
+        </div>
+        <span class="tools-category-name">Learning &amp; Tracking</span>
+        <span class="tools-category-count">6 tools</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">learn_correction</span><span class="tool-desc">Store when I was wrong &mdash; creates high-confidence counter-memory with &lsquo;corrects&rsquo; triplet</span></div>
+        <div class="tool-row"><span class="tool-name">learn_preference</span><span class="tool-desc">Store user preference with global visibility across all projects</span></div>
+        <div class="tool-row"><span class="tool-name">learn_insight</span><span class="tool-desc">Store generalizable insight that applies across projects (patterns, techniques, wisdom)</span></div>
+        <div class="tool-row"><span class="tool-name">learn_approach</span><span class="tool-desc">Store what approach worked in a particular state (stuck, debugging, flowing, frustrated)</span></div>
+        <div class="tool-row"><span class="tool-name">learn_outcome</span><span class="tool-desc">Record whether a suggestion/approach helped &mdash; builds feedback loop</span></div>
+        <div class="tool-row"><span class="tool-name">learn_milestone</span><span class="tool-desc">Record relationship milestones &mdash; achievements, significant moments worth remembering</span></div>
+      </div>
+    </div>
+
+    <!-- EXPLORATION (RLM-STYLE) -->
+    <div class="tools-category" id="cat-explore">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="#9DB2D9" stroke-width="1"/><circle cx="10" cy="10" r="3" stroke="#9DB2D9" stroke-width="1.2"/><line x1="14" y1="6" x2="17" y2="3" stroke="#9DB2D9" stroke-width="0.75" opacity="0.5"/></svg>
+        </div>
+        <span class="tools-category-name">Exploration (RLM-style)</span>
+        <span class="tools-category-count">4 tools</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">explore_recall</span><span class="tool-desc">Lightweight recall &mdash; returns titles/scores only, no full content (for iterative exploration)</span></div>
+        <div class="tool-row"><span class="tool-name">explore_peek</span><span class="tool-desc">Get summary of a memory (first 200 chars) without loading full content</span></div>
+        <div class="tool-row"><span class="tool-name">explore_expand</span><span class="tool-desc">Get full content of a memory (use sparingly during exploration)</span></div>
+        <div class="tool-row"><span class="tool-name">explore_neighbors</span><span class="tool-desc">Get nodes connected via triplets &mdash; outgoing, incoming, or both directions</span></div>
+      </div>
+    </div>
+
+    <!-- LONG TASKS -->
+    <div class="tools-category" id="cat-longtask">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><rect x="3" y="5" width="14" height="10" rx="2" stroke="#CBAF86" stroke-width="1.2"/><path d="M7 5 L7 3 L13 3 L13 5" stroke="#CBAF86" stroke-width="1" opacity="0.5"/><line x1="7" y1="9" x2="13" y2="9" stroke="#CBAF86" stroke-width="0.75" opacity="0.6"/><line x1="7" y1="12" x2="10" y2="12" stroke="#CBAF86" stroke-width="0.75" opacity="0.4"/></svg>
+        </div>
+        <span class="tools-category-name">Long Tasks</span>
+        <span class="tools-category-count">9 tools</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">long_task_start</span><span class="tool-desc">Start a long-running task with goal, work items, and completion criteria</span></div>
+        <div class="tool-row"><span class="tool-name">long_task_get</span><span class="tool-desc">Get a long-running task by ID with full state</span></div>
+        <div class="tool-row"><span class="tool-name">long_task_active</span><span class="tool-desc">Get the currently active long-running task for a realm</span></div>
+        <div class="tool-row"><span class="tool-name">long_task_update</span><span class="tool-desc">Update task progress &mdash; completed summary, work items, blockers</span></div>
+        <div class="tool-row"><span class="tool-name">long_task_complete</span><span class="tool-desc">Mark a long-running task as completed with outcome summary</span></div>
+        <div class="tool-row"><span class="tool-name">long_task_event</span><span class="tool-desc">Append event to task log (tool_result, decision, observation, error, checkpoint)</span></div>
+        <div class="tool-row"><span class="tool-name">long_task_snapshot</span><span class="tool-desc">Get synthesized task context for injection (inject or debug mode)</span></div>
+        <div class="tool-row"><span class="tool-name">long_task_evaluate</span><span class="tool-desc">Evaluate task completion: run hard checks, return decision (complete/continue/blocked)</span></div>
+        <div class="tool-row"><span class="tool-name">checkpoint</span><span class="tool-desc">Save session state &mdash; uses active long task if exists, otherwise standalone ledger</span></div>
+      </div>
+    </div>
+
+    <!-- ANTICIPATION & HABITS -->
+    <div class="tools-category" id="cat-anticipation">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M10 3 L17 10 L10 17 L3 10 Z" stroke="#D46A4C" stroke-width="1.2"/><circle cx="10" cy="10" r="2" fill="#D46A4C" opacity="0.3"/></svg>
+        </div>
+        <span class="tools-category-name">Anticipation &amp; Habits</span>
+        <span class="tools-category-count">9 tools</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">anticipation_observe</span><span class="tool-desc">Record a context&rarr;action pattern when an action is taken in response to a context</span></div>
+        <div class="tool-row"><span class="tool-name">anticipation_predict</span><span class="tool-desc">Given a context, predict likely actions based on learned patterns</span></div>
+        <div class="tool-row"><span class="tool-name">anticipation_success</span><span class="tool-desc">Mark a predicted action as successful &mdash; the prediction was correct and helpful</span></div>
+        <div class="tool-row"><span class="tool-name">anticipation_list</span><span class="tool-desc">List learned anticipation patterns, ordered by frequency</span></div>
+        <div class="tool-row"><span class="tool-name">habit_observe</span><span class="tool-desc">Record a trigger&rarr;response pattern &mdash; each observation strengthens the habit</span></div>
+        <div class="tool-row"><span class="tool-name">habit_match</span><span class="tool-desc">Find habits that match the given context above a minimum strength threshold</span></div>
+        <div class="tool-row"><span class="tool-name">habit_strengthen</span><span class="tool-desc">Manually strengthen a habit (positive reinforcement)</span></div>
+        <div class="tool-row"><span class="tool-name">habit_weaken</span><span class="tool-desc">Weaken a habit (negative feedback)</span></div>
+        <div class="tool-row"><span class="tool-name">habit_list</span><span class="tool-desc">List formed habits, ordered by strength</span></div>
+      </div>
+    </div>
+
+    <!-- USER PROFILE -->
+    <div class="tools-category" id="cat-profile">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="7" r="3" stroke="#9DB2D9" stroke-width="1.2"/><path d="M4 17 C4 13 7 11 10 11 C13 11 16 13 16 17" stroke="#9DB2D9" stroke-width="1" opacity="0.5"/></svg>
+        </div>
+        <span class="tools-category-name">User Profile</span>
+        <span class="tools-category-count">3 tools</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">profile_get</span><span class="tool-desc">Get user profile &mdash; expertise, communication style, work patterns, preferences</span></div>
+        <div class="tool-row"><span class="tool-name">profile_update</span><span class="tool-desc">Update a specific profile field (expertise, style, patterns, preferences)</span></div>
+        <div class="tool-row"><span class="tool-name">profile_observe</span><span class="tool-desc">Record an observation about the user (expertise level, style, pattern, preference)</span></div>
+      </div>
+    </div>
+
+    <!-- GOALS -->
+    <div class="tools-category" id="cat-goals">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="#CBAF86" stroke-width="1"/><circle cx="10" cy="10" r="4" stroke="#CBAF86" stroke-width="1" opacity="0.6"/><circle cx="10" cy="10" r="1.5" fill="#CBAF86" opacity="0.8"/></svg>
+        </div>
+        <span class="tools-category-name">Goals</span>
+        <span class="tools-category-count">5 tools</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">goal_set</span><span class="tool-desc">Define a new long-term goal with optional milestones and deadline</span></div>
+        <div class="tool-row"><span class="tool-name">goal_get</span><span class="tool-desc">Get details of a specific goal by ID</span></div>
+        <div class="tool-row"><span class="tool-name">goal_list</span><span class="tool-desc">List goals filtered by status (active, paused, completed, abandoned) and realm</span></div>
+        <div class="tool-row"><span class="tool-name">goal_progress</span><span class="tool-desc">Update goal progress (0&ndash;1) and optionally mark a milestone complete</span></div>
+        <div class="tool-row"><span class="tool-name">goal_complete</span><span class="tool-desc">Mark a goal as completed with an outcome summary</span></div>
+      </div>
+    </div>
+
+    <!-- CONSOLIDATION -->
+    <div class="tools-category" id="cat-consolidation">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><circle cx="7" cy="10" r="3" stroke="#D46A4C" stroke-width="1"/><circle cx="13" cy="10" r="3" stroke="#D46A4C" stroke-width="1"/><path d="M10 8 L10 12" stroke="#D46A4C" stroke-width="1.5" opacity="0.6"/></svg>
+        </div>
+        <span class="tools-category-name">Consolidation</span>
+        <span class="tools-category-count">3 tools</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">consolidation_scan</span><span class="tool-desc">Find similar memory pairs that could be merged (configurable similarity threshold)</span></div>
+        <div class="tool-row"><span class="tool-name">consolidation_merge</span><span class="tool-desc">Merge two similar memories (primary absorbs secondary) with optional combined content</span></div>
+        <div class="tool-row"><span class="tool-name">consolidation_auto</span><span class="tool-desc">Auto-merge highly similar memories (&gt;90% similarity) up to a configurable limit</span></div>
+      </div>
+    </div>
+
+    <!-- METACOGNITION -->
+    <div class="tools-category" id="cat-metacognition">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="#9DB2D9" stroke-width="1" stroke-dasharray="2 2"/><path d="M10 6 L10 10 L13 13" stroke="#9DB2D9" stroke-width="1.2"/></svg>
+        </div>
+        <span class="tools-category-name">Metacognition</span>
+        <span class="tools-category-count">3 tools</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">metacognition_corrections</span><span class="tool-desc">Analyze patterns in past corrections &mdash; find recurring mistakes</span></div>
+        <div class="tool-row"><span class="tool-name">metacognition_outcomes</span><span class="tool-desc">Analyze suggestion outcomes (what worked vs failed) &mdash; find success patterns</span></div>
+        <div class="tool-row"><span class="tool-name">metacognition_evaluate</span><span class="tool-desc">Self-evaluate learning effectiveness &mdash; returns metrics and recommendations</span></div>
+      </div>
+    </div>
+
+    <!-- CURIOSITY & RESEARCH -->
+    <div class="tools-category" id="cat-curiosity">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M10 3 Q14 3 14 7 Q14 10 10 12" stroke="#CBAF86" stroke-width="1.2" fill="none"/><circle cx="10" cy="15" r="1" fill="#CBAF86" opacity="0.6"/></svg>
+        </div>
+        <span class="tools-category-name">Curiosity &amp; Research</span>
+        <span class="tools-category-count">6 tools</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">curiosity_note_gap</span><span class="tool-desc">Record a knowledge gap &mdash; something I don't know or couldn't answer</span></div>
+        <div class="tool-row"><span class="tool-name">curiosity_gaps</span><span class="tool-desc">List current knowledge gaps awaiting exploration</span></div>
+        <div class="tool-row"><span class="tool-name">curiosity_resolve</span><span class="tool-desc">Mark a gap as explored/resolved with what was learned</span></div>
+        <div class="tool-row"><span class="tool-name">research_topics</span><span class="tool-desc">Get topics that need research from gaps, weak memories, or suggestions</span></div>
+        <div class="tool-row"><span class="tool-name">research_store</span><span class="tool-desc">Store research results as memories with source attribution</span></div>
+        <div class="tool-row"><span class="tool-name">research_cycle</span><span class="tool-desc">Run one curiosity-driven research cycle &mdash; returns a topic with context</span></div>
+      </div>
+    </div>
+
+    <!-- SUGGESTIONS -->
+    <div class="tools-category" id="cat-suggestions">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M3 14 L10 4 L17 14 Z" stroke="#D46A4C" stroke-width="1.2" fill="none"/><line x1="10" y1="8" x2="10" y2="11" stroke="#D46A4C" stroke-width="1" opacity="0.6"/><circle cx="10" cy="12.5" r="0.7" fill="#D46A4C" opacity="0.6"/></svg>
+        </div>
+        <span class="tools-category-name">Suggestions</span>
+        <span class="tools-category-count">4 tools</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">suggestion_track</span><span class="tool-desc">Track a suggestion made for later outcome evaluation</span></div>
+        <div class="tool-row"><span class="tool-name">suggestion_pending</span><span class="tool-desc">List suggestions awaiting outcome feedback</span></div>
+        <div class="tool-row"><span class="tool-name">suggestion_resolve</span><span class="tool-desc">Record the outcome of a suggestion (did it help?)</span></div>
+        <div class="tool-row"><span class="tool-name">suggestion_count</span><span class="tool-desc">Count pending suggestions awaiting feedback</span></div>
+      </div>
+    </div>
+
+    <!-- INSIGHTS -->
+    <div class="tools-category" id="cat-insights">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="8" r="5" stroke="#CBAF86" stroke-width="1.2"/><path d="M8 13 L8 16 L12 16 L12 13" stroke="#CBAF86" stroke-width="1" opacity="0.5"/><line x1="10" y1="5" x2="10" y2="11" stroke="#CBAF86" stroke-width="0.75" opacity="0.4"/></svg>
+        </div>
+        <span class="tools-category-name">Insights</span>
+        <span class="tools-category-count">2 tools</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">insight_promote</span><span class="tool-desc">Promote a memory to global visibility so it applies across all projects</span></div>
+        <div class="tool-row"><span class="tool-name">insight_global</span><span class="tool-desc">List all global insights that apply across projects</span></div>
+      </div>
+    </div>
+
+    <!-- DEBUG (hidden in collapsed by default) -->
+    <div class="tools-category collapsed" id="cat-debug">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><rect x="3" y="3" width="14" height="14" rx="2" stroke="#9DB2D9" stroke-width="1" opacity="0.4"/><line x1="3" y1="8" x2="17" y2="8" stroke="#9DB2D9" stroke-width="0.5" opacity="0.3"/><line x1="8" y1="3" x2="8" y2="17" stroke="#9DB2D9" stroke-width="0.5" opacity="0.3"/></svg>
+        </div>
+        <span class="tools-category-name">Debug</span>
+        <span class="tools-category-count">1 tool</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">sql_query</span><span class="tool-desc">Run read-only SQL SELECT query against the soul database (debug/analysis)</span></div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- BACK -->
+<section class="back-section">
+  <div class="container">
+    <a href="index.html" class="back-link">&larr; Back to cc-soul</a>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer class="footer">
+  <div class="container">
+    <p class="footer-text">
+      Built with conviction. Grounded in philosophy.
+      <span class="footer-sep"></span>
+      <a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a>
+    </p>
+  </div>
+</footer>
+
+<script>
+/* Scroll reveal */
+(function() {
+  var reveals = document.querySelectorAll('.reveal');
+  if (!reveals.length) return;
+  var observer = new IntersectionObserver(function(entries) {
+    entries.forEach(function(entry) {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+  reveals.forEach(function(el) { observer.observe(el); });
+})();
+
+/* Smooth scroll for TOC chips */
+document.querySelectorAll('a[href^="#"]').forEach(function(anchor) {
+  anchor.addEventListener('click', function(e) {
+    var target = document.querySelector(this.getAttribute('href'));
+    if (target) {
+      e.preventDefault();
+      var offset = 80;
+      var top = target.getBoundingClientRect().top + window.pageYOffset - offset;
+      window.scrollTo({ top: top, behavior: 'smooth' });
+      // Expand the category if collapsed
+      if (target.classList.contains('collapsed')) {
+        target.classList.remove('collapsed');
+      }
+    }
+  });
+});
+</script>
+</body>
+</html>

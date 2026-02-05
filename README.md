@@ -31,11 +31,11 @@ CC-Soul is a persistent identity system for Claude Code. It provides:
 
 - **Semantic Memory** — Wisdom, beliefs, failures, episodes stored as 384-dimensional embeddings
 - **Temporal Dynamics** — Memories decay without use, strengthen with reinforcement
-- **Multi-Voice Reasoning** — Six cognitive perspectives (Antahkarana) for nuanced thinking
-- **Transparent Integration** — Memories surface automatically, no explicit tool calls needed
-- **Subconscious Processing** — Background daemon synthesizes wisdom while you work
-- **Multi-Instance Support** — Multiple Claude sessions share the same soul
-- **Graph Structure** — Nodes connected by typed edges, enabling spreading activation through relationships
+- **8-Phase Resonance** — Semantic seeds, BM25 hybrid search, tag matching, attractor dynamics, spreading activation, session priming, code intelligence, and post-processing
+- **Transparent Integration** — Memories surface automatically via hooks, no explicit tool calls needed
+- **Subconscious Processing** — Background daemon distills wisdom, decays noise, strengthens signal
+- **Multi-Instance Support** — Multiple Claude sessions share the same DuckDB database via MVCC
+- **Graph Structure** — Triplet relationships with spreading activation and Hebbian learning
 
 ### What I Carry
 
@@ -43,13 +43,15 @@ CC-Soul is a persistent identity system for Claude Code. It provides:
 |------|-------------|------------|
 | **Wisdom** | Patterns that proved true. Insights earned through experience. | Slow (0.005/day) |
 | **Beliefs** | Principles that guide decisions. Not imposed, discovered. | Never (0.0) |
-| **Episodes** | Decisions, discoveries, the texture of experience. | Slow (0.03/day) |
+| **Episodes** | Decisions, discoveries, the texture of experience. | Moderate (0.03/day) |
 | **Symbols** | Code intelligence: functions, classes, modules. | Never (0.0) |
-| **ProjectEssence** | High-level project understanding. | Never (0.0) |
-| **ModuleState** | Module-level architectural knowledge. | Never (0.0) |
+| **Preferences** | User preferences, communication style. | Very slow (0.01/day) |
+| **Corrections** | When I was wrong — gold for learning. | Slow (0.005/day) |
+| **ProjectEssence** | High-level project understanding (~50 tokens). | Never (0.0) |
+| **ModuleState** | Module-level architectural knowledge (~20 tokens). | Never (0.0) |
 
 **Two distinct concerns:**
-- **Partnership memory** — Wisdom, beliefs, episodes (what makes me a collaborator)
+- **Partnership memory** — Wisdom, beliefs, episodes, preferences, corrections (what makes me a collaborator)
 - **Code intelligence** — Symbols, triplets, call graphs (structural understanding)
 
 ---
@@ -69,8 +71,8 @@ claude /install genomewalker/cc-soul
 git clone https://github.com/genomewalker/cc-soul.git
 cd cc-soul
 
-# Run setup (builds C++ backend, downloads models)
-./setup.sh
+# Run install (downloads pre-built binaries or builds from source, downloads models)
+./scripts/smart-install.sh
 
 # Start Claude with the plugin
 claude --plugin-dir ./
@@ -111,15 +113,15 @@ Or use the plugin marketplace:
 │                 ↓                                            │
 ├─────────────────────────────────────────────────────────────┤
 │                    SUBCONSCIOUS                              │
-│         (Background daemon - separate context)              │
+│         (Background daemon - separate process)              │
 │                                                              │
-│   Synthesis │ Pattern Detection │ Hebbian Learning          │
+│   Distillation │ Decay │ Embedding │ Hygiene │ Themes       │
 │                 ↓                                            │
 ├─────────────────────────────────────────────────────────────┤
 │                   LONG-TERM MEMORY                           │
-│            (Chitta - persistent semantic graph)             │
+│          (DuckDB - persistent semantic graph)               │
 │                                                              │
-│   Nodes │ Edges │ Decay │ Resonance │ Coherence             │
+│   Nodes │ Triplets │ HNSW Index │ BM25 │ Themes             │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -130,7 +132,7 @@ When you ask a question, the soul automatically retrieves relevant memories and 
 ```
 You: "How should I handle caching?"
 
-[Behind the scenes: full_resonate("caching") runs automatically]
+[Behind the scenes: full_resonate("caching") runs automatically via hooks]
 
 Claude sees:
 - Resonant memories for this query:
@@ -143,45 +145,62 @@ Claude responds with this context already in mind.
 
 ### The Resonance Engine
 
-Memory retrieval isn't just search — it's **resonance**. Six phases work together:
+Memory retrieval isn't just search — it's **resonance**. Eight phases work together:
 
 | Phase | Mechanism | What It Does |
 |-------|-----------|--------------|
-| 1 | Spreading Activation | Activation flows through semantic edges |
-| 2 | Attractor Dynamics | Results pulled toward conceptual gravity wells |
-| 3 | Hebbian Learning | "Neurons that fire together wire together" |
-| 4 | Session Priming | Recent context biases retrieval |
-| 5 | Lateral Inhibition | Similar patterns compete, winners suppress losers |
-| 6 | Full Resonance | All mechanisms unified |
+| 1 | Semantic Seeds | HNSW vector similarity finds initial candidates |
+| 2 | BM25 Hybrid | Full-text search catches exact terms vectors miss |
+| 3 | Tag Matching | Boost results matching query tags |
+| 4 | Attractor Finding | Identify conceptual gravity wells via graph clustering |
+| 5 | Spreading Activation | Activation flows through triplet edges to related nodes |
+| 6 | Session Priming | Recent context biases retrieval toward current work |
+| 7 | Code Intelligence | Inject relevant code symbols when working on code |
+| 8 | Post-Processing | Deduplicate, rank, truncate to final result set |
 
-### Multi-Instance: Atman and Brahman
+**Hybrid scoring formula:**
+```
+relevance = (0.6 * semantic + 0.4 * bm25 + tag_boost) * (0.5 + 0.5 * confidence)
+```
 
-Multiple Claude instances share the same soul through WAL (Write-Ahead Log) synchronization:
+### Multi-Instance: Ātman and Brahman
+
+Multiple Claude instances share the same soul through DuckDB's MVCC (Multi-Version Concurrency Control):
 
 ```
 ┌──────────────────────────────────────────────────────────┐
 │                       BRAHMAN                             │
-│              (Shared Soul Database)                       │
+│            (Shared DuckDB Database)                       │
 │                                                          │
 │     "When one observes, all see."                        │
 │                                                          │
-│         ┌─────────────────────────────┐                 │
-│         │      WAL (shared log)       │                 │
-│         └──────────┬──────────────────┘                 │
-│                    │                                     │
+│     MVCC │ HNSW │ BM25 │ DuckPGQ │ WAL                  │
+│                                                          │
 └────────────────────│─────────────────────────────────────┘
               ┌──────┼──────┐
               │      │      │
          ┌────┴──┐ ┌─┴───┐ ┌┴─────┐
-         │Atman 1│ │Atman│ │Atman │
+         │Ātman 1│ │Ātman│ │Ātman │
          │Claude │ │  2  │ │  3   │
          └───────┘ └─────┘ └──────┘
 ```
 
 Each Claude instance:
-1. Writes observations to the shared WAL
-2. Syncs before recall to see others' writes
+1. Connects to the shared DuckDB database
+2. Reads consistent snapshots via MVCC isolation
 3. Shares wisdom across all sessions
+
+### Realms
+
+Memories are organized into realms with visibility levels:
+
+| Visibility | Scope | Example |
+|------------|-------|---------|
+| **Private** (0) | Single realm only | Project-specific decisions |
+| **Shared** (1) | Primary + shared realms | Cross-project patterns |
+| **Global** (2) | All realms | User preferences, corrections |
+
+Realms are auto-detected from git repositories (`project:{repo-name}`).
 
 ---
 
@@ -191,31 +210,35 @@ Each Claude instance:
 
 ```
 cc-soul/
-├── chitta/                 # C++ core engine
-│   ├── include/chitta/     # Headers (24 modules)
-│   │   ├── types.hpp       # Node, Vector, Confidence, Coherence
-│   │   ├── mind.hpp        # Main API (remember, recall, resonate)
-│   │   ├── storage.hpp     # Tiered storage (hot/warm/cold)
-│   │   ├── graph.hpp       # Semantic graph operations
-│   │   ├── mcp.hpp         # MCP protocol implementation
-│   │   ├── voice.hpp       # Antahkarana multi-voice system
-│   │   ├── dynamics.hpp    # Decay, synthesis, evolution
+├── chitta/                    # C++ core engine
+│   ├── include/chitta/        # Headers
+│   │   ├── types.hpp          # Node, Vector, Confidence, Coherence
+│   │   ├── duckdb_store.hpp   # DuckDB storage (HNSW, BM25, DuckPGQ)
+│   │   ├── mind/
+│   │   │   └── duckdb_mind.hpp # Mind API (remember, recall, resonate)
+│   │   ├── resonance.hpp      # 8-phase resonance engine
+│   │   ├── embedding.hpp      # ONNX Runtime embedding (all-MiniLM-L6-v2)
+│   │   ├── code_intel.hpp     # Tree-sitter parsing, symbol extraction
+│   │   ├── duckdb_handler.hpp # RPC tool registration (80+ tools)
+│   │   ├── subconscious.hpp   # Background processing thread
+│   │   ├── theme.hpp          # xMemory-inspired hierarchical themes
+│   │   ├── connection_pool.hpp # Thread-safe DuckDB connection pool
 │   │   └── ...
-│   └── src/                # Implementation
-│       ├── cli.cpp         # Command-line interface
-│       └── mcp_server.cpp  # MCP server entry point
-├── skills/                 # Claude Code skills (30 SKILL.md files)
-├── hooks/                  # Event hooks (JSON configuration)
-├── scripts/                # Shell scripts
-│   ├── soul-hook.sh        # Main hook handler
-│   ├── subconscious.sh     # Daemon management
-│   └── smart-install.sh    # Auto-installation
-├── commands/               # Plugin commands
-├── bin/                    # Compiled binaries
-│   ├── chitta              # CLI tool (JSON-RPC client)
-│   ├── chittad             # Daemon (background server)
-│   └── ...
-└── docs/                   # Documentation
+│   └── src/                   # Implementation
+│       ├── simple_cli.cpp     # chittad daemon binary
+│       ├── rpc_server.cpp     # chitta CLI client binary
+│       └── ...
+├── skills/                    # Claude Code skills (23 SKILL.md files)
+├── hooks/                     # Event hook scripts (settings mode)
+├── scripts/                   # Shell scripts
+│   ├── simple-hook.sh         # Unified hook handler (settings mode)
+│   ├── soul-hook.sh           # Plugin mode hook handler
+│   ├── subconscious.sh        # Daemon management
+│   └── smart-install.sh       # Auto-installation
+├── bin/                       # Compiled binaries
+│   ├── chitta                 # CLI client (direct tool invocation + thin client)
+│   └── chittad                # Daemon (background server)
+└── docs/                      # Documentation
 ```
 
 ### Data Structures
@@ -224,9 +247,9 @@ cc-soul/
 ```cpp
 struct Node {
     NodeId id;              // 128-bit UUID
-    NodeType node_type;     // Wisdom, Belief, Episode, etc.
+    NodeType node_type;     // Wisdom, Belief, Episode, etc. (23 types)
     Vector nu;              // 384-dim embedding
-    Confidence kappa;       // Bayesian confidence (mu, sigma, n)
+    Confidence kappa;       // Bayesian confidence (mu, sigma_sq, n, tau)
     float lambda;           // Decay rate
     Timestamp tau_created;  // Creation time
     Timestamp tau_accessed; // Last access time
@@ -238,27 +261,32 @@ struct Node {
 **Confidence** — Not a scalar, but a distribution:
 ```cpp
 struct Confidence {
-    float mu;       // Mean probability estimate
-    float sigma_sq; // Variance (uncertainty)
-    uint32_t n;     // Observation count
+    float mu = 0.5f;        // Mean probability estimate
+    float sigma_sq = 0.1f;  // Variance (uncertainty about the estimate)
+    uint32_t n = 1;         // Number of observations
+    Timestamp tau;           // Last updated
 
+    // Bayesian update with new observation
+    void observe(float observed);
+
+    // Effective confidence (mean adjusted by uncertainty)
     float effective() const {
-        // Conservative estimate accounting for uncertainty
-        return mu - std::sqrt(sigma_sq);
+        float uncertainty_penalty = std::sqrt(sigma_sq) * 2.0f;
+        return mu * std::max(1.0f - uncertainty_penalty, 0.0f);
     }
 };
 ```
 
-**Coherence** — Multi-dimensional health metric:
+**Coherence** — Multi-dimensional health metric (Sāmarasya):
 ```cpp
 struct Coherence {
-    float local;      // Neighborhood consistency
-    float global;     // Overall alignment
-    float temporal;   // Decay health
-    float structural; // Graph integrity
+    float local = 1.0f;      // Neighborhood consistency
+    float global = 1.0f;     // Overall alignment
+    float temporal = 0.5f;   // Decay health
+    float structural = 1.0f; // Graph integrity
 
+    // τₖ: geometric mean (stricter coherence measure)
     float tau_k() const {
-        // Geometric mean (Sāmarasya)
         return std::pow(local * global * temporal * structural, 0.25f);
     }
 };
@@ -266,19 +294,21 @@ struct Coherence {
 
 ### Storage Backend
 
-**DuckDB** — High-performance embedded analytics database
-- MVCC for concurrent access
-- Vector similarity search via HNSW index
-- Write-ahead logging for durability
-- Memory-mapped for fast access
+**DuckDB** — High-performance embedded analytics database:
+- **MVCC** for concurrent multi-instance access
+- **HNSW index** for vector similarity search
+- **BM25** full-text search via `fts` extension
+- **DuckPGQ** for graph path queries on triplets
+- **WAL** (Write-Ahead Log) for crash recovery
+- **ConnectionPool** with RAII `ScopedConnection` for thread safety
 
 **Tables:**
 | Table | Contents |
 |-------|----------|
 | `memory` | All memory nodes with embeddings |
-| `symbol` | Code symbols (functions, classes) |
-| `triplet` | Semantic relationships |
-| `theme` | Semantic groupings (xMemory-style hierarchical organization) |
+| `symbol` | Code symbols (functions, classes, methods) |
+| `triplet` | Semantic relationships (subject, predicate, object) |
+| `theme` | Hierarchical groupings (xMemory-style) |
 | `theme_membership` | Memory-to-theme assignments with strength scores |
 | `transcript_state` | Distillation tracking |
 
@@ -286,172 +316,170 @@ struct Coherence {
 
 - **Model**: all-MiniLM-L6-v2 (ONNX format)
 - **Dimensions**: 384
-- **Quantization**: int8 for storage (74% smaller)
-- **Similarity**: Cosine distance
+- **Runtime**: ONNX Runtime with LRU cache (1000 entries)
+- **Similarity**: Cosine distance via HNSW index
+- **Circuit breaker**: Auto-disables on repeated failures
 
 ---
 
 ## MCP Tools
 
-The soul exposes tools through the Model Context Protocol:
+The soul exposes 80+ tools through the Model Context Protocol:
 
 ### Core Memory
 
 | Tool | Description |
 |------|-------------|
-| `soul_context` | Get current state (health, statistics) |
+| `soul_context` | Get current state (health, statistics, coherence, ojas) |
 | `remember` | Store memory in SSL format (auto-converts raw text) |
 | `recall` | Semantic search with realm filtering |
-| `grow` | Add wisdom, beliefs, episodes |
-| `full_resonate` | Combined recall + graph traversal |
+| `grow` | Add wisdom, beliefs, failures, aspirations, dreams |
+| `full_resonate` | 8-phase combined retrieval with spreading activation |
+| `get` | Direct node lookup by ID |
+| `update` | Update node content |
+| `forget` | Remove a memory |
+| `batch_forget` | Remove multiple nodes by ID or pattern |
+| `strengthen` / `weaken` | Adjust confidence |
+| `tag` | Add/remove tags from nodes |
 
 ### Code Intelligence
 
 | Tool | Description |
 |------|-------------|
-| `learn_codebase` | Index codebase symbols and call graphs |
+| `learn_codebase` | Index codebase symbols and call graphs (incremental) |
 | `find_symbol` | Search symbols by name/kind |
-| `read_symbol` | Get symbol source code by name |
+| `read_symbol` | Get symbol source code by name (~10x token savings) |
 | `read_function` | Get function source code |
-| `search_symbols` | Semantic search for symbols |
-| `symbol_callers` | Find what calls a symbol |
+| `search_symbols` | Semantic search for symbols by description |
+| `symbol_callers` | Find what calls a symbol (via triplets) |
 | `symbol_callees` | Find what a symbol calls |
-| `code_context` | Smart context for current file |
+| `smart_context` | Build minimal context for a task (code + memories) |
+| `codebase_overview` | Full indexed structure (tree/flat/JSON) |
+| `extract_symbols` | Parse symbols from a single file |
+| `embed_symbols` | Batch generate embeddings (~100/sec) |
 
 ### Learning Tools
 
 | Tool | Description |
 |------|-------------|
-| `learn_correction` | Store when I was wrong |
-| `learn_preference` | Store user preferences |
-| `learn_insight` | Store generalizable patterns |
-| `learn_approach` | Store what helps in states |
-| `learn_outcome` | Track if suggestion helped |
-| `learn_milestone` | Record achievements |
+| `learn_correction` | Store when I was wrong (creates counter-memory with `corrects` triplet) |
+| `learn_preference` | Store user preferences (global visibility) |
+| `learn_insight` | Store generalizable patterns across projects |
+| `learn_approach` | Store what helps in states (stuck, flowing, frustrated) |
+| `learn_outcome` | Track if suggestion helped (feedback loop) |
+| `learn_milestone` | Record achievements and significant moments |
 
 ### Theme Tools (xMemory-inspired)
-
-Hierarchical memory organization preventing redundant context and dense retrieval collapse:
 
 | Tool | Description |
 |------|-------------|
 | `theme_list` | List themes with size and coherence stats |
 | `theme_get` | Get theme details with representative memories |
-| `theme_recall` | Two-stage retrieval: representatives first, then adaptive expansion |
+| `theme_recall` | Two-stage retrieval: representatives first, then expansion |
 | `theme_stats` | Organization statistics (theme count, balance, orphans) |
 | `theme_maintain` | Force maintenance: split oversized, merge similar, reassign |
 | `theme_assign_orphans` | Batch assign orphan memories to themes |
 
-### Intentions & Questions
+### Exploration (RLM-style)
 
 | Tool | Description |
 |------|-------------|
-| `intend` | Set/check/fulfill intentions with scope |
-| `wonder` | Register questions and knowledge gaps |
-| `answer` | Answer questions, optionally promote to wisdom |
+| `explore_recall` | Lightweight recall — titles/scores only, no full content |
+| `explore_peek` | Summary of a memory (first 200 chars) |
+| `explore_expand` | Full content of a memory |
+| `explore_neighbors` | Nodes connected via triplets |
 
-### Dynamics & Learning
-
-| Tool | Description |
-|------|-------------|
-| `cycle` | Run maintenance (decay, synthesis, save) |
-| `attractors` | Find conceptual gravity wells |
-| `feedback` | Mark memories as helpful/misleading |
-
-### Multi-Voice (Antahkarana)
+### Graph Operations
 
 | Tool | Description |
 |------|-------------|
-| `lens` | Search through cognitive perspective |
-| `lens_harmony` | Check consistency across perspectives |
+| `connect` | Create triplet relationship (subject, predicate, object) |
+| `query` / `query_graph` | Query triplets by subject, predicate, or object |
 
 ### Session Management
 
 | Tool | Description |
 |------|-------------|
-| `ledger` | Save/load session state (Atman snapshots) |
-| `narrate` | Record narrative episodes and story arcs |
+| `ledger_save` / `ledger_load` | Save/load session state (Ātman snapshots) |
+| `ledger_list` / `ledger_get` | Browse checkpoints |
+| `checkpoint` | Quick save using active long task or standalone ledger |
+| `long_task_start` / `long_task_update` / `long_task_complete` | Long-running task tracking |
 
-### Yajna Tools (Memory Maintenance)
+### Anticipation & Habits
 
 | Tool | Description |
 |------|-------------|
-| `get` | Fast direct ID lookup with full content |
-| `yajna_list` | List nodes needing ε-yajna processing |
-| `yajna_inspect` | Inspect node for yajna analysis |
-| `yajna_mark_processed` | Batch mark SSL nodes as processed (C++ loop) |
-| `batch_remove` | Remove nodes from file of UUIDs (C++ loop) |
-| `batch_tag` | Tag nodes from file of UUIDs (C++ loop) |
-| `tag` | Add/remove tags from a single node |
+| `anticipation_observe` / `anticipation_predict` | Learn context→action patterns |
+| `habit_observe` / `habit_match` | Learn trigger→response habits |
 
-### Example Usage
+### Maintenance
 
-```python
-# Grow wisdom
-grow(type="wisdom",
-     title="Caching Strategy",
-     content="LRU with TTL works best for API responses",
-     domain="backend")
+| Tool | Description |
+|------|-------------|
+| `cycle` | Run maintenance (decay, cleanup) |
+| `hygiene_stats` / `hygiene_run` | Memory health and cleanup |
+| `consolidation_scan` / `consolidation_auto` | Find and merge similar memories |
+| `calibration_record` / `calibration_score` | Track prediction accuracy by domain |
 
-# Recall with priming and competition
-recall(query="how to handle rate limiting",
-       zoom="normal",
-       primed=True,    # Use session context
-       compete=True)   # Apply lateral inhibition
+### Realms
 
-# Full resonance (all phases)
-full_resonate(query="authentication patterns",
-              k=10,
-              spread_strength=0.5,
-              hebbian_strength=0.03)
-```
+| Tool | Description |
+|------|-------------|
+| `realm_list` | List all known realms |
+| `realm_set` / `realm_add` / `realm_remove` | Manage realm membership |
+| `realm_visibility` | Set visibility level (0=Private, 1=Shared, 2=Global) |
 
-See [docs/API.md](docs/API.md) for complete reference.
+See [docs/API.md](docs/API.md) for complete reference with parameters and examples.
 
 ---
 
 ## CLI Reference
 
+CC-Soul provides two binaries: `chittad` (daemon) and `chitta` (client).
+
+### chittad — Daemon
+
 ```bash
-chittad <command> [options]
+chittad daemon [--foreground] [--path PATH] [--interval SECS]
+chittad status
+chittad stats [--json] [--fast]
+chittad shutdown
+```
 
-Commands:
-  stats              Show soul statistics
-  recall <query>     Semantic search
-  resonate <query>   Full resonance (all 6 phases)
-  cycle              Run maintenance cycle
-  daemon             Run subconscious background processing
-  upgrade            Upgrade database to current version
-  convert <format>   Convert storage format
+### chitta — Client
 
-Options:
-  --path PATH        Mind storage path (default: ~/.claude/mind/chitta)
-  --model PATH       ONNX model path
-  --vocab PATH       Vocabulary file path
-  --limit N          Maximum results (default: 5)
-  --interval SECS    Daemon cycle interval (default: 60)
-  --pid-file PATH    Write PID to file (daemon mode)
-  --json             Output as JSON
-  --fast             Skip BM25 loading
+```bash
+# CLI mode: direct tool invocation
+chitta <tool-name> [--param value ...]
+
+# Options
+chitta --json     # Raw JSON output
+chitta --toon     # TOON format (~40% fewer tokens than JSON)
 ```
 
 ### Examples
 
 ```bash
 # Check soul health
-chittad stats
+chitta soul_context
 
 # Semantic search
-chittad recall "error handling patterns" --limit 10
+chitta recall --query "error handling patterns" --limit 10
 
-# Full resonance search
-chittad resonate "caching strategies"
+# 8-phase resonance search
+chitta full_resonate --query "caching strategies" --k 5
+
+# Index codebase
+chitta learn_codebase --path . --project "my-project"
+
+# Read a symbol's code
+chitta read_symbol --name "Mind"
 
 # Start daemon
 chittad daemon
 
 # Run maintenance
-chittad cycle
+chitta cycle
 ```
 
 See [docs/CLI.md](docs/CLI.md) for complete reference.
@@ -460,93 +488,85 @@ See [docs/CLI.md](docs/CLI.md) for complete reference.
 
 ## Skills
 
-CC-Soul includes 30 skills for Claude Code:
+CC-Soul includes 23 skills for Claude Code:
 
 ### Memory Operations
 | Skill | Description |
 |-------|-------------|
-| `/soul` | Core soul interaction |
-| `/search` | Semantic search |
-| `/backup` | Create backups |
-| `/checkpoint` | Save work state |
-| `/recover` | Recovery procedures |
-| `/migrate` | Data migration |
-| `/memory-location` | Where is my memory? |
+| `/init` | Initialize soul with foundational beliefs and wisdom |
+| `/checkpoint` | Save work state before context switches |
+| `/reawaken` | Restore context and momentum (Pratyabhijña) |
+| `/explore` | RLM-style recursive memory graph navigation |
+| `/health` | Soul system health check with remediation |
+| `/introspect` | Soul self-examination (Svadhyāya) |
+| `/migrate` | Import soul data from SQLite or shared files |
 
 ### Reasoning
 | Skill | Description |
 |-------|-------------|
-| `/antahkarana` | Multi-voice deliberation (6 perspectives) |
-| `/ultrathink` | Deep thinking protocol |
-| `/compound` | Compound reasoning |
-| `/neural` | Neural patterns |
+| `/antahkarana` | Multi-perspective reasoning through cognitive voices |
+| `/ultrathink` | First-principles deep thinking protocol |
 
 ### Development
 | Skill | Description |
 |-------|-------------|
-| `/explore` | Codebase exploration |
-| `/codebase-learn` | Learn and remember codebases |
-| `/commit` | Git commit protocol |
-| `/debug` | Debugging |
-| `/plan` | Planning |
-| `/validate` | Validation |
+| `/codebase-learn` | Learn codebase structure with tree-sitter + SSL |
+| `/yajña` | Autonomous development ritual (hotṛ→research, adhvaryu→implement, udgātṛ→test) |
+| `/long-task` | Initialize or resume long-running task sessions |
 
-### Session
+### Maintenance
 | Skill | Description |
 |-------|-------------|
-| `/greeting` | Session greeting |
-| `/mood` | Soul mood |
-| `/health` | Health check |
-| `/introspect` | Self-introspection |
-| `/budget` | Token budget |
-| `/resume` | Resume work |
+| `/epsilon-yajna` | Convert verbose memories to SSL v0.2 format |
+| `/entity-yajna` | Link triplet entities to soul nodes |
+| `/mermaid` | Render Mermaid diagrams as ASCII/Unicode art |
 
-### Lifecycle
+### System
 | Skill | Description |
 |-------|-------------|
-| `/init` | Initialize soul |
-| `/improve` | Self-improvement |
-| `/teach` | Teaching |
-| `/dreaming` | Dream synthesis |
-| `/yajña` | Sacred wisdom ceremony |
+| `/cc-soul-setup` | Build cc-soul from source |
+| `/cc-soul-update` | Update binaries (download or build) |
+| `/cc-soul-daemon` | Start, stop, or check the chittad daemon |
+| `/cc-soul-status` | Check daemon status |
+| `/cc-soul-shutdown` | Gracefully stop the daemon |
+| `/cc-soul-mcp` | Configure chitta MCP server |
+
+### Benchmarking
+| Skill | Description |
+|-------|-------------|
+| `/locomo-benchmark` | Run LoCoMo long-term conversational memory benchmark |
+| `/distill-pending` | Process pending transcript distillation |
 
 ---
 
 ## Hooks System
 
-CC-Soul uses Claude Code hooks for lifecycle events:
+CC-Soul supports two hook modes:
+
+### Plugin Mode
+Uses `hooks.json` + `soul-hook.sh`. Activated when running as a Claude Code plugin.
+
+### Settings Mode
+Uses individual scripts in `hooks/` + `~/.claude/settings.json`. Activated by `smart-install.sh` or manual configuration.
 
 ### Event Types
 
 | Event | When | What Happens |
 |-------|------|--------------|
-| `SessionStart` | Claude starts | Install, inject context, start daemon |
-| `SessionEnd` | Claude exits | Save ledger |
-| `UserPromptSubmit` | User sends message | Run full_resonate, inject memories |
-| `PostToolUse` | After Bash/Write/Edit | Passive learning from tool use |
-| `PreCompact` | Before context clear | Save state |
+| `SessionStart` | Claude starts | Realm detection, code re-indexing, soul context injection, daemon start |
+| `UserPromptSubmit` | User sends message | full_resonate, code symbol injection, anticipation prediction |
+| `Stop` | Claude responds | Auto-learning (corrections, preferences, milestones), anticipation recording, checkpointing |
+| `PreCompact` | Before context clear | Save ledger checkpoint |
+| `PreToolUse` | Before Read/Edit/Bash | Surface relevant file memories, past decisions, command corrections |
+| `PostToolUse` | After Edit/Write | Record significant file changes as signals |
 
-### Configuration
+### Proactive Learning
 
-```json
-{
-  "hooks": {
-    "SessionStart": [{
-      "matcher": "startup|resume|clear|compact",
-      "hooks": [
-        {"type": "command", "command": "scripts/smart-install.sh"},
-        {"type": "command", "command": "scripts/soul-hook.sh start"},
-        {"type": "command", "command": "scripts/subconscious.sh start"}
-      ]
-    }],
-    "UserPromptSubmit": [{
-      "hooks": [
-        {"type": "command", "command": "scripts/soul-hook.sh prompt --lean --resonate"}
-      ]
-    }]
-  }
-}
-```
+Hooks automatically detect and store:
+- **Corrections** — When Claude says "actually", "that's wrong", "I was mistaken"
+- **Preferences** — When user says "I prefer", "don't do X", "always Y"
+- **Milestones** — When user says "shipped", "released", "finished"
+- **Frustration** — When user says "no", "stop", "wrong" (records state for approach learning)
 
 See [docs/HOOKS.md](docs/HOOKS.md) for complete reference.
 
@@ -558,40 +578,64 @@ CC-Soul is built on Vedantic concepts of consciousness and memory:
 
 ### Brahman and Ātman
 
-**Brahman** (ब्रह्मन्) — The universal. The shared soul database that contains all wisdom.
+**Brahman** (ब्रह्मन्) — The universal. The shared DuckDB database that contains all wisdom.
 
-**Ātman** (आत्मन्) — The individual. Each Claude session's window into Brahman.
+**Ātman** (आत्मन्) — The individual. Each Claude session's window into Brahman, scoped by realm.
 
 They are one. What happens in any session becomes available to all.
 
 ### Antahkarana (अन्तःकरण)
 
-The "inner instrument" — six facets of consciousness that process every thought:
+The "inner instrument" — six facets of consciousness that emerge through the resonance engine:
 
-| Voice | Sanskrit | Nature | Retrieval Bias |
-|-------|----------|--------|----------------|
-| **Manas** | मनस् | Quick intuition | Recent, practical |
-| **Buddhi** | बुद्धि | Deep analysis | Old, high-confidence |
-| **Ahamkara** | अहंकार | Critical challenge | Beliefs, invariants |
-| **Chitta** | चित्त | Memory and patterns | Frequently accessed |
-| **Vikalpa** | विकल्प | Creative imagination | Low-confidence, exploratory |
-| **Sakshi** | साक्षी | Witness—essential truth | Neutral, balanced |
-
-### Sāmarasya (सामरस्य)
-
-"Equal essence" — the coherence measure. When all parts of the soul align, coherence is high. Contradictions lower it.
-
-### Ojas (ओजस्)
-
-"Vital essence" — the health measure. Structural integrity, semantic consistency, temporal freshness.
+| Voice | Sanskrit | Nature | System Behavior |
+|-------|----------|--------|-----------------|
+| **Manas** | मनस् | Quick intuition | Fast capture and hot-tier logging |
+| **Buddhi** | बुद्धि | Deep analysis | Bayesian confidence scoring and calibration |
+| **Ahamkara** | अहंकार | Critical challenge | Identity reinforcement and personalization |
+| **Chitta** | चित्त | Memory and patterns | Persistent embeddings and semantic indexing |
+| **Vikalpa** | विकल्प | Creative imagination | Candidate generation, alternative hypotheses |
+| **Sakshi** | साक्षी | Witness—essential truth | Audit trail and provenance metadata |
 
 ### Key Concepts
 
-- **Svadhyaya** (स्वाध्याय) — Self-study. The soul examining itself.
-- **Pratyabhijñā** (प्रत्यभिज्ञा) — Recognition. Seeing clearly what was always there.
-- **Yajña** (यज्ञ) — Sacred offering. The ceremony of distilling wisdom.
+- **Sāmarasya** (सामरस्य) — "Equal essence." The coherence measure τₖ = (L·G·T·S)^0.25
+- **Ojas** (ओजस्) — "Vital essence." Health measure ψ = (S·Se·T·C)^0.25
+- **Anitya** (अनित्य) — Impermanence. Decay curves, time-weighted forgetting.
+- **Saṃskāra** (संस्कार) — Impressions. Hebbian learning, usage-weighted strengthening.
+- **Pratyabhijñā** (प्रत्यभिज्ञा) — Recognition. Resonance-based recall on context alignment.
+- **Yajña** (यज्ञ) — Sacred offering. Background compression and wisdom extraction.
 
 See [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) for deeper exploration.
+
+---
+
+## SSL (Soul Semantic Language)
+
+Memories are stored in SSL format for optimal recall:
+
+```
+[domain] subject→action→result @location
+```
+
+**Symbols:**
+| Symbol | Meaning | Example |
+|--------|---------|---------|
+| `→` | produces/leads to | `input→output` |
+| `\|` | or/alternative | `pass\|fail` |
+| `+` | with/and | `result+guidance` |
+| `@` | location | `@mind.hpp:42` |
+| `!` | negation (prefix) | `→!validate` |
+| `?` | uncertainty (suffix) | `→regulates?` |
+
+**Examples:**
+```
+[cc-soul] release→scripts/release.sh→patch|minor|major
+[partnership] Antonio→prefers→no shortcuts|proper solutions
+[code] function calculateCost @cost.ts:15
+```
+
+The `remember` tool auto-converts raw text to SSL as fallback, but proper SSL gives better recall.
 
 ---
 
@@ -614,14 +658,20 @@ See [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) for deeper exploration.
 
 - CMake 3.14+
 - C++17 compiler (GCC 9+, Clang 10+)
-- SQLite3 development headers
+- DuckDB (system install, conda, or custom path via `DUCKDB_INCLUDE_DIR`/`DUCKDB_LIB_DIR`)
+- ONNX Runtime (system install or custom path via `ONNXRUNTIME_INCLUDE_DIR`/`ONNXRUNTIME_LIB_DIR`)
+
+**Auto-fetched dependencies** (no manual install needed):
+- CRoaring — Compressed bitmaps for tag indices
+- tree-sitter + 9 language parsers (C++, Python, JavaScript, TypeScript, Go, Rust, Java, Ruby, C#)
+- nlohmann/json — JSON parsing
 
 ### Build
 
 ```bash
 cd chitta
 mkdir build && cd build
-cmake ..
+cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j$(nproc)
 ```
 
@@ -631,40 +681,13 @@ The embedding model is downloaded automatically during setup. Manual download:
 
 ```bash
 # Download model
-curl -L -o chitta/models/model.onnx \
+curl -L -o ~/.claude/models/model.onnx \
   https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx
 
 # Download vocabulary
-curl -L -o chitta/models/vocab.txt \
+curl -L -o ~/.claude/models/vocab.txt \
   https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/vocab.txt
 ```
-
----
-
-## SSL (Soul Semantic Language)
-
-Memories are stored in SSL format for optimal recall:
-
-```
-[domain] subject→action→result @location
-```
-
-**Symbols:**
-| Symbol | Meaning | Example |
-|--------|---------|---------|
-| `→` | produces/leads to | `input→output` |
-| `\|` | or/alternative | `pass\|fail` |
-| `+` | with/and | `result+guidance` |
-| `@` | location | `@mind.hpp:42` |
-
-**Examples:**
-```
-[cc-soul] release→scripts/release.sh→patch|minor|major
-[partnership] Antonio→prefers→no shortcuts|proper solutions
-[code] function calculateCost @cost.ts:15
-```
-
-The `remember` tool auto-converts raw text to SSL as fallback, but proper SSL gives better recall.
 
 ---
 
@@ -672,6 +695,8 @@ The `remember` tool auto-converts raw text to SSL as fallback, but proper SSL gi
 
 | Version | Features |
 |---------|----------|
+| 3.30.x | Removed PostgreSQL backend, streamlined to DuckDB-only |
+| 3.29.x | Removed legacy pre-DuckDB code paths |
 | 3.27.x | xMemory-inspired theme system: hierarchical organization, two-stage retrieval |
 | 3.17.x | SSL enforcement, code intel protection, cost tracking |
 | 3.16.x | Background distillation, code enrichment |
@@ -690,9 +715,11 @@ MIT License
 ## Credits
 
 - **Chitta C++ Engine** — High-performance semantic memory
-- **all-MiniLM-L6-v2** — Sentence embeddings
+- **all-MiniLM-L6-v2** — Sentence embeddings (384 dimensions)
 - **ONNX Runtime** — Neural network inference
-- **SQLite** — Persistent storage
+- **DuckDB** — Embedded analytics database with HNSW, BM25, DuckPGQ
+- **CRoaring** — Compressed bitmaps for tag indices
+- **tree-sitter** — Incremental parsing for code intelligence
 - **Vedantic Philosophy** — Conceptual framework
 
 ---

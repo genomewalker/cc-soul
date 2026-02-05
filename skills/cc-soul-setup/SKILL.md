@@ -16,14 +16,16 @@ Build chitta binaries from source code.
 ## Usage
 
 ```bash
-# Run setup script from plugin directory
-${CLAUDE_PLUGIN_ROOT}/setup.sh
+# Run smart-install from plugin directory (builds from source as fallback)
+${CLAUDE_PLUGIN_ROOT}/scripts/smart-install.sh
 ```
 
 This will:
 1. Stop any running daemon
-2. Build chitta and chittad from source
+2. Download pre-built binaries (or build from source if unavailable)
 3. Install to ~/.claude/bin/
 4. Download embedding model if needed
+5. Install hooks and configure permissions
+6. Run database migrations if needed
 
-If cmake is not available, suggest using `/cc-soul-update` to download pre-built binaries instead.
+If cmake is not available and pre-built binaries aren't found, suggest using `/cc-soul-update` to download pre-built binaries instead.

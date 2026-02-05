@@ -23,7 +23,7 @@ evaluate:
   hot nodes %: >50% healthy | 30-50% warning | <30% critical
 
 remediate:
-  setup issues→suggest ./setup.sh
+  setup issues→suggest scripts/smart-install.sh
   low coherence→cycle(save=true)
 
 report: setup status | version | node count | coherence | actions needed

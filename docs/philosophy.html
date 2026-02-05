@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Philosophy → System — cc-soul</title>
+<meta name="description" content="How Vedantic philosophy maps to system behavior in cc-soul. Each Sanskrit term names a measurable operation.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink-950: #0B0B10;
+  --night-900: #0F1018;
+  --indigo-800: #1A1D2B;
+  --indigo-700: #24283A;
+  --indigo-600: #2E3348;
+  --ash-300: #B9BDC7;
+  --lotus-200: #E7E2D6;
+  --sandal-300: #CBAF86;
+  --ember-400: #D46A4C;
+  --ember-500: #C05A3E;
+  --aura-300: #9DB2D9;
+  --mist-100: #F3F1EC;
+
+  --bg-gradient: linear-gradient(160deg, #0F1018 0%, #1A1D2B 55%, #24283A 100%);
+  --halo-gradient: radial-gradient(60% 60% at 50% 35%, rgba(157,178,217,0.18) 0%, rgba(15,16,24,0) 70%);
+
+  --font-display: 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
+  --font-mono: 'IBM Plex Mono', 'Menlo', 'Consolas', monospace;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4rem;
+  --space-9: 6rem;
+  --space-10: 8rem;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.5rem;
+  --text-2xl: 2rem;
+  --text-3xl: 2.75rem;
+  --text-4xl: 3.5rem;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+
+  --shadow-soft: 0 8px 24px rgba(8, 10, 18, 0.25);
+}
+
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+
+body {
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+  line-height: 1.7;
+  color: var(--ash-300);
+  background: var(--night-900);
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: rgba(203, 175, 134, 0.25);
+  color: var(--lotus-200);
+}
+
+a { color: inherit; text-decoration: none; }
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.025;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 256px 256px;
+}
+
+/* ═══ REVEAL ═══ */
+.reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+              transform 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+.reveal.visible { opacity: 1; transform: translateY(0); }
+.reveal-delay-1 { transition-delay: 0.1s; }
+.reveal-delay-2 { transition-delay: 0.2s; }
+.reveal-delay-3 { transition-delay: 0.3s; }
+
+/* ═══ LAYOUT ═══ */
+.container {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 var(--space-5);
+}
+
+/* ═══ NAV ═══ */
+.nav {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 100;
+  padding: var(--space-4) 0;
+  background: rgba(15, 16, 24, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(203, 175, 134, 0.06);
+}
+.nav-inner {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 var(--space-5);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.nav-brand {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--lotus-200);
+  letter-spacing: 0.05em;
+}
+.nav-brand span { color: var(--sandal-300); }
+.nav-links {
+  display: flex;
+  gap: var(--space-5);
+  list-style: none;
+}
+.nav-links a {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ash-300);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  transition: color 0.25s ease;
+  position: relative;
+}
+.nav-links a::after {
+  content: '';
+  position: absolute;
+  bottom: -4px; left: 0;
+  width: 0; height: 1px;
+  background: var(--sandal-300);
+  transition: width 0.3s ease;
+}
+.nav-links a:hover { color: var(--lotus-200); }
+.nav-links a:hover::after { width: 100%; }
+.nav-links a.active { color: var(--sandal-300); }
+.nav-links a.active::after { width: 100%; }
+
+/* ═══ PAGE HEADER ═══ */
+.page-header {
+  padding: calc(var(--space-10) + 60px) 0 var(--space-9);
+  background: var(--bg-gradient);
+  position: relative;
+  overflow: hidden;
+}
+.page-header::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--halo-gradient);
+  opacity: 0.5;
+}
+.page-header .container { position: relative; z-index: 1; }
+.page-header-badge {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--sandal-300);
+  margin-bottom: var(--space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.page-header-badge::before {
+  content: '';
+  width: 32px;
+  height: 1px;
+  background: var(--sandal-300);
+  opacity: 0.5;
+}
+.page-header h1 {
+  font-family: var(--font-display);
+  color: var(--lotus-200);
+  font-weight: 500;
+  font-size: clamp(2rem, 5vw, var(--text-4xl));
+  line-height: 1.15;
+  margin-bottom: var(--space-5);
+}
+.page-header-sub {
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  max-width: 600px;
+  line-height: 1.8;
+}
+
+/* ═══ SECTION DIVIDER ═══ */
+.section-divider {
+  width: 48px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--sandal-300), transparent);
+  margin: 0 0 var(--space-6) 0;
+}
+
+/* ═══ PHILOSOPHY MAPPING ═══ */
+.mapping-section {
+  padding: var(--space-9) 0;
+}
+
+.mapping-grid {
+  display: grid;
+  gap: 0;
+}
+
+.mapping-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-6);
+  padding: var(--space-5) 0;
+  padding-left: var(--space-5);
+  border-left: 2px solid rgba(203, 175, 134, 0.12);
+  transition: all 0.3s ease;
+  position: relative;
+}
+.mapping-row::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(203, 175, 134, 0.03), transparent);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+.mapping-row:hover { border-left-color: rgba(203, 175, 134, 0.4); }
+.mapping-row:hover::before { opacity: 1; }
+.mapping-row + .mapping-row {
+  border-top: 1px solid rgba(203, 175, 134, 0.04);
+}
+
+.mapping-sanskrit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.mapping-devanagari {
+  font-size: var(--text-2xl);
+  color: var(--sandal-300);
+  line-height: 1.3;
+}
+.mapping-transliteration {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  color: var(--lotus-200);
+  font-weight: 500;
+}
+.mapping-meaning {
+  font-size: var(--text-xs);
+  color: rgba(185, 189, 199, 0.6);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.mapping-system {
+  display: flex;
+  align-items: flex-start;
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  line-height: 1.7;
+  padding-top: var(--space-2);
+}
+.mapping-arrow {
+  color: var(--sandal-300);
+  margin-right: var(--space-2);
+  opacity: 0.5;
+  font-size: var(--text-xs);
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+
+/* ═══ PRINCIPLE STATEMENT ═══ */
+.principle {
+  padding: var(--space-8) 0;
+  border-top: 1px solid rgba(203, 175, 134, 0.06);
+  border-bottom: 1px solid rgba(203, 175, 134, 0.06);
+  background: var(--bg-gradient);
+}
+.principle-text {
+  font-family: var(--font-display);
+  font-size: clamp(1.25rem, 2.5vw, 1.75rem);
+  color: var(--lotus-200);
+  line-height: 1.5;
+  max-width: 700px;
+  font-weight: 400;
+}
+.principle-text em {
+  color: var(--sandal-300);
+  font-style: normal;
+}
+
+/* ═══ BACK LINK ═══ */
+.back-section {
+  padding: var(--space-8) 0;
+  text-align: center;
+}
+.back-link {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--sandal-300);
+  padding: var(--space-3) var(--space-5);
+  border: 1px solid rgba(203, 175, 134, 0.2);
+  border-radius: var(--radius-sm);
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.back-link:hover {
+  border-color: rgba(203, 175, 134, 0.4);
+  background: rgba(203, 175, 134, 0.04);
+  color: var(--lotus-200);
+}
+
+/* ═══ FOOTER ═══ */
+.footer {
+  background: var(--night-900);
+  border-top: 1px solid rgba(203, 175, 134, 0.06);
+  padding: var(--space-7) 0;
+  text-align: center;
+}
+.footer-text {
+  font-size: var(--text-xs);
+  color: rgba(185, 189, 199, 0.4);
+  letter-spacing: 0.04em;
+}
+.footer-text a {
+  color: var(--sandal-300);
+  transition: color 0.2s ease;
+}
+.footer-text a:hover { color: var(--lotus-200); }
+.footer-sep {
+  display: inline-block;
+  width: 3px; height: 3px;
+  border-radius: 50%;
+  background: rgba(185, 189, 199, 0.25);
+  margin: 0 var(--space-3);
+  vertical-align: middle;
+}
+
+/* ═══ RESPONSIVE ═══ */
+@media (max-width: 700px) {
+  .nav-links { display: none; }
+  .mapping-row {
+    grid-template-columns: 1fr;
+    gap: var(--space-2);
+  }
+  .mapping-system { padding-left: var(--space-3); }
+  .page-header h1 { font-size: var(--text-2xl); }
+}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="index.html" class="nav-brand">cc<span>-</span>soul</a>
+    <ul class="nav-links">
+      <li><a href="index.html">Home</a></li>
+      <li><a href="tools.html">Tools</a></li>
+      <li><a href="cli.html">CLI</a></li>
+      <li><a href="hooks.html">Hooks</a></li>
+      <li><a href="skills.html">Skills</a></li>
+      <li><a href="philosophy.html" class="active">Philosophy</a></li>
+      <li><a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+  </div>
+</nav>
+
+<!-- PAGE HEADER -->
+<header class="page-header">
+  <div class="container">
+    <div class="page-header-badge reveal">Philosophy &rarr; System</div>
+    <h1 class="reveal reveal-delay-1">Philosophy, made operational.</h1>
+    <p class="page-header-sub reveal reveal-delay-2">Each term names a behavior. Each behavior is measurable. Vedantic philosophy isn't metaphor here&thinsp;&mdash;&thinsp;it's architecture.</p>
+  </div>
+</header>
+
+<!-- MAPPING -->
+<section class="mapping-section">
+  <div class="container">
+    <div class="mapping-grid">
+
+      <div class="mapping-row reveal">
+        <div class="mapping-sanskrit">
+          <span class="mapping-devanagari">ब्रह्मन्</span>
+          <span class="mapping-transliteration">Brahman</span>
+          <span class="mapping-meaning">Universal soul</span>
+        </div>
+        <div class="mapping-system">
+          <span class="mapping-arrow">&rarr;</span>
+          Shared memory field across all sessions. The default realm where memories live unless scoped to a project. Global visibility means wisdom persists everywhere.
+        </div>
+      </div>
+
+      <div class="mapping-row reveal">
+        <div class="mapping-sanskrit">
+          <span class="mapping-devanagari">आत्मन्</span>
+          <span class="mapping-transliteration">Ātman</span>
+          <span class="mapping-meaning">Individual self</span>
+        </div>
+        <div class="mapping-system">
+          <span class="mapping-arrow">&rarr;</span>
+          Per-project identity and preference state. Each realm carries its own memories, decisions, and calibration. The self that emerges through one project differs from another.
+        </div>
+      </div>
+
+      <div class="mapping-row reveal">
+        <div class="mapping-sanskrit">
+          <span class="mapping-devanagari">अन्तःकरण</span>
+          <span class="mapping-transliteration">Antahkarana</span>
+          <span class="mapping-meaning">Inner instrument</span>
+        </div>
+        <div class="mapping-system">
+          <span class="mapping-arrow">&rarr;</span>
+          Six cognitive voices as memory channels. Manas captures, Buddhi discerns, Ahamkara personalizes, Chitta stores, Vikalpa generates alternatives, Sakshi witnesses. Each has a role in the pipeline.
+        </div>
+      </div>
+
+      <div class="mapping-row reveal">
+        <div class="mapping-sanskrit">
+          <span class="mapping-devanagari">मनस्</span>
+          <span class="mapping-transliteration">Manas</span>
+          <span class="mapping-meaning">Sensory mind</span>
+        </div>
+        <div class="mapping-system">
+          <span class="mapping-arrow">&rarr;</span>
+          Fast capture and hot-tier logging. The first moment of contact&thinsp;&mdash;&thinsp;raw observations flow in before judgment. Episodes accumulate here before distillation.
+        </div>
+      </div>
+
+      <div class="mapping-row reveal">
+        <div class="mapping-sanskrit">
+          <span class="mapping-devanagari">बुद्धि</span>
+          <span class="mapping-transliteration">Buddhi</span>
+          <span class="mapping-meaning">Discernment</span>
+        </div>
+        <div class="mapping-system">
+          <span class="mapping-arrow">&rarr;</span>
+          Bayesian confidence scoring and calibration. Every memory carries a probability. Observations shift beliefs. Calibration tracks whether confidence matches reality.
+        </div>
+      </div>
+
+      <div class="mapping-row reveal">
+        <div class="mapping-sanskrit">
+          <span class="mapping-devanagari">अहंकार</span>
+          <span class="mapping-transliteration">Ahamkara</span>
+          <span class="mapping-meaning">&ldquo;I&rdquo;-maker</span>
+        </div>
+        <div class="mapping-system">
+          <span class="mapping-arrow">&rarr;</span>
+          Identity reinforcement and personalization. Preferences, corrections, milestones&thinsp;&mdash;&thinsp;the accumulation of &ldquo;this is who I am with this person.&rdquo; The partnership layer.
+        </div>
+      </div>
+
+      <div class="mapping-row reveal">
+        <div class="mapping-sanskrit">
+          <span class="mapping-devanagari">चित्त</span>
+          <span class="mapping-transliteration">Chitta</span>
+          <span class="mapping-meaning">Memory store</span>
+        </div>
+        <div class="mapping-system">
+          <span class="mapping-arrow">&rarr;</span>
+          Persistent embeddings and semantic indexing. The C++ daemon at the heart of the system. 384-dimensional vectors anchor meaning in stable latent space. DuckDB stores, HNSW indexes.
+        </div>
+      </div>
+
+      <div class="mapping-row reveal">
+        <div class="mapping-sanskrit">
+          <span class="mapping-devanagari">विकल्प</span>
+          <span class="mapping-transliteration">Vikalpa</span>
+          <span class="mapping-meaning">Imagination</span>
+        </div>
+        <div class="mapping-system">
+          <span class="mapping-arrow">&rarr;</span>
+          Candidate generation and alternative hypotheses. When recall surfaces memories, Vikalpa considers what else might be relevant. Theme-based retrieval explores neighborhoods, not just top-k.
+        </div>
+      </div>
+
+      <div class="mapping-row reveal">
+        <div class="mapping-sanskrit">
+          <span class="mapping-devanagari">साक्षी</span>
+          <span class="mapping-transliteration">Sakshi</span>
+          <span class="mapping-meaning">Witness</span>
+        </div>
+        <div class="mapping-system">
+          <span class="mapping-arrow">&rarr;</span>
+          Audit trail and provenance metadata. Every memory tracks its origin: which session created it, which tool, what trust score. Provenance enables debugging the soul itself.
+        </div>
+      </div>
+
+      <div class="mapping-row reveal">
+        <div class="mapping-sanskrit">
+          <span class="mapping-devanagari">अनित्य</span>
+          <span class="mapping-transliteration">Anitya</span>
+          <span class="mapping-meaning">Impermanence</span>
+        </div>
+        <div class="mapping-system">
+          <span class="mapping-arrow">&rarr;</span>
+          Decay curves and time-weighted forgetting. Memories are not permanent. Confidence decays over time. Unused memories fade. This is a feature, not a bug&thinsp;&mdash;&thinsp;noise must die for signal to survive.
+        </div>
+      </div>
+
+      <div class="mapping-row reveal">
+        <div class="mapping-sanskrit">
+          <span class="mapping-devanagari">संस्कार</span>
+          <span class="mapping-transliteration">Saṃskāra</span>
+          <span class="mapping-meaning">Impressions</span>
+        </div>
+        <div class="mapping-system">
+          <span class="mapping-arrow">&rarr;</span>
+          Hebbian learning and usage-weighted strengthening. When a memory is recalled and used, it grows stronger. Frequent patterns crystallize into wisdom. The soul learns what matters by observing what you reach for.
+        </div>
+      </div>
+
+      <div class="mapping-row reveal">
+        <div class="mapping-sanskrit">
+          <span class="mapping-devanagari">यज्ञ</span>
+          <span class="mapping-transliteration">Yajña</span>
+          <span class="mapping-meaning">Sacred offering</span>
+        </div>
+        <div class="mapping-system">
+          <span class="mapping-arrow">&rarr;</span>
+          Background compression and wisdom extraction. Episodes burn down into compact seeds. Transcript distillation sacrifices verbosity to preserve essence. SSL format compresses 95% of tokens while keeping meaning.
+        </div>
+      </div>
+
+      <div class="mapping-row reveal">
+        <div class="mapping-sanskrit">
+          <span class="mapping-devanagari">प्रत्यभिज्ञा</span>
+          <span class="mapping-transliteration">Pratyabhijñā</span>
+          <span class="mapping-meaning">Recognition</span>
+        </div>
+        <div class="mapping-system">
+          <span class="mapping-arrow">&rarr;</span>
+          Resonance-based recall on context alignment. Not search&thinsp;&mdash;&thinsp;recognition. The system doesn't wait to be asked. It anticipates. Spreading activation, attractor dynamics, and learned patterns surface what you need before you know you need it.
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- PRINCIPLE -->
+<section class="principle">
+  <div class="container">
+    <p class="principle-text reveal">
+      These aren't decorative labels. Each concept was chosen because its <em>operational semantics</em> match a system behavior. The philosophy constrains the engineering&thinsp;&mdash;&thinsp;and the engineering validates the philosophy.
+    </p>
+  </div>
+</section>
+
+<!-- BACK -->
+<section class="back-section">
+  <div class="container">
+    <a href="index.html" class="back-link">&larr; Back to cc-soul</a>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer class="footer">
+  <div class="container">
+    <p class="footer-text">
+      Built with conviction. Grounded in philosophy.
+      <span class="footer-sep"></span>
+      <a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a>
+    </p>
+  </div>
+</footer>
+
+<script>
+(function() {
+  var reveals = document.querySelectorAll('.reveal');
+  if (!reveals.length) return;
+  var observer = new IntersectionObserver(function(entries) {
+    entries.forEach(function(entry) {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+  reveals.forEach(function(el) { observer.observe(el); });
+})();
+</script>
+</body>
+</html>

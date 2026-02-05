@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>23 Skills — cc-soul</title>
+<meta name="description" content="Complete reference for all 23 slash-command skills in cc-soul. Memory operations, reasoning, development rituals, maintenance, system management, and benchmarking.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink-950: #0B0B10;
+  --night-900: #0F1018;
+  --indigo-800: #1A1D2B;
+  --indigo-700: #24283A;
+  --indigo-600: #2E3348;
+  --ash-300: #B9BDC7;
+  --lotus-200: #E7E2D6;
+  --sandal-300: #CBAF86;
+  --ember-400: #D46A4C;
+  --ember-500: #C05A3E;
+  --aura-300: #9DB2D9;
+  --mist-100: #F3F1EC;
+
+  --bg-gradient: linear-gradient(160deg, #0F1018 0%, #1A1D2B 55%, #24283A 100%);
+  --halo-gradient: radial-gradient(60% 60% at 50% 35%, rgba(157,178,217,0.18) 0%, rgba(15,16,24,0) 70%);
+
+  --font-display: 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
+  --font-mono: 'IBM Plex Mono', 'Menlo', 'Consolas', monospace;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4rem;
+  --space-9: 6rem;
+  --space-10: 8rem;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.5rem;
+  --text-2xl: 2rem;
+  --text-3xl: 2.75rem;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+
+  --shadow-soft: 0 8px 24px rgba(8, 10, 18, 0.25);
+}
+
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+
+body {
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+  line-height: 1.7;
+  color: var(--ash-300);
+  background: var(--night-900);
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection { background: rgba(203, 175, 134, 0.25); color: var(--lotus-200); }
+a { color: inherit; text-decoration: none; }
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.025;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 256px 256px;
+}
+
+/* ═══ REVEAL ═══ */
+.reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+              transform 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+.reveal.visible { opacity: 1; transform: translateY(0); }
+.reveal-delay-1 { transition-delay: 0.1s; }
+.reveal-delay-2 { transition-delay: 0.2s; }
+
+/* ═══ LAYOUT ═══ */
+.container {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 var(--space-5);
+}
+
+/* ═══ NAV ═══ */
+.nav {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 100;
+  padding: var(--space-4) 0;
+  background: rgba(15, 16, 24, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(203, 175, 134, 0.06);
+}
+.nav-inner {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 var(--space-5);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.nav-brand {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--lotus-200);
+  letter-spacing: 0.05em;
+}
+.nav-brand span { color: var(--sandal-300); }
+.nav-links { display: flex; gap: var(--space-5); list-style: none; }
+.nav-links a {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ash-300);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  transition: color 0.25s ease;
+  position: relative;
+}
+.nav-links a::after {
+  content: '';
+  position: absolute;
+  bottom: -4px; left: 0;
+  width: 0; height: 1px;
+  background: var(--sandal-300);
+  transition: width 0.3s ease;
+}
+.nav-links a:hover { color: var(--lotus-200); }
+.nav-links a:hover::after { width: 100%; }
+.nav-links a.active { color: var(--sandal-300); }
+.nav-links a.active::after { width: 100%; }
+
+/* ═══ PAGE HEADER ═══ */
+.page-header {
+  padding: calc(var(--space-10) + 60px) 0 var(--space-9);
+  background: var(--bg-gradient);
+  position: relative;
+  overflow: hidden;
+}
+.page-header::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--halo-gradient);
+  opacity: 0.5;
+}
+.page-header .container { position: relative; z-index: 1; }
+.page-header-badge {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--sandal-300);
+  margin-bottom: var(--space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.page-header-badge::before {
+  content: '';
+  width: 32px;
+  height: 1px;
+  background: var(--sandal-300);
+  opacity: 0.5;
+}
+.page-header h1 {
+  font-family: var(--font-display);
+  color: var(--lotus-200);
+  font-weight: 500;
+  font-size: clamp(2rem, 5vw, var(--text-3xl));
+  line-height: 1.15;
+  margin-bottom: var(--space-5);
+}
+.page-header-sub {
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  max-width: 600px;
+  line-height: 1.8;
+}
+
+/* ═══ CATEGORY TOC ═══ */
+.toc {
+  padding: var(--space-7) 0;
+  border-bottom: 1px solid rgba(203, 175, 134, 0.06);
+}
+.toc-label {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(185, 189, 199, 0.5);
+  margin-bottom: var(--space-4);
+}
+.toc-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.toc-chip {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ash-300);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid rgba(157, 178, 217, 0.12);
+  border-radius: var(--radius-sm);
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+.toc-chip:hover {
+  border-color: rgba(157, 178, 217, 0.3);
+  color: var(--lotus-200);
+  background: rgba(157, 178, 217, 0.04);
+}
+.toc-chip .count {
+  color: rgba(185, 189, 199, 0.4);
+  margin-left: var(--space-1);
+}
+
+/* ═══ SKILLS CATEGORIES ═══ */
+.tools-section {
+  padding: var(--space-8) 0;
+}
+
+.tools-category {
+  margin-bottom: var(--space-8);
+}
+
+.tools-category-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid rgba(203, 175, 134, 0.08);
+  cursor: pointer;
+  user-select: none;
+}
+.tools-category-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.tools-category-icon svg { width: 100%; height: 100%; }
+.tools-category-name {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  color: var(--lotus-200);
+  font-weight: 500;
+}
+.tools-category-count {
+  font-size: var(--text-xs);
+  color: rgba(185, 189, 199, 0.45);
+  margin-left: auto;
+}
+.tools-category-toggle {
+  color: var(--sandal-300);
+  font-size: var(--text-xs);
+  opacity: 0.5;
+  transition: transform 0.3s ease, opacity 0.2s ease;
+}
+.tools-category-header:hover .tools-category-toggle { opacity: 1; }
+.tools-category.collapsed .tools-category-toggle { transform: rotate(-90deg); }
+.tools-category.collapsed .tools-list { display: none; }
+
+.tools-list { display: grid; gap: 0; }
+
+.tool-row {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: var(--space-5);
+  padding: var(--space-3) 0;
+  padding-left: var(--space-3);
+  border-left: 1px solid rgba(157, 178, 217, 0.06);
+  transition: all 0.2s ease;
+}
+.tool-row:hover {
+  border-left-color: rgba(157, 178, 217, 0.2);
+  background: rgba(157, 178, 217, 0.02);
+}
+.tool-row + .tool-row {
+  border-top: 1px solid rgba(203, 175, 134, 0.03);
+}
+.tool-name {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--aura-300);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.tool-desc {
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  line-height: 1.6;
+}
+
+/* ═══ BACK LINK ═══ */
+.back-section {
+  padding: var(--space-8) 0;
+  text-align: center;
+}
+.back-link {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--sandal-300);
+  padding: var(--space-3) var(--space-5);
+  border: 1px solid rgba(203, 175, 134, 0.2);
+  border-radius: var(--radius-sm);
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.back-link:hover {
+  border-color: rgba(203, 175, 134, 0.4);
+  background: rgba(203, 175, 134, 0.04);
+  color: var(--lotus-200);
+}
+
+/* ═══ FOOTER ═══ */
+.footer {
+  background: var(--night-900);
+  border-top: 1px solid rgba(203, 175, 134, 0.06);
+  padding: var(--space-7) 0;
+  text-align: center;
+}
+.footer-text {
+  font-size: var(--text-xs);
+  color: rgba(185, 189, 199, 0.4);
+  letter-spacing: 0.04em;
+}
+.footer-text a { color: var(--sandal-300); transition: color 0.2s ease; }
+.footer-text a:hover { color: var(--lotus-200); }
+.footer-sep {
+  display: inline-block;
+  width: 3px; height: 3px;
+  border-radius: 50%;
+  background: rgba(185, 189, 199, 0.25);
+  margin: 0 var(--space-3);
+  vertical-align: middle;
+}
+
+/* ═══ RESPONSIVE ═══ */
+@media (max-width: 700px) {
+  .nav-links { display: none; }
+  .tool-row {
+    grid-template-columns: 1fr;
+    gap: var(--space-1);
+  }
+  .page-header h1 { font-size: var(--text-2xl); }
+}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="index.html" class="nav-brand">cc<span>-</span>soul</a>
+    <ul class="nav-links">
+      <li><a href="index.html">Home</a></li>
+      <li><a href="tools.html">Tools</a></li>
+      <li><a href="cli.html">CLI</a></li>
+      <li><a href="hooks.html">Hooks</a></li>
+      <li><a href="skills.html" class="active">Skills</a></li>
+      <li><a href="philosophy.html">Philosophy</a></li>
+      <li><a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+  </div>
+</nav>
+
+<!-- PAGE HEADER -->
+<header class="page-header">
+  <div class="container">
+    <div class="page-header-badge reveal">Skills Reference</div>
+    <h1 class="reveal reveal-delay-1">23 skills. Invoke with /.</h1>
+    <p class="page-header-sub reveal reveal-delay-2">Skills are slash commands that expand into specialized prompts. They guide Claude through structured workflows&thinsp;&mdash;&thinsp;from soul initialization to autonomous development rituals.</p>
+  </div>
+</header>
+
+<!-- TABLE OF CONTENTS -->
+<section class="toc">
+  <div class="container">
+    <p class="toc-label">Jump to category</p>
+    <div class="toc-grid">
+      <a href="#cat-memory" class="toc-chip">Memory Operations <span class="count">7</span></a>
+      <a href="#cat-reasoning" class="toc-chip">Reasoning <span class="count">2</span></a>
+      <a href="#cat-development" class="toc-chip">Development <span class="count">3</span></a>
+      <a href="#cat-maintenance" class="toc-chip">Maintenance <span class="count">3</span></a>
+      <a href="#cat-system" class="toc-chip">System <span class="count">6</span></a>
+      <a href="#cat-benchmarking" class="toc-chip">Benchmarking <span class="count">2</span></a>
+    </div>
+  </div>
+</section>
+
+<!-- SKILLS -->
+<section class="tools-section">
+  <div class="container">
+
+    <!-- MEMORY OPERATIONS -->
+    <div class="tools-category" id="cat-memory">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="4" stroke="#CBAF86" stroke-width="1.5"/><circle cx="10" cy="10" r="8" stroke="#CBAF86" stroke-width="0.75" opacity="0.4"/></svg>
+        </div>
+        <span class="tools-category-name">Memory Operations</span>
+        <span class="tools-category-count">7 skills</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">/init</span><span class="tool-desc">Initialize soul with foundational beliefs and wisdom</span></div>
+        <div class="tool-row"><span class="tool-name">/checkpoint</span><span class="tool-desc">Save work state before context switches or /clear</span></div>
+        <div class="tool-row"><span class="tool-name">/reawaken</span><span class="tool-desc">Restore context and momentum via Pratyabhij&ntilde;&#x0101; (recognition)</span></div>
+        <div class="tool-row"><span class="tool-name">/explore</span><span class="tool-desc">RLM-style recursive memory graph navigation &mdash; dynamically navigate the memory graph instead of top-k dump</span></div>
+        <div class="tool-row"><span class="tool-name">/health</span><span class="tool-desc">Soul system health check with remediation recommendations</span></div>
+        <div class="tool-row"><span class="tool-name">/introspect</span><span class="tool-desc">Soul self-examination (Sv&#x0101;dhy&#x0101;ya) &mdash; review what&rsquo;s working, identify improvements</span></div>
+        <div class="tool-row"><span class="tool-name">/migrate</span><span class="tool-desc">Import soul data from SQLite or shared chitta files</span></div>
+      </div>
+    </div>
+
+    <!-- REASONING -->
+    <div class="tools-category" id="cat-reasoning">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M10 3 L17 10 L10 17 L3 10 Z" stroke="#9DB2D9" stroke-width="1.2"/><circle cx="10" cy="10" r="2" fill="#9DB2D9" opacity="0.3"/></svg>
+        </div>
+        <span class="tools-category-name">Reasoning</span>
+        <span class="tools-category-count">2 skills</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">/antahkarana</span><span class="tool-desc">Multi-perspective reasoning through six cognitive voices (Manas, Buddhi, Ahamkara, Chitta, Vikalpa, Sakshi)</span></div>
+        <div class="tool-row"><span class="tool-name">/ultrathink</span><span class="tool-desc">First-principles deep thinking protocol for significant problems</span></div>
+      </div>
+    </div>
+
+    <!-- DEVELOPMENT -->
+    <div class="tools-category" id="cat-development">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M7 5 L3 10 L7 15" stroke="#D46A4C" stroke-width="1.2"/><path d="M13 5 L17 10 L13 15" stroke="#D46A4C" stroke-width="1.2"/><line x1="11" y1="4" x2="9" y2="16" stroke="#D46A4C" stroke-width="0.75" opacity="0.5"/></svg>
+        </div>
+        <span class="tools-category-name">Development</span>
+        <span class="tools-category-count">3 skills</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">/codebase-learn</span><span class="tool-desc">Learn codebase structure with tree-sitter parsing + SSL pattern extraction. Indexes symbols, relationships, and call graphs.</span></div>
+        <div class="tool-row"><span class="tool-name">/yaj&#xF1;a</span><span class="tool-desc">Autonomous development ritual with role-based coordination. Loops until complete using specialized agents: hot&#x1E5B;&rarr;research, adhvaryu&rarr;implement, udg&#x0101;t&#x1E5B;&rarr;test.</span></div>
+        <div class="tool-row"><span class="tool-name">/long-task</span><span class="tool-desc">Initialize or resume a long-running task session. For complex multi-session work with progress tracking.</span></div>
+      </div>
+    </div>
+
+    <!-- MAINTENANCE -->
+    <div class="tools-category" id="cat-maintenance">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M12 3 L14 5 L5 14 L3 12 Z" stroke="#CBAF86" stroke-width="1.2"/><circle cx="15" cy="5" r="2" stroke="#CBAF86" stroke-width="0.75" opacity="0.4"/></svg>
+        </div>
+        <span class="tools-category-name">Maintenance</span>
+        <span class="tools-category-count">3 skills</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">/epsilon-yajna</span><span class="tool-desc">Convert verbose memories to SSL v0.2 format. Compress episodes into compact semantic seeds while preserving meaning.</span></div>
+        <div class="tool-row"><span class="tool-name">/entity-yajna</span><span class="tool-desc">Link triplet entities to soul nodes &mdash; connects the knowledge graph layer to memory nodes</span></div>
+        <div class="tool-row"><span class="tool-name">/mermaid</span><span class="tool-desc">Render Mermaid diagrams as ASCII/Unicode art or SVG</span></div>
+      </div>
+    </div>
+
+    <!-- SYSTEM -->
+    <div class="tools-category" id="cat-system">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><rect x="3" y="3" width="14" height="14" rx="2" stroke="#9DB2D9" stroke-width="1.2"/><line x1="7" y1="7" x2="13" y2="7" stroke="#9DB2D9" stroke-width="0.75" opacity="0.6"/><line x1="7" y1="10" x2="13" y2="10" stroke="#9DB2D9" stroke-width="0.75" opacity="0.6"/><line x1="7" y1="13" x2="10" y2="13" stroke="#9DB2D9" stroke-width="0.75" opacity="0.6"/></svg>
+        </div>
+        <span class="tools-category-name">System</span>
+        <span class="tools-category-count">6 skills</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">/cc-soul-setup</span><span class="tool-desc">Build cc-soul from source (requires cmake, make, C++ compiler)</span></div>
+        <div class="tool-row"><span class="tool-name">/cc-soul-update</span><span class="tool-desc">Update cc-soul binaries (downloads pre-built or builds from source)</span></div>
+        <div class="tool-row"><span class="tool-name">/cc-soul-daemon</span><span class="tool-desc">Start, stop, or check the chittad daemon</span></div>
+        <div class="tool-row"><span class="tool-name">/cc-soul-status</span><span class="tool-desc">Quick check if cc-soul daemon is running</span></div>
+        <div class="tool-row"><span class="tool-name">/cc-soul-shutdown</span><span class="tool-desc">Gracefully stop the cc-soul daemon</span></div>
+        <div class="tool-row"><span class="tool-name">/cc-soul-mcp</span><span class="tool-desc">Configure chitta MCP server for direct tool access (mcp__chitta__* tools)</span></div>
+      </div>
+    </div>
+
+    <!-- BENCHMARKING -->
+    <div class="tools-category" id="cat-benchmarking">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M3 15 L7 8 L11 11 L17 4" stroke="#D46A4C" stroke-width="1.2" fill="none"/><circle cx="17" cy="4" r="1.5" stroke="#D46A4C" stroke-width="0.75" opacity="0.5"/></svg>
+        </div>
+        <span class="tools-category-name">Benchmarking</span>
+        <span class="tools-category-count">2 skills</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">/locomo-benchmark</span><span class="tool-desc">Run LoCoMo long-term conversational memory benchmark</span></div>
+        <div class="tool-row"><span class="tool-name">/distill-pending</span><span class="tool-desc">Process pending transcript distillation</span></div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- BACK -->
+<section class="back-section">
+  <div class="container">
+    <a href="index.html" class="back-link">&larr; Back to cc-soul</a>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer class="footer">
+  <div class="container">
+    <p class="footer-text">
+      Built with conviction. Grounded in philosophy.
+      <span class="footer-sep"></span>
+      <a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a>
+    </p>
+  </div>
+</footer>
+
+<script>
+/* Scroll reveal */
+(function() {
+  var reveals = document.querySelectorAll('.reveal');
+  if (!reveals.length) return;
+  var observer = new IntersectionObserver(function(entries) {
+    entries.forEach(function(entry) {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+  reveals.forEach(function(el) { observer.observe(el); });
+})();
+
+/* Smooth scroll for TOC chips */
+document.querySelectorAll('a[href^="#"]').forEach(function(anchor) {
+  anchor.addEventListener('click', function(e) {
+    var target = document.querySelector(this.getAttribute('href'));
+    if (target) {
+      e.preventDefault();
+      var offset = 80;
+      var top = target.getBoundingClientRect().top + window.pageYOffset - offset;
+      window.scrollTo({ top: top, behavior: 'smooth' });
+      // Expand the category if collapsed
+      if (target.classList.contains('collapsed')) {
+        target.classList.remove('collapsed');
+      }
+    }
+  });
+});
+</script>
+</body>
+</html>
