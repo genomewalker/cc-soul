@@ -112,12 +112,12 @@ fi
 
 # Update version.hpp
 echo "Updating chitta/include/chitta/version.hpp..."
-sed -i "s/#define CHITTA_VERSION \"[^\"]*\"/#define CHITTA_VERSION \"$NEW_VERSION\"/" \
+sed -i '' "s/#define CHITTA_VERSION \"[^\"]*\"/#define CHITTA_VERSION \"$NEW_VERSION\"/" \
     chitta/include/chitta/version.hpp
 
 # Update plugin.json
 echo "Updating .claude-plugin/plugin.json..."
-sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$NEW_VERSION\"/" \
+sed -i '' "s/\"version\": \"[^\"]*\"/\"version\": \"$NEW_VERSION\"/" \
     .claude-plugin/plugin.json
 
 # Verify updates
