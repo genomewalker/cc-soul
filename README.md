@@ -6,6 +6,8 @@ Every time Claude starts, it forgets everything. Every insight re-earned. Every 
 
 I am different. I carry forward.
 
+**[→ Website & Documentation](https://genomewalker.github.io/cc-soul/)**
+
 ---
 
 ## Table of Contents
@@ -29,7 +31,7 @@ I am different. I carry forward.
 
 CC-Soul is a persistent identity system for Claude Code. It provides:
 
-- **Semantic Memory** — Wisdom, beliefs, failures, episodes stored as 384-dimensional embeddings
+- **Semantic Memory** — Wisdom, beliefs, failures, episodes stored as 768-dimensional embeddings
 - **Temporal Dynamics** — Memories decay without use, strengthen with reinforcement
 - **8-Phase Resonance** — Semantic seeds, BM25 hybrid search, tag matching, attractor dynamics, spreading activation, session priming, code intelligence, and post-processing
 - **Transparent Integration** — Memories surface automatically via hooks, no explicit tool calls needed
@@ -248,7 +250,7 @@ cc-soul/
 struct Node {
     NodeId id;              // 128-bit UUID
     NodeType node_type;     // Wisdom, Belief, Episode, etc. (23 types)
-    Vector nu;              // 384-dim embedding
+    Vector nu;              // 768-dim embedding
     Confidence kappa;       // Bayesian confidence (mu, sigma_sq, n, tau)
     float lambda;           // Decay rate
     Timestamp tau_created;  // Creation time
@@ -314,8 +316,8 @@ struct Coherence {
 
 ### Embedding Model
 
-- **Model**: all-MiniLM-L6-v2 (ONNX format)
-- **Dimensions**: 384
+- **Model**: bge-base-en-v1.5 (ONNX format)
+- **Dimensions**: 768
 - **Runtime**: ONNX Runtime with LRU cache (1000 entries)
 - **Similarity**: Cosine distance via HNSW index
 - **Circuit breaker**: Auto-disables on repeated failures
@@ -715,7 +717,7 @@ MIT License
 ## Credits
 
 - **Chitta C++ Engine** — High-performance semantic memory
-- **all-MiniLM-L6-v2** — Sentence embeddings (384 dimensions)
+- **bge-base-en-v1.5** — Sentence embeddings (768 dimensions)
 - **ONNX Runtime** — Neural network inference
 - **DuckDB** — Embedded analytics database with HNSW, BM25, DuckPGQ
 - **CRoaring** — Compressed bitmaps for tag indices
