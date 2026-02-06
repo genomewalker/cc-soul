@@ -537,7 +537,8 @@ private:
                 {"properties", {
                     {"name", {{"type", "string"}, {"description", "Symbol name to find callers for"}}},
                     {"id", {{"type", "integer"}, {"description", "Symbol ID (alternative to name)"}}},
-                    {"kind", {{"type", "string"}, {"description", "Filter by symbol kind when using name"}}}
+                    {"kind", {{"type", "string"}, {"description", "Filter by symbol kind when using name"}}},
+                    {"project", {{"type", "string"}, {"description", "Project name to disambiguate when multiple symbols share the same name"}}}
                 }}
             }}
         });
@@ -551,7 +552,8 @@ private:
                 {"properties", {
                     {"name", {{"type", "string"}, {"description", "Symbol name to find callees for"}}},
                     {"id", {{"type", "integer"}, {"description", "Symbol ID (alternative to name)"}}},
-                    {"kind", {{"type", "string"}, {"description", "Filter by symbol kind when using name"}}}
+                    {"kind", {{"type", "string"}, {"description", "Filter by symbol kind when using name"}}},
+                    {"project", {{"type", "string"}, {"description", "Project name to disambiguate when multiple symbols share the same name"}}}
                 }}
             }}
         });
@@ -565,7 +567,8 @@ private:
                 {"properties", {
                     {"name", {{"type", "string"}, {"description", "Symbol name to read"}}},
                     {"id", {{"type", "integer"}, {"description", "Symbol ID (alternative to name)"}}},
-                    {"kind", {{"type", "string"}, {"description", "Filter by symbol kind (function, class, method)"}}}
+                    {"kind", {{"type", "string"}, {"description", "Filter by symbol kind (function, class, method)"}}},
+                    {"project", {{"type", "string"}, {"description", "Project name to disambiguate when multiple symbols share the same name"}}}
                 }}
             }}
         });
@@ -577,7 +580,8 @@ private:
             {"inputSchema", {
                 {"type", "object"},
                 {"properties", {
-                    {"name", {{"type", "string"}, {"description", "Function name to read"}}}
+                    {"name", {{"type", "string"}, {"description", "Function name to read"}}},
+                    {"project", {{"type", "string"}, {"description", "Project name to disambiguate"}}}
                 }},
                 {"required", {"name"}}
             }}
@@ -3533,7 +3537,7 @@ private:
 
     // Helper to resolve symbol by name or ID
     std::optional<Symbol> resolve_symbol(const json& params) {
-        // Try ID first (more specific)
+        // Try ID first (most specific)
         if (params.contains("id") && params["id"].is_number_integer()) {
             int64_t id = params["id"].get<int64_t>();
             return mind_->store().get_symbol_by_id(id);
@@ -3547,11 +3551,47 @@ private:
         auto symbols = mind_->store().find_symbol(name, kind);
         if (symbols.empty()) return std::nullopt;
 
-        // Return first match (exact match preferred)
+        // Collect exact name matches
+        std::vector<Symbol> exact;
         for (const auto& s : symbols) {
-            if (s.name == name) return s;
+            if (s.name == name) exact.push_back(s);
         }
-        return symbols[0];
+        if (exact.empty()) return symbols[0];
+        if (exact.size() == 1) return exact[0];
+
+        // Multiple exact matches — disambiguate
+
+        // 1. Project filter: match symbol file_path against project's indexed files
+        std::string project = params.value("project", "");
+        if (!project.empty()) {
+            std::string escaped;
+            for (char c : project) {
+                if (c == '\'') escaped += "''";
+                else escaped += c;
+            }
+            auto path_result = mind_->store().execute_sql_query(
+                "SELECT DISTINCT path FROM code_file WHERE project = '" + escaped + "'"
+            );
+            if (path_result.success && !path_result.rows.empty()) {
+                std::unordered_set<std::string> project_files;
+                for (const auto& row : path_result.rows) {
+                    if (!row.empty()) project_files.insert(row[0]);
+                }
+                for (const auto& s : exact) {
+                    if (project_files.count(s.file_path)) return s;
+                }
+            }
+        }
+
+        // 2. Prefer symbols that have call edges (actually participate in call graph)
+        for (const auto& s : exact) {
+            auto callers = mind_->store().callers(s.id);
+            auto callees = mind_->store().callees(s.id);
+            if (!callers.empty() || !callees.empty()) return s;
+        }
+
+        // 3. Fallback: first exact match
+        return exact[0];
     }
 
     DuckDBToolResult tool_symbol_callers(const json& params) {
