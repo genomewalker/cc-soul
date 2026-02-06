@@ -1,0 +1,1905 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Architecture — cc-soul</title>
+<meta name="description" content="Technical architecture of cc-soul: DuckDB storage, 8-phase resonance engine, Bayesian self-tuning, tree-sitter code intelligence, and the Vak embedding pipeline.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink-950: #0B0B10;
+  --night-900: #0F1018;
+  --indigo-800: #1A1D2B;
+  --indigo-700: #24283A;
+  --indigo-600: #2E3348;
+  --ash-300: #B9BDC7;
+  --lotus-200: #E7E2D6;
+  --sandal-300: #CBAF86;
+  --ember-400: #D46A4C;
+  --ember-500: #C05A3E;
+  --aura-300: #9DB2D9;
+  --mist-100: #F3F1EC;
+
+  --bg-gradient: linear-gradient(160deg, #0F1018 0%, #1A1D2B 55%, #24283A 100%);
+  --halo-gradient: radial-gradient(60% 60% at 50% 35%, rgba(157,178,217,0.18) 0%, rgba(15,16,24,0) 70%);
+
+  --font-display: 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
+  --font-mono: 'IBM Plex Mono', 'Menlo', 'Consolas', monospace;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4rem;
+  --space-9: 6rem;
+  --space-10: 8rem;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.5rem;
+  --text-2xl: 2rem;
+  --text-3xl: 2.75rem;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+
+  --shadow-soft: 0 8px 24px rgba(8, 10, 18, 0.25);
+}
+
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+
+body {
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+  line-height: 1.7;
+  color: var(--ash-300);
+  background: var(--night-900);
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection { background: rgba(203, 175, 134, 0.25); color: var(--lotus-200); }
+a { color: inherit; text-decoration: none; }
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.025;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 256px 256px;
+}
+
+/* REVEAL */
+.reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+              transform 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+.reveal.visible { opacity: 1; transform: translateY(0); }
+.reveal-delay-1 { transition-delay: 0.1s; }
+.reveal-delay-2 { transition-delay: 0.2s; }
+.reveal-delay-3 { transition-delay: 0.3s; }
+.reveal-delay-4 { transition-delay: 0.4s; }
+.reveal-delay-5 { transition-delay: 0.5s; }
+
+/* LAYOUT */
+.container {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 var(--space-5);
+}
+
+/* NAV */
+.nav {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 100;
+  padding: var(--space-4) 0;
+  background: rgba(15, 16, 24, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(203, 175, 134, 0.06);
+}
+.nav-inner {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 var(--space-5);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.nav-brand {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--lotus-200);
+  letter-spacing: 0.05em;
+}
+.nav-brand span { color: var(--sandal-300); }
+.nav-links { display: flex; gap: var(--space-5); list-style: none; }
+.nav-links a {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ash-300);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  transition: color 0.25s ease;
+  position: relative;
+}
+.nav-links a::after {
+  content: '';
+  position: absolute;
+  bottom: -4px; left: 0;
+  width: 0; height: 1px;
+  background: var(--sandal-300);
+  transition: width 0.3s ease;
+}
+.nav-links a:hover { color: var(--lotus-200); }
+.nav-links a:hover::after { width: 100%; }
+.nav-links a.active { color: var(--sandal-300); }
+.nav-links a.active::after { width: 100%; }
+
+/* PAGE HEADER */
+.page-header {
+  padding: calc(var(--space-10) + 60px) 0 var(--space-9);
+  background: var(--bg-gradient);
+  position: relative;
+  overflow: hidden;
+}
+.page-header::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--halo-gradient);
+  opacity: 0.5;
+}
+.page-header .container { position: relative; z-index: 1; }
+.page-header-badge {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--sandal-300);
+  margin-bottom: var(--space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.page-header-badge::before {
+  content: '';
+  width: 32px;
+  height: 1px;
+  background: var(--sandal-300);
+  opacity: 0.5;
+}
+.page-header h1 {
+  font-family: var(--font-display);
+  color: var(--lotus-200);
+  font-weight: 500;
+  font-size: clamp(2rem, 5vw, var(--text-3xl));
+  line-height: 1.15;
+  margin-bottom: var(--space-5);
+}
+.page-header-sub {
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  max-width: 680px;
+  line-height: 1.8;
+}
+
+/* SECTION DIVIDER */
+.section-divider {
+  width: 48px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--sandal-300), transparent);
+  margin: 0 0 var(--space-6) 0;
+}
+
+/* HEADING */
+.heading-section {
+  font-family: var(--font-display);
+  color: var(--lotus-200);
+  font-weight: 500;
+  font-size: var(--text-3xl);
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  margin-bottom: var(--space-3);
+}
+
+/* CONTENT SECTIONS */
+.arch-section {
+  padding: var(--space-9) 0;
+  position: relative;
+}
+.arch-section + .arch-section {
+  border-top: 1px solid rgba(203, 175, 134, 0.06);
+}
+.arch-section.alt-bg {
+  background: var(--bg-gradient);
+}
+.section-intro {
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  max-width: 100%;
+  line-height: 1.8;
+  margin-bottom: var(--space-7);
+}
+
+/* TOC */
+.toc {
+  padding: var(--space-7) 0;
+  border-bottom: 1px solid rgba(203, 175, 134, 0.06);
+}
+.toc-label {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(185, 189, 199, 0.5);
+  margin-bottom: var(--space-4);
+}
+.toc-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.toc-chip {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ash-300);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid rgba(157, 178, 217, 0.12);
+  border-radius: var(--radius-sm);
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+.toc-chip:hover {
+  border-color: rgba(157, 178, 217, 0.3);
+  color: var(--lotus-200);
+  background: rgba(157, 178, 217, 0.04);
+}
+
+/* SYSTEM DIAGRAM */
+.sys-diagram {
+  background: rgba(11, 11, 16, 0.5);
+  border: 1px solid rgba(157, 178, 217, 0.08);
+  border-radius: var(--radius-lg);
+  padding: var(--space-7) var(--space-6);
+  position: relative;
+  overflow: hidden;
+}
+.sys-diagram::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(255,255,255,0.01) 0%, transparent 50%);
+  pointer-events: none;
+}
+
+.diagram-layer {
+  border: 1px solid rgba(157, 178, 217, 0.12);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+  margin-bottom: var(--space-4);
+  position: relative;
+}
+.diagram-layer:last-child { margin-bottom: 0; }
+
+.diagram-layer-label {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  position: absolute;
+  top: -9px;
+  left: var(--space-4);
+  padding: 0 var(--space-2);
+  background: var(--night-900);
+}
+.layer-claude .diagram-layer-label { color: var(--aura-300); }
+.layer-claude { border-color: rgba(157, 178, 217, 0.18); }
+.layer-daemon .diagram-layer-label { color: var(--sandal-300); }
+.layer-daemon { border-color: rgba(203, 175, 134, 0.18); }
+.layer-mind .diagram-layer-label { color: var(--ember-400); }
+.layer-mind { border-color: rgba(212, 106, 76, 0.18); }
+
+.diagram-boxes {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.diagram-box {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(185, 189, 199, 0.12);
+  background: rgba(36, 40, 58, 0.5);
+  color: var(--ash-300);
+  text-align: center;
+  transition: all 0.2s ease;
+}
+.diagram-box:hover {
+  border-color: rgba(185, 189, 199, 0.25);
+  background: rgba(36, 40, 58, 0.8);
+  color: var(--lotus-200);
+}
+.diagram-box.highlight-aura { border-color: rgba(157, 178, 217, 0.3); color: var(--aura-300); }
+.diagram-box.highlight-sandal { border-color: rgba(203, 175, 134, 0.3); color: var(--sandal-300); }
+.diagram-box.highlight-ember { border-color: rgba(212, 106, 76, 0.3); color: var(--ember-400); }
+
+.diagram-connector {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-2) 0;
+}
+.diagram-connector-line {
+  width: 1px;
+  height: 24px;
+  background: linear-gradient(to bottom, rgba(203, 175, 134, 0.3), rgba(203, 175, 134, 0.08));
+}
+.diagram-connector-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: rgba(185, 189, 199, 0.4);
+  text-align: center;
+  margin-top: 2px;
+  letter-spacing: 0.06em;
+}
+
+/* COMPONENT TABLE */
+.comp-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: var(--space-5);
+}
+.comp-table th {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(185, 189, 199, 0.5);
+  text-align: left;
+  padding: var(--space-3) var(--space-3);
+  border-bottom: 1px solid rgba(203, 175, 134, 0.12);
+}
+.comp-table td {
+  font-size: var(--text-sm);
+  padding: var(--space-3) var(--space-3);
+  border-bottom: 1px solid rgba(203, 175, 134, 0.04);
+  vertical-align: top;
+}
+.comp-table tr:hover td {
+  background: rgba(157, 178, 217, 0.02);
+}
+.comp-table .class-name {
+  font-family: var(--font-mono);
+  color: var(--aura-300);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.comp-table .file-name {
+  font-family: var(--font-mono);
+  color: var(--sandal-300);
+  font-size: var(--text-xs);
+  opacity: 0.8;
+}
+.comp-table .role-desc {
+  color: var(--ash-300);
+}
+
+/* RESONANCE PIPELINE */
+.pipeline-canvas-wrap {
+  position: relative;
+  width: 100%;
+  max-width: 900px;
+  height: 420px;
+  margin: 0 auto var(--space-7);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: rgba(11, 11, 16, 0.5);
+  border: 1px solid rgba(157, 178, 217, 0.06);
+}
+#pipeline-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.pipeline-grid {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.phase-card {
+  background: var(--indigo-700);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+  box-shadow: var(--shadow-soft);
+  border-left: 3px solid transparent;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  gap: var(--space-4);
+  align-items: start;
+}
+.phase-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(255,255,255,0.02) 0%, transparent 50%);
+  pointer-events: none;
+}
+.phase-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-soft), 0 0 0 1px rgba(203, 175, 134, 0.08);
+}
+
+.phase-card:nth-child(8n+1) { border-left-color: var(--sandal-300); }
+.phase-card:nth-child(8n+2) { border-left-color: var(--aura-300); }
+.phase-card:nth-child(8n+3) { border-left-color: var(--ember-400); }
+.phase-card:nth-child(8n+4) { border-left-color: var(--sandal-300); }
+.phase-card:nth-child(8n+5) { border-left-color: var(--aura-300); }
+.phase-card:nth-child(8n+6) { border-left-color: var(--ember-400); }
+.phase-card:nth-child(8n+7) { border-left-color: var(--sandal-300); }
+.phase-card:nth-child(8n+8) { border-left-color: var(--aura-300); }
+
+.phase-number {
+  font-family: var(--font-display);
+  font-size: 2.5rem;
+  font-weight: 600;
+  line-height: 1;
+  opacity: 0.15;
+  color: var(--lotus-200);
+  text-align: center;
+}
+.phase-card:nth-child(8n+1) .phase-number { color: var(--sandal-300); opacity: 0.25; }
+.phase-card:nth-child(8n+2) .phase-number { color: var(--aura-300); opacity: 0.25; }
+.phase-card:nth-child(8n+3) .phase-number { color: var(--ember-400); opacity: 0.25; }
+.phase-card:nth-child(8n+4) .phase-number { color: var(--sandal-300); opacity: 0.25; }
+.phase-card:nth-child(8n+5) .phase-number { color: var(--aura-300); opacity: 0.25; }
+.phase-card:nth-child(8n+6) .phase-number { color: var(--ember-400); opacity: 0.25; }
+.phase-card:nth-child(8n+7) .phase-number { color: var(--sandal-300); opacity: 0.25; }
+.phase-card:nth-child(8n+8) .phase-number { color: var(--aura-300); opacity: 0.25; }
+
+.phase-content {}
+.phase-title {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  color: var(--lotus-200);
+  font-weight: 500;
+  margin-bottom: var(--space-2);
+  line-height: 1.3;
+}
+.phase-desc {
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  line-height: 1.7;
+  margin-bottom: var(--space-3);
+}
+.phase-params {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.phase-param {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--aura-300);
+  padding: 2px var(--space-2);
+  background: rgba(157, 178, 217, 0.08);
+  border: 1px solid rgba(157, 178, 217, 0.12);
+  border-radius: 3px;
+}
+
+/* CONFIG BLOCK */
+.config-block {
+  background: var(--indigo-700);
+  border: 1px solid rgba(157, 178, 217, 0.1);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+  margin-top: var(--space-6);
+  overflow-x: auto;
+}
+.config-block-title {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(185, 189, 199, 0.5);
+  margin-bottom: var(--space-3);
+}
+.config-block pre {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--aura-300);
+  line-height: 1.8;
+  white-space: pre;
+  overflow-x: auto;
+}
+.config-block .kw { color: var(--ember-400); }
+.config-block .ty { color: var(--sandal-300); }
+.config-block .val { color: var(--aura-300); }
+.config-block .cm { color: rgba(185, 189, 199, 0.35); font-style: italic; }
+
+/* CODE INLINE */
+code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  color: var(--aura-300);
+  background: rgba(157, 178, 217, 0.06);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+/* EMBEDDING PIPELINE */
+.embed-pipeline {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: var(--space-5) 0;
+  margin-bottom: var(--space-6);
+}
+.embed-stage {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid rgba(203, 175, 134, 0.15);
+  border-radius: var(--radius-sm);
+  background: rgba(36, 40, 58, 0.5);
+  color: var(--lotus-200);
+  transition: all 0.2s ease;
+}
+.embed-stage:hover {
+  border-color: rgba(203, 175, 134, 0.35);
+  background: rgba(36, 40, 58, 0.8);
+}
+.embed-arrow {
+  font-size: var(--text-sm);
+  color: var(--sandal-300);
+  opacity: 0.5;
+}
+
+/* SANSKRIT TABLE */
+.sanskrit-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.sanskrit-table th {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(185, 189, 199, 0.5);
+  text-align: left;
+  padding: var(--space-3) var(--space-3);
+  border-bottom: 1px solid rgba(203, 175, 134, 0.12);
+}
+.sanskrit-table td {
+  font-size: var(--text-sm);
+  padding: var(--space-3) var(--space-3);
+  border-bottom: 1px solid rgba(203, 175, 134, 0.04);
+  vertical-align: top;
+}
+.sanskrit-table tr:hover td {
+  background: rgba(157, 178, 217, 0.02);
+}
+.sanskrit-table .skt-name {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  color: var(--sandal-300);
+  font-weight: 500;
+}
+.sanskrit-table .skt-meaning {
+  font-family: var(--font-display);
+  font-style: italic;
+  color: var(--lotus-200);
+}
+.sanskrit-table .skt-role {
+  color: var(--ash-300);
+}
+
+/* CIRCUIT BREAKER DIAGRAM */
+.cb-diagram {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: var(--space-5);
+  background: rgba(36, 40, 58, 0.3);
+  border: 1px solid rgba(157, 178, 217, 0.08);
+  border-radius: var(--radius-md);
+  margin-top: var(--space-5);
+}
+.cb-state {
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  border: 1px solid transparent;
+}
+.cb-closed { color: #6bca6b; border-color: rgba(107, 202, 107, 0.25); background: rgba(107, 202, 107, 0.06); }
+.cb-open { color: var(--ember-400); border-color: rgba(212, 106, 76, 0.25); background: rgba(212, 106, 76, 0.06); }
+.cb-half { color: var(--sandal-300); border-color: rgba(203, 175, 134, 0.25); background: rgba(203, 175, 134, 0.06); }
+.cb-arrow {
+  font-size: var(--text-xs);
+  color: rgba(185, 189, 199, 0.4);
+  font-family: var(--font-mono);
+  text-align: center;
+  line-height: 1.3;
+}
+
+/* DB PATHS */
+.db-paths {
+  background: var(--indigo-700);
+  border: 1px solid rgba(157, 178, 217, 0.1);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+  margin: var(--space-5) 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  line-height: 2;
+}
+.db-paths .path { color: var(--aura-300); }
+.db-paths .comment { color: rgba(185, 189, 199, 0.4); font-style: italic; }
+
+/* THEME FORMULA */
+.formula-block {
+  background: var(--indigo-700);
+  border: 1px solid rgba(203, 175, 134, 0.1);
+  border-radius: var(--radius-md);
+  padding: var(--space-5) var(--space-6);
+  margin: var(--space-5) 0;
+  text-align: center;
+}
+.formula {
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  color: var(--sandal-300);
+  letter-spacing: 0.02em;
+}
+.formula-note {
+  font-size: var(--text-xs);
+  color: rgba(185, 189, 199, 0.5);
+  margin-top: var(--space-3);
+}
+
+/* NODE TYPES GRID */
+.node-types-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--space-2);
+  margin: var(--space-5) 0;
+}
+.node-type-chip {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid rgba(157, 178, 217, 0.1);
+  border-radius: var(--radius-sm);
+  background: rgba(36, 40, 58, 0.3);
+  color: var(--ash-300);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  transition: all 0.2s ease;
+}
+.node-type-chip:hover {
+  border-color: rgba(157, 178, 217, 0.25);
+  background: rgba(36, 40, 58, 0.6);
+  color: var(--lotus-200);
+}
+.node-type-id {
+  color: rgba(185, 189, 199, 0.3);
+  font-size: 10px;
+  min-width: 18px;
+}
+
+/* DECAY TABLE */
+.decay-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: var(--space-5) 0;
+}
+.decay-table th {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(185, 189, 199, 0.5);
+  text-align: left;
+  padding: var(--space-3);
+  border-bottom: 1px solid rgba(203, 175, 134, 0.12);
+}
+.decay-table td {
+  font-size: var(--text-sm);
+  padding: var(--space-3);
+  border-bottom: 1px solid rgba(203, 175, 134, 0.04);
+}
+.decay-table tr:hover td { background: rgba(157, 178, 217, 0.02); }
+.decay-bar-wrap {
+  width: 100%;
+  height: 4px;
+  background: rgba(157, 178, 217, 0.06);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.decay-bar {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.5s ease;
+}
+
+/* TUNING SECTION */
+.tuning-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-5);
+  margin-top: var(--space-5);
+}
+.tuning-card {
+  background: var(--indigo-700);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+  border-top: 2px solid var(--aura-300);
+}
+.tuning-card:nth-child(2) { border-top-color: var(--sandal-300); }
+.tuning-card-title {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  color: var(--lotus-200);
+  font-weight: 500;
+  margin-bottom: var(--space-3);
+}
+.tuning-card-desc {
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  line-height: 1.7;
+}
+
+/* LANG TABLE */
+.lang-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: var(--space-2);
+  margin: var(--space-5) 0;
+}
+.lang-chip {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid rgba(157, 178, 217, 0.12);
+  border-radius: var(--radius-sm);
+  color: var(--ash-300);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  transition: all 0.2s ease;
+}
+.lang-chip:hover {
+  border-color: rgba(157, 178, 217, 0.3);
+  color: var(--lotus-200);
+  background: rgba(157, 178, 217, 0.04);
+}
+.lang-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* SEARCH MODES TABLE */
+.search-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: var(--space-5) 0;
+}
+.search-table th {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(185, 189, 199, 0.5);
+  text-align: left;
+  padding: var(--space-3);
+  border-bottom: 1px solid rgba(203, 175, 134, 0.12);
+}
+.search-table td {
+  font-size: var(--text-sm);
+  padding: var(--space-3);
+  border-bottom: 1px solid rgba(203, 175, 134, 0.04);
+}
+.search-table tr:hover td { background: rgba(157, 178, 217, 0.02); }
+
+/* BACK LINK */
+.back-section {
+  padding: var(--space-8) 0;
+  text-align: center;
+}
+.back-link {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--sandal-300);
+  padding: var(--space-3) var(--space-5);
+  border: 1px solid rgba(203, 175, 134, 0.2);
+  border-radius: var(--radius-sm);
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.back-link:hover {
+  border-color: rgba(203, 175, 134, 0.4);
+  background: rgba(203, 175, 134, 0.04);
+  color: var(--lotus-200);
+}
+
+/* FOOTER */
+.footer {
+  background: var(--night-900);
+  border-top: 1px solid rgba(203, 175, 134, 0.06);
+  padding: var(--space-7) 0;
+  text-align: center;
+}
+.footer-text {
+  font-size: var(--text-xs);
+  color: rgba(185, 189, 199, 0.4);
+  letter-spacing: 0.04em;
+}
+.footer-text a { color: var(--sandal-300); transition: color 0.2s ease; }
+.footer-text a:hover { color: var(--lotus-200); }
+.footer-sep {
+  display: inline-block;
+  width: 3px; height: 3px;
+  border-radius: 50%;
+  background: rgba(185, 189, 199, 0.25);
+  margin: 0 var(--space-3);
+  vertical-align: middle;
+}
+
+.nav-hamburger {
+  display: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: var(--space-2);
+  flex-direction: column;
+  gap: 5px;
+}
+.nav-hamburger span {
+  display: block;
+  width: 20px;
+  height: 1.5px;
+  background: var(--lotus-200);
+  transition: all 0.3s ease;
+}
+
+/* RESPONSIVE */
+@media (max-width: 700px) {
+  .nav-hamburger { display: flex; }
+  .nav-links {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: rgba(15, 16, 24, 0.97);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    flex-direction: column;
+    padding: var(--space-4) var(--space-5);
+    gap: var(--space-3);
+    border-bottom: 1px solid rgba(203, 175, 134, 0.08);
+  }
+  .nav-open .nav-links { display: flex; }
+  .nav-open .nav-hamburger span:nth-child(1) { transform: rotate(45deg) translate(4px, 4px); }
+  .nav-open .nav-hamburger span:nth-child(2) { opacity: 0; }
+  .nav-open .nav-hamburger span:nth-child(3) { transform: rotate(-45deg) translate(5px, -5px); }
+  .page-header h1 { font-size: var(--text-2xl); }
+  .heading-section { font-size: var(--text-2xl); }
+  .phase-card {
+    grid-template-columns: 40px 1fr;
+    gap: var(--space-3);
+    padding: var(--space-4);
+  }
+  .phase-number { font-size: 2rem; }
+  .comp-table, .sanskrit-table, .decay-table, .search-table {
+    font-size: var(--text-xs);
+  }
+  .comp-table th, .comp-table td,
+  .sanskrit-table th, .sanskrit-table td,
+  .decay-table th, .decay-table td,
+  .search-table th, .search-table td {
+    padding: var(--space-2);
+  }
+  .tuning-grid { grid-template-columns: 1fr; }
+  .embed-pipeline { justify-content: center; }
+  .sys-diagram { padding: var(--space-4) var(--space-3); }
+  .diagram-boxes { gap: var(--space-2); }
+  .pipeline-canvas-wrap { height: 300px; }
+  .cb-diagram { flex-direction: column; align-items: flex-start; }
+  .node-types-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="index.html" class="nav-brand">cc<span>-</span>soul</a>
+    <button class="nav-hamburger" onclick="document.querySelector('.nav').classList.toggle('nav-open')" aria-label="Menu">
+      <span></span><span></span><span></span>
+    </button>
+    <ul class="nav-links">
+      <li><a href="index.html">Home</a></li>
+      <li><a href="getting-started.html">Get Started</a></li>
+      <li><a href="philosophy.html">Philosophy</a></li>
+      <li><a href="architecture.html" class="active">Architecture</a></li>
+      <li><a href="tools.html">Tools</a></li>
+      <li><a href="cli.html">CLI</a></li>
+      <li><a href="hooks.html">Hooks</a></li>
+      <li><a href="skills.html">Skills</a></li>
+      <li><a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+  </div>
+</nav>
+
+<!-- PAGE HEADER -->
+<header class="page-header">
+  <div class="container">
+    <div class="page-header-badge reveal">Technical Architecture</div>
+    <h1 class="reveal reveal-delay-1">How cc-soul thinks.</h1>
+    <p class="page-header-sub reveal reveal-delay-2">DuckDB storage, 8-phase resonance, Bayesian self-tuning, and tree-sitter code intelligence&thinsp;&mdash;&thinsp;in a single C++ daemon.</p>
+  </div>
+</header>
+
+<!-- TABLE OF CONTENTS -->
+<section class="toc">
+  <div class="container">
+    <p class="toc-label">Jump to section</p>
+    <div class="toc-grid">
+      <a href="#overview" class="toc-chip">System Overview</a>
+      <a href="#components" class="toc-chip">Components</a>
+      <a href="#resonance" class="toc-chip">Resonance Engine</a>
+      <a href="#storage" class="toc-chip">Storage Layer</a>
+      <a href="#embedding" class="toc-chip">Embedding Engine</a>
+      <a href="#themes" class="toc-chip">Theme System</a>
+      <a href="#codeintel" class="toc-chip">Code Intelligence</a>
+      <a href="#lifecycle" class="toc-chip">Memory Lifecycle</a>
+      <a href="#tuning" class="toc-chip">Self-Tuning</a>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════
+     SYSTEM OVERVIEW
+     ═══════════════════════════════════════════ -->
+<section class="arch-section" id="overview">
+  <div class="container">
+    <div class="reveal">
+      <div class="section-divider"></div>
+      <h2 class="heading-section">System Overview</h2>
+    </div>
+    <p class="section-intro reveal reveal-delay-1">Three layers, one process. Claude Code hooks and the MCP server communicate with the <code>chittad</code> daemon over a Unix domain socket. Inside, <code>DuckDBMind</code> orchestrates storage, embedding, resonance, and self-tuning.</p>
+
+    <div class="sys-diagram reveal reveal-delay-2">
+
+      <!-- Claude Code Layer -->
+      <div class="diagram-layer layer-claude">
+        <span class="diagram-layer-label">Claude Code</span>
+        <div class="diagram-boxes">
+          <div class="diagram-box highlight-aura">Hooks</div>
+          <div class="diagram-box highlight-aura">soul-hook.sh</div>
+          <div class="diagram-box highlight-aura">MCP Server (chitta-mcp)</div>
+          <div class="diagram-box highlight-aura">capture-hook.sh</div>
+        </div>
+      </div>
+
+      <!-- Connector -->
+      <div class="diagram-connector">
+        <div style="text-align: center;">
+          <div class="diagram-connector-line" style="margin: 0 auto;"></div>
+          <div class="diagram-connector-label">Unix Domain Socket</div>
+        </div>
+      </div>
+
+      <!-- Daemon Layer -->
+      <div class="diagram-layer layer-daemon">
+        <span class="diagram-layer-label">chittad Daemon</span>
+        <div class="diagram-boxes">
+          <div class="diagram-box highlight-sandal">Thread Pool (2-16)</div>
+          <div class="diagram-box highlight-sandal">RPC Handler (100+ tools)</div>
+          <div class="diagram-box highlight-sandal">Subconscious (background)</div>
+        </div>
+      </div>
+
+      <!-- Connector -->
+      <div class="diagram-connector">
+        <div style="text-align: center;">
+          <div class="diagram-connector-line" style="margin: 0 auto;"></div>
+        </div>
+      </div>
+
+      <!-- Mind Layer -->
+      <div class="diagram-layer layer-mind">
+        <span class="diagram-layer-label">DuckDBMind</span>
+        <div class="diagram-boxes">
+          <div class="diagram-box highlight-ember">Embedder &amp; V&#x101;k (ONNX)</div>
+          <div class="diagram-box highlight-ember">ResonanceLearner</div>
+          <div class="diagram-box highlight-ember">ThemeManager (xMemory)</div>
+          <div class="diagram-box highlight-ember">SessionContext</div>
+          <div class="diagram-box highlight-ember">DuckDBStore</div>
+          <div class="diagram-box highlight-ember">Embeddings DB (HNSW)</div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Key Design Decisions -->
+    <div class="config-block reveal reveal-delay-3">
+      <div class="config-block-title">Key Design Decisions</div>
+      <pre><span class="cm">// Single storage engine, no tiers</span>
+<span class="kw">DuckDB</span>     <span class="cm">HNSW vectors + BM25 full-text + graph queries + ACID</span>
+<span class="kw">Separate</span>   <span class="cm">Embeddings DB avoids write contention during HNSW rebuilds</span>
+<span class="kw">Pool</span>       <span class="cm">ConnectionPool for concurrent reads, serialized writes</span>
+<span class="kw">Socket</span>     <span class="cm">Unix domain socket IPC between Claude Code and daemon</span>
+<span class="kw">Scaling</span>    <span class="cm">Auto-scaling thread pool (2-16) with watchdog for slow requests</span></pre>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════
+     COMPONENTS
+     ═══════════════════════════════════════════ -->
+<section class="arch-section alt-bg" id="components">
+  <div class="container">
+    <div class="reveal">
+      <div class="section-divider"></div>
+      <h2 class="heading-section">Core Components</h2>
+    </div>
+    <p class="section-intro reveal reveal-delay-1">Eleven classes form the skeleton. Each handles one concern, composed at the <code>DuckDBMind</code> level.</p>
+
+    <table class="comp-table reveal reveal-delay-2">
+      <thead>
+        <tr>
+          <th>Class</th>
+          <th>File</th>
+          <th>Role</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td class="class-name">DuckDBMind</td><td class="file-name">mind/duckdb_mind.hpp</td><td class="role-desc">Central orchestrator: remember, recall, resonate, self-tune</td></tr>
+        <tr><td class="class-name">DuckDBStore</td><td class="file-name">duckdb_store.hpp</td><td class="role-desc">Storage: all DuckDB operations, schema, queries</td></tr>
+        <tr><td class="class-name">DuckDBRpcHandler</td><td class="file-name">rpc/duckdb_handler.hpp</td><td class="role-desc">JSON-RPC 2.0 handler, 100+ registered tools</td></tr>
+        <tr><td class="class-name">Embedder</td><td class="file-name">mind/embedder.hpp</td><td class="role-desc">Embedding with LRU cache and circuit breaker</td></tr>
+        <tr><td class="class-name">AntahkaranaYantra</td><td class="file-name">vak_onnx.hpp</td><td class="role-desc">ONNX Runtime inference for all-MiniLM-L6-v2</td></tr>
+        <tr><td class="class-name">Subconscious</td><td class="file-name">mind/subconscious.hpp</td><td class="role-desc">Background thread: patterns, hygiene, embedding</td></tr>
+        <tr><td class="class-name">ThemeManager</td><td class="file-name">theme_manager.hpp</td><td class="role-desc">xMemory hierarchical memory organization</td></tr>
+        <tr><td class="class-name">CodeIntel</td><td class="file-name">code_intel.hpp</td><td class="role-desc">Tree-sitter symbol extraction (9 languages)</td></tr>
+        <tr><td class="class-name">SymbolResolver</td><td class="file-name">symbol_resolver.hpp</td><td class="role-desc">Cross-file symbol resolution for call graphs</td></tr>
+        <tr><td class="class-name">ThreadPool</td><td class="file-name">rpc/thread_pool.hpp</td><td class="role-desc">Auto-scaling worker pool with watchdog</td></tr>
+        <tr><td class="class-name">ProvenanceSpine</td><td class="file-name">provenance.hpp</td><td class="role-desc">Knowledge source tracking and trust scoring</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════
+     RESONANCE ENGINE (HERO SECTION)
+     ═══════════════════════════════════════════ -->
+<section class="arch-section" id="resonance">
+  <div class="container">
+    <div class="reveal">
+      <div class="section-divider"></div>
+      <h2 class="heading-section">The Resonance Engine</h2>
+    </div>
+    <p class="section-intro reveal reveal-delay-1">The core of memory retrieval. <code>DuckDBMind::full_resonate()</code> runs 8 phases to find relevant memories&thinsp;&mdash;&thinsp;not search, but resonance. Each phase adds signal; post-processing refines it.</p>
+
+    <!-- Interactive Pipeline Canvas -->
+    <div class="pipeline-canvas-wrap reveal reveal-delay-2">
+      <canvas id="pipeline-canvas"></canvas>
+    </div>
+
+    <!-- 8 Phase Cards -->
+    <div class="pipeline-grid">
+
+      <div class="phase-card reveal">
+        <div class="phase-number">1</div>
+        <div class="phase-content">
+          <h3 class="phase-title">Semantic Seeds</h3>
+          <p class="phase-desc">Vector similarity search using HNSW index. Returns top-k memories by cosine distance to the query embedding&thinsp;&mdash;&thinsp;the initial gravity wells of meaning.</p>
+          <div class="phase-params">
+            <span class="phase-param">semantic_weight = 0.6</span>
+            <span class="phase-param">HNSW cosine</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="phase-card reveal">
+        <div class="phase-number">2</div>
+        <div class="phase-content">
+          <h3 class="phase-title">BM25 Hybrid</h3>
+          <p class="phase-desc">Keyword-based search using BM25 scoring complements semantic search for exact term matches. Results merge using weighted combination with confidence factor.</p>
+          <div class="phase-params">
+            <span class="phase-param">bm25_weight = 0.4</span>
+            <span class="phase-param">tag_boost = 0.05</span>
+            <span class="phase-param">conf_factor = 0.5 + 0.5 * confidence</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="phase-card reveal">
+        <div class="phase-number">3</div>
+        <div class="phase-content">
+          <h3 class="phase-title">Tag Matching</h3>
+          <p class="phase-desc">Boost memories whose tags match terms in the query. A small additive signal that rewards explicit categorization.</p>
+          <div class="phase-params">
+            <span class="phase-param">additive boost</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="phase-card reveal">
+        <div class="phase-number">4</div>
+        <div class="phase-content">
+          <h3 class="phase-title">Attractor Finding</h3>
+          <p class="phase-desc">Identify conceptual gravity wells&thinsp;&mdash;&thinsp;clusters of densely connected memories in the triplet graph. Attractors are cached with 5-minute TTL.</p>
+          <div class="phase-params">
+            <span class="phase-param">max_attractors = 10</span>
+            <span class="phase-param">basin_boost = 1.15x</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="phase-card reveal">
+        <div class="phase-number">5</div>
+        <div class="phase-content">
+          <h3 class="phase-title">Spreading Activation</h3>
+          <p class="phase-desc">Starting from seed memories, activation spreads through the triplet graph. Connected memories receive activation proportional to edge weight, inversely proportional to distance.</p>
+          <div class="phase-params">
+            <span class="phase-param">spread_strength = 0.5</span>
+            <span class="phase-param">spread_decay = 0.5</span>
+            <span class="phase-param">max_hops = 3</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="phase-card reveal">
+        <div class="phase-number">6</div>
+        <div class="phase-content">
+          <h3 class="phase-title">Session Priming</h3>
+          <p class="phase-desc">Recent observations and active topics from the current session boost related memories. The context of the conversation shapes what surfaces.</p>
+          <div class="phase-params">
+            <span class="phase-param">priming_boost = 0.3</span>
+            <span class="phase-param">topic_boost = 0.2</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="phase-card reveal">
+        <div class="phase-number">7</div>
+        <div class="phase-content">
+          <h3 class="phase-title">Code Intelligence</h3>
+          <p class="phase-desc">For code-like queries (detected by heuristic: <code>::</code>, <code>-></code>, <code>_</code>, <code>.</code>, or single identifiers), BM25 and term-based search on symbol names and signatures.</p>
+          <div class="phase-params">
+            <span class="phase-param">code_symbol_weight = 0.5</span>
+            <span class="phase-param">heuristic detection</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="phase-card reveal">
+        <div class="phase-number">8</div>
+        <div class="phase-content">
+          <h3 class="phase-title">Post-Processing</h3>
+          <p class="phase-desc">Attractor boost, lateral inhibition (similar memories compete), Hebbian learning (co-accessed memories strengthen connections), and credit assignment for the Bayesian bandit.</p>
+          <div class="phase-params">
+            <span class="phase-param">inhibition = 0.7</span>
+            <span class="phase-param">similarity_threshold = 0.85</span>
+            <span class="phase-param">hebbian = 0.03</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Config struct -->
+    <div class="config-block reveal">
+      <div class="config-block-title">DuckDBResonanceConfig</div>
+      <pre><span class="kw">struct</span> <span class="ty">DuckDBResonanceConfig</span> {
+    <span class="ty">float</span> spread_strength     = <span class="val">0.5f</span>;
+    <span class="ty">float</span> spread_decay        = <span class="val">0.5f</span>;
+    <span class="ty">int</span>   max_hops            = <span class="val">3</span>;
+    <span class="ty">float</span> hebbian_strength    = <span class="val">0.03f</span>;
+    <span class="ty">int</span>   max_attractors      = <span class="val">10</span>;
+    <span class="ty">float</span> basin_boost         = <span class="val">1.15f</span>;
+    <span class="ty">float</span> similarity_threshold = <span class="val">0.85f</span>;
+    <span class="ty">float</span> inhibition_strength = <span class="val">0.7f</span>;
+    <span class="ty">float</span> epsilon_boost_alpha = <span class="val">0.3f</span>;
+    <span class="ty">float</span> semantic_weight     = <span class="val">0.6f</span>;
+    <span class="ty">float</span> activation_weight   = <span class="val">0.4f</span>;
+    <span class="ty">float</span> code_symbol_weight  = <span class="val">0.5f</span>;
+};</pre>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════
+     STORAGE LAYER
+     ═══════════════════════════════════════════ -->
+<section class="arch-section alt-bg" id="storage">
+  <div class="container">
+    <div class="reveal">
+      <div class="section-divider"></div>
+      <h2 class="heading-section">Storage Layer</h2>
+    </div>
+    <p class="section-intro reveal reveal-delay-1">DuckDB is an embedded analytical database. CC-Soul uses it for HNSW vector search, BM25 full-text, graph queries via DuckPGQ, and ACID transactions with WAL-based crash recovery.</p>
+
+    <!-- Database paths -->
+    <div class="db-paths reveal reveal-delay-2">
+      <span class="path">~/.claude/mind/chitta/</span><br>
+      &ensp;&ensp;<span class="path">chitta.duckdb</span> &ensp;<span class="comment">// Main database (memories, triplets, symbols, ledger)</span><br>
+      &ensp;&ensp;<span class="path">chitta_emb.duckdb</span> &ensp;<span class="comment">// Embeddings database (HNSW index, separate to avoid contention)</span><br>
+      &ensp;&ensp;<span class="path">chitta.duckdb.wal</span> &ensp;<span class="comment">// Write-ahead log (auto-managed)</span>
+    </div>
+
+    <!-- Key Tables -->
+    <h3 style="font-family: var(--font-display); font-size: var(--text-xl); color: var(--lotus-200); font-weight: 500; margin-bottom: var(--space-4);" class="reveal">Key Tables</h3>
+
+    <table class="comp-table reveal">
+      <thead>
+        <tr><th>Table</th><th>Columns</th><th>Purpose</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="class-name">memory</td>
+          <td class="file-name">id, kind, content, confidence, decay_rate, tags, realm, visibility, timestamps, access_count</td>
+          <td class="role-desc">Core unit of storage. Each memory has Bayesian confidence and configurable decay.</td>
+        </tr>
+        <tr>
+          <td class="class-name">triplet</td>
+          <td class="file-name">subject, predicate, object, weight</td>
+          <td class="role-desc">Knowledge graph with string-based entities. Predicates: calls, contains, imports, inherits, corrects, relates_to.</td>
+        </tr>
+        <tr>
+          <td class="class-name">symbol</td>
+          <td class="file-name">id, name, kind, signature, file_path, line_start, line_end, parent, project, description</td>
+          <td class="role-desc">Code intelligence: functions, classes, methods extracted by tree-sitter.</td>
+        </tr>
+        <tr>
+          <td class="class-name">call_edge</td>
+          <td class="file-name">caller_id, callee_id</td>
+          <td class="role-desc">Call graph edges, populated by SymbolResolver.</td>
+        </tr>
+        <tr>
+          <td class="class-name">ledger</td>
+          <td class="file-name">session_id, mood, todos, decisions, next_steps, blockers, snapshot</td>
+          <td class="role-desc">Session checkpoints for continuity across conversations.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- Connection Pool -->
+    <div class="config-block reveal">
+      <div class="config-block-title">Connection Pool</div>
+      <pre><span class="cm">// Pre-allocated connections for concurrent reads</span>
+<span class="cm">// Write operations go through a dedicated write connection</span>
+<span class="cm">// ScopedConnection: RAII wrapper that returns connection on destruction</span>
+
+<span class="kw">Default pool</span>: <span class="val">4-8 connections</span>
+<span class="kw">Reads</span>:        <span class="val">shared, parallel</span>
+<span class="kw">Writes</span>:       <span class="val">serialized, single connection</span>
+<span class="kw">Overflow</span>:     <span class="val">emergency connections created when pool exhausted</span></pre>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════
+     EMBEDDING ENGINE
+     ═══════════════════════════════════════════ -->
+<section class="arch-section" id="embedding">
+  <div class="container">
+    <div class="reveal">
+      <div class="section-divider"></div>
+      <h2 class="heading-section">Embedding Engine (V&#x101;k)</h2>
+    </div>
+    <p class="section-intro reveal reveal-delay-1">The embedding pipeline follows a Vedantic naming convention. Each stage transforms speech into meaning, mirroring the philosophical concept of V&#x101;k&thinsp;&mdash;&thinsp;the power of articulated consciousness.</p>
+
+    <!-- Pipeline visualization -->
+    <div class="embed-pipeline reveal reveal-delay-2">
+      <div class="embed-stage">Text</div>
+      <span class="embed-arrow">&rarr;</span>
+      <div class="embed-stage">VakPatha</div>
+      <span class="embed-arrow">&rarr;</span>
+      <div class="embed-stage">Shabda</div>
+      <span class="embed-arrow">&rarr;</span>
+      <div class="embed-stage">AntahkaranaYantra</div>
+      <span class="embed-arrow">&rarr;</span>
+      <div class="embed-stage">Artha</div>
+    </div>
+
+    <!-- Sanskrit mapping table -->
+    <table class="sanskrit-table reveal">
+      <thead>
+        <tr><th>Class</th><th>Sanskrit Meaning</th><th>Role</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="skt-name">VakPatha</td><td class="skt-meaning">Path of speech</td><td class="skt-role">WordPiece tokenizer (vocab.txt)</td></tr>
+        <tr><td class="skt-name">Shabda</td><td class="skt-meaning">Sound-form</td><td class="skt-role">Tokenized input (input_ids + attention_mask)</td></tr>
+        <tr><td class="skt-name">Artha</td><td class="skt-meaning">Meaning</td><td class="skt-role">384-dim embedding vector + certainty</td></tr>
+        <tr><td class="skt-name">AntahkaranaYantra</td><td class="skt-meaning">Inner instrument</td><td class="skt-role">ONNX Runtime inference engine</td></tr>
+        <tr><td class="skt-name">SmritiYantra</td><td class="skt-meaning">Memory machine</td><td class="skt-role">Caching wrapper (LRU, 10000 entries)</td></tr>
+        <tr><td class="skt-name">ShantaYantra</td><td class="skt-meaning">Silent machine</td><td class="skt-role">Zero-vector fallback</td></tr>
+      </tbody>
+    </table>
+
+    <!-- Model specs -->
+    <div class="config-block reveal">
+      <div class="config-block-title">Model: all-MiniLM-L6-v2</div>
+      <pre><span class="kw">Parameters</span>:   <span class="val">22M</span>
+<span class="kw">Dimensions</span>:   <span class="val">384</span>
+<span class="kw">Max sequence</span>: <span class="val">128 tokens</span>
+<span class="kw">Pooling</span>:      <span class="val">Mean pooling with L2 normalization</span>
+<span class="kw">Runtime</span>:      <span class="val">ONNX Runtime, sequential execution mode</span>
+<span class="kw">Batch size</span>:  <span class="val">Up to 32 texts per inference call</span>
+<span class="kw">LRU cache</span>:   <span class="val">1000 entries, tracks hit/miss rate</span></pre>
+    </div>
+
+    <!-- Circuit Breaker -->
+    <h3 style="font-family: var(--font-display); font-size: var(--text-xl); color: var(--lotus-200); font-weight: 500; margin-top: var(--space-6); margin-bottom: var(--space-2);" class="reveal">Circuit Breaker</h3>
+    <p style="font-size: var(--text-sm); color: var(--ash-300); margin-bottom: var(--space-3);" class="reveal">Opens after 3 consecutive failures, enters 60-second cooldown, then half-open state for testing recovery.</p>
+
+    <div class="cb-diagram reveal">
+      <div class="cb-state cb-closed">CLOSED</div>
+      <div class="cb-arrow">&rarr; 3 failures &rarr;</div>
+      <div class="cb-state cb-open">OPEN</div>
+      <div class="cb-arrow">&rarr; 60s cooldown &rarr;</div>
+      <div class="cb-state cb-half">HALF_OPEN</div>
+      <div class="cb-arrow">&rarr; success &rarr;</div>
+      <div class="cb-state cb-closed">CLOSED</div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════
+     THEME SYSTEM
+     ═══════════════════════════════════════════ -->
+<section class="arch-section alt-bg" id="themes">
+  <div class="container">
+    <div class="reveal">
+      <div class="section-divider"></div>
+      <h2 class="heading-section">Theme System (xMemory)</h2>
+    </div>
+    <p class="section-intro reveal reveal-delay-1">Inspired by the xMemory paper, themes provide hierarchical organization of memories. Each memory is assigned to a theme based on semantic similarity, with sparsity penalizing oversized themes.</p>
+
+    <!-- Scoring formula -->
+    <div class="formula-block reveal reveal-delay-2">
+      <div class="formula">score = semantic_weight &times; cosine_similarity + sparsity_weight &times; sparsity_score</div>
+      <div class="formula-note">Where sparsity = 1 / (1 + exp(2 &times; (theme_size / ideal_size - 1)))</div>
+    </div>
+
+    <h3 style="font-family: var(--font-display); font-size: var(--text-xl); color: var(--lotus-200); font-weight: 500; margin-top: var(--space-6); margin-bottom: var(--space-3);" class="reveal">Two-Stage Retrieval</h3>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); margin-top: var(--space-4);" class="reveal reveal-delay-1">
+      <div style="background: var(--indigo-700); border-radius: var(--radius-md); padding: var(--space-5); border-top: 2px solid var(--sandal-300);">
+        <h4 style="font-family: var(--font-display); font-size: var(--text-lg); color: var(--sandal-300); margin-bottom: var(--space-2);">Stage 1: Theme Matching</h4>
+        <p style="font-size: var(--text-sm); color: var(--ash-300); line-height: 1.7;">Find diverse theme representatives matching the query. Ensures breadth across conceptual areas.</p>
+      </div>
+      <div style="background: var(--indigo-700); border-radius: var(--radius-md); padding: var(--space-5); border-top: 2px solid var(--aura-300);">
+        <h4 style="font-family: var(--font-display); font-size: var(--text-lg); color: var(--aura-300); margin-bottom: var(--space-2);">Stage 2: Adaptive Expansion</h4>
+        <p style="font-size: var(--text-sm); color: var(--ash-300); line-height: 1.7;">Expand within matching themes for depth. Background maintenance splits, merges, and reassigns as needed.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════
+     CODE INTELLIGENCE
+     ═══════════════════════════════════════════ -->
+<section class="arch-section" id="codeintel">
+  <div class="container">
+    <div class="reveal">
+      <div class="section-divider"></div>
+      <h2 class="heading-section">Code Intelligence</h2>
+    </div>
+    <p class="section-intro reveal reveal-delay-1">Tree-sitter parsing extracts structural information from source code: symbols, callsites, imports, and type hierarchy. The <code>SymbolResolver</code> links callsites to known symbols for call graph traversal.</p>
+
+    <!-- Language grid -->
+    <h3 style="font-family: var(--font-display); font-size: var(--text-xl); color: var(--lotus-200); font-weight: 500; margin-bottom: var(--space-3);" class="reveal">Supported Languages</h3>
+
+    <div class="lang-grid reveal reveal-delay-1">
+      <div class="lang-chip"><span class="lang-dot" style="background: #f34b7d;"></span>C++</div>
+      <div class="lang-chip"><span class="lang-dot" style="background: #3572A5;"></span>Python</div>
+      <div class="lang-chip"><span class="lang-dot" style="background: #f1e05a;"></span>JavaScript</div>
+      <div class="lang-chip"><span class="lang-dot" style="background: #3178c6;"></span>TypeScript</div>
+      <div class="lang-chip"><span class="lang-dot" style="background: #00ADD8;"></span>Go</div>
+      <div class="lang-chip"><span class="lang-dot" style="background: #dea584;"></span>Rust</div>
+      <div class="lang-chip"><span class="lang-dot" style="background: #b07219;"></span>Java</div>
+      <div class="lang-chip"><span class="lang-dot" style="background: #701516;"></span>Ruby</div>
+      <div class="lang-chip"><span class="lang-dot" style="background: #178600;"></span>C#</div>
+    </div>
+
+    <!-- Search modes -->
+    <h3 style="font-family: var(--font-display); font-size: var(--text-xl); color: var(--lotus-200); font-weight: 500; margin-top: var(--space-6); margin-bottom: var(--space-3);" class="reveal">Search Modes</h3>
+
+    <table class="search-table reveal">
+      <thead>
+        <tr><th>Mode</th><th>Tool</th><th>Method</th></tr>
+      </thead>
+      <tbody>
+        <tr><td style="color: var(--sandal-300); font-weight: 500;">Name search</td><td><code>find_symbol</code></td><td>Exact/prefix match on symbol name</td></tr>
+        <tr><td style="color: var(--sandal-300); font-weight: 500;">Semantic search</td><td><code>search_symbols</code></td><td>Embedding similarity on symbol metadata</td></tr>
+        <tr><td style="color: var(--sandal-300); font-weight: 500;">BM25 search</td><td style="color: rgba(185,189,199,0.5);">(internal)</td><td>Full-text keyword match on name + signature</td></tr>
+        <tr><td style="color: var(--sandal-300); font-weight: 500;">Call graph</td><td><code>symbol_callers</code> / <code>symbol_callees</code></td><td>Traversal of call_edge table</td></tr>
+      </tbody>
+    </table>
+
+    <!-- Extracted info -->
+    <div class="config-block reveal">
+      <div class="config-block-title">Extracted Information</div>
+      <pre><span class="kw">Symbols</span>     <span class="cm">Functions, classes, methods, structs, enums</span>
+            <span class="cm">name, kind, signature, file_path, line_range, parent</span>
+<span class="kw">Callsites</span>   <span class="cm">Call, MemberCall, Qualified, New, Ctor, Indirect, LambdaCall</span>
+<span class="kw">Imports</span>     <span class="cm">File dependencies</span>
+<span class="kw">Hierarchy</span>   <span class="cm">Inheritance relationships</span></pre>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════
+     MEMORY TYPES & LIFECYCLE
+     ═══════════════════════════════════════════ -->
+<section class="arch-section alt-bg" id="lifecycle">
+  <div class="container">
+    <div class="reveal">
+      <div class="section-divider"></div>
+      <h2 class="heading-section">Memory Types &amp; Lifecycle</h2>
+    </div>
+    <p class="section-intro reveal reveal-delay-1">26 node types, each with distinct decay characteristics and quality gates. Confidence is Bayesian, not a simple scalar&thinsp;&mdash;&thinsp;it tracks mean, variance, observation count, and decay.</p>
+
+    <!-- Node Types Grid -->
+    <h3 style="font-family: var(--font-display); font-size: var(--text-xl); color: var(--lotus-200); font-weight: 500; margin-bottom: var(--space-3);" class="reveal">Node Types</h3>
+
+    <div class="node-types-grid reveal reveal-delay-1">
+      <div class="node-type-chip"><span class="node-type-id">0</span>Wisdom</div>
+      <div class="node-type-chip"><span class="node-type-id">1</span>Belief</div>
+      <div class="node-type-chip"><span class="node-type-id">2</span>Intention</div>
+      <div class="node-type-chip"><span class="node-type-id">3</span>Episode</div>
+      <div class="node-type-chip"><span class="node-type-id">4</span>Failure</div>
+      <div class="node-type-chip"><span class="node-type-id">5</span>Aspiration</div>
+      <div class="node-type-chip"><span class="node-type-id">6</span>Dream</div>
+      <div class="node-type-chip"><span class="node-type-id">7</span>Question</div>
+      <div class="node-type-chip"><span class="node-type-id">8</span>Correction</div>
+      <div class="node-type-chip"><span class="node-type-id">9</span>Entity</div>
+      <div class="node-type-chip"><span class="node-type-id">10</span>Term</div>
+      <div class="node-type-chip"><span class="node-type-id">11</span>Edge</div>
+      <div class="node-type-chip"><span class="node-type-id">12</span>Insight</div>
+      <div class="node-type-chip"><span class="node-type-id">13</span>Signal</div>
+      <div class="node-type-chip"><span class="node-type-id">14</span>State</div>
+      <div class="node-type-chip"><span class="node-type-id">15</span>Summary</div>
+      <div class="node-type-chip"><span class="node-type-id">16</span>Review</div>
+      <div class="node-type-chip"><span class="node-type-id">17</span>Preference</div>
+      <div class="node-type-chip"><span class="node-type-id">18</span>Milestone</div>
+      <div class="node-type-chip"><span class="node-type-id">19</span>Approach</div>
+      <div class="node-type-chip"><span class="node-type-id">20</span>Outcome</div>
+      <div class="node-type-chip"><span class="node-type-id">21</span>Gap</div>
+      <div class="node-type-chip"><span class="node-type-id">22</span>Symbol</div>
+      <div class="node-type-chip"><span class="node-type-id">23</span>ProjectEssence</div>
+      <div class="node-type-chip"><span class="node-type-id">24</span>ModuleState</div>
+      <div class="node-type-chip"><span class="node-type-id">25</span>PatternState</div>
+    </div>
+
+    <!-- Decay Rates Table -->
+    <h3 style="font-family: var(--font-display); font-size: var(--text-xl); color: var(--lotus-200); font-weight: 500; margin-top: var(--space-7); margin-bottom: var(--space-3);" class="reveal">Decay Rates</h3>
+
+    <table class="decay-table reveal">
+      <thead>
+        <tr><th>Type</th><th>Rate</th><th>Visual</th><th>Rationale</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td style="color: var(--sandal-300); font-weight: 500;">Belief</td>
+          <td><code>0.0</code></td>
+          <td><div class="decay-bar-wrap"><div class="decay-bar" style="width: 0%; background: var(--sandal-300);"></div></div></td>
+          <td>Never decays (core identity)</td>
+        </tr>
+        <tr>
+          <td style="color: var(--sandal-300); font-weight: 500;">Symbol</td>
+          <td><code>0.0</code></td>
+          <td><div class="decay-bar-wrap"><div class="decay-bar" style="width: 0%; background: var(--aura-300);"></div></div></td>
+          <td>Code structure doesn't decay</td>
+        </tr>
+        <tr>
+          <td style="color: var(--sandal-300); font-weight: 500;">Wisdom</td>
+          <td><code>0.005</code></td>
+          <td><div class="decay-bar-wrap"><div class="decay-bar" style="width: 17%; background: var(--sandal-300);"></div></div></td>
+          <td>Proven patterns should persist</td>
+        </tr>
+        <tr>
+          <td style="color: var(--sandal-300); font-weight: 500;">Correction</td>
+          <td><code>0.005</code></td>
+          <td><div class="decay-bar-wrap"><div class="decay-bar" style="width: 17%; background: var(--ember-400);"></div></div></td>
+          <td>Important lessons persist</td>
+        </tr>
+        <tr>
+          <td style="color: var(--sandal-300); font-weight: 500;">Preference</td>
+          <td><code>0.01</code></td>
+          <td><div class="decay-bar-wrap"><div class="decay-bar" style="width: 33%; background: var(--aura-300);"></div></div></td>
+          <td>Slowly fades if not reinforced</td>
+        </tr>
+        <tr>
+          <td style="color: var(--sandal-300); font-weight: 500;">Episode</td>
+          <td><code>0.03</code></td>
+          <td><div class="decay-bar-wrap"><div class="decay-bar" style="width: 100%; background: var(--ember-400);"></div></div></td>
+          <td>Fades unless reinforced</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- Confidence Model -->
+    <h3 style="font-family: var(--font-display); font-size: var(--text-xl); color: var(--lotus-200); font-weight: 500; margin-top: var(--space-7); margin-bottom: var(--space-3);" class="reveal">Bayesian Confidence Model</h3>
+
+    <div class="config-block reveal">
+      <div class="config-block-title">Confidence struct</div>
+      <pre><span class="kw">struct</span> <span class="ty">Confidence</span> {
+    <span class="ty">float</span> mu;           <span class="cm">// Mean confidence</span>
+    <span class="ty">float</span> sigma_sq;     <span class="cm">// Variance (uncertainty)</span>
+    <span class="ty">int</span>   n;            <span class="cm">// Number of observations</span>
+    <span class="ty">float</span> tau;          <span class="cm">// Decay parameter</span>
+
+    <span class="kw">void</span> observe(<span class="ty">float</span> value);  <span class="cm">// Update with new evidence</span>
+    <span class="kw">void</span> decay(<span class="ty">float</span> rate);     <span class="cm">// Time-based decay</span>
+};
+
+<span class="cm">// strengthen() calls observe(positive) &mdash; increases mu, reduces sigma</span>
+<span class="cm">// weaken() calls observe(negative) &mdash; decreases mu</span>
+<span class="cm">// decay() gradually reduces confidence based on decay_rate</span></pre>
+    </div>
+
+    <!-- Quality Gate -->
+    <h3 style="font-family: var(--font-display); font-size: var(--text-xl); color: var(--lotus-200); font-weight: 500; margin-top: var(--space-7); margin-bottom: var(--space-3);" class="reveal">Quality Gate</h3>
+
+    <div class="config-block reveal">
+      <div class="config-block-title">Before storing, DuckDBMind::remember() applies</div>
+      <pre><span class="val">1.</span> <span class="kw">Minimum length</span>:       Content must be &gt;= <span class="val">10 characters</span>
+<span class="val">2.</span> <span class="kw">Deduplication</span>:        Cosine similarity check (threshold: <span class="val">0.95</span>)
+<span class="val">3.</span> <span class="kw">Diversity sampling</span>:   Avoids storing too many similar memories in quick succession</pre>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════
+     SELF-TUNING (BAYESIAN BANDITS)
+     ═══════════════════════════════════════════ -->
+<section class="arch-section" id="tuning">
+  <div class="container">
+    <div class="reveal">
+      <div class="section-divider"></div>
+      <h2 class="heading-section">Self-Tuning (Bayesian Bandits)</h2>
+    </div>
+    <p class="section-intro reveal reveal-delay-1">The <code>ResonanceLearner</code> uses Thompson sampling to automatically optimize resonance parameters. No manual tuning&thinsp;&mdash;&thinsp;the system learns what works for each user's memory patterns.</p>
+
+    <div class="tuning-grid reveal reveal-delay-2">
+      <div class="tuning-card">
+        <h3 class="tuning-card-title">Thompson Sampling</h3>
+        <p class="tuning-card-desc">
+          Each tunable parameter has a Bayesian prior. <strong>BetaPrior</strong> for bounded parameters (0&ndash;1), <strong>GaussianPrior</strong> for unbounded. On each <code>full_resonate()</code> call, parameters are sampled from their current posteriors, balancing exploration and exploitation.
+        </p>
+      </div>
+      <div class="tuning-card">
+        <h3 class="tuning-card-title">Credit Assignment</h3>
+        <p class="tuning-card-desc">
+          When a user strengthens or weakens a memory, the learner attributes credit to the parameters active when that memory was surfaced. <strong>QueryContext</strong> features&thinsp;&mdash;&thinsp;query length, term count, technical terms, domain prefix&thinsp;&mdash;&thinsp;inform the bandit. State persists across daemon restarts.
+        </p>
+      </div>
+    </div>
+
+    <div class="config-block reveal reveal-delay-3">
+      <div class="config-block-title">Tuned Parameters</div>
+      <pre><span class="kw">Semantic weight</span>   vs.  <span class="kw">BM25 weight</span>       <span class="cm">// Balance vector vs keyword</span>
+<span class="kw">Spread strength</span>   and  <span class="kw">Spread decay</span>      <span class="cm">// Graph activation dynamics</span>
+<span class="kw">Hebbian rate</span>                              <span class="cm">// Co-access learning speed</span>
+<span class="kw">Tag boost</span>                                 <span class="cm">// Categorical signal magnitude</span>
+
+<span class="cm">// QueryContext features:</span>
+<span class="ty">query_length</span>, <span class="ty">term_count</span>, <span class="ty">has_technical_terms</span>
+<span class="ty">has_domain_prefix</span>, <span class="ty">avg_term_frequency</span></pre>
+    </div>
+  </div>
+</section>
+
+
+<!-- BACK -->
+<section class="back-section">
+  <div class="container">
+    <a href="index.html" class="back-link">&larr; Back to cc-soul</a>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer class="footer">
+  <div class="container">
+    <p class="footer-text">
+      Built with conviction. Grounded in philosophy.
+      <span class="footer-sep"></span>
+      <a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a>
+    </p>
+  </div>
+</footer>
+
+<script>
+/* ═══════════════════════════════════════════
+   SCROLL REVEAL (IntersectionObserver)
+   ═══════════════════════════════════════════ */
+(function() {
+  var reveals = document.querySelectorAll('.reveal');
+  if (!reveals.length) return;
+  var observer = new IntersectionObserver(function(entries) {
+    entries.forEach(function(entry) {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.01, rootMargin: '0px 0px -20px 0px' });
+  reveals.forEach(function(el) { observer.observe(el); });
+})();
+
+/* ═══════════════════════════════════════════
+   SMOOTH SCROLL FOR TOC CHIPS
+   ═══════════════════════════════════════════ */
+document.querySelectorAll('a[href^="#"]').forEach(function(anchor) {
+  anchor.addEventListener('click', function(e) {
+    var target = document.querySelector(this.getAttribute('href'));
+    if (target) {
+      e.preventDefault();
+      var offset = 80;
+      var top = target.getBoundingClientRect().top + window.pageYOffset - offset;
+      window.scrollTo({ top: top, behavior: 'smooth' });
+    }
+  });
+});
+
+/* ═══════════════════════════════════════════
+   RESONANCE PIPELINE CANVAS
+   ═══════════════════════════════════════════ */
+(function() {
+  var canvas = document.getElementById('pipeline-canvas');
+  if (!canvas) return;
+
+  var ctx = canvas.getContext('2d');
+  var w, h, dpr;
+  var raf;
+
+  var PHASE_COLORS = [
+    { r: 203, g: 175, b: 134 },  // sandal - Phase 1
+    { r: 157, g: 178, b: 217 },  // aura - Phase 2
+    { r: 212, g: 106, b: 76 },   // ember - Phase 3
+    { r: 203, g: 175, b: 134 },  // sandal - Phase 4
+    { r: 157, g: 178, b: 217 },  // aura - Phase 5
+    { r: 212, g: 106, b: 76 },   // ember - Phase 6
+    { r: 203, g: 175, b: 134 },  // sandal - Phase 7
+    { r: 157, g: 178, b: 217 },  // aura - Phase 8
+  ];
+
+  var PHASE_NAMES = [
+    'Seeds', 'BM25', 'Tags', 'Attractors',
+    'Spread', 'Priming', 'Code', 'Post'
+  ];
+
+  var particles = [];
+  var PARTICLE_COUNT = 60;
+  var PHASE_COUNT = 8;
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var rect = canvas.parentElement.getBoundingClientRect();
+    w = rect.width;
+    h = rect.height;
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function createParticles() {
+    particles = [];
+    for (var i = 0; i < PARTICLE_COUNT; i++) {
+      particles.push({
+        x: Math.random() * w,
+        phase: Math.random() * PHASE_COUNT,
+        speed: 0.005 + Math.random() * 0.015,
+        radius: 1.5 + Math.random() * 2.5,
+        opacity: 0.2 + Math.random() * 0.6,
+        yOffset: (Math.random() - 0.5) * 0.7,
+        alive: Math.random() > 0.3,
+        pulsePhase: Math.random() * Math.PI * 2
+      });
+    }
+  }
+
+  function getPhaseX(phase) {
+    var margin = 60;
+    var usable = w - margin * 2;
+    return margin + (phase / PHASE_COUNT) * usable;
+  }
+
+  function getPhaseY(phase, yOffset) {
+    var centerY = h * 0.5;
+    var amplitude = h * 0.15;
+    return centerY + Math.sin(phase * 0.8) * amplitude * yOffset;
+  }
+
+  function draw(time) {
+    ctx.clearRect(0, 0, w, h);
+
+    // Draw phase zones (vertical bands)
+    var margin = 60;
+    var usable = w - margin * 2;
+    var phaseWidth = usable / PHASE_COUNT;
+
+    for (var p = 0; p < PHASE_COUNT; p++) {
+      var px = margin + p * phaseWidth;
+      var col = PHASE_COLORS[p];
+
+      // Zone background
+      ctx.fillStyle = 'rgba(' + col.r + ',' + col.g + ',' + col.b + ',0.03)';
+      ctx.fillRect(px, 0, phaseWidth, h);
+
+      // Zone border
+      if (p > 0) {
+        ctx.beginPath();
+        ctx.moveTo(px, 0);
+        ctx.lineTo(px, h);
+        ctx.strokeStyle = 'rgba(' + col.r + ',' + col.g + ',' + col.b + ',0.08)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+
+      // Phase label
+      ctx.fillStyle = 'rgba(' + col.r + ',' + col.g + ',' + col.b + ',0.35)';
+      ctx.font = '10px "IBM Plex Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(PHASE_NAMES[p], px + phaseWidth / 2, h - 12);
+
+      // Phase number
+      ctx.fillStyle = 'rgba(' + col.r + ',' + col.g + ',' + col.b + ',0.12)';
+      ctx.font = 'bold 32px "Cormorant Garamond", serif';
+      ctx.fillText(String(p + 1), px + phaseWidth / 2, 36);
+    }
+
+    // Draw center flow line
+    ctx.beginPath();
+    ctx.moveTo(margin, h * 0.5);
+    for (var fx = margin; fx <= w - margin; fx += 2) {
+      var fphase = ((fx - margin) / usable) * PHASE_COUNT;
+      var fy = h * 0.5 + Math.sin(fphase * 0.8) * h * 0.05;
+      ctx.lineTo(fx, fy);
+    }
+    ctx.strokeStyle = 'rgba(203, 175, 134, 0.08)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Update and draw particles
+    for (var i = 0; i < particles.length; i++) {
+      var part = particles[i];
+
+      // Advance phase
+      part.phase += part.speed;
+
+      // Wrap around
+      if (part.phase >= PHASE_COUNT) {
+        part.phase -= PHASE_COUNT;
+        // Some particles "die" during processing (filtered out)
+        part.alive = Math.random() > 0.2;
+        part.radius = 1.5 + Math.random() * 2.5;
+        part.opacity = 0.2 + Math.random() * 0.6;
+      }
+
+      if (!part.alive && part.phase > 2) continue;
+
+      var px2 = getPhaseX(part.phase);
+      var py = getPhaseY(part.phase, part.yOffset);
+
+      // Particle shrinks through phases (filtering effect)
+      var phaseIdx = Math.floor(part.phase) % PHASE_COUNT;
+      var shrinkFactor = 1.0 - (part.phase / PHASE_COUNT) * 0.4;
+      var r = part.radius * shrinkFactor;
+
+      // Color based on current phase
+      var col2 = PHASE_COLORS[phaseIdx];
+      var pulse = Math.sin(time * 0.002 + part.pulsePhase) * 0.15 + 0.85;
+      var alpha = part.opacity * pulse * (part.alive ? 1 : 0.3);
+
+      // Glow
+      if (r > 2 && alpha > 0.3) {
+        var gradient = ctx.createRadialGradient(px2, py, 0, px2, py, r * 4);
+        gradient.addColorStop(0, 'rgba(' + col2.r + ',' + col2.g + ',' + col2.b + ',' + (alpha * 0.1) + ')');
+        gradient.addColorStop(1, 'rgba(' + col2.r + ',' + col2.g + ',' + col2.b + ',0)');
+        ctx.beginPath();
+        ctx.arc(px2, py, r * 4, 0, Math.PI * 2);
+        ctx.fillStyle = gradient;
+        ctx.fill();
+      }
+
+      // Core
+      ctx.beginPath();
+      ctx.arc(px2, py, r, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(' + col2.r + ',' + col2.g + ',' + col2.b + ',' + alpha + ')';
+      ctx.fill();
+    }
+
+    // Draw output funnel indicator
+    var funnelX = w - margin + 10;
+    ctx.beginPath();
+    ctx.moveTo(funnelX, h * 0.35);
+    ctx.lineTo(funnelX + 15, h * 0.45);
+    ctx.lineTo(funnelX + 15, h * 0.55);
+    ctx.lineTo(funnelX, h * 0.65);
+    ctx.strokeStyle = 'rgba(231, 226, 214, 0.12)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(231, 226, 214, 0.2)';
+    ctx.font = '10px "IBM Plex Mono", monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText('result', funnelX + 4, h * 0.5 + 3);
+
+    raf = requestAnimationFrame(draw);
+  }
+
+  function init() {
+    resize();
+    createParticles();
+    window.addEventListener('resize', function() {
+      resize();
+    });
+    raf = requestAnimationFrame(draw);
+  }
+
+  // Start when visible
+  var pipeObs = new IntersectionObserver(function(entries) {
+    if (entries[0].isIntersecting) {
+      init();
+      pipeObs.disconnect();
+    }
+  }, { threshold: 0.1 });
+
+  pipeObs.observe(canvas.parentElement);
+})();
+</script>
+</body>
+</html>
