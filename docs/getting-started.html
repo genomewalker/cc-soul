@@ -476,6 +476,45 @@ body::before {
   white-space: nowrap;
 }
 
+/* TROUBLESHOOTING */
+.troubleshoot-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+.troubleshoot-item {
+  background: var(--indigo-700);
+  border-radius: var(--radius-md);
+  padding: var(--space-5) var(--space-6);
+  box-shadow: var(--shadow-soft);
+  border-left: 2px solid var(--ember-400);
+}
+.troubleshoot-symptom {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  color: var(--lotus-200);
+  font-weight: 500;
+  line-height: 1.3;
+  margin-bottom: var(--space-3);
+}
+.troubleshoot-symptom code {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--aura-300);
+}
+.troubleshoot-fix {
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  line-height: 1.8;
+}
+.troubleshoot-fix p {
+  margin-bottom: var(--space-3);
+}
+.troubleshoot-fix .code-block {
+  margin-top: var(--space-2);
+  background: rgba(15, 16, 24, 0.5);
+}
+
 /* BACK LINK */
 .back-section {
   padding: var(--space-8) 0;
@@ -841,6 +880,66 @@ body::before {
         </tbody>
       </table>
     </div>
+  </div>
+</section>
+
+<!-- TROUBLESHOOTING -->
+<section class="content-section">
+  <div class="container">
+    <div class="reveal">
+      <div class="section-divider"></div>
+      <h2 class="section-title">Troubleshooting</h2>
+    </div>
+
+    <dl class="troubleshoot-list">
+      <div class="troubleshoot-item reveal reveal-delay-1">
+        <dt class="troubleshoot-symptom">Daemon not starting</dt>
+        <dd class="troubleshoot-fix">
+          <p>Check that <code>~/.claude/bin/chittad</code> exists and is executable. Run it manually to see errors:</p>
+          <div class="code-block"><span class="command">~/.claude/bin/chittad</span> daemon --foreground</div>
+        </dd>
+      </div>
+
+      <div class="troubleshoot-item reveal reveal-delay-1">
+        <dt class="troubleshoot-symptom"><code>search_symbols</code> returns nothing</dt>
+        <dd class="troubleshoot-fix">
+          <p>Embeddings have not been generated. Run both steps after indexing:</p>
+          <div class="code-block"><span class="command">chitta</span> learn_codebase /path/to/project
+<span class="command">chitta</span> embed_symbols</div>
+        </dd>
+      </div>
+
+      <div class="troubleshoot-item reveal reveal-delay-2">
+        <dt class="troubleshoot-symptom">Tool calls fail with connection error</dt>
+        <dd class="troubleshoot-fix">
+          <p>The daemon is not running. Terminate the stale process and retry &mdash; the daemon auto-restarts on the next call:</p>
+          <div class="code-block"><span class="command">pkill</span> -TERM chittad</div>
+        </dd>
+      </div>
+
+      <div class="troubleshoot-item reveal reveal-delay-2">
+        <dt class="troubleshoot-symptom">MCP tools not showing in Claude</dt>
+        <dd class="troubleshoot-fix">
+          <p>The MCP server process is stale. Restart it:</p>
+          <div class="code-block"><span class="command">pkill</span> -f "chitta mcp"</div>
+        </dd>
+      </div>
+
+      <div class="troubleshoot-item reveal reveal-delay-3">
+        <dt class="troubleshoot-symptom">Memory seems empty</dt>
+        <dd class="troubleshoot-fix">
+          <p>This is normal for a fresh install. Memories build organically through usage &mdash; preferences, corrections, solutions, and insights accumulate as you work together.</p>
+        </dd>
+      </div>
+
+      <div class="troubleshoot-item reveal reveal-delay-3">
+        <dt class="troubleshoot-symptom"><code>embed_symbols</code> shows 0 new</dt>
+        <dd class="troubleshoot-fix">
+          <p>All symbols are already embedded. Use the reset flag to regenerate with fresh text:</p>
+          <div class="code-block"><span class="command">chitta</span> embed_symbols --reset true</div>
+        </dd>
+      </div>
+    </dl>
   </div>
 </section>
 

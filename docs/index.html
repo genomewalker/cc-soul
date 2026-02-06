@@ -607,6 +607,101 @@ section {
 }
 
 /* ═══════════════════════════════════════════
+   FIRST 30 DAYS PROGRESSION
+   ═══════════════════════════════════════════ */
+.progression {
+  background: var(--night-900);
+  border-top: 1px solid rgba(203, 175, 134, 0.06);
+}
+
+.progression-header {
+  margin-bottom: var(--space-8);
+}
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-width: 640px;
+}
+
+.timeline-item {
+  display: grid;
+  grid-template-columns: 40px 1fr;
+  gap: var(--space-5);
+  min-height: 120px;
+}
+
+.timeline-marker {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: var(--space-1);
+}
+
+.timeline-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--indigo-700);
+  border: 2px solid var(--sandal-300);
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.timeline-dot--final {
+  width: 14px;
+  height: 14px;
+  background: var(--sandal-300);
+  border-color: var(--sandal-300);
+  box-shadow: 0 0 12px rgba(203, 175, 134, 0.3);
+}
+
+.timeline-line {
+  width: 1px;
+  flex: 1;
+  background: linear-gradient(180deg, var(--sandal-300), rgba(203, 175, 134, 0.15));
+  margin-top: var(--space-2);
+}
+
+.timeline-item--final .timeline-marker {
+  padding-top: var(--space-1);
+}
+
+.timeline-content {
+  padding-bottom: var(--space-7);
+}
+
+.timeline-item--final .timeline-content {
+  padding-bottom: 0;
+}
+
+.timeline-label {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--sandal-300);
+  margin-bottom: var(--space-2);
+}
+
+.timeline-title {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  color: var(--lotus-200);
+  font-weight: 500;
+  line-height: 1.3;
+  margin-bottom: var(--space-2);
+}
+
+.timeline-desc {
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  line-height: 1.8;
+}
+
+/* ═══════════════════════════════════════════
    WHY IT MATTERS
    ═══════════════════════════════════════════ */
 .why {
@@ -1024,6 +1119,15 @@ section {
     height: 280px;
   }
 
+  .timeline-item {
+    grid-template-columns: 32px 1fr;
+    gap: var(--space-3);
+  }
+
+  .timeline-content {
+    padding-bottom: var(--space-5);
+  }
+
   .why-statements {
     padding-left: var(--space-4);
   }
@@ -1223,6 +1327,66 @@ section {
         </div>
         <h3 class="card-title">Subconscious Processing</h3>
         <p class="card-desc">Background distillation, decay, and strengthening while idle. The daemon works so the session doesn't have to.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FIRST 30 DAYS -->
+<section class="progression" id="progression">
+  <div class="container">
+    <div class="progression-header reveal">
+      <div class="section-divider"></div>
+      <h2 class="heading-section">The first 30 days.</h2>
+      <p class="subtext">cc-soul doesn't arrive fully formed. It grows through use.</p>
+    </div>
+
+    <div class="timeline">
+      <div class="timeline-item reveal reveal-delay-1">
+        <div class="timeline-marker">
+          <span class="timeline-dot"></span>
+          <span class="timeline-line"></span>
+        </div>
+        <div class="timeline-content">
+          <h3 class="timeline-label">Day 1</h3>
+          <h4 class="timeline-title">Foundation</h4>
+          <p class="timeline-desc">Basic recall and code indexing. cc-soul remembers what you tell it and indexes your codebase structure &mdash; symbols, call graphs, file relationships.</p>
+        </div>
+      </div>
+
+      <div class="timeline-item reveal reveal-delay-2">
+        <div class="timeline-marker">
+          <span class="timeline-dot"></span>
+          <span class="timeline-line"></span>
+        </div>
+        <div class="timeline-content">
+          <h3 class="timeline-label">Week 1</h3>
+          <h4 class="timeline-title">Adaptation</h4>
+          <p class="timeline-desc">Preferences learned, corrections absorbed. The soul starts adapting to your workflow and communication style &mdash; your conventions, your gotchas, your shortcuts.</p>
+        </div>
+      </div>
+
+      <div class="timeline-item reveal reveal-delay-3">
+        <div class="timeline-marker">
+          <span class="timeline-dot"></span>
+          <span class="timeline-line"></span>
+        </div>
+        <div class="timeline-content">
+          <h3 class="timeline-label">Week 2</h3>
+          <h4 class="timeline-title">Anticipation</h4>
+          <p class="timeline-desc">Patterns emerging, anticipation improving. The system predicts your next actions and suggests approaches before you ask &mdash; built from observed habits and outcomes.</p>
+        </div>
+      </div>
+
+      <div class="timeline-item timeline-item--final reveal reveal-delay-4">
+        <div class="timeline-marker">
+          <span class="timeline-dot timeline-dot--final"></span>
+        </div>
+        <div class="timeline-content">
+          <h3 class="timeline-label">Month 1</h3>
+          <h4 class="timeline-title">Partnership</h4>
+          <p class="timeline-desc">Session narrative, proactive suggestions, wisdom distillation. It feels like a genuine collaborator who knows your project history &mdash; not a tool that forgets.</p>
+        </div>
       </div>
     </div>
   </div>

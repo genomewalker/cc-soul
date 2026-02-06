@@ -149,6 +149,7 @@ public:
 
     size_t dimension() const override { return inner_->dimension(); }
     bool ready() const override { return inner_->ready(); }
+    std::string execution_provider_name() const override { return inner_->execution_provider_name(); }
 
     // For circuit breaker integration
     size_t consecutive_failures() const { return consecutive_failures_.load(); }

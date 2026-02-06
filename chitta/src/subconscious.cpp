@@ -47,6 +47,12 @@ Subconscious::Subconscious(DuckDBMind* mind, SubconsciousConfig config)
         R"(\b(try\s+\w+|consider\s+\w+|you could|you might|perhaps|maybe try|suggest)\b)",
         std::regex_constants::icase
     );
+
+    // Uncertainty patterns in assistant messages: "I don't know", "I'm not sure", etc.
+    uncertainty_pattern_ = std::regex(
+        R"(\b(i don'?t know|i'?m not sure|unclear|couldn'?t (find|determine)|need to check|i'?ll have to look)\b)",
+        std::regex_constants::icase
+    );
 }
 
 Subconscious::~Subconscious() {
@@ -126,6 +132,11 @@ void Subconscious::process_loop() {
             run_theme_maintenance();
         }
 
+        // Check for auto-distillation (episodes -> wisdom)
+        if (config_.enable_distillation && time_for_distillation()) {
+            run_auto_distillation();
+        }
+
         // Check for background embedding
         if (config_.enable_background_embedding && time_for_embedding()) {
             run_background_embedding();
@@ -152,6 +163,11 @@ void Subconscious::process_user_message(const SubconsciousEvent& event) {
 }
 
 void Subconscious::process_assistant_message(const SubconsciousEvent& event) {
+    // Detect uncertainty/knowledge gaps in assistant responses
+    if (config_.enable_pattern_detection) {
+        detect_uncertainty(event.content, event.realm);
+    }
+
     if (config_.enable_suggestion_tracking) {
         // Look for suggestions in assistant output
         std::smatch match;
@@ -185,6 +201,25 @@ void Subconscious::process_assistant_message(const SubconsciousEvent& event) {
 void Subconscious::process_tool_result(const SubconsciousEvent& event) {
     if (config_.enable_anticipation) {
         verify_prediction(event.content, event.realm);
+    }
+
+    // Extract tool name from content (format: "tool_name: result" or just tool_name)
+    if (config_.enable_habit_formation) {
+        std::string tool_name;
+        size_t colon_pos = event.content.find(':');
+        if (colon_pos != std::string::npos && colon_pos < 50) {
+            tool_name = event.content.substr(0, colon_pos);
+        } else {
+            // Try to extract first word as tool name
+            size_t space_pos = event.content.find(' ');
+            if (space_pos != std::string::npos && space_pos < 50) {
+                tool_name = event.content.substr(0, space_pos);
+            }
+        }
+
+        if (!tool_name.empty()) {
+            observe_tool_for_habit(tool_name, event.content, event.realm);
+        }
     }
 }
 
@@ -258,6 +293,21 @@ void Subconscious::detect_milestone(const std::string& content, const std::strin
     }
 }
 
+void Subconscious::detect_uncertainty(const std::string& content, const std::string& realm) {
+    std::smatch match;
+    if (std::regex_search(content, match, uncertainty_pattern_)) {
+        // Extract uncertainty context
+        size_t pos = static_cast<size_t>(match.position());
+        size_t len = static_cast<size_t>(match.length());
+        size_t start = (pos > 100) ? (pos - 100) : 0;
+        size_t end = std::min(pos + len + 100, content.size());
+        std::string context = content.substr(start, end - start);
+
+        store_uncertainty(context, realm);
+        stats_.uncertainties_detected++;
+    }
+}
+
 // Auto-learning Storage
 // Uses mind_->remember() to generate proper embeddings via yantra
 
@@ -312,6 +362,23 @@ void Subconscious::store_milestone(const std::string& achievement, const std::st
                               RealmVisibility::Shared);
     if (id != NodeId{}) {
         mind_->store().set_visibility(static_cast<int64_t>(id.low), RealmVisibility::Shared);
+    }
+}
+
+void Subconscious::store_uncertainty(const std::string& context, const std::string& realm) {
+    // Store uncertainty as a curiosity gap (integrates with curiosity system)
+    std::ostringstream content;
+    content << "[gap] " << context;
+
+    // Use mind->remember which generates proper embeddings
+    auto id = mind_->remember(content.str(), NodeType::Episode,  // Use Episode, will be tagged as gap
+                              realm.empty() ? "brahman" : realm,
+                              RealmVisibility::Private);
+
+    if (id != NodeId{}) {
+        // Tag as gap and unresolved for the curiosity system
+        mind_->store().add_tag(static_cast<int64_t>(id.low), "gap");
+        mind_->store().add_tag(static_cast<int64_t>(id.low), "unresolved");
     }
 }
 
@@ -404,6 +471,116 @@ void Subconscious::verify_prediction(const std::string& actual_action, const std
     last_predicted_action_.clear();
 }
 
+// Habit Formation from Tool Sequences
+
+void Subconscious::observe_tool_for_habit(const std::string& tool_name, const std::string& context,
+                                           const std::string& realm) {
+    std::lock_guard<std::mutex> lock(tool_sequence_mutex_);
+
+    // Add to sequence
+    recent_tool_sequence_.push_back({tool_name, context.substr(0, 100)});
+    if (recent_tool_sequence_.size() > MAX_TOOL_SEQUENCE) {
+        recent_tool_sequence_.pop_front();
+    }
+
+    // Need at least 3 tools to detect a pattern
+    if (recent_tool_sequence_.size() < 3) return;
+
+    // Categorize tools into groups for pattern detection
+    auto categorize_tool = [](const std::string& name) -> std::string {
+        // File reading tools
+        if (name == "Read" || name == "cat" || name == "head" || name == "tail") {
+            return "read";
+        }
+        // File editing tools
+        if (name == "Edit" || name == "Write" || name == "sed" || name == "awk") {
+            return "edit";
+        }
+        // Search tools
+        if (name == "Grep" || name == "Glob" || name == "find" || name == "rg") {
+            return "search";
+        }
+        // Git tools
+        if (name.find("git") == 0 || name == "gh") {
+            return "git";
+        }
+        // Build tools
+        if (name == "make" || name == "cmake" || name == "npm" || name == "cargo") {
+            return "build";
+        }
+        // Test tools
+        if (name == "pytest" || name == "jest" || name == "test" || name.find("test") != std::string::npos) {
+            return "test";
+        }
+        return name;  // Use tool name as category if unrecognized
+    };
+
+    // Check for pattern: 3 consecutive same-category tools -> next action
+    size_t seq_size = recent_tool_sequence_.size();
+    if (seq_size < 3) return;
+
+    std::string cat1 = categorize_tool(recent_tool_sequence_[seq_size - 3].first);
+    std::string cat2 = categorize_tool(recent_tool_sequence_[seq_size - 2].first);
+    std::string cat3 = categorize_tool(recent_tool_sequence_[seq_size - 1].first);
+
+    // Pattern: Same category repeated 3 times suggests a workflow
+    if (cat1 == cat2 && cat2 == cat3) {
+        // Build trigger pattern
+        std::string trigger = cat1 + "," + cat1 + "," + cat1;
+        std::string response = "likely_" + cat1 + "_workflow";
+
+        // Check if we've seen this pattern before (look for repeat in history)
+        // by scanning our sequence for previous occurrences
+        int pattern_count = 0;
+        for (size_t i = 2; i < seq_size; ++i) {
+            std::string c1 = categorize_tool(recent_tool_sequence_[i - 2].first);
+            std::string c2 = categorize_tool(recent_tool_sequence_[i - 1].first);
+            std::string c3 = categorize_tool(recent_tool_sequence_[i].first);
+            if (c1 == cat1 && c2 == cat1 && c3 == cat1) {
+                pattern_count++;
+            }
+        }
+
+        // If pattern has occurred 2+ times, form a habit
+        if (pattern_count >= 2) {
+            int64_t id = mind_->store().habit_observe(trigger, response, realm.empty() ? "brahman" : realm);
+            if (id > 0) {
+                stats_.habits_formed++;
+            }
+        }
+    }
+
+    // Also check for transition patterns: A,A -> B suggests "after reading, edit"
+    if (seq_size >= 3) {
+        std::string prev_cat = categorize_tool(recent_tool_sequence_[seq_size - 2].first);
+        std::string curr_cat = cat3;
+
+        // If previous two were same category and now different, it's a transition
+        if (cat1 == cat2 && cat2 != curr_cat) {
+            std::string trigger = cat1 + "," + cat1;
+            std::string response = curr_cat;
+
+            // Count how often this transition occurs
+            int transition_count = 0;
+            for (size_t i = 2; i < seq_size; ++i) {
+                std::string c1 = categorize_tool(recent_tool_sequence_[i - 2].first);
+                std::string c2 = categorize_tool(recent_tool_sequence_[i - 1].first);
+                std::string c3 = categorize_tool(recent_tool_sequence_[i].first);
+                if (c1 == cat1 && c2 == cat1 && c3 == curr_cat) {
+                    transition_count++;
+                }
+            }
+
+            if (transition_count >= 2) {
+                int64_t id = mind_->store().habit_observe(trigger, response, realm.empty() ? "brahman" : realm);
+                if (id > 0) {
+                    stats_.habits_formed++;
+                }
+            }
+        }
+    }
+}
+
 // Periodic Tasks
 
 void Subconscious::run_hygiene() {
@@ -462,6 +639,41 @@ bool Subconscious::time_for_theme_maintenance() const {
     auto now = now_ms();
     auto interval_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         config_.theme_maintenance_interval
+    ).count();
+
+    return (now - last) >= interval_ms;
+}
+
+void Subconscious::run_auto_distillation() {
+    // Skip if daemon is busy with queries
+    if (!is_idle()) {
+        return;
+    }
+
+    // Run auto-distillation to convert repeated episode patterns into wisdom
+    size_t created = mind_->auto_distill_episodes(
+        5,      // max_distillations per run
+        0.85f,  // similarity_threshold
+        3       // min_occurrences
+    );
+
+    stats_.distillation_runs++;
+    stats_.wisdom_created += created;
+    stats_.last_distillation_at = now_ms();
+
+    if (created > 0) {
+        std::cerr << "[subconscious] Auto-distillation: created " << created
+                  << " wisdom nodes from episode patterns\n";
+    }
+}
+
+bool Subconscious::time_for_distillation() const {
+    auto last = stats_.last_distillation_at.load();
+    if (last == 0) return true;  // Never run
+
+    auto now = now_ms();
+    auto interval_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        config_.distillation_interval
     ).count();
 
     return (now - last) >= interval_ms;

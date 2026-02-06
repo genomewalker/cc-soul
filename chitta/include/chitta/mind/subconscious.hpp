@@ -49,6 +49,7 @@ struct SubconsciousConfig {
     std::chrono::seconds process_interval{1};
     std::chrono::minutes hygiene_interval{30};
     std::chrono::minutes theme_maintenance_interval{60};  // Theme maintenance every hour
+    std::chrono::minutes distillation_interval{120};      // Auto-distillation every 2 hours
     std::chrono::seconds embedding_interval{30};  // Background embedding interval (30s to reduce CPU)
     std::chrono::seconds idle_threshold{30};      // Only embed when no queries for this long
     size_t max_queue_size{1000};
@@ -56,10 +57,12 @@ struct SubconsciousConfig {
     float correction_confidence{0.8f};
     bool enable_hygiene{true};
     bool enable_theme_maintenance{true};          // xMemory theme maintenance
+    bool enable_distillation{true};               // Auto-distill episodes into wisdom
     bool enable_anticipation{true};
     bool enable_pattern_detection{true};
     bool enable_suggestion_tracking{true};
     bool enable_background_embedding{false};      // Disabled by default - use embed_symbols tool
+    bool enable_habit_formation{true};            // Auto-detect tool patterns and form habits
 };
 
 // Queued embedding result (computed in background, flushed by main thread)
@@ -75,6 +78,7 @@ struct SubconsciousStats {
     std::atomic<size_t> preferences_detected{0};
     std::atomic<size_t> frustrations_detected{0};
     std::atomic<size_t> milestones_detected{0};
+    std::atomic<size_t> uncertainties_detected{0};
     std::atomic<size_t> suggestions_tracked{0};
     std::atomic<size_t> outcomes_verified{0};
     std::atomic<size_t> hygiene_runs{0};
@@ -82,11 +86,16 @@ struct SubconsciousStats {
     std::atomic<size_t> themes_split{0};
     std::atomic<size_t> themes_merged{0};
     std::atomic<size_t> memories_reassigned{0};
+    std::atomic<size_t> distillation_runs{0};         // Auto-distillation runs
+    std::atomic<size_t> wisdom_created{0};            // Wisdom nodes created from distillation
     std::atomic<size_t> symbols_embedded{0};
     std::atomic<size_t> embeddings_queued{0};
     std::atomic<size_t> embedding_skips{0};       // Skipped due to busy state
+    std::atomic<size_t> habits_formed{0};         // Habits auto-created from tool patterns
+    std::atomic<size_t> habits_matched{0};        // Existing habits matched by patterns
     std::atomic<int64_t> last_hygiene_at{0};
     std::atomic<int64_t> last_theme_maintenance_at{0};
+    std::atomic<int64_t> last_distillation_at{0};
     std::atomic<int64_t> last_embedding_at{0};
     std::atomic<int64_t> last_query_at{0};        // Last RPC query timestamp
     std::atomic<int64_t> started_at{0};
@@ -154,6 +163,7 @@ private:
     std::regex frustration_pattern_;
     std::regex milestone_pattern_;
     std::regex suggestion_pattern_;
+    std::regex uncertainty_pattern_;
 
     // Tracked suggestions for outcome verification
     std::mutex suggestions_mutex_;
@@ -164,6 +174,11 @@ private:
     std::mutex anticipation_mutex_;
     std::string last_context_;
     std::string last_predicted_action_;
+
+    // Habit formation from tool sequences
+    std::deque<std::pair<std::string, std::string>> recent_tool_sequence_;
+    static constexpr size_t MAX_TOOL_SEQUENCE = 10;
+    std::mutex tool_sequence_mutex_;
 
     // Main processing loop
     void process_loop();
@@ -178,6 +193,7 @@ private:
     void detect_preference(const std::string& content, const std::string& realm);
     void detect_frustration(const std::string& content, const std::string& realm);
     void detect_milestone(const std::string& content, const std::string& realm);
+    void detect_uncertainty(const std::string& content, const std::string& realm);
 
     // Auto-learning (stores to DuckDBStore)
     void store_correction(const std::string& context, const std::string& correction,
@@ -185,6 +201,7 @@ private:
     void store_preference(const std::string& preference, const std::string& realm);
     void store_frustration(const std::string& context, const std::string& realm);
     void store_milestone(const std::string& achievement, const std::string& realm);
+    void store_uncertainty(const std::string& context, const std::string& realm);
 
     // Suggestion tracking
     void track_suggestion(const std::string& content, const std::string& context,
@@ -196,11 +213,17 @@ private:
                          const std::string& realm);
     void verify_prediction(const std::string& actual_action, const std::string& realm);
 
+    // Habit formation from tool sequences
+    void observe_tool_for_habit(const std::string& tool_name, const std::string& context,
+                                 const std::string& realm);
+
     // Periodic tasks
     void run_hygiene();
     bool time_for_hygiene() const;
     void run_theme_maintenance();
     bool time_for_theme_maintenance() const;
+    void run_auto_distillation();
+    bool time_for_distillation() const;
     void run_background_embedding();
     bool time_for_embedding() const;
 

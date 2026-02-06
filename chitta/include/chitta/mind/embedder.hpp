@@ -145,7 +145,47 @@ public:
         return true;
     }
 
-    // Embed single text (with caching and circuit breaker)
+    // Embed a search query (adds instruction prefix for BGE models)
+    Vector embed_query(const std::string& text) {
+        if (should_skip_embedding()) return Vector::zeros();
+
+        std::string cache_key = "__q:" + text;
+        std::unique_lock lock(mutex_);
+        if (auto cached = cache_.get(cache_key)) {
+            cache_.record_hit();
+            return *cached;
+        }
+        cache_.record_miss();
+        if (!yantra_ || !yantra_->ready()) return Vector::zeros();
+
+        auto artha = yantra_->transform(text, EmbedMode::Query);
+        if (artha.nu.is_zero()) { record_failure(); return Vector::zeros(); }
+        record_success();
+        cache_.put(cache_key, artha.nu);
+        return artha.nu;
+    }
+
+    // Embed query returning full Artha
+    Artha transform_query(const std::string& text) {
+        if (should_skip_embedding()) return Artha{Vector::zeros(), 0.0f, text};
+
+        std::string cache_key = "__q:" + text;
+        std::unique_lock lock(mutex_);
+        if (auto cached = cache_.get(cache_key)) {
+            cache_.record_hit();
+            return Artha{*cached, 1.0f, text};
+        }
+        cache_.record_miss();
+        if (!yantra_ || !yantra_->ready()) return Artha{};
+
+        auto artha = yantra_->transform(text, EmbedMode::Query);
+        if (artha.nu.is_zero()) { record_failure(); return artha; }
+        record_success();
+        cache_.put(cache_key, artha.nu);
+        return artha;
+    }
+
+    // Embed single text (with caching and circuit breaker) — document mode
     Vector embed(const std::string& text) {
         // Check circuit breaker first
         if (should_skip_embedding()) {

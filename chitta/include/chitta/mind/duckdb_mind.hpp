@@ -13,6 +13,8 @@
 
 #include "../duckdb_store.hpp"
 #include "../theme_manager.hpp"
+#include "../narrative.hpp"
+#include "../anticipator.hpp"
 #include "embedder.hpp"
 #include "types.hpp"
 #include "../types.hpp"
@@ -530,6 +532,9 @@ public:
         load_learner_state_unlocked();
         // Initialize theme manager
         theme_manager_ = std::make_unique<ThemeManager>(&store_, &embedder_, theme_config_);
+        // Initialize narrative engine and anticipator
+        narrative_engine_ = std::make_unique<NarrativeEngine>(store_);
+        anticipator_ = std::make_unique<Anticipator>(&store_, narrative_engine_.get());
         return true;
     }
 
@@ -553,6 +558,11 @@ public:
 
     bool has_yantra() const {
         return embedder_.ready();
+    }
+
+    // Get the underlying yantra for status queries
+    std::shared_ptr<VakYantra> embedder_yantra() const {
+        return embedder_.yantra();
     }
 
     // Public accessors for diagnostics
@@ -633,8 +643,8 @@ public:
             constexpr float w_bm25 = 0.4f;
             constexpr float tag_boost = 0.05f;
 
-            // Phase 1: Semantic search
-            Artha artha = embedder_.transform(query);
+            // Phase 1: Semantic search (query mode — adds instruction prefix for BGE)
+            Artha artha = embedder_.transform_query(query);
             auto sem_results = store_.recall(artha.nu.data, limit * 2);
 
             // Phase 2: BM25 keyword search (if FTS available)
@@ -801,6 +811,14 @@ public:
             // Set provenance: derived from first episode
             store_.set_provenance(wisdom_id, "auto_distill", "auto_distill_episodes",
                                    c.avg_confidence, c.episode_ids[0]);
+
+            // Assign to theme if theme_manager is available
+            if (theme_manager_) {
+                auto themes = store_.themes_by_relevance(artha.nu.data, 1);
+                if (!themes.empty()) {
+                    store_.theme_assign(wisdom_id, themes[0].id, 0.8f);
+                }
+            }
 
             // Create "EvolvedFrom" triplets linking wisdom to source episodes
             for (int64_t ep_id : c.episode_ids) {
@@ -1035,8 +1053,8 @@ public:
                 active_config = learner_.sample_params(context);
             }
 
-            // Transform query to embedding
-            Artha artha = embedder_.transform(query);
+            // Transform query to embedding (query mode — adds instruction prefix for BGE)
+            Artha artha = embedder_.transform_query(query);
             if (artha.nu.size() == 0) return {};
 
             // Phase 1a: Get semantic seeds (initial candidates)
@@ -1228,8 +1246,8 @@ public:
             return {};
         }
 
-        // Transform query to embedding
-        Artha artha = embedder_.transform(query);
+        // Transform query to embedding (query mode — adds instruction prefix for BGE)
+        Artha artha = embedder_.transform_query(query);
         if (artha.nu.size() == 0) return {};
 
         // Two-stage retrieval
@@ -1272,7 +1290,7 @@ public:
             return {};
         }
 
-        Artha artha = embedder_.transform(query);
+        Artha artha = embedder_.transform_query(query);
         if (artha.nu.size() == 0) return {};
 
         return theme_manager_->retrieve_representatives(artha.nu.data, max_themes, realm);
@@ -1310,6 +1328,14 @@ public:
     // Access to theme manager
     ThemeManager* theme_manager() { return theme_manager_.get(); }
     const ThemeManager* theme_manager() const { return theme_manager_.get(); }
+
+    // Access to narrative engine
+    NarrativeEngine* narrative() { return narrative_engine_.get(); }
+    const NarrativeEngine* narrative() const { return narrative_engine_.get(); }
+
+    // Access to anticipator
+    Anticipator* anticipator() { return anticipator_.get(); }
+    const Anticipator* anticipator() const { return anticipator_.get(); }
 
     // Access to theme config
     ThemeConfig& theme_config() { return theme_config_; }
@@ -1779,6 +1805,10 @@ private:
     ThemeConfig theme_config_;
     mutable std::unique_ptr<ThemeManager> theme_manager_;
     bool enable_theme_recall_ = true;  // Use theme-based retrieval
+
+    // Narrative and Anticipation
+    std::unique_ptr<NarrativeEngine> narrative_engine_;
+    std::unique_ptr<Anticipator> anticipator_;
 
     // Attractor cache (expensive to compute, changes slowly)
     mutable std::vector<DuckDBAttractor> attractor_cache_;

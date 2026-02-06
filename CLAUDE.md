@@ -120,18 +120,20 @@ Only fall back to Grep/Glob/Read when chitta doesn't have the codebase indexed o
 | Structural | `find_symbol`, `query` | Find by name, navigate triplets |
 | Semantic | `search_symbols` | Find by natural language (~50-80% accuracy) |
 
-**Indexing:**
+**Indexing (two steps, both required):**
 ```bash
-/codebase-learn /path/to/project  # Index symbols and relationships
-chitta embed_symbols              # Generate embeddings (~50/sec)
+/codebase-learn /path/to/project  # Step 1: Extract symbols and relationships
+chitta embed_symbols              # Step 2: Generate embeddings (~90-100/sec)
 ```
+`learn_codebase` extracts structure. `embed_symbols` makes semantic search work. Without step 2, `search_symbols` returns nothing. Use `embed_symbols --reset true` to regenerate all embeddings with fresh text.
 
 **Querying:**
 ```bash
 chitta find_symbol --name "Mind" --kind class
-chitta search_symbols --query "memory storage class" --limit 5
+chitta search_symbols --query "memory storage class" --limit 5 --project cc-soul
 chitta query --subject "Mind" --predicate contains
 ```
+Use `--project` to filter search results to a specific project (avoids cross-project noise).
 
 **Exploration (RLM-style):**
 ```bash
@@ -143,7 +145,7 @@ chitta explore_neighbors --node "Mind"               # Triplet connections
 
 Use `/explore` skill for dynamic memory graph navigation instead of top-k dump.
 
-**Note:** Semantic search finds structural matches (names), not understanding. For "what does X do?" — read the code or check memories.
+**Note:** Semantic search matches symbol names, signatures, and structure — not semantic understanding of what code does. For "what does X do?" — read the code or check memories.
 
 ## Session Continuity
 
@@ -160,12 +162,19 @@ Hooks handle mechanics:
 
 ## Building Chitta
 
+**Always follow all three steps after code changes:**
 ```bash
-cd chitta && cmake --build build --parallel
-pkill -TERM chittad  # Graceful restart
+cd chitta && cmake --build build --parallel          # 1. Build
+cp bin/chitta bin/chittad ~/.claude/bin/              # 2. Install
+pkill -TERM chittad                                  # 3. Restart daemon
 ```
 
-Daemon auto-starts on next tool call.
+Daemon auto-starts on next tool call. The MCP server (`chitta mcp`) is a separate process — if tool schemas change (new params, new tools), it must also be restarted: `pkill -f "chitta mcp"`.
+
+**Release:** Always use the release script, never manual version bumps:
+```bash
+./scripts/release.sh patch|minor|major -y
+```
 
 ## Learning Tools
 
@@ -242,14 +251,27 @@ This auto-records a positive outcome and strengthens the memory.
 | Find symbol | `chitta find_symbol --name "X"` |
 | Read symbol code | `chitta read_symbol --name "X"` |
 | Find callers | `chitta symbol_callers --name "X"` |
-| Semantic code search | `chitta search_symbols --query "..."` |
-| Release | `./scripts/release.sh patch\|minor\|major` |
+| Semantic code search | `chitta search_symbols --query "..." --project X` |
+| Generate embeddings | `chitta embed_symbols` (run after learn_codebase) |
+| Release | `./scripts/release.sh patch\|minor\|major -y` |
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `search_symbols` returns nothing | Embeddings not generated | Run `embed_symbols` after `learn_codebase` |
+| `search_symbols` returns wrong project | No project filter | Pass `--project` parameter |
+| New tool params not visible in MCP | Schema cached by Claude Code | `pkill -f "chitta mcp"` to restart MCP server |
+| Tool calls fail with connection error | Daemon not running | `pkill -TERM chittad` then retry (auto-restarts) |
+| `embed_symbols` shows 0 new | All symbols already embedded | Use `--reset true` to re-embed with fresh text |
+| soul_context shows empty state | No memories stored yet | Normal for new installs — memories build over time |
 
 ## Recovery
 
 ```bash
 chitta soul_context                     # Check health
 chitta recall --query "test" --limit 3  # Test recall
+chitta hygiene_stats                    # Memory health metrics
 ```
 
 If corrupted, use `rebuild_indexes` via RPC or restore from snapshot.

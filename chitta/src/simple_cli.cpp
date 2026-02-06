@@ -944,6 +944,49 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                             mind.store().anticipation_success(id);
                             queue_count++;
                         }
+                    } else if (tool == "narrative_log") {
+                        std::string session_id = args.value("session_id", "");
+                        std::string kind_str = args.value("kind", "user_message");
+                        std::string summary = args.value("summary", "");
+                        std::string tool_name = args.value("tool_name", "");
+                        bool success = args.value("success", true);
+                        if (!session_id.empty() && !summary.empty()) {
+                            SessionEvent event;
+                            event.session_id = session_id;
+                            event.kind = string_to_session_event_kind(kind_str);
+                            event.summary = summary;
+                            event.tool_name = tool_name;
+                            event.success = success;
+                            mind.store().event_log_append(event);
+                            if (mind.narrative()) {
+                                mind.narrative()->evaluate(session_id, event);
+                            }
+                            queue_count++;
+                        }
+                    } else if (tool == "calibration_record") {
+                        std::string domain = args.value("domain", "");
+                        bool success = args.value("success", true);
+                        if (!domain.empty()) {
+                            mind.store().calibration_record(domain, success);
+                            queue_count++;
+                        }
+                    } else if (tool == "curiosity_note_gap") {
+                        std::string gap = args.value("gap", "");
+                        if (!gap.empty()) {
+                            // Create memory with "gap" and "unresolved" tags
+                            std::string content = "[curiosity] " + gap;
+                            mind.remember(content, NodeType::Episode, "brahman",
+                                          RealmVisibility::Private, 0.7f);
+                            queue_count++;
+                        }
+                    } else if (tool == "habit_observe") {
+                        std::string trigger = args.value("trigger", "");
+                        std::string response = args.value("response", "");
+                        std::string realm = args.value("realm", "brahman");
+                        if (!trigger.empty() && !response.empty()) {
+                            mind.store().habit_observe(trigger, response, realm);
+                            queue_count++;
+                        }
                     }
                 } catch (const std::exception& e) {
                     if (verbose_mode) {

@@ -10,12 +10,13 @@
 // - Batch processing with dynamic shapes
 
 #include "vak.hpp"
-#include <onnxruntime/core/session/onnxruntime_cxx_api.h>
+#include <onnxruntime_cxx_api.h>
 #include <array>
 #include <numeric>
 #include <cmath>
 #include <codecvt>
 #include <locale>
+#include <iostream>
 
 namespace chitta {
 
@@ -33,7 +34,7 @@ struct ModelConfig {
     std::vector<std::string> output_names;
     std::vector<std::vector<int64_t>> input_shapes;
     std::vector<std::vector<int64_t>> output_shapes;
-    int64_t hidden_dim = 384;
+    int64_t hidden_dim = 768;
     int64_t max_seq_length = 512;
     bool has_token_type_ids = false;
     bool outputs_pooled = false;  // Some models output pooled directly
@@ -144,6 +145,14 @@ public:
         // Validate
         if (unk_id_ < 0) {
             return false;  // Must have UNK token
+        }
+
+        // Find max token length for optimization
+        max_token_len_ = 0;
+        for (const auto& [token, _] : vocab_) {
+            if (token.length() > max_token_len_) {
+                max_token_len_ = token.length();
+            }
         }
 
         return true;
@@ -259,43 +268,51 @@ private:
 
     std::vector<int64_t> tokenize_word(const std::string& word) const {
         std::vector<int64_t> tokens;
-
         if (word.empty()) return tokens;
 
-        // Check if whole word exists
+        // Check if whole word exists (common case - fast path)
         auto it = vocab_.find(word);
         if (it != vocab_.end()) {
             tokens.push_back(it->second);
             return tokens;
         }
 
-        // WordPiece algorithm
+        // WordPiece algorithm - optimized to reduce allocations
         size_t start = 0;
+        std::string buffer;
+        buffer.reserve(max_token_len_ + 2);  // Pre-allocate for "##" prefix
+
         while (start < word.length()) {
-            size_t end = word.length();
+            // Limit search to max possible token length
+            size_t prefix_len = (start > 0) ? 2 : 0;  // "##" prefix
+            size_t max_len = std::min(word.length() - start, max_token_len_ - prefix_len);
+            size_t end = start + max_len;
             int64_t cur_id = -1;
+            size_t found_end = start;
 
-            while (start < end) {
-                std::string substr = word.substr(start, end - start);
+            while (end > start) {
+                // Reuse buffer to avoid allocations
+                buffer.clear();
                 if (start > 0) {
-                    substr = "##" + substr;
+                    buffer = "##";
                 }
+                buffer.append(word, start, end - start);
 
-                auto it = vocab_.find(substr);
+                auto it = vocab_.find(buffer);
                 if (it != vocab_.end()) {
                     cur_id = it->second;
+                    found_end = end;
                     break;
                 }
                 end--;
             }
 
             if (cur_id < 0) {
-                // Single character not found, use UNK
                 tokens.push_back(unk_id_);
                 start++;
             } else {
                 tokens.push_back(cur_id);
-                start = end;
+                start = found_end;
             }
         }
 
@@ -309,20 +326,44 @@ private:
     int64_t pad_id_ = 0;
     int64_t unk_id_ = -1;
     int64_t mask_id_ = -1;
+    size_t max_token_len_ = 20;  // Max subword length in vocab (optimization)
+};
+
+// Execution provider type for status reporting
+enum class ExecutionProvider {
+    CPU,
+    CoreML,   // Apple Neural Engine + GPU
+    CUDA,     // NVIDIA GPU
+    Unknown
 };
 
 // The main ONNX embedding engine
 class AntahkaranaYantra : public VakYantra {
 public:
     struct Config {
-        PoolingStrategy pooling = PoolingStrategy::Mean;
-        size_t max_seq_length = 128;
+        PoolingStrategy pooling = PoolingStrategy::CLS;  // CLS for BGE models
+        size_t max_seq_length = 256;  // Balance between quality and speed
         size_t batch_size = 32;       // Max batch for efficiency
         bool normalize_embeddings = true;
         int num_threads = 4;          // Default to 4 threads (not auto)
+        // BGE instruction prefix for query embeddings
+        std::string query_prefix = "Represent this sentence for searching relevant passages: ";
     };
 
     AntahkaranaYantra() : env_(ORT_LOGGING_LEVEL_WARNING, "chitta") {}
+
+    // Get current execution provider (for status reporting)
+    ExecutionProvider execution_provider() const { return exec_provider_; }
+
+    // Human-readable execution provider name (overrides VakYantra)
+    std::string execution_provider_name() const override {
+        switch (exec_provider_) {
+            case ExecutionProvider::CoreML: return "CoreML (GPU+ANE)";
+            case ExecutionProvider::CUDA: return "CUDA";
+            case ExecutionProvider::CPU: return "CPU";
+            default: return "Unknown";
+        }
+    }
 
     explicit AntahkaranaYantra(Config config)
         : env_(ORT_LOGGING_LEVEL_WARNING, "chitta"), config_(config) {}
@@ -351,6 +392,10 @@ public:
 
             opts.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
 
+            // CPU execution - CoreML tested but no speedup for single-sentence embeddings
+            // (tokenization is the bottleneck, not inference)
+            exec_provider_ = ExecutionProvider::CPU;
+
             // Create session
             session_ = std::make_unique<Ort::Session>(env_, model_path.c_str(), opts);
 
@@ -374,6 +419,18 @@ public:
     Artha transform(const std::string& vak) override {
         auto results = transform_batch({vak});
         return results.empty() ? Artha(Vector::zeros(), 0.0f, vak) : results[0];
+    }
+
+    Artha transform(const std::string& vak, EmbedMode mode) override {
+        // For query mode, prepend instruction prefix
+        if (mode == EmbedMode::Query && !config_.query_prefix.empty()) {
+            std::string prefixed = config_.query_prefix + vak;
+            auto results = run_inference({prefixed});
+            if (results.empty()) return Artha(Vector::zeros(), 0.0f, vak);
+            results[0].source = vak;  // Store original text, not prefixed
+            return results[0];
+        }
+        return transform(vak);
     }
 
     std::vector<Artha> transform_batch(const std::vector<std::string>& vaks) override {
@@ -674,6 +731,7 @@ private:
 
     bool ready_ = false;
     std::string error_;
+    ExecutionProvider exec_provider_ = ExecutionProvider::CPU;
 };
 
 // Factory function with sensible defaults
@@ -683,7 +741,7 @@ inline std::shared_ptr<VakYantra> create_yantra(
     size_t cache_size = 10000)
 {
     AntahkaranaYantra::Config config;
-    config.pooling = PoolingStrategy::Mean;
+    config.pooling = PoolingStrategy::CLS;  // CLS pooling for BGE models
     config.normalize_embeddings = true;
 
     auto inner = std::make_shared<AntahkaranaYantra>(config);

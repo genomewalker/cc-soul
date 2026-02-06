@@ -296,6 +296,184 @@ struct AnticipationPattern {
     int64_t created_at = 0;
 };
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Narrative Event Stream: Session Event Logging
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Session event kinds (append-only log)
+enum class SessionEventKind : uint8_t {
+    UserMessage = 0,
+    AssistantMessage = 1,
+    ToolUse = 2,
+    ToolResult = 3,
+    Error = 4,
+    FileEdit = 5,
+    Search = 6,
+    Build = 7,
+    Test = 8,
+    Commit = 9,
+    ModeChange = 10,
+};
+
+// Convert SessionEventKind to string
+inline std::string session_event_kind_to_string(SessionEventKind kind) {
+    switch (kind) {
+        case SessionEventKind::UserMessage: return "user_message";
+        case SessionEventKind::AssistantMessage: return "assistant_message";
+        case SessionEventKind::ToolUse: return "tool_use";
+        case SessionEventKind::ToolResult: return "tool_result";
+        case SessionEventKind::Error: return "error";
+        case SessionEventKind::FileEdit: return "file_edit";
+        case SessionEventKind::Search: return "search";
+        case SessionEventKind::Build: return "build";
+        case SessionEventKind::Test: return "test";
+        case SessionEventKind::Commit: return "commit";
+        case SessionEventKind::ModeChange: return "mode_change";
+        default: return "unknown";
+    }
+}
+
+// Convert string to SessionEventKind
+inline SessionEventKind string_to_session_event_kind(const std::string& s) {
+    if (s == "user_message") return SessionEventKind::UserMessage;
+    if (s == "assistant_message") return SessionEventKind::AssistantMessage;
+    if (s == "tool_use") return SessionEventKind::ToolUse;
+    if (s == "tool_result") return SessionEventKind::ToolResult;
+    if (s == "error") return SessionEventKind::Error;
+    if (s == "file_edit") return SessionEventKind::FileEdit;
+    if (s == "search") return SessionEventKind::Search;
+    if (s == "build") return SessionEventKind::Build;
+    if (s == "test") return SessionEventKind::Test;
+    if (s == "commit") return SessionEventKind::Commit;
+    if (s == "mode_change") return SessionEventKind::ModeChange;
+    return SessionEventKind::UserMessage;  // Default
+}
+
+// Session event: individual action in the event stream
+struct SessionEvent {
+    int64_t id = 0;
+    std::string session_id;
+    SessionEventKind kind = SessionEventKind::UserMessage;
+    std::string summary;           // Brief description of the event
+    std::string payload;           // JSON: tool args, message content, etc.
+    std::string tool_name;         // For ToolUse/ToolResult events
+    bool success = true;           // For ToolResult events
+    std::string files_mentioned;   // JSON array of file paths
+    std::string realm;
+    int64_t created_at = 0;
+};
+
+// Work mode for state segments
+enum class WorkMode : uint8_t {
+    Orienting = 0,      // Understanding the task/codebase
+    Exploring = 1,      // Searching, reading, investigating
+    Implementing = 2,   // Writing code, editing files
+    Debugging = 3,      // Fixing issues, analyzing errors
+    Validating = 4,     // Running tests, checking builds
+    Blocked = 5,        // Waiting on user input or stuck
+    Flow = 6,           // Deep productive work
+};
+
+// Convert WorkMode to string
+inline std::string work_mode_to_string(WorkMode mode) {
+    switch (mode) {
+        case WorkMode::Orienting: return "orienting";
+        case WorkMode::Exploring: return "exploring";
+        case WorkMode::Implementing: return "implementing";
+        case WorkMode::Debugging: return "debugging";
+        case WorkMode::Validating: return "validating";
+        case WorkMode::Blocked: return "blocked";
+        case WorkMode::Flow: return "flow";
+        default: return "unknown";
+    }
+}
+
+// Convert string to WorkMode
+inline WorkMode string_to_work_mode(const std::string& s) {
+    if (s == "orienting") return WorkMode::Orienting;
+    if (s == "exploring") return WorkMode::Exploring;
+    if (s == "implementing") return WorkMode::Implementing;
+    if (s == "debugging") return WorkMode::Debugging;
+    if (s == "validating") return WorkMode::Validating;
+    if (s == "blocked") return WorkMode::Blocked;
+    if (s == "flow") return WorkMode::Flow;
+    return WorkMode::Orienting;  // Default
+}
+
+// State segment: contiguous period of a work mode
+struct StateSegment {
+    int64_t id = 0;
+    std::string session_id;
+    WorkMode mode = WorkMode::Orienting;
+    float confidence = 0.5f;       // How confident is the mode inference
+    std::string evidence;          // JSON: what led to this inference
+    int64_t started_at = 0;
+    int64_t ended_at = 0;          // 0 = still open
+    int32_t event_count = 0;       // Events in this segment
+    std::string tools_used;        // JSON array of tool names
+    std::string files_active;      // JSON array of file paths
+    std::string realm;
+    std::string status;            // "open" or "closed"
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Anticipation Candidates and Annoyance Gate
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Source of anticipation prediction
+enum class AnticipationSource : uint8_t {
+    Rule = 0,           // Pattern-matching rule (e.g., "after file edit, often build")
+    Sequence = 1,       // Sequential pattern from event history
+    EpisodeMatch = 2,   // Similar past episode recalled
+};
+
+// Convert AnticipationSource to string
+inline std::string anticipation_source_to_string(AnticipationSource source) {
+    switch (source) {
+        case AnticipationSource::Rule: return "rule";
+        case AnticipationSource::Sequence: return "sequence";
+        case AnticipationSource::EpisodeMatch: return "episode_match";
+        default: return "unknown";
+    }
+}
+
+// Convert string to AnticipationSource
+inline AnticipationSource string_to_anticipation_source(const std::string& s) {
+    if (s == "rule") return AnticipationSource::Rule;
+    if (s == "sequence") return AnticipationSource::Sequence;
+    if (s == "episode_match") return AnticipationSource::EpisodeMatch;
+    return AnticipationSource::Rule;  // Default
+}
+
+// Anticipation candidate: a prediction waiting to be surfaced or resolved
+struct AnticipationCandidate {
+    int64_t id = 0;
+    std::string session_id;
+    std::string prediction;         // What we predict will happen/be needed
+    AnticipationSource source = AnticipationSource::Rule;
+    float confidence = 0.5f;        // 0-1 confidence in the prediction
+    std::string evidence;           // JSON: what led to this prediction
+    std::string current_mode;       // Work mode when prediction was made
+    bool surfaced = false;          // Has this been shown to the user?
+    std::string outcome;            // "correct", "incorrect", "expired", "" (pending)
+    int64_t created_at = 0;
+    int64_t surfaced_at = 0;        // When it was shown (0 if not surfaced)
+    int64_t resolved_at = 0;        // When outcome was determined (0 if pending)
+};
+
+// Annoyance gate state: controls how often predictions are surfaced
+struct AnnoyanceGateState {
+    std::string session_id;         // Session this gate applies to
+    int32_t predictions_surfaced = 0;   // Total predictions shown
+    int32_t predictions_correct = 0;    // How many were right
+    int32_t predictions_incorrect = 0;  // How many were wrong
+    int64_t last_surfaced_at = 0;       // When we last showed a prediction
+    int32_t budget_remaining = 5;       // How many more we can show this session
+    int64_t cooldown_ms = 120000;       // Min time between predictions (default 2 min)
+    float confidence_floor = 0.7f;      // Min confidence to surface (precision-first)
+    int64_t created_at = 0;
+};
+
 // Habit: repeated pattern that strengthens with use
 struct Habit {
     int64_t id = 0;
@@ -738,6 +916,42 @@ public:
     bool anticipation_success(int64_t id);
     std::vector<AnticipationPattern> anticipation_list(const std::string& realm = "",
                                                         size_t limit = 50);
+
+    // Session event logging: append-only event stream
+    int64_t event_log_append(const SessionEvent& event);
+    std::vector<SessionEvent> event_log_recent(const std::string& session_id,
+                                                size_t limit = 50,
+                                                const std::string& kind = "");
+    size_t event_log_count(const std::string& session_id = "");
+
+    // State segments: work mode inference
+    int64_t segment_open(const std::string& session_id, WorkMode mode,
+                         float confidence, const std::string& evidence,
+                         const std::string& realm = "brahman");
+    bool segment_close(int64_t segment_id, int32_t event_count,
+                       const std::string& tools_used,
+                       const std::string& files_active);
+    bool segment_update(int64_t segment_id, WorkMode mode, float confidence,
+                        const std::string& evidence);
+    std::optional<StateSegment> segment_current(const std::string& session_id);
+    std::vector<StateSegment> segment_history(const std::string& session_id,
+                                               size_t limit = 20);
+
+    // Anticipation candidates: predictions waiting to be surfaced
+    int64_t candidate_create(const AnticipationCandidate& candidate);
+    std::vector<AnticipationCandidate> candidate_pending(const std::string& session_id,
+                                                          size_t limit = 10);
+    bool candidate_surface(int64_t candidate_id);
+    bool candidate_resolve(int64_t candidate_id, const std::string& outcome);
+    std::optional<AnticipationCandidate> candidate_get(int64_t candidate_id);
+
+    // Annoyance gate: controls prediction surfacing frequency
+    bool gate_init(const std::string& session_id);
+    std::optional<AnnoyanceGateState> gate_get(const std::string& session_id);
+    bool gate_record_surface(const std::string& session_id);
+    bool gate_record_outcome(const std::string& session_id, bool correct);
+    bool gate_allows(const std::string& session_id, float confidence);
+    bool gate_update(const std::string& session_id, float confidence_floor, int64_t cooldown_ms);
 
     // Habit formation: repeated patterns that strengthen
     int64_t habit_observe(const std::string& trigger, const std::string& response,

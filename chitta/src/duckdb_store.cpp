@@ -177,11 +177,28 @@ bool DuckDBStore::create_embeddings_schema() {
         // Enable experimental persistence for HNSW in embeddings DB
         emb_conn_->Query("SET hnsw_enable_experimental_persistence = true");
 
+        // Migration: detect old 384-dim embedding tables and drop them
+        // Embeddings are regenerated via embed_symbols --reset
+        try {
+            auto result = emb_conn_->Query("SELECT array_length(embedding) as dim FROM symbol_embeddings LIMIT 1");
+            if (result && !result->HasError()) {
+                auto chunk = result->Fetch();
+                if (chunk && chunk->size() > 0) {
+                    auto dim = chunk->GetValue(0, 0).GetValue<int32_t>();
+                    if (dim != 768) {
+                        emb_conn_->Query("DROP TABLE IF EXISTS symbol_embeddings");
+                        emb_conn_->Query("DROP TABLE IF EXISTS memory_embeddings");
+                        std::cerr << "[DuckDBStore] Dropped old " << dim << "-dim embedding tables (will regenerate)\n";
+                    }
+                }
+            }
+        } catch (...) {}
+
         // Symbol embeddings table
         emb_conn_->Query(R"(
             CREATE TABLE IF NOT EXISTS symbol_embeddings (
                 symbol_id INTEGER PRIMARY KEY,
-                embedding FLOAT[384],
+                embedding FLOAT[768],
                 created_at TIMESTAMP DEFAULT current_timestamp
             )
         )");
@@ -190,7 +207,7 @@ bool DuckDBStore::create_embeddings_schema() {
         emb_conn_->Query(R"(
             CREATE TABLE IF NOT EXISTS memory_embeddings (
                 memory_id INTEGER PRIMARY KEY,
-                embedding FLOAT[384],
+                embedding FLOAT[768],
                 created_at TIMESTAMP DEFAULT current_timestamp
             )
         )");
@@ -263,13 +280,28 @@ bool DuckDBStore::create_schema() {
             decay_rate FLOAT,
             created_at BIGINT,
             accessed_at BIGINT,
-            embedding FLOAT[384],
+            embedding FLOAT[768],
             realm VARCHAR DEFAULT 'brahman',
             visibility INTEGER DEFAULT 0
         )
     )")) {
         return false;
     }
+
+    // Migration: null out old 384-dim embeddings (will be re-embedded)
+    try {
+        auto result = write_query("SELECT array_length(embedding) as dim FROM memory WHERE embedding IS NOT NULL LIMIT 1");
+        if (result && !result->HasError()) {
+            auto chunk = result->Fetch();
+            if (chunk && chunk->size() > 0) {
+                auto dim = chunk->GetValue(0, 0).GetValue<int32_t>();
+                if (dim != 768) {
+                    write_execute("UPDATE memory SET embedding = NULL WHERE embedding IS NOT NULL");
+                    std::cerr << "[DuckDBStore] Nulled old " << dim << "-dim memory embeddings (will re-embed)\n";
+                }
+            }
+        }
+    } catch (...) {}
 
     // Realm membership table for multi-realm support
     if (!write_execute(R"(
@@ -338,7 +370,7 @@ bool DuckDBStore::create_schema() {
             line_start INTEGER,
             line_end INTEGER,
             repo_id BIGINT,
-            embedding FLOAT[384]
+            embedding FLOAT[768]
         )
     )")) {
         return false;
@@ -594,6 +626,100 @@ bool DuckDBStore::create_schema() {
     write_execute("CREATE INDEX IF NOT EXISTS idx_anticipation_realm ON anticipation(realm)");
     write_execute("CREATE INDEX IF NOT EXISTS idx_anticipation_freq ON anticipation(frequency DESC)");
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Narrative Event Stream: Session Event Logging
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    // Session event table: append-only event log
+    if (!write_execute(R"(
+        CREATE TABLE IF NOT EXISTS session_event (
+            id BIGINT PRIMARY KEY,
+            session_id VARCHAR NOT NULL,
+            kind VARCHAR NOT NULL,
+            summary TEXT,
+            payload TEXT,
+            tool_name VARCHAR,
+            success BOOLEAN DEFAULT TRUE,
+            files_mentioned TEXT,
+            realm VARCHAR DEFAULT 'brahman',
+            created_at BIGINT NOT NULL
+        )
+    )")) {
+        return false;
+    }
+
+    // Indexes for session event queries
+    write_execute("CREATE INDEX IF NOT EXISTS idx_session_event_session_time ON session_event(session_id, created_at)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_session_event_kind ON session_event(kind)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_session_event_created ON session_event(created_at DESC)");
+
+    // State segment table: derived work mode segments
+    if (!write_execute(R"(
+        CREATE TABLE IF NOT EXISTS state_segment (
+            id BIGINT PRIMARY KEY,
+            session_id VARCHAR NOT NULL,
+            mode VARCHAR NOT NULL,
+            confidence FLOAT DEFAULT 0.5,
+            evidence TEXT,
+            started_at BIGINT NOT NULL,
+            ended_at BIGINT DEFAULT 0,
+            event_count INTEGER DEFAULT 0,
+            tools_used TEXT,
+            files_active TEXT,
+            realm VARCHAR DEFAULT 'brahman',
+            status VARCHAR DEFAULT 'open'
+        )
+    )")) {
+        return false;
+    }
+
+    // Indexes for state segment queries
+    write_execute("CREATE INDEX IF NOT EXISTS idx_state_segment_session_time ON state_segment(session_id, started_at)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_state_segment_mode ON state_segment(mode)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_state_segment_status ON state_segment(status)");
+
+    // Anticipation candidate table: predictions waiting to be surfaced or resolved
+    if (!write_execute(R"(
+        CREATE TABLE IF NOT EXISTS anticipation_candidate (
+            id BIGINT PRIMARY KEY,
+            session_id VARCHAR NOT NULL,
+            prediction TEXT NOT NULL,
+            source VARCHAR NOT NULL,
+            confidence FLOAT DEFAULT 0.5,
+            evidence TEXT,
+            current_mode VARCHAR,
+            surfaced BOOLEAN DEFAULT FALSE,
+            outcome VARCHAR DEFAULT '',
+            created_at BIGINT NOT NULL,
+            surfaced_at BIGINT DEFAULT 0,
+            resolved_at BIGINT DEFAULT 0
+        )
+    )")) {
+        return false;
+    }
+
+    // Indexes for anticipation candidate queries
+    write_execute("CREATE INDEX IF NOT EXISTS idx_anticipation_candidate_session_time ON anticipation_candidate(session_id, created_at)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_anticipation_candidate_surfaced ON anticipation_candidate(surfaced)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_anticipation_candidate_outcome ON anticipation_candidate(outcome)");
+
+    // Annoyance gate table: controls prediction surfacing frequency
+    if (!write_execute(R"(
+        CREATE TABLE IF NOT EXISTS annoyance_gate (
+            session_id VARCHAR PRIMARY KEY,
+            predictions_surfaced INTEGER DEFAULT 0,
+            predictions_correct INTEGER DEFAULT 0,
+            predictions_incorrect INTEGER DEFAULT 0,
+            last_surfaced_at BIGINT DEFAULT 0,
+            budget_remaining INTEGER DEFAULT 5,
+            cooldown_ms BIGINT DEFAULT 120000,
+            confidence_floor FLOAT DEFAULT 0.7,
+            created_at BIGINT NOT NULL
+        )
+    )")) {
+        return false;
+    }
+
     // Habit table: repeated patterns that strengthen with use
     if (!write_execute(R"(
         CREATE TABLE IF NOT EXISTS habit (
@@ -728,7 +854,7 @@ bool DuckDBStore::create_schema() {
         CREATE TABLE IF NOT EXISTS theme (
             id BIGINT PRIMARY KEY,
             name VARCHAR NOT NULL,
-            centroid FLOAT[384],
+            centroid FLOAT[768],
             coherence FLOAT DEFAULT 1.0,
             sparsity FLOAT DEFAULT 0.5,
             memory_count INTEGER DEFAULT 0,
@@ -765,6 +891,9 @@ bool DuckDBStore::create_schema() {
     // Add primary_theme_id column to memory table (migration)
     write_execute("ALTER TABLE memory ADD COLUMN IF NOT EXISTS primary_theme_id BIGINT DEFAULT NULL");
 
+    // Add access_count column for usage-based decay (migration)
+    write_execute("ALTER TABLE memory ADD COLUMN IF NOT EXISTS access_count INTEGER DEFAULT 0");
+
     // Memory tags table (many-to-many)
     write_execute("CREATE TABLE IF NOT EXISTS memory_tags ("
         "memory_id BIGINT, tag VARCHAR, "
@@ -782,6 +911,9 @@ bool DuckDBStore::create_schema() {
     write_execute("CREATE SEQUENCE IF NOT EXISTS habit_seq START 1");
     write_execute("CREATE SEQUENCE IF NOT EXISTS background_seq START 1");
     write_execute("CREATE SEQUENCE IF NOT EXISTS theme_seq START 1");
+    write_execute("CREATE SEQUENCE IF NOT EXISTS session_event_seq START 1");
+    write_execute("CREATE SEQUENCE IF NOT EXISTS state_segment_seq START 1");
+    write_execute("CREATE SEQUENCE IF NOT EXISTS anticipation_candidate_seq START 1");
 
     return true;
 }
@@ -857,7 +989,7 @@ size_t DuckDBStore::migrate_embeddings_to_vss() {
         auto result = read_query(R"(
             SELECT id, embedding FROM memory
             WHERE embedding IS NOT NULL
-            AND array_length(embedding) = 384
+            AND array_length(embedding) = 768
         )");
 
         if (!result || result->HasError()) {
@@ -882,7 +1014,7 @@ size_t DuckDBStore::migrate_embeddings_to_vss() {
                     embedding.push_back(v.GetValue<float>());
                 }
 
-                if (embedding.size() == 384) {
+                if (embedding.size() == 768) {
                     // Delete first to avoid HNSW duplicate key errors
                     std::ostringstream del_sql;
                     del_sql << "DELETE FROM memory_embeddings WHERE memory_id = " << mem_id;
@@ -955,15 +1087,15 @@ std::unique_ptr<duckdb::QueryResult> DuckDBStore::read_query(const std::string& 
 // but embeddings differ each call so caching requires a map. Using std::string
 // with reserve() to avoid repeated allocations in the ostringstream.
 std::string DuckDBStore::embedding_to_sql(const std::vector<float>& embedding) {
-    // ~12 chars per float (e.g. "-0.12345678,") * 384 dims + overhead
+    // ~12 chars per float (e.g. "-0.12345678,") * 768 dims + overhead
     std::string result;
-    result.reserve(384 * 12 + 20);
+    result.reserve(768 * 12 + 20);
     result += "[";
     for (size_t i = 0; i < embedding.size(); ++i) {
         if (i > 0) result += ",";
         result += std::to_string(embedding[i]);
     }
-    result += "]::FLOAT[384]";
+    result += "]::FLOAT[768]";
     return result;
 }
 
@@ -1350,7 +1482,8 @@ bool DuckDBStore::touch(int64_t id) {
     if (!db_) return false;
 
     std::ostringstream sql;
-    sql << "UPDATE memory SET accessed_at = " << now() << " WHERE id = " << id;
+    sql << "UPDATE memory SET accessed_at = " << now()
+        << ", access_count = COALESCE(access_count, 0) + 1 WHERE id = " << id;
 
     return write_execute(sql.str());
 }
@@ -1432,7 +1565,7 @@ bool DuckDBStore::update_visibility(int64_t id, RealmVisibility visibility) {
 
 bool DuckDBStore::set_memory_embedding(int64_t id, const std::vector<float>& embedding) {
     if (!db_) return false;
-    if (embedding.size() != 384) return false;
+    if (embedding.size() != 768) return false;
 
     // Store in embeddings DB (for HNSW index) if available
     if (emb_conn_) {
@@ -1685,16 +1818,18 @@ size_t DuckDBStore::apply_decay() {
     Timestamp current = now();
 
     // DESIGN NOTE: apply_decay is idempotent. It recomputes confidence from the
-    // elapsed time since last access using: confidence * exp(-decay_rate * dt).
-    // Calling it multiple times in succession produces the same result because
-    // the formula is based on absolute time difference, not incremental reduction.
-    // This means it's safe to call from cron jobs, background tasks, or multiple
-    // sessions without risk of double-decaying memories.
+    // elapsed time since last access using: confidence * exp(-decay_rate / usage_factor * dt).
+    // The usage_factor = 1 + ln(1 + access_count) means frequently-accessed memories
+    // decay slower (logarithmic dampening). Calling it multiple times in succession
+    // produces the same result because the formula is based on absolute time difference,
+    // not incremental reduction. This means it's safe to call from cron jobs, background
+    // tasks, or multiple sessions without risk of double-decaying memories.
     //
-    // Apply exponential decay based on time since last access
+    // Apply exponential decay based on time since last access, dampened by usage
     // Single atomic UPDATE - DuckDB handles locking internally
     std::ostringstream sql;
-    sql << "UPDATE memory SET confidence = confidence * exp(-decay_rate * "
+    sql << "UPDATE memory SET confidence = confidence * exp(-decay_rate "
+        << "/ (1.0 + ln(1.0 + COALESCE(access_count, 0))) * "
         << "(" << current << " - accessed_at) / 86400000.0) "
         << "WHERE decay_rate > 0 AND accessed_at < " << (current - 60000);  // Only decay if >1min since access
 
@@ -3141,7 +3276,7 @@ size_t DuckDBStore::count_total_symbols() {
 }
 
 bool DuckDBStore::set_symbol_embedding(int64_t symbol_id, const std::vector<float>& embedding) {
-    if (!db_ || embedding.size() != 384) return false;
+    if (!db_ || embedding.size() != 768) return false;
 
     // Reject zero vectors (embedder circuit-breaker returns zeros on failure)
     bool all_zero = true;
@@ -3320,7 +3455,7 @@ std::vector<DuckDBStore::SymbolMatch> DuckDBStore::search_symbols_by_embedding(
     const std::string& project) {
 
     std::vector<SymbolMatch> results;
-    if (!db_ || query_embedding.size() != 384) return results;
+    if (!db_ || query_embedding.size() != 768) return results;
 
     // Build query embedding array literal
     std::ostringstream emb_str;
@@ -3329,7 +3464,7 @@ std::vector<DuckDBStore::SymbolMatch> DuckDBStore::search_symbols_by_embedding(
         if (i > 0) emb_str << ",";
         emb_str << query_embedding[i];
     }
-    emb_str << "]::FLOAT[384]";
+    emb_str << "]::FLOAT[768]";
 
     // If separate embeddings DB is available, search there (joined with main symbol table)
     if (emb_conn_) {
@@ -4667,6 +4802,664 @@ std::vector<AnticipationPattern> DuckDBStore::anticipation_list(const std::strin
 }
 
 // ============================================================================
+// Session Event Logging: append-only event stream
+// ============================================================================
+
+int64_t DuckDBStore::event_log_append(const SessionEvent& event) {
+    if (!db_ || event.session_id.empty()) return 0;
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    auto now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+
+    int64_t created = event.created_at > 0 ? event.created_at : now;
+
+    std::ostringstream sql;
+    sql << "INSERT INTO session_event (id, session_id, kind, summary, payload, tool_name, success, files_mentioned, realm, created_at) "
+        << "VALUES (nextval('session_event_seq'), "
+        << "'" << escape(event.session_id) << "', "
+        << "'" << escape(session_event_kind_to_string(event.kind)) << "', "
+        << "'" << escape(event.summary) << "', "
+        << "'" << escape(event.payload) << "', "
+        << "'" << escape(event.tool_name) << "', "
+        << (event.success ? "TRUE" : "FALSE") << ", "
+        << "'" << escape(event.files_mentioned) << "', "
+        << "'" << escape(event.realm.empty() ? "brahman" : event.realm) << "', "
+        << created << ") "
+        << "RETURNING id";
+
+    auto result = write_query(sql.str());
+    if (!result || result->HasError()) {
+        last_error_ = result ? result->GetError() : "No result";
+        return 0;
+    }
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return 0;
+    return chunk->GetValue(0, 0).GetValue<int64_t>();
+}
+
+std::vector<SessionEvent> DuckDBStore::event_log_recent(const std::string& session_id,
+                                                          size_t limit,
+                                                          const std::string& kind) {
+    std::vector<SessionEvent> events;
+    if (!db_) return events;
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    std::ostringstream sql;
+    sql << "SELECT id, session_id, kind, summary, payload, tool_name, success, files_mentioned, realm, created_at "
+        << "FROM session_event WHERE session_id = '" << escape(session_id) << "'";
+
+    if (!kind.empty()) {
+        sql << " AND kind = '" << escape(kind) << "'";
+    }
+
+    sql << " ORDER BY created_at DESC LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) {
+        last_error_ = result ? result->GetError() : "No result";
+        return events;
+    }
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); i++) {
+            SessionEvent e;
+            e.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            e.session_id = chunk->GetValue(1, i).ToString();
+            e.kind = string_to_session_event_kind(chunk->GetValue(2, i).ToString());
+            e.summary = chunk->GetValue(3, i).ToString();
+            e.payload = chunk->GetValue(4, i).ToString();
+            e.tool_name = chunk->GetValue(5, i).ToString();
+            e.success = chunk->GetValue(6, i).GetValue<bool>();
+            e.files_mentioned = chunk->GetValue(7, i).ToString();
+            e.realm = chunk->GetValue(8, i).ToString();
+            e.created_at = chunk->GetValue(9, i).GetValue<int64_t>();
+            events.push_back(e);
+        }
+    }
+
+    return events;
+}
+
+size_t DuckDBStore::event_log_count(const std::string& session_id) {
+    if (!db_) return 0;
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    std::ostringstream sql;
+    sql << "SELECT COUNT(*) FROM session_event";
+
+    if (!session_id.empty()) {
+        sql << " WHERE session_id = '" << escape(session_id) << "'";
+    }
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) return 0;
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return 0;
+    return static_cast<size_t>(chunk->GetValue(0, 0).GetValue<int64_t>());
+}
+
+// ============================================================================
+// State Segments: work mode inference
+// ============================================================================
+
+int64_t DuckDBStore::segment_open(const std::string& session_id, WorkMode mode,
+                                   float confidence, const std::string& evidence,
+                                   const std::string& realm) {
+    if (!db_ || session_id.empty()) return 0;
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    auto now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+
+    std::ostringstream sql;
+    sql << "INSERT INTO state_segment (id, session_id, mode, confidence, evidence, started_at, ended_at, event_count, tools_used, files_active, realm, status) "
+        << "VALUES (nextval('state_segment_seq'), "
+        << "'" << escape(session_id) << "', "
+        << "'" << escape(work_mode_to_string(mode)) << "', "
+        << confidence << ", "
+        << "'" << escape(evidence) << "', "
+        << now << ", 0, 0, '[]', '[]', "
+        << "'" << escape(realm.empty() ? "brahman" : realm) << "', 'open') "
+        << "RETURNING id";
+
+    auto result = write_query(sql.str());
+    if (!result || result->HasError()) {
+        last_error_ = result ? result->GetError() : "No result";
+        return 0;
+    }
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return 0;
+    return chunk->GetValue(0, 0).GetValue<int64_t>();
+}
+
+bool DuckDBStore::segment_close(int64_t segment_id, int32_t event_count,
+                                 const std::string& tools_used,
+                                 const std::string& files_active) {
+    if (!db_ || segment_id <= 0) return false;
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    auto now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+
+    std::ostringstream sql;
+    sql << "UPDATE state_segment SET "
+        << "ended_at = " << now << ", "
+        << "event_count = " << event_count << ", "
+        << "tools_used = '" << escape(tools_used) << "', "
+        << "files_active = '" << escape(files_active) << "', "
+        << "status = 'closed' "
+        << "WHERE id = " << segment_id;
+
+    return write_execute(sql.str());
+}
+
+bool DuckDBStore::segment_update(int64_t segment_id, WorkMode mode, float confidence,
+                                  const std::string& evidence) {
+    if (!db_ || segment_id <= 0) return false;
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    std::ostringstream sql;
+    sql << "UPDATE state_segment SET "
+        << "mode = '" << escape(work_mode_to_string(mode)) << "', "
+        << "confidence = " << confidence << ", "
+        << "evidence = '" << escape(evidence) << "' "
+        << "WHERE id = " << segment_id << " AND status = 'open'";
+
+    return write_execute(sql.str());
+}
+
+std::optional<StateSegment> DuckDBStore::segment_current(const std::string& session_id) {
+    if (!db_ || session_id.empty()) return std::nullopt;
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    std::ostringstream sql;
+    sql << "SELECT id, session_id, mode, confidence, evidence, started_at, ended_at, event_count, tools_used, files_active, realm, status "
+        << "FROM state_segment "
+        << "WHERE session_id = '" << escape(session_id) << "' AND status = 'open' "
+        << "ORDER BY started_at DESC LIMIT 1";
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) {
+        last_error_ = result ? result->GetError() : "No result";
+        return std::nullopt;
+    }
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return std::nullopt;
+
+    StateSegment s;
+    s.id = chunk->GetValue(0, 0).GetValue<int64_t>();
+    s.session_id = chunk->GetValue(1, 0).ToString();
+    s.mode = string_to_work_mode(chunk->GetValue(2, 0).ToString());
+    s.confidence = chunk->GetValue(3, 0).GetValue<float>();
+    s.evidence = chunk->GetValue(4, 0).ToString();
+    s.started_at = chunk->GetValue(5, 0).GetValue<int64_t>();
+    s.ended_at = chunk->GetValue(6, 0).GetValue<int64_t>();
+    s.event_count = chunk->GetValue(7, 0).GetValue<int32_t>();
+    s.tools_used = chunk->GetValue(8, 0).ToString();
+    s.files_active = chunk->GetValue(9, 0).ToString();
+    s.realm = chunk->GetValue(10, 0).ToString();
+    s.status = chunk->GetValue(11, 0).ToString();
+    return s;
+}
+
+std::vector<StateSegment> DuckDBStore::segment_history(const std::string& session_id, size_t limit) {
+    std::vector<StateSegment> segments;
+    if (!db_ || session_id.empty()) return segments;
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    std::ostringstream sql;
+    sql << "SELECT id, session_id, mode, confidence, evidence, started_at, ended_at, event_count, tools_used, files_active, realm, status "
+        << "FROM state_segment "
+        << "WHERE session_id = '" << escape(session_id) << "' "
+        << "ORDER BY started_at DESC LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) {
+        last_error_ = result ? result->GetError() : "No result";
+        return segments;
+    }
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); i++) {
+            StateSegment s;
+            s.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            s.session_id = chunk->GetValue(1, i).ToString();
+            s.mode = string_to_work_mode(chunk->GetValue(2, i).ToString());
+            s.confidence = chunk->GetValue(3, i).GetValue<float>();
+            s.evidence = chunk->GetValue(4, i).ToString();
+            s.started_at = chunk->GetValue(5, i).GetValue<int64_t>();
+            s.ended_at = chunk->GetValue(6, i).GetValue<int64_t>();
+            s.event_count = chunk->GetValue(7, i).GetValue<int32_t>();
+            s.tools_used = chunk->GetValue(8, i).ToString();
+            s.files_active = chunk->GetValue(9, i).ToString();
+            s.realm = chunk->GetValue(10, i).ToString();
+            s.status = chunk->GetValue(11, i).ToString();
+            segments.push_back(s);
+        }
+    }
+
+    return segments;
+}
+
+// ============================================================================
+// Anticipation Candidates: predictions waiting to be surfaced or resolved
+// ============================================================================
+
+int64_t DuckDBStore::candidate_create(const AnticipationCandidate& candidate) {
+    if (!db_ || candidate.session_id.empty() || candidate.prediction.empty()) return 0;
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    auto now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+
+    std::ostringstream sql;
+    sql << "INSERT INTO anticipation_candidate (id, session_id, prediction, source, confidence, evidence, current_mode, surfaced, outcome, created_at, surfaced_at, resolved_at) "
+        << "VALUES (nextval('anticipation_candidate_seq'), '" << escape(candidate.session_id) << "', "
+        << "'" << escape(candidate.prediction) << "', "
+        << "'" << anticipation_source_to_string(candidate.source) << "', "
+        << candidate.confidence << ", "
+        << "'" << escape(candidate.evidence) << "', "
+        << "'" << escape(candidate.current_mode) << "', "
+        << "FALSE, '', " << now << ", 0, 0) "
+        << "RETURNING id";
+
+    auto result = write_query(sql.str());
+    if (!result || result->HasError()) {
+        last_error_ = result ? result->GetError() : "No result";
+        return 0;
+    }
+
+    auto chunk = result->Fetch();
+    if (chunk && chunk->size() > 0) {
+        return chunk->GetValue(0, 0).GetValue<int64_t>();
+    }
+    return 0;
+}
+
+std::vector<AnticipationCandidate> DuckDBStore::candidate_pending(const std::string& session_id, size_t limit) {
+    std::vector<AnticipationCandidate> candidates;
+    if (!db_ || session_id.empty()) return candidates;
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    std::ostringstream sql;
+    sql << "SELECT id, session_id, prediction, source, confidence, evidence, current_mode, surfaced, outcome, created_at, surfaced_at, resolved_at "
+        << "FROM anticipation_candidate "
+        << "WHERE session_id = '" << escape(session_id) << "' "
+        << "AND surfaced = FALSE AND outcome = '' "
+        << "ORDER BY confidence DESC, created_at DESC LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) {
+        last_error_ = result ? result->GetError() : "No result";
+        return candidates;
+    }
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); i++) {
+            AnticipationCandidate c;
+            c.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            c.session_id = chunk->GetValue(1, i).ToString();
+            c.prediction = chunk->GetValue(2, i).ToString();
+            c.source = string_to_anticipation_source(chunk->GetValue(3, i).ToString());
+            c.confidence = chunk->GetValue(4, i).GetValue<float>();
+            c.evidence = chunk->GetValue(5, i).ToString();
+            c.current_mode = chunk->GetValue(6, i).ToString();
+            c.surfaced = chunk->GetValue(7, i).GetValue<bool>();
+            c.outcome = chunk->GetValue(8, i).ToString();
+            c.created_at = chunk->GetValue(9, i).GetValue<int64_t>();
+            c.surfaced_at = chunk->GetValue(10, i).GetValue<int64_t>();
+            c.resolved_at = chunk->GetValue(11, i).GetValue<int64_t>();
+            candidates.push_back(c);
+        }
+    }
+
+    return candidates;
+}
+
+bool DuckDBStore::candidate_surface(int64_t candidate_id) {
+    if (!db_ || candidate_id <= 0) return false;
+
+    auto now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+
+    std::ostringstream sql;
+    sql << "UPDATE anticipation_candidate SET surfaced = TRUE, surfaced_at = " << now
+        << " WHERE id = " << candidate_id;
+
+    return write_execute(sql.str());
+}
+
+bool DuckDBStore::candidate_resolve(int64_t candidate_id, const std::string& outcome) {
+    if (!db_ || candidate_id <= 0 || outcome.empty()) return false;
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    auto now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+
+    std::ostringstream sql;
+    sql << "UPDATE anticipation_candidate SET outcome = '" << escape(outcome) << "', resolved_at = " << now
+        << " WHERE id = " << candidate_id;
+
+    return write_execute(sql.str());
+}
+
+std::optional<AnticipationCandidate> DuckDBStore::candidate_get(int64_t candidate_id) {
+    if (!db_ || candidate_id <= 0) return std::nullopt;
+
+    std::ostringstream sql;
+    sql << "SELECT id, session_id, prediction, source, confidence, evidence, current_mode, surfaced, outcome, created_at, surfaced_at, resolved_at "
+        << "FROM anticipation_candidate WHERE id = " << candidate_id;
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) {
+        last_error_ = result ? result->GetError() : "No result";
+        return std::nullopt;
+    }
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return std::nullopt;
+
+    AnticipationCandidate c;
+    c.id = chunk->GetValue(0, 0).GetValue<int64_t>();
+    c.session_id = chunk->GetValue(1, 0).ToString();
+    c.prediction = chunk->GetValue(2, 0).ToString();
+    c.source = string_to_anticipation_source(chunk->GetValue(3, 0).ToString());
+    c.confidence = chunk->GetValue(4, 0).GetValue<float>();
+    c.evidence = chunk->GetValue(5, 0).ToString();
+    c.current_mode = chunk->GetValue(6, 0).ToString();
+    c.surfaced = chunk->GetValue(7, 0).GetValue<bool>();
+    c.outcome = chunk->GetValue(8, 0).ToString();
+    c.created_at = chunk->GetValue(9, 0).GetValue<int64_t>();
+    c.surfaced_at = chunk->GetValue(10, 0).GetValue<int64_t>();
+    c.resolved_at = chunk->GetValue(11, 0).GetValue<int64_t>();
+
+    return c;
+}
+
+// ============================================================================
+// Annoyance Gate: controls prediction surfacing frequency
+// ============================================================================
+
+bool DuckDBStore::gate_init(const std::string& session_id) {
+    if (!db_ || session_id.empty()) return false;
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    auto now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+
+    std::ostringstream sql;
+    sql << "INSERT INTO annoyance_gate (session_id, predictions_surfaced, predictions_correct, predictions_incorrect, "
+        << "last_surfaced_at, budget_remaining, cooldown_ms, confidence_floor, created_at) "
+        << "VALUES ('" << escape(session_id) << "', 0, 0, 0, 0, 5, 120000, 0.7, " << now << ") "
+        << "ON CONFLICT (session_id) DO NOTHING";
+
+    return write_execute(sql.str());
+}
+
+std::optional<AnnoyanceGateState> DuckDBStore::gate_get(const std::string& session_id) {
+    if (!db_ || session_id.empty()) return std::nullopt;
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    std::ostringstream sql;
+    sql << "SELECT session_id, predictions_surfaced, predictions_correct, predictions_incorrect, "
+        << "last_surfaced_at, budget_remaining, cooldown_ms, confidence_floor, created_at "
+        << "FROM annoyance_gate WHERE session_id = '" << escape(session_id) << "'";
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) {
+        last_error_ = result ? result->GetError() : "No result";
+        return std::nullopt;
+    }
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return std::nullopt;
+
+    AnnoyanceGateState gate;
+    gate.session_id = chunk->GetValue(0, 0).ToString();
+    gate.predictions_surfaced = chunk->GetValue(1, 0).GetValue<int32_t>();
+    gate.predictions_correct = chunk->GetValue(2, 0).GetValue<int32_t>();
+    gate.predictions_incorrect = chunk->GetValue(3, 0).GetValue<int32_t>();
+    gate.last_surfaced_at = chunk->GetValue(4, 0).GetValue<int64_t>();
+    gate.budget_remaining = chunk->GetValue(5, 0).GetValue<int32_t>();
+    gate.cooldown_ms = chunk->GetValue(6, 0).GetValue<int64_t>();
+    gate.confidence_floor = chunk->GetValue(7, 0).GetValue<float>();
+    gate.created_at = chunk->GetValue(8, 0).GetValue<int64_t>();
+
+    return gate;
+}
+
+bool DuckDBStore::gate_record_surface(const std::string& session_id) {
+    if (!db_ || session_id.empty()) return false;
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    auto now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+
+    std::ostringstream sql;
+    sql << "UPDATE annoyance_gate SET "
+        << "predictions_surfaced = predictions_surfaced + 1, "
+        << "budget_remaining = GREATEST(0, budget_remaining - 1), "
+        << "last_surfaced_at = " << now
+        << " WHERE session_id = '" << escape(session_id) << "'";
+
+    return write_execute(sql.str());
+}
+
+bool DuckDBStore::gate_record_outcome(const std::string& session_id, bool correct) {
+    if (!db_ || session_id.empty()) return false;
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    std::ostringstream sql;
+    if (correct) {
+        // Correct prediction: increment correct count, restore some budget
+        sql << "UPDATE annoyance_gate SET "
+            << "predictions_correct = predictions_correct + 1, "
+            << "budget_remaining = LEAST(10, budget_remaining + 1) "  // Reward correct predictions
+            << "WHERE session_id = '" << escape(session_id) << "'";
+    } else {
+        // Incorrect prediction: increment incorrect count, reduce budget further
+        sql << "UPDATE annoyance_gate SET "
+            << "predictions_incorrect = predictions_incorrect + 1, "
+            << "budget_remaining = GREATEST(0, budget_remaining - 1) "  // Penalize incorrect
+            << "WHERE session_id = '" << escape(session_id) << "'";
+    }
+
+    return write_execute(sql.str());
+}
+
+bool DuckDBStore::gate_allows(const std::string& session_id, float confidence) {
+    auto gate = gate_get(session_id);
+    if (!gate) {
+        // No gate exists - initialize one and allow
+        gate_init(session_id);
+        return confidence >= 0.7f;  // Default confidence floor
+    }
+
+    // Check budget
+    if (gate->budget_remaining <= 0) return false;
+
+    // Check confidence floor
+    if (confidence < gate->confidence_floor) return false;
+
+    // Check cooldown (convert seconds to milliseconds for comparison)
+    auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+
+    // last_surfaced_at is in seconds, convert to ms
+    int64_t last_surfaced_ms = gate->last_surfaced_at * 1000;
+    if (now_ms - last_surfaced_ms < gate->cooldown_ms) return false;
+
+    return true;
+}
+
+bool DuckDBStore::gate_update(const std::string& session_id, float confidence_floor, int64_t cooldown_ms) {
+    if (!db_ || session_id.empty()) return false;
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    // Ensure gate exists
+    gate_init(session_id);
+
+    std::ostringstream sql;
+    sql << "UPDATE annoyance_gate SET "
+        << "confidence_floor = " << confidence_floor << ", "
+        << "cooldown_ms = " << cooldown_ms << " "
+        << "WHERE session_id = '" << escape(session_id) << "'";
+
+    return write_execute(sql.str());
+}
+
+// ============================================================================
 // Habit Formation: repeated patterns that strengthen with use
 // ============================================================================
 
@@ -5862,7 +6655,7 @@ std::vector<DistillCandidate> DuckDBStore::find_distill_candidates(
             if (k > 0) emb_literal << ",";
             emb_literal << anchor_emb[k];
         }
-        emb_literal << "]::FLOAT[384]";
+        emb_literal << "]::FLOAT[768]";
 
         std::ostringstream sim_sql;
         sim_sql << "SELECT memory_id, array_cosine_similarity(embedding, "
@@ -6575,7 +7368,7 @@ std::vector<DuckDBStore::OrphanMemory> DuckDBStore::get_orphan_memories_with_emb
     std::ostringstream sql;
     sql << "SELECT m.id, m.content, m.kind, m.realm, m.embedding FROM memory m "
         << "WHERE NOT EXISTS (SELECT 1 FROM theme_membership tm WHERE tm.memory_id = m.id) "
-        << "AND m.embedding IS NOT NULL AND array_length(m.embedding) = 384";
+        << "AND m.embedding IS NOT NULL AND array_length(m.embedding) = 768";
     if (!realm.empty()) {
         sql << " AND m.realm = '" << realm << "'";
     }
@@ -6618,7 +7411,7 @@ size_t DuckDBStore::count_orphan_memories(const std::string& realm) const {
     std::ostringstream sql;
     sql << "SELECT COUNT(*) FROM memory m "
         << "WHERE NOT EXISTS (SELECT 1 FROM theme_membership tm WHERE tm.memory_id = m.id) "
-        << "AND m.embedding IS NOT NULL AND array_length(m.embedding) = 384";
+        << "AND m.embedding IS NOT NULL AND array_length(m.embedding) = 768";
     if (!realm.empty()) {
         sql << " AND m.realm = '" << realm << "'";
     }

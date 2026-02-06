@@ -18,8 +18,8 @@
 
 namespace chitta {
 
-// Embedding dimension (all-MiniLM-L6-v2 compatible)
-constexpr size_t EMBED_DIM = 384;
+// Embedding dimension (bge-base-en-v1.5)
+constexpr size_t EMBED_DIM = 768;
 
 // Timestamp as Unix millis
 using Timestamp = int64_t;

@@ -295,14 +295,25 @@ private:
     size_t max_size_;
 };
 
+// Embedding mode: queries need instruction prefix for BGE models
+enum class EmbedMode {
+    Document,  // Embedding content for storage (no prefix)
+    Query      // Embedding a search query (add instruction prefix)
+};
+
 // VakYantra: the machine of speech - abstract embedder interface
 // (Yantra = instrument/machine)
 class VakYantra {
 public:
     virtual ~VakYantra() = default;
 
-    // Transform utterance into meaning
+    // Transform utterance into meaning (document mode by default)
     virtual Artha transform(const std::string& vak) = 0;
+
+    // Transform with explicit mode (query vs document)
+    virtual Artha transform(const std::string& vak, EmbedMode mode) {
+        return transform(vak);  // Default: ignore mode (subclasses override)
+    }
 
     // Transform multiple utterances (batch for efficiency)
     virtual std::vector<Artha> transform_batch(const std::vector<std::string>& vaks) {
@@ -319,6 +330,9 @@ public:
 
     // Is the yantra ready?
     virtual bool ready() const = 0;
+
+    // Get execution provider name (CPU, CoreML, CUDA, etc.)
+    virtual std::string execution_provider_name() const { return "CPU"; }
 };
 
 // ShantaYantra: the silent machine - returns zeros
@@ -356,6 +370,17 @@ public:
         return artha;
     }
 
+    Artha transform(const std::string& vak, EmbedMode mode) override {
+        // Query embeddings use a prefix, so cache key differs
+        std::string cache_key = (mode == EmbedMode::Query) ? ("__q:" + vak) : vak;
+        if (auto remembered = kosha_.recall(cache_key)) {
+            return std::move(*remembered);
+        }
+        Artha artha = inner_->transform(vak, mode);
+        kosha_.remember(cache_key, artha);
+        return artha;
+    }
+
     std::vector<Artha> transform_batch(const std::vector<std::string>& vaks) override {
         std::vector<Artha> results;
         std::vector<std::string> to_compute;
@@ -387,6 +412,7 @@ public:
 
     size_t dimension() const override { return inner_->dimension(); }
     bool ready() const override { return inner_->ready(); }
+    std::string execution_provider_name() const override { return inner_->execution_provider_name(); }
 
     // Direct access to memory
     SmritiKosha& kosha() { return kosha_; }
