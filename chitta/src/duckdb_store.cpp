@@ -367,6 +367,20 @@ bool DuckDBStore::create_schema() {
     write_execute("CREATE INDEX IF NOT EXISTS idx_symbol_name ON symbol(name)");
     write_execute("CREATE INDEX IF NOT EXISTS idx_symbol_kind ON symbol(kind)");
 
+    // Migration: deduplicate symbols, then add unique constraint
+    write_execute(R"(
+        DELETE FROM symbol WHERE id IN (
+            SELECT id FROM (
+                SELECT id, ROW_NUMBER() OVER (
+                    PARTITION BY kind, name, file_path, line_start
+                    ORDER BY id
+                ) as rn
+                FROM symbol
+            ) WHERE rn > 1
+        )
+    )");
+    write_execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_symbol_unique ON symbol(kind, name, file_path, line_start)");
+
     // FTS index for BM25 search on symbols (if FTS extension loaded)
     if (fts_loaded_) {
         try {
@@ -2033,7 +2047,12 @@ int64_t DuckDBStore::add_symbol(const Symbol& sym, const std::vector<float>& emb
         << sym.line_start << ", "
         << sym.line_end << ", "
         << sym.repo_id << ", "
-        << embedding_to_sql(embed) << ") RETURNING id";
+        << embedding_to_sql(embed) << ") "
+        << "ON CONFLICT (kind, name, file_path, line_start) DO UPDATE SET "
+        << "signature = EXCLUDED.signature, "
+        << "line_end = EXCLUDED.line_end, "
+        << "repo_id = EXCLUDED.repo_id "
+        << "RETURNING id";
 
     auto result = write_query(sql.str());
     if (!result || result->HasError()) {
@@ -3124,6 +3143,13 @@ size_t DuckDBStore::count_total_symbols() {
 bool DuckDBStore::set_symbol_embedding(int64_t symbol_id, const std::vector<float>& embedding) {
     if (!db_ || embedding.size() != 384) return false;
 
+    // Reject zero vectors (embedder circuit-breaker returns zeros on failure)
+    bool all_zero = true;
+    for (size_t i = 0; i < embedding.size() && all_zero; ++i) {
+        if (embedding[i] != 0.0f) all_zero = false;
+    }
+    if (all_zero) return false;
+
     // Build embedding array
     std::ostringstream emb_sql;
     emb_sql << "[";
@@ -3186,7 +3212,8 @@ std::vector<DuckDBStore::UndescribedSymbol> DuckDBStore::get_unembedded_symbols(
         } catch (...) {}
     }
 
-    // Get symbols with NULL or zero embedding
+    // Get symbols needing embedding
+    // When using separate embeddings DB, exclude IDs already there via NOT IN
     std::ostringstream sql;
     sql << "SELECT id, kind, name, signature, file_path, line_start, line_end, "
         << "CASE kind "
@@ -3197,9 +3224,22 @@ std::vector<DuckDBStore::UndescribedSymbol> DuckDBStore::get_unembedded_symbols(
         << "  ELSE 3 "
         << "END as priority "
         << "FROM symbol "
-        << "WHERE embedding IS NULL OR described_at = 0 "
-        << "ORDER BY priority, id "
-        << "LIMIT " << (limit * 2);  // Over-fetch to account for filtering
+        << "WHERE (embedding IS NULL OR described_at = 0) ";
+
+    // Exclude already-embedded IDs directly in SQL for efficient filtering
+    if (!embedded_ids.empty()) {
+        sql << "AND id NOT IN (";
+        bool first = true;
+        for (int64_t eid : embedded_ids) {
+            if (!first) sql << ",";
+            sql << eid;
+            first = false;
+        }
+        sql << ") ";
+    }
+
+    sql << "ORDER BY priority, id "
+        << "LIMIT " << limit;
 
     auto query_result = read_query(sql.str());
     if (!query_result || query_result->HasError()) return result;
@@ -3236,14 +3276,43 @@ std::vector<DuckDBStore::UndescribedSymbol> DuckDBStore::get_unembedded_symbols(
 size_t DuckDBStore::count_unembedded_symbols() {
     if (!db_) return 0;
 
-    auto result = read_query("SELECT COUNT(*) FROM symbol WHERE embedding IS NULL OR described_at = 0");
+    // If using separate embeddings DB, subtract the count there
+    size_t embedded_in_emb_db = 0;
+    if (emb_conn_) {
+        std::lock_guard<std::mutex> lock(emb_mutex_);
+        try {
+            auto emb_result = emb_conn_->Query("SELECT COUNT(*) FROM symbol_embeddings");
+            if (emb_result && !emb_result->HasError()) {
+                auto chunk = emb_result->Fetch();
+                if (chunk && chunk->size() > 0) {
+                    embedded_in_emb_db = chunk->GetValue(0, 0).GetValue<int64_t>();
+                }
+            }
+        } catch (...) {}
+    }
+
+    // Count total symbols
+    size_t total = 0;
+    auto result = read_query("SELECT COUNT(*) FROM symbol");
     if (result && !result->HasError()) {
         auto chunk = result->Fetch();
         if (chunk && chunk->size() > 0) {
-            return chunk->GetValue(0, 0).GetValue<int64_t>();
+            total = chunk->GetValue(0, 0).GetValue<int64_t>();
         }
     }
-    return 0;
+
+    // Also count those with embeddings in main DB (if any)
+    size_t embedded_in_main = 0;
+    auto main_result = read_query("SELECT COUNT(*) FROM symbol WHERE embedding IS NOT NULL AND described_at > 0");
+    if (main_result && !main_result->HasError()) {
+        auto chunk = main_result->Fetch();
+        if (chunk && chunk->size() > 0) {
+            embedded_in_main = chunk->GetValue(0, 0).GetValue<int64_t>();
+        }
+    }
+
+    size_t total_embedded = embedded_in_emb_db + embedded_in_main;
+    return total > total_embedded ? total - total_embedded : 0;
 }
 
 std::vector<DuckDBStore::SymbolMatch> DuckDBStore::search_symbols_by_embedding(
@@ -3262,15 +3331,104 @@ std::vector<DuckDBStore::SymbolMatch> DuckDBStore::search_symbols_by_embedding(
     }
     emb_str << "]::FLOAT[384]";
 
-    // Use cosine similarity: 1 - (a <=> b) gives similarity score
+    // If separate embeddings DB is available, search there (joined with main symbol table)
+    if (emb_conn_) {
+        // Step 1: Get scored embeddings from separate DB
+        std::vector<std::pair<int64_t, float>> scored_ids;
+        {
+            std::lock_guard<std::mutex> lock(emb_mutex_);
+            try {
+                std::ostringstream emb_sql;
+                emb_sql << "SELECT symbol_id, "
+                        << "(1 - list_cosine_distance(embedding, " << emb_str.str() << ")) as score "
+                        << "FROM symbol_embeddings "
+                        << "WHERE embedding IS NOT NULL "
+                        << "ORDER BY score DESC LIMIT " << (limit * 3);  // Over-fetch for filtering
+                auto emb_result = emb_conn_->Query(emb_sql.str());
+                if (emb_result && !emb_result->HasError()) {
+                    while (auto chunk = emb_result->Fetch()) {
+                        if (!chunk || chunk->size() == 0) break;
+                        for (size_t i = 0; i < chunk->size(); ++i) {
+                            float score = chunk->GetValue(1, i).GetValue<float>();
+                            if (score > 0.10f) {
+                                scored_ids.push_back({
+                                    chunk->GetValue(0, i).GetValue<int64_t>(), score});
+                            }
+                        }
+                    }
+                }
+            } catch (...) {}
+        }
+
+        if (!scored_ids.empty()) {
+            // Step 2: Fetch symbol metadata from main DB for matched IDs
+            std::unordered_map<int64_t, float> score_map;
+            std::ostringstream id_list;
+            bool first = true;
+            for (const auto& [id, score] : scored_ids) {
+                score_map[id] = score;
+                if (!first) id_list << ",";
+                id_list << id;
+                first = false;
+            }
+
+            std::ostringstream meta_sql;
+            meta_sql << "SELECT id, kind, name, signature, file_path, line_start, line_end, repo_id "
+                     << "FROM symbol WHERE id IN (" << id_list.str() << ") ";
+            if (!kind_filter.empty()) {
+                meta_sql << "AND kind = '" << kind_filter << "' ";
+            }
+            if (!project.empty()) {
+                std::string escaped_project;
+                for (char c : project) {
+                    if (c == '\'') escaped_project += "''";
+                    else escaped_project += c;
+                }
+                meta_sql << "AND file_path IN (SELECT path FROM code_file WHERE project = '"
+                         << escaped_project << "') ";
+            }
+
+            auto meta_result = read_query(meta_sql.str());
+            if (meta_result && !meta_result->HasError()) {
+                while (auto chunk = meta_result->Fetch()) {
+                    if (!chunk || chunk->size() == 0) break;
+                    for (size_t i = 0; i < chunk->size(); ++i) {
+                        SymbolMatch match;
+                        match.symbol.id = chunk->GetValue(0, i).GetValue<int64_t>();
+                        match.symbol.kind = chunk->GetValue(1, i).ToString();
+                        match.symbol.name = chunk->GetValue(2, i).ToString();
+                        match.symbol.signature = chunk->GetValue(3, i).IsNull() ? "" : chunk->GetValue(3, i).ToString();
+                        match.symbol.file_path = chunk->GetValue(4, i).ToString();
+                        match.symbol.line_start = chunk->GetValue(5, i).GetValue<int32_t>();
+                        match.symbol.line_end = chunk->GetValue(6, i).GetValue<int32_t>();
+                        match.symbol.repo_id = chunk->GetValue(7, i).IsNull() ? 0 : chunk->GetValue(7, i).GetValue<int64_t>();
+                        match.score = score_map[match.symbol.id];
+                        results.push_back(match);
+                    }
+                }
+            }
+
+            // Sort by score descending
+            std::sort(results.begin(), results.end(),
+                [](const SymbolMatch& a, const SymbolMatch& b) { return a.score > b.score; });
+            if (results.size() > limit) results.resize(limit);
+        }
+
+        // If we got results from the separate DB, return them
+        if (!results.empty()) return results;
+    }
+
+    // Fallback: search main DB embeddings (original behavior)
     std::ostringstream sql;
-    sql << "SELECT id, kind, name, signature, file_path, line_start, line_end, repo_id, "
-        << "(1 - list_cosine_distance(embedding, " << emb_str.str() << ")) as score "
-        << "FROM symbol "
-        << "WHERE embedding IS NOT NULL AND described_at > 0 ";
+    sql << "SELECT id, kind, name, signature, file_path, line_start, line_end, repo_id, score "
+        << "FROM ("
+        << "  SELECT id, kind, name, signature, file_path, line_start, line_end, repo_id, "
+        << "  (1 - list_cosine_distance(embedding, " << emb_str.str() << ")) as score "
+        << "  FROM symbol "
+        << "  WHERE embedding IS NOT NULL AND described_at > 0 ";
 
     if (!kind_filter.empty()) {
-        sql << "AND kind = '" << kind_filter << "' ";
+        sql << "  AND kind = '" << kind_filter << "' ";
     }
 
     if (!project.empty()) {
@@ -3279,11 +3437,12 @@ std::vector<DuckDBStore::SymbolMatch> DuckDBStore::search_symbols_by_embedding(
             if (c == '\'') escaped_project += "''";
             else escaped_project += c;
         }
-        sql << "AND file_path IN (SELECT path FROM code_file WHERE project = '"
+        sql << "  AND file_path IN (SELECT path FROM code_file WHERE project = '"
             << escaped_project << "') ";
     }
 
-    sql << "ORDER BY score DESC "
+    sql << ") WHERE score > 0.10 "
+        << "ORDER BY score DESC "
         << "LIMIT " << limit;
 
     auto result = read_query(sql.str());
@@ -3306,6 +3465,111 @@ std::vector<DuckDBStore::SymbolMatch> DuckDBStore::search_symbols_by_embedding(
     }
 
     return results;
+}
+
+std::vector<int64_t> DuckDBStore::purge_zero_embeddings_ids() {
+    std::vector<int64_t> zero_ids;
+    if (!emb_conn_) return zero_ids;
+
+    std::lock_guard<std::mutex> lock(emb_mutex_);
+    try {
+        // Find zero-vector embeddings in separate embeddings DB
+        auto result = emb_conn_->Query(
+            "SELECT symbol_id FROM symbol_embeddings "
+            "WHERE embedding[1] = 0.0 AND embedding[2] = 0.0 AND embedding[3] = 0.0");
+        if (result && !result->HasError()) {
+            while (auto chunk = result->Fetch()) {
+                if (!chunk || chunk->size() == 0) break;
+                for (size_t i = 0; i < chunk->size(); ++i) {
+                    zero_ids.push_back(chunk->GetValue(0, i).GetValue<int64_t>());
+                }
+            }
+
+            // Delete zero-vector entries in batches
+            for (size_t i = 0; i < zero_ids.size(); i += 500) {
+                std::ostringstream del;
+                del << "DELETE FROM symbol_embeddings WHERE symbol_id IN (";
+                for (size_t j = i; j < std::min(i + 500, zero_ids.size()); ++j) {
+                    if (j > i) del << ",";
+                    del << zero_ids[j];
+                }
+                del << ")";
+                emb_conn_->Query(del.str());
+            }
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "[DuckDBStore] purge_zero_embeddings failed: " << e.what() << "\n";
+    }
+    return zero_ids;
+}
+
+size_t DuckDBStore::clean_orphaned_symbol_embeddings() {
+    if (!emb_conn_ || !db_) return 0;
+
+    // Collect valid symbol IDs from main DB
+    std::unordered_set<int64_t> valid_ids;
+    auto sym_result = read_query("SELECT id FROM symbol");
+    if (sym_result && !sym_result->HasError()) {
+        while (auto chunk = sym_result->Fetch()) {
+            if (!chunk || chunk->size() == 0) break;
+            for (size_t i = 0; i < chunk->size(); ++i) {
+                valid_ids.insert(chunk->GetValue(0, i).GetValue<int64_t>());
+            }
+        }
+    }
+
+    // Find orphaned embedding IDs
+    std::vector<int64_t> orphan_ids;
+    {
+        std::lock_guard<std::mutex> lock(emb_mutex_);
+        try {
+            auto emb_result = emb_conn_->Query("SELECT symbol_id FROM symbol_embeddings");
+            if (emb_result && !emb_result->HasError()) {
+                while (auto chunk = emb_result->Fetch()) {
+                    if (!chunk || chunk->size() == 0) break;
+                    for (size_t i = 0; i < chunk->size(); ++i) {
+                        int64_t sid = chunk->GetValue(0, i).GetValue<int64_t>();
+                        if (valid_ids.find(sid) == valid_ids.end()) {
+                            orphan_ids.push_back(sid);
+                        }
+                    }
+                }
+            }
+
+            // Delete orphans in batches of 500
+            for (size_t i = 0; i < orphan_ids.size(); i += 500) {
+                std::ostringstream del;
+                del << "DELETE FROM symbol_embeddings WHERE symbol_id IN (";
+                for (size_t j = i; j < std::min(i + 500, orphan_ids.size()); ++j) {
+                    if (j > i) del << ",";
+                    del << orphan_ids[j];
+                }
+                del << ")";
+                emb_conn_->Query(del.str());
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "[DuckDBStore] clean_orphaned_symbol_embeddings failed: " << e.what() << "\n";
+        }
+    }
+
+    return orphan_ids.size();
+}
+
+size_t DuckDBStore::clear_symbol_embeddings() {
+    if (!emb_conn_) return 0;
+    std::lock_guard<std::mutex> lock(emb_mutex_);
+    try {
+        auto count = emb_conn_->Query("SELECT COUNT(*) FROM symbol_embeddings");
+        size_t total = 0;
+        if (count && !count->HasError()) {
+            total = count->GetValue(0, 0).GetValue<int64_t>();
+        }
+        emb_conn_->Query("DELETE FROM symbol_embeddings");
+        return total;
+    } catch (const std::exception& e) {
+        std::cerr << "[DuckDBStore] clear_symbol_embeddings failed: " << e.what() << "\n";
+    }
+    return 0;
 }
 
 bool DuckDBStore::execute_raw(const std::string& sql) {

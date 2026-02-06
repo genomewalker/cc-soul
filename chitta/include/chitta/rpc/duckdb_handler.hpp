@@ -42,6 +42,20 @@ struct DuckDBToolResult {
     }
 };
 
+// Extract "parent/basename" from a full file path for display (disambiguates same-named files)
+inline std::string display_path(const std::string& file_path) {
+    size_t last_slash = file_path.rfind('/');
+    if (last_slash == std::string::npos) return file_path;
+    std::string basename = file_path.substr(last_slash + 1);
+    if (last_slash > 0) {
+        size_t prev_slash = file_path.rfind('/', last_slash - 1);
+        if (prev_slash != std::string::npos) {
+            return file_path.substr(prev_slash + 1);
+        }
+    }
+    return basename;
+}
+
 class DuckDBRpcHandler {
 public:
     explicit DuckDBRpcHandler(DuckDBMind* mind) : mind_(mind), subconscious_(nullptr) {
@@ -362,11 +376,12 @@ private:
 
         tools_.push_back({
             {"name", "embed_symbols"},
-            {"description", "Fast embed symbol metadata (no LLM needed, ~100/sec)"},
+            {"description", "Fast embed symbol metadata (no LLM needed, ~100/sec). Use reset=true to clear all embeddings and re-embed with richer text."},
             {"inputSchema", {
                 {"type", "object"},
                 {"properties", {
-                    {"batch_size", {{"type", "integer"}, {"description", "Symbols per batch (default: 100)"}}}
+                    {"batch_size", {{"type", "integer"}, {"description", "Symbols per batch (default: 100)"}}},
+                    {"reset", {{"type", "boolean"}, {"description", "Clear all symbol embeddings before re-embedding (default: false)"}}}
                 }}
             }}
         });
@@ -2402,32 +2417,106 @@ private:
     }
 
     DuckDBToolResult tool_soul_context(const json&) {
-        // Use cached health for fast response (updated by maintenance cycle)
         auto cached = mind_->store().cached_health();
 
-        std::ostringstream ss;
-        ss << "Soul State (DuckDB):\n";
-        ss << "  Nodes: " << cached.total_memories << " total\n";
-        ss << "  Confidence: " << std::fixed << std::setprecision(2) << cached.avg_confidence << " avg\n";
-        ss << "  Triplets: " << cached.total_triplets << "\n";
-        ss << "  Symbols: " << cached.total_symbols << "\n";
-        ss << "  Yantra: " << (mind_->has_yantra() ? "ready" : "not attached") << "\n";
-        ss << "  Status: " << (cached.is_open ? "OK" : "ERROR") << "\n";
+        // Query actual relationship state (not just stats)
+        size_t preferences = 0, corrections = 0, insights = 0, solutions = 0;
+        size_t wisdom_nodes = 0, beliefs = 0, episodes = 0;
+        float strongest_conf = 0.0f;
+        std::string strongest_memory;
 
-        // Skip expensive queries - use cached values
-        size_t transcripts = 0;  // Skip transcript_count() query
-        json calibration_json = json::array();  // Skip calibration query
+        auto type_counts = mind_->store().execute_sql_query(
+            "SELECT "
+            "  SUM(CASE WHEN content LIKE '[preference%' OR content LIKE '[pref]%' THEN 1 ELSE 0 END) as prefs, "
+            "  SUM(CASE WHEN content LIKE '[correction%' OR content LIKE '[gotcha%' THEN 1 ELSE 0 END) as corrections, "
+            "  SUM(CASE WHEN content LIKE '[insight%' THEN 1 ELSE 0 END) as insights, "
+            "  SUM(CASE WHEN content LIKE '[solution%' OR content LIKE '[sol]%' THEN 1 ELSE 0 END) as solutions, "
+            "  SUM(CASE WHEN kind = 'wisdom' OR kind = 'distilled' THEN 1 ELSE 0 END) as wisdom, "
+            "  SUM(CASE WHEN kind = 'belief' THEN 1 ELSE 0 END) as beliefs, "
+            "  SUM(CASE WHEN kind = 'episode' THEN 1 ELSE 0 END) as episodes "
+            "FROM memory WHERE confidence > 0.01"
+        );
+        if (type_counts.success && !type_counts.rows.empty()) {
+            const auto& r = type_counts.rows[0];
+            if (r.size() >= 7) {
+                preferences = r[0].empty() ? 0 : std::stoull(r[0]);
+                corrections = r[1].empty() ? 0 : std::stoull(r[1]);
+                insights = r[2].empty() ? 0 : std::stoull(r[2]);
+                solutions = r[3].empty() ? 0 : std::stoull(r[3]);
+                wisdom_nodes = r[4].empty() ? 0 : std::stoull(r[4]);
+                beliefs = r[5].empty() ? 0 : std::stoull(r[5]);
+                episodes = r[6].empty() ? 0 : std::stoull(r[6]);
+            }
+        }
+
+        // Get strongest memory (highest confidence, most accessed)
+        auto top = mind_->store().execute_sql_query(
+            "SELECT content, confidence FROM memory WHERE confidence > 0.5 "
+            "ORDER BY confidence DESC, accessed_at DESC LIMIT 1"
+        );
+        if (top.success && !top.rows.empty() && top.rows[0].size() >= 2) {
+            strongest_memory = top.rows[0][0];
+            if (strongest_memory.size() > 80) strongest_memory = strongest_memory.substr(0, 80) + "...";
+            strongest_conf = std::stof(top.rows[0][1]);
+        }
+
+        // Get indexed projects
+        auto projects = mind_->store().execute_sql_query(
+            "SELECT project, COUNT(*) as files FROM code_file GROUP BY project ORDER BY files DESC"
+        );
+        json projects_json = json::array();
+        if (projects.success) {
+            for (const auto& row : projects.rows) {
+                if (row.size() >= 2) {
+                    projects_json.push_back({{"name", row[0]}, {"files", std::stoi(row[1])}});
+                }
+            }
+        }
+
+        std::ostringstream ss;
+        ss << "Soul State:\n";
+        ss << "  Partnership: " << preferences << " preferences, "
+           << corrections << " corrections, " << insights << " insights, "
+           << solutions << " solutions\n";
+        ss << "  Memory: " << wisdom_nodes << " wisdom, " << beliefs << " beliefs, "
+           << episodes << " episodes (" << cached.total_memories << " total)\n";
+        ss << "  Confidence: " << std::fixed << std::setprecision(2) << cached.avg_confidence << " avg\n";
+        if (!strongest_memory.empty()) {
+            ss << "  Strongest: [" << std::setprecision(0) << (strongest_conf * 100) << "%] "
+               << strongest_memory << "\n";
+        }
+        ss << "  Code: " << cached.total_symbols << " symbols, "
+           << cached.total_triplets << " triplets";
+        if (!projects_json.empty()) {
+            ss << " across " << projects_json.size() << " project"
+               << (projects_json.size() > 1 ? "s" : "");
+        }
+        ss << "\n";
+        ss << "  Yantra: " << (mind_->has_yantra() ? "ready" : "not attached") << "\n";
+        ss << "  Status: " << (cached.is_open ? "OK" : "ERROR");
 
         return DuckDBToolResult::ok(ss.str(), {
             {"version", CHITTA_VERSION},
-            {"total_nodes", cached.total_memories},
-            {"total_symbols", cached.total_symbols},
-            {"avg_confidence", cached.avg_confidence},
-            {"triplet_count", cached.total_triplets},
+            {"partnership", {
+                {"preferences", preferences},
+                {"corrections", corrections},
+                {"insights", insights},
+                {"solutions", solutions}
+            }},
+            {"memory", {
+                {"wisdom", wisdom_nodes},
+                {"beliefs", beliefs},
+                {"episodes", episodes},
+                {"total", cached.total_memories},
+                {"avg_confidence", cached.avg_confidence}
+            }},
+            {"code", {
+                {"symbols", cached.total_symbols},
+                {"triplets", cached.total_triplets},
+                {"projects", projects_json}
+            }},
             {"yantra_ready", mind_->has_yantra()},
-            {"status", cached.is_open ? "OK" : "ERROR"},
-            {"transcripts_tracked", transcripts},
-            {"calibration", calibration_json}
+            {"status", cached.is_open ? "OK" : "ERROR"}
         });
     }
 
@@ -2714,6 +2803,18 @@ private:
             return DuckDBToolResult::error("Yantra (embedder) not attached");
         }
 
+        // Reset all embeddings if requested (for re-embedding with richer text)
+        bool reset = params.value("reset", false);
+        size_t purged = 0;
+        if (reset) {
+            // Clear all from separate embeddings DB
+            purged = mind_->store().clear_symbol_embeddings();
+            // Clear main DB embeddings and described_at
+            mind_->store().execute_raw(
+                "UPDATE symbol SET embedding = NULL, described_at = 0 "
+                "WHERE embedding IS NOT NULL OR described_at > 0");
+        }
+
         size_t batch_size = params.value("batch_size", 100);
         auto symbols = mind_->store().get_unembedded_symbols(batch_size);
 
@@ -2724,16 +2825,61 @@ private:
         size_t embedded = 0;
         auto start = std::chrono::steady_clock::now();
 
+        // Pre-fetch triplet members for classes/structs (contains predicate)
+        // to enrich embedding text with member names
+        std::unordered_map<std::string, std::vector<std::string>> class_members;
+        {
+            auto members_result = mind_->store().execute_sql_query(
+                "SELECT subject, object FROM triplet WHERE predicate = 'contains' "
+                "AND subject IN (SELECT DISTINCT subject FROM triplet WHERE predicate = 'contains')");
+            if (members_result.success) {
+                for (const auto& row : members_result.rows) {
+                    if (row.size() >= 2) {
+                        // Extract leaf name from object for cleaner text
+                        std::string leaf = row[1];
+                        size_t cpos = leaf.rfind(':');
+                        if (cpos != std::string::npos && cpos + 1 < leaf.size())
+                            leaf = leaf.substr(cpos + 1);
+                        class_members[row[0]].push_back(leaf);
+                    }
+                }
+            }
+        }
+
         for (const auto& sym : symbols) {
-            // Build searchable text from metadata
-            std::string basename = sym.file_path;
-            size_t pos = basename.rfind('/');
-            if (pos != std::string::npos) basename = basename.substr(pos + 1);
+            // Build rich searchable text from metadata + context
+            std::string disp = display_path(sym.file_path);
 
             std::ostringstream text;
-            text << sym.kind << " " << sym.name << " in " << basename;
+            text << sym.kind << " " << sym.name;
+            text << " in " << disp;
+
             if (!sym.signature.empty() && sym.signature != sym.name) {
                 text << ": " << sym.signature;
+            }
+
+            // For classes/structs, append member names for richer semantics
+            if (sym.kind == "class" || sym.kind == "struct" || sym.kind == "interface") {
+                // Build lowercase key to match triplet subjects (connect_batch lowercases)
+                std::string lower_name;
+                for (char c : sym.name) {
+                    lower_name += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                }
+                // Try both the raw name and common triplet key patterns
+                for (const auto& key : {lower_name, sym.kind + ":" + lower_name}) {
+                    auto it = class_members.find(key);
+                    if (it != class_members.end() && !it->second.empty()) {
+                        text << " { ";
+                        size_t count = 0;
+                        for (const auto& member : it->second) {
+                            if (count++ > 0) text << ", ";
+                            if (count > 8) { text << "..."; break; }  // Cap at 8 members
+                            text << member;
+                        }
+                        text << " }";
+                        break;
+                    }
+                }
             }
 
             // Embed using Yantra
@@ -2752,16 +2898,21 @@ private:
         size_t remaining = mind_->store().count_unembedded_symbols();
 
         std::ostringstream ss;
+        if (purged > 0) {
+            ss << "Purged " << purged << " zero-vector embeddings\n";
+        }
         ss << "Embedded " << embedded << " symbols in " << ms << "ms";
         ss << " (" << std::fixed << std::setprecision(1) << rate << "/sec)\n";
         ss << "Remaining: " << remaining;
 
-        return DuckDBToolResult::ok(ss.str(), {
+        json result = {
             {"embedded", embedded},
             {"remaining", remaining},
             {"elapsed_ms", ms},
             {"rate_per_sec", rate}
-        });
+        };
+        if (purged > 0) result["purged_zeros"] = purged;
+        return DuckDBToolResult::ok(ss.str(), result);
     }
 
     DuckDBToolResult tool_dedupe_symbols(const json& /*params*/) {
@@ -2784,14 +2935,21 @@ private:
         size_t after = mind_->store().count_total_symbols();
         size_t removed = before - after;
 
+        // Clean orphaned embeddings left behind by deleted duplicates
+        size_t orphans_cleaned = mind_->store().clean_orphaned_symbol_embeddings();
+
         std::ostringstream ss;
         ss << "Removed " << removed << " duplicate symbols\n";
         ss << "Before: " << before << ", After: " << after;
+        if (orphans_cleaned > 0) {
+            ss << "\nCleaned " << orphans_cleaned << " orphaned embeddings";
+        }
 
         return DuckDBToolResult::ok(ss.str(), {
             {"before", before},
             {"after", after},
-            {"removed", removed}
+            {"removed", removed},
+            {"orphaned_embeddings_cleaned", orphans_cleaned}
         });
     }
 
@@ -3455,6 +3613,9 @@ private:
             }
         }
 
+        // Clean orphaned embeddings after force re-index
+        size_t orphans_cleaned = mind_->store().clean_orphaned_symbol_embeddings();
+
         // Create project triplet
         mind_->connect(project, "contains", std::to_string(symbols_stored) + "_symbols");
 
@@ -3464,6 +3625,9 @@ private:
         ss << "  Symbols: " << symbols_stored << "\n";
         ss << "  Symbols embedded: " << symbols_embedded << "\n";
         ss << "  Callsites: " << callsites_stored << "\n";
+        if (orphans_cleaned > 0) {
+            ss << "  Orphaned embeddings cleaned: " << orphans_cleaned << "\n";
+        }
 
         // Summary by kind
         std::unordered_map<std::string, size_t> by_kind;
@@ -3846,9 +4010,7 @@ private:
             if (seen_ids.count(sym.id) || symbols_json.size() >= limit) return;
             seen_ids.insert(sym.id);
 
-            std::string basename = sym.file_path;
-            size_t pos = basename.rfind('/');
-            if (pos != std::string::npos) basename = basename.substr(pos + 1);
+            std::string disp = display_path(sym.file_path);
 
             // Filter by kind if specified
             if (!kind.empty() && sym.kind != kind) return;
@@ -3858,7 +4020,7 @@ private:
             } else {
                 ss << "  ";
             }
-            ss << sym.kind << " " << sym.name << " @" << basename << ":" << sym.line_start
+            ss << sym.kind << " " << sym.name << " @" << disp << ":" << sym.line_start
                << " (" << source << ")\n";
 
             json sym_json = {

@@ -660,6 +660,15 @@ public:
                                                           const std::string& kind_filter = "",
                                                           const std::string& project = "");
 
+    // Purge zero-vector embeddings from separate embeddings DB, return purged IDs
+    std::vector<int64_t> purge_zero_embeddings_ids();
+
+    // Clean orphaned symbol embeddings (symbol_id no longer exists in symbol table)
+    size_t clean_orphaned_symbol_embeddings();
+
+    // Clear all symbol embeddings from separate embeddings DB (for full re-embed)
+    size_t clear_symbol_embeddings();
+
     // Raw SQL execution (for maintenance operations)
     bool execute_raw(const std::string& sql);
 
