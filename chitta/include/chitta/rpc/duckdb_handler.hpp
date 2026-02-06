@@ -596,7 +596,8 @@ private:
                 {"properties", {
                     {"query", {{"type", "string"}, {"description", "Natural language query to find symbols"}}},
                     {"kind", {{"type", "string"}, {"description", "Filter by symbol kind (class, function, method)"}}},
-                    {"limit", {{"type", "integer"}, {"description", "Max results (default 10)"}}}
+                    {"limit", {{"type", "integer"}, {"description", "Max results (default 10)"}}},
+                    {"project", {{"type", "string"}, {"description", "Filter results to symbols from this project only"}}}
                 }},
                 {"required", {"query"}}
             }}
@@ -3805,6 +3806,7 @@ private:
         std::string kind = params.value("kind", "");
         size_t limit = params.value("limit", 10);
         std::string mode = params.value("mode", "auto");  // auto, bm25, semantic
+        std::string project = params.value("project", "");
 
         bool is_code_query = looks_like_code_query(query);
         bool use_bm25 = (mode == "bm25") || (mode == "auto" && is_code_query);
@@ -3822,7 +3824,7 @@ private:
 
         // BM25 search (fast, ~50ms)
         if (use_bm25) {
-            bm25_matches = mind_->store().bm25_search_symbols(query, limit);
+            bm25_matches = mind_->store().bm25_search_symbols(query, limit, project);
             search_mode = "bm25";
         }
 
@@ -3830,7 +3832,7 @@ private:
         if (use_semantic && mind_->has_yantra()) {
             auto artha = mind_->embedder().transform(query);
             if (!artha.nu.is_zero()) {
-                semantic_matches = mind_->store().search_symbols_by_embedding(artha.nu.data, limit, kind);
+                semantic_matches = mind_->store().search_symbols_by_embedding(artha.nu.data, limit, kind, project);
                 search_mode = use_bm25 ? "hybrid" : "semantic";
             }
         }

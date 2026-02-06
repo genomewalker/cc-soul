@@ -582,7 +582,8 @@ public:
     std::vector<std::pair<std::string, size_t>> get_top_connected_entities(size_t limit = 20);
 
     // BM25 full-text search on symbols (no embeddings needed)
-    std::vector<Symbol> bm25_search_symbols(const std::string& query, size_t limit = 10);
+    std::vector<Symbol> bm25_search_symbols(const std::string& query, size_t limit = 10,
+                                             const std::string& project = "");
     bool has_fts() const;
 
     // BM25 full-text search on memory content for hybrid recall
@@ -656,7 +657,8 @@ public:
     };
     std::vector<SymbolMatch> search_symbols_by_embedding(const std::vector<float>& query_embedding,
                                                           size_t limit = 10,
-                                                          const std::string& kind_filter = "");
+                                                          const std::string& kind_filter = "",
+                                                          const std::string& project = "");
 
     // Raw SQL execution (for maintenance operations)
     bool execute_raw(const std::string& sql);

@@ -2321,7 +2321,8 @@ std::vector<std::pair<std::string, size_t>> DuckDBStore::get_top_connected_entit
     return results;
 }
 
-std::vector<Symbol> DuckDBStore::bm25_search_symbols(const std::string& search_query, size_t limit) {
+std::vector<Symbol> DuckDBStore::bm25_search_symbols(const std::string& search_query, size_t limit,
+                                                       const std::string& project) {
     // Lock handled in write_execute/write_query/read_query
     std::vector<Symbol> results;
     if (!db_ || !fts_loaded_) return results;
@@ -2333,13 +2334,26 @@ std::vector<Symbol> DuckDBStore::bm25_search_symbols(const std::string& search_q
         else escaped += c;
     }
 
+    // Build project filter subquery
+    std::string project_filter;
+    if (!project.empty()) {
+        std::string escaped_project;
+        for (char c : project) {
+            if (c == '\'') escaped_project += "''";
+            else escaped_project += c;
+        }
+        project_filter = " AND s.file_path IN (SELECT path FROM code_file WHERE project = '"
+                       + escaped_project + "')";
+    }
+
     // Use FTS match_bm25 for ranked search
     std::ostringstream sql;
     sql << "SELECT s.id, s.kind, s.name, s.signature, s.file_path, "
         << "s.line_start, s.line_end, s.repo_id, "
         << "fts_main_symbol.match_bm25(s.id, '" << escaped << "') as score "
         << "FROM symbol s "
-        << "WHERE score IS NOT NULL "
+        << "WHERE score IS NOT NULL"
+        << project_filter << " "
         << "ORDER BY score DESC "
         << "LIMIT " << limit;
 
@@ -2347,10 +2361,11 @@ std::vector<Symbol> DuckDBStore::bm25_search_symbols(const std::string& search_q
     if (!result || result->HasError()) {
         // Fallback to LIKE search if FTS fails
         std::ostringstream fallback;
-        fallback << "SELECT id, kind, name, signature, file_path, "
-                 << "line_start, line_end, repo_id "
-                 << "FROM symbol WHERE name ILIKE '%" << escaped << "%' "
-                 << "OR signature ILIKE '%" << escaped << "%' "
+        fallback << "SELECT s.id, s.kind, s.name, s.signature, s.file_path, "
+                 << "s.line_start, s.line_end, s.repo_id "
+                 << "FROM symbol s WHERE (s.name ILIKE '%" << escaped << "%' "
+                 << "OR s.signature ILIKE '%" << escaped << "%')"
+                 << project_filter << " "
                  << "LIMIT " << limit;
         result = this->read_query(fallback.str());
         if (!result || result->HasError()) return results;
@@ -3232,7 +3247,8 @@ size_t DuckDBStore::count_unembedded_symbols() {
 }
 
 std::vector<DuckDBStore::SymbolMatch> DuckDBStore::search_symbols_by_embedding(
-    const std::vector<float>& query_embedding, size_t limit, const std::string& kind_filter) {
+    const std::vector<float>& query_embedding, size_t limit, const std::string& kind_filter,
+    const std::string& project) {
 
     std::vector<SymbolMatch> results;
     if (!db_ || query_embedding.size() != 384) return results;
@@ -3255,6 +3271,16 @@ std::vector<DuckDBStore::SymbolMatch> DuckDBStore::search_symbols_by_embedding(
 
     if (!kind_filter.empty()) {
         sql << "AND kind = '" << kind_filter << "' ";
+    }
+
+    if (!project.empty()) {
+        std::string escaped_project;
+        for (char c : project) {
+            if (c == '\'') escaped_project += "''";
+            else escaped_project += c;
+        }
+        sql << "AND file_path IN (SELECT path FROM code_file WHERE project = '"
+            << escaped_project << "') ";
     }
 
     sql << "ORDER BY score DESC "
