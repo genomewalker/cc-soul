@@ -177,6 +177,38 @@ else
         echo ""
         echo "⚠️ [compliance-issues] Recent missed corrections - be more proactive!"
     fi
+
+    # ===========================================
+    # MEMORY.MD MERGE: Import Claude Code auto-memory into chitta
+    # ===========================================
+    SANITIZED_PATH=$(echo "$PROJECT_DIR" | sed 's|/|-|g')
+    MEMORY_FILE="$HOME/.claude/projects/$SANITIZED_PATH/memory/MEMORY.md"
+
+    if [[ -f "$MEMORY_FILE" ]]; then
+        MEMORY_CONTENT=$(cat "$MEMORY_FILE" 2>/dev/null || true)
+
+        # Skip if empty or only contains chitta auto-synced content
+        if [[ -n "$MEMORY_CONTENT" && "$MEMORY_CONTENT" != *"Chitta Soul Memories (auto-synced)"* ]] || \
+           [[ "$MEMORY_CONTENT" == *"## Project Notes"* ]]; then
+
+            # Extract user-added content (after "## Project Notes" or before "Chitta Soul")
+            USER_CONTENT=""
+            if [[ "$MEMORY_CONTENT" == *"## Project Notes"* ]]; then
+                USER_CONTENT=$(echo "$MEMORY_CONTENT" | sed -n '/## Project Notes/,/---/p' | grep -v "^##" | grep -v "^---" | head -20)
+            elif [[ "$MEMORY_CONTENT" != *"Chitta Soul"* ]]; then
+                # No chitta section, entire file is user content
+                USER_CONTENT=$(echo "$MEMORY_CONTENT" | grep -v "^#" | head -20)
+            fi
+
+            if [[ -n "$USER_CONTENT" && ${#USER_CONTENT} -gt 10 ]]; then
+                # Import into chitta (fire-and-forget via queue)
+                PROJECT_NAME=$(basename "$PROJECT_DIR")
+                IMPORT_SSL="[memory:$PROJECT_NAME] Claude Code MEMORY.md import\n$USER_CONTENT"
+                queue_write "remember" "{\"content\":$(echo -e "$IMPORT_SSL" | jq -Rs .),\"tags\":[\"memory-import\",\"$PROJECT_NAME\"]}"
+                echo "[soul] imported MEMORY.md content" >&2
+            fi
+        fi
+    fi
 fi
 
 exit 0
