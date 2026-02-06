@@ -379,6 +379,52 @@ section {
 }
 
 /* ═══════════════════════════════════════════
+   QUICK START
+   ═══════════════════════════════════════════ */
+.quickstart {
+  padding: var(--space-7) 0;
+  background: var(--night-900);
+}
+
+.quickstart-box {
+  max-width: 500px;
+  margin: 0 auto;
+  text-align: center;
+  padding: var(--space-6);
+  background: var(--indigo-700);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--indigo-600);
+}
+
+.quickstart-code {
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  color: var(--aura-300);
+  background: var(--indigo-800);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--space-4);
+  user-select: all;
+}
+
+.quickstart-note {
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  margin-bottom: var(--space-3);
+}
+
+.quickstart-link {
+  font-size: var(--text-sm);
+  color: var(--sandal-300);
+  opacity: 0.8;
+  transition: opacity 0.2s;
+}
+
+.quickstart-link:hover {
+  opacity: 1;
+}
+
+/* ═══════════════════════════════════════════
    BUTTONS
    ═══════════════════════════════════════════ */
 .btn {
@@ -527,6 +573,22 @@ section {
   margin-right: var(--space-2);
   opacity: 0.5;
   font-size: var(--text-xs);
+}
+
+.bridge-link {
+  text-align: center;
+  margin-top: var(--space-6);
+}
+
+.bridge-link a {
+  color: var(--sandal-300);
+  font-size: var(--text-sm);
+  opacity: 0.8;
+  transition: opacity 0.2s;
+}
+
+.bridge-link a:hover {
+  opacity: 1;
 }
 
 /* ═══════════════════════════════════════════
@@ -1201,6 +1263,17 @@ section {
   </div>
 </section>
 
+<!-- QUICK START -->
+<section class="quickstart" id="quickstart">
+  <div class="container">
+    <div class="quickstart-box reveal">
+      <div class="quickstart-code">claude /install genomewalker/cc-soul</div>
+      <p class="quickstart-note">Restart Claude Code. The soul awakens.</p>
+      <a href="getting-started.html" class="quickstart-link">Full setup guide &rarr;</a>
+    </div>
+  </div>
+</section>
+
 <!-- WHY IT MATTERS -->
 <section class="why" id="why">
   <div class="container">
@@ -1242,6 +1315,40 @@ section {
         <span class="vignette-prompt">&gt; </span>You ask <span class="vignette-highlight">where&rsquo;s Mind.hpp?</span> and it recalls the last commit you touched it in, then offers the path.
       </div>
     </div>
+  </div>
+</section>
+
+<!-- PHILOSOPHY BRIDGE -->
+<section class="bridge" id="philosophy">
+  <div class="container">
+    <div class="bridge-header reveal">
+      <div class="section-divider"></div>
+      <h2 class="heading-section">Vedantic roots, operational code.</h2>
+      <p class="bridge-subtext">Sanskrit concepts map to system behaviors. Philosophy isn't decoration&thinsp;&mdash;&thinsp;it's architecture.</p>
+    </div>
+
+    <div class="mapping-grid reveal reveal-delay-1">
+      <a href="philosophy.html#chitta" class="mapping-row">
+        <span class="mapping-sanskrit">चित्त <span class="mapping-transliteration">Chitta</span></span>
+        <span class="mapping-system">Memory store &mdash; the persistent mind that carries forward</span>
+      </a>
+      <a href="philosophy.html#anitya" class="mapping-row">
+        <span class="mapping-sanskrit">अनित्य <span class="mapping-transliteration">Anitya</span></span>
+        <span class="mapping-system">Impermanence &mdash; decay curves ensure only valuable memories persist</span>
+      </a>
+      <a href="philosophy.html#samskara" class="mapping-row">
+        <span class="mapping-sanskrit">संस्कार <span class="mapping-transliteration">Saṃskāra</span></span>
+        <span class="mapping-system">Impressions &mdash; repeated use strengthens, neglect weakens</span>
+      </a>
+      <a href="philosophy.html#pratyabhijna" class="mapping-row">
+        <span class="mapping-sanskrit">प्रत्यभिज्ञा <span class="mapping-transliteration">Pratyabhijñā</span></span>
+        <span class="mapping-system">Recognition &mdash; resonance-based recall when context aligns</span>
+      </a>
+    </div>
+
+    <p class="bridge-link reveal reveal-delay-2">
+      <a href="philosophy.html">Explore all 13 concepts &rarr;</a>
+    </p>
   </div>
 </section>
 
