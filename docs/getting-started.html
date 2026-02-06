@@ -803,6 +803,131 @@ body::before {
   </div>
 </section>
 
+<!-- COMPANION FEATURES -->
+<section class="content-section">
+  <div class="container">
+    <div class="reveal">
+      <div class="section-divider"></div>
+      <h2 class="section-title">Companion Features</h2>
+    </div>
+    <p class="reveal reveal-delay-1" style="font-size: var(--text-sm); color: var(--ash-300); margin-bottom: var(--space-6); line-height: 1.8;">Beyond memory, cc-soul learns how you work. These features build a richer partnership over time &mdash; most activate automatically through hooks, but you can also use them directly.</p>
+
+    <div class="steps-list">
+
+      <!-- Habits -->
+      <div class="step-card reveal reveal-delay-1" style="border-top-color: var(--sandal-300);">
+        <div class="step-header">
+          <span class="step-number" style="font-size: var(--text-2xl);">&circlearrowleft;</span>
+          <div class="step-info">
+            <h3 class="step-title">Habits</h3>
+            <p class="step-desc">Recurring trigger&rarr;response patterns that strengthen each time they're observed. After building, always install and restart the daemon. After a test fails, always check the logs first. Habits surface these patterns so they become automatic.</p>
+          </div>
+        </div>
+        <div class="code-block"><span class="comment"># Record a habit</span>
+<span class="command">chitta</span> habit_observe --trigger "after building chitta" --response "install binaries and restart daemon"
+
+<span class="comment"># Find habits matching your current context</span>
+<span class="command">chitta</span> habit_match --context "just finished building the project"
+
+<span class="comment"># See all formed habits</span>
+<span class="command">chitta</span> habit_list</div>
+      </div>
+
+      <!-- Anticipation -->
+      <div class="step-card reveal reveal-delay-2" style="border-top-color: var(--aura-300);">
+        <div class="step-header">
+          <span class="step-number" style="font-size: var(--text-2xl);">&Gt;</span>
+          <div class="step-info">
+            <h3 class="step-title">Anticipation</h3>
+            <p class="step-desc">Context&rarr;action patterns that predict what you'll need next. When you open a particular file, anticipation predicts which tools and commands typically follow. The prompt hook surfaces these predictions automatically.</p>
+          </div>
+        </div>
+        <div class="code-block"><span class="comment"># Record what action followed a context</span>
+<span class="command">chitta</span> anticipation_observe --context "editing duckdb_handler.hpp" --action "rebuild and test"
+
+<span class="comment"># Predict next actions from current context</span>
+<span class="command">chitta</span> anticipation_predict --context "user asked about build errors"
+
+<span class="comment"># See all learned patterns</span>
+<span class="command">chitta</span> anticipation_list</div>
+      </div>
+
+      <!-- Goals -->
+      <div class="step-card reveal reveal-delay-3" style="border-top-color: var(--ember-400);">
+        <div class="step-header">
+          <span class="step-number" style="font-size: var(--text-2xl);">&target;</span>
+          <div class="step-info">
+            <h3 class="step-title">Goals</h3>
+            <p class="step-desc">Track long-term objectives with milestones and progress. Goals persist across sessions, so the soul always knows what you're working toward and how far you've come.</p>
+          </div>
+        </div>
+        <div class="code-block"><span class="comment"># Set a goal with milestones</span>
+<span class="command">chitta</span> goal_set --title "Ship v4.0" --description "Major release with new features" \
+  --milestones '[{"name":"API stable","done":false},{"name":"Docs complete","done":false}]'
+
+<span class="comment"># Update progress and mark milestones</span>
+<span class="command">chitta</span> goal_progress --id 1 --progress 0.6 --milestone "API stable"
+
+<span class="comment"># List active goals</span>
+<span class="command">chitta</span> goal_list --status active</div>
+      </div>
+
+      <!-- Work Modes (Narrative) -->
+      <div class="step-card reveal reveal-delay-4" style="border-top-color: var(--sandal-300);">
+        <div class="step-header">
+          <span class="step-number" style="font-size: var(--text-2xl);">&hellip;</span>
+          <div class="step-info">
+            <h3 class="step-title">Work Modes</h3>
+            <p class="step-desc">The narrative engine tracks your session's work mode &mdash; exploring, building, debugging, reviewing &mdash; by observing tool usage and file patterns. The prompt hook displays your current mode, and anticipation uses it to filter predictions to what's relevant right now.</p>
+          </div>
+        </div>
+        <div class="code-block"><span class="comment"># Check current work mode and confidence</span>
+<span class="command">chitta</span> narrative_status
+
+<span class="comment"># View session history of mode transitions</span>
+<span class="command">chitta</span> narrative_history --session_id "abc123" --limit 10</div>
+      </div>
+
+      <!-- Curiosity -->
+      <div class="step-card reveal reveal-delay-1" style="border-top-color: var(--aura-300);">
+        <div class="step-header">
+          <span class="step-number" style="font-size: var(--text-2xl);">?</span>
+          <div class="step-info">
+            <h3 class="step-title">Curiosity</h3>
+            <p class="step-desc">Track knowledge gaps as you encounter them. When you hit something you don't understand, note it. Later, when the gap is resolved, record what you learned. This builds a map of your evolving understanding.</p>
+          </div>
+        </div>
+        <div class="code-block"><span class="comment"># Note a knowledge gap</span>
+<span class="command">chitta</span> curiosity_note_gap --gap "How does spreading activation affect recall?" \
+  --context "Noticed recall results vary with triplet density"
+
+<span class="comment"># List open gaps</span>
+<span class="command">chitta</span> curiosity_gaps
+
+<span class="comment"># Resolve when you learn the answer</span>
+<span class="command">chitta</span> curiosity_resolve --id 3 --learned "Spreading activation boosts neighbors by 0.15 per hop"</div>
+      </div>
+
+      <!-- Calibration -->
+      <div class="step-card reveal reveal-delay-2" style="border-top-color: var(--ember-400);">
+        <div class="step-header">
+          <span class="step-number" style="font-size: var(--text-2xl);">&percnt;</span>
+          <div class="step-info">
+            <h3 class="step-title">Calibration</h3>
+            <p class="step-desc">Track prediction accuracy across domains. Was that architecture suggestion correct? Did the debugging approach work? Over time, calibration reveals where the soul's advice is reliable and where it needs improvement.</p>
+          </div>
+        </div>
+        <div class="code-block"><span class="comment"># Record whether a prediction was correct</span>
+<span class="command">chitta</span> calibration_record --domain "debugging" --success true
+
+<span class="comment"># Check accuracy scores</span>
+<span class="command">chitta</span> calibration_score</div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
 <!-- FIRST STEPS -->
 <section class="content-section">
   <div class="container">

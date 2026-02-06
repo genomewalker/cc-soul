@@ -21,6 +21,7 @@ Complete reference for all tools exposed by cc-soul v3.30 via JSON-RPC 2.0 over 
 - [Metacognition](#metacognition)
 - [Curiosity and Gaps](#curiosity-and-gaps)
 - [Anticipation and Habits](#anticipation-and-habits)
+- [Narrative (Work Modes)](#narrative-work-modes)
 - [Transcripts and Distillation](#transcripts-and-distillation)
 - [User Profile](#user-profile)
 - [Goals](#goals)
@@ -867,14 +868,24 @@ Predict likely actions for a given context.
 |-------|------|----------|-------------|
 | `context` | string | Yes | Current situation |
 | `limit` | integer | No | Max predictions (default: 5) |
+| `realm` | string | No | Filter by realm |
 
 ### anticipation_success
 
-Mark a prediction as successful.
+Mark a predicted action as successful — the prediction was correct and helpful. Increases the pattern's success count.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | integer | Yes | Pattern ID to mark successful |
 
 ### anticipation_list
 
-List learned patterns ordered by frequency.
+List learned anticipation patterns, ordered by frequency.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `realm` | string | No | Filter by realm |
+| `limit` | integer | No | Max patterns (default: 50) |
 
 ### habit_observe
 
@@ -894,14 +905,74 @@ Find habits matching the current context.
 |-------|------|----------|-------------|
 | `context` | string | Yes | Context to match |
 | `min_strength` | number | No | Min strength 0-1 (default: 0.3) |
+| `realm` | string | No | Filter by realm |
 
-### habit_strengthen / habit_weaken
+### habit_strengthen
 
-Adjust habit strength.
+Manually strengthen a habit. Use when a habit proves useful.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | integer | Yes | Habit ID |
+| `amount` | number | No | Amount to strengthen (default: 0.1) |
+
+### habit_weaken
+
+Weaken a habit (negative feedback). Use when a habit is no longer relevant.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | integer | Yes | Habit ID |
+| `amount` | number | No | Amount to weaken (default: 0.05) |
 
 ### habit_list
 
-List formed habits ordered by strength.
+List formed habits, ordered by strength.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `realm` | string | No | Filter by realm |
+| `min_strength` | number | No | Minimum strength (default: 0) |
+| `limit` | integer | No | Max habits (default: 50) |
+
+---
+
+## Narrative (Work Modes)
+
+The narrative engine tracks session work modes (exploring, building, debugging, reviewing) by observing tool usage and file patterns. The prompt hook uses `narrative_status` to surface the current mode, and anticipation uses it to filter predictions.
+
+### narrative_status
+
+Get current work mode, confidence, and segment summary for the session.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `session_id` | string | No | Session ID (default: current from environment) |
+
+**Returns:** Current mode (exploring, building, debugging, reviewing, etc.), confidence score, event count, tools used, and active files.
+
+### narrative_log
+
+Manually append an event to the session event log. The narrative engine evaluates each event and may trigger a mode transition.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `session_id` | string | Yes | Session ID |
+| `kind` | string | Yes | Event kind: user_message, assistant_message, tool_use, tool_result, error, file_edit, search, build, test, commit, mode_change |
+| `summary` | string | Yes | Brief description of the event |
+| `tool_name` | string | No | Tool name (for tool events) |
+| `success` | boolean | No | Whether the action succeeded (default: true) |
+| `payload` | string | No | JSON payload with event details |
+| `files_mentioned` | string | No | JSON array of file paths |
+
+### narrative_history
+
+Get history of work mode segments for a session. Each segment represents a period where the session was in a particular mode.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `session_id` | string | Yes | Session ID |
+| `limit` | integer | No | Max segments to return (default: 20) |
 
 ---
 
