@@ -154,12 +154,13 @@ build_from_source() {
     fi
 
     # Copy binaries from plugin bin to install location (~/.claude/bin)
+    # Only chitta and chittad are required; migrate/import are legacy optional tools
     local all_built=true
-    for bin in chitta chittad chitta_migrate chitta_import; do
+    for bin in chitta chittad; do
         if [[ -x "$plugin_bin/$bin" ]]; then
             cp -f "$plugin_bin/$bin" "$BIN_DIR/$bin"
         else
-            echo "[cc-soul] WARNING: $bin not built" >&2
+            echo "[cc-soul] ERROR: $bin not built" >&2
             all_built=false
         fi
     done
