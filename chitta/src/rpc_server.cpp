@@ -437,7 +437,8 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
       {"reset", "Clear all embeddings first", false, "false"}}},
 
     {"reembed_memories", "Re-embed memories with missing/zero embeddings",
-     {{"limit", "Max memories to process", false, "100"},
+     {{"all", "Re-embed ALL memories with NULL embeddings", false, "false"},
+      {"limit", "Max memories to process", false, "100"},
       {"kind", "Filter by kind: belief, wisdom, episode, correction, preference", false, nullptr},
       {"min_confidence", "Min confidence threshold", false, "0"},
       {"dry_run", "Preview without updating", false, "false"}}},

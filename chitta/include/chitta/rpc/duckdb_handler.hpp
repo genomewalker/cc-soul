@@ -367,6 +367,7 @@ private:
             {"inputSchema", {
                 {"type", "object"},
                 {"properties", {
+                    {"all", {{"type", "boolean"}, {"description", "Re-embed ALL memories with NULL embeddings, not just global (default: false)"}}},
                     {"kind", {{"type", "string"}, {"description", "Filter by kind: belief, wisdom, episode, correction, preference"}}},
                     {"min_confidence", {{"type", "number"}, {"description", "Min confidence threshold (default: 0)"}}},
                     {"limit", {{"type", "integer"}, {"description", "Max memories to process (default: 100)"}}},
@@ -2854,38 +2855,69 @@ private:
         float min_confidence = params.value("min_confidence", 0.0f);
         int limit = params.value("limit", 100);
         bool dry_run = params.value("dry_run", false);
+        bool all = params.value("all", false);  // Re-embed ALL memories, not just global
 
-        // Get global memories (these are the partnership memories we care most about)
-        auto memories = mind_->store().list_global_memories(limit, kind_filter);
-
-        // Filter to those that might have zero embeddings (check by recalling with their own content)
         std::vector<std::pair<int64_t, std::string>> to_reembed;
+        size_t total_checked = 0;
 
-        for (const auto& mem : memories) {
-            if (min_confidence > 0 && mem.confidence < min_confidence) continue;
+        if (all) {
+            // Query ALL memories with NULL embeddings directly
+            std::ostringstream sql;
+            sql << "SELECT id, COALESCE(content, '') FROM memory WHERE embedding IS NULL";
+            if (!kind_filter.empty()) {
+                std::string escaped = kind_filter;
+                for (size_t pos = 0; (pos = escaped.find('\'', pos)) != std::string::npos; pos += 2) {
+                    escaped.replace(pos, 1, "''");
+                }
+                sql << " AND kind = '" << escaped << "'";
+            }
+            if (min_confidence > 0) {
+                sql << " AND confidence >= " << min_confidence;
+            }
+            sql << " ORDER BY confidence DESC LIMIT " << limit;
 
-            // Check if memory has meaningful embedding by recalling it
-            // If a memory with its own content doesn't recall itself well, it likely has zero embedding
-            auto recalls = mind_->store().recall(
-                mind_->embedder().transform(mem.content).nu.data,
-                5, "", true
-            );
-
-            bool found_self = false;
-            for (const auto& r : recalls) {
-                if (r.id == mem.id && r.similarity > 0.9f) {
-                    found_self = true;
-                    break;
+            auto result = mind_->store().raw_query(sql.str());
+            if (result) {
+                while (auto chunk = result->Fetch()) {
+                    for (size_t i = 0; i < chunk->size(); ++i) {
+                        int64_t id = chunk->GetValue(0, i).GetValue<int64_t>();
+                        std::string content = chunk->GetValue(1, i).ToString();
+                        if (!content.empty()) {
+                            to_reembed.push_back({id, content});
+                        }
+                        total_checked++;
+                    }
                 }
             }
+        } else {
+            // Original behavior: only global memories
+            auto memories = mind_->store().list_global_memories(limit, kind_filter);
+            total_checked = memories.size();
 
-            if (!found_self) {
-                to_reembed.push_back({mem.id, mem.content});
+            for (const auto& mem : memories) {
+                if (min_confidence > 0 && mem.confidence < min_confidence) continue;
+
+                // Check if memory has meaningful embedding by recalling it
+                auto recalls = mind_->store().recall(
+                    mind_->embedder().transform(mem.content).nu.data,
+                    5, "", true
+                );
+
+                bool found_self = false;
+                for (const auto& r : recalls) {
+                    if (r.id == mem.id && r.similarity > 0.9f) {
+                        found_self = true;
+                        break;
+                    }
+                }
+
+                if (!found_self) {
+                    to_reembed.push_back({mem.id, mem.content});
+                }
             }
         }
 
         size_t zero_embed_count = to_reembed.size();
-        size_t total_checked = memories.size();
 
         if (dry_run) {
             std::ostringstream ss;
