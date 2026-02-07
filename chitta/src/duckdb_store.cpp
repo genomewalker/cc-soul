@@ -810,6 +810,8 @@ bool DuckDBStore::create_schema() {
     write_execute("CREATE INDEX IF NOT EXISTS idx_habit_trigger ON habit(trigger_pattern)");
     write_execute("CREATE INDEX IF NOT EXISTS idx_habit_realm ON habit(realm)");
     write_execute("CREATE INDEX IF NOT EXISTS idx_habit_strength ON habit(strength DESC)");
+    // Migration: add unique constraint for upsert (needed for habit_observe ON CONFLICT)
+    write_execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_habit_upsert ON habit(trigger_pattern, response, realm)");
 
     // Background task table: daemon-level processing
     if (!write_execute(R"(
