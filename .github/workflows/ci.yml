@@ -24,8 +24,8 @@ jobs:
         shell: bash -l {0}
         run: |
           conda install -y cmake nlohmann_json sqlite libduckdb-devel
-          # Install ONNX Runtime with headers from conda-forge
-          conda install -y -c conda-forge onnxruntime
+          # Install ONNX Runtime C++ library with headers from conda-forge
+          conda install -y -c conda-forge onnxruntime-cpp
 
       - name: Build
         shell: bash -l {0}
