@@ -83,6 +83,12 @@ trap 'rmdir "$LOCK_FILE" 2>/dev/null' EXIT
         # Log result if any files were indexed
         if echo "$result" | grep -qE 'indexed [1-9]'; then
             echo "[auto-index] $PROJECT_NAME: $result" | head -1
+
+            # Generate embeddings for newly indexed symbols
+            embed_result=$("$CHITTA_BIN" embed_symbols --project "$PROJECT_NAME" 2>&1 || true)
+            if echo "$embed_result" | grep -qE 'embedded [1-9]'; then
+                echo "[auto-index] $PROJECT_NAME: embeddings - $embed_result" | head -1
+            fi
         fi
 
         # Update last index time

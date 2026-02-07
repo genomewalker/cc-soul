@@ -64,6 +64,29 @@ else
     REALM=$(timeout "$MAX_WAIT" "$CHITTA_BIN" realm_detect 2>/dev/null || echo "brahman")
 fi
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Background maintenance: auto-index and realm-retag
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Determine plugin directory (for script paths)
+PLUGIN_DIR="${CC_SOUL_PLUGIN_DIR:-$(dirname "$(dirname "$(realpath "${BASH_SOURCE[0]}")")")}"
+
+# Auto-index codebase (10-minute rate limit built into script)
+if [[ -n "$PROJECT_DIR" && -d "$PROJECT_DIR" ]]; then
+    AUTO_INDEX_SCRIPT="$PLUGIN_DIR/scripts/auto-index.sh"
+    if [[ -x "$AUTO_INDEX_SCRIPT" ]]; then
+        (cd "$PROJECT_DIR" && "$AUTO_INDEX_SCRIPT") &
+        disown
+    fi
+fi
+
+# Realm retag (daily rate limit built into script)
+REALM_RETAG_SCRIPT="$PLUGIN_DIR/scripts/realm-retag.sh"
+if [[ -x "$REALM_RETAG_SCRIPT" ]]; then
+    "$REALM_RETAG_SCRIPT" &
+    disown
+fi
+
 # Queue transcript registration (fire-and-forget)
 if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
     queue_write "transcript_register" "{\"session_id\":\"$SESSION_ID\",\"transcript_path\":$(echo "$TRANSCRIPT_PATH" | jq -Rs .),\"realm\":\"$REALM\"}"

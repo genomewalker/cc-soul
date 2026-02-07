@@ -33,17 +33,13 @@ queue_write() {
 # Convert to SSL format
 # Input: category, raw content
 # Output: SSL formatted string
+# Note: Uses global $REALM set by realm_detect (line 105)
 to_ssl() {
     local category="$1"
     local content="$2"
 
-    # Detect realm/domain from content or use default
-    local domain="partnership"
-    if echo "$content" | grep -qiE '(code|function|class|file|build|compile)'; then
-        domain="code"
-    elif echo "$content" | grep -qiE '(hook|daemon|queue|rpc|socket)'; then
-        domain="cc-soul"
-    fi
+    # Use detected realm (falls back to "brahman" if unset)
+    local domain="${REALM:-brahman}"
 
     # Extract key parts using → notation
     # Try to find pattern: subject verb/action object/result
@@ -104,6 +100,10 @@ RESPONSE=$(tac "$TRANSCRIPT_PATH" | grep -m1 '"role":"assistant"' | \
 # Detect realm (quick CLI call with short timeout)
 REALM=$(timeout "$MAX_WAIT" "$CHITTA_BIN" realm_detect 2>/dev/null || echo "brahman")
 
+# Quality gate: dedup file for this session
+DEDUP_FILE="$MIND_PATH/.stop_dedup"
+touch "$DEDUP_FILE"
+
 # Extract typed learnings → convert to SSL → queue
 LEARNED=0
 while IFS= read -r line; do
@@ -114,6 +114,21 @@ while IFS= read -r line; do
 
         # Convert to SSL format
         ssl_content=$(to_ssl "$category" "$raw_content")
+
+        # Quality gate: minimum content length (30 chars)
+        if [[ ${#ssl_content} -lt 30 ]]; then
+            echo "[soul] skip ${type,,}: too short (${#ssl_content}<30)" >&2
+            continue
+        fi
+
+        # Quality gate: hash-based deduplication
+        content_hash=$(echo -n "$ssl_content" | md5sum | cut -d' ' -f1)
+        if grep -q "^${content_hash}$" "$DEDUP_FILE" 2>/dev/null; then
+            echo "[soul] skip ${type,,}: duplicate" >&2
+            continue
+        fi
+        echo "$content_hash" >> "$DEDUP_FILE"
+
         title=$(echo "$ssl_content" | head -c 100)
 
         # Queue observe with SSL-formatted content
@@ -316,6 +331,56 @@ if [[ -f "$PREDICTIONS_FILE" ]]; then
 fi
 
 # ===========================================
+# HABIT OBSERVATION: Learn trigger→response patterns
+# ===========================================
+if [[ -n "$LAST_USER_MSG" && -n "$TOOLS_FROM_TRANSCRIPT" ]]; then
+    # Extract trigger: first 5 meaningful words from user message
+    trigger=$(echo "$LAST_USER_MSG" | tr -cs '[:alnum:]' ' ' | awk '{for(i=1;i<=5 && i<=NF;i++) printf "%s ", $i}' | sed 's/ $//')
+
+    # Extract response: first 5 tools used
+    response=$(echo "$TOOLS_FROM_TRANSCRIPT" | head -5 | tr '\n' ',' | sed 's/,$//')
+
+    if [[ -n "$trigger" && -n "$response" ]]; then
+        queue_write "habit_observe" "{\"trigger\":$(echo "$trigger" | jq -Rs .),\"response\":$(echo "$response" | jq -Rs .)}"
+        echo "[soul] +habit: ${trigger:0:30}→${response:0:30}" >&2
+    fi
+fi
+
+# ===========================================
+# CALIBRATION: Track prediction accuracy by domain
+# ===========================================
+# Debugging calibration: error detected and resolution attempted
+if echo "$RESPONSE" | grep -qiE '(error|failed|exception|bug)'; then
+    # Check if resolution was attempted (edit/fix patterns in response)
+    if echo "$RESPONSE" | grep -qiE '(fixed|resolved|updated|corrected|the issue was)'; then
+        queue_write "calibration_record" "{\"domain\":\"debugging\",\"success\":true}"
+        echo "[soul] +calibration: debugging success" >&2
+    else
+        queue_write "calibration_record" "{\"domain\":\"debugging\",\"success\":false}"
+        echo "[soul] +calibration: debugging incomplete" >&2
+    fi
+fi
+
+# Code generation calibration: Edit/Write tools used
+if echo "$TOOLS_FROM_TRANSCRIPT" | grep -qiE '(Edit|Write)'; then
+    # Success if no errors in response after code changes
+    if ! echo "$RESPONSE" | grep -qiE '(error|failed|syntax error|compilation failed)'; then
+        queue_write "calibration_record" "{\"domain\":\"code_generation\",\"success\":true}"
+        echo "[soul] +calibration: code_generation success" >&2
+    else
+        queue_write "calibration_record" "{\"domain\":\"code_generation\",\"success\":false}"
+        echo "[soul] +calibration: code_generation had errors" >&2
+    fi
+fi
+
+# Architecture calibration: design/architecture discussions
+if echo "$RESPONSE" | grep -qiE '(architecture|design pattern|refactor|abstraction|interface|module|component|structure)'; then
+    # Record architecture discussion (success = we provided guidance)
+    queue_write "calibration_record" "{\"domain\":\"architecture\",\"success\":true}"
+    echo "[soul] +calibration: architecture discussion" >&2
+fi
+
+# ===========================================
 # STRUCTURED SPANS: Capture tool uses with outcomes
 # ===========================================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -324,9 +389,13 @@ if [[ -x "$SCRIPT_DIR/span-capture.sh" ]]; then
 fi
 
 # Clean up temp files
-rm -f "$MIND_PATH/.last_user_message" "$PREDICTIONS_FILE" 2>/dev/null
+rm -f "$MIND_PATH/.last_user_message" "$PREDICTIONS_FILE" "$DEDUP_FILE" 2>/dev/null
 
 # Ledger save → queue (fire-and-forget)
+# Extract active files from transcript (file_path fields from tool calls)
+ACTIVE_FILES=$(jq -r '[.[] | select(.role=="assistant") | .message.content[]? | select(.type=="tool_use") | .input.file_path // .input.path // empty] | unique | map(select(. != ""))' "$TRANSCRIPT_PATH" 2>/dev/null || echo "[]")
+[[ -z "$ACTIVE_FILES" || "$ACTIVE_FILES" == "null" ]] && ACTIVE_FILES="[]"
+
 SESSION_ID="${SESSION_ID_INPUT:-auto-$(date +%Y%m%d-%H%M%S)}"
 
 # Detect mood
@@ -350,16 +419,56 @@ snapshot=$(echo "$RESPONSE" | grep -v '^$' | grep -v '^\[' | head -1 | head -c 2
 TOOLS_USED=$(jq -r '[.[] | select(.role=="assistant") | .message.content[]? | select(.type=="tool_use") | .name] | unique | join(", ")' "$TRANSCRIPT_PATH" 2>/dev/null | head -c 200)
 TURNS=$(jq '[.[] | select(.role=="assistant")] | length' "$TRANSCRIPT_PATH" 2>/dev/null || echo "?")
 
-# Build SSL summary
-SUMMARY="[session:$SESSION_ID] ${mood}→${TURNS} turns"
-[[ -n "$TOOLS_USED" ]] && SUMMARY="$SUMMARY | tools: ${TOOLS_USED:0:100}"
-[[ -n "$snapshot" ]] && SUMMARY="$SUMMARY | ${snapshot:0:100}"
+# Quality gate: minimum 3 turns for session summary (avoid trivial session noise)
+if [[ "$TURNS" =~ ^[0-9]+$ && "$TURNS" -ge 3 ]]; then
+    # Build SSL summary
+    SUMMARY="[session:$SESSION_ID] ${mood}→${TURNS} turns"
+    [[ -n "$TOOLS_USED" ]] && SUMMARY="$SUMMARY | tools: ${TOOLS_USED:0:100}"
+    [[ -n "$snapshot" ]] && SUMMARY="$SUMMARY | ${snapshot:0:100}"
 
-# Queue session summary memory
-queue_write "observe" "{\"category\":\"session_summary\",\"title\":\"Session $SESSION_ID\",\"content\":$(echo "$SUMMARY" | jq -Rs .)}"
-echo "[soul] +session-summary: ${SUMMARY:0:60}" >&2
+    # Queue session summary memory
+    queue_write "observe" "{\"category\":\"session_summary\",\"title\":\"Session $SESSION_ID\",\"content\":$(echo "$SUMMARY" | jq -Rs .)}"
+    echo "[soul] +session-summary: ${SUMMARY:0:60}" >&2
+else
+    echo "[soul] skip session-summary: too few turns ($TURNS<3)" >&2
+fi
 
-queue_write "ledger_save" "{\"session_id\":\"$SESSION_ID\",\"project\":\"$REALM\",\"mood\":\"$mood\",\"snapshot\":$(echo "$snapshot" | jq -Rs .)}"
-echo "[ledger] queued: $SESSION_ID ($mood, +$LEARNED)" >&2
+queue_write "ledger_save" "{\"session_id\":\"$SESSION_ID\",\"project\":\"$REALM\",\"mood\":\"$mood\",\"snapshot\":$(echo "$snapshot" | jq -Rs .),\"active_files\":$ACTIVE_FILES}"
+echo "[ledger] queued: $SESSION_ID ($mood, +$LEARNED, files: $(echo "$ACTIVE_FILES" | jq -r 'length'))" >&2
+
+# ===========================================
+# GOAL DETECTION: Detect goal setting and progress patterns
+# ===========================================
+if [[ -n "$LAST_USER_MSG" ]]; then
+    # Goal setting patterns: "I want to", "we need to", "let's build/create/implement"
+    if echo "$LAST_USER_MSG" | grep -qiE "(I want to|we need to|let'?s (build|create|implement|make|ship|finish|complete)|goal is to|objective is|planning to)"; then
+        goal_title=$(echo "$LAST_USER_MSG" | grep -ioE "(I want to|we need to|let'?s (build|create|implement|make|ship|finish|complete)|goal is to|objective is|planning to)[^.!?]*" | head -1 | head -c 100 | tr '\n' ' ')
+        if [[ -n "$goal_title" && ${#goal_title} -gt 10 ]]; then
+            queue_write "goal_set" "{\"title\":$(echo "$goal_title" | jq -Rs .),\"description\":$(echo "$LAST_USER_MSG" | head -c 300 | jq -Rs .)}"
+            echo "[soul] +goal detected: ${goal_title:0:50}" >&2
+        fi
+    fi
+
+    # Goal completion patterns: "done", "shipped", "released", "finished", "completed"
+    if echo "$LAST_USER_MSG" | grep -qiE "(it'?s done|we'?re done|finished|shipped|released|completed|all done|mission accomplished|working now|tests pass|merged)"; then
+        progress_context=$(echo "$LAST_USER_MSG" | head -c 150 | tr '\n' ' ')
+        queue_write "goal_progress" "{\"update\":$(echo "$progress_context" | jq -Rs .),\"percentage\":100}"
+        echo "[soul] +goal progress: completion detected" >&2
+    fi
+fi
+
+# ===========================================
+# CURIOSITY RESOLUTION: Detect answers to knowledge gaps
+# ===========================================
+# Check if response contains resolution patterns
+if echo "$RESPONSE" | grep -qiE "(I found|the answer is|it turns out|the reason is|figured out|discovered that|realized that|the issue was|the problem was|the solution is|turns out|mystery solved)"; then
+    resolution_context=$(echo "$RESPONSE" | grep -iE "(I found|the answer is|it turns out|the reason is|figured out|discovered|realized|the issue was|the problem was|the solution is)" | head -1 | head -c 300 | tr '\n' ' ')
+    if [[ -n "$resolution_context" && ${#resolution_context} -gt 20 ]]; then
+        # Get most recent unresolved gap and resolve it
+        # Use queue to call curiosity_resolve with the resolution
+        queue_write "curiosity_resolve" "{\"resolution\":$(echo "$resolution_context" | jq -Rs .)}"
+        echo "[soul] +curiosity resolved: ${resolution_context:0:50}" >&2
+    fi
+fi
 
 exit 0
