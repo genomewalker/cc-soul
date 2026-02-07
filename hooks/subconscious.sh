@@ -3,7 +3,7 @@
 #
 # Usage: subconscious.sh <start|stop|status>
 
-set -e
+# Don't use set -e: we want hooks to succeed even if daemon is slow to start
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
