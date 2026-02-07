@@ -431,6 +431,17 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
      {{"query", "SQL SELECT query", true, nullptr},
       {"limit", "Max rows to return", false, "100"}}},
 
+    // Embedding tools
+    {"embed_symbols", "Fast embed symbol metadata (~100/sec, no LLM needed)",
+     {{"batch_size", "Symbols per batch", false, "100"},
+      {"reset", "Clear all embeddings first", false, "false"}}},
+
+    {"reembed_memories", "Re-embed memories with missing/zero embeddings",
+     {{"limit", "Max memories to process", false, "100"},
+      {"kind", "Filter by kind: belief, wisdom, episode, correction, preference", false, nullptr},
+      {"min_confidence", "Min confidence threshold", false, "0"},
+      {"dry_run", "Preview without updating", false, "false"}}},
+
     // Background processing tools
     {"background_status", "Get background processing and embedding scheduler status",
      {}},
@@ -734,6 +745,10 @@ int run_cli(const std::string& socket_path, const std::string& tool,
 
     // Parse and output result
     try {
+        // DEBUG: Print raw response for troubleshooting
+        if (std::getenv("CHITTA_DEBUG")) {
+            std::cerr << "[DEBUG] Raw response (" << resp->size() << " bytes): " << resp->substr(0, 200) << "\n";
+        }
         auto result = json::parse(*resp);
 
         if (result.contains("error")) {

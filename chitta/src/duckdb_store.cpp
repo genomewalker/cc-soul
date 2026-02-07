@@ -1342,8 +1342,9 @@ std::vector<MemoryResult> DuckDBStore::recall(
         }
 
         std::ostringstream sql;
-        sql << "SELECT m.id, m.kind, m.content, m.confidence, m.created_at, m.accessed_at, "
-            << "m.realm, m.visibility "
+        sql << "SELECT m.id, COALESCE(m.kind, 'episode'), COALESCE(m.content, ''), "
+            << "COALESCE(m.confidence, 0.5), COALESCE(m.created_at, 0), COALESCE(m.accessed_at, 0), "
+            << "COALESCE(m.realm, 'brahman'), COALESCE(m.visibility, 0) "
             << "FROM memory m "
             << where_clause.str();
 
@@ -1415,11 +1416,13 @@ std::vector<MemoryResult> DuckDBStore::recall(
         }
 
         std::ostringstream sql;
-        sql << "SELECT m.id, m.kind, m.content, m.confidence, m.created_at, m.accessed_at, "
-            << "m.realm, m.visibility, "
-            << "array_cosine_similarity(m.embedding, " << embedding_to_sql(query_embedding) << ") AS similarity "
+        sql << "SELECT m.id, COALESCE(m.kind, 'episode'), COALESCE(m.content, ''), "
+            << "COALESCE(m.confidence, 0.5), COALESCE(m.created_at, 0), COALESCE(m.accessed_at, 0), "
+            << "COALESCE(m.realm, 'brahman'), COALESCE(m.visibility, 0), "
+            << "COALESCE(array_cosine_similarity(m.embedding, " << embedding_to_sql(query_embedding) << "), 0.0) AS similarity "
             << "FROM memory m "
             << where_clause.str()
+            << (has_where ? "AND " : "WHERE ") << "m.embedding IS NOT NULL "
             << "ORDER BY similarity DESC "
             << "LIMIT " << k;
 
@@ -1667,7 +1670,8 @@ std::vector<MemoryResult> DuckDBStore::list_global_memories(size_t limit, const 
     if (!db_) return results;
 
     std::ostringstream sql;
-    sql << "SELECT id, content, kind, confidence, realm, visibility, created_at, accessed_at "
+    sql << "SELECT id, COALESCE(content, ''), COALESCE(kind, 'episode'), "
+        << "COALESCE(confidence, 0.5), COALESCE(realm, 'brahman') "
         << "FROM memory WHERE visibility = " << static_cast<int>(RealmVisibility::Global);
 
     if (!kind.empty()) {
@@ -1681,7 +1685,7 @@ std::vector<MemoryResult> DuckDBStore::list_global_memories(size_t limit, const 
         sql << " AND kind = '" << escaped << "'";
     }
 
-    sql << " ORDER BY confidence DESC, accessed_at DESC LIMIT " << limit;
+    sql << " ORDER BY confidence DESC LIMIT " << limit;
 
     auto result = read_query(sql.str());
     if (!result) return results;
@@ -4654,7 +4658,7 @@ bool DuckDBStore::consolidation_merge(int64_t primary_id, int64_t secondary_id, 
     };
 
     // Get secondary memory info for merging
-    std::string sql = "SELECT content, confidence FROM memory WHERE id = " + std::to_string(secondary_id);
+    std::string sql = "SELECT COALESCE(content, ''), COALESCE(confidence, 0.5) FROM memory WHERE id = " + std::to_string(secondary_id);
     auto result = read_query(sql);
     if (!result || result->HasError()) return false;
 
@@ -6655,7 +6659,7 @@ std::vector<DistillCandidate> DuckDBStore::find_distill_candidates(
 
     // Step 1: Get all episode memories with embeddings
     auto episodes_result = read_query(
-        "SELECT id, content, confidence FROM memory WHERE kind = 'episode' ORDER BY id");
+        "SELECT id, COALESCE(content, ''), COALESCE(confidence, 0.5) FROM memory WHERE kind = 'episode' ORDER BY id");
     if (!episodes_result || episodes_result->HasError()) return candidates;
 
     struct EpisodeInfo {
@@ -7435,7 +7439,7 @@ std::vector<DuckDBStore::OrphanMemory> DuckDBStore::get_orphan_memories_with_emb
     size_t limit, const std::string& realm) {
 
     std::ostringstream sql;
-    sql << "SELECT m.id, m.content, m.kind, m.realm, m.embedding FROM memory m "
+    sql << "SELECT m.id, COALESCE(m.content, ''), COALESCE(m.kind, 'episode'), COALESCE(m.realm, 'brahman'), m.embedding FROM memory m "
         << "WHERE NOT EXISTS (SELECT 1 FROM theme_membership tm WHERE tm.memory_id = m.id) "
         << "AND m.embedding IS NOT NULL AND array_length(m.embedding) = 768";
     if (!realm.empty()) {

@@ -22,6 +22,7 @@
 #include <vector>
 #include <string>
 #include <iostream>
+#include <nlohmann/json.hpp>
 
 namespace chitta {
 
@@ -174,8 +175,13 @@ private:
             try {
                 result = task.work();
             } catch (const std::exception& e) {
-                result = R"({"jsonrpc":"2.0","error":{"code":-32603,"message":")" +
-                         std::string(e.what()) + R"("},"id":null})";
+                // Properly escape error message to prevent JSON injection
+                nlohmann::json error_response = {
+                    {"jsonrpc", "2.0"},
+                    {"error", {{"code", -32603}, {"message", e.what()}}},
+                    {"id", nullptr}
+                };
+                result = error_response.dump();
             }
 
             // Mark completed and remove from active
