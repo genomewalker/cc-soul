@@ -274,62 +274,108 @@ endif()
 
 # ONNX Runtime (optional)
 if(CHITTA_WITH_ONNX)
-    # Allow user-specified paths via -D flags
-    # Priority: user flags > official release (~/.claude/deps) > homebrew > conda
-    if(NOT ONNXRUNTIME_INCLUDE_DIR)
-        # Check for official release with CoreML support
-        if(EXISTS "$ENV{HOME}/.claude/deps/onnxruntime/include/onnxruntime_cxx_api.h")
-            set(ONNXRUNTIME_INCLUDE_DIR "$ENV{HOME}/.claude/deps/onnxruntime/include")
-            set(ONNXRUNTIME_LIB_DIR "$ENV{HOME}/.claude/deps/onnxruntime/lib")
-            message(STATUS "ONNX Runtime: using official release (CoreML available)")
-        elseif(APPLE AND EXISTS "/opt/homebrew/opt/onnxruntime/include/onnxruntime/core/session/onnxruntime_cxx_api.h")
-            # Homebrew on Apple Silicon — use session subdir for flat include compatibility
-            set(ONNXRUNTIME_INCLUDE_DIR "/opt/homebrew/opt/onnxruntime/include/onnxruntime/core/session")
-            set(ONNXRUNTIME_LIB_DIR "/opt/homebrew/opt/onnxruntime/lib")
-            message(STATUS "ONNX Runtime: using homebrew (no CoreML)")
-        elseif(DEFINED ENV{CONDA_PREFIX})
-            set(ONNXRUNTIME_INCLUDE_DIR "$ENV{CONDA_PREFIX}/include")
-            set(ONNXRUNTIME_LIB_DIR "$ENV{CONDA_PREFIX}/lib")
-            message(STATUS "ONNX Runtime: using conda")
-        else()
-            set(ONNXRUNTIME_INCLUDE_DIR "" CACHE PATH "ONNX Runtime include directory")
-            set(ONNXRUNTIME_LIB_DIR "" CACHE PATH "ONNX Runtime library directory")
+    # Auto-discover ONNX Runtime - no hardcoded paths
+    # Priority: user -D flags > find_library/find_path
+
+    if(NOT ONNXRUNTIME_INCLUDE_DIR OR NOT ONNXRUNTIME_LIB_DIR)
+        # Build search hints from environment
+        set(_ort_search_paths "")
+
+        # Official cc-soul deps location (has CoreML on macOS)
+        if(EXISTS "$ENV{HOME}/.claude/deps/onnxruntime")
+            list(APPEND _ort_search_paths "$ENV{HOME}/.claude/deps/onnxruntime")
         endif()
-    endif()
-    if(NOT ONNXRUNTIME_LIB_DIR)
+
+        # Environment-based paths (conda, virtualenv, etc.)
         if(DEFINED ENV{CONDA_PREFIX})
-            set(ONNXRUNTIME_LIB_DIR "$ENV{CONDA_PREFIX}/lib")
-        else()
+            list(APPEND _ort_search_paths "$ENV{CONDA_PREFIX}")
+        endif()
+        if(DEFINED ENV{VIRTUAL_ENV})
+            list(APPEND _ort_search_paths "$ENV{VIRTUAL_ENV}")
+        endif()
+
+        # Homebrew (detect dynamically)
+        if(APPLE)
+            execute_process(
+                COMMAND brew --prefix onnxruntime
+                OUTPUT_VARIABLE _brew_ort_prefix
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_QUIET
+                RESULT_VARIABLE _brew_result
+            )
+            if(_brew_result EQUAL 0 AND EXISTS "${_brew_ort_prefix}")
+                list(APPEND _ort_search_paths "${_brew_ort_prefix}")
+            endif()
+        endif()
+
+        # System paths
+        list(APPEND _ort_search_paths "/usr/local" "/usr")
+
+        # Find the library first
+        find_library(ONNXRUNTIME_LIBRARY
+            NAMES onnxruntime
+            HINTS ${_ort_search_paths}
+            PATH_SUFFIXES lib lib64
+        )
+
+        if(ONNXRUNTIME_LIBRARY)
+            get_filename_component(ONNXRUNTIME_LIB_DIR "${ONNXRUNTIME_LIBRARY}" DIRECTORY)
+            get_filename_component(_ort_root "${ONNXRUNTIME_LIB_DIR}" DIRECTORY)
+
+            # Find header - check both layouts (flat and nested)
+            # Nested: onnxruntime/core/session/onnxruntime_cxx_api.h
+            # Flat: onnxruntime_cxx_api.h
+            find_path(ONNXRUNTIME_INCLUDE_DIR
+                NAMES onnxruntime_cxx_api.h
+                HINTS "${_ort_root}/include" ${_ort_search_paths}
+                PATH_SUFFIXES
+                    include
+                    include/onnxruntime/core/session
+                    onnxruntime/core/session
+            )
+
+            if(ONNXRUNTIME_INCLUDE_DIR)
+                message(STATUS "ONNX Runtime: auto-detected")
+                message(STATUS "  Library: ${ONNXRUNTIME_LIBRARY}")
+                message(STATUS "  Include: ${ONNXRUNTIME_INCLUDE_DIR}")
+
+                # Check for CoreML support (macOS official release)
+                if(APPLE AND EXISTS "${ONNXRUNTIME_INCLUDE_DIR}/coreml_provider_factory.h")
+                    set(ONNXRUNTIME_HAS_COREML TRUE)
+                    message(STATUS "  CoreML: available")
+                endif()
+            endif()
+        endif()
+
+        # Cache for user override
+        if(NOT ONNXRUNTIME_INCLUDE_DIR)
+            set(ONNXRUNTIME_INCLUDE_DIR "" CACHE PATH "ONNX Runtime include directory")
+        endif()
+        if(NOT ONNXRUNTIME_LIB_DIR)
             set(ONNXRUNTIME_LIB_DIR "" CACHE PATH "ONNX Runtime library directory")
         endif()
     endif()
 
-    # Create imported target (platform-aware library extension)
-    if(APPLE)
-        set(ONNXRUNTIME_LIB "${ONNXRUNTIME_LIB_DIR}/libonnxruntime.dylib")
+    # Create imported target if found
+    if(ONNXRUNTIME_LIBRARY AND ONNXRUNTIME_INCLUDE_DIR)
+        add_library(onnxruntime SHARED IMPORTED)
+        set_target_properties(onnxruntime PROPERTIES
+            IMPORTED_LOCATION "${ONNXRUNTIME_LIBRARY}"
+            INTERFACE_INCLUDE_DIRECTORIES "${ONNXRUNTIME_INCLUDE_DIR}"
+        )
+
+        # Link Apple frameworks for CoreML EP
+        if(ONNXRUNTIME_HAS_COREML)
+            target_compile_definitions(chitta INTERFACE CHITTA_WITH_COREML=1)
+        endif()
+
+        # Add to chitta
+        target_link_libraries(chitta INTERFACE onnxruntime)
+        target_compile_definitions(chitta INTERFACE CHITTA_WITH_ONNX=1)
+        message(STATUS "ONNX Runtime enabled")
     else()
-        set(ONNXRUNTIME_LIB "${ONNXRUNTIME_LIB_DIR}/libonnxruntime.so")
+        message(STATUS "ONNX Runtime: not found (embeddings disabled)")
     endif()
-
-    add_library(onnxruntime SHARED IMPORTED)
-    set_target_properties(onnxruntime PROPERTIES
-        IMPORTED_LOCATION "${ONNXRUNTIME_LIB}"
-        INTERFACE_INCLUDE_DIRECTORIES "${ONNXRUNTIME_INCLUDE_DIR}"
-    )
-
-    # Link Apple frameworks for CoreML EP
-    if(APPLE AND EXISTS "${ONNXRUNTIME_INCLUDE_DIR}/coreml_provider_factory.h")
-        target_compile_definitions(chitta INTERFACE CHITTA_WITH_COREML=1)
-        message(STATUS "  CoreML EP: available")
-    endif()
-
-    # Add to chitta
-    target_link_libraries(chitta INTERFACE onnxruntime)
-    target_compile_definitions(chitta INTERFACE CHITTA_WITH_ONNX=1)
-
-    message(STATUS "ONNX Runtime enabled")
-    message(STATUS "  Include: ${ONNXRUNTIME_INCLUDE_DIR}")
-    message(STATUS "  Library: ${ONNXRUNTIME_LIB_DIR}")
 endif()
 
 # Tests

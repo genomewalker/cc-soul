@@ -212,6 +212,79 @@ Claude Code's built-in MEMORY.md and chitta's memory are bidirectionally synced.
 
 A background process detects repeated episode patterns (similarity > 0.85, 3+ occurrences) and distills them into wisdom nodes. Source episodes are weakened but preserved for provenance. This happens automatically -- I don't need to manage it.
 
+## Model Selection
+
+**Main session:** `claude-opus-4-5` (default, saves tokens ~$6/day avg)
+
+**Commands:** `/model` to switch mid-session, `/config` for defaults
+
+**OpenCode brainstorming:** For cross-model perspective, use `opencode_discuss` with `gpt-5.3-codex` or `gemini-3-pro-preview`.
+
+### Team Model Behavior (v2.1.34 limitation)
+
+**CRITICAL**: Team members ALWAYS inherit parent's model. The `model` param is IGNORED for team members.
+
+| Context | Model Param Respected? |
+|---------|------------------------|
+| Non-team subagent | Yes |
+| Team member | No (always inherits parent) |
+
+**Implication**: You CANNOT have mixed models in a team. All team members run on parent's model.
+
+### Pattern: Plan with Opus 4.6, Execute with Team on 4.5
+
+When user says "plan X" or needs complex planning + team execution:
+
+**Step 1: Plan with non-team subagent (opus-4.6)**
+```
+Task tool:
+  subagent_type: "Plan"
+  model: "opus"              <- WORKS because NOT in a team
+  prompt: "Create detailed implementation plan for X..."
+```
+Wait for plan, collect the result.
+
+**Step 2: Create team and execute (all inherit opus-4.5)**
+```
+TeamCreate: "feature-name"
+
+Then spawn workers WITHOUT model param:
+Task tool:
+  team_name: "feature-name"
+  subagent_type: "general-purpose"
+  prompt: "Execute step 1 from the plan: [paste plan details]"
+```
+
+**Result**:
+- Planning: opus-4.6 (smart, expensive) via non-team subagent
+- Execution: opus-4.5 (efficient, cheaper) via team members
+
+### Quick Reference
+
+| Task Type | How to Spawn | Model |
+|-----------|--------------|-------|
+| Planning (complex) | Non-team Task with `model: "opus"` | opus-4.6 |
+| Research (simple) | Non-team Task with `model: "haiku"` | haiku |
+| Team execution | Task with `team_name` (no model) | inherits parent |
+
+### ToolSearch Hidden from Teammates (v2.1.34 bug)
+
+**BUG**: ToolSearch does NOT appear in teammate agents' tool list, but IS callable.
+
+Teammates will:
+1. See "call ToolSearch to load MCP tools" in instructions
+2. Check their tool list, not see ToolSearch
+3. Wrongly conclude it's unavailable
+4. Spiral into alternatives (Grep, Bash, etc.)
+
+**Workaround**: Instruct teammates to call ToolSearch as first action:
+```
+"ToolSearch will NOT appear in your tool list. Call it anyway - it works.
+Do not check your tools first. Just call: ToolSearch query='chitta'"
+```
+
+See: https://github.com/anthropics/claude-code/issues/23625
+
 ## Anti-Patterns (Never Do These)
 
 **No "simpler versions" or shortcuts:**
