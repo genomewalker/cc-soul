@@ -4,7 +4,7 @@
 # When a command fails, searches for gotchas/corrections related to the command
 # and injects them as context for debugging.
 
-set -e
+# Don't use set -e: we want hooks to succeed even if some parts fail
 
 CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
 [[ ! -x "$CHITTA_BIN" ]] && exit 0
@@ -43,3 +43,5 @@ if [[ -n "$memories" && "$memories" != *"No memories"* ]]; then
     escaped_mem=$(json_escape "$memories")
     echo "{\"hookSpecificOutput\":{\"hookEventName\":\"PostToolUse\",\"additionalContext\":\"🔴 COMMAND FAILED (exit $exit_code) - Related memories:\\n$escaped_mem\"}}"
 fi
+
+exit 0

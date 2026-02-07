@@ -53,3 +53,5 @@ done
 # Log with timestamp
 echo "# $(date '+%Y-%m-%d %H:%M:%S')" >> "$HISTORY_FILE"
 echo "$COMMAND" >> "$HISTORY_FILE"
+
+exit 0

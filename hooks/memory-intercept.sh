@@ -2,7 +2,7 @@
 # memory-intercept.sh - Intercept Claude Code MEMORY.md writes and sync to chitta
 # PostToolUse hook for Write tool
 
-set -euo pipefail
+# Don't use set -e: we want hooks to succeed even if some parts fail
 
 # Read JSON input from stdin
 INPUT=$(cat)

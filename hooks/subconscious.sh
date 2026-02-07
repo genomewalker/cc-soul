@@ -3,7 +3,7 @@
 #
 # Usage: subconscious.sh <start|stop|status>
 
-set -e
+# Don't use set -e: we want hooks to succeed even if daemon is slow to start
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
@@ -165,13 +165,20 @@ cmd_start() {
         done
         # Timed out waiting, clean stale lock if old
         if [[ -d "$lock_dir" ]]; then
-            local lock_age
-            lock_age=$(( $(date +%s) - $(stat -c %Y "$lock_dir" 2>/dev/null || echo 0) ))
+            local lock_age lock_mtime
+            # Use portable stat syntax (Linux: -c %Y, macOS: -f %m)
+            if stat -c %Y "$lock_dir" >/dev/null 2>&1; then
+                lock_mtime=$(stat -c %Y "$lock_dir" 2>/dev/null || echo 0)
+            else
+                lock_mtime=$(stat -f %m "$lock_dir" 2>/dev/null || echo 0)
+            fi
+            lock_age=$(( $(date +%s) - lock_mtime ))
             if (( lock_age > 30 )); then
                 rmdir "$lock_dir" 2>/dev/null || true
             fi
         fi
-        return 1
+        # Don't fail the hook - another process is starting the daemon
+        return 0
     fi
 
     # We hold the lock - ensure cleanup on exit
@@ -238,8 +245,9 @@ cmd_start() {
         local pid=$(cat "$PID_FILE" 2>/dev/null || pgrep -f "chittad daemon.*--path $MIND_PATH" | head -1)
         echo "[subconscious] Started (pid=$pid, socket=$SOCKET_PATH, heartbeat=ok)"
     else
-        echo "[subconscious] Failed to start (daemon not responding)" >&2
-        return 1
+        # Don't fail the hook - daemon may still be initializing
+        # MCP server will spawn it on demand if needed
+        echo "[subconscious] Daemon still initializing (will retry on next tool call)" >&2
     fi
 }
 

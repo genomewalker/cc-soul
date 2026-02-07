@@ -15,12 +15,12 @@
 # 2. Call OpenCode for description
 # 3. Store as memory and link to symbol
 
-set -e
+# Don't use set -e: we want the script to continue even if parts fail
 
 TEMP_FILE="$1"
 if [[ -z "$TEMP_FILE" || ! -f "$TEMP_FILE" ]]; then
     echo "[enrich] Error: No input file provided" >&2
-    exit 1
+    exit 0  # Exit gracefully - don't fail the hook
 fi
 
 # Parse input
@@ -37,7 +37,7 @@ CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
 
 if [[ -z "$SYMBOL_ID" || -z "$FILE_PATH" ]]; then
     echo "[enrich] Error: Missing required fields" >&2
-    exit 1
+    exit 0  # Exit gracefully - don't fail the hook
 fi
 
 # Extract code snippet (limit to 200 lines max)
@@ -123,3 +123,5 @@ if [[ -n "$MEMORY_ID" ]]; then
 else
     echo "[enrich] Warning: Could not store memory for $NAME" >&2
 fi
+
+exit 0

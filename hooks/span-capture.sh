@@ -5,7 +5,7 @@
 # Captures tool uses with outcomes and reward signals
 # Outputs JSONL spans to ~/.claude/mind/spans/
 
-set -e
+# Don't use set -e: we want hooks to succeed even if some parts fail
 
 MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
 SPANS_DIR="$MIND_PATH/spans"

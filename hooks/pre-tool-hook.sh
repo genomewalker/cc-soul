@@ -4,7 +4,7 @@
 # Searches for relevant warnings based on command patterns.
 # Returns context that gets injected into my prompt.
 
-set -e
+# Don't use set -e: we want hooks to succeed even if some parts fail
 
 MATCHER="${1:-}"
 [[ -z "$MATCHER" ]] && exit 0
@@ -77,3 +77,5 @@ case "$MATCHER" in
         exit 0
         ;;
 esac
+
+exit 0

@@ -7,7 +7,8 @@
 # - Tasks and progress
 # - Blockers and discoveries
 
-set -e
+# Don't use set -e: we want to continue even if some parts fail
+# This is critical for post-compaction sessions where some data may be missing
 
 CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
 QUEUE_FILE="${CHITTA_QUEUE:-/tmp/chitta-queue.jsonl}"
