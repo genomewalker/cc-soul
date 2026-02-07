@@ -67,7 +67,7 @@ jobs:
             -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
             -DDUCKDB_INCLUDE_DIR=/opt/duckdb/include \
             -DDUCKDB_LIB_DIR=/opt/duckdb/lib \
-            -DONNXRUNTIME_INCLUDE_DIR=/opt/onnxruntime/include \
+            -DONNXRUNTIME_INCLUDE_DIR=/opt/onnxruntime/include/onnxruntime/core/session \
             -DONNXRUNTIME_LIB_DIR=/opt/onnxruntime/lib \
             -DJSON_INCLUDE_DIR=/opt/nlohmann_json/include
           ninja
@@ -75,7 +75,7 @@ jobs:
       - name: Verify binaries
         run: |
           ls -la bin/
-          for b in chitta chittad chitta_migrate chitta_import duckdb_test; do
+          for b in chitta chittad duckdb_test; do
             test -x bin/$b || { echo "Missing: $b"; exit 1; }
           done
 
@@ -85,7 +85,7 @@ jobs:
           cp /opt/onnxruntime/lib/libonnxruntime.so.${{ env.ONNX_VERSION }} bin/
           ln -sf libonnxruntime.so.${{ env.ONNX_VERSION }} bin/libonnxruntime.so
           cp /opt/duckdb/lib/libduckdb.so bin/
-          for b in bin/chitta bin/chittad bin/chitta_migrate bin/chitta_import bin/duckdb_test; do
+          for b in bin/chitta bin/chittad bin/duckdb_test; do
             patchelf --set-rpath '$ORIGIN' $b 2>/dev/null || true
           done
           echo "Checking library dependencies..."
