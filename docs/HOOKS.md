@@ -35,7 +35,7 @@ CC-Soul provides hooks in two forms:
 
 | System | Files | Used When |
 |--------|-------|-----------|
-| **Plugin hooks** | `hooks/hooks.json` + `scripts/soul-hook.sh` | Installed as Claude Code plugin |
+| **Plugin hooks** | `hooks/hooks.json` + `hooks/session-start-hook.sh, hooks/prompt-hook.sh, hooks/stop-hook.sh` | Installed as Claude Code plugin |
 | **Settings hooks** | `hooks/*.sh` + `~/.claude/settings.json` | Standalone installation |
 
 The `smart-install.sh` script configures the appropriate system automatically.
@@ -190,11 +190,11 @@ When installed as a Claude Code plugin, hooks are defined in `hooks/hooks.json`:
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/soul-hook.sh start"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-start-hook.sh, hooks/prompt-hook.sh, hooks/stop-hook.sh start"
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/subconscious.sh start",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/subconscious.sh start",
             "timeout": 10
           }
         ]
@@ -206,7 +206,7 @@ When installed as a Claude Code plugin, hooks are defined in `hooks/hooks.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/soul-hook.sh prompt --lean --resonate",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-start-hook.sh, hooks/prompt-hook.sh, hooks/stop-hook.sh prompt --lean --resonate",
             "timeout": 15
           }
         ]
@@ -526,16 +526,16 @@ The daemon keeps running even after Claude Code exits because:
 
 ```bash
 # Check status
-./scripts/subconscious.sh status
+./hooks/subconscious.sh status
 
 # Health check with auto-recovery
-./scripts/subconscious.sh health
+./hooks/subconscious.sh health
 
 # Stop manually
-./scripts/subconscious.sh stop
+./hooks/subconscious.sh stop
 
 # Restart
-./scripts/subconscious.sh restart
+./hooks/subconscious.sh restart
 
 # View logs
 tail -f ~/.claude/mind/.subconscious.log
@@ -665,7 +665,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"recall","a
 
 3. Ensure daemon is running:
    ```bash
-   ./scripts/subconscious.sh status
+   ./hooks/subconscious.sh status
    ```
 
 ### Slow Hook Execution
@@ -673,7 +673,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"recall","a
 Hooks have timeouts. If they're slow:
 
 1. Increase timeout in configuration
-2. Check daemon responsiveness: `./scripts/subconscious.sh health`
+2. Check daemon responsiveness: `./hooks/subconscious.sh health`
 3. Set `CC_SOUL_MAX_WAIT=10` for longer daemon response timeout
 4. Reduce resonance results: default is 3, can lower to 2
 
@@ -726,7 +726,7 @@ Hooks have timeouts. If they're slow:
 
 1. Verify hook output manually:
    ```bash
-   echo '{"message":"test query"}' | ./scripts/simple-hook.sh prompt
+   echo '{"message":"test query"}' | ./hooks/prompt-hook.sh prompt
    ```
 
 2. Check daemon socket communication:
@@ -753,7 +753,7 @@ Debug output (to stderr) shows:
 
 To test manually:
 ```bash
-DEBUG_SOUL=1 ./scripts/simple-hook.sh prompt "your test query"
+DEBUG_SOUL=1 ./hooks/prompt-hook.sh prompt "your test query"
 ```
 
 ---

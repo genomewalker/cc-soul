@@ -9,7 +9,7 @@
 - Batch embed during indexing (move cost to index time)
 
 ### 1.2 Code diff awareness
-**Files:** `scripts/simple-hook.sh`, `chitta-mcp/server.py`
+**Files:** `hooks/prompt-hook.sh, hooks/stop-hook.sh`, `chitta-mcp/server.py`
 - On SessionStart, detect git changes since last session
 - Surface: "Files changed: X, Y, Z" in context
 - Store last commit hash in ledger
@@ -23,7 +23,7 @@
 ## Phase 2: Memory & Learning
 
 ### 2.1 Incremental distillation
-**Files:** `scripts/simple-hook.sh`, `chitta-mcp/server.py`
+**Files:** `hooks/prompt-hook.sh, hooks/stop-hook.sh`, `chitta-mcp/server.py`
 - On Stop hook, extract learnings from current turn (not whole session)
 - Detect [LEARN] patterns in assistant responses
 - Store immediately, don't wait for full session distillation
@@ -35,7 +35,7 @@
 - Link to original incorrect statement via triplet
 
 ### 2.3 Proactive memory surfacing
-**Files:** `scripts/simple-hook.sh`
+**Files:** `hooks/prompt-hook.sh, hooks/stop-hook.sh`
 - Analyze query for implicit needs (not just explicit keywords)
 - Surface related memories even if not directly matching
 - Add confidence threshold for proactive suggestions
