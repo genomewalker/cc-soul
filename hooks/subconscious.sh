@@ -165,8 +165,14 @@ cmd_start() {
         done
         # Timed out waiting, clean stale lock if old
         if [[ -d "$lock_dir" ]]; then
-            local lock_age
-            lock_age=$(( $(date +%s) - $(stat -c %Y "$lock_dir" 2>/dev/null || echo 0) ))
+            local lock_age lock_mtime
+            # Use portable stat syntax (Linux: -c %Y, macOS: -f %m)
+            if stat -c %Y "$lock_dir" >/dev/null 2>&1; then
+                lock_mtime=$(stat -c %Y "$lock_dir" 2>/dev/null || echo 0)
+            else
+                lock_mtime=$(stat -f %m "$lock_dir" 2>/dev/null || echo 0)
+            fi
+            lock_age=$(( $(date +%s) - lock_mtime ))
             if (( lock_age > 30 )); then
                 rmdir "$lock_dir" 2>/dev/null || true
             fi

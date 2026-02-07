@@ -8,7 +8,7 @@
 # - Blockers and discoveries
 # - Understanding built
 
-set -e
+# Don't use set -e: we want to save as much state as possible even if parts fail
 
 CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
 QUEUE_FILE="${CHITTA_QUEUE:-/tmp/chitta-queue.jsonl}"
