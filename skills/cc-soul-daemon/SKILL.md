@@ -14,16 +14,16 @@ Run the subconscious.sh script with the requested action:
 
 ```bash
 # Check status (default)
-${CLAUDE_PLUGIN_ROOT}/scripts/subconscious.sh status
+${CLAUDE_PLUGIN_ROOT}/hooks/subconscious.sh status
 
 # Start daemon
-${CLAUDE_PLUGIN_ROOT}/scripts/subconscious.sh start
+${CLAUDE_PLUGIN_ROOT}/hooks/subconscious.sh start
 
 # Stop daemon
-${CLAUDE_PLUGIN_ROOT}/scripts/subconscious.sh stop
+${CLAUDE_PLUGIN_ROOT}/hooks/subconscious.sh stop
 
 # Restart daemon
-${CLAUDE_PLUGIN_ROOT}/scripts/subconscious.sh restart
+${CLAUDE_PLUGIN_ROOT}/hooks/subconscious.sh restart
 ```
 
 Parse user request for action (start/stop/restart/status), default to status.

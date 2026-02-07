@@ -54,11 +54,11 @@ legacy recognition (needs conversion):
 
 ceremony:
   0. śuddhi: sample nodes, recognize format
-     chitta yajna_list --limit 10
+     chitta recall --query "verbose memory" --limit 10
      inspect samples: prose or SSL?
 
   1. for each legacy node:
-     a. inspect: chitta yajna_inspect --id "UUID"
+     a. inspect: chitta get --id "UUID"
      b. understand: what's the core insight?
      c. extract triplets (REQUIRED):
         chitta connect --subject "X" --predicate "Y" --object "Z"
@@ -71,7 +71,7 @@ ceremony:
      e. update: chitta update --id "UUID" --content "SEED"
      f. tag: chitta tag --id "UUID" --add "ε-processed"
 
-  2. verify: chitta yajna_list returns fewer unprocessed
+  2. verify: check that tagged nodes have ε-processed tag
 
 examples:
 

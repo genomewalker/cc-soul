@@ -15,7 +15,7 @@ verify setup:
   db files@~/.claude/mind/chitta.*
   version from plugin.json
 
-get status: soul_context(format=json) + harmonize
+get status: soul_context + hygiene_stats
 
 evaluate:
   symlinks: valid|missing warm|missing hot/cold

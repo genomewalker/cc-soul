@@ -11,7 +11,7 @@ Stop the chittad daemon gracefully.
 ## Usage
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/subconscious.sh stop
+${CLAUDE_PLUGIN_ROOT}/hooks/subconscious.sh stop
 ```
 
 This will:

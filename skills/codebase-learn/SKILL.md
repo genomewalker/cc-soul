@@ -94,31 +94,31 @@ SSL captures what AST can't:
 When code changes:
 
 ```bash
-# Check what's stale
-chitta staleness_stats
-
-# Re-learn (only re-analyzes changed files internally)
+# Re-learn (only re-analyzes changed files with incremental: true default)
 chitta learn_codebase --path /path/to/project
+
+# Force full re-index if needed
+chitta learn_codebase --path /path/to/project --force true
 ```
 
-Provenance tracking means:
-- Each Symbol knows its source file and hash
-- File changes mark symbols as `maybe_stale`
-- Re-analysis updates only what changed
+Incremental tracking means:
+- Each file hash is stored
+- Re-analysis only processes changed files by default
+- Use `--force true` to re-index everything
 
 ## Token Savings
 
 Traditional: inject full code context (~thousands of tokens)
 
-Hierarchical approach:
-- Level 0: ~50 tokens (project essence, always injected)
-- Level 1: ~100 tokens (relevant modules)
-- Level 2: ~50 tokens (active patterns)
-- **Total: ~200 tokens vs ~2000+**
+Smart context approach:
+- Codebase overview provides high-level structure
+- Symbol search finds specific definitions
+- Semantic search with embeddings finds related code
+- **Result: targeted context vs full file dumps**
 
-View current state:
+View codebase structure:
 ```bash
-chitta hierarchical_state
+chitta codebase_overview --project myproject
 ```
 
 ## Example: Learning cc-soul
@@ -169,8 +169,8 @@ chittad daemon --no-enrich  # disable enrichment
 After running:
 - `recall("Mind architecture")` → finds Symbol nodes AND architectural SSL
 - `recall("memory storage")` → finds enriched code descriptions
-- `hierarchical_state` → token-efficient context ready for injection
-- `staleness_stats` → know when re-indexing needed
+- `codebase_overview --project cc-soul` → see full structure at a glance
 - `query --subject Mind` → find all Mind relationships
+- `search_symbols --query "storage"` → semantic search across symbols
 
 The soul knows both structure (symbols) and meaning (SSL + semantic descriptions).
