@@ -110,14 +110,23 @@ if [[ "$AUTO_CONFIRM" != "true" ]]; then
     fi
 fi
 
+# Cross-platform sed -i (macOS needs '', Linux doesn't)
+sedi() {
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        sed -i '' "$@"
+    else
+        sed -i "$@"
+    fi
+}
+
 # Update version.hpp
 echo "Updating chitta/include/chitta/version.hpp..."
-sed -i '' "s/#define CHITTA_VERSION \"[^\"]*\"/#define CHITTA_VERSION \"$NEW_VERSION\"/" \
+sedi "s/#define CHITTA_VERSION \"[^\"]*\"/#define CHITTA_VERSION \"$NEW_VERSION\"/" \
     chitta/include/chitta/version.hpp
 
 # Update plugin.json
 echo "Updating .claude-plugin/plugin.json..."
-sed -i '' "s/\"version\": \"[^\"]*\"/\"version\": \"$NEW_VERSION\"/" \
+sedi "s/\"version\": \"[^\"]*\"/\"version\": \"$NEW_VERSION\"/" \
     .claude-plugin/plugin.json
 
 # Verify updates
