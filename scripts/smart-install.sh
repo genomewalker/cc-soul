@@ -309,6 +309,19 @@ install_hooks() {
     done
 }
 
+# Install CLAUDE.md as user-level rule
+install_claude_rules() {
+    local rules_dir="${HOME}/.claude/rules"
+    local source="$PLUGIN_DIR/CLAUDE.md"
+    local target="$rules_dir/cc-soul.md"
+
+    [[ ! -f "$source" ]] && return 0
+
+    mkdir -p "$rules_dir"
+    ln -sf "$source" "$target"
+    echo "[cc-soul] Linked CLAUDE.md → ~/.claude/rules/cc-soul.md"
+}
+
 # Configure hooks in settings.json
 configure_hooks() {
     local settings_file="${HOME}/.claude/settings.json"
@@ -487,6 +500,9 @@ main() {
 
     # Install hooks
     install_hooks
+
+    # Link CLAUDE.md to user rules
+    install_claude_rules
 
     # Configure bash permissions for chitta commands
     configure_permissions
