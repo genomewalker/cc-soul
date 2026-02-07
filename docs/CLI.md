@@ -91,7 +91,7 @@ chittad daemon --path /custom/mind --interval 30
 
 **What the daemon does:**
 - Opens DuckDB database at `{path}/chitta.duckdb`
-- Loads ONNX embedding model (all-MiniLM-L6-v2, 384 dimensions)
+- Loads ONNX embedding model (bge-base-en-v1.5, 768 dimensions)
 - Creates Unix domain socket at `/tmp/chitta-{hash}.sock`
 - Writes PID to `/tmp/chitta-{hash}.pid`
 - Starts thread pool (auto-scaling 2-16 workers)

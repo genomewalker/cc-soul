@@ -1013,9 +1013,8 @@ code {
         <span class="diagram-layer-label">Claude Code</span>
         <div class="diagram-boxes">
           <div class="diagram-box highlight-aura">Hooks</div>
-          <div class="diagram-box highlight-aura">soul-hook.sh</div>
+          <div class="diagram-box highlight-aura">hooks/*.sh</div>
           <div class="diagram-box highlight-aura">MCP Server (chitta-mcp)</div>
-          <div class="diagram-box highlight-aura">capture-hook.sh</div>
         </div>
       </div>
 
@@ -1097,7 +1096,7 @@ code {
         <tr><td class="class-name">DuckDBStore</td><td class="file-name">duckdb_store.hpp</td><td class="role-desc">Storage: all DuckDB operations, schema, queries</td></tr>
         <tr><td class="class-name">DuckDBRpcHandler</td><td class="file-name">rpc/duckdb_handler.hpp</td><td class="role-desc">JSON-RPC 2.0 handler, 100+ registered tools</td></tr>
         <tr><td class="class-name">Embedder</td><td class="file-name">mind/embedder.hpp</td><td class="role-desc">Embedding with LRU cache and circuit breaker</td></tr>
-        <tr><td class="class-name">AntahkaranaYantra</td><td class="file-name">vak_onnx.hpp</td><td class="role-desc">ONNX Runtime inference for all-MiniLM-L6-v2</td></tr>
+        <tr><td class="class-name">AntahkaranaYantra</td><td class="file-name">vak_onnx.hpp</td><td class="role-desc">ONNX Runtime inference for bge-base-en-v1.5</td></tr>
         <tr><td class="class-name">Subconscious</td><td class="file-name">mind/subconscious.hpp</td><td class="role-desc">Background thread: patterns, hygiene, embedding</td></tr>
         <tr><td class="class-name">ThemeManager</td><td class="file-name">theme_manager.hpp</td><td class="role-desc">xMemory hierarchical memory organization</td></tr>
         <tr><td class="class-name">CodeIntel</td><td class="file-name">code_intel.hpp</td><td class="role-desc">Tree-sitter symbol extraction (9 languages)</td></tr>
@@ -1363,9 +1362,9 @@ code {
 
     <!-- Model specs -->
     <div class="config-block reveal">
-      <div class="config-block-title">Model: all-MiniLM-L6-v2</div>
-      <pre><span class="kw">Parameters</span>:   <span class="val">22M</span>
-<span class="kw">Dimensions</span>:   <span class="val">384</span>
+      <div class="config-block-title">Model: bge-base-en-v1.5</div>
+      <pre><span class="kw">Parameters</span>:   <span class="val">110M</span>
+<span class="kw">Dimensions</span>:   <span class="val">768</span>
 <span class="kw">Max sequence</span>: <span class="val">128 tokens</span>
 <span class="kw">Pooling</span>:      <span class="val">Mean pooling with L2 normalization</span>
 <span class="kw">Runtime</span>:      <span class="val">ONNX Runtime, sequential execution mode</span>

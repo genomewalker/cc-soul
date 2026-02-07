@@ -35,7 +35,7 @@ Technical architecture of cc-soul v3.30, a persistent identity and memory system
 │         │                              │                     │
 │         ▼                              ▼                     │
 │  ┌────────────┐                 ┌────────────────┐           │
-│  │ soul-hook.sh│                 │ MCP Server     │           │
+│  │ hooks/*.sh  │                 │ MCP Server     │           │
 │  │ (context    │                 │ (chitta-mcp)   │           │
 │  │  injection) │                 │                │           │
 │  └──────┬──────┘                 └───────┬────────┘           │
@@ -99,7 +99,7 @@ Technical architecture of cc-soul v3.30, a persistent identity and memory system
 | `DuckDBStore` | `duckdb_store.hpp` | Storage: all DuckDB operations, schema, queries |
 | `DuckDBRpcHandler` | `rpc/duckdb_handler.hpp` | JSON-RPC 2.0 handler, 100+ registered tools |
 | `Embedder` | `mind/embedder.hpp` | Embedding with LRU cache and circuit breaker |
-| `AntahkaranaYantra` | `vak_onnx.hpp` | ONNX Runtime inference for all-MiniLM-L6-v2 |
+| `AntahkaranaYantra` | `vak_onnx.hpp` | ONNX Runtime inference for bge-base-en-v1.5 |
 | `Subconscious` | `mind/subconscious.hpp` | Background thread: patterns, hygiene, embedding |
 | `ThemeManager` | `theme_manager.hpp` | xMemory hierarchical memory organization |
 | `CodeIntel` | `code_intel.hpp` | Tree-sitter symbol extraction (9 languages) |
@@ -115,7 +115,7 @@ Technical architecture of cc-soul v3.30, a persistent identity and memory system
 
 DuckDB is an embedded analytical database. CC-Soul uses it for:
 
-- **HNSW vector search** via the VSS extension (cosine similarity on 384-dim embeddings)
+- **HNSW vector search** via the VSS extension (cosine similarity on 768-dim embeddings)
 - **Graph queries** via DuckPGQ extension (triplet traversal)
 - **Full-text search** via BM25 (keyword matching as complement to semantic search)
 - **ACID transactions** with WAL-based crash recovery
@@ -214,15 +214,15 @@ Text → VakPatha (tokenizer) → Shabda (token sequence) → AntahkaranaYantra 
 |-------|------------------|------|
 | `VakPatha` | Path of speech | WordPiece tokenizer (vocab.txt) |
 | `Shabda` | Sound-form | Tokenized input (input_ids + attention_mask) |
-| `Artha` | Meaning | 384-dim embedding vector + certainty |
+| `Artha` | Meaning | 768-dim embedding vector + certainty |
 | `AntahkaranaYantra` | Inner instrument | ONNX Runtime inference engine |
 | `SmritiYantra` | Memory machine | Caching wrapper (LRU, 10000 entries) |
 | `ShantaYantra` | Silent machine | Zero-vector fallback |
 
 ### Model
 
-- **Model**: all-MiniLM-L6-v2 (22M parameters)
-- **Dimensions**: 384
+- **Model**: bge-base-en-v1.5 (110M parameters)
+- **Dimensions**: 768
 - **Max sequence length**: 128 tokens
 - **Pooling**: Mean pooling with L2 normalization
 - **Runtime**: ONNX Runtime with sequential execution mode
@@ -719,11 +719,12 @@ CC-Soul integrates via Claude Code hooks:
 
 | Event | Script | Action |
 |-------|--------|--------|
-| SessionStart | `soul-hook.sh start` | Load soul context, start daemon |
-| UserPromptSubmit | `soul-hook.sh prompt --lean --resonate` | Surface relevant memories |
-| PostToolUse | `capture-hook.sh` | Passive learning from tool use |
-| PreCompact | `soul-hook.sh pre-compact` | Save state before compaction |
-| SessionEnd | `soul-hook.sh end` | Save ledger |
+| SessionStart | `session-start-hook.sh` | Load soul context, start daemon |
+| UserPromptSubmit | `prompt-hook.sh` | Surface relevant memories |
+| Stop | `stop-hook.sh` | Auto-learning, checkpoints, ledger save |
+| PreCompact | `pre-compact-hook.sh` | Save state before compaction |
+| PreToolUse | `pre-tool-hook.sh` | Surface file memories, command corrections |
+| PostToolUse | `post-bash-hook.sh` | Record significant file changes |
 
 ### MCP Server
 
@@ -745,7 +746,7 @@ The key integration pattern:
 
 1. User sends a message
 2. `UserPromptSubmit` hook fires
-3. `soul-hook.sh` extracts the message and calls `full_resonate`
+3. `prompt-hook.sh` extracts the message and calls `full_resonate`
 4. Relevant memories are injected into Claude's context as `<system-reminder>`
 5. Claude sees memories naturally, without explicit tool calls
 

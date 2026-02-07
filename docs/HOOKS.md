@@ -60,7 +60,7 @@ The `smart-install.sh` script configures the appropriate system automatically.
 │         │                                                      │
 │         ▼                                                      │
 │  ┌─────────────────────────────────────────────────────────┐  │
-│  │               SIMPLE-HOOK.SH (prompt)                    │  │
+│  │               PROMPT-HOOK.SH                              │  │
 │  │                                                          │  │
 │  │  1. Extract user message from stdin JSON                 │  │
 │  │  2. Detect learning opportunities (corrections, prefs)   │  │
@@ -105,7 +105,7 @@ CC-Soul responds to these Claude Code events:
 
 **When:** Claude Code session ends or Claude produces a response
 
-**What CC-Soul Does (Stop hook — simple-hook.sh):**
+**What CC-Soul Does (Stop hook — stop-hook.sh):**
 1. Read Claude's response from stdin
 2. Auto-detect missed learning opportunities:
    - Corrections the user made → auto-store via `remember`
@@ -117,7 +117,7 @@ CC-Soul responds to these Claude Code events:
 6. Extract files, decisions, next steps, blockers from response
 7. Save ledger with session state
 
-**What CC-Soul Does (End hook — soul-hook.sh):**
+**What CC-Soul Does (End hook — stop-hook.sh):**
 1. Calculate session duration and node delta
 2. Save session ledger (Ātman snapshot)
 3. Record session observation (for sessions >1 minute)
@@ -148,13 +148,13 @@ CC-Soul responds to these Claude Code events:
 
 **What CC-Soul Does:**
 - **capture-hook.sh**: Currently disabled (exits immediately). Previously captured significant commands and file operations.
-- **simple-hook.sh (post-tool)**: Records significant Edit/Write operations as signals for background learning.
+- **post-bash-hook.sh**: Records significant Edit/Write operations as signals for background learning.
 
 ### PreToolUse
 
 **When:** Before Read, Edit, Write, or Bash tools execute
 
-**What CC-Soul Does (simple-hook.sh pre-tool):**
+**What CC-Soul Does (pre-tool-hook.sh):**
 - **Read**: Injects past memories about the file being read
 - **Edit/Write**: Surfaces past decisions about the file being edited
 - **Bash**: Detects command patterns (R, Python, git) and injects relevant corrections
@@ -181,34 +181,50 @@ When installed as a Claude Code plugin, hooks are defined in `hooks/hooks.json`:
   "hooks": {
     "SessionStart": [
       {
-        "matcher": "startup|resume|clear|compact",
+        "matcher": "*",
         "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/smart-install.sh",
-            "timeout": 300
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-start-hook.sh, hooks/prompt-hook.sh, hooks/stop-hook.sh start"
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/subconscious.sh start",
-            "timeout": 10
-          }
+          {"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/subconscious.sh start"},
+          {"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-start-hook.sh"}
         ]
       }
     ],
     "UserPromptSubmit": [
       {
-        "matcher": "",
+        "matcher": "*",
         "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-start-hook.sh, hooks/prompt-hook.sh, hooks/stop-hook.sh prompt --lean --resonate",
-            "timeout": 15
-          }
+          {"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/prompt-hook.sh", "timeout": 10}
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop-hook.sh"}
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-compact-hook.sh"}
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-hook.sh Bash", "timeout": 3}
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-bash-hook.sh", "timeout": 5}
         ]
       }
     ]
@@ -287,54 +303,21 @@ When installed standalone, `smart-install.sh` configures hooks in settings.json:
 
 ## Scripts
 
-### soul-hook.sh
+### Individual Hook Scripts
 
-Main hook handler for plugin mode. Socket-first, daemon-aware.
+Each lifecycle event is handled by a dedicated script in the `hooks/` directory. All scripts use socket-first communication with the daemon.
 
-**Usage:**
-```bash
-soul-hook.sh <command> [options]
+| Script | Event | Purpose |
+|--------|-------|---------|
+| `session-start-hook.sh` | SessionStart | Realm detection, code re-indexing, soul context injection, ledger restore, git diff awareness |
+| `prompt-hook.sh` | UserPromptSubmit | full_resonate search, code symbol injection, anticipation prediction, learning detection |
+| `stop-hook.sh` | Stop | Auto-learning extraction, anticipation recording, ledger save, auto-checkpoint |
+| `pre-compact-hook.sh` | PreCompact | Save ledger checkpoint before context compaction |
+| `pre-tool-hook.sh` | PreToolUse | Surface file memories, past decisions, command corrections |
+| `post-bash-hook.sh` | PostToolUse | Record significant file changes as signals |
+| `distill.sh` | Background | Transcript distillation into compressed wisdom nodes |
 
-Commands:
-  start         Session start (load context, ledger)
-  end           Session end (save ledger, stats)
-  prompt        User prompt (inject context)
-  pre-compact   Before compaction (save state)
-
-Options:
-  --lean        Minimal output (stats only)
-  --resonate    Run full_resonate on user message
-```
-
-**Communication:** Uses Unix domain socket to talk to daemon directly (fast path). Falls back to `chitta` thin client if socket unavailable. Socket path is derived from mind path using djb2 hash: `/tmp/chitta-{hash}.sock`.
-
-**Prompt handler (`--lean --resonate`):**
-
-1. Read user message from stdin JSON
-2. Call `full_resonate` via daemon socket with `exclude_tags` filter
-3. Filter results ≥25% relevance
-4. Strip `[XX%] [type]` prefixes for clean output
-5. Truncate to 500 chars
-6. Call `proactive_surface` for additional context
-7. Output to stdout (injected as `<system-reminder>`)
-
-### simple-hook.sh
-
-Unified hook handler for settings mode. Handles all event types.
-
-**Usage:**
-```bash
-simple-hook.sh <hook-type> [options]
-
-Hook types:
-  start           Session start
-  prompt          User prompt (memory resonance)
-  stop            After Claude response (auto-learning)
-  pre-compact     Before context compaction
-  pre-tool        Before tool execution (context injection)
-  post-tool       After tool execution (learning)
-  post-failure    After tool failure (record failures)
-```
+**Communication:** All scripts use Unix domain socket to talk to daemon directly (fast path). Falls back to `chitta` thin client if socket unavailable. Socket path is derived from mind path using djb2 hash: `/tmp/chitta-{hash}.sock`.
 
 **Key features:**
 - Realm-aware (auto-detects project realm)
@@ -441,13 +424,13 @@ Edit hook configuration to modify behavior:
 
 ```bash
 # Disable resonance (stats only)
-soul-hook.sh prompt --lean
+prompt-hook.sh --lean
 
 # Enable resonance (default)
-soul-hook.sh prompt --lean --resonate
+prompt-hook.sh --lean --resonate
 
 # Full context (verbose)
-soul-hook.sh prompt
+prompt-hook.sh
 ```
 
 ---

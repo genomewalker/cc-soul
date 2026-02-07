@@ -219,7 +219,7 @@ cc-soul/
 │   │   ├── mind/
 │   │   │   └── duckdb_mind.hpp # Mind API (remember, recall, resonate)
 │   │   ├── resonance.hpp      # 8-phase resonance engine
-│   │   ├── embedding.hpp      # ONNX Runtime embedding (all-MiniLM-L6-v2)
+│   │   ├── embedding.hpp      # ONNX Runtime embedding (bge-base-en-v1.5)
 │   │   ├── code_intel.hpp     # Tree-sitter parsing, symbol extraction
 │   │   ├── duckdb_handler.hpp # RPC tool registration (80+ tools)
 │   │   ├── subconscious.hpp   # Background processing thread
@@ -231,12 +231,17 @@ cc-soul/
 │       ├── rpc_server.cpp     # chitta CLI client binary
 │       └── ...
 ├── skills/                    # Claude Code skills (23 SKILL.md files)
-├── hooks/                     # Event hook scripts (settings mode)
-├── scripts/                   # Shell scripts
-│   ├── simple-hook.sh         # Unified hook handler (settings mode)
-│   ├── soul-hook.sh           # Plugin mode hook handler
+├── hooks/                     # Event hook scripts + plugin hooks.json
+│   ├── session-start-hook.sh  # SessionStart handler
+│   ├── prompt-hook.sh         # UserPromptSubmit handler
+│   ├── stop-hook.sh           # Stop handler (auto-learning, checkpoints)
+│   ├── pre-compact-hook.sh    # PreCompact handler
+│   ├── pre-tool-hook.sh       # PreToolUse handler
+│   ├── post-bash-hook.sh      # PostToolUse handler
 │   ├── subconscious.sh        # Daemon management
+│   ├── distill.sh             # Background transcript distillation
 │   └── smart-install.sh       # Auto-installation
+├── scripts/                   # Utility scripts
 ├── bin/                       # Compiled binaries
 │   ├── chitta                 # CLI client (direct tool invocation + thin client)
 │   └── chittad                # Daemon (background server)
@@ -502,6 +507,8 @@ CC-Soul includes 23 skills for Claude Code:
 | `/health` | Soul system health check with remediation |
 | `/introspect` | Soul self-examination (Svadhyāya) |
 | `/migrate` | Import soul data from SQLite or shared files |
+| `/learn` | Quickly store a learning (correction, preference, insight) |
+| `/remember` | Quickly save a memory to the soul |
 
 ### Reasoning
 | Skill | Description |
@@ -520,7 +527,6 @@ CC-Soul includes 23 skills for Claude Code:
 | Skill | Description |
 |-------|-------------|
 | `/epsilon-yajna` | Convert verbose memories to SSL v0.2 format |
-| `/entity-yajna` | Link triplet entities to soul nodes |
 | `/mermaid` | Render Mermaid diagrams as ASCII/Unicode art |
 
 ### System
@@ -529,7 +535,6 @@ CC-Soul includes 23 skills for Claude Code:
 | `/cc-soul-setup` | Build cc-soul from source |
 | `/cc-soul-update` | Update binaries (download or build) |
 | `/cc-soul-daemon` | Start, stop, or check the chittad daemon |
-| `/cc-soul-status` | Check daemon status |
 | `/cc-soul-shutdown` | Gracefully stop the daemon |
 | `/cc-soul-mcp` | Configure chitta MCP server |
 
@@ -543,13 +548,7 @@ CC-Soul includes 23 skills for Claude Code:
 
 ## Hooks System
 
-CC-Soul supports two hook modes:
-
-### Plugin Mode
-Uses `hooks.json` + `soul-hook.sh`. Activated when running as a Claude Code plugin.
-
-### Settings Mode
-Uses individual scripts in `hooks/` + `~/.claude/settings.json`. Activated by `smart-install.sh` or manual configuration.
+CC-Soul uses `hooks.json` (plugin mode) or `~/.claude/settings.json` (standalone) to wire Claude Code lifecycle events to individual hook scripts in the `hooks/` directory.
 
 ### Event Types
 
@@ -684,11 +683,11 @@ The embedding model is downloaded automatically during setup. Manual download:
 ```bash
 # Download model
 curl -L -o ~/.claude/models/model.onnx \
-  https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx
+  https://huggingface.co/BAAI/bge-base-en-v1.5/resolve/main/onnx/model.onnx
 
 # Download vocabulary
 curl -L -o ~/.claude/models/vocab.txt \
-  https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/vocab.txt
+  https://huggingface.co/BAAI/bge-base-en-v1.5/resolve/main/vocab.txt
 ```
 
 ---
@@ -697,6 +696,7 @@ curl -L -o ~/.claude/models/vocab.txt \
 
 | Version | Features |
 |---------|----------|
+| 3.35.x | Companion activation, rich ledger extraction, auto-distillation, bge-base-en-v1.5 embeddings |
 | 3.30.x | Removed PostgreSQL backend, streamlined to DuckDB-only |
 | 3.29.x | Removed legacy pre-DuckDB code paths |
 | 3.27.x | xMemory-inspired theme system: hierarchical organization, two-stage retrieval |
