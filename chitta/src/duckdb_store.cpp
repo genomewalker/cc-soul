@@ -261,7 +261,99 @@ bool DuckDBStore::load_extensions() {
     return true;
 }
 
+// Helper to migrate embedding columns from 384 to 768 dimensions
+void DuckDBStore::migrate_embedding_dimensions() {
+    // Check if symbol table has old 384-dim embedding column and migrate
+    try {
+        auto result = read_query(R"(
+            SELECT data_type FROM information_schema.columns
+            WHERE table_name = 'symbol' AND column_name = 'embedding'
+        )");
+        if (result && !result->HasError()) {
+            auto chunk = result->Fetch();
+            if (chunk && chunk->size() > 0) {
+                std::string dtype = chunk->GetValue(0, 0).ToString();
+                if (dtype.find("384") != std::string::npos) {
+                    std::cerr << "[DuckDBStore] Migrating embeddings from 384 to 768 dimensions...\n";
+
+                    // Drop ALL indexes on memory and symbol tables first
+                    write_execute("DROP INDEX IF EXISTS idx_memory_realm");
+                    write_execute("DROP INDEX IF EXISTS idx_memory_kind");
+                    write_execute("DROP INDEX IF EXISTS memory_embedding_idx");
+                    write_execute("DROP INDEX IF EXISTS fts_idx_memory");
+                    write_execute("DROP INDEX IF EXISTS idx_symbol_kind");
+                    write_execute("DROP INDEX IF EXISTS idx_symbol_name");
+                    write_execute("DROP INDEX IF EXISTS idx_symbol_unique");
+                    write_execute("DROP INDEX IF EXISTS idx_symbol_file");
+                    write_execute("DROP INDEX IF EXISTS symbol_embedding_idx");
+                    write_execute("DROP INDEX IF EXISTS fts_idx_symbol");
+
+                    // Migrate memory table: rename, create new, copy, drop old
+                    std::cerr << "[DuckDBStore] Migrating memory table...\n";
+                    write_execute("ALTER TABLE memory RENAME TO memory_old");
+                    write_execute(R"(
+                        CREATE TABLE memory (
+                            id BIGINT PRIMARY KEY,
+                            kind VARCHAR,
+                            content VARCHAR,
+                            confidence FLOAT,
+                            decay_rate FLOAT,
+                            created_at BIGINT,
+                            accessed_at BIGINT,
+                            embedding FLOAT[768],
+                            realm VARCHAR DEFAULT 'brahman',
+                            visibility INTEGER DEFAULT 0
+                        )
+                    )");
+                    write_execute(R"(
+                        INSERT INTO memory (id, kind, content, confidence, decay_rate, created_at, accessed_at, realm, visibility)
+                        SELECT id, kind, content, confidence, decay_rate, created_at, accessed_at, realm, visibility
+                        FROM memory_old
+                    )");
+                    write_execute("DROP TABLE memory_old");
+
+                    // Migrate symbol table
+                    std::cerr << "[DuckDBStore] Migrating symbol table...\n";
+                    write_execute("ALTER TABLE symbol RENAME TO symbol_old");
+                    write_execute(R"(
+                        CREATE TABLE symbol (
+                            id BIGINT PRIMARY KEY,
+                            kind VARCHAR,
+                            name VARCHAR,
+                            signature VARCHAR,
+                            file_path VARCHAR,
+                            line_start INTEGER,
+                            line_end INTEGER,
+                            repo_id BIGINT,
+                            embedding FLOAT[768],
+                            memory_id BIGINT DEFAULT NULL,
+                            described_at BIGINT DEFAULT 0,
+                            description VARCHAR DEFAULT NULL
+                        )
+                    )");
+                    write_execute(R"(
+                        INSERT INTO symbol (id, kind, name, signature, file_path, line_start, line_end, repo_id, memory_id, described_at, description)
+                        SELECT id, kind, name, signature, file_path, line_start, line_end, repo_id, memory_id, described_at, description
+                        FROM symbol_old
+                    )");
+                    write_execute("DROP TABLE symbol_old");
+
+                    std::cerr << "[DuckDBStore] Migration complete - embeddings cleared, will re-embed\n";
+                }
+            }
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "[DuckDBStore] Embedding migration failed: " << e.what() << "\n";
+    }
+
+    // Set detected dimension (should now be 768 or still default)
+    detected_embed_dim_ = EMBED_DIM;
+}
+
 bool DuckDBStore::create_schema() {
+    // First, migrate old 384-dim embedding columns if present
+    migrate_embedding_dimensions();
+
     // Memory table with ARRAY for embeddings
     if (!write_execute(R"(
         CREATE TABLE IF NOT EXISTS memory (
@@ -279,21 +371,6 @@ bool DuckDBStore::create_schema() {
     )")) {
         return false;
     }
-
-    // Migration: null out old 384-dim embeddings (will be re-embedded)
-    try {
-        auto result = write_query("SELECT array_length(embedding) as dim FROM memory WHERE embedding IS NOT NULL LIMIT 1");
-        if (result && !result->HasError()) {
-            auto chunk = result->Fetch();
-            if (chunk && chunk->size() > 0) {
-                auto dim = chunk->GetValue(0, 0).GetValue<int32_t>();
-                if (dim != 768) {
-                    write_execute("UPDATE memory SET embedding = NULL WHERE embedding IS NOT NULL");
-                    std::cerr << "[DuckDBStore] Nulled old " << dim << "-dim memory embeddings (will re-embed)\n";
-                }
-            }
-        }
-    } catch (...) {}
 
     // Realm membership table for multi-realm support
     if (!write_execute(R"(

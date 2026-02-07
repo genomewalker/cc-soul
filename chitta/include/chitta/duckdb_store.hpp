@@ -1147,8 +1147,10 @@ private:
     std::unique_ptr<duckdb::Connection> emb_conn_;    // Dedicated embedding connection
     mutable std::mutex emb_mutex_;                    // Separate mutex for embeddings
     bool emb_attached_ = false;                       // Whether embeddings DB is attached to main
+    size_t detected_embed_dim_ = EMBED_DIM;           // Detected embedding dimension from schema
 
-    // Schema creation
+    // Schema creation and migration
+    void migrate_embedding_dimensions();
     bool create_schema();
     bool load_extensions();
     bool create_vector_index();
