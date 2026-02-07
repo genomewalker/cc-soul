@@ -289,20 +289,24 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
     {"symbol_callers", "Find all symbols that call the given symbol (reverse call graph)",
      {{"name", "Symbol name to find callers for", false, nullptr},
       {"id", "Symbol ID (alternative to name)", false, nullptr},
-      {"kind", "Filter by symbol kind when using name", false, nullptr}}},
+      {"kind", "Filter by symbol kind when using name", false, nullptr},
+      {"project", "Project name to disambiguate", false, nullptr}}},
 
     {"symbol_callees", "Find all symbols that the given symbol calls (forward call graph)",
      {{"name", "Symbol name to find callees for", false, nullptr},
       {"id", "Symbol ID (alternative to name)", false, nullptr},
-      {"kind", "Filter by symbol kind when using name", false, nullptr}}},
+      {"kind", "Filter by symbol kind when using name", false, nullptr},
+      {"project", "Project name to disambiguate", false, nullptr}}},
 
     {"read_symbol", "Read the actual source code for a symbol by name or ID",
      {{"name", "Symbol name to read", false, nullptr},
       {"id", "Symbol ID (alternative to name)", false, nullptr},
-      {"kind", "Filter by symbol kind (function, class, method)", false, nullptr}}},
+      {"kind", "Filter by symbol kind (function, class, method)", false, nullptr},
+      {"project", "Project name to disambiguate", false, nullptr}}},
 
     {"read_function", "Read source code of a function/method by name",
-     {{"name", "Function name to read", true, nullptr}}},
+     {{"name", "Function name to read", true, nullptr},
+      {"project", "Project name to disambiguate", false, nullptr}}},
 
     {"type_hierarchy", "Get type hierarchy (base classes, implemented interfaces) for a type",
      {{"name", "Type name to query", true, nullptr},

@@ -63,17 +63,17 @@ public:
     void clear() { map_.clear(); order_.clear(); }
 
     // Stats
-    size_t hits() const { return hits_; }
-    size_t misses() const { return misses_; }
-    void record_hit() { ++hits_; }
-    void record_miss() { ++misses_; }
+    size_t hits() const { return hits_.load(std::memory_order_relaxed); }
+    size_t misses() const { return misses_.load(std::memory_order_relaxed); }
+    void record_hit() { hits_.fetch_add(1, std::memory_order_relaxed); }
+    void record_miss() { misses_.fetch_add(1, std::memory_order_relaxed); }
 
 private:
     size_t capacity_;
     std::list<K> order_;
     std::unordered_map<K, std::pair<V, typename std::list<K>::iterator>> map_;
-    mutable size_t hits_ = 0;
-    mutable size_t misses_ = 0;
+    mutable std::atomic<size_t> hits_{0};
+    mutable std::atomic<size_t> misses_{0};
 };
 
 class Embedder {
@@ -92,19 +92,21 @@ public:
 
     // Circuit breaker configuration
     void configure_circuit_breaker(CircuitBreakerConfig cfg) {
-        std::unique_lock lock(mutex_);
+        std::lock_guard<std::mutex> lock(cb_mutex_);
         breaker_config_ = cfg;
     }
 
     // Check if circuit is open (embedder disabled)
     bool is_circuit_open() const {
-        return circuit_open_.load();
+        std::lock_guard<std::mutex> lock(cb_mutex_);
+        return circuit_open_;
     }
 
     // Record an embedding failure (timeout, error, etc.)
     void record_failure() {
+        std::lock_guard<std::mutex> lock(cb_mutex_);
         size_t failures = ++consecutive_failures_;
-        if (failures >= breaker_config_.failure_threshold && !circuit_open_.load()) {
+        if (failures >= breaker_config_.failure_threshold && !circuit_open_) {
             circuit_open_ = true;
             circuit_opened_at_ = std::chrono::steady_clock::now();
             std::cerr << "[Embedder] Circuit breaker OPEN after " << failures
@@ -114,8 +116,9 @@ public:
 
     // Record successful embedding (resets failure count)
     void record_success() {
+        std::lock_guard<std::mutex> lock(cb_mutex_);
         consecutive_failures_ = 0;
-        if (circuit_open_.load()) {
+        if (circuit_open_) {
             circuit_open_ = false;
             std::cerr << "[Embedder] Circuit breaker CLOSED - embeddings restored\n";
         }
@@ -123,6 +126,7 @@ public:
 
     // Force circuit breaker trip (used by watchdog)
     void force_trip() {
+        std::lock_guard<std::mutex> lock(cb_mutex_);
         circuit_open_ = true;
         circuit_opened_at_ = std::chrono::steady_clock::now();
         std::cerr << "[Embedder] Circuit breaker FORCED OPEN by watchdog\n";
@@ -130,7 +134,8 @@ public:
 
     // Check if we should skip embedding (circuit open and not in half-open state)
     bool should_skip_embedding() const {
-        if (!circuit_open_.load()) return false;
+        std::lock_guard<std::mutex> lock(cb_mutex_);
+        if (!circuit_open_) return false;
 
         // Check if cooldown has elapsed (half-open state - allow retry)
         auto elapsed = std::chrono::steady_clock::now() - circuit_opened_at_;
@@ -140,26 +145,56 @@ public:
         return true;
     }
 
-    // Embed single text (with caching and circuit breaker)
+    // Embed a search query (adds instruction prefix for BGE models)
+    Vector embed_query(const std::string& text) {
+        if (should_skip_embedding()) return Vector::zeros();
+
+        std::string cache_key = "__q:" + text;
+        std::unique_lock lock(mutex_);
+        if (auto cached = cache_.get(cache_key)) {
+            cache_.record_hit();
+            return *cached;
+        }
+        cache_.record_miss();
+        if (!yantra_ || !yantra_->ready()) return Vector::zeros();
+
+        auto artha = yantra_->transform(text, EmbedMode::Query);
+        if (artha.nu.is_zero()) { record_failure(); return Vector::zeros(); }
+        record_success();
+        cache_.put(cache_key, artha.nu);
+        return artha.nu;
+    }
+
+    // Embed query returning full Artha
+    Artha transform_query(const std::string& text) {
+        if (should_skip_embedding()) return Artha{Vector::zeros(), 0.0f, text};
+
+        std::string cache_key = "__q:" + text;
+        std::unique_lock lock(mutex_);
+        if (auto cached = cache_.get(cache_key)) {
+            cache_.record_hit();
+            return Artha{*cached, 1.0f, text};
+        }
+        cache_.record_miss();
+        if (!yantra_ || !yantra_->ready()) return Artha{};
+
+        auto artha = yantra_->transform(text, EmbedMode::Query);
+        if (artha.nu.is_zero()) { record_failure(); return artha; }
+        record_success();
+        cache_.put(cache_key, artha.nu);
+        return artha;
+    }
+
+    // Embed single text (with caching and circuit breaker) — document mode
     Vector embed(const std::string& text) {
         // Check circuit breaker first
         if (should_skip_embedding()) {
             return Vector::zeros();
         }
 
-        // Check cache first
-        {
-            std::shared_lock lock(mutex_);
-            if (auto cached = cache_.get(text)) {
-                cache_.record_hit();
-                return *cached;
-            }
-        }
-
-        // Cache miss - compute embedding
+        // Cache lookup requires unique_lock since get() mutates LRU order
         std::unique_lock lock(mutex_);
 
-        // Double-check after acquiring write lock
         if (auto cached = cache_.get(text)) {
             cache_.record_hit();
             return *cached;
@@ -212,22 +247,9 @@ public:
             return artha;
         }
 
-        // Check cache first
-        {
-            std::shared_lock lock(mutex_);
-            if (auto cached = cache_.get(text)) {
-                cache_.record_hit();
-                Artha artha;
-                artha.nu = *cached;
-                artha.source = text;
-                return artha;
-            }
-        }
-
-        // Cache miss - compute embedding
+        // Cache lookup requires unique_lock since get() mutates LRU order
         std::unique_lock lock(mutex_);
 
-        // Double-check after acquiring write lock
         if (auto cached = cache_.get(text)) {
             cache_.record_hit();
             Artha artha;
@@ -295,11 +317,12 @@ private:
     std::shared_ptr<VakYantra> yantra_;
     mutable LRUCache<std::string, Vector> cache_{1000};  // Default 1000 entries
 
-    // Circuit breaker state
+    // Circuit breaker state (protected by cb_mutex_)
+    mutable std::mutex cb_mutex_;
     CircuitBreakerConfig breaker_config_;
-    std::atomic<bool> circuit_open_{false};
-    std::atomic<size_t> consecutive_failures_{0};
-    mutable std::chrono::steady_clock::time_point circuit_opened_at_;
+    bool circuit_open_{false};
+    size_t consecutive_failures_{0};
+    std::chrono::steady_clock::time_point circuit_opened_at_;
 };
 
 }  // namespace chitta

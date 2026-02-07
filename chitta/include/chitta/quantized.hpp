@@ -8,9 +8,50 @@
 
 namespace chitta {
 
-// Quantized 384-dim vector: 396 bytes vs 1536 bytes (74% savings)
+// Portable popcount implementations
+namespace detail {
+
+inline int portable_popcount(unsigned int x) {
+#if defined(__has_builtin)
+#if __has_builtin(__builtin_popcount)
+    return __builtin_popcount(x);
+#else
+    int count = 0;
+    while (x) { count += x & 1; x >>= 1; }
+    return count;
+#endif
+#elif defined(__GNUC__)
+    return __builtin_popcount(x);
+#else
+    int count = 0;
+    while (x) { count += x & 1; x >>= 1; }
+    return count;
+#endif
+}
+
+inline int portable_popcountll(unsigned long long x) {
+#if defined(__has_builtin)
+#if __has_builtin(__builtin_popcountll)
+    return __builtin_popcountll(x);
+#else
+    int count = 0;
+    while (x) { count += x & 1; x >>= 1; }
+    return count;
+#endif
+#elif defined(__GNUC__)
+    return __builtin_popcountll(x);
+#else
+    int count = 0;
+    while (x) { count += x & 1; x >>= 1; }
+    return count;
+#endif
+}
+
+} // namespace detail
+
+// Quantized 768-dim vector: 780 bytes vs 3072 bytes (74% savings)
 struct QuantizedVector {
-    int8_t data[EMBED_DIM];  // 384 bytes
+    int8_t data[EMBED_DIM];  // 768 bytes
     float scale;              // 4 bytes
     float offset;             // 4 bytes
     mutable int32_t cached_norm_sq_ = 0;  // Cached squared norm (lazy computed)
@@ -98,10 +139,10 @@ struct QuantizedVector {
     }
 };
 
-// QuantizedVector: 384 (data) + 4 (scale) + 4 (offset) + 4 (cached_norm) + 1 (bool) + padding
-static_assert(sizeof(QuantizedVector) <= EMBED_DIM + 16, "QuantizedVector size check");
+// QuantizedVector: 768 (data) + 4 (scale) + 4 (offset) + 4 (cached_norm) + 1 (bool) + padding
+static_assert(sizeof(QuantizedVector) <= EMBED_DIM + 20, "QuantizedVector size check");
 
-// Binary quantized vector: 48 bytes for 384 dims (32x compression vs float32)
+// Binary quantized vector: 96 bytes for 768 dims (32x compression vs float32)
 // Uses sign bit: positive → 1, negative → 0
 // Similarity via Hamming distance (popcount)
 struct BinaryVector {
@@ -136,7 +177,7 @@ struct BinaryVector {
     uint32_t hamming(const BinaryVector& other) const {
         uint32_t dist = 0;
         for (size_t i = 0; i < BYTES; ++i) {
-            dist += __builtin_popcount(bits[i] ^ other.bits[i]);
+            dist += detail::portable_popcount(static_cast<unsigned int>(bits[i] ^ other.bits[i]));
         }
         return dist;
     }
@@ -148,20 +189,21 @@ struct BinaryVector {
     }
 
     // For uint64 optimization (6 x 64-bit words)
-    static_assert(BYTES == 48, "Binary vector should be 48 bytes");
+    static_assert(BYTES == 96, "Binary vector should be 96 bytes");
 
     uint32_t hamming_fast(const BinaryVector& other) const {
-        const uint64_t* a = reinterpret_cast<const uint64_t*>(bits);
-        const uint64_t* b = reinterpret_cast<const uint64_t*>(other.bits);
         uint32_t dist = 0;
-        for (size_t i = 0; i < 6; ++i) {
-            dist += __builtin_popcountll(a[i] ^ b[i]);
+        for (size_t i = 0; i < 12; ++i) {
+            uint64_t a, b;
+            std::memcpy(&a, bits + i * 8, sizeof(uint64_t));
+            std::memcpy(&b, other.bits + i * 8, sizeof(uint64_t));
+            dist += detail::portable_popcountll(a ^ b);
         }
         return dist;
     }
 };
 
-static_assert(sizeof(BinaryVector) == 48, "BinaryVector should be 48 bytes");
+static_assert(sizeof(BinaryVector) == 96, "BinaryVector should be 96 bytes");
 
 // Storage tier for nodes
 enum class StorageTier : uint8_t {

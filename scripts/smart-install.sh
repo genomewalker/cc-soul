@@ -154,12 +154,13 @@ build_from_source() {
     fi
 
     # Copy binaries from plugin bin to install location (~/.claude/bin)
+    # Only chitta and chittad are required; migrate/import are legacy optional tools
     local all_built=true
-    for bin in chitta chittad chitta_migrate chitta_import; do
+    for bin in chitta chittad; do
         if [[ -x "$plugin_bin/$bin" ]]; then
             cp -f "$plugin_bin/$bin" "$BIN_DIR/$bin"
         else
-            echo "[cc-soul] WARNING: $bin not built" >&2
+            echo "[cc-soul] ERROR: $bin not built" >&2
             all_built=false
         fi
     done
@@ -177,19 +178,27 @@ build_from_source() {
 # Download ONNX models with checksum verification
 download_models() {
     if [[ -f "$MODELS_DIR/model.onnx" && -f "$MODELS_DIR/vocab.txt" ]]; then
-        # Verify existing models
-        if verify_checksum "$MODELS_DIR/model.onnx" "$MODEL_CHECKSUM" && \
-           verify_checksum "$MODELS_DIR/vocab.txt" "$VOCAB_CHECKSUM"; then
-            return 0
+        # Check if model dimension changed (force re-download for model upgrade)
+        # Must check BEFORE checksum verification to catch old MiniLM→BGE upgrade
+        local model_size=$(stat -f%z "$MODELS_DIR/model.onnx" 2>/dev/null || stat --printf="%s" "$MODELS_DIR/model.onnx" 2>/dev/null || echo "0")
+        if [[ "$model_size" -lt 200000000 ]]; then
+            echo "[cc-soul] Model upgrade detected (384→768 dim), re-downloading..."
+            rm -f "$MODELS_DIR/model.onnx" "$MODELS_DIR/vocab.txt"
+        else
+            # Verify checksums on correct-sized model
+            if verify_checksum "$MODELS_DIR/model.onnx" "$MODEL_CHECKSUM" && \
+               verify_checksum "$MODELS_DIR/vocab.txt" "$VOCAB_CHECKSUM"; then
+                return 0
+            fi
+            echo "[cc-soul] Model checksum mismatch, re-downloading..."
         fi
-        echo "[cc-soul] Model checksum mismatch, re-downloading..."
     fi
 
-    echo "[cc-soul] Downloading embedding model..."
+    echo "[cc-soul] Downloading embedding model (bge-base-en-v1.5, ~436MB)..."
     mkdir -p "$MODELS_DIR"
 
-    local model_url="https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx"
-    local vocab_url="https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/vocab.txt"
+    local model_url="https://huggingface.co/BAAI/bge-base-en-v1.5/resolve/main/onnx/model.onnx"
+    local vocab_url="https://huggingface.co/BAAI/bge-base-en-v1.5/resolve/main/vocab.txt"
 
     if ! download "$model_url" "$MODELS_DIR/model.onnx"; then
         echo "[cc-soul] WARNING: Could not download model.onnx" >&2

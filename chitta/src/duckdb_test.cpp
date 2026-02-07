@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cstdlib>
 #include <filesystem>
+#include <unistd.h>
 
 using namespace chitta;
 
@@ -22,7 +23,7 @@ std::vector<float> test_embedding(float seed) {
 }
 
 int main() {
-    std::string test_path = "/tmp/duckdb_test_" + std::to_string(std::time(nullptr));
+    std::string test_path = "/tmp/duckdb_test_" + std::to_string(std::time(nullptr)) + "_" + std::to_string(getpid());
 
     std::cout << "=== DuckDB Store Test ===\n";
     std::cout << "Test path: " << test_path << "\n\n";

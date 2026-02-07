@@ -14,6 +14,8 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <list>
+#include <optional>
 #include <unordered_map>
 #include <mutex>
 #include <fstream>
@@ -159,16 +161,17 @@ private:
         std::string current;
 
         for (char c : text) {
-            if (std::isspace(c) || std::ispunct(c)) {
+            auto uc = static_cast<unsigned char>(c);
+            if (std::isspace(uc) || std::ispunct(uc)) {
                 if (!current.empty()) {
                     words.push_back(current);
                     current.clear();
                 }
-                if (std::ispunct(c)) {
+                if (std::ispunct(uc)) {
                     words.push_back(std::string(1, c));
                 }
             } else {
-                current += std::tolower(c);
+                current += static_cast<char>(std::tolower(uc));
             }
         }
 
@@ -233,6 +236,7 @@ private:
 
 // SmritiKosha: the treasury of memory - embedding cache
 // (Smriti = memory, Kosha = treasury/sheath)
+// O(1) LRU cache using std::list + std::unordered_map
 class SmritiKosha {
 public:
     SmritiKosha(size_t max_size = 10000) : max_size_(max_size) {}
@@ -241,29 +245,42 @@ public:
     void remember(const std::string& vak, Artha artha) {
         std::lock_guard<std::mutex> lock(mutex_);
 
-        // Evict oldest if at capacity
-        if (cache_.size() >= max_size_ && access_order_.size() > 0) {
-            auto oldest = access_order_.front();
-            access_order_.erase(access_order_.begin());
-            cache_.erase(oldest);
+        auto it = cache_.find(vak);
+        if (it != cache_.end()) {
+            // Update existing entry and move to front
+            it->second.first = std::move(artha);
+            lru_order_.splice(lru_order_.begin(), lru_order_, it->second.second);
+            return;
         }
 
-        cache_[vak] = std::move(artha);
-        access_order_.push_back(vak);
+        // Evict LRU if at capacity
+        if (cache_.size() >= max_size_ && !lru_order_.empty()) {
+            const auto& evict_key = lru_order_.back();
+            cache_.erase(evict_key);
+            lru_order_.pop_back();
+        }
+
+        // Insert new entry at front
+        lru_order_.push_front(vak);
+        cache_[vak] = {std::move(artha), lru_order_.begin()};
     }
 
-    // Recall a remembered meaning
-    const Artha* recall(const std::string& vak) const {
+    // Recall a remembered meaning (returns by value to avoid dangling pointers)
+    std::optional<Artha> recall(const std::string& vak) {
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = cache_.find(vak);
-        return it != cache_.end() ? &it->second : nullptr;
+        if (it == cache_.end()) return std::nullopt;
+
+        // Move to front (most recently used)
+        lru_order_.splice(lru_order_.begin(), lru_order_, it->second.second);
+        return it->second.first;
     }
 
     // Forget everything
     void forget() {
         std::lock_guard<std::mutex> lock(mutex_);
         cache_.clear();
-        access_order_.clear();
+        lru_order_.clear();
     }
 
     size_t size() const {
@@ -273,9 +290,15 @@ public:
 
 private:
     mutable std::mutex mutex_;
-    std::unordered_map<std::string, Artha> cache_;
-    std::vector<std::string> access_order_;
+    std::list<std::string> lru_order_;  // front = most recent, back = least recent
+    std::unordered_map<std::string, std::pair<Artha, std::list<std::string>::iterator>> cache_;
     size_t max_size_;
+};
+
+// Embedding mode: queries need instruction prefix for BGE models
+enum class EmbedMode {
+    Document,  // Embedding content for storage (no prefix)
+    Query      // Embedding a search query (add instruction prefix)
 };
 
 // VakYantra: the machine of speech - abstract embedder interface
@@ -284,8 +307,13 @@ class VakYantra {
 public:
     virtual ~VakYantra() = default;
 
-    // Transform utterance into meaning
+    // Transform utterance into meaning (document mode by default)
     virtual Artha transform(const std::string& vak) = 0;
+
+    // Transform with explicit mode (query vs document)
+    virtual Artha transform(const std::string& vak, EmbedMode mode) {
+        return transform(vak);  // Default: ignore mode (subclasses override)
+    }
 
     // Transform multiple utterances (batch for efficiency)
     virtual std::vector<Artha> transform_batch(const std::vector<std::string>& vaks) {
@@ -302,6 +330,9 @@ public:
 
     // Is the yantra ready?
     virtual bool ready() const = 0;
+
+    // Get execution provider name (CPU, CoreML, CUDA, etc.)
+    virtual std::string execution_provider_name() const { return "CPU"; }
 };
 
 // ShantaYantra: the silent machine - returns zeros
@@ -329,13 +360,24 @@ public:
 
     Artha transform(const std::string& vak) override {
         // Try to recall from memory
-        if (const Artha* remembered = kosha_.recall(vak)) {
-            return *remembered;
+        if (auto remembered = kosha_.recall(vak)) {
+            return std::move(*remembered);
         }
 
         // Transform and remember
         Artha artha = inner_->transform(vak);
         kosha_.remember(vak, artha);
+        return artha;
+    }
+
+    Artha transform(const std::string& vak, EmbedMode mode) override {
+        // Query embeddings use a prefix, so cache key differs
+        std::string cache_key = (mode == EmbedMode::Query) ? ("__q:" + vak) : vak;
+        if (auto remembered = kosha_.recall(cache_key)) {
+            return std::move(*remembered);
+        }
+        Artha artha = inner_->transform(vak, mode);
+        kosha_.remember(cache_key, artha);
         return artha;
     }
 
@@ -348,8 +390,8 @@ public:
 
         // Check cache first
         for (size_t i = 0; i < vaks.size(); ++i) {
-            if (const Artha* remembered = kosha_.recall(vaks[i])) {
-                results[i] = *remembered;
+            if (auto remembered = kosha_.recall(vaks[i])) {
+                results[i] = std::move(*remembered);
             } else {
                 to_compute.push_back(vaks[i]);
                 compute_indices.push_back(i);
@@ -370,6 +412,7 @@ public:
 
     size_t dimension() const override { return inner_->dimension(); }
     bool ready() const override { return inner_->ready(); }
+    std::string execution_provider_name() const override { return inner_->execution_provider_name(); }
 
     // Direct access to memory
     SmritiKosha& kosha() { return kosha_; }

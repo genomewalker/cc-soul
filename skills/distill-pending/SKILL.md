@@ -1,3 +1,9 @@
+---
+name: distill-pending
+description: Process pending transcript distillation
+execution: inline
+---
+
 # Distill Pending Sessions
 
 Process staged conversation transcripts and extract learnings.

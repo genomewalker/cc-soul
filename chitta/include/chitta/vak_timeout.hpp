@@ -33,10 +33,14 @@ public:
         // Copy vak for thread safety
         std::string vak_copy = vak;
 
+        // Capture inner_ by value (shared_ptr copy) to prevent use-after-free
+        // if TimeoutYantra is destroyed while the thread is still running
+        auto inner_copy = inner_;
+
         // Launch worker thread
-        std::thread worker([this, vak_copy, result_ptr, done, mtx, cv]() {
+        std::thread worker([inner_copy, vak_copy, result_ptr, done, mtx, cv]() {
             try {
-                Artha result = inner_->transform(vak_copy);
+                Artha result = inner_copy->transform(vak_copy);
                 {
                     std::lock_guard<std::mutex> lock(*mtx);
                     *result_ptr = std::move(result);
@@ -92,10 +96,13 @@ public:
         std::vector<std::string> vaks_copy = vaks;
         auto batch_timeout = timeout_ + std::chrono::milliseconds(1000 * vaks_copy.size());
 
+        // Capture inner_ by value (shared_ptr copy) to prevent use-after-free
+        auto inner_copy = inner_;
+
         // Launch worker thread
-        std::thread worker([this, vaks_copy, result_ptr, done, mtx, cv]() {
+        std::thread worker([inner_copy, vaks_copy, result_ptr, done, mtx, cv]() {
             try {
-                auto result = inner_->transform_batch(vaks_copy);
+                auto result = inner_copy->transform_batch(vaks_copy);
                 {
                     std::lock_guard<std::mutex> lock(*mtx);
                     *result_ptr = std::move(result);
@@ -142,6 +149,7 @@ public:
 
     size_t dimension() const override { return inner_->dimension(); }
     bool ready() const override { return inner_->ready(); }
+    std::string execution_provider_name() const override { return inner_->execution_provider_name(); }
 
     // For circuit breaker integration
     size_t consecutive_failures() const { return consecutive_failures_.load(); }

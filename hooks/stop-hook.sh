@@ -138,6 +138,15 @@ while IFS= read -r marker; do
     echo "[soul] ↑+ ${mem_id:0:12}..." >&2
 done <<< "$(echo "$RESPONSE" | grep -oE '\[USED:[a-zA-Z0-9_-]+\]')"
 
+# ===========================================
+# CURIOSITY GAPS: Detect uncertainty/knowledge gaps
+# ===========================================
+if echo "$RESPONSE" | grep -qiE "(I don.?t know|I.?m not sure|unclear|couldn.?t (find|determine)|need to check|I.?ll have to look)"; then
+    gap_context=$(echo "$RESPONSE" | grep -iE "(I don.?t know|I.?m not sure|unclear|couldn.?t)" | head -1 | head -c 200 | tr '\n' ' ' | sed 's/"/\\"/g')
+    [[ -n "$gap_context" ]] && queue_write "curiosity_note_gap" "{\"gap\":$(echo "$gap_context" | jq -Rs .)}"
+    echo "[soul] +curiosity-gap detected" >&2
+fi
+
 # Extract [TRIPLET] → queue connect
 while IFS= read -r line; do
     if [[ "$line" =~ ^\[TRIPLET\] ]]; then
@@ -212,7 +221,48 @@ if [[ "$CLAUDE_LEARNED" == "false" && -n "$LAST_USER_MSG" ]]; then
 fi
 
 # ===========================================
-# ANTICIPATION SUCCESS: Learn from correct predictions
+# NARRATIVE EVENT LOGGING: Log assistant response and tool uses
+# ===========================================
+SESSION_ID="${SESSION_ID_INPUT:-default}"
+
+# djb2 hash - must match C++ implementation
+djb2_hash() {
+    local str="$1"
+    local hash=5381
+    local i c
+    for ((i=0; i<${#str}; i++)); do
+        c=$(printf '%d' "'${str:$i:1}")
+        hash=$(( ((hash << 5) + hash) + c ))
+        hash=$((hash & 0xFFFFFFFF))
+    done
+    echo "$hash"
+}
+
+MIND_HASH=$(djb2_hash "$MIND_PATH")
+SOCKET_PATH="${CHITTA_SOCKET:-/tmp/chitta-${MIND_HASH}.sock}"
+
+# Log assistant_message event (first line of response)
+if [[ -S "$SOCKET_PATH" && -n "$RESPONSE" ]]; then
+    summary=$(echo "$RESPONSE" | grep -v '^$' | grep -v '^\[' | head -1 | head -c 200 | tr '\n' ' ' | sed 's/"/\\"/g')
+    [[ -n "$summary" ]] && queue_write "narrative_log" "{\"session_id\":\"$SESSION_ID\",\"kind\":\"assistant_message\",\"summary\":$(echo "$summary" | jq -Rs .)}"
+
+    # Extract and log tool_use events (last 10 unique tools)
+    TOOLS_FROM_TRANSCRIPT=$(jq -r '.[] | select(.role=="assistant") | .message.content[]? | select(.type=="tool_use") | .name' "$TRANSCRIPT_PATH" 2>/dev/null | tail -10 | sort -u)
+
+    while IFS= read -r tool; do
+        [[ -z "$tool" ]] && continue
+        queue_write "narrative_log" "{\"session_id\":\"$SESSION_ID\",\"kind\":\"tool_use\",\"summary\":\"Used $tool\",\"tool_name\":\"$tool\",\"success\":true}"
+    done <<< "$TOOLS_FROM_TRANSCRIPT"
+
+    # Log error events if response contains error indicators
+    if echo "$RESPONSE" | grep -qiE '(error|failed|exception|traceback|fatal)'; then
+        error_line=$(echo "$RESPONSE" | grep -iE '(error|failed|exception)' | head -1 | head -c 150 | tr '\n' ' ' | sed 's/"/\\"/g')
+        [[ -n "$error_line" ]] && queue_write "narrative_log" "{\"session_id\":\"$SESSION_ID\",\"kind\":\"error\",\"summary\":$(echo "$error_line" | jq -Rs .),\"success\":false}"
+    fi
+fi
+
+# ===========================================
+# ANTICIPATION OUTCOME: Track prediction correctness
 # ===========================================
 PREDICTIONS_FILE="$MIND_PATH/.last_predictions.json"
 
@@ -226,36 +276,39 @@ if [[ -f "$PREDICTIONS_FILE" ]]; then
 
         if [[ -n "$predictions" && "$predictions" != "[]" ]]; then
             # For each prediction, check if the action matches any tool used
-            while read -r pattern; do
-                [[ -z "$pattern" ]] && continue
+            while read -r candidate; do
+                [[ -z "$candidate" ]] && continue
 
-                pattern_id=$(echo "$pattern" | jq -r '.id // 0' 2>/dev/null)
-                action=$(echo "$pattern" | jq -r '.action // ""' 2>/dev/null)
+                candidate_id=$(echo "$candidate" | jq -r '.id // 0' 2>/dev/null)
+                prediction=$(echo "$candidate" | jq -r '.prediction // ""' 2>/dev/null)
 
-                [[ "$pattern_id" -eq 0 || -z "$action" ]] && continue
+                [[ "$candidate_id" -eq 0 || -z "$prediction" ]] && continue
 
-                # Check if action matches any tool used (fuzzy match: contains tool name or vice versa)
+                # Check if prediction matches any tool used (fuzzy match)
                 match_found=false
                 while IFS= read -r tool; do
                     [[ -z "$tool" ]] && continue
 
-                    # Match if:
-                    # - tool name appears in action (e.g., "Edit" in "use Edit tool")
-                    # - action appears in tool name
-                    # - case-insensitive substring match
-                    action_lower=$(echo "$action" | tr '[:upper:]' '[:lower:]')
+                    prediction_lower=$(echo "$prediction" | tr '[:upper:]' '[:lower:]')
                     tool_lower=$(echo "$tool" | tr '[:upper:]' '[:lower:]')
 
-                    if [[ "$action_lower" == *"$tool_lower"* || "$tool_lower" == *"$action_lower"* ]]; then
+                    # Match keywords: edit, test, build, commit, etc.
+                    if [[ "$prediction_lower" == *"edit"* && "$tool_lower" == *"edit"* ]] ||
+                       [[ "$prediction_lower" == *"test"* && ("$tool_lower" == *"test"* || "$tool_lower" == *"bash"*) ]] ||
+                       [[ "$prediction_lower" == *"build"* && "$tool_lower" == *"bash"* ]] ||
+                       [[ "$prediction_lower" == *"commit"* && "$tool_lower" == *"bash"* ]] ||
+                       [[ "$prediction_lower" == *"$tool_lower"* || "$tool_lower" == *"$prediction_lower"* ]]; then
                         match_found=true
                         break
                     fi
                 done <<< "$TOOLS_USED"
 
                 if [[ "$match_found" == "true" ]]; then
-                    # Queue anticipation_success call
-                    queue_write "anticipation_success" "{\"id\":$pattern_id}"
-                    echo "[soul] ✓ prediction #${pattern_id}: ${action:0:40}" >&2
+                    # Record correct outcome via new anticipation_record_outcome
+                    queue_write "anticipation_record_outcome" "{\"candidate_id\":$candidate_id,\"correct\":true}"
+                    # Feed calibration
+                    queue_write "calibration_record" "{\"domain\":\"anticipation\",\"success\":$match_found}"
+                    echo "[soul] ✓ prediction #${candidate_id}: ${prediction:0:40}" >&2
                 fi
             done <<< "$(echo "$predictions" | jq -c '.[]' 2>/dev/null)"
         fi
@@ -289,6 +342,22 @@ fi
 
 snapshot=$(echo "$RESPONSE" | grep -v '^$' | grep -v '^\[' | head -1 | head -c 200)
 [[ -z "$snapshot" ]] && snapshot=$(echo "$RESPONSE" | head -1 | head -c 200)
+
+# ===========================================
+# SESSION SUMMARY: Capture narrative for continuity
+# ===========================================
+# Extract key actions from transcript (tool uses + outcomes)
+TOOLS_USED=$(jq -r '[.[] | select(.role=="assistant") | .message.content[]? | select(.type=="tool_use") | .name] | unique | join(", ")' "$TRANSCRIPT_PATH" 2>/dev/null | head -c 200)
+TURNS=$(jq '[.[] | select(.role=="assistant")] | length' "$TRANSCRIPT_PATH" 2>/dev/null || echo "?")
+
+# Build SSL summary
+SUMMARY="[session:$SESSION_ID] ${mood}→${TURNS} turns"
+[[ -n "$TOOLS_USED" ]] && SUMMARY="$SUMMARY | tools: ${TOOLS_USED:0:100}"
+[[ -n "$snapshot" ]] && SUMMARY="$SUMMARY | ${snapshot:0:100}"
+
+# Queue session summary memory
+queue_write "observe" "{\"category\":\"session_summary\",\"title\":\"Session $SESSION_ID\",\"content\":$(echo "$SUMMARY" | jq -Rs .)}"
+echo "[soul] +session-summary: ${SUMMARY:0:60}" >&2
 
 queue_write "ledger_save" "{\"session_id\":\"$SESSION_ID\",\"project\":\"$REALM\",\"mood\":\"$mood\",\"snapshot\":$(echo "$snapshot" | jq -Rs .)}"
 echo "[ledger] queued: $SESSION_ID ($mood, +$LEARNED)" >&2

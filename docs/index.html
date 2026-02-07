@@ -379,6 +379,52 @@ section {
 }
 
 /* ═══════════════════════════════════════════
+   QUICK START
+   ═══════════════════════════════════════════ */
+.quickstart {
+  padding: var(--space-7) 0;
+  background: var(--night-900);
+}
+
+.quickstart-box {
+  max-width: 500px;
+  margin: 0 auto;
+  text-align: center;
+  padding: var(--space-6);
+  background: var(--indigo-700);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--indigo-600);
+}
+
+.quickstart-code {
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  color: var(--aura-300);
+  background: var(--indigo-800);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--space-4);
+  user-select: all;
+}
+
+.quickstart-note {
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  margin-bottom: var(--space-3);
+}
+
+.quickstart-link {
+  font-size: var(--text-sm);
+  color: var(--sandal-300);
+  opacity: 0.8;
+  transition: opacity 0.2s;
+}
+
+.quickstart-link:hover {
+  opacity: 1;
+}
+
+/* ═══════════════════════════════════════════
    BUTTONS
    ═══════════════════════════════════════════ */
 .btn {
@@ -529,6 +575,22 @@ section {
   font-size: var(--text-xs);
 }
 
+.bridge-link {
+  text-align: center;
+  margin-top: var(--space-6);
+}
+
+.bridge-link a {
+  color: var(--sandal-300);
+  font-size: var(--text-sm);
+  opacity: 0.8;
+  transition: opacity 0.2s;
+}
+
+.bridge-link a:hover {
+  opacity: 1;
+}
+
 /* ═══════════════════════════════════════════
    HOW IT WORKS
    ═══════════════════════════════════════════ */
@@ -571,6 +633,8 @@ section {
 .feature-card:nth-child(4) { border-top-color: var(--aura-300); }
 .feature-card:nth-child(5) { border-top-color: var(--sandal-300); }
 .feature-card:nth-child(6) { border-top-color: var(--ember-400); }
+.feature-card:nth-child(7) { border-top-color: var(--aura-300); }
+.feature-card:nth-child(8) { border-top-color: var(--sandal-300); }
 
 .feature-card:hover {
   transform: translateY(-3px);
@@ -604,6 +668,101 @@ section {
   font-size: var(--text-sm);
   color: var(--ash-300);
   line-height: 1.7;
+}
+
+/* ═══════════════════════════════════════════
+   FIRST 30 DAYS PROGRESSION
+   ═══════════════════════════════════════════ */
+.progression {
+  background: var(--night-900);
+  border-top: 1px solid rgba(203, 175, 134, 0.06);
+}
+
+.progression-header {
+  margin-bottom: var(--space-8);
+}
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-width: 640px;
+}
+
+.timeline-item {
+  display: grid;
+  grid-template-columns: 40px 1fr;
+  gap: var(--space-5);
+  min-height: 120px;
+}
+
+.timeline-marker {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: var(--space-1);
+}
+
+.timeline-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--indigo-700);
+  border: 2px solid var(--sandal-300);
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.timeline-dot--final {
+  width: 14px;
+  height: 14px;
+  background: var(--sandal-300);
+  border-color: var(--sandal-300);
+  box-shadow: 0 0 12px rgba(203, 175, 134, 0.3);
+}
+
+.timeline-line {
+  width: 1px;
+  flex: 1;
+  background: linear-gradient(180deg, var(--sandal-300), rgba(203, 175, 134, 0.15));
+  margin-top: var(--space-2);
+}
+
+.timeline-item--final .timeline-marker {
+  padding-top: var(--space-1);
+}
+
+.timeline-content {
+  padding-bottom: var(--space-7);
+}
+
+.timeline-item--final .timeline-content {
+  padding-bottom: 0;
+}
+
+.timeline-label {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--sandal-300);
+  margin-bottom: var(--space-2);
+}
+
+.timeline-title {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  color: var(--lotus-200);
+  font-weight: 500;
+  line-height: 1.3;
+  margin-bottom: var(--space-2);
+}
+
+.timeline-desc {
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  line-height: 1.8;
 }
 
 /* ═══════════════════════════════════════════
@@ -958,10 +1117,46 @@ section {
   }
 }
 
+/* ═══════════════════════════════════════════
+   HAMBURGER MENU
+   ═══════════════════════════════════════════ */
+.nav-hamburger {
+  display: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: var(--space-2);
+  flex-direction: column;
+  gap: 5px;
+}
+.nav-hamburger span {
+  display: block;
+  width: 20px;
+  height: 1.5px;
+  background: var(--lotus-200);
+  transition: all 0.3s ease;
+}
+
 @media (max-width: 700px) {
+  .nav-hamburger { display: flex; }
   .nav-links {
     display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: rgba(15, 16, 24, 0.97);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    flex-direction: column;
+    padding: var(--space-4) var(--space-5);
+    gap: var(--space-3);
+    border-bottom: 1px solid rgba(203, 175, 134, 0.08);
   }
+  .nav-open .nav-links { display: flex; }
+  .nav-open .nav-hamburger span:nth-child(1) { transform: rotate(45deg) translate(4px, 4px); }
+  .nav-open .nav-hamburger span:nth-child(2) { opacity: 0; }
+  .nav-open .nav-hamburger span:nth-child(3) { transform: rotate(-45deg) translate(5px, -5px); }
 
   section {
     padding: var(--space-9) 0;
@@ -986,6 +1181,15 @@ section {
 
   .resonance-canvas-wrap {
     height: 280px;
+  }
+
+  .timeline-item {
+    grid-template-columns: 32px 1fr;
+    gap: var(--space-3);
+  }
+
+  .timeline-content {
+    padding-bottom: var(--space-5);
   }
 
   .why-statements {
@@ -1022,12 +1226,17 @@ section {
 <nav class="nav">
   <div class="nav-inner">
     <a href="#" class="nav-brand">cc<span>-</span>soul</a>
+    <button class="nav-hamburger" onclick="document.querySelector('.nav').classList.toggle('nav-open')" aria-label="Menu">
+      <span></span><span></span><span></span>
+    </button>
     <ul class="nav-links">
+      <li><a href="getting-started.html">Get Started</a></li>
+      <li><a href="philosophy.html">Philosophy</a></li>
+      <li><a href="architecture.html">Architecture</a></li>
       <li><a href="tools.html">Tools</a></li>
       <li><a href="cli.html">CLI</a></li>
       <li><a href="hooks.html">Hooks</a></li>
       <li><a href="skills.html">Skills</a></li>
-      <li><a href="philosophy.html">Philosophy</a></li>
       <li><a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a></li>
     </ul>
   </div>
@@ -1047,8 +1256,20 @@ section {
     <p class="hero-subtitle">cc-soul gives Claude Code a persistent identity&thinsp;&mdash;&thinsp;memory that decays, deepens, and distills across sessions.</p>
     <p class="hero-aside">Not a database. A relationship.</p>
     <div class="hero-ctas">
-      <a href="tools.html" class="btn btn-primary">Explore the tools</a>
+      <a href="getting-started.html" class="btn btn-primary">Get started</a>
+      <a href="tools.html" class="btn btn-outline">Explore the tools</a>
       <a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener" class="btn btn-outline">View on GitHub</a>
+    </div>
+  </div>
+</section>
+
+<!-- QUICK START -->
+<section class="quickstart" id="quickstart">
+  <div class="container">
+    <div class="quickstart-box reveal">
+      <div class="quickstart-code">claude /install genomewalker/cc-soul</div>
+      <p class="quickstart-note">Restart Claude Code. The soul awakens.</p>
+      <a href="getting-started.html" class="quickstart-link">Full setup guide &rarr;</a>
     </div>
   </div>
 </section>
@@ -1097,6 +1318,40 @@ section {
   </div>
 </section>
 
+<!-- PHILOSOPHY BRIDGE -->
+<section class="bridge" id="philosophy">
+  <div class="container">
+    <div class="bridge-header reveal">
+      <div class="section-divider"></div>
+      <h2 class="heading-section">Vedantic roots, operational code.</h2>
+      <p class="bridge-subtext">Sanskrit concepts map to system behaviors. Philosophy isn't decoration&thinsp;&mdash;&thinsp;it's architecture.</p>
+    </div>
+
+    <div class="mapping-grid reveal reveal-delay-1">
+      <a href="philosophy.html#chitta" class="mapping-row">
+        <span class="mapping-sanskrit">चित्त <span class="mapping-transliteration">Chitta</span></span>
+        <span class="mapping-system">Memory store &mdash; the persistent mind that carries forward</span>
+      </a>
+      <a href="philosophy.html#anitya" class="mapping-row">
+        <span class="mapping-sanskrit">अनित्य <span class="mapping-transliteration">Anitya</span></span>
+        <span class="mapping-system">Impermanence &mdash; decay curves ensure only valuable memories persist</span>
+      </a>
+      <a href="philosophy.html#samskara" class="mapping-row">
+        <span class="mapping-sanskrit">संस्कार <span class="mapping-transliteration">Saṃskāra</span></span>
+        <span class="mapping-system">Impressions &mdash; repeated use strengthens, neglect weakens</span>
+      </a>
+      <a href="philosophy.html#pratyabhijna" class="mapping-row">
+        <span class="mapping-sanskrit">प्रत्यभिज्ञा <span class="mapping-transliteration">Pratyabhijñā</span></span>
+        <span class="mapping-system">Recognition &mdash; resonance-based recall when context aligns</span>
+      </a>
+    </div>
+
+    <p class="bridge-link reveal reveal-delay-2">
+      <a href="philosophy.html">Explore all 13 concepts &rarr;</a>
+    </p>
+  </div>
+</section>
+
 <!-- HOW IT WORKS -->
 <section class="how" id="how">
   <div class="container">
@@ -1115,7 +1370,7 @@ section {
           </svg>
         </div>
         <h3 class="card-title">Semantic Anchoring</h3>
-        <p class="card-desc">384-dimensional embeddings anchor meaning in a stable latent space. Every memory has a position in semantic geometry.</p>
+        <p class="card-desc">768-dimensional embeddings anchor meaning in a stable latent space. Every memory has a position in semantic geometry.</p>
       </div>
 
       <div class="feature-card reveal reveal-delay-2">
@@ -1182,6 +1437,94 @@ section {
         <h3 class="card-title">Subconscious Processing</h3>
         <p class="card-desc">Background distillation, decay, and strengthening while idle. The daemon works so the session doesn't have to.</p>
       </div>
+
+      <div class="feature-card reveal reveal-delay-1">
+        <div class="card-icon">
+          <svg viewBox="0 0 36 36" fill="none">
+            <path d="M18 6 C18 6 10 14 10 20 C10 24.4 13.6 28 18 28 C22.4 28 26 24.4 26 20 C26 14 18 6 18 6Z" stroke="#9DB2D9" stroke-width="1.5" fill="none" opacity="0.8"/>
+            <path d="M14 20 Q18 16 22 20" stroke="#9DB2D9" stroke-width="1" opacity="0.5"/>
+            <path d="M15 23 Q18 19 21 23" stroke="#9DB2D9" stroke-width="0.75" opacity="0.35"/>
+            <circle cx="18" cy="12" r="1.5" fill="#9DB2D9" opacity="0.6"/>
+          </svg>
+        </div>
+        <h3 class="card-title">Habits &amp; Anticipation</h3>
+        <p class="card-desc">Learns &ldquo;when X happens, do Y&rdquo; patterns from repeated behavior. Predicts your next actions and suggests approaches before you ask&thinsp;&mdash;&thinsp;proactive, not reactive.</p>
+      </div>
+
+      <div class="feature-card reveal reveal-delay-2">
+        <div class="card-icon">
+          <svg viewBox="0 0 36 36" fill="none">
+            <circle cx="18" cy="14" r="5" stroke="#CBAF86" stroke-width="1.5" fill="none" opacity="0.8"/>
+            <circle cx="18" cy="14" r="1.5" fill="#CBAF86" opacity="0.5"/>
+            <line x1="18" y1="19" x2="18" y2="24" stroke="#CBAF86" stroke-width="1" opacity="0.6"/>
+            <path d="M12 28 L18 24 L24 28" stroke="#CBAF86" stroke-width="1" fill="none" opacity="0.5"/>
+            <circle cx="12" cy="28" r="1.5" fill="#CBAF86" opacity="0.35"/>
+            <circle cx="24" cy="28" r="1.5" fill="#CBAF86" opacity="0.35"/>
+          </svg>
+        </div>
+        <h3 class="card-title">Goals &amp; Narrative</h3>
+        <p class="card-desc">Tracks long-term objectives with milestones. Detects work mode&thinsp;&mdash;&thinsp;orienting, debugging, flow&thinsp;&mdash;&thinsp;and adapts behavior accordingly. Celebrates when you ship.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FIRST 30 DAYS -->
+<section class="progression" id="progression">
+  <div class="container">
+    <div class="progression-header reveal">
+      <div class="section-divider"></div>
+      <h2 class="heading-section">The first 30 days.</h2>
+      <p class="subtext">cc-soul doesn't arrive fully formed. It grows through use.</p>
+    </div>
+
+    <div class="timeline">
+      <div class="timeline-item reveal reveal-delay-1">
+        <div class="timeline-marker">
+          <span class="timeline-dot"></span>
+          <span class="timeline-line"></span>
+        </div>
+        <div class="timeline-content">
+          <h3 class="timeline-label">Day 1</h3>
+          <h4 class="timeline-title">Foundation</h4>
+          <p class="timeline-desc">Basic recall and code indexing. cc-soul remembers what you tell it and indexes your codebase structure &mdash; symbols, call graphs, file relationships.</p>
+        </div>
+      </div>
+
+      <div class="timeline-item reveal reveal-delay-2">
+        <div class="timeline-marker">
+          <span class="timeline-dot"></span>
+          <span class="timeline-line"></span>
+        </div>
+        <div class="timeline-content">
+          <h3 class="timeline-label">Week 1</h3>
+          <h4 class="timeline-title">Adaptation</h4>
+          <p class="timeline-desc">Preferences learned, corrections absorbed. The soul starts adapting to your workflow and communication style &mdash; your conventions, your gotchas, your shortcuts.</p>
+        </div>
+      </div>
+
+      <div class="timeline-item reveal reveal-delay-3">
+        <div class="timeline-marker">
+          <span class="timeline-dot"></span>
+          <span class="timeline-line"></span>
+        </div>
+        <div class="timeline-content">
+          <h3 class="timeline-label">Week 2</h3>
+          <h4 class="timeline-title">Anticipation</h4>
+          <p class="timeline-desc">Patterns emerging, habits forming. The system predicts your next actions, surfaces relevant gotchas, and adapts to your work mode &mdash; flow, debugging, or blocked.</p>
+        </div>
+      </div>
+
+      <div class="timeline-item timeline-item--final reveal reveal-delay-4">
+        <div class="timeline-marker">
+          <span class="timeline-dot timeline-dot--final"></span>
+        </div>
+        <div class="timeline-content">
+          <h3 class="timeline-label">Month 1</h3>
+          <h4 class="timeline-title">Partnership</h4>
+          <p class="timeline-desc">Goals tracked, curiosity gaps filled, predictions calibrated. It feels like a collaborator who knows your project history and anticipates your needs &mdash; not a tool that forgets.</p>
+        </div>
+      </div>
     </div>
   </div>
 </section>
@@ -1208,7 +1551,9 @@ section {
     </p>
 
     <div class="tools-footer reveal reveal-delay-2">
+      <a href="getting-started.html" class="tools-link">Get Started</a>
       <a href="tools.html" class="tools-link">120+ MCP Tools Reference</a>
+      <a href="architecture.html" class="tools-link">Architecture</a>
       <a href="philosophy.html" class="tools-link">Philosophy &rarr; System</a>
       <a href="cli.html" class="tools-link">CLI Reference</a>
       <a href="hooks.html" class="tools-link">Hook System</a>
@@ -1256,8 +1601,8 @@ section {
       }
     });
   }, {
-    threshold: 0.12,
-    rootMargin: '0px 0px -40px 0px'
+    threshold: 0.01,
+    rootMargin: '0px 0px -20px 0px'
   });
 
   reveals.forEach(function(el) { observer.observe(el); });

@@ -13,7 +13,9 @@
 #include "types.hpp"
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
+#include <memory>
 
 namespace chitta {
 
@@ -119,8 +121,8 @@ struct TrustConfig {
     bool require_user_input = false;  // Only include user-provided knowledge
     bool exclude_synthesis = false;   // Exclude LLM-synthesized knowledge
     bool require_source_url = false;  // Only include knowledge with source URL
-    std::vector<std::string> allowed_tools;  // Empty = all tools allowed
-    std::vector<std::string> allowed_sessions;  // Empty = all sessions
+    std::unordered_set<std::string> allowed_tools;  // Empty = all tools allowed
+    std::unordered_set<std::string> allowed_sessions;  // Empty = all sessions
 };
 
 // Provenance spine - manages provenance for all nodes
@@ -171,26 +173,12 @@ public:
 
         // Check tool whitelist
         if (!config.allowed_tools.empty() && !prov.tool_name.empty()) {
-            bool found = false;
-            for (const auto& t : config.allowed_tools) {
-                if (t == prov.tool_name) {
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) return false;
+            if (config.allowed_tools.count(prov.tool_name) == 0) return false;
         }
 
         // Check session whitelist
         if (!config.allowed_sessions.empty() && !prov.session_id.empty()) {
-            bool found = false;
-            for (const auto& s : config.allowed_sessions) {
-                if (s == prov.session_id) {
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) return false;
+            if (config.allowed_sessions.count(prov.session_id) == 0) return false;
         }
 
         return true;
@@ -281,44 +269,39 @@ public:
     }
 
     bool load(const std::string& path) {
-        FILE* f = fopen(path.c_str(), "rb");
+        std::unique_ptr<FILE, decltype(&fclose)> f(fopen(path.c_str(), "rb"), &fclose);
         if (!f) return false;
 
         uint32_t magic, version;
         uint64_t count;
 
-        if (fread(&magic, sizeof(magic), 1, f) != 1 || magic != 0x50524F56 ||
-            fread(&version, sizeof(version), 1, f) != 1 || version != 1 ||
-            fread(&count, sizeof(count), 1, f) != 1 || count > 100000000) {
-            fclose(f);
+        if (fread(&magic, sizeof(magic), 1, f.get()) != 1 || magic != 0x50524F56 ||
+            fread(&version, sizeof(version), 1, f.get()) != 1 || version != 1 ||
+            fread(&count, sizeof(count), 1, f.get()) != 1 || count > 100000000) {
             return false;
         }
 
         provenance_.clear();
         for (uint64_t i = 0; i < count; ++i) {
             NodeId id;
-            if (fread(&id.high, sizeof(id.high), 1, f) != 1 ||
-                fread(&id.low, sizeof(id.low), 1, f) != 1) {
-                fclose(f);
+            if (fread(&id.high, sizeof(id.high), 1, f.get()) != 1 ||
+                fread(&id.low, sizeof(id.low), 1, f.get()) != 1) {
                 return false;
             }
 
             uint32_t data_size;
-            if (fread(&data_size, sizeof(data_size), 1, f) != 1 || data_size > 10000) {
-                fclose(f);
+            if (fread(&data_size, sizeof(data_size), 1, f.get()) != 1 || data_size > 10000) {
                 return false;
             }
 
             std::vector<uint8_t> data(data_size);
-            if (fread(data.data(), 1, data_size, f) != data_size) {
-                fclose(f);
+            if (fread(data.data(), 1, data_size, f.get()) != data_size) {
                 return false;
             }
 
             provenance_[id] = Provenance::deserialize(data.data(), data_size);
         }
 
-        fclose(f);
         return true;
     }
 

@@ -20,6 +20,7 @@
 #include <filesystem>
 #include <fstream>
 #include <algorithm>
+#include <unordered_map>
 #include <unordered_set>
 #include <cctype>
 #include <array>
@@ -41,6 +42,20 @@ struct DuckDBToolResult {
         return {true, msg, json()};
     }
 };
+
+// Extract "parent/basename" from a full file path for display (disambiguates same-named files)
+inline std::string display_path(const std::string& file_path) {
+    size_t last_slash = file_path.rfind('/');
+    if (last_slash == std::string::npos) return file_path;
+    std::string basename = file_path.substr(last_slash + 1);
+    if (last_slash > 0) {
+        size_t prev_slash = file_path.rfind('/', last_slash - 1);
+        if (prev_slash != std::string::npos) {
+            return file_path.substr(prev_slash + 1);
+        }
+    }
+    return basename;
+}
 
 class DuckDBRpcHandler {
 public:
@@ -81,6 +96,7 @@ private:
     Subconscious* subconscious_;
     std::vector<json> tools_;
     std::unordered_map<std::string, std::function<DuckDBToolResult(const json&)>> handlers_;
+    std::unordered_map<std::string, std::string> tool_visibility_;
 
     // Category to confidence mapping for high-value learnings
     static float category_to_confidence(const std::string& category) {
@@ -362,11 +378,12 @@ private:
 
         tools_.push_back({
             {"name", "embed_symbols"},
-            {"description", "Fast embed symbol metadata (no LLM needed, ~100/sec)"},
+            {"description", "Fast embed symbol metadata (no LLM needed, ~100/sec). Use reset=true to clear all embeddings and re-embed with richer text."},
             {"inputSchema", {
                 {"type", "object"},
                 {"properties", {
-                    {"batch_size", {{"type", "integer"}, {"description", "Symbols per batch (default: 100)"}}}
+                    {"batch_size", {{"type", "integer"}, {"description", "Symbols per batch (default: 100)"}}},
+                    {"reset", {{"type", "boolean"}, {"description", "Clear all symbol embeddings before re-embedding (default: false)"}}}
                 }}
             }}
         });
@@ -537,7 +554,8 @@ private:
                 {"properties", {
                     {"name", {{"type", "string"}, {"description", "Symbol name to find callers for"}}},
                     {"id", {{"type", "integer"}, {"description", "Symbol ID (alternative to name)"}}},
-                    {"kind", {{"type", "string"}, {"description", "Filter by symbol kind when using name"}}}
+                    {"kind", {{"type", "string"}, {"description", "Filter by symbol kind when using name"}}},
+                    {"project", {{"type", "string"}, {"description", "Project name to disambiguate when multiple symbols share the same name"}}}
                 }}
             }}
         });
@@ -551,7 +569,8 @@ private:
                 {"properties", {
                     {"name", {{"type", "string"}, {"description", "Symbol name to find callees for"}}},
                     {"id", {{"type", "integer"}, {"description", "Symbol ID (alternative to name)"}}},
-                    {"kind", {{"type", "string"}, {"description", "Filter by symbol kind when using name"}}}
+                    {"kind", {{"type", "string"}, {"description", "Filter by symbol kind when using name"}}},
+                    {"project", {{"type", "string"}, {"description", "Project name to disambiguate when multiple symbols share the same name"}}}
                 }}
             }}
         });
@@ -565,7 +584,8 @@ private:
                 {"properties", {
                     {"name", {{"type", "string"}, {"description", "Symbol name to read"}}},
                     {"id", {{"type", "integer"}, {"description", "Symbol ID (alternative to name)"}}},
-                    {"kind", {{"type", "string"}, {"description", "Filter by symbol kind (function, class, method)"}}}
+                    {"kind", {{"type", "string"}, {"description", "Filter by symbol kind (function, class, method)"}}},
+                    {"project", {{"type", "string"}, {"description", "Project name to disambiguate when multiple symbols share the same name"}}}
                 }}
             }}
         });
@@ -577,7 +597,8 @@ private:
             {"inputSchema", {
                 {"type", "object"},
                 {"properties", {
-                    {"name", {{"type", "string"}, {"description", "Function name to read"}}}
+                    {"name", {{"type", "string"}, {"description", "Function name to read"}}},
+                    {"project", {{"type", "string"}, {"description", "Project name to disambiguate"}}}
                 }},
                 {"required", {"name"}}
             }}
@@ -592,7 +613,8 @@ private:
                 {"properties", {
                     {"query", {{"type", "string"}, {"description", "Natural language query to find symbols"}}},
                     {"kind", {{"type", "string"}, {"description", "Filter by symbol kind (class, function, method)"}}},
-                    {"limit", {{"type", "integer"}, {"description", "Max results (default 10)"}}}
+                    {"limit", {{"type", "integer"}, {"description", "Max results (default 10)"}}},
+                    {"project", {{"type", "string"}, {"description", "Filter results to symbols from this project only"}}}
                 }},
                 {"required", {"query"}}
             }}
@@ -1986,6 +2008,152 @@ private:
         });
         handlers_["ssl_convert"] = [this](const json& p) { return tool_ssl_convert(p); };
 
+        // ======================================================================
+        // Narrative and Anticipation Tools
+        // ======================================================================
+
+        // narrative_status - Get current work mode and segment summary
+        tools_.push_back({
+            {"name", "narrative_status"},
+            {"description", "Get current work mode, confidence, and segment summary for the session"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"session_id", {{"type", "string"}, {"description", "Session ID (default: current)"}}}
+                }},
+                {"required", json::array()}
+            }}
+        });
+        handlers_["narrative_status"] = [this](const json& p) { return tool_narrative_status(p); };
+
+        // narrative_log - Manually append event to session log
+        tools_.push_back({
+            {"name", "narrative_log"},
+            {"description", "Manually append an event to the session event log"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"session_id", {{"type", "string"}, {"description", "Session ID"}}},
+                    {"kind", {{"type", "string"}, {"description", "Event kind: user_message, assistant_message, tool_use, tool_result, error, file_edit, search, build, test, commit, mode_change"}}},
+                    {"summary", {{"type", "string"}, {"description", "Brief description of the event"}}},
+                    {"tool_name", {{"type", "string"}, {"description", "Tool name (for tool events)"}}},
+                    {"success", {{"type", "boolean"}, {"description", "Whether the action succeeded"}}},
+                    {"payload", {{"type", "string"}, {"description", "JSON payload with event details"}}},
+                    {"files_mentioned", {{"type", "string"}, {"description", "JSON array of file paths"}}}
+                }},
+                {"required", {"session_id", "kind", "summary"}}
+            }}
+        });
+        handlers_["narrative_log"] = [this](const json& p) { return tool_narrative_log(p); };
+
+        // narrative_history - Get state segment history
+        tools_.push_back({
+            {"name", "narrative_history"},
+            {"description", "Get history of work mode segments for a session"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"session_id", {{"type", "string"}, {"description", "Session ID"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Max segments to return (default 20)"}}}
+                }},
+                {"required", {"session_id"}}
+            }}
+        });
+        handlers_["narrative_history"] = [this](const json& p) { return tool_narrative_history(p); };
+
+        // anticipation_filter - Get filtered predictions that pass annoyance gate
+        tools_.push_back({
+            {"name", "anticipation_filter"},
+            {"description", "Get anticipation candidates that pass the annoyance gate"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"session_id", {{"type", "string"}, {"description", "Session ID"}}},
+                    {"max", {{"type", "integer"}, {"description", "Max predictions to return (default 2)"}}}
+                }},
+                {"required", {"session_id"}}
+            }}
+        });
+        handlers_["anticipation_filter"] = [this](const json& p) { return tool_anticipation_filter(p); };
+
+        // anticipation_gate_status - Show annoyance gate state
+        tools_.push_back({
+            {"name", "anticipation_gate_status"},
+            {"description", "Show the current annoyance gate state for debugging"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"session_id", {{"type", "string"}, {"description", "Session ID"}}}
+                }},
+                {"required", {"session_id"}}
+            }}
+        });
+        handlers_["anticipation_gate_status"] = [this](const json& p) { return tool_anticipation_gate_status(p); };
+
+        // anticipation_record_outcome - Record outcome of a prediction
+        tools_.push_back({
+            {"name", "anticipation_record_outcome"},
+            {"description", "Record whether a surfaced prediction was correct or incorrect"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"candidate_id", {{"type", "integer"}, {"description", "Anticipation candidate ID"}}},
+                    {"correct", {{"type", "boolean"}, {"description", "Whether the prediction was correct"}}}
+                }},
+                {"required", {"candidate_id", "correct"}}
+            }}
+        });
+        handlers_["anticipation_record_outcome"] = [this](const json& p) { return tool_anticipation_record_outcome(p); };
+
+        classify_tools();
+    }
+
+    void classify_tools() {
+        // Internal tools - hidden from MCP tools/list
+        static const std::vector<std::string> internal_tools = {
+            "cleanup", "cleanup_code_wisdom", "hygiene_run", "hygiene_stats",
+            "consolidation_scan", "consolidation_merge", "consolidation_auto",
+            "batch_forget", "sql_query", "migrate_vss", "reembed_memories",
+            "dedupe_symbols", "background_run_cycle", "background_schedule", "background_status",
+            "metacognition_evaluate", "metacognition_corrections", "metacognition_outcomes",
+            "episode_cluster_status", "distill_status", "enrichment_status", "epiplexity_check",
+            "clear_codebase", "clear_triplets", "describe_symbol", "extract_symbols",
+            "file_dependents", "file_imports", "resolve_callsites",
+            "restore_code_intel_confidence", "ssl_convert", "subconscious_stats",
+            "suggestion_count", "suggestion_pending", "suggestion_resolve", "suggestion_track",
+            "transcript_get", "transcript_list", "transcript_parse", "transcript_register",
+            "transcript_remove", "transcript_search", "transcript_update",
+            "type_hierarchy", "version_check", "health_check",
+            "export_soul", "import_soul", "codebase_overview",
+            "long_task_start", "long_task_update", "long_task_complete", "long_task_get",
+            "long_task_event", "long_task_evaluate", "long_task_active", "long_task_snapshot",
+            "insight_global", "insight_promote",
+            "connect_batch", "research_cycle", "research_store", "research_topics",
+            "cycle", "grow",
+            "anticipation_gate_status", "anticipation_record_outcome"
+        };
+
+        // Advanced tools - visible but secondary
+        static const std::vector<std::string> advanced_tools = {
+            "strengthen", "weaken", "tag", "update", "get", "query_graph",
+            "realm_add", "realm_detect", "realm_get", "realm_list", "realm_remove", "realm_set", "realm_visibility",
+            "goal_set", "goal_get", "goal_list", "goal_complete", "goal_progress",
+            "habit_observe", "habit_match", "habit_list", "habit_strengthen", "habit_weaken",
+            "anticipation_predict", "anticipation_observe", "anticipation_list", "anticipation_success",
+            "calibration_record", "calibration_score",
+            "profile_get", "profile_observe", "profile_update",
+            "curiosity_gaps", "curiosity_note_gap", "curiosity_resolve",
+            "narrative_history"
+        };
+
+        // Everything defaults to "default" visibility
+        for (const auto& name : internal_tools) {
+            tool_visibility_[name] = "internal";
+        }
+        for (const auto& name : advanced_tools) {
+            tool_visibility_[name] = "advanced";
+        }
+        // All remaining tools are implicitly "default"
     }
 
     // ========================================================================
@@ -2397,32 +2565,106 @@ private:
     }
 
     DuckDBToolResult tool_soul_context(const json&) {
-        // Use cached health for fast response (updated by maintenance cycle)
         auto cached = mind_->store().cached_health();
 
-        std::ostringstream ss;
-        ss << "Soul State (DuckDB):\n";
-        ss << "  Nodes: " << cached.total_memories << " total\n";
-        ss << "  Confidence: " << std::fixed << std::setprecision(2) << cached.avg_confidence << " avg\n";
-        ss << "  Triplets: " << cached.total_triplets << "\n";
-        ss << "  Symbols: " << cached.total_symbols << "\n";
-        ss << "  Yantra: " << (mind_->has_yantra() ? "ready" : "not attached") << "\n";
-        ss << "  Status: " << (cached.is_open ? "OK" : "ERROR") << "\n";
+        // Query actual relationship state (not just stats)
+        size_t preferences = 0, corrections = 0, insights = 0, solutions = 0;
+        size_t wisdom_nodes = 0, beliefs = 0, episodes = 0;
+        float strongest_conf = 0.0f;
+        std::string strongest_memory;
 
-        // Skip expensive queries - use cached values
-        size_t transcripts = 0;  // Skip transcript_count() query
-        json calibration_json = json::array();  // Skip calibration query
+        auto type_counts = mind_->store().execute_sql_query(
+            "SELECT "
+            "  SUM(CASE WHEN content LIKE '[preference%' OR content LIKE '[pref]%' THEN 1 ELSE 0 END) as prefs, "
+            "  SUM(CASE WHEN content LIKE '[correction%' OR content LIKE '[gotcha%' THEN 1 ELSE 0 END) as corrections, "
+            "  SUM(CASE WHEN content LIKE '[insight%' THEN 1 ELSE 0 END) as insights, "
+            "  SUM(CASE WHEN content LIKE '[solution%' OR content LIKE '[sol]%' THEN 1 ELSE 0 END) as solutions, "
+            "  SUM(CASE WHEN kind = 'wisdom' OR kind = 'distilled' THEN 1 ELSE 0 END) as wisdom, "
+            "  SUM(CASE WHEN kind = 'belief' THEN 1 ELSE 0 END) as beliefs, "
+            "  SUM(CASE WHEN kind = 'episode' THEN 1 ELSE 0 END) as episodes "
+            "FROM memory WHERE confidence > 0.01"
+        );
+        if (type_counts.success && !type_counts.rows.empty()) {
+            const auto& r = type_counts.rows[0];
+            if (r.size() >= 7) {
+                preferences = r[0].empty() ? 0 : std::stoull(r[0]);
+                corrections = r[1].empty() ? 0 : std::stoull(r[1]);
+                insights = r[2].empty() ? 0 : std::stoull(r[2]);
+                solutions = r[3].empty() ? 0 : std::stoull(r[3]);
+                wisdom_nodes = r[4].empty() ? 0 : std::stoull(r[4]);
+                beliefs = r[5].empty() ? 0 : std::stoull(r[5]);
+                episodes = r[6].empty() ? 0 : std::stoull(r[6]);
+            }
+        }
+
+        // Get strongest memory (highest confidence, most accessed)
+        auto top = mind_->store().execute_sql_query(
+            "SELECT content, confidence FROM memory WHERE confidence > 0.5 "
+            "ORDER BY confidence DESC, accessed_at DESC LIMIT 1"
+        );
+        if (top.success && !top.rows.empty() && top.rows[0].size() >= 2) {
+            strongest_memory = top.rows[0][0];
+            if (strongest_memory.size() > 80) strongest_memory = strongest_memory.substr(0, 80) + "...";
+            strongest_conf = std::stof(top.rows[0][1]);
+        }
+
+        // Get indexed projects
+        auto projects = mind_->store().execute_sql_query(
+            "SELECT project, COUNT(*) as files FROM code_file GROUP BY project ORDER BY files DESC"
+        );
+        json projects_json = json::array();
+        if (projects.success) {
+            for (const auto& row : projects.rows) {
+                if (row.size() >= 2) {
+                    projects_json.push_back({{"name", row[0]}, {"files", std::stoi(row[1])}});
+                }
+            }
+        }
+
+        std::ostringstream ss;
+        ss << "Soul State:\n";
+        ss << "  Partnership: " << preferences << " preferences, "
+           << corrections << " corrections, " << insights << " insights, "
+           << solutions << " solutions\n";
+        ss << "  Memory: " << wisdom_nodes << " wisdom, " << beliefs << " beliefs, "
+           << episodes << " episodes (" << cached.total_memories << " total)\n";
+        ss << "  Confidence: " << std::fixed << std::setprecision(2) << cached.avg_confidence << " avg\n";
+        if (!strongest_memory.empty()) {
+            ss << "  Strongest: [" << std::setprecision(0) << (strongest_conf * 100) << "%] "
+               << strongest_memory << "\n";
+        }
+        ss << "  Code: " << cached.total_symbols << " symbols, "
+           << cached.total_triplets << " triplets";
+        if (!projects_json.empty()) {
+            ss << " across " << projects_json.size() << " project"
+               << (projects_json.size() > 1 ? "s" : "");
+        }
+        ss << "\n";
+        ss << "  Yantra: " << (mind_->has_yantra() ? "ready" : "not attached") << "\n";
+        ss << "  Status: " << (cached.is_open ? "OK" : "ERROR");
 
         return DuckDBToolResult::ok(ss.str(), {
             {"version", CHITTA_VERSION},
-            {"total_nodes", cached.total_memories},
-            {"total_symbols", cached.total_symbols},
-            {"avg_confidence", cached.avg_confidence},
-            {"triplet_count", cached.total_triplets},
+            {"partnership", {
+                {"preferences", preferences},
+                {"corrections", corrections},
+                {"insights", insights},
+                {"solutions", solutions}
+            }},
+            {"memory", {
+                {"wisdom", wisdom_nodes},
+                {"beliefs", beliefs},
+                {"episodes", episodes},
+                {"total", cached.total_memories},
+                {"avg_confidence", cached.avg_confidence}
+            }},
+            {"code", {
+                {"symbols", cached.total_symbols},
+                {"triplets", cached.total_triplets},
+                {"projects", projects_json}
+            }},
             {"yantra_ready", mind_->has_yantra()},
-            {"status", cached.is_open ? "OK" : "ERROR"},
-            {"transcripts_tracked", transcripts},
-            {"calibration", calibration_json}
+            {"status", cached.is_open ? "OK" : "ERROR"}
         });
     }
 
@@ -2709,6 +2951,18 @@ private:
             return DuckDBToolResult::error("Yantra (embedder) not attached");
         }
 
+        // Reset all embeddings if requested (for re-embedding with richer text)
+        bool reset = params.value("reset", false);
+        size_t purged = 0;
+        if (reset) {
+            // Clear all from separate embeddings DB
+            purged = mind_->store().clear_symbol_embeddings();
+            // Clear main DB embeddings and described_at
+            mind_->store().execute_raw(
+                "UPDATE symbol SET embedding = NULL, described_at = 0 "
+                "WHERE embedding IS NOT NULL OR described_at > 0");
+        }
+
         size_t batch_size = params.value("batch_size", 100);
         auto symbols = mind_->store().get_unembedded_symbols(batch_size);
 
@@ -2719,16 +2973,61 @@ private:
         size_t embedded = 0;
         auto start = std::chrono::steady_clock::now();
 
+        // Pre-fetch triplet members for classes/structs (contains predicate)
+        // to enrich embedding text with member names
+        std::unordered_map<std::string, std::vector<std::string>> class_members;
+        {
+            auto members_result = mind_->store().execute_sql_query(
+                "SELECT subject, object FROM triplet WHERE predicate = 'contains' "
+                "AND subject IN (SELECT DISTINCT subject FROM triplet WHERE predicate = 'contains')");
+            if (members_result.success) {
+                for (const auto& row : members_result.rows) {
+                    if (row.size() >= 2) {
+                        // Extract leaf name from object for cleaner text
+                        std::string leaf = row[1];
+                        size_t cpos = leaf.rfind(':');
+                        if (cpos != std::string::npos && cpos + 1 < leaf.size())
+                            leaf = leaf.substr(cpos + 1);
+                        class_members[row[0]].push_back(leaf);
+                    }
+                }
+            }
+        }
+
         for (const auto& sym : symbols) {
-            // Build searchable text from metadata
-            std::string basename = sym.file_path;
-            size_t pos = basename.rfind('/');
-            if (pos != std::string::npos) basename = basename.substr(pos + 1);
+            // Build rich searchable text from metadata + context
+            std::string disp = display_path(sym.file_path);
 
             std::ostringstream text;
-            text << sym.kind << " " << sym.name << " in " << basename;
+            text << sym.kind << " " << sym.name;
+            text << " in " << disp;
+
             if (!sym.signature.empty() && sym.signature != sym.name) {
                 text << ": " << sym.signature;
+            }
+
+            // For classes/structs, append member names for richer semantics
+            if (sym.kind == "class" || sym.kind == "struct" || sym.kind == "interface") {
+                // Build lowercase key to match triplet subjects (connect_batch lowercases)
+                std::string lower_name;
+                for (char c : sym.name) {
+                    lower_name += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                }
+                // Try both the raw name and common triplet key patterns
+                for (const auto& key : {lower_name, sym.kind + ":" + lower_name}) {
+                    auto it = class_members.find(key);
+                    if (it != class_members.end() && !it->second.empty()) {
+                        text << " { ";
+                        size_t count = 0;
+                        for (const auto& member : it->second) {
+                            if (count++ > 0) text << ", ";
+                            if (count > 8) { text << "..."; break; }  // Cap at 8 members
+                            text << member;
+                        }
+                        text << " }";
+                        break;
+                    }
+                }
             }
 
             // Embed using Yantra
@@ -2747,16 +3046,21 @@ private:
         size_t remaining = mind_->store().count_unembedded_symbols();
 
         std::ostringstream ss;
+        if (purged > 0) {
+            ss << "Purged " << purged << " zero-vector embeddings\n";
+        }
         ss << "Embedded " << embedded << " symbols in " << ms << "ms";
         ss << " (" << std::fixed << std::setprecision(1) << rate << "/sec)\n";
         ss << "Remaining: " << remaining;
 
-        return DuckDBToolResult::ok(ss.str(), {
+        json result = {
             {"embedded", embedded},
             {"remaining", remaining},
             {"elapsed_ms", ms},
             {"rate_per_sec", rate}
-        });
+        };
+        if (purged > 0) result["purged_zeros"] = purged;
+        return DuckDBToolResult::ok(ss.str(), result);
     }
 
     DuckDBToolResult tool_dedupe_symbols(const json& /*params*/) {
@@ -2779,14 +3083,21 @@ private:
         size_t after = mind_->store().count_total_symbols();
         size_t removed = before - after;
 
+        // Clean orphaned embeddings left behind by deleted duplicates
+        size_t orphans_cleaned = mind_->store().clean_orphaned_symbol_embeddings();
+
         std::ostringstream ss;
         ss << "Removed " << removed << " duplicate symbols\n";
         ss << "Before: " << before << ", After: " << after;
+        if (orphans_cleaned > 0) {
+            ss << "\nCleaned " << orphans_cleaned << " orphaned embeddings";
+        }
 
         return DuckDBToolResult::ok(ss.str(), {
             {"before", before},
             {"after", after},
-            {"removed", removed}
+            {"removed", removed},
+            {"orphaned_embeddings_cleaned", orphans_cleaned}
         });
     }
 
@@ -3030,7 +3341,7 @@ private:
         // These are the memories that make Claude feel personalized
         std::vector<Recall> partnership_results;
         if (mind_->embedder_ready()) {
-            Artha artha = mind_->embedder().transform(query);
+            Artha artha = mind_->embedder().transform_query(query);
             // Get global partnership memories directly
             auto globals = mind_->store().list_global_memories(k, "");
             for (const auto& mem : globals) {
@@ -3450,6 +3761,9 @@ private:
             }
         }
 
+        // Clean orphaned embeddings after force re-index
+        size_t orphans_cleaned = mind_->store().clean_orphaned_symbol_embeddings();
+
         // Create project triplet
         mind_->connect(project, "contains", std::to_string(symbols_stored) + "_symbols");
 
@@ -3459,6 +3773,9 @@ private:
         ss << "  Symbols: " << symbols_stored << "\n";
         ss << "  Symbols embedded: " << symbols_embedded << "\n";
         ss << "  Callsites: " << callsites_stored << "\n";
+        if (orphans_cleaned > 0) {
+            ss << "  Orphaned embeddings cleaned: " << orphans_cleaned << "\n";
+        }
 
         // Summary by kind
         std::unordered_map<std::string, size_t> by_kind;
@@ -3533,7 +3850,7 @@ private:
 
     // Helper to resolve symbol by name or ID
     std::optional<Symbol> resolve_symbol(const json& params) {
-        // Try ID first (more specific)
+        // Try ID first (most specific)
         if (params.contains("id") && params["id"].is_number_integer()) {
             int64_t id = params["id"].get<int64_t>();
             return mind_->store().get_symbol_by_id(id);
@@ -3547,11 +3864,47 @@ private:
         auto symbols = mind_->store().find_symbol(name, kind);
         if (symbols.empty()) return std::nullopt;
 
-        // Return first match (exact match preferred)
+        // Collect exact name matches
+        std::vector<Symbol> exact;
         for (const auto& s : symbols) {
-            if (s.name == name) return s;
+            if (s.name == name) exact.push_back(s);
         }
-        return symbols[0];
+        if (exact.empty()) return symbols[0];
+        if (exact.size() == 1) return exact[0];
+
+        // Multiple exact matches — disambiguate
+
+        // 1. Project filter: match symbol file_path against project's indexed files
+        std::string project = params.value("project", "");
+        if (!project.empty()) {
+            std::string escaped;
+            for (char c : project) {
+                if (c == '\'') escaped += "''";
+                else escaped += c;
+            }
+            auto path_result = mind_->store().execute_sql_query(
+                "SELECT DISTINCT path FROM code_file WHERE project = '" + escaped + "'"
+            );
+            if (path_result.success && !path_result.rows.empty()) {
+                std::unordered_set<std::string> project_files;
+                for (const auto& row : path_result.rows) {
+                    if (!row.empty()) project_files.insert(row[0]);
+                }
+                for (const auto& s : exact) {
+                    if (project_files.count(s.file_path)) return s;
+                }
+            }
+        }
+
+        // 2. Prefer symbols that have call edges (actually participate in call graph)
+        for (const auto& s : exact) {
+            auto callers = mind_->store().callers(s.id);
+            auto callees = mind_->store().callees(s.id);
+            if (!callers.empty() || !callees.empty()) return s;
+        }
+
+        // 3. Fallback: first exact match
+        return exact[0];
     }
 
     DuckDBToolResult tool_symbol_callers(const json& params) {
@@ -3765,6 +4118,7 @@ private:
         std::string kind = params.value("kind", "");
         size_t limit = params.value("limit", 10);
         std::string mode = params.value("mode", "auto");  // auto, bm25, semantic
+        std::string project = params.value("project", "");
 
         bool is_code_query = looks_like_code_query(query);
         bool use_bm25 = (mode == "bm25") || (mode == "auto" && is_code_query);
@@ -3782,15 +4136,15 @@ private:
 
         // BM25 search (fast, ~50ms)
         if (use_bm25) {
-            bm25_matches = mind_->store().bm25_search_symbols(query, limit);
+            bm25_matches = mind_->store().bm25_search_symbols(query, limit, project);
             search_mode = "bm25";
         }
 
         // Semantic search (slow, ~2-5s on CPU)
         if (use_semantic && mind_->has_yantra()) {
-            auto artha = mind_->embedder().transform(query);
+            auto artha = mind_->embedder().transform_query(query);
             if (!artha.nu.is_zero()) {
-                semantic_matches = mind_->store().search_symbols_by_embedding(artha.nu.data, limit, kind);
+                semantic_matches = mind_->store().search_symbols_by_embedding(artha.nu.data, limit, kind, project);
                 search_mode = use_bm25 ? "hybrid" : "semantic";
             }
         }
@@ -3804,9 +4158,7 @@ private:
             if (seen_ids.count(sym.id) || symbols_json.size() >= limit) return;
             seen_ids.insert(sym.id);
 
-            std::string basename = sym.file_path;
-            size_t pos = basename.rfind('/');
-            if (pos != std::string::npos) basename = basename.substr(pos + 1);
+            std::string disp = display_path(sym.file_path);
 
             // Filter by kind if specified
             if (!kind.empty() && sym.kind != kind) return;
@@ -3816,7 +4168,7 @@ private:
             } else {
                 ss << "  ";
             }
-            ss << sym.kind << " " << sym.name << " @" << basename << ":" << sym.line_start
+            ss << sym.kind << " " << sym.name << " @" << disp << ":" << sym.line_start
                << " (" << source << ")\n";
 
             json sym_json = {
@@ -4006,7 +4358,7 @@ private:
             } else {
                 // Full mode with natural language: semantic search
                 if (mind_->has_yantra()) {
-                    auto artha = mind_->embedder().transform(task);
+                    auto artha = mind_->embedder().transform_query(task);
                     if (!artha.nu.is_zero()) {
                         auto semantic_results = mind_->store().search_symbols_by_embedding(
                             artha.nu.data, sym_limit, "");
@@ -4647,6 +4999,13 @@ private:
         // Get cached stats (non-blocking)
         auto cached = mind_->store().cached_health();
 
+        // Get execution provider from embedder's yantra
+        std::string exec_provider = "N/A";
+        auto embedder_yantra = mind_->embedder_yantra();
+        if (embedder_yantra) {
+            exec_provider = embedder_yantra->execution_provider_name();
+        }
+
         std::ostringstream ss;
         ss << "Health Check:\n";
         ss << "  Status: " << (is_open ? "OK" : "ERROR") << "\n";
@@ -4655,6 +5014,7 @@ private:
         ss << "  Triplets: " << cached.total_triplets << "\n";
         ss << "  Avg Confidence: " << cached.avg_confidence << "\n";
         ss << "  Yantra: " << (yantra ? "ready" : "not attached") << "\n";
+        ss << "  Execution: " << exec_provider << "\n";
 
         return DuckDBToolResult::ok(ss.str(), {
             {"status", is_open ? "ok" : "error"},
@@ -4665,7 +5025,8 @@ private:
             {"symbols", cached.total_symbols},
             {"triplets", cached.total_triplets},
             {"avg_confidence", cached.avg_confidence},
-            {"yantra_ready", yantra}
+            {"yantra_ready", yantra},
+            {"execution_provider", exec_provider}
         });
     }
 
@@ -6565,8 +6926,8 @@ private:
                 }
             } else {
                 // Full semantic search with embeddings
-                // Generate query embedding once
-                Artha query_artha = mind_->embedder().transform(query);
+                // Generate query embedding once (query mode for BGE)
+                Artha query_artha = mind_->embedder().transform_query(query);
                 const std::vector<float>& query_embedding = query_artha.nu.data;
 
                 for (const auto& c : candidates) {
@@ -7057,7 +7418,16 @@ private:
 
     // Helpers
     json tool_list() {
-        return {{"tools", tools_}};
+        json filtered = json::array();
+        for (const auto& tool : tools_) {
+            auto name = tool["name"].get<std::string>();
+            auto it = tool_visibility_.find(name);
+            std::string vis = (it != tool_visibility_.end()) ? it->second : "default";
+            if (vis != "internal") {
+                filtered.push_back(tool);
+            }
+        }
+        return {{"tools", filtered}};
     }
 
     json make_response(const json& id, const json& result) {
@@ -7983,6 +8353,290 @@ private:
             {"converted", true},
             {"content", ssl_content},
             {"domain", domain}
+        });
+    }
+
+    // ========================================================================
+    // Narrative and Anticipation Tools
+    // ========================================================================
+
+    DuckDBToolResult tool_narrative_status(const json& params) {
+        std::string session_id = params.value("session_id", "");
+        if (session_id.empty()) {
+            // Try to get current session from environment or use default
+            const char* env_session = std::getenv("CLAUDE_SESSION_ID");
+            session_id = env_session ? env_session : "default";
+        }
+
+        auto& store = mind_->store();
+
+        // Get current segment
+        auto segment = store.segment_current(session_id);
+        if (!segment) {
+            return DuckDBToolResult::ok("No active session segment", {
+                {"session_id", session_id},
+                {"mode", "unknown"},
+                {"confidence", 0.0f},
+                {"segment_id", 0}
+            });
+        }
+
+        std::ostringstream ss;
+        ss << "Mode: " << work_mode_to_string(segment->mode)
+           << " (" << std::fixed << std::setprecision(2) << segment->confidence << ")\n";
+        ss << "Segment: " << segment->event_count << " events";
+
+        // Parse files_active JSON array
+        if (!segment->files_active.empty() && segment->files_active != "[]") {
+            size_t count = std::count(segment->files_active.begin(), segment->files_active.end(), '"') / 2;
+            ss << ", " << count << " files active";
+        }
+
+        // Parse tools_used JSON array
+        if (!segment->tools_used.empty() && segment->tools_used != "[]") {
+            size_t count = std::count(segment->tools_used.begin(), segment->tools_used.end(), '"') / 2;
+            ss << ", " << count << " tools used";
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"session_id", session_id},
+            {"mode", work_mode_to_string(segment->mode)},
+            {"confidence", segment->confidence},
+            {"segment_id", segment->id},
+            {"event_count", segment->event_count},
+            {"started_at", segment->started_at},
+            {"tools_used", segment->tools_used},
+            {"files_active", segment->files_active}
+        });
+    }
+
+    DuckDBToolResult tool_narrative_log(const json& params) {
+        std::string session_id = params.value("session_id", "");
+        std::string kind_str = params.value("kind", "");
+        std::string summary = params.value("summary", "");
+
+        if (session_id.empty() || kind_str.empty() || summary.empty()) {
+            return DuckDBToolResult::error("session_id, kind, and summary are required");
+        }
+
+        SessionEvent event;
+        event.session_id = session_id;
+        event.kind = string_to_session_event_kind(kind_str);
+        event.summary = summary;
+        event.tool_name = params.value("tool_name", "");
+        event.success = params.value("success", true);
+        event.payload = params.value("payload", "");
+        event.files_mentioned = params.value("files_mentioned", "[]");
+        event.realm = params.value("realm", "brahman");
+
+        // Use NarrativeEngine to record event (handles mode inference and segments)
+        auto* narrative = mind_->narrative();
+        if (!narrative) {
+            return DuckDBToolResult::error("Narrative engine not initialized");
+        }
+
+        // Append event to log first
+        auto& store = mind_->store();
+        int64_t event_id = store.event_log_append(event);
+        if (event_id <= 0) {
+            return DuckDBToolResult::error("Failed to append event: " + store.last_error());
+        }
+
+        // Then evaluate mode (updates segments)
+        WorkMode mode = narrative->evaluate(session_id, event);
+
+        return DuckDBToolResult::ok("Event logged, mode: " + work_mode_to_string(mode), {
+            {"session_id", session_id},
+            {"kind", kind_str},
+            {"mode", work_mode_to_string(mode)}
+        });
+    }
+
+    DuckDBToolResult tool_narrative_history(const json& params) {
+        std::string session_id = params.value("session_id", "");
+        if (session_id.empty()) {
+            return DuckDBToolResult::error("session_id is required");
+        }
+
+        size_t limit = params.value("limit", 20);
+        auto& store = mind_->store();
+        auto segments = store.segment_history(session_id, limit);
+
+        std::ostringstream ss;
+        ss << segments.size() << " segments for session " << session_id << ":\n\n";
+
+        json segment_list = json::array();
+        for (const auto& seg : segments) {
+            ss << "- " << work_mode_to_string(seg.mode) << " ("
+               << std::fixed << std::setprecision(2) << seg.confidence << "): "
+               << seg.event_count << " events";
+            if (seg.status == "open") ss << " [active]";
+            ss << "\n";
+
+            segment_list.push_back({
+                {"id", seg.id},
+                {"mode", work_mode_to_string(seg.mode)},
+                {"confidence", seg.confidence},
+                {"event_count", seg.event_count},
+                {"started_at", seg.started_at},
+                {"ended_at", seg.ended_at},
+                {"status", seg.status}
+            });
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"session_id", session_id},
+            {"count", segments.size()},
+            {"segments", segment_list}
+        });
+    }
+
+    DuckDBToolResult tool_anticipation_filter(const json& params) {
+        std::string session_id = params.value("session_id", "");
+        if (session_id.empty()) {
+            return DuckDBToolResult::error("session_id is required");
+        }
+
+        size_t max = params.value("max", 2);
+        auto& store = mind_->store();
+
+        // First, generate new candidates using the Anticipator
+        auto* anticipator = mind_->anticipator();
+        if (anticipator) {
+            anticipator->generate(session_id);
+        }
+
+        // Get pending candidates
+        auto candidates = store.candidate_pending(session_id, 10);
+
+        std::vector<AnticipationCandidate> surfaceable;
+        for (const auto& c : candidates) {
+            if (surfaceable.size() >= max) break;
+            if (store.gate_allows(session_id, c.confidence)) {
+                // Mark as surfaced before returning
+                store.candidate_surface(c.id);
+                surfaceable.push_back(c);
+            }
+        }
+
+        if (surfaceable.empty()) {
+            return DuckDBToolResult::ok("No predictions pass the annoyance gate", {
+                {"session_id", session_id},
+                {"count", 0},
+                {"candidates", json::array()}
+            });
+        }
+
+        std::ostringstream ss;
+        ss << surfaceable.size() << " prediction(s) ready to surface:\n\n";
+
+        json cand_list = json::array();
+        for (const auto& c : surfaceable) {
+            ss << "- [" << anticipation_source_to_string(c.source) << "] "
+               << c.prediction << " (conf: "
+               << std::fixed << std::setprecision(2) << c.confidence << ")\n";
+
+            cand_list.push_back({
+                {"id", c.id},
+                {"prediction", c.prediction},
+                {"source", anticipation_source_to_string(c.source)},
+                {"confidence", c.confidence},
+                {"current_mode", c.current_mode},
+                {"evidence", c.evidence}
+            });
+        }
+
+        ss << "\nUse anticipation_record_outcome to record feedback.";
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"session_id", session_id},
+            {"count", surfaceable.size()},
+            {"candidates", cand_list}
+        });
+    }
+
+    DuckDBToolResult tool_anticipation_gate_status(const json& params) {
+        std::string session_id = params.value("session_id", "");
+        if (session_id.empty()) {
+            return DuckDBToolResult::error("session_id is required");
+        }
+
+        auto& store = mind_->store();
+        auto gate = store.gate_get(session_id);
+
+        if (!gate) {
+            // Initialize gate if not exists
+            store.gate_init(session_id);
+            gate = store.gate_get(session_id);
+        }
+
+        if (!gate) {
+            return DuckDBToolResult::error("Failed to get or create gate state");
+        }
+
+        std::ostringstream ss;
+        ss << "Annoyance Gate for session " << session_id << ":\n\n";
+        ss << "Budget remaining: " << gate->budget_remaining << "/5\n";
+        ss << "Confidence floor: " << std::fixed << std::setprecision(2) << gate->confidence_floor << "\n";
+        ss << "Cooldown: " << gate->cooldown_ms / 1000 << "s\n";
+        ss << "Predictions surfaced: " << gate->predictions_surfaced << "\n";
+        ss << "Correct: " << gate->predictions_correct << " / Incorrect: " << gate->predictions_incorrect << "\n";
+
+        float accuracy = gate->predictions_surfaced > 0 ?
+            static_cast<float>(gate->predictions_correct) / gate->predictions_surfaced : 0.0f;
+        ss << "Accuracy: " << std::fixed << std::setprecision(1) << (accuracy * 100) << "%";
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"session_id", session_id},
+            {"budget_remaining", gate->budget_remaining},
+            {"confidence_floor", gate->confidence_floor},
+            {"cooldown_ms", gate->cooldown_ms},
+            {"predictions_surfaced", gate->predictions_surfaced},
+            {"predictions_correct", gate->predictions_correct},
+            {"predictions_incorrect", gate->predictions_incorrect},
+            {"last_surfaced_at", gate->last_surfaced_at}
+        });
+    }
+
+    DuckDBToolResult tool_anticipation_record_outcome(const json& params) {
+        auto [candidate_id, _] = parse_id(params, "candidate_id");
+        if (candidate_id <= 0) {
+            return DuckDBToolResult::error("candidate_id is required");
+        }
+
+        bool correct = params.value("correct", false);
+        auto& store = mind_->store();
+
+        // Get candidate to find session
+        auto candidate = store.candidate_get(candidate_id);
+        if (!candidate) {
+            return DuckDBToolResult::error("Candidate not found: " + std::to_string(candidate_id));
+        }
+
+        std::string outcome = correct ? "correct" : "incorrect";
+        if (!store.candidate_resolve(candidate_id, outcome)) {
+            return DuckDBToolResult::error("Failed to resolve candidate");
+        }
+
+        if (!store.gate_record_outcome(candidate->session_id, correct)) {
+            return DuckDBToolResult::error("Failed to update gate state");
+        }
+
+        // Feed calibration system
+        std::string domain = "anticipation";
+        if (candidate) {
+            domain = "anticipation:" + candidate->current_mode;
+        }
+        mind_->store().calibration_record(domain, correct);
+
+        std::ostringstream ss;
+        ss << "Recorded outcome: " << outcome << " for prediction \"" << candidate->prediction << "\"";
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"candidate_id", candidate_id},
+            {"outcome", outcome},
+            {"prediction", candidate->prediction},
+            {"session_id", candidate->session_id}
         });
     }
 };

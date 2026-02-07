@@ -115,50 +115,192 @@ if echo "$QUERY" | grep -qiE "(it works|finally|success|done|shipped|released|co
 fi
 
 # ===========================================
-# ANTICIPATION: Predict likely next actions
+# NARRATIVE: Get current work mode and log user message
+# ===========================================
+NARRATIVE_STATUS=""
+SOCKET_PATH="${CHITTA_SOCKET:-/tmp/chitta-${MIND_HASH}.sock}"
+SESSION_ID="${CLAUDE_SESSION_ID:-default}"
+
+# Log user_message event via queue (fire-and-forget)
+if [[ -S "$SOCKET_PATH" ]]; then
+    # First, ensure gate is initialized for this session
+    request='{"jsonrpc":"2.0","id":1,"method":"gate_init","params":{"session_id":"'"$SESSION_ID"'"}}'
+    timeout 0.5 echo "$request" | nc -U -N "$SOCKET_PATH" >/dev/null 2>&1 || true
+
+    # Log the user message event
+    summary=$(echo "$QUERY" | head -c 200 | tr '\n' ' ' | sed 's/"/\\"/g')
+    request='{"jsonrpc":"2.0","id":2,"method":"narrative_log","params":{"session_id":"'"$SESSION_ID"'","kind":"user_message","summary":"'"$summary"'"}}'
+    timeout 0.5 echo "$request" | nc -U -N "$SOCKET_PATH" >/dev/null 2>&1 || true
+
+    # Get narrative status
+    request='{"jsonrpc":"2.0","id":3,"method":"narrative_status","params":{"session_id":"'"$SESSION_ID"'"}}'
+    response=$(timeout 1 echo "$request" | nc -U -N "$SOCKET_PATH" 2>/dev/null || true)
+
+    if [[ -n "$response" ]]; then
+        mode=$(echo "$response" | jq -r '.result.metadata.mode // "unknown"' 2>/dev/null)
+        confidence=$(echo "$response" | jq -r '.result.metadata.confidence // 0' 2>/dev/null)
+        if [[ "$mode" != "unknown" && "$mode" != "null" ]]; then
+            # Format as percentage
+            conf_pct=$(awk "BEGIN {printf \"%.0f\", $confidence * 100}")
+            NARRATIVE_STATUS="[narrative:$mode:$conf_pct%]"
+        fi
+    fi
+fi
+
+# ===========================================
+# ANTICIPATION: Predict likely next actions (using new anticipation_filter)
 # ===========================================
 ANTICIPATIONS=""
-SOCKET_PATH="${CHITTA_SOCKET:-/tmp/chitta-${MIND_HASH}.sock}"
 PREDICTIONS_FILE="$MIND_PATH/.last_predictions.json"
 
 # Clear old predictions
 rm -f "$PREDICTIONS_FILE" 2>/dev/null
 
-# Call daemon via socket to get predictions with IDs
+# Call anticipation_filter via socket to get gated predictions
 if [[ -S "$SOCKET_PATH" ]]; then
-    # Build JSON-RPC request
-    request='{"jsonrpc":"2.0","id":1,"method":"anticipation_predict","params":{"context":"'"$(echo "$QUERY" | sed 's/"/\\"/g' | tr '\n' ' ')"'","limit":3}}'
-
-    # Call daemon (timeout 1s)
+    request='{"jsonrpc":"2.0","id":4,"method":"anticipation_filter","params":{"session_id":"'"$SESSION_ID"'","max":3}}'
     response=$(timeout 1 echo "$request" | nc -U -N "$SOCKET_PATH" 2>/dev/null || true)
 
     if [[ -n "$response" ]]; then
-        # Extract patterns array from JSON response
-        patterns=$(echo "$response" | jq -r '.result.metadata.patterns // []' 2>/dev/null)
+        candidates=$(echo "$response" | jq -r '.result.metadata.candidates // []' 2>/dev/null)
 
-        if [[ "$patterns" != "[]" && -n "$patterns" ]]; then
-            # Save full predictions to temp file for stop-hook
-            echo "$patterns" > "$PREDICTIONS_FILE"
+        if [[ "$candidates" != "[]" && -n "$candidates" ]]; then
+            # Save predictions to temp file for stop-hook
+            echo "$candidates" > "$PREDICTIONS_FILE"
 
-            # Extract action names for display (confidence > 40% based on frequency)
-            actions=""
-            while read -r pattern; do
-                [[ -z "$pattern" ]] && continue
+            # Extract predictions
+            while read -r candidate; do
+                [[ -z "$candidate" ]] && continue
 
-                freq=$(echo "$pattern" | jq -r '.frequency // 0' 2>/dev/null)
-                success=$(echo "$pattern" | jq -r '.success_count // 0' 2>/dev/null)
-                action=$(echo "$pattern" | jq -r '.action // ""' 2>/dev/null)
+                id=$(echo "$candidate" | jq -r '.id // 0' 2>/dev/null)
+                prediction=$(echo "$candidate" | jq -r '.prediction // ""' 2>/dev/null)
+                source=$(echo "$candidate" | jq -r '.source // "rule"' 2>/dev/null)
+                confidence=$(echo "$candidate" | jq -r '.confidence // 0' 2>/dev/null)
 
-                # Simple confidence heuristic: success rate or frequency > 2
-                if [[ "$freq" -gt 2 || "$success" -gt 0 ]] && [[ -n "$action" ]]; then
-                    actions="${actions:+$actions, }$action"
+                if [[ -n "$prediction" && "$prediction" != "null" ]]; then
+                    conf_pct=$(awk "BEGIN {printf \"%.0f\", $confidence * 100}")
+                    ANTICIPATIONS="${ANTICIPATIONS}[anticipate:$source:$conf_pct%] ${prediction}
+"
                 fi
-            done <<< "$(echo "$patterns" | jq -c '.[]' 2>/dev/null)"
+            done <<< "$(echo "$candidates" | jq -c '.[]' 2>/dev/null)"
+        fi
+    fi
 
-            if [[ -n "$actions" ]]; then
-                ANTICIPATIONS="[anticipate] Predicted: $actions"
+    # Fall back to old anticipation_predict if no candidates from filter
+    if [[ -z "$ANTICIPATIONS" ]]; then
+        request='{"jsonrpc":"2.0","id":5,"method":"anticipation_predict","params":{"context":"'"$(echo "$QUERY" | sed 's/"/\\"/g' | tr '\n' ' ')"'","limit":3}}'
+        response=$(timeout 1 echo "$request" | nc -U -N "$SOCKET_PATH" 2>/dev/null || true)
+
+        if [[ -n "$response" ]]; then
+            patterns=$(echo "$response" | jq -r '.result.metadata.patterns // []' 2>/dev/null)
+
+            if [[ "$patterns" != "[]" && -n "$patterns" ]]; then
+                while read -r pattern; do
+                    [[ -z "$pattern" ]] && continue
+
+                    freq=$(echo "$pattern" | jq -r '.frequency // 0' 2>/dev/null)
+                    success=$(echo "$pattern" | jq -r '.success_count // 0' 2>/dev/null)
+                    action=$(echo "$pattern" | jq -r '.action // ""' 2>/dev/null)
+
+                    if [[ "$freq" -gt 2 || "$success" -gt 0 ]] && [[ -n "$action" ]]; then
+                        ANTICIPATIONS="${ANTICIPATIONS}[anticipate] ${action}
+"
+                    fi
+                done <<< "$(echo "$patterns" | jq -c '.[]' 2>/dev/null)"
             fi
         fi
+    fi
+fi
+
+# ===========================================
+# HABITS: Surface strong habits matching context
+# ===========================================
+HABITS_OUTPUT=""
+if [[ -S "$SOCKET_PATH" ]]; then
+    # Build context from query for habit matching
+    context=$(echo "$QUERY" | head -c 100 | tr '\n' ' ' | sed 's/"/\\"/g')
+    request='{"jsonrpc":"2.0","id":6,"method":"habit_match","params":{"context":"'"$context"'","min_strength":0.7}}'
+    response=$(timeout 1 echo "$request" | nc -U -N "$SOCKET_PATH" 2>/dev/null || true)
+
+    if [[ -n "$response" ]]; then
+        habits_array=$(echo "$response" | jq -c '.result.metadata.habits // []' 2>/dev/null)
+        if [[ "$habits_array" != "[]" && -n "$habits_array" ]]; then
+            while read -r habit; do
+                [[ -z "$habit" ]] && continue
+                response_text=$(echo "$habit" | jq -r '.response // ""' 2>/dev/null)
+                strength=$(echo "$habit" | jq -r '.strength // 0' 2>/dev/null)
+                if [[ -n "$response_text" && "$response_text" != "null" ]]; then
+                    strength_pct=$(awk "BEGIN {printf \"%.0f\", $strength * 100}")
+                    HABITS_OUTPUT="${HABITS_OUTPUT}[habit:${strength_pct}%] ${response_text}
+"
+                fi
+            done <<< "$(echo "$habits_array" | jq -c '.[]' 2>/dev/null)"
+        fi
+    fi
+fi
+
+# ===========================================
+# GOALS: Surface active goals for context
+# ===========================================
+GOALS_OUTPUT=""
+if [[ -S "$SOCKET_PATH" ]]; then
+    request='{"jsonrpc":"2.0","id":7,"method":"goal_list","params":{"status":"active","limit":3}}'
+    response=$(timeout 1 echo "$request" | nc -U -N "$SOCKET_PATH" 2>/dev/null || true)
+    if [[ -n "$response" ]]; then
+        goals_array=$(echo "$response" | jq -c '.result.metadata.goals // []' 2>/dev/null)
+        if [[ "$goals_array" != "[]" && -n "$goals_array" ]]; then
+            while read -r goal; do
+                [[ -z "$goal" ]] && continue
+                id=$(echo "$goal" | jq -r '.id // ""' 2>/dev/null)
+                title=$(echo "$goal" | jq -r '.title // ""' 2>/dev/null)
+                progress=$(echo "$goal" | jq -r '.progress // 0' 2>/dev/null)
+                if [[ -n "$title" && "$title" != "null" ]]; then
+                    progress_pct=$(awk "BEGIN {printf \"%.0f\", $progress * 100}")
+                    GOALS_OUTPUT="${GOALS_OUTPUT}[goal:${id}] ${title} (${progress_pct}%)
+"
+                fi
+            done <<< "$(echo "$goals_array" | jq -c '.[]' 2>/dev/null)"
+        fi
+    fi
+fi
+
+# ===========================================
+# CURIOSITY: Surface unresolved knowledge gaps (once per session)
+# ===========================================
+CURIOSITY_OUTPUT=""
+if [[ ! -f "$MIND_PATH/.gaps_surfaced" && -S "$SOCKET_PATH" ]]; then
+    touch "$MIND_PATH/.gaps_surfaced"
+    request='{"jsonrpc":"2.0","id":8,"method":"curiosity_gaps","params":{"limit":1}}'
+    response=$(timeout 1 echo "$request" | nc -U -N "$SOCKET_PATH" 2>/dev/null || true)
+    if [[ -n "$response" ]]; then
+        gaps_array=$(echo "$response" | jq -c '.result.metadata.gaps // []' 2>/dev/null)
+        if [[ "$gaps_array" != "[]" && -n "$gaps_array" ]]; then
+            while read -r gap; do
+                [[ -z "$gap" ]] && continue
+                content=$(echo "$gap" | jq -r '.content // ""' 2>/dev/null)
+                if [[ -n "$content" && "$content" != "null" ]]; then
+                    # Extract just the gap text, strip [gap] prefix if present
+                    gap_text=$(echo "$content" | sed 's/^\[gap\] //' | head -c 150 | tr '\n' ' ')
+                    CURIOSITY_OUTPUT="[curiosity] Unresolved: ${gap_text}"
+                    break  # Only show one gap per session
+                fi
+            done <<< "$(echo "$gaps_array" | jq -c '.[]' 2>/dev/null)"
+        fi
+    fi
+fi
+
+# ===========================================
+# SESSION CONTINUITY: Surface last session for context
+# ===========================================
+if [[ ! -f "$MIND_PATH/.session_active" ]]; then
+    touch "$MIND_PATH/.session_active"
+    # Surface last session summary for continuity
+    recent_session=$(timeout 1 "$CHITTA_BIN" recall --query "session_summary" --limit 1 2>/dev/null || true)
+    if [[ -n "$recent_session" && "$recent_session" != *"No memories"* ]]; then
+        # Extract just the first relevant line
+        session_line=$(echo "$recent_session" | grep -v '^$' | head -1 | head -c 150)
+        [[ -n "$session_line" ]] && ANTICIPATIONS="${ANTICIPATIONS}[last-session] ${session_line}
+"
     fi
 fi
 
@@ -168,6 +310,26 @@ fi
 # Learning hints at top - these are action items for Claude
 if [[ -n "$LEARNING_HINTS" ]]; then
     echo "$LEARNING_HINTS"
+fi
+
+# Narrative status (work mode context)
+if [[ -n "$NARRATIVE_STATUS" ]]; then
+    echo "$NARRATIVE_STATUS"
+fi
+
+# Goals (active objectives)
+if [[ -n "$GOALS_OUTPUT" ]]; then
+    echo -n "$GOALS_OUTPUT"
+fi
+
+# Curiosity gaps (unresolved knowledge)
+if [[ -n "$CURIOSITY_OUTPUT" ]]; then
+    echo "$CURIOSITY_OUTPUT"
+fi
+
+# Habits (strong patterns)
+if [[ -n "$HABITS_OUTPUT" ]]; then
+    echo -n "$HABITS_OUTPUT"
 fi
 
 # Then memories

@@ -159,6 +159,18 @@ if(NOT tree-sitter-c-sharp_POPULATED)
     FetchContent_Populate(tree-sitter-c-sharp)
 endif()
 
+# Tree-sitter Swift grammar (alex-pinkus maintained fork)
+FetchContent_Declare(
+    tree-sitter-swift
+    GIT_REPOSITORY https://github.com/alex-pinkus/tree-sitter-swift.git
+    GIT_TAG 0.7.1-with-generated-files
+    GIT_SHALLOW TRUE
+)
+FetchContent_GetProperties(tree-sitter-swift)
+if(NOT tree-sitter-swift_POPULATED)
+    FetchContent_Populate(tree-sitter-swift)
+endif()
+
 # Build tree-sitter parsers as static library
 add_library(tree-sitter-parsers STATIC
     ${tree-sitter-cpp_SOURCE_DIR}/src/parser.c
@@ -177,6 +189,8 @@ add_library(tree-sitter-parsers STATIC
     ${tree-sitter-ruby_SOURCE_DIR}/src/scanner.c
     ${tree-sitter-c-sharp_SOURCE_DIR}/src/parser.c
     ${tree-sitter-c-sharp_SOURCE_DIR}/src/scanner.c
+    ${tree-sitter-swift_SOURCE_DIR}/src/parser.c
+    ${tree-sitter-swift_SOURCE_DIR}/src/scanner.c
 )
 target_include_directories(tree-sitter-parsers PUBLIC
     ${tree-sitter_SOURCE_DIR}/lib/include
@@ -189,6 +203,7 @@ target_include_directories(tree-sitter-parsers PUBLIC
     ${tree-sitter-java_SOURCE_DIR}/src
     ${tree-sitter-ruby_SOURCE_DIR}/src
     ${tree-sitter-c-sharp_SOURCE_DIR}/src
+    ${tree-sitter-swift_SOURCE_DIR}/src
 )
 target_link_libraries(tree-sitter-parsers PUBLIC tree-sitter)
 
@@ -259,12 +274,26 @@ endif()
 
 # ONNX Runtime (optional)
 if(CHITTA_WITH_ONNX)
-    # Allow user-specified paths via -D flags, fallback to conda/system
+    # Allow user-specified paths via -D flags
+    # Priority: user flags > official release (~/.claude/deps) > homebrew > conda
     if(NOT ONNXRUNTIME_INCLUDE_DIR)
-        if(DEFINED ENV{CONDA_PREFIX})
+        # Check for official release with CoreML support
+        if(EXISTS "$ENV{HOME}/.claude/deps/onnxruntime/include/onnxruntime_cxx_api.h")
+            set(ONNXRUNTIME_INCLUDE_DIR "$ENV{HOME}/.claude/deps/onnxruntime/include")
+            set(ONNXRUNTIME_LIB_DIR "$ENV{HOME}/.claude/deps/onnxruntime/lib")
+            message(STATUS "ONNX Runtime: using official release (CoreML available)")
+        elseif(APPLE AND EXISTS "/opt/homebrew/opt/onnxruntime/include/onnxruntime/core/session/onnxruntime_cxx_api.h")
+            # Homebrew on Apple Silicon — use session subdir for flat include compatibility
+            set(ONNXRUNTIME_INCLUDE_DIR "/opt/homebrew/opt/onnxruntime/include/onnxruntime/core/session")
+            set(ONNXRUNTIME_LIB_DIR "/opt/homebrew/opt/onnxruntime/lib")
+            message(STATUS "ONNX Runtime: using homebrew (no CoreML)")
+        elseif(DEFINED ENV{CONDA_PREFIX})
             set(ONNXRUNTIME_INCLUDE_DIR "$ENV{CONDA_PREFIX}/include")
+            set(ONNXRUNTIME_LIB_DIR "$ENV{CONDA_PREFIX}/lib")
+            message(STATUS "ONNX Runtime: using conda")
         else()
             set(ONNXRUNTIME_INCLUDE_DIR "" CACHE PATH "ONNX Runtime include directory")
+            set(ONNXRUNTIME_LIB_DIR "" CACHE PATH "ONNX Runtime library directory")
         endif()
     endif()
     if(NOT ONNXRUNTIME_LIB_DIR)
@@ -287,6 +316,12 @@ if(CHITTA_WITH_ONNX)
         IMPORTED_LOCATION "${ONNXRUNTIME_LIB}"
         INTERFACE_INCLUDE_DIRECTORIES "${ONNXRUNTIME_INCLUDE_DIR}"
     )
+
+    # Link Apple frameworks for CoreML EP
+    if(APPLE AND EXISTS "${ONNXRUNTIME_INCLUDE_DIR}/coreml_provider_factory.h")
+        target_compile_definitions(chitta INTERFACE CHITTA_WITH_COREML=1)
+        message(STATUS "  CoreML EP: available")
+    endif()
 
     # Add to chitta
     target_link_libraries(chitta INTERFACE onnxruntime)

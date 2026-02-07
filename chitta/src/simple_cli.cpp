@@ -39,6 +39,8 @@ using namespace chitta;
 using json = nlohmann::json;
 
 // Global flags
+// Verify lock-free for async-signal-safety in daemon_signal_handler
+static_assert(std::atomic<bool>::is_always_lock_free, "atomic<bool> must be lock-free for signal handler");
 static std::atomic<bool> daemon_running{true};
 static std::atomic<bool> verbose_mode{false};
 
@@ -78,20 +80,38 @@ bool daemonize(const std::string& log_path) {
     if (pid < 0) return false;
     if (pid > 0) _exit(0);
 
-    umask(0);
+    umask(077);
     chdir("/");
 
     int null_fd = open("/dev/null", O_RDONLY);
     if (null_fd >= 0) {
-        dup2(null_fd, STDIN_FILENO);
+        if (dup2(null_fd, STDIN_FILENO) < 0) {
+            // Log to file since stderr may not be available
+            int err_fd = open("/tmp/chittad-daemonize.err", O_WRONLY | O_CREAT | O_APPEND, 0600);
+            if (err_fd >= 0) {
+                const char msg[] = "dup2(STDIN) failed\n";
+                [[maybe_unused]] auto _ = write(err_fd, msg, sizeof(msg) - 1);
+                close(err_fd);
+            }
+            close(null_fd);
+            return false;
+        }
         close(null_fd);
     }
 
     const char* out_path = log_path.empty() ? "/dev/null" : log_path.c_str();
     int log_fd = open(out_path, O_WRONLY | O_CREAT | O_APPEND, 0644);
     if (log_fd >= 0) {
-        dup2(log_fd, STDOUT_FILENO);
-        dup2(log_fd, STDERR_FILENO);
+        if (dup2(log_fd, STDOUT_FILENO) < 0 || dup2(log_fd, STDERR_FILENO) < 0) {
+            int err_fd = open("/tmp/chittad-daemonize.err", O_WRONLY | O_CREAT | O_APPEND, 0600);
+            if (err_fd >= 0) {
+                const char msg[] = "dup2(STDOUT/STDERR) failed\n";
+                [[maybe_unused]] auto _ = write(err_fd, msg, sizeof(msg) - 1);
+                close(err_fd);
+            }
+            close(log_fd);
+            return false;
+        }
         close(log_fd);
     }
 
@@ -122,8 +142,12 @@ bool acquire_lock(const std::string& mind_path, DaemonLock& lock) {
     }
 
     std::string pid = std::to_string(getpid()) + "\n";
-    ftruncate(lock.fd, 0);
-    write(lock.fd, pid.data(), pid.size());
+    if (ftruncate(lock.fd, 0) < 0) {
+        std::cerr << "[daemon] Warning: ftruncate lock file failed: " << strerror(errno) << "\n";
+    }
+    if (write(lock.fd, pid.data(), pid.size()) < 0) {
+        std::cerr << "[daemon] Warning: write PID to lock file failed: " << strerror(errno) << "\n";
+    }
     return true;
 }
 
@@ -360,8 +384,17 @@ bool run_distillation(DuckDBMind& mind, const TranscriptState& state,
         if (pid == 0) {
             // Child process - detach and run script
             setsid();
-            std::string cmd = config.script_path + " " + temp_path + " >/dev/null 2>&1; rm -f " + temp_path;
-            execl("/bin/sh", "sh", "-c", cmd.c_str(), nullptr);
+            // Use execv with explicit argv to avoid shell command injection
+            int devnull = open("/dev/null", O_RDWR);
+            if (devnull >= 0) {
+                dup2(devnull, STDOUT_FILENO);
+                dup2(devnull, STDERR_FILENO);
+                close(devnull);
+            }
+            const char* argv[] = {config.script_path.c_str(), temp_path.c_str(), nullptr};
+            execv(config.script_path.c_str(), const_cast<char* const*>(argv));
+            // execv failed - clean up temp file and exit
+            std::remove(temp_path.c_str());
             _exit(1);
         } else if (pid < 0) {
             // Fork failed, cleanup
@@ -401,6 +434,9 @@ std::string generate_stats(DuckDBMind& mind) {
 int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                const std::string& mind_path, const std::string& pid_file,
                const DistillConfig& distill_config, EnrichConfig& enrich_config) {
+    // Automatically reap child processes to prevent zombie accumulation
+    signal(SIGCHLD, SIG_IGN);
+
     // Clean up stale files from crashed daemon
     if (!cleanup_stale_daemon(mind_path)) {
         std::cerr << "[daemon] Another daemon is running (PID alive)\n";
@@ -414,9 +450,23 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
     }
 
     // Check if opencode is available for distillation
+    // Note: After daemonize(), std::system("command -v ...") may fail because
+    // the forked shell doesn't source profile files. Search PATH directly instead.
+    auto find_in_path = [](const char* name) -> bool {
+        const char* path_env = getenv("PATH");
+        if (!path_env) return false;
+        std::string path_str(path_env);
+        std::istringstream iss(path_str);
+        std::string dir;
+        while (std::getline(iss, dir, ':')) {
+            std::string full = dir + "/" + name;
+            if (access(full.c_str(), X_OK) == 0) return true;
+        }
+        return false;
+    };
     if (distill_config.enabled) {
-        int result = std::system("command -v opencode >/dev/null 2>&1");
-        if (result != 0) {
+        bool found = find_in_path("opencode");
+        if (!found) {
             std::cerr << "[daemon] ERROR: opencode not found in PATH\n";
             std::cerr << "[daemon] Distillation requires opencode. Install it or use --no-distill\n";
             release_lock(lock);
@@ -431,8 +481,8 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
     if (enrich_config.enabled) {
         // opencode already checked above if distillation enabled; check here if only enrichment
         if (!distill_config.enabled) {
-            int result = std::system("command -v opencode >/dev/null 2>&1");
-            if (result != 0) {
+            bool found = find_in_path("opencode");
+            if (!found) {
                 std::cerr << "[daemon] WARNING: opencode not found, disabling code enrichment\n";
                 enrich_config.enabled = false;
             }
@@ -894,6 +944,49 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                             mind.store().anticipation_success(id);
                             queue_count++;
                         }
+                    } else if (tool == "narrative_log") {
+                        std::string session_id = args.value("session_id", "");
+                        std::string kind_str = args.value("kind", "user_message");
+                        std::string summary = args.value("summary", "");
+                        std::string tool_name = args.value("tool_name", "");
+                        bool success = args.value("success", true);
+                        if (!session_id.empty() && !summary.empty()) {
+                            SessionEvent event;
+                            event.session_id = session_id;
+                            event.kind = string_to_session_event_kind(kind_str);
+                            event.summary = summary;
+                            event.tool_name = tool_name;
+                            event.success = success;
+                            mind.store().event_log_append(event);
+                            if (mind.narrative()) {
+                                mind.narrative()->evaluate(session_id, event);
+                            }
+                            queue_count++;
+                        }
+                    } else if (tool == "calibration_record") {
+                        std::string domain = args.value("domain", "");
+                        bool success = args.value("success", true);
+                        if (!domain.empty()) {
+                            mind.store().calibration_record(domain, success);
+                            queue_count++;
+                        }
+                    } else if (tool == "curiosity_note_gap") {
+                        std::string gap = args.value("gap", "");
+                        if (!gap.empty()) {
+                            // Create memory with "gap" and "unresolved" tags
+                            std::string content = "[curiosity] " + gap;
+                            mind.remember(content, NodeType::Episode, "brahman",
+                                          RealmVisibility::Private, 0.7f);
+                            queue_count++;
+                        }
+                    } else if (tool == "habit_observe") {
+                        std::string trigger = args.value("trigger", "");
+                        std::string response = args.value("response", "");
+                        std::string realm = args.value("realm", "brahman");
+                        if (!trigger.empty() && !response.empty()) {
+                            mind.store().habit_observe(trigger, response, realm);
+                            queue_count++;
+                        }
                     }
                 } catch (const std::exception& e) {
                     if (verbose_mode) {
@@ -1126,19 +1219,33 @@ int main(int argc, char* argv[]) {
     EnrichConfig enrich_config;
     enrich_config.script_path = default_enrich_script();
 
+    auto safe_stoi = [&](const char* arg, const char* option_name) -> int {
+        try {
+            return std::stoi(arg);
+        } catch (const std::invalid_argument&) {
+            std::cerr << "Error: invalid integer for " << option_name << ": " << arg << "\n";
+            print_usage(argv[0]);
+            std::exit(1);
+        } catch (const std::out_of_range&) {
+            std::cerr << "Error: integer out of range for " << option_name << ": " << arg << "\n";
+            print_usage(argv[0]);
+            std::exit(1);
+        }
+    };
+
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--path") == 0 && i + 1 < argc) {
             mind_path = argv[++i];
         } else if (strcmp(argv[i], "--interval") == 0 && i + 1 < argc) {
-            interval = std::stoi(argv[++i]);
+            interval = safe_stoi(argv[++i], "--interval");
         } else if (strcmp(argv[i], "-f") == 0 || strcmp(argv[i], "--foreground") == 0) {
             foreground = true;
         } else if (strcmp(argv[i], "--verbose") == 0) {
             verbose_mode = true;
         } else if (strcmp(argv[i], "--distill-interval") == 0 && i + 1 < argc) {
-            distill_config.interval_minutes = std::stoi(argv[++i]);
+            distill_config.interval_minutes = safe_stoi(argv[++i], "--distill-interval");
         } else if (strcmp(argv[i], "--distill-min-turns") == 0 && i + 1 < argc) {
-            distill_config.min_turns = std::stoi(argv[++i]);
+            distill_config.min_turns = safe_stoi(argv[++i], "--distill-min-turns");
         } else if (strcmp(argv[i], "--distill-script") == 0 && i + 1 < argc) {
             distill_config.script_path = argv[++i];
         } else if (strcmp(argv[i], "--distill-model") == 0 && i + 1 < argc) {
@@ -1146,11 +1253,11 @@ int main(int argc, char* argv[]) {
         } else if (strcmp(argv[i], "--no-distill") == 0) {
             distill_config.enabled = false;
         } else if (strcmp(argv[i], "--enrich-interval") == 0 && i + 1 < argc) {
-            enrich_config.interval_minutes = std::stoi(argv[++i]);
+            enrich_config.interval_minutes = safe_stoi(argv[++i], "--enrich-interval");
         } else if (strcmp(argv[i], "--enrich-batch") == 0 && i + 1 < argc) {
-            enrich_config.batch_size = std::stoi(argv[++i]);
+            enrich_config.batch_size = safe_stoi(argv[++i], "--enrich-batch");
         } else if (strcmp(argv[i], "--enrich-idle") == 0 && i + 1 < argc) {
-            enrich_config.idle_seconds = std::stoi(argv[++i]);
+            enrich_config.idle_seconds = safe_stoi(argv[++i], "--enrich-idle");
         } else if (strcmp(argv[i], "--enrich-model") == 0 && i + 1 < argc) {
             enrich_config.model = argv[++i];
         } else if (strcmp(argv[i], "--no-enrich") == 0) {

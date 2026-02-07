@@ -24,8 +24,7 @@ bool socket_is_active(const std::string& path) {
         return true;
     }
 
-    struct sockaddr_un addr;
-    memset(&addr, 0, sizeof(addr));
+    struct sockaddr_un addr = {};
     addr.sun_family = AF_UNIX;
     strncpy(addr.sun_path, path.c_str(), sizeof(addr.sun_path) - 1);
 
@@ -52,15 +51,21 @@ bool socket_is_active(const std::string& path) {
 
 // Message framing: newline-delimited JSON (same as RPC stdio)
 bool ClientConnection::has_complete_message() const {
-    return read_buffer.find('\n') != std::string::npos;
+    return read_buffer.find('\n', read_offset) != std::string::npos;
 }
 
 std::string ClientConnection::extract_message() {
-    size_t pos = read_buffer.find('\n');
+    size_t pos = read_buffer.find('\n', read_offset);
     if (pos == std::string::npos) return "";
 
-    std::string msg = read_buffer.substr(0, pos);
-    read_buffer.erase(0, pos + 1);
+    std::string msg = read_buffer.substr(read_offset, pos - read_offset);
+    read_offset = pos + 1;
+
+    // Compact when offset exceeds half the buffer size
+    if (read_offset > read_buffer.size() / 2) {
+        read_buffer.erase(0, read_offset);
+        read_offset = 0;
+    }
     return msg;
 }
 
@@ -152,8 +157,7 @@ bool SocketServer::create_socket() {
     }
 
     // Bind to path
-    struct sockaddr_un addr;
-    memset(&addr, 0, sizeof(addr));
+    struct sockaddr_un addr = {};
     addr.sun_family = AF_UNIX;
     strncpy(addr.sun_path, socket_path_.c_str(), sizeof(addr.sun_path) - 1);
 
@@ -184,26 +188,41 @@ std::vector<ClientRequest> SocketServer::poll(int timeout_ms) {
 
     if (server_fd_ < 0) return requests;
 
-    // Build poll fd array
-    std::vector<pollfd> fds;
-    fds.reserve(2 + connections_.size());
+    // Rebuild poll fd array only when connections change
+    if (fds_dirty_) {
+        poll_fds_.clear();
+        poll_fds_.reserve(2 + connections_.size());
 
-    // Server socket - watch for new connections
-    fds.push_back({server_fd_, POLLIN, 0});
+        // Server socket - watch for new connections
+        poll_fds_.push_back({server_fd_, POLLIN, 0});
 
-    // Wake pipe read end - allows thread pool to wake us when responses ready
-    if (wake_pipe_[0] >= 0) {
-        fds.push_back({wake_pipe_[0], POLLIN, 0});
-    }
-
-    // Client sockets
-    for (const auto& conn : connections_) {
-        short events = POLLIN;
-        if (!conn.write_buffer.empty()) {
-            events |= POLLOUT;
+        // Wake pipe read end - allows thread pool to wake us when responses ready
+        if (wake_pipe_[0] >= 0) {
+            poll_fds_.push_back({wake_pipe_[0], POLLIN, 0});
         }
-        fds.push_back({conn.fd, events, 0});
+
+        // Client sockets
+        for (const auto& conn : connections_) {
+            poll_fds_.push_back({conn.fd, POLLIN, 0});
+        }
+
+        fds_dirty_ = false;
     }
+
+    // Update write interest flags each call (cheap O(n) without allocation)
+    size_t client_start = 1 + (wake_pipe_[0] >= 0 ? 1 : 0);
+    for (size_t i = 0; i < connections_.size(); ++i) {
+        poll_fds_[client_start + i].events = POLLIN;
+        if (!connections_[i].write_buffer.empty()) {
+            poll_fds_[client_start + i].events |= POLLOUT;
+        }
+        poll_fds_[client_start + i].revents = 0;
+    }
+    // Clear revents for server and wake fds
+    poll_fds_[0].revents = 0;
+    if (wake_pipe_[0] >= 0) poll_fds_[1].revents = 0;
+
+    auto& fds = poll_fds_;
 
     int ret = ::poll(fds.data(), fds.size(), timeout_ms);
     if (ret < 0) {
@@ -331,7 +350,8 @@ void SocketServer::accept_new_connections() {
             fcntl(client_fd, F_SETFL, flags | O_NONBLOCK);
         }
 
-        connections_.push_back({client_fd, "", "", false});
+        connections_.push_back({client_fd, "", 0, "", false});
+        fds_dirty_ = true;
         std::cerr << "[socket_server] Client connected (fd=" << client_fd
                   << ", total=" << connections_.size() << ")\n";
     }
@@ -347,7 +367,10 @@ void SocketServer::cleanup_closed_connections() {
             }
             return false;
         });
-    connections_.erase(it, connections_.end());
+    if (it != connections_.end()) {
+        connections_.erase(it, connections_.end());
+        fds_dirty_ = true;
+    }
 }
 
 size_t SocketServer::pending_writes() const {

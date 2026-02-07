@@ -15,6 +15,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <unistd.h>
+#include <poll.h>
 
 namespace chitta {
 
@@ -56,6 +57,7 @@ struct PendingResponse {
 struct ClientConnection {
     int fd = -1;
     std::string read_buffer;
+    size_t read_offset = 0;  // Offset tracking to avoid O(n) erase
     std::string write_buffer;
     bool wants_close = false;
 
@@ -117,6 +119,10 @@ private:
     // Thread-safe response queue for async RPC
     mutable std::mutex response_mutex_;
     std::vector<PendingResponse> response_queue_;
+
+    // Cached pollfd array - only rebuilt when connections change
+    std::vector<struct pollfd> poll_fds_;
+    bool fds_dirty_ = true;
 
     // Internal operations
     bool create_socket();

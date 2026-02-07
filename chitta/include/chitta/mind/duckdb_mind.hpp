@@ -13,9 +13,12 @@
 
 #include "../duckdb_store.hpp"
 #include "../theme_manager.hpp"
+#include "../narrative.hpp"
+#include "../anticipator.hpp"
 #include "embedder.hpp"
 #include "types.hpp"
 #include "../types.hpp"
+#include "../rpc/types.hpp"
 #include "../vak_onnx.hpp"
 #include <memory>
 #include <shared_mutex>
@@ -32,7 +35,6 @@
 #include <random>
 #include <filesystem>
 #include <set>
-#include <chrono>
 #include <cmath>
 
 namespace chitta {
@@ -392,18 +394,31 @@ private:
 
 // Session context for priming
 struct DuckDBSessionContext {
-    std::unordered_set<int64_t> recent_observations;  // Memory IDs accessed this session
-    std::unordered_set<std::string> active_topics;    // Current topic strings
-    size_t max_observations = 50;                     // Limit recent observations
+    // Maintains insertion order via deque + O(1) lookup via set.
+    // Evicts oldest (FIFO) when full, unlike unordered_set which removes
+    // an arbitrary element.
+    std::deque<int64_t> recent_observations_order;          // Insertion order
+    std::unordered_set<int64_t> recent_observations_set;    // O(1) lookup
+    std::unordered_set<std::string> active_topics;          // Current topic strings
+    size_t max_observations = 50;                           // Limit recent observations
 
     float priming_boost = 0.3f;   // Boost for recently observed
     float topic_boost = 0.2f;     // Boost for topic-related
 
     void observe(int64_t id) {
-        recent_observations.insert(id);
-        if (recent_observations.size() > max_observations) {
-            recent_observations.erase(recent_observations.begin());
+        if (recent_observations_set.count(id)) return;  // Already tracked
+        recent_observations_set.insert(id);
+        recent_observations_order.push_back(id);
+        while (recent_observations_order.size() > max_observations) {
+            int64_t oldest = recent_observations_order.front();
+            recent_observations_order.pop_front();
+            recent_observations_set.erase(oldest);
         }
+    }
+
+    // O(1) membership check
+    bool has_observation(int64_t id) const {
+        return recent_observations_set.count(id) > 0;
     }
 
     void add_topic(const std::string& topic) {
@@ -411,7 +426,8 @@ struct DuckDBSessionContext {
     }
 
     void clear() {
-        recent_observations.clear();
+        recent_observations_order.clear();
+        recent_observations_set.clear();
         active_topics.clear();
     }
 };
@@ -516,6 +532,9 @@ public:
         load_learner_state_unlocked();
         // Initialize theme manager
         theme_manager_ = std::make_unique<ThemeManager>(&store_, &embedder_, theme_config_);
+        // Initialize narrative engine and anticipator
+        narrative_engine_ = std::make_unique<NarrativeEngine>(store_);
+        anticipator_ = std::make_unique<Anticipator>(&store_, narrative_engine_.get());
         return true;
     }
 
@@ -539,6 +558,11 @@ public:
 
     bool has_yantra() const {
         return embedder_.ready();
+    }
+
+    // Get the underlying yantra for status queries
+    std::shared_ptr<VakYantra> embedder_yantra() const {
+        return embedder_.yantra();
     }
 
     // Public accessors for diagnostics
@@ -600,97 +624,108 @@ public:
 
     // Recall - hybrid search with semantic + BM25 + tag matching
     // Formula: relevance = (w_sem * similarity + w_bm25 * bm25 + tag_boost) * (0.5 + 0.5 * confidence)
+    //
+    // Lock strategy: shared_lock for read phases (embedding, DB query, scoring),
+    // then upgrade to unique_lock only for write operations (touch/strengthen).
     std::vector<Recall> recall(const std::string& query, size_t limit = 10) {
-        std::unique_lock lock(mutex_);
-
-        if (!embedder_.ready()) {
-            return {};
-        }
-
-        // Hybrid scoring weights
-        constexpr float w_sem = 0.6f;
-        constexpr float w_bm25 = 0.4f;
-        constexpr float tag_boost = 0.05f;
-
-        // Phase 1: Semantic search
-        Artha artha = embedder_.transform(query);
-        auto sem_results = store_.recall(artha.nu.data, limit * 2);
-
-        // Phase 2: BM25 keyword search (if FTS available)
-        std::unordered_map<int64_t, float> bm25_scores;
-        if (store_.has_fts() && !query.empty()) {
-            auto bm25_results = store_.bm25_search_memory(query, limit * 3);
-            // Normalize BM25 scores to [0,1]
-            float bm25_max = 0.0f;
-            for (const auto& [id, score] : bm25_results) {
-                bm25_max = std::max(bm25_max, score);
-            }
-            if (bm25_max > 0.0f) {
-                for (const auto& [id, score] : bm25_results) {
-                    bm25_scores[id] = score / bm25_max;
-                }
-            }
-        }
-
-        // Phase 3: Tag hits
-        auto query_terms = extract_terms_unlocked(query);
-        auto tag_hit_ids = store_.tag_hits(query_terms);
-
-        // Phase 4: Merge scores
-        std::unordered_map<int64_t, Recall> merged;
-        for (const auto& r : sem_results) {
-            Recall recall;
-            recall.id = int64_to_nodeid(r.id);
-            recall.text = r.content;
-            recall.similarity = r.similarity;
-            recall.type = string_to_node_type(r.kind);
-
-            // Hybrid relevance formula
-            float sem_score = r.similarity;
-            float bm25_score = bm25_scores.count(r.id) ? bm25_scores[r.id] : 0.0f;
-            float tag_bonus = tag_hit_ids.count(r.id) ? tag_boost : 0.0f;
-            float confidence_factor = 0.5f + 0.5f * r.confidence;
-
-            recall.relevance = (w_sem * sem_score + w_bm25 * bm25_score + tag_bonus) * confidence_factor;
-            merged[r.id] = recall;
-        }
-
-        // Add BM25-only results (may have low semantic similarity but high keyword match)
-        for (const auto& [id, bm25_score] : bm25_scores) {
-            if (merged.count(id) == 0) {
-                auto mem = store_.get_memory(id);
-                if (mem) {
-                    Recall recall;
-                    recall.id = int64_to_nodeid(id);
-                    recall.text = mem->content;
-                    recall.similarity = 0.0f;  // No semantic match
-                    recall.type = string_to_node_type(mem->kind);
-
-                    float tag_bonus = tag_hit_ids.count(id) ? tag_boost : 0.0f;
-                    float confidence_factor = 0.5f + 0.5f * mem->confidence;
-                    recall.relevance = (w_bm25 * bm25_score + tag_bonus) * confidence_factor;
-                    merged[id] = recall;
-                }
-            }
-        }
-
-        // Convert to vector and sort by relevance
         std::vector<Recall> recalls;
-        recalls.reserve(merged.size());
-        for (auto& [id, recall] : merged) {
-            recalls.push_back(std::move(recall));
-        }
-        std::sort(recalls.begin(), recalls.end(),
-                  [](const Recall& a, const Recall& b) { return a.relevance > b.relevance; });
 
-        // Limit results and apply reinforcement
-        if (recalls.size() > limit) {
-            recalls.resize(limit);
-        }
-        for (const auto& recall : recalls) {
-            int64_t id = nodeid_to_int64(recall.id);
-            store_.touch(id);
-            store_.strengthen(id, config_.reinforce_amount);
+        {
+            // Read phase: shared lock allows concurrent reads
+            std::shared_lock lock(mutex_);
+
+            if (!embedder_.ready()) {
+                return {};
+            }
+
+            // Hybrid scoring weights
+            constexpr float w_sem = 0.6f;
+            constexpr float w_bm25 = 0.4f;
+            constexpr float tag_boost = 0.05f;
+
+            // Phase 1: Semantic search (query mode — adds instruction prefix for BGE)
+            Artha artha = embedder_.transform_query(query);
+            auto sem_results = store_.recall(artha.nu.data, limit * 2);
+
+            // Phase 2: BM25 keyword search (if FTS available)
+            std::unordered_map<int64_t, float> bm25_scores;
+            if (store_.has_fts() && !query.empty()) {
+                auto bm25_results = store_.bm25_search_memory(query, limit * 3);
+                // Normalize BM25 scores to [0,1]
+                float bm25_max = 0.0f;
+                for (const auto& [id, score] : bm25_results) {
+                    bm25_max = std::max(bm25_max, score);
+                }
+                if (bm25_max > 0.0f) {
+                    for (const auto& [id, score] : bm25_results) {
+                        bm25_scores[id] = score / bm25_max;
+                    }
+                }
+            }
+
+            // Phase 3: Tag hits
+            auto query_terms = extract_terms_unlocked(query);
+            auto tag_hit_ids = store_.tag_hits(query_terms);
+
+            // Phase 4: Merge scores
+            std::unordered_map<int64_t, Recall> merged;
+            for (const auto& r : sem_results) {
+                Recall recall;
+                recall.id = int64_to_nodeid(r.id);
+                recall.text = r.content;
+                recall.similarity = r.similarity;
+                recall.type = string_to_node_type(r.kind);
+
+                // Hybrid relevance formula
+                float sem_score = r.similarity;
+                float bm25_score = bm25_scores.count(r.id) ? bm25_scores[r.id] : 0.0f;
+                float tag_bonus = tag_hit_ids.count(r.id) ? tag_boost : 0.0f;
+                float confidence_factor = 0.5f + 0.5f * r.confidence;
+
+                recall.relevance = (w_sem * sem_score + w_bm25 * bm25_score + tag_bonus) * confidence_factor;
+                merged[r.id] = recall;
+            }
+
+            // Add BM25-only results (may have low semantic similarity but high keyword match)
+            for (const auto& [id, bm25_score] : bm25_scores) {
+                if (merged.count(id) == 0) {
+                    auto mem = store_.get_memory(id);
+                    if (mem) {
+                        Recall recall;
+                        recall.id = int64_to_nodeid(id);
+                        recall.text = mem->content;
+                        recall.similarity = 0.0f;  // No semantic match
+                        recall.type = string_to_node_type(mem->kind);
+
+                        float tag_bonus = tag_hit_ids.count(id) ? tag_boost : 0.0f;
+                        float confidence_factor = 0.5f + 0.5f * mem->confidence;
+                        recall.relevance = (w_bm25 * bm25_score + tag_bonus) * confidence_factor;
+                        merged[id] = recall;
+                    }
+                }
+            }
+
+            // Convert to vector and sort by relevance
+            recalls.reserve(merged.size());
+            for (auto& [id, recall] : merged) {
+                recalls.push_back(std::move(recall));
+            }
+            std::sort(recalls.begin(), recalls.end(),
+                      [](const Recall& a, const Recall& b) { return a.relevance > b.relevance; });
+
+            if (recalls.size() > limit) {
+                recalls.resize(limit);
+            }
+        }  // shared_lock released
+
+        // Write phase: unique lock for reinforcement (touch/strengthen)
+        {
+            std::unique_lock lock(mutex_);
+            for (const auto& recall : recalls) {
+                int64_t id = nodeid_to_int64(recall.id);
+                store_.touch(id);
+                store_.strengthen(id, config_.reinforce_amount);
+            }
         }
 
         return recalls;
@@ -776,6 +811,14 @@ public:
             // Set provenance: derived from first episode
             store_.set_provenance(wisdom_id, "auto_distill", "auto_distill_episodes",
                                    c.avg_confidence, c.episode_ids[0]);
+
+            // Assign to theme if theme_manager is available
+            if (theme_manager_) {
+                auto themes = store_.themes_by_relevance(artha.nu.data, 1);
+                if (!themes.empty()) {
+                    store_.theme_assign(wisdom_id, themes[0].id, 0.8f);
+                }
+            }
 
             // Create "EvolvedFrom" triplets linking wisdom to source episodes
             for (int64_t ep_id : c.episode_ids) {
@@ -983,195 +1026,204 @@ public:
     // 4. Lateral Inhibition: Similar patterns compete
     // 5. Hebbian Learning: Co-activated nodes strengthen connections
     // 6. Self-Tuning: Bayesian bandits adapt parameters from feedback
+    // Lock strategy: shared_lock for read phases (embedding, DB queries, scoring,
+    // lateral inhibition), then briefly upgrade to unique_lock for write phases
+    // (Hebbian update, bandit state, session context, learner state).
     std::vector<Recall> full_resonate(const std::string& query, size_t k = 10,
                                         const std::vector<std::string>& exclude_kinds = {}) {
-        std::unique_lock lock(mutex_);
-
-        if (!embedder_.ready()) {
-            return {};
-        }
-
-        // Extract query context for contextual bandit
-        QueryContext context = extract_query_context_unlocked(query);
-
-        // Self-tuning: sample parameters using Thompson sampling
-        DuckDBResonanceConfig active_config = resonance_config_;
-        if (enable_learning_) {
-            active_config = learner_.sample_params(context);
-        }
-
-        // Transform query to embedding
-        Artha artha = embedder_.transform(query);
-        if (artha.nu.size() == 0) return {};
-
-        // Phase 1a: Get semantic seeds (initial candidates)
-        auto seeds = store_.recall(artha.nu.data, k * 2, "", true, exclude_kinds);
-        if (seeds.empty()) return {};
-
-        // Phase 1b: BM25 keyword search for hybrid scoring
-        constexpr float w_bm25 = 0.3f;  // BM25 weight (lower than simple recall since we have activation)
-        constexpr float tag_boost = 0.05f;
-        std::unordered_map<int64_t, float> bm25_scores;
-        if (store_.has_fts() && !query.empty()) {
-            auto bm25_results = store_.bm25_search_memory(query, k * 3, "", true, exclude_kinds);
-            float bm25_max = 0.0f;
-            for (const auto& [id, score] : bm25_results) {
-                bm25_max = std::max(bm25_max, score);
-            }
-            if (bm25_max > 0.0f) {
-                for (const auto& [id, score] : bm25_results) {
-                    bm25_scores[id] = score / bm25_max;
-                }
-            }
-        }
-
-        // Phase 1c: Tag hits for query terms
-        auto query_terms = extract_terms_unlocked(query);
-        auto tag_hit_ids = store_.tag_hits(query_terms);
-
-        // Phase 2: Find attractors (conceptual gravity wells)
-        auto attractors = find_attractors_unlocked();
-
-        // Phase 3: Spread activation through triplet graph
-        std::unordered_map<int64_t, float> activation;
-
-        // Initialize activation from seeds (using sampled params)
-        for (const auto& seed : seeds) {
-            activation[seed.id] = seed.similarity * active_config.spread_strength;
-        }
-
-        // Spread through triplet graph (using sampled params)
-        spread_activation_unlocked(query_terms, activation, active_config);
-
-        // Phase 4: Build results with activation-boosted relevance
         std::vector<Recall> results;
-        std::unordered_set<int64_t> seen;
+        DuckDBResonanceConfig active_config;
+        QueryContext context;
+        std::vector<int64_t> seed_ids_for_priming;
 
-        for (const auto& seed : seeds) {
-            Recall recall;
-            recall.id = int64_to_nodeid(seed.id);
-            recall.text = seed.content;
-            recall.similarity = seed.similarity;
-            recall.type = string_to_node_type(seed.kind);
-            recall.confidence = Confidence(seed.confidence);
-            recall.created = seed.created_at;
-            recall.accessed = seed.accessed_at;
+        {
+            // Read phase: shared lock allows concurrent reads
+            std::shared_lock lock(mutex_);
 
-            // Combine semantic relevance with activation + BM25 hybrid (using sampled weights)
-            float act = activation.count(seed.id) ? activation[seed.id] : 0.0f;
-            float bm25 = bm25_scores.count(seed.id) ? bm25_scores[seed.id] : 0.0f;
-            float tag_bonus = tag_hit_ids.count(seed.id) ? tag_boost : 0.0f;
-
-            // Hybrid formula: semantic + BM25 + activation + tag boost
-            // Using soft confidence (0.5 + 0.5 * conf) instead of hard multiplication
-            float confidence_factor = 0.5f + 0.5f * seed.confidence;
-            recall.relevance = (seed.similarity * active_config.semantic_weight
-                             + bm25 * w_bm25
-                             + act * active_config.activation_weight
-                             + tag_bonus) * confidence_factor;
-
-            // Session priming boost
-            if (session_context_.recent_observations.count(seed.id)) {
-                recall.relevance *= (1.0f + session_context_.priming_boost);
+            if (!embedder_.ready()) {
+                return {};
             }
 
-            results.push_back(std::move(recall));
-            seen.insert(seed.id);
+            // Extract query context for contextual bandit
+            context = extract_query_context_unlocked(query);
 
-            // Record observation for future priming
-            session_context_.observe(seed.id);
-        }
-
-        // Add activated nodes not in seeds (discovered via graph)
-        for (const auto& [id, act] : activation) {
-            if (seen.count(id) || act < 0.1f) continue;
-
-            auto mem_opt = store_.get_memory(id);
-            if (!mem_opt) continue;
-            const auto& mem = *mem_opt;
-
-            Recall recall;
-            recall.id = int64_to_nodeid(id);
-            recall.text = mem.content;
-            recall.type = string_to_node_type(mem.kind);
-            recall.confidence = Confidence(mem.confidence);
-            recall.relevance = act;
-
-            results.push_back(std::move(recall));
-            seen.insert(id);
-        }
-
-        // Phase 4b: Code intelligence - hybrid BM25 + term search
-        // Skip if exclude_kinds contains "symbol" (partnership-only mode)
-        bool skip_code_intel = std::find(exclude_kinds.begin(), exclude_kinds.end(), "symbol") != exclude_kinds.end();
-        if (!skip_code_intel) {
-            std::vector<Symbol> code_symbols;
-            if (store_.has_fts()) {
-                // Use BM25 full-text search (ranked by relevance)
-                code_symbols = store_.bm25_search_symbols(query, active_config.max_code_symbols);
+            // Self-tuning: sample parameters using Thompson sampling
+            active_config = resonance_config_;
+            if (enable_learning_) {
+                active_config = learner_.sample_params(context);
             }
-            // Fallback or supplement with term-based search
-            if (code_symbols.size() < active_config.max_code_symbols) {
-                auto term_symbols = find_code_symbols_unlocked(query_terms,
-                    active_config.max_code_symbols - code_symbols.size());
-                // Merge, avoiding duplicates
-                std::unordered_set<int64_t> seen_symbols;
-                for (const auto& s : code_symbols) seen_symbols.insert(s.id);
-                for (auto& s : term_symbols) {
-                    if (!seen_symbols.count(s.id)) {
-                        code_symbols.push_back(std::move(s));
+
+            // Transform query to embedding (query mode — adds instruction prefix for BGE)
+            Artha artha = embedder_.transform_query(query);
+            if (artha.nu.size() == 0) return {};
+
+            // Phase 1a: Get semantic seeds (initial candidates)
+            auto seeds = store_.recall(artha.nu.data, k * 2, "", true, exclude_kinds);
+            if (seeds.empty()) return {};
+
+            // Phase 1b: BM25 keyword search for hybrid scoring
+            constexpr float w_bm25 = 0.3f;
+            constexpr float tag_boost = 0.05f;
+            std::unordered_map<int64_t, float> bm25_scores;
+            if (store_.has_fts() && !query.empty()) {
+                auto bm25_results = store_.bm25_search_memory(query, k * 3, "", true, exclude_kinds);
+                float bm25_max = 0.0f;
+                for (const auto& [id, score] : bm25_results) {
+                    bm25_max = std::max(bm25_max, score);
+                }
+                if (bm25_max > 0.0f) {
+                    for (const auto& [id, score] : bm25_results) {
+                        bm25_scores[id] = score / bm25_max;
                     }
                 }
             }
 
-            for (const auto& sym : code_symbols) {
+            // Phase 1c: Tag hits for query terms
+            auto query_terms = extract_terms_unlocked(query);
+            auto tag_hit_ids = store_.tag_hits(query_terms);
+
+            // Phase 2: Find attractors (conceptual gravity wells)
+            auto attractors = find_attractors_unlocked();
+
+            // Phase 3: Spread activation through triplet graph
+            std::unordered_map<int64_t, float> activation;
+
+            for (const auto& seed : seeds) {
+                activation[seed.id] = seed.similarity * active_config.spread_strength;
+            }
+
+            spread_activation_unlocked(query_terms, activation, active_config);
+
+            // Phase 4: Build results with activation-boosted relevance
+            std::unordered_set<int64_t> seen;
+
+            for (const auto& seed : seeds) {
                 Recall recall;
-                // Use negative ID range for code symbols to avoid collision
-                recall.id = NodeId{static_cast<uint64_t>(-sym.id), 0};
-                // Format: "kind name @ file:line"
-                recall.text = "[CODE] " + sym.kind + " " + sym.name +
-                             " @ " + sym.file_path + ":" + std::to_string(sym.line_start);
-                recall.type = NodeType::Operation;  // Code symbols are operations
-                recall.relevance = active_config.code_symbol_weight;
-                recall.confidence = Confidence(1.0f);  // Code symbols are certain
+                recall.id = int64_to_nodeid(seed.id);
+                recall.text = seed.content;
+                recall.similarity = seed.similarity;
+                recall.type = string_to_node_type(seed.kind);
+                recall.confidence = Confidence(seed.confidence);
+                recall.created = seed.created_at;
+                recall.accessed = seed.accessed_at;
+
+                float act = activation.count(seed.id) ? activation[seed.id] : 0.0f;
+                float bm25 = bm25_scores.count(seed.id) ? bm25_scores[seed.id] : 0.0f;
+                float tag_bonus = tag_hit_ids.count(seed.id) ? tag_boost : 0.0f;
+
+                float confidence_factor = 0.5f + 0.5f * seed.confidence;
+                recall.relevance = (seed.similarity * active_config.semantic_weight
+                                 + bm25 * w_bm25
+                                 + act * active_config.activation_weight
+                                 + tag_bonus) * confidence_factor;
+
+                // Session priming boost
+                if (session_context_.has_observation(seed.id)) {
+                    recall.relevance *= (1.0f + session_context_.priming_boost);
+                }
+
                 results.push_back(std::move(recall));
+                seen.insert(seed.id);
+
+                // Collect seed IDs for priming update (deferred to write phase)
+                seed_ids_for_priming.push_back(seed.id);
             }
-        }
 
-        // Phase 5: Attractor dynamics - boost results in same basin
-        if (!attractors.empty() && !results.empty()) {
-            apply_attractor_boost_unlocked(results, attractors, query_terms);
-        }
+            // Add activated nodes not in seeds (discovered via graph)
+            for (const auto& [id, act] : activation) {
+                if (seen.count(id) || act < 0.1f) continue;
 
-        // Sort by relevance
-        std::sort(results.begin(), results.end(),
-                  [](const Recall& a, const Recall& b) {
-                      return a.relevance > b.relevance;
-                  });
+                auto mem_opt = store_.get_memory(id);
+                if (!mem_opt) continue;
+                const auto& mem = *mem_opt;
 
-        // Phase 6: Lateral inhibition (competition) - using sampled config
-        if (active_config.enable_competition && results.size() >= 2) {
-            apply_lateral_inhibition_unlocked(results, active_config);
-        }
+                Recall recall;
+                recall.id = int64_to_nodeid(id);
+                recall.text = mem.content;
+                recall.type = string_to_node_type(mem.kind);
+                recall.confidence = Confidence(mem.confidence);
+                recall.relevance = act;
 
-        // Limit to k results
-        if (results.size() > k) {
-            results.resize(k);
-        }
-
-        // Phase 7: Hebbian learning - strengthen triplet connections
-        if (results.size() >= 2) {
-            hebbian_update_unlocked(results, active_config);
-        }
-
-        // Phase 8: Record outcome for self-tuning credit assignment
-        if (enable_learning_ && !results.empty()) {
-            std::vector<int64_t> result_ids;
-            result_ids.reserve(results.size());
-            for (const auto& r : results) {
-                result_ids.push_back(static_cast<int64_t>(r.id.low));
+                results.push_back(std::move(recall));
+                seen.insert(id);
             }
-            learner_.record_outcome(result_ids, active_config, context);
+
+            // Phase 4b: Code intelligence - hybrid BM25 + term search
+            bool skip_code_intel = std::find(exclude_kinds.begin(), exclude_kinds.end(), "symbol") != exclude_kinds.end();
+            if (!skip_code_intel) {
+                std::vector<Symbol> code_symbols;
+                if (store_.has_fts()) {
+                    code_symbols = store_.bm25_search_symbols(query, active_config.max_code_symbols);
+                }
+                if (code_symbols.size() < active_config.max_code_symbols) {
+                    auto term_symbols = find_code_symbols_unlocked(query_terms,
+                        active_config.max_code_symbols - code_symbols.size());
+                    std::unordered_set<int64_t> seen_symbols;
+                    for (const auto& s : code_symbols) seen_symbols.insert(s.id);
+                    for (auto& s : term_symbols) {
+                        if (!seen_symbols.count(s.id)) {
+                            code_symbols.push_back(std::move(s));
+                        }
+                    }
+                }
+
+                for (const auto& sym : code_symbols) {
+                    Recall recall;
+                    recall.id = NodeId{static_cast<uint64_t>(-sym.id), 0};
+                    recall.text = "[CODE] " + sym.kind + " " + sym.name +
+                                 " @ " + sym.file_path + ":" + std::to_string(sym.line_start);
+                    recall.type = NodeType::Operation;
+                    recall.relevance = active_config.code_symbol_weight;
+                    recall.confidence = Confidence(1.0f);
+                    results.push_back(std::move(recall));
+                }
+            }
+
+            // Phase 5: Attractor dynamics - boost results in same basin
+            if (!attractors.empty() && !results.empty()) {
+                apply_attractor_boost_unlocked(results, attractors, query_terms);
+            }
+
+            // Sort by relevance
+            std::sort(results.begin(), results.end(),
+                      [](const Recall& a, const Recall& b) {
+                          return a.relevance > b.relevance;
+                      });
+
+            // Phase 6: Lateral inhibition (competition) - read-only scoring
+            if (active_config.enable_competition && results.size() >= 2) {
+                apply_lateral_inhibition_unlocked(results, active_config);
+            }
+
+            // Limit to k results
+            if (results.size() > k) {
+                results.resize(k);
+            }
+        }  // shared_lock released
+
+        // Write phase: unique lock for Hebbian update, session context, learner state
+        {
+            std::unique_lock lock(mutex_);
+
+            // Record observations for future priming
+            for (int64_t id : seed_ids_for_priming) {
+                session_context_.observe(id);
+            }
+
+            // Phase 7: Hebbian learning - strengthen triplet connections
+            if (results.size() >= 2) {
+                hebbian_update_unlocked(results, active_config);
+            }
+
+            // Phase 8: Record outcome for self-tuning credit assignment
+            if (enable_learning_ && !results.empty()) {
+                std::vector<int64_t> result_ids;
+                result_ids.reserve(results.size());
+                for (const auto& r : results) {
+                    result_ids.push_back(static_cast<int64_t>(r.id.low));
+                }
+                learner_.record_outcome(result_ids, active_config, context);
+            }
         }
 
         return results;
@@ -1194,8 +1246,8 @@ public:
             return {};
         }
 
-        // Transform query to embedding
-        Artha artha = embedder_.transform(query);
+        // Transform query to embedding (query mode — adds instruction prefix for BGE)
+        Artha artha = embedder_.transform_query(query);
         if (artha.nu.size() == 0) return {};
 
         // Two-stage retrieval
@@ -1238,7 +1290,7 @@ public:
             return {};
         }
 
-        Artha artha = embedder_.transform(query);
+        Artha artha = embedder_.transform_query(query);
         if (artha.nu.size() == 0) return {};
 
         return theme_manager_->retrieve_representatives(artha.nu.data, max_themes, realm);
@@ -1276,6 +1328,14 @@ public:
     // Access to theme manager
     ThemeManager* theme_manager() { return theme_manager_.get(); }
     const ThemeManager* theme_manager() const { return theme_manager_.get(); }
+
+    // Access to narrative engine
+    NarrativeEngine* narrative() { return narrative_engine_.get(); }
+    const NarrativeEngine* narrative() const { return narrative_engine_.get(); }
+
+    // Access to anticipator
+    Anticipator* anticipator() { return anticipator_.get(); }
+    const Anticipator* anticipator() const { return anticipator_.get(); }
 
     // Access to theme config
     ThemeConfig& theme_config() { return theme_config_; }
@@ -1349,6 +1409,7 @@ private:
 
     // Extract significant terms from query for graph traversal
     std::vector<std::string> extract_terms_unlocked(const std::string& query) const {
+        // Thread-safe: const after static initialization
         static const std::unordered_set<std::string> stopwords = {
             "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
             "have", "has", "had", "do", "does", "did", "will", "would", "could",
@@ -1569,9 +1630,19 @@ private:
     }
 
     // Apply lateral inhibition (winner-take-all competition)
+    // Optimized: pre-extracts term sets for all results once (O(n)),
+    // then uses indices in the pairwise loop (avoids repeated extract_terms calls).
     void apply_lateral_inhibition_unlocked(std::vector<Recall>& results,
                                             const DuckDBResonanceConfig& config) {
         if (results.size() < 2) return;
+
+        // Pre-extract term sets for all results ONCE
+        std::vector<std::unordered_set<std::string>> term_sets;
+        term_sets.reserve(results.size());
+        for (const auto& r : results) {
+            auto terms = extract_terms_unlocked(r.text);
+            term_sets.emplace_back(terms.begin(), terms.end());
+        }
 
         std::vector<bool> suppressed(results.size(), false);
 
@@ -1583,8 +1654,8 @@ private:
             for (size_t j = i + 1; j < results.size(); ++j) {
                 if (suppressed[j]) continue;
 
-                // Check similarity based on text overlap (simplified)
-                float text_sim = compute_text_similarity_unlocked(results[i].text, results[j].text);
+                // Jaccard similarity using pre-extracted term sets
+                float text_sim = compute_jaccard_similarity(term_sets[i], term_sets[j]);
 
                 if (text_sim > config.similarity_threshold) {
                     // Lateral inhibition: winner suppresses this similar loser
@@ -1602,23 +1673,32 @@ private:
                   });
     }
 
-    // Simple text similarity (Jaccard on words)
-    float compute_text_similarity_unlocked(const std::string& a, const std::string& b) const {
-        auto terms_a = extract_terms_unlocked(a);
-        auto terms_b = extract_terms_unlocked(b);
-
-        if (terms_a.empty() || terms_b.empty()) return 0.0f;
-
-        std::unordered_set<std::string> set_a(terms_a.begin(), terms_a.end());
-        std::unordered_set<std::string> set_b(terms_b.begin(), terms_b.end());
+    // Jaccard similarity between pre-computed term sets
+    static float compute_jaccard_similarity(const std::unordered_set<std::string>& set_a,
+                                            const std::unordered_set<std::string>& set_b) {
+        if (set_a.empty() || set_b.empty()) return 0.0f;
 
         size_t intersection = 0;
-        for (const auto& term : set_a) {
-            if (set_b.count(term)) intersection++;
+        // Iterate over the smaller set for efficiency
+        const auto& smaller = (set_a.size() <= set_b.size()) ? set_a : set_b;
+        const auto& larger = (set_a.size() <= set_b.size()) ? set_b : set_a;
+        for (const auto& term : smaller) {
+            if (larger.count(term)) intersection++;
         }
 
         size_t union_size = set_a.size() + set_b.size() - intersection;
         return union_size > 0 ? static_cast<float>(intersection) / union_size : 0.0f;
+    }
+
+    // Simple text similarity (Jaccard on words) - kept for other callers
+    float compute_text_similarity_unlocked(const std::string& a, const std::string& b) const {
+        auto terms_a = extract_terms_unlocked(a);
+        auto terms_b = extract_terms_unlocked(b);
+
+        std::unordered_set<std::string> set_a(terms_a.begin(), terms_a.end());
+        std::unordered_set<std::string> set_b(terms_b.begin(), terms_b.end());
+
+        return compute_jaccard_similarity(set_a, set_b);
     }
 
     // Hebbian learning: strengthen connections between co-activated results
@@ -1668,14 +1748,11 @@ private:
         store_.connect(subject, "related_to", object, strength);
     }
 
-    // Convert string to lowercase
-    static std::string to_lower(const std::string& s) {
-        std::string result;
-        result.reserve(s.size());
-        for (char c : s) {
-            result += std::tolower(static_cast<unsigned char>(c));
-        }
-        return result;
+    // Convert string to lowercase (in-place transform, single allocation)
+    static std::string to_lower(std::string s) {
+        std::transform(s.begin(), s.end(), s.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
+        return s;
     }
 
     // Persistence helpers (unlocked - caller must hold mutex)
@@ -1729,6 +1806,10 @@ private:
     mutable std::unique_ptr<ThemeManager> theme_manager_;
     bool enable_theme_recall_ = true;  // Use theme-based retrieval
 
+    // Narrative and Anticipation
+    std::unique_ptr<NarrativeEngine> narrative_engine_;
+    std::unique_ptr<Anticipator> anticipator_;
+
     // Attractor cache (expensive to compute, changes slowly)
     mutable std::vector<DuckDBAttractor> attractor_cache_;
     mutable std::chrono::steady_clock::time_point attractor_cache_time_;
@@ -1780,19 +1861,9 @@ private:
         }
     }
 
+    // Delegates to the canonical implementation in rpc/types.hpp
     static std::string node_type_to_string(NodeType type) {
-        switch (type) {
-            case NodeType::Wisdom: return "wisdom";
-            case NodeType::Belief: return "belief";
-            case NodeType::Intention: return "intention";
-            case NodeType::Episode: return "episode";
-            case NodeType::Symbol: return "symbol";
-            case NodeType::Dream: return "dream";
-            case NodeType::ProjectEssence: return "projectessence";
-            case NodeType::ModuleState: return "modulestate";
-            case NodeType::PatternState: return "patternstate";
-            default: return "unknown";
-        }
+        return chitta::rpc::node_type_to_string(type);
     }
 
     static NodeType string_to_node_type(const std::string& s) {

@@ -36,15 +36,23 @@ class SymbolResolver {
 public:
     explicit SymbolResolver(DuckDBStore& store) : store_(store) {}
 
-    // Extract leaf name from triplet subject like "cpp:method:class::name" -> "name"
+    // Extract leaf name from triplet subject
+    // Formats: "cpp:method:class::name" -> "name"
+    //          "cpp:function:name" -> "name"
+    //          "Parent.method" -> "method" (Swift style)
     static std::string extract_leaf_name(const std::string& subject) {
-        // Find last :: separator
+        // Find last :: separator (C++/Rust qualified names)
         size_t pos = subject.rfind("::");
         if (pos != std::string::npos && pos + 2 < subject.size()) {
             return subject.substr(pos + 2);
         }
         // Try last : for format like "cpp:function:name"
         pos = subject.rfind(':');
+        if (pos != std::string::npos && pos + 1 < subject.size()) {
+            return subject.substr(pos + 1);
+        }
+        // Try last . for format like "Class.method" (Swift/Python)
+        pos = subject.rfind('.');
         if (pos != std::string::npos && pos + 1 < subject.size()) {
             return subject.substr(pos + 1);
         }
@@ -73,8 +81,18 @@ public:
             std::string name = row[2];
             std::string file_path = row[3];
 
-            // Index by simple name
+            // Index by simple name (original case)
             name_to_ids_[name].push_back(id);
+
+            // Also index by lowercase name (triplets are lowercased by connect_batch)
+            std::string lower_name;
+            lower_name.reserve(name.size());
+            for (char c : name) {
+                lower_name += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            }
+            if (lower_name != name) {
+                name_to_ids_[lower_name].push_back(id);
+            }
 
             // Index by qualified name (kind::name)
             std::string qualified = kind + "::" + name;
@@ -96,18 +114,22 @@ public:
 
         if (!index_built_) build_index();
 
-        // Query calls triplets: subject (caller) → "calls" → object (callee name)
+        // Query calls triplets: subject (caller) -> "calls" -> object (callee name)
         std::string query = "SELECT subject, object, source_file "
                            "FROM triplet "
                            "WHERE predicate = 'calls'";
         if (!project.empty()) {
-            // Escape single quotes in project name
+            // Join against code_file to filter by project name
+            // (project names may differ from file paths)
             std::string escaped_project;
+            escaped_project.reserve(project.size());
             for (char c : project) {
                 if (c == '\'') escaped_project += "''";
                 else escaped_project += c;
             }
-            query += " AND source_file LIKE '%" + escaped_project + "%'";
+            query += " AND source_file IN "
+                     "(SELECT DISTINCT path FROM code_file WHERE project = '"
+                     + escaped_project + "')";
         }
 
         auto result = store_.execute_sql_query(query);

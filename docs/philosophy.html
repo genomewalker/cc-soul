@@ -367,8 +367,43 @@ body::before {
 }
 
 /* ═══ RESPONSIVE ═══ */
+.nav-hamburger {
+  display: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: var(--space-2);
+  flex-direction: column;
+  gap: 5px;
+}
+.nav-hamburger span {
+  display: block;
+  width: 20px;
+  height: 1.5px;
+  background: var(--lotus-200);
+  transition: all 0.3s ease;
+}
+
 @media (max-width: 700px) {
-  .nav-links { display: none; }
+  .nav-hamburger { display: flex; }
+  .nav-links {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: rgba(15, 16, 24, 0.97);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    flex-direction: column;
+    padding: var(--space-4) var(--space-5);
+    gap: var(--space-3);
+    border-bottom: 1px solid rgba(203, 175, 134, 0.08);
+  }
+  .nav-open .nav-links { display: flex; }
+  .nav-open .nav-hamburger span:nth-child(1) { transform: rotate(45deg) translate(4px, 4px); }
+  .nav-open .nav-hamburger span:nth-child(2) { opacity: 0; }
+  .nav-open .nav-hamburger span:nth-child(3) { transform: rotate(-45deg) translate(5px, -5px); }
   .mapping-row {
     grid-template-columns: 1fr;
     gap: var(--space-2);
@@ -384,13 +419,18 @@ body::before {
 <nav class="nav">
   <div class="nav-inner">
     <a href="index.html" class="nav-brand">cc<span>-</span>soul</a>
+    <button class="nav-hamburger" onclick="document.querySelector('.nav').classList.toggle('nav-open')" aria-label="Menu">
+      <span></span><span></span><span></span>
+    </button>
     <ul class="nav-links">
       <li><a href="index.html">Home</a></li>
+      <li><a href="getting-started.html">Get Started</a></li>
+      <li><a href="philosophy.html" class="active">Philosophy</a></li>
+      <li><a href="architecture.html">Architecture</a></li>
       <li><a href="tools.html">Tools</a></li>
       <li><a href="cli.html">CLI</a></li>
       <li><a href="hooks.html">Hooks</a></li>
       <li><a href="skills.html">Skills</a></li>
-      <li><a href="philosophy.html" class="active">Philosophy</a></li>
       <li><a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a></li>
     </ul>
   </div>
@@ -608,7 +648,7 @@ body::before {
         observer.unobserve(entry.target);
       }
     });
-  }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+  }, { threshold: 0.01, rootMargin: '0px 0px -20px 0px' });
   reveals.forEach(function(el) { observer.observe(el); });
 })();
 </script>
