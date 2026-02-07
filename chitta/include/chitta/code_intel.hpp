@@ -27,6 +27,7 @@ extern "C" {
     TSLanguage* tree_sitter_ruby();
     TSLanguage* tree_sitter_c_sharp();
     TSLanguage* tree_sitter_swift();
+    TSLanguage* tree_sitter_lua();
 }
 
 namespace chitta {
@@ -175,6 +176,9 @@ public:
 
         parsers_["swift"] = ts_parser_new();
         ts_parser_set_language(parsers_["swift"], tree_sitter_swift());
+
+        parsers_["lua"] = ts_parser_new();
+        ts_parser_set_language(parsers_["lua"], tree_sitter_lua());
     }
 
     ~CodeIntel() {
@@ -201,6 +205,7 @@ public:
         if (ext == ".rb") return "ruby";
         if (ext == ".cs") return "csharp";
         if (ext == ".swift") return "swift";
+        if (ext == ".lua") return "lua";
 
         return "";
     }
@@ -251,6 +256,8 @@ public:
             extract_csharp(root, source, path, symbols);
         } else if (lang == "swift") {
             extract_swift(root, source, path, symbols);
+        } else if (lang == "lua") {
+            extract_lua(root, source, path, symbols);
         }
 
         ts_tree_delete(tree);
@@ -303,6 +310,9 @@ public:
         } else if (lang == "swift") {
             extract_swift_full(root, source, path, result.symbols, result.callsites,
                               result.type_relationships, result.imports);
+        } else if (lang == "lua") {
+            extract_lua_full(root, source, path, result.symbols, result.callsites,
+                            result.type_relationships, result.imports);
         } else {
             // Languages without full extraction yet - symbols only
             if (lang == "java") {
@@ -2797,6 +2807,126 @@ private:
         for (uint32_t i = 0; i < count; i++) {
             extract_swift_full(ts_node_child(node, i), source, path,
                               symbols, callsites, type_rels, imports, parent);
+        }
+    }
+
+    // Lua extraction
+    // Node types from tree-sitter-lua:
+    //   function_declaration - global function
+    //   local_function_declaration - local function
+    //   function_definition - anonymous function
+    //   variable_declaration - can contain table definitions
+    void extract_lua(TSNode node, const std::string& source,
+                     const std::string& path, std::vector<ExtractedSymbol>& symbols,
+                     const std::string& parent = "") {
+        const char* type = ts_node_type(node);
+
+        if (strcmp(type, "function_declaration") == 0 ||
+            strcmp(type, "local_function_declaration") == 0) {
+            // Find the function name (identifier or dot_index_expression or method_index_expression)
+            TSNode name_node = find_child(node, "identifier");
+            if (ts_node_is_null(name_node)) {
+                name_node = find_child(node, "dot_index_expression");
+            }
+            if (ts_node_is_null(name_node)) {
+                name_node = find_child(node, "method_index_expression");
+            }
+            if (!ts_node_is_null(name_node)) {
+                ExtractedSymbol sym;
+                sym.kind = parent.empty() ? "function" : "method";
+                sym.name = node_text(name_node, source);
+                sym.file_path = path;
+                sym.line_start = node_line(node);
+                sym.line_end = node_end_line(node);
+                sym.parent = parent;
+                symbols.push_back(sym);
+            }
+            return;
+        }
+
+        // Recurse to children
+        uint32_t count = ts_node_child_count(node);
+        for (uint32_t i = 0; i < count; i++) {
+            extract_lua(ts_node_child(node, i), source, path, symbols, parent);
+        }
+    }
+
+    // Lua full extraction (with callsites)
+    void extract_lua_full(TSNode node, const std::string& source,
+                          const std::string& path,
+                          std::vector<ExtractedSymbol>& symbols,
+                          std::vector<Callsite>& callsites,
+                          std::vector<TypeRelationship>& type_rels,
+                          std::vector<ImportStatement>& imports,
+                          const std::string& parent = "") {
+        const char* type = ts_node_type(node);
+
+        if (strcmp(type, "function_declaration") == 0 ||
+            strcmp(type, "local_function_declaration") == 0) {
+            TSNode name_node = find_child(node, "identifier");
+            if (ts_node_is_null(name_node)) {
+                name_node = find_child(node, "dot_index_expression");
+            }
+            if (ts_node_is_null(name_node)) {
+                name_node = find_child(node, "method_index_expression");
+            }
+            if (!ts_node_is_null(name_node)) {
+                ExtractedSymbol sym;
+                sym.kind = parent.empty() ? "function" : "method";
+                sym.name = node_text(name_node, source);
+                sym.file_path = path;
+                sym.line_start = node_line(node);
+                sym.line_end = node_end_line(node);
+                sym.parent = parent;
+                symbols.push_back(sym);
+            }
+        } else if (strcmp(type, "function_call") == 0) {
+            // Extract callsite
+            TSNode name_node = find_child(node, "identifier");
+            if (ts_node_is_null(name_node)) {
+                name_node = find_child(node, "dot_index_expression");
+            }
+            if (ts_node_is_null(name_node)) {
+                name_node = find_child(node, "method_index_expression");
+            }
+            if (!ts_node_is_null(name_node)) {
+                Callsite cs;
+                cs.caller_symbol = parent;
+                std::string callee_name = node_text(name_node, source);
+                cs.callee_text = callee_name;
+                cs.callee_leaf = callee_name;
+                cs.file_path = path;
+                cs.line = node_line(node);
+                callsites.push_back(cs);
+            }
+        } else if (strcmp(type, "call") == 0) {
+            // require("module") pattern
+            TSNode prefix = find_child(node, "identifier");
+            if (!ts_node_is_null(prefix) && node_text(prefix, source) == "require") {
+                TSNode args = find_child(node, "arguments");
+                if (!ts_node_is_null(args)) {
+                    TSNode str_node = find_child(args, "string");
+                    if (!ts_node_is_null(str_node)) {
+                        ImportStatement imp;
+                        imp.file_path = path;
+                        std::string mod = node_text(str_node, source);
+                        // Strip quotes
+                        if (mod.size() >= 2) {
+                            mod = mod.substr(1, mod.size() - 2);
+                        }
+                        imp.import_path = mod;
+                        imp.line = node_line(node);
+                        imports.push_back(imp);
+                    }
+                }
+            }
+        }
+
+        // Recurse
+        uint32_t count = ts_node_child_count(node);
+        for (uint32_t i = 0; i < count; i++) {
+            extract_lua_full(ts_node_child(node, i), source, path,
+                            symbols, callsites, type_rels, imports, parent);
         }
     }
 };

@@ -171,6 +171,17 @@ if(NOT tree-sitter-swift_POPULATED)
     FetchContent_Populate(tree-sitter-swift)
 endif()
 
+FetchContent_Declare(
+    tree-sitter-lua
+    GIT_REPOSITORY https://github.com/tree-sitter-grammars/tree-sitter-lua.git
+    GIT_TAG v0.2.0
+    GIT_SHALLOW TRUE
+)
+FetchContent_GetProperties(tree-sitter-lua)
+if(NOT tree-sitter-lua_POPULATED)
+    FetchContent_Populate(tree-sitter-lua)
+endif()
+
 # Build tree-sitter parsers as static library
 add_library(tree-sitter-parsers STATIC
     ${tree-sitter-cpp_SOURCE_DIR}/src/parser.c
@@ -191,6 +202,8 @@ add_library(tree-sitter-parsers STATIC
     ${tree-sitter-c-sharp_SOURCE_DIR}/src/scanner.c
     ${tree-sitter-swift_SOURCE_DIR}/src/parser.c
     ${tree-sitter-swift_SOURCE_DIR}/src/scanner.c
+    ${tree-sitter-lua_SOURCE_DIR}/src/parser.c
+    ${tree-sitter-lua_SOURCE_DIR}/src/scanner.c
 )
 target_include_directories(tree-sitter-parsers PUBLIC
     ${tree-sitter_SOURCE_DIR}/lib/include
@@ -204,6 +217,7 @@ target_include_directories(tree-sitter-parsers PUBLIC
     ${tree-sitter-ruby_SOURCE_DIR}/src
     ${tree-sitter-c-sharp_SOURCE_DIR}/src
     ${tree-sitter-swift_SOURCE_DIR}/src
+    ${tree-sitter-lua_SOURCE_DIR}/src
 )
 target_link_libraries(tree-sitter-parsers PUBLIC tree-sitter)
 
