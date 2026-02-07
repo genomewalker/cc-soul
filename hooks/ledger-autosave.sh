@@ -11,7 +11,7 @@
 #   WORK_STATE: JSON object with work state
 #   CONTINUATION: JSON object with continuation
 
-set -euo pipefail
+# Don't use set -e: we want hooks to succeed even if some parts fail
 
 ACTION="${1:-save}"
 SESSION_ID="${2:-$(date +%Y%m%d-%H%M%S)}"
@@ -62,7 +62,8 @@ RESPONSE=$(send_request "$REQUEST")
 
 if echo "$RESPONSE" | grep -q '"error"'; then
     echo "[ledger] Error: $RESPONSE" >&2
-    exit 1
-else
-    echo "[ledger] $ACTION complete for session $SESSION_ID"
+    # Don't exit 1 - hooks should always succeed
 fi
+
+echo "[ledger] $ACTION complete for session $SESSION_ID"
+exit 0

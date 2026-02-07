@@ -4,7 +4,7 @@
 # Lists verbose nodes ready for compression and outputs node IDs
 # for batch processing by yajna-processor sub-agents.
 
-set -e
+# Don't use set -e: we want the script to continue even if parts fail
 
 CHITTA="${HOME}/.claude/bin/chitta"
 BATCH_SIZE="${1:-50}"
@@ -29,3 +29,5 @@ echo "$result" | grep -oE '\[[0-9a-f-]{36}\]' | tr -d '[]' | head -n "$BATCH_SIZ
 # Count
 count=$(echo "$result" | grep -c '\[.*\]' || echo 0)
 echo "[yajna] Found $count verbose nodes ready for processing" >&2
+
+exit 0

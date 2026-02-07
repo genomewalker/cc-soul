@@ -14,12 +14,12 @@
 #
 # Outputs SSL-formatted learnings with typed markers
 
-set -e
+# Don't use set -e: we want the script to continue even if parts fail
 
 TEMP_FILE="$1"
 if [[ -z "$TEMP_FILE" || ! -f "$TEMP_FILE" ]]; then
     echo "[distill] Error: No input file provided" >&2
-    exit 1
+    exit 0  # Exit gracefully - don't fail the hook
 fi
 
 # Parse header
@@ -246,3 +246,5 @@ done <<< "$RESULT"
 store_current
 
 echo "[distill] Session $SESSION_ID: Done (+$STORED learnings, $TRIPLETS triplets)"
+
+exit 0

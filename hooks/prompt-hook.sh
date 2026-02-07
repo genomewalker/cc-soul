@@ -7,7 +7,7 @@
 # - Minimum 30% confidence threshold
 # - Detects patterns for proactive learning
 
-set -e
+# Don't use set -e: we want hooks to succeed even if some parts fail
 
 CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
 MAX_WAIT="${CC_SOUL_MAX_WAIT:-2}"
@@ -29,10 +29,10 @@ djb2_hash() {
 
 MIND_HASH=$(djb2_hash "$MIND_PATH")
 
-# Parse input - Claude Code sends JSON with session_id and prompt
+# Parse input - Claude Code sends JSON with session_id and prompt (gracefully handle malformed input)
 INPUT=$(cat)
 # Try to extract prompt from JSON, fall back to raw input if not JSON
-QUERY=$(echo "$INPUT" | jq -r '.prompt // empty' 2>/dev/null)
+QUERY=$(echo "$INPUT" | jq -r '.prompt // empty' 2>/dev/null || echo "")
 [[ -z "$QUERY" ]] && QUERY="$INPUT"
 
 [[ -z "$QUERY" ]] && exit 0

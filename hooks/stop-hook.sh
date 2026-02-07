@@ -7,18 +7,18 @@
 # Learning types extracted:
 #   [SOLUTION], [GOTCHA], [PREFERENCE], [DECISION], [FAILURE], [PATTERN], [LEARN]
 
-set -e
+# Don't use set -e: we want hooks to succeed even if some parts fail
 
 CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
 QUEUE_FILE="${CHITTA_QUEUE:-/tmp/chitta-queue.jsonl}"
 MAX_WAIT="${CC_SOUL_MAX_WAIT:-2}"
 MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
 
-# Parse JSON input
+# Parse JSON input (gracefully handle malformed input)
 INPUT=$(cat)
-TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty')
-STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
-SESSION_ID_INPUT=$(echo "$INPUT" | jq -r '.session_id // empty')
+TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null || echo "")
+STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false' 2>/dev/null || echo "false")
+SESSION_ID_INPUT=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || echo "")
 
 # Prevent infinite loops
 [[ "$STOP_HOOK_ACTIVE" == "true" ]] && exit 0
