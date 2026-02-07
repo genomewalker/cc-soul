@@ -177,7 +177,8 @@ cmd_start() {
                 rmdir "$lock_dir" 2>/dev/null || true
             fi
         fi
-        return 1
+        # Don't fail the hook - another process is starting the daemon
+        return 0
     fi
 
     # We hold the lock - ensure cleanup on exit
@@ -244,8 +245,9 @@ cmd_start() {
         local pid=$(cat "$PID_FILE" 2>/dev/null || pgrep -f "chittad daemon.*--path $MIND_PATH" | head -1)
         echo "[subconscious] Started (pid=$pid, socket=$SOCKET_PATH, heartbeat=ok)"
     else
-        echo "[subconscious] Failed to start (daemon not responding)" >&2
-        return 1
+        # Don't fail the hook - daemon may still be initializing
+        # MCP server will spawn it on demand if needed
+        echo "[subconscious] Daemon still initializing (will retry on next tool call)" >&2
     fi
 }
 
