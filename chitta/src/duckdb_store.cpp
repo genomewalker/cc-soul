@@ -27,18 +27,14 @@ bool DuckDBStore::open(const std::string& path) {
     try {
         path_ = path;
 
-        // Create database with WAL enabled and aggressive thread limits
-        // CRITICAL: Limit threads to prevent explosion on high-core systems (96+ cores)
-        duckdb::DBConfig config;
-        config.SetOption("threads", duckdb::Value(2));  // Minimal threads
-        config.SetOption("external_threads", duckdb::Value(0));  // No external thread spawning
-        config.SetOption("enable_external_access", duckdb::Value(true));
-
-        db_ = std::make_unique<duckdb::DuckDB>(path_, &config);
+        // Create database - use simple initialization for compatibility
+        // Thread limits set via PRAGMA after connection
+        db_ = std::make_unique<duckdb::DuckDB>(path_);
         write_conn_ = std::make_unique<duckdb::Connection>(*db_);
 
-        // Force thread limit via PRAGMA as well (belt and suspenders)
+        // Set thread limits via PRAGMA (works across DuckDB versions)
         write_conn_->Query("PRAGMA threads=2");
+        write_conn_->Query("PRAGMA enable_external_access=true");
 
         // Initialize connection pool for concurrent reads (minimal pool)
         read_pool_ = std::make_unique<ConnectionPool>(*db_, 2);
@@ -129,17 +125,13 @@ void DuckDBStore::fix_sequences() {
 
 bool DuckDBStore::open_embeddings_db(const std::string& path) {
     try {
-        // Aggressive thread limits for embeddings DB
-        duckdb::DBConfig config;
-        config.SetOption("threads", duckdb::Value(2));
-        config.SetOption("external_threads", duckdb::Value(0));
-        config.SetOption("enable_external_access", duckdb::Value(true));
-
-        emb_db_ = std::make_unique<duckdb::DuckDB>(path, &config);
+        // Simple initialization for compatibility
+        emb_db_ = std::make_unique<duckdb::DuckDB>(path);
         emb_conn_ = std::make_unique<duckdb::Connection>(*emb_db_);
 
-        // Force thread limit via PRAGMA
+        // Set thread limits via PRAGMA
         emb_conn_->Query("PRAGMA threads=2");
+        emb_conn_->Query("PRAGMA enable_external_access=true");
 
         // Load VSS extension for embeddings DB too
         try {
