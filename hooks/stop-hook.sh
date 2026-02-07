@@ -443,17 +443,27 @@ if [[ -n "$LAST_USER_MSG" ]]; then
     # Goal setting patterns: "I want to", "we need to", "let's build/create/implement"
     if echo "$LAST_USER_MSG" | grep -qiE "(I want to|we need to|let'?s (build|create|implement|make|ship|finish|complete)|goal is to|objective is|planning to)"; then
         goal_title=$(echo "$LAST_USER_MSG" | grep -ioE "(I want to|we need to|let'?s (build|create|implement|make|ship|finish|complete)|goal is to|objective is|planning to)[^.!?]*" | head -1 | head -c 100 | tr '\n' ' ')
-        if [[ -n "$goal_title" && ${#goal_title} -gt 10 ]]; then
-            queue_write "goal_set" "{\"title\":$(echo "$goal_title" | jq -Rs .),\"description\":$(echo "$LAST_USER_MSG" | head -c 300 | jq -Rs .)}"
+        if [[ -n "$goal_title" && ${#goal_title} -gt 10 && -S "$SOCKET_PATH" ]]; then
+            request='{"jsonrpc":"2.0","id":1,"method":"goal_set","params":{"title":'$(echo "$goal_title" | jq -Rs .)',"description":'$(echo "$LAST_USER_MSG" | head -c 300 | jq -Rs .)'}}'
+            timeout 1 echo "$request" | nc -U -N "$SOCKET_PATH" >/dev/null 2>&1 || true
             echo "[soul] +goal detected: ${goal_title:0:50}" >&2
         fi
     fi
 
     # Goal completion patterns: "done", "shipped", "released", "finished", "completed"
+    # Note: goal_progress requires goal ID, so we get the most recent active goal first
     if echo "$LAST_USER_MSG" | grep -qiE "(it'?s done|we'?re done|finished|shipped|released|completed|all done|mission accomplished|working now|tests pass|merged)"; then
-        progress_context=$(echo "$LAST_USER_MSG" | head -c 150 | tr '\n' ' ')
-        queue_write "goal_progress" "{\"update\":$(echo "$progress_context" | jq -Rs .),\"percentage\":100}"
-        echo "[soul] +goal progress: completion detected" >&2
+        if [[ -S "$SOCKET_PATH" ]]; then
+            # Get most recent active goal
+            request='{"jsonrpc":"2.0","id":1,"method":"goal_list","params":{"status":"active","limit":1}}'
+            response=$(timeout 1 echo "$request" | nc -U -N "$SOCKET_PATH" 2>/dev/null || true)
+            goal_id=$(echo "$response" | jq -r '.result.goals[0].id // empty' 2>/dev/null)
+            if [[ -n "$goal_id" ]]; then
+                request='{"jsonrpc":"2.0","id":1,"method":"goal_progress","params":{"id":'"$goal_id"',"progress":1.0}}'
+                timeout 1 echo "$request" | nc -U -N "$SOCKET_PATH" >/dev/null 2>&1 || true
+                echo "[soul] +goal progress: $goal_id -> 100%" >&2
+            fi
+        fi
     fi
 fi
 
@@ -463,11 +473,16 @@ fi
 # Check if response contains resolution patterns
 if echo "$RESPONSE" | grep -qiE "(I found|the answer is|it turns out|the reason is|figured out|discovered that|realized that|the issue was|the problem was|the solution is|turns out|mystery solved)"; then
     resolution_context=$(echo "$RESPONSE" | grep -iE "(I found|the answer is|it turns out|the reason is|figured out|discovered|realized|the issue was|the problem was|the solution is)" | head -1 | head -c 300 | tr '\n' ' ')
-    if [[ -n "$resolution_context" && ${#resolution_context} -gt 20 ]]; then
-        # Get most recent unresolved gap and resolve it
-        # Use queue to call curiosity_resolve with the resolution
-        queue_write "curiosity_resolve" "{\"resolution\":$(echo "$resolution_context" | jq -Rs .)}"
-        echo "[soul] +curiosity resolved: ${resolution_context:0:50}" >&2
+    if [[ -n "$resolution_context" && ${#resolution_context} -gt 20 && -S "$SOCKET_PATH" ]]; then
+        # Get most recent unresolved curiosity gap
+        request='{"jsonrpc":"2.0","id":1,"method":"curiosity_gaps","params":{"limit":1}}'
+        response=$(timeout 1 echo "$request" | nc -U -N "$SOCKET_PATH" 2>/dev/null || true)
+        gap_id=$(echo "$response" | jq -r '.result.gaps[0].id // empty' 2>/dev/null)
+        if [[ -n "$gap_id" ]]; then
+            request='{"jsonrpc":"2.0","id":1,"method":"curiosity_resolve","params":{"id":'"$gap_id"',"learned":'$(echo "$resolution_context" | jq -Rs .)'}}'
+            timeout 1 echo "$request" | nc -U -N "$SOCKET_PATH" >/dev/null 2>&1 || true
+            echo "[soul] +curiosity resolved: gap $gap_id" >&2
+        fi
     fi
 fi
 
