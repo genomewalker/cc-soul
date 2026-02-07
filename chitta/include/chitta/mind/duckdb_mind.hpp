@@ -19,7 +19,9 @@
 #include "types.hpp"
 #include "../types.hpp"
 #include "../rpc/types.hpp"
+#ifdef CHITTA_WITH_ONNX
 #include "../vak_onnx.hpp"
+#endif
 #include <memory>
 #include <shared_mutex>
 #include <optional>
