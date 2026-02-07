@@ -294,6 +294,7 @@ install_hooks() {
         stop-hook.sh
         pre-compact-hook.sh
         pre-tool-hook.sh
+        post-bash-hook.sh
         log-bash-history.sh
     )
 
