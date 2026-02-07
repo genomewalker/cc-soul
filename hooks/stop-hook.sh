@@ -391,17 +391,51 @@ fi
 # Clean up temp files
 rm -f "$MIND_PATH/.last_user_message" "$PREDICTIONS_FILE" "$DEDUP_FILE" 2>/dev/null
 
-# Ledger save → queue (fire-and-forget)
-# Extract active files from transcript (file_path fields from tool calls)
+# ===========================================
+# LEDGER: Rich session checkpoint for continuity
+# ===========================================
+SESSION_ID="${SESSION_ID_INPUT:-auto-$(date +%Y%m%d-%H%M%S)}"
+TURNS=$(jq '[.[] | select(.role=="assistant")] | length' "$TRANSCRIPT_PATH" 2>/dev/null || echo "?")
+
+# Extract active files from tool calls
 ACTIVE_FILES=$(jq -r '[.[] | select(.role=="assistant") | .message.content[]? | select(.type=="tool_use") | .input.file_path // .input.path // empty] | unique | map(select(. != ""))' "$TRANSCRIPT_PATH" 2>/dev/null || echo "[]")
 [[ -z "$ACTIVE_FILES" || "$ACTIVE_FILES" == "null" ]] && ACTIVE_FILES="[]"
 
-SESSION_ID="${SESSION_ID_INPUT:-auto-$(date +%Y%m%d-%H%M%S)}"
+# Extract tools used
+TOOLS_USED=$(jq -r '[.[] | select(.role=="assistant") | .message.content[]? | select(.type=="tool_use") | .name] | unique | join(", ")' "$TRANSCRIPT_PATH" 2>/dev/null | head -c 200)
 
-# Detect mood
+# Extract assistant text for marker detection
+ASSISTANT_TEXT=$(jq -r '.[] | select(.role=="assistant") | .message.content[]? | select(.type=="text") | .text' "$TRANSCRIPT_PATH" 2>/dev/null | tail -5000)
+
+# Extract typed markers
+DECISIONS="[]"
+DECISIONS_RAW=$(echo "$ASSISTANT_TEXT" | grep -oE '\[DECISION\].*$' | sed 's/\[DECISION\]\s*//' | head -10)
+[[ -n "$DECISIONS_RAW" ]] && DECISIONS=$(echo "$DECISIONS_RAW" | jq -R . | jq -s .)
+
+BLOCKERS="[]"
+BLOCKERS_RAW=$(echo "$ASSISTANT_TEXT" | grep -oE '\[BLOCKER\].*$' | sed 's/\[BLOCKER\]\s*//' | head -5)
+[[ -n "$BLOCKERS_RAW" ]] && BLOCKERS=$(echo "$BLOCKERS_RAW" | jq -R . | jq -s .)
+
+DISCOVERIES="[]"
+DISCOVERIES_RAW=$(echo "$ASSISTANT_TEXT" | grep -oE '\[(SOLUTION|GOTCHA)\].*$' | head -10)
+[[ -n "$DISCOVERIES_RAW" ]] && DISCOVERIES=$(echo "$DISCOVERIES_RAW" | jq -R . | jq -s .)
+
+# Extract pending tasks from transcript
+TODOS="[]"
+TASK_INFO=$(grep -oE '"subject"\s*:\s*"[^"]*".*"status"\s*:\s*"(pending|in_progress)"' "$TRANSCRIPT_PATH" 2>/dev/null | head -5 || true)
+if [[ -n "$TASK_INFO" ]]; then
+    TODOS=$(echo "$TASK_INFO" | while read -r line; do
+        subj=$(echo "$line" | grep -oE '"subject"\s*:\s*"[^"]*"' | sed 's/"subject"\s*:\s*"//' | sed 's/"$//')
+        stat=$(echo "$line" | grep -oE '"status"\s*:\s*"[^"]*"' | sed 's/"status"\s*:\s*"//' | sed 's/"$//')
+        echo "{\"content\":\"$subj\",\"status\":\"$stat\"}"
+    done | jq -s .)
+    [[ -z "$TODOS" || "$TODOS" == "null" ]] && TODOS="[]"
+fi
+
+# Detect mood from session content
 if echo "$RESPONSE" | grep -qiE '(error|failed|bug|stuck)'; then
     mood="debugging"
-elif echo "$RESPONSE" | grep -qiE '(complete|done|finished|success)'; then
+elif echo "$RESPONSE" | grep -qiE '(complete|done|finished|shipped|success)'; then
     mood="confident"
 elif [[ $LEARNED -gt 0 ]]; then
     mood="learning"
@@ -409,32 +443,48 @@ else
     mood="working"
 fi
 
-snapshot=$(echo "$RESPONSE" | grep -v '^$' | grep -v '^\[' | head -1 | head -c 200)
-[[ -z "$snapshot" ]] && snapshot=$(echo "$RESPONSE" | head -1 | head -c 200)
+# Build snapshot: last meaningful assistant text (not just first line)
+snapshot=$(echo "$ASSISTANT_TEXT" | grep -v '^$' | tail -20 | head -c 1000)
+[[ -z "$snapshot" ]] && snapshot=$(echo "$RESPONSE" | head -3 | head -c 300)
 
-# ===========================================
-# SESSION SUMMARY: Capture narrative for continuity
-# ===========================================
-# Extract key actions from transcript (tool uses + outcomes)
-TOOLS_USED=$(jq -r '[.[] | select(.role=="assistant") | .message.content[]? | select(.type=="tool_use") | .name] | unique | join(", ")' "$TRANSCRIPT_PATH" 2>/dev/null | head -c 200)
-TURNS=$(jq '[.[] | select(.role=="assistant")] | length' "$TRANSCRIPT_PATH" 2>/dev/null || echo "?")
-
-# Quality gate: minimum 3 turns for session summary (avoid trivial session noise)
+# Quality gate: minimum 3 turns for session summary
 if [[ "$TURNS" =~ ^[0-9]+$ && "$TURNS" -ge 3 ]]; then
-    # Build SSL summary
     SUMMARY="[session:$SESSION_ID] ${mood}→${TURNS} turns"
     [[ -n "$TOOLS_USED" ]] && SUMMARY="$SUMMARY | tools: ${TOOLS_USED:0:100}"
-    [[ -n "$snapshot" ]] && SUMMARY="$SUMMARY | ${snapshot:0:100}"
-
-    # Queue session summary memory
     queue_write "observe" "{\"category\":\"session_summary\",\"title\":\"Session $SESSION_ID\",\"content\":$(echo "$SUMMARY" | jq -Rs .)}"
     echo "[soul] +session-summary: ${SUMMARY:0:60}" >&2
 else
     echo "[soul] skip session-summary: too few turns ($TURNS<3)" >&2
 fi
 
-queue_write "ledger_save" "{\"session_id\":\"$SESSION_ID\",\"project\":\"$REALM\",\"mood\":\"$mood\",\"snapshot\":$(echo "$snapshot" | jq -Rs .),\"active_files\":$ACTIVE_FILES}"
-echo "[ledger] queued: $SESSION_ID ($mood, +$LEARNED, files: $(echo "$ACTIVE_FILES" | jq -r 'length'))" >&2
+# Build rich ledger entry
+LEDGER_ARGS=$(jq -n \
+    --arg session_id "$SESSION_ID" \
+    --arg project "$REALM" \
+    --arg mood "$mood" \
+    --argjson active_files "$ACTIVE_FILES" \
+    --argjson decisions "$DECISIONS" \
+    --argjson todos "$TODOS" \
+    --argjson blockers "$BLOCKERS" \
+    --argjson discoveries "$DISCOVERIES" \
+    --arg snapshot "$snapshot" \
+    '{
+        session_id: $session_id,
+        project: $project,
+        mood: $mood,
+        active_files: $active_files,
+        decisions: $decisions,
+        todos: $todos,
+        blockers: $blockers,
+        discoveries: $discoveries,
+        snapshot: $snapshot
+    }')
+
+queue_write "ledger_save" "$LEDGER_ARGS"
+file_count=$(echo "$ACTIVE_FILES" | jq 'length')
+decision_count=$(echo "$DECISIONS" | jq 'length')
+todo_count=$(echo "$TODOS" | jq 'length')
+echo "[ledger] queued: $SESSION_ID ($mood, files=$file_count decisions=$decision_count todos=$todo_count)" >&2
 
 # ===========================================
 # GOAL DETECTION: Detect goal setting and progress patterns
