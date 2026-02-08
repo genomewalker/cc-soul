@@ -33,7 +33,7 @@ CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
 
 # Ensure daemon is running (required for indexing)
 if [[ ! -S "$SOCKET" ]]; then
-    exit 0  # Daemon not running, let simple-hook.sh handle it
+    exit 0  # Daemon not running, let session-start-hook.sh handle it
 fi
 
 # Check if we're in a git repo

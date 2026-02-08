@@ -87,10 +87,10 @@
 [TRIPLET] attractor_dampener updates confidence
 
 # Hook System
-[cc-soul] soul-hook.sh→session lifecycle→start/end/prompt/pre-compact @scripts/soul-hook.sh:1
-[high-ε] Manages session state, injects context, saves ledger.
-[TRIPLET] soul-hook handles SessionStart
-[TRIPLET] soul-hook handles SessionEnd
+[cc-soul] hooks/*→session lifecycle→start/end/prompt/pre-compact @hooks/
+[high-ε] Manages session state, injects context, saves ledger via individual hook scripts.
+[TRIPLET] session-start-hook handles SessionStart
+[TRIPLET] stop-hook handles Stop
 
 [cc-soul] stop-hook.sh→learning extraction→[LEARN] markers @scripts/stop-hook.sh:1
 [high-ε] Parses assistant response for SSL patterns, stores as wisdom/triplets.

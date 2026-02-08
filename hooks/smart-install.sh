@@ -188,8 +188,8 @@ download_models() {
     echo "[cc-soul] Downloading embedding model..."
     mkdir -p "$MODELS_DIR"
 
-    local model_url="https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx"
-    local vocab_url="https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/vocab.txt"
+    local model_url="https://huggingface.co/BAAI/bge-base-en-v1.5/resolve/main/onnx/model.onnx"
+    local vocab_url="https://huggingface.co/BAAI/bge-base-en-v1.5/resolve/main/vocab.txt"
 
     if ! download "$model_url" "$MODELS_DIR/model.onnx"; then
         echo "[cc-soul] WARNING: Could not download model.onnx" >&2
