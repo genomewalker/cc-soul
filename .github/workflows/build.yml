@@ -119,12 +119,13 @@ jobs:
           import shutil
           import os
 
+          # bge-base-en-v1.5: 768 dimensions, 110M params
           model_path = hf_hub_download(
-              repo_id='sentence-transformers/all-MiniLM-L6-v2',
+              repo_id='BAAI/bge-base-en-v1.5',
               filename='onnx/model.onnx'
           )
           vocab_path = hf_hub_download(
-              repo_id='sentence-transformers/all-MiniLM-L6-v2',
+              repo_id='BAAI/bge-base-en-v1.5',
               filename='vocab.txt'
           )
 

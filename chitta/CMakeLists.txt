@@ -368,6 +368,21 @@ if(CHITTA_WITH_ONNX)
         if(NOT ONNXRUNTIME_LIB_DIR)
             set(ONNXRUNTIME_LIB_DIR "" CACHE PATH "ONNX Runtime library directory")
         endif()
+    else()
+        # User provided both dirs via -D flags, find the library
+        message(STATUS "ONNX Runtime: using user-provided paths")
+        message(STATUS "  Include: ${ONNXRUNTIME_INCLUDE_DIR}")
+        message(STATUS "  Lib dir: ${ONNXRUNTIME_LIB_DIR}")
+        find_library(ONNXRUNTIME_LIBRARY
+            NAMES onnxruntime
+            HINTS ${ONNXRUNTIME_LIB_DIR}
+            NO_DEFAULT_PATH
+        )
+        if(ONNXRUNTIME_LIBRARY)
+            message(STATUS "  Library: ${ONNXRUNTIME_LIBRARY}")
+        else()
+            message(WARNING "ONNX Runtime library not found in ${ONNXRUNTIME_LIB_DIR}")
+        endif()
     endif()
 
     # Create imported target if found

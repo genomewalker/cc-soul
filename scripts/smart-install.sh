@@ -116,6 +116,69 @@ download_binaries() {
     return 1
 }
 
+# Detect ONNX Runtime location
+detect_onnx_runtime() {
+    local include_dir=""
+    local lib_dir=""
+
+    # 1. Check CONDA_PREFIX (active conda environment)
+    if [[ -n "$CONDA_PREFIX" ]]; then
+        if [[ -f "$CONDA_PREFIX/lib/libonnxruntime.so" || -f "$CONDA_PREFIX/lib/libonnxruntime.dylib" ]]; then
+            lib_dir="$CONDA_PREFIX/lib"
+            # Check for nested include structure
+            if [[ -d "$CONDA_PREFIX/include/onnxruntime/core/session" ]]; then
+                include_dir="$CONDA_PREFIX/include/onnxruntime/core/session"
+            elif [[ -f "$CONDA_PREFIX/include/onnxruntime_cxx_api.h" ]]; then
+                include_dir="$CONDA_PREFIX/include"
+            fi
+        fi
+    fi
+
+    # 2. Check ~/.claude/deps/onnxruntime (dedicated install)
+    if [[ -z "$lib_dir" && -d "$HOME/.claude/deps/onnxruntime" ]]; then
+        local ort_dir="$HOME/.claude/deps/onnxruntime"
+        if [[ -f "$ort_dir/lib/libonnxruntime.so" || -f "$ort_dir/lib/libonnxruntime.dylib" ]]; then
+            lib_dir="$ort_dir/lib"
+            if [[ -d "$ort_dir/include/onnxruntime/core/session" ]]; then
+                include_dir="$ort_dir/include/onnxruntime/core/session"
+            elif [[ -f "$ort_dir/include/onnxruntime_cxx_api.h" ]]; then
+                include_dir="$ort_dir/include"
+            fi
+        fi
+    fi
+
+    # 3. Check pip install location
+    if [[ -z "$lib_dir" ]]; then
+        local pip_ort=$(python3 -c "import onnxruntime; print(onnxruntime.__file__)" 2>/dev/null | xargs dirname 2>/dev/null || true)
+        if [[ -n "$pip_ort" && -d "$pip_ort/capi" ]]; then
+            if [[ -f "$pip_ort/capi/libonnxruntime.so" || -f "$pip_ort/capi/libonnxruntime.dylib" ]]; then
+                lib_dir="$pip_ort/capi"
+                include_dir="$pip_ort/capi/include"
+            fi
+        fi
+    fi
+
+    # 4. macOS: Check Homebrew
+    if [[ -z "$lib_dir" && "$(uname -s)" == "Darwin" ]]; then
+        local brew_prefix=$(brew --prefix onnxruntime 2>/dev/null || true)
+        if [[ -n "$brew_prefix" && -d "$brew_prefix/lib" ]]; then
+            lib_dir="$brew_prefix/lib"
+            if [[ -d "$brew_prefix/include/onnxruntime/core/session" ]]; then
+                include_dir="$brew_prefix/include/onnxruntime/core/session"
+            elif [[ -f "$brew_prefix/include/onnxruntime_cxx_api.h" ]]; then
+                include_dir="$brew_prefix/include"
+            fi
+        fi
+    fi
+
+    # Return results
+    if [[ -n "$lib_dir" && -n "$include_dir" ]]; then
+        echo "$include_dir|$lib_dir"
+        return 0
+    fi
+    return 1
+}
+
 # Build from source
 build_from_source() {
     echo "[cc-soul] Building from source..."
@@ -139,9 +202,24 @@ build_from_source() {
     mkdir -p "$BUILD_DIR"
     cd "$BUILD_DIR"
 
+    # Detect ONNX Runtime for embeddings
+    local cmake_args="-DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS= -DCMAKE_C_FLAGS="
+    local onnx_info
+    if onnx_info=$(detect_onnx_runtime); then
+        local onnx_include="${onnx_info%%|*}"
+        local onnx_lib="${onnx_info##*|}"
+        echo "[cc-soul] Found ONNX Runtime: $onnx_lib"
+        cmake_args="$cmake_args -DONNXRUNTIME_INCLUDE_DIR=$onnx_include -DONNXRUNTIME_LIB_DIR=$onnx_lib"
+        # Set RPATH so binary finds libs at runtime without LD_LIBRARY_PATH
+        cmake_args="$cmake_args -DCMAKE_INSTALL_RPATH=$onnx_lib"
+        cmake_args="$cmake_args -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON"
+    else
+        echo "[cc-soul] WARNING: ONNX Runtime not found, embeddings will be disabled"
+        echo "[cc-soul]   Install via: conda install onnxruntime-cpp, pip install onnxruntime, or brew install onnxruntime"
+    fi
+
     # Configure - show errors now for debugging
-    # Explicitly clear ASAN flags for release builds
-    if ! cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="" -DCMAKE_C_FLAGS="" 2>&1 | tail -5; then
+    if ! cmake .. $cmake_args 2>&1 | tail -10; then
         echo "[cc-soul] ERROR: cmake configuration failed" >&2
         return 1
     fi
@@ -483,7 +561,30 @@ main() {
     fi
 
     if $need_binaries; then
-        if [[ "$platform" != "unknown" ]]; then
+        # Check if ONNX Runtime is available locally
+        # Pre-built binaries DON'T include ONNX, so build from source when possible
+        local has_local_onnx=false
+        if detect_onnx_runtime >/dev/null 2>&1; then
+            has_local_onnx=true
+        fi
+
+        if $has_local_onnx; then
+            # ONNX available: build from source to get embeddings support
+            echo "[cc-soul] ONNX Runtime detected, building from source for embedding support..."
+            build_from_source || {
+                echo "[cc-soul] WARNING: Source build failed, trying pre-built (no embeddings)"
+                if [[ "$platform" != "unknown" ]]; then
+                    download_binaries "$current_version" "$platform" || {
+                        echo "[cc-soul] ERROR: Installation failed" >&2
+                        exit 1
+                    }
+                else
+                    echo "[cc-soul] ERROR: No pre-built binaries for this platform" >&2
+                    exit 1
+                fi
+            }
+        elif [[ "$platform" != "unknown" ]]; then
+            # No local ONNX: try pre-built first (faster), then source
             download_binaries "$current_version" "$platform" || build_from_source || {
                 echo "[cc-soul] ERROR: Installation failed" >&2
                 exit 1
