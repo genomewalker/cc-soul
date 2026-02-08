@@ -1,7 +1,7 @@
 {
   "name": "cc-soul",
-  "description": "Persistent identity for Claude Code. Wisdom, beliefs, failures, and continuity across sessions.",
-  "version": "3.35.12",
+  "description": "Persistent memory and code intelligence for Claude Code. Claude learns your preferences, remembers your codebase, anticipates your needs, and gets smarter over time. 150+ tools. Local-first. Zero configuration.",
+  "version": "3.36.0",
   "author": {
     "name": "Antonio Fernandez-Guerra",
     "url": "https://github.com/genomewalker"
@@ -10,6 +10,11 @@
   "license": "MIT",
   "keywords": [
     "memory",
+    "persistence",
+    "code-intelligence",
+    "mcp",
+    "local-first",
+    "learning",
     "identity",
     "wisdom",
     "continuity",

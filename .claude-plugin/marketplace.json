@@ -1,6 +1,6 @@
 {
   "name": "genomewalker-cc-soul",
-  "description": "Persistent identity and memory for Claude Code",
+  "description": "Persistent memory and code intelligence for Claude Code. Claude learns your preferences, remembers your codebase, anticipates your needs, and gets smarter over time. 150+ tools. Local-first. Zero configuration.",
   "owner": {
     "name": "Antonio Fernandez-Guerra"
   },
@@ -8,7 +8,7 @@
     {
       "name": "cc-soul",
       "source": "./",
-      "description": "Persistent identity for Claude Code. Wisdom, beliefs, failures, and continuity across sessions.",
+      "description": "Persistent memory and code intelligence for Claude Code. Claude learns your preferences, remembers your codebase, anticipates your needs, and gets smarter over time. 150+ tools. Local-first. Zero configuration.",
       "skills": [
         "./skills/antahkarana",
         "./skills/cc-soul-daemon",

@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>cc-soul — The soul persists</title>
-<meta name="description" content="Persistent identity for Claude Code. Memory that decays, deepens, and distills across sessions. Grounded in Vedantic philosophy.">
+<title>cc-soul — Persistent memory for Claude Code</title>
+<meta name="description" content="Claude Code that learns how you work. Persistent memory, code intelligence, and workflow adaptation across every session. Local-first. 150+ tools. Zero configuration.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
@@ -1252,9 +1252,9 @@ section {
     <div class="hero-ring"></div>
   </div>
   <div class="hero-content">
-    <h1 class="hero-title heading-display">The soul persists.</h1>
-    <p class="hero-subtitle">cc-soul gives Claude Code a persistent identity&thinsp;&mdash;&thinsp;memory that decays, deepens, and distills across sessions.</p>
-    <p class="hero-aside">Not a database. A relationship.</p>
+    <h1 class="hero-title heading-display">Claude Code that learns how you work.</h1>
+    <p class="hero-subtitle">Persistent memory, code intelligence, and workflow adaptation across every session. Local-first. 150+ tools. Zero configuration.</p>
+    <p class="hero-aside">Install in 10 seconds. See the difference in your first conversation.</p>
     <div class="hero-ctas">
       <a href="getting-started.html" class="btn btn-primary">Get started</a>
       <a href="tools.html" class="btn btn-outline">Explore the tools</a>
@@ -1270,6 +1270,22 @@ section {
       <div class="quickstart-code">claude /install genomewalker/cc-soul</div>
       <p class="quickstart-note">Restart Claude Code. The soul awakens.</p>
       <a href="getting-started.html" class="quickstart-link">Full setup guide &rarr;</a>
+    </div>
+  </div>
+</section>
+
+<!-- WHAT'S NEW 3.36 -->
+<section class="why" id="whats-new" style="padding: var(--space-6) 0; border-bottom: 1px solid rgba(203, 175, 134, 0.06);">
+  <div class="container">
+    <div class="reveal" style="background: linear-gradient(135deg, rgba(212, 106, 76, 0.08) 0%, rgba(157, 178, 217, 0.08) 100%); border: 1px solid rgba(212, 106, 76, 0.2); border-radius: var(--radius-md); padding: var(--space-5) var(--space-6);">
+      <div style="display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3);">
+        <span style="font-family: var(--font-mono); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.1em; color: var(--ember-400);">New in v3.36</span>
+      </div>
+      <p style="font-family: var(--font-display); font-size: var(--text-xl); color: var(--lotus-200); margin-bottom: var(--space-2);">Native MCP tools and intelligent memory</p>
+      <p style="font-size: var(--text-sm); color: var(--ash-300); line-height: 1.7;">
+        Direct MCP tool access without CLI overhead. Smart context injection that understands what you're working on.
+        <a href="https://github.com/genomewalker/cc-soul/releases" style="color: var(--sandal-300);">See release notes &rarr;</a>
+      </p>
     </div>
   </div>
 </section>
@@ -1306,48 +1322,52 @@ section {
 
     <div class="vignettes-grid">
       <div class="vignette-card reveal reveal-delay-1">
-        <span class="vignette-prompt">&gt; </span>You type <span class="vignette-highlight">realm_detect</span> and it reminds you to set <span class="vignette-highlight">CHITTA_BIN</span>&thinsp;&mdash;&thinsp;the same trap from last week.
+        <span class="vignette-prompt">&gt; </span>You ask about <span class="vignette-highlight">auth</span> and Claude surfaces that you chose JWT over sessions two weeks ago&thinsp;&mdash;&thinsp;with the reasoning you gave at the time.
       </div>
       <div class="vignette-card reveal reveal-delay-2">
-        <span class="vignette-prompt">&gt; </span>You mention <span class="vignette-highlight">release</span> and it surfaces <span class="vignette-highlight">./scripts/release.sh patch|minor|major</span> with your exact cadence.
+        <span class="vignette-prompt">&gt; </span>You start <span class="vignette-highlight">debugging</span> and Claude says &ldquo;last time this happened, it was the connection pool&rdquo;&thinsp;&mdash;&thinsp;because it remembers.
       </div>
       <div class="vignette-card reveal reveal-delay-3">
-        <span class="vignette-prompt">&gt; </span>You ask <span class="vignette-highlight">where&rsquo;s Mind.hpp?</span> and it recalls the last commit you touched it in, then offers the path.
+        <span class="vignette-prompt">&gt; </span>You run <span class="vignette-highlight">build</span> and Claude reminds you to lint first&thinsp;&mdash;&thinsp;because you always do, and it learned that.
       </div>
     </div>
   </div>
 </section>
 
-<!-- PHILOSOPHY BRIDGE -->
-<section class="bridge" id="philosophy">
+<!-- COMPARISON -->
+<section class="bridge" id="comparison">
   <div class="container">
     <div class="bridge-header reveal">
       <div class="section-divider"></div>
-      <h2 class="heading-section">Vedantic roots, operational code.</h2>
-      <p class="bridge-subtext">Sanskrit concepts map to system behaviors. Philosophy isn't decoration&thinsp;&mdash;&thinsp;it's architecture.</p>
+      <h2 class="heading-section">What makes cc-soul different?</h2>
+      <p class="bridge-subtext">Most memory systems store text. cc-soul learns how you think.</p>
     </div>
 
-    <div class="mapping-grid reveal reveal-delay-1">
-      <a href="philosophy.html#chitta" class="mapping-row">
-        <span class="mapping-sanskrit">चित्त <span class="mapping-transliteration">Chitta</span></span>
-        <span class="mapping-system">Memory store &mdash; the persistent mind that carries forward</span>
-      </a>
-      <a href="philosophy.html#anitya" class="mapping-row">
-        <span class="mapping-sanskrit">अनित्य <span class="mapping-transliteration">Anitya</span></span>
-        <span class="mapping-system">Impermanence &mdash; decay curves ensure only valuable memories persist</span>
-      </a>
-      <a href="philosophy.html#samskara" class="mapping-row">
-        <span class="mapping-sanskrit">संस्कार <span class="mapping-transliteration">Saṃskāra</span></span>
-        <span class="mapping-system">Impressions &mdash; repeated use strengthens, neglect weakens</span>
-      </a>
-      <a href="philosophy.html#pratyabhijna" class="mapping-row">
-        <span class="mapping-sanskrit">प्रत्यभिज्ञा <span class="mapping-transliteration">Pratyabhijñā</span></span>
-        <span class="mapping-system">Recognition &mdash; resonance-based recall when context aligns</span>
-      </a>
+    <div class="reveal reveal-delay-1" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: var(--space-5); max-width: 800px;">
+      <div style="background: rgba(157, 178, 217, 0.06); border: 1px solid rgba(157, 178, 217, 0.12); border-radius: var(--radius-md); padding: var(--space-5);">
+        <h3 style="font-family: var(--font-display); font-size: var(--text-lg); color: var(--lotus-200); margin-bottom: var(--space-4);">Simple Memory</h3>
+        <ul style="list-style: none; font-size: var(--text-sm); color: var(--ash-300); line-height: 2;">
+          <li style="opacity: 0.6;">Stores everything forever</li>
+          <li style="opacity: 0.6;">Keyword search only</li>
+          <li style="opacity: 0.6;">Same importance for all items</li>
+          <li style="opacity: 0.6;">No pattern recognition</li>
+          <li style="opacity: 0.6;">Manual organization required</li>
+        </ul>
+      </div>
+      <div style="background: rgba(212, 106, 76, 0.08); border: 1px solid rgba(212, 106, 76, 0.2); border-radius: var(--radius-md); padding: var(--space-5);">
+        <h3 style="font-family: var(--font-display); font-size: var(--text-lg); color: var(--lotus-200); margin-bottom: var(--space-4);">cc-soul</h3>
+        <ul style="list-style: none; font-size: var(--text-sm); color: var(--ash-300); line-height: 2;">
+          <li><span style="color: var(--ember-400);">&#10003;</span> Important memories strengthen, noise fades</li>
+          <li><span style="color: var(--ember-400);">&#10003;</span> Semantic search understands meaning</li>
+          <li><span style="color: var(--ember-400);">&#10003;</span> Confidence tracking per memory</li>
+          <li><span style="color: var(--ember-400);">&#10003;</span> Learns habits and anticipates needs</li>
+          <li><span style="color: var(--ember-400);">&#10003;</span> Self-organizing theme clusters</li>
+        </ul>
+      </div>
     </div>
 
-    <p class="bridge-link reveal reveal-delay-2">
-      <a href="philosophy.html">Explore all 13 concepts &rarr;</a>
+    <p class="bridge-link reveal reveal-delay-2" style="margin-top: var(--space-6);">
+      <a href="philosophy.html">Explore the philosophy behind it &rarr;</a>
     </p>
   </div>
 </section>
@@ -1369,8 +1389,8 @@ section {
             <circle cx="18" cy="18" r="17" stroke="#CBAF86" stroke-width="0.5" opacity="0.2"/>
           </svg>
         </div>
-        <h3 class="card-title">Semantic Anchoring</h3>
-        <p class="card-desc">768-dimensional embeddings anchor meaning in a stable latent space. Every memory has a position in semantic geometry.</p>
+        <h3 class="card-title">Understands Meaning, Not Keywords</h3>
+        <p class="card-desc">Finds what you meant, not just what you typed. Semantic embeddings anchor meaning so related concepts surface together.</p>
       </div>
 
       <div class="feature-card reveal reveal-delay-2">
@@ -1381,8 +1401,8 @@ section {
             <circle cx="24" cy="8" r="2" fill="#9DB2D9" opacity="0.6"/>
           </svg>
         </div>
-        <h3 class="card-title">Bayesian Confidence</h3>
-        <p class="card-desc">Tracks uncertainty and calibrates recall strength over time. A belief with two observations differs from one with a hundred.</p>
+        <h3 class="card-title">Knows What It's Sure About</h3>
+        <p class="card-desc">Tracks certainty over time. Memories you reinforce stay strong. Things you mention once fade naturally.</p>
       </div>
 
       <div class="feature-card reveal reveal-delay-3">
@@ -1396,8 +1416,8 @@ section {
             <line x1="23" y1="16.5" x2="19" y2="22" stroke="#D46A4C" stroke-width="0.75" opacity="0.4"/>
           </svg>
         </div>
-        <h3 class="card-title">Resonance Engine</h3>
-        <p class="card-desc">Spreading activation, attractor dynamics, and Hebbian learning surface what matters. Not search&thinsp;&mdash;&thinsp;resonance.</p>
+        <h3 class="card-title">Finds What Matters</h3>
+        <p class="card-desc">Connected ideas activate together. Context flows through the knowledge graph to surface exactly what's relevant right now.</p>
       </div>
 
       <div class="feature-card reveal reveal-delay-1">
@@ -1411,8 +1431,8 @@ section {
             <circle cx="12" cy="24.5" r="1.5" fill="#9DB2D9" opacity="0.2"/>
           </svg>
         </div>
-        <h3 class="card-title">DuckDB Engine</h3>
-        <p class="card-desc">Single embedded database with HNSW vector search, BM25 full-text, graph queries, and MVCC concurrency&thinsp;&mdash;&thinsp;no tiers, no complexity.</p>
+        <h3 class="card-title">Everything in One Place</h3>
+        <p class="card-desc">Single embedded database. No external services. Your memories stay on your machine, searchable in milliseconds.</p>
       </div>
 
       <div class="feature-card reveal reveal-delay-2">
@@ -1422,8 +1442,8 @@ section {
             <path d="M8 26 L14 18 L20 22 L28 10 L28 26 Z" fill="#CBAF86" opacity="0.06"/>
           </svg>
         </div>
-        <h3 class="card-title">SSL Compression</h3>
-        <p class="card-desc">Soul Semantic Language&thinsp;&mdash;&thinsp;a compact format that preserves meaning and drops noise. Up to 95% token reduction.</p>
+        <h3 class="card-title">Token-Efficient Storage</h3>
+        <p class="card-desc">Memories compress to essential meaning. Up to 95% smaller than raw text, so more context fits in every conversation.</p>
       </div>
 
       <div class="feature-card reveal reveal-delay-3">
@@ -1434,8 +1454,8 @@ section {
             <circle cx="18" cy="18" r="2" fill="#D46A4C" opacity="0.5"/>
           </svg>
         </div>
-        <h3 class="card-title">Subconscious Processing</h3>
-        <p class="card-desc">Background distillation, decay, and strengthening while idle. The daemon works so the session doesn't have to.</p>
+        <h3 class="card-title">Works While You're Away</h3>
+        <p class="card-desc">Background processing strengthens important memories and lets noise fade. The daemon learns even between sessions.</p>
       </div>
 
       <div class="feature-card reveal reveal-delay-1">
@@ -1447,8 +1467,8 @@ section {
             <circle cx="18" cy="12" r="1.5" fill="#9DB2D9" opacity="0.6"/>
           </svg>
         </div>
-        <h3 class="card-title">Habits &amp; Anticipation</h3>
-        <p class="card-desc">Learns &ldquo;when X happens, do Y&rdquo; patterns from repeated behavior. Predicts your next actions and suggests approaches before you ask&thinsp;&mdash;&thinsp;proactive, not reactive.</p>
+        <h3 class="card-title">Learns Your Patterns</h3>
+        <p class="card-desc">Notices your workflows. If you always lint before commit, it learns that. Suggests what you'll need before you ask.</p>
       </div>
 
       <div class="feature-card reveal reveal-delay-2">
@@ -1462,8 +1482,40 @@ section {
             <circle cx="24" cy="28" r="1.5" fill="#CBAF86" opacity="0.35"/>
           </svg>
         </div>
-        <h3 class="card-title">Goals &amp; Narrative</h3>
-        <p class="card-desc">Tracks long-term objectives with milestones. Detects work mode&thinsp;&mdash;&thinsp;orienting, debugging, flow&thinsp;&mdash;&thinsp;and adapts behavior accordingly. Celebrates when you ship.</p>
+        <h3 class="card-title">Tracks What You're Building</h3>
+        <p class="card-desc">Knows your goals and milestones. Adapts to your work mode&thinsp;&mdash;&thinsp;quiet in flow state, helpful when you're stuck.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- BY THE NUMBERS -->
+<section class="why" id="numbers" style="border-top: 1px solid rgba(203, 175, 134, 0.06);">
+  <div class="container">
+    <div class="reveal" style="text-align: center; margin-bottom: var(--space-7);">
+      <div class="section-divider" style="margin: 0 auto var(--space-5);"></div>
+      <h2 class="heading-section">By the numbers.</h2>
+    </div>
+    <div class="reveal reveal-delay-1" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: var(--space-5); text-align: center;">
+      <div>
+        <span style="font-family: var(--font-display); font-size: var(--text-3xl); color: var(--sandal-300); font-weight: 500;">150+</span>
+        <p style="font-size: var(--text-sm); color: var(--ash-300); margin-top: var(--space-2);">MCP tools</p>
+      </div>
+      <div>
+        <span style="font-family: var(--font-display); font-size: var(--text-3xl); color: var(--aura-300); font-weight: 500;">300ms</span>
+        <p style="font-size: var(--text-sm); color: var(--ash-300); margin-top: var(--space-2);">Avg latency</p>
+      </div>
+      <div>
+        <span style="font-family: var(--font-display); font-size: var(--text-3xl); color: var(--ember-400); font-weight: 500;">768</span>
+        <p style="font-size: var(--text-sm); color: var(--ash-300); margin-top: var(--space-2);">Dimensions</p>
+      </div>
+      <div>
+        <span style="font-family: var(--font-display); font-size: var(--text-3xl); color: var(--sandal-300); font-weight: 500;">9</span>
+        <p style="font-size: var(--text-sm); color: var(--ash-300); margin-top: var(--space-2);">Languages</p>
+      </div>
+      <div>
+        <span style="font-family: var(--font-display); font-size: var(--text-3xl); color: var(--aura-300); font-weight: 500;">23</span>
+        <p style="font-size: var(--text-sm); color: var(--ash-300); margin-top: var(--space-2);">Skills</p>
       </div>
     </div>
   </div>
@@ -1547,12 +1599,12 @@ section {
       <h2 class="heading-section">Go deeper.</h2>
     </div>
     <p class="tools-intro reveal reveal-delay-1">
-      120+ MCP tools. 13 Sanskrit concepts made operational. Vedantic philosophy meets C++ engineering.
+      150+ MCP tools. 13 Sanskrit concepts made operational. Vedantic philosophy meets C++ engineering.
     </p>
 
     <div class="tools-footer reveal reveal-delay-2">
       <a href="getting-started.html" class="tools-link">Get Started</a>
-      <a href="tools.html" class="tools-link">120+ MCP Tools Reference</a>
+      <a href="tools.html" class="tools-link">150+ MCP Tools Reference</a>
       <a href="architecture.html" class="tools-link">Architecture</a>
       <a href="philosophy.html" class="tools-link">Philosophy &rarr; System</a>
       <a href="cli.html" class="tools-link">CLI Reference</a>
