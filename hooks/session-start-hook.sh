@@ -99,10 +99,11 @@ if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
 fi
 
 # Register session in cross-session messaging registry
+# Use PPID to get Claude's PID (parent), not the hook script's PID
 if [[ -n "$SESSION_ID" && -S "$SOCKET_PATH" ]]; then
-    PID=$$
-    request='{"jsonrpc":"2.0","id":1,"method":"session_register","params":{"session_id":"'"$SESSION_ID"'","realm":"'"$REALM"'","pid":'"$PID"'}}'
-    timeout 0.5 echo "$request" | nc -U "$SOCKET_PATH" >/dev/null 2>&1 || true
+    CLAUDE_PID=${PPID:-$$}
+    request='{"jsonrpc":"2.0","id":1,"method":"session_register","params":{"session_id":"'"$SESSION_ID"'","realm":"'"$REALM"'","pid":'"$CLAUDE_PID"'}}'
+    timeout 1 echo "$request" | nc -U "$SOCKET_PATH" >/dev/null 2>&1 || true
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════
