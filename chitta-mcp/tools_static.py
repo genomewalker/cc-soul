@@ -113,7 +113,6 @@ TOOLS = [
                                 "type": "string"
                         }
                 },
-                "required": None,
                 "type": "object"
         }
     ),

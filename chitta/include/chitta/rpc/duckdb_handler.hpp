@@ -243,8 +243,7 @@ private:
                     {"limit", {{"type", "integer"}, {"description", "Max results (default 20)"}}},
                     {"realm", {{"type", "string"}, {"description", "Filter by realm"}}},
                     {"include_global", {{"type", "boolean"}, {"description", "Include global memories (default: true)"}}}
-                }},
-                {"required", {}}
+                }}
             }}
         });
         handlers_["recall_temporal"] = [this](const json& p) { return tool_recall_temporal(p); };

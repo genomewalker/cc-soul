@@ -65,6 +65,15 @@ def fetch_tools() -> list[dict]:
         return []
 
 
+def strip_null_values(obj):
+    """Recursively remove keys with null values from dicts."""
+    if isinstance(obj, dict):
+        return {k: strip_null_values(v) for k, v in obj.items() if v is not None}
+    elif isinstance(obj, list):
+        return [strip_null_values(item) for item in obj]
+    return obj
+
+
 def generate_static_file(tools: list[dict]) -> str:
     """Generate Python code for static tools."""
     lines = [
@@ -84,13 +93,15 @@ def generate_static_file(tools: list[dict]) -> str:
     for t in tools:
         name = t["name"]
         desc = t["description"].replace('"', '\\"')
-        schema = json.dumps(t["inputSchema"], indent=8)
+        # Strip null values from inputSchema (required: null breaks Zod validation)
+        clean_schema = strip_null_values(t["inputSchema"])
+        # Fix null properties (should be empty object, not missing)
+        if clean_schema.get("properties") is None:
+            clean_schema["properties"] = {}
+        schema = json.dumps(clean_schema, indent=8)
         # Convert JSON literals to Python
         schema = schema.replace(': true', ': True')
         schema = schema.replace(': false', ': False')
-        # Fix null properties (invalid JSON Schema) - must be empty object
-        schema = schema.replace('"properties": null', '"properties": {}')
-        schema = schema.replace(': null', ': None')
         # Indent the schema properly
         schema_lines = schema.split('\n')
         schema_formatted = schema_lines[0]

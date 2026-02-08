@@ -29,6 +29,22 @@ from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, ServerCapabilities, ToolsCapability
 
 from tools_static import TOOLS, COMPOSITE_TOOLS
+from mcp.types import Tool
+
+
+def strip_null_values(obj):
+    """Recursively remove keys with null values from dicts."""
+    if isinstance(obj, dict):
+        return {k: strip_null_values(v) for k, v in obj.items() if v is not None}
+    elif isinstance(obj, list):
+        return [strip_null_values(item) for item in obj]
+    return obj
+
+
+def clean_tool_schema(tool: Tool) -> Tool:
+    """Return a Tool with null values stripped from inputSchema."""
+    clean_schema = strip_null_values(tool.inputSchema)
+    return Tool(name=tool.name, description=tool.description, inputSchema=clean_schema)
 
 
 def djb2_hash(s: str) -> int:
@@ -234,7 +250,9 @@ async def list_tools():
     """Return static tools. Composite tools override daemon tools with same name."""
     composite_names = {t.name for t in COMPOSITE_TOOLS}
     filtered = [t for t in TOOLS if t.name not in composite_names]
-    return filtered + COMPOSITE_TOOLS
+    # Strip null values from inputSchema (required: null breaks Zod validation)
+    all_tools = filtered + COMPOSITE_TOOLS
+    return [clean_tool_schema(t) for t in all_tools]
 
 
 # Composite tool handlers for token-efficient code intelligence
