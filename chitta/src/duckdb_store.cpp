@@ -8060,10 +8060,10 @@ DuckDBStore::SessionSyncResult DuckDBStore::session_sync(const std::string& clau
             if (s.session_id == newest_session_id) {
                 found = true;
                 // Update with PID if changed
-                if (s.pid != pid || s.status != "running") {
+                if (s.pid != pid || s.status != "active") {
                     std::ostringstream sql;
                     sql << "UPDATE session_registry SET pid = " << pid
-                        << ", status = 'running', project_dir = '" << cwd
+                        << ", status = 'active', project_dir = '" << cwd
                         << "', last_heartbeat = "
                         << std::chrono::duration_cast<std::chrono::milliseconds>(
                                std::chrono::system_clock::now().time_since_epoch()).count()
@@ -8076,16 +8076,15 @@ DuckDBStore::SessionSyncResult DuckDBStore::session_sync(const std::string& clau
         }
         if (!found) {
             session_register(newest_session_id, realm, pid, newest_transcript, cwd, "{}");
-            // Mark as running
-            write_execute("UPDATE session_registry SET status = 'running' WHERE session_id = '" + newest_session_id + "'");
+            // session_register already sets status to 'active'
             result.discovered++;
         }
     }
 
-    // Step 3: Mark sessions that were "running" but process is gone as "dead"
+    // Step 3: Mark sessions that were "active" but process is gone as "dead"
     auto all_sessions = session_list("", "");
     for (const auto& s : all_sessions) {
-        if (s.status == "running" && running_sessions.find(s.session_id) == running_sessions.end()) {
+        if (s.status == "active" && running_sessions.find(s.session_id) == running_sessions.end()) {
             write_execute("UPDATE session_registry SET status = 'dead', pid = 0 WHERE session_id = '" + s.session_id + "'");
             result.marked_dead++;
         }

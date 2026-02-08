@@ -2255,6 +2255,7 @@ private:
                 {"properties", {
                     {"session_id", {{"type", "string"}, {"description", "Session ID (default: from env)"}}},
                     {"realm", {{"type", "string"}, {"description", "Session realm (default: auto-detect)"}}},
+                    {"pid", {{"type", "integer"}, {"description", "Process ID (default: caller's PID)"}}},
                     {"transcript_path", {{"type", "string"}, {"description", "Path to transcript .jsonl file"}}},
                     {"project_dir", {{"type", "string"}, {"description", "Project working directory"}}},
                     {"metadata", {{"type", "string"}, {"description", "JSON metadata about the session"}}}
@@ -9612,7 +9613,8 @@ private:
             realm = detect_current_realm();
         }
 
-        int32_t pid = static_cast<int32_t>(getpid());
+        // Use passed PID or fall back to caller's PID
+        int32_t pid = params.contains("pid") ? params["pid"].get<int32_t>() : static_cast<int32_t>(getpid());
 
         if (!mind_->store().session_register(session_id, realm, pid, transcript_path, project_dir, metadata)) {
             return DuckDBToolResult::error("Failed to register session: " + mind_->store().last_error());
