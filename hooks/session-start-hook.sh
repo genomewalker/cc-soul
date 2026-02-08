@@ -106,6 +106,13 @@ if [[ -n "$SESSION_ID" && -S "$SOCKET_PATH" ]]; then
     timeout 1 echo "$request" | nc -U "$SOCKET_PATH" >/dev/null 2>&1 || true
 fi
 
+# Write session ID sidecar file for MCP server fallback detection
+# This provides a reliable way for MCP server to find session when other methods fail
+if [[ -n "$SESSION_ID" ]]; then
+    mkdir -p "$HOME/.claude/mind"
+    echo "$SESSION_ID" > "$HOME/.claude/mind/.current_session"
+fi
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Load and inject session state
 # ═══════════════════════════════════════════════════════════════════════════

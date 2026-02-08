@@ -202,6 +202,7 @@ private:
                 {"properties", {
                     {"content", {{"type", "string"}, {"description", "Text to remember"}}},
                     {"type", {{"type", "string"}, {"description", "Node type (wisdom, insight, signal, episode)"}}},
+                    {"confidence", {{"type", "number"}, {"description", "Initial confidence 0-1 (default: 0.8)"}}},
                     {"tags", {{"type", "array"}, {"items", {{"type", "string"}}}, {"description", "Optional tags"}}},
                     {"realm", {{"type", "string"}, {"description", "Primary realm (default: brahman)"}}},
                     {"visibility", {{"type", "integer"}, {"description", "0=Private, 1=Shared, 2=Global (default: 0)"}}},
@@ -221,6 +222,7 @@ private:
                 {"properties", {
                     {"query", {{"type", "string"}, {"description", "Search query"}}},
                     {"limit", {{"type", "integer"}, {"description", "Max results (default 10)"}}},
+                    {"min_confidence", {{"type", "number"}, {"description", "Minimum confidence threshold (default: 0)"}}},
                     {"tag", {{"type", "string"}, {"description", "Filter by tag"}}},
                     {"realm", {{"type", "string"}, {"description", "Filter by realm (empty = all realms)"}}},
                     {"include_global", {{"type", "boolean"}, {"description", "Include global memories (default: true)"}}}
@@ -233,7 +235,7 @@ private:
         // recall_temporal: time-bounded memory search
         tools_.push_back({
             {"name", "recall_temporal"},
-            {"description", "Search memories within a time window, optionally with semantic filtering"},
+            {"description", "Search memories within a time window (defaults to last 7 days if no dates), optionally with semantic filtering"},
             {"inputSchema", {
                 {"type", "object"},
                 {"properties", {
@@ -390,7 +392,7 @@ private:
                     {"all", {{"type", "boolean"}, {"description", "Re-embed ALL memories with NULL embeddings, not just global (default: false)"}}},
                     {"kind", {{"type", "string"}, {"description", "Filter by kind: belief, wisdom, episode, correction, preference"}}},
                     {"min_confidence", {{"type", "number"}, {"description", "Min confidence threshold (default: 0)"}}},
-                    {"limit", {{"type", "integer"}, {"description", "Max memories to process (default: 100)"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Max memories to process (default: 30)"}}},
                     {"dry_run", {{"type", "boolean"}, {"description", "Preview without updating (default: false)"}}}
                 }}
             }}
@@ -1016,7 +1018,7 @@ private:
                     {"discoveries", {{"type", "array"}, {"items", {{"type", "string"}}}, {"description", "Array of discoveries"}}},
                     {"snapshot", {{"type", "string"}, {"description", "Full checkpoint text for reconstruction"}}}
                 }},
-                {"required", {"session_id"}}
+                {"required", json::array()}
             }}
         });
         handlers_["ledger_save"] = [this](const json& p) { return tool_ledger_save(p); };
@@ -1189,7 +1191,8 @@ private:
                 {"type", "object"},
                 {"properties", {
                     {"task_id", {{"type", "string"}, {"description", "Task identifier"}}},
-                    {"mode", {{"type", "string"}, {"description", "Output mode: inject (compact) or debug (verbose)"}}}
+                    {"mode", {{"type", "string"}, {"description", "Output mode: inject (compact) or debug (verbose)"}}},
+                    {"max_tokens", {{"type", "integer"}, {"description", "Max output tokens (default: 2000)"}}}
                 }},
                 {"required", {"task_id"}}
             }}
@@ -1273,7 +1276,7 @@ private:
                 {"type", "object"},
                 {"properties", {
                     {"similarity_threshold", {{"type", "number"}, {"description", "Min similarity (0-1, default: 0.85)"}}},
-                    {"limit", {{"type", "integer"}, {"description", "Max candidates (default: 50)"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Max candidates (default: 20)"}}},
                     {"realm", {{"type", "string"}, {"description", "Filter by realm"}}}
                 }}
             }}
@@ -1533,6 +1536,7 @@ private:
                 {"properties", {
                     {"context", {{"type", "string"}, {"description", "Current situation/context"}}},
                     {"limit", {{"type", "integer"}, {"description", "Max predictions (default: 5)"}}},
+                    {"min_confidence", {{"type", "number"}, {"description", "Minimum pattern confidence (default: 0.3)"}}},
                     {"realm", {{"type", "string"}, {"description", "Filter by realm"}}}
                 }},
                 {"required", {"context"}}
@@ -1560,7 +1564,8 @@ private:
                 {"type", "object"},
                 {"properties", {
                     {"realm", {{"type", "string"}, {"description", "Filter by realm"}}},
-                    {"limit", {{"type", "integer"}, {"description", "Max patterns (default: 50)"}}}
+                    {"limit", {{"type", "integer"}, {"description", "Max patterns (default: 20)"}}},
+                    {"sort_by", {{"type", "string"}, {"description", "Sort by: frequency, confidence, created_at (default: frequency)"}}}
                 }}
             }}
         });
@@ -1633,7 +1638,8 @@ private:
                 {"properties", {
                     {"realm", {{"type", "string"}, {"description", "Filter by realm"}}},
                     {"min_strength", {{"type", "number"}, {"description", "Minimum strength (default: 0)"}}},
-                    {"limit", {{"type", "integer"}, {"description", "Max habits (default: 50)"}}}
+                    {"limit", {{"type", "integer"}, {"description", "Max habits (default: 20)"}}},
+                    {"sort_by", {{"type", "string"}, {"description", "Sort by: strength, frequency, created_at (default: strength)"}}}
                 }}
             }}
         });
@@ -1756,7 +1762,8 @@ private:
                 {"properties", {
                     {"status", {{"type", "string"}, {"description", "Filter: active, paused, completed, abandoned (default: active)"}}},
                     {"realm", {{"type", "string"}, {"description", "Filter by realm"}}},
-                    {"limit", {{"type", "integer"}, {"description", "Max results (default: 20)"}}}
+                    {"limit", {{"type", "integer"}, {"description", "Max results (default: 20)"}}},
+                    {"sort_by", {{"type", "string"}, {"description", "Sort by: progress, created_at, updated_at (default: updated_at)"}}}
                 }}
             }}
         });
@@ -1855,7 +1862,7 @@ private:
                 {"type", "object"},
                 {"properties", {
                     {"realm", {{"type", "string"}, {"description", "Filter by realm"}}},
-                    {"limit", {{"type", "integer"}, {"description", "Max themes to return (default: 50)"}}}
+                    {"limit", {{"type", "integer"}, {"description", "Max themes to return (default: 20)"}}}
                 }}
             }}
         });
@@ -1978,7 +1985,7 @@ private:
                 {"type", "object"},
                 {"properties", {
                     {"query", {{"type", "string"}, {"description", "SQL query to execute (SELECT only)"}}},
-                    {"limit", {{"type", "integer"}, {"description", "Max rows to return (default: 100)"}}}
+                    {"limit", {{"type", "integer"}, {"description", "Max rows to return (default: 20)"}}}
                 }},
                 {"required", {"query"}}
             }}
@@ -2021,7 +2028,7 @@ private:
                 {"type", "object"},
                 {"properties", {
                     {"aspect", {{"type", "string"}, {"description", "Semantic aspect: preferences, corrections, insights, failures, decisions, approaches, milestones, goals, habits, beliefs, wisdom, code, gaps"}}},
-                    {"limit", {{"type", "integer"}, {"description", "Max results (default: 50)"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Max results (default: 30)"}}},
                     {"min_confidence", {{"type", "number"}, {"description", "Minimum confidence threshold (default: 0.1)"}}}
                 }},
                 {"required", {"aspect"}}
@@ -2105,7 +2112,7 @@ private:
                     {"payload", {{"type", "string"}, {"description", "JSON payload with event details"}}},
                     {"files_mentioned", {{"type", "string"}, {"description", "JSON array of file paths"}}}
                 }},
-                {"required", {"session_id", "kind", "summary"}}
+                {"required", {"kind", "summary"}}
             }}
         });
         handlers_["narrative_log"] = [this](const json& p) { return tool_narrative_log(p); };
@@ -2120,7 +2127,7 @@ private:
                     {"session_id", {{"type", "string"}, {"description", "Session ID"}}},
                     {"limit", {{"type", "integer"}, {"description", "Max segments to return (default 20)"}}}
                 }},
-                {"required", {"session_id"}}
+                {"required", json::array()}
             }}
         });
         handlers_["narrative_history"] = [this](const json& p) { return tool_narrative_history(p); };
@@ -2135,7 +2142,7 @@ private:
                     {"session_id", {{"type", "string"}, {"description", "Session ID"}}},
                     {"max", {{"type", "integer"}, {"description", "Max predictions to return (default 2)"}}}
                 }},
-                {"required", {"session_id"}}
+                {"required", json::array()}
             }}
         });
         handlers_["anticipation_filter"] = [this](const json& p) { return tool_anticipation_filter(p); };
@@ -2149,7 +2156,7 @@ private:
                 {"properties", {
                     {"session_id", {{"type", "string"}, {"description", "Session ID"}}}
                 }},
-                {"required", {"session_id"}}
+                {"required", json::array()}
             }}
         });
         handlers_["anticipation_gate_status"] = [this](const json& p) { return tool_anticipation_gate_status(p); };
@@ -2240,7 +2247,7 @@ private:
                 {"type", "object"},
                 {"properties", {
                     {"session_id", {{"type", "string"}, {"description", "Session ID (default: from env)"}}},
-                    {"limit", {{"type", "integer"}, {"description", "Max messages (default: 50)"}}}
+                    {"limit", {{"type", "integer"}, {"description", "Max messages (default: 30)"}}}
                 }}
             }}
         });
@@ -2468,13 +2475,23 @@ private:
             return DuckDBToolResult::error("Failed: " + (err.empty() ? "store.remember returned -1" : err));
         }
 
-        // Set realm and visibility if non-default
+        // Set realm, visibility, and confidence if non-default
         int64_t db_id = static_cast<int64_t>(id.low);
         if (realm != "brahman") {
             mind_->store().set_realm(db_id, realm);
         }
         if (visibility != RealmVisibility::Private) {
             mind_->store().set_visibility(db_id, visibility);
+        }
+        // Apply custom confidence if specified (default is 0.8)
+        if (params.contains("confidence")) {
+            float target = std::clamp(params.value("confidence", 0.8f), 0.0f, 1.0f);
+            float delta = target - 0.8f;  // Default confidence is 0.8
+            if (delta > 0.01f) {
+                mind_->store().strengthen(db_id, delta);
+            } else if (delta < -0.01f) {
+                mind_->store().weaken(db_id, -delta);
+            }
         }
         for (const auto& shared : shared_realms) {
             mind_->store().add_to_realm(db_id, shared);
@@ -2504,6 +2521,7 @@ private:
         }
 
         size_t limit = params.value("limit", 10);
+        float min_confidence = params.value("min_confidence", 0.0f);
         std::string realm = params.value("realm", "");
         bool include_global = params.value("include_global", true);
 
@@ -2548,10 +2566,14 @@ private:
                 {"text", r.text}
             };
 
-            // Include realm info in results
+            // Include realm info in results and apply confidence filter
             auto mem = mind_->store().get_memory(static_cast<int64_t>(r.id.low));
             if (mem) {
+                // Skip if below min_confidence threshold
+                if (mem->confidence < min_confidence) continue;
+
                 result_entry["realm"] = mem->realm;
+                result_entry["confidence"] = mem->confidence;
                 if (mem->visibility != RealmVisibility::Private) {
                     result_entry["visibility"] = static_cast<int>(mem->visibility);
                 }
@@ -2622,9 +2644,17 @@ private:
         std::string realm = params.value("realm", "");
         bool include_global = params.value("include_global", true);
 
-        // Parse timestamps
+        // Parse timestamps - default to last 7 days if not specified
         auto start_time = parse_timestamp_str(start_str);
         auto end_time = parse_timestamp_str(end_str);
+
+        if (!start_time && !end_time) {
+            // Default: last 7 days
+            auto now = std::chrono::system_clock::now();
+            auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+            end_time = now_ms;
+            start_time = now_ms - (7 * 24 * 60 * 60 * 1000LL);  // 7 days ago
+        }
 
         // If end time is a date without time, set to end of day
         if (end_time && end_str.find('T') == std::string::npos && end_str.find(':') == std::string::npos) {
@@ -2712,7 +2742,7 @@ private:
             return DuckDBToolResult::error("Query is required");
         }
 
-        size_t limit = params.value("limit", 10);
+        size_t limit = params.value("limit", 15);
         auto results = mind_->recall(query, limit);
 
         // Return lightweight results: id, title (first line), score only
@@ -3182,7 +3212,7 @@ private:
 
         std::string kind_filter = params.value("kind", "");
         float min_confidence = params.value("min_confidence", 0.0f);
-        int limit = params.value("limit", 100);
+        int limit = params.value("limit", 30);
         bool dry_run = params.value("dry_run", false);
         bool all = params.value("all", false);  // Re-embed ALL memories, not just global
 
@@ -5717,10 +5747,7 @@ private:
 
     // Ledger tool implementations
     DuckDBToolResult tool_ledger_save(const json& params) {
-        std::string session_id = params.value("session_id", "");
-        if (session_id.empty()) {
-            return DuckDBToolResult::error("session_id is required");
-        }
+        std::string session_id = get_session_id(params);
 
         LedgerEntry entry;
         entry.session_id = session_id;
@@ -6187,6 +6214,8 @@ private:
     DuckDBToolResult tool_long_task_snapshot(const json& params) {
         std::string task_id = params.value("task_id", "");
         std::string mode = params.value("mode", "inject");
+        size_t max_tokens = params.value("max_tokens", 2000);
+        size_t max_chars = max_tokens * 4;  // Rough estimate: ~4 chars per token
 
         if (task_id.empty()) {
             return DuckDBToolResult::error("task_id is required");
@@ -6269,15 +6298,23 @@ private:
             }
         }
 
+        std::string snapshot = ss.str();
+        bool truncated = false;
+        if (snapshot.size() > max_chars) {
+            snapshot = snapshot.substr(0, max_chars) + "\n... (truncated)";
+            truncated = true;
+        }
+
         json result = {
             {"task_id", task_id},
             {"status", task->status},
             {"iterations", task->iterations},
             {"event_count", events.size()},
-            {"snapshot", ss.str()}
+            {"truncated", truncated},
+            {"snapshot", snapshot}
         };
 
-        return DuckDBToolResult::ok(ss.str(), result);
+        return DuckDBToolResult::ok(snapshot, result);
     }
 
     DuckDBToolResult tool_long_task_evaluate(const json& params) {
@@ -6490,7 +6527,7 @@ private:
     // Memory consolidation
     DuckDBToolResult tool_consolidation_scan(const json& params) {
         float threshold = params.value("similarity_threshold", 0.85f);
-        size_t limit = params.value("limit", 50);
+        size_t limit = params.value("limit", 20);
         std::string realm = params.value("realm", "");
 
         auto candidates = mind_->store().consolidation_scan(threshold, limit, realm);
@@ -6815,7 +6852,7 @@ private:
     }
 
     DuckDBToolResult tool_curiosity_gaps(const json& params) {
-        size_t limit = params.value("limit", 20);
+        size_t limit = params.value("limit", 10);
         std::string realm = params.value("realm", "");
 
         std::string sql = "SELECT m.id, m.content, m.created_at FROM memory m "
@@ -7486,39 +7523,45 @@ private:
     DuckDBToolResult tool_anticipation_predict(const json& params) {
         std::string context = params.value("context", "");
         size_t limit = params.value("limit", 5);
+        float min_confidence = params.value("min_confidence", 0.3f);
         std::string realm = params.value("realm", "");
 
         if (context.empty()) {
             return DuckDBToolResult::error("context is required");
         }
 
-        auto patterns = mind_->store().anticipation_predict(context, limit, realm);
+        auto patterns = mind_->store().anticipation_predict(context, limit * 2, realm);  // Fetch more for filtering
 
         std::ostringstream ss;
         ss << "Predicted Actions for Context\n";
         ss << "══════════════════════════════\n\n";
 
-        if (patterns.empty()) {
-            ss << "No matching patterns found.\n";
-        } else {
-            for (const auto& p : patterns) {
-                float success_rate = p.frequency > 0 ? (float)p.success_count / p.frequency * 100 : 0;
-                ss << "• " << p.action << "\n";
-                ss << "  Context: " << p.context.substr(0, 80) << (p.context.length() > 80 ? "..." : "") << "\n";
-                ss << "  Frequency: " << p.frequency << " | Success: " << std::fixed << std::setprecision(0) << success_rate << "%\n\n";
-            }
-        }
-
         json patterns_json = json::array();
+        size_t count = 0;
         for (const auto& p : patterns) {
+            float success_rate = p.frequency > 0 ? (float)p.success_count / p.frequency : 0;
+            // Filter by min_confidence (success rate)
+            if (success_rate < min_confidence) continue;
+
+            ss << "• " << p.action << "\n";
+            ss << "  Context: " << p.context.substr(0, 80) << (p.context.length() > 80 ? "..." : "") << "\n";
+            ss << "  Frequency: " << p.frequency << " | Success: " << std::fixed << std::setprecision(0) << (success_rate * 100) << "%\n\n";
+
             patterns_json.push_back({
                 {"id", p.id},
                 {"context", p.context},
                 {"action", p.action},
                 {"frequency", p.frequency},
                 {"success_count", p.success_count},
+                {"confidence", success_rate},
                 {"realm", p.realm}
             });
+
+            if (++count >= limit) break;
+        }
+
+        if (patterns_json.empty()) {
+            ss << "No matching patterns found.\n";
         }
 
         return DuckDBToolResult::ok(ss.str(), {{"patterns", patterns_json}});
@@ -7539,9 +7582,24 @@ private:
 
     DuckDBToolResult tool_anticipation_list(const json& params) {
         std::string realm = params.value("realm", "");
-        size_t limit = params.value("limit", 50);
+        size_t limit = params.value("limit", 20);
+        std::string sort_by = params.value("sort_by", "frequency");
 
         auto patterns = mind_->store().anticipation_list(realm, limit);
+
+        // Apply sorting
+        if (sort_by == "confidence") {
+            std::sort(patterns.begin(), patterns.end(), [](const auto& a, const auto& b) {
+                float rate_a = a.frequency > 0 ? (float)a.success_count / a.frequency : 0;
+                float rate_b = b.frequency > 0 ? (float)b.success_count / b.frequency : 0;
+                return rate_a > rate_b;
+            });
+        } else if (sort_by == "created_at") {
+            std::sort(patterns.begin(), patterns.end(), [](const auto& a, const auto& b) {
+                return a.created_at > b.created_at;
+            });
+        }
+        // Default: frequency (already sorted by store)
 
         std::ostringstream ss;
         ss << "Learned Anticipation Patterns\n";
@@ -7656,9 +7714,22 @@ private:
     DuckDBToolResult tool_habit_list(const json& params) {
         std::string realm = params.value("realm", "");
         float min_strength = params.value("min_strength", 0.0f);
-        size_t limit = params.value("limit", 50);
+        size_t limit = params.value("limit", 20);
+        std::string sort_by = params.value("sort_by", "strength");
 
         auto habits = mind_->store().habit_list(realm, min_strength, limit);
+
+        // Apply sorting
+        if (sort_by == "frequency") {
+            std::sort(habits.begin(), habits.end(), [](const auto& a, const auto& b) {
+                return a.frequency > b.frequency;
+            });
+        } else if (sort_by == "created_at") {
+            std::sort(habits.begin(), habits.end(), [](const auto& a, const auto& b) {
+                return a.created_at > b.created_at;
+            });
+        }
+        // Default: strength (already sorted by store)
 
         std::ostringstream ss;
         ss << "Formed Habits\n";
@@ -7969,8 +8040,21 @@ private:
         std::string status = params.value("status", "active");
         std::string realm = params.value("realm", "");
         size_t limit = params.value("limit", 20);
+        std::string sort_by = params.value("sort_by", "updated_at");
 
         auto goals = mind_->store().goal_list(status, realm, limit);
+
+        // Apply sorting
+        if (sort_by == "progress") {
+            std::sort(goals.begin(), goals.end(), [](const auto& a, const auto& b) {
+                return a.progress > b.progress;
+            });
+        } else if (sort_by == "created_at") {
+            std::sort(goals.begin(), goals.end(), [](const auto& a, const auto& b) {
+                return a.created_at > b.created_at;
+            });
+        }
+        // Default: updated_at (already sorted by store)
 
         if (goals.empty()) {
             return DuckDBToolResult::ok("No " + status + " goals", {{"count", 0}, {"goals", json::array()}});
@@ -8192,7 +8276,7 @@ private:
 
     DuckDBToolResult tool_theme_list(const json& params) {
         std::string realm = params.value("realm", "");
-        size_t limit = params.value("limit", 50);
+        size_t limit = params.value("limit", 20);
 
         auto themes = mind_->store().theme_list(realm, limit);
 
@@ -8542,7 +8626,7 @@ private:
 
     DuckDBToolResult tool_sql_query(const json& params) {
         std::string query = params.value("query", "");
-        size_t limit = params.value("limit", 100);
+        size_t limit = params.value("limit", 20);
 
         if (query.empty()) {
             return DuckDBToolResult::error("Query is required");
@@ -8712,7 +8796,7 @@ private:
             return DuckDBToolResult::error("aspect parameter required");
         }
 
-        size_t limit = params.value("limit", 50);
+        size_t limit = params.value("limit", 30);
         float min_confidence = params.value("min_confidence", 0.1f);
 
         auto memories = mind_->store().list_by_aspect(aspect, limit, min_confidence);
@@ -9069,12 +9153,7 @@ private:
     // ========================================================================
 
     DuckDBToolResult tool_narrative_status(const json& params) {
-        std::string session_id = params.value("session_id", "");
-        if (session_id.empty()) {
-            // Try to get current session from environment or use default
-            const char* env_session = std::getenv("CLAUDE_SESSION_ID");
-            session_id = env_session ? env_session : "default";
-        }
+        std::string session_id = get_session_id(params);
 
         auto& store = mind_->store();
 
@@ -9119,12 +9198,12 @@ private:
     }
 
     DuckDBToolResult tool_narrative_log(const json& params) {
-        std::string session_id = params.value("session_id", "");
+        std::string session_id = get_session_id(params);
         std::string kind_str = params.value("kind", "");
         std::string summary = params.value("summary", "");
 
-        if (session_id.empty() || kind_str.empty() || summary.empty()) {
-            return DuckDBToolResult::error("session_id, kind, and summary are required");
+        if (kind_str.empty() || summary.empty()) {
+            return DuckDBToolResult::error("kind and summary are required");
         }
 
         SessionEvent event;
@@ -9161,10 +9240,7 @@ private:
     }
 
     DuckDBToolResult tool_narrative_history(const json& params) {
-        std::string session_id = params.value("session_id", "");
-        if (session_id.empty()) {
-            return DuckDBToolResult::error("session_id is required");
-        }
+        std::string session_id = get_session_id(params);
 
         size_t limit = params.value("limit", 20);
         auto& store = mind_->store();
@@ -9352,14 +9428,31 @@ private:
     // Cross-Session Messaging Tool Implementations
     // ========================================================================
 
-    // Helper: get session ID from env or params
+    // Helper: get session ID from params, env, or PID lookup
     std::string get_session_id(const json& params) {
         std::string session_id = params.value("session_id", "");
-        if (session_id.empty()) {
-            const char* env_session = std::getenv("CLAUDE_SESSION_ID");
-            session_id = env_session ? env_session : "default";
+        if (!session_id.empty()) {
+            return session_id;
         }
-        return session_id;
+
+        // Try environment variable
+        if (const char* env_session = std::getenv("CLAUDE_SESSION_ID")) {
+            return env_session;
+        }
+
+        // Try PID lookup if provided (for CLI calls that pass their PPID)
+        int64_t pid = params.value("pid", 0LL);
+        if (pid > 0) {
+            std::ostringstream sql;
+            sql << "SELECT session_id FROM session_registry WHERE pid = " << pid
+                << " AND status = 'active' LIMIT 1";
+            auto result = mind_->store().execute_sql_query(sql.str());
+            if (!result.rows.empty() && !result.rows[0].empty()) {
+                return result.rows[0][0];
+            }
+        }
+
+        return "default";
     }
 
     // Helper: detect current realm
@@ -9558,7 +9651,7 @@ private:
 
     DuckDBToolResult tool_msg_history(const json& params) {
         std::string session_id = get_session_id(params);
-        size_t limit = params.value("limit", 50);
+        size_t limit = params.value("limit", 30);
 
         auto messages = mind_->store().msg_history(session_id, limit);
 

@@ -1,6 +1,6 @@
 # CC-Soul API Reference
 
-Complete reference for all tools exposed by cc-soul v3.30 via JSON-RPC 2.0 over Unix socket.
+Complete reference for all tools exposed by cc-soul v3.35 via JSON-RPC 2.0 over Unix socket.
 
 ---
 
@@ -14,6 +14,7 @@ Complete reference for all tools exposed by cc-soul v3.30 via JSON-RPC 2.0 over 
 - [Code Intelligence](#code-intelligence)
 - [Realm Management](#realm-management)
 - [Session and Ledger](#session-and-ledger)
+- [Cross-Session Messaging](#cross-session-messaging)
 - [Long-Running Tasks](#long-running-tasks)
 - [Theme System (xMemory)](#theme-system-xmemory)
 - [Suggestions and Feedback](#suggestions-and-feedback)
@@ -596,6 +597,74 @@ Unified checkpoint — routes to active long task if one exists, otherwise stand
 | `next_steps` | string[] | No | Next actions |
 | `active_files` | string[] | No | Files being worked on |
 | `discoveries` | string[] | No | Insights |
+
+---
+
+## Cross-Session Messaging
+
+Tools for communication between Claude Code sessions via shared mind database.
+
+### session_register
+
+Register a session in the cross-session registry.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `session_id` | string | Yes | Session UUID |
+| `realm` | string | No | Primary realm (default: brahman) |
+| `pid` | integer | No | Process ID of the Claude session |
+
+### session_sync
+
+Reconcile session registry with running processes. Marks sessions as dead if their PID is no longer running.
+
+No parameters required.
+
+### session_list
+
+List all registered sessions with their status.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `realm` | string | No | Filter by realm |
+| `active_only` | boolean | No | Only show active sessions (default: false) |
+
+### msg_send
+
+Send a message to another session, realm, or all sessions.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `target` | string | Yes | Target: session UUID, realm name, or "*" for all |
+| `content` | string | Yes | Message content |
+| `priority` | integer | No | 0=info, 1=normal, 2=important, 3=urgent (default: 1) |
+
+### msg_inbox
+
+Check unread messages for the current session.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `session_id` | string | Yes | Current session UUID |
+| `limit` | integer | No | Max messages (default: 10) |
+
+### msg_ack_all
+
+Acknowledge (mark as read) all messages for a session.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `session_id` | string | Yes | Session UUID |
+
+### msg_history
+
+View message history (sent and received).
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `session_id` | string | Yes | Session UUID |
+| `limit` | integer | No | Max messages (default: 20) |
+| `direction` | string | No | "sent", "received", or "both" (default: both) |
 
 ---
 

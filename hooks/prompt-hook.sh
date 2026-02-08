@@ -291,13 +291,16 @@ fi
 # CROSS-SESSION MESSAGING: Heartbeat and inbox check
 # ===========================================
 CROSS_SESSION_MSGS=""
-if [[ -n "$SESSION_ID" && -S "$SOCKET_PATH" ]]; then
+# Refresh session ID for messaging (in case it wasn't available at script start)
+MSG_SESSION_ID=$(get_session_id)
+[[ -z "$MSG_SESSION_ID" ]] && MSG_SESSION_ID="$SESSION_ID"
+if [[ -n "$MSG_SESSION_ID" && "$MSG_SESSION_ID" != "default" && -S "$SOCKET_PATH" ]]; then
     # Session heartbeat
-    request='{"jsonrpc":"2.0","id":10,"method":"session_heartbeat","params":{"session_id":"'"$SESSION_ID"'"}}'
+    request='{"jsonrpc":"2.0","id":10,"method":"session_heartbeat","params":{"session_id":"'"$MSG_SESSION_ID"'"}}'
     timeout 0.3 echo "$request" | nc -U "$SOCKET_PATH" >/dev/null 2>&1 || true
 
     # Check for cross-session messages
-    request='{"jsonrpc":"2.0","id":11,"method":"msg_inbox","params":{"session_id":"'"$SESSION_ID"'","limit":3,"min_priority":1,"auto_ack":true}}'
+    request='{"jsonrpc":"2.0","id":11,"method":"msg_inbox","params":{"session_id":"'"$MSG_SESSION_ID"'","limit":3,"min_priority":1,"auto_ack":true}}'
     response=$(timeout 1 echo "$request" | nc -U "$SOCKET_PATH" 2>/dev/null || true)
     if [[ -n "$response" ]]; then
         msg_count=$(echo "$response" | jq -r '.result.count // 0' 2>/dev/null)

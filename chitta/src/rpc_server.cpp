@@ -20,6 +20,7 @@
 #include <chitta/socket_client.hpp>
 #include <chitta/mind/duckdb_mind.hpp>
 #include <chitta/rpc/duckdb_handler.hpp>
+#include <unistd.h>  // getppid
 #ifdef CHITTA_WITH_ONNX
 #include <chitta/vak_onnx.hpp>
 #endif
@@ -799,6 +800,19 @@ int run_cli(const std::string& socket_path, const std::string& tool,
         return 1;
     }
 
+    // For session-aware tools, inject PPID for session lookup if session_id not provided
+    static const std::set<std::string> SESSION_TOOLS = {
+        "msg_inbox", "msg_send", "msg_ack", "msg_ack_all", "msg_history",
+        "ledger_save", "narrative_log", "narrative_history",
+        "anticipation_filter", "anticipation_gate_status"
+    };
+    if (SESSION_TOOLS.count(tool) && !args.contains("session_id")) {
+        pid_t ppid = getppid();
+        if (ppid > 1) {  // Sanity check: not init
+            args["pid"] = static_cast<int64_t>(ppid);
+        }
+    }
+
     // Send tool call
     json tool_req = {
         {"jsonrpc", "2.0"},
@@ -1162,6 +1176,20 @@ int main(int argc, char* argv[]) {
                     auto params = mcp_request.value("params", nlohmann::json::object());
                     std::string tool_name = params.value("name", "");
                     auto arguments = params.value("arguments", nlohmann::json::object());
+
+                    // For session-aware tools, inject PPID for session lookup if session_id not provided
+                    // In MCP bridge mode, getppid() returns Claude's PID
+                    static const std::set<std::string> SESSION_TOOLS = {
+                        "msg_inbox", "msg_send", "msg_ack", "msg_ack_all", "msg_history",
+                        "ledger_save", "narrative_log", "narrative_history",
+                        "anticipation_filter", "anticipation_gate_status"
+                    };
+                    if (SESSION_TOOLS.count(tool_name) && !arguments.contains("session_id")) {
+                        pid_t ppid = getppid();
+                        if (ppid > 1) {  // Sanity check: not init
+                            arguments["pid"] = static_cast<int64_t>(ppid);
+                        }
+                    }
 
                     nlohmann::json daemon_req;
                     daemon_req["jsonrpc"] = "2.0";

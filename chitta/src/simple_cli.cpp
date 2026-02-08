@@ -30,6 +30,7 @@
 #include <fstream>
 #include <sstream>
 #include <nlohmann/json.hpp>
+#include <set>
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -1082,6 +1083,20 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
             // Extract tool name for better tracing
             if (method == "tools/call" && parsed.contains("params")) {
                 tool_name = parsed["params"].value("name", "unknown");
+
+                // For messaging tools, inject PPID for session lookup if session_id not provided
+                static const std::set<std::string> MSG_TOOLS = {
+                    "msg_inbox", "msg_send", "msg_ack", "msg_ack_all", "msg_history"
+                };
+                if (MSG_TOOLS.count(tool_name) && parsed["params"].contains("arguments")) {
+                    auto& args = parsed["params"]["arguments"];
+                    if (!args.contains("session_id") || args["session_id"].get<std::string>().empty()) {
+                        pid_t ppid = getppid();
+                        if (ppid > 1) {
+                            args["pid"] = static_cast<int64_t>(ppid);
+                        }
+                    }
+                }
             }
 
             // Fast-path: health_check stays on main thread (always responsive)

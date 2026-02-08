@@ -1,6 +1,6 @@
 # CC-Soul Architecture
 
-Technical architecture of cc-soul v3.30, a persistent identity and memory system for Claude Code.
+Technical architecture of cc-soul v3.35, a persistent identity and memory system for Claude Code.
 
 ---
 
@@ -778,4 +778,4 @@ cd chitta && cmake --build build --parallel
 
 ---
 
-*Version 3.30.1 — DuckDB backend, 8-phase resonance, self-tuning, xMemory themes.*
+*Version 3.35 — DuckDB backend, 8-phase resonance, self-tuning, xMemory themes, cross-session messaging.*

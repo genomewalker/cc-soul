@@ -111,6 +111,7 @@ class ChittaClient:
 client: Optional[ChittaClient] = None
 server = Server("chitta-mcp")
 current_session_id: Optional[str] = None  # Track current session for auto-defaults
+current_realm: Optional[str] = None  # Track current realm for auto-defaults
 
 
 def ensure_daemon() -> bool:
@@ -982,15 +983,162 @@ COMPOSITE_HANDLERS = {
     "transcript_search": handle_transcript_search,
 }
 
+# Messaging tools that need session_id auto-injection
+MSG_TOOLS = {"msg_inbox", "msg_send", "msg_ack", "msg_ack_all", "msg_history"}
+
+# Tools that need session_id injection
+SESSION_TOOLS = {
+    "ledger_save", "narrative_log", "narrative_history",
+    "anticipation_filter", "anticipation_gate_status",
+    "transcript_register", "transcript_get", "transcript_update",
+    "transcript_remove", "transcript_parse",
+    "msg_inbox", "msg_send", "msg_ack", "msg_ack_all", "msg_history",
+    "session_register", "session_heartbeat", "session_deregister",
+}
+
+# Tools that store memories - need realm auto-injection
+REALM_STORE_TOOLS = {
+    "remember", "grow", "observe", "long_task_start", "checkpoint",
+    "goal_set", "habit_observe", "anticipation_observe",
+    "suggestion_track", "curiosity_note_gap", "background_schedule",
+    "narrative_log", "transcript_register",
+}
+
+# Tools that filter/query by realm
+REALM_FILTER_TOOLS = {"long_task_active", "smart_context"}
+
+
+def get_current_session_id() -> Optional[str]:
+    """
+    Get current session ID using multiple detection strategies.
+
+    Order of precedence:
+    1. Cached current_session_id (from session_register or transcript_register)
+    2. CLAUDE_SESSION_ID environment variable
+    3. PPID lookup in session_registry (find session where pid = our parent)
+    4. Sidecar file ~/.claude/mind/.current_session (written by session-start-hook)
+    5. Single active session fallback (if exactly one exists)
+    """
+    global current_session_id
+
+    # 1. Return cached session if set
+    if current_session_id:
+        return current_session_id
+
+    # 2. Check environment variable
+    env_session = os.environ.get("CLAUDE_SESSION_ID")
+    if env_session:
+        current_session_id = env_session
+        return current_session_id
+
+    # 3. PPID lookup - query session_registry for our parent process
+    ppid = os.getppid()
+    try:
+        result = daemon_call("session_list", {}, structured=True)
+        data = json.loads(result)
+        sessions = data.get("sessions", [])
+
+        # Look for session matching our PPID
+        for s in sessions:
+            if s.get("pid") == ppid and s.get("status") == "active":
+                current_session_id = s.get("session_id")
+                return current_session_id
+    except (json.JSONDecodeError, KeyError, TypeError):
+        sessions = []
+
+    # 4. Sidecar file - written by session-start-hook.sh
+    sidecar_path = os.path.join(os.environ.get("HOME", ""), ".claude", "mind", ".current_session")
+    try:
+        if os.path.exists(sidecar_path):
+            with open(sidecar_path, 'r') as f:
+                sid = f.read().strip()
+                if sid:
+                    current_session_id = sid
+                    return current_session_id
+    except (IOError, OSError):
+        pass
+
+    # 5. Single active session fallback
+    try:
+        if not sessions:
+            result = daemon_call("session_list", {}, structured=True)
+            data = json.loads(result)
+            sessions = data.get("sessions", [])
+        active_sessions = [s for s in sessions if s.get("status") == "active"]
+        if len(active_sessions) == 1:
+            current_session_id = active_sessions[0].get("session_id")
+            return current_session_id
+    except (json.JSONDecodeError, KeyError, TypeError):
+        pass
+
+    return None
+
+
+def get_current_realm() -> Optional[str]:
+    """
+    Get current realm using multiple detection strategies.
+
+    Order of precedence:
+    1. Cached current_realm (from previous detection)
+    2. CHITTA_REALM environment variable
+    3. .cc-soul-realm file in current directory
+    4. Git repository name (becomes project:<repo-name>)
+    """
+    global current_realm
+
+    # 1. Return cached realm if set
+    if current_realm:
+        return current_realm
+
+    # 2. CHITTA_REALM env var
+    env_realm = os.environ.get("CHITTA_REALM")
+    if env_realm:
+        current_realm = env_realm
+        return current_realm
+
+    # 3. .cc-soul-realm file
+    try:
+        realm_file = os.path.join(os.getcwd(), ".cc-soul-realm")
+        if os.path.exists(realm_file):
+            with open(realm_file) as f:
+                realm = f.read().strip()
+                if realm:
+                    current_realm = realm
+                    return current_realm
+    except:
+        pass
+
+    # 4. Git repo name
+    try:
+        import subprocess
+        result = subprocess.run(["git", "rev-parse", "--show-toplevel"],
+                              capture_output=True, text=True, timeout=2)
+        if result.returncode == 0 and result.stdout.strip():
+            repo_name = os.path.basename(result.stdout.strip())
+            current_realm = f"project:{repo_name}"
+            return current_realm
+    except:
+        pass
+
+    return None
+
 
 @server.call_tool()
 async def call_tool(name: str, arguments: dict):
     """Handle tool calls - composite tools handled locally, others forwarded to daemon."""
     global current_session_id
 
-    # Track session_id from transcript_register for auto-defaults
+    # Track session_id from session_register and transcript_register for auto-defaults
+    if name == "session_register" and "session_id" in arguments:
+        current_session_id = arguments["session_id"]
     if name == "transcript_register" and "session_id" in arguments:
         current_session_id = arguments["session_id"]
+
+    # Auto-inject session_id for messaging tools if not provided
+    if name in MSG_TOOLS and not arguments.get("session_id"):
+        sid = get_current_session_id()
+        if sid:
+            arguments["session_id"] = sid
 
     # Auto-inject session_id for transcript_search if not provided
     # Pass session_id="*" to explicitly search all transcripts
@@ -999,6 +1147,18 @@ async def call_tool(name: str, arguments: dict):
             arguments["session_id"] = ""  # Empty = search all
         elif current_session_id and not arguments.get("session_id"):
             arguments["session_id"] = current_session_id
+
+    # Auto-inject realm for store operations
+    if name in REALM_STORE_TOOLS and not arguments.get("realm"):
+        realm = get_current_realm()
+        if realm:
+            arguments["realm"] = realm
+
+    # Auto-inject realm for filter operations
+    if name in REALM_FILTER_TOOLS and not arguments.get("realm"):
+        realm = get_current_realm()
+        if realm:
+            arguments["realm"] = realm
 
     # Check if this is a composite tool
     if name in COMPOSITE_HANDLERS:

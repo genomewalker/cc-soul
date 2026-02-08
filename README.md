@@ -38,6 +38,20 @@ CC-Soul is a persistent identity system for Claude Code. It provides:
 - **Subconscious Processing** — Background daemon distills wisdom, decays noise, strengthens signal
 - **Multi-Instance Support** — Multiple Claude sessions share the same DuckDB database via MVCC
 - **Graph Structure** — Triplet relationships with spreading activation and Hebbian learning
+- **Intent-Driven Retrieval** — Query classification routes to optimal search strategy (3-4x faster than search-everything-and-rerank)
+- **Native MCP Tools** — Auto-detect session_id and realm, sensible defaults for all 150+ tools
+
+### Intelligent Memory System
+
+CC-Soul doesn't just store facts — it remembers the story.
+
+| Feature | Description |
+|---------|-------------|
+| **Temporal Context Graph** | When things happened, how your thinking evolved, what led to each decision. Your preferences, goals, and past choices — all connected in a graph that understands sequence and context. |
+| **Memory Agent, Not RAG** | Traditional RAG asks "what text chunks look similar?" CC-Soul asks "what does the user want to know, and where in the organized knowledge does that live?" |
+| **13 Fact Aspects** | Every fact is classified (Preference, Decision, Correction, Insight, Goal, Habit, Belief, Wisdom, Failure, Approach, Milestone, Gap, Code) so the right context surfaces at the right time — coding style preferences during code review, past architectural decisions when designing a new feature. |
+| **7 Query Types** | Queries are classified by intent (Aspect, Entity, Temporal, Exploratory, Relationship, Code, Meta) and routed to the exact search strategy. Looking for "my preferences"? Aspect filter. "Tell me about cmake"? Entity graph traversal. "What happened last week"? Temporal filter. |
+| **Intent-Driven Routing** | Classification first, search second. 300-450ms vs 1200-2400ms for the old "search everything and rerank" approach. |
 
 ### What I Carry
 
@@ -411,6 +425,16 @@ The soul exposes 80+ tools through the Model Context Protocol:
 | `ledger_list` / `ledger_get` | Browse checkpoints |
 | `checkpoint` | Quick save using active long task or standalone ledger |
 | `long_task_start` / `long_task_update` / `long_task_complete` | Long-running task tracking |
+
+### Cross-Session Messaging
+
+| Tool | Description |
+|------|-------------|
+| `session_register` / `session_list` | Register and list active Claude sessions |
+| `session_sync` | Reconcile registry with running processes |
+| `msg_send` | Send message to session, realm, or all (`*`) |
+| `msg_inbox` / `msg_ack_all` | Check and acknowledge messages |
+| `msg_history` | View sent/received message history |
 
 ### Anticipation & Habits
 
