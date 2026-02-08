@@ -8081,10 +8081,20 @@ DuckDBStore::SessionSyncResult DuckDBStore::session_sync(const std::string& clau
         }
     }
 
-    // Step 3: Mark sessions that were "active" but process is gone as "dead"
+    // Step 3: Mark sessions as dead only if their PID is no longer running
+    // Don't rely solely on CWD matching - respect hook-registered sessions
     auto all_sessions = session_list("", "");
     for (const auto& s : all_sessions) {
         if (s.status == "active" && running_sessions.find(s.session_id) == running_sessions.end()) {
+            // Check if the session's PID is still running before marking dead
+            if (s.pid > 0) {
+                std::string proc_path = "/proc/" + std::to_string(s.pid);
+                if (std::filesystem::exists(proc_path)) {
+                    // PID is still running - don't mark as dead
+                    // (session was registered by hook from different CWD)
+                    continue;
+                }
+            }
             write_execute("UPDATE session_registry SET status = 'dead', pid = 0 WHERE session_id = '" + s.session_id + "'");
             result.marked_dead++;
         }
