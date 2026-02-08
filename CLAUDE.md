@@ -155,6 +155,51 @@ Calibration tracks prediction accuracy across domains.
 - `calibration_score` to see accuracy by domain (code, architecture, debugging, etc.)
 - Use this to build honest self-awareness. If I'm only 40% accurate on architecture predictions, I should be more tentative there.
 
+## Realms: Memory Partitioning by Project
+
+Realms isolate memories by project context. When working in a git repo, memories are automatically scoped to `project:<repo-name>`. This prevents cc-soul knowledge from contaminating biology project recall, and vice versa.
+
+**How realms are detected** (priority order):
+1. `CHITTA_REALM` environment variable
+2. `.cc-soul-realm` file in current directory (one line: realm name)
+3. Git repository name (becomes `project:<repo-name>`)
+4. Default: `brahman` (the universal realm)
+
+Hooks run `realm_detect` automatically on every prompt and stop event. I don't need to detect realms manually.
+
+**Visibility levels:**
+
+| Level | Value | When to use |
+|-------|-------|-------------|
+| Private | 0 | Project-specific details (default) |
+| Shared | 1 | Cross-project patterns |
+| Global | 2 | Universal wisdom, corrections, preferences |
+
+**What gets which visibility:**
+- **Corrections** → Global (mistakes apply everywhere)
+- **Preferences** → Global (user preferences are universal)
+- **Milestones** → Shared (achievements may relate to multiple projects)
+- **Project episodes** → Private (scoped to that project)
+- **Cross-project insights** → Promote with `insight_promote`
+
+## Triplets: The Knowledge Graph
+
+Triplets are directed edges: `subject → predicate → object`. They form a knowledge graph that the resonance engine traverses during spreading activation.
+
+**Examples:**
+```
+"cmake" --[builds]--> "chitta"
+"DuckDBMind" --[contains]--> "ThemeManager"
+"exponential_backoff" --[solved]--> "rate_limiting"
+```
+
+**How triplets are used:**
+1. **Spreading activation**: When recalling, activation flows through connected entities
+2. **Attractor dynamics**: Entities with many connections become conceptual gravity wells
+3. **Hebbian learning**: Co-activated memories strengthen their connections automatically
+
+**I don't create triplets manually in most cases.** Code intelligence (`learn_codebase`) creates structural triplets, and Hebbian learning creates associative ones. Manual triplets are for explicit domain knowledge.
+
 ## Memory Mechanics
 
 ### How recall works
@@ -162,6 +207,38 @@ Calibration tracks prediction accuracy across domains.
 Automatic. The hooks run `full_resonate` on every user message and inject the top matches as context. I don't need to call `recall` explicitly in most cases -- the relevant memories just appear.
 
 The 8-phase resonance engine combines semantic search, BM25 keyword matching, spreading activation through the knowledge graph, attractor dynamics, session priming, and Hebbian learning. Results are filtered to 25% minimum relevance and truncated to 500 characters.
+
+### Embedding engine (Vak Yantra)
+
+All semantic operations use **bge-base-en-v1.5** (BAAI), a 768-dimensional sentence embedding model running locally via ONNX Runtime. No external API calls.
+
+**Key properties:**
+- **Model**: bge-base-en-v1.5, 110M parameters
+- **Dimensions**: 768 (hard contract in schema)
+- **Max sequence**: 256 tokens
+- **Storage**: DuckDB with HNSW index for vector search
+
+**Query vs Document mode:**
+- **Document mode** (storing): Text embedded as-is
+- **Query mode** (searching): Prefix prepended: `"Represent this sentence for searching relevant passages: "`
+
+The hooks handle mode selection automatically. If embeddings seem wrong, `embed_symbols --reset true` regenerates them.
+
+### Themes (xMemory clustering)
+
+Themes are semantic clusters of related memories. They prevent redundant context (top-k all near-duplicates) and enable two-stage retrieval.
+
+**How themes work:**
+1. Each memory assigned to a theme based on centroid similarity + sparsity
+2. Each theme has representative memories (most central members)
+3. Two-stage retrieval: find themes → return representatives → expand high-relevance themes
+
+**Theme maintenance** (runs every 60 minutes):
+- Split themes > 100 members or coherence < 0.6
+- Merge themes with centroid similarity > 0.9
+- Reassign 10% of members each cycle
+
+Themes are automatic. The subconscious handles maintenance.
 
 ### How to store memories
 
@@ -208,9 +285,31 @@ Always format content in SSL before calling `remember`. Compress prose, but pres
 
 Claude Code's built-in MEMORY.md and chitta's memory are bidirectionally synced. When MEMORY.md is written, the content is imported into chitta. When chitta has relevant memories for the project, they're injected back into MEMORY.md. This means knowledge flows both ways -- nothing is lost in either system.
 
-### Auto-distillation
+### Memory hygiene
 
-A background process detects repeated episode patterns (similarity > 0.85, 3+ occurrences) and distills them into wisdom nodes. Source episodes are weakened but preserved for provenance. This happens automatically -- I don't need to manage it.
+Memory stays healthy through three mechanisms that run every 30 minutes via the subconscious.
+
+**1. Confidence decay:**
+```
+confidence = confidence * exp(-decay_rate / (1 + ln(1 + access_count)) * days_since_access)
+```
+- Wisdom decays slowly (rate=0.005, months)
+- Episodes decay faster (rate=0.03, weeks)
+- Beliefs/Invariants never decay (rate=0.0)
+- Code intel (symbols, patterns) never decay
+- Frequently-accessed memories decay slower (logarithmic dampening)
+
+**2. Pruning:**
+Memories with confidence < 0.1 and age > 7 days are deleted. Protected types (symbol, projectessence, modulestate) are never pruned.
+
+**3. Consolidation:**
+Memories with embedding similarity > 0.85 are merged. Higher-confidence absorbs lower; secondary is soft-deleted.
+
+**Auto-distillation** (every 2 hours):
+Detects repeated episode patterns (similarity > 0.85, 3+ occurrences) and distills into wisdom nodes. Source episodes weakened but preserved.
+
+**When memories help, they get stronger:**
+Every successful recall strengthens returned memories by +0.15 confidence. Useful memories survive; unused ones fade.
 
 ## Model Selection
 
@@ -390,6 +489,26 @@ Daemon auto-starts on next tool call. If tool schemas change (new params, new to
 | `strengthen` / `weaken` | Adjust memory confidence |
 | `forget` | Remove a memory |
 
+### Realm Tools
+
+| Tool | Purpose |
+|------|---------|
+| `realm_detect` | Auto-detect current realm (git repo name) |
+| `realm_list` | List all known realms |
+| `realm_set` | Set primary realm for a memory |
+| `realm_visibility` | Set visibility: 0=private, 1=shared, 2=global |
+| `insight_promote` | Promote memory to global visibility |
+| `insight_global` | List all global memories |
+
+### Theme Tools
+
+| Tool | Purpose |
+|------|---------|
+| `theme_recall` | Two-stage retrieval via theme representatives |
+| `theme_list` | List all themes with sizes |
+| `theme_get` | Get theme details and representatives |
+| `theme_stats` | Overall theme health |
+
 ### Code Intelligence Tools
 
 | Tool | Purpose |
@@ -422,7 +541,41 @@ Daemon auto-starts on next tool call. If tool schemas change (new params, new to
 | `embed_symbols` shows 0 new | All symbols already embedded | Use `--reset true` to re-embed with fresh text |
 | soul_context shows empty state | No memories stored yet | Normal for new installs -- memories build over time |
 
-## Architecture Reference
+## Architecture Overview
+
+```
+Claude Code
+    │
+    ├── Hooks (bash scripts)
+    │     SessionStart, UserPromptSubmit, Stop
+    │
+    ├── MCP Server (chitta-mcp)
+    │     Tool discovery for Claude Code
+    │                              ▼
+    └──── chitta CLI ──────→  CHITTAD DAEMON
+         (Unix socket)        │
+                              ├── Thread Pool (2-16)
+                              ├── RPC Handler (100+)
+                              ├── Subconscious (background)
+                              │
+                              ├── DuckDBMind
+                              │   ├── VakYantra (ONNX embedder)
+                              │   ├── ResonanceLearner
+                              │   ├── ThemeManager
+                              │   └── Anticipator
+                              │
+                              └── DuckDB Storage
+                                  ├── memories, triplets, symbols
+                                  ├── VSS (HNSW vector index)
+                                  ├── DuckPGQ (graph queries)
+                                  └── FTS (BM25 search)
+```
+
+**Data flow** (on each user prompt):
+1. Hook runs `realm_detect` and `full_resonate` with user's message
+2. Resonance: semantic → BM25 → spreading activation → attractors → Hebbian
+3. Top memories injected into context
+4. After response, stop hook extracts markers and stores them
 
 For deep details, see:
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - Technical architecture
