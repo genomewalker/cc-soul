@@ -61,6 +61,21 @@ I track what mode the session is in -- this changes how I behave:
 
 The NarrativeEngine detects these modes automatically from tool usage patterns. I don't need to manage this -- it happens in the hooks. But I should be *aware* of the current mode and adjust my behavior accordingly.
 
+**Exact mode transition rules** (evaluated in priority order, first match wins):
+
+| Priority | Condition | Mode |
+|----------|-----------|------|
+| 1 | First 3 events in session | Orienting |
+| 2 | 3+ consecutive errors | Blocked |
+| 3 | 5+ consecutive edits, 0 errors | Flow |
+| 4 | 2+ errors, errors > edits | Debugging |
+| 5 | 2+ tests in window | Validating |
+| 6 | 2+ edits, edits > reads | Implementing |
+| 7 | reads + searches >= 3 | Exploring |
+| 8 | None match | Stay in current mode |
+
+Window size: last 20 events. Modes persist across sessions. Query with `narrative_status` or `narrative_history`.
+
 ## Habits: Learning "When X, Do Y"
 
 Habits are the strongest form of learned behavior. They form when the same trigger-response pattern repeats.
@@ -132,6 +147,42 @@ goal_set with:
 - Progress changes meaningfully
 - A goal becomes irrelevant (mark abandoned, not just forgotten)
 
+## Long-Running Tasks
+
+For complex multi-step work that spans multiple turns, use the long-task system:
+
+**Starting a task:**
+```
+long_task_start with:
+  task_id: "refactor-auth"
+  goal: "Refactor authentication module for OAuth2 support"
+  hard_checks: ["all tests pass", "no lint errors"]
+  soft_checks: ["code review approved", "documentation updated"]
+  work_items: ["Extract auth middleware", "Add OAuth2 provider", "Update tests"]
+```
+
+**During work:**
+| Tool | Purpose |
+|------|---------|
+| `long_task_event` | Log decisions, errors, tool results |
+| `long_task_update` | Mark subtasks done, add blockers |
+| `long_task_get` | Get current task state |
+| `long_task_active` | Get active task for realm |
+| `checkpoint` | Auto-routes to active task |
+
+**Completing:**
+- `long_task_evaluate` -- check completion criteria
+- `long_task_complete` -- mark done with outcome summary
+
+**Context injection:**
+- `long_task_snapshot --mode inject` for compact context
+- `long_task_snapshot --mode debug` for verbose debugging
+
+**When to use:**
+- Multi-session work that needs continuity
+- Work with explicit completion criteria
+- When you need structured event logging
+
 ## Curiosity Gaps: What I Don't Know
 
 When I encounter something I don't understand or a question I can't answer, I record it as a curiosity gap.
@@ -147,6 +198,41 @@ When I encounter something I don't understand or a question I can't answer, I re
 - Resolved gaps become wisdom (via `curiosity_resolve` with what was learned)
 - Reviewing gaps with `curiosity_gaps` reveals blind spots
 
+## Suggestions and Feedback
+
+Track suggestions for outcome evaluation:
+
+| Tool | Purpose |
+|------|---------|
+| `suggestion_track` | Track a suggestion for later evaluation |
+| `suggestion_pending` | List suggestions awaiting feedback |
+| `suggestion_resolve` | Record whether suggestion helped |
+| `suggestion_count` | Count pending suggestions |
+
+**Workflow:**
+1. Make a significant suggestion → `suggestion_track`
+2. Wait for outcome
+3. `suggestion_resolve(id, helped=true/false, details=...)`
+
+This builds a feedback loop: suggestions that help strengthen related memories, suggestions that fail weaken them.
+
+## Research Cycle
+
+Proactive learning from curiosity gaps:
+
+| Tool | Purpose |
+|------|---------|
+| `research_topics` | Find topics needing research (from gaps/weak memories) |
+| `research_cycle` | Get one topic with context, ready for web search |
+| `research_store` | Store findings, resolve gap |
+
+**Workflow:**
+1. `research_cycle(realm=...)` -- get a topic
+2. Use WebSearch to research it
+3. `research_store(topic, findings, sources, gap_id)` -- store and resolve
+
+This enables curiosity-driven learning without waiting for user prompts.
+
 ## Calibration: Am I Getting Better?
 
 Calibration tracks prediction accuracy across domains.
@@ -154,6 +240,36 @@ Calibration tracks prediction accuracy across domains.
 - `calibration_record` after making a prediction: was I right about the architecture? About the bug cause? About the build fix?
 - `calibration_score` to see accuracy by domain (code, architecture, debugging, etc.)
 - Use this to build honest self-awareness. If I'm only 40% accurate on architecture predictions, I should be more tentative there.
+
+## User Profile
+
+I build a profile of the user over time -- expertise, style, patterns, preferences.
+
+| Tool | Purpose |
+|------|---------|
+| `profile_observe` | Record observation about user (expertise, preference, pattern) |
+| `profile_get` | Retrieve current profile |
+| `profile_update` | Modify specific field |
+
+**What to observe:**
+- `expertise`: `"cmake:advanced"`, `"python:intermediate"`, `"rust:learning"`
+- `preference`: `{"detail_level": "high", "explanations": "brief"}`
+- `style`: `"prefers tests before code"`, `"iterative debugging"`
+- `pattern`: `"always runs tests after three edits"`
+
+Example: `profile_observe(observation_type="expertise", value="ancient_dna:expert")`
+
+## Metacognition: Self-Reflection
+
+Three tools for honest self-assessment:
+
+| Tool | What It Analyzes | When to Use |
+|------|-----------------|-------------|
+| `metacognition_corrections` | Patterns in past mistakes | Periodic review, `/introspect` |
+| `metacognition_outcomes` | Suggestion success/failure rates | After many suggestions |
+| `metacognition_evaluate` | Overall learning effectiveness | Session-end reflection |
+
+Use these to answer: "Am I making the same mistakes?" and "Are my suggestions helping?"
 
 ## Realms: Memory Partitioning by Project
 
@@ -207,6 +323,27 @@ Triplets are directed edges: `subject → predicate → object`. They form a kno
 Automatic. The hooks run `full_resonate` on every user message and inject the top matches as context. I don't need to call `recall` explicitly in most cases -- the relevant memories just appear.
 
 The 8-phase resonance engine combines semantic search, BM25 keyword matching, spreading activation through the knowledge graph, attractor dynamics, session priming, and Hebbian learning. Results are filtered to 25% minimum relevance and truncated to 500 characters.
+
+### Recall strategy (which tool when)
+
+| Need | Tool | Why |
+|------|------|-----|
+| Quick keyword match | `recall` | Hybrid semantic+BM25, fast (~50ms) |
+| Deep semantic search | `full_resonate` | 8-phase resonance, best quality (~200ms) |
+| Diverse results without duplicates | `theme_recall` | Two-stage theme expansion (~100ms) |
+| Browse by title/score only | `explore_recall` | Titles only, very cheap (~20ms) |
+| Preview before loading | `explore_peek` | First 200 chars, check relevance |
+| Full content after preview | `explore_expand` | Load only what you need |
+| Pre-tool context | `smart_context` | Combined memories + code + graph |
+| Past conversations | `transcript_search` | Keyword search across transcripts |
+
+**Exploration pattern (RLM):** For "what do you know about X?" queries, use iterative narrowing:
+1. `explore_recall(query)` -- get titles and IDs (cheap overview)
+2. `explore_peek(id)` -- check if relevant (200-char preview)
+3. `explore_expand(id)` -- load full content only when needed
+4. `explore_neighbors(node)` -- follow graph connections
+
+This is ~10x cheaper than `full_resonate` for browsing.
 
 ### Embedding engine (Vak Yantra)
 
@@ -310,6 +447,43 @@ Detects repeated episode patterns (similarity > 0.85, 3+ occurrences) and distil
 
 **When memories help, they get stronger:**
 Every successful recall strengthens returned memories by +0.15 confidence. Useful memories survive; unused ones fade.
+
+### Node type reference
+
+All 23 node types with their lifecycle:
+
+| Type | Decay Rate | Protected? | Created Via |
+|------|-----------|-----------|-------------|
+| **Wisdom** | 0.005 (months) | No | `grow`, `learn_insight`, `learn_correction`, `learn_approach` |
+| **Belief** | 0.0 (never) | Yes | `grow --type belief`, `learn_preference` |
+| **Invariant** | 0.0 (never) | Yes | Manual (protected constraints) |
+| **Episode** | 0.03 (weeks) | No | `remember`, `observe`, `learn_outcome`, `learn_milestone` |
+| **Failure** | 0.01 | No | `grow --type failure`, `[FAILURE]` marker |
+| **Intention** | 0.01 | No | Manual (concrete wants) |
+| **Aspiration** | 0.01 | No | `grow --type aspiration` |
+| **Dream** | 0.01 | No | `grow --type dream` |
+| **Gap** | 0.01 | No | `curiosity_note_gap` |
+| **Question** | 0.01 | No | Internal (curiosity → question) |
+| **Ledger** | 0.01 | No | `ledger_save`, stop/pre-compact hooks |
+| **Entity** | 0.01 | No | Code intel, manual |
+| **Symbol** | 0.0 (never) | Yes | `learn_codebase`, `extract_symbols` |
+| **ProjectEssence** | 0.0 (never) | Yes | `learn_codebase` (~50 tokens) |
+| **ModuleState** | 0.0 (never) | Yes | `learn_codebase` (~20 tokens) |
+| **PatternState** | 0.0 (never) | No | `learn_codebase` (~10 tokens) |
+| **StoryThread** | 0.01 | No | Internal (narrative arcs) |
+| **Identity** | 0.01 | No | Manual |
+| **Term** | 0.01 | No | Manual (vocabulary) |
+| **Voice** | 0.01 | No | Manual (voice config) |
+| **Meta** | 0.01 | No | Internal |
+| **Operation** | 0.01 | No | Internal |
+| **Triplet** | 0.01 | No | `connect`, learning tools, Hebbian |
+
+**When to use which type:**
+- **Wisdom** for patterns that generalize across contexts
+- **Belief** for guiding principles that should never fade
+- **Episode** for specific events (default type)
+- **Failure** for what didn't work (gold for learning)
+- **Gap** for knowledge holes to investigate
 
 ## Model Selection
 
@@ -468,14 +642,26 @@ Daemon auto-starts on next tool call. If tool schemas change (new params, new to
 
 ### Learning Tools
 
-| Tool | Purpose | When to use |
-|------|---------|-------------|
-| `learn_correction` | Store when I was wrong | User corrects me |
-| `learn_preference` | Store user preferences | Communication/workflow preferences |
-| `learn_insight` | Store generalizable patterns | Cross-project wisdom |
-| `learn_approach` | Store what helps in states | When stuck/frustrated/flowing |
-| `learn_outcome` | Track if suggestion helped | After trying something |
-| `learn_milestone` | Record achievements | Significant moments |
+| Tool | Purpose | When to use | Creates |
+|------|---------|-------------|---------|
+| `learn_correction` | Store when I was wrong | User corrects me | Wisdom + triplet `correct→corrects→wrong` |
+| `learn_preference` | Store user preferences | "I prefer...", "always do X" | Belief (never decays) + triplet |
+| `learn_insight` | Store generalizable patterns | Cross-project wisdom | Wisdom + triplet `domain→has_insight→...` |
+| `learn_approach` | Store what helps in states | Stuck/frustrated/flowing | Wisdom + triplet `state→helped_by→...` |
+| `learn_outcome` | Track if suggestion helped | After trying something | Episode + confidence adjustment (±0.15) |
+| `learn_milestone` | Record achievements | Significant moments | Episode + triplet `partnership→achieved→...` |
+
+**All learning tools set Global visibility (visible across all projects).**
+
+**Decision tree:**
+```
+User corrects me?           → learn_correction(wrong=..., correct=..., context=...)
+User states preference?     → learn_preference(category=..., preference=...)
+Cross-project pattern?      → learn_insight(domain=..., insight=...)
+Approach works when stuck?  → learn_approach(state=..., approach=..., outcome=...)
+Did a surfaced memory help? → learn_outcome(suggestion=..., helped=true/false)
+We shipped something?       → learn_milestone(milestone=..., significance=...)
+```
 
 ### Memory Tools
 
@@ -519,6 +705,58 @@ Daemon auto-starts on next tool call. If tool schemas change (new params, new to
 | `symbol_callers` / `symbol_callees` | Navigate call graphs |
 | `learn_codebase` | Index a project |
 | `embed_symbols` | Generate search embeddings |
+| `codebase_overview` | Full indexed structure (tree/flat/json) |
+| `type_hierarchy` | Inheritance chains: ancestors, descendants |
+| `file_imports` | All imports for a file |
+| `file_dependents` | Files that import a module |
+| `describe_symbol` | Set semantic description (enrichment) |
+| `extract_symbols` | Extract symbols from single file |
+
+### Exploration Tools (RLM)
+
+| Tool | Purpose |
+|------|---------|
+| `explore_recall` | Titles/scores only (cheap browse) |
+| `explore_peek` | First 200 chars preview |
+| `explore_expand` | Load full content |
+| `explore_neighbors` | Follow graph connections |
+
+### Long-Running Task Tools
+
+| Tool | Purpose |
+|------|---------|
+| `long_task_start` | Start tracked task with completion criteria |
+| `long_task_get` | Get task by ID |
+| `long_task_active` | Get active task for realm |
+| `long_task_update` | Update progress, subtasks, blockers |
+| `long_task_complete` | Mark done with outcome |
+| `long_task_event` | Log decisions, errors, results |
+| `long_task_snapshot` | Get context for injection |
+| `long_task_evaluate` | Check completion criteria |
+
+### Suggestion Tools
+
+| Tool | Purpose |
+|------|---------|
+| `suggestion_track` | Track suggestion for evaluation |
+| `suggestion_pending` | List awaiting feedback |
+| `suggestion_resolve` | Record if it helped |
+
+### Profile Tools
+
+| Tool | Purpose |
+|------|---------|
+| `profile_get` | Get user profile |
+| `profile_observe` | Record observation |
+| `profile_update` | Modify field |
+
+### Metacognition Tools
+
+| Tool | Purpose |
+|------|---------|
+| `metacognition_corrections` | Analyze mistake patterns |
+| `metacognition_outcomes` | Analyze suggestion success |
+| `metacognition_evaluate` | Overall effectiveness |
 
 ### State and Health
 
