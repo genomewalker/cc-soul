@@ -597,6 +597,18 @@ void Subconscious::run_hygiene() {
     std::cerr << "[subconscious] Hygiene run: decayed=" << result.decayed
               << ", pruned=" << result.pruned
               << ", consolidated=" << result.consolidated << "\n";
+
+    // Clean dead sessions (no heartbeat for 10+ minutes)
+    size_t dead_sessions = mind_->store().session_cleanup_dead(600000);
+    if (dead_sessions > 0) {
+        std::cerr << "[subconscious] Cleaned " << dead_sessions << " dead sessions\n";
+    }
+
+    // Clean expired messages
+    size_t expired_msgs = mind_->store().msg_cleanup_expired();
+    if (expired_msgs > 0) {
+        std::cerr << "[subconscious] Cleaned " << expired_msgs << " expired messages\n";
+    }
 }
 
 bool Subconscious::time_for_hygiene() const {

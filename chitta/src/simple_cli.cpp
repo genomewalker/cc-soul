@@ -987,6 +987,28 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                             mind.store().habit_observe(trigger, response, realm);
                             queue_count++;
                         }
+                    } else if (tool == "session_register") {
+                        std::string sid = args.value("session_id", "");
+                        std::string realm = args.value("realm", "brahman");
+                        int32_t pid = args.value("pid", 0);
+                        std::string metadata = args.value("metadata", "{}");
+                        if (!sid.empty()) {
+                            mind.store().session_register(sid, realm, pid, metadata);
+                            queue_count++;
+                        }
+                    } else if (tool == "session_heartbeat") {
+                        std::string sid = args.value("session_id", "");
+                        std::string metadata = args.value("metadata", "");
+                        if (!sid.empty()) {
+                            mind.store().session_heartbeat(sid, metadata);
+                            queue_count++;
+                        }
+                    } else if (tool == "session_deregister") {
+                        std::string sid = args.value("session_id", "");
+                        if (!sid.empty()) {
+                            mind.store().session_deregister(sid);
+                            queue_count++;
+                        }
                     }
                 } catch (const std::exception& e) {
                     if (verbose_mode) {

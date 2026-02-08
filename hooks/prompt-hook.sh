@@ -1,9 +1,9 @@
 #!/bin/bash
 # UserPromptSubmit hook: Surface relevant memories + detect learning opportunities
 #
-# HIGH PERFORMANCE: Single call with filtering
-# - Uses full_resonate (better than recall - has spreading activation)
-# - Filters out code symbols for non-code queries
+# HIGH PERFORMANCE: Single call with smart routing
+# - Uses smart_recall (auto-classifies query intent and routes optimally)
+# - Handles temporal, aspect, entity, code, and exploratory queries
 # - Minimum 30% confidence threshold
 # - Detects patterns for proactive learning
 
@@ -14,20 +14,13 @@ MAX_WAIT="${CC_SOUL_MAX_WAIT:-2}"
 MIN_CONFIDENCE=30
 MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
 
-# djb2 hash - must match C++ implementation in socket_server.hpp
-djb2_hash() {
-    local str="$1"
-    local hash=5381
-    local i c
-    for ((i=0; i<${#str}; i++)); do
-        c=$(printf '%d' "'${str:$i:1}")
-        hash=$(( ((hash << 5) + hash) + c ))
-        hash=$((hash & 0xFFFFFFFF))
-    done
-    echo "$hash"
-}
+# Source shared library
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib.sh"
 
-MIND_HASH=$(djb2_hash "$MIND_PATH")
+SOCKET_PATH=$(get_socket_path)
+SESSION_ID=$(get_session_id)
+[[ -z "$SESSION_ID" ]] && SESSION_ID="default"
 
 # Parse input - Claude Code sends JSON with session_id and prompt (gracefully handle malformed input)
 INPUT=$(cat)
@@ -42,19 +35,10 @@ QUERY=$(echo "$INPUT" | jq -r '.prompt // empty' 2>/dev/null || echo "")
 mkdir -p "$MIND_PATH"
 echo "$QUERY" > "$MIND_PATH/.last_user_message"
 
-# Detect if query is about code (include symbols) or conversation (exclude symbols)
-IS_CODE_QUERY=false
-if echo "$QUERY" | grep -qiE '(function|class|method|implement|code|file|\.py|\.js|\.cpp|\.ts|error|bug|fix)'; then
-    IS_CODE_QUERY=true
-fi
-
-# Use full_resonate for better semantic matching
-# For non-code queries, use --partnership-only to exclude code intel kinds
-if [[ "$IS_CODE_QUERY" == "false" ]]; then
-    memories=$(timeout "$MAX_WAIT" "$CHITTA_BIN" full_resonate --query "$QUERY" --k 6 --partnership-only true 2>/dev/null || true)
-else
-    memories=$(timeout "$MAX_WAIT" "$CHITTA_BIN" full_resonate --query "$QUERY" --k 6 2>/dev/null || true)
-fi
+# Use smart_recall for intelligent query routing
+# - Automatically classifies query intent (temporal, aspect, entity, code, etc.)
+# - Routes to optimal retrieval strategy
+memories=$(timeout "$MAX_WAIT" "$CHITTA_BIN" smart_recall --query "$QUERY" --limit 6 2>/dev/null || true)
 
 if [[ -z "$memories" || "$memories" == *"No memories"* ]]; then
     exit 0
@@ -65,10 +49,11 @@ OUTPUT=""
 COUNT=0
 while IFS= read -r line; do
     [[ -z "$line" ]] && continue
-    [[ ! "$line" =~ ^\[[0-9]+%\] ]] && continue
+    # Match both formats: "[79%]..." (full_resonate) and "#123 [kind] [79%]..." (smart_recall)
+    [[ ! "$line" =~ \[[0-9]+%\] ]] && continue
 
-    # Extract confidence
-    conf=$(echo "$line" | grep -oE '^\[[0-9]+%\]' | tr -d '[]%')
+    # Extract confidence from anywhere in line
+    conf=$(echo "$line" | grep -oE '\[[0-9]+%\]' | head -1 | tr -d '[]%')
     [[ -z "$conf" ]] && continue
 
     # Skip low confidence
@@ -118,8 +103,6 @@ fi
 # NARRATIVE: Get current work mode and log user message
 # ===========================================
 NARRATIVE_STATUS=""
-SOCKET_PATH="${CHITTA_SOCKET:-/tmp/chitta-${MIND_HASH}.sock}"
-SESSION_ID="${CLAUDE_SESSION_ID:-default}"
 
 # Log user_message event via queue (fire-and-forget)
 if [[ -S "$SOCKET_PATH" ]]; then
@@ -305,6 +288,32 @@ if [[ ! -f "$MIND_PATH/.session_active" ]]; then
 fi
 
 # ===========================================
+# CROSS-SESSION MESSAGING: Heartbeat and inbox check
+# ===========================================
+CROSS_SESSION_MSGS=""
+if [[ -n "$SESSION_ID" && -S "$SOCKET_PATH" ]]; then
+    # Session heartbeat
+    request='{"jsonrpc":"2.0","id":10,"method":"session_heartbeat","params":{"session_id":"'"$SESSION_ID"'"}}'
+    timeout 0.3 echo "$request" | nc -U "$SOCKET_PATH" >/dev/null 2>&1 || true
+
+    # Check for cross-session messages
+    request='{"jsonrpc":"2.0","id":11,"method":"msg_inbox","params":{"session_id":"'"$SESSION_ID"'","limit":3,"min_priority":1,"auto_ack":true}}'
+    response=$(timeout 1 echo "$request" | nc -U "$SOCKET_PATH" 2>/dev/null || true)
+    if [[ -n "$response" ]]; then
+        msg_count=$(echo "$response" | jq -r '.result.count // 0' 2>/dev/null)
+        if [[ "$msg_count" -gt 0 ]]; then
+            # Format messages based on priority:
+            # priority 3 = [MSG:URGENT:realm], priority 2 = [MSG:important:realm], else = [msg:realm]
+            CROSS_SESSION_MSGS=$(echo "$response" | jq -r '.result.messages[] |
+                if .priority == 3 then "[MSG:URGENT:\(.sender_realm)] \(.content | .[0:150])"
+                elif .priority == 2 then "[MSG:important:\(.sender_realm)] \(.content | .[0:150])"
+                else "[msg:\(.sender_realm)] \(.content | .[0:150])"
+                end' 2>/dev/null || true)
+        fi
+    fi
+fi
+
+# ===========================================
 # OUTPUT - Learning hints FIRST (so Claude sees them immediately)
 # ===========================================
 # Learning hints at top - these are action items for Claude
@@ -325,6 +334,13 @@ fi
 # Curiosity gaps (unresolved knowledge)
 if [[ -n "$CURIOSITY_OUTPUT" ]]; then
     echo "$CURIOSITY_OUTPUT"
+fi
+
+# Cross-session messages
+if [[ -n "$CROSS_SESSION_MSGS" ]]; then
+    echo "[cross-session messages]"
+    echo "$CROSS_SESSION_MSGS"
+    echo "[/cross-session messages]"
 fi
 
 # Habits (strong patterns)

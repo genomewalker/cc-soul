@@ -675,6 +675,76 @@ We shipped something?       → learn_milestone(milestone=..., significance=...)
 | `strengthen` / `weaken` | Adjust memory confidence |
 | `forget` | Remove a memory |
 
+### Cross-Session Messaging Tools
+
+Sessions can communicate with each other via the shared mind database.
+
+| Tool | Purpose |
+|------|---------|
+| `msg_send` | Send message to session/realm/all |
+| `msg_inbox` | Check unread messages |
+| `msg_ack_all` | Acknowledge all messages |
+| `msg_history` | View sent/received history |
+| `session_list` | List active sessions |
+
+**Targeting:**
+- Direct: `msg_send --target "session-uuid" --content "Hello"`
+- Realm: `msg_send --target "project:cc-soul" --content "Build done"`
+- Global: `msg_send --target "*" --content "Breaking change!"`
+
+**Priority levels:**
+- 0 = info (low)
+- 1 = normal (default)
+- 2 = important
+- 3 = urgent
+
+**Automatic integration:**
+- `session-start-hook.sh` registers session
+- `prompt-hook.sh` shows unread messages, sends heartbeat
+- `stop-hook.sh` deregisters session
+- Subconscious cleans dead sessions (10+ min no heartbeat)
+
+### Query Intelligence Tools
+
+| Tool | Purpose | When to use |
+|------|---------|-------------|
+| `smart_recall` | Unified query entry point | Default for memory queries - auto-routes based on intent |
+| `recall_temporal` | Time-bounded memory search | "what happened last week", "memories from January" |
+| `list_by_aspect` | Filter by semantic category | "show preferences", "list all corrections" |
+| `list_aspects` | Show available aspects | Discovering what categories exist |
+
+### Query Intent Types
+
+smart_recall classifies queries into 7 types and routes accordingly:
+
+| Intent | Example Query | Routed To |
+|--------|---------------|-----------|
+| Aspect | "what preferences exist" | `list_by_aspect()` |
+| Temporal | "memories from last week" | `recall_temporal()` |
+| Entity | "what do I know about cmake" | semantic `recall()` |
+| Relationship | "how does X relate to Y" | triplet graph |
+| Code | "find function foo" | symbol search |
+| Meta | "how many memories" | health stats |
+| Exploratory | default/unclear | semantic `recall()` |
+
+### Available Aspects
+
+| Aspect | Node Types |
+|--------|------------|
+| preferences | preference |
+| corrections | correction |
+| insights | insight, wisdom |
+| failures | failure |
+| decisions | decision |
+| approaches | approach |
+| milestones | milestone |
+| goals | goal |
+| habits | habit |
+| beliefs | belief, invariant |
+| wisdom | wisdom, insight |
+| code | symbol, function, class, file, dependency |
+| gaps | gap, curiosity |
+
 ### Realm Tools
 
 | Tool | Purpose |

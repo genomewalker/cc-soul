@@ -7,6 +7,7 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <algorithm>
+#include <filesystem>
 #include <nlohmann/json.hpp>
 
 namespace chitta {
@@ -121,6 +122,7 @@ void DuckDBStore::fix_sequences() {
     fix_seq("long_task", "task_seq");
     fix_seq("task_event", "event_seq");
     fix_seq("theme", "theme_seq");
+    fix_seq("session_message", "session_message_seq");
 }
 
 bool DuckDBStore::open_embeddings_db(const std::string& path) {
@@ -970,6 +972,61 @@ bool DuckDBStore::create_schema() {
         "memory_id BIGINT, tag VARCHAR, "
         "PRIMARY KEY (memory_id, tag))");
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // Cross-Session Messaging
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Session registry for cross-session messaging
+    write_execute(R"(
+        CREATE TABLE IF NOT EXISTS session_registry (
+            session_id VARCHAR PRIMARY KEY,
+            realm VARCHAR DEFAULT 'brahman',
+            pid INTEGER,
+            transcript_path VARCHAR DEFAULT '',
+            project_dir VARCHAR DEFAULT '',
+            started_at BIGINT NOT NULL,
+            last_heartbeat BIGINT NOT NULL,
+            status VARCHAR DEFAULT 'active',
+            metadata TEXT DEFAULT '{}'
+        )
+    )");
+    // Migration: add columns if missing
+    write_execute("ALTER TABLE session_registry ADD COLUMN IF NOT EXISTS transcript_path VARCHAR DEFAULT ''");
+    write_execute("ALTER TABLE session_registry ADD COLUMN IF NOT EXISTS project_dir VARCHAR DEFAULT ''");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_registry_status ON session_registry(status)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_registry_realm ON session_registry(realm)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_registry_heartbeat ON session_registry(last_heartbeat)");
+
+    // Cross-session messages
+    write_execute(R"(
+        CREATE TABLE IF NOT EXISTS session_message (
+            id BIGINT PRIMARY KEY,
+            sender_session VARCHAR NOT NULL,
+            sender_realm VARCHAR DEFAULT 'brahman',
+            target_type VARCHAR NOT NULL,
+            target_id VARCHAR NOT NULL,
+            priority INTEGER DEFAULT 1,
+            content TEXT NOT NULL,
+            content_type VARCHAR DEFAULT 'text',
+            expires_at BIGINT NOT NULL,
+            created_at BIGINT NOT NULL
+        )
+    )");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_msg_target ON session_message(target_type, target_id, created_at)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_msg_expires ON session_message(expires_at)");
+
+    // Message delivery tracking
+    write_execute(R"(
+        CREATE TABLE IF NOT EXISTS session_message_delivery (
+            message_id BIGINT NOT NULL,
+            session_id VARCHAR NOT NULL,
+            delivered_at BIGINT NOT NULL,
+            acked_at BIGINT DEFAULT 0,
+            PRIMARY KEY (message_id, session_id)
+        )
+    )");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_delivery_inbox ON session_message_delivery(session_id, acked_at, delivered_at)");
+
     // Sequence for IDs
     write_execute("CREATE SEQUENCE IF NOT EXISTS memory_seq START 1");
     write_execute("CREATE SEQUENCE IF NOT EXISTS triplet_seq START 1");
@@ -985,6 +1042,7 @@ bool DuckDBStore::create_schema() {
     write_execute("CREATE SEQUENCE IF NOT EXISTS session_event_seq START 1");
     write_execute("CREATE SEQUENCE IF NOT EXISTS state_segment_seq START 1");
     write_execute("CREATE SEQUENCE IF NOT EXISTS anticipation_candidate_seq START 1");
+    write_execute("CREATE SEQUENCE IF NOT EXISTS session_message_seq START 1");
 
     return true;
 }
@@ -1487,6 +1545,237 @@ std::vector<MemoryResult> DuckDBStore::recall(
     return results;
 }
 
+std::vector<MemoryResult> DuckDBStore::recall_temporal(
+    const std::vector<float>& query_embedding,
+    std::optional<int64_t> start_time,
+    std::optional<int64_t> end_time,
+    size_t limit,
+    const std::string& realm,
+    bool include_global
+) {
+    std::vector<MemoryResult> results;
+    if (!db_) return results;
+
+    // Escape realm for SQL
+    std::string escaped_realm;
+    for (char c : realm) {
+        if (c == '\'') escaped_realm += "''";
+        else escaped_realm += c;
+    }
+
+    // Build WHERE clause for time and realm filtering
+    std::ostringstream where_clause;
+    std::vector<std::string> conditions;
+
+    // Time bounds
+    if (start_time) {
+        conditions.push_back("m.created_at >= " + std::to_string(*start_time));
+    }
+    if (end_time) {
+        conditions.push_back("m.created_at <= " + std::to_string(*end_time));
+    }
+
+    // Realm filtering
+    if (!realm.empty()) {
+        std::ostringstream realm_cond;
+        realm_cond << "(m.realm = '" << escaped_realm << "' ";
+        realm_cond << "OR m.id IN (SELECT memory_id FROM realm_membership WHERE realm = '" << escaped_realm << "')";
+        if (include_global) {
+            realm_cond << " OR m.visibility = 2";
+        }
+        realm_cond << ")";
+        conditions.push_back(realm_cond.str());
+    }
+
+    if (!conditions.empty()) {
+        where_clause << "WHERE ";
+        for (size_t i = 0; i < conditions.size(); ++i) {
+            if (i > 0) where_clause << " AND ";
+            where_clause << conditions[i];
+        }
+    }
+
+    // Two strategies: with or without semantic search
+    bool use_semantic = !query_embedding.empty();
+
+    if (use_semantic && emb_conn_) {
+        // Phase 1: Get candidate IDs from embeddings DB (fast HNSW lookup)
+        std::vector<std::pair<int64_t, float>> candidate_ids;
+        {
+            std::lock_guard<std::mutex> lock(emb_mutex_);
+            try {
+                std::ostringstream emb_sql;
+                emb_sql << "SELECT memory_id, "
+                        << "array_cosine_similarity(embedding, " << embedding_to_sql(query_embedding) << ") AS similarity "
+                        << "FROM memory_embeddings "
+                        << "ORDER BY array_distance(embedding, " << embedding_to_sql(query_embedding) << ") "
+                        << "LIMIT " << (limit * 5);  // Get extra candidates for time filtering
+
+                auto emb_result = emb_conn_->Query(emb_sql.str());
+                if (emb_result && !emb_result->HasError()) {
+                    while (true) {
+                        auto chunk = emb_result->Fetch();
+                        if (!chunk || chunk->size() == 0) break;
+                        for (size_t i = 0; i < chunk->size(); ++i) {
+                            int64_t mem_id = chunk->GetValue(0, i).GetValue<int64_t>();
+                            float sim = chunk->GetValue(1, i).GetValue<float>();
+                            candidate_ids.push_back({mem_id, sim});
+                        }
+                    }
+                }
+            } catch (const std::exception& e) {
+                std::cerr << "[DuckDBStore] recall_temporal embeddings query failed: " << e.what() << "\n";
+                candidate_ids.clear();
+            }
+        }
+
+        // Phase 2: Fetch memory data with time/realm filtering
+        if (!candidate_ids.empty()) {
+            std::ostringstream id_list;
+            for (size_t i = 0; i < candidate_ids.size(); ++i) {
+                if (i > 0) id_list << ",";
+                id_list << candidate_ids[i].first;
+            }
+
+            std::ostringstream sql;
+            sql << "SELECT m.id, COALESCE(m.kind, 'episode'), COALESCE(m.content, ''), "
+                << "COALESCE(m.confidence, 0.5), COALESCE(m.created_at, 0), COALESCE(m.accessed_at, 0), "
+                << "COALESCE(m.realm, 'brahman'), COALESCE(m.visibility, 0) "
+                << "FROM memory m "
+                << "WHERE m.id IN (" << id_list.str() << ")";
+
+            // Add time/realm conditions
+            if (start_time) {
+                sql << " AND m.created_at >= " << *start_time;
+            }
+            if (end_time) {
+                sql << " AND m.created_at <= " << *end_time;
+            }
+            if (!realm.empty()) {
+                sql << " AND (m.realm = '" << escaped_realm << "' ";
+                sql << "OR m.id IN (SELECT memory_id FROM realm_membership WHERE realm = '" << escaped_realm << "')";
+                if (include_global) {
+                    sql << " OR m.visibility = 2";
+                }
+                sql << ")";
+            }
+
+            auto result = read_query(sql.str());
+            if (result && !result->HasError()) {
+                std::unordered_map<int64_t, float> sim_map;
+                for (const auto& [id, sim] : candidate_ids) {
+                    sim_map[id] = sim;
+                }
+
+                while (true) {
+                    auto chunk = result->Fetch();
+                    if (!chunk || chunk->size() == 0) break;
+
+                    for (size_t i = 0; i < chunk->size(); ++i) {
+                        MemoryResult r;
+                        r.id = chunk->GetValue(0, i).GetValue<int64_t>();
+                        r.kind = chunk->GetValue(1, i).ToString();
+                        r.content = chunk->GetValue(2, i).ToString();
+                        r.confidence = chunk->GetValue(3, i).GetValue<float>();
+                        r.created_at = chunk->GetValue(4, i).GetValue<int64_t>();
+                        r.accessed_at = chunk->GetValue(5, i).GetValue<int64_t>();
+                        r.realm = chunk->GetValue(6, i).ToString();
+                        r.visibility = static_cast<RealmVisibility>(chunk->GetValue(7, i).GetValue<int32_t>());
+                        r.similarity = sim_map[r.id];
+                        results.push_back(r);
+                    }
+                }
+
+                // Sort by similarity and limit
+                std::sort(results.begin(), results.end(),
+                    [](const MemoryResult& a, const MemoryResult& b) {
+                        return a.similarity > b.similarity;
+                    });
+                if (results.size() > limit) {
+                    results.resize(limit);
+                }
+            }
+        }
+    } else {
+        // No semantic search: just time-based retrieval with optional fallback semantic
+        std::ostringstream sql;
+        sql << "SELECT m.id, COALESCE(m.kind, 'episode'), COALESCE(m.content, ''), "
+            << "COALESCE(m.confidence, 0.5), COALESCE(m.created_at, 0), COALESCE(m.accessed_at, 0), "
+            << "COALESCE(m.realm, 'brahman'), COALESCE(m.visibility, 0)";
+
+        if (use_semantic) {
+            // Fallback brute-force semantic search on main DB
+            sql << ", COALESCE(array_cosine_similarity(m.embedding, " << embedding_to_sql(query_embedding) << "), 0.0) AS similarity";
+        }
+
+        sql << " FROM memory m " << where_clause.str();
+
+        if (use_semantic) {
+            sql << (conditions.empty() ? " WHERE " : " AND ") << "m.embedding IS NOT NULL";
+            sql << " ORDER BY similarity DESC";
+        } else {
+            sql << " ORDER BY m.created_at DESC";
+        }
+        sql << " LIMIT " << limit;
+
+        auto result = read_query(sql.str());
+        if (result && !result->HasError()) {
+            while (true) {
+                auto chunk = result->Fetch();
+                if (!chunk || chunk->size() == 0) break;
+
+                for (size_t i = 0; i < chunk->size(); ++i) {
+                    MemoryResult r;
+                    r.id = chunk->GetValue(0, i).GetValue<int64_t>();
+                    r.kind = chunk->GetValue(1, i).ToString();
+                    r.content = chunk->GetValue(2, i).ToString();
+                    r.confidence = chunk->GetValue(3, i).GetValue<float>();
+                    r.created_at = chunk->GetValue(4, i).GetValue<int64_t>();
+                    r.accessed_at = chunk->GetValue(5, i).GetValue<int64_t>();
+                    r.realm = chunk->GetValue(6, i).ToString();
+                    r.visibility = static_cast<RealmVisibility>(chunk->GetValue(7, i).GetValue<int32_t>());
+                    r.similarity = use_semantic ? chunk->GetValue(8, i).GetValue<float>() : 0.0f;
+                    results.push_back(r);
+                }
+            }
+        }
+    }
+
+    // Load shared realms for all results in a single batch query
+    if (!results.empty()) {
+        std::ostringstream membership_sql;
+        membership_sql << "SELECT memory_id, realm FROM realm_membership WHERE memory_id IN (";
+        for (size_t idx = 0; idx < results.size(); ++idx) {
+            if (idx > 0) membership_sql << ",";
+            membership_sql << results[idx].id;
+        }
+        membership_sql << ")";
+
+        std::unordered_map<int64_t, size_t> id_to_idx;
+        for (size_t idx = 0; idx < results.size(); ++idx) {
+            id_to_idx[results[idx].id] = idx;
+        }
+
+        auto membership_result = read_query(membership_sql.str());
+        if (membership_result && !membership_result->HasError()) {
+            while (true) {
+                auto chunk = membership_result->Fetch();
+                if (!chunk || chunk->size() == 0) break;
+                for (size_t i = 0; i < chunk->size(); ++i) {
+                    int64_t mem_id = chunk->GetValue(0, i).GetValue<int64_t>();
+                    std::string realm_name = chunk->GetValue(1, i).ToString();
+                    auto it = id_to_idx.find(mem_id);
+                    if (it != id_to_idx.end()) {
+                        results[it->second].shared_realms.push_back(std::move(realm_name));
+                    }
+                }
+            }
+        }
+    }
+
+    return results;
+}
+
 bool DuckDBStore::strengthen(int64_t id, float amount) {
     // Lock handled in write_execute/write_query/read_query
     if (!db_) return false;
@@ -1700,6 +1989,74 @@ std::vector<MemoryResult> DuckDBStore::list_global_memories(size_t limit, const 
             mem.kind = chunk->GetValue(2, i).GetValue<std::string>();
             mem.confidence = chunk->GetValue(3, i).GetValue<float>();
             mem.realm = chunk->GetValue(4, i).GetValue<std::string>();
+            results.push_back(mem);
+        }
+    }
+
+    return results;
+}
+
+// Aspect to node kind mapping for semantic filtering
+static const std::unordered_map<std::string, std::vector<std::string>> ASPECT_TO_KINDS = {
+    {"preferences", {"preference"}},
+    {"corrections", {"correction"}},
+    {"insights", {"insight", "wisdom"}},
+    {"failures", {"failure"}},
+    {"decisions", {"decision"}},
+    {"approaches", {"approach"}},
+    {"milestones", {"milestone"}},
+    {"goals", {"goal"}},
+    {"habits", {"habit"}},
+    {"beliefs", {"belief", "invariant"}},
+    {"wisdom", {"wisdom", "insight"}},
+    {"code", {"symbol", "function", "class", "file", "dependency"}},
+    {"gaps", {"gap", "curiosity"}}
+};
+
+std::vector<MemoryResult> DuckDBStore::list_by_aspect(
+    const std::string& aspect,
+    size_t limit,
+    float min_confidence
+) {
+    std::vector<MemoryResult> results;
+    if (!db_) return results;
+
+    auto it = ASPECT_TO_KINDS.find(aspect);
+    if (it == ASPECT_TO_KINDS.end()) {
+        return results;  // Unknown aspect
+    }
+
+    const auto& kinds = it->second;
+
+    // Build IN clause with escaped kinds
+    std::string kind_list;
+    for (size_t i = 0; i < kinds.size(); ++i) {
+        if (i > 0) kind_list += ", ";
+        kind_list += "'" + kinds[i] + "'";
+    }
+
+    std::ostringstream sql;
+    sql << "SELECT id, COALESCE(content, ''), COALESCE(kind, 'episode'), "
+        << "COALESCE(confidence, 0.5), COALESCE(realm, 'brahman'), "
+        << "COALESCE(created_at, 0), COALESCE(accessed_at, 0) "
+        << "FROM memory WHERE kind IN (" << kind_list << ") "
+        << "AND confidence >= " << min_confidence << " "
+        << "ORDER BY confidence DESC, created_at DESC "
+        << "LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    if (!result) return results;
+
+    while (auto chunk = result->Fetch()) {
+        for (size_t i = 0; i < chunk->size(); i++) {
+            MemoryResult mem;
+            mem.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            mem.content = chunk->GetValue(1, i).GetValue<std::string>();
+            mem.kind = chunk->GetValue(2, i).GetValue<std::string>();
+            mem.confidence = chunk->GetValue(3, i).GetValue<float>();
+            mem.realm = chunk->GetValue(4, i).GetValue<std::string>();
+            mem.created_at = chunk->GetValue(5, i).GetValue<int64_t>();
+            mem.accessed_at = chunk->GetValue(6, i).GetValue<int64_t>();
             results.push_back(mem);
         }
     }
@@ -7498,6 +7855,436 @@ size_t DuckDBStore::count_orphan_memories(const std::string& realm) const {
     if (!chunk || chunk->size() == 0) return 0;
 
     return chunk->GetValue(0, 0).GetValue<int64_t>();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Cross-Session Messaging Implementation
+// ═══════════════════════════════════════════════════════════════════════════
+
+bool DuckDBStore::session_register(const std::string& session_id, const std::string& realm,
+                                    int32_t pid, const std::string& transcript_path,
+                                    const std::string& project_dir, const std::string& metadata) {
+    auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+
+    std::ostringstream sql;
+    sql << "INSERT INTO session_registry (session_id, realm, pid, transcript_path, project_dir, "
+        << "started_at, last_heartbeat, status, metadata) "
+        << "VALUES ('" << session_id << "', '" << realm << "', " << pid << ", "
+        << "'" << transcript_path << "', '" << project_dir << "', "
+        << now << ", " << now << ", 'active', '" << metadata << "') "
+        << "ON CONFLICT (session_id) DO UPDATE SET "
+        << "realm = EXCLUDED.realm, pid = EXCLUDED.pid, "
+        << "transcript_path = EXCLUDED.transcript_path, project_dir = EXCLUDED.project_dir, "
+        << "last_heartbeat = EXCLUDED.last_heartbeat, "
+        << "status = 'active', metadata = EXCLUDED.metadata";
+
+    return write_execute(sql.str());
+}
+
+bool DuckDBStore::session_heartbeat(const std::string& session_id, const std::string& metadata) {
+    auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+
+    std::ostringstream sql;
+    sql << "UPDATE session_registry SET last_heartbeat = " << now;
+    if (!metadata.empty()) {
+        sql << ", metadata = '" << metadata << "'";
+    }
+    sql << " WHERE session_id = '" << session_id << "'";
+
+    return write_execute(sql.str());
+}
+
+bool DuckDBStore::session_deregister(const std::string& session_id) {
+    std::ostringstream sql;
+    sql << "UPDATE session_registry SET status = 'dead' WHERE session_id = '" << session_id << "'";
+    return write_execute(sql.str());
+}
+
+std::vector<SessionRegistryEntry> DuckDBStore::session_list(const std::string& realm,
+                                                             const std::string& status) {
+    std::ostringstream sql;
+    sql << "SELECT session_id, realm, pid, transcript_path, project_dir, "
+        << "started_at, last_heartbeat, status, metadata "
+        << "FROM session_registry WHERE 1=1";
+    if (!realm.empty()) {
+        sql << " AND realm = '" << realm << "'";
+    }
+    if (!status.empty()) {
+        sql << " AND status = '" << status << "'";
+    }
+    sql << " ORDER BY last_heartbeat DESC";
+
+    std::vector<SessionRegistryEntry> entries;
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) return entries;
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            SessionRegistryEntry entry;
+            entry.session_id = chunk->GetValue(0, i).ToString();
+            entry.realm = chunk->GetValue(1, i).ToString();
+            entry.pid = chunk->GetValue(2, i).GetValue<int32_t>();
+            entry.transcript_path = chunk->GetValue(3, i).ToString();
+            entry.project_dir = chunk->GetValue(4, i).ToString();
+            entry.started_at = chunk->GetValue(5, i).GetValue<int64_t>();
+            entry.last_heartbeat = chunk->GetValue(6, i).GetValue<int64_t>();
+            entry.status = chunk->GetValue(7, i).ToString();
+            entry.metadata = chunk->GetValue(8, i).ToString();
+            entries.push_back(std::move(entry));
+        }
+    }
+    return entries;
+}
+
+size_t DuckDBStore::session_cleanup_dead(int64_t timeout_ms) {
+    auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+    int64_t cutoff = now - timeout_ms;
+
+    // First mark stale sessions as dead
+    std::ostringstream mark_sql;
+    mark_sql << "UPDATE session_registry SET status = 'dead' "
+             << "WHERE status = 'active' AND last_heartbeat < " << cutoff;
+    write_execute(mark_sql.str());
+
+    // Count dead sessions
+    auto count_result = read_query("SELECT COUNT(*) FROM session_registry WHERE status = 'dead'");
+    if (!count_result || count_result->HasError()) return 0;
+
+    auto chunk = count_result->Fetch();
+    if (!chunk || chunk->size() == 0) return 0;
+
+    size_t dead_count = chunk->GetValue(0, 0).GetValue<int64_t>();
+
+    // Delete very old dead sessions (older than 24 hours)
+    int64_t delete_cutoff = now - (24 * 60 * 60 * 1000);
+    std::ostringstream delete_sql;
+    delete_sql << "DELETE FROM session_registry WHERE status = 'dead' AND last_heartbeat < " << delete_cutoff;
+    write_execute(delete_sql.str());
+
+    return dead_count;
+}
+
+DuckDBStore::SessionSyncResult DuckDBStore::session_sync(const std::string& claude_projects_dir) {
+    SessionSyncResult result;
+
+    // Determine the projects directory
+    std::string projects_dir = claude_projects_dir;
+    if (projects_dir.empty()) {
+        const char* home = std::getenv("HOME");
+        if (home) {
+            projects_dir = std::string(home) + "/.claude/projects";
+        }
+    }
+
+    // Helper: encode a path the way Claude does (replace / with -, prefix with -)
+    auto encode_path = [](const std::string& path) -> std::string {
+        std::string encoded = path;
+        // Remove leading slash if present
+        if (!encoded.empty() && encoded[0] == '/') {
+            encoded = encoded.substr(1);
+        }
+        // Replace all / with -
+        std::replace(encoded.begin(), encoded.end(), '/', '-');
+        return "-" + encoded;
+    };
+
+    // Step 1: Find all running claude processes and their working directories
+    std::vector<std::pair<std::string, int32_t>> cwds_with_pids;  // (CWD, PID)
+    FILE* pipe = popen("pgrep '^claude$' 2>/dev/null", "r");
+    if (pipe) {
+        char line[64];
+        while (fgets(line, sizeof(line), pipe)) {
+            int pid = 0;
+            if (sscanf(line, "%d", &pid) == 1 && pid > 0) {
+                // Read the CWD of this process
+                std::string cwd_link = "/proc/" + std::to_string(pid) + "/cwd";
+                char cwd_buf[4096];
+                ssize_t len = readlink(cwd_link.c_str(), cwd_buf, sizeof(cwd_buf) - 1);
+                if (len > 0) {
+                    cwd_buf[len] = '\0';
+                    cwds_with_pids.emplace_back(std::string(cwd_buf), pid);
+                }
+            }
+        }
+        pclose(pipe);
+    }
+
+    // Step 2: For each running process, encode its CWD and find matching project dir
+    std::unordered_set<std::string> running_sessions;
+    for (const auto& [cwd, pid] : cwds_with_pids) {
+        std::string encoded_cwd = encode_path(cwd);
+        std::string project_path = projects_dir + "/" + encoded_cwd;
+
+        if (!std::filesystem::exists(project_path)) continue;
+
+        // Find most recent transcript in this project
+        std::filesystem::file_time_type newest_time{};
+        std::string newest_transcript;
+        std::string newest_session_id;
+
+        try {
+            for (const auto& file : std::filesystem::directory_iterator(project_path)) {
+                if (!file.is_regular_file()) continue;
+                std::string fname = file.path().filename().string();
+                if (fname.size() > 6 && fname.substr(fname.size() - 6) == ".jsonl") {
+                    auto ftime = file.last_write_time();
+                    if (newest_transcript.empty() || ftime > newest_time) {
+                        newest_time = ftime;
+                        newest_transcript = file.path().string();
+                        newest_session_id = fname.substr(0, fname.size() - 6);
+                    }
+                }
+            }
+        } catch (...) {}
+
+        if (newest_session_id.empty()) continue;
+
+        running_sessions.insert(newest_session_id);
+
+        // Extract realm from CWD
+        std::string realm = "project:" + cwd.substr(1);  // Remove leading /
+
+        // Register or update this session as running
+        auto existing = session_list("", "");
+        bool found = false;
+        for (const auto& s : existing) {
+            if (s.session_id == newest_session_id) {
+                found = true;
+                // Update with PID if changed
+                if (s.pid != pid || s.status != "running") {
+                    std::ostringstream sql;
+                    sql << "UPDATE session_registry SET pid = " << pid
+                        << ", status = 'running', project_dir = '" << cwd
+                        << "', last_heartbeat = "
+                        << std::chrono::duration_cast<std::chrono::milliseconds>(
+                               std::chrono::system_clock::now().time_since_epoch()).count()
+                        << " WHERE session_id = '" << newest_session_id << "'";
+                    write_execute(sql.str());
+                    result.updated++;
+                }
+                break;
+            }
+        }
+        if (!found) {
+            session_register(newest_session_id, realm, pid, newest_transcript, cwd, "{}");
+            // Mark as running
+            write_execute("UPDATE session_registry SET status = 'running' WHERE session_id = '" + newest_session_id + "'");
+            result.discovered++;
+        }
+    }
+
+    // Step 3: Mark sessions that were "running" but process is gone as "dead"
+    auto all_sessions = session_list("", "");
+    for (const auto& s : all_sessions) {
+        if (s.status == "running" && running_sessions.find(s.session_id) == running_sessions.end()) {
+            write_execute("UPDATE session_registry SET status = 'dead', pid = 0 WHERE session_id = '" + s.session_id + "'");
+            result.marked_dead++;
+        }
+    }
+
+    return result;
+}
+
+int64_t DuckDBStore::msg_send(const SessionMessage& msg) {
+    auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+
+    // Get next ID from sequence
+    auto id_result = write_query("SELECT nextval('session_message_seq')");
+    if (!id_result || id_result->HasError()) return 0;
+    auto id_chunk = id_result->Fetch();
+    if (!id_chunk || id_chunk->size() == 0) return 0;
+    int64_t msg_id = id_chunk->GetValue(0, 0).GetValue<int64_t>();
+
+    // Insert message
+    std::ostringstream sql;
+    sql << "INSERT INTO session_message (id, sender_session, sender_realm, target_type, target_id, "
+        << "priority, content, content_type, expires_at, created_at) VALUES ("
+        << msg_id << ", '" << msg.sender_session << "', '" << msg.sender_realm << "', '"
+        << msg.target_type << "', '" << msg.target_id << "', " << msg.priority << ", '"
+        << msg.content << "', '" << msg.content_type << "', " << msg.expires_at << ", " << now << ")";
+
+    if (!write_execute(sql.str())) return 0;
+
+    // Fan out deliveries based on target_type
+    if (msg.target_type == "direct") {
+        // Single delivery to target_id
+        std::ostringstream del_sql;
+        del_sql << "INSERT INTO session_message_delivery (message_id, session_id, delivered_at, acked_at) "
+                << "SELECT " << msg_id << ", '" << msg.target_id << "', " << now << ", 0 "
+                << "WHERE EXISTS (SELECT 1 FROM session_registry WHERE session_id = '" << msg.target_id << "') "
+                << "AND '" << msg.target_id << "' != '" << msg.sender_session << "' "
+                << "ON CONFLICT DO NOTHING";
+        write_execute(del_sql.str());
+    } else if (msg.target_type == "realm") {
+        // Delivery to all active sessions in the realm
+        std::ostringstream del_sql;
+        del_sql << "INSERT INTO session_message_delivery (message_id, session_id, delivered_at, acked_at) "
+                << "SELECT " << msg_id << ", session_id, " << now << ", 0 "
+                << "FROM session_registry "
+                << "WHERE realm = '" << msg.target_id << "' AND status = 'active' "
+                << "AND session_id != '" << msg.sender_session << "' "
+                << "ON CONFLICT DO NOTHING";
+        write_execute(del_sql.str());
+    } else if (msg.target_type == "global") {
+        // Delivery to all active sessions
+        std::ostringstream del_sql;
+        del_sql << "INSERT INTO session_message_delivery (message_id, session_id, delivered_at, acked_at) "
+                << "SELECT " << msg_id << ", session_id, " << now << ", 0 "
+                << "FROM session_registry "
+                << "WHERE status = 'active' "
+                << "AND session_id != '" << msg.sender_session << "' "
+                << "ON CONFLICT DO NOTHING";
+        write_execute(del_sql.str());
+    }
+
+    return msg_id;
+}
+
+std::vector<InboxItem> DuckDBStore::msg_inbox(const std::string& session_id,
+                                               size_t limit, int32_t min_priority) {
+    auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+
+    std::ostringstream sql;
+    sql << "SELECT m.id, m.sender_session, m.sender_realm, m.target_type, m.target_id, "
+        << "m.priority, m.content, m.content_type, m.expires_at, m.created_at, "
+        << "d.delivered_at, d.acked_at "
+        << "FROM session_message_delivery d "
+        << "JOIN session_message m ON m.id = d.message_id "
+        << "WHERE d.session_id = '" << session_id << "' "
+        << "AND d.acked_at = 0 "
+        << "AND (m.expires_at = 0 OR m.expires_at > " << now << ") "
+        << "AND m.priority >= " << min_priority << " "
+        << "ORDER BY m.priority DESC, m.created_at ASC "
+        << "LIMIT " << limit;
+
+    std::vector<InboxItem> items;
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) return items;
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            InboxItem item;
+            item.message.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            item.message.sender_session = chunk->GetValue(1, i).ToString();
+            item.message.sender_realm = chunk->GetValue(2, i).ToString();
+            item.message.target_type = chunk->GetValue(3, i).ToString();
+            item.message.target_id = chunk->GetValue(4, i).ToString();
+            item.message.priority = chunk->GetValue(5, i).GetValue<int32_t>();
+            item.message.content = chunk->GetValue(6, i).ToString();
+            item.message.content_type = chunk->GetValue(7, i).ToString();
+            item.message.expires_at = chunk->GetValue(8, i).GetValue<int64_t>();
+            item.message.created_at = chunk->GetValue(9, i).GetValue<int64_t>();
+            item.delivered_at = chunk->GetValue(10, i).GetValue<int64_t>();
+            item.is_read = chunk->GetValue(11, i).GetValue<int64_t>() > 0;
+            items.push_back(std::move(item));
+        }
+    }
+    return items;
+}
+
+bool DuckDBStore::msg_ack(int64_t message_id, const std::string& session_id) {
+    auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+
+    std::ostringstream sql;
+    sql << "UPDATE session_message_delivery SET acked_at = " << now
+        << " WHERE message_id = " << message_id << " AND session_id = '" << session_id << "'";
+
+    return write_execute(sql.str());
+}
+
+bool DuckDBStore::msg_ack_all(const std::string& session_id) {
+    auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+
+    std::ostringstream sql;
+    sql << "UPDATE session_message_delivery SET acked_at = " << now
+        << " WHERE session_id = '" << session_id << "' AND acked_at = 0";
+
+    return write_execute(sql.str());
+}
+
+std::vector<SessionMessage> DuckDBStore::msg_history(const std::string& session_id, size_t limit) {
+    std::ostringstream sql;
+    sql << "SELECT m.id, m.sender_session, m.sender_realm, m.target_type, m.target_id, "
+        << "m.priority, m.content, m.content_type, m.expires_at, m.created_at "
+        << "FROM session_message_delivery d "
+        << "JOIN session_message m ON m.id = d.message_id "
+        << "WHERE d.session_id = '" << session_id << "' "
+        << "ORDER BY m.created_at DESC "
+        << "LIMIT " << limit;
+
+    std::vector<SessionMessage> messages;
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) return messages;
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            SessionMessage msg;
+            msg.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            msg.sender_session = chunk->GetValue(1, i).ToString();
+            msg.sender_realm = chunk->GetValue(2, i).ToString();
+            msg.target_type = chunk->GetValue(3, i).ToString();
+            msg.target_id = chunk->GetValue(4, i).ToString();
+            msg.priority = chunk->GetValue(5, i).GetValue<int32_t>();
+            msg.content = chunk->GetValue(6, i).ToString();
+            msg.content_type = chunk->GetValue(7, i).ToString();
+            msg.expires_at = chunk->GetValue(8, i).GetValue<int64_t>();
+            msg.created_at = chunk->GetValue(9, i).GetValue<int64_t>();
+            messages.push_back(std::move(msg));
+        }
+    }
+    return messages;
+}
+
+size_t DuckDBStore::msg_cleanup_expired() {
+    auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+
+    // Count expired messages
+    std::ostringstream count_sql;
+    count_sql << "SELECT COUNT(*) FROM session_message WHERE expires_at > 0 AND expires_at < " << now;
+    auto count_result = read_query(count_sql.str());
+    if (!count_result || count_result->HasError()) return 0;
+
+    auto chunk = count_result->Fetch();
+    if (!chunk || chunk->size() == 0) return 0;
+    size_t expired_count = chunk->GetValue(0, 0).GetValue<int64_t>();
+
+    // Delete expired delivery records
+    std::ostringstream del_delivery_sql;
+    del_delivery_sql << "DELETE FROM session_message_delivery WHERE message_id IN "
+                     << "(SELECT id FROM session_message WHERE expires_at > 0 AND expires_at < " << now << ")";
+    write_execute(del_delivery_sql.str());
+
+    // Delete expired messages
+    std::ostringstream del_msg_sql;
+    del_msg_sql << "DELETE FROM session_message WHERE expires_at > 0 AND expires_at < " << now;
+    write_execute(del_msg_sql.str());
+
+    return expired_count;
 }
 
 }  // namespace chitta

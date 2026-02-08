@@ -84,6 +84,40 @@ TOOLS = [
         }
     ),
     Tool(
+        name="recall_temporal",
+        description="Search memories within a time window, optionally with semantic filtering",
+        inputSchema={
+                "properties": {
+                        "end": {
+                                "description": "End date (ISO8601 or YYYY-MM-DD)",
+                                "type": "string"
+                        },
+                        "include_global": {
+                                "description": "Include global memories (default: True)",
+                                "type": "boolean"
+                        },
+                        "limit": {
+                                "description": "Max results (default 20)",
+                                "type": "integer"
+                        },
+                        "query": {
+                                "description": "Optional semantic search query",
+                                "type": "string"
+                        },
+                        "realm": {
+                                "description": "Filter by realm",
+                                "type": "string"
+                        },
+                        "start": {
+                                "description": "Start date (ISO8601 or YYYY-MM-DD)",
+                                "type": "string"
+                        }
+                },
+                "required": None,
+                "type": "object"
+        }
+    ),
+    Tool(
         name="explore_recall",
         description="Lightweight recall - returns titles/scores only, no full content (for iterative exploration)",
         inputSchema={
@@ -207,106 +241,19 @@ TOOLS = [
         }
     ),
     Tool(
-        name="enrichment_status",
-        description="Get code enrichment progress (semantic descriptions for symbols)",
-        inputSchema={
-                "properties": {},
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="describe_symbol",
-        description="Set description for a code symbol (stores directly in symbol table, not as wisdom)",
-        inputSchema={
-                "properties": {
-                        "description": {
-                                "description": "Semantic description of the symbol",
-                                "type": "string"
-                        },
-                        "symbol_id": {
-                                "description": "Symbol ID to describe",
-                                "type": "integer"
-                        }
-                },
-                "required": [
-                        "symbol_id",
-                        "description"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="cleanup_code_wisdom",
-        description="Migration: delete [code] wisdom memories and clear orphaned symbol.memory_id references",
-        inputSchema={
-                "properties": {
-                        "dry_run": {
-                                "description": "Preview only without changes (default: True)",
-                                "type": "boolean"
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="subconscious_stats",
-        description="Get subconscious background processor statistics",
-        inputSchema={
-                "properties": {},
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="reembed_memories",
-        description="Re-embed memories with proper embeddings. Use to fix memories stored with zero embeddings.",
-        inputSchema={
-                "properties": {
-                        "dry_run": {
-                                "description": "Preview without updating (default: False)",
-                                "type": "boolean"
-                        },
-                        "kind": {
-                                "description": "Filter by kind: belief, wisdom, episode, correction, preference",
-                                "type": "string"
-                        },
-                        "limit": {
-                                "description": "Max memories to process (default: 100)",
-                                "type": "integer"
-                        },
-                        "min_confidence": {
-                                "description": "Min confidence threshold (default: 0)",
-                                "type": "number"
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
         name="embed_symbols",
-        description="Fast embed symbol metadata (no LLM needed, ~100/sec)",
+        description="Fast embed symbol metadata (no LLM needed, ~100/sec). Use reset=true to clear all embeddings and re-embed with richer text.",
         inputSchema={
                 "properties": {
                         "batch_size": {
                                 "description": "Symbols per batch (default: 100)",
                                 "type": "integer"
+                        },
+                        "reset": {
+                                "description": "Clear all symbol embeddings before re-embedding (default: False)",
+                                "type": "boolean"
                         }
                 },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="dedupe_symbols",
-        description="Remove duplicate symbols from the database",
-        inputSchema={
-                "properties": {},
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="migrate_vss",
-        description="Migrate embeddings from main DB to separate VSS database for HNSW stability",
-        inputSchema={
-                "properties": {},
                 "type": "object"
         }
     ),
@@ -363,26 +310,6 @@ TOOLS = [
                 "required": [
                         "id"
                 ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="batch_forget",
-        description="Delete multiple nodes by ID (batch deletion)",
-        inputSchema={
-                "properties": {
-                        "ids": {
-                                "description": "Array of node IDs (UUID strings)",
-                                "items": {
-                                        "type": "string"
-                                },
-                                "type": "array"
-                        },
-                        "pattern": {
-                                "description": "Search pattern to find and delete matching nodes (alternative to ids)",
-                                "type": "string"
-                        }
-                },
                 "type": "object"
         }
     ),
@@ -459,22 +386,6 @@ TOOLS = [
         }
     ),
     Tool(
-        name="extract_symbols",
-        description="Extract symbols (functions, classes) from source file using tree-sitter",
-        inputSchema={
-                "properties": {
-                        "path": {
-                                "description": "File path to analyze",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "path"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
         name="learn_codebase",
         description="Learn codebase incrementally - only re-indexes changed files",
         inputSchema={
@@ -546,6 +457,10 @@ TOOLS = [
                         "name": {
                                 "description": "Symbol name to find callers for",
                                 "type": "string"
+                        },
+                        "project": {
+                                "description": "Project name to disambiguate when multiple symbols share the same name",
+                                "type": "string"
                         }
                 },
                 "type": "object"
@@ -566,6 +481,10 @@ TOOLS = [
                         },
                         "name": {
                                 "description": "Symbol name to find callees for",
+                                "type": "string"
+                        },
+                        "project": {
+                                "description": "Project name to disambiguate when multiple symbols share the same name",
                                 "type": "string"
                         }
                 },
@@ -588,6 +507,10 @@ TOOLS = [
                         "name": {
                                 "description": "Symbol name to read",
                                 "type": "string"
+                        },
+                        "project": {
+                                "description": "Project name to disambiguate when multiple symbols share the same name",
+                                "type": "string"
                         }
                 },
                 "type": "object"
@@ -600,6 +523,10 @@ TOOLS = [
                 "properties": {
                         "name": {
                                 "description": "Function name to read",
+                                "type": "string"
+                        },
+                        "project": {
+                                "description": "Project name to disambiguate",
                                 "type": "string"
                         }
                 },
@@ -621,6 +548,10 @@ TOOLS = [
                         "limit": {
                                 "description": "Max results (default 10)",
                                 "type": "integer"
+                        },
+                        "project": {
+                                "description": "Filter results to symbols from this project only",
+                                "type": "string"
                         },
                         "query": {
                                 "description": "Natural language query to find symbols",
@@ -704,111 +635,6 @@ TOOLS = [
                                 "type": "string"
                         }
                 },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="clear_codebase",
-        description="Remove all code intelligence data (symbols, triplets) for a project",
-        inputSchema={
-                "properties": {
-                        "dry_run": {
-                                "description": "Preview only (default: False)",
-                                "type": "boolean"
-                        },
-                        "project": {
-                                "description": "Project name to clear",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "project"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="clear_triplets",
-        description="Delete triplets by subject pattern (e.g., '%.cpp' for all C++ file triplets)",
-        inputSchema={
-                "properties": {
-                        "dry_run": {
-                                "description": "Preview only (default: False)",
-                                "type": "boolean"
-                        },
-                        "pattern": {
-                                "description": "SQL LIKE pattern for subject (e.g., '%.cpp', '%.hpp', 'chitta/%')",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "pattern"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="resolve_callsites",
-        description="Resolve callsites to symbols and populate call_edge table for call graph queries",
-        inputSchema={
-                "properties": {
-                        "project": {
-                                "description": "Filter to specific project path (optional)",
-                                "type": "string"
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="type_hierarchy",
-        description="Get type hierarchy (base classes, implemented interfaces) for a type",
-        inputSchema={
-                "properties": {
-                        "direction": {
-                                "description": "ancestors, descendants, or both (default: both)",
-                                "type": "string"
-                        },
-                        "name": {
-                                "description": "Type name to query",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "name"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="file_imports",
-        description="Get all imports for a file",
-        inputSchema={
-                "properties": {
-                        "path": {
-                                "description": "File path or filename to query imports for",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "path"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="file_dependents",
-        description="Get files that import a given module/file",
-        inputSchema={
-                "properties": {
-                        "module": {
-                                "description": "Module or file name to find dependents of",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "module"
-                ],
                 "type": "object"
         }
     ),
@@ -928,78 +754,6 @@ TOOLS = [
         description="Check daemon health and readiness",
         inputSchema={
                 "properties": {},
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="version_check",
-        description="Get version information",
-        inputSchema={
-                "properties": {},
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="cycle",
-        description="Run maintenance cycle (decay, cleanup)",
-        inputSchema={
-                "properties": {
-                        "force": {
-                                "description": "Force full cycle",
-                                "type": "boolean"
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="cleanup",
-        description="Remove garbage nodes",
-        inputSchema={
-                "properties": {
-                        "dry_run": {
-                                "description": "Preview only",
-                                "type": "boolean"
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="import_soul",
-        description="Import .soul file (SSL format)",
-        inputSchema={
-                "properties": {
-                        "content": {
-                                "description": "SSL content (alternative to file)",
-                                "type": "string"
-                        },
-                        "file": {
-                                "description": "Path to .soul file",
-                                "type": "string"
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="export_soul",
-        description="Export memories to SSL format",
-        inputSchema={
-                "properties": {
-                        "file": {
-                                "description": "Output file path",
-                                "type": "string"
-                        },
-                        "limit": {
-                                "description": "Max nodes to export",
-                                "type": "integer"
-                        },
-                        "tag": {
-                                "description": "Filter by tag",
-                                "type": "string"
-                        }
-                },
                 "type": "object"
         }
     ),
@@ -1508,174 +1262,6 @@ TOOLS = [
         }
     ),
     Tool(
-        name="suggestion_track",
-        description="Track a suggestion made for later outcome evaluation",
-        inputSchema={
-                "properties": {
-                        "content": {
-                                "description": "What was suggested",
-                                "type": "string"
-                        },
-                        "context": {
-                                "description": "Why/when it was suggested",
-                                "type": "string"
-                        },
-                        "realm": {
-                                "description": "Project scope (default: brahman)",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "content"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="suggestion_pending",
-        description="List suggestions awaiting outcome feedback",
-        inputSchema={
-                "properties": {
-                        "limit": {
-                                "description": "Max results (default: 20)",
-                                "type": "integer"
-                        },
-                        "realm": {
-                                "description": "Filter by realm",
-                                "type": "string"
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="suggestion_resolve",
-        description="Record the outcome of a suggestion (did it help?)",
-        inputSchema={
-                "properties": {
-                        "details": {
-                                "description": "What happened",
-                                "type": "string"
-                        },
-                        "helped": {
-                                "description": "Did the suggestion help?",
-                                "type": "boolean"
-                        },
-                        "id": {
-                                "description": "Suggestion ID",
-                                "type": "integer"
-                        }
-                },
-                "required": [
-                        "id",
-                        "helped"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="suggestion_count",
-        description="Count pending suggestions awaiting feedback",
-        inputSchema={
-                "properties": {
-                        "realm": {
-                                "description": "Filter by realm",
-                                "type": "string"
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="consolidation_scan",
-        description="Find similar memory pairs that could be merged",
-        inputSchema={
-                "properties": {
-                        "limit": {
-                                "description": "Max candidates (default: 50)",
-                                "type": "integer"
-                        },
-                        "realm": {
-                                "description": "Filter by realm",
-                                "type": "string"
-                        },
-                        "similarity_threshold": {
-                                "description": "Min similarity (0-1, default: 0.85)",
-                                "type": "number"
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="consolidation_merge",
-        description="Merge two similar memories (primary absorbs secondary)",
-        inputSchema={
-                "properties": {
-                        "merged_content": {
-                                "description": "Optional combined content",
-                                "type": "string"
-                        },
-                        "primary_id": {
-                                "description": "ID of primary memory (kept)",
-                                "type": "integer"
-                        },
-                        "secondary_id": {
-                                "description": "ID of secondary memory (absorbed)",
-                                "type": "integer"
-                        }
-                },
-                "required": [
-                        "primary_id",
-                        "secondary_id"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="consolidation_auto",
-        description="Auto-merge highly similar memories (>90% similarity)",
-        inputSchema={
-                "properties": {
-                        "max_merges": {
-                                "description": "Max merges to perform (default: 20)",
-                                "type": "integer"
-                        },
-                        "similarity_threshold": {
-                                "description": "Min similarity (default: 0.90)",
-                                "type": "number"
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="metacognition_corrections",
-        description="Analyze patterns in past corrections. Finds recurring mistakes.",
-        inputSchema={
-                "properties": {
-                        "limit": {
-                                "description": "Max corrections to analyze (default: 50)",
-                                "type": "integer"
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="metacognition_outcomes",
-        description="Analyze suggestion outcomes (what worked vs failed). Finds success patterns.",
-        inputSchema={
-                "properties": {
-                        "limit": {
-                                "description": "Max outcomes to analyze (default: 50)",
-                                "type": "integer"
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
         name="metacognition_evaluate",
         description="Self-evaluate learning effectiveness. Returns metrics and recommendations.",
         inputSchema={
@@ -1740,178 +1326,6 @@ TOOLS = [
                 },
                 "required": [
                         "id"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="transcript_register",
-        description="Register a transcript file for distillation tracking",
-        inputSchema={
-                "properties": {
-                        "realm": {
-                                "description": "Project/realm isolation (default: 'default')",
-                                "type": "string"
-                        },
-                        "session_id": {
-                                "description": "Claude session ID",
-                                "type": "string"
-                        },
-                        "transcript_path": {
-                                "description": "Path to .jsonl transcript file",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "session_id",
-                        "transcript_path"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="transcript_get",
-        description="Get transcript state for a session",
-        inputSchema={
-                "properties": {
-                        "session_id": {
-                                "description": "Session ID to look up",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "session_id"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="transcript_list",
-        description="List all registered transcripts",
-        inputSchema={
-                "properties": {},
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="transcript_update",
-        description="Update transcript processing progress",
-        inputSchema={
-                "properties": {
-                        "last_line": {
-                                "description": "Last processed line number",
-                                "type": "integer"
-                        },
-                        "session_id": {
-                                "description": "Session ID",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "session_id",
-                        "last_line"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="transcript_remove",
-        description="Remove transcript from tracking",
-        inputSchema={
-                "properties": {
-                        "session_id": {
-                                "description": "Session ID to remove",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "session_id"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="transcript_parse",
-        description="Parse new turns from a transcript JSONL file",
-        inputSchema={
-                "properties": {
-                        "min_turns": {
-                                "description": "Minimum turns to return (default: 4)",
-                                "type": "integer"
-                        },
-                        "session_id": {
-                                "description": "Session ID to parse",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "session_id"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="transcript_search",
-        description="Semantic search across transcript content. Defaults to current session. Use keyword_only=true for fast search.",
-        inputSchema={
-                "properties": {
-                        "keyword_only": {
-                                "description": "Fast keyword match without embeddings (default: False)",
-                                "type": "boolean"
-                        },
-                        "limit": {
-                                "description": "Max results (default: 10)",
-                                "type": "integer"
-                        },
-                        "min_similarity": {
-                                "description": "Minimum cosine similarity 0-1 (default: 0.3)",
-                                "type": "number"
-                        },
-                        "query": {
-                                "description": "Search query",
-                                "type": "string"
-                        },
-                        "session_id": {
-                                "description": "Session to search (default: current, '*' for all)",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "query"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="distill_status",
-        description="Get distillation system status: transcripts, realms, pending work",
-        inputSchema={
-                "properties": {},
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="epiplexity_check",
-        description="Compute epiplexity (ε) score for a seed - measures reconstruction quality",
-        inputSchema={
-                "properties": {
-                        "original": {
-                                "description": "Original full text",
-                                "type": "string"
-                        },
-                        "reconstructed": {
-                                "description": "Text reconstructed from seed",
-                                "type": "string"
-                        },
-                        "seed": {
-                                "description": "Compressed SSL seed",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "original",
-                        "seed",
-                        "reconstructed"
                 ],
                 "type": "object"
         }
@@ -2105,42 +1519,6 @@ TOOLS = [
                                 "type": "string"
                         }
                 },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="background_schedule",
-        description="Schedule a background task (consolidation, decay, pruning, pattern_extraction).",
-        inputSchema={
-                "properties": {
-                        "realm": {
-                                "description": "Project scope (default: brahman)",
-                                "type": "string"
-                        },
-                        "task_type": {
-                                "description": "Type: consolidation, decay, pruning, pattern_extraction",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "task_type"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="background_status",
-        description="Get status of background processing (pending, running, completed today).",
-        inputSchema={
-                "properties": {},
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="background_run_cycle",
-        description="Run one cycle of background processing. Processes pending tasks.",
-        inputSchema={
-                "properties": {},
                 "type": "object"
         }
     ),
@@ -2365,25 +1743,100 @@ TOOLS = [
         }
     ),
     Tool(
-        name="hygiene_run",
-        description="Run memory hygiene: decay, prune low-confidence old memories, consolidate similar.",
+        name="theme_list",
+        description="List all themes with statistics",
         inputSchema={
                 "properties": {
-                        "consolidation_threshold": {
-                                "description": "Similarity threshold for consolidation (default: 0.85)",
-                                "type": "number"
-                        },
-                        "max_consolidations": {
-                                "description": "Max consolidations per run (default: 10)",
+                        "limit": {
+                                "description": "Max themes to return (default: 50)",
                                 "type": "integer"
                         },
-                        "min_age_days": {
-                                "description": "Minimum age in days for pruning (default: 7)",
-                                "type": "number"
+                        "realm": {
+                                "description": "Filter by realm",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="theme_get",
+        description="Get theme details including representatives",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "description": "Theme ID",
+                                "type": "integer"
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="theme_recall",
+        description="Two-stage theme-based retrieval (xMemory): diverse representatives then adaptive expansion",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "description": "Max results (default: 10)",
+                                "type": "integer"
                         },
-                        "prune_threshold": {
-                                "description": "Confidence below which to prune (default: 0.1)",
-                                "type": "number"
+                        "query": {
+                                "description": "Search query",
+                                "type": "string"
+                        },
+                        "realm": {
+                                "description": "Filter by realm",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "query"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="theme_stats",
+        description="Get theme organization statistics",
+        inputSchema={
+                "properties": {
+                        "realm": {
+                                "description": "Filter by realm",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="theme_maintain",
+        description="Force theme maintenance cycle: split oversized, merge similar, reassign memories",
+        inputSchema={
+                "properties": {
+                        "realm": {
+                                "description": "Filter by realm",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="theme_assign_orphans",
+        description="Assign orphan memories (not in any theme) to themes in batches",
+        inputSchema={
+                "properties": {
+                        "batch_size": {
+                                "description": "Memories per batch (default: 100)",
+                                "type": "integer"
+                        },
+                        "realm": {
+                                "description": "Filter by realm",
+                                "type": "string"
                         }
                 },
                 "type": "object"
@@ -2437,43 +1890,6 @@ TOOLS = [
         }
     ),
     Tool(
-        name="restore_code_intel_confidence",
-        description="Restore confidence and fix decay_rate for code intel memories (symbol, projectessence, modulestate, patternstate). Run this once to fix memories that were incorrectly decayed.",
-        inputSchema={
-                "properties": {
-                        "confidence": {
-                                "description": "Confidence to restore (default: 0.8)",
-                                "type": "number"
-                        },
-                        "dry_run": {
-                                "description": "Preview changes without applying (default: False)",
-                                "type": "boolean"
-                        }
-                },
-                "type": "object"
-        }
-    ),
-    Tool(
-        name="sql_query",
-        description="Execute a read-only SQL query against the soul database. Use for debugging, analysis, and complex queries.",
-        inputSchema={
-                "properties": {
-                        "limit": {
-                                "description": "Max rows to return (default: 100)",
-                                "type": "integer"
-                        },
-                        "query": {
-                                "description": "SQL query to execute (SELECT only)",
-                                "type": "string"
-                        }
-                },
-                "required": [
-                        "query"
-                ],
-                "type": "object"
-        }
-    ),
-    Tool(
         name="insight_promote",
         description="Promote a memory to global visibility so it applies across all projects.",
         inputSchema={
@@ -2511,26 +1927,284 @@ TOOLS = [
         }
     ),
     Tool(
-        name="ssl_convert",
-        description="Convert raw text to SSL (Soul Semantic Language) format. Use before remember for non-SSL content.",
+        name="list_by_aspect",
+        description="List memories filtered by semantic aspect. Aspects group related node kinds (e.g., 'preferences' returns preference memories, 'wisdom' returns wisdom+insight).",
         inputSchema={
                 "properties": {
-                        "content": {
-                                "description": "Raw text to convert",
+                        "aspect": {
+                                "description": "Semantic aspect: preferences, corrections, insights, failures, decisions, approaches, milestones, goals, habits, beliefs, wisdom, code, gaps",
                                 "type": "string"
                         },
-                        "domain": {
-                                "description": "Domain tag (e.g., 'cc-soul', 'partnership')",
+                        "limit": {
+                                "description": "Max results (default: 50)",
+                                "type": "integer"
+                        },
+                        "min_confidence": {
+                                "description": "Minimum confidence threshold (default: 0.1)",
+                                "type": "number"
+                        }
+                },
+                "required": [
+                        "aspect"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="list_aspects",
+        description="List all available semantic aspects and the node kinds they include.",
+        inputSchema={
+                "properties": {},
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="smart_recall",
+        description="Intelligent memory recall that classifies query intent and routes to optimal retrieval method. Handles temporal queries (\"last week\"), aspect queries (\"show preferences\"), entity queries, and relationship queries automatically.",
+        inputSchema={
+                "properties": {
+                        "include_global": {
+                                "description": "Include global memories (default: True)",
+                                "type": "boolean"
+                        },
+                        "limit": {
+                                "description": "Max results (default: 20)",
+                                "type": "integer"
+                        },
+                        "query": {
+                                "description": "Natural language query (e.g., 'what happened last week', 'show preferences', 'what connects X and Y')",
                                 "type": "string"
                         },
-                        "location": {
-                                "description": "Optional location reference (@file:line)",
+                        "realm": {
+                                "description": "Filter by realm (empty = all realms)",
                                 "type": "string"
                         }
                 },
                 "required": [
+                        "query"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="narrative_status",
+        description="Get current work mode, confidence, and segment summary for the session",
+        inputSchema={
+                "properties": {
+                        "session_id": {
+                                "description": "Session ID (default: current)",
+                                "type": "string"
+                        }
+                },
+                "required": [],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="narrative_log",
+        description="Manually append an event to the session event log",
+        inputSchema={
+                "properties": {
+                        "files_mentioned": {
+                                "description": "JSON array of file paths",
+                                "type": "string"
+                        },
+                        "kind": {
+                                "description": "Event kind: user_message, assistant_message, tool_use, tool_result, error, file_edit, search, build, test, commit, mode_change",
+                                "type": "string"
+                        },
+                        "payload": {
+                                "description": "JSON payload with event details",
+                                "type": "string"
+                        },
+                        "session_id": {
+                                "description": "Session ID",
+                                "type": "string"
+                        },
+                        "success": {
+                                "description": "Whether the action succeeded",
+                                "type": "boolean"
+                        },
+                        "summary": {
+                                "description": "Brief description of the event",
+                                "type": "string"
+                        },
+                        "tool_name": {
+                                "description": "Tool name (for tool events)",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "session_id",
+                        "kind",
+                        "summary"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="narrative_history",
+        description="Get history of work mode segments for a session",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "description": "Max segments to return (default 20)",
+                                "type": "integer"
+                        },
+                        "session_id": {
+                                "description": "Session ID",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "session_id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="anticipation_filter",
+        description="Get anticipation candidates that pass the annoyance gate",
+        inputSchema={
+                "properties": {
+                        "max": {
+                                "description": "Max predictions to return (default 2)",
+                                "type": "integer"
+                        },
+                        "session_id": {
+                                "description": "Session ID",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "session_id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="msg_send",
+        description="Send a message to another session, a realm, or all sessions",
+        inputSchema={
+                "properties": {
+                        "content": {
+                                "description": "Message content",
+                                "type": "string"
+                        },
+                        "content_type": {
+                                "description": "text|json|ssl (default: text)",
+                                "type": "string"
+                        },
+                        "priority": {
+                                "description": "0=info, 1=normal, 2=important, 3=urgent",
+                                "type": "integer"
+                        },
+                        "session_id": {
+                                "description": "Sender session ID (default: from env)",
+                                "type": "string"
+                        },
+                        "target": {
+                                "description": "Target: session_id, realm name (e.g., project:cc-soul), or '*' for global",
+                                "type": "string"
+                        },
+                        "target_type": {
+                                "description": "direct|realm|global (auto-detected if omitted)",
+                                "type": "string"
+                        },
+                        "ttl": {
+                                "description": "TTL in seconds (default: 3600, 0 = no expiry)",
+                                "type": "integer"
+                        }
+                },
+                "required": [
+                        "target",
                         "content"
                 ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="msg_inbox",
+        description="Check unread cross-session messages",
+        inputSchema={
+                "properties": {
+                        "auto_ack": {
+                                "description": "Auto-acknowledge returned messages (default: False)",
+                                "type": "boolean"
+                        },
+                        "limit": {
+                                "description": "Max messages (default: 20)",
+                                "type": "integer"
+                        },
+                        "min_priority": {
+                                "description": "Minimum priority level (default: 0)",
+                                "type": "integer"
+                        },
+                        "session_id": {
+                                "description": "Session ID (default: from env)",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="msg_ack_all",
+        description="Acknowledge all unread messages",
+        inputSchema={
+                "properties": {
+                        "session_id": {
+                                "description": "Session ID (default: from env)",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="msg_history",
+        description="Get message history for the session",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "description": "Max messages (default: 50)",
+                                "type": "integer"
+                        },
+                        "session_id": {
+                                "description": "Session ID (default: from env)",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="session_list",
+        description="List active sessions",
+        inputSchema={
+                "properties": {
+                        "realm": {
+                                "description": "Filter by realm (empty = all)",
+                                "type": "string"
+                        },
+                        "status": {
+                                "description": "Filter by status: active|idle|dead (default: active)",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="session_sync",
+        description="Sync session registry with running Claude processes and transcript files. Discovers new sessions, updates existing, and marks dead sessions.",
+        inputSchema={
+                "properties": {
+                        "projects_dir": {
+                                "description": "Claude projects directory (default: ~/.claude/projects)",
+                                "type": "string"
+                        }
+                },
                 "type": "object"
         }
     ),

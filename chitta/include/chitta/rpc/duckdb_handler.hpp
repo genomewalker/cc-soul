@@ -9,6 +9,7 @@
 #include "../code_intel.hpp"
 #include "../symbol_resolver.hpp"
 #include "../version.hpp"
+#include "../query_intent.hpp"
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
@@ -25,6 +26,7 @@
 #include <cctype>
 #include <array>
 #include <cstdio>
+#include <unistd.h>
 
 namespace chitta {
 
@@ -227,6 +229,25 @@ private:
             }}
         });
         handlers_["recall"] = [this](const json& p) { return tool_recall(p); };
+
+        // recall_temporal: time-bounded memory search
+        tools_.push_back({
+            {"name", "recall_temporal"},
+            {"description", "Search memories within a time window, optionally with semantic filtering"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"query", {{"type", "string"}, {"description", "Optional semantic search query"}}},
+                    {"start", {{"type", "string"}, {"description", "Start date (ISO8601 or YYYY-MM-DD)"}}},
+                    {"end", {{"type", "string"}, {"description", "End date (ISO8601 or YYYY-MM-DD)"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Max results (default 20)"}}},
+                    {"realm", {{"type", "string"}, {"description", "Filter by realm"}}},
+                    {"include_global", {{"type", "boolean"}, {"description", "Include global memories (default: true)"}}}
+                }},
+                {"required", {}}
+            }}
+        });
+        handlers_["recall_temporal"] = [this](const json& p) { return tool_recall_temporal(p); };
 
         // RLM-style exploration primitives
         tools_.push_back({
@@ -1993,6 +2014,49 @@ private:
         });
         handlers_["insight_global"] = [this](const json& p) { return tool_insight_global(p); };
 
+        // Aspect-based memory access
+        tools_.push_back({
+            {"name", "list_by_aspect"},
+            {"description", "List memories filtered by semantic aspect. Aspects group related node kinds (e.g., 'preferences' returns preference memories, 'wisdom' returns wisdom+insight)."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"aspect", {{"type", "string"}, {"description", "Semantic aspect: preferences, corrections, insights, failures, decisions, approaches, milestones, goals, habits, beliefs, wisdom, code, gaps"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Max results (default: 50)"}}},
+                    {"min_confidence", {{"type", "number"}, {"description", "Minimum confidence threshold (default: 0.1)"}}}
+                }},
+                {"required", {"aspect"}}
+            }}
+        });
+        handlers_["list_by_aspect"] = [this](const json& p) { return tool_list_by_aspect(p); };
+
+        tools_.push_back({
+            {"name", "list_aspects"},
+            {"description", "List all available semantic aspects and the node kinds they include."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {}}
+            }}
+        });
+        handlers_["list_aspects"] = [this](const json& p) { return tool_list_aspects(p); };
+
+        // Smart recall: unified query intent classification and routing
+        tools_.push_back({
+            {"name", "smart_recall"},
+            {"description", "Intelligent memory recall that classifies query intent and routes to optimal retrieval method. Handles temporal queries (\"last week\"), aspect queries (\"show preferences\"), entity queries, and relationship queries automatically."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"query", {{"type", "string"}, {"description", "Natural language query (e.g., 'what happened last week', 'show preferences', 'what connects X and Y')"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Max results (default: 20)"}}},
+                    {"realm", {{"type", "string"}, {"description", "Filter by realm (empty = all realms)"}}},
+                    {"include_global", {{"type", "boolean"}, {"description", "Include global memories (default: true)"}}}
+                }},
+                {"required", {"query"}}
+            }}
+        });
+        handlers_["smart_recall"] = [this](const json& p) { return tool_smart_recall(p); };
+
         // SSL conversion tool
         tools_.push_back({
             {"name", "ssl_convert"},
@@ -2106,32 +2170,172 @@ private:
         });
         handlers_["anticipation_record_outcome"] = [this](const json& p) { return tool_anticipation_record_outcome(p); };
 
+        // ========================================================================
+        // Cross-Session Messaging Tools
+        // ========================================================================
+
+        tools_.push_back({
+            {"name", "msg_send"},
+            {"description", "Send a message to another session, a realm, or all sessions"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"target", {{"type", "string"}, {"description", "Target: session_id, realm name (e.g., project:cc-soul), or '*' for global"}}},
+                    {"content", {{"type", "string"}, {"description", "Message content"}}},
+                    {"target_type", {{"type", "string"}, {"description", "direct|realm|global (auto-detected if omitted)"}}},
+                    {"priority", {{"type", "integer"}, {"description", "0=info, 1=normal, 2=important, 3=urgent"}}},
+                    {"content_type", {{"type", "string"}, {"description", "text|json|ssl (default: text)"}}},
+                    {"ttl", {{"type", "integer"}, {"description", "TTL in seconds (default: 3600, 0 = no expiry)"}}},
+                    {"session_id", {{"type", "string"}, {"description", "Sender session ID (default: from env)"}}}
+                }},
+                {"required", {"target", "content"}}
+            }}
+        });
+        handlers_["msg_send"] = [this](const json& p) { return tool_msg_send(p); };
+
+        tools_.push_back({
+            {"name", "msg_inbox"},
+            {"description", "Check unread cross-session messages"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"session_id", {{"type", "string"}, {"description", "Session ID (default: from env)"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Max messages (default: 20)"}}},
+                    {"min_priority", {{"type", "integer"}, {"description", "Minimum priority level (default: 0)"}}},
+                    {"auto_ack", {{"type", "boolean"}, {"description", "Auto-acknowledge returned messages (default: false)"}}}
+                }}
+            }}
+        });
+        handlers_["msg_inbox"] = [this](const json& p) { return tool_msg_inbox(p); };
+
+        tools_.push_back({
+            {"name", "msg_ack"},
+            {"description", "Acknowledge a specific message as read"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"message_id", {{"type", "integer"}, {"description", "Message ID to acknowledge"}}},
+                    {"session_id", {{"type", "string"}, {"description", "Session ID (default: from env)"}}}
+                }},
+                {"required", {"message_id"}}
+            }}
+        });
+        handlers_["msg_ack"] = [this](const json& p) { return tool_msg_ack(p); };
+
+        tools_.push_back({
+            {"name", "msg_ack_all"},
+            {"description", "Acknowledge all unread messages"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"session_id", {{"type", "string"}, {"description", "Session ID (default: from env)"}}}
+                }}
+            }}
+        });
+        handlers_["msg_ack_all"] = [this](const json& p) { return tool_msg_ack_all(p); };
+
+        tools_.push_back({
+            {"name", "msg_history"},
+            {"description", "Get message history for the session"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"session_id", {{"type", "string"}, {"description", "Session ID (default: from env)"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Max messages (default: 50)"}}}
+                }}
+            }}
+        });
+        handlers_["msg_history"] = [this](const json& p) { return tool_msg_history(p); };
+
+        tools_.push_back({
+            {"name", "session_register"},
+            {"description", "Register this session in the session registry"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"session_id", {{"type", "string"}, {"description", "Session ID (default: from env)"}}},
+                    {"realm", {{"type", "string"}, {"description", "Session realm (default: auto-detect)"}}},
+                    {"transcript_path", {{"type", "string"}, {"description", "Path to transcript .jsonl file"}}},
+                    {"project_dir", {{"type", "string"}, {"description", "Project working directory"}}},
+                    {"metadata", {{"type", "string"}, {"description", "JSON metadata about the session"}}}
+                }}
+            }}
+        });
+        handlers_["session_register"] = [this](const json& p) { return tool_session_register(p); };
+
+        tools_.push_back({
+            {"name", "session_heartbeat"},
+            {"description", "Send heartbeat to keep session active"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"session_id", {{"type", "string"}, {"description", "Session ID (default: from env)"}}},
+                    {"metadata", {{"type", "string"}, {"description", "Optional metadata update"}}}
+                }}
+            }}
+        });
+        handlers_["session_heartbeat"] = [this](const json& p) { return tool_session_heartbeat(p); };
+
+        tools_.push_back({
+            {"name", "session_list"},
+            {"description", "List active sessions"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"realm", {{"type", "string"}, {"description", "Filter by realm (empty = all)"}}},
+                    {"status", {{"type", "string"}, {"description", "Filter by status: active|idle|dead (default: active)"}}}
+                }}
+            }}
+        });
+        handlers_["session_list"] = [this](const json& p) { return tool_session_list(p); };
+
+        tools_.push_back({
+            {"name", "session_deregister"},
+            {"description", "Deregister this session from the registry"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"session_id", {{"type", "string"}, {"description", "Session ID (default: from env)"}}}
+                }}
+            }}
+        });
+        handlers_["session_deregister"] = [this](const json& p) { return tool_session_deregister(p); };
+
+        tools_.push_back({
+            {"name", "session_sync"},
+            {"description", "Sync session registry with running Claude processes and transcript files. Discovers new sessions, updates existing, and marks dead sessions."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"projects_dir", {{"type", "string"}, {"description", "Claude projects directory (default: ~/.claude/projects)"}}}
+                }}
+            }}
+        });
+        handlers_["session_sync"] = [this](const json& p) { return tool_session_sync(p); };
+
         classify_tools();
     }
 
     void classify_tools() {
-        // Internal tools - hidden from MCP tools/list
+        // Internal tools - hidden from MCP tools/list (maintenance/hooks only)
         static const std::vector<std::string> internal_tools = {
-            "cleanup", "cleanup_code_wisdom", "hygiene_run", "hygiene_stats",
+            "cleanup", "cleanup_code_wisdom", "hygiene_run",
             "consolidation_scan", "consolidation_merge", "consolidation_auto",
             "batch_forget", "sql_query", "migrate_vss", "reembed_memories",
             "dedupe_symbols", "background_run_cycle", "background_schedule", "background_status",
-            "metacognition_evaluate", "metacognition_corrections", "metacognition_outcomes",
-            "episode_cluster_status", "distill_status", "enrichment_status", "epiplexity_check",
+            "metacognition_corrections", "metacognition_outcomes",
+            "distill_status", "enrichment_status", "epiplexity_check",
             "clear_codebase", "clear_triplets", "describe_symbol", "extract_symbols",
             "file_dependents", "file_imports", "resolve_callsites",
             "restore_code_intel_confidence", "ssl_convert", "subconscious_stats",
             "suggestion_count", "suggestion_pending", "suggestion_resolve", "suggestion_track",
             "transcript_get", "transcript_list", "transcript_parse", "transcript_register",
             "transcript_remove", "transcript_search", "transcript_update",
-            "type_hierarchy", "version_check", "health_check",
-            "export_soul", "import_soul", "codebase_overview",
-            "long_task_start", "long_task_update", "long_task_complete", "long_task_get",
-            "long_task_event", "long_task_evaluate", "long_task_active", "long_task_snapshot",
-            "insight_global", "insight_promote",
+            "type_hierarchy", "version_check",
+            "export_soul", "import_soul",
             "connect_batch", "research_cycle", "research_store", "research_topics",
-            "cycle", "grow",
-            "anticipation_gate_status", "anticipation_record_outcome"
+            "cycle", "anticipation_gate_status", "anticipation_record_outcome",
+            "session_register", "session_heartbeat", "session_deregister", "msg_ack"
         };
 
         // Advanced tools - visible but secondary
@@ -2371,6 +2575,131 @@ private:
         }
 
         return DuckDBToolResult::ok(ss.str(), {{"results", results_json}, {"realm", realm}});
+    }
+
+    // Parse ISO8601 or YYYY-MM-DD date to Unix milliseconds
+    std::optional<int64_t> parse_timestamp_str(const std::string& ts) {
+        if (ts.empty()) return std::nullopt;
+
+        std::tm tm = {};
+        int year, month, day, hour = 0, min = 0, sec = 0;
+
+        // Try YYYY-MM-DDTHH:MM:SS or YYYY-MM-DD HH:MM:SS
+        if (std::sscanf(ts.c_str(), "%d-%d-%dT%d:%d:%d", &year, &month, &day, &hour, &min, &sec) >= 3 ||
+            std::sscanf(ts.c_str(), "%d-%d-%d %d:%d:%d", &year, &month, &day, &hour, &min, &sec) >= 3 ||
+            std::sscanf(ts.c_str(), "%d-%d-%d", &year, &month, &day) == 3) {
+            tm.tm_year = year - 1900;
+            tm.tm_mon = month - 1;
+            tm.tm_mday = day;
+            tm.tm_hour = hour;
+            tm.tm_min = min;
+            tm.tm_sec = sec;
+            tm.tm_isdst = -1;
+
+            std::time_t time = std::mktime(&tm);
+            if (time == -1) return std::nullopt;
+            return static_cast<int64_t>(time) * 1000;  // Convert to milliseconds
+        }
+
+        // Try parsing as Unix timestamp (seconds or milliseconds)
+        try {
+            int64_t val = std::stoll(ts);
+            // If value is too small to be milliseconds (before year 2000), assume seconds
+            if (val < 946684800000LL) val *= 1000;
+            return val;
+        } catch (...) {
+            return std::nullopt;
+        }
+    }
+
+    DuckDBToolResult tool_recall_temporal(const json& params) {
+        if (subconscious_) subconscious_->notify_query();
+
+        std::string query = params.value("query", "");
+        std::string start_str = params.value("start", "");
+        std::string end_str = params.value("end", "");
+        size_t limit = params.value("limit", 20);
+        std::string realm = params.value("realm", "");
+        bool include_global = params.value("include_global", true);
+
+        // Parse timestamps
+        auto start_time = parse_timestamp_str(start_str);
+        auto end_time = parse_timestamp_str(end_str);
+
+        // If end time is a date without time, set to end of day
+        if (end_time && end_str.find('T') == std::string::npos && end_str.find(':') == std::string::npos) {
+            *end_time += 86400000 - 1;  // Add 24 hours minus 1 ms
+        }
+
+        // Get query embedding if query provided
+        std::vector<float> embedding;
+        if (!query.empty() && mind_->embedder_ready()) {
+            embedding = mind_->embedder().embed_query(query).data;
+        }
+
+        auto results = mind_->store().recall_temporal(
+            embedding, start_time, end_time, limit, realm, include_global
+        );
+
+        std::ostringstream ss;
+        json results_json = json::array();
+
+        for (const auto& r : results) {
+            // Format timestamp for display
+            std::time_t created_sec = r.created_at / 1000;
+            std::tm* tm = std::localtime(&created_sec);
+            char time_buf[32];
+            std::strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M", tm);
+
+            json result_entry = {
+                {"id", std::to_string(r.id)},
+                {"kind", r.kind},
+                {"content", r.content},
+                {"confidence", r.confidence},
+                {"created_at", r.created_at},
+                {"created_at_str", std::string(time_buf)},
+                {"realm", r.realm}
+            };
+
+            if (!embedding.empty()) {
+                result_entry["similarity"] = r.similarity;
+            }
+
+            results_json.push_back(result_entry);
+
+            // Build text output
+            int sim_pct = embedding.empty() ? 0 : static_cast<int>(r.similarity * 100);
+            ss << "[" << time_buf << "]";
+            if (!embedding.empty()) ss << " [" << sim_pct << "%]";
+            ss << " [" << r.kind << "] ";
+            std::string preview = r.content.substr(0, 100);
+            size_t nl = preview.find('\n');
+            if (nl != std::string::npos) preview = preview.substr(0, nl);
+            ss << preview;
+            if (r.content.size() > 100) ss << "...";
+            ss << "\n";
+        }
+
+        std::ostringstream header;
+        header << "Found " << results.size() << " memories";
+        if (start_time || end_time) {
+            header << " from ";
+            if (start_time) header << start_str;
+            else header << "beginning";
+            header << " to ";
+            if (end_time) header << end_str;
+            else header << "now";
+        }
+        if (!realm.empty()) header << " in realm '" << realm << "'";
+        header << ":\n";
+
+        return DuckDBToolResult::ok(header.str() + ss.str(), {
+            {"results", results_json},
+            {"count", results.size()},
+            {"start", start_str},
+            {"end", end_str},
+            {"realm", realm}
+        });
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -8357,6 +8686,353 @@ private:
     }
 
     // ========================================================================
+    // Aspect-based memory access
+    // ========================================================================
+
+    // Aspect to node kind mapping (must match duckdb_store.cpp)
+    static inline const std::unordered_map<std::string, std::vector<std::string>> ASPECT_KINDS = {
+        {"preferences", {"preference"}},
+        {"corrections", {"correction"}},
+        {"insights", {"insight", "wisdom"}},
+        {"failures", {"failure"}},
+        {"decisions", {"decision"}},
+        {"approaches", {"approach"}},
+        {"milestones", {"milestone"}},
+        {"goals", {"goal"}},
+        {"habits", {"habit"}},
+        {"beliefs", {"belief", "invariant"}},
+        {"wisdom", {"wisdom", "insight"}},
+        {"code", {"symbol", "function", "class", "file", "dependency"}},
+        {"gaps", {"gap", "curiosity"}}
+    };
+
+    DuckDBToolResult tool_list_by_aspect(const json& params) {
+        std::string aspect = params.value("aspect", "");
+        if (aspect.empty()) {
+            return DuckDBToolResult::error("aspect parameter required");
+        }
+
+        size_t limit = params.value("limit", 50);
+        float min_confidence = params.value("min_confidence", 0.1f);
+
+        auto memories = mind_->store().list_by_aspect(aspect, limit, min_confidence);
+
+        if (memories.empty()) {
+            // Check if aspect is valid
+            if (ASPECT_KINDS.find(aspect) == ASPECT_KINDS.end()) {
+                std::ostringstream ss;
+                ss << "Unknown aspect: '" << aspect << "'. Valid aspects: ";
+                bool first = true;
+                for (const auto& [name, _] : ASPECT_KINDS) {
+                    if (!first) ss << ", ";
+                    ss << name;
+                    first = false;
+                }
+                return DuckDBToolResult::error(ss.str());
+            }
+            return DuckDBToolResult::ok("No memories found for aspect: " + aspect, {{"count", 0}});
+        }
+
+        std::ostringstream ss;
+        ss << "Memories for aspect '" << aspect << "' (" << memories.size() << "):\n";
+        ss << "══════════════════════════════\n\n";
+
+        json items = json::array();
+        for (const auto& m : memories) {
+            ss << "#" << m.id << " [" << m.kind << "] ";
+            ss << m.content.substr(0, 80) << (m.content.size() > 80 ? "..." : "") << "\n";
+            ss << "  Confidence: " << std::fixed << std::setprecision(2) << m.confidence;
+            ss << " | Realm: " << m.realm << "\n\n";
+
+            items.push_back({
+                {"id", m.id},
+                {"kind", m.kind},
+                {"content", m.content},
+                {"confidence", m.confidence},
+                {"realm", m.realm}
+            });
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"count", memories.size()},
+            {"aspect", aspect},
+            {"memories", items}
+        });
+    }
+
+    DuckDBToolResult tool_list_aspects(const json& params) {
+        (void)params;  // Unused
+
+        std::ostringstream ss;
+        ss << "Available Semantic Aspects:\n";
+        ss << "══════════════════════════════\n\n";
+
+        json aspects = json::array();
+        for (const auto& [aspect, kinds] : ASPECT_KINDS) {
+            ss << "  " << aspect << ": ";
+            for (size_t i = 0; i < kinds.size(); ++i) {
+                if (i > 0) ss << ", ";
+                ss << kinds[i];
+            }
+            ss << "\n";
+
+            aspects.push_back({
+                {"name", aspect},
+                {"kinds", kinds}
+            });
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {{"aspects", aspects}});
+    }
+
+    // ========================================================================
+    // Smart Recall: unified query intent classification and routing
+    // ========================================================================
+
+    DuckDBToolResult tool_smart_recall(const json& params) {
+        if (subconscious_) subconscious_->notify_query();
+
+        std::string query = params.value("query", "");
+        if (query.empty()) {
+            return DuckDBToolResult::error("query parameter required");
+        }
+
+        size_t limit = params.value("limit", 20);
+        std::string realm = params.value("realm", "");
+        bool include_global = params.value("include_global", true);
+
+        // 1. Classify the query intent
+        QueryIntentClassifier classifier;
+        QueryIntent intent = classifier.classify(query);
+
+        std::vector<MemoryResult> results;
+        std::string route_taken;
+
+        // 2. Route based on intent type
+        switch (intent.type) {
+            case QueryIntentType::Aspect: {
+                // Use list_by_aspect with the detected aspect
+                if (intent.aspect) {
+                    results = mind_->store().list_by_aspect(*intent.aspect, limit, 0.1f);
+                    route_taken = "aspect:" + *intent.aspect;
+                }
+                break;
+            }
+
+            case QueryIntentType::Temporal: {
+                // Use recall_temporal with detected time range
+                if (intent.time_range && intent.time_range->valid()) {
+                    auto& tr = *intent.time_range;
+                    std::optional<int64_t> start_ms, end_ms;
+                    if (tr.start) {
+                        start_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            tr.start->time_since_epoch()).count();
+                    }
+                    if (tr.end) {
+                        end_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            tr.end->time_since_epoch()).count();
+                    }
+                    // Get query embedding if there's still an entity component
+                    std::vector<float> embedding;
+                    if (intent.entity && !intent.entity->empty() && mind_->embedder_ready()) {
+                        embedding = mind_->embedder().embed_query(*intent.entity).data;
+                    }
+                    results = mind_->store().recall_temporal(embedding, start_ms, end_ms, limit, realm, include_global);
+                    route_taken = "temporal";
+                }
+                break;
+            }
+
+            case QueryIntentType::Entity: {
+                // Standard semantic recall on the entity
+                if (intent.entity && !intent.entity->empty() && mind_->embedder_ready()) {
+                    auto embedding = mind_->embedder().embed_query(*intent.entity).data;
+                    results = mind_->store().recall(embedding, limit, realm, include_global);
+                    route_taken = "entity:" + *intent.entity;
+                }
+                break;
+            }
+
+            case QueryIntentType::Relationship: {
+                // Query the triplet graph for connections between entities
+                if (intent.subject && intent.object) {
+                    // Get triplets from subject and object
+                    auto subject_triplets = mind_->store().query_subject(*intent.subject);
+                    auto object_triplets = mind_->store().query_object(*intent.object);
+
+                    // Build response from triplet data (no direct memory results)
+                    std::ostringstream ss;
+                    ss << "Relationships involving '" << *intent.subject << "' and '" << *intent.object << "':\n";
+                    ss << "══════════════════════════════\n\n";
+
+                    json triplets_json = json::array();
+                    size_t count = 0;
+
+                    // Subject triplets
+                    for (const auto& t : subject_triplets) {
+                        if (count >= limit) break;
+                        ss << "  " << t.subject << " --[" << t.predicate << "]--> " << t.object << "\n";
+                        triplets_json.push_back({
+                            {"subject", t.subject},
+                            {"predicate", t.predicate},
+                            {"object", t.object},
+                            {"weight", t.weight}
+                        });
+                        count++;
+                    }
+
+                    // Object triplets (if room)
+                    for (const auto& t : object_triplets) {
+                        if (count >= limit) break;
+                        ss << "  " << t.subject << " --[" << t.predicate << "]--> " << t.object << "\n";
+                        triplets_json.push_back({
+                            {"subject", t.subject},
+                            {"predicate", t.predicate},
+                            {"object", t.object},
+                            {"weight", t.weight}
+                        });
+                        count++;
+                    }
+
+                    return DuckDBToolResult::ok(ss.str(), {
+                        {"intent", {
+                            {"type", query_intent_type_to_string(intent.type)},
+                            {"confidence", intent.confidence},
+                            {"subject", intent.subject.value_or("")},
+                            {"object", intent.object.value_or("")}
+                        }},
+                        {"route", "relationship"},
+                        {"triplets", triplets_json},
+                        {"count", count}
+                    });
+                }
+                break;
+            }
+
+            case QueryIntentType::Code: {
+                // Code queries should go through find_symbol/search_symbols
+                return DuckDBToolResult::ok(
+                    "Code queries are best handled by dedicated tools:\n"
+                    "  - find_symbol: search by name/kind\n"
+                    "  - search_symbols: semantic search\n"
+                    "  - symbol_callers/symbol_callees: call graph navigation\n"
+                    "  - read_symbol/read_function: get source code\n",
+                    {
+                        {"intent", {
+                            {"type", "code"},
+                            {"confidence", intent.confidence},
+                            {"entity", intent.entity.value_or("")}
+                        }},
+                        {"route", "code"},
+                        {"suggestion", "Use find_symbol or search_symbols for code queries"}
+                    }
+                );
+            }
+
+            case QueryIntentType::Meta: {
+                // Return memory stats
+                auto health = mind_->store().health();
+                auto hygiene = mind_->store().hygiene_stats();
+
+                std::ostringstream ss;
+                ss << "Memory Health Stats:\n";
+                ss << "══════════════════════════════\n\n";
+                ss << "  Total memories: " << health.total_memories << "\n";
+                ss << "  Total symbols: " << health.total_symbols << "\n";
+                ss << "  Total triplets: " << health.total_triplets << "\n";
+                ss << "  Average confidence: " << std::fixed << std::setprecision(2) << health.avg_confidence << "\n";
+                ss << "\n";
+                ss << "  High confidence (>0.7): " << hygiene.high_confidence << "\n";
+                ss << "  Medium confidence: " << hygiene.medium_confidence << "\n";
+                ss << "  Low confidence (<0.3): " << hygiene.low_confidence << "\n";
+                ss << "  Old unaccessed (30+ days): " << hygiene.old_unaccessed << "\n";
+                ss << "  Consolidation candidates: " << hygiene.consolidation_candidates << "\n";
+
+                return DuckDBToolResult::ok(ss.str(), {
+                    {"intent", {
+                        {"type", "meta"},
+                        {"confidence", intent.confidence}
+                    }},
+                    {"route", "meta"},
+                    {"health", {
+                        {"total_memories", health.total_memories},
+                        {"total_symbols", health.total_symbols},
+                        {"total_triplets", health.total_triplets},
+                        {"avg_confidence", health.avg_confidence}
+                    }},
+                    {"hygiene", {
+                        {"high_confidence", hygiene.high_confidence},
+                        {"medium_confidence", hygiene.medium_confidence},
+                        {"low_confidence", hygiene.low_confidence},
+                        {"old_unaccessed", hygiene.old_unaccessed},
+                        {"consolidation_candidates", hygiene.consolidation_candidates}
+                    }}
+                });
+            }
+
+            case QueryIntentType::Exploratory:
+            default: {
+                // Fall back to standard semantic recall
+                if (mind_->embedder_ready()) {
+                    auto embedding = mind_->embedder().embed_query(query).data;
+                    results = mind_->store().recall(embedding, limit, realm, include_global);
+                    route_taken = "exploratory";
+                }
+                break;
+            }
+        }
+
+        // Format results (for non-special cases)
+        if (results.empty() && route_taken.empty()) {
+            return DuckDBToolResult::error("Could not process query - embedder may not be ready");
+        }
+
+        std::ostringstream ss;
+        ss << "Smart Recall Results (" << results.size() << " found)\n";
+        ss << "Route: " << route_taken << " | Intent: " << query_intent_type_to_string(intent.type);
+        ss << " (" << static_cast<int>(intent.confidence * 100) << "% confidence)\n";
+        ss << "══════════════════════════════\n\n";
+
+        json results_json = json::array();
+        for (const auto& r : results) {
+            // Format timestamp for display
+            std::time_t created_sec = r.created_at / 1000;
+            std::tm* tm = std::localtime(&created_sec);
+            char time_buf[32];
+            std::strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M", tm);
+
+            int sim_pct = static_cast<int>(r.similarity * 100);
+            ss << "#" << r.id << " [" << r.kind << "]";
+            if (r.similarity > 0) ss << " [" << sim_pct << "%]";
+            ss << " " << time_buf << "\n";
+            ss << "  " << r.content.substr(0, 100) << (r.content.size() > 100 ? "..." : "") << "\n\n";
+
+            results_json.push_back({
+                {"id", std::to_string(r.id)},
+                {"kind", r.kind},
+                {"content", r.content},
+                {"confidence", r.confidence},
+                {"similarity", r.similarity},
+                {"created_at", r.created_at},
+                {"created_at_str", std::string(time_buf)},
+                {"realm", r.realm}
+            });
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"intent", {
+                {"type", query_intent_type_to_string(intent.type)},
+                {"confidence", intent.confidence},
+                {"aspect", intent.aspect.value_or("")},
+                {"entity", intent.entity.value_or("")}
+            }},
+            {"route", route_taken},
+            {"results", results_json},
+            {"count", results.size()}
+        });
+    }
+
+    // ========================================================================
     // SSL conversion tool
     // ========================================================================
 
@@ -8669,6 +9345,369 @@ private:
             {"outcome", outcome},
             {"prediction", candidate->prediction},
             {"session_id", candidate->session_id}
+        });
+    }
+
+    // ========================================================================
+    // Cross-Session Messaging Tool Implementations
+    // ========================================================================
+
+    // Helper: get session ID from env or params
+    std::string get_session_id(const json& params) {
+        std::string session_id = params.value("session_id", "");
+        if (session_id.empty()) {
+            const char* env_session = std::getenv("CLAUDE_SESSION_ID");
+            session_id = env_session ? env_session : "default";
+        }
+        return session_id;
+    }
+
+    // Helper: detect current realm
+    std::string detect_current_realm() {
+        // Priority: CHITTA_REALM env > .cc-soul-realm file > git repo > "brahman"
+        if (const char* env_realm = std::getenv("CHITTA_REALM")) {
+            return env_realm;
+        }
+
+        std::ifstream realm_file(".cc-soul-realm");
+        if (realm_file.good()) {
+            std::string realm;
+            std::getline(realm_file, realm);
+            realm.erase(0, realm.find_first_not_of(" \t\n\r"));
+            realm.erase(realm.find_last_not_of(" \t\n\r") + 1);
+            if (!realm.empty()) return realm;
+        }
+
+        std::array<char, 256> buffer;
+        FILE* pipe = popen("git rev-parse --show-toplevel 2>/dev/null", "r");
+        if (pipe) {
+            std::string git_root;
+            if (fgets(buffer.data(), buffer.size(), pipe)) {
+                git_root = buffer.data();
+                if (!git_root.empty() && git_root.back() == '\n') git_root.pop_back();
+            }
+            pclose(pipe);
+            if (!git_root.empty()) {
+                size_t last_slash = git_root.rfind('/');
+                std::string repo = (last_slash != std::string::npos)
+                    ? git_root.substr(last_slash + 1) : git_root;
+                return "project:" + repo;
+            }
+        }
+
+        return "brahman";
+    }
+
+    // Helper: get current time in milliseconds
+    static int64_t current_time_ms() {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+    }
+
+    // Helper: format timestamp for display
+    static std::string format_timestamp(int64_t ms) {
+        if (ms == 0) return "never";
+        time_t seconds = ms / 1000;
+        std::tm* tm = std::localtime(&seconds);
+        std::ostringstream ss;
+        ss << std::put_time(tm, "%Y-%m-%d %H:%M:%S");
+        return ss.str();
+    }
+
+    // Helper: priority to string
+    static std::string priority_to_string(int32_t priority) {
+        switch (priority) {
+            case 0: return "info";
+            case 1: return "normal";
+            case 2: return "important";
+            case 3: return "urgent";
+            default: return "unknown";
+        }
+    }
+
+    DuckDBToolResult tool_msg_send(const json& params) {
+        std::string target = params.value("target", "");
+        std::string content = params.value("content", "");
+
+        if (target.empty()) return DuckDBToolResult::error("target is required");
+        if (content.empty()) return DuckDBToolResult::error("content is required");
+
+        std::string target_type = params.value("target_type", "");
+        int32_t priority = params.value("priority", 1);
+        std::string content_type = params.value("content_type", "text");
+        int32_t ttl = params.value("ttl", 3600);
+        std::string session_id = get_session_id(params);
+
+        // Auto-detect target_type
+        if (target_type.empty()) {
+            if (target == "*") {
+                target_type = "global";
+            } else if (target.find("project:") == 0 || target == "brahman") {
+                target_type = "realm";
+            } else {
+                target_type = "direct";
+            }
+        }
+
+        SessionMessage msg;
+        msg.sender_session = session_id;
+        msg.sender_realm = detect_current_realm();
+        msg.target_type = target_type;
+        msg.target_id = target;
+        msg.priority = priority;
+        msg.content = content;
+        msg.content_type = content_type;
+        msg.expires_at = ttl > 0 ? current_time_ms() + (static_cast<int64_t>(ttl) * 1000) : 0;
+        msg.created_at = current_time_ms();
+
+        int64_t msg_id = mind_->store().msg_send(msg);
+
+        if (msg_id <= 0) {
+            return DuckDBToolResult::error("Failed to send message: " + mind_->store().last_error());
+        }
+
+        std::ostringstream ss;
+        ss << "Message sent (" << target_type << " to " << target << ")";
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"message_id", msg_id},
+            {"target_type", target_type},
+            {"target", target},
+            {"priority", priority}
+        });
+    }
+
+    DuckDBToolResult tool_msg_inbox(const json& params) {
+        std::string session_id = get_session_id(params);
+        size_t limit = params.value("limit", 20);
+        int32_t min_priority = params.value("min_priority", 0);
+        bool auto_ack = params.value("auto_ack", false);
+
+        auto items = mind_->store().msg_inbox(session_id, limit, min_priority);
+
+        if (items.empty()) {
+            return DuckDBToolResult::ok("No unread messages", {
+                {"session_id", session_id},
+                {"count", 0},
+                {"messages", json::array()}
+            });
+        }
+
+        std::ostringstream ss;
+        ss << items.size() << " unread message(s):\n\n";
+
+        json msg_list = json::array();
+        for (const auto& item : items) {
+            const auto& msg = item.message;
+            ss << "[" << priority_to_string(msg.priority) << "] "
+               << "From: " << msg.sender_session << " (" << msg.sender_realm << ")\n"
+               << msg.content << "\n\n";
+
+            msg_list.push_back({
+                {"id", msg.id},
+                {"sender_session", msg.sender_session},
+                {"sender_realm", msg.sender_realm},
+                {"priority", msg.priority},
+                {"content", msg.content},
+                {"content_type", msg.content_type},
+                {"created_at", msg.created_at},
+                {"is_read", item.is_read}
+            });
+
+            if (auto_ack) {
+                mind_->store().msg_ack(msg.id, session_id);
+            }
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"session_id", session_id},
+            {"count", items.size()},
+            {"messages", msg_list}
+        });
+    }
+
+    DuckDBToolResult tool_msg_ack(const json& params) {
+        auto [message_id, _] = parse_id(params, "message_id");
+        if (message_id <= 0) {
+            return DuckDBToolResult::error("message_id is required");
+        }
+
+        std::string session_id = get_session_id(params);
+
+        if (!mind_->store().msg_ack(message_id, session_id)) {
+            return DuckDBToolResult::error("Failed to acknowledge message");
+        }
+
+        return DuckDBToolResult::ok("Message acknowledged", {
+            {"message_id", message_id},
+            {"session_id", session_id}
+        });
+    }
+
+    DuckDBToolResult tool_msg_ack_all(const json& params) {
+        std::string session_id = get_session_id(params);
+
+        if (!mind_->store().msg_ack_all(session_id)) {
+            return DuckDBToolResult::error("Failed to acknowledge messages");
+        }
+
+        return DuckDBToolResult::ok("All messages acknowledged", {
+            {"session_id", session_id}
+        });
+    }
+
+    DuckDBToolResult tool_msg_history(const json& params) {
+        std::string session_id = get_session_id(params);
+        size_t limit = params.value("limit", 50);
+
+        auto messages = mind_->store().msg_history(session_id, limit);
+
+        if (messages.empty()) {
+            return DuckDBToolResult::ok("No message history", {
+                {"session_id", session_id},
+                {"count", 0},
+                {"messages", json::array()}
+            });
+        }
+
+        std::ostringstream ss;
+        ss << "Message history (" << messages.size() << " messages):\n\n";
+
+        json msg_list = json::array();
+        for (const auto& msg : messages) {
+            ss << "[" << format_timestamp(msg.created_at) << "] "
+               << msg.sender_session << " -> " << msg.target_id << ": "
+               << msg.content.substr(0, 80)
+               << (msg.content.size() > 80 ? "..." : "") << "\n";
+
+            msg_list.push_back({
+                {"id", msg.id},
+                {"sender_session", msg.sender_session},
+                {"sender_realm", msg.sender_realm},
+                {"target_type", msg.target_type},
+                {"target_id", msg.target_id},
+                {"priority", msg.priority},
+                {"content", msg.content},
+                {"content_type", msg.content_type},
+                {"created_at", msg.created_at},
+                {"expires_at", msg.expires_at}
+            });
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"session_id", session_id},
+            {"count", messages.size()},
+            {"messages", msg_list}
+        });
+    }
+
+    DuckDBToolResult tool_session_register(const json& params) {
+        std::string session_id = get_session_id(params);
+        std::string realm = params.value("realm", "");
+        std::string transcript_path = params.value("transcript_path", "");
+        std::string project_dir = params.value("project_dir", "");
+        std::string metadata = params.value("metadata", "{}");
+
+        if (realm.empty()) {
+            realm = detect_current_realm();
+        }
+
+        int32_t pid = static_cast<int32_t>(getpid());
+
+        if (!mind_->store().session_register(session_id, realm, pid, transcript_path, project_dir, metadata)) {
+            return DuckDBToolResult::error("Failed to register session: " + mind_->store().last_error());
+        }
+
+        return DuckDBToolResult::ok("Session registered", {
+            {"session_id", session_id},
+            {"realm", realm},
+            {"pid", pid},
+            {"transcript_path", transcript_path}
+        });
+    }
+
+    DuckDBToolResult tool_session_heartbeat(const json& params) {
+        std::string session_id = get_session_id(params);
+        std::string metadata = params.value("metadata", "");
+
+        if (!mind_->store().session_heartbeat(session_id, metadata)) {
+            return DuckDBToolResult::error("Failed to send heartbeat");
+        }
+
+        return DuckDBToolResult::ok("Heartbeat sent", {
+            {"session_id", session_id}
+        });
+    }
+
+    DuckDBToolResult tool_session_list(const json& params) {
+        std::string realm = params.value("realm", "");
+        std::string status = params.value("status", "active");
+
+        auto sessions = mind_->store().session_list(realm, status);
+
+        if (sessions.empty()) {
+            return DuckDBToolResult::ok("No sessions found", {
+                {"count", 0},
+                {"realm", realm},
+                {"status", status},
+                {"sessions", json::array()}
+            });
+        }
+
+        std::ostringstream ss;
+        ss << sessions.size() << " session(s):\n\n";
+
+        json session_list = json::array();
+        for (const auto& s : sessions) {
+            ss << "- " << s.session_id << " [" << s.status << "] "
+               << s.realm << " (pid " << s.pid << ")\n";
+
+            session_list.push_back({
+                {"session_id", s.session_id},
+                {"realm", s.realm},
+                {"pid", s.pid},
+                {"status", s.status},
+                {"started_at", s.started_at},
+                {"last_heartbeat", s.last_heartbeat},
+                {"metadata", s.metadata}
+            });
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"count", sessions.size()},
+            {"realm", realm},
+            {"status", status},
+            {"sessions", session_list}
+        });
+    }
+
+    DuckDBToolResult tool_session_deregister(const json& params) {
+        std::string session_id = get_session_id(params);
+
+        if (!mind_->store().session_deregister(session_id)) {
+            return DuckDBToolResult::error("Failed to deregister session");
+        }
+
+        return DuckDBToolResult::ok("Session deregistered", {
+            {"session_id", session_id}
+        });
+    }
+
+    DuckDBToolResult tool_session_sync(const json& params) {
+        std::string projects_dir = params.value("projects_dir", "");
+
+        auto result = mind_->store().session_sync(projects_dir);
+
+        std::ostringstream msg;
+        msg << "Session sync complete: "
+            << result.discovered << " discovered, "
+            << result.updated << " updated, "
+            << result.marked_dead << " marked dead";
+
+        return DuckDBToolResult::ok(msg.str(), {
+            {"discovered", result.discovered},
+            {"updated", result.updated},
+            {"marked_dead", result.marked_dead}
         });
     }
 };

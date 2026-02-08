@@ -184,6 +184,28 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
       {"tag", "Filter by tag", false, nullptr},
       {"realm", "Filter by realm (empty = all visible)", false, nullptr}}},
 
+    {"recall_temporal", "Search memories within a time window",
+     {{"query", "Optional semantic search query", false, nullptr},
+      {"start", "Start date (ISO8601 or YYYY-MM-DD)", false, nullptr},
+      {"end", "End date (ISO8601 or YYYY-MM-DD)", false, nullptr},
+      {"limit", "Max results", false, "20"},
+      {"realm", "Filter by realm", false, nullptr},
+      {"include_global", "Include global memories", false, "true"}}},
+
+    {"smart_recall", "Intelligent recall with automatic query intent classification",
+     {{"query", "Natural language query (e.g., 'last week', 'show preferences')", true, nullptr},
+      {"limit", "Max results", false, "20"},
+      {"realm", "Filter by realm", false, nullptr},
+      {"include_global", "Include global memories", false, "true"}}},
+
+    {"list_by_aspect", "List memories by semantic aspect",
+     {{"aspect", "Aspect: preferences|corrections|insights|failures|decisions|approaches|milestones|goals|habits|beliefs|wisdom|code|gaps", true, nullptr},
+      {"limit", "Max results", false, "50"},
+      {"min_confidence", "Minimum confidence", false, "0.1"}}},
+
+    {"list_aspects", "List available semantic aspects",
+     {}},
+
     {"grow", "Add wisdom, belief, failure, aspiration, or dream",
      {{"type", "Type: wisdom|belief|failure|aspiration|dream", true, nullptr},
       {"content", "Content to store", true, nullptr},
@@ -500,6 +522,56 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
     {"theme_assign_orphans", "Assign orphan memories to themes in batches",
      {{"batch_size", "Memories per batch", false, "100"},
       {"realm", "Filter by realm", false, nullptr}}},
+
+    // Cross-session messaging
+    {"msg_send", "Send a message to another session, a realm, or all sessions",
+     {{"target", "Target: session_id, realm name, or '*' for all", true, nullptr},
+      {"content", "Message content", true, nullptr},
+      {"target_type", "direct|realm|global (auto-detected if omitted)", false, nullptr},
+      {"priority", "0=info, 1=normal, 2=important, 3=urgent", false, "1"},
+      {"content_type", "text|json|ssl", false, "text"},
+      {"ttl", "TTL in seconds (0 = no expiry)", false, "3600"},
+      {"session_id", "Sender session ID", false, nullptr}}},
+
+    {"msg_inbox", "Check unread cross-session messages",
+     {{"session_id", "Session ID (default: current)", false, nullptr},
+      {"limit", "Max messages", false, "20"},
+      {"min_priority", "Minimum priority level", false, "0"},
+      {"auto_ack", "Auto-acknowledge returned messages", false, "false"}}},
+
+    {"msg_ack", "Acknowledge a cross-session message",
+     {{"message_id", "Message ID", true, nullptr},
+      {"session_id", "Session ID (default: current)", false, nullptr}}},
+
+    {"msg_ack_all", "Acknowledge all unread messages",
+     {{"session_id", "Session ID (default: current)", false, nullptr}}},
+
+    {"msg_history", "List recent cross-session messages",
+     {{"session_id", "Session ID (default: current)", false, nullptr},
+      {"direction", "sent|received|both", false, "both"},
+      {"limit", "Max messages", false, "50"}}},
+
+    {"session_register", "Register session for cross-session messaging",
+     {{"session_id", "Session ID", true, nullptr},
+      {"realm", "Realm", false, "brahman"},
+      {"pid", "Process ID", false, nullptr},
+      {"transcript_path", "Path to transcript .jsonl file (stable ID)", false, nullptr},
+      {"project_dir", "Working directory", false, nullptr},
+      {"metadata", "JSON metadata", false, "{}"}}},
+
+    {"session_heartbeat", "Update session heartbeat",
+     {{"session_id", "Session ID", true, nullptr},
+      {"metadata", "Updated JSON metadata", false, nullptr}}},
+
+    {"session_list", "List active sessions",
+     {{"realm", "Filter by realm", false, nullptr},
+      {"status", "Filter by status", false, "active"}}},
+
+    {"session_deregister", "Remove session from registry",
+     {{"session_id", "Session ID", true, nullptr}}},
+
+    {"session_sync", "Sync session registry with running Claude processes and transcript files",
+     {{"projects_dir", "Claude projects directory (default: ~/.claude/projects)", false, nullptr}}},
 };
 
 // Build set of known tools from specs

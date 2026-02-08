@@ -14,6 +14,10 @@ QUEUE_FILE="${CHITTA_QUEUE:-/tmp/chitta-queue.jsonl}"
 MAX_WAIT="${CC_SOUL_MAX_WAIT:-2}"
 MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
 
+# Source shared library
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib.sh"
+
 # Parse JSON input (gracefully handle malformed input)
 INPUT=$(cat)
 TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null || echo "")
@@ -534,6 +538,16 @@ if echo "$RESPONSE" | grep -qiE "(I found|the answer is|it turns out|the reason 
             echo "[soul] +curiosity resolved: gap $gap_id" >&2
         fi
     fi
+fi
+
+# ===========================================
+# CROSS-SESSION MESSAGING: Deregister session
+# ===========================================
+DEREGISTER_SOCKET=$(get_socket_path 2>/dev/null || echo "$SOCKET_PATH")
+DEREGISTER_SESSION="${SESSION_ID_INPUT:-${CLAUDE_SESSION_ID:-}}"
+if [[ -n "$DEREGISTER_SESSION" && -S "$DEREGISTER_SOCKET" ]]; then
+    request='{"jsonrpc":"2.0","id":1,"method":"session_deregister","params":{"session_id":"'"$DEREGISTER_SESSION"'"}}'
+    timeout 0.5 echo "$request" | nc -U "$DEREGISTER_SOCKET" >/dev/null 2>&1 || true
 fi
 
 exit 0

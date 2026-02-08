@@ -628,6 +628,44 @@ struct ThemeStats {
     size_t oversized_themes = 0;      // Above max_theme_size
 };
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Cross-Session Messaging
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Cross-session message
+struct SessionMessage {
+    int64_t id = 0;
+    std::string sender_session;
+    std::string sender_realm;
+    std::string target_type;       // "direct", "realm", "global"
+    std::string target_id;         // session_id, realm name, or "*"
+    int32_t priority = 1;          // 0=info, 1=normal, 2=important, 3=urgent
+    std::string content;
+    std::string content_type;      // "text", "json", "ssl"
+    int64_t expires_at = 0;
+    int64_t created_at = 0;
+};
+
+// Session registry entry
+struct SessionRegistryEntry {
+    std::string session_id;
+    std::string realm;
+    int32_t pid = 0;
+    std::string transcript_path;   // Path to transcript .jsonl file (stable ID)
+    std::string project_dir;       // Working directory
+    int64_t started_at = 0;
+    int64_t last_heartbeat = 0;
+    std::string status;            // "active", "idle", "dead"
+    std::string metadata;          // JSON
+};
+
+// Inbox item: message + delivery info
+struct InboxItem {
+    SessionMessage message;
+    int64_t delivered_at = 0;
+    bool is_read = false;
+};
+
 // DuckDBStore: unified storage using DuckDB embedded database
 class DuckDBStore {
 public:
@@ -659,6 +697,17 @@ public:
         const std::vector<std::string>& exclude_kinds = {}  // Filter out these kinds
     );
 
+    // Time-bounded recall: filter memories by creation time window
+    // Optionally combines with semantic search if query_embedding provided
+    std::vector<MemoryResult> recall_temporal(
+        const std::vector<float>& query_embedding,  // Empty = no semantic filtering
+        std::optional<int64_t> start_time,          // Unix ms, optional start bound
+        std::optional<int64_t> end_time,            // Unix ms, optional end bound
+        size_t limit = 20,
+        const std::string& realm = "",
+        bool include_global = true
+    );
+
     // Realm management
     bool set_realm(int64_t id, const std::string& realm);
     bool set_visibility(int64_t id, RealmVisibility visibility);
@@ -686,6 +735,15 @@ public:
 
     // List global memories (cross-project insights)
     std::vector<MemoryResult> list_global_memories(size_t limit = 20, const std::string& kind = "");
+
+    // List memories by semantic aspect (filters by node kind)
+    // Aspects: preferences, corrections, insights, failures, decisions, approaches,
+    //          milestones, goals, habits, beliefs, wisdom, code, gaps
+    std::vector<MemoryResult> list_by_aspect(
+        const std::string& aspect,
+        size_t limit = 50,
+        float min_confidence = 0.1f
+    );
 
     // Tag management
     bool add_tag(int64_t id, const std::string& tag);
@@ -1121,6 +1179,38 @@ public:
 
     // Count orphan memories (not in any theme)
     size_t count_orphan_memories(const std::string& realm = "") const;
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Cross-Session Messaging
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Session registry
+    bool session_register(const std::string& session_id, const std::string& realm,
+                          int32_t pid, const std::string& transcript_path = "",
+                          const std::string& project_dir = "", const std::string& metadata = "{}");
+    bool session_heartbeat(const std::string& session_id, const std::string& metadata = "");
+    bool session_deregister(const std::string& session_id);
+    std::vector<SessionRegistryEntry> session_list(const std::string& realm = "",
+                                                    const std::string& status = "active");
+    size_t session_cleanup_dead(int64_t timeout_ms = 600000);
+
+    // Sync registry with running processes and transcripts
+    struct SessionSyncResult {
+        size_t discovered = 0;      // New sessions found from transcripts
+        size_t updated = 0;         // Existing sessions updated
+        size_t marked_dead = 0;     // Sessions marked dead (process not running)
+    };
+    SessionSyncResult session_sync(const std::string& claude_projects_dir = "");
+
+    // Messages
+    int64_t msg_send(const SessionMessage& msg);
+    std::vector<InboxItem> msg_inbox(const std::string& session_id,
+                                      size_t limit = 20, int32_t min_priority = 0);
+    bool msg_ack(int64_t message_id, const std::string& session_id);
+    bool msg_ack_all(const std::string& session_id);
+    std::vector<SessionMessage> msg_history(const std::string& session_id,
+                                             size_t limit = 50);
+    size_t msg_cleanup_expired();
 
     // Error tracking
     std::string last_error() const { return last_error_; }

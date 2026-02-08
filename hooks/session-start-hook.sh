@@ -14,6 +14,12 @@ CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
 QUEUE_FILE="${CHITTA_QUEUE:-/tmp/chitta-queue.jsonl}"
 MAX_WAIT="${CC_SOUL_MAX_WAIT:-2}"
 
+# Source shared library
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib.sh"
+
+SOCKET_PATH=$(get_socket_path)
+
 # Parse JSON input
 INPUT=$(cat)
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
@@ -90,6 +96,13 @@ fi
 # Queue transcript registration (fire-and-forget)
 if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
     queue_write "transcript_register" "{\"session_id\":\"$SESSION_ID\",\"transcript_path\":$(echo "$TRANSCRIPT_PATH" | jq -Rs .),\"realm\":\"$REALM\"}"
+fi
+
+# Register session in cross-session messaging registry
+if [[ -n "$SESSION_ID" && -S "$SOCKET_PATH" ]]; then
+    PID=$$
+    request='{"jsonrpc":"2.0","id":1,"method":"session_register","params":{"session_id":"'"$SESSION_ID"'","realm":"'"$REALM"'","pid":'"$PID"'}}'
+    timeout 0.5 echo "$request" | nc -U "$SOCKET_PATH" >/dev/null 2>&1 || true
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════
