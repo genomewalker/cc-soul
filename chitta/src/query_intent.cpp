@@ -107,6 +107,13 @@ QueryIntentClassifier::QueryIntentClassifier() {
         {"question", "gaps"},
         {"unknown", "gaps"},
         {"unknowns", "gaps"},
+
+        // Analyses
+        {"analyses", "analyses"},
+        {"analysis", "analyses"},
+        {"data", "analyses"},
+        {"scripts", "analyses"},
+        {"where is", "analyses"},
     };
 
     // Meta query keywords

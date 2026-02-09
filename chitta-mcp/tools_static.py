@@ -2465,6 +2465,42 @@ COMPOSITE_TOOLS = [
             "required": ["milestone"]
         }
     ),
+    Tool(
+        name="learn_analysis",
+        description="Record an analysis with data and script locations. Makes analyses reproducible and findable later. Use after completing any significant analysis.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Short name for the analysis (e.g., 'AGP codon optimization', 'bin_28 damage patterns')"
+                },
+                "description": {
+                    "type": "string",
+                    "description": "What the analysis does/investigates"
+                },
+                "data_paths": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Paths to input data files/directories"
+                },
+                "script_paths": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Paths to analysis scripts"
+                },
+                "findings": {
+                    "type": "string",
+                    "description": "Key findings or results (optional)"
+                },
+                "project": {
+                    "type": "string",
+                    "description": "Project name for organization (optional)"
+                }
+            },
+            "required": ["name"]
+        }
+    ),
     # Curiosity-driven research (background learning agent)
     Tool(
         name="research_topics",

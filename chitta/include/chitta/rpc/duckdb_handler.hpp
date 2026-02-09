@@ -8787,7 +8787,8 @@ private:
         {"beliefs", {"belief", "invariant"}},
         {"wisdom", {"wisdom", "insight"}},
         {"code", {"symbol", "function", "class", "file", "dependency"}},
-        {"gaps", {"gap", "curiosity"}}
+        {"gaps", {"gap", "curiosity"}},
+        {"analyses", {"analysis"}}
     };
 
     DuckDBToolResult tool_list_by_aspect(const json& params) {

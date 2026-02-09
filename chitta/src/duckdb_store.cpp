@@ -2010,7 +2010,8 @@ static const std::unordered_map<std::string, std::vector<std::string>> ASPECT_TO
     {"beliefs", {"belief", "invariant"}},
     {"wisdom", {"wisdom", "insight"}},
     {"code", {"symbol", "function", "class", "file", "dependency"}},
-    {"gaps", {"gap", "curiosity"}}
+    {"gaps", {"gap", "curiosity"}},
+    {"analyses", {"analysis"}}  // learn_analysis stores as episode with [analysis:] tag
 };
 
 std::vector<MemoryResult> DuckDBStore::list_by_aspect(
@@ -2052,6 +2053,8 @@ std::vector<MemoryResult> DuckDBStore::list_by_aspect(
         sql << " OR (kind = 'wisdom' AND content LIKE '[approach:%')";
     } else if (aspect == "milestones") {
         sql << " OR (kind = 'episode' AND content LIKE '[milestone]%')";
+    } else if (aspect == "analyses") {
+        sql << " OR (kind = 'episode' AND content LIKE '[analysis:%')";
     }
 
     sql << ") AND confidence >= " << min_confidence << " "

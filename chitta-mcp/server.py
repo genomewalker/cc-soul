@@ -677,6 +677,72 @@ def handle_learn_milestone(arguments: dict) -> str:
     return f"Milestone recorded:\n  Date: {date}\n  Milestone: {milestone}"
 
 
+def handle_learn_analysis(arguments: dict) -> str:
+    """
+    Record an analysis with its data and script locations.
+    Makes it easy to find and reproduce analyses later.
+    """
+    name = arguments.get("name", "")
+    description = arguments.get("description", "")
+    data_paths = arguments.get("data_paths", [])
+    script_paths = arguments.get("script_paths", [])
+    findings = arguments.get("findings", "")
+    project = arguments.get("project", "")
+
+    if not name:
+        return "Error: 'name' parameter required"
+
+    # Format as analysis memory
+    import datetime
+    date = datetime.datetime.now().strftime("%Y-%m-%d")
+
+    content = f"[analysis:{project or 'general'}] {name}"
+    if description:
+        content += f"\nDescription: {description}"
+
+    if data_paths:
+        if isinstance(data_paths, list):
+            content += f"\nData: {', '.join(data_paths)}"
+        else:
+            content += f"\nData: {data_paths}"
+
+    if script_paths:
+        if isinstance(script_paths, list):
+            content += f"\nScripts: {', '.join(script_paths)}"
+        else:
+            content += f"\nScripts: {script_paths}"
+
+    if findings:
+        content += f"\nFindings: {findings}"
+
+    # Store with realm-specific visibility (analysis is project-bound)
+    result = daemon_call("remember", {
+        "content": content,
+        "tags": ["analysis", project or "general", "reproducibility"],
+        "type": "episode",
+        "visibility": 0  # Private to realm by default
+    })
+
+    # Create triplets for navigation
+    analysis_slug = name[:40].replace(" ", "_").lower()
+    daemon_call("connect", {
+        "subject": project or "general",
+        "predicate": "has_analysis",
+        "object": analysis_slug
+    })
+
+    # Link data paths
+    for path in (data_paths if isinstance(data_paths, list) else [data_paths]):
+        if path:
+            daemon_call("connect", {
+                "subject": analysis_slug,
+                "predicate": "uses_data",
+                "object": path[:60]
+            })
+
+    return f"Analysis recorded:\n  Name: {name}\n  Data: {data_paths}\n  Scripts: {script_paths}"
+
+
 # ============================================================================
 # Curiosity-driven research (background learning agent)
 # ============================================================================
@@ -975,6 +1041,7 @@ COMPOSITE_HANDLERS = {
     "learn_approach": handle_learn_approach,
     "learn_outcome": handle_learn_outcome,
     "learn_milestone": handle_learn_milestone,
+    "learn_analysis": handle_learn_analysis,
     # Curiosity-driven research
     "research_topics": handle_research_topics,
     "research_store": handle_research_store,
