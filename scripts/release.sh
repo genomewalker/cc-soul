@@ -129,13 +129,19 @@ echo "Updating .claude-plugin/plugin.json..."
 sedi "s/\"version\": \"[^\"]*\"/\"version\": \"$NEW_VERSION\"/" \
     .claude-plugin/plugin.json
 
+# Update chitta-mcp/pyproject.toml
+echo "Updating chitta-mcp/pyproject.toml..."
+sedi "s/^version = \"[^\"]*\"/version = \"$NEW_VERSION\"/" \
+    chitta-mcp/pyproject.toml
+
 # Verify updates
 grep -q "\"$NEW_VERSION\"" chitta/include/chitta/version.hpp || { echo "version.hpp update failed"; exit 1; }
 grep -q "\"$NEW_VERSION\"" .claude-plugin/plugin.json || { echo "plugin.json update failed"; exit 1; }
+grep -q "\"$NEW_VERSION\"" chitta-mcp/pyproject.toml || { echo "pyproject.toml update failed"; exit 1; }
 
 # Commit version bump
 echo "Committing version bump..."
-git add chitta/include/chitta/version.hpp .claude-plugin/plugin.json
+git add chitta/include/chitta/version.hpp .claude-plugin/plugin.json chitta-mcp/pyproject.toml
 git commit -m "chore: bump version to $NEW_VERSION"
 
 # Create and push tag

@@ -72,9 +72,9 @@ add_mcp() {
         return 1
     fi
 
-    # Install Python package
+    # Install Python package (force reinstall to pick up updates)
     echo "[configure-mcp] Installing chitta-mcp Python package..."
-    $PIP install -q "$CHITTA_MCP_DIR"
+    $PIP install -q --force-reinstall "$CHITTA_MCP_DIR"
 
     # Verify installation
     if ! command -v chitta-mcp &>/dev/null; then
