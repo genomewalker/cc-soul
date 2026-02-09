@@ -265,8 +265,9 @@ std::string default_enrich_script() {
 
 // Run distillation for a single transcript
 // Returns true if distillation was successful
+// queue_triggered: if true, uses min_turns=1 (for pre-compact immediate distillation)
 bool run_distillation(DuckDBMind& mind, const TranscriptState& state,
-                      const DistillConfig& config) {
+                      const DistillConfig& config, bool queue_triggered = false) {
     // Parse transcript for new turns
     std::ifstream file(state.transcript_path);
     if (!file) {
@@ -349,7 +350,13 @@ bool run_distillation(DuckDBMind& mind, const TranscriptState& state,
     }
 
     // Check if we have enough turns
-    if (static_cast<int>(turns.size()) < config.min_turns) {
+    // For queue-triggered (pre-compact), use min_turns=1 to capture final turns
+    int effective_min_turns = queue_triggered ? 1 : config.min_turns;
+    if (static_cast<int>(turns.size()) < effective_min_turns) {
+        if (verbose_mode && queue_triggered) {
+            std::cerr << "[distill] Queue-triggered " << state.session_id
+                      << ": only " << turns.size() << " turns, need at least 1\n";
+        }
         return false;
     }
 
@@ -379,12 +386,11 @@ bool run_distillation(DuckDBMind& mind, const TranscriptState& state,
             }
         }
 
-        // Execute script non-blocking (fire and forget)
-        // Script is responsible for cleanup of temp file
+        // Execute script synchronously with timeout (150s max)
+        // Only mark as distilled after script succeeds
         pid_t pid = fork();
         if (pid == 0) {
-            // Child process - detach and run script
-            setsid();
+            // Child process - run script
             // Use execv with explicit argv to avoid shell command injection
             int devnull = open("/dev/null", O_RDWR);
             if (devnull >= 0) {
@@ -405,10 +411,50 @@ bool run_distillation(DuckDBMind& mind, const TranscriptState& state,
             }
             return false;
         }
-        // Parent continues immediately - don't wait
+
+        // Parent waits for child with timeout (150 seconds max)
+        constexpr int timeout_secs = 150;
+        int status = 0;
+        bool finished = false;
+
+        for (int i = 0; i < timeout_secs && daemon_running; i++) {
+            int result = waitpid(pid, &status, WNOHANG);
+            if (result > 0) {
+                finished = true;
+                break;
+            } else if (result < 0) {
+                // Error - child already reaped or doesn't exist
+                finished = true;
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+
+        if (!finished) {
+            // Timeout - kill child and don't mark as distilled
+            kill(pid, SIGKILL);
+            waitpid(pid, &status, 0);
+            std::remove(temp_path.c_str());
+            std::cerr << "[distill] Timeout after " << timeout_secs << "s for "
+                      << state.session_id << " (will retry)\n";
+            return false;
+        }
+
+        // Check exit status
+        if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+            std::remove(temp_path.c_str());
+            if (verbose_mode) {
+                int exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+                std::cerr << "[distill] Script failed for " << state.session_id
+                          << " (exit=" << exit_code << ", will retry)\n";
+            }
+            return false;
+        }
+
+        // Script succeeded - temp file cleaned up by script
     }
 
-    // Update progress (using thread-safe methods)
+    // Update progress ONLY after script succeeds (using thread-safe methods)
     mind.update_transcript_progress(state.session_id, last_line);
     mind.mark_transcript_distilled(state.session_id);
 
@@ -796,6 +842,7 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
 
     // Queue processor thread - handles fire-and-forget writes from hooks
     std::atomic<size_t> queue_count{0};
+    std::atomic<size_t> queue_distill_count{0};  // Separate counter for pre-compact distillations
     std::string queue_path = "/tmp/chitta-queue.jsonl";
     std::thread queue_processor([&]() {
         while (daemon_running) {
@@ -1016,11 +1063,20 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                         if (!sid.empty() && distill_config.enabled) {
                             auto state_opt = mind.store().get_transcript(sid);
                             if (state_opt) {
-                                if (verbose_mode) {
-                                    std::cerr << "[queue] Triggered distillation for " << sid << "\n";
+                                std::cerr << "[queue] Pre-compact distillation triggered for " << sid << "\n";
+                                // Use queue_triggered=true for min_turns=1
+                                bool success = run_distillation(mind, *state_opt, distill_config, true);
+                                if (success) {
+                                    queue_distill_count++;
+                                    std::cerr << "[queue] Pre-compact distillation succeeded for " << sid
+                                              << " (total=" << queue_distill_count << ")\n";
+                                } else {
+                                    std::cerr << "[queue] Pre-compact distillation failed for " << sid
+                                              << " (will not retry)\n";
                                 }
-                                run_distillation(mind, *state_opt, distill_config);
                                 queue_count++;
+                            } else {
+                                std::cerr << "[queue] No transcript found for session " << sid << "\n";
                             }
                         }
                     }
@@ -1173,6 +1229,7 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
     const auto& sc_stats = subconscious.stats();
     std::cerr << "[daemon] Stopped (cycles=" << cycle_count
               << ", distilled=" << distill_count
+              << ", queue_distilled=" << queue_distill_count
               << ", enriched=" << enrich_count
               << ", queued=" << queue_count
               << ", subconscious_events=" << sc_stats.events_processed.load()

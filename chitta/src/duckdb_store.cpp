@@ -1044,6 +1044,260 @@ bool DuckDBStore::create_schema() {
     write_execute("CREATE SEQUENCE IF NOT EXISTS anticipation_candidate_seq START 1");
     write_execute("CREATE SEQUENCE IF NOT EXISTS session_message_seq START 1");
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // Conversational Memory System (State-of-the-Art Architecture)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Lossless conversation storage - every turn verbatim
+    if (!write_execute(R"(
+        CREATE TABLE IF NOT EXISTS conversation_turn (
+            id BIGINT PRIMARY KEY,
+            session_id VARCHAR NOT NULL,
+            realm VARCHAR DEFAULT 'brahman',
+            role VARCHAR NOT NULL,
+            turn_index INTEGER NOT NULL,
+            content TEXT NOT NULL,
+            content_hash VARCHAR,
+            token_count INTEGER DEFAULT 0,
+            episode_id BIGINT DEFAULT 0,
+            thread_id BIGINT DEFAULT 0,
+            parent_turn_id BIGINT DEFAULT 0,
+            intent_type VARCHAR,
+            topic_tags VARCHAR DEFAULT '',
+            sentiment FLOAT DEFAULT 0.0,
+            tools_used VARCHAR DEFAULT '[]',
+            files_touched VARCHAR DEFAULT '[]',
+            has_code_edit BOOLEAN DEFAULT FALSE,
+            has_error BOOLEAN DEFAULT FALSE,
+            created_at BIGINT NOT NULL,
+            UNIQUE(session_id, turn_index)
+        )
+    )")) {
+        return false;
+    }
+    write_execute("CREATE INDEX IF NOT EXISTS idx_turn_session ON conversation_turn(session_id, turn_index)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_turn_episode ON conversation_turn(episode_id)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_turn_realm ON conversation_turn(realm)");
+    write_execute("CREATE SEQUENCE IF NOT EXISTS conversation_turn_seq START 1");
+
+    // Dialogue episodes - coherent conversation chunks
+    if (!write_execute(R"(
+        CREATE TABLE IF NOT EXISTS dialogue_episode (
+            id BIGINT PRIMARY KEY,
+            session_id VARCHAR NOT NULL,
+            realm VARCHAR DEFAULT 'brahman',
+            title VARCHAR,
+            summary TEXT,
+            start_turn INTEGER NOT NULL,
+            end_turn INTEGER DEFAULT 0,
+            turn_count INTEGER DEFAULT 0,
+            episode_type VARCHAR,
+            outcome VARCHAR,
+            outcome_detail TEXT,
+            key_entities VARCHAR DEFAULT '[]',
+            key_files VARCHAR DEFAULT '[]',
+            key_decisions VARCHAR DEFAULT '[]',
+            user_satisfaction FLOAT DEFAULT 0.0,
+            task_complexity FLOAT DEFAULT 0.0,
+            created_at BIGINT NOT NULL,
+            closed_at BIGINT DEFAULT 0
+        )
+    )")) {
+        return false;
+    }
+    write_execute("CREATE INDEX IF NOT EXISTS idx_episode_session ON dialogue_episode(session_id)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_episode_realm ON dialogue_episode(realm)");
+    write_execute("CREATE SEQUENCE IF NOT EXISTS dialogue_episode_seq START 1");
+
+    // Dialogue threads - multi-session topic continuity
+    if (!write_execute(R"(
+        CREATE TABLE IF NOT EXISTS dialogue_thread (
+            id BIGINT PRIMARY KEY,
+            realm VARCHAR DEFAULT 'brahman',
+            title VARCHAR NOT NULL,
+            summary TEXT,
+            session_count INTEGER DEFAULT 1,
+            episode_count INTEGER DEFAULT 1,
+            total_turns INTEGER DEFAULT 0,
+            status VARCHAR DEFAULT 'active',
+            last_active_at BIGINT NOT NULL,
+            created_at BIGINT NOT NULL
+        )
+    )")) {
+        return false;
+    }
+    write_execute("CREATE INDEX IF NOT EXISTS idx_thread_realm ON dialogue_thread(realm)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_thread_status ON dialogue_thread(status)");
+    write_execute("CREATE SEQUENCE IF NOT EXISTS dialogue_thread_seq START 1");
+
+    // First-class entity registry
+    if (!write_execute(R"(
+        CREATE TABLE IF NOT EXISTS entity (
+            id BIGINT PRIMARY KEY,
+            name VARCHAR NOT NULL UNIQUE,
+            display_name VARCHAR,
+            entity_type VARCHAR NOT NULL,
+            description TEXT,
+            mention_count INTEGER DEFAULT 1,
+            last_mentioned BIGINT NOT NULL,
+            salience_score FLOAT DEFAULT 0.5,
+            realm VARCHAR DEFAULT 'brahman',
+            created_at BIGINT NOT NULL
+        )
+    )")) {
+        return false;
+    }
+    write_execute("CREATE INDEX IF NOT EXISTS idx_entity_name ON entity(name)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_entity_type ON entity(entity_type)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_entity_salience ON entity(salience_score DESC)");
+    write_execute("CREATE SEQUENCE IF NOT EXISTS entity_seq START 1");
+
+    // Entity mentions in turns
+    if (!write_execute(R"(
+        CREATE TABLE IF NOT EXISTS entity_mention (
+            turn_id BIGINT NOT NULL,
+            entity_id BIGINT NOT NULL,
+            mention_type VARCHAR,
+            span_start INTEGER DEFAULT 0,
+            span_end INTEGER DEFAULT 0,
+            PRIMARY KEY(turn_id, entity_id, span_start)
+        )
+    )")) {
+        return false;
+    }
+    write_execute("CREATE INDEX IF NOT EXISTS idx_mention_entity ON entity_mention(entity_id)");
+
+    // Claim-based semantic memory (Mem0-style)
+    if (!write_execute(R"(
+        CREATE TABLE IF NOT EXISTS claim (
+            id BIGINT PRIMARY KEY,
+            subject VARCHAR NOT NULL,
+            predicate VARCHAR NOT NULL,
+            object_norm VARCHAR NOT NULL,
+            value_json TEXT,
+            scope_key VARCHAR NOT NULL,
+            polarity INTEGER DEFAULT 1,
+            confidence FLOAT DEFAULT 0.5,
+            support_count INTEGER DEFAULT 1,
+            contradiction_count INTEGER DEFAULT 0,
+            valid_from_ms BIGINT NOT NULL,
+            valid_to_ms BIGINT DEFAULT 0,
+            superseded_by BIGINT DEFAULT 0,
+            source_class VARCHAR NOT NULL,
+            source_turn_id BIGINT DEFAULT 0,
+            realm VARCHAR DEFAULT 'brahman',
+            created_at BIGINT NOT NULL
+        )
+    )")) {
+        return false;
+    }
+    write_execute("CREATE INDEX IF NOT EXISTS idx_claim_subject ON claim(subject)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_claim_predicate ON claim(predicate)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_claim_scope ON claim(scope_key)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_claim_active ON claim(valid_to_ms) WHERE valid_to_ms = 0");
+    write_execute("CREATE SEQUENCE IF NOT EXISTS claim_seq START 1");
+
+    // Policy memory with promotion states
+    if (!write_execute(R"(
+        CREATE TABLE IF NOT EXISTS policy_memory (
+            id BIGINT PRIMARY KEY,
+            policy_type VARCHAR NOT NULL,
+            content TEXT NOT NULL,
+            scope_key VARCHAR NOT NULL,
+            state VARCHAR DEFAULT 'ephemeral',
+            confidence FLOAT DEFAULT 0.5,
+            support_count INTEGER DEFAULT 1,
+            session_count INTEGER DEFAULT 1,
+            violation_count INTEGER DEFAULT 0,
+            last_applied_at BIGINT DEFAULT 0,
+            last_reinforced_at BIGINT NOT NULL,
+            source_turn_id BIGINT DEFAULT 0,
+            realm VARCHAR DEFAULT 'brahman',
+            created_at BIGINT NOT NULL
+        )
+    )")) {
+        return false;
+    }
+    write_execute("CREATE INDEX IF NOT EXISTS idx_policy_type ON policy_memory(policy_type)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_policy_state ON policy_memory(state)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_policy_scope ON policy_memory(scope_key)");
+    write_execute("CREATE SEQUENCE IF NOT EXISTS policy_memory_seq START 1");
+
+    // Relationship events between user and assistant
+    if (!write_execute(R"(
+        CREATE TABLE IF NOT EXISTS relationship_event (
+            id BIGINT PRIMARY KEY,
+            session_id VARCHAR NOT NULL,
+            event_type VARCHAR NOT NULL,
+            context TEXT,
+            content TEXT NOT NULL,
+            turn_id BIGINT DEFAULT 0,
+            episode_id BIGINT DEFAULT 0,
+            resolved BOOLEAN DEFAULT FALSE,
+            resolution TEXT,
+            realm VARCHAR DEFAULT 'brahman',
+            created_at BIGINT NOT NULL
+        )
+    )")) {
+        return false;
+    }
+    write_execute("CREATE INDEX IF NOT EXISTS idx_rel_event_type ON relationship_event(event_type)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_rel_event_session ON relationship_event(session_id)");
+    write_execute("CREATE SEQUENCE IF NOT EXISTS relationship_event_seq START 1");
+
+    // Correction log for tracking mistakes
+    if (!write_execute(R"(
+        CREATE TABLE IF NOT EXISTS correction_log (
+            id BIGINT PRIMARY KEY,
+            session_id VARCHAR NOT NULL,
+            turn_id BIGINT DEFAULT 0,
+            wrong_belief TEXT NOT NULL,
+            correct_answer TEXT NOT NULL,
+            domain VARCHAR,
+            memory_id BIGINT DEFAULT 0,
+            applied BOOLEAN DEFAULT FALSE,
+            recurrence INTEGER DEFAULT 0,
+            realm VARCHAR DEFAULT 'brahman',
+            created_at BIGINT NOT NULL
+        )
+    )")) {
+        return false;
+    }
+    write_execute("CREATE INDEX IF NOT EXISTS idx_correction_domain ON correction_log(domain)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_correction_session ON correction_log(session_id)");
+    write_execute("CREATE SEQUENCE IF NOT EXISTS correction_log_seq START 1");
+
+    // Outcome traces for causal chains
+    if (!write_execute(R"(
+        CREATE TABLE IF NOT EXISTS outcome_trace (
+            id BIGINT PRIMARY KEY,
+            session_id VARCHAR NOT NULL,
+            trigger_turn_id BIGINT DEFAULT 0,
+            action_turn_id BIGINT DEFAULT 0,
+            outcome_turn_id BIGINT DEFAULT 0,
+            trigger_intent VARCHAR,
+            action_type VARCHAR,
+            outcome_type VARCHAR,
+            lesson TEXT,
+            memory_id BIGINT DEFAULT 0,
+            realm VARCHAR DEFAULT 'brahman',
+            created_at BIGINT NOT NULL
+        )
+    )")) {
+        return false;
+    }
+    write_execute("CREATE INDEX IF NOT EXISTS idx_outcome_session ON outcome_trace(session_id)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_outcome_type ON outcome_trace(outcome_type)");
+    write_execute("CREATE SEQUENCE IF NOT EXISTS outcome_trace_seq START 1");
+
+    // Pre-seed user and assistant entities
+    write_execute(R"(
+        INSERT OR IGNORE INTO entity (id, name, display_name, entity_type, description, last_mentioned, created_at)
+        VALUES
+            (1, 'user:default', 'User', 'person', 'The human user', epoch_ms(now()), epoch_ms(now())),
+            (2, 'assistant:claude', 'Claude', 'person', 'The AI assistant', epoch_ms(now()), epoch_ms(now()))
+    )");
+
     return true;
 }
 
@@ -7247,6 +7501,235 @@ std::vector<MemoryResult> DuckDBStore::recall_with_provenance(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Hybrid Retrieval - Combines Vector + BM25 + Graph for state-of-the-art recall
+// ═══════════════════════════════════════════════════════════════════════════
+
+std::vector<std::pair<int64_t, float>> DuckDBStore::graph_spread(
+    const std::vector<int64_t>& seed_ids,
+    size_t max_results,
+    size_t max_hops
+) {
+    std::vector<std::pair<int64_t, float>> results;
+    if (!db_ || seed_ids.empty()) return results;
+
+    // Track visited memories and their scores
+    std::unordered_map<int64_t, float> scores;
+    std::unordered_set<int64_t> visited;
+
+    // Initialize seeds with score 1.0
+    for (int64_t seed : seed_ids) {
+        scores[seed] = 1.0f;
+        visited.insert(seed);
+    }
+
+    // Edge weights for different relationship types
+    auto get_edge_weight = [](const std::string& predicate) -> float {
+        if (predicate == "corrects" || predicate == "supersedes") return 2.4f;
+        if (predicate == "contradicts") return 2.0f;
+        if (predicate == "prefers" || predicate == "requires") return 1.8f;
+        if (predicate == "related_to" || predicate == "mentions") return 1.5f;
+        if (predicate == "calls" || predicate == "uses") return 1.3f;
+        return 1.0f;  // Default weight
+    };
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    // BFS with decay
+    std::queue<std::pair<int64_t, size_t>> frontier;  // (memory_id, hop_count)
+    for (int64_t seed : seed_ids) {
+        frontier.push({seed, 0});
+    }
+
+    while (!frontier.empty() && results.size() < max_results * 3) {
+        auto [current_id, hop] = frontier.front();
+        frontier.pop();
+
+        if (hop >= max_hops) continue;
+
+        // Find connected memories via triplets
+        std::ostringstream sql;
+        sql << "SELECT DISTINCT m.id, t.predicate, t.confidence "
+            << "FROM memory m "
+            << "JOIN triplet t ON (t.subject = m.content OR t.object = m.content) "
+            << "WHERE m.id != " << current_id << " "
+            << "AND m.confidence > 0.3 "
+            << "LIMIT 20";
+
+        auto result = read_query(sql.str());
+        if (!result || result->HasError()) continue;
+
+        float current_score = scores[current_id];
+        float decay = 0.7f;  // Score decays with each hop
+
+        while (true) {
+            auto chunk = result->Fetch();
+            if (!chunk || chunk->size() == 0) break;
+
+            for (size_t i = 0; i < chunk->size(); ++i) {
+                int64_t neighbor_id = chunk->GetValue(0, i).GetValue<int64_t>();
+                std::string predicate = chunk->GetValue(1, i).ToString();
+                float triplet_conf = chunk->GetValue(2, i).GetValue<float>();
+
+                if (visited.count(neighbor_id)) continue;
+
+                float edge_weight = get_edge_weight(predicate);
+                float propagated_score = current_score * decay * edge_weight * triplet_conf;
+
+                if (propagated_score > 0.1f) {
+                    scores[neighbor_id] = std::max(scores[neighbor_id], propagated_score);
+                    if (visited.insert(neighbor_id).second) {
+                        frontier.push({neighbor_id, hop + 1});
+                    }
+                }
+            }
+        }
+    }
+
+    // Convert to results (exclude seeds)
+    for (const auto& [id, score] : scores) {
+        bool is_seed = std::find(seed_ids.begin(), seed_ids.end(), id) != seed_ids.end();
+        if (!is_seed && score > 0.1f) {
+            results.push_back({id, score});
+        }
+    }
+
+    // Sort by score descending
+    std::sort(results.begin(), results.end(),
+              [](const auto& a, const auto& b) { return a.second > b.second; });
+
+    // Limit results
+    if (results.size() > max_results) {
+        results.resize(max_results);
+    }
+
+    return results;
+}
+
+std::vector<MemoryResult> DuckDBStore::hybrid_recall(
+    const std::vector<float>& query_embedding,
+    const std::string& query_text,
+    size_t k,
+    const std::string& realm,
+    bool include_global,
+    HybridRecallConfig config
+) {
+    std::vector<MemoryResult> results;
+    if (!db_) return results;
+
+    // RRF fusion: score = sum(1 / (k + rank_i))
+    std::unordered_map<int64_t, float> fusion_scores;
+    std::unordered_map<int64_t, MemoryResult> memory_cache;
+
+    // 1. Vector search
+    auto vector_results = recall(query_embedding, k * 2, realm, include_global, {});
+    for (size_t rank = 0; rank < vector_results.size(); ++rank) {
+        int64_t id = vector_results[rank].id;
+        float rrf_score = config.vector_weight / (config.rrf_k + rank + 1);
+        fusion_scores[id] += rrf_score;
+        memory_cache[id] = vector_results[rank];
+    }
+
+    // 2. BM25 search (if text provided)
+    if (!query_text.empty() && has_fts()) {
+        auto bm25_results = bm25_search_memory(query_text, k * 2, realm);
+        for (size_t rank = 0; rank < bm25_results.size(); ++rank) {
+            int64_t id = bm25_results[rank].first;
+            float rrf_score = config.bm25_weight / (config.rrf_k + rank + 1);
+            fusion_scores[id] += rrf_score;
+
+            // Fetch memory if not in cache
+            if (!memory_cache.count(id)) {
+                auto mem = get_memory(id);
+                if (mem) {
+                    MemoryResult mr;
+                    mr.id = mem->id;
+                    mr.kind = mem->kind;
+                    mr.content = mem->content;
+                    mr.confidence = mem->confidence;
+                    mr.created_at = mem->created_at;
+                    mr.accessed_at = mem->accessed_at;
+                    mr.realm = mem->realm;
+                    memory_cache[id] = mr;
+                }
+            }
+        }
+    }
+
+    // 3. Graph spreading from top vector results
+    if (config.graph_weight > 0 && !vector_results.empty()) {
+        std::vector<int64_t> seeds;
+        for (size_t i = 0; i < std::min(size_t(5), vector_results.size()); ++i) {
+            seeds.push_back(vector_results[i].id);
+        }
+
+        auto graph_results = graph_spread(seeds, k * 2, config.graph_hops);
+        for (size_t rank = 0; rank < graph_results.size(); ++rank) {
+            int64_t id = graph_results[rank].first;
+            float rrf_score = config.graph_weight / (config.rrf_k + rank + 1);
+            fusion_scores[id] += rrf_score;
+
+            // Fetch memory if not in cache
+            if (!memory_cache.count(id)) {
+                auto mem = get_memory(id);
+                if (mem) {
+                    MemoryResult mr;
+                    mr.id = mem->id;
+                    mr.kind = mem->kind;
+                    mr.content = mem->content;
+                    mr.confidence = mem->confidence;
+                    mr.created_at = mem->created_at;
+                    mr.accessed_at = mem->accessed_at;
+                    mr.realm = mem->realm;
+                    memory_cache[id] = mr;
+                }
+            }
+        }
+    }
+
+    // 4. Apply recency bonus
+    if (config.recency_weight > 0) {
+        int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+
+        for (auto& [id, score] : fusion_scores) {
+            if (memory_cache.count(id)) {
+                int64_t age_ms = now_ms - memory_cache[id].created_at;
+                float age_days = static_cast<float>(age_ms) / (86400.0f * 1000.0f);
+                float recency_bonus = std::exp(-age_days / 30.0f);  // Decay over 30 days
+                score += config.recency_weight * recency_bonus;
+            }
+        }
+    }
+
+    // 5. Sort by fusion score and build final results
+    std::vector<std::pair<int64_t, float>> scored_ids;
+    for (const auto& [id, score] : fusion_scores) {
+        scored_ids.push_back({id, score});
+    }
+    std::sort(scored_ids.begin(), scored_ids.end(),
+              [](const auto& a, const auto& b) { return a.second > b.second; });
+
+    // Return top k results
+    for (size_t i = 0; i < std::min(k, scored_ids.size()); ++i) {
+        int64_t id = scored_ids[i].first;
+        if (memory_cache.count(id)) {
+            auto mr = memory_cache[id];
+            mr.similarity = scored_ids[i].second;  // Use fusion score as similarity
+            results.push_back(mr);
+        }
+    }
+
+    return results;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // xMemory Theme System Implementation
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -8311,6 +8794,1050 @@ size_t DuckDBStore::msg_cleanup_expired() {
     write_execute(del_msg_sql.str());
 
     return expired_count;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Lossless Conversation Storage
+// ═══════════════════════════════════════════════════════════════════════════
+
+int64_t DuckDBStore::store_conversation_turn(const ConversationTurn& turn) {
+    if (!db_) return -1;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    Timestamp now_ts = turn.created_at > 0 ? turn.created_at : now();
+
+    std::ostringstream sql;
+    sql << "INSERT INTO conversation_turn (id, session_id, realm, role, turn_index, content, "
+        << "episode_id, intent_type, tools_used, files_touched, has_error, created_at) "
+        << "VALUES (nextval('conversation_turn_seq'), "
+        << "'" << escape(turn.session_id) << "', "
+        << "'" << escape(turn.realm.empty() ? "brahman" : turn.realm) << "', "
+        << "'" << escape(turn.role) << "', "
+        << turn.turn_index << ", "
+        << "'" << escape(turn.content) << "', "
+        << turn.episode_id << ", "
+        << "'" << escape(turn.intent_type) << "', "
+        << "'" << escape(turn.tools_used.empty() ? "[]" : turn.tools_used) << "', "
+        << "'" << escape(turn.files_touched.empty() ? "[]" : turn.files_touched) << "', "
+        << (turn.has_error ? "TRUE" : "FALSE") << ", "
+        << now_ts << ") "
+        << "ON CONFLICT (session_id, turn_index) DO UPDATE SET "
+        << "content = EXCLUDED.content, "
+        << "tools_used = EXCLUDED.tools_used, "
+        << "files_touched = EXCLUDED.files_touched, "
+        << "has_error = EXCLUDED.has_error "
+        << "RETURNING id";
+
+    auto result = write_query(sql.str());
+    if (!result || result->HasError()) {
+        last_error_ = result ? result->GetError() : "Query failed";
+        return -1;
+    }
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) {
+        return -1;
+    }
+
+    return chunk->GetValue(0, 0).GetValue<int64_t>();
+}
+
+std::vector<DuckDBStore::ConversationTurn> DuckDBStore::get_conversation_turns(
+    const std::string& session_id,
+    int start_index,
+    size_t limit
+) {
+    std::vector<ConversationTurn> turns;
+    if (!db_) return turns;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    std::ostringstream sql;
+    sql << "SELECT id, session_id, realm, role, turn_index, content, content_hash, "
+        << "token_count, episode_id, intent_type, tools_used, files_touched, has_error, created_at "
+        << "FROM conversation_turn "
+        << "WHERE session_id = '" << escape(session_id) << "' "
+        << "AND turn_index >= " << start_index << " "
+        << "ORDER BY turn_index ASC "
+        << "LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) return turns;
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            ConversationTurn turn;
+            turn.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            turn.session_id = chunk->GetValue(1, i).ToString();
+            turn.realm = chunk->GetValue(2, i).ToString();
+            turn.role = chunk->GetValue(3, i).ToString();
+            turn.turn_index = chunk->GetValue(4, i).GetValue<int>();
+            turn.content = chunk->GetValue(5, i).ToString();
+            turn.content_hash = chunk->GetValue(6, i).ToString();
+            turn.token_count = chunk->GetValue(7, i).GetValue<int>();
+            turn.episode_id = chunk->GetValue(8, i).GetValue<int64_t>();
+            turn.intent_type = chunk->GetValue(9, i).ToString();
+            turn.tools_used = chunk->GetValue(10, i).ToString();
+            turn.files_touched = chunk->GetValue(11, i).ToString();
+            turn.has_error = chunk->GetValue(12, i).GetValue<bool>();
+            turn.created_at = chunk->GetValue(13, i).GetValue<int64_t>();
+            turns.push_back(std::move(turn));
+        }
+    }
+    return turns;
+}
+
+std::optional<DuckDBStore::ConversationTurn> DuckDBStore::get_turn_by_id(int64_t turn_id) {
+    if (!db_) return std::nullopt;
+
+    std::ostringstream sql;
+    sql << "SELECT id, session_id, realm, role, turn_index, content, content_hash, "
+        << "token_count, episode_id, intent_type, tools_used, files_touched, has_error, created_at "
+        << "FROM conversation_turn WHERE id = " << turn_id;
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) return std::nullopt;
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return std::nullopt;
+
+    ConversationTurn turn;
+    turn.id = chunk->GetValue(0, 0).GetValue<int64_t>();
+    turn.session_id = chunk->GetValue(1, 0).ToString();
+    turn.realm = chunk->GetValue(2, 0).ToString();
+    turn.role = chunk->GetValue(3, 0).ToString();
+    turn.turn_index = chunk->GetValue(4, 0).GetValue<int>();
+    turn.content = chunk->GetValue(5, 0).ToString();
+    turn.content_hash = chunk->GetValue(6, 0).ToString();
+    turn.token_count = chunk->GetValue(7, 0).GetValue<int>();
+    turn.episode_id = chunk->GetValue(8, 0).GetValue<int64_t>();
+    turn.intent_type = chunk->GetValue(9, 0).ToString();
+    turn.tools_used = chunk->GetValue(10, 0).ToString();
+    turn.files_touched = chunk->GetValue(11, 0).ToString();
+    turn.has_error = chunk->GetValue(12, 0).GetValue<bool>();
+    turn.created_at = chunk->GetValue(13, 0).GetValue<int64_t>();
+    return turn;
+}
+
+int64_t DuckDBStore::create_dialogue_episode(
+    const std::string& session_id,
+    const std::string& title,
+    int32_t start_turn,
+    const std::string& episode_type,
+    const std::string& realm
+) {
+    if (!db_) return -1;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    Timestamp now_ts = now();
+
+    std::ostringstream sql;
+    sql << "INSERT INTO dialogue_episode (id, session_id, realm, title, start_turn, episode_type, created_at) "
+        << "VALUES (nextval('dialogue_episode_seq'), "
+        << "'" << escape(session_id) << "', "
+        << "'" << escape(realm.empty() ? "brahman" : realm) << "', "
+        << "'" << escape(title) << "', "
+        << start_turn << ", "
+        << "'" << escape(episode_type) << "', "
+        << now_ts << ") RETURNING id";
+
+    auto result = write_query(sql.str());
+    if (!result || result->HasError()) {
+        last_error_ = result ? result->GetError() : "Query failed";
+        return -1;
+    }
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) {
+        return -1;
+    }
+
+    return chunk->GetValue(0, 0).GetValue<int64_t>();
+}
+
+bool DuckDBStore::close_dialogue_episode(
+    int64_t episode_id,
+    const std::string& outcome,
+    const std::string& summary,
+    const std::string& key_entities
+) {
+    if (!db_) return false;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    Timestamp now_ts = now();
+
+    // First get the session and start_turn to calculate turn_count
+    std::ostringstream get_sql;
+    get_sql << "SELECT session_id, start_turn FROM dialogue_episode WHERE id = " << episode_id;
+    auto get_result = read_query(get_sql.str());
+    if (!get_result || get_result->HasError()) return false;
+
+    auto chunk = get_result->Fetch();
+    if (!chunk || chunk->size() == 0) return false;
+
+    std::string session_id = chunk->GetValue(0, 0).ToString();
+    int32_t start_turn = chunk->GetValue(1, 0).GetValue<int32_t>();
+
+    // Get the max turn index for this session to calculate end_turn
+    std::ostringstream max_sql;
+    max_sql << "SELECT COALESCE(MAX(turn_index), " << start_turn << ") FROM conversation_turn "
+            << "WHERE session_id = '" << escape(session_id) << "'";
+    auto max_result = read_query(max_sql.str());
+    int32_t end_turn = start_turn;
+    if (max_result && !max_result->HasError()) {
+        auto max_chunk = max_result->Fetch();
+        if (max_chunk && max_chunk->size() > 0) {
+            end_turn = max_chunk->GetValue(0, 0).GetValue<int32_t>();
+        }
+    }
+
+    int32_t turn_count = end_turn - start_turn + 1;
+
+    std::ostringstream sql;
+    sql << "UPDATE dialogue_episode SET "
+        << "outcome = '" << escape(outcome) << "', "
+        << "summary = '" << escape(summary) << "', "
+        << "key_entities = '" << escape(key_entities) << "', "
+        << "end_turn = " << end_turn << ", "
+        << "turn_count = " << turn_count << ", "
+        << "closed_at = " << now_ts << " "
+        << "WHERE id = " << episode_id;
+
+    return write_execute(sql.str());
+}
+
+std::optional<DuckDBStore::DialogueEpisode> DuckDBStore::get_dialogue_episode(int64_t episode_id) {
+    if (!db_) return std::nullopt;
+
+    std::ostringstream sql;
+    sql << "SELECT id, session_id, realm, title, summary, start_turn, end_turn, turn_count, "
+        << "episode_type, outcome, key_entities, created_at, closed_at "
+        << "FROM dialogue_episode WHERE id = " << episode_id;
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) return std::nullopt;
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return std::nullopt;
+
+    DialogueEpisode ep;
+    ep.id = chunk->GetValue(0, 0).GetValue<int64_t>();
+    ep.session_id = chunk->GetValue(1, 0).ToString();
+    ep.realm = chunk->GetValue(2, 0).ToString();
+    ep.title = chunk->GetValue(3, 0).ToString();
+    ep.summary = chunk->GetValue(4, 0).ToString();
+    ep.start_turn = chunk->GetValue(5, 0).GetValue<int>();
+    ep.end_turn = chunk->GetValue(6, 0).GetValue<int>();
+    ep.turn_count = chunk->GetValue(7, 0).GetValue<int>();
+    ep.episode_type = chunk->GetValue(8, 0).ToString();
+    ep.outcome = chunk->GetValue(9, 0).ToString();
+    ep.key_entities = chunk->GetValue(10, 0).ToString();
+    ep.created_at = chunk->GetValue(11, 0).GetValue<int64_t>();
+    ep.closed_at = chunk->GetValue(12, 0).GetValue<int64_t>();
+    return ep;
+}
+
+std::vector<DuckDBStore::DialogueEpisode> DuckDBStore::list_dialogue_episodes(
+    const std::string& session_id,
+    size_t limit
+) {
+    std::vector<DialogueEpisode> episodes;
+    if (!db_) return episodes;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    std::ostringstream sql;
+    sql << "SELECT id, session_id, realm, title, summary, start_turn, end_turn, turn_count, "
+        << "episode_type, outcome, key_entities, created_at, closed_at "
+        << "FROM dialogue_episode "
+        << "WHERE session_id = '" << escape(session_id) << "' "
+        << "ORDER BY created_at DESC "
+        << "LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) return episodes;
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            DialogueEpisode ep;
+            ep.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            ep.session_id = chunk->GetValue(1, i).ToString();
+            ep.realm = chunk->GetValue(2, i).ToString();
+            ep.title = chunk->GetValue(3, i).ToString();
+            ep.summary = chunk->GetValue(4, i).ToString();
+            ep.start_turn = chunk->GetValue(5, i).GetValue<int>();
+            ep.end_turn = chunk->GetValue(6, i).GetValue<int>();
+            ep.turn_count = chunk->GetValue(7, i).GetValue<int>();
+            ep.episode_type = chunk->GetValue(8, i).ToString();
+            ep.outcome = chunk->GetValue(9, i).ToString();
+            ep.key_entities = chunk->GetValue(10, i).ToString();
+            ep.created_at = chunk->GetValue(11, i).GetValue<int64_t>();
+            ep.closed_at = chunk->GetValue(12, i).GetValue<int64_t>();
+            episodes.push_back(std::move(ep));
+        }
+    }
+    return episodes;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Claim Model - Semantic memory with contradiction handling
+// ═══════════════════════════════════════════════════════════════════════════
+
+int64_t DuckDBStore::store_claim(const Claim& claim) {
+    if (!db_) return -1;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    Timestamp now_ts = now();
+
+    std::ostringstream sql;
+    sql << "INSERT INTO claim (id, subject, predicate, object_norm, value_json, scope_key, "
+        << "polarity, confidence, support_count, contradiction_count, "
+        << "valid_from_ms, valid_to_ms, superseded_by, source_class, source_turn_id, realm, created_at) "
+        << "VALUES (nextval('claim_seq'), "
+        << "'" << escape(claim.subject) << "', "
+        << "'" << escape(claim.predicate) << "', "
+        << "'" << escape(claim.object_norm) << "', "
+        << "'" << escape(claim.value_json.empty() ? "{}" : claim.value_json) << "', "
+        << "'" << escape(claim.scope_key.empty() ? "session" : claim.scope_key) << "', "
+        << claim.polarity << ", "
+        << claim.confidence << ", "
+        << claim.support_count << ", "
+        << claim.contradiction_count << ", "
+        << (claim.valid_from_ms > 0 ? claim.valid_from_ms : now_ts) << ", "
+        << claim.valid_to_ms << ", "
+        << claim.superseded_by << ", "
+        << "'" << escape(claim.source_class.empty() ? "llm_infer" : claim.source_class) << "', "
+        << claim.source_turn_id << ", "
+        << "'" << escape(claim.realm.empty() ? "brahman" : claim.realm) << "', "
+        << now_ts << ") RETURNING id";
+
+    auto result = write_query(sql.str());
+    if (!result || result->HasError()) {
+        last_error_ = result ? result->GetError() : "Query failed";
+        return -1;
+    }
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return -1;
+
+    return chunk->GetValue(0, 0).GetValue<int64_t>();
+}
+
+bool DuckDBStore::supersede_claim(int64_t old_claim_id, int64_t new_claim_id) {
+    if (!db_) return false;
+
+    Timestamp now_ts = now();
+
+    std::ostringstream sql;
+    sql << "UPDATE claim SET "
+        << "superseded_by = " << new_claim_id << ", "
+        << "valid_to_ms = " << now_ts << " "
+        << "WHERE id = " << old_claim_id << " AND superseded_by = 0";
+
+    return write_execute(sql.str());
+}
+
+std::vector<DuckDBStore::Claim> DuckDBStore::query_claims(
+    const std::string& subject,
+    const std::string& predicate,
+    const std::string& scope_key,
+    bool active_only,
+    size_t limit
+) {
+    std::vector<Claim> claims;
+    if (!db_) return claims;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    std::ostringstream sql;
+    sql << "SELECT id, subject, predicate, object_norm, value_json, scope_key, "
+        << "polarity, confidence, support_count, contradiction_count, "
+        << "valid_from_ms, valid_to_ms, superseded_by, source_class, source_turn_id, realm, created_at "
+        << "FROM claim WHERE 1=1 ";
+
+    if (!subject.empty()) {
+        sql << "AND subject = '" << escape(subject) << "' ";
+    }
+    if (!predicate.empty()) {
+        sql << "AND predicate = '" << escape(predicate) << "' ";
+    }
+    if (!scope_key.empty()) {
+        sql << "AND scope_key = '" << escape(scope_key) << "' ";
+    }
+    if (active_only) {
+        sql << "AND superseded_by = 0 AND valid_to_ms = 0 ";
+    }
+
+    sql << "ORDER BY confidence DESC, created_at DESC LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) return claims;
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            Claim c;
+            c.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            c.subject = chunk->GetValue(1, i).ToString();
+            c.predicate = chunk->GetValue(2, i).ToString();
+            c.object_norm = chunk->GetValue(3, i).ToString();
+            c.value_json = chunk->GetValue(4, i).ToString();
+            c.scope_key = chunk->GetValue(5, i).ToString();
+            c.polarity = chunk->GetValue(6, i).GetValue<int>();
+            c.confidence = chunk->GetValue(7, i).GetValue<float>();
+            c.support_count = chunk->GetValue(8, i).GetValue<int>();
+            c.contradiction_count = chunk->GetValue(9, i).GetValue<int>();
+            c.valid_from_ms = chunk->GetValue(10, i).GetValue<int64_t>();
+            c.valid_to_ms = chunk->GetValue(11, i).GetValue<int64_t>();
+            c.superseded_by = chunk->GetValue(12, i).GetValue<int64_t>();
+            c.source_class = chunk->GetValue(13, i).ToString();
+            c.source_turn_id = chunk->GetValue(14, i).GetValue<int64_t>();
+            c.realm = chunk->GetValue(15, i).ToString();
+            c.created_at = chunk->GetValue(16, i).GetValue<int64_t>();
+            claims.push_back(std::move(c));
+        }
+    }
+    return claims;
+}
+
+std::vector<DuckDBStore::Claim> DuckDBStore::find_contradicting_claims(const Claim& new_claim) {
+    std::vector<Claim> conflicts;
+    if (!db_) return conflicts;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    // Find claims with same subject+predicate but different object or opposite polarity
+    std::ostringstream sql;
+    sql << "SELECT id, subject, predicate, object_norm, value_json, scope_key, "
+        << "polarity, confidence, support_count, contradiction_count, "
+        << "valid_from_ms, valid_to_ms, superseded_by, source_class, source_turn_id, realm, created_at "
+        << "FROM claim "
+        << "WHERE subject = '" << escape(new_claim.subject) << "' "
+        << "AND predicate = '" << escape(new_claim.predicate) << "' "
+        << "AND superseded_by = 0 AND valid_to_ms = 0 "
+        << "AND (object_norm != '" << escape(new_claim.object_norm) << "' "
+        << "     OR polarity != " << new_claim.polarity << ") "
+        << "ORDER BY confidence DESC";
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) return conflicts;
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            Claim c;
+            c.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            c.subject = chunk->GetValue(1, i).ToString();
+            c.predicate = chunk->GetValue(2, i).ToString();
+            c.object_norm = chunk->GetValue(3, i).ToString();
+            c.value_json = chunk->GetValue(4, i).ToString();
+            c.scope_key = chunk->GetValue(5, i).ToString();
+            c.polarity = chunk->GetValue(6, i).GetValue<int>();
+            c.confidence = chunk->GetValue(7, i).GetValue<float>();
+            c.support_count = chunk->GetValue(8, i).GetValue<int>();
+            c.contradiction_count = chunk->GetValue(9, i).GetValue<int>();
+            c.valid_from_ms = chunk->GetValue(10, i).GetValue<int64_t>();
+            c.valid_to_ms = chunk->GetValue(11, i).GetValue<int64_t>();
+            c.superseded_by = chunk->GetValue(12, i).GetValue<int64_t>();
+            c.source_class = chunk->GetValue(13, i).ToString();
+            c.source_turn_id = chunk->GetValue(14, i).GetValue<int64_t>();
+            c.realm = chunk->GetValue(15, i).ToString();
+            c.created_at = chunk->GetValue(16, i).GetValue<int64_t>();
+            conflicts.push_back(std::move(c));
+        }
+    }
+    return conflicts;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Policy Memory - With promotion states
+// ═══════════════════════════════════════════════════════════════════════════
+
+int64_t DuckDBStore::store_policy(const PolicyMemory& policy) {
+    if (!db_) return -1;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    Timestamp now_ts = now();
+
+    std::ostringstream sql;
+    sql << "INSERT INTO policy_memory (id, policy_type, content, scope_key, state, "
+        << "confidence, support_count, session_count, violation_count, "
+        << "last_applied_at, last_reinforced_at, source_turn_id, realm, created_at) "
+        << "VALUES (nextval('policy_memory_seq'), "
+        << "'" << escape(policy.policy_type) << "', "
+        << "'" << escape(policy.content) << "', "
+        << "'" << escape(policy.scope_key.empty() ? "session" : policy.scope_key) << "', "
+        << "'" << escape(policy.state.empty() ? "ephemeral" : policy.state) << "', "
+        << policy.confidence << ", "
+        << policy.support_count << ", "
+        << policy.session_count << ", "
+        << policy.violation_count << ", "
+        << policy.last_applied_at << ", "
+        << policy.last_reinforced_at << ", "
+        << policy.source_turn_id << ", "
+        << "'" << escape(policy.realm.empty() ? "brahman" : policy.realm) << "', "
+        << now_ts << ") RETURNING id";
+
+    auto result = write_query(sql.str());
+    if (!result || result->HasError()) {
+        last_error_ = result ? result->GetError() : "Query failed";
+        return -1;
+    }
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return -1;
+
+    return chunk->GetValue(0, 0).GetValue<int64_t>();
+}
+
+bool DuckDBStore::promote_policy(int64_t policy_id, const std::string& new_state) {
+    if (!db_) return false;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    std::ostringstream sql;
+    sql << "UPDATE policy_memory SET state = '" << escape(new_state) << "' "
+        << "WHERE id = " << policy_id;
+
+    return write_execute(sql.str());
+}
+
+bool DuckDBStore::reinforce_policy(int64_t policy_id) {
+    if (!db_) return false;
+
+    Timestamp now_ts = now();
+
+    std::ostringstream sql;
+    sql << "UPDATE policy_memory SET "
+        << "support_count = support_count + 1, "
+        << "confidence = LEAST(1.0, confidence + 0.05), "
+        << "last_reinforced_at = " << now_ts << " "
+        << "WHERE id = " << policy_id;
+
+    return write_execute(sql.str());
+}
+
+std::vector<DuckDBStore::PolicyMemory> DuckDBStore::get_active_policies(
+    const std::string& scope_key,
+    const std::string& policy_type,
+    size_t limit
+) {
+    std::vector<PolicyMemory> policies;
+    if (!db_) return policies;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    std::ostringstream sql;
+    sql << "SELECT id, policy_type, content, scope_key, state, "
+        << "confidence, support_count, session_count, violation_count, "
+        << "last_applied_at, last_reinforced_at, source_turn_id, realm, created_at "
+        << "FROM policy_memory WHERE state != 'ephemeral' ";
+
+    if (!scope_key.empty()) {
+        sql << "AND scope_key = '" << escape(scope_key) << "' ";
+    }
+    if (!policy_type.empty()) {
+        sql << "AND policy_type = '" << escape(policy_type) << "' ";
+    }
+
+    sql << "ORDER BY confidence DESC, support_count DESC LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) return policies;
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            PolicyMemory p;
+            p.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            p.policy_type = chunk->GetValue(1, i).ToString();
+            p.content = chunk->GetValue(2, i).ToString();
+            p.scope_key = chunk->GetValue(3, i).ToString();
+            p.state = chunk->GetValue(4, i).ToString();
+            p.confidence = chunk->GetValue(5, i).GetValue<float>();
+            p.support_count = chunk->GetValue(6, i).GetValue<int>();
+            p.session_count = chunk->GetValue(7, i).GetValue<int>();
+            p.violation_count = chunk->GetValue(8, i).GetValue<int>();
+            p.last_applied_at = chunk->GetValue(9, i).GetValue<int64_t>();
+            p.last_reinforced_at = chunk->GetValue(10, i).GetValue<int64_t>();
+            p.source_turn_id = chunk->GetValue(11, i).GetValue<int64_t>();
+            p.realm = chunk->GetValue(12, i).ToString();
+            p.created_at = chunk->GetValue(13, i).GetValue<int64_t>();
+            policies.push_back(std::move(p));
+        }
+    }
+    return policies;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Entity Registry - First-class entity tracking
+// ═══════════════════════════════════════════════════════════════════════════
+
+int64_t DuckDBStore::get_or_create_entity(
+    const std::string& name,
+    const std::string& entity_type,
+    const std::string& display_name
+) {
+    if (!db_) return -1;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    // Try to find existing entity
+    std::ostringstream find_sql;
+    find_sql << "SELECT id FROM entity WHERE name = '" << escape(name) << "'";
+    auto find_result = read_query(find_sql.str());
+    if (find_result && !find_result->HasError()) {
+        auto chunk = find_result->Fetch();
+        if (chunk && chunk->size() > 0) {
+            int64_t entity_id = chunk->GetValue(0, 0).GetValue<int64_t>();
+            // Update mention count and last_mentioned
+            Timestamp now_ts = now();
+            std::ostringstream update_sql;
+            update_sql << "UPDATE entity SET mention_count = mention_count + 1, "
+                       << "last_mentioned = " << now_ts << " WHERE id = " << entity_id;
+            write_execute(update_sql.str());
+            return entity_id;
+        }
+    }
+
+    // Create new entity
+    Timestamp now_ts = now();
+    std::ostringstream sql;
+    sql << "INSERT INTO entity (id, name, display_name, entity_type, realm, last_mentioned, created_at) "
+        << "VALUES (nextval('entity_seq'), "
+        << "'" << escape(name) << "', "
+        << "'" << escape(display_name.empty() ? name : display_name) << "', "
+        << "'" << escape(entity_type) << "', "
+        << "'brahman', "
+        << now_ts << ", "
+        << now_ts << ") RETURNING id";
+
+    auto result = write_query(sql.str());
+    if (!result || result->HasError()) {
+        last_error_ = result ? result->GetError() : "Query failed";
+        return -1;
+    }
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return -1;
+
+    return chunk->GetValue(0, 0).GetValue<int64_t>();
+}
+
+bool DuckDBStore::update_entity_salience(int64_t entity_id) {
+    if (!db_) return false;
+
+    // Salience score based on recency and frequency
+    // Score = 0.3 * log(mention_count + 1) + 0.7 * exp(-age_days/30)
+    std::ostringstream sql;
+    sql << "UPDATE entity SET salience_score = "
+        << "0.3 * LN(mention_count + 1) + "
+        << "0.7 * EXP(-CAST((epoch_ms(now()) - last_mentioned) AS DOUBLE) / (30.0 * 86400000.0)) "
+        << "WHERE id = " << entity_id;
+
+    return write_execute(sql.str());
+}
+
+std::optional<DuckDBStore::Entity> DuckDBStore::get_entity(const std::string& name) {
+    if (!db_) return std::nullopt;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    std::ostringstream sql;
+    sql << "SELECT id, name, display_name, entity_type, description, "
+        << "mention_count, salience_score, realm, last_mentioned, created_at "
+        << "FROM entity WHERE name = '" << escape(name) << "'";
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) return std::nullopt;
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return std::nullopt;
+
+    Entity e;
+    e.id = chunk->GetValue(0, 0).GetValue<int64_t>();
+    e.name = chunk->GetValue(1, 0).ToString();
+    e.display_name = chunk->GetValue(2, 0).ToString();
+    e.entity_type = chunk->GetValue(3, 0).ToString();
+    e.description = chunk->GetValue(4, 0).ToString();
+    e.mention_count = chunk->GetValue(5, 0).GetValue<int>();
+    e.salience_score = chunk->GetValue(6, 0).GetValue<float>();
+    e.realm = chunk->GetValue(7, 0).ToString();
+    e.last_mentioned = chunk->GetValue(8, 0).GetValue<int64_t>();
+    e.created_at = chunk->GetValue(9, 0).GetValue<int64_t>();
+    return e;
+}
+
+std::vector<DuckDBStore::Entity> DuckDBStore::get_top_entities(
+    const std::string& entity_type,
+    size_t limit
+) {
+    std::vector<Entity> entities;
+    if (!db_) return entities;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    std::ostringstream sql;
+    sql << "SELECT id, name, display_name, entity_type, description, "
+        << "mention_count, salience_score, realm, last_mentioned, created_at "
+        << "FROM entity WHERE 1=1 ";
+
+    if (!entity_type.empty()) {
+        sql << "AND entity_type = '" << escape(entity_type) << "' ";
+    }
+
+    sql << "ORDER BY salience_score DESC, mention_count DESC LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) return entities;
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            Entity e;
+            e.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            e.name = chunk->GetValue(1, i).ToString();
+            e.display_name = chunk->GetValue(2, i).ToString();
+            e.entity_type = chunk->GetValue(3, i).ToString();
+            e.description = chunk->GetValue(4, i).ToString();
+            e.mention_count = chunk->GetValue(5, i).GetValue<int>();
+            e.salience_score = chunk->GetValue(6, i).GetValue<float>();
+            e.realm = chunk->GetValue(7, i).ToString();
+            e.last_mentioned = chunk->GetValue(8, i).GetValue<int64_t>();
+            e.created_at = chunk->GetValue(9, i).GetValue<int64_t>();
+            entities.push_back(std::move(e));
+        }
+    }
+    return entities;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Relationship Events - Track user-assistant interaction patterns
+// ═══════════════════════════════════════════════════════════════════════════
+
+int64_t DuckDBStore::store_relationship_event(const RelationshipEvent& event) {
+    if (!db_) return -1;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    Timestamp now_ts = now();
+
+    std::ostringstream sql;
+    sql << "INSERT INTO relationship_event (id, session_id, event_type, context, content, "
+        << "turn_id, episode_id, resolved, resolution, realm, created_at) "
+        << "VALUES (nextval('relationship_event_seq'), "
+        << "'" << escape(event.session_id) << "', "
+        << "'" << escape(event.event_type) << "', "
+        << "'" << escape(event.context) << "', "
+        << "'" << escape(event.content) << "', "
+        << event.turn_id << ", "
+        << event.episode_id << ", "
+        << (event.resolved ? "TRUE" : "FALSE") << ", "
+        << "'" << escape(event.resolution) << "', "
+        << "'" << escape(event.realm.empty() ? "brahman" : event.realm) << "', "
+        << now_ts << ") RETURNING id";
+
+    auto result = write_query(sql.str());
+    if (!result || result->HasError()) {
+        last_error_ = result ? result->GetError() : "Query failed";
+        return -1;
+    }
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return -1;
+
+    return chunk->GetValue(0, 0).GetValue<int64_t>();
+}
+
+std::vector<DuckDBStore::RelationshipEvent> DuckDBStore::get_relationship_events(
+    const std::string& event_type,
+    const std::string& session_id,
+    size_t limit
+) {
+    std::vector<RelationshipEvent> events;
+    if (!db_) return events;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    std::ostringstream sql;
+    sql << "SELECT id, session_id, event_type, context, content, "
+        << "turn_id, episode_id, resolved, resolution, realm, created_at "
+        << "FROM relationship_event WHERE 1=1 ";
+
+    if (!event_type.empty()) {
+        sql << "AND event_type = '" << escape(event_type) << "' ";
+    }
+    if (!session_id.empty()) {
+        sql << "AND session_id = '" << escape(session_id) << "' ";
+    }
+
+    sql << "ORDER BY created_at DESC LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) return events;
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            RelationshipEvent e;
+            e.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            e.session_id = chunk->GetValue(1, i).ToString();
+            e.event_type = chunk->GetValue(2, i).ToString();
+            e.context = chunk->GetValue(3, i).ToString();
+            e.content = chunk->GetValue(4, i).ToString();
+            e.turn_id = chunk->GetValue(5, i).GetValue<int64_t>();
+            e.episode_id = chunk->GetValue(6, i).GetValue<int64_t>();
+            e.resolved = chunk->GetValue(7, i).GetValue<bool>();
+            e.resolution = chunk->GetValue(8, i).ToString();
+            e.realm = chunk->GetValue(9, i).ToString();
+            e.created_at = chunk->GetValue(10, i).GetValue<int64_t>();
+            events.push_back(std::move(e));
+        }
+    }
+    return events;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Correction Log - Track and learn from mistakes
+// ═══════════════════════════════════════════════════════════════════════════
+
+int64_t DuckDBStore::log_correction(const CorrectionLogEntry& entry) {
+    if (!db_) return -1;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    Timestamp now_ts = now();
+
+    std::ostringstream sql;
+    sql << "INSERT INTO correction_log (id, session_id, turn_id, wrong_belief, correct_answer, "
+        << "domain, memory_id, applied, recurrence, realm, created_at) "
+        << "VALUES (nextval('correction_log_seq'), "
+        << "'" << escape(entry.session_id) << "', "
+        << entry.turn_id << ", "
+        << "'" << escape(entry.wrong_belief) << "', "
+        << "'" << escape(entry.correct_answer) << "', "
+        << "'" << escape(entry.domain) << "', "
+        << entry.memory_id << ", "
+        << (entry.applied ? "TRUE" : "FALSE") << ", "
+        << entry.recurrence << ", "
+        << "'" << escape(entry.realm.empty() ? "brahman" : entry.realm) << "', "
+        << now_ts << ") RETURNING id";
+
+    auto result = write_query(sql.str());
+    if (!result || result->HasError()) {
+        last_error_ = result ? result->GetError() : "Query failed";
+        return -1;
+    }
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return -1;
+
+    return chunk->GetValue(0, 0).GetValue<int64_t>();
+}
+
+std::vector<DuckDBStore::CorrectionLogEntry> DuckDBStore::get_corrections(
+    const std::string& domain,
+    size_t limit
+) {
+    std::vector<CorrectionLogEntry> corrections;
+    if (!db_) return corrections;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    std::ostringstream sql;
+    sql << "SELECT id, session_id, turn_id, wrong_belief, correct_answer, "
+        << "domain, memory_id, applied, recurrence, realm, created_at "
+        << "FROM correction_log WHERE 1=1 ";
+
+    if (!domain.empty()) {
+        sql << "AND domain = '" << escape(domain) << "' ";
+    }
+
+    sql << "ORDER BY recurrence DESC, created_at DESC LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) return corrections;
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            CorrectionLogEntry c;
+            c.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            c.session_id = chunk->GetValue(1, i).ToString();
+            c.turn_id = chunk->GetValue(2, i).GetValue<int64_t>();
+            c.wrong_belief = chunk->GetValue(3, i).ToString();
+            c.correct_answer = chunk->GetValue(4, i).ToString();
+            c.domain = chunk->GetValue(5, i).ToString();
+            c.memory_id = chunk->GetValue(6, i).GetValue<int64_t>();
+            c.applied = chunk->GetValue(7, i).GetValue<bool>();
+            c.recurrence = chunk->GetValue(8, i).GetValue<int>();
+            c.realm = chunk->GetValue(9, i).ToString();
+            c.created_at = chunk->GetValue(10, i).GetValue<int64_t>();
+            corrections.push_back(std::move(c));
+        }
+    }
+    return corrections;
+}
+
+bool DuckDBStore::mark_correction_applied(int64_t correction_id, int64_t memory_id) {
+    if (!db_) return false;
+
+    std::ostringstream sql;
+    sql << "UPDATE correction_log SET "
+        << "applied = TRUE, "
+        << "memory_id = " << memory_id << " "
+        << "WHERE id = " << correction_id;
+
+    return write_execute(sql.str());
 }
 
 }  // namespace chitta

@@ -1103,6 +1103,44 @@ public:
         const std::vector<std::string>& exclude_kinds = {}
     );
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // Hybrid Retrieval - Combines Vector + BM25 + Graph for state-of-the-art recall
+    // ═══════════════════════════════════════════════════════════════════════
+
+    struct HybridRecallConfig {
+        float vector_weight;
+        float bm25_weight;
+        float graph_weight;
+        float recency_weight;
+        size_t graph_hops;
+        float rrf_k;
+
+        HybridRecallConfig()
+            : vector_weight(0.4f)
+            , bm25_weight(0.3f)
+            , graph_weight(0.2f)
+            , recency_weight(0.1f)
+            , graph_hops(2)
+            , rrf_k(60.0f) {}
+    };
+
+    // Hybrid recall: combines vector search, BM25, and graph spreading with RRF fusion
+    std::vector<MemoryResult> hybrid_recall(
+        const std::vector<float>& query_embedding,
+        const std::string& query_text,
+        size_t k = 10,
+        const std::string& realm = "",
+        bool include_global = true,
+        HybridRecallConfig config = HybridRecallConfig()
+    );
+
+    // Graph spreading: find memories connected via triplets (RWR-lite)
+    std::vector<std::pair<int64_t, float>> graph_spread(
+        const std::vector<int64_t>& seed_ids,
+        size_t max_results = 20,
+        size_t max_hops = 2
+    );
+
     // Code intel confidence restoration: fix memories that were incorrectly decayed
     struct CodeIntelRestoreResult {
         size_t total_updated = 0;
@@ -1211,6 +1249,185 @@ public:
     std::vector<SessionMessage> msg_history(const std::string& session_id,
                                              size_t limit = 50);
     size_t msg_cleanup_expired();
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Conversational Memory System
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Conversation turns - lossless storage
+    struct ConversationTurn {
+        int64_t id = 0;
+        std::string session_id;
+        std::string realm;
+        std::string role;           // user, assistant, system
+        int turn_index = 0;
+        std::string content;
+        std::string content_hash;
+        int token_count = 0;
+        int64_t episode_id = 0;
+        std::string intent_type;
+        std::string tools_used;     // JSON array
+        std::string files_touched;  // JSON array
+        bool has_error = false;
+        int64_t created_at = 0;
+    };
+
+    int64_t store_conversation_turn(const ConversationTurn& turn);
+    std::vector<ConversationTurn> get_conversation_turns(
+        const std::string& session_id, int32_t start_index = 0, size_t limit = 100);
+    std::optional<ConversationTurn> get_turn_by_id(int64_t turn_id);
+
+    // Dialogue episodes
+    struct DialogueEpisode {
+        int64_t id = 0;
+        std::string session_id;
+        std::string realm;
+        std::string title;
+        std::string summary;
+        int32_t start_turn = 0;
+        int32_t end_turn = 0;
+        int32_t turn_count = 0;
+        std::string episode_type;
+        std::string outcome;
+        std::string key_entities;   // JSON array
+        int64_t created_at = 0;
+        int64_t closed_at = 0;
+    };
+
+    int64_t create_dialogue_episode(
+        const std::string& session_id,
+        const std::string& title,
+        int32_t start_turn,
+        const std::string& episode_type = "",
+        const std::string& realm = "brahman");
+    bool close_dialogue_episode(
+        int64_t episode_id,
+        const std::string& outcome,
+        const std::string& summary = "",
+        const std::string& key_entities = "[]");
+    std::optional<DialogueEpisode> get_dialogue_episode(int64_t episode_id);
+    std::vector<DialogueEpisode> list_dialogue_episodes(
+        const std::string& session_id, size_t limit = 20);
+
+    // Claims - semantic memory with contradiction handling
+    struct Claim {
+        int64_t id = 0;
+        std::string subject;
+        std::string predicate;
+        std::string object_norm;
+        std::string value_json;
+        std::string scope_key;      // user|repo|branch|session|task
+        int polarity = 1;           // +1 true, -1 false
+        float confidence = 0.5f;
+        int support_count = 1;
+        int contradiction_count = 0;
+        int64_t valid_from_ms = 0;
+        int64_t valid_to_ms = 0;    // 0 = still valid
+        int64_t superseded_by = 0;
+        std::string source_class;   // tool, user_explicit, rule, llm_infer
+        int64_t source_turn_id = 0;
+        std::string realm;
+        int64_t created_at = 0;
+    };
+
+    int64_t store_claim(const Claim& claim);
+    bool supersede_claim(int64_t old_claim_id, int64_t new_claim_id);
+    std::vector<Claim> query_claims(const std::string& subject = "",
+                                    const std::string& predicate = "",
+                                    const std::string& scope_key = "",
+                                    bool active_only = true,
+                                    size_t limit = 20);
+    std::vector<Claim> find_contradicting_claims(const Claim& new_claim);
+
+    // Policy memory with promotion states
+    struct PolicyMemory {
+        int64_t id = 0;
+        std::string policy_type;    // correction, preference, constraint
+        std::string content;
+        std::string scope_key;
+        std::string state;          // ephemeral, candidate, stable_soft, stable_hard
+        float confidence = 0.5f;
+        int support_count = 1;
+        int session_count = 1;
+        int violation_count = 0;
+        int64_t last_applied_at = 0;
+        int64_t last_reinforced_at = 0;
+        int64_t source_turn_id = 0;
+        std::string realm;
+        int64_t created_at = 0;
+    };
+
+    int64_t store_policy(const PolicyMemory& policy);
+    bool promote_policy(int64_t policy_id, const std::string& new_state);
+    bool reinforce_policy(int64_t policy_id);
+    std::vector<PolicyMemory> get_active_policies(
+        const std::string& scope_key = "",
+        const std::string& policy_type = "",
+        size_t limit = 50);
+
+    // Entity registry
+    struct Entity {
+        int64_t id = 0;
+        std::string name;
+        std::string display_name;
+        std::string entity_type;    // person, project, concept, tool, file, function
+        std::string description;
+        int mention_count = 1;
+        float salience_score = 0.5f;
+        std::string realm;
+        int64_t last_mentioned = 0;
+        int64_t created_at = 0;
+    };
+
+    int64_t get_or_create_entity(const std::string& name,
+                                 const std::string& entity_type,
+                                 const std::string& display_name = "");
+    bool update_entity_salience(int64_t entity_id);
+    std::optional<Entity> get_entity(const std::string& name);
+    std::vector<Entity> get_top_entities(const std::string& entity_type = "",
+                                         size_t limit = 20);
+
+    // Relationship events
+    struct RelationshipEvent {
+        int64_t id = 0;
+        std::string session_id;
+        std::string event_type;     // correction, praise, frustration, discovery
+        std::string context;
+        std::string content;
+        int64_t turn_id = 0;
+        int64_t episode_id = 0;
+        bool resolved = false;
+        std::string resolution;
+        std::string realm;
+        int64_t created_at = 0;
+    };
+
+    int64_t store_relationship_event(const RelationshipEvent& event);
+    std::vector<RelationshipEvent> get_relationship_events(
+        const std::string& event_type = "",
+        const std::string& session_id = "",
+        size_t limit = 20);
+
+    // Correction log
+    struct CorrectionLogEntry {
+        int64_t id = 0;
+        std::string session_id;
+        int64_t turn_id = 0;
+        std::string wrong_belief;
+        std::string correct_answer;
+        std::string domain;
+        int64_t memory_id = 0;
+        bool applied = false;
+        int recurrence = 0;
+        std::string realm;
+        int64_t created_at = 0;
+    };
+
+    int64_t log_correction(const CorrectionLogEntry& entry);
+    std::vector<CorrectionLogEntry> get_corrections(
+        const std::string& domain = "",
+        size_t limit = 20);
+    bool mark_correction_applied(int64_t correction_id, int64_t memory_id);
 
     // Error tracking
     std::string last_error() const { return last_error_; }
