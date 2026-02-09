@@ -2320,6 +2320,100 @@ private:
         });
         handlers_["session_sync"] = [this](const json& p) { return tool_session_sync(p); };
 
+        // ========================================================================
+        // Conversational Memory System - Lossless storage and retrieval
+        // ========================================================================
+
+        tools_.push_back({
+            {"name", "get_turns"},
+            {"description", "Get conversation turns for a session. Returns lossless history of all user and assistant messages."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"session_id", {{"type", "string"}, {"description", "Session ID (default: current session)"}}},
+                    {"start_index", {{"type", "integer"}, {"description", "Starting turn index (default: 0)"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Max turns to return (default: 50)"}}}
+                }}
+            }}
+        });
+        handlers_["get_turns"] = [this](const json& p) { return tool_get_turns(p); };
+
+        tools_.push_back({
+            {"name", "query_claims"},
+            {"description", "Query semantic claims (subject-predicate-object facts). Use for retrieving learned facts and detecting contradictions."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"subject", {{"type", "string"}, {"description", "Filter by subject (e.g., 'user', 'assistant', entity name)"}}},
+                    {"predicate", {{"type", "string"}, {"description", "Filter by predicate (e.g., 'prefers', 'was_corrected_on')"}}},
+                    {"scope", {{"type", "string"}, {"description", "Filter by scope: task, session, repo, project, user, global"}}},
+                    {"active_only", {{"type", "boolean"}, {"description", "Only return non-superseded claims (default: true)"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Max claims to return (default: 20)"}}}
+                }}
+            }}
+        });
+        handlers_["query_claims"] = [this](const json& p) { return tool_query_claims(p); };
+
+        tools_.push_back({
+            {"name", "get_policies"},
+            {"description", "Get active policy memories (preferences, corrections, constraints). Policies have promotion states: ephemeral → candidate → stable_soft → stable_hard."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"scope", {{"type", "string"}, {"description", "Filter by scope: session, repo, project, user, global"}}},
+                    {"type", {{"type", "string"}, {"description", "Filter by policy type: preference, correction, constraint"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Max policies to return (default: 30)"}}}
+                }}
+            }}
+        });
+        handlers_["get_policies"] = [this](const json& p) { return tool_get_policies(p); };
+
+        tools_.push_back({
+            {"name", "hybrid_recall"},
+            {"description", "State-of-the-art memory retrieval combining vector similarity, BM25 keyword matching, and graph spreading with RRF fusion."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"query", {{"type", "string"}, {"description", "Search query text"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Max results (default: 10)"}}},
+                    {"realm", {{"type", "string"}, {"description", "Filter by realm"}}},
+                    {"vector_weight", {{"type", "number"}, {"description", "Weight for vector similarity (default: 0.4)"}}},
+                    {"bm25_weight", {{"type", "number"}, {"description", "Weight for BM25 keyword match (default: 0.3)"}}},
+                    {"graph_weight", {{"type", "number"}, {"description", "Weight for graph spreading (default: 0.2)"}}},
+                    {"recency_weight", {{"type", "number"}, {"description", "Weight for recency bonus (default: 0.1)"}}}
+                }},
+                {"required", {"query"}}
+            }}
+        });
+        handlers_["hybrid_recall"] = [this](const json& p) { return tool_hybrid_recall(p); };
+
+        tools_.push_back({
+            {"name", "get_entities"},
+            {"description", "Get tracked entities (user, assistant, projects, concepts) with salience scores."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"type", {{"type", "string"}, {"description", "Filter by entity type: person, project, concept, tool, file"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Max entities to return (default: 20)"}}}
+                }}
+            }}
+        });
+        handlers_["get_entities"] = [this](const json& p) { return tool_get_entities(p); };
+
+        tools_.push_back({
+            {"name", "get_relationship_events"},
+            {"description", "Get relationship events (corrections, praise, frustration, discoveries) for understanding user-assistant interaction patterns."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"event_type", {{"type", "string"}, {"description", "Filter by type: correction, praise, frustration, discovery"}}},
+                    {"session_id", {{"type", "string"}, {"description", "Filter by session"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Max events to return (default: 20)"}}}
+                }}
+            }}
+        });
+        handlers_["get_relationship_events"] = [this](const json& p) { return tool_get_relationship_events(p); };
+
         classify_tools();
     }
 
@@ -9804,6 +9898,219 @@ private:
             {"updated", result.updated},
             {"marked_dead", result.marked_dead}
         });
+    }
+
+    // ========================================================================
+    // Conversational Memory System Tool Implementations
+    // ========================================================================
+
+    DuckDBToolResult tool_get_turns(const json& params) {
+        std::string session_id = params.value("session_id", "");
+        int start_index = params.value("start_index", 0);
+        size_t limit = params.value("limit", 50);
+
+        auto turns = mind_->store().get_conversation_turns(session_id, start_index, limit);
+
+        json result;
+        result["turns"] = json::array();
+        result["count"] = turns.size();
+
+        for (const auto& turn : turns) {
+            json t;
+            t["id"] = turn.id;
+            t["session_id"] = turn.session_id;
+            t["role"] = turn.role;
+            t["turn_index"] = turn.turn_index;
+            t["content"] = turn.content.substr(0, 500);
+            t["tools_used"] = turn.tools_used;
+            t["files_touched"] = turn.files_touched;
+            t["has_error"] = turn.has_error;
+            t["created_at"] = turn.created_at;
+            result["turns"].push_back(t);
+        }
+
+        std::ostringstream msg;
+        msg << "Found " << turns.size() << " conversation turn(s)";
+
+        return DuckDBToolResult::ok(msg.str(), result);
+    }
+
+    DuckDBToolResult tool_query_claims(const json& params) {
+        std::string subject = params.value("subject", "");
+        std::string predicate = params.value("predicate", "");
+        std::string scope = params.value("scope", "");
+        bool active_only = params.value("active_only", true);
+        size_t limit = params.value("limit", 20);
+
+        auto claims = mind_->store().query_claims(subject, predicate, scope, active_only, limit);
+
+        json result;
+        result["claims"] = json::array();
+        result["count"] = claims.size();
+
+        for (const auto& claim : claims) {
+            json c;
+            c["id"] = claim.id;
+            c["subject"] = claim.subject;
+            c["predicate"] = claim.predicate;
+            c["object"] = claim.object_norm;
+            c["scope"] = claim.scope_key;
+            c["polarity"] = claim.polarity;
+            c["confidence"] = claim.confidence;
+            c["support_count"] = claim.support_count;
+            c["source"] = claim.source_class;
+            c["created_at"] = claim.created_at;
+            result["claims"].push_back(c);
+        }
+
+        std::ostringstream msg;
+        msg << "Found " << claims.size() << " claim(s)";
+
+        return DuckDBToolResult::ok(msg.str(), result);
+    }
+
+    DuckDBToolResult tool_get_policies(const json& params) {
+        std::string scope = params.value("scope", "");
+        std::string policy_type = params.value("type", "");
+        size_t limit = params.value("limit", 30);
+
+        auto policies = mind_->store().get_active_policies(scope, policy_type, limit);
+
+        json result;
+        result["policies"] = json::array();
+        result["count"] = policies.size();
+
+        for (const auto& policy : policies) {
+            json p;
+            p["id"] = policy.id;
+            p["type"] = policy.policy_type;
+            p["content"] = policy.content.substr(0, 300);
+            p["scope"] = policy.scope_key;
+            p["state"] = policy.state;
+            p["confidence"] = policy.confidence;
+            p["support_count"] = policy.support_count;
+            p["session_count"] = policy.session_count;
+            p["created_at"] = policy.created_at;
+            result["policies"].push_back(p);
+        }
+
+        std::ostringstream msg;
+        msg << "Found " << policies.size() << " active policy/policies";
+
+        return DuckDBToolResult::ok(msg.str(), result);
+    }
+
+    DuckDBToolResult tool_hybrid_recall(const json& params) {
+        std::string query = params.value("query", "");
+        if (query.empty()) {
+            return DuckDBToolResult::error("Query is required");
+        }
+
+        size_t limit = params.value("limit", 10);
+        std::string realm = params.value("realm", "");
+
+        // Build config from params
+        DuckDBStore::HybridRecallConfig config;
+        if (params.contains("vector_weight")) config.vector_weight = params["vector_weight"].get<float>();
+        if (params.contains("bm25_weight")) config.bm25_weight = params["bm25_weight"].get<float>();
+        if (params.contains("graph_weight")) config.graph_weight = params["graph_weight"].get<float>();
+        if (params.contains("recency_weight")) config.recency_weight = params["recency_weight"].get<float>();
+
+        // Get embedding for query
+        if (!mind_->embedder_ready()) {
+            return DuckDBToolResult::error("Embedder not ready");
+        }
+        auto embedding = mind_->embedder().embed_query(query).data;
+        if (embedding.empty()) {
+            return DuckDBToolResult::error("Failed to generate query embedding");
+        }
+
+        auto results = mind_->store().hybrid_recall(embedding, query, limit, realm, true, config);
+
+        json result;
+        result["memories"] = json::array();
+        result["count"] = results.size();
+
+        for (const auto& r : results) {
+            json mem;
+            mem["id"] = r.id;
+            mem["kind"] = r.kind;
+            mem["content"] = r.content.substr(0, 300);
+            mem["similarity"] = r.similarity;
+            mem["confidence"] = r.confidence;
+            mem["realm"] = r.realm;
+            mem["created_at"] = r.created_at;
+            result["memories"].push_back(mem);
+        }
+
+        json cfg;
+        cfg["vector_weight"] = config.vector_weight;
+        cfg["bm25_weight"] = config.bm25_weight;
+        cfg["graph_weight"] = config.graph_weight;
+        cfg["recency_weight"] = config.recency_weight;
+        result["config"] = cfg;
+
+        std::ostringstream msg;
+        msg << "Found " << results.size() << " memory/memories via hybrid retrieval";
+
+        return DuckDBToolResult::ok(msg.str(), result);
+    }
+
+    DuckDBToolResult tool_get_entities(const json& params) {
+        std::string entity_type = params.value("type", "");
+        size_t limit = params.value("limit", 20);
+
+        auto entities = mind_->store().get_top_entities(entity_type, limit);
+
+        json result;
+        result["entities"] = json::array();
+        result["count"] = entities.size();
+
+        for (const auto& e : entities) {
+            json ent;
+            ent["id"] = e.id;
+            ent["name"] = e.name;
+            ent["display_name"] = e.display_name;
+            ent["type"] = e.entity_type;
+            ent["mention_count"] = e.mention_count;
+            ent["salience"] = e.salience_score;
+            ent["last_mentioned"] = e.last_mentioned;
+            result["entities"].push_back(ent);
+        }
+
+        std::ostringstream msg;
+        msg << "Found " << entities.size() << " entity/entities";
+
+        return DuckDBToolResult::ok(msg.str(), result);
+    }
+
+    DuckDBToolResult tool_get_relationship_events(const json& params) {
+        std::string event_type = params.value("event_type", "");
+        std::string session_id = params.value("session_id", "");
+        size_t limit = params.value("limit", 20);
+
+        auto events = mind_->store().get_relationship_events(event_type, session_id, limit);
+
+        json result;
+        result["events"] = json::array();
+        result["count"] = events.size();
+
+        for (const auto& e : events) {
+            json evt;
+            evt["id"] = e.id;
+            evt["session_id"] = e.session_id;
+            evt["event_type"] = e.event_type;
+            evt["content"] = e.content.substr(0, 300);
+            evt["context"] = e.context;
+            evt["resolved"] = e.resolved;
+            evt["created_at"] = e.created_at;
+            result["events"].push_back(evt);
+        }
+
+        std::ostringstream msg;
+        msg << "Found " << events.size() << " relationship event(s)";
+
+        return DuckDBToolResult::ok(msg.str(), result);
     }
 };
 
