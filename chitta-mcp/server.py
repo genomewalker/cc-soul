@@ -55,6 +55,67 @@ def djb2_hash(s: str) -> int:
     return h
 
 
+def to_toon(obj: Any, indent: int = 0) -> str:
+    """Convert JSON to TOON format (~40% fewer tokens).
+
+    TOON format:
+    - Scalars: key: value
+    - Arrays: key[n]{fields}: val1|val2 | val1|val2
+    - Objects: key.subkey: value
+    """
+    if obj is None:
+        return ""
+
+    if isinstance(obj, (int, float, bool)):
+        return str(obj)
+
+    if isinstance(obj, str):
+        # Escape newlines and pipes for TOON rows
+        return obj.replace('\n', '\\n').replace('|', '/')
+
+    if isinstance(obj, list):
+        if not obj:
+            return "[]"
+        # Check if list of uniform dicts
+        if all(isinstance(x, dict) for x in obj):
+            # Get common keys
+            keys = list(obj[0].keys()) if obj else []
+            if keys and all(set(x.keys()) == set(keys) for x in obj):
+                # Compact table format with | separator (safer than comma)
+                header = f"[{len(obj)}]{{{','.join(keys)}}}:"
+                rows = []
+                for item in obj:
+                    vals = []
+                    for k in keys:
+                        v = item.get(k, '')
+                        # Truncate long strings, escape newlines
+                        s = str(v) if v is not None else ''
+                        s = s.replace('\n', ' ').replace('|', '/')[:80]
+                        vals.append(s)
+                    rows.append(" " + "|".join(vals))
+                return header + "\n" + "\n".join(rows)
+        # Fallback: one per line
+        return "\n".join(f"- {to_toon(x)}" for x in obj)
+
+    if isinstance(obj, dict):
+        lines = []
+        for k, v in obj.items():
+            if v is None:
+                continue
+            if isinstance(v, dict):
+                # Flatten nested dicts
+                for sk, sv in v.items():
+                    if sv is not None:
+                        lines.append(f"{k}.{sk}: {to_toon(sv)}")
+            elif isinstance(v, list):
+                lines.append(f"{k}{to_toon(v)}")
+            else:
+                lines.append(f"{k}: {to_toon(v)}")
+        return "\n".join(lines)
+
+    return str(obj)
+
+
 def get_socket_path() -> str:
     """Get the daemon socket path."""
     home = os.environ.get("HOME", "")
@@ -228,20 +289,30 @@ def daemon_call(tool_name: str, arguments: dict, structured: bool = False) -> st
             return json.dumps(result["structured"])
 
         content = result.get("content", [])
+        structured = result.get("structured", {})
 
+        # Extract text content
+        text_parts = []
         if content and isinstance(content, list):
-            texts = []
             for item in content:
                 if isinstance(item, dict):
-                    texts.append(item.get("text", str(item)))
+                    text_parts.append(item.get("text", str(item)))
                 else:
-                    texts.append(str(item))
-            return "\n".join(texts)
+                    text_parts.append(str(item))
 
-        if "structured" in result:
-            return json.dumps(result["structured"], indent=2)
+        # Combine: text summary + TOON structured data
+        output_parts = []
+        if text_parts:
+            output_parts.append("\n".join(text_parts))
+        if structured:
+            toon_data = to_toon(structured)
+            if toon_data:
+                output_parts.append(toon_data)
 
-        return json.dumps(result, indent=2)
+        if output_parts:
+            return "\n".join(output_parts)
+
+        return to_toon(result)
     except Exception as e:
         return f"Error: {e}"
 
