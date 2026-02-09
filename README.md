@@ -11,9 +11,9 @@
 
 CC-soul gives Claude Code persistent memory across sessions. It learns your preferences, remembers your codebase structure, anticipates your needs, and gets smarter the more you use it. One command to install. Zero commands to operate.
 
-## What's New in 3.36
+## What's New in 3.38.6
 
-- **Native MCP Tools** — Auto-detect session and realm. No manual configuration. 150+ tools just work.
+- **Native MCP Tools** — Auto-detect session and realm. No manual configuration. 100+ tools just work.
 - **Intelligent Memory System** — 7 query types with intent-driven routing. 3-4x faster retrieval.
 - **13 Fact Aspects** — Every memory is classified (preference, correction, insight, etc.)
 
@@ -32,7 +32,11 @@ CC-soul gives Claude Code persistent memory across sessions. It learns your pref
 ## Quick Start
 
 ```bash
-claude /install genomewalker/cc-soul
+# 1. Register marketplace
+claude marketplace add https://github.com/genomewalker/cc-soul
+
+# 2. Install plugin
+claude plugin add cc-soul@genomewalker-cc-soul
 ```
 
 Or manual installation:
@@ -40,15 +44,6 @@ Or manual installation:
 ```bash
 git clone https://github.com/genomewalker/cc-soul.git
 cd cc-soul && ./scripts/smart-install.sh
-claude --plugin-dir ./
-```
-
-Add to `~/.claude/settings.json` for permanent use:
-
-```json
-{
-  "plugins": ["genomewalker/cc-soul"]
-}
 ```
 
 ## How It Works
@@ -137,7 +132,7 @@ The soul is not a database. It is who Claude becomes through working with you.
 |----------|-------------|
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Technical architecture |
 | [PHILOSOPHY.md](docs/PHILOSOPHY.md) | Vedantic concepts explained |
-| [API.md](docs/API.md) | Complete MCP tools reference (150+) |
+| [API.md](docs/API.md) | Complete MCP tools reference (100+) |
 | [CLI.md](docs/CLI.md) | Command-line interface |
 | [HOOKS.md](docs/HOOKS.md) | Hook system configuration |
 | [CLAUDE.md](CLAUDE.md) | Instructions for Claude |

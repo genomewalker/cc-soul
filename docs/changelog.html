@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Changelog - cc-soul</title>
+<meta name="description" content="Release history and changelog for cc-soul. Track new features, improvements, and changes across versions.">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<meta property="og:title" content="Changelog - cc-soul">
+<meta property="og:description" content="Release history and changelog for cc-soul.">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink-950: #0B0B10;
+  --night-900: #0F1018;
+  --indigo-800: #1A1D2B;
+  --indigo-700: #24283A;
+  --indigo-600: #2E3348;
+  --ash-300: #B9BDC7;
+  --lotus-200: #E7E2D6;
+  --sandal-300: #CBAF86;
+  --ember-400: #D46A4C;
+  --ember-500: #C05A3E;
+  --aura-300: #9DB2D9;
+  --mist-100: #F3F1EC;
+
+  --bg-gradient: linear-gradient(160deg, #0F1018 0%, #1A1D2B 55%, #24283A 100%);
+  --halo-gradient: radial-gradient(60% 60% at 50% 35%, rgba(157,178,217,0.18) 0%, rgba(15,16,24,0) 70%);
+
+  --font-display: 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
+  --font-mono: 'IBM Plex Mono', 'Menlo', 'Consolas', monospace;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4rem;
+  --space-9: 6rem;
+  --space-10: 8rem;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.5rem;
+  --text-2xl: 2rem;
+  --text-3xl: 2.75rem;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+
+  --shadow-soft: 0 8px 24px rgba(8, 10, 18, 0.25);
+}
+
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+
+body {
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+  line-height: 1.7;
+  color: var(--ash-300);
+  background: var(--night-900);
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection { background: rgba(203, 175, 134, 0.25); color: var(--lotus-200); }
+a { color: inherit; text-decoration: none; }
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.025;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 256px 256px;
+}
+
+.reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+              transform 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+.reveal.visible { opacity: 1; transform: translateY(0); }
+.reveal-delay-1 { transition-delay: 0.1s; }
+.reveal-delay-2 { transition-delay: 0.2s; }
+
+.container {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 var(--space-5);
+}
+
+/* NAV */
+.nav {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 100;
+  padding: var(--space-4) 0;
+  background: rgba(15, 16, 24, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(203, 175, 134, 0.06);
+}
+.nav-inner {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 var(--space-5);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.nav-brand {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--lotus-200);
+  letter-spacing: 0.05em;
+}
+.nav-brand span { color: var(--sandal-300); }
+.nav-links { display: flex; gap: var(--space-5); list-style: none; }
+.nav-links a {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ash-300);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  transition: color 0.25s ease;
+  position: relative;
+}
+.nav-links a::after {
+  content: '';
+  position: absolute;
+  bottom: -4px; left: 0;
+  width: 0; height: 1px;
+  background: var(--sandal-300);
+  transition: width 0.3s ease;
+}
+.nav-links a:hover { color: var(--lotus-200); }
+.nav-links a:hover::after { width: 100%; }
+.nav-links a.active { color: var(--sandal-300); }
+.nav-links a.active::after { width: 100%; }
+
+/* PAGE HEADER */
+.page-header {
+  padding: calc(var(--space-10) + 60px) 0 var(--space-9);
+  background: var(--bg-gradient);
+  position: relative;
+  overflow: hidden;
+}
+.page-header::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--halo-gradient);
+  opacity: 0.5;
+}
+.page-header .container { position: relative; z-index: 1; }
+.page-header-badge {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--sandal-300);
+  margin-bottom: var(--space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.page-header-badge::before {
+  content: '';
+  width: 32px;
+  height: 1px;
+  background: var(--sandal-300);
+  opacity: 0.5;
+}
+.page-header h1 {
+  font-family: var(--font-display);
+  color: var(--lotus-200);
+  font-weight: 500;
+  font-size: clamp(2rem, 5vw, var(--text-3xl));
+  line-height: 1.15;
+  margin-bottom: var(--space-5);
+}
+.page-header-sub {
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  max-width: 600px;
+  line-height: 1.8;
+}
+
+/* CHANGELOG CONTENT */
+.changelog-section {
+  padding: var(--space-8) 0;
+}
+
+.changelog-version {
+  margin-bottom: var(--space-8);
+  padding-bottom: var(--space-7);
+  border-bottom: 1px solid rgba(203, 175, 134, 0.08);
+}
+
+.changelog-version:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.version-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+
+.version-number {
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  color: var(--lotus-200);
+  font-weight: 500;
+}
+
+.version-date {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: rgba(185, 189, 199, 0.5);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.version-latest {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ember-400);
+  background: rgba(212, 106, 76, 0.1);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.change-category {
+  margin-bottom: var(--space-5);
+}
+
+.change-category-title {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--sandal-300);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: var(--space-3);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.change-category-title.added::before {
+  content: '+';
+  color: #4ade80;
+  font-weight: 600;
+}
+
+.change-category-title.changed::before {
+  content: '~';
+  color: var(--aura-300);
+  font-weight: 600;
+}
+
+.change-category-title.removed::before {
+  content: '-';
+  color: var(--ember-400);
+  font-weight: 600;
+}
+
+.change-list {
+  list-style: none;
+  padding-left: var(--space-4);
+  border-left: 1px solid rgba(157, 178, 217, 0.1);
+}
+
+.change-list li {
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  line-height: 1.8;
+  padding: var(--space-2) 0;
+  padding-left: var(--space-3);
+  position: relative;
+}
+
+.change-list li::before {
+  content: '';
+  position: absolute;
+  left: -1px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 6px;
+  height: 1px;
+  background: rgba(157, 178, 217, 0.3);
+}
+
+.change-list li strong {
+  color: var(--lotus-200);
+  font-weight: 500;
+}
+
+.change-list li code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  color: var(--aura-300);
+  background: rgba(157, 178, 217, 0.08);
+  padding: 0.1em 0.4em;
+  border-radius: 3px;
+}
+
+/* BACK LINK */
+.back-section {
+  padding: var(--space-8) 0;
+  text-align: center;
+}
+.back-link {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--sandal-300);
+  padding: var(--space-3) var(--space-5);
+  border: 1px solid rgba(203, 175, 134, 0.2);
+  border-radius: var(--radius-sm);
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.back-link:hover {
+  border-color: rgba(203, 175, 134, 0.4);
+  background: rgba(203, 175, 134, 0.04);
+  color: var(--lotus-200);
+}
+
+/* FOOTER */
+.footer {
+  background: var(--night-900);
+  border-top: 1px solid rgba(203, 175, 134, 0.06);
+  padding: var(--space-7) 0;
+  text-align: center;
+}
+.footer-text {
+  font-size: var(--text-xs);
+  color: rgba(185, 189, 199, 0.4);
+  letter-spacing: 0.04em;
+}
+.footer-text a { color: var(--sandal-300); transition: color 0.2s ease; }
+.footer-text a:hover { color: var(--lotus-200); }
+.footer-sep {
+  display: inline-block;
+  width: 3px; height: 3px;
+  border-radius: 50%;
+  background: rgba(185, 189, 199, 0.25);
+  margin: 0 var(--space-3);
+  vertical-align: middle;
+}
+
+/* RESPONSIVE */
+.nav-hamburger {
+  display: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: var(--space-2);
+  flex-direction: column;
+  gap: 5px;
+}
+.nav-hamburger span {
+  display: block;
+  width: 20px;
+  height: 1.5px;
+  background: var(--lotus-200);
+  transition: all 0.3s ease;
+}
+
+@media (max-width: 700px) {
+  .nav-hamburger { display: flex; }
+  .nav-links {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: rgba(15, 16, 24, 0.97);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    flex-direction: column;
+    padding: var(--space-4) var(--space-5);
+    gap: var(--space-3);
+    border-bottom: 1px solid rgba(203, 175, 134, 0.08);
+  }
+  .nav-open .nav-links { display: flex; }
+  .nav-open .nav-hamburger span:nth-child(1) { transform: rotate(45deg) translate(4px, 4px); }
+  .nav-open .nav-hamburger span:nth-child(2) { opacity: 0; }
+  .nav-open .nav-hamburger span:nth-child(3) { transform: rotate(-45deg) translate(5px, -5px); }
+  .page-header h1 { font-size: var(--text-2xl); }
+  .version-header { flex-direction: column; gap: var(--space-2); }
+}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="index.html" class="nav-brand">cc<span>-</span>soul</a>
+    <button class="nav-hamburger" onclick="document.querySelector('.nav').classList.toggle('nav-open')" aria-label="Menu">
+      <span></span><span></span><span></span>
+    </button>
+    <ul class="nav-links">
+      <li><a href="index.html">Home</a></li>
+      <li><a href="getting-started.html">Get Started</a></li>
+      <li><a href="philosophy.html">Philosophy</a></li>
+      <li><a href="architecture.html">Architecture</a></li>
+      <li><a href="tools.html">Tools</a></li>
+      <li><a href="cli.html">CLI</a></li>
+      <li><a href="hooks.html">Hooks</a></li>
+      <li><a href="skills.html">Skills</a></li>
+      <li><a href="changelog.html" class="active">Changelog</a></li>
+      <li><a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+  </div>
+</nav>
+
+<!-- PAGE HEADER -->
+<header class="page-header">
+  <div class="container">
+    <div class="page-header-badge reveal">Release History</div>
+    <h1 class="reveal reveal-delay-1">Changelog</h1>
+    <p class="page-header-sub reveal reveal-delay-2">Track the evolution of cc-soul. New features, improvements, and breaking changes across versions.</p>
+  </div>
+</header>
+
+<!-- CHANGELOG -->
+<section class="changelog-section">
+  <div class="container">
+
+    <!-- 3.36.0 -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v3.36.0</span>
+        <span class="version-date">February 8, 2026</span>
+        <span class="version-latest">Latest</span>
+      </div>
+
+      <div class="change-category">
+        <h3 class="change-category-title added">Added</h3>
+        <ul class="change-list">
+          <li><strong>Native MCP Tools</strong> &mdash; Auto-detect session_id and realm for 34 tools (SESSION_TOOLS, REALM_STORE_TOOLS, REALM_FILTER_TOOLS)</li>
+          <li><strong>Intelligent Memory System</strong> &mdash; 7 query types (Aspect, Entity, Temporal, Exploratory, Relationship, Code, Meta) with intent-driven routing</li>
+          <li><strong>13 Fact Aspects</strong> &mdash; Classification system for preferences, corrections, insights, failures, decisions, approaches, milestones, goals, habits, beliefs, wisdom, code, gaps</li>
+          <li><strong>Standardized tool limits</strong> &mdash; Interactive (10-15), List (20-30), Batch (50+)</li>
+        </ul>
+      </div>
+
+      <div class="change-category">
+        <h3 class="change-category-title changed">Changed</h3>
+        <ul class="change-list">
+          <li>Query routing: classification first, search second (300-450ms vs 1200-2400ms)</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 3.35.x -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v3.35.x</span>
+        <span class="version-date">February 2026</span>
+      </div>
+
+      <div class="change-category">
+        <h3 class="change-category-title added">Added</h3>
+        <ul class="change-list">
+          <li>Companion activation mode</li>
+          <li>Rich ledger extraction</li>
+          <li>Auto-distillation of episode patterns</li>
+        </ul>
+      </div>
+
+      <div class="change-category">
+        <h3 class="change-category-title changed">Changed</h3>
+        <ul class="change-list">
+          <li>Embedding model: <code>all-MiniLM-L6-v2</code> to <code>bge-base-en-v1.5</code> (768 dimensions)</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 3.30.x -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v3.30.x</span>
+        <span class="version-date">January 2026</span>
+      </div>
+
+      <div class="change-category">
+        <h3 class="change-category-title removed">Removed</h3>
+        <ul class="change-list">
+          <li>PostgreSQL backend (DuckDB-only now)</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 3.27.x -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v3.27.x</span>
+        <span class="version-date">December 2025</span>
+      </div>
+
+      <div class="change-category">
+        <h3 class="change-category-title added">Added</h3>
+        <ul class="change-list">
+          <li>xMemory-inspired theme system</li>
+          <li>Hierarchical organization</li>
+          <li>Two-stage retrieval</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 3.17.x -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v3.17.x</span>
+      </div>
+
+      <div class="change-category">
+        <h3 class="change-category-title added">Added</h3>
+        <ul class="change-list">
+          <li>SSL enforcement</li>
+          <li>Code intel protection</li>
+          <li>Cost tracking</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 3.16.x -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v3.16.x</span>
+      </div>
+
+      <div class="change-category">
+        <h3 class="change-category-title added">Added</h3>
+        <ul class="change-list">
+          <li>Background distillation</li>
+          <li>Code enrichment</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 3.x -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v3.x</span>
+      </div>
+
+      <div class="change-category">
+        <h3 class="change-category-title added">Added</h3>
+        <ul class="change-list">
+          <li>DuckDB backend</li>
+          <li>Tree-sitter parsing</li>
+          <li>Call graphs</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 2.x -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v2.x</span>
+      </div>
+
+      <div class="change-category">
+        <h3 class="change-category-title changed">Changed</h3>
+        <ul class="change-list">
+          <li>C++ rewrite (Chitta engine)</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 1.x -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v1.x</span>
+      </div>
+
+      <div class="change-category">
+        <h3 class="change-category-title added">Added</h3>
+        <ul class="change-list">
+          <li>Initial Python implementation</li>
+        </ul>
+      </div>
+    </article>
+
+  </div>
+</section>
+
+<!-- BACK -->
+<section class="back-section">
+  <div class="container">
+    <a href="index.html" class="back-link">&larr; Back to cc-soul</a>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer class="footer">
+  <div class="container">
+    <p class="footer-text">
+      Built with conviction. Grounded in philosophy.
+      <span class="footer-sep"></span>
+      <a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a>
+    </p>
+  </div>
+</footer>
+
+<script>
+/* Scroll reveal */
+(function() {
+  var reveals = document.querySelectorAll('.reveal');
+  if (!reveals.length) return;
+  var observer = new IntersectionObserver(function(entries) {
+    entries.forEach(function(entry) {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.01, rootMargin: '0px 0px -20px 0px' });
+  reveals.forEach(function(el) { observer.observe(el); });
+})();
+</script>
+</body>
+</html>

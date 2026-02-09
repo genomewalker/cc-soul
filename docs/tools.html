@@ -5,410 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>150+ MCP Tools — cc-soul</title>
 <meta name="description" content="Complete reference for all 150+ MCP tools in cc-soul's Chitta daemon. Memory, code intelligence, learning, anticipation, realms, distillation, and more.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<meta property="og:title" content="150+ MCP Tools — cc-soul">
+<meta property="og:description" content="Complete reference for all 150+ MCP tools in cc-soul's Chitta daemon. Memory, code intelligence, learning, anticipation, realms, distillation, and more.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="favicon.svg">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="150+ MCP Tools — cc-soul">
+<meta name="twitter:description" content="Complete reference for all 150+ MCP tools in cc-soul's Chitta daemon.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
-<style>
-:root {
-  --ink-950: #0B0B10;
-  --night-900: #0F1018;
-  --indigo-800: #1A1D2B;
-  --indigo-700: #24283A;
-  --indigo-600: #2E3348;
-  --ash-300: #B9BDC7;
-  --lotus-200: #E7E2D6;
-  --sandal-300: #CBAF86;
-  --ember-400: #D46A4C;
-  --ember-500: #C05A3E;
-  --aura-300: #9DB2D9;
-  --mist-100: #F3F1EC;
-
-  --bg-gradient: linear-gradient(160deg, #0F1018 0%, #1A1D2B 55%, #24283A 100%);
-  --halo-gradient: radial-gradient(60% 60% at 50% 35%, rgba(157,178,217,0.18) 0%, rgba(15,16,24,0) 70%);
-
-  --font-display: 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
-  --font-mono: 'IBM Plex Mono', 'Menlo', 'Consolas', monospace;
-
-  --space-1: 0.25rem;
-  --space-2: 0.5rem;
-  --space-3: 0.75rem;
-  --space-4: 1rem;
-  --space-5: 1.5rem;
-  --space-6: 2rem;
-  --space-7: 3rem;
-  --space-8: 4rem;
-  --space-9: 6rem;
-  --space-10: 8rem;
-
-  --text-xs: 0.75rem;
-  --text-sm: 0.875rem;
-  --text-md: 1rem;
-  --text-lg: 1.125rem;
-  --text-xl: 1.5rem;
-  --text-2xl: 2rem;
-  --text-3xl: 2.75rem;
-
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 16px;
-
-  --shadow-soft: 0 8px 24px rgba(8, 10, 18, 0.25);
-}
-
-*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
-
-body {
-  font-family: var(--font-mono);
-  font-size: var(--text-md);
-  line-height: 1.7;
-  color: var(--ash-300);
-  background: var(--night-900);
-  overflow-x: hidden;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-::selection { background: rgba(203, 175, 134, 0.25); color: var(--lotus-200); }
-a { color: inherit; text-decoration: none; }
-
-body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-  pointer-events: none;
-  opacity: 0.025;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
-  background-repeat: repeat;
-  background-size: 256px 256px;
-}
-
-/* ═══ REVEAL ═══ */
-.reveal {
-  opacity: 0;
-  transform: translateY(24px);
-  transition: opacity 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94),
-              transform 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-}
-.reveal.visible { opacity: 1; transform: translateY(0); }
-.reveal-delay-1 { transition-delay: 0.1s; }
-.reveal-delay-2 { transition-delay: 0.2s; }
-
-/* ═══ LAYOUT ═══ */
-.container {
-  max-width: 1080px;
-  margin: 0 auto;
-  padding: 0 var(--space-5);
-}
-
-/* ═══ NAV ═══ */
-.nav {
-  position: fixed;
-  top: 0; left: 0; right: 0;
-  z-index: 100;
-  padding: var(--space-4) 0;
-  background: rgba(15, 16, 24, 0.85);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-bottom: 1px solid rgba(203, 175, 134, 0.06);
-}
-.nav-inner {
-  max-width: 1080px;
-  margin: 0 auto;
-  padding: 0 var(--space-5);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.nav-brand {
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  font-weight: 500;
-  color: var(--lotus-200);
-  letter-spacing: 0.05em;
-}
-.nav-brand span { color: var(--sandal-300); }
-.nav-links { display: flex; gap: var(--space-5); list-style: none; }
-.nav-links a {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  color: var(--ash-300);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  transition: color 0.25s ease;
-  position: relative;
-}
-.nav-links a::after {
-  content: '';
-  position: absolute;
-  bottom: -4px; left: 0;
-  width: 0; height: 1px;
-  background: var(--sandal-300);
-  transition: width 0.3s ease;
-}
-.nav-links a:hover { color: var(--lotus-200); }
-.nav-links a:hover::after { width: 100%; }
-.nav-links a.active { color: var(--sandal-300); }
-.nav-links a.active::after { width: 100%; }
-
-/* ═══ PAGE HEADER ═══ */
-.page-header {
-  padding: calc(var(--space-10) + 60px) 0 var(--space-9);
-  background: var(--bg-gradient);
-  position: relative;
-  overflow: hidden;
-}
-.page-header::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: var(--halo-gradient);
-  opacity: 0.5;
-}
-.page-header .container { position: relative; z-index: 1; }
-.page-header-badge {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--sandal-300);
-  margin-bottom: var(--space-4);
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-}
-.page-header-badge::before {
-  content: '';
-  width: 32px;
-  height: 1px;
-  background: var(--sandal-300);
-  opacity: 0.5;
-}
-.page-header h1 {
-  font-family: var(--font-display);
-  color: var(--lotus-200);
-  font-weight: 500;
-  font-size: clamp(2rem, 5vw, var(--text-3xl));
-  line-height: 1.15;
-  margin-bottom: var(--space-5);
-}
-.page-header-sub {
-  font-size: var(--text-sm);
-  color: var(--ash-300);
-  max-width: 600px;
-  line-height: 1.8;
-}
-
-/* ═══ CATEGORY TOC ═══ */
-.toc {
-  padding: var(--space-7) 0;
-  border-bottom: 1px solid rgba(203, 175, 134, 0.06);
-}
-.toc-label {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: rgba(185, 189, 199, 0.5);
-  margin-bottom: var(--space-4);
-}
-.toc-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-}
-.toc-chip {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  color: var(--ash-300);
-  padding: var(--space-1) var(--space-3);
-  border: 1px solid rgba(157, 178, 217, 0.12);
-  border-radius: var(--radius-sm);
-  transition: all 0.2s ease;
-  cursor: pointer;
-}
-.toc-chip:hover {
-  border-color: rgba(157, 178, 217, 0.3);
-  color: var(--lotus-200);
-  background: rgba(157, 178, 217, 0.04);
-}
-.toc-chip .count {
-  color: rgba(185, 189, 199, 0.4);
-  margin-left: var(--space-1);
-}
-
-/* ═══ TOOLS CATEGORIES ═══ */
-.tools-section {
-  padding: var(--space-8) 0;
-}
-
-.tools-category {
-  margin-bottom: var(--space-8);
-}
-
-.tools-category-header {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  margin-bottom: var(--space-5);
-  padding-bottom: var(--space-3);
-  border-bottom: 1px solid rgba(203, 175, 134, 0.08);
-  cursor: pointer;
-  user-select: none;
-}
-.tools-category-icon {
-  width: 20px;
-  height: 20px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.tools-category-icon svg { width: 100%; height: 100%; }
-.tools-category-name {
-  font-family: var(--font-display);
-  font-size: var(--text-xl);
-  color: var(--lotus-200);
-  font-weight: 500;
-}
-.tools-category-count {
-  font-size: var(--text-xs);
-  color: rgba(185, 189, 199, 0.45);
-  margin-left: auto;
-}
-.tools-category-toggle {
-  color: var(--sandal-300);
-  font-size: var(--text-xs);
-  opacity: 0.5;
-  transition: transform 0.3s ease, opacity 0.2s ease;
-}
-.tools-category-header:hover .tools-category-toggle { opacity: 1; }
-.tools-category.collapsed .tools-category-toggle { transform: rotate(-90deg); }
-.tools-category.collapsed .tools-list { display: none; }
-
-.tools-list { display: grid; gap: 0; }
-
-.tool-row {
-  display: grid;
-  grid-template-columns: 200px 1fr;
-  gap: var(--space-5);
-  padding: var(--space-3) 0;
-  padding-left: var(--space-3);
-  border-left: 1px solid rgba(157, 178, 217, 0.06);
-  transition: all 0.2s ease;
-}
-.tool-row:hover {
-  border-left-color: rgba(157, 178, 217, 0.2);
-  background: rgba(157, 178, 217, 0.02);
-}
-.tool-row + .tool-row {
-  border-top: 1px solid rgba(203, 175, 134, 0.03);
-}
-.tool-name {
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  color: var(--aura-300);
-  font-weight: 500;
-  white-space: nowrap;
-}
-.tool-desc {
-  font-size: var(--text-sm);
-  color: var(--ash-300);
-  line-height: 1.6;
-}
-
-/* ═══ BACK LINK ═══ */
-.back-section {
-  padding: var(--space-8) 0;
-  text-align: center;
-}
-.back-link {
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  color: var(--sandal-300);
-  padding: var(--space-3) var(--space-5);
-  border: 1px solid rgba(203, 175, 134, 0.2);
-  border-radius: var(--radius-sm);
-  transition: all 0.2s ease;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-.back-link:hover {
-  border-color: rgba(203, 175, 134, 0.4);
-  background: rgba(203, 175, 134, 0.04);
-  color: var(--lotus-200);
-}
-
-/* ═══ FOOTER ═══ */
-.footer {
-  background: var(--night-900);
-  border-top: 1px solid rgba(203, 175, 134, 0.06);
-  padding: var(--space-7) 0;
-  text-align: center;
-}
-.footer-text {
-  font-size: var(--text-xs);
-  color: rgba(185, 189, 199, 0.4);
-  letter-spacing: 0.04em;
-}
-.footer-text a { color: var(--sandal-300); transition: color 0.2s ease; }
-.footer-text a:hover { color: var(--lotus-200); }
-.footer-sep {
-  display: inline-block;
-  width: 3px; height: 3px;
-  border-radius: 50%;
-  background: rgba(185, 189, 199, 0.25);
-  margin: 0 var(--space-3);
-  vertical-align: middle;
-}
-
-/* ═══ RESPONSIVE ═══ */
-.nav-hamburger {
-  display: none;
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: var(--space-2);
-  flex-direction: column;
-  gap: 5px;
-}
-.nav-hamburger span {
-  display: block;
-  width: 20px;
-  height: 1.5px;
-  background: var(--lotus-200);
-  transition: all 0.3s ease;
-}
-
-@media (max-width: 700px) {
-  .nav-hamburger { display: flex; }
-  .nav-links {
-    display: none;
-    position: absolute;
-    top: 100%;
-    left: 0;
-    right: 0;
-    background: rgba(15, 16, 24, 0.97);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    flex-direction: column;
-    padding: var(--space-4) var(--space-5);
-    gap: var(--space-3);
-    border-bottom: 1px solid rgba(203, 175, 134, 0.08);
-  }
-  .nav-open .nav-links { display: flex; }
-  .nav-open .nav-hamburger span:nth-child(1) { transform: rotate(45deg) translate(4px, 4px); }
-  .nav-open .nav-hamburger span:nth-child(2) { opacity: 0; }
-  .nav-open .nav-hamburger span:nth-child(3) { transform: rotate(-45deg) translate(5px, -5px); }
-  .tool-row {
-    grid-template-columns: 1fr;
-    gap: var(--space-1);
-  }
-  .page-header h1 { font-size: var(--text-2xl); }
-}
-</style>
+<link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
@@ -441,6 +49,16 @@ body::before {
     <p class="page-header-sub reveal reveal-delay-2">Every tool is served by <code style="color: var(--aura-300);">chittad</code>&thinsp;&mdash;&thinsp;a C++ daemon communicating over Unix socket. All parameters are strings unless noted.</p>
   </div>
 </header>
+
+<!-- SEARCH -->
+<section class="search-section">
+  <div class="container">
+    <div class="search-box">
+      <input type="text" id="tools-search" class="search-input" placeholder="Filter tools..." autocomplete="off" />
+      <span class="search-count" id="search-count"></span>
+    </div>
+  </div>
+</section>
 
 <!-- TABLE OF CONTENTS -->
 <section class="toc">
@@ -1077,6 +695,656 @@ document.querySelectorAll('a[href^="#"]').forEach(function(anchor) {
     }
   });
 });
+
+/* Tools search/filter */
+(function() {
+  var searchInput = document.getElementById('tools-search');
+  var searchCount = document.getElementById('search-count');
+  var categories = document.querySelectorAll('.tools-category');
+  var allTools = document.querySelectorAll('.tool-row');
+  var toolsSection = document.querySelector('.tools-section .container');
+  var noResults = null;
+
+  if (!searchInput || !allTools.length) return;
+
+  var totalTools = allTools.length;
+
+  function updateCount(visible) {
+    if (visible === totalTools) {
+      searchCount.textContent = '';
+    } else {
+      searchCount.textContent = visible + ' / ' + totalTools;
+    }
+  }
+
+  function filterTools() {
+    var query = searchInput.value.toLowerCase().trim();
+    var visibleCount = 0;
+
+    // Remove no-results message if exists
+    if (noResults) {
+      noResults.remove();
+      noResults = null;
+    }
+
+    if (!query) {
+      // Show all tools and categories
+      allTools.forEach(function(tool) {
+        tool.classList.remove('hidden');
+      });
+      categories.forEach(function(cat) {
+        cat.classList.remove('hidden');
+      });
+      updateCount(totalTools);
+      return;
+    }
+
+    // Filter tools
+    categories.forEach(function(cat) {
+      var tools = cat.querySelectorAll('.tool-row');
+      var categoryName = cat.querySelector('.tools-category-name').textContent.toLowerCase();
+      var catVisible = 0;
+
+      tools.forEach(function(tool) {
+        var name = tool.querySelector('.tool-name').textContent.toLowerCase();
+        var desc = tool.querySelector('.tool-desc').textContent.toLowerCase();
+
+        if (name.indexOf(query) !== -1 || desc.indexOf(query) !== -1 || categoryName.indexOf(query) !== -1) {
+          tool.classList.remove('hidden');
+          catVisible++;
+          visibleCount++;
+        } else {
+          tool.classList.add('hidden');
+        }
+      });
+
+      // Hide category if no tools visible
+      if (catVisible === 0) {
+        cat.classList.add('hidden');
+      } else {
+        cat.classList.remove('hidden');
+        // Expand category to show results
+        cat.classList.remove('collapsed');
+      }
+    });
+
+    updateCount(visibleCount);
+
+    // Show no results message
+    if (visibleCount === 0) {
+      noResults = document.createElement('div');
+      noResults.className = 'no-results';
+      noResults.textContent = 'No tools match "' + searchInput.value + '"';
+      toolsSection.appendChild(noResults);
+    }
+  }
+
+  searchInput.addEventListener('input', filterTools);
+
+  // Clear on Escape
+  searchInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+      searchInput.value = '';
+      filterTools();
+      searchInput.blur();
+    }
+  });
+
+  // Focus search with / key
+  document.addEventListener('keydown', function(e) {
+    if (e.key === '/' && document.activeElement !== searchInput) {
+      e.preventDefault();
+      searchInput.focus();
+    }
+  });
+})();
+
+/* Tool parameters database - from API.md */
+(function() {
+  var TOOL_PARAMS = {
+    // Core Memory
+    remember: [
+      {name: 'content', type: 'string', req: true, desc: 'Text to remember'},
+      {name: 'type', type: 'string', req: false, desc: 'Node type: wisdom, insight, signal, episode (default: episode)'},
+      {name: 'tags', type: 'string[]', req: false, desc: 'Optional tags'},
+      {name: 'realm', type: 'string', req: false, desc: 'Primary realm (default: brahman)'},
+      {name: 'visibility', type: 'integer', req: false, desc: '0=Private, 1=Shared, 2=Global (default: 0)'},
+      {name: 'shared_realms', type: 'string[]', req: false, desc: 'Additional realms to share with'}
+    ],
+    recall: [
+      {name: 'query', type: 'string', req: true, desc: 'Search query'},
+      {name: 'limit', type: 'integer', req: false, desc: 'Max results (default: 10)'},
+      {name: 'tag', type: 'string', req: false, desc: 'Filter by tag'},
+      {name: 'realm', type: 'string', req: false, desc: 'Filter by realm'},
+      {name: 'include_global', type: 'boolean', req: false, desc: 'Include global memories (default: true)'}
+    ],
+    recall_temporal: [
+      {name: 'query', type: 'string', req: false, desc: 'Optional semantic query'},
+      {name: 'start', type: 'string', req: false, desc: 'Start time (ISO 8601 or relative)'},
+      {name: 'end', type: 'string', req: false, desc: 'End time'},
+      {name: 'limit', type: 'integer', req: false, desc: 'Max results'}
+    ],
+    smart_recall: [
+      {name: 'query', type: 'string', req: true, desc: 'Natural language query'},
+      {name: 'limit', type: 'integer', req: false, desc: 'Max results'}
+    ],
+    grow: [
+      {name: 'type', type: 'string', req: true, desc: 'wisdom, belief, failure, aspiration, dream'},
+      {name: 'content', type: 'string', req: true, desc: 'Content to store'},
+      {name: 'title', type: 'string', req: false, desc: 'Short title'},
+      {name: 'tags', type: 'string', req: false, desc: 'Comma-separated tags'}
+    ],
+    get: [{name: 'id', type: 'string', req: true, desc: 'Node ID (integer or UUID)'}],
+    update: [
+      {name: 'id', type: 'string', req: true, desc: 'Node ID'},
+      {name: 'content', type: 'string', req: true, desc: 'New content'}
+    ],
+    strengthen: [
+      {name: 'id', type: 'string', req: true, desc: 'Node ID'},
+      {name: 'amount', type: 'number', req: false, desc: 'Amount (default: 0.1)'}
+    ],
+    weaken: [
+      {name: 'id', type: 'string', req: true, desc: 'Node ID'},
+      {name: 'amount', type: 'number', req: false, desc: 'Amount (default: 0.1)'}
+    ],
+    forget: [{name: 'id', type: 'string', req: true, desc: 'Node ID'}],
+    batch_forget: [
+      {name: 'ids', type: 'string[]', req: false, desc: 'Array of node IDs'},
+      {name: 'pattern', type: 'string', req: false, desc: 'Search pattern to find and delete'}
+    ],
+    tag: [
+      {name: 'id', type: 'string', req: true, desc: 'Node ID'},
+      {name: 'add', type: 'string', req: false, desc: 'Tag to add'},
+      {name: 'remove', type: 'string', req: false, desc: 'Tag to remove'}
+    ],
+    observe: [
+      {name: 'title', type: 'string', req: true, desc: 'Title/summary'},
+      {name: 'content', type: 'string', req: true, desc: 'Full content'},
+      {name: 'category', type: 'string', req: false, desc: 'correction, preference, solution, decision, failure, wisdom, episode'},
+      {name: 'tags', type: 'string', req: false, desc: 'Comma-separated tags'},
+      {name: 'confidence', type: 'number', req: false, desc: 'Override confidence (0.0-1.0)'}
+    ],
+    // Graph
+    connect: [
+      {name: 'subject', type: 'string', req: true, desc: 'Subject entity'},
+      {name: 'predicate', type: 'string', req: true, desc: 'Relationship type'},
+      {name: 'object', type: 'string', req: true, desc: 'Object entity'}
+    ],
+    query: [
+      {name: 'subject', type: 'string', req: false, desc: 'Subject filter'},
+      {name: 'predicate', type: 'string', req: false, desc: 'Predicate filter'},
+      {name: 'object', type: 'string', req: false, desc: 'Object filter'}
+    ],
+    query_graph: [
+      {name: 'subject', type: 'string', req: false, desc: 'Query by subject'},
+      {name: 'object', type: 'string', req: false, desc: 'Query by object'}
+    ],
+    // Code Intelligence
+    learn_codebase: [
+      {name: 'path', type: 'string', req: true, desc: 'Directory path'},
+      {name: 'project', type: 'string', req: false, desc: 'Project name (auto-detected)'},
+      {name: 'max_files', type: 'integer', req: false, desc: 'Max files (default: 500)'},
+      {name: 'exclude', type: 'string', req: false, desc: 'Comma-separated dirs to exclude'},
+      {name: 'incremental', type: 'boolean', req: false, desc: 'Only changed files (default: true)'},
+      {name: 'force', type: 'boolean', req: false, desc: 'Force full re-index (default: false)'}
+    ],
+    extract_symbols: [{name: 'path', type: 'string', req: true, desc: 'File path'}],
+    find_symbol: [
+      {name: 'name', type: 'string', req: true, desc: 'Symbol name'},
+      {name: 'kind', type: 'string', req: false, desc: 'Filter: function, class, method'}
+    ],
+    read_symbol: [
+      {name: 'name', type: 'string', req: false, desc: 'Symbol name'},
+      {name: 'id', type: 'integer', req: false, desc: 'Symbol ID'},
+      {name: 'kind', type: 'string', req: false, desc: 'Kind filter'}
+    ],
+    read_function: [{name: 'name', type: 'string', req: true, desc: 'Function name'}],
+    search_symbols: [
+      {name: 'query', type: 'string', req: true, desc: 'Natural language query'},
+      {name: 'kind', type: 'string', req: false, desc: 'Kind filter'},
+      {name: 'limit', type: 'integer', req: false, desc: 'Max results (default: 10)'}
+    ],
+    symbol_callers: [
+      {name: 'name', type: 'string', req: false, desc: 'Symbol name'},
+      {name: 'id', type: 'integer', req: false, desc: 'Symbol ID'},
+      {name: 'kind', type: 'string', req: false, desc: 'Kind filter'}
+    ],
+    symbol_callees: [
+      {name: 'name', type: 'string', req: false, desc: 'Symbol name'},
+      {name: 'id', type: 'integer', req: false, desc: 'Symbol ID'},
+      {name: 'kind', type: 'string', req: false, desc: 'Kind filter'}
+    ],
+    codebase_overview: [
+      {name: 'project', type: 'string', req: false, desc: 'Project filter'},
+      {name: 'format', type: 'string', req: false, desc: 'tree, flat, or json (default: tree)'},
+      {name: 'include_callsites', type: 'boolean', req: false, desc: 'Include callsites (default: false)'}
+    ],
+    embed_symbols: [{name: 'batch_size', type: 'integer', req: false, desc: 'Symbols per batch (default: 100)'}],
+    type_hierarchy: [
+      {name: 'name', type: 'string', req: true, desc: 'Type name'},
+      {name: 'direction', type: 'string', req: false, desc: 'ancestors, descendants, or both (default: both)'}
+    ],
+    file_imports: [{name: 'path', type: 'string', req: true, desc: 'File path or filename'}],
+    file_dependents: [{name: 'module', type: 'string', req: true, desc: 'Module or file name'}],
+    clear_codebase: [
+      {name: 'project', type: 'string', req: true, desc: 'Project name'},
+      {name: 'dry_run', type: 'boolean', req: false, desc: 'Preview only (default: false)'}
+    ],
+    clear_triplets: [
+      {name: 'pattern', type: 'string', req: true, desc: 'SQL LIKE pattern (e.g., \'%.cpp\')'},
+      {name: 'dry_run', type: 'boolean', req: false, desc: 'Preview only (default: false)'}
+    ],
+    describe_symbol: [
+      {name: 'symbol_id', type: 'integer', req: true, desc: 'Symbol ID'},
+      {name: 'description', type: 'string', req: true, desc: 'Description'}
+    ],
+    // Code Wisdom
+    smart_context: [
+      {name: 'task', type: 'string', req: true, desc: 'Query to find context for'},
+      {name: 'mode', type: 'string', req: false, desc: 'fast (<80ms) or full (<200ms)'},
+      {name: 'limit', type: 'integer', req: false, desc: 'Token limit (default: 300)'},
+      {name: 'memories', type: 'boolean', req: false, desc: 'Include memories (default: true)'},
+      {name: 'code', type: 'boolean', req: false, desc: 'Include code symbols (default: true)'},
+      {name: 'neighbors', type: 'boolean', req: false, desc: 'Include triplet neighbors (default: true)'},
+      {name: 'realm', type: 'string', req: false, desc: 'Filter by realm'}
+    ],
+    code_context: [{name: 'path', type: 'string', req: false, desc: 'Limit to files under this path'}],
+    cleanup_code_wisdom: [{name: 'dry_run', type: 'boolean', req: false, desc: 'Preview only (default: true)'}],
+    // Realms
+    realm_get: [{name: 'id', type: 'string', req: true, desc: 'Memory ID'}],
+    realm_set: [
+      {name: 'id', type: 'string', req: true, desc: 'Memory ID'},
+      {name: 'realm', type: 'string', req: true, desc: 'Realm name'}
+    ],
+    realm_add: [
+      {name: 'id', type: 'string', req: true, desc: 'Memory ID'},
+      {name: 'realm', type: 'string', req: true, desc: 'Realm to add to'}
+    ],
+    realm_remove: [
+      {name: 'id', type: 'string', req: true, desc: 'Memory ID'},
+      {name: 'realm', type: 'string', req: true, desc: 'Realm to remove from'}
+    ],
+    realm_visibility: [
+      {name: 'id', type: 'string', req: true, desc: 'Memory ID'},
+      {name: 'visibility', type: 'integer', req: true, desc: '0=Private, 1=Shared, 2=Global'}
+    ],
+    // Session/Ledger
+    ledger_save: [
+      {name: 'session_id', type: 'string', req: true, desc: 'Session identifier'},
+      {name: 'project', type: 'string', req: false, desc: 'Project scope'},
+      {name: 'mood', type: 'string', req: false, desc: 'confident, uncertain, flowing, frustrated'},
+      {name: 'coherence', type: 'number', req: false, desc: 'Coherence score 0-1'},
+      {name: 'confidence', type: 'number', req: false, desc: 'Confidence score 0-1'},
+      {name: 'todos', type: 'array', req: false, desc: '[{content, status}] objects'},
+      {name: 'active_files', type: 'string[]', req: false, desc: 'File paths'},
+      {name: 'decisions', type: 'string[]', req: false, desc: 'Key decisions'},
+      {name: 'next_steps', type: 'string[]', req: false, desc: 'Next actions'},
+      {name: 'blockers', type: 'string[]', req: false, desc: 'Current blockers'},
+      {name: 'discoveries', type: 'string[]', req: false, desc: 'Insights'},
+      {name: 'snapshot', type: 'string', req: false, desc: 'Full checkpoint text'}
+    ],
+    ledger_load: [
+      {name: 'session_id', type: 'string', req: false, desc: 'Session filter'},
+      {name: 'project', type: 'string', req: false, desc: 'Project filter'}
+    ],
+    ledger_list: [
+      {name: 'project', type: 'string', req: false, desc: 'Project filter'},
+      {name: 'limit', type: 'integer', req: false, desc: 'Max entries (default: 10)'}
+    ],
+    ledger_get: [{name: 'id', type: 'integer', req: true, desc: 'Checkpoint ID'}],
+    ledger_delete: [{name: 'id', type: 'integer', req: true, desc: 'Checkpoint ID'}],
+    checkpoint: [
+      {name: 'realm', type: 'string', req: false, desc: 'Project scope'},
+      {name: 'mood', type: 'string', req: false, desc: 'Session mood'},
+      {name: 'summary', type: 'string', req: false, desc: 'What\'s been accomplished'},
+      {name: 'next_steps', type: 'string[]', req: false, desc: 'Next actions'},
+      {name: 'active_files', type: 'string[]', req: false, desc: 'Files being worked on'},
+      {name: 'discoveries', type: 'string[]', req: false, desc: 'Insights'}
+    ],
+    // Cross-Session Messaging
+    session_register: [
+      {name: 'session_id', type: 'string', req: true, desc: 'Session UUID'},
+      {name: 'realm', type: 'string', req: false, desc: 'Primary realm (default: brahman)'},
+      {name: 'pid', type: 'integer', req: false, desc: 'Process ID'}
+    ],
+    session_list: [
+      {name: 'realm', type: 'string', req: false, desc: 'Filter by realm'},
+      {name: 'active_only', type: 'boolean', req: false, desc: 'Only show active (default: false)'}
+    ],
+    msg_send: [
+      {name: 'target', type: 'string', req: true, desc: 'Session UUID, realm name, or "*" for all'},
+      {name: 'content', type: 'string', req: true, desc: 'Message content'},
+      {name: 'priority', type: 'integer', req: false, desc: '0=info, 1=normal, 2=important, 3=urgent'}
+    ],
+    msg_inbox: [
+      {name: 'session_id', type: 'string', req: true, desc: 'Current session UUID'},
+      {name: 'limit', type: 'integer', req: false, desc: 'Max messages (default: 10)'}
+    ],
+    msg_ack_all: [{name: 'session_id', type: 'string', req: true, desc: 'Session UUID'}],
+    msg_history: [
+      {name: 'session_id', type: 'string', req: true, desc: 'Session UUID'},
+      {name: 'limit', type: 'integer', req: false, desc: 'Max messages (default: 20)'},
+      {name: 'direction', type: 'string', req: false, desc: '"sent", "received", or "both"'}
+    ],
+    // Narrative
+    narrative_status: [{name: 'session_id', type: 'string', req: false, desc: 'Session ID (default: current)'}],
+    narrative_log: [
+      {name: 'session_id', type: 'string', req: true, desc: 'Session ID'},
+      {name: 'kind', type: 'string', req: true, desc: 'Event kind (user_message, tool_use, etc.)'},
+      {name: 'summary', type: 'string', req: true, desc: 'Brief description'},
+      {name: 'tool_name', type: 'string', req: false, desc: 'Tool name (for tool events)'},
+      {name: 'success', type: 'boolean', req: false, desc: 'Whether action succeeded'},
+      {name: 'payload', type: 'string', req: false, desc: 'JSON payload'},
+      {name: 'files_mentioned', type: 'string', req: false, desc: 'JSON array of file paths'}
+    ],
+    narrative_history: [
+      {name: 'session_id', type: 'string', req: true, desc: 'Session ID'},
+      {name: 'limit', type: 'integer', req: false, desc: 'Max segments (default: 20)'}
+    ],
+    // Long Tasks
+    long_task_start: [
+      {name: 'task_id', type: 'string', req: true, desc: 'Unique identifier'},
+      {name: 'goal', type: 'string', req: true, desc: 'What to achieve'},
+      {name: 'realm', type: 'string', req: false, desc: 'Project scope'},
+      {name: 'hard_checks', type: 'string[]', req: false, desc: 'Deterministic criteria'},
+      {name: 'soft_checks', type: 'string[]', req: false, desc: 'Semantic criteria'},
+      {name: 'work_items', type: 'string[]', req: false, desc: 'Initial subtasks'}
+    ],
+    long_task_get: [{name: 'task_id', type: 'string', req: true, desc: 'Task ID'}],
+    long_task_update: [
+      {name: 'task_id', type: 'string', req: true, desc: 'Task ID'},
+      {name: 'completed_summary', type: 'string', req: false, desc: 'What\'s done'},
+      {name: 'work_items', type: 'string[]', req: false, desc: 'Updated subtasks'},
+      {name: 'blockers', type: 'string[]', req: false, desc: 'Current blockers'}
+    ],
+    long_task_complete: [
+      {name: 'task_id', type: 'string', req: true, desc: 'Task ID'},
+      {name: 'outcome', type: 'string', req: true, desc: 'Final outcome'}
+    ],
+    long_task_event: [
+      {name: 'task_id', type: 'string', req: true, desc: 'Task ID'},
+      {name: 'kind', type: 'string', req: true, desc: 'tool_result, decision, observation, error, checkpoint'},
+      {name: 'payload', type: 'string', req: false, desc: 'Event data (JSON)'},
+      {name: 'tags', type: 'string[]', req: false, desc: 'Tags'},
+      {name: 'related_entities', type: 'string[]', req: false, desc: 'Related files/functions'}
+    ],
+    long_task_snapshot: [
+      {name: 'task_id', type: 'string', req: true, desc: 'Task ID'},
+      {name: 'mode', type: 'string', req: false, desc: 'inject (compact) or debug (verbose)'}
+    ],
+    long_task_evaluate: [{name: 'task_id', type: 'string', req: true, desc: 'Task ID'}],
+    // Exploration
+    explore_recall: [
+      {name: 'query', type: 'string', req: true, desc: 'Search query'},
+      {name: 'limit', type: 'integer', req: false, desc: 'Max results (default: 10)'}
+    ],
+    explore_peek: [{name: 'id', type: 'string', req: true, desc: 'Memory ID'}],
+    explore_expand: [{name: 'id', type: 'string', req: true, desc: 'Memory ID'}],
+    explore_neighbors: [
+      {name: 'node', type: 'string', req: true, desc: 'Node name'},
+      {name: 'direction', type: 'string', req: false, desc: 'outgoing, incoming, or both'}
+    ],
+    // Theme
+    theme_list: [
+      {name: 'realm', type: 'string', req: false, desc: 'Filter by realm'},
+      {name: 'limit', type: 'integer', req: false, desc: 'Max themes (default: 50)'}
+    ],
+    theme_get: [{name: 'id', type: 'integer', req: true, desc: 'Theme ID'}],
+    theme_recall: [
+      {name: 'query', type: 'string', req: true, desc: 'Search query'},
+      {name: 'limit', type: 'integer', req: false, desc: 'Max results (default: 10)'},
+      {name: 'realm', type: 'string', req: false, desc: 'Filter by realm'}
+    ],
+    theme_assign_orphans: [
+      {name: 'batch_size', type: 'integer', req: false, desc: 'Per batch (default: 100)'},
+      {name: 'realm', type: 'string', req: false, desc: 'Filter by realm'}
+    ],
+    // Anticipation & Habits
+    anticipation_observe: [
+      {name: 'context', type: 'string', req: true, desc: 'Trigger situation'},
+      {name: 'action', type: 'string', req: true, desc: 'Response taken'},
+      {name: 'realm', type: 'string', req: false, desc: 'Project scope'}
+    ],
+    anticipation_predict: [
+      {name: 'context', type: 'string', req: true, desc: 'Current situation'},
+      {name: 'limit', type: 'integer', req: false, desc: 'Max predictions (default: 5)'},
+      {name: 'realm', type: 'string', req: false, desc: 'Filter by realm'}
+    ],
+    anticipation_success: [{name: 'id', type: 'integer', req: true, desc: 'Pattern ID'}],
+    anticipation_list: [
+      {name: 'realm', type: 'string', req: false, desc: 'Filter by realm'},
+      {name: 'limit', type: 'integer', req: false, desc: 'Max patterns (default: 50)'}
+    ],
+    habit_observe: [
+      {name: 'trigger', type: 'string', req: true, desc: 'What triggers the habit'},
+      {name: 'response', type: 'string', req: true, desc: 'What should happen'},
+      {name: 'realm', type: 'string', req: false, desc: 'Project scope'}
+    ],
+    habit_match: [
+      {name: 'context', type: 'string', req: true, desc: 'Context to match'},
+      {name: 'min_strength', type: 'number', req: false, desc: 'Min strength 0-1 (default: 0.3)'},
+      {name: 'realm', type: 'string', req: false, desc: 'Filter by realm'}
+    ],
+    habit_strengthen: [
+      {name: 'id', type: 'integer', req: true, desc: 'Habit ID'},
+      {name: 'amount', type: 'number', req: false, desc: 'Amount (default: 0.1)'}
+    ],
+    habit_weaken: [
+      {name: 'id', type: 'integer', req: true, desc: 'Habit ID'},
+      {name: 'amount', type: 'number', req: false, desc: 'Amount (default: 0.05)'}
+    ],
+    habit_list: [
+      {name: 'realm', type: 'string', req: false, desc: 'Filter by realm'},
+      {name: 'min_strength', type: 'number', req: false, desc: 'Min strength (default: 0)'},
+      {name: 'limit', type: 'integer', req: false, desc: 'Max habits (default: 50)'}
+    ],
+    // Profile
+    profile_update: [
+      {name: 'field', type: 'string', req: true, desc: 'expertise_json, style_json, patterns_json, or preferences_json'},
+      {name: 'value', type: 'string', req: true, desc: 'JSON value'}
+    ],
+    profile_observe: [
+      {name: 'observation_type', type: 'string', req: true, desc: 'expertise, style, pattern, preference'},
+      {name: 'value', type: 'string', req: true, desc: 'For expertise: \'domain:level\'. Others: JSON'}
+    ],
+    // Goals
+    goal_set: [
+      {name: 'title', type: 'string', req: true, desc: 'Short name'},
+      {name: 'description', type: 'string', req: false, desc: 'Details'},
+      {name: 'milestones', type: 'string', req: false, desc: 'JSON: [{"name":"v1","done":false}]'},
+      {name: 'deadline', type: 'integer', req: false, desc: 'Unix timestamp'},
+      {name: 'realm', type: 'string', req: false, desc: 'Project scope'}
+    ],
+    goal_get: [{name: 'id', type: 'integer', req: true, desc: 'Goal ID'}],
+    goal_list: [
+      {name: 'status', type: 'string', req: false, desc: 'active, paused, completed, abandoned'},
+      {name: 'realm', type: 'string', req: false, desc: 'Filter by realm'}
+    ],
+    goal_progress: [
+      {name: 'id', type: 'integer', req: true, desc: 'Goal ID'},
+      {name: 'progress', type: 'number', req: true, desc: 'Progress 0-1'},
+      {name: 'milestone', type: 'string', req: false, desc: 'Milestone to mark complete'}
+    ],
+    goal_complete: [
+      {name: 'id', type: 'integer', req: true, desc: 'Goal ID'},
+      {name: 'outcome', type: 'string', req: true, desc: 'Achievement summary'}
+    ],
+    // Consolidation
+    consolidation_scan: [
+      {name: 'similarity_threshold', type: 'number', req: false, desc: 'Min similarity (default: 0.85)'},
+      {name: 'limit', type: 'integer', req: false, desc: 'Max candidates (default: 50)'},
+      {name: 'realm', type: 'string', req: false, desc: 'Filter by realm'}
+    ],
+    consolidation_merge: [
+      {name: 'primary_id', type: 'integer', req: true, desc: 'Primary memory (kept)'},
+      {name: 'secondary_id', type: 'integer', req: true, desc: 'Secondary memory (absorbed)'},
+      {name: 'merged_content', type: 'string', req: false, desc: 'Combined content'}
+    ],
+    consolidation_auto: [
+      {name: 'similarity_threshold', type: 'number', req: false, desc: 'Min similarity (default: 0.90)'},
+      {name: 'max_merges', type: 'integer', req: false, desc: 'Max merges (default: 20)'}
+    ],
+    // Curiosity
+    curiosity_note_gap: [
+      {name: 'gap', type: 'string', req: true, desc: 'What I don\'t know'},
+      {name: 'context', type: 'string', req: false, desc: 'When/why it came up'},
+      {name: 'realm', type: 'string', req: false, desc: 'Project scope'}
+    ],
+    curiosity_resolve: [
+      {name: 'id', type: 'integer', req: true, desc: 'Gap ID'},
+      {name: 'learned', type: 'string', req: false, desc: 'What was learned'}
+    ],
+    // Suggestions
+    suggestion_track: [
+      {name: 'content', type: 'string', req: true, desc: 'What was suggested'},
+      {name: 'context', type: 'string', req: false, desc: 'Why/when suggested'},
+      {name: 'realm', type: 'string', req: false, desc: 'Project scope'}
+    ],
+    suggestion_resolve: [
+      {name: 'id', type: 'integer', req: true, desc: 'Suggestion ID'},
+      {name: 'helped', type: 'boolean', req: true, desc: 'Did it help?'},
+      {name: 'details', type: 'string', req: false, desc: 'What happened'}
+    ],
+    // Insights
+    insight_promote: [
+      {name: 'id', type: 'integer', req: true, desc: 'Memory ID'},
+      {name: 'reason', type: 'string', req: false, desc: 'Why it\'s cross-project'}
+    ],
+    // Calibration
+    calibration_record: [
+      {name: 'domain', type: 'string', req: true, desc: 'Domain (code, architecture, debugging)'},
+      {name: 'success', type: 'boolean', req: true, desc: 'Was prediction correct?'}
+    ],
+    // Hygiene
+    hygiene_run: [
+      {name: 'prune_threshold', type: 'number', req: false, desc: 'Confidence to prune below (default: 0.1)'},
+      {name: 'min_age_days', type: 'number', req: false, desc: 'Min age for pruning (default: 7)'},
+      {name: 'consolidation_threshold', type: 'number', req: false, desc: 'Similarity for consolidation (default: 0.85)'},
+      {name: 'max_consolidations', type: 'integer', req: false, desc: 'Max per run (default: 10)'}
+    ],
+    episode_cluster_status: [
+      {name: 'similarity_threshold', type: 'number', req: false, desc: 'Min similarity (default: 0.85)'},
+      {name: 'min_occurrences', type: 'integer', req: false, desc: 'Min episodes (default: 3)'}
+    ],
+    // Maintenance
+    cycle: [{name: 'force', type: 'boolean', req: false, desc: 'Force full cycle'}],
+    cleanup: [{name: 'dry_run', type: 'boolean', req: false, desc: 'Preview only'}],
+    // Import/Export
+    import_soul: [
+      {name: 'file', type: 'string', req: false, desc: 'Path to .soul file'},
+      {name: 'content', type: 'string', req: false, desc: 'SSL content directly'}
+    ],
+    export_soul: [
+      {name: 'file', type: 'string', req: false, desc: 'Output file path'},
+      {name: 'tag', type: 'string', req: false, desc: 'Filter by tag'},
+      {name: 'limit', type: 'integer', req: false, desc: 'Max nodes'}
+    ],
+    // Background
+    background_schedule: [
+      {name: 'task_type', type: 'string', req: true, desc: 'consolidation, decay, pruning, pattern_extraction'},
+      {name: 'realm', type: 'string', req: false, desc: 'Project scope'}
+    ],
+    // Learning
+    learn_correction: [
+      {name: 'wrong', type: 'string', req: true, desc: 'What was incorrect'},
+      {name: 'correct', type: 'string', req: true, desc: 'The correct information'},
+      {name: 'context', type: 'string', req: false, desc: 'Where this applies'}
+    ],
+    learn_preference: [
+      {name: 'category', type: 'string', req: false, desc: 'communication, detail, autonomy, style, workflow'},
+      {name: 'preference', type: 'string', req: true, desc: 'The preference'},
+      {name: 'example', type: 'string', req: false, desc: 'Demonstration'}
+    ],
+    learn_insight: [
+      {name: 'domain', type: 'string', req: false, desc: 'programming, debugging, architecture, etc.'},
+      {name: 'insight', type: 'string', req: true, desc: 'The insight'},
+      {name: 'learned_from', type: 'string', req: false, desc: 'Context'}
+    ],
+    learn_approach: [
+      {name: 'state', type: 'string', req: true, desc: 'stuck, debugging, exploring, flowing, etc.'},
+      {name: 'approach', type: 'string', req: true, desc: 'What helped'},
+      {name: 'outcome', type: 'string', req: false, desc: 'What happened'}
+    ],
+    learn_outcome: [
+      {name: 'memory_id', type: 'string', req: true, desc: 'Memory ID or UUID'},
+      {name: 'outcome', type: 'string', req: true, desc: 'positive, negative, or neutral'},
+      {name: 'context', type: 'string', req: false, desc: 'What you were doing'}
+    ],
+    learn_milestone: [
+      {name: 'milestone', type: 'string', req: true, desc: 'What happened'},
+      {name: 'significance', type: 'string', req: false, desc: 'Why it matters'}
+    ],
+    // Hook Integration
+    full_resonate: [
+      {name: 'query', type: 'string', req: true, desc: 'Search query'},
+      {name: 'k', type: 'integer', req: false, desc: 'Max results'},
+      {name: 'realm', type: 'string', req: false, desc: 'Filter by realm'},
+      {name: 'include_global', type: 'boolean', req: false, desc: 'Include global (default: true)'},
+      {name: 'exclude_kinds', type: 'string[]', req: false, desc: 'Memory kinds to exclude'},
+      {name: 'partnership_only', type: 'boolean', req: false, desc: 'Exclude code intel types'}
+    ],
+    // Transcript
+    transcript_register: [
+      {name: 'session_id', type: 'string', req: true, desc: 'Claude session ID'},
+      {name: 'transcript_path', type: 'string', req: true, desc: 'Path to .jsonl file'},
+      {name: 'realm', type: 'string', req: false, desc: 'Realm isolation'}
+    ],
+    transcript_parse: [
+      {name: 'session_id', type: 'string', req: true, desc: 'Session ID'},
+      {name: 'min_turns', type: 'integer', req: false, desc: 'Min turns (default: 4)'}
+    ],
+    // SQL
+    sql_query: [
+      {name: 'query', type: 'string', req: true, desc: 'SQL query (SELECT only)'},
+      {name: 'limit', type: 'integer', req: false, desc: 'Max rows (default: 100)'}
+    ]
+  };
+
+  function buildParamsTable(params) {
+    if (!params || !params.length) return '<p class="tool-no-params">No parameters</p>';
+    var html = '<table class="tool-params-table"><thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody>';
+    params.forEach(function(p) {
+      html += '<tr>';
+      html += '<td><span class="param-name">' + p.name + '</span></td>';
+      html += '<td><span class="param-type">' + p.type + '</span></td>';
+      html += '<td><span class="' + (p.req ? 'param-required' : 'param-optional') + '">' + (p.req ? 'Yes' : 'No') + '</span></td>';
+      html += '<td><span class="param-desc">' + p.desc + '</span></td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+    return html;
+  }
+
+  // Inject parameters into tool rows
+  var toolRows = document.querySelectorAll('.tool-row');
+  toolRows.forEach(function(row) {
+    var nameEl = row.querySelector('.tool-name');
+    if (!nameEl) return;
+    var toolName = nameEl.textContent.trim();
+    var params = TOOL_PARAMS[toolName];
+
+    // Add expand icon to tools with params
+    if (params) {
+      row.classList.add('expandable');
+      var descEl = row.querySelector('.tool-desc');
+      if (descEl) {
+        descEl.innerHTML += '<span class="tool-expand-icon">&#x25BE;</span>';
+      }
+
+      // Create params container
+      var paramsDiv = document.createElement('div');
+      paramsDiv.className = 'tool-params';
+      paramsDiv.innerHTML = buildParamsTable(params);
+      row.appendChild(paramsDiv);
+
+      // Toggle on click
+      row.addEventListener('click', function(e) {
+        e.stopPropagation();
+        this.classList.toggle('expanded');
+      });
+    }
+  });
+})();
 </script>
 </body>
 </html>

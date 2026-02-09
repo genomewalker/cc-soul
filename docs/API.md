@@ -1,6 +1,6 @@
 # CC-Soul API Reference
 
-Complete reference for all tools exposed by cc-soul v3.35 via JSON-RPC 2.0 over Unix socket.
+Complete reference for all tools exposed by cc-soul v3.38.6 via JSON-RPC 2.0 over Unix socket.
 
 ---
 
