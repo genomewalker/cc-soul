@@ -650,6 +650,7 @@ Daemon auto-starts on next tool call. If tool schemas change (new params, new to
 | `learn_approach` | Store what helps in states | Stuck/frustrated/flowing | Wisdom + triplet `state→helped_by→...` |
 | `learn_outcome` | Track if suggestion helped | After trying something | Episode + confidence adjustment (±0.15) |
 | `learn_milestone` | Record achievements | Significant moments | Episode + triplet `partnership→achieved→...` |
+| `learn_analysis` | Record analysis with data/script paths | After completing analysis | Episode + triplets `project→has_analysis`, `analysis→uses_data` |
 
 **All learning tools set Global visibility (visible across all projects).**
 
@@ -661,6 +662,7 @@ Cross-project pattern?      → learn_insight(domain=..., insight=...)
 Approach works when stuck?  → learn_approach(state=..., approach=..., outcome=...)
 Did a surfaced memory help? → learn_outcome(suggestion=..., helped=true/false)
 We shipped something?       → learn_milestone(milestone=..., significance=...)
+Completed an analysis?      → learn_analysis(name=..., data_paths=[...], script_paths=[...])
 ```
 
 ### Memory Tools
@@ -744,6 +746,7 @@ smart_recall classifies queries into 7 types and routes accordingly:
 | wisdom | wisdom, insight |
 | code | symbol, function, class, file, dependency |
 | gaps | gap, curiosity |
+| analyses | analysis (episodes with [analysis:] tag) |
 
 ### Realm Tools
 
