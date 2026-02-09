@@ -1010,6 +1010,19 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                             mind.store().session_deregister(sid);
                             queue_count++;
                         }
+                    } else if (tool == "distill_trigger") {
+                        // Immediate distillation trigger (used by PreCompact hook)
+                        std::string sid = args.value("session_id", "");
+                        if (!sid.empty() && distill_config.enabled) {
+                            auto state_opt = mind.store().get_transcript(sid);
+                            if (state_opt) {
+                                if (verbose_mode) {
+                                    std::cerr << "[queue] Triggered distillation for " << sid << "\n";
+                                }
+                                run_distillation(mind, *state_opt, distill_config);
+                                queue_count++;
+                            }
+                        }
                     }
                 } catch (const std::exception& e) {
                     if (verbose_mode) {

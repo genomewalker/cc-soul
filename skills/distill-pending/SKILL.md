@@ -6,61 +6,56 @@ execution: inline
 
 # Distill Pending Sessions
 
-Process staged conversation transcripts and extract learnings.
+Trigger distillation of pending transcripts and check distillation status.
 
-## Instructions
+## How Distillation Works
 
-You have pending session transcripts that need distillation. For each staged file:
+1. **Automatic**: The daemon distills transcripts every 5 minutes (configurable)
+2. **On Compaction**: PreCompact hook triggers immediate distillation before context is lost
+3. **On Session Start**: SessionStart hook triggers distillation of any pending work
 
-1. Read the conversation content
-2. Extract learnings in SSL format:
-   - Key decisions made and why
-   - Problems solved and how
-   - Patterns discovered
-   - Failures and lessons learned
-   - Important facts worth remembering
+## Manual Trigger
 
-3. Store each learning using this format:
-
-```
-[LEARN] [domain] subject→action→result @location
-[ε] Key details and context.
-[TRIPLET] subject predicate object
-```
-
-4. After processing, mark the staging file as complete.
-
-## Execution
-
-Read the staging directory and process pending files:
+If you need to manually trigger distillation for the current session:
 
 ```bash
-ls ~/.claude/mind/.distill_staging/*.json 2>/dev/null | head -5
+# Add to queue for daemon processing
+echo '{"tool":"distill_trigger","args":{"session_id":"CURRENT_SESSION_ID"},"ts":'$(date +%s)'}' >> /tmp/chitta-queue.jsonl
 ```
 
-For each pending file, read it and extract the conversation:
+## Check Distillation Status
+
+View registered transcripts and their distillation state:
 
 ```bash
-cat ~/.claude/mind/.distill_staging/<file>.json | jq -r '.conversation' | head -100
+chitta transcript_list
 ```
 
-After extracting learnings, mark as processed:
+This shows:
+- `session_id`: Transcript identifier
+- `last_processed_line`: How many lines have been distilled
+- `distilled`: Whether any distillation has occurred
+- `realm`: Project context
 
-```bash
-# Update status in staging file
-jq '.status = "processed"' <file>.json > <file>.json.tmp && mv <file>.json.tmp <file>.json
-```
+## Distillation Output
 
-Or archive if no longer needed:
+Distilled learnings are stored as memories with:
+- `[learn]` prefix for extracted insights
+- SSL format for efficient storage
+- Connected via triplets for graph navigation
 
-```bash
-mv <file>.json ~/.claude/mind/.distill_staging/archive/
-```
+## Configuration
 
-## Quality Guidelines
+Daemon distillation settings (in `chittad --help`):
+- `--distill-interval MINS`: Check interval (default: 5)
+- `--distill-min-turns N`: Min turns before distilling (default: 4)
+- `--distill-model MODEL`: LLM model for extraction
+- `--no-distill`: Disable automatic distillation
 
-- Only extract genuinely useful learnings
-- Skip trivial operations (simple file reads, routine commands)
-- Focus on decisions, solutions, failures, and patterns
-- Each learning should help in future similar situations
-- Use specific domains: [cc-soul], [project-name], [domain], etc.
+## Troubleshooting
+
+If distillation isn't running:
+1. Check daemon is running: `chitta health_check`
+2. Check opencode is available: `which opencode`
+3. Check transcript is registered: `chitta transcript_list`
+4. Check queue is being processed: `ls -la /tmp/chitta-queue.jsonl*`

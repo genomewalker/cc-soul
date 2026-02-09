@@ -96,6 +96,16 @@ fi
 # Queue transcript registration (fire-and-forget)
 if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
     queue_write "transcript_register" "{\"session_id\":\"$SESSION_ID\",\"transcript_path\":$(echo "$TRANSCRIPT_PATH" | jq -Rs .),\"realm\":\"$REALM\"}"
+
+    # Trigger distillation of any pending un-distilled transcripts (handles post-compaction case)
+    queue_write "distill_trigger" "{\"session_id\":\"$SESSION_ID\"}"
+fi
+
+# Archive orphaned distillation staging files (one-time cleanup)
+STAGING_DIR="$HOME/.claude/mind/.distill_staging"
+if [[ -d "$STAGING_DIR" ]] && ls "$STAGING_DIR"/*.json >/dev/null 2>&1; then
+    mkdir -p "$STAGING_DIR/archive"
+    mv "$STAGING_DIR"/*.json "$STAGING_DIR/archive/" 2>/dev/null || true
 fi
 
 # Register session in cross-session messaging registry

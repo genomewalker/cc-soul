@@ -18,6 +18,7 @@ MAX_WAIT="${CC_SOUL_MAX_WAIT:-2}"
 INPUT=$(cat)
 TRIGGER=$(echo "$INPUT" | jq -r '.trigger // "auto"')
 TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty')
+REAL_SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
 
 # Check chitta CLI exists
 [[ ! -x "$CHITTA_BIN" ]] && exit 0
@@ -118,6 +119,38 @@ if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
     if [[ ${#SNAPSHOT} -lt 100 ]]; then
         SNAPSHOT="Context compacted ($TRIGGER). Files: $(echo "$ACTIVE_FILES" | jq -r '.[:5] | join(", ")')"
     fi
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Extract and persist key contextual facts as memories (no LLM needed)
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    # Extract operational knowledge patterns:
+    # - "use X for/to/via Y" patterns
+    # - "X is the working/correct host/server"
+    # - "works via/through X"
+    # - host names, SSH commands, rclone, proxy info
+    FACTS_RAW=$(echo "$ASSISTANT_TEXT" | grep -iE \
+        '(use [a-z]+ (for|to|via|through)|is the (working|correct|proper|right)|works? (via|through|by|with)|connect (to|through|via)|host[: ][a-z]|server[: ][a-z]|proxy|socks|ssh [^$]|rclone|important:|note:|remember:)' \
+        2>/dev/null | grep -v '^\s*$' | head -10)
+
+    # Also extract context around markers (lines near decisions/solutions)
+    MARKER_CONTEXT=$(echo "$ASSISTANT_TEXT" | grep -B2 -A2 -E '^\[(DECISION|BLOCKER|SOLUTION|GOTCHA)\]' 2>/dev/null \
+        | grep -v '^\[(DECISION|BLOCKER|SOLUTION|GOTCHA)\]' | grep -v '^--$' | head -10)
+
+    # Combine and deduplicate
+    ALL_FACTS=$(printf "%s\n%s" "$FACTS_RAW" "$MARKER_CONTEXT" | sort -u | grep -v '^\s*$' | head -15)
+
+    if [[ -n "$ALL_FACTS" ]]; then
+        # Store as wisdom memory with pre-compact provenance
+        FACT_CONTENT=$(printf "[pre-compact:%s] Key context from session\n%s" "$REALM" "$ALL_FACTS")
+        FACT_ARGS=$(jq -n \
+            --arg category "wisdom" \
+            --arg title "Pre-compact context: $SESSION_ID" \
+            --arg content "$FACT_CONTENT" \
+            --arg realm "$REALM" \
+            '{category: $category, title: $title, content: $content, realm: $realm, confidence: 0.85}')
+        queue_write "observe" "$FACT_ARGS"
+    fi
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -169,5 +202,25 @@ decision_count=$(echo "$DECISIONS" | jq 'length')
 todo_count=$(echo "$TODOS" | jq 'length')
 
 echo "[checkpoint] $SESSION_ID: files=$file_count decisions=$decision_count todos=$todo_count" >&2
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Trigger immediate distillation via daemon
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Use real session_id if available, otherwise derive from transcript path
+DISTILL_SESSION_ID="$REAL_SESSION_ID"
+if [[ -z "$DISTILL_SESSION_ID" && -n "$TRANSCRIPT_PATH" ]]; then
+    DISTILL_SESSION_ID=$(basename "$TRANSCRIPT_PATH" .jsonl)
+fi
+
+if [[ -n "$DISTILL_SESSION_ID" && -n "$TRANSCRIPT_PATH" ]]; then
+    # Ensure transcript is registered (in case session-start didn't fire)
+    queue_write "transcript_register" "{\"session_id\":\"$DISTILL_SESSION_ID\",\"transcript_path\":$(echo "$TRANSCRIPT_PATH" | jq -Rs .),\"realm\":\"$REALM\"}"
+
+    # Trigger immediate distillation before compaction loses context
+    queue_write "distill_trigger" "{\"session_id\":\"$DISTILL_SESSION_ID\"}"
+
+    echo "[distill] Triggered for $DISTILL_SESSION_ID" >&2
+fi
 
 exit 0
