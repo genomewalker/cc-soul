@@ -109,18 +109,11 @@ if [[ -d "$STAGING_DIR" ]] && ls "$STAGING_DIR"/*.json >/dev/null 2>&1; then
 fi
 
 # Register session in cross-session messaging registry
-# Use PPID to get Claude's PID (parent), not the hook script's PID
-if [[ -n "$SESSION_ID" && -S "$SOCKET_PATH" ]]; then
-    CLAUDE_PID=${PPID:-$$}
-    request='{"jsonrpc":"2.0","id":1,"method":"session_register","params":{"session_id":"'"$SESSION_ID"'","realm":"'"$REALM"'","pid":'"$CLAUDE_PID"'}}'
-    timeout 1 echo "$request" | nc -U "$SOCKET_PATH" >/dev/null 2>&1 || true
-fi
-
-# Write session ID sidecar file for MCP server fallback detection
-# This provides a reliable way for MCP server to find session when other methods fail
+# Use CLI instead of netcat (netcat to socket doesn't work reliably)
+# PPID = Claude's PID (parent of this hook script)
 if [[ -n "$SESSION_ID" ]]; then
-    mkdir -p "$HOME/.claude/mind"
-    echo "$SESSION_ID" > "$HOME/.claude/mind/.current_session"
+    CLAUDE_PID=${PPID:-$$}
+    chitta session_register --session_id "$SESSION_ID" --realm "$REALM" --pid "$CLAUDE_PID" >/dev/null 2>&1 || true
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════

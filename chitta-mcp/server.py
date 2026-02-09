@@ -1146,31 +1146,31 @@ REALM_STORE_TOOLS = {
 REALM_FILTER_TOOLS = {"long_task_active", "smart_context"}
 
 
-def get_current_session_id() -> Optional[str]:
+def get_current_session_id(use_cache: bool = True) -> Optional[str]:
     """
     Get current session ID using multiple detection strategies.
 
     Order of precedence:
-    1. Cached current_session_id (from session_register or transcript_register)
-    2. CLAUDE_SESSION_ID environment variable
-    3. PPID lookup in session_registry (find session where pid = our parent)
-    4. Sidecar file ~/.claude/mind/.current_session (written by session-start-hook)
-    5. Single active session fallback (if exactly one exists)
+    1. CLAUDE_SESSION_ID environment variable (most reliable if set)
+    2. PPID lookup in session_registry (find session where pid = our parent)
+    3. Cached current_session_id (from session_register or transcript_register)
+    4. Single active session fallback (if exactly one exists)
+
+    Note: Sidecar file removed - unreliable with multiple concurrent sessions.
+    Note: use_cache=False forces fresh PPID lookup (use for messaging tools).
     """
     global current_session_id
 
-    # 1. Return cached session if set
-    if current_session_id:
-        return current_session_id
-
-    # 2. Check environment variable
+    # 1. Check environment variable (most reliable)
     env_session = os.environ.get("CLAUDE_SESSION_ID")
     if env_session:
         current_session_id = env_session
         return current_session_id
 
-    # 3. PPID lookup - query session_registry for our parent process
+    # 2. PPID lookup - query session_registry for our parent process
+    # This is the most reliable method for multi-session scenarios
     ppid = os.getppid()
+    sessions = []
     try:
         result = daemon_call("session_list", {}, structured=True)
         data = json.loads(result)
@@ -1182,21 +1182,13 @@ def get_current_session_id() -> Optional[str]:
                 current_session_id = s.get("session_id")
                 return current_session_id
     except (json.JSONDecodeError, KeyError, TypeError):
-        sessions = []
-
-    # 4. Sidecar file - written by session-start-hook.sh
-    sidecar_path = os.path.join(os.environ.get("HOME", ""), ".claude", "mind", ".current_session")
-    try:
-        if os.path.exists(sidecar_path):
-            with open(sidecar_path, 'r') as f:
-                sid = f.read().strip()
-                if sid:
-                    current_session_id = sid
-                    return current_session_id
-    except (IOError, OSError):
         pass
 
-    # 5. Single active session fallback
+    # 3. Return cached session if set (and cache allowed)
+    if use_cache and current_session_id:
+        return current_session_id
+
+    # 4. Single active session fallback
     try:
         if not sessions:
             result = daemon_call("session_list", {}, structured=True)
@@ -1273,8 +1265,9 @@ async def call_tool(name: str, arguments: dict):
         current_session_id = arguments["session_id"]
 
     # Auto-inject session_id for messaging tools if not provided
+    # Force fresh PPID lookup (use_cache=False) for messaging to handle session resume
     if name in MSG_TOOLS and not arguments.get("session_id"):
-        sid = get_current_session_id()
+        sid = get_current_session_id(use_cache=False)
         if sid:
             arguments["session_id"] = sid
 
