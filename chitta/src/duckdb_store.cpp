@@ -2039,8 +2039,22 @@ std::vector<MemoryResult> DuckDBStore::list_by_aspect(
     sql << "SELECT id, COALESCE(content, ''), COALESCE(kind, 'episode'), "
         << "COALESCE(confidence, 0.5), COALESCE(realm, 'brahman'), "
         << "COALESCE(created_at, 0), COALESCE(accessed_at, 0) "
-        << "FROM memory WHERE kind IN (" << kind_list << ") "
-        << "AND confidence >= " << min_confidence << " "
+        << "FROM memory WHERE (kind IN (" << kind_list << ")";
+
+    // Include tagged memories that learning tools create with different types
+    // learn_preference → belief with [preference:], learn_correction → wisdom with [correction]
+    // learn_approach → wisdom with [approach:], learn_milestone → episode with [milestone]
+    if (aspect == "preferences") {
+        sql << " OR (kind = 'belief' AND content LIKE '[preference:%')";
+    } else if (aspect == "corrections") {
+        sql << " OR (kind = 'wisdom' AND content LIKE '[correction]%')";
+    } else if (aspect == "approaches") {
+        sql << " OR (kind = 'wisdom' AND content LIKE '[approach:%')";
+    } else if (aspect == "milestones") {
+        sql << " OR (kind = 'episode' AND content LIKE '[milestone]%')";
+    }
+
+    sql << ") AND confidence >= " << min_confidence << " "
         << "ORDER BY confidence DESC, created_at DESC "
         << "LIMIT " << limit;
 

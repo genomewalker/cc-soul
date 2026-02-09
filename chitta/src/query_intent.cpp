@@ -9,80 +9,82 @@ namespace chitta {
 QueryIntentClassifier::QueryIntentClassifier() {
     // Initialize aspect keyword mappings
     // Each keyword maps to an aspect name for filtering
+    // NOTE: Values must match keys in ASPECT_TO_KINDS (duckdb_store.cpp)
     aspect_keywords_ = {
         // Preferences
-        {"preferences", "preference"},
-        {"prefer", "preference"},
-        {"i prefer", "preference"},
-        {"i like", "preference"},
-        {"likes", "preference"},
+        {"preferences", "preferences"},
+        {"preference", "preferences"},
+        {"prefer", "preferences"},
+        {"i prefer", "preferences"},
+        {"i like", "preferences"},
+        {"likes", "preferences"},
 
         // Corrections
-        {"corrections", "correction"},
-        {"correction", "correction"},
-        {"mistakes", "correction"},
-        {"mistake", "correction"},
-        {"wrong", "correction"},
-        {"errors", "correction"},
+        {"corrections", "corrections"},
+        {"correction", "corrections"},
+        {"mistakes", "corrections"},
+        {"mistake", "corrections"},
+        {"wrong", "corrections"},
+        {"errors", "corrections"},
 
         // Insights
-        {"insights", "insight"},
-        {"insight", "insight"},
-        {"learned", "insight"},
-        {"patterns", "insight"},
-        {"pattern", "insight"},
+        {"insights", "insights"},
+        {"insight", "insights"},
+        {"learned", "insights"},
+        {"patterns", "insights"},
+        {"pattern", "insights"},
 
         // Failures
-        {"failures", "failure"},
-        {"failure", "failure"},
-        {"didn't work", "failure"},
-        {"didnt work", "failure"},
-        {"failed", "failure"},
+        {"failures", "failures"},
+        {"failure", "failures"},
+        {"didn't work", "failures"},
+        {"didnt work", "failures"},
+        {"failed", "failures"},
 
         // Decisions
-        {"decisions", "decision"},
-        {"decision", "decision"},
-        {"decided", "decision"},
-        {"chose", "decision"},
-        {"choice", "decision"},
+        {"decisions", "decisions"},
+        {"decision", "decisions"},
+        {"decided", "decisions"},
+        {"chose", "decisions"},
+        {"choice", "decisions"},
 
         // Approaches
-        {"approaches", "approach"},
-        {"approach", "approach"},
-        {"strategies", "approach"},
-        {"strategy", "approach"},
-        {"methods", "approach"},
-        {"method", "approach"},
+        {"approaches", "approaches"},
+        {"approach", "approaches"},
+        {"strategies", "approaches"},
+        {"strategy", "approaches"},
+        {"methods", "approaches"},
+        {"method", "approaches"},
 
         // Milestones
-        {"milestones", "milestone"},
-        {"milestone", "milestone"},
-        {"achievements", "milestone"},
-        {"achievement", "milestone"},
-        {"completed", "milestone"},
+        {"milestones", "milestones"},
+        {"milestone", "milestones"},
+        {"achievements", "milestones"},
+        {"achievement", "milestones"},
+        {"completed", "milestones"},
 
         // Goals
-        {"goals", "goal"},
-        {"goal", "goal"},
-        {"objectives", "goal"},
-        {"objective", "goal"},
-        {"targets", "goal"},
-        {"target", "goal"},
+        {"goals", "goals"},
+        {"goal", "goals"},
+        {"objectives", "goals"},
+        {"objective", "goals"},
+        {"targets", "goals"},
+        {"target", "goals"},
 
         // Habits
-        {"habits", "habit"},
-        {"habit", "habit"},
-        {"routines", "habit"},
-        {"routine", "habit"},
-        {"always do", "habit"},
+        {"habits", "habits"},
+        {"habit", "habits"},
+        {"routines", "habits"},
+        {"routine", "habits"},
+        {"always do", "habits"},
 
         // Beliefs
-        {"beliefs", "belief"},
-        {"belief", "belief"},
-        {"values", "belief"},
-        {"value", "belief"},
-        {"principles", "belief"},
-        {"principle", "belief"},
+        {"beliefs", "beliefs"},
+        {"belief", "beliefs"},
+        {"values", "beliefs"},
+        {"value", "beliefs"},
+        {"principles", "beliefs"},
+        {"principle", "beliefs"},
 
         // Wisdom
         {"wisdom", "wisdom"},
@@ -99,12 +101,12 @@ QueryIntentClassifier::QueryIntentClassifier() {
         {"symbols", "code"},
 
         // Gaps
-        {"gaps", "gap"},
-        {"gap", "gap"},
-        {"questions", "gap"},
-        {"question", "gap"},
-        {"unknown", "gap"},
-        {"unknowns", "gap"},
+        {"gaps", "gaps"},
+        {"gap", "gaps"},
+        {"questions", "gaps"},
+        {"question", "gaps"},
+        {"unknown", "gaps"},
+        {"unknowns", "gaps"},
     };
 
     // Meta query keywords
