@@ -346,6 +346,14 @@ The 8-phase resonance engine combines semantic search, BM25 keyword matching, sp
 | Full content after preview | `explore_expand` | Load only what you need |
 | Pre-tool context | `smart_context` | Combined memories + code + graph |
 | Past conversations | `transcript_search` | Keyword search across transcripts |
+| Conversation turns | `get_turns` | Lossless turn history (session_id="default") |
+| Semantic claims | `query_claims` | Subject/predicate/object triples |
+| Policy memories | `get_policies` | User preferences with promotion states |
+| Hybrid retrieval | `hybrid_recall` | RRF fusion: vector+BM25+graph+recency |
+| Tracked entities | `get_entities` | People, projects, concepts with salience |
+| Relationship events | `get_relationship_events` | Corrections, preferences, milestones |
+
+**IMPORTANT:** `get_turns` requires `session_id="default"` - hooks currently use a fixed session ID. Empty session_id returns 0 results.
 
 **Exploration pattern (RLM):** For "what do you know about X?" queries, use iterative narrowing:
 1. `explore_recall(query)` -- get titles and IDs (cheap overview)
