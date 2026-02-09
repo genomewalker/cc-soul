@@ -1079,6 +1079,71 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                                 std::cerr << "[queue] No transcript found for session " << sid << "\n";
                             }
                         }
+                    } else if (tool == "store_turn") {
+                        // Store conversation turn for lossless memory
+                        std::string session_id = args.value("session_id", "");
+                        std::string role = args.value("role", "");
+                        std::string content = args.value("content", "");
+                        int turn_index = args.value("turn_index", -1);
+                        if (!session_id.empty() && !role.empty() && !content.empty()) {
+                            DuckDBStore::ConversationTurn turn;
+                            turn.session_id = session_id;
+                            turn.role = role;
+                            turn.content = content;
+                            turn.turn_index = turn_index >= 0 ? turn_index : 0;
+                            turn.realm = args.value("realm", "brahman");
+                            turn.intent_type = args.value("intent_type", "");
+                            turn.tools_used = args.value("tools_used", "[]");
+                            turn.files_touched = args.value("files_touched", "[]");
+                            turn.has_error = args.value("has_error", false);
+                            mind.store().store_conversation_turn(turn);
+                            queue_count++;
+                        }
+                    } else if (tool == "store_claim") {
+                        // Store semantic claim
+                        std::string subject = args.value("subject", "");
+                        std::string predicate = args.value("predicate", "");
+                        std::string object_norm = args.value("object", "");
+                        if (!subject.empty() && !predicate.empty() && !object_norm.empty()) {
+                            DuckDBStore::Claim claim;
+                            claim.subject = subject;
+                            claim.predicate = predicate;
+                            claim.object_norm = object_norm;
+                            claim.scope_key = args.value("scope", "session");
+                            claim.polarity = args.value("polarity", 1);
+                            claim.confidence = args.value("confidence", 0.7f);
+                            claim.source_class = args.value("source", "hook");
+                            mind.store().store_claim(claim);
+                            queue_count++;
+                        }
+                    } else if (tool == "store_policy") {
+                        // Store policy memory
+                        std::string policy_type = args.value("type", "");
+                        std::string content = args.value("content", "");
+                        if (!policy_type.empty() && !content.empty()) {
+                            DuckDBStore::PolicyMemory policy;
+                            policy.policy_type = policy_type;
+                            policy.content = content;
+                            policy.scope_key = args.value("scope", "session");
+                            policy.state = args.value("state", "ephemeral");
+                            policy.confidence = args.value("confidence", 0.5f);
+                            mind.store().store_policy(policy);
+                            queue_count++;
+                        }
+                    } else if (tool == "store_relationship_event") {
+                        // Store relationship event (correction, praise, etc.)
+                        std::string event_type = args.value("event_type", "");
+                        std::string content = args.value("content", "");
+                        std::string session_id = args.value("session_id", "");
+                        if (!event_type.empty() && !content.empty()) {
+                            DuckDBStore::RelationshipEvent event;
+                            event.session_id = session_id;
+                            event.event_type = event_type;
+                            event.content = content;
+                            event.context = args.value("context", "");
+                            mind.store().store_relationship_event(event);
+                            queue_count++;
+                        }
                     }
                 } catch (const std::exception& e) {
                     if (verbose_mode) {

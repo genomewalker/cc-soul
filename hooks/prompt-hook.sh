@@ -35,6 +35,17 @@ QUERY=$(echo "$INPUT" | jq -r '.prompt // empty' 2>/dev/null || echo "")
 mkdir -p "$MIND_PATH"
 echo "$QUERY" > "$MIND_PATH/.last_user_message"
 
+# Get turn index from counter file
+TURN_FILE="$MIND_PATH/.turn_index_$SESSION_ID"
+TURN_INDEX=$(cat "$TURN_FILE" 2>/dev/null || echo "0")
+
+# Store user turn in lossless conversation storage
+QUEUE_FILE="${CHITTA_QUEUE:-/tmp/chitta-queue.jsonl}"
+echo "{\"tool\":\"store_turn\",\"args\":{\"session_id\":\"$SESSION_ID\",\"role\":\"user\",\"content\":$(echo "$QUERY" | jq -Rs .),\"turn_index\":$TURN_INDEX},\"ts\":$(date +%s)}" >> "$QUEUE_FILE"
+
+# Increment turn index
+echo $((TURN_INDEX + 1)) > "$TURN_FILE"
+
 # Use smart_recall for intelligent query routing
 # - Automatically classifies query intent (temporal, aspect, entity, code, etc.)
 # - Routes to optimal retrieval strategy

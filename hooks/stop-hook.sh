@@ -101,6 +101,31 @@ RESPONSE=$(tac "$TRANSCRIPT_PATH" | grep -m1 '"role":"assistant"' | \
 
 [[ -z "$RESPONSE" || ${#RESPONSE} -lt 10 ]] && exit 0
 
+# ===========================================
+# LOSSLESS STORAGE: Store assistant turn
+# ===========================================
+# Get turn index from counter file
+TURN_FILE="$MIND_PATH/.turn_index_$SESSION_ID"
+TURN_INDEX=$(cat "$TURN_FILE" 2>/dev/null || echo "1")
+
+# Extract tools used from transcript for this turn
+TOOLS_JSON=$(jq -r '[.[] | select(.role=="assistant") | .message.content[]? | select(.type=="tool_use") | .name] | unique' "$TRANSCRIPT_PATH" 2>/dev/null || echo "[]")
+[[ "$TOOLS_JSON" == "null" ]] && TOOLS_JSON="[]"
+
+# Extract files touched
+FILES_JSON=$(jq -r '[.[] | select(.role=="assistant") | .message.content[]? | select(.type=="tool_use") | .input.file_path // .input.path // empty] | unique | map(select(. != ""))' "$TRANSCRIPT_PATH" 2>/dev/null || echo "[]")
+[[ "$FILES_JSON" == "null" ]] && FILES_JSON="[]"
+
+# Check for errors
+HAS_ERROR=false
+echo "$RESPONSE" | grep -qiE '(error|failed|exception|traceback)' && HAS_ERROR=true
+
+# Store assistant turn
+queue_write "store_turn" "{\"session_id\":\"$SESSION_ID\",\"role\":\"assistant\",\"content\":$(echo "$RESPONSE" | head -c 5000 | jq -Rs .),\"turn_index\":$TURN_INDEX,\"tools_used\":$TOOLS_JSON,\"files_touched\":$FILES_JSON,\"has_error\":$HAS_ERROR}"
+
+# Increment turn index
+echo $((TURN_INDEX + 1)) > "$TURN_FILE"
+
 # Detect realm (quick CLI call with short timeout)
 REALM=$(timeout "$MAX_WAIT" "$CHITTA_BIN" realm_detect 2>/dev/null || echo "brahman")
 
@@ -210,6 +235,13 @@ if [[ "$CLAUDE_LEARNED" == "false" && -n "$LAST_USER_MSG" ]]; then
         failure_context=$(echo "$LAST_USER_MSG" | head -c 100 | tr '\n' ' ')
         queue_write "observe" "{\"category\":\"compliance\",\"title\":\"Missed correction\",\"content\":$(echo "[compliance:fail] Correction detected but learn_correction not called: $failure_context" | jq -Rs .)}"
         echo "[soul] ⚠️ COMPLIANCE FAIL: Correction detected but learn_correction not called" >&2
+
+        # Store as relationship event (new memory system)
+        queue_write "store_relationship_event" "{\"session_id\":\"$SESSION_ID\",\"event_type\":\"correction\",\"content\":$(echo "$LAST_USER_MSG" | head -c 300 | jq -Rs .),\"context\":\"User correction detected but not processed\"}"
+
+        # Store as claim: user corrected assistant on this topic
+        topic=$(echo "$LAST_USER_MSG" | tr -cs '[:alnum:]' ' ' | awk '{for(i=1;i<=3 && i<=NF;i++) printf "%s ", $i}' | sed 's/ $//')
+        queue_write "store_claim" "{\"subject\":\"assistant\",\"predicate\":\"was_corrected_on\",\"object\":$(echo "$topic" | jq -Rs .),\"scope\":\"session\",\"source\":\"hook\"}"
     fi
 
     # Direct + meta-preference patterns
@@ -219,8 +251,15 @@ if [[ "$CLAUDE_LEARNED" == "false" && -n "$LAST_USER_MSG" ]]; then
         # Format as SSL preference
         content="[preference] Antonio→$pref_context"
 
-        # Queue the learning
+        # Queue the learning (existing memory)
         queue_write "observe" "{\"category\":\"preference\",\"title\":\"Auto-preference\",\"content\":$(echo "$content" | jq -Rs .)}"
+
+        # Store as policy memory (new system) - starts as ephemeral, can be promoted
+        queue_write "store_policy" "{\"type\":\"preference\",\"content\":$(echo "$pref_context" | jq -Rs .),\"scope\":\"user\",\"state\":\"ephemeral\",\"confidence\":0.6}"
+
+        # Store as claim: user prefers X
+        queue_write "store_claim" "{\"subject\":\"user\",\"predicate\":\"prefers\",\"object\":$(echo "$pref_context" | jq -Rs .),\"scope\":\"user\",\"source\":\"hook\",\"confidence\":0.7}"
+
         echo "[soul] +auto-preference: ${pref_context:0:60}" >&2
         ((LEARNED++)) || true
     fi
