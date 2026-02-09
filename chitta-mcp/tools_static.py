@@ -14,6 +14,10 @@ TOOLS = [
         description="Store text in memory with optional tags and realm",
         inputSchema={
                 "properties": {
+                        "confidence": {
+                                "description": "Initial confidence 0-1 (default: 0.8)",
+                                "type": "number"
+                        },
                         "content": {
                                 "description": "Text to remember",
                                 "type": "string"
@@ -64,6 +68,10 @@ TOOLS = [
                                 "description": "Max results (default 10)",
                                 "type": "integer"
                         },
+                        "min_confidence": {
+                                "description": "Minimum confidence threshold (default: 0)",
+                                "type": "number"
+                        },
                         "query": {
                                 "description": "Search query",
                                 "type": "string"
@@ -85,7 +93,7 @@ TOOLS = [
     ),
     Tool(
         name="recall_temporal",
-        description="Search memories within a time window, optionally with semantic filtering",
+        description="Search memories within a time window (defaults to last 7 days if no dates), optionally with semantic filtering",
         inputSchema={
                 "properties": {
                         "end": {
@@ -941,9 +949,7 @@ TOOLS = [
                                 "type": "array"
                         }
                 },
-                "required": [
-                        "session_id"
-                ],
+                "required": [],
                 "type": "object"
         }
     ),
@@ -1229,6 +1235,10 @@ TOOLS = [
         description="Get synthesized task context for injection (what's done, pending, blockers, relevant memories)",
         inputSchema={
                 "properties": {
+                        "max_tokens": {
+                                "description": "Max output tokens (default: 2000)",
+                                "type": "integer"
+                        },
                         "mode": {
                                 "description": "Output mode: inject (compact) or debug (verbose)",
                                 "type": "string"
@@ -1367,6 +1377,10 @@ TOOLS = [
                                 "description": "Max predictions (default: 5)",
                                 "type": "integer"
                         },
+                        "min_confidence": {
+                                "description": "Minimum pattern confidence (default: 0.3)",
+                                "type": "number"
+                        },
                         "realm": {
                                 "description": "Filter by realm",
                                 "type": "string"
@@ -1400,11 +1414,15 @@ TOOLS = [
         inputSchema={
                 "properties": {
                         "limit": {
-                                "description": "Max patterns (default: 50)",
+                                "description": "Max patterns (default: 20)",
                                 "type": "integer"
                         },
                         "realm": {
                                 "description": "Filter by realm",
+                                "type": "string"
+                        },
+                        "sort_by": {
+                                "description": "Sort by: frequency, confidence, created_at (default: frequency)",
                                 "type": "string"
                         }
                 },
@@ -1506,7 +1524,7 @@ TOOLS = [
         inputSchema={
                 "properties": {
                         "limit": {
-                                "description": "Max habits (default: 50)",
+                                "description": "Max habits (default: 20)",
                                 "type": "integer"
                         },
                         "min_strength": {
@@ -1515,6 +1533,10 @@ TOOLS = [
                         },
                         "realm": {
                                 "description": "Filter by realm",
+                                "type": "string"
+                        },
+                        "sort_by": {
+                                "description": "Sort by: strength, frequency, created_at (default: strength)",
                                 "type": "string"
                         }
                 },
@@ -1645,6 +1667,10 @@ TOOLS = [
                                 "description": "Filter by realm",
                                 "type": "string"
                         },
+                        "sort_by": {
+                                "description": "Sort by: progress, created_at, updated_at (default: updated_at)",
+                                "type": "string"
+                        },
                         "status": {
                                 "description": "Filter: active, paused, completed, abandoned (default: active)",
                                 "type": "string"
@@ -1737,8 +1763,8 @@ TOOLS = [
         name="hygiene_stats",
         description="Get memory hygiene statistics - confidence distribution, growth rate, stale memories.",
         inputSchema={
-                "properties": {},
-                "type": "object"
+                "type": "object",
+                "properties": {}
         }
     ),
     Tool(
@@ -1747,7 +1773,7 @@ TOOLS = [
         inputSchema={
                 "properties": {
                         "limit": {
-                                "description": "Max themes to return (default: 50)",
+                                "description": "Max themes to return (default: 20)",
                                 "type": "integer"
                         },
                         "realm": {
@@ -1935,7 +1961,7 @@ TOOLS = [
                                 "type": "string"
                         },
                         "limit": {
-                                "description": "Max results (default: 50)",
+                                "description": "Max results (default: 30)",
                                 "type": "integer"
                         },
                         "min_confidence": {
@@ -1953,8 +1979,8 @@ TOOLS = [
         name="list_aspects",
         description="List all available semantic aspects and the node kinds they include.",
         inputSchema={
-                "properties": {},
-                "type": "object"
+                "type": "object",
+                "properties": {}
         }
     ),
     Tool(
@@ -2034,7 +2060,6 @@ TOOLS = [
                         }
                 },
                 "required": [
-                        "session_id",
                         "kind",
                         "summary"
                 ],
@@ -2055,9 +2080,7 @@ TOOLS = [
                                 "type": "string"
                         }
                 },
-                "required": [
-                        "session_id"
-                ],
+                "required": [],
                 "type": "object"
         }
     ),
@@ -2075,9 +2098,7 @@ TOOLS = [
                                 "type": "string"
                         }
                 },
-                "required": [
-                        "session_id"
-                ],
+                "required": [],
                 "type": "object"
         }
     ),
@@ -2166,7 +2187,7 @@ TOOLS = [
         inputSchema={
                 "properties": {
                         "limit": {
-                                "description": "Max messages (default: 50)",
+                                "description": "Max messages (default: 30)",
                                 "type": "integer"
                         },
                         "session_id": {
@@ -2201,6 +2222,155 @@ TOOLS = [
                 "properties": {
                         "projects_dir": {
                                 "description": "Claude projects directory (default: ~/.claude/projects)",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="get_turns",
+        description="Get conversation turns for a session. Returns lossless history of all user and assistant messages.",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "description": "Max turns to return (default: 50)",
+                                "type": "integer"
+                        },
+                        "session_id": {
+                                "description": "Session ID (default: current session)",
+                                "type": "string"
+                        },
+                        "start_index": {
+                                "description": "Starting turn index (default: 0)",
+                                "type": "integer"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="query_claims",
+        description="Query semantic claims (subject-predicate-object facts). Use for retrieving learned facts and detecting contradictions.",
+        inputSchema={
+                "properties": {
+                        "active_only": {
+                                "description": "Only return non-superseded claims (default: True)",
+                                "type": "boolean"
+                        },
+                        "limit": {
+                                "description": "Max claims to return (default: 20)",
+                                "type": "integer"
+                        },
+                        "predicate": {
+                                "description": "Filter by predicate (e.g., 'prefers', 'was_corrected_on')",
+                                "type": "string"
+                        },
+                        "scope": {
+                                "description": "Filter by scope: task, session, repo, project, user, global",
+                                "type": "string"
+                        },
+                        "subject": {
+                                "description": "Filter by subject (e.g., 'user', 'assistant', entity name)",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="get_policies",
+        description="Get active policy memories (preferences, corrections, constraints). Policies have promotion states: ephemeral → candidate → stable_soft → stable_hard.",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "description": "Max policies to return (default: 30)",
+                                "type": "integer"
+                        },
+                        "scope": {
+                                "description": "Filter by scope: session, repo, project, user, global",
+                                "type": "string"
+                        },
+                        "type": {
+                                "description": "Filter by policy type: preference, correction, constraint",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="hybrid_recall",
+        description="State-of-the-art memory retrieval combining vector similarity, BM25 keyword matching, and graph spreading with RRF fusion.",
+        inputSchema={
+                "properties": {
+                        "bm25_weight": {
+                                "description": "Weight for BM25 keyword match (default: 0.3)",
+                                "type": "number"
+                        },
+                        "graph_weight": {
+                                "description": "Weight for graph spreading (default: 0.2)",
+                                "type": "number"
+                        },
+                        "limit": {
+                                "description": "Max results (default: 10)",
+                                "type": "integer"
+                        },
+                        "query": {
+                                "description": "Search query text",
+                                "type": "string"
+                        },
+                        "realm": {
+                                "description": "Filter by realm",
+                                "type": "string"
+                        },
+                        "recency_weight": {
+                                "description": "Weight for recency bonus (default: 0.1)",
+                                "type": "number"
+                        },
+                        "vector_weight": {
+                                "description": "Weight for vector similarity (default: 0.4)",
+                                "type": "number"
+                        }
+                },
+                "required": [
+                        "query"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="get_entities",
+        description="Get tracked entities (user, assistant, projects, concepts) with salience scores.",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "description": "Max entities to return (default: 20)",
+                                "type": "integer"
+                        },
+                        "type": {
+                                "description": "Filter by entity type: person, project, concept, tool, file",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="get_relationship_events",
+        description="Get relationship events (corrections, praise, frustration, discoveries) for understanding user-assistant interaction patterns.",
+        inputSchema={
+                "properties": {
+                        "event_type": {
+                                "description": "Filter by type: correction, praise, frustration, discovery",
+                                "type": "string"
+                        },
+                        "limit": {
+                                "description": "Max events to return (default: 20)",
+                                "type": "integer"
+                        },
+                        "session_id": {
+                                "description": "Filter by session",
                                 "type": "string"
                         }
                 },
