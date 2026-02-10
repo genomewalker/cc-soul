@@ -143,6 +143,38 @@ Detection: `CHITTA_REALM` env → `.cc-soul-realm` file → git repo name → `b
 | Meta | `calibration_record/score`, `metacognition_evaluate` |
 | Messages | `msg_send/inbox/ack_all` |
 
+## Team Workflows
+
+Teammates can access the shared mind but need explicit setup.
+
+**Problem**: ToolSearch is callable but hidden from teammate tool lists (Claude Code bug).
+
+**Solution**: Include this in teammate prompts:
+```
+CRITICAL - First action before any other tool:
+  ToolSearch query="+chitta recall"
+
+ToolSearch will NOT appear in your tool list. Call it anyway - it works.
+After loading, you have: recall, remember, observe, learn_*, etc.
+```
+
+**Key points**:
+- All teammates share the same daemon socket (same mind)
+- Concurrent reads are safe; concurrent writes may interleave
+- For heavy coordination, use `msg_send`/`msg_inbox` for team messaging
+
+**Minimal teammate prompt pattern**:
+```
+You are [role] on team [name].
+
+FIRST ACTION (mandatory):
+  ToolSearch query="+chitta recall"
+
+Then use chitta tools for memory access:
+- recall --query "relevant context"
+- remember --content "[domain] findings"
+```
+
 ## Troubleshooting
 
 | Issue | Fix |
@@ -150,3 +182,4 @@ Detection: `CHITTA_REALM` env → `.cc-soul-realm` file → git repo name → `b
 | search_symbols empty | Run `embed_symbols` |
 | Connection error | `pkill -TERM chittad` |
 | MCP schema stale | `pkill -f "chitta mcp"` |
+| Teammate can't find tools | Add ToolSearch instruction to prompt |
