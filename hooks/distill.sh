@@ -157,9 +157,17 @@ fi
 
 echo "[distill] Processing SSL results..."
 
-# Create episode marker for this distillation
-EPISODE_ID=$("$CHITTA_BIN" grow --type episode --content "Session $SESSION_ID distilled" --realm "$REALM" --json 2>/dev/null | grep -oP '"id"\s*:\s*"\K[^"]+' || echo "")
-[[ -n "$EPISODE_ID" ]] && echo "[distill]   Episode: $EPISODE_ID"
+# Get turn range for this session (for hierarchical retrieval)
+TURN_RANGE=$("$CHITTA_BIN" sql_query --query "SELECT MIN(turn_index), MAX(turn_index) FROM conversation_turn WHERE session_id = '$SESSION_ID'" 2>/dev/null | grep -E '^[0-9]' || echo "0 0")
+START_TURN=$(echo "$TURN_RANGE" | awk -F'|' '{gsub(/[^0-9]/,"",$1); print $1+0}')
+END_TURN=$(echo "$TURN_RANGE" | awk -F'|' '{gsub(/[^0-9]/,"",$2); print $2+0}')
+[[ -z "$START_TURN" ]] && START_TURN=0
+[[ -z "$END_TURN" ]] && END_TURN=0
+
+# Create dialogue episode with turn range (for hierarchical retrieval: SSL → episode → turns)
+EPISODE_RESP=$("$CHITTA_BIN" create_episode --session_id "$SESSION_ID" --title "Distillation $(date +%Y-%m-%d)" --start_turn "$START_TURN" --end_turn "$END_TURN" --episode_type "distillation" --realm "$REALM" --json 2>/dev/null || echo "")
+EPISODE_ID=$(echo "$EPISODE_RESP" | grep -oP '"episode_id"\s*:\s*\K[0-9]+' || echo "")
+[[ -n "$EPISODE_ID" ]] && echo "[distill]   Episode: $EPISODE_ID (turns $START_TURN-$END_TURN)"
 
 # Process markers - combine TYPE line with following [ε] lines
 STORED=0

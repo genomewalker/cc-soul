@@ -598,6 +598,12 @@ void Subconscious::run_hygiene() {
               << ", pruned=" << result.pruned
               << ", consolidated=" << result.consolidated << "\n";
 
+    // Heal session registry - check if PIDs are still alive
+    size_t healed_sessions = mind_->store().session_heal();
+    if (healed_sessions > 0) {
+        std::cerr << "[subconscious] Healed " << healed_sessions << " stale sessions (dead PIDs)\n";
+    }
+
     // Clean dead sessions (no heartbeat for 10+ minutes)
     size_t dead_sessions = mind_->store().session_cleanup_dead(600000);
     if (dead_sessions > 0) {

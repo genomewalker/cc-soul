@@ -11,8 +11,11 @@
 # Don't use set -e: we want to save as much state as possible even if parts fail
 
 CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
-QUEUE_FILE="${CHITTA_QUEUE:-/tmp/chitta-queue.jsonl}"
 MAX_WAIT="${CC_SOUL_MAX_WAIT:-2}"
+
+# Source shared library (provides queue_write with ack_id, get_queue_file, etc.)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib.sh"
 
 # Parse JSON input
 INPUT=$(cat)
@@ -22,12 +25,6 @@ REAL_SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
 
 # Check chitta CLI exists
 [[ ! -x "$CHITTA_BIN" ]] && exit 0
-
-# Queue write - fire and forget
-queue_write() {
-    local tool="$1" args="$2"
-    echo "{\"tool\":\"$tool\",\"args\":$args,\"ts\":$(date +%s)}" >> "$QUEUE_FILE"
-}
 
 # Derive project directory from transcript path
 # Transcript path: ~/.claude/projects/-maps-projects-X-Y-Z/session.jsonl

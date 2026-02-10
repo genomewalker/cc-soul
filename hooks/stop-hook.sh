@@ -10,11 +10,10 @@
 # Don't use set -e: we want hooks to succeed even if some parts fail
 
 CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
-QUEUE_FILE="${CHITTA_QUEUE:-/tmp/chitta-queue.jsonl}"
 MAX_WAIT="${CC_SOUL_MAX_WAIT:-2}"
 MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
 
-# Source shared library
+# Source shared library (provides queue_write with ack_id, get_queue_file, etc.)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib.sh"
 
@@ -24,15 +23,12 @@ TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null 
 STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false' 2>/dev/null || echo "false")
 SESSION_ID_INPUT=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || echo "")
 
+# Set SESSION_ID early (used by store_turn)
+SESSION_ID="${SESSION_ID_INPUT:-default}"
+
 # Prevent infinite loops
 [[ "$STOP_HOOK_ACTIVE" == "true" ]] && exit 0
 [[ -z "$TRANSCRIPT_PATH" || ! -f "$TRANSCRIPT_PATH" ]] && exit 0
-
-# Queue write - fire and forget (~1ms)
-queue_write() {
-    local tool="$1" args="$2"
-    echo "{\"tool\":\"$tool\",\"args\":$args,\"ts\":$(date +%s)}" >> "$QUEUE_FILE"
-}
 
 # Convert to SSL format
 # Input: category, raw content
@@ -97,7 +93,7 @@ map_category() {
 
 # Extract last assistant message
 RESPONSE=$(tac "$TRANSCRIPT_PATH" | grep -m1 '"role":"assistant"' | \
-    jq -r '.message.content[] | select(.type=="text") | .text' 2>/dev/null | head -c 10000)
+    jq -r '.message.content[] | select(.type=="text") | .text' 2>/dev/null | head -c 50000)
 
 [[ -z "$RESPONSE" || ${#RESPONSE} -lt 10 ]] && exit 0
 
@@ -121,7 +117,7 @@ HAS_ERROR=false
 echo "$RESPONSE" | grep -qiE '(error|failed|exception|traceback)' && HAS_ERROR=true
 
 # Store assistant turn
-queue_write "store_turn" "{\"session_id\":\"$SESSION_ID\",\"role\":\"assistant\",\"content\":$(echo "$RESPONSE" | head -c 5000 | jq -Rs .),\"turn_index\":$TURN_INDEX,\"tools_used\":$TOOLS_JSON,\"files_touched\":$FILES_JSON,\"has_error\":$HAS_ERROR}"
+queue_write "store_turn" "{\"session_id\":\"$SESSION_ID\",\"role\":\"assistant\",\"content\":$(echo "$RESPONSE" | jq -Rs .),\"turn_index\":$TURN_INDEX,\"tools_used\":$TOOLS_JSON,\"files_touched\":$FILES_JSON,\"has_error\":$HAS_ERROR}"
 
 # Increment turn index
 echo $((TURN_INDEX + 1)) > "$TURN_FILE"
@@ -167,7 +163,7 @@ while IFS= read -r line; do
     fi
 done <<< "$RESPONSE"
 
-# Extract [USED:id] feedback → queue strengthen + learn_outcome
+# Extract [USED:id] feedback → strengthen + learn_outcome
 # Accepts both numeric IDs and UUID-like strings
 while IFS= read -r marker; do
     [[ -z "$marker" ]] && continue
@@ -177,8 +173,10 @@ while IFS= read -r marker; do
 
     # Strengthen the memory (existing behavior)
     queue_write "strengthen" "{\"id\":\"$mem_id\",\"amount\":0.1}"
-    # Record positive usage outcome (closes feedback loop)
-    queue_write "learn_outcome" "{\"memory-id\":\"$mem_id\",\"outcome\":\"positive\",\"context\":\"Memory explicitly marked as helpful via [USED] marker\"}"
+    # CRITICAL: Record positive usage outcome with fallback (feedback loop must not silently fail)
+    if ! "$CHITTA_BIN" learn_outcome --memory-id "$mem_id" --outcome "positive" --context "Memory explicitly marked as helpful via [USED] marker" 2>/dev/null; then
+        echo "{\"tool\":\"learn_outcome\",\"args\":{\"memory-id\":\"$mem_id\",\"outcome\":\"positive\",\"context\":\"Memory explicitly marked as helpful via [USED] marker\"},\"ts\":$(date +%s)}" >> "$HOME/.claude/mind/.failed_observations.jsonl"
+    fi
     echo "[soul] ↑+ ${mem_id:0:12}..." >&2
 done <<< "$(echo "$RESPONSE" | grep -oE '\[USED:[a-zA-Z0-9_-]+\]')"
 
@@ -229,52 +227,24 @@ if [[ "$CLAUDE_LEARNED" == "false" && -n "$LAST_USER_MSG" ]]; then
         CORRECTION_DETECTED=true
     fi
 
-    # If correction was detected but Claude didn't call learn_correction, log compliance failure
+    # If correction was detected but Claude didn't call learn_correction, log to stderr only
+    # Don't store raw text as memory - let distillation handle it properly
     if [[ "$CORRECTION_DETECTED" == "true" && "$CLAUDE_LEARNED" == "false" ]]; then
-        # Store compliance failure for tracking
-        failure_context=$(echo "$LAST_USER_MSG" | head -c 100 | tr '\n' ' ')
-        queue_write "observe" "{\"category\":\"compliance\",\"title\":\"Missed correction\",\"content\":$(echo "[compliance:fail] Correction detected but learn_correction not called: $failure_context" | jq -Rs .)}"
-        echo "[soul] ⚠️ COMPLIANCE FAIL: Correction detected but learn_correction not called" >&2
-
-        # Store as relationship event (new memory system)
-        queue_write "store_relationship_event" "{\"session_id\":\"$SESSION_ID\",\"event_type\":\"correction\",\"content\":$(echo "$LAST_USER_MSG" | head -c 300 | jq -Rs .),\"context\":\"User correction detected but not processed\"}"
-
-        # Store as claim: user corrected assistant on this topic
-        topic=$(echo "$LAST_USER_MSG" | tr -cs '[:alnum:]' ' ' | awk '{for(i=1;i<=3 && i<=NF;i++) printf "%s ", $i}' | sed 's/ $//')
-        queue_write "store_claim" "{\"subject\":\"assistant\",\"predicate\":\"was_corrected_on\",\"object\":$(echo "$topic" | jq -Rs .),\"scope\":\"session\",\"source\":\"hook\"}"
+        echo "[soul] ⚠️ COMPLIANCE: Correction detected but learn_correction not called" >&2
     fi
 
-    # Direct + meta-preference patterns
+    # Direct + meta-preference patterns - detect and log, let distillation format properly
     if echo "$LAST_USER_MSG" | grep -qiE "(I (prefer|like|want|always|never)|please (don'?t|always|never)|from now on|more concise|fewer examples|go deeper|simpler please|don'?t overexplain|be more verbose)"; then
-        pref_context=$(echo "$LAST_USER_MSG" | head -c 200 | tr '\n' ' ')
-
-        # Format as SSL preference
-        content="[preference] Antonio→$pref_context"
-
-        # Queue the learning (existing memory)
-        queue_write "observe" "{\"category\":\"preference\",\"title\":\"Auto-preference\",\"content\":$(echo "$content" | jq -Rs .)}"
-
-        # Store as policy memory (new system) - starts as ephemeral, can be promoted
-        queue_write "store_policy" "{\"type\":\"preference\",\"content\":$(echo "$pref_context" | jq -Rs .),\"scope\":\"user\",\"state\":\"ephemeral\",\"confidence\":0.6}"
-
-        # Store as claim: user prefers X
-        queue_write "store_claim" "{\"subject\":\"user\",\"predicate\":\"prefers\",\"object\":$(echo "$pref_context" | jq -Rs .),\"scope\":\"user\",\"source\":\"hook\",\"confidence\":0.7}"
-
-        echo "[soul] +auto-preference: ${pref_context:0:60}" >&2
-        ((LEARNED++)) || true
+        pref_context=$(echo "$LAST_USER_MSG" | head -c 60 | tr '\n' ' ')
+        echo "[soul] preference detected: ${pref_context}..." >&2
+        # Don't auto-store raw text - distillation will format it properly as SSL
     fi
 
-    # If milestone detected, auto-store
+    # If milestone detected, log it - let distillation or explicit learn_milestone handle storage
     if echo "$LAST_USER_MSG" | grep -qiE "(it works|finally|success|shipped|released|completed|finished|passed|merged|deployed)"; then
-        milestone_context=$(echo "$LAST_USER_MSG" | head -c 100 | tr '\n' ' ')
-
-        # Format as SSL milestone
-        content="[milestone] $milestone_context"
-
-        # Queue the learning
-        queue_write "observe" "{\"category\":\"milestone\",\"title\":\"Auto-milestone\",\"content\":$(echo "$content" | jq -Rs .)}"
-        echo "[soul] +auto-milestone: ${milestone_context:0:60}" >&2
-        ((LEARNED++)) || true
+        milestone_context=$(echo "$LAST_USER_MSG" | head -c 60 | tr '\n' ' ')
+        echo "[soul] milestone detected: ${milestone_context}..." >&2
+        # Don't auto-store raw text - use learn_milestone for proper formatting
     fi
 fi
 
@@ -536,9 +506,9 @@ if [[ -n "$LAST_USER_MSG" ]]; then
     # Goal setting patterns: "I want to", "we need to", "let's build/create/implement"
     if echo "$LAST_USER_MSG" | grep -qiE "(I want to|we need to|let'?s (build|create|implement|make|ship|finish|complete)|goal is to|objective is|planning to)"; then
         goal_title=$(echo "$LAST_USER_MSG" | grep -ioE "(I want to|we need to|let'?s (build|create|implement|make|ship|finish|complete)|goal is to|objective is|planning to)[^.!?]*" | head -1 | head -c 100 | tr '\n' ' ')
-        if [[ -n "$goal_title" && ${#goal_title} -gt 10 && -S "$SOCKET_PATH" ]]; then
-            request='{"jsonrpc":"2.0","id":1,"method":"goal_set","params":{"title":'$(echo "$goal_title" | jq -Rs .)',"description":'$(echo "$LAST_USER_MSG" | head -c 300 | jq -Rs .)'}}'
-            timeout 1 echo "$request" | nc -U -N "$SOCKET_PATH" >/dev/null 2>&1 || true
+        if [[ -n "$goal_title" && ${#goal_title} -gt 10 ]]; then
+            goal_description=$(echo "$LAST_USER_MSG" | head -c 300)
+            "$CHITTA_BIN" goal_set --title "$goal_title" --description "$goal_description" 2>/dev/null || true
             echo "[soul] +goal detected: ${goal_title:0:50}" >&2
         fi
     fi
@@ -546,16 +516,12 @@ if [[ -n "$LAST_USER_MSG" ]]; then
     # Goal completion patterns: "done", "shipped", "released", "finished", "completed"
     # Note: goal_progress requires goal ID, so we get the most recent active goal first
     if echo "$LAST_USER_MSG" | grep -qiE "(it'?s done|we'?re done|finished|shipped|released|completed|all done|mission accomplished|working now|tests pass|merged)"; then
-        if [[ -S "$SOCKET_PATH" ]]; then
-            # Get most recent active goal
-            request='{"jsonrpc":"2.0","id":1,"method":"goal_list","params":{"status":"active","limit":1}}'
-            response=$(timeout 1 echo "$request" | nc -U -N "$SOCKET_PATH" 2>/dev/null || true)
-            goal_id=$(echo "$response" | jq -r '.result.goals[0].id // empty' 2>/dev/null)
-            if [[ -n "$goal_id" ]]; then
-                request='{"jsonrpc":"2.0","id":1,"method":"goal_progress","params":{"id":'"$goal_id"',"progress":1.0}}'
-                timeout 1 echo "$request" | nc -U -N "$SOCKET_PATH" >/dev/null 2>&1 || true
-                echo "[soul] +goal progress: $goal_id -> 100%" >&2
-            fi
+        # Get most recent active goal via CLI
+        goal_response=$("$CHITTA_BIN" goal_list --status active --limit 1 --json 2>/dev/null || true)
+        goal_id=$(echo "$goal_response" | jq -r '.goals[0].id // empty' 2>/dev/null)
+        if [[ -n "$goal_id" ]]; then
+            "$CHITTA_BIN" goal_progress --id "$goal_id" --progress 1.0 2>/dev/null || true
+            echo "[soul] +goal progress: $goal_id -> 100%" >&2
         fi
     fi
 fi
@@ -566,14 +532,12 @@ fi
 # Check if response contains resolution patterns
 if echo "$RESPONSE" | grep -qiE "(I found|the answer is|it turns out|the reason is|figured out|discovered that|realized that|the issue was|the problem was|the solution is|turns out|mystery solved)"; then
     resolution_context=$(echo "$RESPONSE" | grep -iE "(I found|the answer is|it turns out|the reason is|figured out|discovered|realized|the issue was|the problem was|the solution is)" | head -1 | head -c 300 | tr '\n' ' ')
-    if [[ -n "$resolution_context" && ${#resolution_context} -gt 20 && -S "$SOCKET_PATH" ]]; then
-        # Get most recent unresolved curiosity gap
-        request='{"jsonrpc":"2.0","id":1,"method":"curiosity_gaps","params":{"limit":1}}'
-        response=$(timeout 1 echo "$request" | nc -U -N "$SOCKET_PATH" 2>/dev/null || true)
-        gap_id=$(echo "$response" | jq -r '.result.gaps[0].id // empty' 2>/dev/null)
+    if [[ -n "$resolution_context" && ${#resolution_context} -gt 20 ]]; then
+        # Get most recent unresolved curiosity gap via CLI
+        gaps_response=$("$CHITTA_BIN" curiosity_gaps --limit 1 --json 2>/dev/null || true)
+        gap_id=$(echo "$gaps_response" | jq -r '.gaps[0].id // empty' 2>/dev/null)
         if [[ -n "$gap_id" ]]; then
-            request='{"jsonrpc":"2.0","id":1,"method":"curiosity_resolve","params":{"id":'"$gap_id"',"learned":'$(echo "$resolution_context" | jq -Rs .)'}}'
-            timeout 1 echo "$request" | nc -U -N "$SOCKET_PATH" >/dev/null 2>&1 || true
+            "$CHITTA_BIN" curiosity_resolve --id "$gap_id" --learned "$resolution_context" 2>/dev/null || true
             echo "[soul] +curiosity resolved: gap $gap_id" >&2
         fi
     fi
@@ -582,11 +546,9 @@ fi
 # ===========================================
 # CROSS-SESSION MESSAGING: Deregister session
 # ===========================================
-DEREGISTER_SOCKET=$(get_socket_path 2>/dev/null || echo "$SOCKET_PATH")
 DEREGISTER_SESSION="${SESSION_ID_INPUT:-${CLAUDE_SESSION_ID:-}}"
-if [[ -n "$DEREGISTER_SESSION" && -S "$DEREGISTER_SOCKET" ]]; then
-    request='{"jsonrpc":"2.0","id":1,"method":"session_deregister","params":{"session_id":"'"$DEREGISTER_SESSION"'"}}'
-    timeout 0.5 echo "$request" | nc -U "$DEREGISTER_SOCKET" >/dev/null 2>&1 || true
+if [[ -n "$DEREGISTER_SESSION" ]]; then
+    "$CHITTA_BIN" session_deregister --session_id "$DEREGISTER_SESSION" 2>/dev/null || true
 fi
 
 exit 0

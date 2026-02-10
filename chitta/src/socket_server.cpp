@@ -289,7 +289,7 @@ std::vector<ClientRequest> SocketServer::poll(int timeout_ms) {
     // Extract complete messages
     for (auto& conn : connections_) {
         while (conn.has_complete_message()) {
-            requests.push_back({conn.fd, conn.extract_message()});
+            requests.push_back({conn.fd, conn.peer_pid, conn.extract_message()});
         }
     }
 
@@ -350,7 +350,17 @@ void SocketServer::accept_new_connections() {
             fcntl(client_fd, F_SETFL, flags | O_NONBLOCK);
         }
 
-        connections_.push_back({client_fd, "", 0, "", false});
+        // Get peer credentials (PID) via SO_PEERCRED
+        pid_t peer_pid = 0;
+#ifdef SO_PEERCRED
+        struct ucred cred;
+        socklen_t len = sizeof(cred);
+        if (getsockopt(client_fd, SOL_SOCKET, SO_PEERCRED, &cred, &len) == 0) {
+            peer_pid = cred.pid;
+        }
+#endif
+
+        connections_.push_back({client_fd, peer_pid, "", 0, "", false});
         fds_dirty_ = true;
         std::cerr << "[socket_server] Client connected (fd=" << client_fd
                   << ", total=" << connections_.size() << ")\n";

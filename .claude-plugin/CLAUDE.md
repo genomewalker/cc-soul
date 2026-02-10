@@ -51,6 +51,28 @@
 
 **RLM pattern**: explore_recall → explore_peek → explore_expand → explore_neighbors
 
+## Hierarchical Retrieval
+
+Three-level memory drill-down for context when needed:
+
+| Level | Contains | Tool |
+|-------|----------|------|
+| 1. SSL Memory | Compact wisdom | `recall`, `smart_recall` |
+| 2. Episode | Session + turn range | `expand_memory(id, depth=2)` |
+| 3. Full Turns | User + assistant dialogue | `expand_memory(id, depth=3)` |
+
+**Usage pattern**:
+1. `recall` returns compact SSL memories (fast, low tokens)
+2. If context unclear, `expand_memory(id, depth=3)` retrieves full conversation
+3. Episode links memory to source: `memory --derived_from--> episode`
+
+**Tools**:
+- `expand_memory(id, depth)` - drill from SSL to full turns
+- `create_episode(session_id, title, start_turn, end_turn)` - mark conversation segments
+- `get_turns(session_id, start_index, limit)` - raw turn access
+
+**Memory IDs**: Use numeric row IDs from memory table (e.g., 12937), not UUID suffixes.
+
 ## Storing Memories
 
 **Markers in responses** (extracted by hooks):

@@ -44,6 +44,7 @@ inline std::string pid_path_for_mind(const std::string& mind_path) {
 // Represents a pending request from a client
 struct ClientRequest {
     int client_fd;
+    pid_t peer_pid;  // Peer process ID from SO_PEERCRED
     std::string data;
 };
 
@@ -56,6 +57,7 @@ struct PendingResponse {
 // Connection state for a single client
 struct ClientConnection {
     int fd = -1;
+    pid_t peer_pid = 0;  // Peer process ID from SO_PEERCRED
     std::string read_buffer;
     size_t read_offset = 0;  // Offset tracking to avoid O(n) erase
     std::string write_buffer;

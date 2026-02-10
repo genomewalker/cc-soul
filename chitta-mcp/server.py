@@ -24,6 +24,10 @@ from typing import Optional, Dict, Any, List
 logging.getLogger("root").setLevel(logging.ERROR)
 logging.getLogger("mcp").setLevel(logging.ERROR)
 
+# Logger for chitta-mcp (allow warnings for session mismatch detection)
+logger = logging.getLogger("chitta-mcp")
+logger.setLevel(logging.WARNING)
+
 from mcp.server import Server, InitializationOptions
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, ServerCapabilities, ToolsCapability
@@ -1163,13 +1167,11 @@ def get_current_session_id(use_cache: bool = True) -> Optional[str]:
 
     # 1. Check environment variable (most reliable)
     env_session = os.environ.get("CLAUDE_SESSION_ID")
-    if env_session:
-        current_session_id = env_session
-        return current_session_id
 
     # 2. PPID lookup - query session_registry for our parent process
-    # This is the most reliable method for multi-session scenarios
+    # Always perform this lookup to enable validation against env_session
     ppid = os.getppid()
+    ppid_session = None
     sessions = []
     try:
         result = daemon_call("session_list", {}, structured=True)
@@ -1179,10 +1181,27 @@ def get_current_session_id(use_cache: bool = True) -> Optional[str]:
         # Look for session matching our PPID
         for s in sessions:
             if s.get("pid") == ppid and s.get("status") == "active":
-                current_session_id = s.get("session_id")
-                return current_session_id
+                ppid_session = s.get("session_id")
+                break
     except (json.JSONDecodeError, KeyError, TypeError):
         pass
+
+    # Validate: warn if env_session != ppid_session (potential stale env or wrong context)
+    if env_session and ppid_session and env_session != ppid_session:
+        logger.warning(
+            f"Session mismatch: env={env_session} ppid={ppid_session} (pid={ppid}). "
+            f"Using env_session. This may indicate stale CLAUDE_SESSION_ID."
+        )
+
+    # Return env_session if set (primary source of truth)
+    if env_session:
+        current_session_id = env_session
+        return current_session_id
+
+    # Return PPID-detected session if found
+    if ppid_session:
+        current_session_id = ppid_session
+        return current_session_id
 
     # 3. Return cached session if set (and cache allowed)
     if use_cache and current_session_id:

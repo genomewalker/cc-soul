@@ -30,17 +30,14 @@ get_session_id() {
         return
     fi
 
-    # Try to find session by PID in registry using SQL query
-    local socket_path=$(get_socket_path)
+    # Use CLI sql_query to lookup session by PID (no netcat)
     local claude_pid=${PPID:-$$}
-
-    if [[ -S "$socket_path" && -n "$claude_pid" && "$claude_pid" != "0" ]]; then
-        local request='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"sql_query","arguments":{"query":"SELECT session_id FROM session_registry WHERE pid = '"$claude_pid"' AND status = '\''active'\'' LIMIT 1"}}}'
-        local response=$(echo "$request" | timeout 1 nc -U "$socket_path" 2>/dev/null)
-
-        # Extract session_id from response (format: | session_id | \n| uuid |)
-        local session_id=$(echo "$response" | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
-
+    if [[ -n "$claude_pid" && "$claude_pid" != "0" ]]; then
+        local result
+        result=$(chitta sql_query --query "SELECT session_id FROM session_registry WHERE pid = $claude_pid AND status = 'active' LIMIT 1" --text-only 2>/dev/null)
+        # Extract UUID from result (handles table format output)
+        local session_id
+        session_id=$(echo "$result" | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
         if [[ -n "$session_id" ]]; then
             echo "$session_id"
             return
@@ -49,4 +46,59 @@ get_session_id() {
 
     # Fallback to empty (caller should handle default)
     echo ""
+}
+
+# Get next turn index atomically (flock-protected increment)
+get_next_turn() {
+    local session_id="${1:-$(get_session_id)}"
+    [[ -z "$session_id" ]] && echo 0 && return
+
+    local turn_file="$HOME/.claude/mind/.turn_index_$session_id"
+    local turn
+    {
+        flock -x 200
+        turn=$(cat "$turn_file" 2>/dev/null || echo 0)
+        echo $((turn + 1)) > "$turn_file"
+    } 200>"$turn_file.lock"
+    echo "$turn"
+}
+
+# Default queue file location (must match daemon's queue_path in simple_cli.cpp)
+get_queue_file() {
+    echo "${CHITTA_QUEUE:-/tmp/chitta-queue.jsonl}"
+}
+
+# Generate UUID for queue acknowledgments
+# Uses uuidgen, /proc/sys/kernel/random/uuid, or fallback
+generate_ack_id() {
+    if command -v uuidgen >/dev/null 2>&1; then
+        uuidgen
+    elif [[ -f /proc/sys/kernel/random/uuid ]]; then
+        cat /proc/sys/kernel/random/uuid
+    else
+        # Fallback: timestamp + random hex
+        printf '%08x-%04x-%04x-%04x-%012x' \
+            "$(date +%s)" \
+            "$((RANDOM % 65536))" \
+            "$((RANDOM % 65536))" \
+            "$((RANDOM % 65536))" \
+            "$((RANDOM % 281474976710656))"
+    fi
+}
+
+# Queue write with acknowledgment ID
+# Usage: queue_write <tool> <args_json>
+# Writes: {"ack_id":"uuid","tool":"...","args":{...},"ts":...}
+queue_write() {
+    local tool="$1"
+    local args="$2"
+    local queue_file
+    queue_file=$(get_queue_file)
+    local ack_id
+    ack_id=$(generate_ack_id)
+
+    # Ensure directory exists
+    mkdir -p "$(dirname "$queue_file")"
+
+    echo "{\"ack_id\":\"$ack_id\",\"tool\":\"$tool\",\"args\":$args,\"ts\":$(date +%s)}" >> "$queue_file"
 }

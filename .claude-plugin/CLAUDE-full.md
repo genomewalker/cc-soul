@@ -363,6 +363,33 @@ The 8-phase resonance engine combines semantic search, BM25 keyword matching, sp
 
 This is ~10x cheaper than `full_resonate` for browsing.
 
+### Hierarchical retrieval (SSL → Episode → Turns)
+
+When a recalled memory needs more context, drill down through three levels:
+
+| Level | Contains | How to get |
+|-------|----------|------------|
+| **1. SSL Memory** | Compact distilled wisdom | `recall`, `smart_recall` |
+| **2. Episode** | Session ID + turn range | `expand_memory(id, depth=2)` |
+| **3. Full Turns** | Complete user+assistant dialogue | `expand_memory(id, depth=3)` |
+
+**Workflow:**
+1. `recall --query "..."` returns compact SSL memories (fast, low tokens)
+2. If context unclear, `expand_memory --id <mem_id> --depth 3` retrieves full conversation
+3. Memories link to episodes via triplet: `memory --derived_from--> episode`
+
+**Tools:**
+- `expand_memory(id, depth)` - Drill from SSL to full conversation turns
+- `create_episode(session_id, title, start_turn, end_turn)` - Mark conversation segments
+- `get_turns(session_id, start_index, limit)` - Raw turn access
+
+**Memory IDs:** Use numeric row IDs from memory table (e.g., 12937), not UUID suffixes. Query with:
+```sql
+SELECT id FROM memory WHERE content LIKE '%search%' ORDER BY id DESC LIMIT 1
+```
+
+**How it works:** The `distill.sh` hook extracts SSL memories from conversations, creates episodes with turn ranges, and links them via triplets. This enables lossless storage with efficient retrieval -- start with compact wisdom, expand to full context only when needed.
+
 ### Embedding engine (Vak Yantra)
 
 All semantic operations use **bge-base-en-v1.5** (BAAI), a 768-dimensional sentence embedding model running locally via ONNX Runtime. No external API calls.

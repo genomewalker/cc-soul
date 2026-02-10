@@ -9,7 +9,10 @@
 
 MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
 SPANS_DIR="$MIND_PATH/spans"
-QUEUE_FILE="${CHITTA_QUEUE:-/tmp/chitta-queue.jsonl}"
+
+# Source shared library for queue_write with ack_id
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib.sh"
 
 # Input: transcript path and last user message
 TRANSCRIPT_PATH="$1"
@@ -110,17 +113,17 @@ echo "$TOOL_USES" | jq -c '.[]' 2>/dev/null | while read -r tool_use; do
 
         # If this was a failure, learn from it
         if [[ "$SUCCESS" == "false" ]]; then
-            # Queue a failure learning
+            # Queue a failure learning (uses lib.sh queue_write with ack_id)
             FAILURE_CONTENT="[tool:$TOOL_NAME] failed with: ${OUTPUT:0:100}"
-            echo "{\"tool\":\"observe\",\"args\":{\"category\":\"failure\",\"content\":$(echo "$FAILURE_CONTENT" | jq -Rs .)},\"ts\":$TIMESTAMP}" >> "$QUEUE_FILE"
+            queue_write "observe" "{\"category\":\"failure\",\"content\":$(echo "$FAILURE_CONTENT" | jq -Rs .)}"
         fi
 
         # If strong positive reward, learn the successful pattern
         if [[ "$REWARD" == "1" && "$SUCCESS" == "true" ]]; then
-            # Extract key from input for learning
+            # Extract key from input for learning (uses lib.sh queue_write with ack_id)
             INPUT_SUMMARY=$(echo "$TOOL_INPUT" | jq -r 'to_entries | map("\(.key)=\(.value | tostring | .[0:30])") | join(", ")' 2>/dev/null | head -c 100)
             SUCCESS_CONTENT="[tool:$TOOL_NAME] success: $INPUT_SUMMARY"
-            echo "{\"tool\":\"observe\",\"args\":{\"category\":\"solution\",\"content\":$(echo "$SUCCESS_CONTENT" | jq -Rs .)},\"ts\":$TIMESTAMP}" >> "$QUEUE_FILE"
+            queue_write "observe" "{\"category\":\"solution\",\"content\":$(echo "$SUCCESS_CONTENT" | jq -Rs .)}"
         fi
     fi
 done

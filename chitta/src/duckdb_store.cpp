@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <algorithm>
 #include <filesystem>
+#include <signal.h>
 #include <nlohmann/json.hpp>
 
 namespace chitta {
@@ -8473,6 +8474,43 @@ size_t DuckDBStore::session_cleanup_dead(int64_t timeout_ms) {
     return dead_count;
 }
 
+size_t DuckDBStore::session_heal() {
+    // Get all active sessions with their PIDs
+    auto result = read_query(
+        "SELECT session_id, pid FROM session_registry WHERE status = 'active' AND pid > 0"
+    );
+    if (!result || result->HasError()) return 0;
+
+    size_t healed = 0;
+    auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); i++) {
+            std::string session_id = chunk->GetValue(0, i).ToString();
+            int32_t pid = chunk->GetValue(1, i).GetValue<int32_t>();
+
+            // Check if PID is still alive
+            // kill(pid, 0) returns 0 if process exists, -1 if not
+            if (kill(pid, 0) != 0) {
+                // Process is dead, mark session as stale
+                std::ostringstream sql;
+                sql << "UPDATE session_registry SET status = 'stale', last_heartbeat = " << now
+                    << " WHERE session_id = '" << session_id << "'";
+                write_execute(sql.str());
+                healed++;
+                std::cerr << "[session_heal] Marked stale: " << session_id << " (pid=" << pid << " dead)\n";
+            }
+        }
+    }
+
+    return healed;
+}
+
 DuckDBStore::SessionSyncResult DuckDBStore::session_sync(const std::string& claude_projects_dir) {
     SessionSyncResult result;
 
@@ -9121,6 +9159,65 @@ std::vector<DuckDBStore::DialogueEpisode> DuckDBStore::list_dialogue_episodes(
         }
     }
     return episodes;
+}
+
+std::optional<DuckDBStore::ExpandedMemory> DuckDBStore::expand_memory(int64_t memory_id, int depth) {
+    if (!db_) return std::nullopt;
+
+    ExpandedMemory result;
+    result.memory_id = memory_id;
+
+    // Level 1: Get the memory itself
+    auto mem = get_memory(memory_id);
+    if (!mem) return std::nullopt;
+
+    result.memory_content = mem->content;
+    result.memory_type = mem->kind;
+    result.confidence = mem->confidence;
+
+    if (depth < 2) return result;
+
+    // Level 2: Find linked episode via triplets
+    // Memory is linked to episode via: memory -[derived_from]-> episode
+    // Triplet subject/object are stored as strings (either numeric IDs or UUIDs)
+    std::ostringstream ep_sql;
+    ep_sql << "SELECT object FROM triplet "
+           << "WHERE subject = '" << memory_id << "' "
+           << "AND predicate = 'derived_from' "
+           << "LIMIT 1";
+
+    auto ep_result = read_query(ep_sql.str());
+    if (ep_result && !ep_result->HasError()) {
+        auto chunk = ep_result->Fetch();
+        if (chunk && chunk->size() > 0) {
+            std::string object_str = chunk->GetValue(0, 0).ToString();
+            // Try to parse as numeric episode ID
+            try {
+                int64_t episode_id = std::stoll(object_str);
+                auto episode = get_dialogue_episode(episode_id);
+                if (episode) {
+                    result.episode_id = episode->id;
+                    result.episode_title = episode->title;
+                    result.episode_summary = episode->summary;
+                    result.session_id = episode->session_id;
+                    result.start_turn = episode->start_turn;
+                    result.end_turn = episode->end_turn;
+                }
+            } catch (...) {
+                // Non-numeric episode reference - skip
+            }
+        }
+    }
+
+    if (depth < 3 || result.episode_id == 0) return result;
+
+    // Level 3: Get full conversation turns for this episode's range
+    if (!result.session_id.empty() && result.end_turn >= result.start_turn) {
+        size_t turn_count = static_cast<size_t>(result.end_turn - result.start_turn + 1);
+        result.turns = get_conversation_turns(result.session_id, result.start_turn, turn_count);
+    }
+
+    return result;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

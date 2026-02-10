@@ -11,10 +11,9 @@
 # This is critical for post-compaction sessions where some data may be missing
 
 CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
-QUEUE_FILE="${CHITTA_QUEUE:-/tmp/chitta-queue.jsonl}"
 MAX_WAIT="${CC_SOUL_MAX_WAIT:-2}"
 
-# Source shared library
+# Source shared library (provides queue_write with ack_id, get_queue_file, etc.)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib.sh"
 
@@ -27,12 +26,6 @@ TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty')
 
 # Check chitta CLI exists
 [[ ! -x "$CHITTA_BIN" ]] && exit 0
-
-# Queue write - fire and forget
-queue_write() {
-    local tool="$1" args="$2"
-    echo "{\"tool\":\"$tool\",\"args\":$args,\"ts\":$(date +%s)}" >> "$QUEUE_FILE"
-}
 
 # Derive project directory from transcript path
 # Transcript path: ~/.claude/projects/-maps-projects-X-Y-Z/session.jsonl
@@ -114,6 +107,41 @@ fi
 if [[ -n "$SESSION_ID" ]]; then
     CLAUDE_PID=${PPID:-$$}
     chitta session_register --session_id "$SESSION_ID" --realm "$REALM" --pid "$CLAUDE_PID" >/dev/null 2>&1 || true
+
+    # Export session environment variables for other processes
+    SESSION_ENV_FILE="$HOME/.claude/mind/.session_env_$$"
+    mkdir -p "$(dirname "$SESSION_ENV_FILE")"
+    cat > "$SESSION_ENV_FILE" << EOF
+export CLAUDE_SESSION_ID="$SESSION_ID"
+export CLAUDE_TRANSCRIPT_PATH="$TRANSCRIPT_PATH"
+export CLAUDE_REALM="$REALM"
+export CLAUDE_PID="$CLAUDE_PID"
+EOF
+    chmod 600 "$SESSION_ENV_FILE"
+fi
+
+# Retry failed observations from previous sessions
+FAILED_OBS_FILE="$HOME/.claude/mind/.failed_observations.jsonl"
+if [[ -f "$FAILED_OBS_FILE" && -s "$FAILED_OBS_FILE" ]]; then
+    TEMP_FAILED=$(mktemp)
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        category=$(echo "$line" | jq -r '.category // "general"')
+        content=$(echo "$line" | jq -r '.content // empty')
+        if [[ -n "$content" ]]; then
+            if timeout "$MAX_WAIT" "$CHITTA_BIN" observe --category "$category" --content "$content" >/dev/null 2>&1; then
+                : # Success, don't add to temp file
+            else
+                echo "$line" >> "$TEMP_FAILED"
+            fi
+        fi
+    done < "$FAILED_OBS_FILE"
+    # Replace original with remaining failures (or remove if empty)
+    if [[ -s "$TEMP_FAILED" ]]; then
+        mv "$TEMP_FAILED" "$FAILED_OBS_FILE"
+    else
+        rm -f "$FAILED_OBS_FILE" "$TEMP_FAILED"
+    fi
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════

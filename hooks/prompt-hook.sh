@@ -18,12 +18,14 @@ MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib.sh"
 
-SOCKET_PATH=$(get_socket_path)
-SESSION_ID=$(get_session_id)
-[[ -z "$SESSION_ID" ]] && SESSION_ID="default"
-
 # Parse input - Claude Code sends JSON with session_id and prompt (gracefully handle malformed input)
 INPUT=$(cat)
+# Try to extract session_id from JSON first (most reliable source)
+SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || echo "")
+# Fall back to registry lookup if not in JSON
+[[ -z "$SESSION_ID" ]] && SESSION_ID=$(get_session_id)
+[[ -z "$SESSION_ID" ]] && SESSION_ID="default"
+
 # Try to extract prompt from JSON, fall back to raw input if not JSON
 QUERY=$(echo "$INPUT" | jq -r '.prompt // empty' 2>/dev/null || echo "")
 [[ -z "$QUERY" ]] && QUERY="$INPUT"
@@ -39,9 +41,8 @@ echo "$QUERY" > "$MIND_PATH/.last_user_message"
 TURN_FILE="$MIND_PATH/.turn_index_$SESSION_ID"
 TURN_INDEX=$(cat "$TURN_FILE" 2>/dev/null || echo "0")
 
-# Store user turn in lossless conversation storage
-QUEUE_FILE="${CHITTA_QUEUE:-/tmp/chitta-queue.jsonl}"
-echo "{\"tool\":\"store_turn\",\"args\":{\"session_id\":\"$SESSION_ID\",\"role\":\"user\",\"content\":$(echo "$QUERY" | jq -Rs .),\"turn_index\":$TURN_INDEX},\"ts\":$(date +%s)}" >> "$QUEUE_FILE"
+# Store user turn in lossless conversation storage (uses lib.sh queue_write with ack_id)
+queue_write "store_turn" "{\"session_id\":\"$SESSION_ID\",\"role\":\"user\",\"content\":$(echo "$QUERY" | jq -Rs .),\"turn_index\":$TURN_INDEX}"
 
 # Increment turn index
 echo $((TURN_INDEX + 1)) > "$TURN_FILE"
@@ -115,29 +116,24 @@ fi
 # ===========================================
 NARRATIVE_STATUS=""
 
-# Log user_message event via queue (fire-and-forget)
-if [[ -S "$SOCKET_PATH" ]]; then
-    # First, ensure gate is initialized for this session
-    request='{"jsonrpc":"2.0","id":1,"method":"gate_init","params":{"session_id":"'"$SESSION_ID"'"}}'
-    timeout 0.5 echo "$request" | nc -U -N "$SOCKET_PATH" >/dev/null 2>&1 || true
+# Log user_message event via CLI (fire-and-forget)
+# First, ensure gate is initialized for this session
+timeout 0.5 "$CHITTA_BIN" gate_init --session_id "$SESSION_ID" >/dev/null 2>&1 || true
 
-    # Log the user message event
-    summary=$(echo "$QUERY" | head -c 200 | tr '\n' ' ' | sed 's/"/\\"/g')
-    request='{"jsonrpc":"2.0","id":2,"method":"narrative_log","params":{"session_id":"'"$SESSION_ID"'","kind":"user_message","summary":"'"$summary"'"}}'
-    timeout 0.5 echo "$request" | nc -U -N "$SOCKET_PATH" >/dev/null 2>&1 || true
+# Log the user message event
+summary=$(echo "$QUERY" | head -c 200 | tr '\n' ' ')
+timeout 0.5 "$CHITTA_BIN" narrative_log --session_id "$SESSION_ID" --kind "user_message" --summary "$summary" >/dev/null 2>&1 || true
 
-    # Get narrative status
-    request='{"jsonrpc":"2.0","id":3,"method":"narrative_status","params":{"session_id":"'"$SESSION_ID"'"}}'
-    response=$(timeout 1 echo "$request" | nc -U -N "$SOCKET_PATH" 2>/dev/null || true)
+# Get narrative status
+response=$(timeout 1 "$CHITTA_BIN" narrative_status --session_id "$SESSION_ID" --json 2>/dev/null || true)
 
-    if [[ -n "$response" ]]; then
-        mode=$(echo "$response" | jq -r '.result.metadata.mode // "unknown"' 2>/dev/null)
-        confidence=$(echo "$response" | jq -r '.result.metadata.confidence // 0' 2>/dev/null)
-        if [[ "$mode" != "unknown" && "$mode" != "null" ]]; then
-            # Format as percentage
-            conf_pct=$(awk "BEGIN {printf \"%.0f\", $confidence * 100}")
-            NARRATIVE_STATUS="[narrative:$mode:$conf_pct%]"
-        fi
+if [[ -n "$response" ]]; then
+    mode=$(echo "$response" | jq -r '.metadata.mode // "unknown"' 2>/dev/null)
+    confidence=$(echo "$response" | jq -r '.metadata.confidence // 0' 2>/dev/null)
+    if [[ "$mode" != "unknown" && "$mode" != "null" ]]; then
+        # Format as percentage
+        conf_pct=$(awk "BEGIN {printf \"%.0f\", $confidence * 100}")
+        NARRATIVE_STATUS="[narrative:$mode:$conf_pct%]"
     fi
 fi
 
@@ -150,58 +146,55 @@ PREDICTIONS_FILE="$MIND_PATH/.last_predictions.json"
 # Clear old predictions
 rm -f "$PREDICTIONS_FILE" 2>/dev/null
 
-# Call anticipation_filter via socket to get gated predictions
-if [[ -S "$SOCKET_PATH" ]]; then
-    request='{"jsonrpc":"2.0","id":4,"method":"anticipation_filter","params":{"session_id":"'"$SESSION_ID"'","max":3}}'
-    response=$(timeout 1 echo "$request" | nc -U -N "$SOCKET_PATH" 2>/dev/null || true)
+# Call anticipation_filter via CLI to get gated predictions
+response=$(timeout 1 "$CHITTA_BIN" anticipation_filter --session_id "$SESSION_ID" --max 3 --json 2>/dev/null || true)
+
+if [[ -n "$response" ]]; then
+    candidates=$(echo "$response" | jq -r '.metadata.candidates // []' 2>/dev/null)
+
+    if [[ "$candidates" != "[]" && -n "$candidates" ]]; then
+        # Save predictions to temp file for stop-hook
+        echo "$candidates" > "$PREDICTIONS_FILE"
+
+        # Extract predictions
+        while read -r candidate; do
+            [[ -z "$candidate" ]] && continue
+
+            id=$(echo "$candidate" | jq -r '.id // 0' 2>/dev/null)
+            prediction=$(echo "$candidate" | jq -r '.prediction // ""' 2>/dev/null)
+            source=$(echo "$candidate" | jq -r '.source // "rule"' 2>/dev/null)
+            confidence=$(echo "$candidate" | jq -r '.confidence // 0' 2>/dev/null)
+
+            if [[ -n "$prediction" && "$prediction" != "null" ]]; then
+                conf_pct=$(awk "BEGIN {printf \"%.0f\", $confidence * 100}")
+                ANTICIPATIONS="${ANTICIPATIONS}[anticipate:$source:$conf_pct%] ${prediction}
+"
+            fi
+        done <<< "$(echo "$candidates" | jq -c '.[]' 2>/dev/null)"
+    fi
+fi
+
+# Fall back to old anticipation_predict if no candidates from filter
+if [[ -z "$ANTICIPATIONS" ]]; then
+    context=$(echo "$QUERY" | tr '\n' ' ')
+    response=$(timeout 1 "$CHITTA_BIN" anticipation_predict --context "$context" --limit 3 --json 2>/dev/null || true)
 
     if [[ -n "$response" ]]; then
-        candidates=$(echo "$response" | jq -r '.result.metadata.candidates // []' 2>/dev/null)
+        patterns=$(echo "$response" | jq -r '.metadata.patterns // []' 2>/dev/null)
 
-        if [[ "$candidates" != "[]" && -n "$candidates" ]]; then
-            # Save predictions to temp file for stop-hook
-            echo "$candidates" > "$PREDICTIONS_FILE"
+        if [[ "$patterns" != "[]" && -n "$patterns" ]]; then
+            while read -r pattern; do
+                [[ -z "$pattern" ]] && continue
 
-            # Extract predictions
-            while read -r candidate; do
-                [[ -z "$candidate" ]] && continue
+                freq=$(echo "$pattern" | jq -r '.frequency // 0' 2>/dev/null)
+                success=$(echo "$pattern" | jq -r '.success_count // 0' 2>/dev/null)
+                action=$(echo "$pattern" | jq -r '.action // ""' 2>/dev/null)
 
-                id=$(echo "$candidate" | jq -r '.id // 0' 2>/dev/null)
-                prediction=$(echo "$candidate" | jq -r '.prediction // ""' 2>/dev/null)
-                source=$(echo "$candidate" | jq -r '.source // "rule"' 2>/dev/null)
-                confidence=$(echo "$candidate" | jq -r '.confidence // 0' 2>/dev/null)
-
-                if [[ -n "$prediction" && "$prediction" != "null" ]]; then
-                    conf_pct=$(awk "BEGIN {printf \"%.0f\", $confidence * 100}")
-                    ANTICIPATIONS="${ANTICIPATIONS}[anticipate:$source:$conf_pct%] ${prediction}
+                if [[ "$freq" -gt 2 || "$success" -gt 0 ]] && [[ -n "$action" ]]; then
+                    ANTICIPATIONS="${ANTICIPATIONS}[anticipate] ${action}
 "
                 fi
-            done <<< "$(echo "$candidates" | jq -c '.[]' 2>/dev/null)"
-        fi
-    fi
-
-    # Fall back to old anticipation_predict if no candidates from filter
-    if [[ -z "$ANTICIPATIONS" ]]; then
-        request='{"jsonrpc":"2.0","id":5,"method":"anticipation_predict","params":{"context":"'"$(echo "$QUERY" | sed 's/"/\\"/g' | tr '\n' ' ')"'","limit":3}}'
-        response=$(timeout 1 echo "$request" | nc -U -N "$SOCKET_PATH" 2>/dev/null || true)
-
-        if [[ -n "$response" ]]; then
-            patterns=$(echo "$response" | jq -r '.result.metadata.patterns // []' 2>/dev/null)
-
-            if [[ "$patterns" != "[]" && -n "$patterns" ]]; then
-                while read -r pattern; do
-                    [[ -z "$pattern" ]] && continue
-
-                    freq=$(echo "$pattern" | jq -r '.frequency // 0' 2>/dev/null)
-                    success=$(echo "$pattern" | jq -r '.success_count // 0' 2>/dev/null)
-                    action=$(echo "$pattern" | jq -r '.action // ""' 2>/dev/null)
-
-                    if [[ "$freq" -gt 2 || "$success" -gt 0 ]] && [[ -n "$action" ]]; then
-                        ANTICIPATIONS="${ANTICIPATIONS}[anticipate] ${action}
-"
-                    fi
-                done <<< "$(echo "$patterns" | jq -c '.[]' 2>/dev/null)"
-            fi
+            done <<< "$(echo "$patterns" | jq -c '.[]' 2>/dev/null)"
         fi
     fi
 fi
@@ -210,26 +203,23 @@ fi
 # HABITS: Surface strong habits matching context
 # ===========================================
 HABITS_OUTPUT=""
-if [[ -S "$SOCKET_PATH" ]]; then
-    # Build context from query for habit matching
-    context=$(echo "$QUERY" | head -c 100 | tr '\n' ' ' | sed 's/"/\\"/g')
-    request='{"jsonrpc":"2.0","id":6,"method":"habit_match","params":{"context":"'"$context"'","min_strength":0.7}}'
-    response=$(timeout 1 echo "$request" | nc -U -N "$SOCKET_PATH" 2>/dev/null || true)
+# Build context from query for habit matching
+context=$(echo "$QUERY" | head -c 100 | tr '\n' ' ')
+response=$(timeout 1 "$CHITTA_BIN" habit_match --context "$context" --min_strength 0.7 --json 2>/dev/null || true)
 
-    if [[ -n "$response" ]]; then
-        habits_array=$(echo "$response" | jq -c '.result.metadata.habits // []' 2>/dev/null)
-        if [[ "$habits_array" != "[]" && -n "$habits_array" ]]; then
-            while read -r habit; do
-                [[ -z "$habit" ]] && continue
-                response_text=$(echo "$habit" | jq -r '.response // ""' 2>/dev/null)
-                strength=$(echo "$habit" | jq -r '.strength // 0' 2>/dev/null)
-                if [[ -n "$response_text" && "$response_text" != "null" ]]; then
-                    strength_pct=$(awk "BEGIN {printf \"%.0f\", $strength * 100}")
-                    HABITS_OUTPUT="${HABITS_OUTPUT}[habit:${strength_pct}%] ${response_text}
+if [[ -n "$response" ]]; then
+    habits_array=$(echo "$response" | jq -c '.metadata.habits // []' 2>/dev/null)
+    if [[ "$habits_array" != "[]" && -n "$habits_array" ]]; then
+        while read -r habit; do
+            [[ -z "$habit" ]] && continue
+            response_text=$(echo "$habit" | jq -r '.response // ""' 2>/dev/null)
+            strength=$(echo "$habit" | jq -r '.strength // 0' 2>/dev/null)
+            if [[ -n "$response_text" && "$response_text" != "null" ]]; then
+                strength_pct=$(awk "BEGIN {printf \"%.0f\", $strength * 100}")
+                HABITS_OUTPUT="${HABITS_OUTPUT}[habit:${strength_pct}%] ${response_text}
 "
-                fi
-            done <<< "$(echo "$habits_array" | jq -c '.[]' 2>/dev/null)"
-        fi
+            fi
+        done <<< "$(echo "$habits_array" | jq -c '.[]' 2>/dev/null)"
     fi
 fi
 
@@ -237,24 +227,21 @@ fi
 # GOALS: Surface active goals for context
 # ===========================================
 GOALS_OUTPUT=""
-if [[ -S "$SOCKET_PATH" ]]; then
-    request='{"jsonrpc":"2.0","id":7,"method":"goal_list","params":{"status":"active","limit":3}}'
-    response=$(timeout 1 echo "$request" | nc -U -N "$SOCKET_PATH" 2>/dev/null || true)
-    if [[ -n "$response" ]]; then
-        goals_array=$(echo "$response" | jq -c '.result.metadata.goals // []' 2>/dev/null)
-        if [[ "$goals_array" != "[]" && -n "$goals_array" ]]; then
-            while read -r goal; do
-                [[ -z "$goal" ]] && continue
-                id=$(echo "$goal" | jq -r '.id // ""' 2>/dev/null)
-                title=$(echo "$goal" | jq -r '.title // ""' 2>/dev/null)
-                progress=$(echo "$goal" | jq -r '.progress // 0' 2>/dev/null)
-                if [[ -n "$title" && "$title" != "null" ]]; then
-                    progress_pct=$(awk "BEGIN {printf \"%.0f\", $progress * 100}")
-                    GOALS_OUTPUT="${GOALS_OUTPUT}[goal:${id}] ${title} (${progress_pct}%)
+response=$(timeout 1 "$CHITTA_BIN" goal_list --status "active" --limit 3 --json 2>/dev/null || true)
+if [[ -n "$response" ]]; then
+    goals_array=$(echo "$response" | jq -c '.metadata.goals // []' 2>/dev/null)
+    if [[ "$goals_array" != "[]" && -n "$goals_array" ]]; then
+        while read -r goal; do
+            [[ -z "$goal" ]] && continue
+            id=$(echo "$goal" | jq -r '.id // ""' 2>/dev/null)
+            title=$(echo "$goal" | jq -r '.title // ""' 2>/dev/null)
+            progress=$(echo "$goal" | jq -r '.progress // 0' 2>/dev/null)
+            if [[ -n "$title" && "$title" != "null" ]]; then
+                progress_pct=$(awk "BEGIN {printf \"%.0f\", $progress * 100}")
+                GOALS_OUTPUT="${GOALS_OUTPUT}[goal:${id}] ${title} (${progress_pct}%)
 "
-                fi
-            done <<< "$(echo "$goals_array" | jq -c '.[]' 2>/dev/null)"
-        fi
+            fi
+        done <<< "$(echo "$goals_array" | jq -c '.[]' 2>/dev/null)"
     fi
 fi
 
@@ -262,12 +249,11 @@ fi
 # CURIOSITY: Surface unresolved knowledge gaps (once per session)
 # ===========================================
 CURIOSITY_OUTPUT=""
-if [[ ! -f "$MIND_PATH/.gaps_surfaced" && -S "$SOCKET_PATH" ]]; then
+if [[ ! -f "$MIND_PATH/.gaps_surfaced" ]]; then
     touch "$MIND_PATH/.gaps_surfaced"
-    request='{"jsonrpc":"2.0","id":8,"method":"curiosity_gaps","params":{"limit":1}}'
-    response=$(timeout 1 echo "$request" | nc -U -N "$SOCKET_PATH" 2>/dev/null || true)
+    response=$(timeout 1 "$CHITTA_BIN" curiosity_gaps --limit 1 --json 2>/dev/null || true)
     if [[ -n "$response" ]]; then
-        gaps_array=$(echo "$response" | jq -c '.result.metadata.gaps // []' 2>/dev/null)
+        gaps_array=$(echo "$response" | jq -c '.metadata.gaps // []' 2>/dev/null)
         if [[ "$gaps_array" != "[]" && -n "$gaps_array" ]]; then
             while read -r gap; do
                 [[ -z "$gap" ]] && continue
@@ -302,23 +288,22 @@ fi
 # CROSS-SESSION MESSAGING: Heartbeat and inbox check
 # ===========================================
 CROSS_SESSION_MSGS=""
-# Refresh session ID for messaging (in case it wasn't available at script start)
-MSG_SESSION_ID=$(get_session_id)
-[[ -z "$MSG_SESSION_ID" ]] && MSG_SESSION_ID="$SESSION_ID"
-if [[ -n "$MSG_SESSION_ID" && "$MSG_SESSION_ID" != "default" && -S "$SOCKET_PATH" ]]; then
-    # Session heartbeat
-    request='{"jsonrpc":"2.0","id":10,"method":"session_heartbeat","params":{"session_id":"'"$MSG_SESSION_ID"'"}}'
-    timeout 0.3 echo "$request" | nc -U "$SOCKET_PATH" >/dev/null 2>&1 || true
+# Use SESSION_ID from JSON input (already extracted above) - most reliable source
+MSG_SESSION_ID="$SESSION_ID"
+if [[ -n "$MSG_SESSION_ID" && "$MSG_SESSION_ID" != "default" ]]; then
+    # Session register (upserts PID on each prompt - handles Claude restarts/resumes)
+    # PPID is Claude's PID (hook runs as: Claude → bash → hook script)
+    CLAUDE_PID=${PPID:-$$}
+    timeout 0.3 "$CHITTA_BIN" session_register --session_id "$MSG_SESSION_ID" --realm "${REALM:-brahman}" --pid "$CLAUDE_PID" >/dev/null 2>&1 || true
 
     # Check for cross-session messages
-    request='{"jsonrpc":"2.0","id":11,"method":"msg_inbox","params":{"session_id":"'"$MSG_SESSION_ID"'","limit":3,"min_priority":1,"auto_ack":true}}'
-    response=$(timeout 1 echo "$request" | nc -U "$SOCKET_PATH" 2>/dev/null || true)
+    response=$(timeout 1 "$CHITTA_BIN" msg_inbox --session_id "$MSG_SESSION_ID" --limit 3 --min_priority 1 --auto_ack --json 2>/dev/null || true)
     if [[ -n "$response" ]]; then
-        msg_count=$(echo "$response" | jq -r '.result.count // 0' 2>/dev/null)
+        msg_count=$(echo "$response" | jq -r '.count // 0' 2>/dev/null)
         if [[ "$msg_count" -gt 0 ]]; then
             # Format messages based on priority:
             # priority 3 = [MSG:URGENT:realm], priority 2 = [MSG:important:realm], else = [msg:realm]
-            CROSS_SESSION_MSGS=$(echo "$response" | jq -r '.result.messages[] |
+            CROSS_SESSION_MSGS=$(echo "$response" | jq -r '.messages[] |
                 if .priority == 3 then "[MSG:URGENT:\(.sender_realm)] \(.content | .[0:150])"
                 elif .priority == 2 then "[MSG:important:\(.sender_realm)] \(.content | .[0:150])"
                 else "[msg:\(.sender_realm)] \(.content | .[0:150])"

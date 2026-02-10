@@ -805,6 +805,20 @@ private:
         handlers_["get"] = [this](const json& p) { return tool_get(p); };
 
         tools_.push_back({
+            {"name", "expand_memory"},
+            {"description", "Expand a memory to its full hierarchical context: SSL memory → episode → full turns"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "string"}, {"description", "Memory ID to expand"}}},
+                    {"depth", {{"type", "integer"}, {"description", "1=memory only, 2=+episode, 3=+full turns (default: 3)"}}}
+                }},
+                {"required", {"id"}}
+            }}
+        });
+        handlers_["expand_memory"] = [this](const json& p) { return tool_expand_memory(p); };
+
+        tools_.push_back({
             {"name", "update"},
             {"description", "Update node content"},
             {"inputSchema", {
@@ -2046,15 +2060,16 @@ private:
         });
         handlers_["list_aspects"] = [this](const json& p) { return tool_list_aspects(p); };
 
-        // Smart recall: unified query intent classification and routing
+        // Smart recall: unified query intent classification and routing with hierarchical expansion
         tools_.push_back({
             {"name", "smart_recall"},
-            {"description", "Intelligent memory recall that classifies query intent and routes to optimal retrieval method. Handles temporal queries (\"last week\"), aspect queries (\"show preferences\"), entity queries, and relationship queries automatically."},
+            {"description", "Intelligent memory recall with hierarchical expansion. Classifies query intent, routes to optimal retrieval, and auto-expands top results to full conversation context. Single entry point for finding the right memory."},
             {"inputSchema", {
                 {"type", "object"},
                 {"properties", {
                     {"query", {{"type", "string"}, {"description", "Natural language query (e.g., 'what happened last week', 'show preferences', 'what connects X and Y')"}}},
                     {"limit", {{"type", "integer"}, {"description", "Max results (default: 20)"}}},
+                    {"expand_top", {{"type", "integer"}, {"description", "Auto-expand top N results to full context: SSL→episode→turns (default: 2, 0=disable)"}}},
                     {"realm", {{"type", "string"}, {"description", "Filter by realm (empty = all realms)"}}},
                     {"include_global", {{"type", "boolean"}, {"description", "Include global memories (default: true)"}}}
                 }},
@@ -2337,6 +2352,24 @@ private:
             }}
         });
         handlers_["get_turns"] = [this](const json& p) { return tool_get_turns(p); };
+
+        tools_.push_back({
+            {"name", "create_episode"},
+            {"description", "Create a dialogue episode for tracking conversation segments. Links to turn ranges for hierarchical retrieval."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"session_id", {{"type", "string"}, {"description", "Session ID"}}},
+                    {"title", {{"type", "string"}, {"description", "Episode title/topic"}}},
+                    {"start_turn", {{"type", "integer"}, {"description", "Starting turn index"}}},
+                    {"end_turn", {{"type", "integer"}, {"description", "Ending turn index (optional, 0 = ongoing)"}}},
+                    {"episode_type", {{"type", "string"}, {"description", "Type: distillation, task, discussion"}}},
+                    {"realm", {{"type", "string"}, {"description", "Realm (default: brahman)"}}}
+                }},
+                {"required", {"session_id", "title", "start_turn"}}
+            }}
+        });
+        handlers_["create_episode"] = [this](const json& p) { return tool_create_episode(p); };
 
         tools_.push_back({
             {"name", "query_claims"},
@@ -5368,6 +5401,73 @@ private:
         });
     }
 
+    DuckDBToolResult tool_expand_memory(const json& params) {
+        auto [db_id, id_str] = parse_id(params);
+        if (id_str.empty()) {
+            return DuckDBToolResult::error("Memory ID is required");
+        }
+
+        int depth = params.value("depth", 3);
+        if (depth < 1) depth = 1;
+        if (depth > 3) depth = 3;
+
+        auto expanded = mind_->store().expand_memory(db_id, depth);
+        if (!expanded) {
+            return DuckDBToolResult::error("Memory not found: " + id_str);
+        }
+
+        std::ostringstream ss;
+        ss << "=== Level 1: SSL Memory ===\n";
+        ss << "ID: " << expanded->memory_id << "\n";
+        ss << "Type: " << expanded->memory_type << "\n";
+        ss << "Confidence: " << expanded->confidence << "\n";
+        ss << "Content:\n" << expanded->memory_content << "\n";
+
+        json result = {
+            {"memory_id", expanded->memory_id},
+            {"memory_type", expanded->memory_type},
+            {"memory_content", expanded->memory_content},
+            {"confidence", expanded->confidence}
+        };
+
+        if (depth >= 2 && expanded->episode_id > 0) {
+            ss << "\n=== Level 2: Episode ===\n";
+            ss << "Episode ID: " << expanded->episode_id << "\n";
+            ss << "Session: " << expanded->session_id << "\n";
+            ss << "Title: " << expanded->episode_title << "\n";
+            ss << "Turn range: " << expanded->start_turn << " - " << expanded->end_turn << "\n";
+            if (!expanded->episode_summary.empty()) {
+                ss << "Summary: " << expanded->episode_summary << "\n";
+            }
+
+            result["episode_id"] = expanded->episode_id;
+            result["session_id"] = expanded->session_id;
+            result["episode_title"] = expanded->episode_title;
+            result["start_turn"] = expanded->start_turn;
+            result["end_turn"] = expanded->end_turn;
+            result["episode_summary"] = expanded->episode_summary;
+        }
+
+        if (depth >= 3 && !expanded->turns.empty()) {
+            ss << "\n=== Level 3: Full Turns (" << expanded->turns.size() << ") ===\n";
+            json turns_json = json::array();
+            for (const auto& turn : expanded->turns) {
+                ss << "\n[" << turn.role << "] (turn " << turn.turn_index << ")\n";
+                ss << turn.content << "\n";
+
+                turns_json.push_back({
+                    {"turn_index", turn.turn_index},
+                    {"role", turn.role},
+                    {"content", turn.content},
+                    {"token_count", turn.token_count}
+                });
+            }
+            result["turns"] = turns_json;
+        }
+
+        return DuckDBToolResult::ok(ss.str(), result);
+    }
+
     DuckDBToolResult tool_update(const json& params) {
         // Notify subconscious of DB activity (idle scheduling)
         if (subconscious_) subconscious_->notify_query();
@@ -5491,6 +5591,38 @@ private:
             exec_provider = embedder_yantra->execution_provider_name();
         }
 
+        // Count stale sessions (with dead PIDs) - use public session_list API
+        auto stale_list = mind_->store().session_list("", "stale");
+        int64_t stale_sessions = static_cast<int64_t>(stale_list.size());
+
+        // Count queue items and failed observations
+        int64_t queue_depth = 0;
+        int64_t failed_observations = 0;
+        const char* home = std::getenv("HOME");
+        if (home) {
+            std::string mind_dir = std::string(home) + "/.claude/mind";
+
+            // Count queue items
+            std::string queue_file = mind_dir + "/.queue.jsonl";
+            std::ifstream qf(queue_file);
+            if (qf) {
+                std::string line;
+                while (std::getline(qf, line)) {
+                    if (!line.empty()) queue_depth++;
+                }
+            }
+
+            // Count failed observations
+            std::string failed_file = mind_dir + "/.failed_observations.jsonl";
+            std::ifstream ff(failed_file);
+            if (ff) {
+                std::string line;
+                while (std::getline(ff, line)) {
+                    if (!line.empty()) failed_observations++;
+                }
+            }
+        }
+
         std::ostringstream ss;
         ss << "Health Check:\n";
         ss << "  Status: " << (is_open ? "OK" : "ERROR") << "\n";
@@ -5500,9 +5632,13 @@ private:
         ss << "  Avg Confidence: " << cached.avg_confidence << "\n";
         ss << "  Yantra: " << (yantra ? "ready" : "not attached") << "\n";
         ss << "  Execution: " << exec_provider << "\n";
+        ss << "  Stale Sessions: " << stale_sessions << "\n";
+        ss << "  Queue Depth: " << queue_depth << "\n";
+        ss << "  Failed Observations: " << failed_observations << "\n";
 
         return DuckDBToolResult::ok(ss.str(), {
             {"status", is_open ? "ok" : "error"},
+            {"daemon", "healthy"},
             {"software_version", CHITTA_VERSION},
             {"protocol_major", CHITTA_PROTOCOL_VERSION_MAJOR},
             {"protocol_minor", CHITTA_PROTOCOL_VERSION_MINOR},
@@ -5511,7 +5647,10 @@ private:
             {"triplets", cached.total_triplets},
             {"avg_confidence", cached.avg_confidence},
             {"yantra_ready", yantra},
-            {"execution_provider", exec_provider}
+            {"execution_provider", exec_provider},
+            {"stale_sessions", stale_sessions},
+            {"queue_depth", queue_depth},
+            {"failed_observations", failed_observations}
         });
     }
 
@@ -8977,6 +9116,7 @@ private:
         }
 
         size_t limit = params.value("limit", 20);
+        size_t expand_top = params.value("expand_top", 2);
         std::string realm = params.value("realm", "");
         bool include_global = params.value("include_global", true);
 
@@ -9173,7 +9313,11 @@ private:
         ss << "══════════════════════════════\n\n";
 
         json results_json = json::array();
-        for (const auto& r : results) {
+        json expanded_json = json::array();
+        size_t expanded_count = 0;
+
+        for (size_t i = 0; i < results.size(); ++i) {
+            const auto& r = results[i];
             // Format timestamp for display
             std::time_t created_sec = r.created_at / 1000;
             std::tm* tm = std::localtime(&created_sec);
@@ -9184,9 +9328,9 @@ private:
             ss << "#" << r.id << " [" << r.kind << "]";
             if (r.similarity > 0) ss << " [" << sim_pct << "%]";
             ss << " " << time_buf << "\n";
-            ss << "  " << r.content.substr(0, 100) << (r.content.size() > 100 ? "..." : "") << "\n\n";
+            ss << "  " << r.content.substr(0, 100) << (r.content.size() > 100 ? "..." : "") << "\n";
 
-            results_json.push_back({
+            json mem_json = {
                 {"id", std::to_string(r.id)},
                 {"kind", r.kind},
                 {"content", r.content},
@@ -9195,7 +9339,44 @@ private:
                 {"created_at", r.created_at},
                 {"created_at_str", std::string(time_buf)},
                 {"realm", r.realm}
-            });
+            };
+
+            // Hierarchical expansion for top N results
+            if (expand_top > 0 && expanded_count < expand_top) {
+                auto expanded = mind_->store().expand_memory(r.id, 3);
+                if (expanded && expanded->episode_id > 0) {
+                    json exp;
+                    exp["memory_id"] = r.id;
+                    exp["episode_id"] = expanded->episode_id;
+                    exp["episode_title"] = expanded->episode_title;
+                    exp["session_id"] = expanded->session_id;
+                    exp["start_turn"] = expanded->start_turn;
+                    exp["end_turn"] = expanded->end_turn;
+
+                    ss << "  └─ Episode: " << expanded->episode_title
+                       << " (turns " << expanded->start_turn << "-" << expanded->end_turn << ")\n";
+
+                    if (!expanded->turns.empty()) {
+                        json turns_arr = json::array();
+                        for (const auto& turn : expanded->turns) {
+                            turns_arr.push_back({
+                                {"role", turn.role},
+                                {"content", turn.content},
+                                {"turn_index", turn.turn_index}
+                            });
+                        }
+                        exp["turns"] = turns_arr;
+                        exp["turn_count"] = expanded->turns.size();
+                    }
+
+                    mem_json["expanded"] = exp;
+                    expanded_json.push_back(exp);
+                    expanded_count++;
+                }
+            }
+
+            results_json.push_back(mem_json);
+            ss << "\n";
         }
 
         return DuckDBToolResult::ok(ss.str(), {
@@ -9207,6 +9388,8 @@ private:
             }},
             {"route", route_taken},
             {"results", results_json},
+            {"expanded", expanded_json},
+            {"expanded_count", expanded_count},
             {"count", results.size()}
         });
     }
@@ -9523,6 +9706,27 @@ private:
     // Cross-Session Messaging Tool Implementations
     // ========================================================================
 
+    // Helper: get parent PID from /proc (Linux)
+    int64_t get_parent_pid(int64_t pid) {
+        std::string stat_path = "/proc/" + std::to_string(pid) + "/stat";
+        std::ifstream stat_file(stat_path);
+        if (!stat_file) return 0;
+
+        std::string line;
+        std::getline(stat_file, line);
+
+        // Format: pid (comm) state ppid ...
+        // Find closing paren, then parse fields after it
+        size_t paren_end = line.rfind(')');
+        if (paren_end == std::string::npos) return 0;
+
+        std::istringstream iss(line.substr(paren_end + 2));
+        char state;
+        int64_t ppid;
+        iss >> state >> ppid;
+        return ppid;
+    }
+
     // Helper: get session ID from params, env, or PID lookup
     std::string get_session_id(const json& params) {
         std::string session_id = params.value("session_id", "");
@@ -9535,15 +9739,20 @@ private:
             return env_session;
         }
 
-        // Try PID lookup if provided (for CLI calls that pass their PPID)
+        // Try PID lookup - walk up process tree to find Claude's PID
         int64_t pid = params.value("pid", 0LL);
         if (pid > 0) {
-            std::ostringstream sql;
-            sql << "SELECT session_id FROM session_registry WHERE pid = " << pid
-                << " AND status = 'active' LIMIT 1";
-            auto result = mind_->store().execute_sql_query(sql.str());
-            if (!result.rows.empty() && !result.rows[0].empty()) {
-                return result.rows[0][0];
+            // Walk up process tree (max 10 levels to avoid infinite loops)
+            for (int depth = 0; depth < 10 && pid > 1; ++depth) {
+                std::ostringstream sql;
+                sql << "SELECT session_id FROM session_registry WHERE pid = " << pid
+                    << " AND status = 'active' LIMIT 1";
+                auto result = mind_->store().execute_sql_query(sql.str());
+                if (!result.rows.empty() && !result.rows[0].empty()) {
+                    return result.rows[0][0];
+                }
+                // Walk up to parent
+                pid = get_parent_pid(pid);
             }
         }
 
@@ -9933,6 +10142,48 @@ private:
         msg << "Found " << turns.size() << " conversation turn(s)";
 
         return DuckDBToolResult::ok(msg.str(), result);
+    }
+
+    DuckDBToolResult tool_create_episode(const json& params) {
+        std::string session_id = params.value("session_id", "");
+        std::string title = params.value("title", "");
+        int start_turn = params.value("start_turn", 0);
+        int end_turn = params.value("end_turn", 0);
+        std::string episode_type = params.value("episode_type", "distillation");
+        std::string realm = params.value("realm", "brahman");
+
+        if (session_id.empty() || title.empty()) {
+            return DuckDBToolResult::error("session_id and title are required");
+        }
+
+        int64_t episode_id = mind_->store().create_dialogue_episode(
+            session_id, title, start_turn, episode_type, realm
+        );
+
+        if (episode_id < 0) {
+            return DuckDBToolResult::error("Failed to create episode");
+        }
+
+        // If end_turn provided, set it directly (close_dialogue_episode would override)
+        if (end_turn > 0) {
+            std::ostringstream sql;
+            sql << "UPDATE dialogue_episode SET end_turn = " << end_turn
+                << ", turn_count = " << (end_turn - start_turn + 1)
+                << ", outcome = 'completed' WHERE id = " << episode_id;
+            mind_->store().execute_raw(sql.str());
+        }
+
+        std::ostringstream msg;
+        msg << "Created episode " << episode_id << ": " << title
+            << " (turns " << start_turn << "-" << (end_turn > 0 ? end_turn : start_turn) << ")";
+
+        return DuckDBToolResult::ok(msg.str(), {
+            {"episode_id", episode_id},
+            {"session_id", session_id},
+            {"title", title},
+            {"start_turn", start_turn},
+            {"end_turn", end_turn}
+        });
     }
 
     DuckDBToolResult tool_query_claims(const json& params) {

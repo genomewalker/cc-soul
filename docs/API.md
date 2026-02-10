@@ -1086,6 +1086,48 @@ Semantic search across transcript content.
 
 Get distillation system status.
 
+### get_turns
+
+Get conversation turns for a session. Returns lossless history of all user and assistant messages.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `session_id` | string | No | Session ID (default: current session) |
+| `start_index` | integer | No | Starting turn index (default: 0) |
+| `limit` | integer | No | Max turns to return (default: 50) |
+
+### create_episode
+
+Create a dialogue episode for tracking conversation segments. Links to turn ranges for hierarchical retrieval.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `session_id` | string | Yes | Session ID |
+| `title` | string | Yes | Episode title/topic |
+| `start_turn` | integer | Yes | Starting turn index |
+| `end_turn` | integer | No | Ending turn index (0 = ongoing) |
+| `episode_type` | string | No | Type: distillation, task, discussion |
+| `realm` | string | No | Realm (default: brahman) |
+
+### expand_memory
+
+Expand a memory to its full hierarchical context: SSL memory → episode → full conversation turns.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | string | Yes | Memory ID (numeric row ID from memory table) |
+| `depth` | integer | No | 1=memory only, 2=+episode, 3=+full turns (default: 3) |
+
+**Returns:** Three levels of context:
+- Level 1: The SSL memory content
+- Level 2: Linked episode with session ID and turn range
+- Level 3: Full conversation turns (user + assistant)
+
+**Usage pattern:**
+1. `recall --query "..."` returns compact SSL memories
+2. If context unclear, `expand_memory --id <id> --depth 3` retrieves full dialogue
+3. Memories link to episodes via triplet: `memory --derived_from--> episode`
+
 ---
 
 ## User Profile

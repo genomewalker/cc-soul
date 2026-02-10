@@ -704,6 +704,8 @@ int run_cli(const std::string& socket_path, const std::string& tool,
         if (arg.rfind("--", 0) == 0) {
             // Named argument: --key value
             std::string key = arg.substr(2);
+            // Normalize hyphens to underscores for consistency with JSON keys
+            std::replace(key.begin(), key.end(), '-', '_');
             if (i + 1 < argc && argv[i + 1][0] != '-') {
                 std::string value = argv[++i];
                 // Try to parse as JSON object/array, number, or boolean

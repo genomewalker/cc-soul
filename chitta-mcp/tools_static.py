@@ -691,6 +691,26 @@ TOOLS = [
         }
     ),
     Tool(
+        name="expand_memory",
+        description="Expand a memory to its full hierarchical context: SSL memory → episode → full turns. Use for drilling down from compressed memories to original conversation.",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "description": "Memory ID to expand",
+                                "type": "string"
+                        },
+                        "depth": {
+                                "description": "Expansion depth: 1=memory only, 2=+episode, 3=+full turns (default: 3)",
+                                "type": "integer"
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
         name="update",
         description="Update node content",
         inputSchema={
@@ -1985,24 +2005,28 @@ TOOLS = [
     ),
     Tool(
         name="smart_recall",
-        description="Intelligent memory recall that classifies query intent and routes to optimal retrieval method. Handles temporal queries (\"last week\"), aspect queries (\"show preferences\"), entity queries, and relationship queries automatically.",
+        description="Intelligent memory recall with hierarchical expansion. Classifies query intent, routes to optimal retrieval, and auto-expands top results to full conversation context. Single entry point for finding the right memory.",
         inputSchema={
                 "properties": {
-                        "include_global": {
-                                "description": "Include global memories (default: True)",
-                                "type": "boolean"
+                        "query": {
+                                "description": "Natural language query (e.g., 'what happened last week', 'show preferences', 'what connects X and Y')",
+                                "type": "string"
                         },
                         "limit": {
                                 "description": "Max results (default: 20)",
                                 "type": "integer"
                         },
-                        "query": {
-                                "description": "Natural language query (e.g., 'what happened last week', 'show preferences', 'what connects X and Y')",
-                                "type": "string"
+                        "expand_top": {
+                                "description": "Auto-expand top N results to full context: SSL→episode→turns (default: 2, 0=disable)",
+                                "type": "integer"
                         },
                         "realm": {
                                 "description": "Filter by realm (empty = all realms)",
                                 "type": "string"
+                        },
+                        "include_global": {
+                                "description": "Include global memories (default: True)",
+                                "type": "boolean"
                         }
                 },
                 "required": [
@@ -2246,6 +2270,40 @@ TOOLS = [
                                 "type": "integer"
                         }
                 },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="create_episode",
+        description="Create a dialogue episode for tracking conversation segments. Links to turn ranges for hierarchical retrieval.",
+        inputSchema={
+                "properties": {
+                        "session_id": {
+                                "description": "Session ID",
+                                "type": "string"
+                        },
+                        "title": {
+                                "description": "Episode title/topic",
+                                "type": "string"
+                        },
+                        "start_turn": {
+                                "description": "Starting turn index",
+                                "type": "integer"
+                        },
+                        "end_turn": {
+                                "description": "Ending turn index (optional, 0 = ongoing)",
+                                "type": "integer"
+                        },
+                        "episode_type": {
+                                "description": "Type: distillation, task, discussion",
+                                "type": "string"
+                        },
+                        "realm": {
+                                "description": "Realm (default: brahman)",
+                                "type": "string"
+                        }
+                },
+                "required": ["session_id", "title", "start_turn"],
                 "type": "object"
         }
     ),

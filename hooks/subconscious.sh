@@ -81,10 +81,10 @@ is_responsive() {
         return 1
     fi
 
-    # Try to get stats with short timeout
+    # Try health check with short timeout (CLI handles socket communication)
     local response
-    response=$(echo "stats" | timeout 3 nc -U "$SOCKET_PATH" 2>/dev/null || true)
-    if [[ -n "$response" && "$response" == *"nodes"* ]]; then
+    response=$(timeout 3 "${HOME}/.claude/bin/chitta" health_check 2>/dev/null || true)
+    if [[ -n "$response" && "$response" == *"daemon"* ]]; then
         return 0
     fi
     return 1
@@ -124,11 +124,11 @@ cmd_start() {
     local existing_pids
     existing_pids=$(pgrep -f "chittad daemon.*--path $MIND_PATH" 2>/dev/null || true)
     if [[ -n "$existing_pids" ]]; then
-        # Check if any are responsive
+        # Check if any are responsive (use CLI instead of netcat)
         if [[ -S "$SOCKET_PATH" ]]; then
             local response
-            response=$(echo "stats" | timeout 2 nc -U "$SOCKET_PATH" 2>/dev/null || true)
-            if [[ -n "$response" && "$response" == *"nodes"* ]]; then
+            response=$(timeout 2 "${HOME}/.claude/bin/chitta" health_check 2>/dev/null || true)
+            if [[ -n "$response" && "$response" == *"daemon"* ]]; then
                 # Healthy daemon exists, nothing to do
                 return 0
             fi
@@ -157,8 +157,8 @@ cmd_start() {
             sleep 0.1
             if [[ -S "$SOCKET_PATH" ]]; then
                 local response
-                response=$(echo "stats" | timeout 2 nc -U "$SOCKET_PATH" 2>/dev/null || true)
-                if [[ -n "$response" && "$response" == *"nodes"* ]]; then
+                response=$(timeout 2 "${HOME}/.claude/bin/chitta" health_check 2>/dev/null || true)
+                if [[ -n "$response" && "$response" == *"daemon"* ]]; then
                     return 0
                 fi
             fi
@@ -211,10 +211,10 @@ cmd_start() {
     wait_start=$(date +%s)
     while true; do
         if [[ -S "$SOCKET_PATH" ]]; then
-            # Socket exists, now verify daemon responds with heartbeat
+            # Socket exists, now verify daemon responds with heartbeat (CLI)
             local response
-            response=$(echo "stats" | run_with_timeout nc -U "$SOCKET_PATH" 2>/dev/null || true)
-            if [[ -n "$response" && "$response" == *"nodes"* ]]; then
+            response=$(run_with_timeout "${HOME}/.claude/bin/chitta" health_check 2>/dev/null || true)
+            if [[ -n "$response" && "$response" == *"daemon"* ]]; then
                 daemon_ready=true
                 break
             fi

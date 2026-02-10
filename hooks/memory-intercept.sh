@@ -74,15 +74,9 @@ if [[ -n "$IMPORT_CONTENT" && "$IMPORT_CONTENT" != *"Chitta Soul"* ]]; then
     # Format as SSL and remember
     SSL_CONTENT="[memory:$PROJECT_NAME] Claude Code MEMORY.md import\n$IMPORT_CONTENT"
 
-    # Use remember to store (fire-and-forget via socket)
-    SOCKET_PATH="${CHITTA_SOCKET:-/tmp/chitta-*.sock}"
-    SOCKET=$(ls $SOCKET_PATH 2>/dev/null | head -1)
-
-    if [[ -S "$SOCKET" ]]; then
-        # Queue the import
-        ESCAPED_CONTENT=$(echo -e "$SSL_CONTENT" | jq -Rs '.')
-        REQUEST="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"remember\",\"params\":{\"content\":$ESCAPED_CONTENT,\"tags\":[\"memory-import\",\"$PROJECT_NAME\"]}}"
-        echo "$REQUEST" | timeout 2 nc -U "$SOCKET" >/dev/null 2>&1 || true
+    # Use remember to store (fire-and-forget via CLI)
+    ESCAPED_CONTENT=$(echo -e "$SSL_CONTENT")
+    if timeout 2 "$CHITTA_BIN" remember --content "$ESCAPED_CONTENT" --tags "memory-import,$PROJECT_NAME" >/dev/null 2>&1; then
         echo "[memory-intercept] Imported to chitta" >&2
     fi
 fi

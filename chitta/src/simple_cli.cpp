@@ -31,6 +31,8 @@
 #include <sstream>
 #include <nlohmann/json.hpp>
 #include <set>
+#include <unordered_map>
+#include <mutex>
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -47,11 +49,13 @@ static std::atomic<bool> verbose_mode{false};
 
 // Distillation configuration
 struct DistillConfig {
-    int interval_minutes = 5;       // How often to check for batches
+    int interval_minutes = 15;      // Timer-based check interval (safety net, reduced from 5)
     int min_turns = 4;              // Minimum turns before distilling
     std::string script_path;        // Path to distillation script
     std::string model = "github-copilot/gpt-5-mini";  // OpenCode model
     bool enabled = true;
+    int64_t token_trigger_chars = 120000;  // Token-triggered: ~30k tokens (chars/4), 0 = disabled
+    int cooldown_seconds = 180;     // Minimum seconds between token-triggered distillations per session
 };
 
 // Code enrichment configuration (semantic descriptions for symbols)
@@ -519,9 +523,14 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
             release_lock(lock);
             return 1;
         }
-        std::cerr << "[daemon] Distillation enabled (interval=" << distill_config.interval_minutes
+        std::cerr << "[daemon] Distillation enabled (timer=" << distill_config.interval_minutes
                   << "m, min_turns=" << distill_config.min_turns
-                  << ", model=" << distill_config.model << ")\n";
+                  << ", model=" << distill_config.model;
+        if (distill_config.token_trigger_chars > 0) {
+            std::cerr << ", token_trigger=" << distill_config.token_trigger_chars
+                      << " chars, cooldown=" << distill_config.cooldown_seconds << "s";
+        }
+        std::cerr << ")\n";
     }
 
     // Check for enrichment (uses same opencode)
@@ -844,6 +853,12 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
     std::atomic<size_t> queue_count{0};
     std::atomic<size_t> queue_distill_count{0};  // Separate counter for pre-compact distillations
     std::string queue_path = "/tmp/chitta-queue.jsonl";
+
+    // Token-triggered distillation: per-session content accumulators
+    std::unordered_map<std::string, int64_t> session_content_accum;
+    std::unordered_map<std::string, std::chrono::steady_clock::time_point> session_last_distill;
+    std::mutex session_accum_mutex;  // Protect the maps
+
     std::thread queue_processor([&]() {
         while (daemon_running) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -1091,6 +1106,7 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                             turn.role = role;
                             turn.content = content;
                             turn.turn_index = turn_index >= 0 ? turn_index : 0;
+                            turn.token_count = static_cast<int>(content.size() / 4);  // Rough token estimate
                             turn.realm = args.value("realm", "brahman");
                             turn.intent_type = args.value("intent_type", "");
                             turn.tools_used = args.value("tools_used", "[]");
@@ -1098,6 +1114,33 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                             turn.has_error = args.value("has_error", false);
                             mind.store().store_conversation_turn(turn);
                             queue_count++;
+
+                            // Token-triggered distillation: accumulate content and check threshold
+                            if (distill_config.enabled && distill_config.token_trigger_chars > 0) {
+                                std::lock_guard<std::mutex> lock(session_accum_mutex);
+                                session_content_accum[session_id] += static_cast<int64_t>(content.size());
+
+                                if (session_content_accum[session_id] >= distill_config.token_trigger_chars) {
+                                    auto now = std::chrono::steady_clock::now();
+                                    auto cooldown = std::chrono::seconds(distill_config.cooldown_seconds);
+                                    auto& last = session_last_distill[session_id];
+
+                                    if (now - last >= cooldown) {
+                                        // Look up transcript for this session and trigger distillation
+                                        auto state_opt = mind.store().get_transcript(session_id);
+                                        if (state_opt) {
+                                            std::cerr << "[queue] Token-triggered distillation for " << session_id
+                                                      << " (" << session_content_accum[session_id] << " chars)\n";
+                                            bool success = run_distillation(mind, *state_opt, distill_config, false);
+                                            if (success) {
+                                                queue_distill_count++;
+                                            }
+                                        }
+                                        last = now;
+                                        session_content_accum[session_id] = 0;
+                                    }
+                                }
+                            }
                         }
                     } else if (tool == "store_claim") {
                         // Store semantic claim
@@ -1218,16 +1261,13 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
             if (method == "tools/call" && parsed.contains("params")) {
                 tool_name = parsed["params"].value("name", "unknown");
 
-                // For messaging tools, inject PPID for session lookup if session_id not provided
-                static const std::set<std::string> MSG_TOOLS = {
-                    "msg_inbox", "msg_send", "msg_ack", "msg_ack_all", "msg_history"
-                };
-                if (MSG_TOOLS.count(tool_name) && parsed["params"].contains("arguments")) {
+                // For session-aware tools, inject peer PID for session lookup if session_id not provided
+                // The peer_pid is the CLI process; its parent (PPID) is Claude
+                if (parsed["params"].contains("arguments")) {
                     auto& args = parsed["params"]["arguments"];
                     if (!args.contains("session_id") || args["session_id"].get<std::string>().empty()) {
-                        pid_t ppid = getppid();
-                        if (ppid > 1) {
-                            args["pid"] = static_cast<int64_t>(ppid);
+                        if (req.peer_pid > 1) {
+                            args["pid"] = static_cast<int64_t>(req.peer_pid);
                         }
                     }
                 }
@@ -1355,10 +1395,12 @@ void print_usage(const char* prog) {
               << "  --verbose          Verbose logging\n"
               << "  -v, --version      Show version\n"
               << "\nDistillation:\n"
-              << "  --distill-interval MINS  Distillation interval (default: 5)\n"
+              << "  --distill-interval MINS  Timer-based interval (default: 15, safety net)\n"
               << "  --distill-min-turns N    Min turns before distilling (default: 4)\n"
               << "  --distill-script PATH    Distillation script path\n"
               << "  --distill-model MODEL    OpenCode model (default: github-copilot/gpt-5-mini)\n"
+              << "  --distill-token-trigger N  Token-triggered: chars threshold (default: 120000 ~30k tokens, 0=off)\n"
+              << "  --distill-cooldown SECS  Min seconds between token-triggered distillations (default: 180)\n"
               << "  --no-distill             Disable automatic distillation\n"
               << "\nCode Enrichment (semantic descriptions):\n"
               << "  --enrich-interval MINS   Enrichment interval (default: 2)\n"
@@ -1422,6 +1464,10 @@ int main(int argc, char* argv[]) {
             distill_config.script_path = argv[++i];
         } else if (strcmp(argv[i], "--distill-model") == 0 && i + 1 < argc) {
             distill_config.model = argv[++i];
+        } else if (strcmp(argv[i], "--distill-token-trigger") == 0 && i + 1 < argc) {
+            distill_config.token_trigger_chars = safe_stoi(argv[++i], "--distill-token-trigger");
+        } else if (strcmp(argv[i], "--distill-cooldown") == 0 && i + 1 < argc) {
+            distill_config.cooldown_seconds = safe_stoi(argv[++i], "--distill-cooldown");
         } else if (strcmp(argv[i], "--no-distill") == 0) {
             distill_config.enabled = false;
         } else if (strcmp(argv[i], "--enrich-interval") == 0 && i + 1 < argc) {

@@ -1232,6 +1232,10 @@ public:
                                                     const std::string& status = "active");
     size_t session_cleanup_dead(int64_t timeout_ms = 600000);
 
+    // Heal session registry by checking if PIDs are still alive
+    // Returns number of sessions marked as dead
+    size_t session_heal();
+
     // Sync registry with running processes and transcripts
     struct SessionSyncResult {
         size_t discovered = 0;      // New sessions found from transcripts
@@ -1308,6 +1312,30 @@ public:
     std::optional<DialogueEpisode> get_dialogue_episode(int64_t episode_id);
     std::vector<DialogueEpisode> list_dialogue_episodes(
         const std::string& session_id, size_t limit = 20);
+
+    // Hierarchical memory expansion - drill down from SSL to full context
+    struct ExpandedMemory {
+        // Level 1: The SSL memory itself
+        int64_t memory_id = 0;
+        std::string memory_content;
+        std::string memory_type;
+        float confidence = 0.0f;
+
+        // Level 2: Linked episode (if any)
+        int64_t episode_id = 0;
+        std::string episode_title;
+        std::string episode_summary;
+        std::string session_id;
+        int32_t start_turn = 0;
+        int32_t end_turn = 0;
+
+        // Level 3: Full conversation turns
+        std::vector<ConversationTurn> turns;
+    };
+
+    // Expand a memory to its full hierarchical context
+    // depth: 1 = memory only, 2 = + episode, 3 = + full turns
+    std::optional<ExpandedMemory> expand_memory(int64_t memory_id, int depth = 3);
 
     // Claims - semantic memory with contradiction handling
     struct Claim {
