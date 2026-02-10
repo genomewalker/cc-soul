@@ -1,0 +1,156 @@
+#include "../include/chitta/transcript_parser.hpp"
+#include <sstream>
+
+namespace chitta {
+
+using json = nlohmann::json;
+
+std::vector<ConversationTurn> TranscriptParser::parse(
+    const std::string& path,
+    const TranscriptParseOptions& options,
+    int64_t* last_line
+) {
+    std::vector<ConversationTurn> turns;
+    last_error_.clear();
+
+    std::ifstream file(path);
+    if (!file) {
+        last_error_ = "Cannot open file: " + path;
+        return turns;
+    }
+
+    std::string line;
+    int64_t current_line = 0;
+    int turn_index = 0;
+
+    // Skip to checkpoint
+    while (current_line < options.skip_lines && std::getline(file, line)) {
+        current_line++;
+    }
+
+    while (std::getline(file, line)) {
+        current_line++;
+        if (line.empty()) continue;
+
+        try {
+            auto entry = json::parse(line);
+            std::string type = entry.value("type", "");
+
+            if (type != "user" && type != "assistant") continue;
+
+            std::string content = extract_content(entry, options.include_thinking, options.filter_system_reminders);
+
+            if (!content.empty()) {
+                ConversationTurn turn;
+                turn.role = type;
+                turn.content = content;
+                turn.line_number = current_line;
+                turn.turn_index = turn_index++;
+                turns.push_back(std::move(turn));
+            }
+        } catch (const json::exception& e) {
+            // Skip malformed lines silently
+            continue;
+        }
+    }
+
+    if (last_line) {
+        *last_line = current_line;
+    }
+
+    return turns;
+}
+
+std::string TranscriptParser::extract_content(const nlohmann::json& entry, bool include_thinking, bool filter_reminders) {
+    std::string content;
+
+    if (!entry.contains("message")) return content;
+
+    const auto& msg = entry["message"];
+    if (!msg.contains("content")) return content;
+
+    const auto& msg_content = msg["content"];
+
+    if (msg_content.is_string()) {
+        content = msg_content.get<std::string>();
+        if (filter_reminders) {
+            content = filter_system_reminders(content);
+        }
+    } else if (msg_content.is_array()) {
+        for (const auto& block : msg_content) {
+            std::string block_type = block.value("type", "");
+
+            if (block_type == "text" && block.contains("text")) {
+                std::string text = block["text"].get<std::string>();
+
+                if (filter_reminders) {
+                    text = filter_system_reminders(text);
+                }
+
+                // Skip if only whitespace remains
+                if (text.find_first_not_of(" \t\n\r") == std::string::npos) continue;
+
+                if (!content.empty()) content += "\n";
+                content += text;
+            }
+            else if (include_thinking && block_type == "thinking" && block.contains("thinking")) {
+                std::string thinking = block["thinking"].get<std::string>();
+                // Only include substantial thinking (>100 chars)
+                if (thinking.size() > 100) {
+                    if (!content.empty()) content += "\n";
+                    content += "<thinking>\n" + thinking + "\n</thinking>";
+                }
+            }
+            // Skip tool_use, tool_result - just noise for distillation
+        }
+    }
+
+    return content;
+}
+
+std::string TranscriptParser::filter_system_reminders(const std::string& text) {
+    std::string result = text;
+    size_t pos;
+
+    while ((pos = result.find("<system-reminder>")) != std::string::npos) {
+        size_t end = result.find("</system-reminder>", pos);
+        if (end != std::string::npos) {
+            result.erase(pos, end - pos + 18); // 18 = length of "</system-reminder>"
+        } else {
+            result.erase(pos);
+        }
+    }
+
+    return result;
+}
+
+std::string TranscriptParser::build_conversation(
+    const std::vector<ConversationTurn>& turns,
+    const TruncationParams& params
+) {
+    std::ostringstream ss;
+
+    for (const auto& turn : turns) {
+        ss << "[" << turn.role << "]\n" << turn.content << "\n\n";
+    }
+
+    std::string conversation = ss.str();
+
+    // Apply smart truncation if needed
+    if (conversation.size() > params.max_chars) {
+        std::string head_part = conversation.substr(0, params.head_chars);
+        std::string tail_part = conversation.substr(conversation.size() - params.tail_chars);
+
+        std::ostringstream truncated;
+        truncated << head_part
+                  << "\n\n[... truncated " << conversation.size() << " chars, keeping first "
+                  << params.head_chars << " + last " << params.tail_chars << " ...]\n\n"
+                  << tail_part;
+
+        return truncated.str();
+    }
+
+    return conversation;
+}
+
+} // namespace chitta

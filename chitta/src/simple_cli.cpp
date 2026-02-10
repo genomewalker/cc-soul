@@ -14,6 +14,7 @@
 #include <chitta/rpc/thread_pool.hpp>
 #include <chitta/socket_server.hpp>
 #include <chitta/socket_client.hpp>
+#include <chitta/native_distiller.hpp>
 #include <chitta/version.hpp>
 #ifdef CHITTA_WITH_ONNX
 #include <chitta/vak_onnx.hpp>
@@ -267,204 +268,52 @@ std::string default_enrich_script() {
     return std::string(home ? home : ".") + "/.claude/hooks/enrich-code.sh";
 }
 
-// Run distillation for a single transcript
+// Run distillation for a single transcript using native C++ distiller
 // Returns true if distillation was successful
 // queue_triggered: if true, uses min_turns=1 (for pre-compact immediate distillation)
 bool run_distillation(DuckDBMind& mind, const TranscriptState& state,
                       const DistillConfig& config, bool queue_triggered = false) {
-    // Parse transcript for new turns
-    std::ifstream file(state.transcript_path);
-    if (!file) {
-        if (verbose_mode) {
-            std::cerr << "[distill] Cannot open: " << state.transcript_path << "\n";
-        }
-        return false;
-    }
+    // Configure native distiller
+    NativeDistillConfig native_config;
+    native_config.model = config.model;
+    native_config.timeout_secs = 150;  // Same as old shell timeout
+    native_config.min_turns = config.min_turns;
+    native_config.verbose = verbose_mode;
 
-    // Skip to last processed line
-    std::string line;
-    int64_t current_line = 0;
-    while (current_line < state.last_processed_line && std::getline(file, line)) {
-        current_line++;
-    }
+    NativeDistiller distiller(mind, native_config);
 
-    // Parse new turns
-    std::vector<std::pair<std::string, std::string>> turns;  // (role, content)
-    int64_t last_line = state.last_processed_line;
-
-    while (std::getline(file, line)) {
-        current_line++;
-        if (line.empty()) continue;
-
-        try {
-            auto entry = json::parse(line);
-            std::string type = entry.value("type", "");
-            if (type != "user" && type != "assistant") continue;
-
-            std::string content;
-            if (entry.contains("message")) {
-                auto& msg = entry["message"];
-                if (msg.contains("content")) {
-                    auto& msg_content = msg["content"];
-                    if (msg_content.is_string()) {
-                        content = msg_content.get<std::string>();
-                    } else if (msg_content.is_array()) {
-                        for (const auto& block : msg_content) {
-                            std::string block_type = block.value("type", "");
-                            // Extract text blocks
-                            if (block_type == "text" && block.contains("text")) {
-                                std::string text = block["text"].get<std::string>();
-                                // Filter out system-reminder noise
-                                size_t pos;
-                                while ((pos = text.find("<system-reminder>")) != std::string::npos) {
-                                    size_t end = text.find("</system-reminder>", pos);
-                                    if (end != std::string::npos) {
-                                        text.erase(pos, end - pos + 18);
-                                    } else {
-                                        text.erase(pos);
-                                    }
-                                }
-                                // Skip if only whitespace remains
-                                if (text.find_first_not_of(" \t\n\r") == std::string::npos) continue;
-                                if (!content.empty()) content += "\n";
-                                content += text;
-                            }
-                            // Extract thinking blocks (valuable reasoning)
-                            else if (block_type == "thinking" && block.contains("thinking")) {
-                                std::string thinking = block["thinking"].get<std::string>();
-                                // Only include substantial thinking (>100 chars)
-                                if (thinking.size() > 100) {
-                                    if (!content.empty()) content += "\n";
-                                    content += "<thinking>\n" + thinking + "\n</thinking>";
-                                }
-                            }
-                            // Skip tool_use, tool_result - just noise for distillation
-                        }
-                    }
-                }
-            }
-
-            if (!content.empty()) {
-                turns.emplace_back(type, content);
-                last_line = current_line;
-            }
-        } catch (...) {
-            continue;
-        }
-    }
-
-    // Check if we have enough turns
-    // For queue-triggered (pre-compact), use min_turns=1 to capture final turns
-    int effective_min_turns = queue_triggered ? 1 : config.min_turns;
-    if (static_cast<int>(turns.size()) < effective_min_turns) {
-        if (verbose_mode && queue_triggered) {
-            std::cerr << "[distill] Queue-triggered " << state.session_id
-                      << ": only " << turns.size() << " turns, need at least 1\n";
-        }
-        return false;
-    }
-
+    // Set log callback if verbose
     if (verbose_mode) {
-        std::cerr << "[distill] Session " << state.session_id
-                  << ": " << turns.size() << " new turns\n";
+        distiller.set_log_callback([](const std::string& msg) {
+            std::cerr << msg << "\n";
+        });
     }
 
-    // Build conversation text for distillation
-    std::ostringstream conversation;
-    for (const auto& [role, content] : turns) {
-        conversation << "[" << role << "]\n" << content << "\n\n";
+    // Run distillation
+    auto result = distiller.distill_session(
+        state.session_id,
+        state.transcript_path,
+        state.realm,
+        state.last_processed_line,
+        queue_triggered
+    );
+
+    if (!result.success) {
+        if (verbose_mode && !result.error.empty()) {
+            std::cerr << "[distill] " << state.session_id << ": " << result.error << "\n";
+        }
+        return false;
     }
 
-    // Call distillation script if configured
-    if (!config.script_path.empty()) {
-        // Write conversation to temp file
-        std::string temp_path = "/tmp/distill-" + state.session_id + ".txt";
-        {
-            std::ofstream temp(temp_path);
-            if (temp) {
-                temp << "SESSION_ID=" << state.session_id << "\n";
-                temp << "REALM=" << state.realm << "\n";
-                temp << "MODEL=" << config.model << "\n";
-                temp << "---\n";
-                temp << conversation.str();
-            }
-        }
-
-        // Execute script synchronously with timeout (150s max)
-        // Only mark as distilled after script succeeds
-        pid_t pid = fork();
-        if (pid == 0) {
-            // Child process - run script
-            // Use execv with explicit argv to avoid shell command injection
-            int devnull = open("/dev/null", O_RDWR);
-            if (devnull >= 0) {
-                dup2(devnull, STDOUT_FILENO);
-                dup2(devnull, STDERR_FILENO);
-                close(devnull);
-            }
-            const char* argv[] = {config.script_path.c_str(), temp_path.c_str(), nullptr};
-            execv(config.script_path.c_str(), const_cast<char* const*>(argv));
-            // execv failed - clean up temp file and exit
-            std::remove(temp_path.c_str());
-            _exit(1);
-        } else if (pid < 0) {
-            // Fork failed, cleanup
-            std::remove(temp_path.c_str());
-            if (verbose_mode) {
-                std::cerr << "[distill] Fork failed for " << state.session_id << "\n";
-            }
-            return false;
-        }
-
-        // Parent waits for child with timeout (150 seconds max)
-        constexpr int timeout_secs = 150;
-        int status = 0;
-        bool finished = false;
-
-        for (int i = 0; i < timeout_secs && daemon_running; i++) {
-            int result = waitpid(pid, &status, WNOHANG);
-            if (result > 0) {
-                finished = true;
-                break;
-            } else if (result < 0) {
-                // Error - child already reaped or doesn't exist
-                finished = true;
-                break;
-            }
-            std::this_thread::sleep_for(std::chrono::seconds(1));
-        }
-
-        if (!finished) {
-            // Timeout - kill child and don't mark as distilled
-            kill(pid, SIGKILL);
-            waitpid(pid, &status, 0);
-            std::remove(temp_path.c_str());
-            std::cerr << "[distill] Timeout after " << timeout_secs << "s for "
-                      << state.session_id << " (will retry)\n";
-            return false;
-        }
-
-        // Check exit status
-        if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-            std::remove(temp_path.c_str());
-            if (verbose_mode) {
-                int exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
-                std::cerr << "[distill] Script failed for " << state.session_id
-                          << " (exit=" << exit_code << ", will retry)\n";
-            }
-            return false;
-        }
-
-        // Script succeeded - temp file cleaned up by script
-    }
-
-    // Update progress ONLY after script succeeds (using thread-safe methods)
-    mind.update_transcript_progress(state.session_id, last_line);
+    // Update progress (using thread-safe methods)
+    mind.update_transcript_progress(state.session_id, result.last_line);
     mind.mark_transcript_distilled(state.session_id);
 
     if (verbose_mode) {
         std::cerr << "[distill] Completed " << state.session_id
-                  << " (line " << last_line << ")\n";
+                  << " (line " << result.last_line << ", +"
+                  << result.learnings_stored << " learnings, "
+                  << result.triplets_created << " triplets)\n";
     }
 
     return true;
@@ -1387,6 +1236,7 @@ void print_usage(const char* prog) {
               << "  shutdown   Stop running daemon\n"
               << "  status     Check daemon status\n"
               << "  stats      Show soul statistics\n"
+              << "  distill    Run manual distillation on a transcript\n"
               << "  help       Show this help\n\n"
               << "Options:\n"
               << "  --path PATH        Mind storage path (DuckDB)\n"
@@ -1394,10 +1244,14 @@ void print_usage(const char* prog) {
               << "  -f, --foreground   Run in foreground\n"
               << "  --verbose          Verbose logging\n"
               << "  -v, --version      Show version\n"
-              << "\nDistillation:\n"
+              << "\nManual Distillation (distill command):\n"
+              << "  --transcript-path PATH   JSONL transcript file to distill (required)\n"
+              << "  --session-id ID          Session ID (auto-extracted from path if omitted)\n"
+              << "  --realm REALM            Target realm (default: brahman)\n"
+              << "\nAutomatic Distillation (daemon):\n"
               << "  --distill-interval MINS  Timer-based interval (default: 15, safety net)\n"
               << "  --distill-min-turns N    Min turns before distilling (default: 4)\n"
-              << "  --distill-script PATH    Distillation script path\n"
+              << "  --distill-script PATH    Distillation script path (ignored, uses native)\n"
               << "  --distill-model MODEL    OpenCode model (default: github-copilot/gpt-5-mini)\n"
               << "  --distill-token-trigger N  Token-triggered: chars threshold (default: 120000 ~30k tokens, 0=off)\n"
               << "  --distill-cooldown SECS  Min seconds between token-triggered distillations (default: 180)\n"
@@ -1432,6 +1286,11 @@ int main(int argc, char* argv[]) {
     // Code enrichment config
     EnrichConfig enrich_config;
     enrich_config.script_path = default_enrich_script();
+
+    // Manual distill command args
+    std::string distill_transcript_path;
+    std::string distill_session_id;
+    std::string distill_realm = "brahman";
 
     auto safe_stoi = [&](const char* arg, const char* option_name) -> int {
         try {
@@ -1480,6 +1339,12 @@ int main(int argc, char* argv[]) {
             enrich_config.model = argv[++i];
         } else if (strcmp(argv[i], "--no-enrich") == 0) {
             enrich_config.enabled = false;
+        } else if (strcmp(argv[i], "--transcript-path") == 0 && i + 1 < argc) {
+            distill_transcript_path = argv[++i];
+        } else if (strcmp(argv[i], "--session-id") == 0 && i + 1 < argc) {
+            distill_session_id = argv[++i];
+        } else if (strcmp(argv[i], "--realm") == 0 && i + 1 < argc) {
+            distill_realm = argv[++i];
         } else if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--version") == 0) {
             std::cout << "chittad " << CHITTA_VERSION << "\n";
             return 0;
@@ -1558,6 +1423,40 @@ int main(int argc, char* argv[]) {
         result = cmd_daemon(mind, interval, sock_path, mind_path, pid_file, distill_config, enrich_config);
     } else if (command == "stats") {
         result = cmd_stats(mind);
+    } else if (command == "distill") {
+        // Manual distillation command
+        if (distill_transcript_path.empty()) {
+            std::cerr << "Error: --transcript-path is required for distill command\n";
+            return 1;
+        }
+        if (distill_session_id.empty()) {
+            // Try to extract session ID from path (e.g., /path/to/abc123.jsonl -> abc123)
+            size_t last_slash = distill_transcript_path.rfind('/');
+            size_t start = (last_slash == std::string::npos) ? 0 : last_slash + 1;
+            size_t dot = distill_transcript_path.rfind('.');
+            if (dot != std::string::npos && dot > start) {
+                distill_session_id = distill_transcript_path.substr(start, dot - start);
+            } else {
+                std::cerr << "Error: --session-id is required (could not extract from path)\n";
+                return 1;
+            }
+        }
+
+        verbose_mode = true;  // Enable verbose for manual distillation
+        std::cerr << "[distill] Transcript: " << distill_transcript_path << "\n";
+        std::cerr << "[distill] Session:    " << distill_session_id << "\n";
+        std::cerr << "[distill] Realm:      " << distill_realm << "\n";
+        std::cerr << "[distill] Model:      " << distill_config.model << "\n";
+
+        // Create TranscriptState for the run_distillation function
+        TranscriptState state;
+        state.session_id = distill_session_id;
+        state.transcript_path = distill_transcript_path;
+        state.realm = distill_realm;
+        state.last_processed_line = 0;  // Process from beginning
+
+        bool success = run_distillation(mind, state, distill_config, false);
+        result = success ? 0 : 1;
     } else {
         std::cerr << "Unknown command: " << command << "\n";
         print_usage(argv[0]);

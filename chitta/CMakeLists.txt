@@ -433,6 +433,9 @@ add_executable(chittad
     src/socket_server.cpp
     src/socket_client.cpp
     src/subconscious.cpp
+    src/transcript_parser.cpp
+    src/ssl_parser.cpp
+    src/native_distiller.cpp
 )
 target_link_libraries(chittad PRIVATE chitta duckdb_store)
 
