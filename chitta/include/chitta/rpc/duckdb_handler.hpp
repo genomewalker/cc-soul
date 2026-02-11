@@ -10,7 +10,9 @@
 #include "../symbol_resolver.hpp"
 #include "../version.hpp"
 #include "../query_intent.hpp"
+#include "../transcript_parser.hpp"
 #include <nlohmann/json.hpp>
+#include <glob.h>
 #include <string>
 #include <vector>
 #include <map>
@@ -2334,6 +2336,25 @@ private:
             }}
         });
         handlers_["session_sync"] = [this](const json& p) { return tool_session_sync(p); };
+
+        tools_.push_back({
+            {"name", "read_transcript"},
+            {"description", "Read JSONL transcript file directly with pagination. Use for exploring conversations without loading into memory. Returns metadata and paginated turns."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"path", {{"type", "string"}, {"description", "Path to JSONL transcript file"}}},
+                    {"session_id", {{"type", "string"}, {"description", "Session ID (auto-finds transcript if path not provided)"}}},
+                    {"start_turn", {{"type", "integer"}, {"description", "Starting turn index (default: 0)"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Max turns to return (default: 20)"}}},
+                    {"max_chars_per_turn", {{"type", "integer"}, {"description", "Truncate turn content (default: 500, 0=full)"}}},
+                    {"role_filter", {{"type", "string"}, {"description", "Filter by role: user, assistant, or empty for all"}}},
+                    {"keyword", {{"type", "string"}, {"description", "Filter turns containing this keyword"}}},
+                    {"metadata_only", {{"type", "boolean"}, {"description", "Return only file metadata (turn count, size) without content"}}}
+                }}
+            }}
+        });
+        handlers_["read_transcript"] = [this](const json& p) { return tool_read_transcript(p); };
 
         // ========================================================================
         // Conversational Memory System - Lossless storage and retrieval
@@ -9358,15 +9379,35 @@ private:
 
                     if (!expanded->turns.empty()) {
                         json turns_arr = json::array();
+                        size_t total_chars = 0;
+                        const size_t max_total_chars = 20000;  // Limit expanded content
+                        const size_t max_turn_chars = 2000;    // Limit per turn
+
                         for (const auto& turn : expanded->turns) {
+                            if (total_chars >= max_total_chars) {
+                                turns_arr.push_back({
+                                    {"role", "system"},
+                                    {"content", "[... truncated, " + std::to_string(expanded->turns.size() - turns_arr.size()) + " more turns]"},
+                                    {"turn_index", -1}
+                                });
+                                break;
+                            }
+
+                            std::string content = turn.content;
+                            if (content.size() > max_turn_chars) {
+                                content = content.substr(0, max_turn_chars) + "... [truncated]";
+                            }
+                            total_chars += content.size();
+
                             turns_arr.push_back({
                                 {"role", turn.role},
-                                {"content", turn.content},
+                                {"content", content},
                                 {"turn_index", turn.turn_index}
                             });
                         }
                         exp["turns"] = turns_arr;
                         exp["turn_count"] = expanded->turns.size();
+                        exp["truncated"] = total_chars >= max_total_chars;
                     }
 
                     mem_json["expanded"] = exp;
@@ -10107,6 +10148,141 @@ private:
             {"updated", result.updated},
             {"marked_dead", result.marked_dead}
         });
+    }
+
+    DuckDBToolResult tool_read_transcript(const json& params) {
+        std::string path = params.value("path", "");
+        std::string session_id = params.value("session_id", "");
+        int start_turn = params.value("start_turn", 0);
+        size_t limit = params.value("limit", 20);
+        size_t max_chars = params.value("max_chars_per_turn", 500);
+        std::string role_filter = params.value("role_filter", "");
+        std::string keyword = params.value("keyword", "");
+        bool metadata_only = params.value("metadata_only", false);
+
+        // Find transcript path from session_id if not provided
+        if (path.empty() && !session_id.empty()) {
+            // Try common locations using glob
+            std::string home = std::getenv("HOME") ? std::getenv("HOME") : "";
+            std::string pattern = home + "/.claude/projects/*/" + session_id + ".jsonl";
+
+            glob_t glob_result;
+            if (glob(pattern.c_str(), GLOB_TILDE, nullptr, &glob_result) == 0) {
+                if (glob_result.gl_pathc > 0) {
+                    path = glob_result.gl_pathv[0];
+                }
+                globfree(&glob_result);
+            }
+        }
+
+        if (path.empty()) {
+            return DuckDBToolResult::error("No transcript path provided and couldn't find session");
+        }
+
+        // Parse transcript
+        TranscriptParser parser;
+        TranscriptParseOptions opts;
+        opts.filter_system_reminders = true;
+        opts.include_thinking = false;  // Skip thinking blocks for brevity
+
+        int64_t last_line = 0;
+        auto all_turns = parser.parse(path, opts, &last_line);
+
+        if (all_turns.empty()) {
+            return DuckDBToolResult::error("Failed to parse transcript: " + parser.last_error());
+        }
+
+        // Calculate metadata
+        size_t total_chars = 0;
+        for (const auto& t : all_turns) total_chars += t.content.size();
+
+        json result;
+        result["path"] = path;
+        result["total_turns"] = all_turns.size();
+        result["total_chars"] = total_chars;
+        result["last_line"] = last_line;
+
+        if (metadata_only) {
+            std::ostringstream ss;
+            ss << "Transcript: " << path << "\n"
+               << "Total turns: " << all_turns.size() << "\n"
+               << "Total chars: " << total_chars << "\n"
+               << "Lines: " << last_line;
+            return DuckDBToolResult::ok(ss.str(), result);
+        }
+
+        // Apply filters and pagination
+        std::vector<ConversationTurn> filtered;
+        for (size_t i = 0; i < all_turns.size(); i++) {
+            const auto& t = all_turns[i];
+
+            // Role filter
+            if (!role_filter.empty() && t.role != role_filter) continue;
+
+            // Keyword filter
+            if (!keyword.empty()) {
+                if (t.content.find(keyword) == std::string::npos) continue;
+            }
+
+            filtered.push_back(t);
+        }
+
+        result["filtered_turns"] = filtered.size();
+
+        // Paginate
+        json turns_arr = json::array();
+        size_t output_chars = 0;
+        const size_t max_output_chars = 30000;  // Prevent huge responses
+
+        for (size_t i = start_turn; i < filtered.size() && turns_arr.size() < limit; i++) {
+            const auto& t = filtered[i];
+
+            std::string content = t.content;
+            if (max_chars > 0 && content.size() > max_chars) {
+                content = content.substr(0, max_chars) + "...";
+            }
+
+            if (output_chars + content.size() > max_output_chars) {
+                turns_arr.push_back({
+                    {"role", "system"},
+                    {"content", "[output truncated - use start_turn=" + std::to_string(i) + " to continue]"},
+                    {"turn_index", -1}
+                });
+                break;
+            }
+
+            output_chars += content.size();
+            turns_arr.push_back({
+                {"role", t.role},
+                {"content", content},
+                {"turn_index", t.turn_index},
+                {"line_number", t.line_number}
+            });
+        }
+
+        result["turns"] = turns_arr;
+        result["returned"] = turns_arr.size();
+        result["start_turn"] = start_turn;
+
+        std::ostringstream ss;
+        ss << "Transcript: " << path << "\n"
+           << "Total: " << all_turns.size() << " turns";
+        if (!role_filter.empty() || !keyword.empty()) {
+            ss << " (filtered: " << filtered.size() << ")";
+        }
+        ss << "\nShowing turns " << start_turn << "-" << (start_turn + turns_arr.size() - 1) << ":\n\n";
+
+        for (const auto& t : turns_arr) {
+            ss << "[" << t["role"].get<std::string>() << "] ";
+            std::string content = t["content"].get<std::string>();
+            if (content.size() > 100) {
+                ss << content.substr(0, 100) << "...\n";
+            } else {
+                ss << content << "\n";
+            }
+        }
+
+        return DuckDBToolResult::ok(ss.str(), result);
     }
 
     // ========================================================================
