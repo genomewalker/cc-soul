@@ -125,6 +125,40 @@ echo $((TURN_INDEX + 1)) > "$TURN_FILE"
 # Detect realm (quick CLI call with short timeout)
 REALM=$(timeout "$MAX_WAIT" "$CHITTA_BIN" realm_detect 2>/dev/null || echo "brahman")
 
+# ===========================================
+# EVENT-BASED CHECKPOINT: Save on errors or milestones
+# ===========================================
+EVENT_CHECKPOINT=false
+EVENT_MOOD=""
+EVENT_SNAPSHOT=""
+
+# Error checkpoint
+if [[ "$HAS_ERROR" == "true" ]]; then
+    EVENT_CHECKPOINT=true
+    EVENT_MOOD="debugging"
+    EVENT_SNAPSHOT=$(echo "$RESPONSE" | grep -iE '(error|failed|exception)' | head -3 | head -c 500)
+    echo "[ledger] error checkpoint triggered" >&2
+fi
+
+# Milestone checkpoint (success patterns)
+if echo "$RESPONSE" | grep -qiE '(✓|✅|success|complete|done|shipped|released|merged|tests pass|build succeed)'; then
+    EVENT_CHECKPOINT=true
+    EVENT_MOOD="confident"
+    EVENT_SNAPSHOT=$(echo "$RESPONSE" | grep -iE '(success|complete|done|shipped|released|merged|tests pass|build)' | head -3 | head -c 500)
+    echo "[ledger] milestone checkpoint triggered" >&2
+fi
+
+if [[ "$EVENT_CHECKPOINT" == "true" ]]; then
+    EVENT_ARGS=$(jq -n \
+        --arg session_id "$SESSION_ID" \
+        --arg project "$REALM" \
+        --arg transcript_path "$TRANSCRIPT_PATH" \
+        --arg mood "$EVENT_MOOD" \
+        --arg snapshot "$EVENT_SNAPSHOT" \
+        '{session_id: $session_id, project: $project, transcript_path: $transcript_path, mood: $mood, snapshot: $snapshot}')
+    queue_write "ledger_save" "$EVENT_ARGS"
+fi
+
 # Quality gate: dedup file for this session
 DEDUP_FILE="$MIND_PATH/.stop_dedup"
 touch "$DEDUP_FILE"

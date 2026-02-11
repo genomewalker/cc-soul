@@ -29,6 +29,7 @@ SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || echo ""
 # Try to extract prompt from JSON, fall back to raw input if not JSON
 QUERY=$(echo "$INPUT" | jq -r '.prompt // empty' 2>/dev/null || echo "")
 [[ -z "$QUERY" ]] && QUERY="$INPUT"
+TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null || echo "")
 
 [[ -z "$QUERY" ]] && exit 0
 [[ ! -x "$CHITTA_BIN" ]] && exit 0
@@ -46,6 +47,26 @@ queue_write "store_turn" "{\"session_id\":\"$SESSION_ID\",\"role\":\"user\",\"co
 
 # Increment turn index
 echo $((TURN_INDEX + 1)) > "$TURN_FILE"
+
+# ===========================================
+# TURN-BASED CHECKPOINT: Save ledger every N turns
+# ===========================================
+CHECKPOINT_INTERVAL="${CC_SOUL_CHECKPOINT_INTERVAL:-10}"
+if [[ $((TURN_INDEX % CHECKPOINT_INTERVAL)) -eq 0 && $TURN_INDEX -gt 0 ]]; then
+    # Detect realm for project
+    REALM=$(timeout 1 "$CHITTA_BIN" realm_detect 2>/dev/null | grep -oP 'realm": "\K[^"]+' || echo "brahman")
+
+    CHECKPOINT_ARGS=$(jq -n \
+        --arg session_id "$SESSION_ID" \
+        --arg project "$REALM" \
+        --arg transcript_path "$TRANSCRIPT_PATH" \
+        --arg mood "working" \
+        --arg snapshot "Turn $TURN_INDEX checkpoint" \
+        '{session_id: $session_id, project: $project, transcript_path: $transcript_path, mood: $mood, snapshot: $snapshot}')
+
+    queue_write "ledger_save" "$CHECKPOINT_ARGS"
+    echo "[ledger] checkpoint at turn $TURN_INDEX" >&2
+fi
 
 # Use smart_recall for intelligent query routing
 # - Automatically classifies query intent (temporal, aspect, entity, code, etc.)
