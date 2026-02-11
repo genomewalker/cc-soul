@@ -419,6 +419,12 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
      {{"id", "Checkpoint ID to delete", true, nullptr}}},
 
     // Transcript tools (for distillation)
+    {"read_transcript", "Read JSONL transcript file directly with pagination",
+     {{"path", "Path to .jsonl transcript file (or use session_id)", false, nullptr},
+      {"session_id", "Session ID to find transcript for", false, nullptr},
+      {"start_turn", "Starting turn index", false, "0"},
+      {"limit", "Maximum turns to return", false, "20"}}},
+
     {"transcript_register", "Register a transcript file for distillation tracking",
      {{"session_id", "Claude session ID", true, nullptr},
       {"transcript_path", "Path to .jsonl transcript file", true, nullptr},
@@ -666,7 +672,7 @@ void print_usage(const char* prog) {
               << "  Type/Import: type_hierarchy, file_imports, file_dependents, read_symbol, read_function\n"
               << "  Realm:       realm_detect, realm_list, realm_get, realm_set, realm_add, realm_remove, realm_visibility\n"
               << "  Ledger:      ledger_save, ledger_load, ledger_list, ledger_get, ledger_delete\n"
-              << "  Transcript:  transcript_register, transcript_get, transcript_list, transcript_update, transcript_remove\n"
+              << "  Transcript:  read_transcript, transcript_register, transcript_get, transcript_list, transcript_update, transcript_remove\n"
               << "  Learning:    learn_outcome, episode_cluster_status, calibration_record, calibration_score\n"
               << "  Theme:       theme_list, theme_get, theme_recall, theme_stats, theme_maintain, theme_assign_orphans\n"
               << "  Debug:       sql_query\n"

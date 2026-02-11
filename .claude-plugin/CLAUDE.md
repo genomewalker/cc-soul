@@ -48,6 +48,8 @@
 | Full content | `explore_expand` |
 | Conversation | `get_turns` (session_id="default") |
 | Hybrid | `hybrid_recall` (RRF fusion) |
+| Raw transcript | `read_transcript` (JSONL file) |
+| Session state | `ledger_load` (checkpoints) |
 
 **RLM pattern**: explore_recall → explore_peek → explore_expand → explore_neighbors
 
@@ -70,8 +72,31 @@ Three-level memory drill-down for context when needed:
 - `expand_memory(id, depth)` - drill from SSL to full turns
 - `create_episode(session_id, title, start_turn, end_turn)` - mark conversation segments
 - `get_turns(session_id, start_index, limit)` - raw turn access
+- `read_transcript(path, start_turn, limit)` - read JSONL transcript directly
+- `ledger_load(project)` - load checkpoint with transcript_path for recovery
 
 **Memory IDs**: Use numeric row IDs from memory table (e.g., 12937), not UUID suffixes.
+
+## Session Continuity
+
+**Ledger** stores checkpoints with transcript_path for context recovery:
+
+| Tool | Purpose |
+|------|---------|
+| `ledger_save` | Save checkpoint (auto at session end + every 10 turns) |
+| `ledger_load` | Load latest checkpoint for project |
+| `ledger_list` | List checkpoints with transcript_path |
+| `ledger_get` | Get full checkpoint by ID |
+
+**Recovery workflow** (crashed/compacted sessions):
+1. `ledger_list --project X` - find session with transcript_path
+2. `ledger_get --id N` - get checkpoint snapshot + transcript_path
+3. `read_transcript --path <transcript_path> --start-turn -10` - read recent turns
+
+**Checkpoints saved automatically**:
+- Every 10 turns (configurable via `CC_SOUL_CHECKPOINT_INTERVAL`)
+- On errors (mood: debugging)
+- On milestones (mood: confident)
 
 ## Storing Memories
 
@@ -140,6 +165,7 @@ Detection: `CHITTA_REALM` env → `.cc-soul-realm` file → git repo name → `b
 | Theme | `theme_recall/list/get` |
 | Code | `find_symbol`, `read_symbol`, `search_symbols`, `symbol_callers` |
 | Explore | `explore_recall/peek/expand/neighbors` |
+| Ledger | `ledger_save/load/list/get`, `read_transcript` |
 | Meta | `calibration_record/score`, `metacognition_evaluate` |
 | Messages | `msg_send/inbox/ack_all` |
 
