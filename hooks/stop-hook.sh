@@ -474,6 +474,7 @@ fi
 LEDGER_ARGS=$(jq -n \
     --arg session_id "$SESSION_ID" \
     --arg project "$REALM" \
+    --arg transcript_path "$TRANSCRIPT_PATH" \
     --arg mood "$mood" \
     --argjson active_files "$ACTIVE_FILES" \
     --argjson decisions "$DECISIONS" \
@@ -484,6 +485,7 @@ LEDGER_ARGS=$(jq -n \
     '{
         session_id: $session_id,
         project: $project,
+        transcript_path: $transcript_path,
         mood: $mood,
         active_files: $active_files,
         decisions: $decisions,

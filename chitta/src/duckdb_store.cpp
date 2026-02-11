@@ -531,6 +531,9 @@ bool DuckDBStore::create_schema() {
     write_execute("CREATE INDEX IF NOT EXISTS idx_ledger_project ON ledger(project)");
     write_execute("CREATE INDEX IF NOT EXISTS idx_ledger_created ON ledger(created_at DESC)");
 
+    // Migration: Add transcript_path column if missing
+    write_execute("ALTER TABLE ledger ADD COLUMN IF NOT EXISTS transcript_path VARCHAR DEFAULT ''");
+
     // Code files table for incremental indexing
     if (!write_execute(R"(
         CREATE TABLE IF NOT EXISTS code_file (
@@ -3440,12 +3443,13 @@ int64_t DuckDBStore::save_ledger(const LedgerEntry& entry) {
     Timestamp now_ts = entry.created_at > 0 ? entry.created_at : now();
 
     std::ostringstream sql;
-    sql << "INSERT INTO ledger (id, session_id, project, created_at, mood, coherence, confidence, "
+    sql << "INSERT INTO ledger (id, session_id, project, created_at, transcript_path, mood, coherence, confidence, "
         << "todos, active_files, decisions, next_steps, blockers, discoveries, snapshot) "
         << "VALUES (nextval('ledger_seq'), "
         << "'" << escape(entry.session_id) << "', "
         << "'" << escape(entry.project.empty() ? "default" : entry.project) << "', "
         << now_ts << ", "
+        << "'" << escape(entry.transcript_path) << "', "
         << "'" << escape(entry.mood) << "', "
         << entry.coherence << ", "
         << entry.confidence << ", "
@@ -3485,7 +3489,7 @@ std::optional<LedgerEntry> DuckDBStore::load_ledger(const std::string& session_i
     };
 
     std::ostringstream sql;
-    sql << "SELECT id, session_id, project, created_at, mood, coherence, confidence, "
+    sql << "SELECT id, session_id, project, created_at, transcript_path, mood, coherence, confidence, "
         << "todos, active_files, decisions, next_steps, blockers, discoveries, snapshot "
         << "FROM ledger WHERE 1=1 ";
 
@@ -3513,16 +3517,17 @@ std::optional<LedgerEntry> DuckDBStore::load_ledger(const std::string& session_i
     entry.session_id = chunk->GetValue(1, 0).ToString();
     entry.project = chunk->GetValue(2, 0).ToString();
     entry.created_at = chunk->GetValue(3, 0).GetValue<int64_t>();
-    entry.mood = chunk->GetValue(4, 0).ToString();
-    entry.coherence = chunk->GetValue(5, 0).IsNull() ? 0.0f : chunk->GetValue(5, 0).GetValue<float>();
-    entry.confidence = chunk->GetValue(6, 0).IsNull() ? 0.0f : chunk->GetValue(6, 0).GetValue<float>();
-    entry.todos = chunk->GetValue(7, 0).ToString();
-    entry.active_files = chunk->GetValue(8, 0).ToString();
-    entry.decisions = chunk->GetValue(9, 0).ToString();
-    entry.next_steps = chunk->GetValue(10, 0).ToString();
-    entry.blockers = chunk->GetValue(11, 0).ToString();
-    entry.discoveries = chunk->GetValue(12, 0).ToString();
-    entry.snapshot = chunk->GetValue(13, 0).ToString();
+    entry.transcript_path = chunk->GetValue(4, 0).ToString();
+    entry.mood = chunk->GetValue(5, 0).ToString();
+    entry.coherence = chunk->GetValue(6, 0).IsNull() ? 0.0f : chunk->GetValue(6, 0).GetValue<float>();
+    entry.confidence = chunk->GetValue(7, 0).IsNull() ? 0.0f : chunk->GetValue(7, 0).GetValue<float>();
+    entry.todos = chunk->GetValue(8, 0).ToString();
+    entry.active_files = chunk->GetValue(9, 0).ToString();
+    entry.decisions = chunk->GetValue(10, 0).ToString();
+    entry.next_steps = chunk->GetValue(11, 0).ToString();
+    entry.blockers = chunk->GetValue(12, 0).ToString();
+    entry.discoveries = chunk->GetValue(13, 0).ToString();
+    entry.snapshot = chunk->GetValue(14, 0).ToString();
 
     return entry;
 }
@@ -3542,7 +3547,7 @@ std::vector<LedgerEntry> DuckDBStore::list_ledgers(const std::string& project, s
     };
 
     std::ostringstream sql;
-    sql << "SELECT id, session_id, project, created_at, mood, coherence, confidence, "
+    sql << "SELECT id, session_id, project, created_at, transcript_path, mood, coherence, confidence, "
         << "todos, active_files, decisions, next_steps, blockers, discoveries, snapshot "
         << "FROM ledger ";
 
@@ -3567,16 +3572,17 @@ std::vector<LedgerEntry> DuckDBStore::list_ledgers(const std::string& project, s
             entry.session_id = chunk->GetValue(1, i).ToString();
             entry.project = chunk->GetValue(2, i).ToString();
             entry.created_at = chunk->GetValue(3, i).GetValue<int64_t>();
-            entry.mood = chunk->GetValue(4, i).ToString();
-            entry.coherence = chunk->GetValue(5, i).IsNull() ? 0.0f : chunk->GetValue(5, i).GetValue<float>();
-            entry.confidence = chunk->GetValue(6, i).IsNull() ? 0.0f : chunk->GetValue(6, i).GetValue<float>();
-            entry.todos = chunk->GetValue(7, i).ToString();
-            entry.active_files = chunk->GetValue(8, i).ToString();
-            entry.decisions = chunk->GetValue(9, i).ToString();
-            entry.next_steps = chunk->GetValue(10, i).ToString();
-            entry.blockers = chunk->GetValue(11, i).ToString();
-            entry.discoveries = chunk->GetValue(12, i).ToString();
-            entry.snapshot = chunk->GetValue(13, i).ToString();
+            entry.transcript_path = chunk->GetValue(4, i).ToString();
+            entry.mood = chunk->GetValue(5, i).ToString();
+            entry.coherence = chunk->GetValue(6, i).IsNull() ? 0.0f : chunk->GetValue(6, i).GetValue<float>();
+            entry.confidence = chunk->GetValue(7, i).IsNull() ? 0.0f : chunk->GetValue(7, i).GetValue<float>();
+            entry.todos = chunk->GetValue(8, i).ToString();
+            entry.active_files = chunk->GetValue(9, i).ToString();
+            entry.decisions = chunk->GetValue(10, i).ToString();
+            entry.next_steps = chunk->GetValue(11, i).ToString();
+            entry.blockers = chunk->GetValue(12, i).ToString();
+            entry.discoveries = chunk->GetValue(13, i).ToString();
+            entry.snapshot = chunk->GetValue(14, i).ToString();
             entries.push_back(entry);
         }
     }
@@ -3589,7 +3595,7 @@ std::optional<LedgerEntry> DuckDBStore::get_ledger(int64_t id) {
     if (!db_) return std::nullopt;
 
     std::ostringstream sql;
-    sql << "SELECT id, session_id, project, created_at, mood, coherence, confidence, "
+    sql << "SELECT id, session_id, project, created_at, transcript_path, mood, coherence, confidence, "
         << "todos, active_files, decisions, next_steps, blockers, discoveries, snapshot "
         << "FROM ledger WHERE id = " << id;
 
@@ -3608,16 +3614,17 @@ std::optional<LedgerEntry> DuckDBStore::get_ledger(int64_t id) {
     entry.session_id = chunk->GetValue(1, 0).ToString();
     entry.project = chunk->GetValue(2, 0).ToString();
     entry.created_at = chunk->GetValue(3, 0).GetValue<int64_t>();
-    entry.mood = chunk->GetValue(4, 0).ToString();
-    entry.coherence = chunk->GetValue(5, 0).IsNull() ? 0.0f : chunk->GetValue(5, 0).GetValue<float>();
-    entry.confidence = chunk->GetValue(6, 0).IsNull() ? 0.0f : chunk->GetValue(6, 0).GetValue<float>();
-    entry.todos = chunk->GetValue(7, 0).ToString();
-    entry.active_files = chunk->GetValue(8, 0).ToString();
-    entry.decisions = chunk->GetValue(9, 0).ToString();
-    entry.next_steps = chunk->GetValue(10, 0).ToString();
-    entry.blockers = chunk->GetValue(11, 0).ToString();
-    entry.discoveries = chunk->GetValue(12, 0).ToString();
-    entry.snapshot = chunk->GetValue(13, 0).ToString();
+    entry.transcript_path = chunk->GetValue(4, 0).ToString();
+    entry.mood = chunk->GetValue(5, 0).ToString();
+    entry.coherence = chunk->GetValue(6, 0).IsNull() ? 0.0f : chunk->GetValue(6, 0).GetValue<float>();
+    entry.confidence = chunk->GetValue(7, 0).IsNull() ? 0.0f : chunk->GetValue(7, 0).GetValue<float>();
+    entry.todos = chunk->GetValue(8, 0).ToString();
+    entry.active_files = chunk->GetValue(9, 0).ToString();
+    entry.decisions = chunk->GetValue(10, 0).ToString();
+    entry.next_steps = chunk->GetValue(11, 0).ToString();
+    entry.blockers = chunk->GetValue(12, 0).ToString();
+    entry.discoveries = chunk->GetValue(13, 0).ToString();
+    entry.snapshot = chunk->GetValue(14, 0).ToString();
 
     return entry;
 }

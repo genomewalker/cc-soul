@@ -1023,6 +1023,7 @@ private:
                 {"properties", {
                     {"session_id", {{"type", "string"}, {"description", "Session identifier"}}},
                     {"project", {{"type", "string"}, {"description", "Project scope"}}},
+                    {"transcript_path", {{"type", "string"}, {"description", "Path to JSONL transcript file for full context recovery"}}},
                     {"mood", {{"type", "string"}, {"description", "Current feeling: confident|uncertain|flowing|frustrated"}}},
                     {"coherence", {{"type", "number"}, {"description", "Coherence score 0-1"}}},
                     {"confidence", {{"type", "number"}, {"description", "Confidence score 0-1"}}},
@@ -6006,6 +6007,7 @@ private:
         LedgerEntry entry;
         entry.session_id = session_id;
         entry.project = params.value("project", "default");
+        entry.transcript_path = params.value("transcript_path", "");
         entry.mood = params.value("mood", "");
         entry.coherence = params.value("coherence", 0.0f);
         entry.confidence = params.value("confidence", 0.0f);
@@ -6065,6 +6067,7 @@ private:
         ss << "  ID: " << entry->id << "\n";
         ss << "  Session: " << entry->session_id << "\n";
         ss << "  Project: " << entry->project << "\n";
+        if (!entry->transcript_path.empty()) ss << "  Transcript: " << entry->transcript_path << "\n";
         if (!entry->mood.empty()) ss << "  Mood: " << entry->mood << "\n";
         if (entry->coherence > 0) ss << "  Coherence: " << entry->coherence << "\n";
         if (entry->confidence > 0) ss << "  Confidence: " << entry->confidence << "\n";
@@ -6075,6 +6078,7 @@ private:
             {"id", entry->id},
             {"session_id", entry->session_id},
             {"project", entry->project},
+            {"transcript_path", entry->transcript_path},
             {"created_at", entry->created_at},
             {"mood", entry->mood},
             {"coherence", entry->coherence},
@@ -6129,6 +6133,7 @@ private:
                 {"id", entry.id},
                 {"session_id", entry.session_id},
                 {"project", entry.project},
+                {"transcript_path", entry.transcript_path},
                 {"created_at", entry.created_at},
                 {"mood", entry.mood}
             });
@@ -6152,6 +6157,7 @@ private:
         ss << "Checkpoint " << id << ":\n";
         ss << "  Session: " << entry->session_id << "\n";
         ss << "  Project: " << entry->project << "\n";
+        if (!entry->transcript_path.empty()) ss << "  Transcript: " << entry->transcript_path << "\n";
         if (!entry->mood.empty()) ss << "  Mood: " << entry->mood << "\n";
         if (entry->coherence > 0) ss << "  Coherence: " << entry->coherence << "\n";
         if (entry->confidence > 0) ss << "  Confidence: " << entry->confidence << "\n";
@@ -6172,6 +6178,7 @@ private:
             {"id", entry->id},
             {"session_id", entry->session_id},
             {"project", entry->project},
+            {"transcript_path", entry->transcript_path},
             {"created_at", entry->created_at},
             {"mood", entry->mood},
             {"coherence", entry->coherence},

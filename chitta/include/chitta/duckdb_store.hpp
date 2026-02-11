@@ -180,6 +180,7 @@ struct LedgerEntry {
     std::string session_id;
     std::string project;
     int64_t created_at = 0;
+    std::string transcript_path;  // Path to JSONL transcript for full context recovery
 
     // Soul state
     std::string mood;
