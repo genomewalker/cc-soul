@@ -55,11 +55,15 @@ validate_version() {
 # Main
 BUMP_TYPE=""
 AUTO_CONFIRM=false
+LOCAL_BUILD=false
 
 for arg in "$@"; do
     case "$arg" in
         -y|--yes)
             AUTO_CONFIRM=true
+            ;;
+        -l|--local)
+            LOCAL_BUILD=true
             ;;
         *)
             if [[ -z "$BUMP_TYPE" ]]; then
@@ -70,7 +74,11 @@ for arg in "$@"; do
 done
 
 if [[ -z "$BUMP_TYPE" ]]; then
-    echo "Usage: $0 <patch|minor|major|X.Y.Z> [-y|--yes]"
+    echo "Usage: $0 <patch|minor|major|X.Y.Z> [-y|--yes] [-l|--local]"
+    echo ""
+    echo "Options:"
+    echo "  -y, --yes    Skip confirmation prompt"
+    echo "  -l, --local  Also build and install locally after push"
     echo ""
     echo "SemVer Guidelines:"
     echo "  patch  Bug fixes only (2.56.0 → 2.56.1)"
@@ -78,9 +86,9 @@ if [[ -z "$BUMP_TYPE" ]]; then
     echo "  major  Breaking changes (2.56.0 → 3.0.0)"
     echo ""
     echo "Examples:"
-    echo "  $0 patch   # Fixed a bug"
-    echo "  $0 minor   # Added new tool"
-    echo "  $0 major   # Changed protocol"
+    echo "  $0 patch          # Fixed a bug"
+    echo "  $0 minor -y       # Added new tool, skip confirm"
+    echo "  $0 patch -y -l    # Bug fix + local build"
     exit 1
 fi
 
@@ -163,3 +171,39 @@ echo "  • ONNX models"
 echo ""
 echo "Monitor: https://github.com/genomewalker/cc-soul/actions"
 echo "Release: https://github.com/genomewalker/cc-soul/releases/tag/v$NEW_VERSION"
+
+# Local build if requested
+if [[ "$LOCAL_BUILD" == "true" ]]; then
+    echo ""
+    echo "=== Local Build ==="
+
+    # Build
+    echo "Building chitta..."
+    cd "$REPO_DIR/chitta"
+    if cmake --build build --parallel; then
+        echo "Build successful"
+    else
+        echo "Build failed"
+        exit 1
+    fi
+
+    # Stop daemon
+    echo "Stopping daemon..."
+    pkill -9 chittad 2>/dev/null || true
+    sleep 2
+
+    # Install
+    echo "Installing binaries..."
+    cp "$REPO_DIR/bin/chitta" "$REPO_DIR/bin/chittad" ~/.claude/bin/
+
+    # Verify
+    INSTALLED=$("$HOME/.claude/bin/chitta" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+    echo "Installed: chitta $INSTALLED"
+
+    # Restart MCP
+    echo "Restarting MCP server..."
+    pkill -f "chitta mcp" 2>/dev/null || true
+
+    echo ""
+    echo "=== Local installation complete ==="
+fi
