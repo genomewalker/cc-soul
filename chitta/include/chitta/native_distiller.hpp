@@ -28,6 +28,7 @@ struct NativeDistillConfig {
 struct DistillResult {
     int learnings_stored = 0;
     int triplets_created = 0;
+    int citations_linked = 0;   // Code citations (memory→file:line)
     int64_t episode_id = 0;
     int64_t last_line = 0;      // Last JSONL line processed (for progress tracking)
     bool success = false;
@@ -63,11 +64,13 @@ private:
     std::string call_opencode(const std::string& prompt);
 
     // Store learnings via mind_.remember() equivalent
-    int store_learnings(
-        const SSLParser::Result& result,
+    // Updates result.learnings_stored and result.citations_linked
+    void store_learnings(
+        const SSLParser::Result& ssl_result,
         const std::string& session_id,
         const std::string& realm,
-        int64_t episode_id
+        int64_t episode_id,
+        DistillResult& result
     );
 
     // Get confidence for category

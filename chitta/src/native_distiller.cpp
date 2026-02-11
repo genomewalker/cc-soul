@@ -142,15 +142,14 @@ std::string NativeDistiller::call_opencode(const std::string& prompt) {
     return output;
 }
 
-int NativeDistiller::store_learnings(
-    const SSLParser::Result& result,
+void NativeDistiller::store_learnings(
+    const SSLParser::Result& ssl_result,
     const std::string& session_id,
     const std::string& realm,
-    int64_t episode_id
+    int64_t episode_id,
+    DistillResult& result
 ) {
-    int stored = 0;
-
-    for (const auto& learning : result.learnings) {
+    for (const auto& learning : ssl_result.learnings) {
         float confidence = category_to_confidence(learning.category);
 
         // Combine title and content
@@ -167,24 +166,48 @@ int NativeDistiller::store_learnings(
 
         int64_t id = static_cast<int64_t>(nid.low);
         if (nid.low != 0) {
-            stored++;
+            result.learnings_stored++;
             log("[distill]   +" + learning.category + ": " + learning.title.substr(0, 60) + "...");
 
             // Link to episode if we have one
             if (episode_id > 0) {
                 mind_.connect(std::to_string(id), "derived_from", std::to_string(episode_id));
             }
+
+            // Store citation triplets: memory --cites--> file:line
+            // Also bridge to symbols if a symbol exists at that location
+            for (const auto& cite : learning.citations) {
+                std::string cite_target = cite.file;
+                if (cite.line > 0) {
+                    cite_target += ":" + std::to_string(cite.line);
+                }
+
+                // Always store raw file:line citation
+                if (mind_.connect(std::to_string(id), "cites", cite_target)) {
+                    result.citations_linked++;
+                    log("[distill]     cite: " + cite_target);
+                }
+
+                // Try to bridge to a symbol at this location
+                if (cite.line > 0) {
+                    auto symbol = mind_.store().find_symbol_at_line(cite.file, cite.line);
+                    if (symbol) {
+                        std::string symbol_ref = "symbol:" + std::to_string(symbol->id);
+                        if (mind_.connect(std::to_string(id), "cites", symbol_ref)) {
+                            log("[distill]     → symbol: " + symbol->name + " (" + symbol->kind + ")");
+                        }
+                    }
+                }
+            }
         }
     }
 
     // Store triplets
-    for (const auto& triplet : result.triplets) {
+    for (const auto& triplet : ssl_result.triplets) {
         if (mind_.connect(triplet.subject, triplet.predicate, triplet.object)) {
             log("[distill]   triplet: " + triplet.subject + "→" + triplet.predicate + "→" + triplet.object);
         }
     }
-
-    return stored;
 }
 
 DistillResult NativeDistiller::distill_session(
@@ -263,13 +286,14 @@ DistillResult NativeDistiller::distill_session(
     log("[distill] Processing SSL results...");
     auto ssl_result = ssl_parser_.parse(llm_output);
 
-    // 9. Store learnings
-    result.learnings_stored = store_learnings(ssl_result, session_id, realm, episode_id);
+    // 9. Store learnings and citations
+    store_learnings(ssl_result, session_id, realm, episode_id, result);
     result.triplets_created = static_cast<int>(ssl_result.triplets.size());
 
     log("[distill] Session " + session_id + ": Done (+" +
         std::to_string(result.learnings_stored) + " learnings, " +
-        std::to_string(result.triplets_created) + " triplets)");
+        std::to_string(result.triplets_created) + " triplets, " +
+        std::to_string(result.citations_linked) + " citations)");
 
     result.last_line = last_line;
     result.success = true;

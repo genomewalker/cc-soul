@@ -2954,6 +2954,46 @@ std::vector<Symbol> DuckDBStore::find_symbol(const std::string& name, const std:
     return results;
 }
 
+std::optional<Symbol> DuckDBStore::find_symbol_at_line(const std::string& file_path, int line) {
+    if (!db_) return std::nullopt;
+    if (file_path.empty() || line <= 0) return std::nullopt;
+
+    // Escape file path for SQL
+    std::string escaped_path;
+    for (char c : file_path) {
+        if (c == '\'') escaped_path += "''";
+        else escaped_path += c;
+    }
+
+    // Query for symbols where line falls within [line_start, line_end]
+    // Match file_path exactly or by suffix (e.g., "main.cpp" matches "/path/to/main.cpp")
+    std::ostringstream sql;
+    sql << "SELECT id, kind, name, signature, file_path, line_start, line_end, repo_id "
+        << "FROM symbol WHERE "
+        << "(file_path = '" << escaped_path << "' OR file_path LIKE '%/" << escaped_path << "') "
+        << "AND line_start <= " << line << " AND line_end >= " << line << " "
+        << "ORDER BY (line_end - line_start) ASC "  // Prefer tightest match (smallest range)
+        << "LIMIT 1";
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) return std::nullopt;
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return std::nullopt;
+
+    Symbol s;
+    s.id = chunk->GetValue(0, 0).GetValue<int64_t>();
+    s.kind = chunk->GetValue(1, 0).ToString();
+    s.name = chunk->GetValue(2, 0).ToString();
+    s.signature = chunk->GetValue(3, 0).ToString();
+    s.file_path = chunk->GetValue(4, 0).ToString();
+    s.line_start = chunk->GetValue(5, 0).GetValue<int32_t>();
+    s.line_end = chunk->GetValue(6, 0).GetValue<int32_t>();
+    s.repo_id = chunk->GetValue(7, 0).GetValue<int64_t>();
+
+    return s;
+}
+
 std::optional<Symbol> DuckDBStore::get_symbol_by_id(int64_t symbol_id) {
     if (!db_) return std::nullopt;
 

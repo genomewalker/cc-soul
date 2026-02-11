@@ -53,6 +53,25 @@ Each learning has a TYPE and uses SSL compression:
 
 Use for: calls, uses, contains, implements, depends_on, derived_from
 
+## Citations
+
+**IMPORTANT**: When a learning references specific code, include citations with @file:line syntax:
+
+```
+[SOLUTION] [build] parallel-cmake→4x-faster @CMakeLists.txt:45 @src/main.cpp:12
+```
+
+Or use explicit [CITE] lines for multiple citations with context:
+
+```
+[SOLUTION] [auth] token-refresh→must-check-expiry-first
+[ε] if (token.expired()) refresh();
+[CITE] src/auth/token.cpp:234 expiry check
+[CITE] src/api/client.cpp:89 refresh call site
+```
+
+Citations enable verification: before surfacing a memory, we can check if the code still matches.
+
 ## Rules
 
 1. **Preserve verbatim**: Commands, code, formulas, thresholds go in [ε] lines

@@ -14,16 +14,62 @@ std::string SSLParser::type_to_category(const std::string& type) {
     return "wisdom";
 }
 
+// Extract @file:line citations from text
+std::vector<SSLCitation> SSLParser::extract_inline_citations(const std::string& text) {
+    std::vector<SSLCitation> citations;
+
+    // Match @path/file.ext:line or @path/file.ext patterns
+    static const std::regex cite_pattern(R"(@([\w./\-]+(?:\.\w+)?):?(\d*))");
+
+    auto begin = std::sregex_iterator(text.begin(), text.end(), cite_pattern);
+    auto end = std::sregex_iterator();
+
+    for (auto it = begin; it != end; ++it) {
+        SSLCitation cite;
+        cite.file = (*it)[1].str();
+        std::string line_str = (*it)[2].str();
+        cite.line = line_str.empty() ? 0 : std::stoi(line_str);
+        citations.push_back(std::move(cite));
+    }
+
+    return citations;
+}
+
+// Parse explicit [CITE] line: file:line optional context
+SSLCitation SSLParser::parse_cite_line(const std::string& line) {
+    SSLCitation cite;
+
+    // Format: [CITE] file:line context  OR  [CITE] file context
+    static const std::regex cite_line_pattern(R"(^\[CITE\]\s+([\w./\-]+(?:\.\w+)?):?(\d*)\s*(.*)?$)");
+
+    std::smatch match;
+    if (std::regex_match(line, match, cite_line_pattern)) {
+        cite.file = match[1].str();
+        std::string line_str = match[2].str();
+        cite.line = line_str.empty() ? 0 : std::stoi(line_str);
+        cite.context = match[3].str();
+
+        // Trim context whitespace
+        while (!cite.context.empty() && std::isspace(cite.context.back())) {
+            cite.context.pop_back();
+        }
+    }
+
+    return cite;
+}
+
 SSLParser::Result SSLParser::parse(const std::string& output) {
     Result result;
 
     // State machine for parsing
     std::string current_type;
     std::string current_content;
+    std::vector<SSLCitation> current_citations;
 
     // Regex for typed markers
     static const std::regex type_pattern(R"(^\[(SOLUTION|GOTCHA|DECISION|PATTERN|PREFERENCE|FAILURE)\]\s+(.*)$)");
     static const std::regex triplet_pattern(R"(^\[TRIPLET\]\s+(\S+)\s+(\S+)\s+(.+)$)");
+    static const std::regex cite_line_pattern(R"(^\[CITE\]\s+)");
 
     auto store_current = [&]() {
         if (current_type.empty() || current_content.empty()) return;
@@ -39,6 +85,26 @@ SSLParser::Result SSLParser::parse(const std::string& output) {
             learning.title = current_content.substr(0, std::min(newline_pos, size_t(100)));
         } else {
             learning.title = current_content.substr(0, std::min(current_content.size(), size_t(100)));
+        }
+
+        // Add explicit [CITE] citations collected during parsing
+        learning.citations = std::move(current_citations);
+        current_citations.clear();
+
+        // Also extract inline @file:line citations from content
+        auto inline_cites = extract_inline_citations(current_content);
+        for (auto& cite : inline_cites) {
+            // Avoid duplicates
+            bool exists = false;
+            for (const auto& existing : learning.citations) {
+                if (existing.file == cite.file && existing.line == cite.line) {
+                    exists = true;
+                    break;
+                }
+            }
+            if (!exists) {
+                learning.citations.push_back(std::move(cite));
+            }
         }
 
         result.learnings.push_back(std::move(learning));
@@ -66,6 +132,13 @@ SSLParser::Result SSLParser::parse(const std::string& output) {
         // Check for epsilon (verbatim) line
         else if (line.substr(0, 3) == "[ε]" && !current_type.empty()) {
             current_content += "\n" + line;
+        }
+        // Check for citation line
+        else if (std::regex_search(line, cite_line_pattern) && !current_type.empty()) {
+            auto cite = parse_cite_line(line);
+            if (!cite.file.empty()) {
+                current_citations.push_back(std::move(cite));
+            }
         }
         // Check for triplet relationship
         else if (std::regex_match(line, match, triplet_pattern)) {
