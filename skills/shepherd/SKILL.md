@@ -26,6 +26,34 @@ Tends long-running pipelines (snakemake, nextflow) using a sense-think-act loop.
 | `--max-restarts` | 3 | Max automatic restarts before escalating |
 | `--notify` | true | Send notifications on events |
 | `--auto-fix` | true | Attempt automatic fixes from memory |
+| `--session` | auto | Target session: "auto", "current", or session name |
+| `--isolate` | auto | Session isolation: "auto", "yes", "no" |
+
+### Session Isolation Strategy
+
+When `--isolate=auto` (default), shepherd chooses based on task characteristics:
+
+| Condition | Isolation | Reason |
+|-----------|-----------|--------|
+| HPC/SLURM job | yes | Long-running, survives disconnects |
+| Remote SSH pipeline | yes | Needs persistent attachment |
+| Quick local task (<1h) | no | Tab isolation sufficient |
+| Multiple parallel pipelines | yes | Separate sessions per pipeline |
+| Interactive monitoring | no | Keep in current session |
+
+```javascript
+function shouldIsolate(command, options) {
+  if (options.isolate === "yes") return true;
+  if (options.isolate === "no") return false;
+
+  // Auto-detect based on command/context
+  if (command.includes("sbatch") || command.includes("srun")) return true;
+  if (options.ssh_session) return true;
+  if (command.includes("--jobs") && parseInt(command.match(/--jobs\s*(\d+)/)?.[1]) > 4) return true;
+
+  return false;  // Default: use tab isolation
+}
+```
 
 ## Initialize
 
@@ -48,32 +76,70 @@ if (existing.task_id) {
 }
 ```
 
-### 3. Create Named Pane and Launch Pipeline
+### 3. Determine Session Strategy
 
 ```javascript
-// Create isolated pane in agent session
+// Decide whether to use session isolation
+const useIsolation = shouldIsolate(command, options);
+let targetSession = null;
+
+if (useIsolation) {
+  // Create or attach to dedicated session
+  const sessionName = options.session || `shepherd-${Date.now()}`;
+
+  // Check if session exists
+  const sessions = mcp__zellij_mcp__list_sessions();
+  const exists = sessions.sessions?.some(s => s.name === sessionName);
+
+  if (!exists) {
+    // Create new session (runs in background)
+    mcp__zellij_mcp__agent_session({ action: "create", session: sessionName });
+  }
+
+  targetSession = sessionName;
+  output(`[SHEPHERD] Using isolated session: ${sessionName}`);
+} else {
+  output(`[SHEPHERD] Using current session with tab isolation`);
+}
+```
+
+### 4. Create Named Pane and Launch Pipeline
+
+```javascript
+// Create isolated pane (session-aware)
 mcp__zellij_mcp__create_named_pane({
   name: "pipeline-main",
   tab: "shepherd",
-  cwd: "/path/to/workflow"
+  cwd: "/path/to/workflow",
+  session: targetSession  // null = current session
 });
 
 // Start the pipeline
 mcp__zellij_mcp__write_to_pane({
   pane_name: "pipeline-main",
   chars: "snakemake --cores 8 --rerun-incomplete",
-  press_enter: true
+  press_enter: true,
+  session: targetSession
 });
 
 // Initialize cursor for incremental reads
-mcp__zellij_mcp__tail_pane({ pane_name: "pipeline-main", reset: true });
+mcp__zellij_mcp__tail_pane({
+  pane_name: "pipeline-main",
+  reset: true,
+  session: targetSession
+});
 
-// Start long task tracking
+// Start long task tracking (store session info for resume)
 mcp__chitta__long_task_start({
   task_id: "shepherd-" + Date.now(),
   goal: "Monitor and tend snakemake pipeline to completion",
   hard_checks: ["All rules completed", "No failed jobs"],
-  soft_checks: ["Pipeline finished successfully"]
+  soft_checks: ["Pipeline finished successfully"],
+  work_items: [
+    `session:${targetSession || "current"}`,
+    `pane:pipeline-main`,
+    `isolation:${useIsolation}`
+  ]
 });
 ```
 
@@ -82,22 +148,27 @@ mcp__chitta__long_task_start({
 ### SENSE: Gather Pipeline State
 
 ```javascript
-function sense(pane_name) {
-  // Get new output since last read
-  output = mcp__zellij_mcp__tail_pane({ pane_name: pane_name });
+function sense(pane_name, session) {
+  // Get new output since last read (session-aware, uses daemon for cross-session)
+  output = mcp__zellij_mcp__tail_pane({
+    pane_name: pane_name,
+    session: session  // Daemon handles cross-session reads
+  });
 
   // Check for stalls (no output for extended period)
   idle = mcp__zellij_mcp__wait_for_idle({
     pane_name: pane_name,
     stable_seconds: 30,
-    timeout: 5  // Don't wait long, just check
+    timeout: 5,  // Don't wait long, just check
+    session: session
   });
 
   // Search for error patterns
   errors = mcp__zellij_mcp__search_pane({
     pane_name: pane_name,
     pattern: "(Error|ERROR|Failed|FAILED|Exception|Traceback)",
-    context: 3
+    context: 3,
+    session: session
   });
 
   return {
@@ -162,7 +233,7 @@ function think(sense_data, restart_count) {
 ### ACT: Execute Decision
 
 ```javascript
-function act(decision, pane_name, task_id) {
+function act(decision, pane_name, task_id, session) {
   switch (decision.action) {
     case "complete":
       mcp__chitta__long_task_complete({
@@ -173,12 +244,17 @@ function act(decision, pane_name, task_id) {
       return "DONE";
 
     case "restart":
-      mcp__zellij_mcp__send_keys({ pane_name: pane_name, keys: "ctrl+c" });
+      mcp__zellij_mcp__send_keys({
+        pane_name: pane_name,
+        keys: "ctrl+c",
+        session: session
+      });
       sleep(2);
       mcp__zellij_mcp__write_to_pane({
         pane_name: pane_name,
         chars: "snakemake --rerun-incomplete",
-        press_enter: true
+        press_enter: true,
+        session: session
       });
       mcp__chitta__long_task_event({
         task_id: task_id,
@@ -190,7 +266,7 @@ function act(decision, pane_name, task_id) {
 
     case "fix":
       // Apply fix from memory
-      apply_fix(decision.fix, pane_name);
+      apply_fix(decision.fix, pane_name, session);
       mcp__chitta__habit_strengthen({
         habit_id: decision.fix.habit_id,
         outcome: "applied"
@@ -252,23 +328,46 @@ When resuming from checkpoint:
 // 1. Load task snapshot
 snapshot = mcp__chitta__long_task_snapshot({ task_id: task_id, mode: "debug" });
 
-// 2. Restore pane state
-panes = mcp__zellij_mcp__list_named_panes();
-if (!panes.includes("pipeline-main")) {
-  // Recreate pane
-  mcp__zellij_mcp__create_named_pane({ name: "pipeline-main", tab: "shepherd" });
+// 2. Extract session info from work_items
+const sessionItem = snapshot.work_items?.find(w => w.startsWith("session:"));
+const targetSession = sessionItem?.split(":")[1];
+const session = targetSession === "current" ? null : targetSession;
+
+// 3. If isolated session, ensure it's still alive
+if (session) {
+  const sessions = mcp__zellij_mcp__list_sessions();
+  const alive = sessions.sessions?.some(s => s.name === session);
+  if (!alive) {
+    output(`[SHEPHERD] Session ${session} no longer exists - recreating`);
+    mcp__zellij_mcp__agent_session({ action: "create", session: session });
+  }
 }
 
-// 3. Check pipeline state
-state = mcp__zellij_mcp__read_pane({ pane_name: "pipeline-main", tail: 50 });
+// 4. Restore pane state
+panes = mcp__zellij_mcp__list_named_panes({ session: session });
+if (!panes.panes?.some(p => p.name === "pipeline-main")) {
+  // Recreate pane
+  mcp__zellij_mcp__create_named_pane({
+    name: "pipeline-main",
+    tab: "shepherd",
+    session: session
+  });
+}
 
-// 4. Decide: resume or restart
-if (state.includes("waiting") || state.includes("running")) {
+// 5. Check pipeline state
+state = mcp__zellij_mcp__read_pane({
+  pane_name: "pipeline-main",
+  tail: 50,
+  session: session
+});
+
+// 6. Decide: resume or restart
+if (state.content?.match(/waiting|running|submitted/i)) {
   // Pipeline still running, just monitor
-  continue_loop();
+  continue_loop(session);
 } else {
   // Pipeline stopped, restart from checkpoint
-  restart_pipeline();
+  restart_pipeline(session);
 }
 ```
 
@@ -284,9 +383,15 @@ async function shepherd_main(command, options) {
   let restart_count = 0;
   let task_id = null;
   let pane_name = "pipeline-main";
+  let targetSession = null;
 
-  // Initialize or resume
-  task_id = await initialize_or_resume(command, options);
+  // Initialize or resume (returns { task_id, session })
+  const init = await initialize_or_resume(command, options);
+  task_id = init.task_id;
+  targetSession = init.session;  // null = current session
+
+  const sessionLabel = targetSession || "current";
+  output(`[SHEPHERD] Monitoring in session: ${sessionLabel}`);
 
   // Main loop
   while (true) {
@@ -297,17 +402,35 @@ async function shepherd_main(command, options) {
       break;
     }
 
-    // SENSE
-    sense_data = sense(pane_name);
+    // Verify session still exists (for isolated sessions)
+    if (targetSession) {
+      const sessions = mcp__zellij_mcp__list_sessions();
+      if (!sessions.sessions?.some(s => s.name === targetSession)) {
+        log(`[BLOCKER] Session ${targetSession} lost`);
+        mcp__chitta__long_task_event({
+          task_id: task_id,
+          kind: "error",
+          payload: JSON.stringify({ error: "session_lost", session: targetSession })
+        });
+        break;
+      }
+    }
+
+    // SENSE (session-aware)
+    sense_data = sense(pane_name, targetSession);
 
     // THINK
     decision = think(sense_data, restart_count);
 
-    // ACT
-    result = act(decision, pane_name, task_id);
+    // ACT (session-aware)
+    result = act(decision, pane_name, task_id, targetSession);
 
     if (result === "DONE") {
       output("[COMPLETE] Pipeline finished successfully");
+      // Optionally cleanup isolated session
+      if (targetSession && options.cleanup !== false) {
+        mcp__zellij_mcp__agent_session({ action: "destroy", session: targetSession });
+      }
       break;
     }
 
@@ -317,7 +440,7 @@ async function shepherd_main(command, options) {
     }
 
     // Status line
-    output(`[SHEPHERD] ${new Date().toISOString()} - ${decision.reason}`);
+    output(`[SHEPHERD] ${new Date().toISOString()} - ${decision.reason} [${sessionLabel}]`);
 
     // Sleep until next cycle
     await sleep(INTERVAL * 1000);
