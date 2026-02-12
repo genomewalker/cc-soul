@@ -21,12 +21,29 @@ def djb2_hash(s: str) -> int:
     return h
 
 
+def get_socket_dir() -> str:
+    """Get persistent socket directory (matches C++ daemon logic)."""
+    xdg_runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if xdg_runtime and os.access(xdg_runtime, os.W_OK):
+        socket_dir = os.path.join(xdg_runtime, "chitta")
+        os.makedirs(socket_dir, mode=0o700, exist_ok=True)
+        return socket_dir
+    home = os.environ.get("HOME")
+    if home:
+        cache_dir = os.path.join(home, ".cache")
+        os.makedirs(cache_dir, mode=0o755, exist_ok=True)
+        socket_dir = os.path.join(cache_dir, "chitta")
+        os.makedirs(socket_dir, mode=0o700, exist_ok=True)
+        return socket_dir
+    return "/tmp"
+
+
 def get_socket_path() -> str:
     """Get the daemon socket path."""
     home = os.environ.get("HOME", "")
     mind_path = os.path.join(home, ".claude", "mind")  # Matches daemon's default
     hash_val = djb2_hash(mind_path)
-    return f"/tmp/chitta-{hash_val}.sock"
+    return os.path.join(get_socket_dir(), f"chitta-{hash_val}.sock")
 
 
 def fetch_tools() -> list[dict]:
