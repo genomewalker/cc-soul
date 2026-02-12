@@ -1,0 +1,78 @@
+# Test workflow for shepherd skill
+# 5 rules with brief sleeps to simulate pipeline execution
+
+rule all:
+    input:
+        "output/final_report.txt"
+
+rule download_data:
+    output:
+        "output/raw_data.txt"
+    shell:
+        """
+        echo "Downloading data..."
+        sleep 2
+        echo "Sample raw data content" > {output}
+        echo "Download complete"
+        """
+
+rule preprocess:
+    input:
+        "output/raw_data.txt"
+    output:
+        "output/processed_data.txt"
+    shell:
+        """
+        echo "Preprocessing data..."
+        sleep 2
+        cat {input} | tr 'a-z' 'A-Z' > {output}
+        echo "Preprocessing complete"
+        """
+
+rule analyze:
+    input:
+        "output/processed_data.txt"
+    output:
+        "output/analysis_results.txt"
+    shell:
+        """
+        echo "Running analysis..."
+        sleep 3
+        echo "Analysis of: $(cat {input})" > {output}
+        echo "Analysis complete"
+        """
+
+rule validate:
+    input:
+        "output/analysis_results.txt"
+    output:
+        "output/validated_results.txt"
+    shell:
+        """
+        echo "Validating results..."
+        sleep 2
+        if [ -s {input} ]; then
+            echo "VALIDATED: $(cat {input})" > {output}
+            echo "Validation passed"
+        else
+            echo "Validation failed: empty input" >&2
+            exit 1
+        fi
+        """
+
+rule generate_report:
+    input:
+        "output/validated_results.txt"
+    output:
+        "output/final_report.txt"
+    shell:
+        """
+        echo "Generating final report..."
+        sleep 2
+        echo "=== FINAL REPORT ===" > {output}
+        echo "Date: $(date)" >> {output}
+        cat {input} >> {output}
+        echo "===================" >> {output}
+        echo "Report generation complete"
+        echo "5 of 5 steps (100%) done"
+        """

@@ -90,6 +90,14 @@ All Claude instances share the same knowledge base. Learn something in one sessi
 ### Anticipates Your Needs
 Patterns in your workflow become predictions. After seeing you run tests following three file edits, it suggests doing so automatically.
 
+### Shepherds Your Pipelines
+Autonomous monitoring for long-running jobs. Snakemake, Nextflow, or Slurm pipelines run while you sleep. Claude detects errors, recalls fixes from memory, restarts automatically, and alerts you only when needed.
+
+```bash
+/shepherd snakemake --cores 8 --rerun-incomplete
+# Goes to bed. Wakes up to completed pipeline or actionable error report.
+```
+
 ### Zero Configuration
 Hooks wire everything together. Memories surface transparently. Just install and work.
 

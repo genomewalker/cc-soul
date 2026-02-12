@@ -16,6 +16,7 @@ Complete reference for all tools exposed by cc-soul v3.38.6 via JSON-RPC 2.0 ove
 - [Session and Ledger](#session-and-ledger)
 - [Cross-Session Messaging](#cross-session-messaging)
 - [Long-Running Tasks](#long-running-tasks)
+- [Shepherd (Pipeline Monitoring)](#shepherd-pipeline-monitoring)
 - [Theme System (xMemory)](#theme-system-xmemory)
 - [Suggestions and Feedback](#suggestions-and-feedback)
 - [Consolidation](#consolidation)
@@ -739,6 +740,52 @@ Evaluate task completion criteria.
 | Param | Type | Required | Description |
 |-------|------|----------|-------------|
 | `task_id` | string | Yes | Task ID |
+
+---
+
+## Shepherd (Pipeline Monitoring)
+
+The shepherd skill uses long-running tasks to autonomously monitor pipelines (snakemake, nextflow, etc.). See `/shepherd` skill for full documentation.
+
+### Shepherd Task Convention
+
+Shepherd tasks use the `shepherd-*` prefix for task IDs, enabling filtering:
+
+```sql
+SELECT * FROM long_task WHERE task_id LIKE 'shepherd-%' AND status = 'active'
+```
+
+### Pane Metadata Convention
+
+Store the monitored pane name in `work_items` as `pane:PANENAME`:
+
+```javascript
+long_task_start({
+  task_id: "shepherd-1707912345",
+  goal: "Monitor snakemake pipeline",
+  work_items: ["pane:pipeline-main", "target:all"]
+});
+```
+
+### Background Polling
+
+The `hooks/shepherd-poll.sh` script polls active shepherd tasks:
+
+```bash
+# Manual run
+./hooks/shepherd-poll.sh --verbose --dry-run
+
+# Or from cron (every 5 minutes)
+*/5 * * * * /path/to/hooks/shepherd-poll.sh 2>&1 >> ~/.claude/mind/.shepherd.log
+```
+
+It detects:
+- Snakemake errors (MissingInputException, WorkflowError, LockException)
+- Nextflow errors (Error executing process, Execution aborted)
+- Slurm states (FAILED, TIMEOUT, OUT_OF_MEMORY)
+- Generic errors (Traceback, segfault, OOM, disk full)
+
+Events are logged via `long_task_event`, critical errors trigger `msg_send` alerts.
 
 ---
 

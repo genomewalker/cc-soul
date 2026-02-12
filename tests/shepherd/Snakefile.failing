@@ -1,0 +1,79 @@
+# Test workflow with intentional failure for shepherd error recovery testing
+# Rule 3 (analyze) will fail on first run, succeed on retry
+
+import os
+
+rule all:
+    input:
+        "output/final_report.txt"
+
+rule download_data:
+    output:
+        "output/raw_data.txt"
+    shell:
+        """
+        echo "Downloading data..."
+        sleep 1
+        echo "Sample raw data content" > {output}
+        echo "Download complete"
+        """
+
+rule preprocess:
+    input:
+        "output/raw_data.txt"
+    output:
+        "output/processed_data.txt"
+    shell:
+        """
+        echo "Preprocessing data..."
+        sleep 1
+        cat {input} | tr 'a-z' 'A-Z' > {output}
+        echo "Preprocessing complete"
+        """
+
+rule analyze:
+    input:
+        "output/processed_data.txt"
+    output:
+        "output/analysis_results.txt"
+    shell:
+        """
+        echo "Running analysis..."
+        sleep 1
+        # Fail if marker file doesn't exist (first run fails, retry succeeds)
+        if [ ! -f "output/.retry_marker" ]; then
+            echo "ERROR: Analysis failed - missing dependency" >&2
+            echo "CalledProcessError: returned non-zero exit status 1" >&2
+            touch "output/.retry_marker"
+            exit 1
+        fi
+        echo "Analysis of: $(cat {input})" > {output}
+        echo "Analysis complete"
+        """
+
+rule validate:
+    input:
+        "output/analysis_results.txt"
+    output:
+        "output/validated_results.txt"
+    shell:
+        """
+        echo "Validating results..."
+        sleep 1
+        echo "VALIDATED: $(cat {input})" > {output}
+        echo "Validation passed"
+        """
+
+rule generate_report:
+    input:
+        "output/validated_results.txt"
+    output:
+        "output/final_report.txt"
+    shell:
+        """
+        echo "Generating final report..."
+        sleep 1
+        echo "=== FINAL REPORT ===" > {output}
+        cat {input} >> {output}
+        echo "5 of 5 steps (100%) done"
+        """

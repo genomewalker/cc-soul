@@ -146,6 +146,39 @@ Detection: `CHITTA_REALM` env → `.cc-soul-realm` file → git repo name → `b
 | `long_task_start/update/complete` | Tracked work with criteria |
 | `checkpoint` | Save state |
 
+## Shepherd (Pipeline Monitoring)
+
+Autonomous monitoring for long-running pipelines (snakemake, nextflow, slurm).
+
+**Commands:**
+```bash
+/shepherd <command>              # Start monitoring a pipeline
+/shepherd status                 # Check shepherd status
+/shepherd stop                   # Stop monitoring
+/shepherd dashboard              # Control center view
+```
+
+**Configuration:**
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--interval` | 60 | Seconds between sense cycles |
+| `--max-restarts` | 3 | Max auto-restarts before escalating |
+| `--notify` | true | Send notifications on events |
+| `--auto-fix` | true | Apply fixes from memory |
+
+**Sense-Think-Act Loop:**
+1. **SENSE**: Read pane output, detect errors, check for stalls
+2. **THINK**: Match patterns against habits, recall fixes from memory
+3. **ACT**: Restart, apply fix, escalate, or checkpoint
+
+**Pattern Libraries:**
+- Snakemake: MissingInputException, WorkflowError, LockException, completion
+- Nextflow: Process failed, OutOfMemoryError, Completed at
+- Slurm: FAILED, TIMEOUT, OUT_OF_MEMORY, CANCELLED
+
+**Background Polling:**
+`hooks/shepherd-poll.sh` runs independently to monitor panes even without active Claude session.
+
 ## Habits & Anticipation
 
 | Tool | Purpose |
