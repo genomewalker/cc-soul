@@ -14,8 +14,10 @@
 #include <mutex>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <unistd.h>
 #include <poll.h>
+#include <sys/stat.h>
 
 namespace chitta {
 
@@ -28,17 +30,40 @@ inline uint32_t djb2_hash(const std::string& str) {
     return hash;
 }
 
+// Get persistent socket directory (immune to /tmp cleanup on HPC systems)
+// Priority: $XDG_RUNTIME_DIR > ~/.cache/chitta > /tmp
+inline std::string get_socket_dir() {
+    // XDG_RUNTIME_DIR is session-scoped and managed by systemd
+    const char* xdg_runtime = getenv("XDG_RUNTIME_DIR");
+    if (xdg_runtime && access(xdg_runtime, W_OK) == 0) {
+        std::string dir = std::string(xdg_runtime) + "/chitta";
+        mkdir(dir.c_str(), 0700);
+        return dir;
+    }
+    // Fall back to ~/.cache/chitta (persistent, user-owned)
+    const char* home = getenv("HOME");
+    if (home) {
+        std::string cache_dir = std::string(home) + "/.cache";
+        mkdir(cache_dir.c_str(), 0755);
+        std::string dir = cache_dir + "/chitta";
+        mkdir(dir.c_str(), 0700);
+        return dir;
+    }
+    // Last resort: /tmp (may be cleaned up on HPC systems)
+    return "/tmp";
+}
+
 // Derive socket/lock/pid paths from mind database path
 inline std::string socket_path_for_mind(const std::string& mind_path) {
-    return "/tmp/chitta-" + std::to_string(djb2_hash(mind_path)) + ".sock";
+    return get_socket_dir() + "/chitta-" + std::to_string(djb2_hash(mind_path)) + ".sock";
 }
 
 inline std::string lock_path_for_mind(const std::string& mind_path) {
-    return "/tmp/chitta-" + std::to_string(djb2_hash(mind_path)) + ".lock";
+    return get_socket_dir() + "/chitta-" + std::to_string(djb2_hash(mind_path)) + ".lock";
 }
 
 inline std::string pid_path_for_mind(const std::string& mind_path) {
-    return "/tmp/chitta-" + std::to_string(djb2_hash(mind_path)) + ".pid";
+    return get_socket_dir() + "/chitta-" + std::to_string(djb2_hash(mind_path)) + ".pid";
 }
 
 // Represents a pending request from a client
@@ -70,9 +95,9 @@ struct ClientConnection {
 // Unix domain socket server for JSON-RPC 2.0
 class SocketServer {
 public:
-    // UID-scoped socket path for multi-user safety
+    // UID-scoped socket path for multi-user safety (uses persistent directory)
     static std::string default_socket_path() {
-        return "/tmp/chitta-" + std::to_string(getuid()) + ".sock";
+        return get_socket_dir() + "/chitta-" + std::to_string(getuid()) + ".sock";
     }
     static constexpr int MAX_CONNECTIONS = 32;
     static constexpr size_t MAX_MESSAGE_SIZE = 16 * 1024 * 1024;  // 16MB
