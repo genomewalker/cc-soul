@@ -73,22 +73,23 @@ class AgentCard(Static, can_focus=True):
         state = s.get("state", "unknown")
 
         dot = {"running": "●", "paused": "◑", "done": "○", "failed": "×"}.get(state, "·")
-        dot_color = {"running": "#66aa66", "paused": "#aaaa66", "done": "#666666", "failed": "#aa6666"}.get(state, "#444444")
+        state_color = {"running": "#66aa66", "paused": "#aaaa66", "done": "#666666", "failed": "#aa6666"}.get(state, "#444444")
 
         text = Text()
-        text.append(f"{dot} ", style=dot_color)
+        text.append(f"{dot} ", style=state_color)
         text.append(f"#{s.get('id', '?'):02d}", style="#cccccc" if self.selected else "#888888")
-        text.append(f"  {s.get('brain_model', '?')}", style="#555555")
+        text.append(f" {state}", style=state_color)
         text.append("\n")
 
-        goal = s.get("goal", "")[:20]
+        goal = s.get("goal", "")[:22]
         text.append(goal, style="#999999" if self.selected else "#666666")
-        if len(s.get("goal", "")) > 20:
+        if len(s.get("goal", "")) > 22:
             text.append("…", style="#444444")
 
         text.append("\n")
         text.append(f"{s.get('iterations', 0)}", style="#aa8866" if self.selected else "#666644")
-        text.append(" cycles", style="#444444")
+        text.append(" cycles ", style="#444444")
+        text.append(f"{s.get('brain_model', '?')}", style="#555555")
 
         return text
 

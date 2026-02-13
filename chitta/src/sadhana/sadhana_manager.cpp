@@ -508,9 +508,26 @@ json SadhanaManager::sense(Sadhana& sadhana, BrainProvider& brain) {
     if (result.success && !result.output.empty()) {
         // Execute the observation command
         std::string cmd = result.output;
+
+        // Strip markdown code blocks (```bash ... ``` or ``` ... ```)
+        size_t start = cmd.find("```");
+        if (start != std::string::npos) {
+            size_t content_start = cmd.find('\n', start);
+            if (content_start != std::string::npos) {
+                content_start++;  // Skip the newline
+                size_t end = cmd.rfind("```");
+                if (end != std::string::npos && end > content_start) {
+                    cmd = cmd.substr(content_start, end - content_start);
+                }
+            }
+        }
+
         // Trim whitespace
         while (!cmd.empty() && (cmd.back() == '\n' || cmd.back() == '\r' || cmd.back() == ' ')) {
             cmd.pop_back();
+        }
+        while (!cmd.empty() && (cmd.front() == '\n' || cmd.front() == '\r' || cmd.front() == ' ')) {
+            cmd.erase(0, 1);
         }
 
         // Execute command
@@ -594,7 +611,16 @@ json SadhanaManager::think(Sadhana& sadhana, BrainProvider& brain, const json& o
         prompt << memory_context << "\n";
     }
 
-    prompt << "Current observation:\n" << observation.dump(2) << "\n\n";
+    // Truncate observation output to avoid "Argument list too long" errors
+    json truncated_obs = observation;
+    if (truncated_obs.contains("output") && truncated_obs["output"].is_string()) {
+        std::string out = truncated_obs["output"].get<std::string>();
+        if (out.length() > 4000) {
+            truncated_obs["output"] = out.substr(0, 2000) + "\n...[truncated " +
+                std::to_string(out.length() - 4000) + " chars]...\n" + out.substr(out.length() - 2000);
+        }
+    }
+    prompt << "Current observation:\n" << truncated_obs.dump(2) << "\n\n";
 
     if (sadhana.iterations > 0) {
         prompt << "This is iteration " << (sadhana.iterations + 1) << " of your work.\n\n";
