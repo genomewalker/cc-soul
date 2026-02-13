@@ -17,6 +17,404 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
+<style>
+/* Sadhana-specific styles */
+.cycle-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-4);
+  margin: var(--space-6) 0;
+}
+@media (max-width: 800px) {
+  .cycle-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 500px) {
+  .cycle-grid { grid-template-columns: 1fr; }
+}
+
+.cycle-card {
+  background: linear-gradient(135deg, rgba(15, 16, 24, 0.9) 0%, rgba(26, 27, 38, 0.9) 100%);
+  border: 1px solid rgba(157, 178, 217, 0.12);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+  text-align: center;
+  position: relative;
+  transition: all 0.3s ease;
+}
+.cycle-card:hover {
+  border-color: rgba(203, 175, 134, 0.3);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+}
+.cycle-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+.cycle-card--sense::before { background: linear-gradient(90deg, #7dcfff, #7aa2f7); }
+.cycle-card--think::before { background: linear-gradient(90deg, #e0af68, #ff9e64); }
+.cycle-card--act::before { background: linear-gradient(90deg, #9ece6a, #73daca); }
+.cycle-card--learn::before { background: linear-gradient(90deg, #bb9af7, #9d7cd8); }
+
+.cycle-icon {
+  font-size: 2.5rem;
+  margin-bottom: var(--space-3);
+  display: block;
+}
+.cycle-card--sense .cycle-icon { color: #7dcfff; }
+.cycle-card--think .cycle-icon { color: #e0af68; }
+.cycle-card--act .cycle-icon { color: #9ece6a; }
+.cycle-card--learn .cycle-icon { color: #bb9af7; }
+
+.cycle-title {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  color: var(--lotus-200);
+  margin-bottom: var(--space-2);
+}
+.cycle-desc {
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  line-height: 1.6;
+}
+
+/* Animated loop indicator */
+.loop-indicator {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-5) 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--sandal-300);
+}
+.loop-arrow {
+  animation: pulse 2s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+/* Architecture diagram */
+.arch-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: 800px;
+  margin: var(--space-6) auto;
+}
+.arch-layer {
+  background: linear-gradient(135deg, rgba(15, 16, 24, 0.95) 0%, rgba(26, 27, 38, 0.95) 100%);
+  border: 1px solid rgba(157, 178, 217, 0.15);
+  border-radius: var(--radius-md);
+  padding: var(--space-4) var(--space-5);
+  position: relative;
+}
+.arch-layer--tui {
+  border-color: rgba(122, 162, 247, 0.3);
+  background: linear-gradient(135deg, rgba(122, 162, 247, 0.08) 0%, rgba(15, 16, 24, 0.95) 100%);
+}
+.arch-layer--daemon {
+  border-color: rgba(203, 175, 134, 0.3);
+  background: linear-gradient(135deg, rgba(203, 175, 134, 0.08) 0%, rgba(15, 16, 24, 0.95) 100%);
+}
+.arch-layer--storage {
+  border-color: rgba(158, 206, 106, 0.3);
+  background: linear-gradient(135deg, rgba(158, 206, 106, 0.08) 0%, rgba(15, 16, 24, 0.95) 100%);
+}
+
+.arch-layer-label {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--sandal-300);
+  margin-bottom: var(--space-3);
+}
+.arch-boxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.arch-box {
+  background: rgba(0,0,0,0.3);
+  border: 1px solid rgba(157, 178, 217, 0.2);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ash-300);
+}
+.arch-box--highlight { color: var(--aura-300); border-color: rgba(122, 162, 247, 0.3); }
+.arch-box--sandal { color: var(--sandal-300); border-color: rgba(203, 175, 134, 0.3); }
+.arch-box--green { color: #9ece6a; border-color: rgba(158, 206, 106, 0.3); }
+
+.arch-connector {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-2) 0;
+}
+.arch-connector-line {
+  width: 2px;
+  height: 24px;
+  background: linear-gradient(180deg, rgba(203, 175, 134, 0.4), rgba(203, 175, 134, 0.1));
+}
+.arch-connector-label {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: rgba(185, 189, 199, 0.5);
+  margin-top: var(--space-1);
+}
+
+/* Memory flow diagram */
+.memory-flow {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-3);
+  margin: var(--space-6) 0;
+  flex-wrap: wrap;
+}
+@media (max-width: 700px) {
+  .memory-flow { flex-direction: column; }
+}
+
+.memory-step {
+  flex: 1;
+  min-width: 200px;
+  background: linear-gradient(135deg, rgba(15, 16, 24, 0.95) 0%, rgba(26, 27, 38, 0.95) 100%);
+  border: 1px solid rgba(157, 178, 217, 0.12);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+}
+.memory-step--query {
+  border-top: 3px solid #7dcfff;
+}
+.memory-step--recall {
+  border-top: 3px solid #e0af68;
+}
+.memory-step--inject {
+  border-top: 3px solid #9ece6a;
+}
+
+.memory-step-title {
+  font-family: var(--font-display);
+  font-size: var(--text-md);
+  color: var(--lotus-200);
+  margin-bottom: var(--space-2);
+}
+.memory-step-desc {
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  line-height: 1.6;
+}
+.memory-arrow {
+  display: flex;
+  align-items: center;
+  color: var(--sandal-300);
+  font-size: 1.5rem;
+}
+@media (max-width: 700px) {
+  .memory-arrow { justify-content: center; transform: rotate(90deg); }
+}
+
+/* TUI mockup */
+.tui-mockup {
+  background: #0a0a0f;
+  border: 1px solid #333;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  margin: var(--space-5) 0;
+}
+.tui-header {
+  background: #111;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid #333;
+  display: flex;
+  justify-content: space-between;
+  color: #666;
+}
+.tui-header-title { color: #888; }
+.tui-header-status { color: #66aa66; }
+
+.tui-body {
+  padding: var(--space-3);
+}
+.tui-agents {
+  display: flex;
+  gap: var(--space-3);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid #222;
+  margin-bottom: var(--space-3);
+  overflow-x: auto;
+}
+.tui-agent {
+  min-width: 140px;
+  padding: var(--space-2);
+  border-left: 3px solid #333;
+}
+.tui-agent--active { border-left-color: #66aa66; }
+.tui-agent-id { color: #7aa2f7; font-weight: 500; }
+.tui-agent-status { color: #666; }
+.tui-agent-status--running { color: #66aa66; }
+.tui-agent-goal { color: #888; font-size: 0.75rem; margin-top: 2px; }
+.tui-agent-cycles { color: #ff9e64; font-size: 0.75rem; }
+
+.tui-detail {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+@media (max-width: 600px) {
+  .tui-detail { grid-template-columns: 1fr; }
+}
+
+.tui-info { color: #888; }
+.tui-info-title { color: #7aa2f7; margin-bottom: var(--space-2); }
+.tui-info-label { color: #565f89; }
+.tui-info-value { color: #a9b1d6; }
+
+.tui-events {}
+.tui-event {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: 2px;
+}
+.tui-event-time { color: #565f89; }
+.tui-event-type { min-width: 40px; }
+.tui-event-type--sense { color: #7dcfff; }
+.tui-event-type--think { color: #e0af68; }
+.tui-event-type--act { color: #9ece6a; }
+.tui-event-type--learn { color: #bb9af7; }
+.tui-event-content { color: #888; }
+
+.tui-footer {
+  background: #111;
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid #333;
+  display: flex;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+.tui-key {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.tui-key-badge {
+  background: #222;
+  padding: 2px 6px;
+  border-radius: 3px;
+  color: #666;
+  font-size: 0.7rem;
+}
+.tui-key-label { color: #555; font-size: 0.75rem; }
+
+/* Learning cards */
+.learning-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-4);
+  margin: var(--space-5) 0;
+}
+@media (max-width: 600px) {
+  .learning-grid { grid-template-columns: 1fr; }
+}
+
+.learning-card {
+  background: linear-gradient(135deg, rgba(15, 16, 24, 0.95) 0%, rgba(26, 27, 38, 0.95) 100%);
+  border: 1px solid rgba(157, 178, 217, 0.12);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+}
+.learning-card--failure {
+  border-top: 3px solid #f7768e;
+}
+.learning-card--success {
+  border-top: 3px solid #9ece6a;
+}
+.learning-card-title {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  color: var(--lotus-200);
+  margin-bottom: var(--space-2);
+}
+.learning-card-desc {
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  line-height: 1.6;
+}
+.learning-card-tag {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  padding: 2px 8px;
+  border-radius: 3px;
+  margin-top: var(--space-3);
+}
+.learning-card--failure .learning-card-tag {
+  background: rgba(247, 118, 142, 0.15);
+  color: #f7768e;
+}
+.learning-card--success .learning-card-tag {
+  background: rgba(158, 206, 106, 0.15);
+  color: #9ece6a;
+}
+
+/* Use case cards */
+.usecase-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-4);
+  margin: var(--space-5) 0;
+}
+@media (max-width: 700px) {
+  .usecase-grid { grid-template-columns: 1fr; }
+}
+
+.usecase-card {
+  background: linear-gradient(135deg, rgba(15, 16, 24, 0.95) 0%, rgba(26, 27, 38, 0.95) 100%);
+  border: 1px solid rgba(157, 178, 217, 0.12);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+  transition: all 0.3s ease;
+}
+.usecase-card:hover {
+  border-color: rgba(203, 175, 134, 0.3);
+  transform: translateY(-2px);
+}
+.usecase-icon {
+  font-size: 2rem;
+  margin-bottom: var(--space-3);
+}
+.usecase-title {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  color: var(--lotus-200);
+  margin-bottom: var(--space-2);
+}
+.usecase-cmd {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  background: rgba(0,0,0,0.3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--aura-300);
+  margin-bottom: var(--space-3);
+  overflow-x: auto;
+}
+.usecase-desc {
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  line-height: 1.6;
+}
+</style>
 </head>
 <body>
 
@@ -82,43 +480,34 @@
       <p>Traditional AI assistants are reactive: you ask, they answer, context is lost. Sadhana inverts this paradigm. You define a goal, and an autonomous agent works toward it continuously — sensing the environment, thinking about next steps, acting, and learning from outcomes.</p>
     </div>
 
-    <div class="sys-diagram reveal reveal-delay-2" style="margin-top: 3rem;">
-      <div class="diagram-layer" style="background: var(--color-card-bg); border: 1px solid var(--color-border);">
-        <span class="diagram-layer-label">Sadhana Lifecycle</span>
-        <pre style="font-family: 'IBM Plex Mono', monospace; font-size: 0.85rem; line-height: 1.6; color: var(--color-text-secondary); text-align: center; padding: 2rem;">
-    ┌──────────┐      ┌──────────┐      ┌──────────┐
-    │  SENSE   │ ───▶ │  THINK   │ ───▶ │   ACT    │
-    │ (observe)│      │ (decide) │      │ (execute)│
-    └────┬─────┘      └────┬─────┘      └────┬─────┘
-         │                 │                  │
-         │                 ▼                  │
-         │          ┌──────────┐              │
-         │          │  LEARN   │◀─────────────┘
-         │          │ (memory) │
-         │          └────┬─────┘
-         │               │
-         └───────────────┴────────── ↻ repeat until goal achieved
-        </pre>
+    <!-- Cycle Cards -->
+    <div class="cycle-grid reveal reveal-delay-2">
+      <div class="cycle-card cycle-card--sense">
+        <span class="cycle-icon">👁</span>
+        <h3 class="cycle-title">SENSE</h3>
+        <p class="cycle-desc">Observe the current state by executing a shell command. What's the pipeline status? Are jobs running?</p>
+      </div>
+      <div class="cycle-card cycle-card--think">
+        <span class="cycle-icon">🧠</span>
+        <h3 class="cycle-title">THINK</h3>
+        <p class="cycle-desc">Analyze the observation, recall relevant memories from past experience, decide the next action.</p>
+      </div>
+      <div class="cycle-card cycle-card--act">
+        <span class="cycle-icon">⚡</span>
+        <h3 class="cycle-title">ACT</h3>
+        <p class="cycle-desc">Execute the decided action. Restart a job, send an alert, modify configuration, or wait.</p>
+      </div>
+      <div class="cycle-card cycle-card--learn">
+        <span class="cycle-icon">📚</span>
+        <h3 class="cycle-title">LEARN</h3>
+        <p class="cycle-desc">Store outcomes in memory. Successes stay local; failures go global so all sadhanas learn.</p>
       </div>
     </div>
 
-    <div class="grid-2 reveal reveal-delay-3" style="margin-top: 2rem;">
-      <div class="card">
-        <h3>SENSE</h3>
-        <p>Observe the current state by executing a shell command. What's the pipeline status? Are jobs running? Any errors?</p>
-      </div>
-      <div class="card">
-        <h3>THINK</h3>
-        <p>Analyze the observation, recall relevant memories from past experience, and decide the next action.</p>
-      </div>
-      <div class="card">
-        <h3>ACT</h3>
-        <p>Execute the decided action. Restart a job, send an alert, modify configuration, or wait.</p>
-      </div>
-      <div class="card">
-        <h3>LEARN</h3>
-        <p>Store outcomes in memory. Successes stay local; failures go global so all sadhanas learn.</p>
-      </div>
+    <div class="loop-indicator reveal">
+      <span class="loop-arrow">↻</span>
+      <span>repeat until goal achieved</span>
+      <span class="loop-arrow">↻</span>
     </div>
   </div>
 </section>
@@ -127,7 +516,7 @@
 <!-- ═══════════════════════════════════════════
      ARCHITECTURE
      ═══════════════════════════════════════════ -->
-<section class="arch-section" id="architecture">
+<section class="arch-section alt-bg" id="architecture">
   <div class="container">
     <div class="reveal">
       <div class="section-divider"></div>
@@ -135,62 +524,61 @@
     </div>
     <p class="section-intro reveal reveal-delay-1">Sadhanas run inside the <code>chittad</code> daemon. The SadhanaManager orchestrates all agents, running a tick loop every 100ms to check which sadhanas need to sense-think-act.</p>
 
-    <div class="sys-diagram reveal reveal-delay-2">
-      <div class="diagram-layer" style="background: var(--color-card-bg); border: 1px solid var(--color-border);">
-        <pre style="font-family: 'IBM Plex Mono', monospace; font-size: 0.8rem; line-height: 1.5; color: var(--color-text-secondary); padding: 1.5rem;">
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        SADHANA TUI (Optional)                           │
-│  ┌─────────────┐  ┌──────────────┐  ┌────────────────────────────────┐ │
-│  │  Dashboard  │  │  Agent List  │  │       Event Stream             │ │
-│  │  • Status   │  │  • Select    │  │  • Sense / Think / Act events │ │
-│  │  • Count    │  │  • Control   │  │  • Timestamps, durations      │ │
-│  └─────────────┘  └──────────────┘  └────────────────────────────────┘ │
-└───────────────────────────────┬─────────────────────────────────────────┘
-                                │ Unix Socket
-┌───────────────────────────────┴─────────────────────────────────────────┐
-│                           CHITTAD DAEMON                                │
-│                                                                         │
-│  ┌─────────────────┐         ┌─────────────────────────────────────┐   │
-│  │ SadhanaManager  │         │         BrainProvider               │   │
-│  │                 │         │  ┌───────────┐  ┌───────────────┐   │   │
-│  │  • tick() loop  │────────▶│  │  Claude   │  │   OpenCode    │   │   │
-│  │  • state machine│         │  │  (API)    │  │   (local)     │   │   │
-│  │  • history log  │         │  └───────────┘  └───────────────┘   │   │
-│  └────────┬────────┘         └─────────────────────────────────────┘   │
-│           │                                                             │
-│           ▼                                                             │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                       DuckDB Storage                             │   │
-│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌─────────────────┐  │   │
-│  │  │ sadhana  │  │ history  │  │ memories │  │    triplets     │  │   │
-│  │  │  table   │  │  table   │  │ (recall) │  │    (graph)      │  │   │
-│  │  └──────────┘  └──────────┘  └──────────┘  └─────────────────┘  │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────────┘
-        </pre>
+    <!-- Architecture Stack -->
+    <div class="arch-stack reveal reveal-delay-2">
+
+      <div class="arch-layer arch-layer--tui">
+        <div class="arch-layer-label">Sadhana TUI (Optional)</div>
+        <div class="arch-boxes">
+          <div class="arch-box arch-box--highlight">Dashboard</div>
+          <div class="arch-box arch-box--highlight">Agent List</div>
+          <div class="arch-box arch-box--highlight">Event Stream</div>
+          <div class="arch-box arch-box--highlight">Controls</div>
+        </div>
       </div>
+
+      <div class="arch-connector">
+        <div style="text-align: center;">
+          <div class="arch-connector-line"></div>
+          <div class="arch-connector-label">Unix Socket</div>
+        </div>
+      </div>
+
+      <div class="arch-layer arch-layer--daemon">
+        <div class="arch-layer-label">chittad Daemon</div>
+        <div class="arch-boxes">
+          <div class="arch-box arch-box--sandal">SadhanaManager</div>
+          <div class="arch-box arch-box--sandal">tick() loop</div>
+          <div class="arch-box arch-box--sandal">BrainProvider</div>
+          <div class="arch-box">Claude API</div>
+          <div class="arch-box">OpenCode (local)</div>
+        </div>
+      </div>
+
+      <div class="arch-connector">
+        <div style="text-align: center;">
+          <div class="arch-connector-line"></div>
+        </div>
+      </div>
+
+      <div class="arch-layer arch-layer--storage">
+        <div class="arch-layer-label">DuckDB Storage</div>
+        <div class="arch-boxes">
+          <div class="arch-box arch-box--green">sadhana table</div>
+          <div class="arch-box arch-box--green">history table</div>
+          <div class="arch-box arch-box--green">memories (recall)</div>
+          <div class="arch-box arch-box--green">triplets (graph)</div>
+        </div>
+      </div>
+
     </div>
 
-    <div class="card card-dark reveal reveal-delay-3" style="margin-top: 2rem;">
-      <h3>Components</h3>
-      <table style="width: 100%; border-collapse: collapse;">
-        <tr style="border-bottom: 1px solid var(--color-border);">
-          <td style="padding: 0.75rem 0; font-weight: 500;">SadhanaManager</td>
-          <td style="padding: 0.75rem 0; color: var(--color-text-secondary);">Orchestrates all sadhanas, runs tick loop every 100ms</td>
-        </tr>
-        <tr style="border-bottom: 1px solid var(--color-border);">
-          <td style="padding: 0.75rem 0; font-weight: 500;">BrainProvider</td>
-          <td style="padding: 0.75rem 0; color: var(--color-text-secondary);">LLM abstraction — Claude API or OpenCode local</td>
-        </tr>
-        <tr style="border-bottom: 1px solid var(--color-border);">
-          <td style="padding: 0.75rem 0; font-weight: 500;">DuckDB Storage</td>
-          <td style="padding: 0.75rem 0; color: var(--color-text-secondary);">Persistent state, history, and memory integration</td>
-        </tr>
-        <tr>
-          <td style="padding: 0.75rem 0; font-weight: 500;">Sadhana TUI</td>
-          <td style="padding: 0.75rem 0; color: var(--color-text-secondary);">Optional terminal interface for real-time monitoring</td>
-        </tr>
-      </table>
+    <div class="config-block reveal reveal-delay-3">
+      <div class="config-block-title">Components</div>
+      <pre><span class="kw">SadhanaManager</span>   <span class="cm">Orchestrates all sadhanas, runs tick loop every 100ms</span>
+<span class="kw">BrainProvider</span>    <span class="cm">LLM abstraction — Claude API or OpenCode local</span>
+<span class="kw">DuckDB Storage</span>   <span class="cm">Persistent state, history, and memory integration</span>
+<span class="kw">Sadhana TUI</span>      <span class="cm">Optional terminal interface for real-time monitoring</span></pre>
     </div>
   </div>
 </section>
@@ -207,47 +595,51 @@
     </div>
     <p class="section-intro reveal reveal-delay-1">Sadhanas are memory-aware. Before each decision, they recall relevant memories from past experience — including failures from other sadhanas.</p>
 
-    <div class="sys-diagram reveal reveal-delay-2">
-      <div class="diagram-layer" style="background: var(--color-card-bg); border: 1px solid var(--color-border);">
-        <pre style="font-family: 'IBM Plex Mono', monospace; font-size: 0.8rem; line-height: 1.5; color: var(--color-text-secondary); padding: 1.5rem;">
-Goal: "Monitor pipeline on server X"
-Observation: { command: "ssh ...", error: "Connection refused" }
-
-┌─────────────────┐
-│  BM25 Search    │──▶ "[sadhana] Failure: ssh to localhost failed"
-│  "ssh refused"  │    "[sadhana] Success: ssh user@server-x worked"
-└─────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  THINK PROMPT                                                    │
-│                                                                  │
-│  You are an autonomous agent working toward this goal:          │
-│  Monitor pipeline on server X                                    │
-│                                                                  │
-│  <strong>Relevant memories from past experience:</strong>                        │
-│  - [sadhana] Failure: ssh to localhost failed...                │
-│  - [sadhana] Success: ssh user@server-x worked...               │
-│                                                                  │
-│  Current observation: { "error": "Connection refused" }          │
-│                                                                  │
-│  Decide what to do next...                                       │
-└─────────────────────────────────────────────────────────────────┘
-
-Result: Agent learns from past failures, tries correct server
-        </pre>
+    <!-- Memory Flow -->
+    <div class="memory-flow reveal reveal-delay-2">
+      <div class="memory-step memory-step--query">
+        <h4 class="memory-step-title">1. Query</h4>
+        <p class="memory-step-desc">Build search query from goal + current observation. Example: <code>"ssh connection refused server-x"</code></p>
+      </div>
+      <div class="memory-arrow">→</div>
+      <div class="memory-step memory-step--recall">
+        <h4 class="memory-step-title">2. Recall</h4>
+        <p class="memory-step-desc">BM25 text search finds relevant memories. Up to 5 memories ranked by relevance.</p>
+      </div>
+      <div class="memory-arrow">→</div>
+      <div class="memory-step memory-step--inject">
+        <h4 class="memory-step-title">3. Inject</h4>
+        <p class="memory-step-desc">Memories injected into think prompt. Agent sees past successes and failures.</p>
       </div>
     </div>
 
-    <div class="grid-2 reveal reveal-delay-3" style="margin-top: 2rem;">
-      <div class="card">
-        <h3>Failure Learning</h3>
-        <p>When an action fails, it's stored with <strong>Global visibility</strong> — all sadhanas across all projects can learn from it. Tagged with <code>["failure", "sadhana"]</code> for filtering.</p>
+    <!-- Learning Cards -->
+    <div class="learning-grid reveal reveal-delay-3">
+      <div class="learning-card learning-card--failure">
+        <h4 class="learning-card-title">Failure Learning</h4>
+        <p class="learning-card-desc">When an action fails, it's stored with <strong>Global visibility</strong> — all sadhanas across all projects can learn from it. Higher salience (0.8) and slow decay (0.03) ensure failures persist.</p>
+        <span class="learning-card-tag">Global Visibility</span>
       </div>
-      <div class="card">
-        <h3>Success Learning</h3>
-        <p>Successful actions are stored with <strong>Private visibility</strong> — project-specific knowledge that doesn't clutter other realms.</p>
+      <div class="learning-card learning-card--success">
+        <h4 class="learning-card-title">Success Learning</h4>
+        <p class="learning-card-desc">Successful actions are stored with <strong>Private visibility</strong> — project-specific knowledge that doesn't clutter other realms. Normal salience and decay.</p>
+        <span class="learning-card-tag">Private Visibility</span>
       </div>
+    </div>
+
+    <div class="config-block reveal">
+      <div class="config-block-title">Memory-Aware Think Prompt</div>
+      <pre><span class="cm">You are an autonomous agent working toward this goal:</span>
+<span class="kw">Monitor pipeline on server X</span>
+
+<span class="cm">Relevant memories from past experience:</span>
+<span class="val">- [sadhana] Failure: ssh to localhost failed, use server-x instead</span>
+<span class="val">- [sadhana] Success: ssh user@server-x worked correctly</span>
+
+<span class="cm">Current observation:</span>
+<span class="kw">{ "error": "Connection refused" }</span>
+
+<span class="cm">Decide what to do next...</span></pre>
     </div>
   </div>
 </section>
@@ -256,7 +648,7 @@ Result: Agent learns from past failures, tries correct server
 <!-- ═══════════════════════════════════════════
      TUI INTERFACE
      ═══════════════════════════════════════════ -->
-<section class="arch-section" id="tui">
+<section class="arch-section alt-bg" id="tui">
   <div class="container">
     <div class="reveal">
       <div class="section-divider"></div>
@@ -264,71 +656,100 @@ Result: Agent learns from past failures, tries correct server
     </div>
     <p class="section-intro reveal reveal-delay-1">A Textual-based terminal interface for real-time monitoring of all your autonomous agents.</p>
 
-    <div class="card card-dark reveal reveal-delay-2">
-      <h3>Installation</h3>
-      <pre><code>pip install -e sadhana-tui/</code></pre>
-      <h3 style="margin-top: 1.5rem;">Running</h3>
-      <pre><code>sadhana-tui</code></pre>
+    <div class="config-block reveal reveal-delay-2">
+      <div class="config-block-title">Installation & Usage</div>
+      <pre><span class="cm"># Install</span>
+<span class="kw">pip install</span> -e sadhana-tui/
+
+<span class="cm"># Run</span>
+<span class="kw">sadhana-tui</span></pre>
     </div>
 
-    <div class="sys-diagram reveal reveal-delay-2" style="margin-top: 2rem;">
-      <div class="diagram-layer" style="background: #0a0a0a; border: 1px solid #333;">
-        <pre style="font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem; line-height: 1.4; color: #a9b1d6; padding: 1rem;">
-┌─────────────────────────────────────────────────────────────────────────┐
-│ <span style="color: #555;">sadhana</span>                                                     <span style="color: #444;">2/3</span> <span style="color: #66aa66;">●</span>     │
-├─────────────────────────────────────────────────────────────────────────┤
-│ <span style="color: #44aa44;">▊</span> <span style="color: #66aa66;">●</span> #06 haiku         <span style="color: #555;">▊</span> <span style="color: #666;">○</span> #05 haiku         <span style="color: #555;">▊</span> <span style="color: #666;">○</span> #04 haiku         │
-│ <span style="color: #44aa44;">▊</span> Monitor pipeline    <span style="color: #555;">▊</span> Verify deploy       <span style="color: #555;">▊</span> Run tests           │
-│ <span style="color: #44aa44;">▊</span> <span style="color: #aa8866;">24</span> cycles           <span style="color: #555;">▊</span> <span style="color: #666;">12</span> cycles           <span style="color: #555;">▊</span> <span style="color: #666;">8</span> cycles            │
-├─────────────────────────────────────────────────────────────────────────┤
-│ <span style="color: #7aa2f7;">#06</span>  <span style="color: #66aa66;">running</span>                      │ <span style="color: #565f89;">01:23</span> <span style="color: #7dcfff;">sense</span> $ squeue -u user   │
-│ ────────────────────────────    │ <span style="color: #565f89;">01:23</span> <span style="color: #e0af68;">think</span> Analyze output     │
-│                                 │ <span style="color: #565f89;">01:22</span> <span style="color: #9ece6a;">act</span>   $ ssh user@host    │
-│ Monitor pipeline on denbi-h-    │ <span style="color: #565f89;">01:20</span> <span style="color: #7dcfff;">sense</span> $ ps aux | grep    │
-│ micro until ALL jobs finished   │ <span style="color: #565f89;">01:20</span> <span style="color: #bb9af7;">learn</span> Success: ssh...    │
-│                                 │                                │
-│ <span style="color: #565f89;">model</span> <span style="color: #888;">haiku</span>   <span style="color: #565f89;">brain</span> <span style="color: #888;">claude</span>     │                                │
-│ <span style="color: #565f89;">cycles</span> <span style="color: #ff9e64;">24</span>     <span style="color: #565f89;">interval</span> <span style="color: #888;">300s</span>   │                                │
-├─────────────────────────────────────────────────────────────────────────┤
-│  <span style="color: #333; background: #222;"> n </span> new   <span style="color: #333; background: #222;"> p </span> pause   <span style="color: #333; background: #222;"> r </span> resume   <span style="color: #333; background: #222;"> s </span> stop   <span style="color: #333; background: #222;"> j/k </span> navigate   <span style="color: #333; background: #222;"> q </span> quit  │
-└─────────────────────────────────────────────────────────────────────────┘
-        </pre>
+    <!-- TUI Mockup -->
+    <div class="tui-mockup reveal reveal-delay-2">
+      <div class="tui-header">
+        <span class="tui-header-title">sadhana</span>
+        <span class="tui-header-status">2/3 ●</span>
+      </div>
+      <div class="tui-body">
+        <div class="tui-agents">
+          <div class="tui-agent tui-agent--active">
+            <div><span class="tui-agent-id">#06</span> <span class="tui-agent-status tui-agent-status--running">● running</span></div>
+            <div class="tui-agent-goal">Monitor pipeline</div>
+            <div class="tui-agent-cycles">24 cycles</div>
+          </div>
+          <div class="tui-agent">
+            <div><span class="tui-agent-id">#05</span> <span class="tui-agent-status">○ done</span></div>
+            <div class="tui-agent-goal">Verify deploy</div>
+            <div class="tui-agent-cycles">12 cycles</div>
+          </div>
+          <div class="tui-agent">
+            <div><span class="tui-agent-id">#04</span> <span class="tui-agent-status">○ paused</span></div>
+            <div class="tui-agent-goal">Run tests</div>
+            <div class="tui-agent-cycles">8 cycles</div>
+          </div>
+        </div>
+        <div class="tui-detail">
+          <div class="tui-info">
+            <div class="tui-info-title">#06 running</div>
+            <div>Monitor pipeline on denbi-h-micro until ALL jobs finished</div>
+            <div style="margin-top: 8px;">
+              <span class="tui-info-label">model</span> <span class="tui-info-value">haiku</span> &nbsp;
+              <span class="tui-info-label">brain</span> <span class="tui-info-value">claude</span>
+            </div>
+            <div>
+              <span class="tui-info-label">cycles</span> <span class="tui-info-value" style="color: #ff9e64;">24</span> &nbsp;
+              <span class="tui-info-label">interval</span> <span class="tui-info-value">300s</span>
+            </div>
+          </div>
+          <div class="tui-events">
+            <div class="tui-event">
+              <span class="tui-event-time">01:23</span>
+              <span class="tui-event-type tui-event-type--sense">sense</span>
+              <span class="tui-event-content">$ squeue -u user</span>
+            </div>
+            <div class="tui-event">
+              <span class="tui-event-time">01:23</span>
+              <span class="tui-event-type tui-event-type--think">think</span>
+              <span class="tui-event-content">Analyze output</span>
+            </div>
+            <div class="tui-event">
+              <span class="tui-event-time">01:22</span>
+              <span class="tui-event-type tui-event-type--act">act</span>
+              <span class="tui-event-content">$ ssh user@host</span>
+            </div>
+            <div class="tui-event">
+              <span class="tui-event-time">01:20</span>
+              <span class="tui-event-type tui-event-type--learn">learn</span>
+              <span class="tui-event-content">Success: ssh worked</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="tui-footer">
+        <span class="tui-key"><span class="tui-key-badge">n</span> <span class="tui-key-label">new</span></span>
+        <span class="tui-key"><span class="tui-key-badge">p</span> <span class="tui-key-label">pause</span></span>
+        <span class="tui-key"><span class="tui-key-badge">r</span> <span class="tui-key-label">resume</span></span>
+        <span class="tui-key"><span class="tui-key-badge">s</span> <span class="tui-key-label">stop</span></span>
+        <span class="tui-key"><span class="tui-key-badge">j/k</span> <span class="tui-key-label">navigate</span></span>
+        <span class="tui-key"><span class="tui-key-badge">q</span> <span class="tui-key-label">quit</span></span>
       </div>
     </div>
 
-    <div class="card reveal reveal-delay-3" style="margin-top: 2rem;">
-      <h3>Keybindings</h3>
-      <table style="width: 100%; border-collapse: collapse;">
-        <tr style="border-bottom: 1px solid var(--color-border);">
-          <td style="padding: 0.5rem 0; font-family: 'IBM Plex Mono', monospace;">n</td>
-          <td style="padding: 0.5rem 0;">Create new sadhana</td>
-        </tr>
-        <tr style="border-bottom: 1px solid var(--color-border);">
-          <td style="padding: 0.5rem 0; font-family: 'IBM Plex Mono', monospace;">p</td>
-          <td style="padding: 0.5rem 0;">Pause selected</td>
-        </tr>
-        <tr style="border-bottom: 1px solid var(--color-border);">
-          <td style="padding: 0.5rem 0; font-family: 'IBM Plex Mono', monospace;">r</td>
-          <td style="padding: 0.5rem 0;">Resume selected</td>
-        </tr>
-        <tr style="border-bottom: 1px solid var(--color-border);">
-          <td style="padding: 0.5rem 0; font-family: 'IBM Plex Mono', monospace;">s</td>
-          <td style="padding: 0.5rem 0;">Stop selected</td>
-        </tr>
-        <tr style="border-bottom: 1px solid var(--color-border);">
-          <td style="padding: 0.5rem 0; font-family: 'IBM Plex Mono', monospace;">j / k</td>
-          <td style="padding: 0.5rem 0;">Navigate down / up</td>
-        </tr>
-        <tr style="border-bottom: 1px solid var(--color-border);">
-          <td style="padding: 0.5rem 0; font-family: 'IBM Plex Mono', monospace;">click</td>
-          <td style="padding: 0.5rem 0;">Select sadhana card</td>
-        </tr>
-        <tr>
-          <td style="padding: 0.5rem 0; font-family: 'IBM Plex Mono', monospace;">q</td>
-          <td style="padding: 0.5rem 0;">Quit</td>
-        </tr>
-      </table>
-    </div>
+    <table class="comp-table reveal reveal-delay-3">
+      <thead>
+        <tr><th>Key</th><th>Action</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="class-name">n</td><td class="role-desc">Create new sadhana</td></tr>
+        <tr><td class="class-name">p</td><td class="role-desc">Pause selected</td></tr>
+        <tr><td class="class-name">r</td><td class="role-desc">Resume selected</td></tr>
+        <tr><td class="class-name">s</td><td class="role-desc">Stop selected</td></tr>
+        <tr><td class="class-name">j / k</td><td class="role-desc">Navigate down / up</td></tr>
+        <tr><td class="class-name">click</td><td class="role-desc">Select sadhana card</td></tr>
+        <tr><td class="class-name">q</td><td class="role-desc">Quit</td></tr>
+      </tbody>
+    </table>
   </div>
 </section>
 
@@ -343,60 +764,32 @@ Result: Agent learns from past failures, tries correct server
       <h2 class="heading-section">Usage</h2>
     </div>
 
-    <div class="card card-dark reveal reveal-delay-1">
-      <h3>Starting a Sadhana</h3>
-      <pre><code># Via skill
-/shepherd snakemake --cores 8 --interval 300
+    <div class="config-block reveal reveal-delay-1">
+      <div class="config-block-title">Starting a Sadhana</div>
+      <pre><span class="cm"># Via skill</span>
+<span class="kw">/shepherd</span> snakemake --cores 8 --interval 300
 
-# Via CLI (JSON-RPC)
-echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
-  "name":"sadhana_start",
-  "arguments":{
-    "goal":"Monitor pipeline until complete",
-    "brain":"claude",
-    "model":"haiku",
-    "interval":120
-  }
-}}' | chitta</code></pre>
+<span class="cm"># Via MCP tool</span>
+<span class="kw">sadhana_start</span> goal="Monitor pipeline" brain="claude" model="haiku" interval=120</pre>
     </div>
 
-    <div class="card reveal reveal-delay-2" style="margin-top: 1.5rem;">
-      <h3>Management Commands</h3>
-      <table style="width: 100%; border-collapse: collapse;">
-        <tr style="border-bottom: 1px solid var(--color-border);">
-          <td style="padding: 0.5rem 0; font-family: 'IBM Plex Mono', monospace; white-space: nowrap;">sadhana_list</td>
-          <td style="padding: 0.5rem 0;">List all sadhanas with state</td>
-        </tr>
-        <tr style="border-bottom: 1px solid var(--color-border);">
-          <td style="padding: 0.5rem 0; font-family: 'IBM Plex Mono', monospace; white-space: nowrap;">sadhana_status --id N</td>
-          <td style="padding: 0.5rem 0;">Get detailed status + history</td>
-        </tr>
-        <tr style="border-bottom: 1px solid var(--color-border);">
-          <td style="padding: 0.5rem 0; font-family: 'IBM Plex Mono', monospace; white-space: nowrap;">sadhana_pause --id N</td>
-          <td style="padding: 0.5rem 0;">Pause a running sadhana</td>
-        </tr>
-        <tr style="border-bottom: 1px solid var(--color-border);">
-          <td style="padding: 0.5rem 0; font-family: 'IBM Plex Mono', monospace; white-space: nowrap;">sadhana_resume --id N</td>
-          <td style="padding: 0.5rem 0;">Resume a paused sadhana</td>
-        </tr>
-        <tr style="border-bottom: 1px solid var(--color-border);">
-          <td style="padding: 0.5rem 0; font-family: 'IBM Plex Mono', monospace; white-space: nowrap;">sadhana_stop --id N</td>
-          <td style="padding: 0.5rem 0;">Stop and mark as done</td>
-        </tr>
-        <tr style="border-bottom: 1px solid var(--color-border);">
-          <td style="padding: 0.5rem 0; font-family: 'IBM Plex Mono', monospace; white-space: nowrap;">sadhana_set_goal --id N --goal "..."</td>
-          <td style="padding: 0.5rem 0;">Update the goal</td>
-        </tr>
-        <tr style="border-bottom: 1px solid var(--color-border);">
-          <td style="padding: 0.5rem 0; font-family: 'IBM Plex Mono', monospace; white-space: nowrap;">sadhana_set_model --id N --model sonnet</td>
-          <td style="padding: 0.5rem 0;">Change LLM model</td>
-        </tr>
-        <tr>
-          <td style="padding: 0.5rem 0; font-family: 'IBM Plex Mono', monospace; white-space: nowrap;">sadhana_set_interval --id N --interval 300</td>
-          <td style="padding: 0.5rem 0;">Change tick interval</td>
-        </tr>
-      </table>
-    </div>
+    <h3 style="font-family: var(--font-display); font-size: var(--text-xl); color: var(--lotus-200); font-weight: 500; margin-top: var(--space-6); margin-bottom: var(--space-4);" class="reveal">Management Commands</h3>
+
+    <table class="comp-table reveal reveal-delay-2">
+      <thead>
+        <tr><th>Command</th><th>Description</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="class-name">sadhana_list</td><td class="role-desc">List all sadhanas with state</td></tr>
+        <tr><td class="class-name">sadhana_status --id N</td><td class="role-desc">Get detailed status + history</td></tr>
+        <tr><td class="class-name">sadhana_pause --id N</td><td class="role-desc">Pause a running sadhana</td></tr>
+        <tr><td class="class-name">sadhana_resume --id N</td><td class="role-desc">Resume a paused sadhana</td></tr>
+        <tr><td class="class-name">sadhana_stop --id N</td><td class="role-desc">Stop and mark as done</td></tr>
+        <tr><td class="class-name">sadhana_set_goal --id N --goal "..."</td><td class="role-desc">Update the goal</td></tr>
+        <tr><td class="class-name">sadhana_set_model --id N --model sonnet</td><td class="role-desc">Change LLM model</td></tr>
+        <tr><td class="class-name">sadhana_set_interval --id N --interval 300</td><td class="role-desc">Change tick interval</td></tr>
+      </tbody>
+    </table>
   </div>
 </section>
 
@@ -404,33 +797,37 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
 <!-- ═══════════════════════════════════════════
      USE CASES
      ═══════════════════════════════════════════ -->
-<section class="arch-section" id="use-cases">
+<section class="arch-section alt-bg" id="use-cases">
   <div class="container">
     <div class="reveal">
       <div class="section-divider"></div>
       <h2 class="heading-section">Use Cases</h2>
     </div>
 
-    <div class="grid-2 reveal reveal-delay-1">
-      <div class="card">
-        <h3>Pipeline Monitoring</h3>
-        <pre style="font-size: 0.85rem;"><code>/shepherd snakemake --cores 8</code></pre>
-        <p style="margin-top: 1rem;">Monitor Snakemake, Nextflow, or Slurm pipelines. Detects failures, recalls fixes from memory, restarts automatically.</p>
+    <div class="usecase-grid reveal reveal-delay-1">
+      <div class="usecase-card">
+        <div class="usecase-icon">🔬</div>
+        <h4 class="usecase-title">Pipeline Monitoring</h4>
+        <div class="usecase-cmd">/shepherd snakemake --cores 8</div>
+        <p class="usecase-desc">Monitor Snakemake, Nextflow, or Slurm pipelines. Detects failures, recalls fixes from memory, restarts automatically.</p>
       </div>
-      <div class="card">
-        <h3>Continuous Testing</h3>
-        <pre style="font-size: 0.85rem;"><code>sadhana_start --goal "Run tests on file change. Fix failures."</code></pre>
-        <p style="margin-top: 1rem;">Watch for changes, run tests, fix issues. Goal: all tests pass.</p>
+      <div class="usecase-card">
+        <div class="usecase-icon">🧪</div>
+        <h4 class="usecase-title">Continuous Testing</h4>
+        <div class="usecase-cmd">sadhana_start --goal "Run tests on file change"</div>
+        <p class="usecase-desc">Watch for changes, run tests, fix issues. Goal: all tests pass.</p>
       </div>
-      <div class="card">
-        <h3>Server Monitoring</h3>
-        <pre style="font-size: 0.85rem;"><code>sadhana_start --goal "Monitor server health. Alert if CPU > 90%."</code></pre>
-        <p style="margin-top: 1rem;">Continuous health checks with intelligent alerting.</p>
+      <div class="usecase-card">
+        <div class="usecase-icon">📊</div>
+        <h4 class="usecase-title">Server Monitoring</h4>
+        <div class="usecase-cmd">sadhana_start --goal "Monitor health. Alert if CPU > 90%"</div>
+        <p class="usecase-desc">Continuous health checks with intelligent alerting.</p>
       </div>
-      <div class="card">
-        <h3>Deployment Verification</h3>
-        <pre style="font-size: 0.85rem;"><code>sadhana_start --goal "Verify deployment. Check endpoints, logs, metrics."</code></pre>
-        <p style="margin-top: 1rem;">Post-deployment monitoring until stability confirmed.</p>
+      <div class="usecase-card">
+        <div class="usecase-icon">🚀</div>
+        <h4 class="usecase-title">Deployment Verification</h4>
+        <div class="usecase-cmd">sadhana_start --goal "Verify deployment succeeded"</div>
+        <p class="usecase-desc">Post-deployment monitoring until stability confirmed.</p>
       </div>
     </div>
   </div>
