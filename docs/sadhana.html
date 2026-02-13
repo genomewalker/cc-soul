@@ -221,100 +221,261 @@
   .memory-arrow { justify-content: center; transform: rotate(90deg); }
 }
 
-/* TUI mockup */
+/* TUI mockup - Premium terminal look */
 .tui-mockup {
-  background: #0a0a0f;
-  border: 1px solid #333;
-  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, #0d0d12 0%, #080810 100%);
+  border: 1px solid rgba(122, 162, 247, 0.2);
+  border-radius: var(--radius-lg);
   overflow: hidden;
   font-family: 'IBM Plex Mono', monospace;
   font-size: 0.8rem;
-  line-height: 1.4;
-  margin: var(--space-5) 0;
+  line-height: 1.5;
+  margin: var(--space-6) 0;
+  box-shadow:
+    0 4px 24px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(122, 162, 247, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 .tui-header {
-  background: #111;
-  padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid #333;
+  background: linear-gradient(90deg, rgba(122, 162, 247, 0.08) 0%, rgba(15, 15, 20, 0.95) 100%);
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(122, 162, 247, 0.15);
   display: flex;
   justify-content: space-between;
-  color: #666;
+  align-items: center;
 }
-.tui-header-title { color: #888; }
-.tui-header-status { color: #66aa66; }
+.tui-header-title {
+  color: #c0caf5;
+  font-weight: 600;
+  font-size: 0.9rem;
+  letter-spacing: 0.02em;
+}
+.tui-header-status {
+  color: #9ece6a;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tui-header-status::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  background: #9ece6a;
+  border-radius: 50%;
+  box-shadow: 0 0 8px rgba(158, 206, 106, 0.6);
+  animation: statusPulse 2s ease-in-out infinite;
+}
+@keyframes statusPulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 8px rgba(158, 206, 106, 0.6); }
+  50% { opacity: 0.7; box-shadow: 0 0 4px rgba(158, 206, 106, 0.3); }
+}
 
 .tui-body {
-  padding: var(--space-3);
+  padding: 16px;
 }
 .tui-agents {
   display: flex;
-  gap: var(--space-3);
-  padding-bottom: var(--space-3);
-  border-bottom: 1px solid #222;
-  margin-bottom: var(--space-3);
+  gap: 12px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(122, 162, 247, 0.1);
+  margin-bottom: 16px;
   overflow-x: auto;
 }
 .tui-agent {
-  min-width: 140px;
-  padding: var(--space-2);
-  border-left: 3px solid #333;
+  min-width: 160px;
+  padding: 12px 14px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-left: 3px solid #3b4261;
+  border-radius: 6px;
+  transition: all 0.2s ease;
 }
-.tui-agent--active { border-left-color: #66aa66; }
-.tui-agent-id { color: #7aa2f7; font-weight: 500; }
-.tui-agent-status { color: #666; }
-.tui-agent-status--running { color: #66aa66; }
-.tui-agent-goal { color: #888; font-size: 0.75rem; margin-top: 2px; }
-.tui-agent-cycles { color: #ff9e64; font-size: 0.75rem; }
+.tui-agent:hover {
+  background: rgba(122, 162, 247, 0.05);
+  border-color: rgba(122, 162, 247, 0.2);
+}
+.tui-agent--active {
+  border-left-color: #9ece6a;
+  background: rgba(158, 206, 106, 0.05);
+  box-shadow: 0 0 20px rgba(158, 206, 106, 0.1);
+}
+.tui-agent-id {
+  color: #7aa2f7;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+.tui-agent-status {
+  color: #565f89;
+  font-size: 0.75rem;
+  margin-left: 8px;
+}
+.tui-agent-status--running {
+  color: #9ece6a;
+}
+.tui-agent-goal {
+  color: #a9b1d6;
+  font-size: 0.8rem;
+  margin-top: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tui-agent-cycles {
+  color: #ff9e64;
+  font-size: 0.75rem;
+  margin-top: 4px;
+}
 
 .tui-detail {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--space-3);
+  grid-template-columns: 1fr 1.2fr;
+  gap: 20px;
 }
-@media (max-width: 600px) {
+@media (max-width: 650px) {
   .tui-detail { grid-template-columns: 1fr; }
 }
 
-.tui-info { color: #888; }
-.tui-info-title { color: #7aa2f7; margin-bottom: var(--space-2); }
-.tui-info-label { color: #565f89; }
-.tui-info-value { color: #a9b1d6; }
-
-.tui-events {}
-.tui-event {
-  display: flex;
-  gap: var(--space-2);
-  margin-bottom: 2px;
+.tui-info {
+  color: #a9b1d6;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.03);
 }
-.tui-event-time { color: #565f89; }
-.tui-event-type { min-width: 40px; }
+.tui-info-title {
+  color: #7aa2f7;
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tui-info-title::before {
+  content: '●';
+  color: #9ece6a;
+  font-size: 0.7rem;
+}
+.tui-info-goal {
+  color: #c0caf5;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.tui-info-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.tui-info-item {
+  display: flex;
+  gap: 8px;
+}
+.tui-info-label {
+  color: #565f89;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.tui-info-value {
+  color: #a9b1d6;
+  font-size: 0.85rem;
+}
+.tui-info-value--highlight { color: #ff9e64; font-weight: 500; }
+
+.tui-events {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.03);
+}
+.tui-events-title {
+  color: #565f89;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 12px;
+}
+.tui-event {
+  display: grid;
+  grid-template-columns: 50px 55px 1fr;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+  align-items: center;
+}
+.tui-event:last-child { border-bottom: none; }
+.tui-event-time {
+  color: #3b4261;
+  font-size: 0.75rem;
+}
+.tui-event-type {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tui-event-type::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
 .tui-event-type--sense { color: #7dcfff; }
+.tui-event-type--sense::before { background: #7dcfff; box-shadow: 0 0 6px rgba(125, 207, 255, 0.5); }
 .tui-event-type--think { color: #e0af68; }
+.tui-event-type--think::before { background: #e0af68; box-shadow: 0 0 6px rgba(224, 175, 104, 0.5); }
 .tui-event-type--act { color: #9ece6a; }
+.tui-event-type--act::before { background: #9ece6a; box-shadow: 0 0 6px rgba(158, 206, 106, 0.5); }
 .tui-event-type--learn { color: #bb9af7; }
-.tui-event-content { color: #888; }
+.tui-event-type--learn::before { background: #bb9af7; box-shadow: 0 0 6px rgba(187, 154, 247, 0.5); }
+.tui-event-content {
+  color: #787c99;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tui-event-content code {
+  color: #9ece6a;
+  background: rgba(158, 206, 106, 0.1);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 0.75rem;
+}
 
 .tui-footer {
-  background: #111;
-  padding: var(--space-2) var(--space-3);
-  border-top: 1px solid #333;
+  background: linear-gradient(90deg, rgba(122, 162, 247, 0.05) 0%, rgba(15, 15, 20, 0.95) 100%);
+  padding: 10px 16px;
+  border-top: 1px solid rgba(122, 162, 247, 0.1);
   display: flex;
-  gap: var(--space-4);
+  gap: 16px;
   flex-wrap: wrap;
 }
 .tui-key {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1);
+  gap: 6px;
 }
 .tui-key-badge {
-  background: #222;
-  padding: 2px 6px;
-  border-radius: 3px;
-  color: #666;
+  background: rgba(122, 162, 247, 0.15);
+  border: 1px solid rgba(122, 162, 247, 0.2);
+  padding: 3px 8px;
+  border-radius: 4px;
+  color: #7aa2f7;
   font-size: 0.7rem;
+  font-weight: 500;
 }
-.tui-key-label { color: #555; font-size: 0.75rem; }
+.tui-key-label {
+  color: #565f89;
+  font-size: 0.75rem;
+}
 
 /* Learning cards */
 .learning-grid {
@@ -669,22 +830,22 @@
     <div class="tui-mockup reveal reveal-delay-2">
       <div class="tui-header">
         <span class="tui-header-title">sadhana</span>
-        <span class="tui-header-status">2/3 ●</span>
+        <span class="tui-header-status">2/3 running</span>
       </div>
       <div class="tui-body">
         <div class="tui-agents">
           <div class="tui-agent tui-agent--active">
-            <div><span class="tui-agent-id">#06</span> <span class="tui-agent-status tui-agent-status--running">● running</span></div>
+            <div><span class="tui-agent-id">#06</span> <span class="tui-agent-status tui-agent-status--running">running</span></div>
             <div class="tui-agent-goal">Monitor pipeline</div>
             <div class="tui-agent-cycles">24 cycles</div>
           </div>
           <div class="tui-agent">
-            <div><span class="tui-agent-id">#05</span> <span class="tui-agent-status">○ done</span></div>
+            <div><span class="tui-agent-id">#05</span> <span class="tui-agent-status">done</span></div>
             <div class="tui-agent-goal">Verify deploy</div>
             <div class="tui-agent-cycles">12 cycles</div>
           </div>
           <div class="tui-agent">
-            <div><span class="tui-agent-id">#04</span> <span class="tui-agent-status">○ paused</span></div>
+            <div><span class="tui-agent-id">#04</span> <span class="tui-agent-status">paused</span></div>
             <div class="tui-agent-goal">Run tests</div>
             <div class="tui-agent-cycles">8 cycles</div>
           </div>
@@ -692,36 +853,52 @@
         <div class="tui-detail">
           <div class="tui-info">
             <div class="tui-info-title">#06 running</div>
-            <div>Monitor pipeline on denbi-h-micro until ALL jobs finished</div>
-            <div style="margin-top: 8px;">
-              <span class="tui-info-label">model</span> <span class="tui-info-value">haiku</span> &nbsp;
-              <span class="tui-info-label">brain</span> <span class="tui-info-value">claude</span>
-            </div>
-            <div>
-              <span class="tui-info-label">cycles</span> <span class="tui-info-value" style="color: #ff9e64;">24</span> &nbsp;
-              <span class="tui-info-label">interval</span> <span class="tui-info-value">300s</span>
+            <div class="tui-info-goal">Monitor pipeline on denbi-h-micro until ALL jobs finished</div>
+            <div class="tui-info-meta">
+              <div class="tui-info-item">
+                <span class="tui-info-label">model</span>
+                <span class="tui-info-value">haiku</span>
+              </div>
+              <div class="tui-info-item">
+                <span class="tui-info-label">brain</span>
+                <span class="tui-info-value">claude</span>
+              </div>
+              <div class="tui-info-item">
+                <span class="tui-info-label">cycles</span>
+                <span class="tui-info-value tui-info-value--highlight">24</span>
+              </div>
+              <div class="tui-info-item">
+                <span class="tui-info-label">interval</span>
+                <span class="tui-info-value">300s</span>
+              </div>
             </div>
           </div>
           <div class="tui-events">
+            <div class="tui-events-title">Event Stream</div>
             <div class="tui-event">
               <span class="tui-event-time">01:23</span>
               <span class="tui-event-type tui-event-type--sense">sense</span>
-              <span class="tui-event-content">$ squeue -u user</span>
+              <span class="tui-event-content"><code>squeue -u user</code></span>
             </div>
             <div class="tui-event">
               <span class="tui-event-time">01:23</span>
               <span class="tui-event-type tui-event-type--think">think</span>
-              <span class="tui-event-content">Analyze output</span>
+              <span class="tui-event-content">Jobs still running, wait for completion</span>
             </div>
             <div class="tui-event">
-              <span class="tui-event-time">01:22</span>
+              <span class="tui-event-time">01:18</span>
               <span class="tui-event-type tui-event-type--act">act</span>
-              <span class="tui-event-content">$ ssh user@host</span>
+              <span class="tui-event-content"><code>ssh user@denbi-h-micro</code></span>
             </div>
             <div class="tui-event">
-              <span class="tui-event-time">01:20</span>
+              <span class="tui-event-time">01:18</span>
               <span class="tui-event-type tui-event-type--learn">learn</span>
-              <span class="tui-event-content">Success: ssh worked</span>
+              <span class="tui-event-content">Success: SSH connection established</span>
+            </div>
+            <div class="tui-event">
+              <span class="tui-event-time">01:13</span>
+              <span class="tui-event-type tui-event-type--sense">sense</span>
+              <span class="tui-event-content"><code>snakemake --summary</code></span>
             </div>
           </div>
         </div>
