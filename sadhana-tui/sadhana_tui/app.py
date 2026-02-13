@@ -188,7 +188,11 @@ class EventStream(RichLog):
         if self._current_id is None:
             return
 
-        status = client.sadhana_status(self._current_id, history_limit=30)
+        try:
+            status = client.sadhana_status(self._current_id, history_limit=30)
+        except Exception:
+            return  # Skip on connection error
+
         if "error" in status:
             return
 
@@ -507,24 +511,61 @@ class SadhanaApp(App):
         self.refresh_events()
 
     def refresh_list(self) -> None:
-        self._sadhanas = self.client.sadhana_list()
+        try:
+            new_sadhanas = self.client.sadhana_list()
+        except Exception:
+            return  # Skip on connection error
+
+        self._sadhanas = new_sadhanas
 
         total = len(self._sadhanas)
         running = sum(1 for s in self._sadhanas if s.get("state") == "running")
-        health = self.client.health_check()
-        dot = "[#66aa66]●[/]" if "error" not in health else "[#aa6666]●[/]"
+
+        try:
+            health = self.client.health_check()
+            dot = "[#66aa66]●[/]" if "error" not in health else "[#aa6666]●[/]"
+        except Exception:
+            dot = "[#aa6666]●[/]"
 
         status = self.query_one("#status-bar", Static)
         status.update(f"[#444444]{running}[/][#333333]/[/][#444444]{total}[/] {dot}")
 
         agent_list = self.query_one("#agent-list", Horizontal)
-        for card in list(self.query(AgentCard)):
-            card.remove()
 
+        # Get existing cards and compare
+        old_cards = list(self.query(AgentCard))
+        old_ids = {c.sadhana.get("id") for c in old_cards}
+        new_ids = {s.get("id") for s in self._sadhanas}
+
+        # Remove cards that no longer exist
+        for card in old_cards:
+            if card.sadhana.get("id") not in new_ids:
+                card.remove()
+
+        # Update existing cards or add new ones
+        existing_ids = {c.sadhana.get("id"): c for c in self.query(AgentCard)}
         for i, s in enumerate(self._sadhanas):
-            card = AgentCard(s, index=i)
-            card.selected = (i == self._selected_idx)
-            agent_list.mount(card)
+            sid = s.get("id")
+            if sid in existing_ids:
+                # Update existing card
+                card = existing_ids[sid]
+                card.sadhana = s
+                card.index = i
+                card.selected = (i == self._selected_idx)
+                # Update state class
+                for state in ["running", "paused", "done", "failed"]:
+                    card.remove_class(state)
+                card.add_class(s.get("state", "unknown"))
+                card.refresh()
+            else:
+                # Add new card
+                card = AgentCard(s, index=i)
+                card.selected = (i == self._selected_idx)
+                agent_list.mount(card)
+
+        # Force container refresh
+        agent_list.refresh(layout=True)
+        self.query_one(HorizontalScroll).refresh(layout=True)
 
     def refresh_events(self) -> None:
         if not self._sadhanas or self._selected_idx >= len(self._sadhanas):
@@ -533,12 +574,15 @@ class SadhanaApp(App):
         selected = self._sadhanas[self._selected_idx]
         sadhana_id = selected.get("id")
 
-        detail = self.query_one("#detail", DetailPanel)
-        detail.update_status(self.client.sadhana_status(sadhana_id, history_limit=0))
+        try:
+            detail = self.query_one("#detail", DetailPanel)
+            detail.update_status(self.client.sadhana_status(sadhana_id, history_limit=0))
 
-        events = self.query_one("#events", EventStream)
-        events.set_sadhana(sadhana_id)
-        events.refresh_events(self.client)
+            events = self.query_one("#events", EventStream)
+            events.set_sadhana(sadhana_id)
+            events.refresh_events(self.client)
+        except Exception:
+            pass  # Skip on connection error
 
     def _update_selection(self) -> None:
         for i, card in enumerate(self.query(AgentCard)):
