@@ -386,14 +386,16 @@ class SummaryModal(ModalScreen[None]):
         background: #111111;
         border: solid #333333;
         padding: 1 2;
+        layout: vertical;
     }
     #summary-header {
         color: #888888;
         padding-bottom: 1;
+        height: auto;
     }
     #summary-content {
-        height: auto;
-        max-height: 50;
+        height: 1fr;
+        max-height: 40;
         overflow-y: auto;
         padding: 1 0;
     }
@@ -411,11 +413,32 @@ class SummaryModal(ModalScreen[None]):
         padding: 1;
         margin-top: 1;
     }
-    #close-btn {
-        margin-top: 1;
+    #footer-row {
+        height: 3;
         width: 100%;
-        background: #222222;
-        color: #888888;
+        layout: horizontal;
+        align: center middle;
+        margin-top: 1;
+        padding: 0 1;
+        dock: bottom;
+    }
+    #keys-hint {
+        color: #555555;
+        width: 1fr;
+    }
+    #close-btn {
+        width: auto;
+        min-width: 12;
+        background: #333333;
+        color: #cccccc;
+        border: solid #444444;
+    }
+    #close-btn:hover {
+        background: #444444;
+        color: #ffffff;
+    }
+    #close-btn:focus {
+        background: #555555;
     }
     """
 
@@ -449,7 +472,9 @@ class SummaryModal(ModalScreen[None]):
                     yield Static("[#666666]learnings[/]", classes="summary-label")
                     yield Static(learnings, id="summary-learnings")
 
-            yield Button("close", id="close-btn")
+            with Horizontal(id="footer-row"):
+                yield Static("[#555555]esc[/] [#444444]or[/] [#555555]enter[/]", id="keys-hint")
+                yield Button("close", id="close-btn")
 
     def _extract_learnings(self) -> str:
         """Extract key learnings from history."""
@@ -494,15 +519,17 @@ class SadhanaApp(App):
     TITLE = "sadhana"
 
     BINDINGS = [
+        Binding("q", "quit", "quit"),
         Binding("n", "new", "new"),
         Binding("p", "pause", "pause"),
         Binding("r", "resume", "resume"),
         Binding("s", "stop", "stop"),
-        Binding("j", "next", "↓"),
-        Binding("k", "prev", "↑"),
+        Binding("j", "next", "next", show=False),
+        Binding("k", "prev", "prev", show=False),
         Binding("R", "refresh", "refresh"),
         Binding("enter", "summary", "summary"),
-        Binding("q", "quit", "quit"),
+        Binding("/", "focus_search", "search"),
+        Binding("escape", "clear_search", "clear", show=False),
     ]
 
     CSS = """
@@ -523,9 +550,41 @@ class SadhanaApp(App):
         color: #555555;
         content-align: left middle;
     }
+    #filter-indicator {
+        width: auto;
+        color: #aa8866;
+        margin-left: 2;
+        content-align: left middle;
+    }
     #status-bar {
         width: 1fr;
         content-align: right middle;
+    }
+
+    /* Vim-style search bar */
+    #search-bar {
+        height: 1;
+        dock: bottom;
+        background: #111111;
+        padding: 0 1;
+        display: none;
+    }
+    #search-bar.visible {
+        display: block;
+    }
+    #search-prompt {
+        width: auto;
+        color: #aa8866;
+    }
+    #search-input {
+        width: 1fr;
+        height: 1;
+        background: #111111;
+        border: none;
+        padding: 0;
+    }
+    #search-input:focus {
+        background: #111111;
     }
 
     /* Agent row - fixed height, horizontal scroll only */
@@ -599,11 +658,14 @@ class SadhanaApp(App):
         super().__init__()
         self.client = ChittaClient()
         self._sadhanas: list[dict] = []
+        self._filtered: list[dict] = []
         self._selected_idx: int = 0
+        self._filter_text: str = ""
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="header"):
             yield Static("sadhana", id="brand")
+            yield Static("", id="filter-indicator")
             yield Static("", id="status-bar")
 
         with Container(id="agent-row"):
@@ -617,18 +679,166 @@ class SadhanaApp(App):
                 yield Static("events", id="events-header")
                 yield EventStream(id="events")
 
+        # Vim-style search bar (hidden by default)
+        with Horizontal(id="search-bar"):
+            yield Static("/", id="search-prompt")
+            yield Input(id="search-input")
+
         yield Footer()
 
     def on_mount(self) -> None:
         self.refresh_all()
         self.set_interval(2.0, self.refresh_list)
         self.set_interval(1.0, self.refresh_events)
+        # Focus first card on start
+        self.set_timer(0.1, self._focus_first_card)
+
+    def _focus_first_card(self) -> None:
+        """Focus first agent card after mount."""
+        cards = list(self.query(AgentCard))
+        if cards:
+            cards[0].focus()
 
     def on_agent_card_clicked(self, event: AgentCard.Clicked) -> None:
         """Handle card click."""
         self._selected_idx = event.index
         self._update_selection()
         self.refresh_events()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        """Handle search input changes - live filtering."""
+        if event.input.id == "search-input":
+            self._filter_text = event.value.lower().strip()
+            self._apply_filter(reset_selection=False)
+            self._update_filter_indicator()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Handle Enter in search - hide search bar."""
+        if event.input.id == "search-input":
+            self._hide_search_bar()
+
+    def _show_search_bar(self) -> None:
+        """Show vim-style search bar."""
+        search_bar = self.query_one("#search-bar")
+        search_bar.add_class("visible")
+        search_input = self.query_one("#search-input", Input)
+        search_input.value = self._filter_text
+        search_input.focus()
+
+    def _hide_search_bar(self) -> None:
+        """Hide search bar."""
+        search_bar = self.query_one("#search-bar")
+        search_bar.remove_class("visible")
+        # Focus first card
+        cards = list(self.query(AgentCard))
+        if cards and self._selected_idx < len(cards):
+            cards[self._selected_idx].focus()
+
+    def _update_filter_indicator(self) -> None:
+        """Update filter indicator in header."""
+        indicator = self.query_one("#filter-indicator", Static)
+        if self._filter_text:
+            indicator.update(f"/{self._filter_text}")
+        else:
+            indicator.update("")
+
+    def _fuzzy_match(self, needle: str, haystack: str, threshold: int = 2) -> bool:
+        """Fuzzy match with Levenshtein distance threshold."""
+        if needle in haystack:
+            return True
+        if len(needle) <= 2:
+            return needle in haystack
+        # Check if needle is subsequence (for short queries)
+        if len(needle) <= 4:
+            it = iter(haystack)
+            return all(c in it for c in needle)
+        # Simple Levenshtein for longer terms
+        if abs(len(needle) - len(haystack)) > threshold:
+            # Check substring windows
+            for i in range(max(0, len(haystack) - len(needle) - threshold)):
+                window = haystack[i:i + len(needle) + threshold]
+                if self._levenshtein(needle, window) <= threshold:
+                    return True
+            return False
+        return self._levenshtein(needle, haystack) <= threshold
+
+    def _levenshtein(self, s1: str, s2: str) -> int:
+        """Calculate Levenshtein distance."""
+        if len(s1) < len(s2):
+            return self._levenshtein(s2, s1)
+        if len(s2) == 0:
+            return len(s1)
+        prev_row = range(len(s2) + 1)
+        for i, c1 in enumerate(s1):
+            curr_row = [i + 1]
+            for j, c2 in enumerate(s2):
+                insertions = prev_row[j + 1] + 1
+                deletions = curr_row[j] + 1
+                substitutions = prev_row[j] + (c1 != c2)
+                curr_row.append(min(insertions, deletions, substitutions))
+            prev_row = curr_row
+        return prev_row[-1]
+
+    def _match_sadhana(self, sadhana: dict, terms: list[str]) -> bool:
+        """Check if sadhana matches all search terms."""
+        goal = sadhana.get("goal", "").lower()
+        state = sadhana.get("state", "").lower()
+        sid = str(sadhana.get("id", ""))
+
+        for term in terms:
+            # Field-specific filters
+            if term.startswith("state:"):
+                val = term[6:]
+                if val not in state:
+                    return False
+            elif term.startswith("id:"):
+                val = term[3:]
+                if val != sid:
+                    return False
+            elif term.startswith("goal:"):
+                val = term[5:]
+                if not self._fuzzy_match(val, goal):
+                    return False
+            else:
+                # General search: fuzzy match against any field
+                if not (self._fuzzy_match(term, goal) or
+                        self._fuzzy_match(term, state) or
+                        term in sid):
+                    return False
+        return True
+
+    def _apply_filter(self, reset_selection: bool = True) -> None:
+        """Apply current filter and refresh cards."""
+        if self._filter_text:
+            # Split into terms (space-separated, AND logic)
+            terms = [t for t in self._filter_text.split() if t]
+            self._filtered = [s for s in self._sadhanas if self._match_sadhana(s, terms)]
+        else:
+            self._filtered = self._sadhanas
+
+        if reset_selection:
+            self._selected_idx = 0
+        elif self._selected_idx >= len(self._filtered):
+            self._selected_idx = max(0, len(self._filtered) - 1)
+        self._rebuild_cards()
+
+    def _rebuild_cards(self) -> None:
+        """Rebuild card list from filtered sadhanas."""
+        agent_list = self.query_one("#agent-list", Horizontal)
+
+        # Remove all existing cards
+        for card in list(self.query(AgentCard)):
+            card.remove()
+
+        # Add filtered cards
+        for i, s in enumerate(self._filtered):
+            card = AgentCard(s, index=i)
+            card.selected = (i == self._selected_idx)
+            agent_list.mount(card)
+
+        # Force container refresh
+        agent_list.refresh(layout=True)
+        self.query_one(HorizontalScroll).refresh(layout=True)
 
     def refresh_all(self) -> None:
         self.refresh_list()
@@ -641,6 +851,7 @@ class SadhanaApp(App):
             return  # Skip on connection error
 
         self._sadhanas = new_sadhanas
+        self._apply_filter(reset_selection=False)
 
         total = len(self._sadhanas)
         running = sum(1 for s in self._sadhanas if s.get("state") == "running")
@@ -652,50 +863,17 @@ class SadhanaApp(App):
             dot = "[#aa6666]●[/]"
 
         status = self.query_one("#status-bar", Static)
-        status.update(f"[#444444]{running}[/][#333333]/[/][#444444]{total}[/] {dot}")
-
-        agent_list = self.query_one("#agent-list", Horizontal)
-
-        # Get existing cards and compare
-        old_cards = list(self.query(AgentCard))
-        old_ids = {c.sadhana.get("id") for c in old_cards}
-        new_ids = {s.get("id") for s in self._sadhanas}
-
-        # Remove cards that no longer exist
-        for card in old_cards:
-            if card.sadhana.get("id") not in new_ids:
-                card.remove()
-
-        # Update existing cards or add new ones
-        existing_ids = {c.sadhana.get("id"): c for c in self.query(AgentCard)}
-        for i, s in enumerate(self._sadhanas):
-            sid = s.get("id")
-            if sid in existing_ids:
-                # Update existing card
-                card = existing_ids[sid]
-                card.sadhana = s
-                card.index = i
-                card.selected = (i == self._selected_idx)
-                # Update state class
-                for state in ["running", "paused", "done", "failed"]:
-                    card.remove_class(state)
-                card.add_class(s.get("state", "unknown"))
-                card.refresh()
-            else:
-                # Add new card
-                card = AgentCard(s, index=i)
-                card.selected = (i == self._selected_idx)
-                agent_list.mount(card)
-
-        # Force container refresh
-        agent_list.refresh(layout=True)
-        self.query_one(HorizontalScroll).refresh(layout=True)
+        filtered_count = len(self._filtered)
+        if self._filter_text:
+            status.update(f"[#444444]{filtered_count}[/][#333333]/[/][#444444]{total}[/] {dot}")
+        else:
+            status.update(f"[#444444]{running}[/][#333333]/[/][#444444]{total}[/] {dot}")
 
     def refresh_events(self) -> None:
-        if not self._sadhanas or self._selected_idx >= len(self._sadhanas):
+        if not self._filtered or self._selected_idx >= len(self._filtered):
             return
 
-        selected = self._sadhanas[self._selected_idx]
+        selected = self._filtered[self._selected_idx]
         sadhana_id = selected.get("id")
 
         try:
@@ -713,14 +891,14 @@ class SadhanaApp(App):
             card.selected = (i == self._selected_idx)
 
     def action_next(self) -> None:
-        if self._sadhanas:
-            self._selected_idx = (self._selected_idx + 1) % len(self._sadhanas)
+        if self._filtered:
+            self._selected_idx = (self._selected_idx + 1) % len(self._filtered)
             self._update_selection()
             self.refresh_events()
 
     def action_prev(self) -> None:
-        if self._sadhanas:
-            self._selected_idx = (self._selected_idx - 1) % len(self._sadhanas)
+        if self._filtered:
+            self._selected_idx = (self._selected_idx - 1) % len(self._filtered)
             self._update_selection()
             self.refresh_events()
 
@@ -736,22 +914,22 @@ class SadhanaApp(App):
         self.push_screen(NewAgentModal(), on_result)
 
     def action_pause(self) -> None:
-        if self._sadhanas and self._selected_idx < len(self._sadhanas):
-            sid = self._sadhanas[self._selected_idx].get("id")
+        if self._filtered and self._selected_idx < len(self._filtered):
+            sid = self._filtered[self._selected_idx].get("id")
             if "error" not in self.client.sadhana_pause(sid):
                 self.notify(f"#{sid} paused")
                 self.refresh_list()
 
     def action_resume(self) -> None:
-        if self._sadhanas and self._selected_idx < len(self._sadhanas):
-            sid = self._sadhanas[self._selected_idx].get("id")
+        if self._filtered and self._selected_idx < len(self._filtered):
+            sid = self._filtered[self._selected_idx].get("id")
             if "error" not in self.client.sadhana_resume(sid):
                 self.notify(f"#{sid} resumed")
                 self.refresh_list()
 
     def action_stop(self) -> None:
-        if self._sadhanas and self._selected_idx < len(self._sadhanas):
-            sid = self._sadhanas[self._selected_idx].get("id")
+        if self._filtered and self._selected_idx < len(self._filtered):
+            sid = self._filtered[self._selected_idx].get("id")
             if "error" not in self.client.sadhana_stop(sid):
                 self.notify(f"#{sid} stopped")
                 self.refresh_list()
@@ -761,12 +939,37 @@ class SadhanaApp(App):
         self.refresh_all()
         self.notify("refreshed")
 
+    def action_focus_search(self) -> None:
+        """Show vim-style search bar."""
+        self._show_search_bar()
+
+    def action_clear_search(self) -> None:
+        """Clear search or hide search bar."""
+        search_bar = self.query_one("#search-bar")
+        search_input = self.query_one("#search-input", Input)
+
+        if search_bar.has_class("visible"):
+            if search_input.value:
+                # First escape: clear input
+                search_input.value = ""
+                self._filter_text = ""
+                self._apply_filter(reset_selection=False)
+                self._update_filter_indicator()
+            else:
+                # Second escape: hide bar
+                self._hide_search_bar()
+        elif self._filter_text:
+            # Not in search mode but have filter - clear it
+            self._filter_text = ""
+            self._apply_filter(reset_selection=False)
+            self._update_filter_indicator()
+
     def action_summary(self) -> None:
         """Show summary modal for selected sadhana."""
-        if not self._sadhanas or self._selected_idx >= len(self._sadhanas):
+        if not self._filtered or self._selected_idx >= len(self._filtered):
             return
 
-        selected = self._sadhanas[self._selected_idx]
+        selected = self._filtered[self._selected_idx]
         sadhana_id = selected.get("id")
 
         try:
