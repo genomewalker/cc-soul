@@ -68,10 +68,28 @@ if [[ $((TURN_INDEX % CHECKPOINT_INTERVAL)) -eq 0 && $TURN_INDEX -gt 0 ]]; then
     echo "[ledger] checkpoint at turn $TURN_INDEX" >&2
 fi
 
-# Use smart_recall for intelligent query routing
-# - Automatically classifies query intent (temporal, aspect, entity, code, etc.)
-# - Routes to optimal retrieval strategy
-memories=$(timeout "$MAX_WAIT" "$CHITTA_BIN" smart_recall --query "$QUERY" --limit 6 2>/dev/null || true)
+# ===========================================
+# MEMORY RETRIEVAL: Choose strategy based on mode
+# ===========================================
+# RLM mode: Use soul_repl for dynamic exploration (more powerful but slower)
+# Standard mode: Use smart_recall for fast retrieval
+RLM_MODE="${CC_SOUL_RLM_MODE:-}"
+
+if [[ -n "$RLM_MODE" ]]; then
+    # RLM-style exploration via Python soul_repl
+    memories=$(timeout "$MAX_WAIT" python3 -c "
+import sys
+sys.path.insert(0, '${SCRIPT_DIR}/../chitta-mcp')
+from server import handle_smart_context
+result = handle_smart_context({'mode': 'rlm', 'task': '''$QUERY'''})
+print(result)
+" 2>/dev/null || true)
+else
+    # Standard: smart_recall for intelligent query routing
+    # - Automatically classifies query intent (temporal, aspect, entity, code, etc.)
+    # - Routes to optimal retrieval strategy
+    memories=$(timeout "$MAX_WAIT" "$CHITTA_BIN" smart_recall --query "$QUERY" --limit 6 2>/dev/null || true)
+fi
 
 if [[ -z "$memories" || "$memories" == *"No memories"* ]]; then
     exit 0

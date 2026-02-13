@@ -179,3 +179,51 @@ class ChittaClient:
     def health_check(self) -> dict:
         """Check daemon health."""
         return self.call("health_check")
+
+    def soul_repl(self, code: str, reset: bool = False) -> dict:
+        """Execute RLM-style code in soul_repl sandbox.
+
+        Example:
+            result = client.soul_repl('''
+                memories = soul.search("goal context", limit=5)
+                relevant = [m for m in memories if m.score > 0.5]
+                soul.expand(relevant[0].id) if relevant else {}
+            ''')
+
+        Returns dict with 'output', 'error', 'trajectory'.
+        """
+        return self.call("soul_repl", {"code": code, "reset": reset})
+
+    def smart_context_rlm(self, task: str) -> dict:
+        """Get RLM-style smart context for a task.
+
+        Uses soul_repl internally for dynamic exploration.
+        """
+        return self.call("smart_context", {"task": task, "mode": "rlm"})
+
+    def explore_for_goal(self, goal: str, limit: int = 10) -> list[dict]:
+        """RLM exploration tailored for sadhana sense phase.
+
+        Searches memories relevant to the goal and returns structured context.
+        """
+        code = f'''
+results = []
+memories = soul.search("{goal[:200]}", limit={limit})
+for m in memories[:5]:
+    if m.score > 0.3:
+        results.append({{"id": m.id, "score": m.score, "content": m.content[:200]}})
+results
+'''
+        result = self.soul_repl(code)
+        if "error" in result:
+            return []
+        # Parse the result output
+        try:
+            # The result is in the output, parse it
+            output = result.get("output", "")
+            if "[" in output:
+                import ast
+                return ast.literal_eval(output.strip().split("\n")[-1])
+        except Exception:
+            pass
+        return []
