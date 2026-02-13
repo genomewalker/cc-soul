@@ -452,9 +452,21 @@ void SadhanaManager::run_cycle(Sadhana& sadhana) {
         << " WHERE id = " << sadhana.id;
     store_.execute_raw(sql.str());
 
-    // Check if goal achieved
-    if (decision.contains("goal_achieved") && decision["goal_achieved"].get<bool>()) {
-        stop(sadhana.id, true, "Goal achieved");
+    // Check if goal achieved (handle bool, string, or number from LLM)
+    if (decision.contains("goal_achieved")) {
+        bool achieved = false;
+        const auto& val = decision["goal_achieved"];
+        if (val.is_boolean()) {
+            achieved = val.get<bool>();
+        } else if (val.is_string()) {
+            std::string s = val.get<std::string>();
+            achieved = (s == "true" || s == "True" || s == "TRUE" || s == "yes" || s == "1");
+        } else if (val.is_number()) {
+            achieved = val.get<int>() != 0;
+        }
+        if (achieved) {
+            stop(sadhana.id, true, "Goal achieved");
+        }
     }
 }
 
