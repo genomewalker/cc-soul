@@ -298,6 +298,50 @@ struct AnticipationPattern {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Context Repository (Letta-inspired): Version Control & Coordination
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Memory version history entry (git-like tracking)
+struct MemoryHistoryEntry {
+    int64_t id = 0;
+    int64_t memory_id = 0;
+    int32_t version = 0;
+    std::string operation;          // create, update, pin, unpin, delete
+    std::string content_before;
+    std::string content_after;
+    float confidence_before = 0.0f;
+    float confidence_after = 0.0f;
+    std::string commit_message;
+    std::string session_id;
+    std::string tool_name;
+    std::string realm;
+    int64_t created_at = 0;
+};
+
+// Memory lock for concurrent sadhana coordination
+struct MemoryLock {
+    int64_t memory_id = 0;
+    std::string holder_id;          // session/sadhana ID holding the lock
+    std::string holder_type;        // "session", "sadhana", "skill"
+    std::string lock_type;          // "exclusive", "shared"
+    int64_t acquired_at = 0;
+    int64_t expires_at = 0;
+};
+
+// Memory merge queue entry for conflict resolution
+struct MemoryMergeEntry {
+    int64_t id = 0;
+    int64_t memory_id = 0;
+    std::string proposed_content;
+    std::string proposed_by;
+    int32_t base_version = 0;
+    std::string status;             // "pending", "applied", "rejected", "conflict"
+    int64_t conflict_with = 0;
+    std::string resolution;
+    int64_t created_at = 0;
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Narrative Event Stream: Session Event Logging
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -730,6 +774,81 @@ public:
 
     // Update memory visibility (for cross-project promotion)
     bool update_visibility(int64_t id, RealmVisibility visibility);
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Context Repository: Version Control (Letta-inspired)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Record a history entry for memory changes (git-like audit trail)
+    bool record_history(int64_t memory_id, const std::string& operation,
+                       const std::string& content_before, const std::string& content_after,
+                       float conf_before, float conf_after,
+                       const std::string& commit_msg = "",
+                       const std::string& session_id = "",
+                       const std::string& tool_name = "");
+
+    // Get version history for a memory
+    std::vector<MemoryHistoryEntry> get_history(int64_t memory_id, int32_t limit = 20);
+
+    // Get a specific version of a memory
+    std::optional<MemoryHistoryEntry> get_version(int64_t memory_id, int32_t version);
+
+    // Revert memory to a previous version (creates new history entry)
+    bool revert_to_version(int64_t memory_id, int32_t version, const std::string& reason = "");
+
+    // Get current version number for a memory
+    int32_t get_current_version(int64_t memory_id);
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Context Repository: Agent-Managed Pinning
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Pin a memory to keep it "hot" (agent decides importance)
+    bool pin_memory(int64_t memory_id, const std::string& reason = "");
+
+    // Unpin a memory
+    bool unpin_memory(int64_t memory_id);
+
+    // List all pinned memories
+    std::vector<MemoryResult> list_pinned(const std::string& realm = "", size_t limit = 50);
+
+    // Check if a memory is pinned
+    bool is_pinned(int64_t memory_id);
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Context Repository: Concurrent Coordination (Locking)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Acquire a lock on a memory (for concurrent sadhana coordination)
+    bool acquire_lock(int64_t memory_id, const std::string& holder_id,
+                     const std::string& holder_type = "session",
+                     const std::string& lock_type = "exclusive",
+                     int64_t duration_seconds = 300);  // 5 min default
+
+    // Release a lock
+    bool release_lock(int64_t memory_id, const std::string& holder_id);
+
+    // Check if a memory is locked
+    std::optional<MemoryLock> get_lock(int64_t memory_id);
+
+    // Clean up expired locks
+    size_t cleanup_expired_locks();
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Context Repository: Merge Queue (Conflict Resolution)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Propose a change to a locked memory (queues for later merge)
+    int64_t propose_change(int64_t memory_id, const std::string& proposed_content,
+                          const std::string& proposed_by);
+
+    // List pending merge proposals
+    std::vector<MemoryMergeEntry> list_merge_queue(const std::string& status = "pending",
+                                                   size_t limit = 50);
+
+    // Resolve a merge proposal (apply, reject, or mark as conflict)
+    bool resolve_merge(int64_t merge_id, const std::string& resolution,
+                      const std::string& new_status = "applied");
 
     // Update memory embedding (for re-embedding with better vectors)
     bool set_memory_embedding(int64_t id, const std::vector<float>& embedding);

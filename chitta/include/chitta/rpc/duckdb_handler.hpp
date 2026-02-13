@@ -2606,6 +2606,176 @@ private:
         });
         handlers_["sadhana_set_interval"] = [this](const json& p) { return tool_sadhana_set_interval(p); };
 
+        // ═══════════════════════════════════════════════════════════════════════
+        // Context Repository Tools (Letta-inspired)
+        // ═══════════════════════════════════════════════════════════════════════
+
+        // Memory version history
+        tools_.push_back({
+            {"name", "memory_history"},
+            {"description", "View version history of a memory (git-like audit trail)"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "integer"}, {"description", "Memory ID"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Max versions to return (default: 20)"}}}
+                }},
+                {"required", {"id"}}
+            }}
+        });
+        handlers_["memory_history"] = [this](const json& p) { return tool_memory_history(p); };
+
+        // Revert to previous version
+        tools_.push_back({
+            {"name", "memory_revert"},
+            {"description", "Revert memory to a previous version"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "integer"}, {"description", "Memory ID"}}},
+                    {"version", {{"type", "integer"}, {"description", "Version number to revert to"}}},
+                    {"reason", {{"type", "string"}, {"description", "Reason for reverting"}}}
+                }},
+                {"required", {"id", "version"}}
+            }}
+        });
+        handlers_["memory_revert"] = [this](const json& p) { return tool_memory_revert(p); };
+
+        // Pin memory (agent-managed context)
+        tools_.push_back({
+            {"name", "pin_memory"},
+            {"description", "Pin a memory to keep it 'hot' in context (agent decides importance)"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "integer"}, {"description", "Memory ID to pin"}}},
+                    {"reason", {{"type", "string"}, {"description", "Why this memory should stay hot"}}}
+                }},
+                {"required", {"id"}}
+            }}
+        });
+        handlers_["pin_memory"] = [this](const json& p) { return tool_pin_memory(p); };
+
+        // Unpin memory
+        tools_.push_back({
+            {"name", "unpin_memory"},
+            {"description", "Unpin a memory (allow it to fade naturally)"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "integer"}, {"description", "Memory ID to unpin"}}}
+                }},
+                {"required", {"id"}}
+            }}
+        });
+        handlers_["unpin_memory"] = [this](const json& p) { return tool_unpin_memory(p); };
+
+        // List pinned memories
+        tools_.push_back({
+            {"name", "list_pinned"},
+            {"description", "List all pinned memories (agent-managed context)"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"realm", {{"type", "string"}, {"description", "Filter by realm (optional)"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Max results (default: 50)"}}}
+                }}
+            }}
+        });
+        handlers_["list_pinned"] = [this](const json& p) { return tool_list_pinned(p); };
+
+        // Acquire memory lock (concurrent coordination)
+        tools_.push_back({
+            {"name", "memory_lock"},
+            {"description", "Acquire a lock on a memory for exclusive access (concurrent sadhana coordination)"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "integer"}, {"description", "Memory ID to lock"}}},
+                    {"holder_id", {{"type", "string"}, {"description", "ID of the session/sadhana acquiring the lock"}}},
+                    {"holder_type", {{"type", "string"}, {"description", "Type: session, sadhana, skill (default: session)"}}},
+                    {"duration", {{"type", "integer"}, {"description", "Lock duration in seconds (default: 300)"}}}
+                }},
+                {"required", {"id", "holder_id"}}
+            }}
+        });
+        handlers_["memory_lock"] = [this](const json& p) { return tool_memory_lock(p); };
+
+        // Release memory lock
+        tools_.push_back({
+            {"name", "memory_unlock"},
+            {"description", "Release a lock on a memory"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "integer"}, {"description", "Memory ID to unlock"}}},
+                    {"holder_id", {{"type", "string"}, {"description", "ID of the holder releasing the lock"}}}
+                }},
+                {"required", {"id", "holder_id"}}
+            }}
+        });
+        handlers_["memory_unlock"] = [this](const json& p) { return tool_memory_unlock(p); };
+
+        // Check lock status
+        tools_.push_back({
+            {"name", "memory_lock_status"},
+            {"description", "Check if a memory is locked and by whom"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "integer"}, {"description", "Memory ID to check"}}}
+                }},
+                {"required", {"id"}}
+            }}
+        });
+        handlers_["memory_lock_status"] = [this](const json& p) { return tool_memory_lock_status(p); };
+
+        // Propose change to locked memory
+        tools_.push_back({
+            {"name", "propose_change"},
+            {"description", "Propose a change to a memory (queued if locked, for later merge)"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "integer"}, {"description", "Memory ID to change"}}},
+                    {"content", {{"type", "string"}, {"description", "Proposed new content"}}},
+                    {"proposed_by", {{"type", "string"}, {"description", "ID of the proposer"}}}
+                }},
+                {"required", {"id", "content", "proposed_by"}}
+            }}
+        });
+        handlers_["propose_change"] = [this](const json& p) { return tool_propose_change(p); };
+
+        // List merge queue
+        tools_.push_back({
+            {"name", "list_merge_queue"},
+            {"description", "List pending merge proposals for conflict resolution"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"status", {{"type", "string"}, {"description", "Filter by status: pending, applied, rejected, conflict"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Max results (default: 50)"}}}
+                }}
+            }}
+        });
+        handlers_["list_merge_queue"] = [this](const json& p) { return tool_list_merge_queue(p); };
+
+        // Resolve merge
+        tools_.push_back({
+            {"name", "resolve_merge"},
+            {"description", "Resolve a pending merge proposal (apply, reject, or mark conflict)"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"merge_id", {{"type", "integer"}, {"description", "Merge proposal ID"}}},
+                    {"resolution", {{"type", "string"}, {"description", "Resolution notes"}}},
+                    {"status", {{"type", "string"}, {"description", "New status: applied, rejected, conflict"}}}
+                }},
+                {"required", {"merge_id", "status"}}
+            }}
+        });
+        handlers_["resolve_merge"] = [this](const json& p) { return tool_resolve_merge(p); };
+
         classify_tools();
     }
 
@@ -2641,7 +2811,11 @@ private:
             "calibration_record", "calibration_score",
             "profile_get", "profile_observe", "profile_update",
             "curiosity_gaps", "curiosity_note_gap", "curiosity_resolve",
-            "narrative_history"
+            "narrative_history",
+            // Context Repository (Letta-inspired)
+            "memory_history", "memory_revert", "pin_memory", "unpin_memory", "list_pinned",
+            "memory_lock", "memory_unlock", "memory_lock_status",
+            "propose_change", "list_merge_queue", "resolve_merge"
         };
 
         // Everything defaults to "default" visibility
@@ -10940,6 +11114,320 @@ private:
         result["interval"] = interval;
 
         return DuckDBToolResult::ok("Set interval to " + std::to_string(interval) + "s for sadhana " + std::to_string(id), result);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Context Repository Tool Handlers (Letta-inspired)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    DuckDBToolResult tool_memory_history(const json& params) {
+        auto [id, id_str] = parse_id(params);
+        if (id <= 0) {
+            return DuckDBToolResult::error("id is required");
+        }
+
+        int32_t limit = params.value("limit", 20);
+        auto history = mind_->store().get_history(id, limit);
+
+        if (history.empty()) {
+            return DuckDBToolResult::ok("No version history for memory #" + std::to_string(id),
+                                       {{"memory_id", id}, {"count", 0}, {"history", json::array()}});
+        }
+
+        std::ostringstream ss;
+        ss << "Version history for memory #" << id << " (" << history.size() << " versions)\n";
+        ss << std::string(60, '-') << "\n";
+
+        json history_json = json::array();
+        for (const auto& entry : history) {
+            ss << "v" << entry.version << " [" << entry.operation << "] ";
+            if (!entry.commit_message.empty()) {
+                ss << entry.commit_message.substr(0, 50);
+            }
+            ss << "\n";
+
+            history_json.push_back({
+                {"version", entry.version},
+                {"operation", entry.operation},
+                {"content_before", entry.content_before.substr(0, 200)},
+                {"content_after", entry.content_after.substr(0, 200)},
+                {"confidence_before", entry.confidence_before},
+                {"confidence_after", entry.confidence_after},
+                {"commit_message", entry.commit_message},
+                {"session_id", entry.session_id},
+                {"tool_name", entry.tool_name},
+                {"created_at", entry.created_at}
+            });
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"memory_id", id},
+            {"count", history.size()},
+            {"history", history_json}
+        });
+    }
+
+    DuckDBToolResult tool_memory_revert(const json& params) {
+        auto [id, id_str] = parse_id(params);
+        if (id <= 0) {
+            return DuckDBToolResult::error("id is required");
+        }
+
+        int32_t version = params.value("version", 0);
+        if (version <= 0) {
+            return DuckDBToolResult::error("version is required");
+        }
+
+        std::string reason = params.value("reason", "");
+
+        if (!mind_->store().revert_to_version(id, version, reason)) {
+            return DuckDBToolResult::error("Failed to revert memory #" + std::to_string(id) +
+                                          " to version " + std::to_string(version));
+        }
+
+        return DuckDBToolResult::ok(
+            "Reverted memory #" + std::to_string(id) + " to version " + std::to_string(version),
+            {{"memory_id", id}, {"reverted_to_version", version}, {"reason", reason}}
+        );
+    }
+
+    DuckDBToolResult tool_pin_memory(const json& params) {
+        auto [id, id_str] = parse_id(params);
+        if (id <= 0) {
+            return DuckDBToolResult::error("id is required");
+        }
+
+        std::string reason = params.value("reason", "important");
+
+        if (!mind_->store().pin_memory(id, reason)) {
+            return DuckDBToolResult::error("Failed to pin memory #" + std::to_string(id));
+        }
+
+        return DuckDBToolResult::ok(
+            "Pinned memory #" + std::to_string(id) + " (" + reason + ")",
+            {{"memory_id", id}, {"pinned", true}, {"reason", reason}}
+        );
+    }
+
+    DuckDBToolResult tool_unpin_memory(const json& params) {
+        auto [id, id_str] = parse_id(params);
+        if (id <= 0) {
+            return DuckDBToolResult::error("id is required");
+        }
+
+        if (!mind_->store().unpin_memory(id)) {
+            return DuckDBToolResult::error("Failed to unpin memory #" + std::to_string(id));
+        }
+
+        return DuckDBToolResult::ok(
+            "Unpinned memory #" + std::to_string(id),
+            {{"memory_id", id}, {"pinned", false}}
+        );
+    }
+
+    DuckDBToolResult tool_list_pinned(const json& params) {
+        std::string realm = params.value("realm", "");
+        size_t limit = params.value("limit", 50);
+
+        auto pinned = mind_->store().list_pinned(realm, limit);
+
+        std::ostringstream ss;
+        ss << "Pinned Memories";
+        if (!realm.empty()) ss << " (realm: " << realm << ")";
+        ss << "\n" << std::string(40, '-') << "\n";
+
+        json pinned_json = json::array();
+        for (const auto& mem : pinned) {
+            ss << "• #" << mem.id << " [" << mem.kind << "] "
+               << mem.content.substr(0, 60) << "...\n";
+
+            pinned_json.push_back({
+                {"id", mem.id},
+                {"content", mem.content.substr(0, 200)},
+                {"kind", mem.kind},
+                {"confidence", mem.confidence},
+                {"realm", mem.realm}
+            });
+        }
+
+        if (pinned.empty()) {
+            ss << "No pinned memories.\n";
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"count", pinned.size()},
+            {"pinned", pinned_json}
+        });
+    }
+
+    DuckDBToolResult tool_memory_lock(const json& params) {
+        auto [id, id_str] = parse_id(params);
+        if (id <= 0) {
+            return DuckDBToolResult::error("id is required");
+        }
+
+        std::string holder_id = params.value("holder_id", "");
+        if (holder_id.empty()) {
+            return DuckDBToolResult::error("holder_id is required");
+        }
+
+        std::string holder_type = params.value("holder_type", "session");
+        int64_t duration = params.value("duration", 300);  // 5 min default
+
+        if (!mind_->store().acquire_lock(id, holder_id, holder_type, "exclusive", duration)) {
+            auto existing = mind_->store().get_lock(id);
+            if (existing) {
+                return DuckDBToolResult::error(
+                    "Memory #" + std::to_string(id) + " is locked by " +
+                    existing->holder_id + " (" + existing->holder_type + ")"
+                );
+            }
+            return DuckDBToolResult::error("Failed to acquire lock on memory #" + std::to_string(id));
+        }
+
+        return DuckDBToolResult::ok(
+            "Acquired lock on memory #" + std::to_string(id) + " for " + std::to_string(duration) + "s",
+            {{"memory_id", id}, {"holder_id", holder_id}, {"duration_seconds", duration}, {"locked", true}}
+        );
+    }
+
+    DuckDBToolResult tool_memory_unlock(const json& params) {
+        auto [id, id_str] = parse_id(params);
+        if (id <= 0) {
+            return DuckDBToolResult::error("id is required");
+        }
+
+        std::string holder_id = params.value("holder_id", "");
+        if (holder_id.empty()) {
+            return DuckDBToolResult::error("holder_id is required");
+        }
+
+        if (!mind_->store().release_lock(id, holder_id)) {
+            return DuckDBToolResult::error("Failed to release lock (not held by " + holder_id + "?)");
+        }
+
+        return DuckDBToolResult::ok(
+            "Released lock on memory #" + std::to_string(id),
+            {{"memory_id", id}, {"locked", false}}
+        );
+    }
+
+    DuckDBToolResult tool_memory_lock_status(const json& params) {
+        auto [id, id_str] = parse_id(params);
+        if (id <= 0) {
+            return DuckDBToolResult::error("id is required");
+        }
+
+        auto lock = mind_->store().get_lock(id);
+        if (!lock) {
+            return DuckDBToolResult::ok(
+                "Memory #" + std::to_string(id) + " is not locked",
+                {{"memory_id", id}, {"locked", false}}
+            );
+        }
+
+        auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        int64_t remaining_ms = lock->expires_at - now_ms;
+        int64_t remaining_s = remaining_ms / 1000;
+
+        std::ostringstream ss;
+        ss << "Memory #" << id << " is locked\n";
+        ss << "  Holder: " << lock->holder_id << " (" << lock->holder_type << ")\n";
+        ss << "  Type: " << lock->lock_type << "\n";
+        ss << "  Expires in: " << remaining_s << "s\n";
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"memory_id", id},
+            {"locked", true},
+            {"holder_id", lock->holder_id},
+            {"holder_type", lock->holder_type},
+            {"lock_type", lock->lock_type},
+            {"expires_in_seconds", remaining_s}
+        });
+    }
+
+    DuckDBToolResult tool_propose_change(const json& params) {
+        auto [id, id_str] = parse_id(params);
+        if (id <= 0) {
+            return DuckDBToolResult::error("id is required");
+        }
+
+        std::string content = params.value("content", "");
+        if (content.empty()) {
+            return DuckDBToolResult::error("content is required");
+        }
+
+        std::string proposed_by = params.value("proposed_by", "unknown");
+
+        int64_t merge_id = mind_->store().propose_change(id, content, proposed_by);
+        if (merge_id <= 0) {
+            return DuckDBToolResult::error("Failed to propose change");
+        }
+
+        return DuckDBToolResult::ok(
+            "Change proposed for memory #" + std::to_string(id) + " (merge request #" + std::to_string(merge_id) + ")",
+            {{"memory_id", id}, {"merge_id", merge_id}, {"status", "pending"}}
+        );
+    }
+
+    DuckDBToolResult tool_list_merge_queue(const json& params) {
+        std::string status = params.value("status", "pending");
+        size_t limit = params.value("limit", 50);
+
+        auto queue = mind_->store().list_merge_queue(status, limit);
+
+        std::ostringstream ss;
+        ss << "Merge Queue";
+        if (!status.empty()) ss << " (status: " << status << ")";
+        ss << "\n" << std::string(40, '-') << "\n";
+
+        json queue_json = json::array();
+        for (const auto& entry : queue) {
+            ss << "• #" << entry.id << " → memory #" << entry.memory_id
+               << " (v" << entry.base_version << ") by " << entry.proposed_by << "\n";
+
+            queue_json.push_back({
+                {"merge_id", entry.id},
+                {"memory_id", entry.memory_id},
+                {"proposed_content", entry.proposed_content.substr(0, 200)},
+                {"proposed_by", entry.proposed_by},
+                {"base_version", entry.base_version},
+                {"status", entry.status},
+                {"created_at", entry.created_at}
+            });
+        }
+
+        if (queue.empty()) {
+            ss << "No pending merge requests.\n";
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"count", queue.size()},
+            {"queue", queue_json}
+        });
+    }
+
+    DuckDBToolResult tool_resolve_merge(const json& params) {
+        int64_t merge_id = params.value("merge_id", 0);
+        if (merge_id <= 0) {
+            return DuckDBToolResult::error("merge_id is required");
+        }
+
+        std::string status = params.value("status", "applied");
+        std::string resolution = params.value("resolution", "");
+
+        if (!mind_->store().resolve_merge(merge_id, resolution, status)) {
+            return DuckDBToolResult::error("Failed to resolve merge request #" + std::to_string(merge_id));
+        }
+
+        std::string action = (status == "applied") ? "applied" :
+                            (status == "rejected") ? "rejected" : "marked as " + status;
+
+        return DuckDBToolResult::ok(
+            "Merge request #" + std::to_string(merge_id) + " " + action,
+            {{"merge_id", merge_id}, {"status", status}, {"resolution", resolution}}
+        );
     }
 };
 

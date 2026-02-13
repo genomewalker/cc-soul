@@ -979,6 +979,69 @@ bool DuckDBStore::create_schema() {
         "PRIMARY KEY (memory_id, tag))");
 
     // ═══════════════════════════════════════════════════════════════════════
+    // Context Repository Features (Letta-inspired)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Migration: add updated_at to memory table for change tracking
+    write_execute("ALTER TABLE memory ADD COLUMN IF NOT EXISTS updated_at BIGINT DEFAULT 0");
+    write_execute("ALTER TABLE memory ADD COLUMN IF NOT EXISTS pinned BOOLEAN DEFAULT FALSE");
+    write_execute("ALTER TABLE memory ADD COLUMN IF NOT EXISTS pin_reason VARCHAR DEFAULT ''");
+
+    // Memory history - git-like version control for memories
+    write_execute(R"(
+        CREATE TABLE IF NOT EXISTS memory_history (
+            id BIGINT PRIMARY KEY,
+            memory_id BIGINT NOT NULL,
+            version INTEGER NOT NULL,
+            operation VARCHAR NOT NULL,
+            content_before TEXT,
+            content_after TEXT,
+            confidence_before FLOAT,
+            confidence_after FLOAT,
+            commit_message VARCHAR DEFAULT '',
+            session_id VARCHAR DEFAULT '',
+            tool_name VARCHAR DEFAULT '',
+            realm VARCHAR DEFAULT 'brahman',
+            created_at BIGINT NOT NULL
+        )
+    )");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_memory_history_memory ON memory_history(memory_id)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_memory_history_version ON memory_history(memory_id, version)");
+
+    // Memory locks for concurrent sadhana coordination
+    write_execute(R"(
+        CREATE TABLE IF NOT EXISTS memory_lock (
+            memory_id BIGINT PRIMARY KEY,
+            holder_id VARCHAR NOT NULL,
+            holder_type VARCHAR DEFAULT 'session',
+            lock_type VARCHAR DEFAULT 'exclusive',
+            acquired_at BIGINT NOT NULL,
+            expires_at BIGINT NOT NULL
+        )
+    )");
+
+    // Memory merge queue for conflict resolution
+    write_execute(R"(
+        CREATE TABLE IF NOT EXISTS memory_merge_queue (
+            id BIGINT PRIMARY KEY,
+            memory_id BIGINT NOT NULL,
+            proposed_content TEXT NOT NULL,
+            proposed_by VARCHAR NOT NULL,
+            base_version INTEGER NOT NULL,
+            status VARCHAR DEFAULT 'pending',
+            conflict_with BIGINT DEFAULT 0,
+            resolution VARCHAR DEFAULT '',
+            created_at BIGINT NOT NULL
+        )
+    )");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_merge_queue_status ON memory_merge_queue(status)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_merge_queue_memory ON memory_merge_queue(memory_id)");
+
+    // Sequences for context repository tables
+    write_execute("CREATE SEQUENCE IF NOT EXISTS memory_history_seq START 1");
+    write_execute("CREATE SEQUENCE IF NOT EXISTS merge_queue_seq START 1");
+
+    // ═══════════════════════════════════════════════════════════════════════
     // Cross-Session Messaging
     // ═══════════════════════════════════════════════════════════════════════
 
@@ -2232,6 +2295,519 @@ bool DuckDBStore::update_visibility(int64_t id, RealmVisibility visibility) {
         << ", accessed_at = " << now() << " WHERE id = " << id;
 
     return write_execute(sql.str());
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Context Repository: Version Control
+// ═══════════════════════════════════════════════════════════════════════════
+
+bool DuckDBStore::record_history(int64_t memory_id, const std::string& operation,
+                                const std::string& content_before, const std::string& content_after,
+                                float conf_before, float conf_after,
+                                const std::string& commit_msg,
+                                const std::string& session_id,
+                                const std::string& tool_name) {
+    if (!db_) return false;
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    // Get next version number
+    int32_t next_version = get_current_version(memory_id) + 1;
+
+    // Get realm from memory
+    std::string realm = "brahman";
+    auto mem = get_memory(memory_id);
+    if (mem) realm = mem->realm;
+
+    std::ostringstream sql;
+    sql << "INSERT INTO memory_history (id, memory_id, version, operation, "
+        << "content_before, content_after, confidence_before, confidence_after, "
+        << "commit_message, session_id, tool_name, realm, created_at) VALUES ("
+        << "nextval('memory_history_seq'), " << memory_id << ", " << next_version << ", "
+        << "'" << escape(operation) << "', "
+        << "'" << escape(content_before) << "', "
+        << "'" << escape(content_after) << "', "
+        << conf_before << ", " << conf_after << ", "
+        << "'" << escape(commit_msg) << "', "
+        << "'" << escape(session_id) << "', "
+        << "'" << escape(tool_name) << "', "
+        << "'" << escape(realm) << "', " << now() << ")";
+
+    // Also update memory's updated_at timestamp
+    std::ostringstream update_sql;
+    update_sql << "UPDATE memory SET updated_at = " << now() << " WHERE id = " << memory_id;
+    write_execute(update_sql.str());
+
+    return write_execute(sql.str());
+}
+
+std::vector<MemoryHistoryEntry> DuckDBStore::get_history(int64_t memory_id, int32_t limit) {
+    std::vector<MemoryHistoryEntry> results;
+    if (!db_) return results;
+
+    std::ostringstream sql;
+    sql << "SELECT id, memory_id, version, operation, content_before, content_after, "
+        << "confidence_before, confidence_after, commit_message, session_id, tool_name, "
+        << "realm, created_at FROM memory_history WHERE memory_id = " << memory_id
+        << " ORDER BY version DESC LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    if (!result) return results;
+
+    while (auto chunk = result->Fetch()) {
+        for (size_t i = 0; i < chunk->size(); i++) {
+            MemoryHistoryEntry entry;
+            entry.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            entry.memory_id = chunk->GetValue(1, i).GetValue<int64_t>();
+            entry.version = chunk->GetValue(2, i).GetValue<int32_t>();
+            entry.operation = chunk->GetValue(3, i).GetValue<std::string>();
+            entry.content_before = chunk->GetValue(4, i).GetValue<std::string>();
+            entry.content_after = chunk->GetValue(5, i).GetValue<std::string>();
+            entry.confidence_before = chunk->GetValue(6, i).GetValue<float>();
+            entry.confidence_after = chunk->GetValue(7, i).GetValue<float>();
+            entry.commit_message = chunk->GetValue(8, i).GetValue<std::string>();
+            entry.session_id = chunk->GetValue(9, i).GetValue<std::string>();
+            entry.tool_name = chunk->GetValue(10, i).GetValue<std::string>();
+            entry.realm = chunk->GetValue(11, i).GetValue<std::string>();
+            entry.created_at = chunk->GetValue(12, i).GetValue<int64_t>();
+            results.push_back(entry);
+        }
+    }
+
+    return results;
+}
+
+std::optional<MemoryHistoryEntry> DuckDBStore::get_version(int64_t memory_id, int32_t version) {
+    if (!db_) return std::nullopt;
+
+    std::ostringstream sql;
+    sql << "SELECT id, memory_id, version, operation, content_before, content_after, "
+        << "confidence_before, confidence_after, commit_message, session_id, tool_name, "
+        << "realm, created_at FROM memory_history WHERE memory_id = " << memory_id
+        << " AND version = " << version;
+
+    auto result = read_query(sql.str());
+    if (!result) return std::nullopt;
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return std::nullopt;
+
+    MemoryHistoryEntry entry;
+    entry.id = chunk->GetValue(0, 0).GetValue<int64_t>();
+    entry.memory_id = chunk->GetValue(1, 0).GetValue<int64_t>();
+    entry.version = chunk->GetValue(2, 0).GetValue<int32_t>();
+    entry.operation = chunk->GetValue(3, 0).GetValue<std::string>();
+    entry.content_before = chunk->GetValue(4, 0).GetValue<std::string>();
+    entry.content_after = chunk->GetValue(5, 0).GetValue<std::string>();
+    entry.confidence_before = chunk->GetValue(6, 0).GetValue<float>();
+    entry.confidence_after = chunk->GetValue(7, 0).GetValue<float>();
+    entry.commit_message = chunk->GetValue(8, 0).GetValue<std::string>();
+    entry.session_id = chunk->GetValue(9, 0).GetValue<std::string>();
+    entry.tool_name = chunk->GetValue(10, 0).GetValue<std::string>();
+    entry.realm = chunk->GetValue(11, 0).GetValue<std::string>();
+    entry.created_at = chunk->GetValue(12, 0).GetValue<int64_t>();
+
+    return entry;
+}
+
+bool DuckDBStore::revert_to_version(int64_t memory_id, int32_t version, const std::string& reason) {
+    if (!db_) return false;
+
+    auto target_version = get_version(memory_id, version);
+    if (!target_version) return false;
+
+    auto current = get_memory(memory_id);
+    if (!current) return false;
+
+    // Get the content from the target version (content_after represents state after that change)
+    std::string new_content = target_version->content_after;
+    float new_confidence = target_version->confidence_after;
+
+    // Record the revert as a new history entry
+    std::string commit_msg = reason.empty() ?
+        "Reverted to version " + std::to_string(version) :
+        reason + " (reverted to v" + std::to_string(version) + ")";
+
+    record_history(memory_id, "revert",
+                  current->content, new_content,
+                  current->confidence, new_confidence,
+                  commit_msg, "", "memory_revert");
+
+    // Update the memory content
+    return update_content(memory_id, new_content);
+}
+
+int32_t DuckDBStore::get_current_version(int64_t memory_id) {
+    if (!db_) return 0;
+
+    std::ostringstream sql;
+    sql << "SELECT COALESCE(MAX(version), 0) FROM memory_history WHERE memory_id = " << memory_id;
+
+    auto result = read_query(sql.str());
+    if (!result) return 0;
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return 0;
+
+    return chunk->GetValue(0, 0).GetValue<int32_t>();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Context Repository: Agent-Managed Pinning
+// ═══════════════════════════════════════════════════════════════════════════
+
+bool DuckDBStore::pin_memory(int64_t memory_id, const std::string& reason) {
+    if (!db_) return false;
+
+    auto current = get_memory(memory_id);
+    if (!current) return false;
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    std::ostringstream sql;
+    sql << "UPDATE memory SET pinned = TRUE, pin_reason = '" << escape(reason)
+        << "', updated_at = " << now() << " WHERE id = " << memory_id;
+
+    bool ok = write_execute(sql.str());
+    if (ok) {
+        record_history(memory_id, "pin", current->content, current->content,
+                      current->confidence, current->confidence,
+                      "Pinned: " + reason, "", "pin_memory");
+    }
+    return ok;
+}
+
+bool DuckDBStore::unpin_memory(int64_t memory_id) {
+    if (!db_) return false;
+
+    auto current = get_memory(memory_id);
+    if (!current) return false;
+
+    std::ostringstream sql;
+    sql << "UPDATE memory SET pinned = FALSE, pin_reason = '', updated_at = "
+        << now() << " WHERE id = " << memory_id;
+
+    bool ok = write_execute(sql.str());
+    if (ok) {
+        record_history(memory_id, "unpin", current->content, current->content,
+                      current->confidence, current->confidence,
+                      "Unpinned", "", "unpin_memory");
+    }
+    return ok;
+}
+
+std::vector<MemoryResult> DuckDBStore::list_pinned(const std::string& realm, size_t limit) {
+    std::vector<MemoryResult> results;
+    if (!db_) return results;
+
+    std::ostringstream sql;
+    sql << "SELECT id, COALESCE(content, ''), COALESCE(kind, 'episode'), "
+        << "COALESCE(confidence, 0.5), COALESCE(realm, 'brahman'), "
+        << "COALESCE(pin_reason, '') "
+        << "FROM memory WHERE pinned = TRUE";
+
+    if (!realm.empty()) {
+        auto escape = [](const std::string& s) {
+            std::string out;
+            for (char c : s) {
+                if (c == '\'') out += "''";
+                else out += c;
+            }
+            return out;
+        };
+        sql << " AND realm = '" << escape(realm) << "'";
+    }
+
+    sql << " ORDER BY confidence DESC LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    if (!result) return results;
+
+    while (auto chunk = result->Fetch()) {
+        for (size_t i = 0; i < chunk->size(); i++) {
+            MemoryResult mem;
+            mem.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            mem.content = chunk->GetValue(1, i).GetValue<std::string>();
+            mem.kind = chunk->GetValue(2, i).GetValue<std::string>();
+            mem.confidence = chunk->GetValue(3, i).GetValue<float>();
+            mem.realm = chunk->GetValue(4, i).GetValue<std::string>();
+            // Pin reason stored in tags field for now
+            results.push_back(mem);
+        }
+    }
+
+    return results;
+}
+
+bool DuckDBStore::is_pinned(int64_t memory_id) {
+    if (!db_) return false;
+
+    std::ostringstream sql;
+    sql << "SELECT pinned FROM memory WHERE id = " << memory_id;
+
+    auto result = read_query(sql.str());
+    if (!result) return false;
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return false;
+
+    return chunk->GetValue(0, 0).GetValue<bool>();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Context Repository: Concurrent Coordination (Locking)
+// ═══════════════════════════════════════════════════════════════════════════
+
+bool DuckDBStore::acquire_lock(int64_t memory_id, const std::string& holder_id,
+                              const std::string& holder_type,
+                              const std::string& lock_type,
+                              int64_t duration_seconds) {
+    if (!db_) return false;
+
+    // Clean up expired locks first
+    cleanup_expired_locks();
+
+    // Check if already locked by someone else
+    auto existing = get_lock(memory_id);
+    if (existing && existing->holder_id != holder_id) {
+        return false;  // Already locked by another holder
+    }
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    int64_t acquired = now();
+    int64_t expires = acquired + (duration_seconds * 1000);  // Convert to ms
+
+    // Upsert lock
+    std::ostringstream sql;
+    sql << "INSERT INTO memory_lock (memory_id, holder_id, holder_type, lock_type, acquired_at, expires_at) "
+        << "VALUES (" << memory_id << ", '" << escape(holder_id) << "', "
+        << "'" << escape(holder_type) << "', '" << escape(lock_type) << "', "
+        << acquired << ", " << expires << ") "
+        << "ON CONFLICT (memory_id) DO UPDATE SET "
+        << "holder_id = EXCLUDED.holder_id, holder_type = EXCLUDED.holder_type, "
+        << "lock_type = EXCLUDED.lock_type, acquired_at = EXCLUDED.acquired_at, "
+        << "expires_at = EXCLUDED.expires_at";
+
+    return write_execute(sql.str());
+}
+
+bool DuckDBStore::release_lock(int64_t memory_id, const std::string& holder_id) {
+    if (!db_) return false;
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    std::ostringstream sql;
+    sql << "DELETE FROM memory_lock WHERE memory_id = " << memory_id
+        << " AND holder_id = '" << escape(holder_id) << "'";
+
+    return write_execute(sql.str());
+}
+
+std::optional<MemoryLock> DuckDBStore::get_lock(int64_t memory_id) {
+    if (!db_) return std::nullopt;
+
+    std::ostringstream sql;
+    sql << "SELECT memory_id, holder_id, holder_type, lock_type, acquired_at, expires_at "
+        << "FROM memory_lock WHERE memory_id = " << memory_id
+        << " AND expires_at > " << now();
+
+    auto result = read_query(sql.str());
+    if (!result) return std::nullopt;
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return std::nullopt;
+
+    MemoryLock lock;
+    lock.memory_id = chunk->GetValue(0, 0).GetValue<int64_t>();
+    lock.holder_id = chunk->GetValue(1, 0).GetValue<std::string>();
+    lock.holder_type = chunk->GetValue(2, 0).GetValue<std::string>();
+    lock.lock_type = chunk->GetValue(3, 0).GetValue<std::string>();
+    lock.acquired_at = chunk->GetValue(4, 0).GetValue<int64_t>();
+    lock.expires_at = chunk->GetValue(5, 0).GetValue<int64_t>();
+
+    return lock;
+}
+
+size_t DuckDBStore::cleanup_expired_locks() {
+    if (!db_) return 0;
+
+    std::ostringstream count_sql;
+    count_sql << "SELECT COUNT(*) FROM memory_lock WHERE expires_at <= " << now();
+
+    auto result = read_query(count_sql.str());
+    size_t count = 0;
+    if (result) {
+        auto chunk = result->Fetch();
+        if (chunk && chunk->size() > 0) {
+            count = chunk->GetValue(0, 0).GetValue<int64_t>();
+        }
+    }
+
+    std::ostringstream sql;
+    sql << "DELETE FROM memory_lock WHERE expires_at <= " << now();
+    write_execute(sql.str());
+
+    return count;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Context Repository: Merge Queue
+// ═══════════════════════════════════════════════════════════════════════════
+
+int64_t DuckDBStore::propose_change(int64_t memory_id, const std::string& proposed_content,
+                                   const std::string& proposed_by) {
+    if (!db_) return 0;
+
+    int32_t base_version = get_current_version(memory_id);
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    std::ostringstream sql;
+    sql << "INSERT INTO memory_merge_queue (id, memory_id, proposed_content, proposed_by, "
+        << "base_version, status, conflict_with, resolution, created_at) VALUES ("
+        << "nextval('merge_queue_seq'), " << memory_id << ", "
+        << "'" << escape(proposed_content) << "', '" << escape(proposed_by) << "', "
+        << base_version << ", 'pending', 0, '', " << now() << ") RETURNING id";
+
+    auto result = write_query(sql.str());
+    if (!result) return 0;
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return 0;
+
+    return chunk->GetValue(0, 0).GetValue<int64_t>();
+}
+
+std::vector<MemoryMergeEntry> DuckDBStore::list_merge_queue(const std::string& status, size_t limit) {
+    std::vector<MemoryMergeEntry> results;
+    if (!db_) return results;
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    std::ostringstream sql;
+    sql << "SELECT id, memory_id, proposed_content, proposed_by, base_version, "
+        << "status, conflict_with, resolution, created_at FROM memory_merge_queue";
+
+    if (!status.empty()) {
+        sql << " WHERE status = '" << escape(status) << "'";
+    }
+
+    sql << " ORDER BY created_at DESC LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    if (!result) return results;
+
+    while (auto chunk = result->Fetch()) {
+        for (size_t i = 0; i < chunk->size(); i++) {
+            MemoryMergeEntry entry;
+            entry.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            entry.memory_id = chunk->GetValue(1, i).GetValue<int64_t>();
+            entry.proposed_content = chunk->GetValue(2, i).GetValue<std::string>();
+            entry.proposed_by = chunk->GetValue(3, i).GetValue<std::string>();
+            entry.base_version = chunk->GetValue(4, i).GetValue<int32_t>();
+            entry.status = chunk->GetValue(5, i).GetValue<std::string>();
+            entry.conflict_with = chunk->GetValue(6, i).GetValue<int64_t>();
+            entry.resolution = chunk->GetValue(7, i).GetValue<std::string>();
+            entry.created_at = chunk->GetValue(8, i).GetValue<int64_t>();
+            results.push_back(entry);
+        }
+    }
+
+    return results;
+}
+
+bool DuckDBStore::resolve_merge(int64_t merge_id, const std::string& resolution,
+                               const std::string& new_status) {
+    if (!db_) return false;
+
+    auto escape = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c == '\'') out += "''";
+            else out += c;
+        }
+        return out;
+    };
+
+    // Get the merge entry
+    std::ostringstream get_sql;
+    get_sql << "SELECT memory_id, proposed_content, proposed_by, base_version "
+            << "FROM memory_merge_queue WHERE id = " << merge_id;
+
+    auto result = read_query(get_sql.str());
+    if (!result) return false;
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return false;
+
+    int64_t memory_id = chunk->GetValue(0, 0).GetValue<int64_t>();
+    std::string proposed_content = chunk->GetValue(1, 0).GetValue<std::string>();
+    std::string proposed_by = chunk->GetValue(2, 0).GetValue<std::string>();
+
+    // Update the merge entry status
+    std::ostringstream update_sql;
+    update_sql << "UPDATE memory_merge_queue SET status = '" << escape(new_status)
+               << "', resolution = '" << escape(resolution) << "' WHERE id = " << merge_id;
+
+    if (!write_execute(update_sql.str())) return false;
+
+    // If applied, update the memory content
+    if (new_status == "applied") {
+        auto current = get_memory(memory_id);
+        if (current) {
+            record_history(memory_id, "merge",
+                          current->content, proposed_content,
+                          current->confidence, current->confidence,
+                          "Merged from " + proposed_by + ": " + resolution,
+                          "", "resolve_merge");
+            update_content(memory_id, proposed_content);
+        }
+    }
+
+    return true;
 }
 
 bool DuckDBStore::set_memory_embedding(int64_t id, const std::vector<float>& embedding) {

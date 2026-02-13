@@ -692,16 +692,16 @@ TOOLS = [
     ),
     Tool(
         name="expand_memory",
-        description="Expand a memory to its full hierarchical context: SSL memory → episode → full turns. Use for drilling down from compressed memories to original conversation.",
+        description="Expand a memory to its full hierarchical context: SSL memory → episode → full turns",
         inputSchema={
                 "properties": {
+                        "depth": {
+                                "description": "1=memory only, 2=+episode, 3=+full turns (default: 3)",
+                                "type": "integer"
+                        },
                         "id": {
                                 "description": "Memory ID to expand",
                                 "type": "string"
-                        },
-                        "depth": {
-                                "description": "Expansion depth: 1=memory only, 2=+episode, 3=+full turns (default: 3)",
-                                "type": "integer"
                         }
                 },
                 "required": [
@@ -967,6 +967,10 @@ TOOLS = [
                         "todos": {
                                 "description": "Array of {content, status} objects",
                                 "type": "array"
+                        },
+                        "transcript_path": {
+                                "description": "Path to JSONL transcript file for full context recovery",
+                                "type": "string"
                         }
                 },
                 "required": [],
@@ -2008,25 +2012,25 @@ TOOLS = [
         description="Intelligent memory recall with hierarchical expansion. Classifies query intent, routes to optimal retrieval, and auto-expands top results to full conversation context. Single entry point for finding the right memory.",
         inputSchema={
                 "properties": {
-                        "query": {
-                                "description": "Natural language query (e.g., 'what happened last week', 'show preferences', 'what connects X and Y')",
-                                "type": "string"
+                        "expand_top": {
+                                "description": "Auto-expand top N results to full context: SSL\u2192episode\u2192turns (default: 2, 0=disable)",
+                                "type": "integer"
+                        },
+                        "include_global": {
+                                "description": "Include global memories (default: True)",
+                                "type": "boolean"
                         },
                         "limit": {
                                 "description": "Max results (default: 20)",
                                 "type": "integer"
                         },
-                        "expand_top": {
-                                "description": "Auto-expand top N results to full context: SSL→episode→turns (default: 2, 0=disable)",
-                                "type": "integer"
+                        "query": {
+                                "description": "Natural language query (e.g., 'what happened last week', 'show preferences', 'what connects X and Y')",
+                                "type": "string"
                         },
                         "realm": {
                                 "description": "Filter by realm (empty = all realms)",
                                 "type": "string"
-                        },
-                        "include_global": {
-                                "description": "Include global memories (default: True)",
-                                "type": "boolean"
                         }
                 },
                 "required": [
@@ -2253,6 +2257,47 @@ TOOLS = [
         }
     ),
     Tool(
+        name="read_transcript",
+        description="Read JSONL transcript file directly with pagination. Use for exploring conversations without loading into memory. Returns metadata and paginated turns.",
+        inputSchema={
+                "properties": {
+                        "keyword": {
+                                "description": "Filter turns containing this keyword",
+                                "type": "string"
+                        },
+                        "limit": {
+                                "description": "Max turns to return (default: 20)",
+                                "type": "integer"
+                        },
+                        "max_chars_per_turn": {
+                                "description": "Truncate turn content (default: 500, 0=full)",
+                                "type": "integer"
+                        },
+                        "metadata_only": {
+                                "description": "Return only file metadata (turn count, size) without content",
+                                "type": "boolean"
+                        },
+                        "path": {
+                                "description": "Path to JSONL transcript file",
+                                "type": "string"
+                        },
+                        "role_filter": {
+                                "description": "Filter by role: user, assistant, or empty for all",
+                                "type": "string"
+                        },
+                        "session_id": {
+                                "description": "Session ID (auto-finds transcript if path not provided)",
+                                "type": "string"
+                        },
+                        "start_turn": {
+                                "description": "Starting turn index (default: 0)",
+                                "type": "integer"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
         name="get_turns",
         description="Get conversation turns for a session. Returns lossless history of all user and assistant messages.",
         inputSchema={
@@ -2278,18 +2323,6 @@ TOOLS = [
         description="Create a dialogue episode for tracking conversation segments. Links to turn ranges for hierarchical retrieval.",
         inputSchema={
                 "properties": {
-                        "session_id": {
-                                "description": "Session ID",
-                                "type": "string"
-                        },
-                        "title": {
-                                "description": "Episode title/topic",
-                                "type": "string"
-                        },
-                        "start_turn": {
-                                "description": "Starting turn index",
-                                "type": "integer"
-                        },
                         "end_turn": {
                                 "description": "Ending turn index (optional, 0 = ongoing)",
                                 "type": "integer"
@@ -2301,9 +2334,25 @@ TOOLS = [
                         "realm": {
                                 "description": "Realm (default: brahman)",
                                 "type": "string"
+                        },
+                        "session_id": {
+                                "description": "Session ID",
+                                "type": "string"
+                        },
+                        "start_turn": {
+                                "description": "Starting turn index",
+                                "type": "integer"
+                        },
+                        "title": {
+                                "description": "Episode title/topic",
+                                "type": "string"
                         }
                 },
-                "required": ["session_id", "title", "start_turn"],
+                "required": [
+                        "session_id",
+                        "title",
+                        "start_turn"
+                ],
                 "type": "object"
         }
     ),
@@ -2432,6 +2481,430 @@ TOOLS = [
                                 "type": "string"
                         }
                 },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="sadhana_start",
+        description="Create and start a new autonomous agent (sadhana) that works toward a goal using sense-think-act loops",
+        inputSchema={
+                "properties": {
+                        "brain_model": {
+                                "description": "Model to use: sonnet, opus, haiku, gpt-4o (default: sonnet)",
+                                "type": "string"
+                        },
+                        "brain_provider": {
+                                "description": "LLM provider: claude or opencode (default: claude)",
+                                "type": "string"
+                        },
+                        "goal": {
+                                "description": "The goal for the agent to achieve",
+                                "type": "string"
+                        },
+                        "interval_seconds": {
+                                "description": "Seconds between sense-think-act cycles (default: 60)",
+                                "type": "integer"
+                        },
+                        "realm": {
+                                "description": "Realm for isolation (default: brahman)",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "goal"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="sadhana_pause",
+        description="Pause a running sadhana",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "description": "Sadhana ID to pause",
+                                "type": "integer"
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="sadhana_resume",
+        description="Resume a paused sadhana",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "description": "Sadhana ID to resume",
+                                "type": "integer"
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="sadhana_stop",
+        description="Stop a sadhana (mark as done or failed)",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "description": "Sadhana ID to stop",
+                                "type": "integer"
+                        },
+                        "reason": {
+                                "description": "Reason for stopping",
+                                "type": "string"
+                        },
+                        "success": {
+                                "description": "Whether the goal was achieved (default: True)",
+                                "type": "boolean"
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="sadhana_status",
+        description="Get status of a sadhana including history",
+        inputSchema={
+                "properties": {
+                        "history_limit": {
+                                "description": "Max history events to return (default: 20)",
+                                "type": "integer"
+                        },
+                        "id": {
+                                "description": "Sadhana ID",
+                                "type": "integer"
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="sadhana_list",
+        description="List all sadhanas with optional filters",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "description": "Max results (default: 50)",
+                                "type": "integer"
+                        },
+                        "realm": {
+                                "description": "Filter by realm",
+                                "type": "string"
+                        },
+                        "state": {
+                                "description": "Filter by state: pending, running, paused, done, failed",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="sadhana_set_model",
+        description="Change the brain model for a running sadhana",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "description": "Sadhana ID",
+                                "type": "integer"
+                        },
+                        "model": {
+                                "description": "New model: opus, sonnet, haiku, etc.",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "id",
+                        "model"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="sadhana_set_goal",
+        description="Change the goal/prompt for a sadhana",
+        inputSchema={
+                "properties": {
+                        "goal": {
+                                "description": "New goal/prompt for the sadhana",
+                                "type": "string"
+                        },
+                        "id": {
+                                "description": "Sadhana ID",
+                                "type": "integer"
+                        }
+                },
+                "required": [
+                        "id",
+                        "goal"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="sadhana_set_interval",
+        description="Change the tick interval (in seconds) for a sadhana",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "description": "Sadhana ID",
+                                "type": "integer"
+                        },
+                        "interval": {
+                                "description": "New interval in seconds",
+                                "type": "integer"
+                        }
+                },
+                "required": [
+                        "id",
+                        "interval"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="memory_history",
+        description="View version history of a memory (git-like audit trail)",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "description": "Memory ID",
+                                "type": "integer"
+                        },
+                        "limit": {
+                                "description": "Max versions to return (default: 20)",
+                                "type": "integer"
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="memory_revert",
+        description="Revert memory to a previous version",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "description": "Memory ID",
+                                "type": "integer"
+                        },
+                        "reason": {
+                                "description": "Reason for reverting",
+                                "type": "string"
+                        },
+                        "version": {
+                                "description": "Version number to revert to",
+                                "type": "integer"
+                        }
+                },
+                "required": [
+                        "id",
+                        "version"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="pin_memory",
+        description="Pin a memory to keep it 'hot' in context (agent decides importance)",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "description": "Memory ID to pin",
+                                "type": "integer"
+                        },
+                        "reason": {
+                                "description": "Why this memory should stay hot",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="unpin_memory",
+        description="Unpin a memory (allow it to fade naturally)",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "description": "Memory ID to unpin",
+                                "type": "integer"
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="list_pinned",
+        description="List all pinned memories (agent-managed context)",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "description": "Max results (default: 50)",
+                                "type": "integer"
+                        },
+                        "realm": {
+                                "description": "Filter by realm (optional)",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="memory_lock",
+        description="Acquire a lock on a memory for exclusive access (concurrent sadhana coordination)",
+        inputSchema={
+                "properties": {
+                        "duration": {
+                                "description": "Lock duration in seconds (default: 300)",
+                                "type": "integer"
+                        },
+                        "holder_id": {
+                                "description": "ID of the session/sadhana acquiring the lock",
+                                "type": "string"
+                        },
+                        "holder_type": {
+                                "description": "Type: session, sadhana, skill (default: session)",
+                                "type": "string"
+                        },
+                        "id": {
+                                "description": "Memory ID to lock",
+                                "type": "integer"
+                        }
+                },
+                "required": [
+                        "id",
+                        "holder_id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="memory_unlock",
+        description="Release a lock on a memory",
+        inputSchema={
+                "properties": {
+                        "holder_id": {
+                                "description": "ID of the holder releasing the lock",
+                                "type": "string"
+                        },
+                        "id": {
+                                "description": "Memory ID to unlock",
+                                "type": "integer"
+                        }
+                },
+                "required": [
+                        "id",
+                        "holder_id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="memory_lock_status",
+        description="Check if a memory is locked and by whom",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "description": "Memory ID to check",
+                                "type": "integer"
+                        }
+                },
+                "required": [
+                        "id"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="propose_change",
+        description="Propose a change to a memory (queued if locked, for later merge)",
+        inputSchema={
+                "properties": {
+                        "content": {
+                                "description": "Proposed new content",
+                                "type": "string"
+                        },
+                        "id": {
+                                "description": "Memory ID to change",
+                                "type": "integer"
+                        },
+                        "proposed_by": {
+                                "description": "ID of the proposer",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "id",
+                        "content",
+                        "proposed_by"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="list_merge_queue",
+        description="List pending merge proposals for conflict resolution",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "description": "Max results (default: 50)",
+                                "type": "integer"
+                        },
+                        "status": {
+                                "description": "Filter by status: pending, applied, rejected, conflict",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="resolve_merge",
+        description="Resolve a pending merge proposal (apply, reject, or mark conflict)",
+        inputSchema={
+                "properties": {
+                        "merge_id": {
+                                "description": "Merge proposal ID",
+                                "type": "integer"
+                        },
+                        "resolution": {
+                                "description": "Resolution notes",
+                                "type": "string"
+                        },
+                        "status": {
+                                "description": "New status: applied, rejected, conflict",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "merge_id",
+                        "status"
+                ],
                 "type": "object"
         }
     ),

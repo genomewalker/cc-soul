@@ -35,6 +35,92 @@ from mcp.types import TextContent, ServerCapabilities, ToolsCapability
 from tools_static import TOOLS, COMPOSITE_TOOLS
 from mcp.types import Tool
 
+# Tools to HIDE from tools/list (still callable, just not listed)
+# Goal: Expose only ~30 essential tools to save context tokens
+#
+# INTERNAL_TOOLS: Maintenance/hooks only - completely hidden
+# ADVANCED_TOOLS: Available but not listed (use via direct call or ToolSearch)
+# SPECIALIZED_TOOLS: Domain-specific tools that most sessions don't need
+
+INTERNAL_TOOLS = {
+    # Maintenance
+    "cleanup", "cleanup_code_wisdom", "hygiene_run", "hygiene_stats",
+    "consolidation_scan", "consolidation_merge", "consolidation_auto",
+    "batch_forget", "sql_query", "migrate_vss", "reembed_memories",
+    "dedupe_symbols", "background_run_cycle", "background_schedule", "background_status",
+    # Metacognition internals
+    "metacognition_corrections", "metacognition_outcomes", "metacognition_evaluate",
+    "distill_status", "enrichment_status", "epiplexity_check",
+    # Code intel internals
+    "clear_codebase", "clear_triplets", "describe_symbol", "extract_symbols",
+    "file_dependents", "file_imports", "resolve_callsites", "embed_symbols",
+    "restore_code_intel_confidence", "ssl_convert", "subconscious_stats",
+    # Suggestions
+    "suggestion_count", "suggestion_pending", "suggestion_resolve", "suggestion_track",
+    # Transcripts
+    "transcript_get", "transcript_list", "transcript_parse", "transcript_register",
+    "transcript_remove", "transcript_search", "transcript_update",
+    # Import/export
+    "type_hierarchy", "version_check", "export_soul", "import_soul",
+    # Research internals
+    "connect_batch", "research_cycle", "research_store", "research_topics",
+    # Daemon internals
+    "cycle", "anticipation_gate_status", "anticipation_record_outcome",
+    "session_register", "session_heartbeat", "session_deregister",
+    "msg_ack", "msg_ack_all",
+}
+
+ADVANCED_TOOLS = {
+    # Memory manipulation
+    "strengthen", "weaken", "tag", "update", "get", "query_graph", "expand_memory",
+    # Realms
+    "realm_add", "realm_detect", "realm_get", "realm_list", "realm_remove", "realm_set", "realm_visibility",
+    # Goals
+    "goal_set", "goal_get", "goal_list", "goal_complete", "goal_progress",
+    # Habits
+    "habit_observe", "habit_match", "habit_list", "habit_strengthen", "habit_weaken",
+    # Anticipation
+    "anticipation_predict", "anticipation_observe", "anticipation_list", "anticipation_success", "anticipation_filter",
+    # Calibration
+    "calibration_record", "calibration_score",
+    # User profile
+    "profile_get", "profile_observe", "profile_update",
+    # Curiosity
+    "curiosity_gaps", "curiosity_note_gap", "curiosity_resolve",
+    # Narrative
+    "narrative_history", "narrative_log", "narrative_status",
+    # Context Repository (Letta-inspired)
+    "memory_history", "memory_revert", "pin_memory", "unpin_memory", "list_pinned",
+    "memory_lock", "memory_unlock", "memory_lock_status",
+    "propose_change", "list_merge_queue", "resolve_merge",
+    # Ledger (session checkpoints)
+    "ledger_save", "ledger_get", "ledger_list", "ledger_load", "ledger_delete",
+    # Episodes
+    "create_episode", "episode_cluster_status", "get_turns",
+    # Themes
+    "theme_assign_orphans", "theme_get", "theme_list", "theme_maintain", "theme_recall", "theme_stats",
+    # Long tasks
+    "long_task_active", "long_task_complete", "long_task_evaluate", "long_task_event",
+    "long_task_get", "long_task_snapshot", "long_task_start", "long_task_update",
+    # Messaging
+    "msg_history", "msg_inbox", "msg_send", "session_list", "session_sync",
+    # Explore tools (RLM-style)
+    "explore_expand", "explore_neighbors", "explore_peek", "explore_recall",
+    # Claims/entities
+    "get_entities", "get_policies", "get_relationship_events", "query_claims",
+    # Learning (specialized - composite tools)
+    "learn_analysis", "learn_approach", "learn_codebase", "learn_correction",
+    "learn_insight", "learn_milestone", "learn_outcome", "learn_preference",
+    # Research (internal - composite tools)
+    "research_cycle", "research_store", "research_topics",
+    # Misc advanced
+    "insight_global", "insight_promote", "list_aspects", "list_by_aspect",
+    "full_resonate", "grow", "connect", "query",
+}
+
+# Combined set of tools to hide from listing (but still callable)
+HIDDEN_TOOLS = INTERNAL_TOOLS | ADVANCED_TOOLS
+
 
 def strip_null_values(obj):
     """Recursively remove keys with null values from dicts."""
@@ -343,11 +429,21 @@ def daemon_call(tool_name: str, arguments: dict, structured: bool = False) -> st
 
 @server.list_tools()
 async def list_tools():
-    """Return static tools. Composite tools override daemon tools with same name."""
+    """Return only essential tools (hide internal/advanced to save tokens).
+
+    Hidden tools are still callable - just not listed in tools/list.
+    This reduces context from ~16k tokens to ~4k tokens.
+    """
     composite_names = {t.name for t in COMPOSITE_TOOLS}
-    filtered = [t for t in TOOLS if t.name not in composite_names]
+    # Filter out: composites (replaced by COMPOSITE_TOOLS), internal tools, advanced tools
+    filtered = [t for t in TOOLS
+                if t.name not in composite_names
+                and t.name not in HIDDEN_TOOLS]
+    # Also filter composite tools if they're in HIDDEN_TOOLS
+    filtered_composites = [t for t in COMPOSITE_TOOLS
+                          if t.name not in HIDDEN_TOOLS]
     # Strip null values from inputSchema (required: null breaks Zod validation)
-    all_tools = filtered + COMPOSITE_TOOLS
+    all_tools = filtered + filtered_composites
     return [clean_tool_schema(t) for t in all_tools]
 
 
