@@ -478,6 +478,38 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
   </div>
 </footer>
 
-<script src="scripts.js"></script>
+<script>
+/* ═══════════════════════════════════════════
+   SCROLL REVEAL (IntersectionObserver)
+   ═══════════════════════════════════════════ */
+(function() {
+  var reveals = document.querySelectorAll('.reveal');
+  if (!reveals.length) return;
+  var observer = new IntersectionObserver(function(entries) {
+    entries.forEach(function(entry) {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.01, rootMargin: '0px 0px -20px 0px' });
+  reveals.forEach(function(el) { observer.observe(el); });
+})();
+
+/* ═══════════════════════════════════════════
+   SMOOTH SCROLL FOR TOC CHIPS
+   ═══════════════════════════════════════════ */
+document.querySelectorAll('a[href^="#"]').forEach(function(anchor) {
+  anchor.addEventListener('click', function(e) {
+    var target = document.querySelector(this.getAttribute('href'));
+    if (target) {
+      e.preventDefault();
+      var offset = 80;
+      var top = target.getBoundingClientRect().top + window.pageYOffset - offset;
+      window.scrollTo({ top: top, behavior: 'smooth' });
+    }
+  });
+});
+</script>
 </body>
 </html>
