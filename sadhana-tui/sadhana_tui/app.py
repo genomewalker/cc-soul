@@ -366,6 +366,125 @@ class NewAgentModal(ModalScreen[dict | None]):
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SUMMARY MODAL
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class SummaryModal(ModalScreen[None]):
+    """Modal showing sadhana summary with learnings."""
+
+    BINDINGS = [("escape", "close", "Close"), ("enter", "close", "Close")]
+
+    DEFAULT_CSS = """
+    SummaryModal {
+        align: center middle;
+        background: rgba(0, 0, 0, 0.85);
+    }
+    #summary-box {
+        width: 70;
+        height: auto;
+        max-height: 80%;
+        background: #111111;
+        border: solid #333333;
+        padding: 1 2;
+    }
+    #summary-header {
+        color: #888888;
+        padding-bottom: 1;
+    }
+    #summary-content {
+        height: auto;
+        max-height: 50;
+        overflow-y: auto;
+        padding: 1 0;
+    }
+    .summary-section {
+        margin-bottom: 1;
+    }
+    .summary-label {
+        color: #666666;
+    }
+    .summary-value {
+        color: #aaaaaa;
+    }
+    #summary-learnings {
+        background: #0a0a0a;
+        padding: 1;
+        margin-top: 1;
+    }
+    #close-btn {
+        margin-top: 1;
+        width: 100%;
+        background: #222222;
+        color: #888888;
+    }
+    """
+
+    def __init__(self, sadhana: dict, history: list, **kwargs):
+        super().__init__(**kwargs)
+        self.sadhana = sadhana
+        self.history = history
+
+    def compose(self) -> ComposeResult:
+        s = self.sadhana
+        with Container(id="summary-box"):
+            yield Label(f"#{s.get('id', '?')} summary", id="summary-header")
+
+            with ScrollableContainer(id="summary-content"):
+                # Goal
+                yield Static(f"[#666666]goal[/] [#aaaaaa]{s.get('goal', '')}[/]", classes="summary-section")
+
+                # Stats
+                state = s.get("state", "unknown")
+                state_color = {"done": "#66aa66", "failed": "#aa6666"}.get(state, "#888888")
+                yield Static(
+                    f"[#666666]state[/] [{state_color}]{state}[/]  "
+                    f"[#666666]cycles[/] [#aa8866]{s.get('iterations', 0)}[/]  "
+                    f"[#666666]brain[/] [#888888]{s.get('brain_model', '?')}[/]",
+                    classes="summary-section"
+                )
+
+                # Learnings from history
+                learnings = self._extract_learnings()
+                if learnings:
+                    yield Static("[#666666]learnings[/]", classes="summary-label")
+                    yield Static(learnings, id="summary-learnings")
+
+            yield Button("close", id="close-btn")
+
+    def _extract_learnings(self) -> str:
+        """Extract key learnings from history."""
+        learnings = []
+
+        for event in self.history:
+            event_type = event.get("event_type", "")
+            content = event.get("content", {})
+
+            if event_type == "learn" and isinstance(content, dict):
+                outcome = content.get("outcome", "")
+                context = content.get("context", "")
+                error = content.get("error", "")
+                if outcome == "success" and context:
+                    learnings.append(f"[#66aa66]✓[/] {context[:60]}")
+                elif outcome == "failure" and error:
+                    learnings.append(f"[#aa6666]✗[/] {error[:60]}")
+
+            elif event_type == "think" and isinstance(content, dict):
+                if content.get("goal_achieved"):
+                    analysis = content.get("analysis", "")
+                    if analysis:
+                        learnings.append(f"[#6688aa]◆[/] {analysis[:80]}")
+
+        # Return last 10 learnings
+        return "\n".join(learnings[-10:]) if learnings else "[#444444]No learnings recorded[/]"
+
+    def on_button_pressed(self, event) -> None:
+        self.dismiss(None)
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # MAIN APPLICATION
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -381,6 +500,8 @@ class SadhanaApp(App):
         Binding("s", "stop", "stop"),
         Binding("j", "next", "↓"),
         Binding("k", "prev", "↑"),
+        Binding("R", "refresh", "refresh"),
+        Binding("enter", "summary", "summary"),
         Binding("q", "quit", "quit"),
     ]
 
@@ -634,6 +755,27 @@ class SadhanaApp(App):
             if "error" not in self.client.sadhana_stop(sid):
                 self.notify(f"#{sid} stopped")
                 self.refresh_list()
+
+    def action_refresh(self) -> None:
+        """Manual refresh of all data."""
+        self.refresh_all()
+        self.notify("refreshed")
+
+    def action_summary(self) -> None:
+        """Show summary modal for selected sadhana."""
+        if not self._sadhanas or self._selected_idx >= len(self._sadhanas):
+            return
+
+        selected = self._sadhanas[self._selected_idx]
+        sadhana_id = selected.get("id")
+
+        try:
+            status = self.client.sadhana_status(sadhana_id, history_limit=50)
+            if "error" not in status:
+                history = status.get("history", [])
+                self.push_screen(SummaryModal(status, history))
+        except Exception:
+            self.notify("failed to load summary", severity="error")
 
 
 def main():
