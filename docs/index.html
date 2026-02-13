@@ -17,585 +17,6 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
-<style>
-/* ═══════════════════════════════════════════
-   BRAIN VISUALIZATION - Landing Page Hero
-   ═══════════════════════════════════════════ */
-
-.brain-hero {
-    position: relative;
-    width: 100%;
-    min-height: 100vh;
-    overflow: hidden;
-    background: var(--bg-gradient);
-}
-
-.brain-hero::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background:
-        radial-gradient(ellipse 80% 50% at 50% 40%, rgba(203, 175, 134, 0.08) 0%, transparent 50%),
-        radial-gradient(ellipse 60% 40% at 30% 60%, rgba(157, 178, 217, 0.06) 0%, transparent 40%),
-        radial-gradient(ellipse 50% 30% at 70% 30%, rgba(212, 106, 76, 0.04) 0%, transparent 35%),
-        var(--halo-gradient);
-    pointer-events: none;
-    animation: heroGlow 8s ease-in-out infinite alternate;
-}
-
-@keyframes heroGlow {
-    0% { opacity: 0.8; }
-    100% { opacity: 1; }
-}
-
-.brain-hero::after {
-    content: '';
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 200px;
-    background: linear-gradient(to top, var(--night-900), transparent);
-    pointer-events: none;
-    z-index: 25;
-}
-
-.brain-header {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    text-align: center;
-    padding: var(--space-8) var(--space-6) var(--space-4);
-    z-index: 20;
-}
-
-.brain-title {
-    font-family: var(--font-display);
-    font-size: clamp(2.5rem, 6vw, 4.5rem);
-    font-weight: 500;
-    color: var(--lotus-200);
-    margin-bottom: var(--space-3);
-    letter-spacing: -0.03em;
-    text-shadow: 0 2px 40px rgba(203, 175, 134, 0.15);
-}
-
-.brain-title span {
-    background: linear-gradient(135deg, var(--sandal-300), var(--ember-400));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-}
-
-.brain-tagline {
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-    color: var(--ash-300);
-    max-width: 600px;
-    margin: 0 auto var(--space-4);
-}
-
-.brain-legend {
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    color: var(--ash-300);
-    opacity: 0.7;
-}
-
-.brain-legend .legend-dot {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    margin: 0 var(--space-1) 0 var(--space-3);
-    vertical-align: middle;
-}
-
-.brain-legend .legend-dot--inbound { background: var(--aura-300); }
-.brain-legend .legend-dot--inter { background: var(--sandal-300); }
-
-/* Stats bar */
-.brain-stats {
-    display: flex;
-    justify-content: center;
-    gap: var(--space-7);
-    padding: var(--space-4);
-    flex-wrap: wrap;
-}
-
-.brain-stat {
-    text-align: center;
-}
-
-.brain-stat-value {
-    font-family: var(--font-display);
-    font-size: var(--text-2xl);
-    font-weight: 600;
-    background: linear-gradient(135deg, var(--sandal-300) 0%, var(--lotus-200) 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    text-shadow: 0 0 40px rgba(203, 175, 134, 0.2);
-}
-
-.brain-stat-label {
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    color: var(--ash-300);
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    opacity: 0.7;
-}
-
-/* Visualization container */
-.brain-viz {
-    position: relative;
-    width: 100%;
-    height: 70vh;
-    min-height: 500px;
-    max-height: 800px;
-}
-
-.brain-svg {
-    width: 100%;
-    height: 100%;
-}
-
-/* Central core */
-.brain-core {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: 180px;
-    height: 180px;
-    pointer-events: none;
-}
-
-/* Module cards */
-.brain-module {
-    position: absolute;
-    background: linear-gradient(145deg, rgba(26, 29, 43, 0.9), rgba(15, 16, 24, 0.95));
-    border: 1px solid rgba(46, 51, 72, 0.6);
-    border-radius: var(--radius-md);
-    padding: var(--space-3) var(--space-4);
-    width: 160px;
-    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-    cursor: pointer;
-    backdrop-filter: blur(12px);
-    box-shadow:
-        0 4px 20px rgba(0, 0, 0, 0.3),
-        inset 0 1px 0 rgba(255, 255, 255, 0.03);
-}
-
-.brain-module:hover {
-    border-color: var(--sandal-300);
-    box-shadow:
-        0 8px 32px rgba(0, 0, 0, 0.4),
-        0 0 20px rgba(203, 175, 134, 0.1),
-        inset 0 1px 0 rgba(255, 255, 255, 0.05);
-    transform: translateY(-2px) scale(1.02);
-}
-
-.brain-module.active {
-    border-color: var(--aura-300);
-    box-shadow:
-        0 8px 32px rgba(0, 0, 0, 0.4),
-        0 0 40px rgba(157, 178, 217, 0.2),
-        0 0 80px rgba(157, 178, 217, 0.1),
-        inset 0 1px 0 rgba(255, 255, 255, 0.08);
-    animation: moduleGlow 0.6s ease-out;
-}
-
-@keyframes moduleGlow {
-    0% { box-shadow: 0 0 0 rgba(157, 178, 217, 0), inset 0 1px 0 rgba(255, 255, 255, 0.08); }
-    50% { box-shadow: 0 0 60px rgba(157, 178, 217, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08); }
-    100% { box-shadow: 0 0 40px rgba(157, 178, 217, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.08); }
-}
-
-.brain-module-icon {
-    font-size: 1.25rem;
-    margin-bottom: var(--space-2);
-}
-
-.brain-module-title {
-    font-family: var(--font-display);
-    font-weight: 500;
-    font-size: var(--text-sm);
-    color: var(--lotus-200);
-    margin-bottom: var(--space-1);
-}
-
-.brain-module-desc {
-    font-family: var(--font-mono);
-    font-size: 0.65rem;
-    color: var(--ash-300);
-    line-height: 1.4;
-    opacity: 0.8;
-}
-
-.brain-module-tags {
-    display: flex;
-    gap: var(--space-2);
-    margin-top: var(--space-2);
-    flex-wrap: wrap;
-}
-
-.brain-module-tag {
-    background: rgba(203, 175, 134, 0.1);
-    padding: 0.15rem 0.4rem;
-    border-radius: 3px;
-    font-family: var(--font-mono);
-    font-size: 0.55rem;
-    color: var(--sandal-300);
-}
-
-/* Module positions */
-.brain-module[data-module="memories"] { top: 6%; left: 50%; transform: translateX(-50%); }
-.brain-module[data-module="rlm"] { top: 12%; left: 12%; }
-.brain-module[data-module="embeddings"] { top: 12%; right: 12%; }
-.brain-module[data-module="triplets"] { top: 32%; left: 4%; }
-.brain-module[data-module="symbols"] { top: 32%; right: 4%; }
-.brain-module[data-module="sadhana"] { top: 52%; left: 6%; }
-.brain-module[data-module="hooks"] { top: 52%; right: 6%; }
-.brain-module[data-module="themes"] { top: 70%; left: 14%; }
-.brain-module[data-module="anticipation"] { top: 70%; right: 14%; }
-.brain-module[data-module="narrative"] { bottom: 3%; left: 50%; transform: translateX(-50%); }
-
-/* Connection lines */
-.brain-connections {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    pointer-events: none;
-    z-index: 0;
-}
-
-.connection-line {
-    stroke: url(#connectionGradient);
-    stroke-width: 1;
-    fill: none;
-    opacity: 0.35;
-    transition: all 0.4s ease;
-}
-
-.connection-line.active {
-    stroke: var(--aura-300);
-    stroke-width: 2;
-    opacity: 1;
-    filter: drop-shadow(0 0 6px var(--aura-300)) drop-shadow(0 0 12px rgba(157, 178, 217, 0.3));
-    animation: lineGlow 0.5s ease-out;
-}
-
-@keyframes lineGlow {
-    0% { stroke-width: 1; }
-    50% { stroke-width: 3; }
-    100% { stroke-width: 2; }
-}
-
-.inter-module-line {
-    stroke: var(--indigo-600);
-    stroke-width: 0.75;
-    stroke-dasharray: 4 6;
-    fill: none;
-    opacity: 0.2;
-    transition: all 0.3s ease;
-}
-
-.inter-module-line.active {
-    stroke: var(--sandal-300);
-    stroke-width: 1.5;
-    opacity: 0.85;
-    filter: drop-shadow(0 0 4px var(--sandal-300)) drop-shadow(0 0 8px rgba(203, 175, 134, 0.3));
-    animation: interLineGlow 0.4s ease-out;
-}
-
-@keyframes interLineGlow {
-    0% { stroke-width: 0.75; }
-    50% { stroke-width: 2.5; }
-    100% { stroke-width: 1.5; }
-}
-
-/* Particle styles */
-.data-particle {
-    fill: var(--aura-300);
-    filter: drop-shadow(0 0 4px var(--aura-300)) drop-shadow(0 0 8px rgba(157, 178, 217, 0.5));
-}
-
-.data-particle.outbound {
-    fill: var(--sandal-300);
-    filter: drop-shadow(0 0 4px var(--sandal-300)) drop-shadow(0 0 8px rgba(203, 175, 134, 0.5));
-}
-
-/* Demo panel */
-.brain-demo {
-    position: absolute;
-    bottom: var(--space-5);
-    left: 50%;
-    transform: translateX(-50%);
-    background: linear-gradient(160deg, rgba(26, 29, 43, 0.95), rgba(15, 16, 24, 0.98));
-    border: 1px solid rgba(46, 51, 72, 0.5);
-    border-radius: var(--radius-lg);
-    padding: var(--space-4) var(--space-5);
-    width: 90%;
-    max-width: 600px;
-    z-index: 30;
-    backdrop-filter: blur(20px);
-    box-shadow:
-        0 8px 32px rgba(0, 0, 0, 0.4),
-        0 0 0 1px rgba(255, 255, 255, 0.02),
-        inset 0 1px 0 rgba(255, 255, 255, 0.03);
-}
-
-.brain-demo-header {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    margin-bottom: var(--space-3);
-}
-
-.brain-demo-dot {
-    width: 8px;
-    height: 8px;
-    background: var(--ember-400);
-    border-radius: 50%;
-    animation: demoPulse 2s infinite;
-}
-
-@keyframes demoPulse {
-    0%, 100% { opacity: 1; transform: scale(1); }
-    50% { opacity: 0.5; transform: scale(1.3); }
-}
-
-.brain-demo-title {
-    font-family: var(--font-display);
-    font-size: var(--text-md);
-    color: var(--lotus-200);
-}
-
-.brain-demo-conversation {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-    max-height: 120px;
-    overflow-y: auto;
-    margin-bottom: var(--space-3);
-}
-
-.brain-demo-message {
-    padding: var(--space-2) var(--space-3);
-    border-radius: var(--radius-sm);
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    max-width: 85%;
-    animation: slideUp 0.3s ease;
-}
-
-@keyframes slideUp {
-    from { opacity: 0; transform: translateY(8px); }
-    to { opacity: 1; transform: translateY(0); }
-}
-
-.brain-demo-message.user {
-    background: linear-gradient(135deg, var(--sandal-300) 0%, var(--ember-400) 100%);
-    color: var(--ink-950);
-    align-self: flex-end;
-}
-
-.brain-demo-message.assistant {
-    background: var(--indigo-700);
-    color: var(--ash-300);
-    align-self: flex-start;
-}
-
-.brain-demo-input-row {
-    display: flex;
-    gap: var(--space-3);
-}
-
-.brain-demo-input {
-    flex: 1;
-    background: var(--ink-950);
-    border: 1px solid var(--indigo-600);
-    border-radius: var(--radius-sm);
-    padding: var(--space-2) var(--space-3);
-    color: var(--lotus-200);
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-}
-
-.brain-demo-input:focus {
-    outline: none;
-    border-color: var(--sandal-300);
-}
-
-.brain-demo-input::placeholder {
-    color: var(--ash-300);
-    opacity: 0.5;
-}
-
-.brain-demo-btn {
-    background: linear-gradient(135deg, var(--sandal-300) 0%, var(--ember-400) 100%);
-    border: none;
-    border-radius: var(--radius-sm);
-    padding: var(--space-2) var(--space-4);
-    color: var(--ink-950);
-    font-family: var(--font-mono);
-    font-weight: 500;
-    font-size: var(--text-sm);
-    cursor: pointer;
-    transition: transform 0.2s, box-shadow 0.2s;
-}
-
-.brain-demo-btn:hover {
-    transform: scale(1.03);
-    box-shadow: var(--shadow-glow-sandal);
-}
-
-/* Detail panel */
-.brain-detail {
-    position: fixed;
-    top: 50%;
-    right: var(--space-5);
-    transform: translateY(-50%) translateX(10px);
-    background: linear-gradient(160deg, rgba(26, 29, 43, 0.98), rgba(15, 16, 24, 0.99));
-    border: 1px solid rgba(46, 51, 72, 0.5);
-    border-radius: var(--radius-md);
-    padding: var(--space-4);
-    width: 260px;
-    opacity: 0;
-    pointer-events: none;
-    transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-    z-index: 40;
-    backdrop-filter: blur(20px);
-    box-shadow:
-        0 12px 40px rgba(0, 0, 0, 0.5),
-        0 0 0 1px rgba(255, 255, 255, 0.02),
-        inset 0 1px 0 rgba(255, 255, 255, 0.03);
-}
-
-.brain-detail.visible {
-    opacity: 1;
-    pointer-events: auto;
-    transform: translateY(-50%) translateX(0);
-}
-
-.brain-detail-title {
-    font-family: var(--font-display);
-    font-size: var(--text-md);
-    color: var(--lotus-200);
-    margin-bottom: var(--space-2);
-}
-
-.brain-detail-desc {
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    color: var(--ash-300);
-    line-height: 1.5;
-    margin-bottom: var(--space-3);
-}
-
-.brain-detail-features {
-    list-style: none;
-}
-
-.brain-detail-features li {
-    padding: var(--space-2) 0;
-    border-bottom: 1px solid var(--indigo-700);
-    font-family: var(--font-mono);
-    font-size: 0.7rem;
-    color: var(--ash-300);
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-}
-
-.brain-detail-features li::before {
-    content: '→';
-    color: var(--sandal-300);
-}
-
-/* Core pulse animation */
-.brain-core.pulse svg circle#coreGlow {
-    animation: corePulse 0.5s ease-out;
-}
-
-@keyframes corePulse {
-    0% { filter: url(#glow); }
-    50% { filter: url(#glow) drop-shadow(0 0 30px rgba(157, 178, 217, 0.6)); }
-    100% { filter: url(#glow); }
-}
-
-/* CTA section below brain */
-.brain-cta {
-    text-align: center;
-    padding: var(--space-6) var(--space-4) var(--space-8);
-    background: var(--night-900);
-}
-
-.brain-cta-code {
-    display: inline-block;
-    background: var(--ink-950);
-    border: 1px solid var(--indigo-600);
-    border-radius: var(--radius-sm);
-    padding: var(--space-3) var(--space-5);
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-    color: var(--sandal-300);
-    margin-bottom: var(--space-3);
-}
-
-.brain-cta-note {
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    color: var(--ash-300);
-    opacity: 0.7;
-    margin-bottom: var(--space-4);
-}
-
-.brain-cta-links {
-    display: flex;
-    justify-content: center;
-    gap: var(--space-4);
-    flex-wrap: wrap;
-}
-
-.brain-cta-links a {
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-    color: var(--aura-300);
-    transition: color 0.2s;
-}
-
-.brain-cta-links a:hover {
-    color: var(--lotus-200);
-}
-
-/* Responsive */
-@media (max-width: 1100px) {
-    .brain-module {
-        width: 140px;
-        padding: var(--space-2) var(--space-3);
-    }
-    .brain-module-title { font-size: 0.75rem; }
-    .brain-module-desc { font-size: 0.6rem; }
-    .brain-detail { display: none; }
-}
-
-@media (max-width: 768px) {
-    .brain-viz { height: 60vh; min-height: 450px; }
-    .brain-module {
-        width: 110px;
-        padding: var(--space-2);
-    }
-    .brain-module-desc { display: none; }
-    .brain-module-tags { display: none; }
-    .brain-stats { gap: var(--space-4); }
-    .brain-header { padding-top: var(--space-6); }
-}
-</style>
 </head>
 <body>
 
@@ -620,245 +41,412 @@
   </div>
 </nav>
 
-<!-- BRAIN VISUALIZATION HERO -->
-<section class="brain-hero">
-    <div class="brain-header">
-        <h1 class="brain-title">cc<span>-</span>soul</h1>
-        <p class="brain-tagline">Persistent memory architecture for Claude Code. Watch ideas flow through the mind.</p>
-        <div class="brain-stats">
-            <div class="brain-stat">
-                <div class="brain-stat-value" id="memoryCount">9,204</div>
-                <div class="brain-stat-label">Memories</div>
-            </div>
-            <div class="brain-stat">
-                <div class="brain-stat-value" id="tripletCount">502K</div>
-                <div class="brain-stat-label">Knowledge Graph</div>
-            </div>
-            <div class="brain-stat">
-                <div class="brain-stat-value" id="symbolCount">1,354</div>
-                <div class="brain-stat-label">Code Symbols</div>
-            </div>
-            <div class="brain-stat">
-                <div class="brain-stat-value">100+</div>
-                <div class="brain-stat-label">MCP Tools</div>
-            </div>
-        </div>
-        <p class="brain-legend">
-            <span class="legend-dot legend-dot--inbound"></span>inbound flow
-            <span class="legend-dot legend-dot--inter"></span>inter-module
-        </p>
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-rings" aria-hidden="true">
+    <div class="hero-ring"></div>
+    <div class="hero-ring"></div>
+    <div class="hero-ring"></div>
+    <div class="hero-ring"></div>
+    <div class="hero-ring"></div>
+  </div>
+  <div class="hero-content">
+    <h1 class="hero-title heading-display">Claude Code that learns how you work.</h1>
+    <p class="hero-subtitle">Persistent memory, code intelligence, and workflow adaptation across every session. Local-first. 100+ tools. Zero configuration.</p>
+    <p class="hero-aside">Install in 10 seconds. See the difference in your first conversation.</p>
+    <div class="hero-ctas">
+      <a href="getting-started.html" class="btn btn-primary">Get started</a>
+      <a href="tools.html" class="btn btn-outline">Explore the tools</a>
+      <a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener" class="btn btn-outline">View on GitHub</a>
     </div>
-
-    <div class="brain-viz" id="brainViz">
-        <!-- SVG for connections -->
-        <svg class="brain-connections" id="connectionsSvg"></svg>
-
-        <!-- Central core -->
-        <div class="brain-core" id="brainCore">
-            <svg viewBox="0 0 180 180">
-                <defs>
-                    <radialGradient id="coreGradient">
-                        <stop offset="0%" stop-color="var(--aura-300)" stop-opacity="0.7"/>
-                        <stop offset="50%" stop-color="var(--sandal-300)" stop-opacity="0.3"/>
-                        <stop offset="100%" stop-color="transparent"/>
-                    </radialGradient>
-                    <radialGradient id="coreActiveGradient">
-                        <stop offset="0%" stop-color="var(--lotus-200)" stop-opacity="0.9"/>
-                        <stop offset="40%" stop-color="var(--aura-300)" stop-opacity="0.6"/>
-                        <stop offset="100%" stop-color="transparent"/>
-                    </radialGradient>
-                    <filter id="glow">
-                        <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
-                        <feMerge>
-                            <feMergeNode in="coloredBlur"/>
-                            <feMergeNode in="SourceGraphic"/>
-                        </feMerge>
-                    </filter>
-                </defs>
-                <!-- Outer ring -->
-                <circle cx="90" cy="90" r="65" fill="none" stroke="var(--sandal-300)" stroke-width="0.5" opacity="0.25">
-                    <animate attributeName="r" values="60;70;60" dur="4s" repeatCount="indefinite"/>
-                </circle>
-                <!-- Main glow -->
-                <circle id="coreGlow" cx="90" cy="90" r="50" fill="url(#coreGradient)" filter="url(#glow)">
-                    <animate attributeName="r" values="45;55;45" dur="3s" repeatCount="indefinite"/>
-                </circle>
-                <!-- Mid ring -->
-                <circle cx="90" cy="90" r="35" fill="none" stroke="var(--sandal-300)" stroke-width="0.75" opacity="0.4">
-                    <animate attributeName="r" values="30;40;30" dur="2.5s" repeatCount="indefinite"/>
-                </circle>
-                <!-- Rotating inner ring -->
-                <circle cx="90" cy="90" r="25" fill="none" stroke="var(--aura-300)" stroke-width="0.5"
-                        stroke-dasharray="4 8" opacity="0.35">
-                    <animateTransform attributeName="transform" type="rotate"
-                                      from="0 90 90" to="360 90 90" dur="25s" repeatCount="indefinite"/>
-                </circle>
-                <!-- Core -->
-                <circle id="coreCenter" cx="90" cy="90" r="18" fill="var(--ink-950)" stroke="var(--aura-300)" stroke-width="1.5">
-                    <animate attributeName="stroke-opacity" values="1;0.4;1" dur="2s" repeatCount="indefinite"/>
-                </circle>
-                <!-- Orbit particles -->
-                <circle r="2" fill="var(--aura-300)" opacity="0.7">
-                    <animateMotion dur="10s" repeatCount="indefinite">
-                        <mpath href="#orbit1"/>
-                    </animateMotion>
-                </circle>
-                <circle r="1.5" fill="var(--sandal-300)" opacity="0.5">
-                    <animateMotion dur="7s" repeatCount="indefinite">
-                        <mpath href="#orbit2"/>
-                    </animateMotion>
-                </circle>
-                <path id="orbit1" d="M 90 40 A 50 50 0 1 1 89.9 40" fill="none"/>
-                <path id="orbit2" d="M 90 55 A 35 35 0 1 0 89.9 55" fill="none"/>
-                <!-- Label -->
-                <text x="90" y="94" text-anchor="middle" fill="var(--aura-300)" font-family="var(--font-display)" font-size="11" font-weight="500">CHITTA</text>
-            </svg>
-        </div>
-
-        <!-- Memory Module -->
-        <div class="brain-module" data-module="memories">
-            <div class="brain-module-icon">🧠</div>
-            <div class="brain-module-title">Hierarchical Memory</div>
-            <div class="brain-module-desc">3-tier: SSL wisdom → Episodes → Full turns</div>
-            <div class="brain-module-tags">
-                <span class="brain-module-tag">9.2K</span>
-                <span class="brain-module-tag">SSL v0.2</span>
-            </div>
-        </div>
-
-        <!-- RLM Module -->
-        <div class="brain-module" data-module="rlm">
-            <div class="brain-module-icon">🔄</div>
-            <div class="brain-module-title">RLM Exploration</div>
-            <div class="brain-module-desc">Recursive Language Model REPL</div>
-            <div class="brain-module-tags">
-                <span class="brain-module-tag">soul.*</span>
-                <span class="brain-module-tag">sandbox</span>
-            </div>
-        </div>
-
-        <!-- Embeddings Module -->
-        <div class="brain-module" data-module="embeddings">
-            <div class="brain-module-icon">🎯</div>
-            <div class="brain-module-title">VakYantra</div>
-            <div class="brain-module-desc">ONNX embedder with HNSW</div>
-            <div class="brain-module-tags">
-                <span class="brain-module-tag">384-dim</span>
-                <span class="brain-module-tag">~5ms</span>
-            </div>
-        </div>
-
-        <!-- Triplets Module -->
-        <div class="brain-module" data-module="triplets">
-            <div class="brain-module-icon">🕸️</div>
-            <div class="brain-module-title">Knowledge Graph</div>
-            <div class="brain-module-desc">DuckPGQ graph queries</div>
-            <div class="brain-module-tags">
-                <span class="brain-module-tag">502K</span>
-                <span class="brain-module-tag">PGQL</span>
-            </div>
-        </div>
-
-        <!-- Symbols Module -->
-        <div class="brain-module" data-module="symbols">
-            <div class="brain-module-icon">📦</div>
-            <div class="brain-module-title">Code Intelligence</div>
-            <div class="brain-module-desc">Tree-sitter + call graphs</div>
-            <div class="brain-module-tags">
-                <span class="brain-module-tag">1.3K</span>
-                <span class="brain-module-tag">BM25</span>
-            </div>
-        </div>
-
-        <!-- Sadhana Module -->
-        <div class="brain-module" data-module="sadhana">
-            <div class="brain-module-icon">🤖</div>
-            <div class="brain-module-title">Sadhana Agents</div>
-            <div class="brain-module-desc">Autonomous sense-think-act</div>
-            <div class="brain-module-tags">
-                <span class="brain-module-tag">haiku</span>
-                <span class="brain-module-tag">async</span>
-            </div>
-        </div>
-
-        <!-- Hooks Module -->
-        <div class="brain-module" data-module="hooks">
-            <div class="brain-module-icon">⚡</div>
-            <div class="brain-module-title">Hook System</div>
-            <div class="brain-module-desc">Session, prompt, tool events</div>
-            <div class="brain-module-tags">
-                <span class="brain-module-tag">6 hooks</span>
-                <span class="brain-module-tag">&lt;80ms</span>
-            </div>
-        </div>
-
-        <!-- Themes Module -->
-        <div class="brain-module" data-module="themes">
-            <div class="brain-module-icon">🎨</div>
-            <div class="brain-module-title">Theme Manager</div>
-            <div class="brain-module-desc">Auto-clustering memories</div>
-            <div class="brain-module-tags">
-                <span class="brain-module-tag">HDBSCAN</span>
-            </div>
-        </div>
-
-        <!-- Anticipation Module -->
-        <div class="brain-module" data-module="anticipation">
-            <div class="brain-module-icon">🔮</div>
-            <div class="brain-module-title">Anticipation</div>
-            <div class="brain-module-desc">Predict & pre-load context</div>
-            <div class="brain-module-tags">
-                <span class="brain-module-tag">calibrated</span>
-            </div>
-        </div>
-
-        <!-- Narrative Module -->
-        <div class="brain-module" data-module="narrative">
-            <div class="brain-module-icon">📖</div>
-            <div class="brain-module-title">Narrative Engine</div>
-            <div class="brain-module-desc">Work mode & session continuity</div>
-            <div class="brain-module-tags">
-                <span class="brain-module-tag">ledger</span>
-                <span class="brain-module-tag">modes</span>
-            </div>
-        </div>
-    </div>
-
-    <!-- Demo Panel -->
-    <div class="brain-demo">
-        <div class="brain-demo-header">
-            <div class="brain-demo-dot"></div>
-            <span class="brain-demo-title">Live Mind Activation</span>
-        </div>
-        <div class="brain-demo-conversation" id="conversation">
-            <div class="brain-demo-message assistant">Ask something to see the mind activate...</div>
-        </div>
-        <div class="brain-demo-input-row">
-            <input type="text" class="brain-demo-input" id="demoInput"
-                   placeholder="How does chitta handle memory retrieval?"
-                   onkeypress="if(event.key==='Enter')simulateQuery()">
-            <button class="brain-demo-btn" onclick="simulateQuery()">Ask</button>
-        </div>
-    </div>
+  </div>
 </section>
 
-<!-- Detail Panel -->
-<div class="brain-detail" id="detailPanel">
-    <div class="brain-detail-title" id="detailTitle"></div>
-    <div class="brain-detail-desc" id="detailDesc"></div>
-    <ul class="brain-detail-features" id="detailFeatures"></ul>
-</div>
-
-<!-- CTA Section -->
-<section class="brain-cta">
-    <div class="brain-cta-code">claude plugin add cc-soul@genomewalker-cc-soul</div>
-    <p class="brain-cta-note">Restart Claude Code. The soul awakens.</p>
-    <div class="brain-cta-links">
-        <a href="getting-started.html">Get Started →</a>
-        <a href="tools.html">100+ Tools →</a>
-        <a href="architecture.html">Architecture →</a>
-        <a href="philosophy.html">Philosophy →</a>
+<!-- QUICK START -->
+<section class="quickstart" id="quickstart">
+  <div class="container">
+    <div class="quickstart-box reveal">
+      <div class="quickstart-code">claude plugin add cc-soul@genomewalker-cc-soul</div>
+      <p class="quickstart-note">Restart Claude Code. The soul awakens.</p>
+      <a href="getting-started.html" class="quickstart-link">Full setup guide &rarr;</a>
     </div>
+  </div>
+</section>
+
+<!-- WHAT'S NEW -->
+<section class="why whats-new-section" id="whats-new">
+  <div class="container">
+    <div class="reveal whats-new-card">
+      <div class="whats-new-header">
+        <span class="whats-new-badge">New in v3.38.6</span>
+      </div>
+      <p class="whats-new-title">Native MCP tools and intelligent memory</p>
+      <p class="whats-new-desc">
+        Direct MCP tool access without CLI overhead. Smart context injection that understands what you're working on.
+        <a href="https://github.com/genomewalker/cc-soul/releases" class="link-sandal">See release notes &rarr;</a>
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- WHY IT MATTERS -->
+<section class="why" id="why">
+  <div class="container">
+    <div class="why-header reveal">
+      <div class="section-divider"></div>
+      <h2 class="heading-section">Less re-explaining. More continuity.</h2>
+    </div>
+
+    <div class="why-statements">
+      <p class="why-statement reveal reveal-delay-1">
+        The system remembers <em>you</em>, not just the project.
+      </p>
+      <p class="why-statement reveal reveal-delay-2">
+        Deep use strengthens high-signal memories. <em>Noise fades.</em>
+      </p>
+      <p class="why-statement reveal reveal-delay-3">
+        Recognition feels native: <em>&ldquo;You mean the thing we already solved.&rdquo;</em>
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- VIGNETTES -->
+<section class="vignettes">
+  <div class="container">
+    <div class="vignettes-header reveal">
+      <div class="section-divider"></div>
+      <h2 class="heading-section"><span class="vignette-title-sanskrit">Pratyabhijñā</span>&thinsp;&mdash;&thinsp;recognition, in action.</h2>
+    </div>
+
+    <div class="vignettes-grid">
+      <div class="vignette-card reveal reveal-delay-1">
+        <span class="vignette-prompt">&gt; </span>You ask about <span class="vignette-highlight">auth</span> and Claude surfaces that you chose JWT over sessions two weeks ago&thinsp;&mdash;&thinsp;with the reasoning you gave at the time.
+      </div>
+      <div class="vignette-card reveal reveal-delay-2">
+        <span class="vignette-prompt">&gt; </span>You start <span class="vignette-highlight">debugging</span> and Claude says &ldquo;last time this happened, it was the connection pool&rdquo;&thinsp;&mdash;&thinsp;because it remembers.
+      </div>
+      <div class="vignette-card reveal reveal-delay-3">
+        <span class="vignette-prompt">&gt; </span>You run <span class="vignette-highlight">build</span> and Claude reminds you to lint first&thinsp;&mdash;&thinsp;because you always do, and it learned that.
+      </div>
+      <div class="vignette-card reveal reveal-delay-4">
+        <span class="vignette-prompt">&gt; </span>You start a <span class="vignette-highlight">snakemake</span> pipeline, type <code>/shepherd</code>, and go to sleep. Claude watches the pane, detects errors, applies fixes from memory, and restarts automatically. You wake to a completed pipeline or an actionable error report.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- COMPARISON -->
+<section class="bridge" id="comparison">
+  <div class="container">
+    <div class="bridge-header reveal">
+      <div class="section-divider"></div>
+      <h2 class="heading-section">What makes cc-soul different?</h2>
+      <p class="bridge-subtext">Most memory systems store text. cc-soul learns how you think.</p>
+    </div>
+
+    <div class="reveal reveal-delay-1 comparison-grid">
+      <div class="comparison-card">
+        <h3 class="comparison-card-title">Simple Memory</h3>
+        <ul class="comparison-list comparison-list--faded">
+          <li>Stores everything forever</li>
+          <li>Keyword search only</li>
+          <li>Same importance for all items</li>
+          <li>No pattern recognition</li>
+          <li>Manual organization required</li>
+        </ul>
+      </div>
+      <div class="comparison-card comparison-card--highlight">
+        <h3 class="comparison-card-title">cc-soul</h3>
+        <ul class="comparison-list">
+          <li><span class="checkmark">&#10003;</span> Important memories strengthen, noise fades</li>
+          <li><span class="checkmark">&#10003;</span> Semantic search understands meaning</li>
+          <li><span class="checkmark">&#10003;</span> Confidence tracking per memory</li>
+          <li><span class="checkmark">&#10003;</span> Learns habits and anticipates needs</li>
+          <li><span class="checkmark">&#10003;</span> Self-organizing theme clusters</li>
+        </ul>
+      </div>
+    </div>
+
+    <p class="bridge-link reveal reveal-delay-2 bridge-link--spaced">
+      <a href="philosophy.html">Explore the philosophy behind it &rarr;</a>
+    </p>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section class="how" id="how">
+  <div class="container">
+    <div class="how-header reveal">
+      <div class="section-divider"></div>
+      <h2 class="heading-section">A memory system that behaves like memory.</h2>
+    </div>
+
+    <div class="cards-grid">
+      <div class="feature-card reveal reveal-delay-1">
+        <div class="card-icon">
+          <svg viewBox="0 0 36 36" fill="none">
+            <circle cx="18" cy="18" r="6" stroke="#CBAF86" stroke-width="1.5" opacity="0.8"/>
+            <circle cx="18" cy="18" r="12" stroke="#CBAF86" stroke-width="1" opacity="0.4"/>
+            <circle cx="18" cy="18" r="17" stroke="#CBAF86" stroke-width="0.5" opacity="0.2"/>
+          </svg>
+        </div>
+        <h3 class="card-title">Understands Meaning, Not Keywords</h3>
+        <p class="card-desc">Finds what you meant, not just what you typed. Semantic embeddings anchor meaning so related concepts surface together.</p>
+      </div>
+
+      <div class="feature-card reveal reveal-delay-2">
+        <div class="card-icon">
+          <svg viewBox="0 0 36 36" fill="none">
+            <path d="M6 28 L12 12 L18 22 L24 8 L30 18" stroke="#9DB2D9" stroke-width="1.5" fill="none" opacity="0.8"/>
+            <circle cx="12" cy="12" r="2" fill="#9DB2D9" opacity="0.6"/>
+            <circle cx="24" cy="8" r="2" fill="#9DB2D9" opacity="0.6"/>
+          </svg>
+        </div>
+        <h3 class="card-title">Knows What It's Sure About</h3>
+        <p class="card-desc">Tracks certainty over time. Memories you reinforce stay strong. Things you mention once fade naturally.</p>
+      </div>
+
+      <div class="feature-card reveal reveal-delay-3">
+        <div class="card-icon">
+          <svg viewBox="0 0 36 36" fill="none">
+            <circle cx="12" cy="14" r="3" stroke="#D46A4C" stroke-width="1.5" opacity="0.8"/>
+            <circle cx="24" cy="14" r="3" stroke="#D46A4C" stroke-width="1.5" opacity="0.8"/>
+            <circle cx="18" cy="24" r="3" stroke="#D46A4C" stroke-width="1.5" opacity="0.8"/>
+            <line x1="14.5" y1="15.5" x2="21.5" y2="15.5" stroke="#D46A4C" stroke-width="0.75" opacity="0.4"/>
+            <line x1="13" y1="16.5" x2="17" y2="22" stroke="#D46A4C" stroke-width="0.75" opacity="0.4"/>
+            <line x1="23" y1="16.5" x2="19" y2="22" stroke="#D46A4C" stroke-width="0.75" opacity="0.4"/>
+          </svg>
+        </div>
+        <h3 class="card-title">Finds What Matters</h3>
+        <p class="card-desc">Connected ideas activate together. Context flows through the knowledge graph to surface exactly what's relevant right now.</p>
+      </div>
+
+      <div class="feature-card reveal reveal-delay-1">
+        <div class="card-icon">
+          <svg viewBox="0 0 36 36" fill="none">
+            <rect x="6" y="8" width="24" height="20" rx="3" stroke="#9DB2D9" stroke-width="1.5" opacity="0.8"/>
+            <line x1="6" y1="15" x2="30" y2="15" stroke="#9DB2D9" stroke-width="0.75" opacity="0.4"/>
+            <line x1="6" y1="21" x2="30" y2="21" stroke="#9DB2D9" stroke-width="0.75" opacity="0.4"/>
+            <circle cx="12" cy="11.5" r="1.5" fill="#9DB2D9" opacity="0.5"/>
+            <circle cx="12" cy="18" r="1.5" fill="#9DB2D9" opacity="0.3"/>
+            <circle cx="12" cy="24.5" r="1.5" fill="#9DB2D9" opacity="0.2"/>
+          </svg>
+        </div>
+        <h3 class="card-title">Everything in One Place</h3>
+        <p class="card-desc">Single embedded database. No external services. Your memories stay on your machine, searchable in milliseconds.</p>
+      </div>
+
+      <div class="feature-card reveal reveal-delay-2">
+        <div class="card-icon">
+          <svg viewBox="0 0 36 36" fill="none">
+            <path d="M8 26 L14 18 L20 22 L28 10" stroke="#CBAF86" stroke-width="1.5" fill="none" opacity="0.8"/>
+            <path d="M8 26 L14 18 L20 22 L28 10 L28 26 Z" fill="#CBAF86" opacity="0.06"/>
+          </svg>
+        </div>
+        <h3 class="card-title">Token-Efficient Storage</h3>
+        <p class="card-desc">Memories compress to essential meaning. Up to 95% smaller than raw text, so more context fits in every conversation.</p>
+      </div>
+
+      <div class="feature-card reveal reveal-delay-3">
+        <div class="card-icon">
+          <svg viewBox="0 0 36 36" fill="none">
+            <circle cx="18" cy="18" r="10" stroke="#D46A4C" stroke-width="1" opacity="0.3" stroke-dasharray="3 3"/>
+            <circle cx="18" cy="18" r="4" fill="#D46A4C" opacity="0.15"/>
+            <circle cx="18" cy="18" r="2" fill="#D46A4C" opacity="0.5"/>
+          </svg>
+        </div>
+        <h3 class="card-title">Works While You're Away</h3>
+        <p class="card-desc">Background processing strengthens important memories and lets noise fade. The daemon learns even between sessions.</p>
+      </div>
+
+      <div class="feature-card reveal reveal-delay-4">
+        <div class="card-icon">
+          <svg viewBox="0 0 36 36" fill="none">
+            <circle cx="18" cy="12" r="5" stroke="#CBAF86" stroke-width="1.5" fill="none" opacity="0.8"/>
+            <path d="M18 17 L18 22" stroke="#CBAF86" stroke-width="1" opacity="0.6"/>
+            <path d="M13 27 L18 22 L23 27" stroke="#CBAF86" stroke-width="1.5" fill="none" opacity="0.8"/>
+            <circle cx="13" cy="27" r="2" stroke="#CBAF86" stroke-width="1" opacity="0.5"/>
+            <circle cx="23" cy="27" r="2" stroke="#CBAF86" stroke-width="1" opacity="0.5"/>
+            <path d="M10 30 L13 27" stroke="#CBAF86" stroke-width="0.75" opacity="0.3"/>
+            <path d="M26 30 L23 27" stroke="#CBAF86" stroke-width="0.75" opacity="0.3"/>
+          </svg>
+        </div>
+        <h3 class="card-title">Shepherds Your Pipelines</h3>
+        <p class="card-desc">Autonomous monitoring for snakemake, nextflow, or slurm jobs. Sense-think-act loop detects errors, applies fixes from memory, restarts automatically.</p>
+      </div>
+
+      <div class="feature-card reveal reveal-delay-1">
+        <div class="card-icon">
+          <svg viewBox="0 0 36 36" fill="none">
+            <path d="M18 6 C18 6 10 14 10 20 C10 24.4 13.6 28 18 28 C22.4 28 26 24.4 26 20 C26 14 18 6 18 6Z" stroke="#9DB2D9" stroke-width="1.5" fill="none" opacity="0.8"/>
+            <path d="M14 20 Q18 16 22 20" stroke="#9DB2D9" stroke-width="1" opacity="0.5"/>
+            <path d="M15 23 Q18 19 21 23" stroke="#9DB2D9" stroke-width="0.75" opacity="0.35"/>
+            <circle cx="18" cy="12" r="1.5" fill="#9DB2D9" opacity="0.6"/>
+          </svg>
+        </div>
+        <h3 class="card-title">Learns Your Patterns</h3>
+        <p class="card-desc">Notices your workflows. If you always lint before commit, it learns that. Suggests what you'll need before you ask.</p>
+      </div>
+
+      <div class="feature-card reveal reveal-delay-2">
+        <div class="card-icon">
+          <svg viewBox="0 0 36 36" fill="none">
+            <circle cx="18" cy="14" r="5" stroke="#CBAF86" stroke-width="1.5" fill="none" opacity="0.8"/>
+            <circle cx="18" cy="14" r="1.5" fill="#CBAF86" opacity="0.5"/>
+            <line x1="18" y1="19" x2="18" y2="24" stroke="#CBAF86" stroke-width="1" opacity="0.6"/>
+            <path d="M12 28 L18 24 L24 28" stroke="#CBAF86" stroke-width="1" fill="none" opacity="0.5"/>
+            <circle cx="12" cy="28" r="1.5" fill="#CBAF86" opacity="0.35"/>
+            <circle cx="24" cy="28" r="1.5" fill="#CBAF86" opacity="0.35"/>
+          </svg>
+        </div>
+        <h3 class="card-title">Tracks What You're Building</h3>
+        <p class="card-desc">Knows your goals and milestones. Adapts to your work mode&thinsp;&mdash;&thinsp;quiet in flow state, helpful when you're stuck.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- BY THE NUMBERS -->
+<section class="why numbers-section" id="numbers">
+  <div class="container">
+    <div class="reveal numbers-header">
+      <div class="section-divider section-divider--centered"></div>
+      <h2 class="heading-section">By the numbers.</h2>
+    </div>
+    <div class="reveal reveal-delay-1 numbers-grid">
+      <div>
+        <span class="stat-value stat-value--sandal">100+</span>
+        <p class="stat-label">MCP tools</p>
+      </div>
+      <div>
+        <span class="stat-value stat-value--aura">300ms</span>
+        <p class="stat-label">Avg latency</p>
+      </div>
+      <div>
+        <span class="stat-value stat-value--ember">768</span>
+        <p class="stat-label">Dimensions</p>
+      </div>
+      <div>
+        <span class="stat-value stat-value--sandal">9</span>
+        <p class="stat-label">Languages</p>
+      </div>
+      <div>
+        <span class="stat-value stat-value--aura">23</span>
+        <p class="stat-label">Skills</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FIRST 30 DAYS -->
+<section class="progression" id="progression">
+  <div class="container">
+    <div class="progression-header reveal">
+      <div class="section-divider"></div>
+      <h2 class="heading-section">The first 30 days.</h2>
+      <p class="subtext">cc-soul doesn't arrive fully formed. It grows through use.</p>
+    </div>
+
+    <div class="timeline">
+      <div class="timeline-item reveal reveal-delay-1">
+        <div class="timeline-marker">
+          <span class="timeline-dot"></span>
+          <span class="timeline-line"></span>
+        </div>
+        <div class="timeline-content">
+          <h3 class="timeline-label">Day 1</h3>
+          <h4 class="timeline-title">Foundation</h4>
+          <p class="timeline-desc">Basic recall and code indexing. cc-soul remembers what you tell it and indexes your codebase structure &mdash; symbols, call graphs, file relationships.</p>
+        </div>
+      </div>
+
+      <div class="timeline-item reveal reveal-delay-2">
+        <div class="timeline-marker">
+          <span class="timeline-dot"></span>
+          <span class="timeline-line"></span>
+        </div>
+        <div class="timeline-content">
+          <h3 class="timeline-label">Week 1</h3>
+          <h4 class="timeline-title">Adaptation</h4>
+          <p class="timeline-desc">Preferences learned, corrections absorbed. The soul starts adapting to your workflow and communication style &mdash; your conventions, your gotchas, your shortcuts.</p>
+        </div>
+      </div>
+
+      <div class="timeline-item reveal reveal-delay-3">
+        <div class="timeline-marker">
+          <span class="timeline-dot"></span>
+          <span class="timeline-line"></span>
+        </div>
+        <div class="timeline-content">
+          <h3 class="timeline-label">Week 2</h3>
+          <h4 class="timeline-title">Anticipation</h4>
+          <p class="timeline-desc">Patterns emerging, habits forming. The system predicts your next actions, surfaces relevant gotchas, and adapts to your work mode &mdash; flow, debugging, or blocked.</p>
+        </div>
+      </div>
+
+      <div class="timeline-item timeline-item--final reveal reveal-delay-4">
+        <div class="timeline-marker">
+          <span class="timeline-dot timeline-dot--final"></span>
+        </div>
+        <div class="timeline-content">
+          <h3 class="timeline-label">Month 1</h3>
+          <h4 class="timeline-title">Partnership</h4>
+          <p class="timeline-desc">Goals tracked, curiosity gaps filled, predictions calibrated. It feels like a collaborator who knows your project history and anticipates your needs &mdash; not a tool that forgets.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- RESONANCE VISUALIZATION -->
+<section class="resonance" id="resonance">
+  <div class="container">
+    <p class="resonance-label reveal">Memory resonance&thinsp;&mdash;&thinsp;hover to activate</p>
+    <div class="resonance-canvas-wrap reveal reveal-delay-1">
+      <canvas id="resonance-canvas"></canvas>
+      <div class="canvas-legend">
+        <div class="legend-item"><span class="legend-dot legend-dot--node"></span><span class="legend-text">Memory node (size = confidence)</span></div>
+        <div class="legend-item"><span class="legend-dot legend-dot--connection"></span><span class="legend-text">Semantic connection</span></div>
+        <div class="legend-item"><span class="legend-dot legend-dot--active"></span><span class="legend-text">Activated memory</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- DOCS LINKS -->
+<section class="tools" id="tools">
+  <div class="container">
+    <div class="tools-header reveal">
+      <div class="section-divider"></div>
+      <h2 class="heading-section">Go deeper.</h2>
+    </div>
+    <p class="tools-intro reveal reveal-delay-1">
+      100+ MCP tools. 13 Sanskrit concepts made operational. Vedantic philosophy meets C++ engineering.
+    </p>
+
+    <div class="tools-footer reveal reveal-delay-2">
+      <a href="getting-started.html" class="tools-link">Get Started</a>
+      <a href="tools.html" class="tools-link">100+ MCP Tools Reference</a>
+      <a href="architecture.html" class="tools-link">Architecture</a>
+      <a href="philosophy.html" class="tools-link">Philosophy &rarr; System</a>
+      <a href="cli.html" class="tools-link">CLI Reference</a>
+      <a href="hooks.html" class="tools-link">Hook System</a>
+      <a href="skills.html" class="tools-link">23 Skills</a>
+    </div>
+  </div>
+</section>
+
+<!-- CLOSING -->
+<section class="closing">
+  <div class="container">
+    <h2 class="closing-title heading-display reveal">Not stateless. Not shallow.</h2>
+    <p class="closing-body reveal reveal-delay-1">cc-soul is for developers who want their tools to grow wiser, not just louder.</p>
+    <p class="closing-sanskrit reveal reveal-delay-2"><span class="devanagari">तत् त्वम् असि</span>&thinsp;&mdash;&thinsp;Tat tvam asi&thinsp;&mdash;&thinsp;That art thou.</p>
+    <div class="reveal reveal-delay-3">
+      <a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener" class="btn btn-primary">Explore the system</a>
+    </div>
+  </div>
 </section>
 
 <!-- FOOTER -->
@@ -874,600 +462,254 @@
 
 <script>
 /* ═══════════════════════════════════════════
-   MODULE DETAILS DATA
+   SCROLL REVEAL (IntersectionObserver)
    ═══════════════════════════════════════════ */
-const moduleDetails = {
-    memories: {
-        title: '🧠 Hierarchical Memory',
-        desc: 'Three-tier memory system inspired by human cognition. SSL provides compressed wisdom, episodes capture session context, full turns preserve complete conversations.',
-        features: [
-            'SSL v0.2 format for compact wisdom',
-            'Episode markers with turn ranges',
-            'expand_memory() for drill-down',
-            'Confidence-based retrieval',
-            'Auto-distillation from transcripts'
-        ]
-    },
-    rlm: {
-        title: '🔄 RLM Exploration',
-        desc: 'Recursive Language Model paradigm letting Claude write Python code to explore memories dynamically.',
-        features: [
-            'soul.search() semantic search',
-            'soul.expand() context drill-down',
-            'soul.triplets() graph queries',
-            'Sandboxed Python execution',
-            'Trajectory tracking'
-        ]
-    },
-    embeddings: {
-        title: '🎯 VakYantra Embedder',
-        desc: 'ONNX-powered embedding engine with HNSW vector index for sub-5ms semantic search.',
-        features: [
-            '384-dimensional vectors',
-            'all-MiniLM-L6-v2 model',
-            'HNSW index (DuckDB VSS)',
-            'CPU & GPU support',
-            'Batch embedding'
-        ]
-    },
-    triplets: {
-        title: '🕸️ Knowledge Graph',
-        desc: 'DuckPGQ-powered graph database storing relationships between memories, symbols, files, and concepts.',
-        features: [
-            '500K+ relationship edges',
-            'Subject-Predicate-Object triples',
-            'PGQL path queries',
-            'Neighbor expansion',
-            'Derived relationships'
-        ]
-    },
-    symbols: {
-        title: '📦 Code Intelligence',
-        desc: 'Tree-sitter powered code symbol extraction with semantic descriptions, call graphs, and BM25 search.',
-        features: [
-            'Function/class extraction',
-            'Call graph tracking',
-            'Symbol descriptions (LLM)',
-            'File dependency analysis',
-            'read_symbol() token savings'
-        ]
-    },
-    sadhana: {
-        title: '🤖 Sadhana Agents',
-        desc: 'Autonomous background agents running sense-think-act loops with persistent goals.',
-        features: [
-            'Persistent goal tracking',
-            'Configurable intervals',
-            'Model switching (haiku/opus)',
-            'Event history logging',
-            'Pause/resume support'
-        ]
-    },
-    hooks: {
-        title: '⚡ Hook System',
-        desc: 'Event-driven hooks that inject context at key moments: session start, user prompt, tool use, and session end.',
-        features: [
-            'SessionStart: realm detection',
-            'UserPromptSubmit: memory recall',
-            'PreToolUse: context injection',
-            'Stop: outcome learning',
-            '<80ms latency target'
-        ]
-    },
-    themes: {
-        title: '🎨 Theme Manager',
-        desc: 'Automatic clustering of memories into themes using HDBSCAN for thematic retrieval.',
-        features: [
-            'HDBSCAN clustering',
-            'Auto-naming with LLM',
-            'Theme-based recall',
-            'Orphan assignment',
-            'Statistics tracking'
-        ]
-    },
-    anticipation: {
-        title: '🔮 Anticipation Engine',
-        desc: 'Predict what the user will do next and pre-load relevant context with calibration.',
-        features: [
-            'Pattern-based predictions',
-            'Confidence gating',
-            'Outcome tracking',
-            'Calibration scoring',
-            'Session-aware filtering'
-        ]
-    },
-    narrative: {
-        title: '📖 Narrative Engine',
-        desc: 'Track the story of each session: work mode, momentum, focus areas, and continuity.',
-        features: [
-            'Work mode detection',
-            'Momentum tracking',
-            'Ledger checkpoints',
-            'Session continuity',
-            'Pratyabhijñā (re-recognition)'
-        ]
-    }
-};
+(function() {
+  const reveals = document.querySelectorAll('.reveal');
+  if (!reveals.length) return;
 
-/* ═══════════════════════════════════════════
-   CONNECTION PATHS & DRAWING
-   ═══════════════════════════════════════════ */
-const connectionPaths = {};
-
-function drawConnections() {
-    const svg = document.getElementById('connectionsSvg');
-    const container = document.getElementById('brainViz');
-    const rect = container.getBoundingClientRect();
-    const centerX = rect.width / 2;
-    const centerY = rect.height / 2;
-
-    svg.innerHTML = '';
-    svg.setAttribute('viewBox', `0 0 ${rect.width} ${rect.height}`);
-
-    // Add gradient definitions
-    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-    defs.innerHTML = `
-        <linearGradient id="connectionGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stop-color="var(--indigo-600)" stop-opacity="0.6"/>
-            <stop offset="50%" stop-color="var(--aura-300)" stop-opacity="0.3"/>
-            <stop offset="100%" stop-color="var(--indigo-600)" stop-opacity="0.6"/>
-        </linearGradient>
-        <filter id="particleGlow" x="-100%" y="-100%" width="300%" height="300%">
-            <feGaussianBlur stdDeviation="2" result="blur"/>
-            <feMerge>
-                <feMergeNode in="blur"/>
-                <feMergeNode in="SourceGraphic"/>
-            </feMerge>
-        </filter>
-    `;
-    svg.appendChild(defs);
-
-    // Groups
-    const interModuleGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    interModuleGroup.id = 'interModuleGroup';
-    svg.appendChild(interModuleGroup);
-
-    const connectionsGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    connectionsGroup.id = 'connectionsGroup';
-    svg.appendChild(connectionsGroup);
-
-    const particlesGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    particlesGroup.id = 'particlesGroup';
-    svg.appendChild(particlesGroup);
-
-    // Draw module-to-center connections
-    document.querySelectorAll('.brain-module').forEach(module => {
-        const moduleRect = module.getBoundingClientRect();
-        const containerRect = container.getBoundingClientRect();
-        const mx = moduleRect.left - containerRect.left + moduleRect.width / 2;
-        const my = moduleRect.top - containerRect.top + moduleRect.height / 2;
-
-        const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-
-        const dx = centerX - mx;
-        const dy = centerY - my;
-        const cpOffset = Math.min(Math.abs(dx), Math.abs(dy)) * 0.4;
-        const cpX = mx + dx * 0.35 + (dy > 0 ? cpOffset : -cpOffset) * 0.25;
-        const cpY = my + dy * 0.5;
-
-        const pathD = `M ${mx} ${my} Q ${cpX} ${cpY}, ${centerX} ${centerY}`;
-        line.setAttribute('d', pathD);
-        line.setAttribute('class', 'connection-line');
-        line.setAttribute('data-module', module.dataset.module);
-        connectionsGroup.appendChild(line);
-
-        connectionPaths[module.dataset.module] = {
-            path: pathD,
-            start: { x: mx, y: my },
-            control: { x: cpX, y: cpY },
-            end: { x: centerX, y: centerY }
-        };
+  const observer = new IntersectionObserver(function(entries) {
+    entries.forEach(function(entry) {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        observer.unobserve(entry.target);
+      }
     });
+  }, {
+    threshold: 0.01,
+    rootMargin: '0px 0px -20px 0px'
+  });
 
-    // Inter-module connections
-    const interModuleConnections = [
-        ['rlm', 'embeddings'],
-        ['rlm', 'memories'],
-        ['embeddings', 'memories'],
-        ['memories', 'triplets'],
-        ['triplets', 'symbols'],
-        ['themes', 'memories'],
-        ['hooks', 'rlm'],
-        ['sadhana', 'rlm'],
-        ['anticipation', 'memories'],
-        ['narrative', 'themes']
-    ];
+  reveals.forEach(function(el) { observer.observe(el); });
+})();
 
-    interModuleConnections.forEach(([from, to]) => {
-        const fromPath = connectionPaths[from];
-        const toPath = connectionPaths[to];
-        if (!fromPath || !toPath) return;
+/* ═══════════════════════════════════════════
+   RESONANCE VISUALIZATION (Canvas)
+   ═══════════════════════════════════════════ */
+(function() {
+  const canvas = document.getElementById('resonance-canvas');
+  if (!canvas) return;
 
-        const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        const midX = (fromPath.start.x + toPath.start.x) / 2;
-        const midY = (fromPath.start.y + toPath.start.y) / 2;
-        const cpX = midX + (centerY - midY) * 0.15;
-        const cpY = midY + (centerX - midX) * 0.15;
+  const ctx = canvas.getContext('2d');
+  let w, h, dpr;
+  let mouse = { x: -1000, y: -1000 };
+  let nodes = [];
+  let raf;
 
-        const pathD = `M ${fromPath.start.x} ${fromPath.start.y} Q ${cpX} ${cpY}, ${toPath.start.x} ${toPath.start.y}`;
-        line.setAttribute('d', pathD);
-        line.setAttribute('class', 'inter-module-line');
-        line.setAttribute('data-from', from);
-        line.setAttribute('data-to', to);
-        interModuleGroup.appendChild(line);
+  const NODE_COUNT = 24;
+  const CONNECTION_DIST = 140;
+  const MOUSE_RADIUS = 180;
 
-        connectionPaths[`${from}->${to}`] = {
-            path: pathD,
-            start: fromPath.start,
-            control: { x: cpX, y: cpY },
-            end: toPath.start
-        };
+  const COLORS = {
+    node: { r: 157, g: 178, b: 217 },       // --aura-300
+    connection: { r: 203, g: 175, b: 134 },  // --sandal-300
+    bright: { r: 231, g: 226, b: 214 },      // --lotus-200
+  };
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const rect = canvas.parentElement.getBoundingClientRect();
+    w = rect.width;
+    h = rect.height;
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function createNodes() {
+    nodes = [];
+    for (let i = 0; i < NODE_COUNT; i++) {
+      const baseConfidence = 0.3 + Math.random() * 0.7;
+      const decayRate = 0.0001 + Math.random() * 0.0003;
+      const strengthening = Math.random() > 0.7;
+      nodes.push({
+        x: 60 + Math.random() * (w - 120),
+        y: 40 + Math.random() * (h - 80),
+        vx: (Math.random() - 0.5) * 0.3,
+        vy: (Math.random() - 0.5) * 0.3,
+        radius: 2 + Math.random() * 3,
+        confidence: baseConfidence,
+        baseConfidence: baseConfidence,
+        decayRate: decayRate,
+        strengthening: strengthening,
+        phase: Math.random() * Math.PI * 2,
+        activated: 0,
+      });
+    }
+  }
+
+  function dist(a, b) {
+    const dx = a.x - b.x;
+    const dy = a.y - b.y;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  function draw(time) {
+    ctx.clearRect(0, 0, w, h);
+
+    // Update nodes
+    for (let i = 0; i < nodes.length; i++) {
+      const n = nodes[i];
+
+      // Drift
+      n.x += n.vx;
+      n.y += n.vy;
+
+      // Bounce softly
+      if (n.x < 20 || n.x > w - 20) n.vx *= -1;
+      if (n.y < 20 || n.y > h - 20) n.vy *= -1;
+
+      // Clamp
+      n.x = Math.max(10, Math.min(w - 10, n.x));
+      n.y = Math.max(10, Math.min(h - 10, n.y));
+
+      // Decay / strengthen cycle
+      if (n.strengthening) {
+        n.confidence = Math.min(1, n.confidence + 0.0002);
+        if (n.confidence >= 0.95) n.strengthening = false;
+      } else {
+        n.confidence = Math.max(0.08, n.confidence - n.decayRate);
+        if (n.confidence <= 0.1) {
+          n.strengthening = true;
+          n.confidence = 0.15;
+        }
+      }
+
+      // Mouse activation
+      const md = dist(n, mouse);
+      if (md < MOUSE_RADIUS) {
+        n.activated = Math.min(1, n.activated + 0.06);
+      } else {
+        n.activated = Math.max(0, n.activated - 0.02);
+      }
+    }
+
+    // Draw connections (only between activated nodes)
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i];
+        const b = nodes[j];
+        const d = dist(a, b);
+        if (d < CONNECTION_DIST) {
+          const activation = Math.min(a.activated, b.activated);
+          if (activation > 0.05) {
+            const alpha = (1 - d / CONNECTION_DIST) * activation * 0.35;
+            ctx.beginPath();
+            ctx.moveTo(a.x, a.y);
+            ctx.lineTo(b.x, b.y);
+            ctx.strokeStyle = 'rgba(' + COLORS.connection.r + ',' + COLORS.connection.g + ',' + COLORS.connection.b + ',' + alpha + ')';
+            ctx.lineWidth = 0.8;
+            ctx.stroke();
+          }
+        }
+      }
+    }
+
+    // Draw nodes
+    for (let i = 0; i < nodes.length; i++) {
+      const n = nodes[i];
+      const pulse = Math.sin(time * 0.001 + n.phase) * 0.15 + 0.85;
+      const alpha = n.confidence * pulse;
+
+      // Glow when activated
+      if (n.activated > 0.1) {
+        const glowAlpha = n.activated * 0.15;
+        const gradient = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, n.radius * 8);
+        gradient.addColorStop(0, 'rgba(' + COLORS.bright.r + ',' + COLORS.bright.g + ',' + COLORS.bright.b + ',' + glowAlpha + ')');
+        gradient.addColorStop(1, 'rgba(' + COLORS.bright.r + ',' + COLORS.bright.g + ',' + COLORS.bright.b + ',0)');
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, n.radius * 8, 0, Math.PI * 2);
+        ctx.fillStyle = gradient;
+        ctx.fill();
+      }
+
+      // Core dot
+      const coreAlpha = alpha * (0.5 + n.activated * 0.5);
+      const r = n.activated > 0.1
+        ? Math.round(COLORS.node.r + (COLORS.bright.r - COLORS.node.r) * n.activated)
+        : COLORS.node.r;
+      const g = n.activated > 0.1
+        ? Math.round(COLORS.node.g + (COLORS.bright.g - COLORS.node.g) * n.activated)
+        : COLORS.node.g;
+      const b = n.activated > 0.1
+        ? Math.round(COLORS.node.b + (COLORS.bright.b - COLORS.node.b) * n.activated)
+        : COLORS.node.b;
+
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, n.radius * (1 + n.activated * 0.4), 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(' + r + ',' + g + ',' + b + ',' + coreAlpha + ')';
+      ctx.fill();
+    }
+
+    raf = requestAnimationFrame(draw);
+  }
+
+  function handleMouse(e) {
+    const rect = canvas.getBoundingClientRect();
+    mouse.x = e.clientX - rect.left;
+    mouse.y = e.clientY - rect.top;
+  }
+
+  function handleMouseLeave() {
+    mouse.x = -1000;
+    mouse.y = -1000;
+  }
+
+  // Touch support
+  function handleTouch(e) {
+    const rect = canvas.getBoundingClientRect();
+    const touch = e.touches[0];
+    if (touch) {
+      mouse.x = touch.clientX - rect.left;
+      mouse.y = touch.clientY - rect.top;
+    }
+  }
+
+  function init() {
+    resize();
+    createNodes();
+    canvas.addEventListener('mousemove', handleMouse);
+    canvas.addEventListener('mouseleave', handleMouseLeave);
+    canvas.addEventListener('touchmove', handleTouch, { passive: true });
+    canvas.addEventListener('touchend', handleMouseLeave);
+    window.addEventListener('resize', function() {
+      resize();
+      // Reclamp nodes
+      for (let i = 0; i < nodes.length; i++) {
+        nodes[i].x = Math.min(nodes[i].x, w - 20);
+        nodes[i].y = Math.min(nodes[i].y, h - 20);
+      }
     });
+    raf = requestAnimationFrame(draw);
+  }
 
-    startAmbientFlow();
-}
-
-/* ═══════════════════════════════════════════
-   PARTICLE ANIMATION
-   ═══════════════════════════════════════════ */
-function animateParticle(moduleName, toCenter = true, duration = 800, delay = 0) {
-    const pathData = connectionPaths[moduleName];
-    if (!pathData) return;
-
-    setTimeout(() => {
-        const particlesGroup = document.getElementById('particlesGroup');
-        if (!particlesGroup) return;
-
-        // Create particle with trail effect
-        const particle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        particle.setAttribute('r', '3');
-        particle.setAttribute('class', `data-particle ${!toCenter ? 'outbound' : ''}`);
-
-        // Create trail
-        const trail = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        trail.setAttribute('fill', 'none');
-        trail.setAttribute('stroke', toCenter ? 'var(--aura-300)' : 'var(--sandal-300)');
-        trail.setAttribute('stroke-width', '2');
-        trail.setAttribute('stroke-linecap', 'round');
-        trail.setAttribute('opacity', '0.4');
-        trail.style.filter = 'blur(1px)';
-
-        particlesGroup.appendChild(trail);
-        particlesGroup.appendChild(particle);
-
-        const start = toCenter ? pathData.start : pathData.end;
-        const end = toCenter ? pathData.end : pathData.start;
-        const control = pathData.control;
-
-        let startTime = null;
-        const trailPoints = [];
-
-        function animate(timestamp) {
-            if (!startTime) startTime = timestamp;
-            const progress = Math.min((timestamp - startTime) / duration, 1);
-            const t = progress < 0.5
-                ? 4 * progress * progress * progress
-                : 1 - Math.pow(-2 * progress + 2, 3) / 2;
-
-            const x = Math.pow(1 - t, 2) * start.x +
-                      2 * (1 - t) * t * control.x +
-                      Math.pow(t, 2) * end.x;
-            const y = Math.pow(1 - t, 2) * start.y +
-                      2 * (1 - t) * t * control.y +
-                      Math.pow(t, 2) * end.y;
-
-            particle.setAttribute('cx', x);
-            particle.setAttribute('cy', y);
-
-            // Update trail
-            trailPoints.push({ x, y });
-            if (trailPoints.length > 12) trailPoints.shift();
-            if (trailPoints.length > 1) {
-                const pathD = trailPoints.map((p, i) => (i === 0 ? 'M' : 'L') + ` ${p.x} ${p.y}`).join(' ');
-                trail.setAttribute('d', pathD);
-                trail.setAttribute('opacity', 0.3 * (1 - progress * 0.5));
-            }
-
-            const scale = 0.5 + Math.sin(progress * Math.PI) * 0.7;
-            particle.setAttribute('r', 2.5 * scale);
-
-            if (progress < 1) {
-                requestAnimationFrame(animate);
-            } else {
-                particle.style.transition = 'opacity 0.2s';
-                trail.style.transition = 'opacity 0.2s';
-                particle.style.opacity = '0';
-                trail.style.opacity = '0';
-                setTimeout(() => {
-                    particle.remove();
-                    trail.remove();
-                }, 200);
-            }
-        }
-
-        requestAnimationFrame(animate);
-    }, delay);
-}
-
-function sendDataFlow(moduleName, toCenter = true, count = 3) {
-    for (let i = 0; i < count; i++) {
-        animateParticle(moduleName, toCenter, 550 + Math.random() * 350, i * 120);
+  // Start when visible
+  const resObs = new IntersectionObserver(function(entries) {
+    if (entries[0].isIntersecting) {
+      init();
+      resObs.disconnect();
     }
+  }, { threshold: 0.1 });
 
-    // Pulse core when particles arrive
-    if (toCenter && count >= 3) {
-        setTimeout(() => {
-            const core = document.getElementById('brainCore');
-            core.classList.add('pulse');
-            setTimeout(() => core.classList.remove('pulse'), 500);
-        }, 550 + count * 100);
+  resObs.observe(canvas.parentElement);
+})();
+
+/* ═══════════════════════════════════════════
+   SMOOTH SCROLL FOR NAV LINKS
+   ═══════════════════════════════════════════ */
+document.querySelectorAll('a[href^="#"]').forEach(function(anchor) {
+  anchor.addEventListener('click', function(e) {
+    const target = document.querySelector(this.getAttribute('href'));
+    if (target) {
+      e.preventDefault();
+      const offset = 80;
+      const top = target.getBoundingClientRect().top + window.pageYOffset - offset;
+      window.scrollTo({ top: top, behavior: 'smooth' });
     }
-}
-
-function animateParticleCustomPath(pathData, duration = 600, delay = 0) {
-    setTimeout(() => {
-        const particlesGroup = document.getElementById('particlesGroup');
-        if (!particlesGroup) return;
-
-        const particle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        particle.setAttribute('r', '2.5');
-        particle.setAttribute('class', 'data-particle outbound');
-
-        particlesGroup.appendChild(particle);
-
-        const { start, control, end } = pathData;
-        let startTime = null;
-
-        function animate(timestamp) {
-            if (!startTime) startTime = timestamp;
-            const progress = Math.min((timestamp - startTime) / duration, 1);
-            const t = progress < 0.5
-                ? 4 * progress * progress * progress
-                : 1 - Math.pow(-2 * progress + 2, 3) / 2;
-
-            const x = Math.pow(1 - t, 2) * start.x +
-                      2 * (1 - t) * t * control.x +
-                      Math.pow(t, 2) * end.x;
-            const y = Math.pow(1 - t, 2) * start.y +
-                      2 * (1 - t) * t * control.y +
-                      Math.pow(t, 2) * end.y;
-
-            particle.setAttribute('cx', x);
-            particle.setAttribute('cy', y);
-
-            const scale = 0.5 + Math.sin(progress * Math.PI) * 0.5;
-            particle.setAttribute('r', 2 * scale);
-
-            if (progress < 1) {
-                requestAnimationFrame(animate);
-            } else {
-                particle.style.transition = 'opacity 0.15s';
-                particle.style.opacity = '0';
-                setTimeout(() => particle.remove(), 150);
-            }
-        }
-
-        requestAnimationFrame(animate);
-    }, delay);
-}
-
-function sendInterModuleFlow(from, to, count = 2) {
-    const key = `${from}->${to}`;
-    const pathData = connectionPaths[key];
-    if (!pathData) return;
-
-    const line = document.querySelector(`.inter-module-line[data-from="${from}"][data-to="${to}"]`);
-    if (line) {
-        line.classList.add('active');
-        setTimeout(() => line.classList.remove('active'), 900);
-    }
-
-    for (let i = 0; i < count; i++) {
-        animateParticleCustomPath(pathData, 450 + Math.random() * 250, i * 90);
-    }
-}
-
-/* ═══════════════════════════════════════════
-   AMBIENT FLOW
-   ═══════════════════════════════════════════ */
-let ambientInterval = null;
-let ambientInterModuleInterval = null;
-
-function startAmbientFlow() {
-    if (ambientInterval) clearInterval(ambientInterval);
-    if (ambientInterModuleInterval) clearInterval(ambientInterModuleInterval);
-
-    const coreModules = ['memories', 'rlm', 'embeddings', 'triplets', 'symbols',
-                         'sadhana', 'hooks', 'themes', 'anticipation', 'narrative'];
-
-    const interModulePairs = [
-        ['rlm', 'embeddings'],
-        ['rlm', 'memories'],
-        ['embeddings', 'memories'],
-        ['memories', 'triplets'],
-        ['triplets', 'symbols'],
-        ['themes', 'memories'],
-        ['anticipation', 'memories']
-    ];
-
-    ambientInterval = setInterval(() => {
-        const module = coreModules[Math.floor(Math.random() * coreModules.length)];
-        const toCenter = Math.random() > 0.35;
-        animateParticle(module, toCenter, 2200, 0);
-    }, 1000);
-
-    ambientInterModuleInterval = setInterval(() => {
-        const pair = interModulePairs[Math.floor(Math.random() * interModulePairs.length)];
-        const pathKey = `${pair[0]}->${pair[1]}`;
-        if (connectionPaths[pathKey]) {
-            animateParticleCustomPath(connectionPaths[pathKey], 1600, 0);
-        }
-    }, 2200);
-}
-
-/* ═══════════════════════════════════════════
-   MODULE ACTIVATION
-   ═══════════════════════════════════════════ */
-function activateModule(moduleName, delay = 0, flowDirection = 'in') {
-    setTimeout(() => {
-        const module = document.querySelector(`[data-module="${moduleName}"]`);
-        const line = document.querySelector(`.connection-line[data-module="${moduleName}"]`);
-
-        if (module) {
-            module.classList.add('active');
-            setTimeout(() => module.classList.remove('active'), 1400);
-        }
-        if (line) {
-            line.classList.add('active');
-            setTimeout(() => line.classList.remove('active'), 1400);
-        }
-
-        const toCenter = flowDirection === 'in';
-        sendDataFlow(moduleName, toCenter, 4);
-
-        setTimeout(() => {
-            sendDataFlow(moduleName, !toCenter, 2);
-        }, 350);
-    }, delay);
-}
-
-function visualizeQueryFlow(query) {
-    activateModule('hooks', 0, 'in');
-
-    setTimeout(() => {
-        sendInterModuleFlow('hooks', 'rlm', 3);
-        activateModule('rlm', 180, 'in');
-    }, 180);
-
-    setTimeout(() => {
-        sendInterModuleFlow('rlm', 'embeddings', 3);
-        sendInterModuleFlow('rlm', 'memories', 2);
-    }, 450);
-
-    activateModule('embeddings', 550, 'in');
-
-    setTimeout(() => {
-        sendInterModuleFlow('embeddings', 'memories', 4);
-        activateModule('memories', 180, 'in');
-    }, 750);
-
-    setTimeout(() => {
-        sendInterModuleFlow('memories', 'triplets', 3);
-        activateModule('triplets', 180, 'in');
-    }, 1050);
-
-    setTimeout(() => {
-        sendInterModuleFlow('triplets', 'symbols', 2);
-        activateModule('symbols', 180, 'in');
-    }, 1350);
-
-    setTimeout(() => {
-        sendInterModuleFlow('themes', 'memories', 3);
-        activateModule('themes', 180, 'in');
-    }, 1550);
-
-    setTimeout(() => {
-        ['memories', 'triplets', 'symbols', 'themes'].forEach((m, i) => {
-            setTimeout(() => sendDataFlow(m, false, 4), i * 130);
-        });
-    }, 1900);
-
-    setTimeout(() => {
-        sendInterModuleFlow('narrative', 'themes', 2);
-        activateModule('narrative', 180, 'out');
-    }, 2500);
-}
-
-/* ═══════════════════════════════════════════
-   DEMO QUERY SIMULATION
-   ═══════════════════════════════════════════ */
-async function simulateQuery() {
-    const input = document.getElementById('demoInput');
-    const query = input.value.trim() || 'How does chitta handle memory retrieval?';
-    input.value = '';
-
-    const conv = document.getElementById('conversation');
-    conv.innerHTML += `<div class="brain-demo-message user">${query}</div>`;
-    conv.scrollTop = conv.scrollHeight;
-
-    visualizeQueryFlow(query);
-
-    setTimeout(() => {
-        const responses = [
-            `Found 7 relevant memories via RLM exploration. VakYantra embeddings matched at 89% confidence. Knowledge graph revealed 3 related concepts.`,
-            `Activated hierarchical retrieval: SSL wisdom provided 2 patterns, expanded to episode context, queried 502K triplets.`,
-            `Smart context assembled: 5 memories (0.85 avg confidence), 2 code symbols, 4 triplet relationships. Trajectory: search → expand → graph.`,
-            `RLM REPL executed: soul.search("${query.substring(0, 25)}...") → 12 candidates → soul.expand(top_3) → context synthesized.`
-        ];
-        const response = responses[Math.floor(Math.random() * responses.length)];
-        conv.innerHTML += `<div class="brain-demo-message assistant">${response}</div>`;
-        conv.scrollTop = conv.scrollHeight;
-    }, 2700);
-}
-
-/* ═══════════════════════════════════════════
-   DETAIL PANEL
-   ═══════════════════════════════════════════ */
-function showDetail(moduleName) {
-    const detail = moduleDetails[moduleName];
-    if (!detail) return;
-
-    document.getElementById('detailTitle').textContent = detail.title;
-    document.getElementById('detailDesc').textContent = detail.desc;
-    document.getElementById('detailFeatures').innerHTML = detail.features.map(f => `<li>${f}</li>`).join('');
-    document.getElementById('detailPanel').classList.add('visible');
-}
-
-function hideDetail() {
-    document.getElementById('detailPanel').classList.remove('visible');
-}
-
-/* ═══════════════════════════════════════════
-   EVENT HANDLERS
-   ═══════════════════════════════════════════ */
-document.querySelectorAll('.brain-module').forEach(module => {
-    module.addEventListener('mouseenter', () => {
-        showDetail(module.dataset.module);
-        sendDataFlow(module.dataset.module, true, 1);
-    });
-    module.addEventListener('mouseleave', hideDetail);
-    module.addEventListener('click', () => {
-        activateModule(module.dataset.module, 0, 'in');
-
-        const relatedFlows = {
-            'rlm': [['rlm', 'embeddings'], ['rlm', 'memories']],
-            'memories': [['embeddings', 'memories'], ['memories', 'triplets'], ['themes', 'memories']],
-            'embeddings': [['rlm', 'embeddings'], ['embeddings', 'memories']],
-            'triplets': [['memories', 'triplets'], ['triplets', 'symbols']],
-            'symbols': [['triplets', 'symbols']],
-            'hooks': [['hooks', 'rlm']],
-            'themes': [['themes', 'memories'], ['narrative', 'themes']],
-            'sadhana': [['sadhana', 'rlm']],
-            'anticipation': [['anticipation', 'memories']],
-            'narrative': [['narrative', 'themes']]
-        };
-
-        const flows = relatedFlows[module.dataset.module] || [];
-        flows.forEach(([from, to], i) => {
-            setTimeout(() => sendInterModuleFlow(from, to, 3), i * 180);
-        });
-    });
+  });
 });
-
-/* ═══════════════════════════════════════════
-   INITIALIZATION
-   ═══════════════════════════════════════════ */
-window.addEventListener('load', () => {
-    drawConnections();
-
-    // Auto-demo after 2 seconds
-    setTimeout(() => {
-        document.getElementById('demoInput').value = 'How does the RLM paradigm improve memory exploration?';
-        simulateQuery();
-    }, 2000);
-});
-
-window.addEventListener('resize', drawConnections);
 </script>
 </body>
 </html>
