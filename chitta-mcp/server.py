@@ -665,11 +665,85 @@ def handle_smart_context(arguments: dict) -> str:
     """
     Build intelligent context combining memories, code symbols, and graph relationships.
 
-    Delegates entirely to C++ daemon for single-RPC-call performance:
-    - fast mode (<80ms): vector recall + BM25 symbols + 1 neighbor
-    - full mode (<200ms): full_resonate + semantic symbols + 3 neighbors
+    Modes:
+    - fast (default): C++ daemon single-RPC (<80ms)
+    - full: daemon full_resonate (<200ms)
+    - rlm: RLM-style dynamic exploration via soul_repl
+
+    RLM mode lets Claude write exploration code for complex queries.
     """
-    # Delegate to daemon's C++ implementation (single RPC call)
+    mode = arguments.get("mode", "fast")
+
+    # RLM mode: use soul_repl for dynamic exploration
+    if mode == "rlm":
+        task = arguments.get("task", "")
+        query = arguments.get("query", task)
+
+        if not query:
+            return "Error: 'task' or 'query' parameter required for RLM mode"
+
+        # Generate exploration code based on the task
+        exploration_code = f'''
+# RLM-style context gathering for: {query[:100]}
+results = {{}}
+
+# 1. Semantic memory search
+memories = soul.search("{query[:200]}", limit=10)
+results["memories"] = [(m.id, m.score, m.content[:150]) for m in memories if m.score > 0.3]
+
+# 2. Find related code symbols
+symbols = soul.symbols(pattern="{query.split()[0] if query else ''}", limit=5)
+results["symbols"] = symbols[:5] if symbols else []
+
+# 3. Expand top memory for full context
+if memories and memories[0].score > 0.5:
+    expanded = soul.expand(memories[0].id, depth=2)
+    results["expanded"] = expanded
+
+# 4. Graph relationships for top result
+if memories:
+    triplets = soul.triplets(subject=f"memory:{{memories[0].id}}", limit=5)
+    results["relations"] = [str(t) for t in triplets]
+
+results["trajectory"] = soul.trajectory()
+results
+'''
+        try:
+            from soul_repl import execute_soul_code
+            result = execute_soul_code(exploration_code)
+
+            if result.error:
+                return f"RLM exploration error: {result.error}"
+
+            # Format output
+            output = [f"[RLM Context for: {query[:50]}...]"]
+            output.append(f"Trajectory: {len(result.trajectory)} soul calls")
+            output.append("")
+
+            if result.result:
+                data = result.result
+                if "memories" in data:
+                    output.append(f"Memories ({len(data['memories'])}):")
+                    for mid, score, content in data["memories"][:5]:
+                        output.append(f"  [{mid}] {score:.0%} {content[:80]}...")
+
+                if "symbols" in data and data["symbols"]:
+                    output.append(f"\nSymbols ({len(data['symbols'])}):")
+                    for s in data["symbols"][:3]:
+                        output.append(f"  {s.get('name', '?')} @ {s.get('file', '?')}")
+
+                if "expanded" in data:
+                    output.append(f"\nExpanded context: {list(data['expanded'].keys())}")
+
+                if "relations" in data and data["relations"]:
+                    output.append(f"\nRelations: {data['relations'][:3]}")
+
+            return "\n".join(output)
+
+        except Exception as e:
+            return f"RLM mode failed: {e}, falling back to daemon"
+
+    # Default: delegate to C++ daemon (fast single-RPC)
     return daemon_call("smart_context", arguments)
 
 
@@ -1275,9 +1349,68 @@ def handle_transcript_search(arguments: dict) -> str:
     return output
 
 
+def handle_soul_repl(arguments: dict) -> str:
+    """
+    RLM-style REPL for programmatic soul exploration.
+
+    Executes Python code in a sandbox with soul.* methods exposed.
+    Returns execution output and exploration trajectory.
+    """
+    code = arguments.get("code", "")
+    reset = arguments.get("reset", False)
+
+    if not code.strip():
+        # Return help/API reference
+        return """Soul REPL - RLM-style Memory Exploration
+
+Write Python code to explore memories programmatically.
+Available methods:
+
+  soul.search(query, limit=20)     - Semantic search
+  soul.recall(query, limit=10)     - Hybrid recall (semantic + keyword + graph)
+  soul.expand(memory_id, depth=3)  - Drill down: SSL -> Episode -> Full turns
+  soul.triplets(subject=, predicate=, object=)  - Knowledge graph query
+  soul.recent(hours=24)            - Recent memories by time
+  soul.remember(content, tags=[])  - Store new memory
+  soul.symbols(pattern=, kind=)    - Search code symbols
+  soul.read_symbol(name)           - Read symbol source
+  soul.stats()                     - Soul statistics
+  soul.trajectory()                - Get exploration path
+
+Example:
+  memories = soul.search("authentication bugs", limit=10)
+  relevant = [m for m in memories if m.score > 0.7]
+  for m in relevant[:3]:
+      print(f"{m.id}: {m.content[:80]}")
+  context = soul.expand(relevant[0].id, depth=3)
+"""
+
+    try:
+        from soul_repl import execute_soul_code
+        result = execute_soul_code(code)
+
+        output = []
+        if result.output:
+            output.append(result.output)
+
+        if result.error:
+            output.append(f"\nError:\n{result.error}")
+
+        if result.trajectory:
+            output.append(f"\n[Trajectory: {len(result.trajectory)} soul calls]")
+            for t in result.trajectory[-5:]:  # Show last 5
+                output.append(f"  - {t['method']}({', '.join(f'{k}={repr(v)[:30]}' for k,v in t['args'].items())})")
+
+        return "\n".join(output) if output else "(no output)"
+
+    except Exception as e:
+        return f"REPL Error: {e}"
+
+
 # Map composite tool names to handlers
 COMPOSITE_HANDLERS = {
     "advanced": handle_advanced,
+    "soul_repl": handle_soul_repl,
     "read_symbol": handle_read_symbol,
     "read_function": handle_read_function,
     "symbol_callers": handle_symbol_callers,

@@ -2937,6 +2937,23 @@ COMPOSITE_TOOLS = [
         }
     ),
     Tool(
+        name="soul_repl",
+        description="RLM-style Python REPL for programmatic memory exploration. Write code with soul.* methods: search(), recall(), expand(), triplets(), recent(), remember(), symbols(). Call with no code for API reference.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "description": "Python code to execute. Has access to soul.search(), soul.recall(), soul.expand(), etc."
+                },
+                "reset": {
+                    "type": "boolean",
+                    "description": "Reset namespace before execution (default: false)"
+                }
+            }
+        }
+    ),
+    Tool(
         name="read_symbol",
         description="Read just a symbol's code, not entire file. ~10x token savings vs full file read. Returns [kind name @ file:line-line] + code.",
         inputSchema={
@@ -3022,7 +3039,7 @@ COMPOSITE_TOOLS = [
     ),
     Tool(
         name="smart_context",
-        description="Build intelligent context combining memories, code symbols, and graph relationships. Two modes: fast (<80ms) for PreToolUse hooks, full (<200ms) for UserPromptSubmit hooks.",
+        description="Build intelligent context. Modes: fast (<80ms), full (<200ms), rlm (RLM-style dynamic exploration via soul_repl - Claude writes the exploration code).",
         inputSchema={
             "type": "object",
             "properties": {
@@ -3032,8 +3049,8 @@ COMPOSITE_TOOLS = [
                 },
                 "mode": {
                     "type": "string",
-                    "enum": ["fast", "full"],
-                    "description": "fast: <80ms (vector + BM25), full: <200ms (full_resonate + semantic)"
+                    "enum": ["fast", "full", "rlm"],
+                    "description": "fast: <80ms (vector + BM25), full: <200ms (full_resonate), rlm: dynamic exploration via soul_repl"
                 },
                 "limit": {
                     "type": "integer",
