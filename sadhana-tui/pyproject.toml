@@ -1,0 +1,15 @@
+[project]
+name = "sadhana-tui"
+version = "0.1.0"
+description = "Terminal UI for monitoring and controlling cc-soul sadhana agents"
+requires-python = ">=3.10"
+dependencies = [
+    "textual>=0.50.0",
+]
+
+[project.scripts]
+sadhana-tui = "sadhana_tui.app:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

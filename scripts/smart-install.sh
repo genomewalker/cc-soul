@@ -401,6 +401,32 @@ install_claude_rules() {
     echo "[cc-soul] Linked CLAUDE.md → ~/.claude/rules/cc-soul.md"
 }
 
+# Install sadhana-tui (optional Python TUI)
+install_sadhana_tui() {
+    local tui_dir="$PLUGIN_DIR/../sadhana-tui"
+
+    # Skip if directory doesn't exist
+    [[ ! -d "$tui_dir" ]] && return 0
+
+    # Skip if Python not available
+    if ! command -v python3 &> /dev/null && ! command -v python &> /dev/null; then
+        return 0
+    fi
+
+    local python_cmd
+    python_cmd=$(command -v python3 || command -v python)
+
+    # Check if already installed and up to date
+    if command -v sadhana-tui &> /dev/null; then
+        return 0
+    fi
+
+    # Install in user mode
+    if $python_cmd -m pip install -q -e "$tui_dir" --user 2>/dev/null; then
+        echo "[cc-soul] Installed sadhana-tui"
+    fi
+}
+
 # Configure hooks in settings.json
 configure_hooks() {
     local settings_file="${HOME}/.claude/settings.json"
@@ -611,6 +637,9 @@ main() {
 
     # Configure hooks in settings.json
     configure_hooks
+
+    # Install sadhana-tui if Python available
+    install_sadhana_tui
 
     if ! validate_binaries; then
         echo "[cc-soul] ERROR: Installation incomplete (invalid binaries)" >&2

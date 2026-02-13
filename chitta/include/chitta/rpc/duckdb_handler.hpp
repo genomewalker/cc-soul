@@ -6,6 +6,7 @@
 #include "../mind/duckdb_mind.hpp"
 #include "../mind/subconscious.hpp"
 #include "../mind/payload.hpp"
+#include "../sadhana/sadhana_manager.hpp"
 #include "../code_intel.hpp"
 #include "../symbol_resolver.hpp"
 #include "../version.hpp"
@@ -63,12 +64,15 @@ inline std::string display_path(const std::string& file_path) {
 
 class DuckDBRpcHandler {
 public:
-    explicit DuckDBRpcHandler(DuckDBMind* mind) : mind_(mind), subconscious_(nullptr) {
+    explicit DuckDBRpcHandler(DuckDBMind* mind) : mind_(mind), subconscious_(nullptr), sadhana_manager_(nullptr) {
         register_tools();
     }
 
     // Connect subconscious for event pushing
     void set_subconscious(Subconscious* s) { subconscious_ = s; }
+
+    // Connect sadhana manager for autonomous agents
+    void set_sadhana_manager(SadhanaManager* sm) { sadhana_manager_ = sm; }
 
     json handle(const json& request) {
         std::string method = request.value("method", "");
@@ -98,6 +102,7 @@ public:
 private:
     DuckDBMind* mind_;
     Subconscious* subconscious_;
+    SadhanaManager* sadhana_manager_;
     std::vector<json> tools_;
     std::unordered_map<std::string, std::function<DuckDBToolResult(const json&)>> handlers_;
     std::unordered_map<std::string, std::string> tool_visibility_;
@@ -2468,6 +2473,138 @@ private:
             }}
         });
         handlers_["get_relationship_events"] = [this](const json& p) { return tool_get_relationship_events(p); };
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // Sadhana: Unified Autonomous Agent System
+        // ═══════════════════════════════════════════════════════════════════════
+
+        tools_.push_back({
+            {"name", "sadhana_start"},
+            {"description", "Create and start a new autonomous agent (sadhana) that works toward a goal using sense-think-act loops"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"goal", {{"type", "string"}, {"description", "The goal for the agent to achieve"}}},
+                    {"brain_provider", {{"type", "string"}, {"description", "LLM provider: claude or opencode (default: claude)"}}},
+                    {"brain_model", {{"type", "string"}, {"description", "Model to use: sonnet, opus, haiku, gpt-4o (default: sonnet)"}}},
+                    {"interval_seconds", {{"type", "integer"}, {"description", "Seconds between sense-think-act cycles (default: 60)"}}},
+                    {"realm", {{"type", "string"}, {"description", "Realm for isolation (default: brahman)"}}}
+                }},
+                {"required", {"goal"}}
+            }}
+        });
+        handlers_["sadhana_start"] = [this](const json& p) { return tool_sadhana_start(p); };
+
+        tools_.push_back({
+            {"name", "sadhana_pause"},
+            {"description", "Pause a running sadhana"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "integer"}, {"description", "Sadhana ID to pause"}}}
+                }},
+                {"required", {"id"}}
+            }}
+        });
+        handlers_["sadhana_pause"] = [this](const json& p) { return tool_sadhana_pause(p); };
+
+        tools_.push_back({
+            {"name", "sadhana_resume"},
+            {"description", "Resume a paused sadhana"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "integer"}, {"description", "Sadhana ID to resume"}}}
+                }},
+                {"required", {"id"}}
+            }}
+        });
+        handlers_["sadhana_resume"] = [this](const json& p) { return tool_sadhana_resume(p); };
+
+        tools_.push_back({
+            {"name", "sadhana_stop"},
+            {"description", "Stop a sadhana (mark as done or failed)"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "integer"}, {"description", "Sadhana ID to stop"}}},
+                    {"success", {{"type", "boolean"}, {"description", "Whether the goal was achieved (default: true)"}}},
+                    {"reason", {{"type", "string"}, {"description", "Reason for stopping"}}}
+                }},
+                {"required", {"id"}}
+            }}
+        });
+        handlers_["sadhana_stop"] = [this](const json& p) { return tool_sadhana_stop(p); };
+
+        tools_.push_back({
+            {"name", "sadhana_status"},
+            {"description", "Get status of a sadhana including history"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "integer"}, {"description", "Sadhana ID"}}},
+                    {"history_limit", {{"type", "integer"}, {"description", "Max history events to return (default: 20)"}}}
+                }},
+                {"required", {"id"}}
+            }}
+        });
+        handlers_["sadhana_status"] = [this](const json& p) { return tool_sadhana_status(p); };
+
+        tools_.push_back({
+            {"name", "sadhana_list"},
+            {"description", "List all sadhanas with optional filters"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"state", {{"type", "string"}, {"description", "Filter by state: pending, running, paused, done, failed"}}},
+                    {"realm", {{"type", "string"}, {"description", "Filter by realm"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Max results (default: 50)"}}}
+                }}
+            }}
+        });
+        handlers_["sadhana_list"] = [this](const json& p) { return tool_sadhana_list(p); };
+
+        tools_.push_back({
+            {"name", "sadhana_set_model"},
+            {"description", "Change the brain model for a running sadhana"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "integer"}, {"description", "Sadhana ID"}}},
+                    {"model", {{"type", "string"}, {"description", "New model: opus, sonnet, haiku, etc."}}}
+                }},
+                {"required", {"id", "model"}}
+            }}
+        });
+        handlers_["sadhana_set_model"] = [this](const json& p) { return tool_sadhana_set_model(p); };
+
+        tools_.push_back({
+            {"name", "sadhana_set_goal"},
+            {"description", "Change the goal/prompt for a sadhana"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "integer"}, {"description", "Sadhana ID"}}},
+                    {"goal", {{"type", "string"}, {"description", "New goal/prompt for the sadhana"}}}
+                }},
+                {"required", {"id", "goal"}}
+            }}
+        });
+        handlers_["sadhana_set_goal"] = [this](const json& p) { return tool_sadhana_set_goal(p); };
+
+        tools_.push_back({
+            {"name", "sadhana_set_interval"},
+            {"description", "Change the tick interval (in seconds) for a sadhana"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "integer"}, {"description", "Sadhana ID"}}},
+                    {"interval", {{"type", "integer"}, {"description", "New interval in seconds"}}}
+                }},
+                {"required", {"id", "interval"}}
+            }}
+        });
+        handlers_["sadhana_set_interval"] = [this](const json& p) { return tool_sadhana_set_interval(p); };
 
         classify_tools();
     }
@@ -10545,6 +10682,264 @@ private:
         msg << "Found " << events.size() << " relationship event(s)";
 
         return DuckDBToolResult::ok(msg.str(), result);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Sadhana Tool Handlers
+    // ═══════════════════════════════════════════════════════════════════════
+
+    DuckDBToolResult tool_sadhana_start(const json& params) {
+        if (!sadhana_manager_) {
+            return DuckDBToolResult::error("Sadhana manager not initialized");
+        }
+
+        std::string goal = params.value("goal", "");
+        if (goal.empty()) {
+            return DuckDBToolResult::error("Goal is required");
+        }
+
+        std::string provider = params.value("brain_provider", "");
+        std::string model = params.value("brain_model", "");
+        int interval = params.value("interval_seconds", 0);
+        std::string realm = params.value("realm", "brahman");
+
+        int64_t id = sadhana_manager_->create(goal, provider, model, interval, realm);
+        if (id == 0) {
+            return DuckDBToolResult::error("Failed to create sadhana");
+        }
+
+        // Auto-start the sadhana
+        if (!sadhana_manager_->start(id)) {
+            return DuckDBToolResult::error("Created sadhana " + std::to_string(id) + " but failed to start");
+        }
+
+        json result;
+        result["id"] = id;
+        result["state"] = "running";
+        result["goal"] = goal.substr(0, 100);
+
+        return DuckDBToolResult::ok("Started sadhana " + std::to_string(id), result);
+    }
+
+    DuckDBToolResult tool_sadhana_pause(const json& params) {
+        if (!sadhana_manager_) {
+            return DuckDBToolResult::error("Sadhana manager not initialized");
+        }
+
+        auto [id, id_str] = parse_id(params, "id");
+        if (id == 0) {
+            return DuckDBToolResult::error("Invalid sadhana ID");
+        }
+
+        if (!sadhana_manager_->pause(id)) {
+            return DuckDBToolResult::error("Failed to pause sadhana " + std::to_string(id));
+        }
+
+        json result;
+        result["id"] = id;
+        result["state"] = "paused";
+
+        return DuckDBToolResult::ok("Paused sadhana " + std::to_string(id), result);
+    }
+
+    DuckDBToolResult tool_sadhana_resume(const json& params) {
+        if (!sadhana_manager_) {
+            return DuckDBToolResult::error("Sadhana manager not initialized");
+        }
+
+        auto [id, id_str] = parse_id(params, "id");
+        if (id == 0) {
+            return DuckDBToolResult::error("Invalid sadhana ID");
+        }
+
+        if (!sadhana_manager_->resume(id)) {
+            return DuckDBToolResult::error("Failed to resume sadhana " + std::to_string(id));
+        }
+
+        json result;
+        result["id"] = id;
+        result["state"] = "running";
+
+        return DuckDBToolResult::ok("Resumed sadhana " + std::to_string(id), result);
+    }
+
+    DuckDBToolResult tool_sadhana_stop(const json& params) {
+        if (!sadhana_manager_) {
+            return DuckDBToolResult::error("Sadhana manager not initialized");
+        }
+
+        auto [id, id_str] = parse_id(params, "id");
+        if (id == 0) {
+            return DuckDBToolResult::error("Invalid sadhana ID");
+        }
+
+        bool success = params.value("success", true);
+        std::string reason = params.value("reason", "");
+
+        if (!sadhana_manager_->stop(id, success, reason)) {
+            return DuckDBToolResult::error("Failed to stop sadhana " + std::to_string(id));
+        }
+
+        json result;
+        result["id"] = id;
+        result["state"] = success ? "done" : "failed";
+        result["reason"] = reason;
+
+        return DuckDBToolResult::ok("Stopped sadhana " + std::to_string(id), result);
+    }
+
+    DuckDBToolResult tool_sadhana_status(const json& params) {
+        if (!sadhana_manager_) {
+            return DuckDBToolResult::error("Sadhana manager not initialized");
+        }
+
+        auto [id, id_str] = parse_id(params, "id");
+        if (id == 0) {
+            return DuckDBToolResult::error("Invalid sadhana ID");
+        }
+
+        auto opt = sadhana_manager_->get(id);
+        if (!opt) {
+            return DuckDBToolResult::error("Sadhana " + std::to_string(id) + " not found");
+        }
+
+        size_t history_limit = params.value("history_limit", 20);
+        auto history = sadhana_manager_->get_history(id, history_limit);
+
+        json result;
+        result["id"] = opt->id;
+        result["goal"] = opt->goal;
+        result["state"] = sadhana_state_to_string(opt->state);
+        result["brain_provider"] = opt->brain_provider;
+        result["brain_model"] = opt->brain_model;
+        result["iterations"] = opt->iterations;
+        result["brain_calls"] = opt->brain_calls;
+        result["interval_seconds"] = opt->interval_seconds;
+        result["realm"] = opt->realm;
+        result["created_at"] = opt->created_at;
+        result["updated_at"] = opt->updated_at;
+        result["last_sense"] = opt->last_sense;
+        result["last_action"] = opt->last_action;
+        result["last_result"] = opt->last_result;
+        result["history"] = history;
+
+        std::ostringstream msg;
+        msg << "Sadhana " << id << " [" << sadhana_state_to_string(opt->state) << "] "
+            << opt->iterations << " iterations";
+
+        return DuckDBToolResult::ok(msg.str(), result);
+    }
+
+    DuckDBToolResult tool_sadhana_list(const json& params) {
+        if (!sadhana_manager_) {
+            return DuckDBToolResult::error("Sadhana manager not initialized");
+        }
+
+        std::string state = params.value("state", "");
+        std::string realm = params.value("realm", "");
+        size_t limit = params.value("limit", 50);
+
+        auto sadhanas = sadhana_manager_->list(state, realm, limit);
+
+        json result;
+        result["sadhanas"] = json::array();
+        result["count"] = sadhanas.size();
+
+        for (const auto& s : sadhanas) {
+            json item;
+            item["id"] = s.id;
+            item["goal"] = s.goal.substr(0, 100);
+            item["state"] = sadhana_state_to_string(s.state);
+            item["brain_model"] = s.brain_model;
+            item["iterations"] = s.iterations;
+            item["interval_seconds"] = s.interval_seconds;
+            item["realm"] = s.realm;
+            item["created_at"] = s.created_at;
+            result["sadhanas"].push_back(item);
+        }
+
+        std::ostringstream msg;
+        msg << "Found " << sadhanas.size() << " sadhana(s)";
+
+        return DuckDBToolResult::ok(msg.str(), result);
+    }
+
+    DuckDBToolResult tool_sadhana_set_model(const json& params) {
+        if (!sadhana_manager_) {
+            return DuckDBToolResult::error("Sadhana manager not initialized");
+        }
+
+        auto [id, id_str] = parse_id(params, "id");
+        if (id == 0) {
+            return DuckDBToolResult::error("Invalid sadhana ID");
+        }
+
+        std::string model = params.value("model", "");
+        if (model.empty()) {
+            return DuckDBToolResult::error("Model is required");
+        }
+
+        if (!sadhana_manager_->set_model(id, model)) {
+            return DuckDBToolResult::error("Failed to set model for sadhana " + std::to_string(id));
+        }
+
+        json result;
+        result["id"] = id;
+        result["model"] = model;
+
+        return DuckDBToolResult::ok("Set model to " + model + " for sadhana " + std::to_string(id), result);
+    }
+
+    DuckDBToolResult tool_sadhana_set_goal(const json& params) {
+        if (!sadhana_manager_) {
+            return DuckDBToolResult::error("Sadhana manager not initialized");
+        }
+
+        auto [id, id_str] = parse_id(params, "id");
+        if (id == 0) {
+            return DuckDBToolResult::error("Invalid sadhana ID");
+        }
+
+        std::string goal = params.value("goal", "");
+        if (goal.empty()) {
+            return DuckDBToolResult::error("Goal is required");
+        }
+
+        if (!sadhana_manager_->set_goal(id, goal)) {
+            return DuckDBToolResult::error("Failed to set goal for sadhana " + std::to_string(id));
+        }
+
+        json result;
+        result["id"] = id;
+        result["goal"] = goal;
+
+        return DuckDBToolResult::ok("Updated goal for sadhana " + std::to_string(id), result);
+    }
+
+    DuckDBToolResult tool_sadhana_set_interval(const json& params) {
+        if (!sadhana_manager_) {
+            return DuckDBToolResult::error("Sadhana manager not initialized");
+        }
+
+        auto [id, id_str] = parse_id(params, "id");
+        if (id == 0) {
+            return DuckDBToolResult::error("Invalid sadhana ID");
+        }
+
+        int interval = params.value("interval", 0);
+        if (interval <= 0) {
+            return DuckDBToolResult::error("Interval must be positive");
+        }
+
+        if (!sadhana_manager_->set_interval(id, interval)) {
+            return DuckDBToolResult::error("Failed to set interval for sadhana " + std::to_string(id));
+        }
+
+        json result;
+        result["id"] = id;
+        result["interval"] = interval;
+
+        return DuckDBToolResult::ok("Set interval to " + std::to_string(interval) + "s for sadhana " + std::to_string(id), result);
     }
 };
 

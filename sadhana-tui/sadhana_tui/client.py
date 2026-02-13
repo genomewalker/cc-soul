@@ -1,0 +1,181 @@
+"""ChittaClient - RPC client for communicating with chittad daemon."""
+
+import json
+import os
+import socket
+from typing import Any, Optional
+
+
+def djb2_hash(s: str) -> int:
+    """DJB2 hash algorithm matching C++ implementation."""
+    h = 5381
+    for c in s:
+        h = ((h << 5) + h + ord(c)) & 0xFFFFFFFF
+    return h
+
+
+def get_socket_dir() -> str:
+    """Get persistent socket directory (matches C++ daemon logic)."""
+    xdg_runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if xdg_runtime and os.access(xdg_runtime, os.W_OK):
+        socket_dir = os.path.join(xdg_runtime, "chitta")
+        os.makedirs(socket_dir, mode=0o700, exist_ok=True)
+        return socket_dir
+    home = os.environ.get("HOME")
+    if home:
+        cache_dir = os.path.join(home, ".cache")
+        os.makedirs(cache_dir, mode=0o755, exist_ok=True)
+        socket_dir = os.path.join(cache_dir, "chitta")
+        os.makedirs(socket_dir, mode=0o700, exist_ok=True)
+        return socket_dir
+    return "/tmp"
+
+
+def get_socket_path() -> str:
+    """Get the daemon socket path."""
+    home = os.environ.get("HOME", "")
+    mind_path = os.path.join(home, ".claude", "mind")
+    hash_val = djb2_hash(mind_path)
+    return os.path.join(get_socket_dir(), f"chitta-{hash_val}.sock")
+
+
+class ChittaClient:
+    """Client for communicating with chittad daemon via Unix socket."""
+
+    def __init__(self, socket_path: Optional[str] = None):
+        self.socket_path = socket_path or get_socket_path()
+        self.sock: Optional[socket.socket] = None
+        self._request_id = 0
+
+    def connect(self) -> bool:
+        """Connect to daemon socket."""
+        try:
+            self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            self.sock.settimeout(5.0)
+            self.sock.connect(self.socket_path)
+            return True
+        except Exception:
+            self.sock = None
+            return False
+
+    def close(self):
+        """Close socket connection."""
+        if self.sock:
+            try:
+                self.sock.close()
+            except Exception:
+                pass
+            self.sock = None
+
+    def is_connected(self) -> bool:
+        """Check if socket is connected."""
+        return self.sock is not None
+
+    def reconnect(self) -> bool:
+        """Reconnect to daemon."""
+        self.close()
+        return self.connect()
+
+    def _send_request(self, data: str) -> Optional[str]:
+        """Send JSON-RPC request and get response."""
+        if not self.sock:
+            return None
+        try:
+            self.sock.sendall((data + "\n").encode())
+            response = b""
+            while True:
+                chunk = self.sock.recv(4096)
+                if not chunk:
+                    break
+                response += chunk
+                if b"\n" in response:
+                    break
+            return response.decode().strip()
+        except Exception:
+            self.sock = None
+            return None
+
+    def call(self, tool: str, args: Optional[dict] = None) -> dict:
+        """Call a tool on the daemon.
+
+        Returns the structured result dict, or {"error": ...} on failure.
+        Daemon uses one request per connection, so we reconnect each time.
+        """
+        # Always reconnect - daemon closes connection after each response
+        self.close()
+        if not self.connect():
+            return {"error": "Not connected to daemon"}
+
+        self._request_id += 1
+        req = {
+            "jsonrpc": "2.0",
+            "id": self._request_id,
+            "method": "tools/call",
+            "params": {"name": tool, "arguments": args or {}}
+        }
+
+        response = self._send_request(json.dumps(req))
+
+        # Retry once on connection failure
+        if not response:
+            self.close()
+            if self.connect():
+                response = self._send_request(json.dumps(req))
+
+        if not response:
+            return {"error": "No response from daemon"}
+
+        try:
+            data = json.loads(response)
+            if "error" in data:
+                return {"error": data["error"].get("message", str(data["error"]))}
+            result = data.get("result", {})
+            return result.get("structured", result)
+        except json.JSONDecodeError as e:
+            return {"error": f"Invalid JSON: {e}"}
+
+    def sadhana_list(self) -> list[dict[str, Any]]:
+        """Get list of all sadhanas."""
+        result = self.call("sadhana_list")
+        if "error" in result:
+            return []
+        return result.get("sadhanas", [])
+
+    def sadhana_status(self, sadhana_id: int, history_limit: int = 20) -> dict:
+        """Get status and history for a specific sadhana."""
+        return self.call("sadhana_status", {"id": sadhana_id, "history_limit": history_limit})
+
+    def sadhana_start(
+        self,
+        goal: str,
+        brain: str = "claude",
+        model: str = "haiku",
+        interval: int = 60
+    ) -> dict:
+        """Start a new sadhana."""
+        return self.call("sadhana_start", {
+            "goal": goal,
+            "brain": brain,
+            "model": model,
+            "interval": interval
+        })
+
+    def sadhana_stop(self, sadhana_id: int) -> dict:
+        """Stop a sadhana."""
+        return self.call("sadhana_stop", {"id": sadhana_id})
+
+    def sadhana_pause(self, sadhana_id: int) -> dict:
+        """Pause a sadhana."""
+        return self.call("sadhana_pause", {"id": sadhana_id})
+
+    def sadhana_resume(self, sadhana_id: int) -> dict:
+        """Resume a paused sadhana."""
+        return self.call("sadhana_resume", {"id": sadhana_id})
+
+    def sadhana_set_model(self, sadhana_id: int, model: str) -> dict:
+        """Change the model for a sadhana."""
+        return self.call("sadhana_set_model", {"id": sadhana_id, "model": model})
+
+    def health_check(self) -> dict:
+        """Check daemon health."""
+        return self.call("health_check")

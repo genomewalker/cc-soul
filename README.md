@@ -90,13 +90,61 @@ All Claude instances share the same knowledge base. Learn something in one sessi
 ### Anticipates Your Needs
 Patterns in your workflow become predictions. After seeing you run tests following three file edits, it suggests doing so automatically.
 
-### Shepherds Your Pipelines
-Autonomous monitoring for long-running jobs. Snakemake, Nextflow, or Slurm pipelines run while you sleep. Claude detects errors, recalls fixes from memory, restarts automatically, and alerts you only when needed.
+### Sadhana: Autonomous Agents
+
+Persistent agents that work toward goals through continuous **sense-think-act** cycles. Memory-aware, self-learning, and fully autonomous.
+
+```
+    ┌──────────┐      ┌──────────┐      ┌──────────┐
+    │  SENSE   │ ───▶ │  THINK   │ ───▶ │   ACT    │
+    │ (observe)│      │ (decide) │      │ (execute)│
+    └────┬─────┘      └────┬─────┘      └────┬─────┘
+         │                 │                  │
+         │                 ▼                  │
+         │          ┌──────────┐              │
+         │          │  LEARN   │◀─────────────┘
+         │          │ (memory) │
+         │          └────┬─────┘
+         └───────────────┴────────── ↻ repeat
+```
+
+**Use cases:**
+- Pipeline monitoring (Snakemake, Nextflow, Slurm)
+- Continuous testing and deployment verification
+- Server health monitoring
+- Any goal requiring persistent autonomous work
 
 ```bash
+# Start a monitoring sadhana
 /shepherd snakemake --cores 8 --rerun-incomplete
-# Goes to bed. Wakes up to completed pipeline or actionable error report.
+
+# Or directly
+chitta sadhana_start --goal "Monitor until all jobs complete" --interval 300
 ```
+
+**Real-time TUI** for monitoring all your agents:
+
+```bash
+sadhana-tui
+```
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ sadhana                                                   2/3 ●     │
+├─────────────────────────────────────────────────────────────────────┤
+│ ▊ ● #06 haiku         ▊ ○ #05 haiku         ▊ ○ #04 haiku         │
+│ ▊ Monitor pipeline    ▊ Verify deploy       ▊ Run tests           │
+│ ▊ 24 cycles           ▊ 12 cycles           ▊ 8 cycles            │
+├─────────────────────────────────────────────────────────────────────┤
+│ #06  running                      │ 01:23 sense $ squeue -u user   │
+│ Monitor pipeline on denbi-h-micro │ 01:23 think Analyze output     │
+│ model haiku   cycles 24           │ 01:22 act   $ ssh user@host    │
+├─────────────────────────────────────────────────────────────────────┤
+│  n new   p pause   r resume   s stop   j/k navigate   q quit       │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+[Full sadhana documentation](docs/SADHANA.md)
 
 ### Zero Configuration
 Hooks wire everything together. Memories surface transparently. Just install and work.
@@ -139,6 +187,7 @@ The soul is not a database. It is who Claude becomes through working with you.
 | Document | Description |
 |----------|-------------|
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Technical architecture |
+| [SADHANA.md](docs/SADHANA.md) | Autonomous agents guide |
 | [PHILOSOPHY.md](docs/PHILOSOPHY.md) | Vedantic concepts explained |
 | [API.md](docs/API.md) | Complete MCP tools reference (100+) |
 | [CLI.md](docs/CLI.md) | Command-line interface |

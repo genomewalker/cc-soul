@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sadhana: Autonomous Agents — cc-soul</title>
+<meta name="description" content="Sadhana: persistent autonomous agents that work toward goals through continuous sense-think-act cycles with memory integration.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<meta property="og:title" content="Sadhana: Autonomous Agents — cc-soul">
+<meta property="og:description" content="Persistent autonomous agents with sense-think-act loops and memory integration.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="favicon.svg">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Sadhana: Autonomous Agents — cc-soul">
+<meta name="twitter:description" content="Persistent autonomous agents with sense-think-act loops and memory integration.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- NAV -->
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="index.html" class="nav-brand">cc<span>-</span>soul</a>
+    <button class="nav-hamburger" onclick="document.querySelector('.nav').classList.toggle('nav-open')" aria-label="Menu">
+      <span></span><span></span><span></span>
+    </button>
+    <ul class="nav-links">
+      <li><a href="index.html">Home</a></li>
+      <li><a href="getting-started.html">Get Started</a></li>
+      <li><a href="philosophy.html">Philosophy</a></li>
+      <li><a href="architecture.html">Architecture</a></li>
+      <li><a href="sadhana.html" class="active">Sadhana</a></li>
+      <li><a href="tools.html">Tools</a></li>
+      <li><a href="cli.html">CLI</a></li>
+      <li><a href="hooks.html">Hooks</a></li>
+      <li><a href="skills.html">Skills</a></li>
+      <li><a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+  </div>
+</nav>
+
+<!-- PAGE HEADER -->
+<header class="page-header">
+  <div class="container">
+    <div class="page-header-badge reveal">Autonomous Agents</div>
+    <h1 class="reveal reveal-delay-1">Sadhana</h1>
+    <p class="page-header-sub reveal reveal-delay-2">Persistent agents that work toward goals through continuous sense-think-act cycles&thinsp;&mdash;&thinsp;with memory integration and self-learning.</p>
+  </div>
+</header>
+
+<!-- TABLE OF CONTENTS -->
+<section class="toc">
+  <div class="container">
+    <p class="toc-label">Jump to section</p>
+    <div class="toc-grid">
+      <a href="#concept" class="toc-chip">Concept</a>
+      <a href="#architecture" class="toc-chip">Architecture</a>
+      <a href="#memory" class="toc-chip">Memory Integration</a>
+      <a href="#tui" class="toc-chip">TUI Interface</a>
+      <a href="#usage" class="toc-chip">Usage</a>
+      <a href="#use-cases" class="toc-chip">Use Cases</a>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════
+     CONCEPT
+     ═══════════════════════════════════════════ -->
+<section class="arch-section" id="concept">
+  <div class="container">
+    <div class="reveal">
+      <div class="section-divider"></div>
+      <h2 class="heading-section">The Concept</h2>
+    </div>
+    <p class="section-intro reveal reveal-delay-1"><strong>Sadhana</strong> (Sanskrit: साधना, "disciplined practice") — persistent autonomous agents that work toward goals through continuous sense-think-act cycles.</p>
+
+    <div class="card card-dark reveal reveal-delay-2">
+      <p>Traditional AI assistants are reactive: you ask, they answer, context is lost. Sadhana inverts this paradigm. You define a goal, and an autonomous agent works toward it continuously — sensing the environment, thinking about next steps, acting, and learning from outcomes.</p>
+    </div>
+
+    <div class="sys-diagram reveal reveal-delay-2" style="margin-top: 3rem;">
+      <div class="diagram-layer" style="background: var(--color-card-bg); border: 1px solid var(--color-border);">
+        <span class="diagram-layer-label">Sadhana Lifecycle</span>
+        <pre style="font-family: 'IBM Plex Mono', monospace; font-size: 0.85rem; line-height: 1.6; color: var(--color-text-secondary); text-align: center; padding: 2rem;">
+    ┌──────────┐      ┌──────────┐      ┌──────────┐
+    │  SENSE   │ ───▶ │  THINK   │ ───▶ │   ACT    │
+    │ (observe)│      │ (decide) │      │ (execute)│
+    └────┬─────┘      └────┬─────┘      └────┬─────┘
+         │                 │                  │
+         │                 ▼                  │
+         │          ┌──────────┐              │
+         │          │  LEARN   │◀─────────────┘
+         │          │ (memory) │
+         │          └────┬─────┘
+         │               │
+         └───────────────┴────────── ↻ repeat until goal achieved
+        </pre>
+      </div>
+    </div>
+
+    <div class="grid-2 reveal reveal-delay-3" style="margin-top: 2rem;">
+      <div class="card">
+        <h3>SENSE</h3>
+        <p>Observe the current state by executing a shell command. What's the pipeline status? Are jobs running? Any errors?</p>
+      </div>
+      <div class="card">
+        <h3>THINK</h3>
+        <p>Analyze the observation, recall relevant memories from past experience, and decide the next action.</p>
+      </div>
+      <div class="card">
+        <h3>ACT</h3>
+        <p>Execute the decided action. Restart a job, send an alert, modify configuration, or wait.</p>
+      </div>
+      <div class="card">
+        <h3>LEARN</h3>
+        <p>Store outcomes in memory. Successes stay local; failures go global so all sadhanas learn.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════
+     ARCHITECTURE
+     ═══════════════════════════════════════════ -->
+<section class="arch-section" id="architecture">
+  <div class="container">
+    <div class="reveal">
+      <div class="section-divider"></div>
+      <h2 class="heading-section">Architecture</h2>
+    </div>
+    <p class="section-intro reveal reveal-delay-1">Sadhanas run inside the <code>chittad</code> daemon. The SadhanaManager orchestrates all agents, running a tick loop every 100ms to check which sadhanas need to sense-think-act.</p>
+
+    <div class="sys-diagram reveal reveal-delay-2">
+      <div class="diagram-layer" style="background: var(--color-card-bg); border: 1px solid var(--color-border);">
+        <pre style="font-family: 'IBM Plex Mono', monospace; font-size: 0.8rem; line-height: 1.5; color: var(--color-text-secondary); padding: 1.5rem;">
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        SADHANA TUI (Optional)                           │
+│  ┌─────────────┐  ┌──────────────┐  ┌────────────────────────────────┐ │
+│  │  Dashboard  │  │  Agent List  │  │       Event Stream             │ │
+│  │  • Status   │  │  • Select    │  │  • Sense / Think / Act events │ │
+│  │  • Count    │  │  • Control   │  │  • Timestamps, durations      │ │
+│  └─────────────┘  └──────────────┘  └────────────────────────────────┘ │
+└───────────────────────────────┬─────────────────────────────────────────┘
+                                │ Unix Socket
+┌───────────────────────────────┴─────────────────────────────────────────┐
+│                           CHITTAD DAEMON                                │
+│                                                                         │
+│  ┌─────────────────┐         ┌─────────────────────────────────────┐   │
+│  │ SadhanaManager  │         │         BrainProvider               │   │
+│  │                 │         │  ┌───────────┐  ┌───────────────┐   │   │
+│  │  • tick() loop  │────────▶│  │  Claude   │  │   OpenCode    │   │   │
+│  │  • state machine│         │  │  (API)    │  │   (local)     │   │   │
+│  │  • history log  │         │  └───────────┘  └───────────────┘   │   │
+│  └────────┬────────┘         └─────────────────────────────────────┘   │
+│           │                                                             │
+│           ▼                                                             │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │                       DuckDB Storage                             │   │
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌─────────────────┐  │   │
+│  │  │ sadhana  │  │ history  │  │ memories │  │    triplets     │  │   │
+│  │  │  table   │  │  table   │  │ (recall) │  │    (graph)      │  │   │
+│  │  └──────────┘  └──────────┘  └──────────┘  └─────────────────┘  │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────┘
+        </pre>
+      </div>
+    </div>
+
+    <div class="card card-dark reveal reveal-delay-3" style="margin-top: 2rem;">
+      <h3>Components</h3>
+      <table style="width: 100%; border-collapse: collapse;">
+        <tr style="border-bottom: 1px solid var(--color-border);">
+          <td style="padding: 0.75rem 0; font-weight: 500;">SadhanaManager</td>
+          <td style="padding: 0.75rem 0; color: var(--color-text-secondary);">Orchestrates all sadhanas, runs tick loop every 100ms</td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--color-border);">
+          <td style="padding: 0.75rem 0; font-weight: 500;">BrainProvider</td>
+          <td style="padding: 0.75rem 0; color: var(--color-text-secondary);">LLM abstraction — Claude API or OpenCode local</td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--color-border);">
+          <td style="padding: 0.75rem 0; font-weight: 500;">DuckDB Storage</td>
+          <td style="padding: 0.75rem 0; color: var(--color-text-secondary);">Persistent state, history, and memory integration</td>
+        </tr>
+        <tr>
+          <td style="padding: 0.75rem 0; font-weight: 500;">Sadhana TUI</td>
+          <td style="padding: 0.75rem 0; color: var(--color-text-secondary);">Optional terminal interface for real-time monitoring</td>
+        </tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════
+     MEMORY INTEGRATION
+     ═══════════════════════════════════════════ -->
+<section class="arch-section" id="memory">
+  <div class="container">
+    <div class="reveal">
+      <div class="section-divider"></div>
+      <h2 class="heading-section">Memory Integration</h2>
+    </div>
+    <p class="section-intro reveal reveal-delay-1">Sadhanas are memory-aware. Before each decision, they recall relevant memories from past experience — including failures from other sadhanas.</p>
+
+    <div class="sys-diagram reveal reveal-delay-2">
+      <div class="diagram-layer" style="background: var(--color-card-bg); border: 1px solid var(--color-border);">
+        <pre style="font-family: 'IBM Plex Mono', monospace; font-size: 0.8rem; line-height: 1.5; color: var(--color-text-secondary); padding: 1.5rem;">
+Goal: "Monitor pipeline on server X"
+Observation: { command: "ssh ...", error: "Connection refused" }
+
+┌─────────────────┐
+│  BM25 Search    │──▶ "[sadhana] Failure: ssh to localhost failed"
+│  "ssh refused"  │    "[sadhana] Success: ssh user@server-x worked"
+└─────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  THINK PROMPT                                                    │
+│                                                                  │
+│  You are an autonomous agent working toward this goal:          │
+│  Monitor pipeline on server X                                    │
+│                                                                  │
+│  <strong>Relevant memories from past experience:</strong>                        │
+│  - [sadhana] Failure: ssh to localhost failed...                │
+│  - [sadhana] Success: ssh user@server-x worked...               │
+│                                                                  │
+│  Current observation: { "error": "Connection refused" }          │
+│                                                                  │
+│  Decide what to do next...                                       │
+└─────────────────────────────────────────────────────────────────┘
+
+Result: Agent learns from past failures, tries correct server
+        </pre>
+      </div>
+    </div>
+
+    <div class="grid-2 reveal reveal-delay-3" style="margin-top: 2rem;">
+      <div class="card">
+        <h3>Failure Learning</h3>
+        <p>When an action fails, it's stored with <strong>Global visibility</strong> — all sadhanas across all projects can learn from it. Tagged with <code>["failure", "sadhana"]</code> for filtering.</p>
+      </div>
+      <div class="card">
+        <h3>Success Learning</h3>
+        <p>Successful actions are stored with <strong>Private visibility</strong> — project-specific knowledge that doesn't clutter other realms.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════
+     TUI INTERFACE
+     ═══════════════════════════════════════════ -->
+<section class="arch-section" id="tui">
+  <div class="container">
+    <div class="reveal">
+      <div class="section-divider"></div>
+      <h2 class="heading-section">Sadhana TUI</h2>
+    </div>
+    <p class="section-intro reveal reveal-delay-1">A Textual-based terminal interface for real-time monitoring of all your autonomous agents.</p>
+
+    <div class="card card-dark reveal reveal-delay-2">
+      <h3>Installation</h3>
+      <pre><code>pip install -e sadhana-tui/</code></pre>
+      <h3 style="margin-top: 1.5rem;">Running</h3>
+      <pre><code>sadhana-tui</code></pre>
+    </div>
+
+    <div class="sys-diagram reveal reveal-delay-2" style="margin-top: 2rem;">
+      <div class="diagram-layer" style="background: #0a0a0a; border: 1px solid #333;">
+        <pre style="font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem; line-height: 1.4; color: #a9b1d6; padding: 1rem;">
+┌─────────────────────────────────────────────────────────────────────────┐
+│ <span style="color: #555;">sadhana</span>                                                     <span style="color: #444;">2/3</span> <span style="color: #66aa66;">●</span>     │
+├─────────────────────────────────────────────────────────────────────────┤
+│ <span style="color: #44aa44;">▊</span> <span style="color: #66aa66;">●</span> #06 haiku         <span style="color: #555;">▊</span> <span style="color: #666;">○</span> #05 haiku         <span style="color: #555;">▊</span> <span style="color: #666;">○</span> #04 haiku         │
+│ <span style="color: #44aa44;">▊</span> Monitor pipeline    <span style="color: #555;">▊</span> Verify deploy       <span style="color: #555;">▊</span> Run tests           │
+│ <span style="color: #44aa44;">▊</span> <span style="color: #aa8866;">24</span> cycles           <span style="color: #555;">▊</span> <span style="color: #666;">12</span> cycles           <span style="color: #555;">▊</span> <span style="color: #666;">8</span> cycles            │
+├─────────────────────────────────────────────────────────────────────────┤
+│ <span style="color: #7aa2f7;">#06</span>  <span style="color: #66aa66;">running</span>                      │ <span style="color: #565f89;">01:23</span> <span style="color: #7dcfff;">sense</span> $ squeue -u user   │
+│ ────────────────────────────    │ <span style="color: #565f89;">01:23</span> <span style="color: #e0af68;">think</span> Analyze output     │
+│                                 │ <span style="color: #565f89;">01:22</span> <span style="color: #9ece6a;">act</span>   $ ssh user@host    │
+│ Monitor pipeline on denbi-h-    │ <span style="color: #565f89;">01:20</span> <span style="color: #7dcfff;">sense</span> $ ps aux | grep    │
+│ micro until ALL jobs finished   │ <span style="color: #565f89;">01:20</span> <span style="color: #bb9af7;">learn</span> Success: ssh...    │
+│                                 │                                │
+│ <span style="color: #565f89;">model</span> <span style="color: #888;">haiku</span>   <span style="color: #565f89;">brain</span> <span style="color: #888;">claude</span>     │                                │
+│ <span style="color: #565f89;">cycles</span> <span style="color: #ff9e64;">24</span>     <span style="color: #565f89;">interval</span> <span style="color: #888;">300s</span>   │                                │
+├─────────────────────────────────────────────────────────────────────────┤
+│  <span style="color: #333; background: #222;"> n </span> new   <span style="color: #333; background: #222;"> p </span> pause   <span style="color: #333; background: #222;"> r </span> resume   <span style="color: #333; background: #222;"> s </span> stop   <span style="color: #333; background: #222;"> j/k </span> navigate   <span style="color: #333; background: #222;"> q </span> quit  │
+└─────────────────────────────────────────────────────────────────────────┘
+        </pre>
+      </div>
+    </div>
+
+    <div class="card reveal reveal-delay-3" style="margin-top: 2rem;">
+      <h3>Keybindings</h3>
+      <table style="width: 100%; border-collapse: collapse;">
+        <tr style="border-bottom: 1px solid var(--color-border);">
+          <td style="padding: 0.5rem 0; font-family: 'IBM Plex Mono', monospace;">n</td>
+          <td style="padding: 0.5rem 0;">Create new sadhana</td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--color-border);">
+          <td style="padding: 0.5rem 0; font-family: 'IBM Plex Mono', monospace;">p</td>
+          <td style="padding: 0.5rem 0;">Pause selected</td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--color-border);">
+          <td style="padding: 0.5rem 0; font-family: 'IBM Plex Mono', monospace;">r</td>
+          <td style="padding: 0.5rem 0;">Resume selected</td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--color-border);">
+          <td style="padding: 0.5rem 0; font-family: 'IBM Plex Mono', monospace;">s</td>
+          <td style="padding: 0.5rem 0;">Stop selected</td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--color-border);">
+          <td style="padding: 0.5rem 0; font-family: 'IBM Plex Mono', monospace;">j / k</td>
+          <td style="padding: 0.5rem 0;">Navigate down / up</td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--color-border);">
+          <td style="padding: 0.5rem 0; font-family: 'IBM Plex Mono', monospace;">click</td>
+          <td style="padding: 0.5rem 0;">Select sadhana card</td>
+        </tr>
+        <tr>
+          <td style="padding: 0.5rem 0; font-family: 'IBM Plex Mono', monospace;">q</td>
+          <td style="padding: 0.5rem 0;">Quit</td>
+        </tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════
+     USAGE
+     ═══════════════════════════════════════════ -->
+<section class="arch-section" id="usage">
+  <div class="container">
+    <div class="reveal">
+      <div class="section-divider"></div>
+      <h2 class="heading-section">Usage</h2>
+    </div>
+
+    <div class="card card-dark reveal reveal-delay-1">
+      <h3>Starting a Sadhana</h3>
+      <pre><code># Via skill
+/shepherd snakemake --cores 8 --interval 300
+
+# Via CLI (JSON-RPC)
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
+  "name":"sadhana_start",
+  "arguments":{
+    "goal":"Monitor pipeline until complete",
+    "brain":"claude",
+    "model":"haiku",
+    "interval":120
+  }
+}}' | chitta</code></pre>
+    </div>
+
+    <div class="card reveal reveal-delay-2" style="margin-top: 1.5rem;">
+      <h3>Management Commands</h3>
+      <table style="width: 100%; border-collapse: collapse;">
+        <tr style="border-bottom: 1px solid var(--color-border);">
+          <td style="padding: 0.5rem 0; font-family: 'IBM Plex Mono', monospace; white-space: nowrap;">sadhana_list</td>
+          <td style="padding: 0.5rem 0;">List all sadhanas with state</td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--color-border);">
+          <td style="padding: 0.5rem 0; font-family: 'IBM Plex Mono', monospace; white-space: nowrap;">sadhana_status --id N</td>
+          <td style="padding: 0.5rem 0;">Get detailed status + history</td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--color-border);">
+          <td style="padding: 0.5rem 0; font-family: 'IBM Plex Mono', monospace; white-space: nowrap;">sadhana_pause --id N</td>
+          <td style="padding: 0.5rem 0;">Pause a running sadhana</td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--color-border);">
+          <td style="padding: 0.5rem 0; font-family: 'IBM Plex Mono', monospace; white-space: nowrap;">sadhana_resume --id N</td>
+          <td style="padding: 0.5rem 0;">Resume a paused sadhana</td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--color-border);">
+          <td style="padding: 0.5rem 0; font-family: 'IBM Plex Mono', monospace; white-space: nowrap;">sadhana_stop --id N</td>
+          <td style="padding: 0.5rem 0;">Stop and mark as done</td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--color-border);">
+          <td style="padding: 0.5rem 0; font-family: 'IBM Plex Mono', monospace; white-space: nowrap;">sadhana_set_goal --id N --goal "..."</td>
+          <td style="padding: 0.5rem 0;">Update the goal</td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--color-border);">
+          <td style="padding: 0.5rem 0; font-family: 'IBM Plex Mono', monospace; white-space: nowrap;">sadhana_set_model --id N --model sonnet</td>
+          <td style="padding: 0.5rem 0;">Change LLM model</td>
+        </tr>
+        <tr>
+          <td style="padding: 0.5rem 0; font-family: 'IBM Plex Mono', monospace; white-space: nowrap;">sadhana_set_interval --id N --interval 300</td>
+          <td style="padding: 0.5rem 0;">Change tick interval</td>
+        </tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════
+     USE CASES
+     ═══════════════════════════════════════════ -->
+<section class="arch-section" id="use-cases">
+  <div class="container">
+    <div class="reveal">
+      <div class="section-divider"></div>
+      <h2 class="heading-section">Use Cases</h2>
+    </div>
+
+    <div class="grid-2 reveal reveal-delay-1">
+      <div class="card">
+        <h3>Pipeline Monitoring</h3>
+        <pre style="font-size: 0.85rem;"><code>/shepherd snakemake --cores 8</code></pre>
+        <p style="margin-top: 1rem;">Monitor Snakemake, Nextflow, or Slurm pipelines. Detects failures, recalls fixes from memory, restarts automatically.</p>
+      </div>
+      <div class="card">
+        <h3>Continuous Testing</h3>
+        <pre style="font-size: 0.85rem;"><code>sadhana_start --goal "Run tests on file change. Fix failures."</code></pre>
+        <p style="margin-top: 1rem;">Watch for changes, run tests, fix issues. Goal: all tests pass.</p>
+      </div>
+      <div class="card">
+        <h3>Server Monitoring</h3>
+        <pre style="font-size: 0.85rem;"><code>sadhana_start --goal "Monitor server health. Alert if CPU > 90%."</code></pre>
+        <p style="margin-top: 1rem;">Continuous health checks with intelligent alerting.</p>
+      </div>
+      <div class="card">
+        <h3>Deployment Verification</h3>
+        <pre style="font-size: 0.85rem;"><code>sadhana_start --goal "Verify deployment. Check endpoints, logs, metrics."</code></pre>
+        <p style="margin-top: 1rem;">Post-deployment monitoring until stability confirmed.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- FOOTER -->
+<footer class="footer">
+  <div class="container">
+    <div class="footer-grid">
+      <div>
+        <a href="index.html" class="footer-brand">cc<span>-</span>soul</a>
+        <p class="footer-tagline">Persistent memory for Claude Code.</p>
+      </div>
+      <div>
+        <p class="footer-heading">Documentation</p>
+        <ul class="footer-links">
+          <li><a href="getting-started.html">Get Started</a></li>
+          <li><a href="architecture.html">Architecture</a></li>
+          <li><a href="sadhana.html">Sadhana</a></li>
+          <li><a href="tools.html">Tools Reference</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="footer-heading">Resources</p>
+        <ul class="footer-links">
+          <li><a href="philosophy.html">Philosophy</a></li>
+          <li><a href="cli.html">CLI</a></li>
+          <li><a href="hooks.html">Hooks</a></li>
+          <li><a href="skills.html">Skills</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="footer-heading">Community</p>
+        <ul class="footer-links">
+          <li><a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/genomewalker/cc-soul/issues" target="_blank" rel="noopener">Issues</a></li>
+          <li><a href="changelog.html">Changelog</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <p>&copy; 2025 cc-soul &middot; MIT License</p>
+    </div>
+  </div>
+</footer>
+
+<script src="scripts.js"></script>
+</body>
+</html>
