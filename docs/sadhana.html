@@ -575,6 +575,113 @@
   color: var(--ash-300);
   line-height: 1.6;
 }
+
+/* Sticky Sidebar TOC */
+.sidebar-toc {
+  position: fixed;
+  left: 24px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+@media (max-width: 1200px) {
+  .sidebar-toc { display: none; }
+}
+
+.sidebar-toc-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  color: #565f89;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  text-decoration: none;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+  position: relative;
+  background: rgba(15, 16, 24, 0.8);
+  backdrop-filter: blur(8px);
+  border: 1px solid transparent;
+}
+.sidebar-toc-link:hover {
+  color: #a9b1d6;
+  background: rgba(122, 162, 247, 0.08);
+  border-color: rgba(122, 162, 247, 0.15);
+}
+.sidebar-toc-link.active {
+  color: #c0caf5;
+  background: rgba(122, 162, 247, 0.12);
+  border-color: rgba(122, 162, 247, 0.25);
+}
+.sidebar-toc-link::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.5;
+  transition: all 0.2s ease;
+}
+.sidebar-toc-link:hover::before,
+.sidebar-toc-link.active::before {
+  opacity: 1;
+  box-shadow: 0 0 8px currentColor;
+}
+.sidebar-toc-link--sense { --toc-color: #7dcfff; }
+.sidebar-toc-link--sense:hover, .sidebar-toc-link--sense.active { color: #7dcfff; }
+.sidebar-toc-link--think { --toc-color: #e0af68; }
+.sidebar-toc-link--think:hover, .sidebar-toc-link--think.active { color: #e0af68; }
+.sidebar-toc-link--act { --toc-color: #9ece6a; }
+.sidebar-toc-link--act:hover, .sidebar-toc-link--act.active { color: #9ece6a; }
+.sidebar-toc-link--learn { --toc-color: #bb9af7; }
+.sidebar-toc-link--learn:hover, .sidebar-toc-link--learn.active { color: #bb9af7; }
+.sidebar-toc-link--tui { --toc-color: #7aa2f7; }
+.sidebar-toc-link--tui:hover, .sidebar-toc-link--tui.active { color: #7aa2f7; }
+.sidebar-toc-link--usage { --toc-color: #f7768e; }
+.sidebar-toc-link--usage:hover, .sidebar-toc-link--usage.active { color: #f7768e; }
+
+/* Mobile TOC fallback */
+.mobile-toc {
+  display: none;
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid rgba(203, 175, 134, 0.06);
+}
+@media (max-width: 1200px) {
+  .mobile-toc { display: block; }
+}
+.mobile-toc-label {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #565f89;
+  margin-bottom: var(--space-3);
+}
+.mobile-toc-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.mobile-toc-chip {
+  padding: 8px 14px;
+  background: rgba(122, 162, 247, 0.08);
+  border: 1px solid rgba(122, 162, 247, 0.15);
+  border-radius: 20px;
+  color: #a9b1d6;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  text-decoration: none;
+  transition: all 0.2s ease;
+}
+.mobile-toc-chip:hover {
+  background: rgba(122, 162, 247, 0.15);
+  border-color: rgba(122, 162, 247, 0.3);
+  color: #c0caf5;
+}
 </style>
 </head>
 <body>
@@ -610,17 +717,27 @@
   </div>
 </header>
 
-<!-- TABLE OF CONTENTS -->
-<section class="toc">
+<!-- STICKY SIDEBAR TOC (Desktop) -->
+<nav class="sidebar-toc" id="sidebar-toc">
+  <a href="#concept" class="sidebar-toc-link sidebar-toc-link--sense" data-section="concept">Concept</a>
+  <a href="#architecture" class="sidebar-toc-link sidebar-toc-link--think" data-section="architecture">Architecture</a>
+  <a href="#memory" class="sidebar-toc-link sidebar-toc-link--learn" data-section="memory">Memory</a>
+  <a href="#tui" class="sidebar-toc-link sidebar-toc-link--tui" data-section="tui">TUI</a>
+  <a href="#usage" class="sidebar-toc-link sidebar-toc-link--act" data-section="usage">Usage</a>
+  <a href="#use-cases" class="sidebar-toc-link sidebar-toc-link--usage" data-section="use-cases">Use Cases</a>
+</nav>
+
+<!-- MOBILE TOC (fallback for smaller screens) -->
+<section class="mobile-toc">
   <div class="container">
-    <p class="toc-label">Jump to section</p>
-    <div class="toc-grid">
-      <a href="#concept" class="toc-chip">Concept</a>
-      <a href="#architecture" class="toc-chip">Architecture</a>
-      <a href="#memory" class="toc-chip">Memory Integration</a>
-      <a href="#tui" class="toc-chip">TUI Interface</a>
-      <a href="#usage" class="toc-chip">Usage</a>
-      <a href="#use-cases" class="toc-chip">Use Cases</a>
+    <p class="mobile-toc-label">Jump to section</p>
+    <div class="mobile-toc-grid">
+      <a href="#concept" class="mobile-toc-chip">Concept</a>
+      <a href="#architecture" class="mobile-toc-chip">Architecture</a>
+      <a href="#memory" class="mobile-toc-chip">Memory</a>
+      <a href="#tui" class="mobile-toc-chip">TUI</a>
+      <a href="#usage" class="mobile-toc-chip">Usage</a>
+      <a href="#use-cases" class="mobile-toc-chip">Use Cases</a>
     </div>
   </div>
 </section>
@@ -1041,7 +1158,7 @@
 })();
 
 /* ═══════════════════════════════════════════
-   SMOOTH SCROLL FOR TOC CHIPS
+   SMOOTH SCROLL FOR TOC
    ═══════════════════════════════════════════ */
 document.querySelectorAll('a[href^="#"]').forEach(function(anchor) {
   anchor.addEventListener('click', function(e) {
@@ -1054,6 +1171,39 @@ document.querySelectorAll('a[href^="#"]').forEach(function(anchor) {
     }
   });
 });
+
+/* ═══════════════════════════════════════════
+   SCROLL SPY - Highlight active TOC section
+   ═══════════════════════════════════════════ */
+(function() {
+  var tocLinks = document.querySelectorAll('.sidebar-toc-link');
+  var sections = [];
+
+  tocLinks.forEach(function(link) {
+    var sectionId = link.getAttribute('data-section');
+    var section = document.getElementById(sectionId);
+    if (section) sections.push({ id: sectionId, el: section, link: link });
+  });
+
+  if (!sections.length) return;
+
+  function updateActive() {
+    var scrollPos = window.scrollY + 150;
+    var activeSection = sections[0];
+
+    sections.forEach(function(section) {
+      if (section.el.offsetTop <= scrollPos) {
+        activeSection = section;
+      }
+    });
+
+    tocLinks.forEach(function(link) { link.classList.remove('active'); });
+    if (activeSection) activeSection.link.classList.add('active');
+  }
+
+  window.addEventListener('scroll', updateActive, { passive: true });
+  updateActive();
+})();
 </script>
 </body>
 </html>
