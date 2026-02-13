@@ -124,6 +124,8 @@ void DuckDBStore::fix_sequences() {
     fix_seq("task_event", "event_seq");
     fix_seq("theme", "theme_seq");
     fix_seq("session_message", "session_message_seq");
+    fix_seq("sadhana", "sadhana_seq");
+    fix_seq("sadhana_history", "sadhana_history_seq");
 }
 
 bool DuckDBStore::open_embeddings_db(const std::string& path) {
@@ -1293,6 +1295,54 @@ bool DuckDBStore::create_schema() {
     write_execute("CREATE INDEX IF NOT EXISTS idx_outcome_session ON outcome_trace(session_id)");
     write_execute("CREATE INDEX IF NOT EXISTS idx_outcome_type ON outcome_trace(outcome_type)");
     write_execute("CREATE SEQUENCE IF NOT EXISTS outcome_trace_seq START 1");
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Sadhana: Unified Autonomous Agent System
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Sadhana table: persistent autonomous agents with sense-think-act loops
+    if (!write_execute(R"(
+        CREATE TABLE IF NOT EXISTS sadhana (
+            id BIGINT PRIMARY KEY,
+            goal TEXT NOT NULL,
+            goal_dsl JSON,
+            state VARCHAR DEFAULT 'pending',
+            brain_provider VARCHAR DEFAULT 'claude',
+            brain_model VARCHAR DEFAULT 'sonnet',
+            created_at BIGINT NOT NULL,
+            updated_at BIGINT NOT NULL,
+            iterations INTEGER DEFAULT 0,
+            last_sense JSON,
+            last_action TEXT,
+            last_result JSON,
+            brain_calls INTEGER DEFAULT 0,
+            learned_patterns JSON,
+            interval_seconds INTEGER DEFAULT 60,
+            realm VARCHAR DEFAULT 'brahman'
+        )
+    )")) {
+        return false;
+    }
+    write_execute("CREATE INDEX IF NOT EXISTS idx_sadhana_state ON sadhana(state)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_sadhana_realm ON sadhana(realm)");
+    write_execute("CREATE SEQUENCE IF NOT EXISTS sadhana_seq START 1");
+
+    // Sadhana history: append-only event log for each sadhana
+    if (!write_execute(R"(
+        CREATE TABLE IF NOT EXISTS sadhana_history (
+            id BIGINT PRIMARY KEY,
+            sadhana_id BIGINT NOT NULL,
+            timestamp BIGINT NOT NULL,
+            event_type VARCHAR NOT NULL,
+            content JSON,
+            duration_ms INTEGER DEFAULT 0
+        )
+    )")) {
+        return false;
+    }
+    write_execute("CREATE INDEX IF NOT EXISTS idx_sadhana_history_id ON sadhana_history(sadhana_id)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_sadhana_history_type ON sadhana_history(event_type)");
+    write_execute("CREATE SEQUENCE IF NOT EXISTS sadhana_history_seq START 1");
 
     // Pre-seed user and assistant entities
     write_execute(R"(

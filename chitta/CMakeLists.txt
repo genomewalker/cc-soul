@@ -436,6 +436,8 @@ add_executable(chittad
     src/transcript_parser.cpp
     src/ssl_parser.cpp
     src/native_distiller.cpp
+    src/sadhana/brain_provider.cpp
+    src/sadhana/sadhana_manager.cpp
 )
 target_link_libraries(chittad PRIVATE chitta duckdb_store)
 

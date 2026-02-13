@@ -10,6 +10,7 @@
 
 #include <chitta/mind/duckdb_mind.hpp>
 #include <chitta/mind/subconscious.hpp>
+#include <chitta/sadhana/sadhana_manager.hpp>
 #include <chitta/rpc/duckdb_handler.hpp>
 #include <chitta/rpc/thread_pool.hpp>
 #include <chitta/socket_server.hpp>
@@ -420,6 +421,11 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
     subconscious.start();
     handler.set_subconscious(&subconscious);
 
+    // Start sadhana manager for autonomous agents
+    SadhanaManager sadhana_manager(mind.store());
+    handler.set_sadhana_manager(&sadhana_manager);
+    std::cerr << "[daemon] Sadhana manager initialized\n";
+
     std::signal(SIGTERM, daemon_signal_handler);
     std::signal(SIGINT, daemon_signal_handler);
     std::signal(SIGPIPE, SIG_IGN);
@@ -453,6 +459,13 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                 } catch (const std::exception& e) {
                     std::cerr << "[maint] Embedding flush failed: " << e.what() << "\n";
                 }
+            }
+
+            // Tick sadhana manager for autonomous agents (runs every 100ms loop)
+            try {
+                sadhana_manager.tick();
+            } catch (const std::exception& e) {
+                std::cerr << "[maint] Sadhana tick failed: " << e.what() << "\n";
             }
 
             if (now_time - last_sync >= interval_secs) {
