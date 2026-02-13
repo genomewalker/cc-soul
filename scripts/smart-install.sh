@@ -401,13 +401,8 @@ install_claude_rules() {
     echo "[cc-soul] Linked CLAUDE.md → ~/.claude/rules/cc-soul.md"
 }
 
-# Install sadhana-tui (optional Python TUI)
-install_sadhana_tui() {
-    local tui_dir="$PLUGIN_DIR/../sadhana-tui"
-
-    # Skip if directory doesn't exist
-    [[ ! -d "$tui_dir" ]] && return 0
-
+# Install Python packages (MCP server and TUI)
+install_python_packages() {
     # Skip if Python not available
     if ! command -v python3 &> /dev/null && ! command -v python &> /dev/null; then
         return 0
@@ -416,14 +411,24 @@ install_sadhana_tui() {
     local python_cmd
     python_cmd=$(command -v python3 || command -v python)
 
-    # Check if already installed and up to date
-    if command -v sadhana-tui &> /dev/null; then
-        return 0
+    # Install chitta-mcp (MCP server)
+    local mcp_dir="$PLUGIN_DIR/chitta-mcp"
+    if [[ -d "$mcp_dir" ]]; then
+        if ! command -v chitta-mcp &> /dev/null; then
+            if $python_cmd -m pip install -q -e "$mcp_dir" --user 2>/dev/null; then
+                echo "[cc-soul] Installed chitta-mcp"
+            fi
+        fi
     fi
 
-    # Install in user mode
-    if $python_cmd -m pip install -q -e "$tui_dir" --user 2>/dev/null; then
-        echo "[cc-soul] Installed sadhana-tui"
+    # Install sadhana-tui (optional Python TUI)
+    local tui_dir="$PLUGIN_DIR/sadhana-tui"
+    if [[ -d "$tui_dir" ]]; then
+        if ! command -v sadhana-tui &> /dev/null; then
+            if $python_cmd -m pip install -q -e "$tui_dir" --user 2>/dev/null; then
+                echo "[cc-soul] Installed sadhana-tui"
+            fi
+        fi
     fi
 }
 
@@ -638,8 +643,8 @@ main() {
     # Configure hooks in settings.json
     configure_hooks
 
-    # Install sadhana-tui if Python available
-    install_sadhana_tui
+    # Install Python packages (MCP server, TUI)
+    install_python_packages
 
     if ! validate_binaries; then
         echo "[cc-soul] ERROR: Installation incomplete (invalid binaries)" >&2

@@ -1,0 +1,7 @@
+{
+  "chitta": {
+    "command": "chitta-mcp",
+    "args": [],
+    "env": {}
+  }
+}
