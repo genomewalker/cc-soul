@@ -198,7 +198,9 @@ class EventStream(RichLog):
 
         history = status.get("history", [])
         if len(history) > self._seen_count:
-            for event in history[self._seen_count:]:
+            # History comes newest-first, reverse to show chronologically (latest at bottom)
+            new_events = list(reversed(history[self._seen_count:]))
+            for event in new_events:
                 self._write_event(event)
             self._seen_count = len(history)
 
