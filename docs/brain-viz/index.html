@@ -3,671 +3,1363 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>cc-soul | Mind Architecture</title>
+    <title>cc-soul | The Mind Architecture</title>
     <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
 
+        :root {
+            --bg-dark: #050508;
+            --bg-card: #0a0a10;
+            --border: #1a1a25;
+            --text: #e8e8f0;
+            --text-dim: #6a6a80;
+            --purple: #8b5cf6;
+            --blue: #3b82f6;
+            --cyan: #06b6d4;
+            --green: #22c55e;
+            --yellow: #eab308;
+            --orange: #f97316;
+            --pink: #ec4899;
+            --red: #ef4444;
+        }
+
         body {
-            font-family: 'SF Mono', 'Fira Code', monospace;
-            background: #0a0a0f;
-            color: #e0e0e0;
+            font-family: 'Inter', sans-serif;
+            background: var(--bg-dark);
+            color: var(--text);
             min-height: 100vh;
             overflow-x: hidden;
         }
 
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-            padding: 2rem;
+        /* Header */
+        .header {
+            text-align: center;
+            padding: 3rem 2rem 1rem;
+            position: relative;
         }
 
-        h1 {
-            text-align: center;
-            font-size: 2.5rem;
-            margin-bottom: 0.5rem;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        .header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 600px;
+            height: 400px;
+            background: radial-gradient(ellipse, rgba(139, 92, 246, 0.15) 0%, transparent 70%);
+            pointer-events: none;
+        }
+
+        .logo {
+            font-size: 3.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--purple), var(--cyan));
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
+            margin-bottom: 0.5rem;
         }
 
-        .subtitle {
-            text-align: center;
-            color: #888;
-            margin-bottom: 2rem;
-        }
-
-        .main-grid {
-            display: grid;
-            grid-template-columns: 300px 1fr 300px;
-            gap: 2rem;
-            align-items: start;
-        }
-
-        /* Chat Panel */
-        .chat-panel {
-            background: #12121a;
-            border-radius: 12px;
-            border: 1px solid #2a2a3a;
-            overflow: hidden;
-        }
-
-        .chat-header {
-            background: #1a1a2a;
-            padding: 1rem;
-            border-bottom: 1px solid #2a2a3a;
-            font-weight: 600;
-        }
-
-        .chat-messages {
-            height: 400px;
-            overflow-y: auto;
-            padding: 1rem;
-        }
-
-        .message {
+        .tagline {
+            font-size: 1.1rem;
+            color: var(--text-dim);
             margin-bottom: 1rem;
-            padding: 0.75rem 1rem;
-            border-radius: 8px;
-            animation: fadeIn 0.3s ease;
         }
 
-        .message.user {
-            background: #2a2a4a;
-            margin-left: 2rem;
-        }
-
-        .message.assistant {
-            background: #1a2a3a;
-            margin-right: 2rem;
-        }
-
-        .message-label {
-            font-size: 0.7rem;
-            color: #888;
-            margin-bottom: 0.25rem;
-        }
-
-        .chat-input-container {
+        .stats-bar {
+            display: flex;
+            justify-content: center;
+            gap: 3rem;
             padding: 1rem;
-            border-top: 1px solid #2a2a3a;
+            flex-wrap: wrap;
         }
 
-        .chat-input {
-            width: 100%;
-            padding: 0.75rem;
-            background: #1a1a2a;
-            border: 1px solid #3a3a4a;
-            border-radius: 8px;
-            color: #e0e0e0;
-            font-family: inherit;
-            font-size: 0.9rem;
+        .stat {
+            text-align: center;
         }
 
-        .chat-input:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-
-        /* Brain Visualization */
-        .brain-container {
-            position: relative;
-            background: #0d0d15;
-            border-radius: 12px;
-            border: 1px solid #2a2a3a;
-            height: 500px;
-            overflow: hidden;
-        }
-
-        .brain-svg {
-            width: 100%;
-            height: 100%;
-        }
-
-        /* Layer Labels */
-        .layer-label {
-            position: absolute;
-            font-size: 0.7rem;
-            color: #667eea;
+        .stat-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 1.5rem;
             font-weight: 600;
+            color: var(--cyan);
+        }
+
+        .stat-label {
+            font-size: 0.75rem;
+            color: var(--text-dim);
             text-transform: uppercase;
             letter-spacing: 1px;
         }
 
-        /* Results Panel */
-        .results-panel {
-            background: #12121a;
-            border-radius: 12px;
-            border: 1px solid #2a2a3a;
+        /* Main visualization container */
+        .viz-container {
+            position: relative;
+            width: 100%;
+            height: 800px;
             overflow: hidden;
         }
 
-        .results-header {
-            background: #1a1a2a;
+        .viz-svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Central brain */
+        .central-brain {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 200px;
+            height: 200px;
+            pointer-events: none;
+        }
+
+        /* Module cards */
+        .module {
+            position: absolute;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
             padding: 1rem;
-            border-bottom: 1px solid #2a2a3a;
+            width: 180px;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .module:hover {
+            transform: scale(1.05);
+            border-color: var(--purple);
+            box-shadow: 0 0 30px rgba(139, 92, 246, 0.2);
+        }
+
+        .module.active {
+            border-color: var(--cyan);
+            box-shadow: 0 0 40px rgba(6, 182, 212, 0.3);
+        }
+
+        .module-icon {
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .module-title {
             font-weight: 600;
-        }
-
-        .results-content {
-            height: 400px;
-            overflow-y: auto;
-            padding: 1rem;
-            font-size: 0.85rem;
-        }
-
-        .result-item {
-            background: #1a1a2a;
-            padding: 0.75rem;
-            border-radius: 6px;
-            margin-bottom: 0.75rem;
-            border-left: 3px solid transparent;
-            animation: slideIn 0.3s ease;
-        }
-
-        .result-item.memory {
-            border-left-color: #667eea;
-        }
-
-        .result-item.symbol {
-            border-left-color: #22c55e;
-        }
-
-        .result-item.triplet {
-            border-left-color: #f59e0b;
-        }
-
-        .result-item .type {
-            font-size: 0.65rem;
-            color: #888;
-            text-transform: uppercase;
+            font-size: 0.9rem;
             margin-bottom: 0.25rem;
         }
 
-        .result-item .score {
-            float: right;
-            color: #667eea;
+        .module-desc {
+            font-size: 0.7rem;
+            color: var(--text-dim);
+            line-height: 1.4;
+        }
+
+        .module-stats {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        .module-stat {
+            background: rgba(139, 92, 246, 0.1);
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.65rem;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* Module positions - orbital layout */
+        .module[data-module="memories"] { top: 8%; left: 50%; transform: translateX(-50%); }
+        .module[data-module="rlm"] { top: 15%; left: 15%; }
+        .module[data-module="embeddings"] { top: 15%; right: 15%; }
+        .module[data-module="triplets"] { top: 35%; left: 5%; }
+        .module[data-module="symbols"] { top: 35%; right: 5%; }
+        .module[data-module="sadhana"] { top: 55%; left: 8%; }
+        .module[data-module="hooks"] { top: 55%; right: 8%; }
+        .module[data-module="themes"] { top: 72%; left: 18%; }
+        .module[data-module="anticipation"] { top: 72%; right: 18%; }
+        .module[data-module="narrative"] { bottom: 5%; left: 50%; transform: translateX(-50%); }
+
+        /* Connection lines */
+        .connections {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .connection-line {
+            stroke: var(--border);
+            stroke-width: 1;
+            fill: none;
+            opacity: 0.4;
+            transition: all 0.3s ease;
+        }
+
+        .connection-line.active {
+            stroke: var(--cyan);
+            stroke-width: 2;
+            opacity: 1;
+            filter: drop-shadow(0 0 6px var(--cyan));
+        }
+
+        .inter-module-line {
+            stroke: var(--border);
+            stroke-width: 1;
+            stroke-dasharray: 4 4;
+            fill: none;
+            opacity: 0.2;
+            transition: all 0.3s ease;
+        }
+
+        .inter-module-line.active {
+            stroke: var(--purple);
+            stroke-width: 1.5;
+            opacity: 0.8;
+            filter: drop-shadow(0 0 4px var(--purple));
+        }
+
+        /* Particle effect on connections */
+        .data-particle {
+            fill: var(--cyan);
+            filter: drop-shadow(0 0 3px var(--cyan));
+        }
+
+        .data-particle.outbound {
+            fill: var(--purple);
+            filter: drop-shadow(0 0 3px var(--purple));
+        }
+
+        .data-particle-trail {
+            fill: none;
+            stroke: var(--cyan);
+            stroke-width: 2;
+            stroke-linecap: round;
+            opacity: 0.3;
+        }
+
+        .data-particle-trail.outbound {
+            stroke: var(--purple);
+        }
+
+        /* Ambient flow (always visible) */
+        @keyframes ambientPulse {
+            0%, 100% { opacity: 0.2; }
+            50% { opacity: 0.5; }
+        }
+
+        .ambient-particle {
+            fill: var(--text-dim);
+            opacity: 0.3;
+        }
+
+        /* Chat demo panel */
+        .demo-panel {
+            position: fixed;
+            bottom: 2rem;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 1.5rem;
+            width: 90%;
+            max-width: 700px;
+            z-index: 100;
+        }
+
+        .demo-header {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 1rem;
+        }
+
+        .demo-dot {
+            width: 10px;
+            height: 10px;
+            background: var(--green);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(1.2); }
+        }
+
+        .demo-title {
             font-weight: 600;
         }
 
-        /* Trajectory Panel */
-        .trajectory-panel {
-            margin-top: 1rem;
-            background: #0d0d15;
-            border-radius: 8px;
-            padding: 1rem;
-            font-size: 0.75rem;
-        }
-
-        .trajectory-item {
+        .demo-conversation {
             display: flex;
-            align-items: center;
-            padding: 0.5rem 0;
-            border-bottom: 1px solid #1a1a2a;
-            opacity: 0;
-            animation: fadeIn 0.3s ease forwards;
+            flex-direction: column;
+            gap: 0.75rem;
+            max-height: 150px;
+            overflow-y: auto;
+            margin-bottom: 1rem;
         }
 
-        .trajectory-item .step {
-            width: 24px;
-            height: 24px;
-            background: #2a2a4a;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin-right: 0.75rem;
-            font-size: 0.7rem;
-            color: #667eea;
+        .demo-message {
+            padding: 0.75rem 1rem;
+            border-radius: 12px;
+            font-size: 0.85rem;
+            max-width: 85%;
+            animation: slideUp 0.3s ease;
         }
 
-        /* Animations */
-        @keyframes fadeIn {
+        @keyframes slideUp {
             from { opacity: 0; transform: translateY(10px); }
             to { opacity: 1; transform: translateY(0); }
         }
 
-        @keyframes slideIn {
-            from { opacity: 0; transform: translateX(-20px); }
-            to { opacity: 1; transform: translateX(0); }
+        .demo-message.user {
+            background: linear-gradient(135deg, var(--purple), var(--blue));
+            align-self: flex-end;
         }
 
-        @keyframes pulse {
-            0%, 100% { transform: scale(1); }
-            50% { transform: scale(1.2); }
+        .demo-message.assistant {
+            background: var(--border);
+            align-self: flex-start;
         }
 
-        @keyframes glow {
-            0%, 100% { filter: drop-shadow(0 0 2px currentColor); }
-            50% { filter: drop-shadow(0 0 8px currentColor); }
-        }
-
-        /* Neuron styles */
-        .neuron {
-            fill: #2a2a4a;
-            transition: all 0.3s ease;
-        }
-
-        .neuron.active {
-            fill: #667eea;
-            animation: pulse 0.5s ease;
-        }
-
-        .neuron.memory { --color: #667eea; }
-        .neuron.symbol { --color: #22c55e; }
-        .neuron.triplet { --color: #f59e0b; }
-        .neuron.embed { --color: #ec4899; }
-        .neuron.rlm { --color: #06b6d4; }
-
-        .neuron.active.memory { fill: #667eea; }
-        .neuron.active.symbol { fill: #22c55e; }
-        .neuron.active.triplet { fill: #f59e0b; }
-        .neuron.active.embed { fill: #ec4899; }
-        .neuron.active.rlm { fill: #06b6d4; }
-
-        .connection {
-            stroke: #2a2a4a;
-            stroke-width: 1;
-            fill: none;
-            transition: all 0.3s ease;
-        }
-
-        .connection.active {
-            stroke: #667eea;
-            stroke-width: 2;
-            animation: glow 0.5s ease;
-        }
-
-        .data-packet {
-            fill: #667eea;
-            opacity: 0;
-        }
-
-        /* Legend */
-        .legend {
+        .demo-input-row {
             display: flex;
-            justify-content: center;
-            gap: 2rem;
-            margin-top: 1rem;
-            padding: 1rem;
-            background: #12121a;
+            gap: 0.75rem;
+        }
+
+        .demo-input {
+            flex: 1;
+            background: var(--bg-dark);
+            border: 1px solid var(--border);
             border-radius: 8px;
+            padding: 0.75rem 1rem;
+            color: var(--text);
+            font-family: inherit;
+            font-size: 0.9rem;
         }
 
-        .legend-item {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            font-size: 0.8rem;
+        .demo-input:focus {
+            outline: none;
+            border-color: var(--purple);
         }
 
-        .legend-dot {
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
+        .demo-btn {
+            background: linear-gradient(135deg, var(--purple), var(--blue));
+            border: none;
+            border-radius: 8px;
+            padding: 0.75rem 1.5rem;
+            color: white;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
         }
 
-        .legend-dot.memory { background: #667eea; }
-        .legend-dot.symbol { background: #22c55e; }
-        .legend-dot.triplet { background: #f59e0b; }
-        .legend-dot.embed { background: #ec4899; }
-        .legend-dot.rlm { background: #06b6d4; }
-
-        /* Status indicator */
-        .status {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            padding: 0.5rem 1rem;
-            background: #1a1a2a;
-            border-radius: 20px;
-            font-size: 0.8rem;
-            margin-bottom: 1rem;
+        .demo-btn:hover {
+            transform: scale(1.05);
         }
 
-        .status-dot {
+        /* Activation flow visualization */
+        .flow-indicator {
+            position: absolute;
+            background: var(--cyan);
             width: 8px;
             height: 8px;
             border-radius: 50%;
-            background: #22c55e;
-            animation: pulse 2s infinite;
+            pointer-events: none;
+            opacity: 0;
+            z-index: 50;
+            box-shadow: 0 0 10px var(--cyan), 0 0 20px var(--cyan);
+        }
+
+        /* Detail panel */
+        .detail-panel {
+            position: fixed;
+            top: 50%;
+            right: 2rem;
+            transform: translateY(-50%);
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            width: 280px;
+            opacity: 0;
+            pointer-events: none;
+            transition: all 0.3s ease;
+            z-index: 100;
+        }
+
+        .detail-panel.visible {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .detail-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .detail-desc {
+            font-size: 0.85rem;
+            color: var(--text-dim);
+            margin-bottom: 1rem;
+            line-height: 1.5;
+        }
+
+        .detail-features {
+            list-style: none;
+        }
+
+        .detail-features li {
+            padding: 0.5rem 0;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.8rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .detail-features li::before {
+            content: '→';
+            color: var(--cyan);
+        }
+
+        /* Responsive */
+        @media (max-width: 1200px) {
+            .module {
+                width: 150px;
+                padding: 0.75rem;
+            }
+            .module-title { font-size: 0.8rem; }
+            .module-desc { font-size: 0.65rem; }
+        }
+
+        @media (max-width: 768px) {
+            .viz-container { height: 600px; }
+            .module { width: 120px; padding: 0.5rem; }
+            .detail-panel { display: none; }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>cc-soul</h1>
-        <p class="subtitle">Recursive Language Model Memory Architecture</p>
-
-        <div class="status">
-            <div class="status-dot"></div>
-            <span>Mind Active | 9,204 memories | 502K triplets</span>
-        </div>
-
-        <div class="main-grid">
-            <!-- Chat Panel -->
-            <div class="chat-panel">
-                <div class="chat-header">Conversation</div>
-                <div class="chat-messages" id="chatMessages">
-                    <div class="message assistant">
-                        <div class="message-label">Claude</div>
-                        Type a question to see the mind activate...
-                    </div>
-                </div>
-                <div class="chat-input-container">
-                    <input type="text" class="chat-input" id="chatInput"
-                           placeholder="Ask something..."
-                           onkeypress="if(event.key==='Enter')sendMessage()">
-                </div>
+    <header class="header">
+        <div class="logo">cc-soul</div>
+        <p class="tagline">Persistent Memory Architecture for Claude Code</p>
+        <p style="font-size: 0.85rem; color: var(--text-dim); margin-top: 0.5rem;">
+            Watch ideas flow through the mind — <span style="color: var(--cyan);">●</span> inbound
+            <span style="color: var(--purple);">●</span> inter-module
+        </p>
+        <div class="stats-bar">
+            <div class="stat">
+                <div class="stat-value" id="memoryCount">9,204</div>
+                <div class="stat-label">Memories</div>
             </div>
-
-            <!-- Brain Visualization -->
-            <div class="brain-container">
-                <svg class="brain-svg" id="brainSvg" viewBox="0 0 600 450">
-                    <!-- Background grid -->
-                    <defs>
-                        <pattern id="grid" width="30" height="30" patternUnits="userSpaceOnUse">
-                            <path d="M 30 0 L 0 0 0 30" fill="none" stroke="#1a1a2a" stroke-width="0.5"/>
-                        </pattern>
-                        <filter id="glow">
-                            <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
-                            <feMerge>
-                                <feMergeNode in="coloredBlur"/>
-                                <feMergeNode in="SourceGraphic"/>
-                            </feMerge>
-                        </filter>
-                    </defs>
-                    <rect width="100%" height="100%" fill="url(#grid)"/>
-
-                    <!-- Layer labels -->
-                    <text x="50" y="30" fill="#667eea" font-size="10" font-weight="600">INPUT</text>
-                    <text x="150" y="30" fill="#06b6d4" font-size="10" font-weight="600">RLM REPL</text>
-                    <text x="270" y="30" fill="#667eea" font-size="10" font-weight="600">RETRIEVAL</text>
-                    <text x="400" y="30" fill="#ec4899" font-size="10" font-weight="600">EMBEDDING</text>
-                    <text x="520" y="30" fill="#22c55e" font-size="10" font-weight="600">OUTPUT</text>
-
-                    <!-- Connections (will be generated dynamically) -->
-                    <g id="connections"></g>
-
-                    <!-- Neurons -->
-                    <g id="neurons"></g>
-
-                    <!-- Data packets (animated) -->
-                    <g id="packets"></g>
-                </svg>
+            <div class="stat">
+                <div class="stat-value" id="tripletCount">502K</div>
+                <div class="stat-label">Knowledge Graph</div>
             </div>
-
-            <!-- Results Panel -->
-            <div class="results-panel">
-                <div class="results-header">Retrieved Context</div>
-                <div class="results-content" id="resultsContent">
-                    <div style="color: #666; text-align: center; margin-top: 2rem;">
-                        Results will appear here...
-                    </div>
-                </div>
-                <div class="trajectory-panel">
-                    <div style="color: #888; margin-bottom: 0.5rem;">Exploration Trajectory</div>
-                    <div id="trajectoryList"></div>
-                </div>
+            <div class="stat">
+                <div class="stat-value" id="symbolCount">1,354</div>
+                <div class="stat-label">Code Symbols</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">100+</div>
+                <div class="stat-label">MCP Tools</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">3</div>
+                <div class="stat-label">Memory Tiers</div>
             </div>
         </div>
+    </header>
 
-        <!-- Legend -->
-        <div class="legend">
-            <div class="legend-item">
-                <div class="legend-dot memory"></div>
-                <span>Memories</span>
+    <div class="viz-container" id="vizContainer">
+        <!-- SVG for connections -->
+        <svg class="connections" id="connectionsSvg"></svg>
+
+        <!-- Central pulsing core with activity indicator -->
+        <div class="central-brain" id="centralBrain">
+            <svg viewBox="0 0 200 200">
+                <defs>
+                    <radialGradient id="coreGradient">
+                        <stop offset="0%" stop-color="var(--cyan)" stop-opacity="0.8"/>
+                        <stop offset="50%" stop-color="var(--purple)" stop-opacity="0.4"/>
+                        <stop offset="100%" stop-color="transparent"/>
+                    </radialGradient>
+                    <radialGradient id="coreActiveGradient">
+                        <stop offset="0%" stop-color="#fff" stop-opacity="0.9"/>
+                        <stop offset="30%" stop-color="var(--cyan)" stop-opacity="0.8"/>
+                        <stop offset="60%" stop-color="var(--purple)" stop-opacity="0.5"/>
+                        <stop offset="100%" stop-color="transparent"/>
+                    </radialGradient>
+                    <filter id="glow">
+                        <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
+                        <feMerge>
+                            <feMergeNode in="coloredBlur"/>
+                            <feMergeNode in="SourceGraphic"/>
+                        </feMerge>
+                    </filter>
+                    <filter id="strongGlow">
+                        <feGaussianBlur stdDeviation="8" result="coloredBlur"/>
+                        <feMerge>
+                            <feMergeNode in="coloredBlur"/>
+                            <feMergeNode in="coloredBlur"/>
+                            <feMergeNode in="SourceGraphic"/>
+                        </feMerge>
+                    </filter>
+                </defs>
+                <!-- Outer glow ring -->
+                <circle id="outerRing" cx="100" cy="100" r="70" fill="none" stroke="var(--purple)" stroke-width="0.5" opacity="0.3">
+                    <animate attributeName="r" values="65;75;65" dur="4s" repeatCount="indefinite"/>
+                    <animate attributeName="opacity" values="0.2;0.4;0.2" dur="4s" repeatCount="indefinite"/>
+                </circle>
+                <!-- Main glow -->
+                <circle id="coreGlow" cx="100" cy="100" r="60" fill="url(#coreGradient)" filter="url(#glow)">
+                    <animate attributeName="r" values="55;65;55" dur="3s" repeatCount="indefinite"/>
+                </circle>
+                <!-- Mid ring -->
+                <circle cx="100" cy="100" r="40" fill="none" stroke="var(--purple)" stroke-width="1" opacity="0.5">
+                    <animate attributeName="r" values="35;45;35" dur="2s" repeatCount="indefinite"/>
+                </circle>
+                <!-- Inner rotating ring -->
+                <circle cx="100" cy="100" r="30" fill="none" stroke="var(--cyan)" stroke-width="0.5"
+                        stroke-dasharray="5 10" opacity="0.4">
+                    <animateTransform attributeName="transform" type="rotate"
+                                      from="0 100 100" to="360 100 100" dur="20s" repeatCount="indefinite"/>
+                </circle>
+                <!-- Core -->
+                <circle id="coreCenter" cx="100" cy="100" r="20" fill="var(--bg-dark)" stroke="var(--cyan)" stroke-width="2">
+                    <animate attributeName="stroke-opacity" values="1;0.5;1" dur="1.5s" repeatCount="indefinite"/>
+                </circle>
+                <!-- Activity indicator particles orbiting -->
+                <g id="orbitParticles">
+                    <circle r="2" fill="var(--cyan)" opacity="0.8">
+                        <animateMotion dur="8s" repeatCount="indefinite">
+                            <mpath href="#orbitPath1"/>
+                        </animateMotion>
+                    </circle>
+                    <circle r="1.5" fill="var(--purple)" opacity="0.6">
+                        <animateMotion dur="6s" repeatCount="indefinite">
+                            <mpath href="#orbitPath2"/>
+                        </animateMotion>
+                    </circle>
+                    <circle r="1" fill="var(--cyan)" opacity="0.5">
+                        <animateMotion dur="10s" repeatCount="indefinite">
+                            <mpath href="#orbitPath1"/>
+                        </animateMotion>
+                    </circle>
+                </g>
+                <path id="orbitPath1" d="M 100 50 A 50 50 0 1 1 99.9 50" fill="none" stroke="none"/>
+                <path id="orbitPath2" d="M 100 60 A 40 40 0 1 0 99.9 60" fill="none" stroke="none"/>
+                <!-- Label -->
+                <text x="100" y="105" text-anchor="middle" fill="var(--cyan)" font-size="12" font-weight="600">CHITTA</text>
+            </svg>
+        </div>
+
+        <!-- Memory Module -->
+        <div class="module" data-module="memories">
+            <div class="module-icon">🧠</div>
+            <div class="module-title">Hierarchical Memory</div>
+            <div class="module-desc">3-tier system: SSL wisdom → Episodes → Full turns</div>
+            <div class="module-stats">
+                <span class="module-stat">9.2K memories</span>
+                <span class="module-stat">SSL v0.2</span>
             </div>
-            <div class="legend-item">
-                <div class="legend-dot symbol"></div>
-                <span>Code Symbols</span>
+        </div>
+
+        <!-- RLM Module -->
+        <div class="module" data-module="rlm">
+            <div class="module-icon">🔄</div>
+            <div class="module-title">RLM Exploration</div>
+            <div class="module-desc">Recursive Language Model REPL for dynamic memory navigation</div>
+            <div class="module-stats">
+                <span class="module-stat">soul.*</span>
+                <span class="module-stat">sandbox</span>
             </div>
-            <div class="legend-item">
-                <div class="legend-dot triplet"></div>
-                <span>Triplets</span>
+        </div>
+
+        <!-- Embeddings Module -->
+        <div class="module" data-module="embeddings">
+            <div class="module-icon">🎯</div>
+            <div class="module-title">VakYantra</div>
+            <div class="module-desc">ONNX embedder with HNSW vector search</div>
+            <div class="module-stats">
+                <span class="module-stat">384-dim</span>
+                <span class="module-stat">~5ms</span>
             </div>
-            <div class="legend-item">
-                <div class="legend-dot embed"></div>
-                <span>Embeddings</span>
+        </div>
+
+        <!-- Triplets Module -->
+        <div class="module" data-module="triplets">
+            <div class="module-icon">🕸️</div>
+            <div class="module-title">Knowledge Graph</div>
+            <div class="module-desc">DuckPGQ graph queries with 500K+ relationships</div>
+            <div class="module-stats">
+                <span class="module-stat">502K edges</span>
+                <span class="module-stat">PGQL</span>
             </div>
-            <div class="legend-item">
-                <div class="legend-dot rlm"></div>
-                <span>RLM Exploration</span>
+        </div>
+
+        <!-- Symbols Module -->
+        <div class="module" data-module="symbols">
+            <div class="module-icon">📦</div>
+            <div class="module-title">Code Intelligence</div>
+            <div class="module-desc">Tree-sitter symbols with call graphs & semantic search</div>
+            <div class="module-stats">
+                <span class="module-stat">1.3K symbols</span>
+                <span class="module-stat">BM25</span>
             </div>
+        </div>
+
+        <!-- Sadhana Module -->
+        <div class="module" data-module="sadhana">
+            <div class="module-icon">🤖</div>
+            <div class="module-title">Sadhana Agents</div>
+            <div class="module-desc">Autonomous sense-think-act loops with persistent goals</div>
+            <div class="module-stats">
+                <span class="module-stat">haiku/opus</span>
+                <span class="module-stat">async</span>
+            </div>
+        </div>
+
+        <!-- Hooks Module -->
+        <div class="module" data-module="hooks">
+            <div class="module-icon">⚡</div>
+            <div class="module-title">Hook System</div>
+            <div class="module-desc">Session, prompt, tool, and stop event handlers</div>
+            <div class="module-stats">
+                <span class="module-stat">6 hooks</span>
+                <span class="module-stat">&lt;80ms</span>
+            </div>
+        </div>
+
+        <!-- Themes Module -->
+        <div class="module" data-module="themes">
+            <div class="module-icon">🎨</div>
+            <div class="module-title">Theme Manager</div>
+            <div class="module-desc">Auto-clustering & thematic organization of memories</div>
+            <div class="module-stats">
+                <span class="module-stat">HDBSCAN</span>
+                <span class="module-stat">auto</span>
+            </div>
+        </div>
+
+        <!-- Anticipation Module -->
+        <div class="module" data-module="anticipation">
+            <div class="module-icon">🔮</div>
+            <div class="module-title">Anticipation</div>
+            <div class="module-desc">Predict user actions & pre-load relevant context</div>
+            <div class="module-stats">
+                <span class="module-stat">calibrated</span>
+                <span class="module-stat">gated</span>
+            </div>
+        </div>
+
+        <!-- Narrative Module -->
+        <div class="module" data-module="narrative">
+            <div class="module-icon">📖</div>
+            <div class="module-title">Narrative Engine</div>
+            <div class="module-desc">Track work mode, momentum, and session continuity</div>
+            <div class="module-stats">
+                <span class="module-stat">modes</span>
+                <span class="module-stat">ledger</span>
+            </div>
+        </div>
+
+        <!-- Flow indicators (animated particles) -->
+        <div class="flow-indicator" id="flow1"></div>
+        <div class="flow-indicator" id="flow2"></div>
+        <div class="flow-indicator" id="flow3"></div>
+    </div>
+
+    <!-- Detail Panel -->
+    <div class="detail-panel" id="detailPanel">
+        <div class="detail-title" id="detailTitle"></div>
+        <div class="detail-desc" id="detailDesc"></div>
+        <ul class="detail-features" id="detailFeatures"></ul>
+    </div>
+
+    <!-- Demo Panel -->
+    <div class="demo-panel">
+        <div class="demo-header">
+            <div class="demo-dot"></div>
+            <span class="demo-title">Live Mind Activation</span>
+        </div>
+        <div class="demo-conversation" id="conversation">
+            <div class="demo-message assistant">Ask something to see the mind activate...</div>
+        </div>
+        <div class="demo-input-row">
+            <input type="text" class="demo-input" id="demoInput"
+                   placeholder="How does chitta handle memory retrieval?"
+                   onkeypress="if(event.key==='Enter')simulateQuery()">
+            <button class="demo-btn" onclick="simulateQuery()">Ask</button>
         </div>
     </div>
 
     <script>
-        // Neural network configuration
-        const layers = [
-            { name: 'input', x: 50, neurons: 3, type: 'input' },
-            { name: 'rlm', x: 150, neurons: 5, type: 'rlm' },
-            { name: 'memory', x: 250, neurons: 6, type: 'memory' },
-            { name: 'symbol', x: 320, neurons: 4, type: 'symbol' },
-            { name: 'triplet', x: 390, neurons: 4, type: 'triplet' },
-            { name: 'embed', x: 460, neurons: 5, type: 'embed' },
-            { name: 'output', x: 550, neurons: 3, type: 'output' }
-        ];
-
-        const svg = document.getElementById('brainSvg');
-        const connectionsGroup = document.getElementById('connections');
-        const neuronsGroup = document.getElementById('neurons');
-        const packetsGroup = document.getElementById('packets');
-
-        // Store neuron positions
-        const neuronPositions = {};
-
-        // Initialize neural network
-        function initNetwork() {
-            layers.forEach((layer, li) => {
-                const startY = (450 - layer.neurons * 50) / 2;
-                neuronPositions[layer.name] = [];
-
-                for (let i = 0; i < layer.neurons; i++) {
-                    const y = startY + i * 50 + 25;
-                    neuronPositions[layer.name].push({ x: layer.x, y });
-
-                    // Create neuron
-                    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-                    circle.setAttribute('cx', layer.x);
-                    circle.setAttribute('cy', y);
-                    circle.setAttribute('r', 12);
-                    circle.setAttribute('class', `neuron ${layer.type}`);
-                    circle.setAttribute('id', `neuron-${layer.name}-${i}`);
-                    neuronsGroup.appendChild(circle);
-                }
-
-                // Create connections to next layer
-                if (li < layers.length - 1) {
-                    const nextLayer = layers[li + 1];
-                    const nextStartY = (450 - nextLayer.neurons * 50) / 2;
-
-                    for (let i = 0; i < layer.neurons; i++) {
-                        const y1 = startY + i * 50 + 25;
-                        for (let j = 0; j < nextLayer.neurons; j++) {
-                            const y2 = nextStartY + j * 50 + 25;
-
-                            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-                            const midX = (layer.x + nextLayer.x) / 2;
-                            path.setAttribute('d', `M ${layer.x + 12} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${nextLayer.x - 12} ${y2}`);
-                            path.setAttribute('class', 'connection');
-                            path.setAttribute('id', `conn-${layer.name}-${i}-${nextLayer.name}-${j}`);
-                            connectionsGroup.appendChild(path);
-                        }
-                    }
-                }
-            });
-        }
-
-        // Activate neurons with animation
-        async function activateNetwork(query) {
-            // Reset all
-            document.querySelectorAll('.neuron, .connection').forEach(el => {
-                el.classList.remove('active');
-            });
-
-            // Simulate processing through layers
-            for (let li = 0; li < layers.length; li++) {
-                const layer = layers[li];
-                const activeCount = Math.floor(Math.random() * layer.neurons) + 1;
-
-                // Activate random neurons in this layer
-                const activated = [];
-                for (let i = 0; i < activeCount; i++) {
-                    const idx = Math.floor(Math.random() * layer.neurons);
-                    if (!activated.includes(idx)) {
-                        activated.push(idx);
-                        const neuron = document.getElementById(`neuron-${layer.name}-${idx}`);
-                        if (neuron) {
-                            neuron.classList.add('active');
-                        }
-                    }
-                }
-
-                // Activate connections from previous layer
-                if (li > 0) {
-                    const prevLayer = layers[li - 1];
-                    activated.forEach(toIdx => {
-                        for (let fromIdx = 0; fromIdx < prevLayer.neurons; fromIdx++) {
-                            const conn = document.getElementById(`conn-${prevLayer.name}-${fromIdx}-${layer.name}-${toIdx}`);
-                            if (conn && Math.random() > 0.5) {
-                                conn.classList.add('active');
-                            }
-                        }
-                    });
-                }
-
-                await sleep(200);
+        // Module details
+        const moduleDetails = {
+            memories: {
+                title: '🧠 Hierarchical Memory',
+                desc: 'Three-tier memory system inspired by human cognition. SSL (Soul-State Language) provides compressed wisdom, episodes capture session context, and full turns preserve complete conversations.',
+                features: [
+                    'SSL v0.2 format for compact wisdom',
+                    'Episode markers with turn ranges',
+                    'expand_memory() for drill-down',
+                    'Confidence-based retrieval',
+                    'Auto-distillation from transcripts'
+                ]
+            },
+            rlm: {
+                title: '🔄 RLM Exploration',
+                desc: 'Recursive Language Model paradigm letting Claude write Python code to explore memories dynamically, rather than fixed retrieval patterns.',
+                features: [
+                    'soul.search() semantic search',
+                    'soul.expand() context drill-down',
+                    'soul.triplets() graph queries',
+                    'Sandboxed Python execution',
+                    'Trajectory tracking'
+                ]
+            },
+            embeddings: {
+                title: '🎯 VakYantra Embedder',
+                desc: 'ONNX-powered embedding engine with HNSW vector index for sub-5ms semantic search across all memories.',
+                features: [
+                    '384-dimensional vectors',
+                    'all-MiniLM-L6-v2 model',
+                    'HNSW index (DuckDB VSS)',
+                    'CPU & GPU support',
+                    'Batch embedding'
+                ]
+            },
+            triplets: {
+                title: '🕸️ Knowledge Graph',
+                desc: 'DuckPGQ-powered graph database storing relationships between memories, symbols, files, and concepts.',
+                features: [
+                    '500K+ relationship edges',
+                    'Subject-Predicate-Object triples',
+                    'PGQL path queries',
+                    'Neighbor expansion',
+                    'Derived relationships'
+                ]
+            },
+            symbols: {
+                title: '📦 Code Intelligence',
+                desc: 'Tree-sitter powered code symbol extraction with semantic descriptions, call graphs, and BM25 search.',
+                features: [
+                    'Function/class extraction',
+                    'Call graph tracking',
+                    'Symbol descriptions (LLM)',
+                    'File dependency analysis',
+                    'read_symbol() token savings'
+                ]
+            },
+            sadhana: {
+                title: '🤖 Sadhana Agents',
+                desc: 'Autonomous background agents running sense-think-act loops with persistent goals and configurable models.',
+                features: [
+                    'Persistent goal tracking',
+                    'Configurable intervals',
+                    'Model switching (haiku/opus)',
+                    'Event history logging',
+                    'Pause/resume support'
+                ]
+            },
+            hooks: {
+                title: '⚡ Hook System',
+                desc: 'Event-driven hooks that inject context at key moments: session start, user prompt, tool use, and session end.',
+                features: [
+                    'SessionStart: realm detection',
+                    'UserPromptSubmit: memory recall',
+                    'PreToolUse: context injection',
+                    'Stop: outcome learning',
+                    '<80ms latency target'
+                ]
+            },
+            themes: {
+                title: '🎨 Theme Manager',
+                desc: 'Automatic clustering of memories into themes using HDBSCAN, enabling thematic retrieval and organization.',
+                features: [
+                    'HDBSCAN clustering',
+                    'Auto-naming with LLM',
+                    'Theme-based recall',
+                    'Orphan assignment',
+                    'Statistics tracking'
+                ]
+            },
+            anticipation: {
+                title: '🔮 Anticipation Engine',
+                desc: 'Predict what the user will do next and pre-load relevant context, with calibration for accuracy.',
+                features: [
+                    'Pattern-based predictions',
+                    'Confidence gating',
+                    'Outcome tracking',
+                    'Calibration scoring',
+                    'Session-aware filtering'
+                ]
+            },
+            narrative: {
+                title: '📖 Narrative Engine',
+                desc: 'Track the story of each session: work mode, momentum, focus areas, and provide continuity across restarts.',
+                features: [
+                    'Work mode detection',
+                    'Momentum tracking',
+                    'Ledger checkpoints',
+                    'Session continuity',
+                    'Pratyabhijñā (re-recognition)'
+                ]
             }
-        }
+        };
 
-        // Sleep utility
-        function sleep(ms) {
-            return new Promise(resolve => setTimeout(resolve, ms));
-        }
+        // Store connection paths for particle animation
+        const connectionPaths = {};
 
-        // Mock results based on query
-        function generateResults(query) {
-            const results = [];
-            const words = query.toLowerCase().split(' ');
+        // Draw connections
+        function drawConnections() {
+            const svg = document.getElementById('connectionsSvg');
+            const container = document.getElementById('vizContainer');
+            const rect = container.getBoundingClientRect();
+            const centerX = rect.width / 2;
+            const centerY = rect.height / 2;
 
-            // Generate memory results
-            for (let i = 0; i < 3; i++) {
-                results.push({
-                    type: 'memory',
-                    score: (0.9 - i * 0.15).toFixed(2),
-                    content: `[wisdom] ${words[0]}-pattern-detected → ${words[words.length-1]}-implementation`
-                });
-            }
+            svg.innerHTML = '';
+            svg.setAttribute('viewBox', `0 0 ${rect.width} ${rect.height}`);
 
-            // Generate symbol results
-            results.push({
-                type: 'symbol',
-                score: '0.78',
-                content: `function handle_${words[0]} @ server.py:142`
+            // Add defs for gradients
+            const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+
+            // Gradient for particle glow
+            const glowGradient = document.createElementNS('http://www.w3.org/2000/svg', 'radialGradient');
+            glowGradient.id = 'particleGlow';
+            glowGradient.innerHTML = `
+                <stop offset="0%" stop-color="var(--cyan)" stop-opacity="1"/>
+                <stop offset="50%" stop-color="var(--cyan)" stop-opacity="0.5"/>
+                <stop offset="100%" stop-color="var(--cyan)" stop-opacity="0"/>
+            `;
+            defs.appendChild(glowGradient);
+
+            const purpleGlow = document.createElementNS('http://www.w3.org/2000/svg', 'radialGradient');
+            purpleGlow.id = 'particleGlowPurple';
+            purpleGlow.innerHTML = `
+                <stop offset="0%" stop-color="var(--purple)" stop-opacity="1"/>
+                <stop offset="50%" stop-color="var(--purple)" stop-opacity="0.5"/>
+                <stop offset="100%" stop-color="var(--purple)" stop-opacity="0"/>
+            `;
+            defs.appendChild(purpleGlow);
+
+            svg.appendChild(defs);
+
+            // Create group for connections and particles
+            const connectionsGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            connectionsGroup.id = 'connectionsGroup';
+            svg.appendChild(connectionsGroup);
+
+            const particlesGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            particlesGroup.id = 'particlesGroup';
+            svg.appendChild(particlesGroup);
+
+            document.querySelectorAll('.module').forEach(module => {
+                const moduleRect = module.getBoundingClientRect();
+                const containerRect = container.getBoundingClientRect();
+                const mx = moduleRect.left - containerRect.left + moduleRect.width / 2;
+                const my = moduleRect.top - containerRect.top + moduleRect.height / 2;
+
+                const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+
+                // More organic curved connection with control point offset
+                const dx = centerX - mx;
+                const dy = centerY - my;
+                const cpOffset = Math.min(Math.abs(dx), Math.abs(dy)) * 0.5;
+                const cpX = mx + dx * 0.3 + (dy > 0 ? cpOffset : -cpOffset) * 0.3;
+                const cpY = my + dy * 0.5;
+
+                const pathD = `M ${mx} ${my} Q ${cpX} ${cpY}, ${centerX} ${centerY}`;
+                line.setAttribute('d', pathD);
+                line.setAttribute('class', 'connection-line');
+                line.setAttribute('data-module', module.dataset.module);
+                connectionsGroup.appendChild(line);
+
+                // Store path for particle animation
+                connectionPaths[module.dataset.module] = {
+                    path: pathD,
+                    start: { x: mx, y: my },
+                    control: { x: cpX, y: cpY },
+                    end: { x: centerX, y: centerY }
+                };
             });
 
-            // Generate triplet
-            results.push({
-                type: 'triplet',
-                score: '0.65',
-                content: `(${words[0]}) --[related_to]--> (${words[words.length-1]})`
-            });
-
-            return results;
-        }
-
-        // Display results
-        function displayResults(results) {
-            const container = document.getElementById('resultsContent');
-            container.innerHTML = '';
-
-            results.forEach((result, i) => {
-                setTimeout(() => {
-                    const div = document.createElement('div');
-                    div.className = `result-item ${result.type}`;
-                    div.innerHTML = `
-                        <div class="type">${result.type}</div>
-                        <span class="score">${result.score}</span>
-                        <div>${result.content}</div>
-                    `;
-                    container.appendChild(div);
-                }, i * 150);
-            });
-        }
-
-        // Display trajectory
-        function displayTrajectory() {
-            const container = document.getElementById('trajectoryList');
-            const steps = [
-                'soul.search(query)',
-                'soul.expand(id=3377)',
-                'soul.triplets(subject)',
-                'format_output()'
+            // Draw inter-module connections (data flows between modules)
+            const interModuleConnections = [
+                ['rlm', 'embeddings'],
+                ['rlm', 'memories'],
+                ['embeddings', 'memories'],
+                ['memories', 'triplets'],
+                ['triplets', 'symbols'],
+                ['themes', 'memories'],
+                ['hooks', 'rlm'],
+                ['sadhana', 'rlm'],
+                ['anticipation', 'memories'],
+                ['narrative', 'themes']
             ];
 
-            container.innerHTML = '';
-            steps.forEach((step, i) => {
-                setTimeout(() => {
-                    const div = document.createElement('div');
-                    div.className = 'trajectory-item';
-                    div.style.animationDelay = `${i * 0.1}s`;
-                    div.innerHTML = `
-                        <div class="step">${i + 1}</div>
-                        <span>${step}</span>
-                    `;
-                    container.appendChild(div);
-                }, i * 200);
+            const interModuleGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            interModuleGroup.id = 'interModuleGroup';
+            svg.insertBefore(interModuleGroup, connectionsGroup);
+
+            interModuleConnections.forEach(([from, to]) => {
+                const fromPath = connectionPaths[from];
+                const toPath = connectionPaths[to];
+                if (!fromPath || !toPath) return;
+
+                const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+
+                // Create curved path between modules
+                const midX = (fromPath.start.x + toPath.start.x) / 2;
+                const midY = (fromPath.start.y + toPath.start.y) / 2;
+                const cpX = midX + (centerY - midY) * 0.2;
+                const cpY = midY + (centerX - midX) * 0.2;
+
+                const pathD = `M ${fromPath.start.x} ${fromPath.start.y} Q ${cpX} ${cpY}, ${toPath.start.x} ${toPath.start.y}`;
+                line.setAttribute('d', pathD);
+                line.setAttribute('class', 'inter-module-line');
+                line.setAttribute('data-from', from);
+                line.setAttribute('data-to', to);
+                interModuleGroup.appendChild(line);
+
+                // Store for particle animation
+                connectionPaths[`${from}->${to}`] = {
+                    path: pathD,
+                    start: fromPath.start,
+                    control: { x: cpX, y: cpY },
+                    end: toPath.start
+                };
             });
+
+            // Start ambient particle flow
+            startAmbientFlow();
         }
 
-        // Add message to chat
-        function addMessage(text, type) {
-            const container = document.getElementById('chatMessages');
-            const div = document.createElement('div');
-            div.className = `message ${type}`;
-            div.innerHTML = `
-                <div class="message-label">${type === 'user' ? 'You' : 'Claude'}</div>
-                ${text}
-            `;
-            container.appendChild(div);
-            container.scrollTop = container.scrollHeight;
+        // Animate inter-module data transfer
+        function sendInterModuleFlow(from, to, count = 2) {
+            const key = `${from}->${to}`;
+            const pathData = connectionPaths[key];
+            if (!pathData) return;
+
+            // Activate the inter-module line
+            const line = document.querySelector(`.inter-module-line[data-from="${from}"][data-to="${to}"]`);
+            if (line) {
+                line.classList.add('active');
+                setTimeout(() => line.classList.remove('active'), 1000);
+            }
+
+            for (let i = 0; i < count; i++) {
+                animateParticleCustomPath(pathData, 500 + Math.random() * 300, i * 100, 'purple');
+            }
         }
 
-        // Send message handler
-        async function sendMessage() {
-            const input = document.getElementById('chatInput');
-            const query = input.value.trim();
-            if (!query) return;
+        // Animate particle along custom path
+        function animateParticleCustomPath(pathData, duration = 600, delay = 0, color = 'cyan') {
+            setTimeout(() => {
+                const particlesGroup = document.getElementById('particlesGroup');
+                if (!particlesGroup) return;
 
-            // Add user message
-            addMessage(query, 'user');
+                const particle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                particle.setAttribute('r', '3');
+                particle.style.fill = color === 'purple' ? 'var(--purple)' : 'var(--cyan)';
+                particle.style.filter = `drop-shadow(0 0 4px var(--${color}))`;
+
+                particlesGroup.appendChild(particle);
+
+                const { start, control, end } = pathData;
+                let startTime = null;
+
+                function animate(timestamp) {
+                    if (!startTime) startTime = timestamp;
+                    const progress = Math.min((timestamp - startTime) / duration, 1);
+                    const t = progress < 0.5
+                        ? 4 * progress * progress * progress
+                        : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+
+                    const x = Math.pow(1 - t, 2) * start.x +
+                              2 * (1 - t) * t * control.x +
+                              Math.pow(t, 2) * end.x;
+                    const y = Math.pow(1 - t, 2) * start.y +
+                              2 * (1 - t) * t * control.y +
+                              Math.pow(t, 2) * end.y;
+
+                    particle.setAttribute('cx', x);
+                    particle.setAttribute('cy', y);
+
+                    const scale = 0.6 + Math.sin(progress * Math.PI) * 0.6;
+                    particle.setAttribute('r', 2.5 * scale);
+
+                    if (progress < 1) {
+                        requestAnimationFrame(animate);
+                    } else {
+                        particle.style.transition = 'opacity 0.15s';
+                        particle.style.opacity = '0';
+                        setTimeout(() => particle.remove(), 150);
+                    }
+                }
+
+                requestAnimationFrame(animate);
+            }, delay);
+        }
+
+        // Animate particle along a bezier path
+        function animateParticle(moduleName, toCenter = true, duration = 800, delay = 0, color = 'cyan') {
+            const pathData = connectionPaths[moduleName];
+            if (!pathData) return;
+
+            setTimeout(() => {
+                const svg = document.getElementById('connectionsSvg');
+                const particlesGroup = document.getElementById('particlesGroup');
+                if (!particlesGroup) return;
+
+                // Create particle with glow
+                const particle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                particle.setAttribute('r', '4');
+                particle.setAttribute('class', `data-particle ${!toCenter ? 'outbound' : ''}`);
+
+                // Create trail effect
+                const trail = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                trail.setAttribute('class', `data-particle-trail ${!toCenter ? 'outbound' : ''}`);
+                trail.setAttribute('stroke-dasharray', '10 5');
+
+                particlesGroup.appendChild(trail);
+                particlesGroup.appendChild(particle);
+
+                const start = toCenter ? pathData.start : pathData.end;
+                const end = toCenter ? pathData.end : pathData.start;
+                const control = pathData.control;
+
+                let startTime = null;
+                const trailPoints = [];
+
+                function animate(timestamp) {
+                    if (!startTime) startTime = timestamp;
+                    const progress = Math.min((timestamp - startTime) / duration, 1);
+
+                    // Ease-in-out cubic
+                    const t = progress < 0.5
+                        ? 4 * progress * progress * progress
+                        : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+
+                    // Calculate position on quadratic bezier
+                    const adjustedT = toCenter ? t : t;
+                    const x = Math.pow(1 - adjustedT, 2) * start.x +
+                              2 * (1 - adjustedT) * adjustedT * control.x +
+                              Math.pow(adjustedT, 2) * end.x;
+                    const y = Math.pow(1 - adjustedT, 2) * start.y +
+                              2 * (1 - adjustedT) * adjustedT * control.y +
+                              Math.pow(adjustedT, 2) * end.y;
+
+                    particle.setAttribute('cx', x);
+                    particle.setAttribute('cy', y);
+
+                    // Update trail
+                    trailPoints.push({ x, y });
+                    if (trailPoints.length > 15) trailPoints.shift();
+
+                    if (trailPoints.length > 1) {
+                        const trailPath = trailPoints.map((p, i) =>
+                            (i === 0 ? 'M' : 'L') + ` ${p.x} ${p.y}`
+                        ).join(' ');
+                        trail.setAttribute('d', trailPath);
+                        trail.style.opacity = 0.4 * (1 - progress * 0.5);
+                    }
+
+                    // Scale particle based on progress (smaller at ends)
+                    const scale = 0.5 + Math.sin(progress * Math.PI) * 0.8;
+                    particle.setAttribute('r', 3 * scale);
+
+                    if (progress < 1) {
+                        requestAnimationFrame(animate);
+                    } else {
+                        // Fade out and remove
+                        particle.style.transition = 'opacity 0.2s';
+                        trail.style.transition = 'opacity 0.2s';
+                        particle.style.opacity = '0';
+                        trail.style.opacity = '0';
+                        setTimeout(() => {
+                            particle.remove();
+                            trail.remove();
+                        }, 200);
+                    }
+                }
+
+                requestAnimationFrame(animate);
+            }, delay);
+        }
+
+        // Send burst of particles for data flow visualization
+        function sendDataFlow(moduleName, toCenter = true, count = 3) {
+            for (let i = 0; i < count; i++) {
+                animateParticle(moduleName, toCenter, 600 + Math.random() * 400, i * 150);
+            }
+        }
+
+        // Ambient particle flow (always running) - the mind is always thinking
+        let ambientInterval = null;
+        let ambientInterModuleInterval = null;
+
+        function startAmbientFlow() {
+            if (ambientInterval) clearInterval(ambientInterval);
+            if (ambientInterModuleInterval) clearInterval(ambientInterModuleInterval);
+
+            const coreModules = ['memories', 'rlm', 'embeddings', 'triplets', 'symbols',
+                                 'sadhana', 'hooks', 'themes', 'anticipation', 'narrative'];
+
+            const interModulePairs = [
+                ['rlm', 'embeddings'],
+                ['rlm', 'memories'],
+                ['embeddings', 'memories'],
+                ['memories', 'triplets'],
+                ['triplets', 'symbols'],
+                ['themes', 'memories'],
+                ['anticipation', 'memories']
+            ];
+
+            // Core module ambient flow
+            ambientInterval = setInterval(() => {
+                const module = coreModules[Math.floor(Math.random() * coreModules.length)];
+                const toCenter = Math.random() > 0.4; // Slightly favor inbound
+
+                // Single slow ambient particle (faint)
+                animateParticle(module, toCenter, 2500, 0);
+            }, 1200);
+
+            // Inter-module ambient flow (less frequent, shows background processing)
+            ambientInterModuleInterval = setInterval(() => {
+                const pair = interModulePairs[Math.floor(Math.random() * interModulePairs.length)];
+                const pathKey = `${pair[0]}->${pair[1]}`;
+
+                if (connectionPaths[pathKey]) {
+                    animateParticleCustomPath(connectionPaths[pathKey], 1800, 0, 'purple');
+                }
+            }, 2500);
+        }
+
+        // Show module details
+        function showDetail(moduleName) {
+            const detail = moduleDetails[moduleName];
+            if (!detail) return;
+
+            document.getElementById('detailTitle').textContent = detail.title;
+            document.getElementById('detailDesc').textContent = detail.desc;
+
+            const featuresList = document.getElementById('detailFeatures');
+            featuresList.innerHTML = detail.features.map(f => `<li>${f}</li>`).join('');
+
+            document.getElementById('detailPanel').classList.add('visible');
+        }
+
+        function hideDetail() {
+            document.getElementById('detailPanel').classList.remove('visible');
+        }
+
+        // Activate module animation with data flow
+        function activateModule(moduleName, delay = 0, flowDirection = 'in') {
+            setTimeout(() => {
+                const module = document.querySelector(`[data-module="${moduleName}"]`);
+                const line = document.querySelector(`.connection-line[data-module="${moduleName}"]`);
+
+                if (module) {
+                    module.classList.add('active');
+                    setTimeout(() => module.classList.remove('active'), 1500);
+                }
+                if (line) {
+                    line.classList.add('active');
+                    setTimeout(() => line.classList.remove('active'), 1500);
+                }
+
+                // Send data particles along the connection
+                const toCenter = flowDirection === 'in';
+                sendDataFlow(moduleName, toCenter, 4);
+
+                // Also send some particles back (bidirectional flow)
+                setTimeout(() => {
+                    sendDataFlow(moduleName, !toCenter, 2);
+                }, 400);
+            }, delay);
+        }
+
+        // Visualize complete query flow through the mind
+        function visualizeQueryFlow(query) {
+            // Phase 1: Query enters through hooks (inbound)
+            activateModule('hooks', 0, 'in');
+
+            // Phase 2: Hooks -> RLM inter-module flow
+            setTimeout(() => {
+                sendInterModuleFlow('hooks', 'rlm', 3);
+                activateModule('rlm', 200, 'in');
+            }, 200);
+
+            // Phase 3: RLM -> Embeddings (parallel with RLM -> Memories)
+            setTimeout(() => {
+                sendInterModuleFlow('rlm', 'embeddings', 3);
+                sendInterModuleFlow('rlm', 'memories', 2);
+            }, 500);
+
+            // Phase 4: Memory search via embeddings
+            activateModule('embeddings', 600, 'in');
+
+            // Phase 5: Embeddings -> Memories flow
+            setTimeout(() => {
+                sendInterModuleFlow('embeddings', 'memories', 4);
+                activateModule('memories', 200, 'in');
+            }, 800);
+
+            // Phase 6: Knowledge graph expansion (Memories -> Triplets)
+            setTimeout(() => {
+                sendInterModuleFlow('memories', 'triplets', 3);
+                activateModule('triplets', 200, 'in');
+            }, 1100);
+
+            // Phase 7: Symbol lookup (Triplets -> Symbols)
+            setTimeout(() => {
+                sendInterModuleFlow('triplets', 'symbols', 2);
+                activateModule('symbols', 200, 'in');
+            }, 1400);
+
+            // Phase 8: Theme clustering for organization
+            setTimeout(() => {
+                sendInterModuleFlow('themes', 'memories', 3);
+                activateModule('themes', 200, 'in');
+            }, 1600);
+
+            // Phase 9: Results consolidation - flow back through center
+            setTimeout(() => {
+                // All modules send results back to center
+                ['memories', 'triplets', 'symbols', 'themes'].forEach((m, i) => {
+                    setTimeout(() => sendDataFlow(m, false, 4), i * 150);
+                });
+            }, 2000);
+
+            // Phase 10: Narrative wraps up session context
+            setTimeout(() => {
+                sendInterModuleFlow('narrative', 'themes', 2);
+                activateModule('narrative', 200, 'out');
+            }, 2600);
+        }
+
+        // Simulate query processing with full data flow visualization
+        async function simulateQuery() {
+            const input = document.getElementById('demoInput');
+            const query = input.value.trim() || 'How does chitta handle memory retrieval?';
             input.value = '';
 
-            // Activate network
-            await activateNetwork(query);
+            // Add user message
+            const conv = document.getElementById('conversation');
+            conv.innerHTML += `<div class="demo-message user">${query}</div>`;
+            conv.scrollTop = conv.scrollHeight;
 
-            // Generate and display results
-            const results = generateResults(query);
-            displayResults(results);
-            displayTrajectory();
+            // Visualize the complete query flow through the mind
+            visualizeQueryFlow(query);
 
-            // Add response
-            await sleep(500);
-            addMessage(`Found ${results.length} relevant memories and symbols for "${query}". The RLM exploration traversed 4 layers with 67% average confidence.`, 'assistant');
+            // Add response after animation completes
+            setTimeout(() => {
+                const responses = [
+                    `Found 7 relevant memories via RLM exploration. VakYantra embeddings matched at 89% confidence. The knowledge graph revealed 3 related concepts through triplet traversal.`,
+                    `Activated hierarchical retrieval: SSL wisdom provided 2 patterns, expanded to episode context, queried 502K triplets for relationships.`,
+                    `Smart context assembled: 5 memories (0.85 avg confidence), 2 code symbols, 4 triplet relationships. Trajectory: search → expand → graph → format.`,
+                    `RLM REPL executed: soul.search("${query.substring(0, 30)}...") → 12 candidates → soul.expand(top_3) → triplets traversed → context synthesized.`
+                ];
+                const response = responses[Math.floor(Math.random() * responses.length)];
+                conv.innerHTML += `<div class="demo-message assistant">${response}</div>`;
+                conv.scrollTop = conv.scrollHeight;
+            }, 2800);
         }
 
-        // Initialize
-        initNetwork();
+        // Module hover and click handlers
+        document.querySelectorAll('.module').forEach(module => {
+            module.addEventListener('mouseenter', () => {
+                showDetail(module.dataset.module);
+                // Send a subtle particle on hover
+                sendDataFlow(module.dataset.module, true, 1);
+            });
+            module.addEventListener('mouseleave', hideDetail);
+            module.addEventListener('click', () => {
+                // Full activation with bidirectional flow
+                activateModule(module.dataset.module, 0, 'in');
 
-        // Demo auto-play
-        setTimeout(() => {
-            document.getElementById('chatInput').value = 'How does the daemon handle memory retrieval?';
-            sendMessage();
-        }, 1000);
+                // Trigger related inter-module flows
+                const relatedFlows = {
+                    'rlm': [['rlm', 'embeddings'], ['rlm', 'memories']],
+                    'memories': [['embeddings', 'memories'], ['memories', 'triplets'], ['themes', 'memories']],
+                    'embeddings': [['rlm', 'embeddings'], ['embeddings', 'memories']],
+                    'triplets': [['memories', 'triplets'], ['triplets', 'symbols']],
+                    'symbols': [['triplets', 'symbols']],
+                    'hooks': [['hooks', 'rlm']],
+                    'themes': [['themes', 'memories'], ['narrative', 'themes']],
+                    'sadhana': [['sadhana', 'rlm']],
+                    'anticipation': [['anticipation', 'memories']],
+                    'narrative': [['narrative', 'themes']]
+                };
+
+                const flows = relatedFlows[module.dataset.module] || [];
+                flows.forEach(([from, to], i) => {
+                    setTimeout(() => sendInterModuleFlow(from, to, 3), i * 200);
+                });
+            });
+        });
+
+        // Pulse the central core when processing
+        function pulseCore(intensity = 1) {
+            const coreGlow = document.getElementById('coreGlow');
+            const coreCenter = document.getElementById('coreCenter');
+
+            if (coreGlow && coreCenter) {
+                // Temporarily enhance the glow
+                coreGlow.setAttribute('fill', 'url(#coreActiveGradient)');
+                coreGlow.setAttribute('filter', 'url(#strongGlow)');
+                coreCenter.style.filter = 'drop-shadow(0 0 10px var(--cyan))';
+
+                setTimeout(() => {
+                    coreGlow.setAttribute('fill', 'url(#coreGradient)');
+                    coreGlow.setAttribute('filter', 'url(#glow)');
+                    coreCenter.style.filter = '';
+                }, 500 * intensity);
+            }
+        }
+
+        // Hook into data flow to pulse core
+        const originalSendDataFlow = sendDataFlow;
+        sendDataFlow = function(moduleName, toCenter, count) {
+            originalSendDataFlow(moduleName, toCenter, count);
+            if (count >= 3) {
+                pulseCore(count / 3);
+            }
+        };
+
+        // Initialize
+        window.addEventListener('load', () => {
+            drawConnections();
+
+            // Auto-demo after 2 seconds
+            setTimeout(() => {
+                document.getElementById('demoInput').value = 'How does the RLM paradigm improve memory exploration?';
+                simulateQuery();
+            }, 2000);
+        });
+
+        window.addEventListener('resize', drawConnections);
     </script>
 </body>
 </html>
