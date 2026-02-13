@@ -144,7 +144,7 @@ sadhana-tui
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-[Full sadhana documentation](docs/SADHANA.md)
+[Full sadhana documentation](docs/SADHANA.md) | [Website](https://genomewalker.github.io/cc-soul/sadhana.html)
 
 ### Zero Configuration
 Hooks wire everything together. Memories surface transparently. Just install and work.
