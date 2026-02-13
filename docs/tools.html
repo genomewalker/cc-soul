@@ -17,6 +17,70 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
+<style>
+/* Sticky Top Submenu TOC */
+.submenu-toc {
+  position: sticky;
+  top: 60px;
+  z-index: 90;
+  background: linear-gradient(180deg, rgba(11, 11, 16, 0.98) 0%, rgba(11, 11, 16, 0.95) 100%);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(122, 162, 247, 0.1);
+  padding: 0;
+  margin-top: -1px;
+}
+.submenu-toc-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 var(--space-5);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.submenu-toc-inner::-webkit-scrollbar { display: none; }
+.submenu-toc-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px;
+  color: #565f89;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+  position: relative;
+}
+.submenu-toc-link:hover { color: #a9b1d6; }
+.submenu-toc-link.active { color: #c0caf5; }
+.submenu-toc-link::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.4;
+  transition: all 0.2s ease;
+}
+.submenu-toc-link:hover::before { opacity: 0.7; }
+.submenu-toc-link.active::before { opacity: 1; box-shadow: 0 0 8px currentColor; }
+.submenu-toc-link.active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 16px;
+  right: 16px;
+  height: 2px;
+  background: currentColor;
+  border-radius: 2px 2px 0 0;
+  box-shadow: 0 0 12px currentColor;
+}
+.submenu-toc-link:hover, .submenu-toc-link.active { color: var(--sandal-300); }
+</style>
 </head>
 <body>
 
@@ -62,40 +126,37 @@
 </section>
 
 <!-- TABLE OF CONTENTS -->
-<section class="toc">
-  <div class="container">
-    <p class="toc-label">Jump to category</p>
-    <div class="toc-grid">
-      <a href="#cat-core" class="toc-chip">Core Memory <span class="count">14</span></a>
-      <a href="#cat-graph" class="toc-chip">Graph &amp; Triplets <span class="count">3</span></a>
-      <a href="#cat-hooks" class="toc-chip">Hook Integration <span class="count">2</span></a>
-      <a href="#cat-context" class="toc-chip">Context &amp; Status <span class="count">3</span></a>
-      <a href="#cat-code" class="toc-chip">Code Intelligence <span class="count">12</span></a>
-      <a href="#cat-codewisdom" class="toc-chip">Code Wisdom <span class="count">4</span></a>
-      <a href="#cat-realm" class="toc-chip">Realms <span class="count">7</span></a>
-      <a href="#cat-ledger" class="toc-chip">Session Continuity <span class="count">6</span></a>
-      <a href="#cat-messaging" class="toc-chip">Cross-Session Messaging <span class="count">7</span></a>
-      <a href="#cat-narrative" class="toc-chip">Narrative (Work Modes) <span class="count">3</span></a>
-      <a href="#cat-transcript" class="toc-chip">Transcript &amp; Distillation <span class="count">8</span></a>
-      <a href="#cat-theme" class="toc-chip">Theme Memory <span class="count">6</span></a>
-      <a href="#cat-hygiene" class="toc-chip">Hygiene &amp; Calibration <span class="count">5</span></a>
-      <a href="#cat-maintenance" class="toc-chip">Maintenance <span class="count">2</span></a>
-      <a href="#cat-io" class="toc-chip">Import / Export <span class="count">2</span></a>
-      <a href="#cat-background" class="toc-chip">Background Processing <span class="count">2</span></a>
-      <a href="#cat-learning" class="toc-chip">Learning &amp; Tracking <span class="count">6</span></a>
-      <a href="#cat-explore" class="toc-chip">Exploration <span class="count">4</span></a>
-      <a href="#cat-longtask" class="toc-chip">Long Tasks <span class="count">9</span></a>
-      <a href="#cat-anticipation" class="toc-chip">Anticipation &amp; Habits <span class="count">10</span></a>
-      <a href="#cat-profile" class="toc-chip">User Profile <span class="count">3</span></a>
-      <a href="#cat-goals" class="toc-chip">Goals <span class="count">5</span></a>
-      <a href="#cat-consolidation" class="toc-chip">Consolidation <span class="count">3</span></a>
-      <a href="#cat-metacognition" class="toc-chip">Metacognition <span class="count">3</span></a>
-      <a href="#cat-curiosity" class="toc-chip">Curiosity &amp; Research <span class="count">6</span></a>
-      <a href="#cat-suggestions" class="toc-chip">Suggestions <span class="count">4</span></a>
-      <a href="#cat-insights" class="toc-chip">Insights <span class="count">2</span></a>
-    </div>
+<nav class="submenu-toc">
+  <div class="submenu-toc-inner">
+    <a href="#cat-core" class="submenu-toc-link" data-section="cat-core">Core Memory</a>
+    <a href="#cat-graph" class="submenu-toc-link" data-section="cat-graph">Graph &amp; Triplets</a>
+    <a href="#cat-hooks" class="submenu-toc-link" data-section="cat-hooks">Hook Integration</a>
+    <a href="#cat-context" class="submenu-toc-link" data-section="cat-context">Context &amp; Status</a>
+    <a href="#cat-code" class="submenu-toc-link" data-section="cat-code">Code Intelligence</a>
+    <a href="#cat-codewisdom" class="submenu-toc-link" data-section="cat-codewisdom">Code Wisdom</a>
+    <a href="#cat-realm" class="submenu-toc-link" data-section="cat-realm">Realms</a>
+    <a href="#cat-ledger" class="submenu-toc-link" data-section="cat-ledger">Session Continuity</a>
+    <a href="#cat-messaging" class="submenu-toc-link" data-section="cat-messaging">Cross-Session Messaging</a>
+    <a href="#cat-narrative" class="submenu-toc-link" data-section="cat-narrative">Narrative (Work Modes)</a>
+    <a href="#cat-transcript" class="submenu-toc-link" data-section="cat-transcript">Transcript &amp; Distillation</a>
+    <a href="#cat-theme" class="submenu-toc-link" data-section="cat-theme">Theme Memory</a>
+    <a href="#cat-hygiene" class="submenu-toc-link" data-section="cat-hygiene">Hygiene &amp; Calibration</a>
+    <a href="#cat-maintenance" class="submenu-toc-link" data-section="cat-maintenance">Maintenance</a>
+    <a href="#cat-io" class="submenu-toc-link" data-section="cat-io">Import / Export</a>
+    <a href="#cat-background" class="submenu-toc-link" data-section="cat-background">Background Processing</a>
+    <a href="#cat-learning" class="submenu-toc-link" data-section="cat-learning">Learning &amp; Tracking</a>
+    <a href="#cat-explore" class="submenu-toc-link" data-section="cat-explore">Exploration</a>
+    <a href="#cat-longtask" class="submenu-toc-link" data-section="cat-longtask">Long Tasks</a>
+    <a href="#cat-anticipation" class="submenu-toc-link" data-section="cat-anticipation">Anticipation &amp; Habits</a>
+    <a href="#cat-profile" class="submenu-toc-link" data-section="cat-profile">User Profile</a>
+    <a href="#cat-goals" class="submenu-toc-link" data-section="cat-goals">Goals</a>
+    <a href="#cat-consolidation" class="submenu-toc-link" data-section="cat-consolidation">Consolidation</a>
+    <a href="#cat-metacognition" class="submenu-toc-link" data-section="cat-metacognition">Metacognition</a>
+    <a href="#cat-curiosity" class="submenu-toc-link" data-section="cat-curiosity">Curiosity &amp; Research</a>
+    <a href="#cat-suggestions" class="submenu-toc-link" data-section="cat-suggestions">Suggestions</a>
+    <a href="#cat-insights" class="submenu-toc-link" data-section="cat-insights">Insights</a>
   </div>
-</section>
+</nav>
 
 <!-- TOOLS -->
 <section class="tools-section">
@@ -686,7 +747,7 @@ document.querySelectorAll('a[href^="#"]').forEach(function(anchor) {
     var target = document.querySelector(this.getAttribute('href'));
     if (target) {
       e.preventDefault();
-      var offset = 80;
+      var offset = 140;
       var top = target.getBoundingClientRect().top + window.pageYOffset - offset;
       window.scrollTo({ top: top, behavior: 'smooth' });
       // Expand the category if collapsed
@@ -696,6 +757,31 @@ document.querySelectorAll('a[href^="#"]').forEach(function(anchor) {
     }
   });
 });
+
+/* ═══════════════════════════════════════════
+   SCROLL SPY - Highlight active TOC section
+   ═══════════════════════════════════════════ */
+(function() {
+  var tocLinks = document.querySelectorAll('.submenu-toc-link');
+  var sections = [];
+  tocLinks.forEach(function(link) {
+    var sectionId = link.getAttribute('data-section');
+    var section = document.getElementById(sectionId);
+    if (section) sections.push({ id: sectionId, el: section, link: link });
+  });
+  if (!sections.length) return;
+  function updateActive() {
+    var scrollPos = window.scrollY + 180;
+    var activeSection = sections[0];
+    sections.forEach(function(section) {
+      if (section.el.offsetTop <= scrollPos) activeSection = section;
+    });
+    tocLinks.forEach(function(link) { link.classList.remove('active'); });
+    if (activeSection) activeSection.link.classList.add('active');
+  }
+  window.addEventListener('scroll', updateActive, { passive: true });
+  updateActive();
+})();
 
 /* Tools search/filter */
 (function() {

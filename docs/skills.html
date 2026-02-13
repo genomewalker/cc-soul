@@ -416,6 +416,69 @@ body::before {
   }
   .page-header h1 { font-size: var(--text-2xl); }
 }
+
+/* Sticky Top Submenu TOC */
+.submenu-toc {
+  position: sticky;
+  top: 60px;
+  z-index: 90;
+  background: linear-gradient(180deg, rgba(11, 11, 16, 0.98) 0%, rgba(11, 11, 16, 0.95) 100%);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(122, 162, 247, 0.1);
+  padding: 0;
+  margin-top: -1px;
+}
+.submenu-toc-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 var(--space-5);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.submenu-toc-inner::-webkit-scrollbar { display: none; }
+.submenu-toc-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px;
+  color: #565f89;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+  position: relative;
+}
+.submenu-toc-link:hover { color: #a9b1d6; }
+.submenu-toc-link.active { color: #c0caf5; }
+.submenu-toc-link::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.4;
+  transition: all 0.2s ease;
+}
+.submenu-toc-link:hover::before { opacity: 0.7; }
+.submenu-toc-link.active::before { opacity: 1; box-shadow: 0 0 8px currentColor; }
+.submenu-toc-link.active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 16px;
+  right: 16px;
+  height: 2px;
+  background: currentColor;
+  border-radius: 2px 2px 0 0;
+  box-shadow: 0 0 12px currentColor;
+}
+.submenu-toc-link:hover, .submenu-toc-link.active { color: var(--sandal-300); }
 </style>
 </head>
 <body>
@@ -452,19 +515,16 @@ body::before {
 </header>
 
 <!-- TABLE OF CONTENTS -->
-<section class="toc">
-  <div class="container">
-    <p class="toc-label">Jump to category</p>
-    <div class="toc-grid">
-      <a href="#cat-memory" class="toc-chip">Memory Operations <span class="count">9</span></a>
-      <a href="#cat-reasoning" class="toc-chip">Reasoning <span class="count">2</span></a>
-      <a href="#cat-development" class="toc-chip">Development <span class="count">4</span></a>
-      <a href="#cat-maintenance" class="toc-chip">Maintenance <span class="count">2</span></a>
-      <a href="#cat-system" class="toc-chip">System <span class="count">5</span></a>
-      <a href="#cat-benchmarking" class="toc-chip">Benchmarking <span class="count">2</span></a>
-    </div>
+<nav class="submenu-toc">
+  <div class="submenu-toc-inner">
+    <a href="#cat-memory" class="submenu-toc-link" data-section="cat-memory">Memory Operations</a>
+    <a href="#cat-reasoning" class="submenu-toc-link" data-section="cat-reasoning">Reasoning</a>
+    <a href="#cat-development" class="submenu-toc-link" data-section="cat-development">Development</a>
+    <a href="#cat-maintenance" class="submenu-toc-link" data-section="cat-maintenance">Maintenance</a>
+    <a href="#cat-system" class="submenu-toc-link" data-section="cat-system">System</a>
+    <a href="#cat-benchmarking" class="submenu-toc-link" data-section="cat-benchmarking">Benchmarking</a>
   </div>
-</section>
+</nav>
 
 <!-- SKILLS -->
 <section class="tools-section">
@@ -621,7 +681,7 @@ document.querySelectorAll('a[href^="#"]').forEach(function(anchor) {
     var target = document.querySelector(this.getAttribute('href'));
     if (target) {
       e.preventDefault();
-      var offset = 80;
+      var offset = 140;
       var top = target.getBoundingClientRect().top + window.pageYOffset - offset;
       window.scrollTo({ top: top, behavior: 'smooth' });
       // Expand the category if collapsed
@@ -631,6 +691,31 @@ document.querySelectorAll('a[href^="#"]').forEach(function(anchor) {
     }
   });
 });
+
+/* ═══════════════════════════════════════════
+   SCROLL SPY - Highlight active TOC section
+   ═══════════════════════════════════════════ */
+(function() {
+  var tocLinks = document.querySelectorAll('.submenu-toc-link');
+  var sections = [];
+  tocLinks.forEach(function(link) {
+    var sectionId = link.getAttribute('data-section');
+    var section = document.getElementById(sectionId);
+    if (section) sections.push({ id: sectionId, el: section, link: link });
+  });
+  if (!sections.length) return;
+  function updateActive() {
+    var scrollPos = window.scrollY + 180;
+    var activeSection = sections[0];
+    sections.forEach(function(section) {
+      if (section.el.offsetTop <= scrollPos) activeSection = section;
+    });
+    tocLinks.forEach(function(link) { link.classList.remove('active'); });
+    if (activeSection) activeSection.link.classList.add('active');
+  }
+  window.addEventListener('scroll', updateActive, { passive: true });
+  updateActive();
+})();
 </script>
 </body>
 </html>

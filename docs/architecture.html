@@ -17,6 +17,70 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
+<style>
+/* Sticky Top Submenu TOC */
+.submenu-toc {
+  position: sticky;
+  top: 60px;
+  z-index: 90;
+  background: linear-gradient(180deg, rgba(11, 11, 16, 0.98) 0%, rgba(11, 11, 16, 0.95) 100%);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(122, 162, 247, 0.1);
+  padding: 0;
+  margin-top: -1px;
+}
+.submenu-toc-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 var(--space-5);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.submenu-toc-inner::-webkit-scrollbar { display: none; }
+.submenu-toc-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px;
+  color: #565f89;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+  position: relative;
+}
+.submenu-toc-link:hover { color: #a9b1d6; }
+.submenu-toc-link.active { color: #c0caf5; }
+.submenu-toc-link::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.4;
+  transition: all 0.2s ease;
+}
+.submenu-toc-link:hover::before { opacity: 0.7; }
+.submenu-toc-link.active::before { opacity: 1; box-shadow: 0 0 8px currentColor; }
+.submenu-toc-link.active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 16px;
+  right: 16px;
+  height: 2px;
+  background: currentColor;
+  border-radius: 2px 2px 0 0;
+  box-shadow: 0 0 12px currentColor;
+}
+.submenu-toc-link:hover, .submenu-toc-link.active { color: var(--sandal-300); }
+</style>
 </head>
 <body>
 
@@ -51,23 +115,20 @@
   </div>
 </header>
 
-<!-- TABLE OF CONTENTS -->
-<section class="toc">
-  <div class="container">
-    <p class="toc-label">Jump to section</p>
-    <div class="toc-grid">
-      <a href="#overview" class="toc-chip">System Overview</a>
-      <a href="#components" class="toc-chip">Components</a>
-      <a href="#resonance" class="toc-chip">Resonance Engine</a>
-      <a href="#storage" class="toc-chip">Storage Layer</a>
-      <a href="#embedding" class="toc-chip">Embedding Engine</a>
-      <a href="#themes" class="toc-chip">Theme System</a>
-      <a href="#codeintel" class="toc-chip">Code Intelligence</a>
-      <a href="#lifecycle" class="toc-chip">Memory Lifecycle</a>
-      <a href="#tuning" class="toc-chip">Self-Tuning</a>
-    </div>
+<!-- STICKY TOP SUBMENU TOC -->
+<nav class="submenu-toc">
+  <div class="submenu-toc-inner">
+    <a href="#overview" class="submenu-toc-link" data-section="overview">Overview</a>
+    <a href="#components" class="submenu-toc-link" data-section="components">Components</a>
+    <a href="#resonance" class="submenu-toc-link" data-section="resonance">Resonance</a>
+    <a href="#storage" class="submenu-toc-link" data-section="storage">Storage</a>
+    <a href="#embedding" class="submenu-toc-link" data-section="embedding">Embedding</a>
+    <a href="#themes" class="submenu-toc-link" data-section="themes">Themes</a>
+    <a href="#codeintel" class="submenu-toc-link" data-section="codeintel">Code Intel</a>
+    <a href="#lifecycle" class="submenu-toc-link" data-section="lifecycle">Lifecycle</a>
+    <a href="#tuning" class="submenu-toc-link" data-section="tuning">Tuning</a>
   </div>
-</section>
+</nav>
 
 
 <!-- ═══════════════════════════════════════════
@@ -757,19 +818,44 @@
 })();
 
 /* ═══════════════════════════════════════════
-   SMOOTH SCROLL FOR TOC CHIPS
+   SMOOTH SCROLL FOR TOC
    ═══════════════════════════════════════════ */
 document.querySelectorAll('a[href^="#"]').forEach(function(anchor) {
   anchor.addEventListener('click', function(e) {
     var target = document.querySelector(this.getAttribute('href'));
     if (target) {
       e.preventDefault();
-      var offset = 80;
+      var offset = 140;
       var top = target.getBoundingClientRect().top + window.pageYOffset - offset;
       window.scrollTo({ top: top, behavior: 'smooth' });
     }
   });
 });
+
+/* ═══════════════════════════════════════════
+   SCROLL SPY - Highlight active TOC section
+   ═══════════════════════════════════════════ */
+(function() {
+  var tocLinks = document.querySelectorAll('.submenu-toc-link');
+  var sections = [];
+  tocLinks.forEach(function(link) {
+    var sectionId = link.getAttribute('data-section');
+    var section = document.getElementById(sectionId);
+    if (section) sections.push({ id: sectionId, el: section, link: link });
+  });
+  if (!sections.length) return;
+  function updateActive() {
+    var scrollPos = window.scrollY + 180;
+    var activeSection = sections[0];
+    sections.forEach(function(section) {
+      if (section.el.offsetTop <= scrollPos) activeSection = section;
+    });
+    tocLinks.forEach(function(link) { link.classList.remove('active'); });
+    if (activeSection) activeSection.link.classList.add('active');
+  }
+  window.addEventListener('scroll', updateActive, { passive: true });
+  updateActive();
+})();
 
 /* ═══════════════════════════════════════════
    RESONANCE PIPELINE CANVAS
