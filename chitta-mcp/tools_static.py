@@ -2912,6 +2912,31 @@ TOOLS = [
 
 COMPOSITE_TOOLS = [
     Tool(
+        name="advanced",
+        description="Gateway to hidden/advanced tools. Use action='list' to see all 100+ hidden tools, or call directly with tool='<name>' and arguments={...}. Example: {\"tool\": \"pin_memory\", \"arguments\": {\"id\": 123}}",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "description": "Action: 'list' to show available tools"
+                },
+                "category": {
+                    "type": "string",
+                    "description": "Filter list by category: 'advanced' or 'internal'"
+                },
+                "tool": {
+                    "type": "string",
+                    "description": "Hidden tool name to call"
+                },
+                "arguments": {
+                    "type": "object",
+                    "description": "Arguments to pass to the hidden tool"
+                }
+            }
+        }
+    ),
+    Tool(
         name="read_symbol",
         description="Read just a symbol's code, not entire file. ~10x token savings vs full file read. Returns [kind name @ file:line-line] + code.",
         inputSchema={

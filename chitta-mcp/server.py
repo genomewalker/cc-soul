@@ -122,6 +122,62 @@ ADVANCED_TOOLS = {
 HIDDEN_TOOLS = INTERNAL_TOOLS | ADVANCED_TOOLS
 
 
+def handle_advanced(arguments: dict) -> str:
+    """
+    Gateway to hidden/advanced tools.
+
+    Actions:
+    - list: Show all available hidden tools by category
+    - call: Call a hidden tool by name with arguments
+
+    Examples:
+    - {"action": "list"} - List all hidden tools
+    - {"action": "list", "category": "internal"} - List internal tools only
+    - {"tool": "pin_memory", "arguments": {"id": 123, "reason": "important"}}
+    """
+    action = arguments.get("action", "")
+    tool = arguments.get("tool", "")
+    tool_args = arguments.get("arguments", {})
+    category = arguments.get("category", "")
+
+    # If tool specified, call it
+    if tool:
+        if tool not in HIDDEN_TOOLS:
+            # Check if it's a valid daemon tool at all
+            return f"Unknown tool: {tool}\nUse action='list' to see available hidden tools."
+
+        # Call the hidden tool via daemon
+        result = daemon_call(tool, tool_args)
+        return f"[{tool}]\n{result}"
+
+    # List hidden tools
+    if action == "list" or not action:
+        output = "Hidden Tools (callable via advanced gateway)\n"
+        output += "=" * 50 + "\n\n"
+
+        if not category or category == "advanced":
+            output += "ADVANCED TOOLS (user-facing but hidden to save context):\n"
+            output += "-" * 50 + "\n"
+            for name in sorted(ADVANCED_TOOLS):
+                output += f"  • {name}\n"
+            output += f"\n  Total: {len(ADVANCED_TOOLS)} tools\n\n"
+
+        if not category or category == "internal":
+            output += "INTERNAL TOOLS (maintenance/hooks only):\n"
+            output += "-" * 50 + "\n"
+            for name in sorted(INTERNAL_TOOLS):
+                output += f"  • {name}\n"
+            output += f"\n  Total: {len(INTERNAL_TOOLS)} tools\n\n"
+
+        output += "Usage:\n"
+        output += '  {"tool": "<name>", "arguments": {...}}\n'
+        output += '\nExample:\n'
+        output += '  {"tool": "pin_memory", "arguments": {"id": 123, "reason": "hot context"}}\n'
+        return output
+
+    return "Unknown action. Use action='list' or specify tool='<name>'."
+
+
 def strip_null_values(obj):
     """Recursively remove keys with null values from dicts."""
     if isinstance(obj, dict):
@@ -1221,6 +1277,7 @@ def handle_transcript_search(arguments: dict) -> str:
 
 # Map composite tool names to handlers
 COMPOSITE_HANDLERS = {
+    "advanced": handle_advanced,
     "read_symbol": handle_read_symbol,
     "read_function": handle_read_function,
     "symbol_callers": handle_symbol_callers,
