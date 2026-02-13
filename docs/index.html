@@ -34,8 +34,30 @@
     content: '';
     position: absolute;
     inset: 0;
-    background: var(--halo-gradient);
+    background:
+        radial-gradient(ellipse 80% 50% at 50% 40%, rgba(203, 175, 134, 0.08) 0%, transparent 50%),
+        radial-gradient(ellipse 60% 40% at 30% 60%, rgba(157, 178, 217, 0.06) 0%, transparent 40%),
+        radial-gradient(ellipse 50% 30% at 70% 30%, rgba(212, 106, 76, 0.04) 0%, transparent 35%),
+        var(--halo-gradient);
     pointer-events: none;
+    animation: heroGlow 8s ease-in-out infinite alternate;
+}
+
+@keyframes heroGlow {
+    0% { opacity: 0.8; }
+    100% { opacity: 1; }
+}
+
+.brain-hero::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 200px;
+    background: linear-gradient(to top, var(--night-900), transparent);
+    pointer-events: none;
+    z-index: 25;
 }
 
 .brain-header {
@@ -50,15 +72,19 @@
 
 .brain-title {
     font-family: var(--font-display);
-    font-size: clamp(2.5rem, 6vw, 4rem);
+    font-size: clamp(2.5rem, 6vw, 4.5rem);
     font-weight: 500;
     color: var(--lotus-200);
     margin-bottom: var(--space-3);
-    letter-spacing: -0.02em;
+    letter-spacing: -0.03em;
+    text-shadow: 0 2px 40px rgba(203, 175, 134, 0.15);
 }
 
 .brain-title span {
-    color: var(--sandal-300);
+    background: linear-gradient(135deg, var(--sandal-300), var(--ember-400));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
 }
 
 .brain-tagline {
@@ -105,7 +131,11 @@
     font-family: var(--font-display);
     font-size: var(--text-2xl);
     font-weight: 600;
-    color: var(--sandal-300);
+    background: linear-gradient(135deg, var(--sandal-300) 0%, var(--lotus-200) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    text-shadow: 0 0 40px rgba(203, 175, 134, 0.2);
 }
 
 .brain-stat-label {
@@ -145,25 +175,42 @@
 /* Module cards */
 .brain-module {
     position: absolute;
-    background: rgba(15, 16, 24, 0.85);
-    border: 1px solid var(--indigo-600);
+    background: linear-gradient(145deg, rgba(26, 29, 43, 0.9), rgba(15, 16, 24, 0.95));
+    border: 1px solid rgba(46, 51, 72, 0.6);
     border-radius: var(--radius-md);
     padding: var(--space-3) var(--space-4);
     width: 160px;
-    transition: all 0.3s ease;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     cursor: pointer;
-    backdrop-filter: blur(8px);
+    backdrop-filter: blur(12px);
+    box-shadow:
+        0 4px 20px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
 .brain-module:hover {
     border-color: var(--sandal-300);
-    box-shadow: var(--shadow-glow-sandal);
-    transform: scale(1.03);
+    box-shadow:
+        0 8px 32px rgba(0, 0, 0, 0.4),
+        0 0 20px rgba(203, 175, 134, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    transform: translateY(-2px) scale(1.02);
 }
 
 .brain-module.active {
     border-color: var(--aura-300);
-    box-shadow: var(--shadow-glow-aura), 0 0 30px rgba(157, 178, 217, 0.15);
+    box-shadow:
+        0 8px 32px rgba(0, 0, 0, 0.4),
+        0 0 40px rgba(157, 178, 217, 0.2),
+        0 0 80px rgba(157, 178, 217, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    animation: moduleGlow 0.6s ease-out;
+}
+
+@keyframes moduleGlow {
+    0% { box-shadow: 0 0 0 rgba(157, 178, 217, 0), inset 0 1px 0 rgba(255, 255, 255, 0.08); }
+    50% { box-shadow: 0 0 60px rgba(157, 178, 217, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08); }
+    100% { box-shadow: 0 0 40px rgba(157, 178, 217, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.08); }
 }
 
 .brain-module-icon {
@@ -227,42 +274,59 @@
 }
 
 .connection-line {
-    stroke: var(--indigo-600);
+    stroke: url(#connectionGradient);
     stroke-width: 1;
     fill: none;
-    opacity: 0.4;
-    transition: all 0.3s ease;
+    opacity: 0.35;
+    transition: all 0.4s ease;
 }
 
 .connection-line.active {
     stroke: var(--aura-300);
-    stroke-width: 1.5;
-    opacity: 0.9;
-    filter: drop-shadow(0 0 4px var(--aura-300));
+    stroke-width: 2;
+    opacity: 1;
+    filter: drop-shadow(0 0 6px var(--aura-300)) drop-shadow(0 0 12px rgba(157, 178, 217, 0.3));
+    animation: lineGlow 0.5s ease-out;
+}
+
+@keyframes lineGlow {
+    0% { stroke-width: 1; }
+    50% { stroke-width: 3; }
+    100% { stroke-width: 2; }
 }
 
 .inter-module-line {
-    stroke: var(--indigo-700);
+    stroke: var(--indigo-600);
     stroke-width: 0.75;
-    stroke-dasharray: 3 3;
+    stroke-dasharray: 4 6;
     fill: none;
-    opacity: 0.25;
+    opacity: 0.2;
+    transition: all 0.3s ease;
 }
 
 .inter-module-line.active {
     stroke: var(--sandal-300);
-    stroke-width: 1;
-    opacity: 0.7;
-    filter: drop-shadow(0 0 3px var(--sandal-300));
+    stroke-width: 1.5;
+    opacity: 0.85;
+    filter: drop-shadow(0 0 4px var(--sandal-300)) drop-shadow(0 0 8px rgba(203, 175, 134, 0.3));
+    animation: interLineGlow 0.4s ease-out;
+}
+
+@keyframes interLineGlow {
+    0% { stroke-width: 0.75; }
+    50% { stroke-width: 2.5; }
+    100% { stroke-width: 1.5; }
 }
 
 /* Particle styles */
 .data-particle {
     fill: var(--aura-300);
+    filter: drop-shadow(0 0 4px var(--aura-300)) drop-shadow(0 0 8px rgba(157, 178, 217, 0.5));
 }
 
 .data-particle.outbound {
     fill: var(--sandal-300);
+    filter: drop-shadow(0 0 4px var(--sandal-300)) drop-shadow(0 0 8px rgba(203, 175, 134, 0.5));
 }
 
 /* Demo panel */
@@ -271,14 +335,18 @@
     bottom: var(--space-5);
     left: 50%;
     transform: translateX(-50%);
-    background: rgba(15, 16, 24, 0.92);
-    border: 1px solid var(--indigo-600);
+    background: linear-gradient(160deg, rgba(26, 29, 43, 0.95), rgba(15, 16, 24, 0.98));
+    border: 1px solid rgba(46, 51, 72, 0.5);
     border-radius: var(--radius-lg);
     padding: var(--space-4) var(--space-5);
     width: 90%;
     max-width: 600px;
     z-index: 30;
-    backdrop-filter: blur(12px);
+    backdrop-filter: blur(20px);
+    box-shadow:
+        0 8px 32px rgba(0, 0, 0, 0.4),
+        0 0 0 1px rgba(255, 255, 255, 0.02),
+        inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
 .brain-demo-header {
@@ -391,22 +459,27 @@
     position: fixed;
     top: 50%;
     right: var(--space-5);
-    transform: translateY(-50%);
-    background: rgba(15, 16, 24, 0.95);
-    border: 1px solid var(--indigo-600);
+    transform: translateY(-50%) translateX(10px);
+    background: linear-gradient(160deg, rgba(26, 29, 43, 0.98), rgba(15, 16, 24, 0.99));
+    border: 1px solid rgba(46, 51, 72, 0.5);
     border-radius: var(--radius-md);
     padding: var(--space-4);
     width: 260px;
     opacity: 0;
     pointer-events: none;
-    transition: all 0.3s ease;
+    transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
     z-index: 40;
-    backdrop-filter: blur(12px);
+    backdrop-filter: blur(20px);
+    box-shadow:
+        0 12px 40px rgba(0, 0, 0, 0.5),
+        0 0 0 1px rgba(255, 255, 255, 0.02),
+        inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
 .brain-detail.visible {
     opacity: 1;
     pointer-events: auto;
+    transform: translateY(-50%) translateX(0);
 }
 
 .brain-detail-title {
@@ -442,6 +515,17 @@
 .brain-detail-features li::before {
     content: '→';
     color: var(--sandal-300);
+}
+
+/* Core pulse animation */
+.brain-core.pulse svg circle#coreGlow {
+    animation: corePulse 0.5s ease-out;
+}
+
+@keyframes corePulse {
+    0% { filter: url(#glow); }
+    50% { filter: url(#glow) drop-shadow(0 0 30px rgba(157, 178, 217, 0.6)); }
+    100% { filter: url(#glow); }
 }
 
 /* CTA section below brain */
@@ -920,6 +1004,24 @@ function drawConnections() {
     svg.innerHTML = '';
     svg.setAttribute('viewBox', `0 0 ${rect.width} ${rect.height}`);
 
+    // Add gradient definitions
+    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+    defs.innerHTML = `
+        <linearGradient id="connectionGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="var(--indigo-600)" stop-opacity="0.6"/>
+            <stop offset="50%" stop-color="var(--aura-300)" stop-opacity="0.3"/>
+            <stop offset="100%" stop-color="var(--indigo-600)" stop-opacity="0.6"/>
+        </linearGradient>
+        <filter id="particleGlow" x="-100%" y="-100%" width="300%" height="300%">
+            <feGaussianBlur stdDeviation="2" result="blur"/>
+            <feMerge>
+                <feMergeNode in="blur"/>
+                <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+        </filter>
+    `;
+    svg.appendChild(defs);
+
     // Groups
     const interModuleGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     interModuleGroup.id = 'interModuleGroup';
@@ -1016,10 +1118,21 @@ function animateParticle(moduleName, toCenter = true, duration = 800, delay = 0)
         const particlesGroup = document.getElementById('particlesGroup');
         if (!particlesGroup) return;
 
+        // Create particle with trail effect
         const particle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
         particle.setAttribute('r', '3');
         particle.setAttribute('class', `data-particle ${!toCenter ? 'outbound' : ''}`);
 
+        // Create trail
+        const trail = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        trail.setAttribute('fill', 'none');
+        trail.setAttribute('stroke', toCenter ? 'var(--aura-300)' : 'var(--sandal-300)');
+        trail.setAttribute('stroke-width', '2');
+        trail.setAttribute('stroke-linecap', 'round');
+        trail.setAttribute('opacity', '0.4');
+        trail.style.filter = 'blur(1px)';
+
+        particlesGroup.appendChild(trail);
         particlesGroup.appendChild(particle);
 
         const start = toCenter ? pathData.start : pathData.end;
@@ -1027,6 +1140,7 @@ function animateParticle(moduleName, toCenter = true, duration = 800, delay = 0)
         const control = pathData.control;
 
         let startTime = null;
+        const trailPoints = [];
 
         function animate(timestamp) {
             if (!startTime) startTime = timestamp;
@@ -1045,15 +1159,29 @@ function animateParticle(moduleName, toCenter = true, duration = 800, delay = 0)
             particle.setAttribute('cx', x);
             particle.setAttribute('cy', y);
 
+            // Update trail
+            trailPoints.push({ x, y });
+            if (trailPoints.length > 12) trailPoints.shift();
+            if (trailPoints.length > 1) {
+                const pathD = trailPoints.map((p, i) => (i === 0 ? 'M' : 'L') + ` ${p.x} ${p.y}`).join(' ');
+                trail.setAttribute('d', pathD);
+                trail.setAttribute('opacity', 0.3 * (1 - progress * 0.5));
+            }
+
             const scale = 0.5 + Math.sin(progress * Math.PI) * 0.7;
             particle.setAttribute('r', 2.5 * scale);
 
             if (progress < 1) {
                 requestAnimationFrame(animate);
             } else {
-                particle.style.transition = 'opacity 0.15s';
+                particle.style.transition = 'opacity 0.2s';
+                trail.style.transition = 'opacity 0.2s';
                 particle.style.opacity = '0';
-                setTimeout(() => particle.remove(), 150);
+                trail.style.opacity = '0';
+                setTimeout(() => {
+                    particle.remove();
+                    trail.remove();
+                }, 200);
             }
         }
 
@@ -1064,6 +1192,15 @@ function animateParticle(moduleName, toCenter = true, duration = 800, delay = 0)
 function sendDataFlow(moduleName, toCenter = true, count = 3) {
     for (let i = 0; i < count; i++) {
         animateParticle(moduleName, toCenter, 550 + Math.random() * 350, i * 120);
+    }
+
+    // Pulse core when particles arrive
+    if (toCenter && count >= 3) {
+        setTimeout(() => {
+            const core = document.getElementById('brainCore');
+            core.classList.add('pulse');
+            setTimeout(() => core.classList.remove('pulse'), 500);
+        }, 550 + count * 100);
     }
 }
 
