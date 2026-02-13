@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>cc-soul | Mind Architecture</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            background: #0a0a0f;
+            color: #e0e0e0;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        h1 {
+            text-align: center;
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #888;
+            margin-bottom: 2rem;
+        }
+
+        .main-grid {
+            display: grid;
+            grid-template-columns: 300px 1fr 300px;
+            gap: 2rem;
+            align-items: start;
+        }
+
+        /* Chat Panel */
+        .chat-panel {
+            background: #12121a;
+            border-radius: 12px;
+            border: 1px solid #2a2a3a;
+            overflow: hidden;
+        }
+
+        .chat-header {
+            background: #1a1a2a;
+            padding: 1rem;
+            border-bottom: 1px solid #2a2a3a;
+            font-weight: 600;
+        }
+
+        .chat-messages {
+            height: 400px;
+            overflow-y: auto;
+            padding: 1rem;
+        }
+
+        .message {
+            margin-bottom: 1rem;
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .message.user {
+            background: #2a2a4a;
+            margin-left: 2rem;
+        }
+
+        .message.assistant {
+            background: #1a2a3a;
+            margin-right: 2rem;
+        }
+
+        .message-label {
+            font-size: 0.7rem;
+            color: #888;
+            margin-bottom: 0.25rem;
+        }
+
+        .chat-input-container {
+            padding: 1rem;
+            border-top: 1px solid #2a2a3a;
+        }
+
+        .chat-input {
+            width: 100%;
+            padding: 0.75rem;
+            background: #1a1a2a;
+            border: 1px solid #3a3a4a;
+            border-radius: 8px;
+            color: #e0e0e0;
+            font-family: inherit;
+            font-size: 0.9rem;
+        }
+
+        .chat-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        /* Brain Visualization */
+        .brain-container {
+            position: relative;
+            background: #0d0d15;
+            border-radius: 12px;
+            border: 1px solid #2a2a3a;
+            height: 500px;
+            overflow: hidden;
+        }
+
+        .brain-svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Layer Labels */
+        .layer-label {
+            position: absolute;
+            font-size: 0.7rem;
+            color: #667eea;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        /* Results Panel */
+        .results-panel {
+            background: #12121a;
+            border-radius: 12px;
+            border: 1px solid #2a2a3a;
+            overflow: hidden;
+        }
+
+        .results-header {
+            background: #1a1a2a;
+            padding: 1rem;
+            border-bottom: 1px solid #2a2a3a;
+            font-weight: 600;
+        }
+
+        .results-content {
+            height: 400px;
+            overflow-y: auto;
+            padding: 1rem;
+            font-size: 0.85rem;
+        }
+
+        .result-item {
+            background: #1a1a2a;
+            padding: 0.75rem;
+            border-radius: 6px;
+            margin-bottom: 0.75rem;
+            border-left: 3px solid transparent;
+            animation: slideIn 0.3s ease;
+        }
+
+        .result-item.memory {
+            border-left-color: #667eea;
+        }
+
+        .result-item.symbol {
+            border-left-color: #22c55e;
+        }
+
+        .result-item.triplet {
+            border-left-color: #f59e0b;
+        }
+
+        .result-item .type {
+            font-size: 0.65rem;
+            color: #888;
+            text-transform: uppercase;
+            margin-bottom: 0.25rem;
+        }
+
+        .result-item .score {
+            float: right;
+            color: #667eea;
+            font-weight: 600;
+        }
+
+        /* Trajectory Panel */
+        .trajectory-panel {
+            margin-top: 1rem;
+            background: #0d0d15;
+            border-radius: 8px;
+            padding: 1rem;
+            font-size: 0.75rem;
+        }
+
+        .trajectory-item {
+            display: flex;
+            align-items: center;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid #1a1a2a;
+            opacity: 0;
+            animation: fadeIn 0.3s ease forwards;
+        }
+
+        .trajectory-item .step {
+            width: 24px;
+            height: 24px;
+            background: #2a2a4a;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 0.75rem;
+            font-size: 0.7rem;
+            color: #667eea;
+        }
+
+        /* Animations */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateX(-20px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.2); }
+        }
+
+        @keyframes glow {
+            0%, 100% { filter: drop-shadow(0 0 2px currentColor); }
+            50% { filter: drop-shadow(0 0 8px currentColor); }
+        }
+
+        /* Neuron styles */
+        .neuron {
+            fill: #2a2a4a;
+            transition: all 0.3s ease;
+        }
+
+        .neuron.active {
+            fill: #667eea;
+            animation: pulse 0.5s ease;
+        }
+
+        .neuron.memory { --color: #667eea; }
+        .neuron.symbol { --color: #22c55e; }
+        .neuron.triplet { --color: #f59e0b; }
+        .neuron.embed { --color: #ec4899; }
+        .neuron.rlm { --color: #06b6d4; }
+
+        .neuron.active.memory { fill: #667eea; }
+        .neuron.active.symbol { fill: #22c55e; }
+        .neuron.active.triplet { fill: #f59e0b; }
+        .neuron.active.embed { fill: #ec4899; }
+        .neuron.active.rlm { fill: #06b6d4; }
+
+        .connection {
+            stroke: #2a2a4a;
+            stroke-width: 1;
+            fill: none;
+            transition: all 0.3s ease;
+        }
+
+        .connection.active {
+            stroke: #667eea;
+            stroke-width: 2;
+            animation: glow 0.5s ease;
+        }
+
+        .data-packet {
+            fill: #667eea;
+            opacity: 0;
+        }
+
+        /* Legend */
+        .legend {
+            display: flex;
+            justify-content: center;
+            gap: 2rem;
+            margin-top: 1rem;
+            padding: 1rem;
+            background: #12121a;
+            border-radius: 8px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.8rem;
+        }
+
+        .legend-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .legend-dot.memory { background: #667eea; }
+        .legend-dot.symbol { background: #22c55e; }
+        .legend-dot.triplet { background: #f59e0b; }
+        .legend-dot.embed { background: #ec4899; }
+        .legend-dot.rlm { background: #06b6d4; }
+
+        /* Status indicator */
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: #1a1a2a;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            margin-bottom: 1rem;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #22c55e;
+            animation: pulse 2s infinite;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>cc-soul</h1>
+        <p class="subtitle">Recursive Language Model Memory Architecture</p>
+
+        <div class="status">
+            <div class="status-dot"></div>
+            <span>Mind Active | 9,204 memories | 502K triplets</span>
+        </div>
+
+        <div class="main-grid">
+            <!-- Chat Panel -->
+            <div class="chat-panel">
+                <div class="chat-header">Conversation</div>
+                <div class="chat-messages" id="chatMessages">
+                    <div class="message assistant">
+                        <div class="message-label">Claude</div>
+                        Type a question to see the mind activate...
+                    </div>
+                </div>
+                <div class="chat-input-container">
+                    <input type="text" class="chat-input" id="chatInput"
+                           placeholder="Ask something..."
+                           onkeypress="if(event.key==='Enter')sendMessage()">
+                </div>
+            </div>
+
+            <!-- Brain Visualization -->
+            <div class="brain-container">
+                <svg class="brain-svg" id="brainSvg" viewBox="0 0 600 450">
+                    <!-- Background grid -->
+                    <defs>
+                        <pattern id="grid" width="30" height="30" patternUnits="userSpaceOnUse">
+                            <path d="M 30 0 L 0 0 0 30" fill="none" stroke="#1a1a2a" stroke-width="0.5"/>
+                        </pattern>
+                        <filter id="glow">
+                            <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+                            <feMerge>
+                                <feMergeNode in="coloredBlur"/>
+                                <feMergeNode in="SourceGraphic"/>
+                            </feMerge>
+                        </filter>
+                    </defs>
+                    <rect width="100%" height="100%" fill="url(#grid)"/>
+
+                    <!-- Layer labels -->
+                    <text x="50" y="30" fill="#667eea" font-size="10" font-weight="600">INPUT</text>
+                    <text x="150" y="30" fill="#06b6d4" font-size="10" font-weight="600">RLM REPL</text>
+                    <text x="270" y="30" fill="#667eea" font-size="10" font-weight="600">RETRIEVAL</text>
+                    <text x="400" y="30" fill="#ec4899" font-size="10" font-weight="600">EMBEDDING</text>
+                    <text x="520" y="30" fill="#22c55e" font-size="10" font-weight="600">OUTPUT</text>
+
+                    <!-- Connections (will be generated dynamically) -->
+                    <g id="connections"></g>
+
+                    <!-- Neurons -->
+                    <g id="neurons"></g>
+
+                    <!-- Data packets (animated) -->
+                    <g id="packets"></g>
+                </svg>
+            </div>
+
+            <!-- Results Panel -->
+            <div class="results-panel">
+                <div class="results-header">Retrieved Context</div>
+                <div class="results-content" id="resultsContent">
+                    <div style="color: #666; text-align: center; margin-top: 2rem;">
+                        Results will appear here...
+                    </div>
+                </div>
+                <div class="trajectory-panel">
+                    <div style="color: #888; margin-bottom: 0.5rem;">Exploration Trajectory</div>
+                    <div id="trajectoryList"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Legend -->
+        <div class="legend">
+            <div class="legend-item">
+                <div class="legend-dot memory"></div>
+                <span>Memories</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot symbol"></div>
+                <span>Code Symbols</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot triplet"></div>
+                <span>Triplets</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot embed"></div>
+                <span>Embeddings</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot rlm"></div>
+                <span>RLM Exploration</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Neural network configuration
+        const layers = [
+            { name: 'input', x: 50, neurons: 3, type: 'input' },
+            { name: 'rlm', x: 150, neurons: 5, type: 'rlm' },
+            { name: 'memory', x: 250, neurons: 6, type: 'memory' },
+            { name: 'symbol', x: 320, neurons: 4, type: 'symbol' },
+            { name: 'triplet', x: 390, neurons: 4, type: 'triplet' },
+            { name: 'embed', x: 460, neurons: 5, type: 'embed' },
+            { name: 'output', x: 550, neurons: 3, type: 'output' }
+        ];
+
+        const svg = document.getElementById('brainSvg');
+        const connectionsGroup = document.getElementById('connections');
+        const neuronsGroup = document.getElementById('neurons');
+        const packetsGroup = document.getElementById('packets');
+
+        // Store neuron positions
+        const neuronPositions = {};
+
+        // Initialize neural network
+        function initNetwork() {
+            layers.forEach((layer, li) => {
+                const startY = (450 - layer.neurons * 50) / 2;
+                neuronPositions[layer.name] = [];
+
+                for (let i = 0; i < layer.neurons; i++) {
+                    const y = startY + i * 50 + 25;
+                    neuronPositions[layer.name].push({ x: layer.x, y });
+
+                    // Create neuron
+                    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    circle.setAttribute('cx', layer.x);
+                    circle.setAttribute('cy', y);
+                    circle.setAttribute('r', 12);
+                    circle.setAttribute('class', `neuron ${layer.type}`);
+                    circle.setAttribute('id', `neuron-${layer.name}-${i}`);
+                    neuronsGroup.appendChild(circle);
+                }
+
+                // Create connections to next layer
+                if (li < layers.length - 1) {
+                    const nextLayer = layers[li + 1];
+                    const nextStartY = (450 - nextLayer.neurons * 50) / 2;
+
+                    for (let i = 0; i < layer.neurons; i++) {
+                        const y1 = startY + i * 50 + 25;
+                        for (let j = 0; j < nextLayer.neurons; j++) {
+                            const y2 = nextStartY + j * 50 + 25;
+
+                            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                            const midX = (layer.x + nextLayer.x) / 2;
+                            path.setAttribute('d', `M ${layer.x + 12} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${nextLayer.x - 12} ${y2}`);
+                            path.setAttribute('class', 'connection');
+                            path.setAttribute('id', `conn-${layer.name}-${i}-${nextLayer.name}-${j}`);
+                            connectionsGroup.appendChild(path);
+                        }
+                    }
+                }
+            });
+        }
+
+        // Activate neurons with animation
+        async function activateNetwork(query) {
+            // Reset all
+            document.querySelectorAll('.neuron, .connection').forEach(el => {
+                el.classList.remove('active');
+            });
+
+            // Simulate processing through layers
+            for (let li = 0; li < layers.length; li++) {
+                const layer = layers[li];
+                const activeCount = Math.floor(Math.random() * layer.neurons) + 1;
+
+                // Activate random neurons in this layer
+                const activated = [];
+                for (let i = 0; i < activeCount; i++) {
+                    const idx = Math.floor(Math.random() * layer.neurons);
+                    if (!activated.includes(idx)) {
+                        activated.push(idx);
+                        const neuron = document.getElementById(`neuron-${layer.name}-${idx}`);
+                        if (neuron) {
+                            neuron.classList.add('active');
+                        }
+                    }
+                }
+
+                // Activate connections from previous layer
+                if (li > 0) {
+                    const prevLayer = layers[li - 1];
+                    activated.forEach(toIdx => {
+                        for (let fromIdx = 0; fromIdx < prevLayer.neurons; fromIdx++) {
+                            const conn = document.getElementById(`conn-${prevLayer.name}-${fromIdx}-${layer.name}-${toIdx}`);
+                            if (conn && Math.random() > 0.5) {
+                                conn.classList.add('active');
+                            }
+                        }
+                    });
+                }
+
+                await sleep(200);
+            }
+        }
+
+        // Sleep utility
+        function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        // Mock results based on query
+        function generateResults(query) {
+            const results = [];
+            const words = query.toLowerCase().split(' ');
+
+            // Generate memory results
+            for (let i = 0; i < 3; i++) {
+                results.push({
+                    type: 'memory',
+                    score: (0.9 - i * 0.15).toFixed(2),
+                    content: `[wisdom] ${words[0]}-pattern-detected → ${words[words.length-1]}-implementation`
+                });
+            }
+
+            // Generate symbol results
+            results.push({
+                type: 'symbol',
+                score: '0.78',
+                content: `function handle_${words[0]} @ server.py:142`
+            });
+
+            // Generate triplet
+            results.push({
+                type: 'triplet',
+                score: '0.65',
+                content: `(${words[0]}) --[related_to]--> (${words[words.length-1]})`
+            });
+
+            return results;
+        }
+
+        // Display results
+        function displayResults(results) {
+            const container = document.getElementById('resultsContent');
+            container.innerHTML = '';
+
+            results.forEach((result, i) => {
+                setTimeout(() => {
+                    const div = document.createElement('div');
+                    div.className = `result-item ${result.type}`;
+                    div.innerHTML = `
+                        <div class="type">${result.type}</div>
+                        <span class="score">${result.score}</span>
+                        <div>${result.content}</div>
+                    `;
+                    container.appendChild(div);
+                }, i * 150);
+            });
+        }
+
+        // Display trajectory
+        function displayTrajectory() {
+            const container = document.getElementById('trajectoryList');
+            const steps = [
+                'soul.search(query)',
+                'soul.expand(id=3377)',
+                'soul.triplets(subject)',
+                'format_output()'
+            ];
+
+            container.innerHTML = '';
+            steps.forEach((step, i) => {
+                setTimeout(() => {
+                    const div = document.createElement('div');
+                    div.className = 'trajectory-item';
+                    div.style.animationDelay = `${i * 0.1}s`;
+                    div.innerHTML = `
+                        <div class="step">${i + 1}</div>
+                        <span>${step}</span>
+                    `;
+                    container.appendChild(div);
+                }, i * 200);
+            });
+        }
+
+        // Add message to chat
+        function addMessage(text, type) {
+            const container = document.getElementById('chatMessages');
+            const div = document.createElement('div');
+            div.className = `message ${type}`;
+            div.innerHTML = `
+                <div class="message-label">${type === 'user' ? 'You' : 'Claude'}</div>
+                ${text}
+            `;
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        // Send message handler
+        async function sendMessage() {
+            const input = document.getElementById('chatInput');
+            const query = input.value.trim();
+            if (!query) return;
+
+            // Add user message
+            addMessage(query, 'user');
+            input.value = '';
+
+            // Activate network
+            await activateNetwork(query);
+
+            // Generate and display results
+            const results = generateResults(query);
+            displayResults(results);
+            displayTrajectory();
+
+            // Add response
+            await sleep(500);
+            addMessage(`Found ${results.length} relevant memories and symbols for "${query}". The RLM exploration traversed 4 layers with 67% average confidence.`, 'assistant');
+        }
+
+        // Initialize
+        initNetwork();
+
+        // Demo auto-play
+        setTimeout(() => {
+            document.getElementById('chatInput').value = 'How does the daemon handle memory retrieval?';
+            sendMessage();
+        }, 1000);
+    </script>
+</body>
+</html>
