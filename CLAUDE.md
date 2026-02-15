@@ -34,7 +34,7 @@ Claude Code
     +---- chitta CLI -------> CHITTAD DAEMON
          (Unix socket)        |
                               +-- Thread Pool (2-16)
-                              +-- RPC Handler (100+)
+                              +-- RPC Handler (137 tools)
                               +-- Subconscious (background)
                               |
                               +-- DuckDBMind

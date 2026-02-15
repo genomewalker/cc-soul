@@ -28,6 +28,7 @@
 #include <unordered_set>
 #include <cctype>
 #include <array>
+#include <regex>
 #include <cstdio>
 #include <unistd.h>
 
@@ -2068,6 +2069,84 @@ private:
         });
         handlers_["list_aspects"] = [this](const json& p) { return tool_list_aspects(p); };
 
+        // ═══════════════════════════════════════════════════════════════════════
+        // Memory Index: Fast pre-retrieval scanning (ClawVault-inspired)
+        // ═══════════════════════════════════════════════════════════════════════
+
+        tools_.push_back({
+            {"name", "list_memories_brief"},
+            {"description", "Fast memory index: returns id, kind, priority, date, and one-liner (first 80 chars). Use as fast path before expensive retrieval - scan what exists, then fetch full content for relevant entries."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"limit", {{"type", "integer"}, {"description", "Max entries (default: 200)"}}},
+                    {"realm", {{"type", "string"}, {"description", "Filter by realm"}}},
+                    {"kind", {{"type", "string"}, {"description", "Filter by memory kind"}}},
+                    {"priority_tier", {{"type", "integer"}, {"description", "Filter by tier: 0=background, 1=notable, 2=critical"}}}
+                }}
+            }}
+        });
+        handlers_["list_memories_brief"] = [this](const json& p) { return tool_list_memories_brief(p); };
+
+        tools_.push_back({
+            {"name", "set_priority_tier"},
+            {"description", "Set memory priority tier. Tiers: 0=background (🟢), 1=notable (🟡), 2=critical (🔴). Critical memories always load first in budget-aware recall."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"memory_id", {{"type", "integer"}, {"description", "Memory ID"}}},
+                    {"tier", {{"type", "integer"}, {"description", "Priority tier: 0=background, 1=notable, 2=critical"}}}
+                }},
+                {"required", {"memory_id", "tier"}}
+            }}
+        });
+        handlers_["set_priority_tier"] = [this](const json& p) { return tool_set_priority_tier(p); };
+
+        tools_.push_back({
+            {"name", "recall_by_priority"},
+            {"description", "Budget-aware recall: fills critical (🔴) first, then notable (🟡), then background (🟢). Respects token budget. Use when context window is limited."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"query", {{"type", "string"}, {"description", "Search query for semantic filtering"}}},
+                    {"budget_tokens", {{"type", "integer"}, {"description", "Token budget (default: 4000)"}}},
+                    {"realm", {{"type", "string"}, {"description", "Filter by realm"}}},
+                    {"include_global", {{"type", "boolean"}, {"description", "Include global memories (default: true)"}}}
+                }}
+            }}
+        });
+        handlers_["recall_by_priority"] = [this](const json& p) { return tool_recall_by_priority(p); };
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // Memory Type Taxonomy (formalized aspect system)
+        // ═══════════════════════════════════════════════════════════════════════
+
+        tools_.push_back({
+            {"name", "set_memory_type"},
+            {"description", "Set the semantic type (kind) of a memory. Types: decision, preference, correction, insight, milestone, approach, habit, belief, gap, wisdom, episode."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"memory_id", {{"type", "integer"}, {"description", "Memory ID"}}},
+                    {"type", {{"type", "string"}, {"description", "Memory type: decision, preference, correction, insight, milestone, approach, habit, belief, gap, wisdom, episode"}}}
+                }},
+                {"required", {"memory_id", "type"}}
+            }}
+        });
+        handlers_["set_memory_type"] = [this](const json& p) { return tool_set_memory_type(p); };
+
+        tools_.push_back({
+            {"name", "memory_type_stats"},
+            {"description", "Get statistics on memory types: counts by kind and priority tier."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"realm", {{"type", "string"}, {"description", "Filter by realm"}}}
+                }}
+            }}
+        });
+        handlers_["memory_type_stats"] = [this](const json& p) { return tool_memory_type_stats(p); };
+
         // Smart recall: unified query intent classification and routing with hierarchical expansion
         tools_.push_back({
             {"name", "smart_recall"},
@@ -2776,6 +2855,70 @@ private:
         });
         handlers_["resolve_merge"] = [this](const json& p) { return tool_resolve_merge(p); };
 
+        // ═══════════════════════════════════════════════════════════════════════
+        // File Time Machine: Explore and restore file versions from past sessions
+        // ═══════════════════════════════════════════════════════════════════════
+
+        tools_.push_back({
+            {"name", "file_timeline"},
+            {"description", "Show files modified in a time range or session (Time Machine)"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"query", {{"type", "string"}, {"description", "Natural language time query like 'at 22:33', 'yesterday', 'last hour'"}}},
+                    {"session_id", {{"type", "string"}, {"description", "Specific session to query"}}},
+                    {"file_pattern", {{"type", "string"}, {"description", "Glob pattern to filter files (e.g., '*.cpp', 'src/*')"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Max results (default: 20)"}}}
+                }}
+            }}
+        });
+        handlers_["file_timeline"] = [this](const json& p) { return tool_file_timeline(p); };
+
+        tools_.push_back({
+            {"name", "file_at_time"},
+            {"description", "Get file content as it was at a specific time (Time Machine)"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"file_path", {{"type", "string"}, {"description", "File path to retrieve"}}},
+                    {"time", {{"type", "string"}, {"description", "Timestamp or natural language (e.g., '2024-02-13T22:33:00', '5 minutes ago')"}}},
+                    {"session_id", {{"type", "string"}, {"description", "Specific session to search in"}}},
+                    {"show_diff", {{"type", "boolean"}, {"description", "Show diff against current version (default: false)"}}}
+                }},
+                {"required", {"file_path"}}
+            }}
+        });
+        handlers_["file_at_time"] = [this](const json& p) { return tool_file_at_time(p); };
+
+        tools_.push_back({
+            {"name", "file_restore"},
+            {"description", "Restore file to a previous version (Time Machine)"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"file_path", {{"type", "string"}, {"description", "File path to restore"}}},
+                    {"version_id", {{"type", "integer"}, {"description", "Version ID from file_timeline"}}},
+                    {"preview", {{"type", "boolean"}, {"description", "Preview only, don't actually restore (default: true)"}}}
+                }},
+                {"required", {"file_path"}}
+            }}
+        });
+        handlers_["file_restore"] = [this](const json& p) { return tool_file_restore(p); };
+
+        tools_.push_back({
+            {"name", "file_index_session"},
+            {"description", "Index file-history from a session transcript (internal)"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"session_id", {{"type", "string"}, {"description", "Session ID to index"}}},
+                    {"force", {{"type", "boolean"}, {"description", "Re-index even if already indexed (default: false)"}}}
+                }},
+                {"required", {"session_id"}}
+            }}
+        });
+        handlers_["file_index_session"] = [this](const json& p) { return tool_file_index_session(p); };
+
         classify_tools();
     }
 
@@ -2798,7 +2941,8 @@ private:
             "export_soul", "import_soul",
             "connect_batch", "research_cycle", "research_store", "research_topics",
             "cycle", "anticipation_gate_status", "anticipation_record_outcome",
-            "session_register", "session_heartbeat", "session_deregister", "msg_ack"
+            "session_register", "session_heartbeat", "session_deregister", "msg_ack",
+            "file_index_session"
         };
 
         // Advanced tools - visible but secondary
@@ -2815,7 +2959,9 @@ private:
             // Context Repository (Letta-inspired)
             "memory_history", "memory_revert", "pin_memory", "unpin_memory", "list_pinned",
             "memory_lock", "memory_unlock", "memory_lock_status",
-            "propose_change", "list_merge_queue", "resolve_merge"
+            "propose_change", "list_merge_queue", "resolve_merge",
+            // File Time Machine
+            "file_timeline", "file_at_time", "file_restore"
         };
 
         // Everything defaults to "default" visibility
@@ -9443,6 +9589,284 @@ private:
     }
 
     // ========================================================================
+    // Memory Index: Fast pre-retrieval scanning (ClawVault-inspired)
+    // ========================================================================
+
+    DuckDBToolResult tool_list_memories_brief(const json& params) {
+        size_t limit = params.value("limit", 200);
+        std::string realm = params.value("realm", "");
+        std::string kind = params.value("kind", "");
+        std::optional<PriorityTier> tier;
+        if (params.contains("priority_tier")) {
+            tier = static_cast<PriorityTier>(params["priority_tier"].get<int>());
+        }
+
+        auto entries = mind_->store().list_memories_brief(limit, realm, kind, tier);
+
+        std::ostringstream ss;
+        ss << "Memory Index (" << entries.size() << " entries):\n";
+        ss << "══════════════════════════════════════════════════════════════════\n";
+        ss << "ID       | Tier | Kind       | Date       | Preview\n";
+        ss << "---------|------|------------|------------|---------------------------\n";
+
+        json items = json::array();
+        for (const auto& e : entries) {
+            // Format date
+            auto ms = std::chrono::milliseconds(e.created_at);
+            auto tp = std::chrono::system_clock::time_point(ms);
+            auto tt = std::chrono::system_clock::to_time_t(tp);
+            std::tm tm = *std::localtime(&tt);
+            char date_buf[16];
+            std::strftime(date_buf, sizeof(date_buf), "%Y-%m-%d", &tm);
+
+            // Tier emoji
+            const char* tier_str = "🟢";
+            if (e.priority_tier == PriorityTier::Critical) tier_str = "🔴";
+            else if (e.priority_tier == PriorityTier::Notable) tier_str = "🟡";
+
+            // Truncate one-liner for display
+            std::string preview = e.one_liner;
+            if (preview.size() > 40) preview = preview.substr(0, 37) + "...";
+
+            ss << std::setw(8) << e.id << " | " << tier_str << "   | "
+               << std::setw(10) << e.kind.substr(0, 10) << " | "
+               << date_buf << " | " << preview << "\n";
+
+            items.push_back({
+                {"id", e.id},
+                {"kind", e.kind},
+                {"priority_tier", static_cast<int>(e.priority_tier)},
+                {"created_at", e.created_at},
+                {"one_liner", e.one_liner}
+            });
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"count", entries.size()},
+            {"entries", items}
+        });
+    }
+
+    DuckDBToolResult tool_set_priority_tier(const json& params) {
+        if (!params.contains("memory_id") || !params.contains("tier")) {
+            return DuckDBToolResult::error("memory_id and tier required");
+        }
+
+        int64_t memory_id = params["memory_id"].get<int64_t>();
+        int tier_val = params["tier"].get<int>();
+
+        if (tier_val < 0 || tier_val > 2) {
+            return DuckDBToolResult::error("tier must be 0 (background), 1 (notable), or 2 (critical)");
+        }
+
+        PriorityTier tier = static_cast<PriorityTier>(tier_val);
+        bool success = mind_->store().set_priority_tier(memory_id, tier);
+
+        if (!success) {
+            return DuckDBToolResult::error("Failed to set priority tier");
+        }
+
+        const char* tier_emoji = tier == PriorityTier::Critical ? "🔴" :
+                                 tier == PriorityTier::Notable ? "🟡" : "🟢";
+        const char* tier_name = tier == PriorityTier::Critical ? "critical" :
+                                tier == PriorityTier::Notable ? "notable" : "background";
+
+        std::ostringstream ss;
+        ss << "Set memory #" << memory_id << " to " << tier_emoji << " " << tier_name << " tier";
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"memory_id", memory_id},
+            {"tier", tier_val},
+            {"tier_name", tier_name}
+        });
+    }
+
+    DuckDBToolResult tool_recall_by_priority(const json& params) {
+        if (subconscious_) subconscious_->notify_query();
+
+        std::string query = params.value("query", "");
+        size_t budget_tokens = params.value("budget_tokens", 4000);
+        std::string realm = params.value("realm", "");
+        bool include_global = params.value("include_global", true);
+
+        // Get embedding if query provided
+        std::vector<float> embedding;
+        if (!query.empty() && mind_->embedder_ready()) {
+            embedding = mind_->embedder().embed_query(query).data;
+        }
+
+        auto results = mind_->store().recall_by_priority(embedding, budget_tokens, realm, include_global);
+
+        std::ostringstream ss;
+        ss << "Budget-Aware Recall (" << results.size() << " memories, ~" << budget_tokens << " token budget):\n";
+        ss << "══════════════════════════════════════════════════════════════════\n\n";
+
+        // Count by tier
+        int critical_count = 0, notable_count = 0, background_count = 0;
+        size_t total_chars = 0;
+        json items = json::array();
+
+        for (const auto& m : results) {
+            if (m.priority_tier == PriorityTier::Critical) critical_count++;
+            else if (m.priority_tier == PriorityTier::Notable) notable_count++;
+            else background_count++;
+            total_chars += m.content.size();
+
+            const char* tier_emoji = m.priority_tier == PriorityTier::Critical ? "🔴" :
+                                     m.priority_tier == PriorityTier::Notable ? "🟡" : "🟢";
+
+            ss << tier_emoji << " #" << m.id << " [" << m.kind << "]\n";
+            ss << "   " << m.content.substr(0, 100) << (m.content.size() > 100 ? "..." : "") << "\n\n";
+
+            items.push_back({
+                {"id", m.id},
+                {"kind", m.kind},
+                {"content", m.content},
+                {"confidence", m.confidence},
+                {"priority_tier", static_cast<int>(m.priority_tier)}
+            });
+        }
+
+        ss << "───────────────────────────────────────────\n";
+        ss << "Tiers: 🔴 " << critical_count << " | 🟡 " << notable_count << " | 🟢 " << background_count << "\n";
+        ss << "Est. tokens: ~" << (total_chars / 4) << " / " << budget_tokens << "\n";
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"count", results.size()},
+            {"critical_count", critical_count},
+            {"notable_count", notable_count},
+            {"background_count", background_count},
+            {"estimated_tokens", total_chars / 4},
+            {"budget_tokens", budget_tokens},
+            {"memories", items}
+        });
+    }
+
+    // ========================================================================
+    // Memory Type Taxonomy (formalized aspect system)
+    // ========================================================================
+
+    // Valid memory types (normalized from aspect system)
+    static constexpr std::array<const char*, 11> VALID_MEMORY_TYPES = {
+        "decision", "preference", "correction", "insight", "milestone",
+        "approach", "habit", "belief", "gap", "wisdom", "episode"
+    };
+
+    DuckDBToolResult tool_set_memory_type(const json& params) {
+        if (!params.contains("memory_id") || !params.contains("type")) {
+            return DuckDBToolResult::error("memory_id and type required");
+        }
+
+        int64_t memory_id = params["memory_id"].get<int64_t>();
+        std::string type = params["type"].get<std::string>();
+
+        // Validate type
+        bool valid = false;
+        for (const auto& t : VALID_MEMORY_TYPES) {
+            if (type == t) { valid = true; break; }
+        }
+
+        if (!valid) {
+            std::ostringstream err;
+            err << "Invalid type '" << type << "'. Valid types: ";
+            for (size_t i = 0; i < VALID_MEMORY_TYPES.size(); ++i) {
+                if (i > 0) err << ", ";
+                err << VALID_MEMORY_TYPES[i];
+            }
+            return DuckDBToolResult::error(err.str());
+        }
+
+        // Check memory exists
+        auto mem = mind_->store().get_memory(memory_id);
+        if (!mem) {
+            return DuckDBToolResult::error("Memory not found");
+        }
+
+        // Update kind via store
+        bool success = mind_->store().update_kind(memory_id, type);
+        if (!success) {
+            return DuckDBToolResult::error("Failed to update memory type");
+        }
+
+        return DuckDBToolResult::ok(
+            "Set memory #" + std::to_string(memory_id) + " type to: " + type,
+            {{"memory_id", memory_id}, {"type", type}, {"previous_type", mem->kind}}
+        );
+    }
+
+    DuckDBToolResult tool_memory_type_stats(const json& params) {
+        std::string realm = params.value("realm", "");
+
+        std::ostringstream where;
+        if (!realm.empty()) {
+            std::string escaped;
+            for (char c : realm) {
+                if (c == '\'') escaped += "''";
+                else escaped += c;
+            }
+            where << " WHERE (realm = '" << escaped << "' OR visibility = 2)";
+        }
+
+        // Query for kind counts
+        std::ostringstream sql;
+        sql << "SELECT COALESCE(kind, 'unknown') as kind, COUNT(*) as count "
+            << "FROM memory" << where.str()
+            << " GROUP BY kind ORDER BY count DESC";
+
+        auto result = mind_->store().raw_query(sql.str());
+
+        std::ostringstream ss;
+        ss << "Memory Type Statistics:\n";
+        ss << "══════════════════════════════\n\n";
+
+        json by_kind = json::object();
+        if (result && !result->HasError()) {
+            while (auto chunk = result->Fetch()) {
+                if (!chunk || chunk->size() == 0) break;
+                for (size_t i = 0; i < chunk->size(); ++i) {
+                    std::string kind = chunk->GetValue(0, i).GetValue<std::string>();
+                    int64_t count = chunk->GetValue(1, i).GetValue<int64_t>();
+                    ss << "  " << std::setw(15) << kind << ": " << count << "\n";
+                    by_kind[kind] = count;
+                }
+            }
+        }
+
+        // Query for priority tier counts
+        std::ostringstream tier_sql;
+        tier_sql << "SELECT COALESCE(priority_tier, 0) as tier, COUNT(*) as count "
+                 << "FROM memory" << where.str()
+                 << " GROUP BY priority_tier ORDER BY tier DESC";
+
+        auto tier_result = mind_->store().raw_query(tier_sql.str());
+
+        ss << "\nPriority Tiers:\n";
+        json by_tier = json::object();
+        int critical = 0, notable = 0, background = 0;
+        if (tier_result && !tier_result->HasError()) {
+            while (auto chunk = tier_result->Fetch()) {
+                if (!chunk || chunk->size() == 0) break;
+                for (size_t i = 0; i < chunk->size(); ++i) {
+                    int tier = chunk->GetValue(0, i).GetValue<int32_t>();
+                    int64_t count = chunk->GetValue(1, i).GetValue<int64_t>();
+                    if (tier == 2) { critical = count; ss << "  🔴 Critical: " << count << "\n"; }
+                    else if (tier == 1) { notable = count; ss << "  🟡 Notable: " << count << "\n"; }
+                    else { background = count; ss << "  🟢 Background: " << count << "\n"; }
+                }
+            }
+        }
+
+        by_tier["critical"] = critical;
+        by_tier["notable"] = notable;
+        by_tier["background"] = background;
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"by_kind", by_kind},
+            {"by_tier", by_tier}
+        });
+    }
+
+    // ========================================================================
     // Smart Recall: unified query intent classification and routing
     // ========================================================================
 
@@ -11427,6 +11851,479 @@ private:
         return DuckDBToolResult::ok(
             "Merge request #" + std::to_string(merge_id) + " " + action,
             {{"merge_id", merge_id}, {"status", status}, {"resolution", resolution}}
+        );
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // File Time Machine: Explore and restore file versions from past sessions
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Helper: get Claude projects directory
+    static std::string get_claude_projects_dir() {
+        const char* home = std::getenv("HOME");
+        if (!home) return "";
+        return std::string(home) + "/.claude/projects";
+    }
+
+    // Helper: get file-history directory
+    static std::string get_file_history_dir() {
+        const char* home = std::getenv("HOME");
+        if (!home) return "";
+        return std::string(home) + "/.claude/file-history";
+    }
+
+    // Helper: parse time string (natural language or ISO8601)
+    static int64_t parse_time_string(const std::string& time_str) {
+        if (time_str.empty()) return 0;
+
+        auto now = std::chrono::system_clock::now();
+        auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now.time_since_epoch()).count();
+
+        // Natural language time parsing
+        std::string lower = time_str;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+
+        // "X minutes ago", "X hours ago", "X days ago"
+        std::regex ago_regex(R"((\d+)\s*(minute|min|hour|hr|day|second|sec)s?\s*ago)", std::regex::icase);
+        std::smatch match;
+        if (std::regex_search(time_str, match, ago_regex)) {
+            int64_t value = std::stoll(match[1].str());
+            std::string unit = match[2].str();
+            std::transform(unit.begin(), unit.end(), unit.begin(), ::tolower);
+
+            int64_t ms_offset = 0;
+            if (unit == "second" || unit == "sec") ms_offset = value * 1000LL;
+            else if (unit == "minute" || unit == "min") ms_offset = value * 60 * 1000LL;
+            else if (unit == "hour" || unit == "hr") ms_offset = value * 60 * 60 * 1000LL;
+            else if (unit == "day") ms_offset = value * 24 * 60 * 60 * 1000LL;
+
+            return now_ms - ms_offset;
+        }
+
+        // "at HH:MM" (today)
+        std::regex at_time_regex(R"(at\s+(\d{1,2}):(\d{2}))", std::regex::icase);
+        if (std::regex_search(time_str, match, at_time_regex)) {
+            int hour = std::stoi(match[1].str());
+            int minute = std::stoi(match[2].str());
+
+            auto now_t = std::chrono::system_clock::to_time_t(now);
+            std::tm* tm_now = std::localtime(&now_t);
+            tm_now->tm_hour = hour;
+            tm_now->tm_min = minute;
+            tm_now->tm_sec = 0;
+
+            auto target = std::chrono::system_clock::from_time_t(std::mktime(tm_now));
+            return std::chrono::duration_cast<std::chrono::milliseconds>(
+                target.time_since_epoch()).count();
+        }
+
+        // "yesterday", "today", "last hour"
+        if (lower.find("yesterday") != std::string::npos) {
+            return now_ms - 24 * 60 * 60 * 1000LL;
+        }
+        if (lower.find("today") != std::string::npos || lower.find("now") != std::string::npos) {
+            return now_ms;
+        }
+        if (lower.find("last hour") != std::string::npos) {
+            return now_ms - 60 * 60 * 1000LL;
+        }
+        if (lower.find("last 10 minutes") != std::string::npos) {
+            return now_ms - 10 * 60 * 1000LL;
+        }
+
+        // Try ISO8601 format: YYYY-MM-DDTHH:MM:SS or YYYY-MM-DD
+        std::tm tm = {};
+        std::istringstream ss(time_str);
+
+        // Try full datetime first
+        ss >> std::get_time(&tm, "%Y-%m-%dT%H:%M:%S");
+        if (!ss.fail()) {
+            auto tp = std::chrono::system_clock::from_time_t(std::mktime(&tm));
+            return std::chrono::duration_cast<std::chrono::milliseconds>(
+                tp.time_since_epoch()).count();
+        }
+
+        // Try date only
+        ss.clear();
+        ss.str(time_str);
+        ss >> std::get_time(&tm, "%Y-%m-%d");
+        if (!ss.fail()) {
+            auto tp = std::chrono::system_clock::from_time_t(std::mktime(&tm));
+            return std::chrono::duration_cast<std::chrono::milliseconds>(
+                tp.time_since_epoch()).count();
+        }
+
+        return 0;  // Could not parse
+    }
+
+    // Helper: format timestamp for display
+    static std::string format_time(int64_t timestamp_ms) {
+        auto seconds = timestamp_ms / 1000;
+        std::time_t t = static_cast<std::time_t>(seconds);
+        std::tm* tm = std::localtime(&t);
+        char buf[32];
+        std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", tm);
+        return std::string(buf);
+    }
+
+    // Helper: index file-history-snapshot entries from a transcript
+    size_t index_file_history_from_transcript(const std::string& session_id, const std::string& transcript_path, const std::string& realm) {
+        if (!std::filesystem::exists(transcript_path)) return 0;
+
+        std::vector<FileEdit> edits;
+        std::ifstream file(transcript_path);
+        std::string line;
+
+        while (std::getline(file, line)) {
+            if (line.empty()) continue;
+
+            try {
+                auto j = json::parse(line);
+
+                // Look for file-history-snapshot entries
+                if (j.value("type", "") != "file-history-snapshot") continue;
+
+                auto snapshot = j.value("snapshot", json::object());
+                auto backups = snapshot.value("trackedFileBackups", json::object());
+
+                for (auto& [file_path, info] : backups.items()) {
+                    std::string backup_filename = info.value("backupFileName", "");
+                    if (backup_filename.empty() || backup_filename == "null") continue;
+
+                    int version = info.value("version", 1);
+                    std::string backup_time_str = info.value("backupTime", "");
+
+                    // Parse ISO8601 timestamp
+                    int64_t backup_time = 0;
+                    if (!backup_time_str.empty()) {
+                        backup_time = parse_time_string(backup_time_str);
+                    }
+
+                    FileEdit edit;
+                    edit.session_id = session_id;
+                    edit.file_path = file_path;
+                    edit.version = version;
+                    edit.backup_filename = backup_filename;
+                    edit.backup_time = backup_time;
+                    edit.realm = realm;
+
+                    edits.push_back(edit);
+                }
+            } catch (...) {
+                // Skip malformed lines
+                continue;
+            }
+        }
+
+        // Store all edits
+        size_t stored = 0;
+        for (const auto& edit : edits) {
+            if (mind_->store().store_file_edit(edit) > 0) {
+                stored++;
+            }
+        }
+
+        return stored;
+    }
+
+    DuckDBToolResult tool_file_index_session(const json& params) {
+        std::string session_id = params.value("session_id", "");
+        if (session_id.empty()) {
+            return DuckDBToolResult::error("session_id is required");
+        }
+
+        bool force = params.value("force", false);
+
+        // Check if already indexed (unless force)
+        if (!force && mind_->store().session_file_edits_indexed(session_id)) {
+            return DuckDBToolResult::ok(
+                "Session " + session_id + " already indexed",
+                {{"session_id", session_id}, {"already_indexed", true}}
+            );
+        }
+
+        // Find transcript path
+        std::string projects_dir = get_claude_projects_dir();
+        std::string transcript_path;
+        std::string realm = "brahman";
+
+        // Search through project directories for this session's transcript
+        for (const auto& project_entry : std::filesystem::directory_iterator(projects_dir)) {
+            if (!project_entry.is_directory()) continue;
+
+            std::string candidate = project_entry.path().string() + "/" + session_id + ".jsonl";
+            if (std::filesystem::exists(candidate)) {
+                transcript_path = candidate;
+                // Extract realm from project directory name
+                realm = "project:" + project_entry.path().filename().string();
+                break;
+            }
+        }
+
+        if (transcript_path.empty()) {
+            return DuckDBToolResult::error("Could not find transcript for session " + session_id);
+        }
+
+        size_t indexed = index_file_history_from_transcript(session_id, transcript_path, realm);
+
+        return DuckDBToolResult::ok(
+            "Indexed " + std::to_string(indexed) + " file edits from session " + session_id,
+            {{"session_id", session_id}, {"indexed_count", indexed}, {"transcript_path", transcript_path}}
+        );
+    }
+
+    DuckDBToolResult tool_file_timeline(const json& params) {
+        std::string query = params.value("query", "");
+        std::string session_id = params.value("session_id", "");
+        std::string file_pattern = params.value("file_pattern", "");
+        size_t limit = params.value("limit", 20);
+
+        std::vector<FileEdit> edits;
+
+        if (!session_id.empty()) {
+            // Index this session if not already done
+            if (!mind_->store().session_file_edits_indexed(session_id)) {
+                tool_file_index_session({{"session_id", session_id}});
+            }
+            edits = mind_->store().get_session_file_edits(session_id, limit);
+        } else if (!query.empty()) {
+            // Parse time query
+            int64_t target_time = parse_time_string(query);
+            if (target_time == 0) {
+                return DuckDBToolResult::error("Could not parse time query: " + query);
+            }
+
+            // Search ±30 minutes around target time
+            int64_t window_ms = 30 * 60 * 1000LL;
+            edits = mind_->store().get_file_edits_in_range(
+                target_time - window_ms,
+                target_time + window_ms,
+                file_pattern,
+                limit
+            );
+        } else {
+            // Default: last hour
+            auto now = std::chrono::system_clock::now();
+            auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                now.time_since_epoch()).count();
+            edits = mind_->store().get_file_edits_in_range(
+                now_ms - 60 * 60 * 1000LL,
+                now_ms,
+                file_pattern,
+                limit
+            );
+        }
+
+        // Format output
+        json results = json::array();
+        std::ostringstream text;
+        text << "File Timeline:\n";
+
+        for (const auto& edit : edits) {
+            text << format_time(edit.backup_time) << "  "
+                 << edit.file_path << "  v" << edit.version << "\n";
+
+            results.push_back({
+                {"id", edit.id},
+                {"file_path", edit.file_path},
+                {"version", edit.version},
+                {"backup_filename", edit.backup_filename},
+                {"backup_time", edit.backup_time},
+                {"time_formatted", format_time(edit.backup_time)},
+                {"session_id", edit.session_id}
+            });
+        }
+
+        if (edits.empty()) {
+            text << "(no file edits found)\n";
+        }
+
+        return DuckDBToolResult::ok(text.str(), {{"edits", results}, {"count", edits.size()}});
+    }
+
+    DuckDBToolResult tool_file_at_time(const json& params) {
+        std::string file_path = params.value("file_path", "");
+        if (file_path.empty()) {
+            return DuckDBToolResult::error("file_path is required");
+        }
+
+        std::string time_str = params.value("time", "");
+        std::string session_id = params.value("session_id", "");
+        bool show_diff = params.value("show_diff", false);
+
+        // Determine target time
+        int64_t target_time;
+        if (!time_str.empty()) {
+            target_time = parse_time_string(time_str);
+            if (target_time == 0) {
+                return DuckDBToolResult::error("Could not parse time: " + time_str);
+            }
+        } else {
+            // Default: now (get most recent version)
+            auto now = std::chrono::system_clock::now();
+            target_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+                now.time_since_epoch()).count();
+        }
+
+        // Find the file edit closest to the target time
+        auto edit_opt = mind_->store().get_file_at_time(file_path, target_time);
+        if (!edit_opt) {
+            return DuckDBToolResult::error("No version found for " + file_path + " at or before " + format_time(target_time));
+        }
+
+        auto& edit = *edit_opt;
+
+        // Read the actual content from file-history
+        std::string file_history_dir = get_file_history_dir();
+        std::string backup_path = file_history_dir + "/" + edit.session_id + "/" + edit.backup_filename;
+
+        if (!std::filesystem::exists(backup_path)) {
+            return DuckDBToolResult::error("Backup file not found: " + backup_path);
+        }
+
+        std::ifstream file(backup_path);
+        std::stringstream content_stream;
+        content_stream << file.rdbuf();
+        std::string content = content_stream.str();
+
+        json result = {
+            {"file_path", edit.file_path},
+            {"version", edit.version},
+            {"backup_filename", edit.backup_filename},
+            {"backup_time", edit.backup_time},
+            {"time_formatted", format_time(edit.backup_time)},
+            {"session_id", edit.session_id},
+            {"content", content},
+            {"content_lines", std::count(content.begin(), content.end(), '\n') + 1}
+        };
+
+        std::ostringstream text;
+        text << "File: " << edit.file_path << " (v" << edit.version << ")\n";
+        text << "Time: " << format_time(edit.backup_time) << "\n";
+        text << "Session: " << edit.session_id << "\n";
+        text << "Lines: " << result["content_lines"] << "\n\n";
+
+        if (show_diff) {
+            // Read current file if it exists
+            if (std::filesystem::exists(file_path)) {
+                std::ifstream current_file(file_path);
+                std::stringstream current_stream;
+                current_stream << current_file.rdbuf();
+                std::string current_content = current_stream.str();
+
+                if (current_content != content) {
+                    text << "[Content differs from current version - use file_restore to restore]\n\n";
+                    result["differs_from_current"] = true;
+                } else {
+                    text << "[Content matches current version]\n\n";
+                    result["differs_from_current"] = false;
+                }
+            }
+        }
+
+        // Show first 100 lines of content
+        std::istringstream lines(content);
+        std::string line;
+        int line_count = 0;
+        text << "--- Content ---\n";
+        while (std::getline(lines, line) && line_count < 100) {
+            text << line << "\n";
+            line_count++;
+        }
+        if (line_count >= 100) {
+            text << "\n... (truncated, " << result["content_lines"] << " total lines)\n";
+        }
+
+        return DuckDBToolResult::ok(text.str(), result);
+    }
+
+    DuckDBToolResult tool_file_restore(const json& params) {
+        std::string file_path = params.value("file_path", "");
+        if (file_path.empty()) {
+            return DuckDBToolResult::error("file_path is required");
+        }
+
+        int64_t version_id = params.value("version_id", int64_t(0));
+        bool preview = params.value("preview", true);
+
+        // If no version_id, get the most recent version
+        std::optional<FileEdit> edit_opt;
+        if (version_id > 0) {
+            // Look up by ID - not implemented yet, use file_at_time for now
+            // For now, we'll use the file path lookup
+            auto edits = mind_->store().get_file_edits(file_path, 1);
+            if (edits.empty()) {
+                return DuckDBToolResult::error("No version found for " + file_path);
+            }
+            edit_opt = edits[0];
+        } else {
+            auto edits = mind_->store().get_file_edits(file_path, 1);
+            if (edits.empty()) {
+                return DuckDBToolResult::error("No version found for " + file_path);
+            }
+            edit_opt = edits[0];
+        }
+
+        auto& edit = *edit_opt;
+
+        // Read the backup content
+        std::string file_history_dir = get_file_history_dir();
+        std::string backup_path = file_history_dir + "/" + edit.session_id + "/" + edit.backup_filename;
+
+        if (!std::filesystem::exists(backup_path)) {
+            return DuckDBToolResult::error("Backup file not found: " + backup_path);
+        }
+
+        std::ifstream backup_file(backup_path);
+        std::stringstream content_stream;
+        content_stream << backup_file.rdbuf();
+        std::string content = content_stream.str();
+
+        json result = {
+            {"file_path", edit.file_path},
+            {"version", edit.version},
+            {"backup_time", edit.backup_time},
+            {"time_formatted", format_time(edit.backup_time)},
+            {"preview", preview},
+            {"content_lines", std::count(content.begin(), content.end(), '\n') + 1}
+        };
+
+        if (preview) {
+            std::ostringstream text;
+            text << "Preview: Would restore " << file_path << " to version from " << format_time(edit.backup_time) << "\n";
+            text << "Lines: " << result["content_lines"] << "\n\n";
+            text << "To actually restore, call file_restore with preview=false\n\n";
+
+            // Show first 50 lines
+            std::istringstream lines(content);
+            std::string line;
+            int line_count = 0;
+            text << "--- Preview Content ---\n";
+            while (std::getline(lines, line) && line_count < 50) {
+                text << line << "\n";
+                line_count++;
+            }
+            if (line_count >= 50) {
+                text << "\n... (truncated)\n";
+            }
+
+            result["content"] = content;
+            return DuckDBToolResult::ok(text.str(), result);
+        }
+
+        // Actually restore the file
+        std::ofstream out_file(file_path);
+        if (!out_file) {
+            return DuckDBToolResult::error("Failed to write to " + file_path);
+        }
+        out_file << content;
+        out_file.close();
+
+        result["restored"] = true;
+        return DuckDBToolResult::ok(
+            "Restored " + file_path + " to version from " + format_time(edit.backup_time),
+            result
         );
     }
 };

@@ -987,6 +987,22 @@ bool DuckDBStore::create_schema() {
     write_execute("ALTER TABLE memory ADD COLUMN IF NOT EXISTS pinned BOOLEAN DEFAULT FALSE");
     write_execute("ALTER TABLE memory ADD COLUMN IF NOT EXISTS pin_reason VARCHAR DEFAULT ''");
 
+    // Migration: add priority_tier for budget-aware recall (ClawVault-inspired)
+    // Tiers: 0=background (🟢), 1=notable (🟡), 2=critical (🔴)
+    write_execute("ALTER TABLE memory ADD COLUMN IF NOT EXISTS priority_tier INTEGER DEFAULT 0");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_memory_priority ON memory(priority_tier, confidence DESC)");
+
+    // Initialize priority_tier from confidence for existing memories
+    // Only update rows where priority_tier is still 0 (default) and confidence suggests higher tier
+    write_execute(R"(
+        UPDATE memory SET priority_tier = CASE
+            WHEN confidence >= 0.8 OR pinned = TRUE THEN 2
+            WHEN confidence >= 0.5 THEN 1
+            ELSE 0
+        END
+        WHERE priority_tier = 0 AND (confidence >= 0.5 OR pinned = TRUE)
+    )");
+
     // Memory history - git-like version control for memories
     write_execute(R"(
         CREATE TABLE IF NOT EXISTS memory_history (
@@ -1414,6 +1430,30 @@ bool DuckDBStore::create_schema() {
             (1, 'user:default', 'User', 'person', 'The human user', epoch_ms(now()), epoch_ms(now())),
             (2, 'assistant:claude', 'Claude', 'person', 'The AI assistant', epoch_ms(now()), epoch_ms(now()))
     )");
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // File Time Machine: Index file versions from Claude Code's file-history
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // File edit tracking - indexes file-history-snapshot entries from transcripts
+    if (!write_execute(R"(
+        CREATE TABLE IF NOT EXISTS file_edit (
+            id BIGINT PRIMARY KEY,
+            session_id VARCHAR NOT NULL,
+            file_path VARCHAR NOT NULL,
+            version INTEGER NOT NULL,
+            backup_filename VARCHAR NOT NULL,
+            backup_time BIGINT NOT NULL,
+            realm VARCHAR DEFAULT 'brahman',
+            UNIQUE(session_id, file_path, version)
+        )
+    )")) {
+        return false;
+    }
+    write_execute("CREATE INDEX IF NOT EXISTS idx_file_edit_path ON file_edit(file_path)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_file_edit_time ON file_edit(backup_time DESC)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_file_edit_session ON file_edit(session_id)");
+    write_execute("CREATE SEQUENCE IF NOT EXISTS file_edit_seq START 1");
 
     return true;
 }
@@ -2287,6 +2327,24 @@ bool DuckDBStore::update_content(int64_t id, const std::string& new_content) {
     return write_execute(sql.str());
 }
 
+bool DuckDBStore::update_kind(int64_t id, const std::string& new_kind) {
+    if (!db_) return false;
+
+    // Escape kind for SQL
+    std::string escaped = new_kind;
+    size_t pos = 0;
+    while ((pos = escaped.find('\'', pos)) != std::string::npos) {
+        escaped.replace(pos, 1, "''");
+        pos += 2;
+    }
+
+    std::ostringstream sql;
+    sql << "UPDATE memory SET kind = '" << escaped << "', "
+        << "updated_at = " << now() << " WHERE id = " << id;
+
+    return write_execute(sql.str());
+}
+
 bool DuckDBStore::update_visibility(int64_t id, RealmVisibility visibility) {
     if (!db_) return false;
 
@@ -2961,6 +3019,199 @@ std::vector<MemoryResult> DuckDBStore::list_by_aspect(
             results.push_back(mem);
         }
     }
+
+    return results;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Memory Index: Fast pre-retrieval scanning (ClawVault-inspired)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+std::vector<DuckDBStore::MemoryIndexEntry> DuckDBStore::list_memories_brief(
+    size_t limit,
+    const std::string& realm,
+    const std::string& kind,
+    std::optional<PriorityTier> tier
+) {
+    std::vector<MemoryIndexEntry> results;
+    if (!db_) return results;
+
+    std::ostringstream sql;
+    sql << "SELECT id, COALESCE(kind, 'episode'), COALESCE(priority_tier, 0), "
+        << "COALESCE(created_at, 0), COALESCE(SUBSTRING(content, 1, 80), '') "
+        << "FROM memory WHERE 1=1 ";
+
+    // Apply filters
+    if (!realm.empty()) {
+        std::string escaped;
+        for (char c : realm) {
+            if (c == '\'') escaped += "''";
+            else escaped += c;
+        }
+        sql << "AND (realm = '" << escaped << "' OR visibility = 2) ";
+    }
+
+    if (!kind.empty()) {
+        std::string escaped;
+        for (char c : kind) {
+            if (c == '\'') escaped += "''";
+            else escaped += c;
+        }
+        sql << "AND kind = '" << escaped << "' ";
+    }
+
+    if (tier.has_value()) {
+        sql << "AND priority_tier = " << static_cast<int>(*tier) << " ";
+    }
+
+    sql << "ORDER BY priority_tier DESC, confidence DESC, created_at DESC "
+        << "LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    if (!result) return results;
+
+    while (auto chunk = result->Fetch()) {
+        for (size_t i = 0; i < chunk->size(); i++) {
+            MemoryIndexEntry entry;
+            entry.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            entry.kind = chunk->GetValue(1, i).GetValue<std::string>();
+            entry.priority_tier = static_cast<PriorityTier>(chunk->GetValue(2, i).GetValue<int32_t>());
+            entry.created_at = chunk->GetValue(3, i).GetValue<int64_t>();
+            entry.one_liner = chunk->GetValue(4, i).GetValue<std::string>();
+            results.push_back(entry);
+        }
+    }
+
+    return results;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Priority Tiers: Budget-aware recall (ClawVault-inspired)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+bool DuckDBStore::set_priority_tier(int64_t memory_id, PriorityTier tier) {
+    if (!db_) return false;
+
+    std::ostringstream sql;
+    sql << "UPDATE memory SET priority_tier = " << static_cast<int>(tier)
+        << ", updated_at = " << now()
+        << " WHERE id = " << memory_id;
+
+    return write_execute(sql.str());
+}
+
+std::vector<MemoryResult> DuckDBStore::recall_by_priority(
+    const std::vector<float>& query_embedding,
+    size_t budget_tokens,
+    const std::string& realm,
+    bool include_global
+) {
+    std::vector<MemoryResult> results;
+    if (!db_) return results;
+
+    // Estimate ~4 chars per token
+    size_t budget_chars = budget_tokens * 4;
+    size_t used_chars = 0;
+
+    // Helper to fetch memories for a tier
+    auto fetch_tier = [&](PriorityTier tier) {
+        if (used_chars >= budget_chars) return;
+
+        std::ostringstream where;
+        where << "WHERE priority_tier = " << static_cast<int>(tier) << " ";
+
+        if (!realm.empty()) {
+            std::string escaped;
+            for (char c : realm) {
+                if (c == '\'') escaped += "''";
+                else escaped += c;
+            }
+            where << "AND (realm = '" << escaped << "' ";
+            if (include_global) {
+                where << "OR visibility = 2 ";
+            }
+            where << ") ";
+        }
+
+        // If we have embeddings, do semantic search within tier
+        if (!query_embedding.empty() && emb_conn_) {
+            std::lock_guard<std::mutex> lock(emb_mutex_);
+            try {
+                // Get candidates from embeddings DB
+                std::ostringstream emb_sql;
+                emb_sql << "SELECT memory_id, "
+                        << "array_cosine_similarity(embedding, " << embedding_to_sql(query_embedding) << ") AS similarity "
+                        << "FROM memory_embeddings "
+                        << "ORDER BY array_distance(embedding, " << embedding_to_sql(query_embedding) << ") "
+                        << "LIMIT 100";
+
+                auto emb_result = emb_conn_->Query(emb_sql.str());
+                std::unordered_map<int64_t, float> sim_map;
+                if (emb_result && !emb_result->HasError()) {
+                    while (auto chunk = emb_result->Fetch()) {
+                        if (!chunk || chunk->size() == 0) break;
+                        for (size_t i = 0; i < chunk->size(); ++i) {
+                            int64_t mem_id = chunk->GetValue(0, i).GetValue<int64_t>();
+                            float sim = chunk->GetValue(1, i).GetValue<float>();
+                            sim_map[mem_id] = sim;
+                        }
+                    }
+                }
+
+                // Build ID filter
+                if (!sim_map.empty()) {
+                    std::ostringstream id_list;
+                    bool first = true;
+                    for (const auto& [id, _] : sim_map) {
+                        if (!first) id_list << ",";
+                        id_list << id;
+                        first = false;
+                    }
+                    where << "AND id IN (" << id_list.str() << ") ";
+                }
+            } catch (...) {
+                // Fall back to no embedding filter
+            }
+        }
+
+        std::ostringstream sql;
+        sql << "SELECT id, COALESCE(kind, 'episode'), COALESCE(content, ''), "
+            << "COALESCE(confidence, 0.5), COALESCE(created_at, 0), COALESCE(accessed_at, 0), "
+            << "COALESCE(realm, 'brahman'), COALESCE(visibility, 0), COALESCE(priority_tier, 0) "
+            << "FROM memory " << where.str()
+            << "ORDER BY confidence DESC, created_at DESC "
+            << "LIMIT 50";
+
+        auto result = read_query(sql.str());
+        if (!result) return;
+
+        while (auto chunk = result->Fetch()) {
+            for (size_t i = 0; i < chunk->size(); i++) {
+                MemoryResult mem;
+                mem.id = chunk->GetValue(0, i).GetValue<int64_t>();
+                mem.kind = chunk->GetValue(1, i).GetValue<std::string>();
+                mem.content = chunk->GetValue(2, i).GetValue<std::string>();
+                mem.confidence = chunk->GetValue(3, i).GetValue<float>();
+                mem.created_at = chunk->GetValue(4, i).GetValue<int64_t>();
+                mem.accessed_at = chunk->GetValue(5, i).GetValue<int64_t>();
+                mem.realm = chunk->GetValue(6, i).GetValue<std::string>();
+                mem.visibility = static_cast<RealmVisibility>(chunk->GetValue(7, i).GetValue<int32_t>());
+                mem.priority_tier = static_cast<PriorityTier>(chunk->GetValue(8, i).GetValue<int32_t>());
+
+                // Check budget
+                size_t content_chars = mem.content.size();
+                if (used_chars + content_chars <= budget_chars) {
+                    results.push_back(mem);
+                    used_chars += content_chars;
+                }
+            }
+        }
+    };
+
+    // Fill tiers in priority order: Critical (2) → Notable (1) → Background (0)
+    fetch_tier(PriorityTier::Critical);
+    fetch_tier(PriorityTier::Notable);
+    fetch_tier(PriorityTier::Background);
 
     return results;
 }
@@ -4477,6 +4728,307 @@ size_t DuckDBStore::delete_file_triplets(const std::string& file_path) {
     write_execute(sql.str());
 
     return count;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// File Time Machine: Track file versions from Claude Code file-history
+// ═══════════════════════════════════════════════════════════════════════════
+
+int64_t DuckDBStore::store_file_edit(const FileEdit& edit) {
+    if (!db_) return 0;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    // Get next ID from sequence
+    int64_t id = 0;
+    auto seq_result = read_query("SELECT nextval('file_edit_seq')");
+    if (seq_result && !seq_result->HasError()) {
+        auto chunk = seq_result->Fetch();
+        if (chunk && chunk->size() > 0) {
+            id = chunk->GetValue(0, 0).GetValue<int64_t>();
+        }
+    }
+    if (id == 0) return 0;
+
+    std::ostringstream sql;
+    sql << "INSERT OR IGNORE INTO file_edit "
+        << "(id, session_id, file_path, version, backup_filename, backup_time, realm) "
+        << "VALUES ("
+        << id << ", '"
+        << escape(edit.session_id) << "', '"
+        << escape(edit.file_path) << "', "
+        << edit.version << ", '"
+        << escape(edit.backup_filename) << "', "
+        << edit.backup_time << ", '"
+        << escape(edit.realm) << "')";
+
+    if (write_execute(sql.str())) {
+        return id;
+    }
+    return 0;
+}
+
+size_t DuckDBStore::store_file_edits_batch(const std::vector<FileEdit>& edits) {
+    if (!db_ || edits.empty()) return 0;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    size_t stored = 0;
+    std::ostringstream sql;
+    sql << "INSERT OR IGNORE INTO file_edit "
+        << "(id, session_id, file_path, version, backup_filename, backup_time, realm) VALUES ";
+
+    bool first = true;
+    for (const auto& edit : edits) {
+        // Get next ID
+        int64_t id = 0;
+        auto seq_result = read_query("SELECT nextval('file_edit_seq')");
+        if (seq_result && !seq_result->HasError()) {
+            auto chunk = seq_result->Fetch();
+            if (chunk && chunk->size() > 0) {
+                id = chunk->GetValue(0, 0).GetValue<int64_t>();
+            }
+        }
+        if (id == 0) continue;
+
+        if (!first) sql << ", ";
+        first = false;
+
+        sql << "(" << id << ", '"
+            << escape(edit.session_id) << "', '"
+            << escape(edit.file_path) << "', "
+            << edit.version << ", '"
+            << escape(edit.backup_filename) << "', "
+            << edit.backup_time << ", '"
+            << escape(edit.realm) << "')";
+        stored++;
+    }
+
+    if (stored > 0 && write_execute(sql.str())) {
+        return stored;
+    }
+    return 0;
+}
+
+std::vector<FileEdit> DuckDBStore::get_file_edits(const std::string& file_path, size_t limit) {
+    std::vector<FileEdit> edits;
+    if (!db_) return edits;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    std::ostringstream sql;
+    sql << "SELECT id, session_id, file_path, version, backup_filename, backup_time, realm "
+        << "FROM file_edit WHERE file_path = '" << escape(file_path) << "' "
+        << "ORDER BY backup_time DESC LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) return edits;
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            FileEdit edit;
+            edit.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            edit.session_id = chunk->GetValue(1, i).ToString();
+            edit.file_path = chunk->GetValue(2, i).ToString();
+            edit.version = chunk->GetValue(3, i).GetValue<int32_t>();
+            edit.backup_filename = chunk->GetValue(4, i).ToString();
+            edit.backup_time = chunk->GetValue(5, i).GetValue<int64_t>();
+            edit.realm = chunk->GetValue(6, i).ToString();
+            edits.push_back(edit);
+        }
+    }
+
+    return edits;
+}
+
+std::vector<FileEdit> DuckDBStore::get_file_edits_in_range(
+    int64_t start_time,
+    int64_t end_time,
+    const std::string& file_pattern,
+    size_t limit
+) {
+    std::vector<FileEdit> edits;
+    if (!db_) return edits;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    std::ostringstream sql;
+    sql << "SELECT id, session_id, file_path, version, backup_filename, backup_time, realm "
+        << "FROM file_edit WHERE backup_time >= " << start_time
+        << " AND backup_time <= " << end_time;
+
+    if (!file_pattern.empty()) {
+        // Convert glob pattern to SQL LIKE pattern
+        std::string like_pattern = file_pattern;
+        for (auto& c : like_pattern) {
+            if (c == '*') c = '%';
+            else if (c == '?') c = '_';
+        }
+        sql << " AND file_path LIKE '" << escape(like_pattern) << "'";
+    }
+
+    sql << " ORDER BY backup_time DESC LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) return edits;
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            FileEdit edit;
+            edit.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            edit.session_id = chunk->GetValue(1, i).ToString();
+            edit.file_path = chunk->GetValue(2, i).ToString();
+            edit.version = chunk->GetValue(3, i).GetValue<int32_t>();
+            edit.backup_filename = chunk->GetValue(4, i).ToString();
+            edit.backup_time = chunk->GetValue(5, i).GetValue<int64_t>();
+            edit.realm = chunk->GetValue(6, i).ToString();
+            edits.push_back(edit);
+        }
+    }
+
+    return edits;
+}
+
+std::vector<FileEdit> DuckDBStore::get_session_file_edits(const std::string& session_id, size_t limit) {
+    std::vector<FileEdit> edits;
+    if (!db_) return edits;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    std::ostringstream sql;
+    sql << "SELECT id, session_id, file_path, version, backup_filename, backup_time, realm "
+        << "FROM file_edit WHERE session_id = '" << escape(session_id) << "' "
+        << "ORDER BY backup_time DESC LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) return edits;
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            FileEdit edit;
+            edit.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            edit.session_id = chunk->GetValue(1, i).ToString();
+            edit.file_path = chunk->GetValue(2, i).ToString();
+            edit.version = chunk->GetValue(3, i).GetValue<int32_t>();
+            edit.backup_filename = chunk->GetValue(4, i).ToString();
+            edit.backup_time = chunk->GetValue(5, i).GetValue<int64_t>();
+            edit.realm = chunk->GetValue(6, i).ToString();
+            edits.push_back(edit);
+        }
+    }
+
+    return edits;
+}
+
+std::optional<FileEdit> DuckDBStore::get_file_at_time(const std::string& file_path, int64_t timestamp) {
+    if (!db_) return std::nullopt;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    // Get the most recent version before or at the given timestamp
+    std::ostringstream sql;
+    sql << "SELECT id, session_id, file_path, version, backup_filename, backup_time, realm "
+        << "FROM file_edit WHERE file_path = '" << escape(file_path) << "' "
+        << "AND backup_time <= " << timestamp << " "
+        << "ORDER BY backup_time DESC LIMIT 1";
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) return std::nullopt;
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return std::nullopt;
+
+    FileEdit edit;
+    edit.id = chunk->GetValue(0, 0).GetValue<int64_t>();
+    edit.session_id = chunk->GetValue(1, 0).ToString();
+    edit.file_path = chunk->GetValue(2, 0).ToString();
+    edit.version = chunk->GetValue(3, 0).GetValue<int32_t>();
+    edit.backup_filename = chunk->GetValue(4, 0).ToString();
+    edit.backup_time = chunk->GetValue(5, 0).GetValue<int64_t>();
+    edit.realm = chunk->GetValue(6, 0).ToString();
+
+    return edit;
+}
+
+bool DuckDBStore::session_file_edits_indexed(const std::string& session_id) {
+    if (!db_) return false;
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    std::ostringstream sql;
+    sql << "SELECT COUNT(*) FROM file_edit WHERE session_id = '" << escape(session_id) << "'";
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) return false;
+
+    auto chunk = result->Fetch();
+    if (!chunk || chunk->size() == 0) return false;
+
+    return chunk->GetValue(0, 0).GetValue<int64_t>() > 0;
+}
+
+bool DuckDBStore::mark_session_file_edits_indexed(const std::string& session_id) {
+    // No-op - the presence of file_edit records for this session indicates it's indexed
+    // This method exists for API symmetry with other indexing systems
+    return true;
 }
 
 DuckDBStore::ClearProjectResult DuckDBStore::clear_project_codebase(const std::string& project) {

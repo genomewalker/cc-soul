@@ -201,6 +201,23 @@ Autonomous monitoring for long-running pipelines (snakemake, nextflow, slurm).
 | Ledger | `ledger_save/load/list/get`, `read_transcript` |
 | Meta | `calibration_record/score`, `metacognition_evaluate` |
 | Messages | `msg_send/inbox/ack_all` |
+| Priority | `list_memories_brief`, `set_priority_tier`, `recall_by_priority` |
+| Types | `set_memory_type`, `memory_type_stats` |
+
+## Advanced Tool (100+ hidden tools)
+
+The `advanced` tool is a gateway to 100+ specialized tools not exposed in the main MCP surface.
+
+**Usage:**
+```
+advanced action="list"                    # List all hidden tools
+advanced action="list" category="advanced" # Filter by category
+advanced tool="pin_memory" arguments={"id": 123}  # Call a hidden tool
+```
+
+**Categories:**
+- `advanced` - Power-user tools (pinning, locking, history, merge queue)
+- `internal` - System tools (cleanup, migrations, diagnostics)
 
 ## Team Workflows
 

@@ -120,6 +120,14 @@ enum class RealmVisibility : uint8_t {
     Global = 2,    // Visible everywhere (brahman)
 };
 
+// Priority tiers for budget-aware recall (ClawVault-inspired)
+// Maps to: 0=🟢 background, 1=🟡 notable, 2=🔴 critical
+enum class PriorityTier : uint8_t {
+    Background = 0,  // Low-signal, loaded last
+    Notable = 1,     // Medium importance, loaded if budget allows
+    Critical = 2,    // Always loaded first
+};
+
 // Memory result from vector search
 struct MemoryResult {
     int64_t id;
@@ -132,6 +140,7 @@ struct MemoryResult {
     std::string realm;                      // Primary realm
     RealmVisibility visibility = RealmVisibility::Private;
     std::vector<std::string> shared_realms; // For Shared visibility
+    PriorityTier priority_tier = PriorityTier::Background;
 
     // Provenance (optional, populated when enable_provenance=true)
     std::optional<std::string> source_session;
@@ -210,6 +219,18 @@ struct CodeFile {
     int32_t symbols_count = 0;  // Number of symbols extracted
     int32_t callsites_count = 0;// Number of callsites extracted
     std::string file_hash;      // Optional content hash
+};
+
+// File edit tracking for File Time Machine
+// Indexes file-history-snapshot entries from Claude Code transcripts
+struct FileEdit {
+    int64_t id = 0;
+    std::string session_id;
+    std::string file_path;      // Relative path from cwd
+    int32_t version = 0;        // Version number (1, 2, 3, ...)
+    std::string backup_filename; // e.g., "9bd8e2ddbec15547@v2"
+    int64_t backup_time = 0;    // Unix timestamp ms
+    std::string realm;
 };
 
 // Transcript state for distillation (reads JSONL directly)
@@ -772,6 +793,9 @@ public:
     // Update memory content
     bool update_content(int64_t id, const std::string& new_content);
 
+    // Update memory kind/type (for taxonomy enforcement)
+    bool update_kind(int64_t id, const std::string& new_kind);
+
     // Update memory visibility (for cross-project promotion)
     bool update_visibility(int64_t id, RealmVisibility visibility);
 
@@ -863,6 +887,44 @@ public:
         const std::string& aspect,
         size_t limit = 50,
         float min_confidence = 0.1f
+    );
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Memory Index: Fast pre-retrieval scanning (ClawVault-inspired)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Brief index entry for fast scanning (vault index pattern)
+    struct MemoryIndexEntry {
+        int64_t id;
+        std::string kind;
+        PriorityTier priority_tier;
+        int64_t created_at;
+        std::string one_liner;  // First 80 chars of content
+    };
+
+    // List memories as brief index entries (fast path before expensive retrieval)
+    // Use to scan what exists, then fetch full content for relevant entries
+    std::vector<MemoryIndexEntry> list_memories_brief(
+        size_t limit = 500,
+        const std::string& realm = "",
+        const std::string& kind = "",              // Filter by kind
+        std::optional<PriorityTier> tier = {}      // Filter by priority tier
+    );
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Priority Tiers: Budget-aware recall (ClawVault-inspired)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Set priority tier for a memory
+    bool set_priority_tier(int64_t memory_id, PriorityTier tier);
+
+    // Budget-aware recall: fills critical first, then notable, then background
+    // Estimates ~4 chars per token for budget calculation
+    std::vector<MemoryResult> recall_by_priority(
+        const std::vector<float>& query_embedding,
+        size_t budget_tokens = 4000,           // Token budget
+        const std::string& realm = "",
+        bool include_global = true
     );
 
     // Tag management
@@ -972,6 +1034,39 @@ public:
     // Delete symbols/triplets for a file (before re-indexing)
     size_t delete_file_symbols(const std::string& file_path);
     size_t delete_file_triplets(const std::string& file_path);
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // File Time Machine: Track file versions from Claude Code file-history
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Store a file edit record (from file-history-snapshot in transcript)
+    int64_t store_file_edit(const FileEdit& edit);
+
+    // Batch store file edits (efficient for indexing entire transcripts)
+    size_t store_file_edits_batch(const std::vector<FileEdit>& edits);
+
+    // Get file edits for a specific file path, ordered by time desc
+    std::vector<FileEdit> get_file_edits(const std::string& file_path, size_t limit = 50);
+
+    // Get file edits in a time range (for timeline queries)
+    std::vector<FileEdit> get_file_edits_in_range(
+        int64_t start_time,      // Unix timestamp ms
+        int64_t end_time,        // Unix timestamp ms
+        const std::string& file_pattern = "",  // Optional glob pattern
+        size_t limit = 100
+    );
+
+    // Get file edits for a session
+    std::vector<FileEdit> get_session_file_edits(const std::string& session_id, size_t limit = 100);
+
+    // Get the file edit closest to a specific time
+    std::optional<FileEdit> get_file_at_time(const std::string& file_path, int64_t timestamp);
+
+    // Check if a session has been indexed for file edits
+    bool session_file_edits_indexed(const std::string& session_id);
+
+    // Mark a session as indexed (to avoid re-processing)
+    bool mark_session_file_edits_indexed(const std::string& session_id);
 
     // Clear entire project codebase (symbols, triplets, file metadata)
     struct ClearProjectResult {
