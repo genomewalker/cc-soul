@@ -230,7 +230,9 @@ BrainResult ClaudeBrain::think(const std::string& prompt, const BrainConfig& con
 BrainResult OpenCodeBrain::think(const std::string& prompt, const BrainConfig& config) {
     std::vector<std::string> args = {
         opencode_path_,
-        "-m", model_
+        "run",           // Required subcommand for non-interactive use
+        "-m", model_,
+        "--print-logs"   // Output to stderr for debugging
     };
 
     // Add extra args
@@ -238,7 +240,7 @@ BrainResult OpenCodeBrain::think(const std::string& prompt, const BrainConfig& c
         args.push_back(arg);
     }
 
-    // Add prompt as final argument
+    // Add prompt as final argument (opencode run accepts message as positional)
     args.push_back(prompt);
 
     return execute_with_timeout(args, "", config.timeout_ms, config.working_dir);

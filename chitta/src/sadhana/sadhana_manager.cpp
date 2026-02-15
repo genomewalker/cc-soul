@@ -5,8 +5,59 @@
 #include <chitta/sadhana/sadhana_manager.hpp>
 #include <iostream>
 #include <sstream>
+#include <regex>
 
 namespace chitta {
+
+// ============================================================================
+// Text sanitization helpers (prevent feedback loops, clean context)
+// ============================================================================
+
+std::string SadhanaManager::strip_ansi(const std::string& text) {
+    // Remove ANSI escape sequences: \x1b[...m, \x1b[...;...m, etc.
+    static const std::regex ansi_regex(R"(\x1b\[[0-9;]*[a-zA-Z])");
+    return std::regex_replace(text, ansi_regex, "");
+}
+
+std::string SadhanaManager::truncate(const std::string& text, size_t max_chars) {
+    if (text.length() <= max_chars) {
+        return text;
+    }
+    return text.substr(0, max_chars) + "... [truncated]";
+}
+
+std::string SadhanaManager::sanitize_for_prompt(const std::string& text, size_t max_chars, bool do_strip_ansi) {
+    std::string result = text;
+    if (do_strip_ansi) {
+        result = strip_ansi(result);
+    }
+    return truncate(result, max_chars);
+}
+
+bool SadhanaManager::is_valid_command(const std::string& cmd) {
+    // Reject obviously invalid commands
+    if (cmd.empty()) return false;
+    if (cmd.length() > 1000) return false;  // Suspiciously long
+
+    // Reject if it looks like an error message or prompt echoed back
+    if (cmd.find("You are an autonomous agent") != std::string::npos) return false;
+    if (cmd.find("Generate a shell command") != std::string::npos) return false;
+    if (cmd.find("Failed to change directory") != std::string::npos) return false;
+    if (cmd.find("\\n") != std::string::npos && cmd.find("\\n") < 50) return false;  // Escaped newlines early = bad
+
+    // Basic sanity: should start with a command-like word
+    size_t first_space = cmd.find(' ');
+    std::string first_word = (first_space != std::string::npos) ? cmd.substr(0, first_space) : cmd;
+
+    // First word should be alphanumeric (possibly with path separators)
+    for (char c : first_word) {
+        if (!std::isalnum(c) && c != '/' && c != '.' && c != '-' && c != '_') {
+            return false;
+        }
+    }
+
+    return true;
+}
 
 SadhanaManager::SadhanaManager(DuckDBStore& store, SadhanaConfig config)
     : store_(store)
@@ -416,11 +467,13 @@ void SadhanaManager::run_cycle(Sadhana& sadhana) {
     std::cerr << "[sadhana] Running cycle for " << sadhana.id << "\n";
 
     BrainProvider* brain = nullptr;
+    int* consecutive_failures = nullptr;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = running_.find(sadhana.id);
         if (it != running_.end()) {
             brain = it->second.brain.get();
+            consecutive_failures = &it->second.consecutive_failures;
         }
     }
 
@@ -431,6 +484,25 @@ void SadhanaManager::run_cycle(Sadhana& sadhana) {
 
     // SENSE
     auto observation = sense(sadhana, *brain);
+
+    // Track consecutive failures
+    bool sense_failed = observation.contains("success") && !observation["success"].get<bool>();
+    if (sense_failed && consecutive_failures) {
+        (*consecutive_failures)++;
+        std::cerr << "[sadhana] Sense failed, consecutive failures: " << *consecutive_failures << "\n";
+
+        if (*consecutive_failures >= config_.max_consecutive_failures) {
+            std::cerr << "[sadhana] Max consecutive failures reached (" << config_.max_consecutive_failures
+                      << "), pausing sadhana " << sadhana.id << "\n";
+            pause(sadhana.id);
+            log_event(sadhana.id, SadhanaEventType::Paused,
+                     {{"reason", "max_consecutive_failures"},
+                      {"failures", *consecutive_failures}});
+            return;
+        }
+    } else if (consecutive_failures) {
+        *consecutive_failures = 0;  // Reset on success
+    }
 
     // THINK
     auto decision = think(sadhana, *brain, observation);
@@ -471,21 +543,44 @@ void SadhanaManager::run_cycle(Sadhana& sadhana) {
 }
 
 json SadhanaManager::sense(Sadhana& sadhana, BrainProvider& brain) {
-    auto start = std::chrono::steady_clock::now();
+    auto start_time = std::chrono::steady_clock::now();
 
-    // Build sense prompt
+    // Build sense prompt with SANITIZED context (prevent feedback loops)
     std::ostringstream prompt;
     prompt << "You are an autonomous agent working toward this goal:\n"
            << sadhana.goal << "\n\n";
 
+    // Sanitize previous context to prevent feedback loops
     if (!sadhana.last_sense.is_null()) {
-        prompt << "Previous observation:\n" << sadhana.last_sense.dump(2) << "\n\n";
+        std::string context;
+        if (sadhana.last_sense.contains("command")) {
+            context = "Command: " + sadhana.last_sense["command"].get<std::string>();
+        }
+        if (sadhana.last_sense.contains("output")) {
+            std::string out = sadhana.last_sense["output"].get<std::string>();
+            context += "\nOutput: " + sanitize_for_prompt(out, config_.max_context_chars, config_.strip_ansi_codes);
+        }
+        if (sadhana.last_sense.contains("error")) {
+            std::string err = sadhana.last_sense["error"].get<std::string>();
+            context += "\nError: " + sanitize_for_prompt(err, config_.max_error_chars, config_.strip_ansi_codes);
+        }
+        if (!context.empty()) {
+            prompt << "Previous observation:\n" << context << "\n\n";
+        }
     }
     if (!sadhana.last_action.empty()) {
         prompt << "Last action taken: " << sadhana.last_action << "\n\n";
     }
     if (!sadhana.last_result.is_null()) {
-        prompt << "Result of last action:\n" << sadhana.last_result.dump(2) << "\n\n";
+        std::string result_context;
+        if (sadhana.last_result.contains("output")) {
+            result_context = sanitize_for_prompt(
+                sadhana.last_result["output"].get<std::string>(),
+                config_.max_context_chars, config_.strip_ansi_codes);
+        }
+        if (!result_context.empty()) {
+            prompt << "Result of last action:\n" << result_context << "\n\n";
+        }
     }
 
     prompt << "Generate a shell command to observe the current state relevant to your goal.\n"
@@ -509,10 +604,15 @@ json SadhanaManager::sense(Sadhana& sadhana, BrainProvider& brain) {
         // Execute the observation command
         std::string cmd = result.output;
 
+        // Strip ANSI codes from brain output first
+        if (config_.strip_ansi_codes) {
+            cmd = strip_ansi(cmd);
+        }
+
         // Strip markdown code blocks (```bash ... ``` or ``` ... ```)
-        size_t start = cmd.find("```");
-        if (start != std::string::npos) {
-            size_t content_start = cmd.find('\n', start);
+        size_t block_start = cmd.find("```");
+        if (block_start != std::string::npos) {
+            size_t content_start = cmd.find('\n', block_start);
             if (content_start != std::string::npos) {
                 content_start++;  // Skip the newline
                 size_t end = cmd.rfind("```");
@@ -530,38 +630,67 @@ json SadhanaManager::sense(Sadhana& sadhana, BrainProvider& brain) {
             cmd.erase(0, 1);
         }
 
-        // Execute command
-        FILE* pipe = popen(cmd.c_str(), "r");
-        if (pipe) {
-            char buffer[4096];
-            std::string output;
-            while (fgets(buffer, sizeof(buffer), pipe)) {
-                output += buffer;
-            }
-            int exit_code = pclose(pipe);
-
-            observation["command"] = cmd;
-            observation["output"] = output;
-            observation["exit_code"] = exit_code;
-            observation["success"] = (exit_code == 0);
-        } else {
-            observation["command"] = cmd;
-            observation["error"] = "Failed to execute command";
+        // VALIDATE command before execution
+        if (!is_valid_command(cmd)) {
+            std::cerr << "[sadhana] Invalid command rejected: " << cmd.substr(0, 100) << "...\n";
+            observation["error"] = "Invalid command generated (prompt echo or malformed)";
+            observation["rejected_command"] = cmd.substr(0, 200);
             observation["success"] = false;
+        } else {
+            // Execute command
+            FILE* pipe = popen(cmd.c_str(), "r");
+            if (pipe) {
+                char buffer[4096];
+                std::string output;
+                while (fgets(buffer, sizeof(buffer), pipe)) {
+                    output += buffer;
+                    // Early truncation to avoid memory issues
+                    if (output.size() > config_.max_output_chars * 2) {
+                        break;
+                    }
+                }
+                int exit_code = pclose(pipe);
+
+                observation["command"] = cmd;
+                // Truncate output for storage
+                if (output.size() > config_.max_output_chars) {
+                    output = output.substr(0, config_.max_output_chars) + "\n... [truncated, " +
+                             std::to_string(output.size()) + " total chars]";
+                }
+                observation["output"] = output;
+                observation["exit_code"] = exit_code;
+                observation["success"] = (exit_code == 0);
+            } else {
+                observation["command"] = cmd;
+                observation["error"] = "Failed to execute command";
+                observation["success"] = false;
+            }
         }
     } else {
         observation["error"] = result.error.empty() ? "Brain failed to generate command" : result.error;
+        if (config_.strip_ansi_codes && !observation["error"].get<std::string>().empty()) {
+            observation["error"] = sanitize_for_prompt(observation["error"].get<std::string>(),
+                                                       config_.max_error_chars, true);
+        }
         observation["success"] = false;
     }
 
-    // Save observation
+    // Save observation (sanitize before storing to prevent DB issues)
+    std::string obs_str = observation.dump();
+    // Escape single quotes for SQL
+    size_t pos = 0;
+    while ((pos = obs_str.find("'", pos)) != std::string::npos) {
+        obs_str.replace(pos, 1, "''");
+        pos += 2;
+    }
+
     std::ostringstream sql;
-    sql << "UPDATE sadhana SET last_sense = '" << observation.dump() << "', updated_at = " << now_ms()
+    sql << "UPDATE sadhana SET last_sense = '" << obs_str << "', updated_at = " << now_ms()
         << " WHERE id = " << sadhana.id;
     store_.execute_raw(sql.str());
 
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - start).count();
+        std::chrono::steady_clock::now() - start_time).count();
     log_event(sadhana.id, SadhanaEventType::Sense, observation, static_cast<int>(elapsed));
 
     sadhana.last_sense = observation;

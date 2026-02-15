@@ -2908,6 +2908,83 @@ TOOLS = [
                 "type": "object"
         }
     ),
+    Tool(
+        name="file_timeline",
+        description="Show files modified in a time range or session (Time Machine)",
+        inputSchema={
+                "properties": {
+                        "file_pattern": {
+                                "description": "Glob pattern to filter files (e.g., '*.cpp', 'src/*')",
+                                "type": "string"
+                        },
+                        "limit": {
+                                "description": "Max results (default: 20)",
+                                "type": "integer"
+                        },
+                        "query": {
+                                "description": "Natural language time query like 'at 22:33', 'yesterday', 'last hour'",
+                                "type": "string"
+                        },
+                        "session_id": {
+                                "description": "Specific session to query",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="file_at_time",
+        description="Get file content as it was at a specific time (Time Machine)",
+        inputSchema={
+                "properties": {
+                        "file_path": {
+                                "description": "File path to retrieve",
+                                "type": "string"
+                        },
+                        "session_id": {
+                                "description": "Specific session to search in",
+                                "type": "string"
+                        },
+                        "show_diff": {
+                                "description": "Show diff against current version (default: False)",
+                                "type": "boolean"
+                        },
+                        "time": {
+                                "description": "Timestamp or natural language (e.g., '2024-02-13T22:33:00', '5 minutes ago')",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "file_path"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="file_restore",
+        description="Restore file to a previous version (Time Machine)",
+        inputSchema={
+                "properties": {
+                        "file_path": {
+                                "description": "File path to restore",
+                                "type": "string"
+                        },
+                        "preview": {
+                                "description": "Preview only, don't actually restore (default: True)",
+                                "type": "boolean"
+                        },
+                        "version_id": {
+                                "description": "Version ID from file_timeline",
+                                "type": "integer"
+                        }
+                },
+                "required": [
+                        "file_path"
+                ],
+                "type": "object"
+        }
+    ),
 ]
 
 COMPOSITE_TOOLS = [

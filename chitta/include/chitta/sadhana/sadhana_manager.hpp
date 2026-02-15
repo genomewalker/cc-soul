@@ -125,6 +125,13 @@ struct SadhanaConfig {
     bool enable_learning = true;    // Store learned patterns in memory
     std::string default_brain_provider = "claude";
     std::string default_brain_model = "sonnet";
+
+    // Hardening settings
+    int max_consecutive_failures = 5;   // Pause after N failures in a row
+    size_t max_context_chars = 500;     // Truncate observation context in prompts
+    size_t max_error_chars = 200;       // Truncate error messages
+    size_t max_output_chars = 4000;     // Truncate command output stored in DB
+    bool strip_ansi_codes = true;       // Remove terminal color codes
 };
 
 // Statistics for monitoring
@@ -188,8 +195,15 @@ private:
     struct RunningState {
         int64_t next_run_at = 0;
         std::unique_ptr<BrainProvider> brain;
+        int consecutive_failures = 0;  // Track failure streaks
     };
     std::unordered_map<int64_t, RunningState> running_;
+
+    // Text sanitization helpers
+    static std::string strip_ansi(const std::string& text);
+    static std::string truncate(const std::string& text, size_t max_chars);
+    static std::string sanitize_for_prompt(const std::string& text, size_t max_chars, bool strip_ansi = true);
+    static bool is_valid_command(const std::string& cmd);
 
     // Core sense-think-act cycle
     void run_cycle(Sadhana& sadhana);

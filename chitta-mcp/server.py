@@ -116,6 +116,8 @@ ADVANCED_TOOLS = {
     # Misc advanced
     "insight_global", "insight_promote", "list_aspects", "list_by_aspect",
     "full_resonate", "grow", "connect", "query",
+    # File Time Machine
+    "file_timeline", "file_at_time", "file_restore", "file_index_session",
 }
 
 # Combined set of tools to hide from listing (but still callable)
