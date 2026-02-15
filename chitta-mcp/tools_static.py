@@ -2008,6 +2008,111 @@ TOOLS = [
         }
     ),
     Tool(
+        name="list_memories_brief",
+        description="Fast memory index: returns id, kind, priority, date, and one-liner (first 80 chars). Use as fast path before expensive retrieval - scan what exists, then fetch full content for relevant entries.",
+        inputSchema={
+                "properties": {
+                        "kind": {
+                                "description": "Filter by memory kind",
+                                "type": "string"
+                        },
+                        "limit": {
+                                "description": "Max entries (default: 200)",
+                                "type": "integer"
+                        },
+                        "priority_tier": {
+                                "description": "Filter by tier: 0=background, 1=notable, 2=critical",
+                                "type": "integer"
+                        },
+                        "realm": {
+                                "description": "Filter by realm",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="set_priority_tier",
+        description="Set memory priority tier. Tiers: 0=background (🟢), 1=notable (🟡), 2=critical (🔴). Critical memories always load first in budget-aware recall.",
+        inputSchema={
+                "properties": {
+                        "memory_id": {
+                                "description": "Memory ID",
+                                "type": "integer"
+                        },
+                        "tier": {
+                                "description": "Priority tier: 0=background, 1=notable, 2=critical",
+                                "type": "integer"
+                        }
+                },
+                "required": [
+                        "memory_id",
+                        "tier"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="recall_by_priority",
+        description="Budget-aware recall: fills critical (🔴) first, then notable (🟡), then background (🟢). Respects token budget. Use when context window is limited.",
+        inputSchema={
+                "properties": {
+                        "budget_tokens": {
+                                "description": "Token budget (default: 4000)",
+                                "type": "integer"
+                        },
+                        "include_global": {
+                                "description": "Include global memories (default: True)",
+                                "type": "boolean"
+                        },
+                        "query": {
+                                "description": "Search query for semantic filtering",
+                                "type": "string"
+                        },
+                        "realm": {
+                                "description": "Filter by realm",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="set_memory_type",
+        description="Set the semantic type (kind) of a memory. Types: decision, preference, correction, insight, milestone, approach, habit, belief, gap, wisdom, episode.",
+        inputSchema={
+                "properties": {
+                        "memory_id": {
+                                "description": "Memory ID",
+                                "type": "integer"
+                        },
+                        "type": {
+                                "description": "Memory type: decision, preference, correction, insight, milestone, approach, habit, belief, gap, wisdom, episode",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "memory_id",
+                        "type"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="memory_type_stats",
+        description="Get statistics on memory types: counts by kind and priority tier.",
+        inputSchema={
+                "properties": {
+                        "realm": {
+                                "description": "Filter by realm",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
         name="smart_recall",
         description="Intelligent memory recall with hierarchical expansion. Classifies query intent, routes to optimal retrieval, and auto-expands top results to full conversation context. Single entry point for finding the right memory.",
         inputSchema={
