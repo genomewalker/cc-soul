@@ -12,6 +12,7 @@
 #include "../version.hpp"
 #include "../query_intent.hpp"
 #include "../transcript_parser.hpp"
+#include "../temporal.hpp"
 #include <nlohmann/json.hpp>
 #include <glob.h>
 #include <string>
@@ -342,6 +343,58 @@ private:
             }}
         });
         handlers_["query_graph"] = [this](const json& p) { return tool_query_graph(p); };
+
+        // query_triplets_temporal: point-in-time triplet queries
+        tools_.push_back({
+            {"name", "query_triplets_temporal"},
+            {"description", "Query triplets at a specific point in time (temporal fact versioning)"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"subject", {{"type", "string"}, {"description", "Filter by subject entity"}}},
+                    {"predicate", {{"type", "string"}, {"description", "Filter by relationship type"}}},
+                    {"object", {{"type", "string"}, {"description", "Filter by object entity"}}},
+                    {"at_date", {{"type", "string"}, {"description", "Date to query at (YYYY-MM-DD). Default: now"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Max results (default 50)"}}}
+                }}
+            }}
+        });
+        handlers_["query_triplets_temporal"] = [this](const json& p) { return tool_query_triplets_temporal(p); };
+
+        // triplet_history: show evolution of a fact over time
+        tools_.push_back({
+            {"name", "triplet_history"},
+            {"description", "Get history of a subject-predicate relationship over time"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"subject", {{"type", "string"}, {"description", "Subject entity"}}},
+                    {"predicate", {{"type", "string"}, {"description", "Relationship type"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Max results (default 20)"}}}
+                }},
+                {"required", {"subject", "predicate"}}
+            }}
+        });
+        handlers_["triplet_history"] = [this](const json& p) { return tool_triplet_history(p); };
+
+        // connect_temporal: create triplet with temporal validity
+        tools_.push_back({
+            {"name", "connect_temporal"},
+            {"description", "Create a triplet with temporal validity period"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"subject", {{"type", "string"}, {"description", "Subject entity"}}},
+                    {"predicate", {{"type", "string"}, {"description", "Relationship type"}}},
+                    {"object", {{"type", "string"}, {"description", "Object entity"}}},
+                    {"valid_from", {{"type", "string"}, {"description", "When fact became true (YYYY-MM-DD or relative like 'yesterday')"}}},
+                    {"valid_to", {{"type", "string"}, {"description", "When fact stopped being true (YYYY-MM-DD). Omit for still valid"}}},
+                    {"context_date", {{"type", "string"}, {"description", "Session date for resolving relative dates (YYYY-MM-DD)"}}}
+                }},
+                {"required", {"subject", "predicate", "object"}}
+            }}
+        });
+        handlers_["connect_temporal"] = [this](const json& p) { return tool_connect_temporal(p); };
 
         // soul_context
         tools_.push_back({
@@ -1873,6 +1926,16 @@ private:
             }}
         });
         handlers_["hygiene_run"] = [this](const json& p) { return tool_hygiene_run(p); };
+
+        tools_.push_back({
+            {"name", "rebuild_fts_index"},
+            {"description", "Rebuild FTS index for BM25 keyword search on memory. Call this if keyword searches return no results."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", json::object()}
+            }}
+        });
+        handlers_["rebuild_fts_index"] = [this](const json& p) { return tool_rebuild_fts_index(p); };
 
         // ═══════════════════════════════════════════════════════════════════
         // xMemory Theme System: Hierarchical Memory Organization
@@ -3528,6 +3591,186 @@ private:
         }
 
         return DuckDBToolResult::ok(ss.str(), {{"triplets", results_json}});
+    }
+
+    DuckDBToolResult tool_query_triplets_temporal(const json& params) {
+        std::string subject = params.value("subject", "");
+        std::string predicate = params.value("predicate", "");
+        std::string object = params.value("object", "");
+        std::string at_date = params.value("at_date", "");
+        size_t limit = params.value("limit", 50);
+
+        // Parse at_date to timestamp
+        int64_t at_time_ms = 0;
+        if (!at_date.empty()) {
+            auto resolved = TemporalResolver::resolve(at_date, TemporalResolver::now_ms());
+            if (resolved) {
+                at_time_ms = resolved->timestamp_ms;
+            } else {
+                return DuckDBToolResult::error("Invalid date format: " + at_date);
+            }
+        }
+
+        auto triplets = mind_->store().query_triplets_temporal(subject, predicate, object, at_time_ms, limit);
+
+        std::ostringstream ss;
+        json results_json = json::array();
+
+        if (at_time_ms > 0) {
+            ss << "Triplets valid at " << TemporalResolver::format_iso_date(at_time_ms) << ":\n";
+        } else {
+            ss << "Current triplets:\n";
+        }
+
+        for (const auto& t : triplets) {
+            ss << "  " << t.subject << " → " << t.predicate << " → " << t.object;
+            if (t.valid_from_ms > 0) {
+                ss << " (from " << TemporalResolver::format_iso_date(t.valid_from_ms);
+                if (t.valid_to_ms > 0) {
+                    ss << " to " << TemporalResolver::format_iso_date(t.valid_to_ms);
+                }
+                ss << ")";
+            }
+            ss << "\n";
+
+            results_json.push_back({
+                {"id", t.id},
+                {"subject", t.subject},
+                {"predicate", t.predicate},
+                {"object", t.object},
+                {"weight", t.weight},
+                {"valid_from_ms", t.valid_from_ms},
+                {"valid_to_ms", t.valid_to_ms},
+                {"valid_from", t.valid_from_ms > 0 ? TemporalResolver::format_iso_date(t.valid_from_ms) : ""},
+                {"valid_to", t.valid_to_ms > 0 ? TemporalResolver::format_iso_date(t.valid_to_ms) : ""}
+            });
+        }
+
+        if (triplets.empty()) {
+            ss << "  (no matching triplets found)\n";
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {{"triplets", results_json}, {"count", triplets.size()}});
+    }
+
+    DuckDBToolResult tool_triplet_history(const json& params) {
+        std::string subject = params.value("subject", "");
+        std::string predicate = params.value("predicate", "");
+        size_t limit = params.value("limit", 20);
+
+        if (subject.empty() || predicate.empty()) {
+            return DuckDBToolResult::error("Subject and predicate are required");
+        }
+
+        auto history = mind_->store().query_triplet_history(subject, predicate, limit);
+
+        std::ostringstream ss;
+        json results_json = json::array();
+
+        ss << "History of " << subject << " → " << predicate << ":\n";
+
+        for (const auto& t : history) {
+            ss << "  " << t.object;
+            if (t.valid_from_ms > 0) {
+                ss << " (from " << TemporalResolver::format_iso_date(t.valid_from_ms);
+                if (t.valid_to_ms > 0) {
+                    ss << " to " << TemporalResolver::format_iso_date(t.valid_to_ms);
+                } else {
+                    ss << " to now";
+                }
+                ss << ")";
+            }
+            if (t.superseded_by > 0) {
+                ss << " [superseded]";
+            }
+            ss << "\n";
+
+            results_json.push_back({
+                {"id", t.id},
+                {"object", t.object},
+                {"valid_from_ms", t.valid_from_ms},
+                {"valid_to_ms", t.valid_to_ms},
+                {"valid_from", t.valid_from_ms > 0 ? TemporalResolver::format_iso_date(t.valid_from_ms) : ""},
+                {"valid_to", t.valid_to_ms > 0 ? TemporalResolver::format_iso_date(t.valid_to_ms) : ""},
+                {"superseded_by", t.superseded_by}
+            });
+        }
+
+        if (history.empty()) {
+            ss << "  (no history found)\n";
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {{"history", results_json}, {"count", history.size()}});
+    }
+
+    DuckDBToolResult tool_connect_temporal(const json& params) {
+        if (subconscious_) subconscious_->notify_query();
+
+        std::string subject = params.value("subject", "");
+        std::string predicate = params.value("predicate", "");
+        std::string object = params.value("object", "");
+        std::string valid_from = params.value("valid_from", "");
+        std::string valid_to = params.value("valid_to", "");
+        std::string context_date = params.value("context_date", "");
+
+        if (subject.empty() || predicate.empty() || object.empty()) {
+            return DuckDBToolResult::error("Subject, predicate, and object are required");
+        }
+
+        int64_t context_date_ms = TemporalResolver::now_ms();
+        if (!context_date.empty()) {
+            auto resolved = TemporalResolver::resolve(context_date, context_date_ms);
+            if (resolved) {
+                context_date_ms = resolved->timestamp_ms;
+            }
+        }
+
+        int64_t valid_from_ms = 0;
+        if (!valid_from.empty()) {
+            auto resolved = TemporalResolver::resolve(valid_from, context_date_ms);
+            if (resolved) {
+                valid_from_ms = resolved->timestamp_ms;
+            } else {
+                return DuckDBToolResult::error("Invalid valid_from date: " + valid_from);
+            }
+        }
+
+        int64_t valid_to_ms = 0;
+        if (!valid_to.empty()) {
+            auto resolved = TemporalResolver::resolve(valid_to, context_date_ms);
+            if (resolved) {
+                valid_to_ms = resolved->timestamp_ms;
+            } else {
+                return DuckDBToolResult::error("Invalid valid_to date: " + valid_to);
+            }
+        }
+
+        bool ok = mind_->store().connect_temporal(
+            subject, predicate, object, 1.0f,
+            valid_from_ms, valid_to_ms, context_date_ms
+        );
+
+        if (!ok) {
+            return DuckDBToolResult::error("Failed to create temporal triplet");
+        }
+
+        std::ostringstream ss;
+        ss << "Connected: " << subject << " → " << predicate << " → " << object;
+        if (valid_from_ms > 0) {
+            ss << " (from " << TemporalResolver::format_iso_date(valid_from_ms);
+            if (valid_to_ms > 0) {
+                ss << " to " << TemporalResolver::format_iso_date(valid_to_ms);
+            }
+            ss << ")";
+        }
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"subject", subject},
+            {"predicate", predicate},
+            {"object", object},
+            {"valid_from_ms", valid_from_ms},
+            {"valid_to_ms", valid_to_ms}
+        });
     }
 
     DuckDBToolResult tool_soul_context(const json&) {
@@ -8986,6 +9229,18 @@ private:
             {"pruned", result.pruned},
             {"consolidated", result.consolidated}
         });
+    }
+
+    DuckDBToolResult tool_rebuild_fts_index(const json& params) {
+        bool success = mind_->store().rebuild_fts_index();
+
+        if (success) {
+            return DuckDBToolResult::ok("FTS index rebuilt successfully. Keyword search should now work.", {
+                {"success", true}
+            });
+        } else {
+            return DuckDBToolResult::error("Failed to rebuild FTS index. FTS extension may not be available.");
+        }
     }
 
     // ========================================================================

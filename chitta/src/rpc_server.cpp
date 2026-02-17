@@ -501,6 +501,9 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
       {"consolidation-threshold", "Similarity threshold for consolidation", false, "0.85"},
       {"max-consolidations", "Max consolidations per run", false, "10"}}},
 
+    {"rebuild_fts_index", "Rebuild FTS index for BM25 keyword search on memory",
+     {}},
+
     {"calibration_record", "Record a prediction outcome for calibration",
      {{"domain", "Domain: code|architecture|debugging|etc", true, nullptr},
       {"success", "Did the prediction succeed? true|false", true, nullptr}}},

@@ -411,11 +411,21 @@ bool DuckDBStore::create_schema() {
     // Migration: add source_file column if missing (for databases created before v3.3.0)
     write_execute("ALTER TABLE triplet ADD COLUMN IF NOT EXISTS source_file VARCHAR DEFAULT ''");
 
+    // Migration: add temporal columns for fact versioning (v3.43.0+)
+    // valid_from_ms/valid_to_ms: when the fact was/stopped being true
+    // superseded_by: ID of triplet that replaced this one
+    // context_date_ms: session date used to resolve relative dates
+    write_execute("ALTER TABLE triplet ADD COLUMN IF NOT EXISTS valid_from_ms BIGINT DEFAULT 0");
+    write_execute("ALTER TABLE triplet ADD COLUMN IF NOT EXISTS valid_to_ms BIGINT DEFAULT 0");
+    write_execute("ALTER TABLE triplet ADD COLUMN IF NOT EXISTS superseded_by BIGINT DEFAULT 0");
+    write_execute("ALTER TABLE triplet ADD COLUMN IF NOT EXISTS context_date_ms BIGINT DEFAULT 0");
+
     // Indexes for triplet queries
     write_execute("CREATE INDEX IF NOT EXISTS idx_triplet_subject ON triplet(subject)");
     write_execute("CREATE INDEX IF NOT EXISTS idx_triplet_object ON triplet(object)");
     write_execute("CREATE INDEX IF NOT EXISTS idx_triplet_predicate ON triplet(predicate)");
     write_execute("CREATE INDEX IF NOT EXISTS idx_triplet_source_file ON triplet(source_file)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_triplet_valid_from ON triplet(valid_from_ms)");
 
     // Unique index for deduplication (migration: dedupe first, then create)
     // First remove duplicates keeping the one with highest weight
@@ -1510,6 +1520,48 @@ bool DuckDBStore::rebuild_vector_index() {
     } catch (const std::exception& e) {
         std::cerr << "[DuckDBStore] HNSW rebuild failed: " << e.what() << "\n";
         index_exists_.store(false);
+        return false;
+    }
+}
+
+bool DuckDBStore::rebuild_fts_index() {
+    // Rebuild FTS index on memory content for BM25 keyword search
+    if (!db_ || !fts_loaded_) {
+        std::cerr << "[DuckDBStore] Cannot rebuild FTS: extension not loaded\n";
+        return false;
+    }
+
+    std::cerr << "[DuckDBStore] Rebuilding FTS index on memory...\n";
+    auto start = std::chrono::steady_clock::now();
+
+    try {
+        std::lock_guard lock(write_mutex_);
+
+        // Create fresh FTS index using direct Query (PRAGMA needs special handling)
+        auto result = write_conn_->Query("PRAGMA create_fts_index('memory', 'id', 'content', overwrite=1)");
+        if (result->HasError()) {
+            std::cerr << "[DuckDBStore] FTS PRAGMA error: " << result->GetError() << "\n";
+            return false;
+        }
+
+        // Force checkpoint to persist
+        write_conn_->Query("CHECKPOINT");
+
+        // Verify index was created by trying a test query
+        auto test = write_conn_->Query(
+            "SELECT COUNT(*) FROM (SELECT fts_main_memory.match_bm25(id, 'test') FROM memory LIMIT 1)"
+        );
+        if (test->HasError()) {
+            std::cerr << "[DuckDBStore] FTS verification failed: " << test->GetError() << "\n";
+            return false;
+        }
+
+        auto end = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+        std::cerr << "[DuckDBStore] FTS index rebuilt and verified in " << elapsed << "ms\n";
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "[DuckDBStore] FTS rebuild failed: " << e.what() << "\n";
         return false;
     }
 }
@@ -3821,6 +3873,235 @@ std::vector<StringTriplet> DuckDBStore::query_predicate(const std::string& predi
     return results;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Temporal Fact Versioning
+// ═══════════════════════════════════════════════════════════════════════════
+
+bool DuckDBStore::connect_temporal(
+    const std::string& subject,
+    const std::string& predicate,
+    const std::string& object,
+    float weight,
+    int64_t valid_from_ms,
+    int64_t valid_to_ms,
+    int64_t context_date_ms
+) {
+    if (!db_) return false;
+
+    // Normalize to lowercase
+    auto escape_lower = [](const std::string& s) {
+        std::string result;
+        result.reserve(s.size());
+        for (char c : s) {
+            char lc = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (lc == '\'') result += "''";
+            else result += lc;
+        }
+        return result;
+    };
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        result.reserve(s.size());
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    int64_t timestamp = now();
+    // If valid_from_ms not specified, use context_date_ms or current time
+    if (valid_from_ms == 0) {
+        valid_from_ms = context_date_ms > 0 ? context_date_ms : timestamp;
+    }
+
+    std::ostringstream sql;
+    sql << "INSERT INTO triplet (id, subject, predicate, object, weight, created_at, "
+        << "valid_from_ms, valid_to_ms, context_date_ms) VALUES ("
+        << "nextval('triplet_seq'), "
+        << "'" << escape_lower(subject) << "', "
+        << "'" << escape(predicate) << "', "
+        << "'" << escape_lower(object) << "', "
+        << weight << ", " << timestamp << ", "
+        << valid_from_ms << ", " << valid_to_ms << ", " << context_date_ms
+        << ") ON CONFLICT (subject, predicate, object, source_file) DO UPDATE SET "
+        << "weight = " << weight << ", "
+        << "valid_from_ms = " << valid_from_ms << ", "
+        << "valid_to_ms = " << valid_to_ms << ", "
+        << "context_date_ms = " << context_date_ms;
+
+    return write_execute(sql.str());
+}
+
+bool DuckDBStore::supersede_triplet(int64_t old_triplet_id, int64_t new_triplet_id) {
+    if (!db_ || old_triplet_id <= 0 || new_triplet_id <= 0) return false;
+
+    int64_t timestamp = now();
+
+    std::ostringstream sql;
+    sql << "UPDATE triplet SET "
+        << "valid_to_ms = " << timestamp << ", "
+        << "superseded_by = " << new_triplet_id
+        << " WHERE id = " << old_triplet_id;
+
+    return write_execute(sql.str());
+}
+
+std::vector<DuckDBStore::TemporalTriplet> DuckDBStore::query_triplets_temporal(
+    const std::string& subject,
+    const std::string& predicate,
+    const std::string& object,
+    int64_t at_time_ms,
+    size_t limit
+) {
+    std::vector<TemporalTriplet> results;
+    if (!db_) return results;
+
+    // Normalize and escape
+    auto escape_lower = [](const std::string& s) {
+        std::string result;
+        result.reserve(s.size());
+        for (char c : s) {
+            char lc = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (lc == '\'') result += "''";
+            else result += lc;
+        }
+        return result;
+    };
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        result.reserve(s.size());
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    // Default to current time if not specified
+    if (at_time_ms == 0) {
+        at_time_ms = now();
+    }
+
+    std::ostringstream sql;
+    sql << "SELECT id, subject, predicate, object, weight, "
+        << "valid_from_ms, valid_to_ms, superseded_by, context_date_ms, created_at "
+        << "FROM triplet WHERE 1=1";
+
+    // Filter by subject
+    if (!subject.empty()) {
+        sql << " AND subject = '" << escape_lower(subject) << "'";
+    }
+
+    // Filter by predicate
+    if (!predicate.empty()) {
+        sql << " AND predicate = '" << escape(predicate) << "'";
+    }
+
+    // Filter by object
+    if (!object.empty()) {
+        sql << " AND object = '" << escape_lower(object) << "'";
+    }
+
+    // Temporal validity filter: fact was valid at the given time
+    // valid_from_ms <= at_time AND (valid_to_ms = 0 OR valid_to_ms > at_time)
+    sql << " AND (valid_from_ms = 0 OR valid_from_ms <= " << at_time_ms << ")"
+        << " AND (valid_to_ms = 0 OR valid_to_ms > " << at_time_ms << ")";
+
+    sql << " ORDER BY valid_from_ms DESC LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) return results;
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            TemporalTriplet t;
+            t.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            t.subject = chunk->GetValue(1, i).ToString();
+            t.predicate = chunk->GetValue(2, i).ToString();
+            t.object = chunk->GetValue(3, i).ToString();
+            t.weight = chunk->GetValue(4, i).GetValue<float>();
+            t.valid_from_ms = chunk->GetValue(5, i).GetValue<int64_t>();
+            t.valid_to_ms = chunk->GetValue(6, i).GetValue<int64_t>();
+            t.superseded_by = chunk->GetValue(7, i).GetValue<int64_t>();
+            t.context_date_ms = chunk->GetValue(8, i).GetValue<int64_t>();
+            t.created_at = chunk->GetValue(9, i).GetValue<int64_t>();
+            results.push_back(t);
+        }
+    }
+
+    return results;
+}
+
+std::vector<DuckDBStore::TemporalTriplet> DuckDBStore::query_triplet_history(
+    const std::string& subject,
+    const std::string& predicate,
+    size_t limit
+) {
+    std::vector<TemporalTriplet> results;
+    if (!db_ || subject.empty() || predicate.empty()) return results;
+
+    // Normalize and escape
+    auto escape_lower = [](const std::string& s) {
+        std::string result;
+        result.reserve(s.size());
+        for (char c : s) {
+            char lc = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (lc == '\'') result += "''";
+            else result += lc;
+        }
+        return result;
+    };
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        result.reserve(s.size());
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    std::ostringstream sql;
+    sql << "SELECT id, subject, predicate, object, weight, "
+        << "valid_from_ms, valid_to_ms, superseded_by, context_date_ms, created_at "
+        << "FROM triplet "
+        << "WHERE subject = '" << escape_lower(subject) << "' "
+        << "AND predicate = '" << escape(predicate) << "' "
+        << "ORDER BY valid_from_ms DESC LIMIT " << limit;
+
+    auto result = read_query(sql.str());
+    if (!result || result->HasError()) return results;
+
+    while (true) {
+        auto chunk = result->Fetch();
+        if (!chunk || chunk->size() == 0) break;
+
+        for (size_t i = 0; i < chunk->size(); ++i) {
+            TemporalTriplet t;
+            t.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            t.subject = chunk->GetValue(1, i).ToString();
+            t.predicate = chunk->GetValue(2, i).ToString();
+            t.object = chunk->GetValue(3, i).ToString();
+            t.weight = chunk->GetValue(4, i).GetValue<float>();
+            t.valid_from_ms = chunk->GetValue(5, i).GetValue<int64_t>();
+            t.valid_to_ms = chunk->GetValue(6, i).GetValue<int64_t>();
+            t.superseded_by = chunk->GetValue(7, i).GetValue<int64_t>();
+            t.context_date_ms = chunk->GetValue(8, i).GetValue<int64_t>();
+            t.created_at = chunk->GetValue(9, i).GetValue<int64_t>();
+            results.push_back(t);
+        }
+    }
+
+    return results;
+}
+
 int64_t DuckDBStore::add_symbol(const Symbol& sym, const std::vector<float>& embedding) {
     // Lock handled in write_execute/write_query/read_query
     if (!db_) return -1;
@@ -4274,11 +4555,14 @@ std::vector<std::pair<int64_t, float>> DuckDBStore::bm25_search_memory(
         else escaped += c;
     }
 
-    // Build SQL with FTS match_bm25
+    // Build SQL with FTS match_bm25 using CTE to allow filtering on score
     std::ostringstream sql;
-    sql << "SELECT m.id, fts_main_memory.match_bm25(m.id, '" << escaped << "') as score "
-        << "FROM memory m "
-        << "WHERE score IS NOT NULL ";
+    sql << "WITH scored AS ("
+        << "SELECT m.id, fts_main_memory.match_bm25(m.id, '" << escaped << "') as score, "
+        << "m.realm, m.visibility, m.kind "
+        << "FROM memory m"
+        << ") "
+        << "SELECT id, score FROM scored WHERE score IS NOT NULL ";
 
     // Realm filter
     if (!realm.empty()) {
@@ -4288,17 +4572,17 @@ std::vector<std::pair<int64_t, float>> DuckDBStore::bm25_search_memory(
             else escaped_realm += c;
         }
         if (include_global) {
-            sql << "AND (m.realm = '" << escaped_realm << "' OR m.visibility = 2 "
-                << "OR m.id IN (SELECT memory_id FROM realm_membership WHERE realm = '" << escaped_realm << "')) ";
+            sql << "AND (realm = '" << escaped_realm << "' OR visibility = 2 "
+                << "OR id IN (SELECT memory_id FROM realm_membership WHERE realm = '" << escaped_realm << "')) ";
         } else {
-            sql << "AND (m.realm = '" << escaped_realm << "' "
-                << "OR m.id IN (SELECT memory_id FROM realm_membership WHERE realm = '" << escaped_realm << "')) ";
+            sql << "AND (realm = '" << escaped_realm << "' "
+                << "OR id IN (SELECT memory_id FROM realm_membership WHERE realm = '" << escaped_realm << "')) ";
         }
     }
 
     // Exclude kinds
     if (!exclude_kinds.empty()) {
-        sql << "AND m.kind NOT IN (";
+        sql << "AND kind NOT IN (";
         for (size_t i = 0; i < exclude_kinds.size(); ++i) {
             if (i > 0) sql << ", ";
             sql << "'" << exclude_kinds[i] << "'";
@@ -4308,8 +4592,13 @@ std::vector<std::pair<int64_t, float>> DuckDBStore::bm25_search_memory(
 
     sql << "ORDER BY score DESC LIMIT " << limit;
 
-    auto result = read_query(sql.str());
+    std::string query_str = sql.str();
+    std::cerr << "[BM25] Query: " << query_str.substr(0, 200) << "...\n";
+
+    auto result = read_query(query_str);
     if (!result || result->HasError()) {
+        std::string err = result ? result->GetError() : "null result";
+        std::cerr << "[BM25] FTS query failed: " << err << ", using LIKE fallback\n";
         // Fallback to LIKE search if FTS fails
         std::ostringstream fallback;
         fallback << "SELECT id, 0.5 as score FROM memory "
@@ -4329,6 +4618,8 @@ std::vector<std::pair<int64_t, float>> DuckDBStore::bm25_search_memory(
             results.emplace_back(id, score);
         }
     }
+
+    std::cerr << "[BM25] Found " << results.size() << " results\n";
     return results;
 }
 

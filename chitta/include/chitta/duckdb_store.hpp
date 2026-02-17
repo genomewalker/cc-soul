@@ -972,6 +972,60 @@ public:
     std::vector<StringTriplet> query_object(const std::string& object);
     std::vector<StringTriplet> query_predicate(const std::string& predicate);
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // Temporal Fact Versioning (Zep-inspired)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Temporal triplet with validity period
+    struct TemporalTriplet {
+        int64_t id = 0;
+        std::string subject;
+        std::string predicate;
+        std::string object;
+        float weight = 1.0f;
+        int64_t valid_from_ms = 0;      // When fact became true
+        int64_t valid_to_ms = 0;        // When fact stopped being true (0 = still valid)
+        int64_t superseded_by = 0;      // ID of replacing triplet
+        int64_t context_date_ms = 0;    // Session date used for relative date resolution
+        int64_t created_at = 0;
+    };
+
+    // Connect with temporal validity
+    // valid_from_ms: when the fact became true (0 = use context_date_ms or now)
+    // valid_to_ms: when the fact stopped being true (0 = still valid)
+    // context_date_ms: session date for relative date resolution
+    bool connect_temporal(
+        const std::string& subject,
+        const std::string& predicate,
+        const std::string& object,
+        float weight,
+        int64_t valid_from_ms,
+        int64_t valid_to_ms = 0,
+        int64_t context_date_ms = 0
+    );
+
+    // Supersede an old triplet with a new one
+    // Sets old.valid_to_ms = now and old.superseded_by = new_id
+    bool supersede_triplet(int64_t old_triplet_id, int64_t new_triplet_id);
+
+    // Query triplets at a specific point in time
+    // Returns triplets where: valid_from_ms <= at_time AND (valid_to_ms = 0 OR valid_to_ms > at_time)
+    std::vector<TemporalTriplet> query_triplets_temporal(
+        const std::string& subject = "",
+        const std::string& predicate = "",
+        const std::string& object = "",
+        int64_t at_time_ms = 0,  // 0 = current time
+        size_t limit = 50
+    );
+
+    // Get the history of a subject-predicate relationship
+    // Returns all versions ordered by valid_from_ms DESC
+    std::vector<TemporalTriplet> query_triplet_history(
+        const std::string& subject,
+        const std::string& predicate,
+        size_t limit = 20
+    );
+
     // Code intelligence
     int64_t add_symbol(const Symbol& sym, const std::vector<float>& embedding = {});
     std::vector<Symbol> find_symbol(const std::string& name, const std::string& kind = "");
@@ -990,6 +1044,7 @@ public:
     bool needs_reindex() const { return needs_reindex_.load(); }
     void mark_needs_reindex() { needs_reindex_.store(true); }
     bool rebuild_vector_index();    // DROP + CREATE index (call during maintenance)
+    bool rebuild_fts_index();       // Rebuild FTS index on memory content
     bool has_vector_index() const { return index_exists_.load(); }
     size_t migrate_embeddings_to_vss();  // Copy embeddings from main DB to VSS DB
 
