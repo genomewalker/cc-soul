@@ -38,14 +38,15 @@ TEMPORAL_PATTERNS = [
     (r'\bon\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b', 'this week'),
 ]
 
-# Event extraction patterns
+# Event extraction patterns - stop at temporal markers to avoid over-capture
+# Use non-greedy matching and exclude temporal words from capture
 EVENT_PATTERNS = [
-    # "I went to X" / "I attended X"
-    r'I\s+(went to|attended|visited|joined|signed up for|participated in)\s+(?:a |an |the )?([^.,!?]+)',
+    # "I went to X yesterday" - stop before temporal words
+    r'I\s+(went to|attended|visited|joined|signed up for|participated in)\s+(?:a |an |the )?(.+?)(?:\s+(?:yesterday|last\s+\w+|this\s+\w+|today|ago)|\s+and\s+|[.,!?]|$)',
     # "I had a X"
-    r'I\s+had\s+(?:a |an )?([^.,!?]+)',
+    r'I\s+had\s+(?:a |an )?(.+?)(?:\s+(?:yesterday|last\s+\w+|this\s+\w+|today|ago)|\s+and\s+|[.,!?]|$)',
     # "I did X"
-    r'I\s+did\s+(?:a |an |some )?([^.,!?]+)',
+    r'I\s+did\s+(?:a |an |some )?(.+?)(?:\s+(?:yesterday|last\s+\w+|this\s+\w+|today|ago)|\s+and\s+|[.,!?]|$)',
     # "went camping/hiking/etc"
     r'(went|did)\s+(camping|hiking|running|swimming|painting|pottery|yoga)',
 ]
@@ -181,6 +182,15 @@ def parse_session_date(date_str: str) -> Optional[datetime]:
         return None
 
 
+def format_natural_date(iso_date: str) -> str:
+    """Convert ISO date (2023-05-07) to natural format (7 May 2023)."""
+    try:
+        dt = datetime.strptime(iso_date, '%Y-%m-%d')
+        return dt.strftime('%-d %B %Y')  # "7 May 2023"
+    except:
+        return iso_date
+
+
 def resolve_relative_date(relative: str, context_date: datetime) -> str:
     """Resolve relative date expression to ISO format."""
     relative = relative.lower().strip()
@@ -310,7 +320,7 @@ def store_temporal_triplets(conv: dict, sample_id: str) -> int:
 
 
 def query_temporal_for_question(question: str, sample_id: str) -> str:
-    """Query temporal triplets for 'when' questions."""
+    """Query temporal triplets for 'when' questions. Returns focused results for better F1."""
     # Extract entity names from question (skip question words)
     question_words = {'When', 'What', 'Where', 'Who', 'How', 'Why', 'Which', 'Would', 'Could', 'Should', 'Did', 'Does', 'Is', 'Are', 'Was', 'Were', 'Has', 'Have', 'Had'}
     entities = [w for w in re.findall(r'\b([A-Z][a-z]+)\b', question) if w not in question_words]
@@ -328,12 +338,11 @@ def query_temporal_for_question(question: str, sample_id: str) -> str:
         activity = activity_match.group(1).lower()
         activity_words = set(w for w in re.findall(r'\w+', activity) if len(w) > 2)
 
-    results = []
+    # Collect matches with scores for ranking
+    scored_results = []
+    seen_dates = set()  # De-duplicate by date
 
     for entity in entities[:2]:  # First 2 capitalized words
-        # Query ALL temporal triplets for this subject (no predicate filter)
-        # Use high limit since results are ordered by date (newest first)
-        # and older events may be far down the list
         response = chitta_rpc(
             "query_triplets_temporal",
             subject=entity.lower(),
@@ -355,13 +364,34 @@ def query_temporal_for_question(question: str, sample_id: str) -> str:
                 obj_normalized = obj.lower().replace('_', ' ')
                 obj_words = set(w for w in re.findall(r'\w+', obj_normalized) if len(w) > 2)
 
-                # Check for overlap with activity keywords
+                # Score based on keyword overlap
                 if activity_words:
-                    if activity_words & obj_words:
-                        results.append(f"{entity} {predicate} {obj} on {valid_from}")
+                    overlap = len(activity_words & obj_words)
+                    if overlap == 0:
+                        continue  # Skip non-matching triplets when we have keywords
+                    score = overlap / len(activity_words)  # 0-1 score
                 else:
-                    # No activity filter - return all dated triplets
-                    results.append(f"{entity} {predicate} {obj} on {valid_from}")
+                    score = 0.1  # Low score for unfiltered results
+
+                # Format date naturally for better F1 matching
+                natural_date = format_natural_date(valid_from)
+
+                # De-duplicate: use object + date to avoid losing different facts on same date
+                dedup_key = f"{entity}:{obj}:{natural_date}"
+                if dedup_key in seen_dates:
+                    continue
+                seen_dates.add(dedup_key)
+
+                scored_results.append((score, f"{entity} {predicate} {obj} on {natural_date}"))
+
+    # Sort by score (descending) and take top results
+    scored_results.sort(key=lambda x: -x[0])
+    # For "when" questions, return just the top match for best F1
+    # If there are good matches (score > 0.5), return only top 1-2
+    if scored_results and scored_results[0][0] > 0.5:
+        results = [r[1] for r in scored_results[:2]]
+    else:
+        results = [r[1] for r in scored_results[:5]]
 
     # Also query triplet history for multiple predicates
     predicates_to_try = ['attended', 'ran', 'went', 'visited', 'painted', 'read', 'played', 'signed_up']
@@ -809,11 +839,12 @@ def recall_for_question(question: str, sample_id: str, category: int = 0) -> str
 
     # === 0. Temporal query for "when" questions ===
     q_type = detect_question_type(question)
-    if q_type == 'when' or category == 3:
+    if q_type == 'when':
         temporal_results = query_temporal_for_question(question, sample_id)
         if temporal_results:
-            results.append("=== Temporal Triplets ===")
-            results.append(temporal_results)
+            # For "when" questions, return ONLY the focused temporal answer
+            # to maximize F1 (avoid diluting with extra context)
+            return temporal_results
 
     # === 1. Hybrid recall - semantic + keyword + graph ===
     # Build query with entities and question

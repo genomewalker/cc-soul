@@ -30,6 +30,16 @@ enum class QueryIntentType {
     Meta          // "how many memories", "memory health"
 };
 
+// Finer-grained temporal intent for routing to optimal retrieval path
+enum class TemporalSubtype {
+    None,           // Not a temporal query
+    When,           // "when did X happen" - lookup event timestamp
+    Duration,       // "how long has X been" - compute interval
+    Sequence,       // "what happened before/after X" - timeline query
+    AsOf,           // "what was X in July" - point-in-time lookup
+    FirstLast       // "first/last time X" - min/max timestamp
+};
+
 inline const char* query_intent_type_to_string(QueryIntentType type) {
     switch (type) {
         case QueryIntentType::Aspect: return "aspect";
@@ -54,25 +64,46 @@ struct TimeRange {
 
 struct QueryIntent {
     QueryIntentType type;
+    TemporalSubtype temporal_subtype = TemporalSubtype::None;  // finer temporal routing
     std::string original_query;
     std::optional<std::string> aspect;      // for Aspect queries
     std::optional<std::string> entity;      // for Entity queries
     std::optional<TimeRange> time_range;    // for Temporal queries
     std::optional<std::string> subject;     // for Relationship queries
     std::optional<std::string> object;      // for Relationship queries
+    std::vector<std::string> entities;      // extracted entity names
     float confidence;
 
     QueryIntent()
         : type(QueryIntentType::Entity)
+        , temporal_subtype(TemporalSubtype::None)
         , confidence(0.5f)
     {}
 };
+
+inline const char* temporal_subtype_to_string(TemporalSubtype st) {
+    switch (st) {
+        case TemporalSubtype::None: return "none";
+        case TemporalSubtype::When: return "when";
+        case TemporalSubtype::Duration: return "duration";
+        case TemporalSubtype::Sequence: return "sequence";
+        case TemporalSubtype::AsOf: return "as_of";
+        case TemporalSubtype::FirstLast: return "first_last";
+    }
+    return "unknown";
+}
 
 class QueryIntentClassifier {
 public:
     QueryIntentClassifier();
 
     QueryIntent classify(const std::string& query);
+
+    // Detect temporal subtype for finer routing
+    TemporalSubtype detect_temporal_subtype(const std::string& query);
+
+    // Extract named entities (capitalized words, excluding question words)
+    std::vector<std::string> extract_entities(const std::string& query);
 
 private:
     bool is_aspect_query(const std::string& query, std::string& aspect);

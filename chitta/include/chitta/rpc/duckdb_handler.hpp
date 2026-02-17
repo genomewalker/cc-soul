@@ -2590,6 +2590,21 @@ private:
         handlers_["hybrid_recall"] = [this](const json& p) { return tool_hybrid_recall(p); };
 
         tools_.push_back({
+            {"name", "smart_recall"},
+            {"description", "Intent-aware memory retrieval. Classifies query type (temporal, entity, relational) and routes to optimal retrieval path. Returns structured results with date candidates for temporal queries."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"query", {{"type", "string"}, {"description", "Natural language query"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Max results (default: 10)"}}},
+                    {"realm", {{"type", "string"}, {"description", "Filter by realm"}}}
+                }},
+                {"required", {"query"}}
+            }}
+        });
+        handlers_["smart_recall"] = [this](const json& p) { return tool_smart_recall(p); };
+
+        tools_.push_back({
             {"name", "get_entities"},
             {"description", "Get tracked entities (user, assistant, projects, concepts) with salience scores."},
             {"inputSchema", {
@@ -10157,7 +10172,78 @@ private:
             }
 
             case QueryIntentType::Temporal: {
-                // Use recall_temporal with detected time range
+                // Enhanced temporal routing based on subtype
+                json temporal_candidates = json::array();
+
+                // Query temporal triplets for extracted entities
+                for (const auto& entity : intent.entities) {
+                    std::string entity_lower;
+                    entity_lower.reserve(entity.size());
+                    for (char c : entity) {
+                        entity_lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                    }
+
+                    auto triplets = mind_->store().query_triplets_temporal(
+                        entity_lower, "", "", 0, limit
+                    );
+
+                    for (const auto& t : triplets) {
+                        if (t.valid_from_ms > 0) {
+                            temporal_candidates.push_back({
+                                {"entity", t.subject},
+                                {"predicate", t.predicate},
+                                {"object", t.object},
+                                {"date", TemporalResolver::format_iso_date(t.valid_from_ms)},
+                                {"timestamp_ms", t.valid_from_ms}
+                            });
+                        }
+                    }
+                }
+
+                // If we have temporal candidates, return them with context
+                if (!temporal_candidates.empty()) {
+                    // Also do semantic recall for supporting context
+                    if (mind_->embedder_ready()) {
+                        auto embedding = mind_->embedder().embed_query(query).data;
+                        results = mind_->store().recall(embedding, limit, realm, include_global);
+                    }
+
+                    std::ostringstream ss;
+                    ss << "Temporal Query Results\n";
+                    ss << "══════════════════════════════\n";
+                    ss << "Subtype: " << temporal_subtype_to_string(intent.temporal_subtype) << "\n\n";
+                    ss << "Temporal Facts (" << temporal_candidates.size() << "):\n";
+                    for (const auto& tc : temporal_candidates) {
+                        ss << "  - " << tc["entity"].get<std::string>()
+                           << " " << tc["predicate"].get<std::string>()
+                           << " " << tc["object"].get<std::string>()
+                           << " @" << tc["date"].get<std::string>() << "\n";
+                    }
+
+                    json results_json = json::array();
+                    for (const auto& r : results) {
+                        results_json.push_back({
+                            {"id", std::to_string(r.id)},
+                            {"content", r.content.substr(0, 200)},
+                            {"similarity", r.similarity}
+                        });
+                    }
+
+                    return DuckDBToolResult::ok(ss.str(), {
+                        {"intent", {
+                            {"type", query_intent_type_to_string(intent.type)},
+                            {"temporal_subtype", temporal_subtype_to_string(intent.temporal_subtype)},
+                            {"confidence", intent.confidence},
+                            {"entities", intent.entities}
+                        }},
+                        {"route", "temporal"},
+                        {"temporal_candidates", temporal_candidates},
+                        {"results", results_json},
+                        {"count", results.size()}
+                    });
+                }
+
+                // Fall back to temporal recall with time range if no triplet matches
                 if (intent.time_range && intent.time_range->valid()) {
                     auto& tr = *intent.time_range;
                     std::optional<int64_t> start_ms, end_ms;
@@ -10420,9 +10506,11 @@ private:
         return DuckDBToolResult::ok(ss.str(), {
             {"intent", {
                 {"type", query_intent_type_to_string(intent.type)},
+                {"temporal_subtype", temporal_subtype_to_string(intent.temporal_subtype)},
                 {"confidence", intent.confidence},
                 {"aspect", intent.aspect.value_or("")},
-                {"entity", intent.entity.value_or("")}
+                {"entity", intent.entity.value_or("")},
+                {"entities", intent.entities}
             }},
             {"route", route_taken},
             {"results", results_json},

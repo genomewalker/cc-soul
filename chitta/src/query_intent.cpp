@@ -606,13 +606,17 @@ QueryIntent QueryIntentClassifier::classify(const std::string& query) {
         return intent;
     }
 
-    // Check for temporal queries
+    // Check for temporal queries (enhanced with subtype detection)
     TimeRange time_range;
-    if (is_temporal_query(query, time_range)) {
+    TemporalSubtype temporal_subtype = detect_temporal_subtype(query);
+    if (temporal_subtype != TemporalSubtype::None || is_temporal_query(query, time_range)) {
         intent.type = QueryIntentType::Temporal;
+        intent.temporal_subtype = temporal_subtype != TemporalSubtype::None
+            ? temporal_subtype : TemporalSubtype::When;
         intent.time_range = time_range;
-        intent.entity = extract_entity(query);  // May still have an entity constraint
-        intent.confidence = 0.8f;
+        intent.entity = extract_entity(query);
+        intent.entities = extract_entities(query);  // Named entities for lookup
+        intent.confidence = 0.85f;
         return intent;
     }
 
@@ -629,6 +633,96 @@ QueryIntent QueryIntentClassifier::classify(const std::string& query) {
     intent.confidence = 0.6f;
 
     return intent;
+}
+
+TemporalSubtype QueryIntentClassifier::detect_temporal_subtype(const std::string& query) {
+    std::string lower;
+    lower.reserve(query.size());
+    for (char c : query) {
+        lower += std::tolower(static_cast<unsigned char>(c));
+    }
+
+    // "when" questions → When subtype
+    if (lower.find("when did") != std::string::npos ||
+        lower.find("when was") != std::string::npos ||
+        lower.find("when is") != std::string::npos ||
+        lower.find("what date") != std::string::npos ||
+        lower.find("what day") != std::string::npos) {
+        return TemporalSubtype::When;
+    }
+
+    // "first/last time" → FirstLast subtype
+    if (lower.find("first time") != std::string::npos ||
+        lower.find("last time") != std::string::npos ||
+        lower.find("most recent") != std::string::npos ||
+        lower.find("earliest") != std::string::npos ||
+        lower.find("latest") != std::string::npos) {
+        return TemporalSubtype::FirstLast;
+    }
+
+    // "how long" → Duration subtype
+    if (lower.find("how long") != std::string::npos ||
+        lower.find("for how many") != std::string::npos ||
+        lower.find("since when") != std::string::npos ||
+        lower.find("how many years") != std::string::npos ||
+        lower.find("how many months") != std::string::npos ||
+        lower.find("how many days") != std::string::npos) {
+        return TemporalSubtype::Duration;
+    }
+
+    // "before/after" → Sequence subtype
+    if (lower.find("before") != std::string::npos ||
+        lower.find("after") != std::string::npos ||
+        lower.find("what happened") != std::string::npos ||
+        lower.find("sequence") != std::string::npos ||
+        lower.find("timeline") != std::string::npos ||
+        lower.find("in order") != std::string::npos) {
+        return TemporalSubtype::Sequence;
+    }
+
+    // "in [month/year]" or "as of" → AsOf subtype
+    if (lower.find("as of") != std::string::npos ||
+        lower.find("at that time") != std::string::npos ||
+        lower.find("back then") != std::string::npos ||
+        std::regex_search(lower, std::regex(R"(in\s+(january|february|march|april|may|june|july|august|september|october|november|december|20\d{2}))"))) {
+        return TemporalSubtype::AsOf;
+    }
+
+    // Generic temporal with time range
+    TimeRange range;
+    if (is_temporal_query(query, range)) {
+        return TemporalSubtype::When;  // Default temporal to When
+    }
+
+    return TemporalSubtype::None;
+}
+
+std::vector<std::string> QueryIntentClassifier::extract_entities(const std::string& query) {
+    std::vector<std::string> entities;
+
+    // Question words to exclude
+    static const std::unordered_set<std::string> question_words = {
+        "When", "What", "Where", "Who", "How", "Why", "Which",
+        "Would", "Could", "Should", "Did", "Does", "Is", "Are",
+        "Was", "Were", "Has", "Have", "Had", "Do", "Can", "Will"
+    };
+
+    // Find capitalized words (potential entity names)
+    std::regex entity_pattern(R"(\b([A-Z][a-z]+)\b)");
+    std::sregex_iterator it(query.begin(), query.end(), entity_pattern);
+    std::sregex_iterator end;
+
+    std::unordered_set<std::string> seen;
+    while (it != end) {
+        std::string word = (*it)[1].str();
+        if (question_words.find(word) == question_words.end() && seen.find(word) == seen.end()) {
+            entities.push_back(word);
+            seen.insert(word);
+        }
+        ++it;
+    }
+
+    return entities;
 }
 
 } // namespace chitta
