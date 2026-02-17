@@ -21,34 +21,66 @@ LOCOMO_DIR = Path("/tmp/locomo")
 LOCOMO_DATA = LOCOMO_DIR / "data" / "locomo10.json"
 CHITTA = Path.home() / ".claude/bin/chitta"
 
-# Temporal patterns for extracting events with relative dates
+# Temporal patterns for extracting events with relative/absolute dates
+# Each pattern returns (regex, date_type) where date_type guides resolution
 TEMPORAL_PATTERNS = [
+    # === Relative dates ===
     # "yesterday" patterns
-    (r'\b(went|attended|visited|did|had|was at|joined)\b[^.]*\byesterday\b', 'yesterday'),
-    (r'\byesterday\b[^.]*\b(went|attended|visited|did|had|was at|joined)\b', 'yesterday'),
+    (r'\b(went|attended|visited|did|had|was at|joined|started|got|adopted|met|moved)\b[^.]*\byesterday\b', 'yesterday'),
+    (r'\byesterday\b[^.]*\b(went|attended|visited|did|had|was at|joined|started|got|adopted|met|moved)\b', 'yesterday'),
     # "last week/weekend" patterns
-    (r'\b(went|attended|visited|did|had|was at|joined)\b[^.]*\blast (week|weekend)\b', 'last week'),
-    (r'\blast (week|weekend)\b[^.]*\b(went|attended|visited|did|had|was at|joined)\b', 'last week'),
-    # "the week before" patterns
+    (r'\blast (week|weekend)\b', 'last week'),
     (r'\bthe week before\b', 'last week'),
     # "last month" patterns
     (r'\blast month\b', 'last month'),
+    # "last year" patterns
+    (r'\blast year\b', 'last year'),
     # Specific day patterns like "on Friday", "last Friday"
     (r'\b(last|this past)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b', 'last week'),
     (r'\bon\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b', 'this week'),
+    # "X ago" patterns
+    (r'\b(\d+|a|one|two|three|four|five)\s+(day|week|month|year)s?\s+ago\b', 'ago'),
+
+    # === Absolute dates (year expressions) ===
+    # "in 2022", "back in 2019", "during 2020"
+    (r'\b(?:in|back in|during|around)\s+(20\d{2})\b', 'year'),
+    # "in June 2023", "last June", "this June"
+    (r'\b(?:in|last|this)\s+(january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+(20\d{2}))?\b', 'month'),
+    # "on March 15", "on the 15th"
+    (r'\bon\s+(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(january|february|march|april|may|june|july|august|september|october|november|december)', 'specific_date'),
+    (r'\bon\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})(?:st|nd|rd|th)?', 'specific_date'),
 ]
 
-# Event extraction patterns - stop at temporal markers to avoid over-capture
+# Event extraction patterns - expanded to capture more life events
 # Use non-greedy matching and exclude temporal words from capture
 EVENT_PATTERNS = [
-    # "I went to X yesterday" - stop before temporal words
-    r'I\s+(went to|attended|visited|joined|signed up for|participated in)\s+(?:a |an |the )?(.+?)(?:\s+(?:yesterday|last\s+\w+|this\s+\w+|today|ago)|\s+and\s+|[.,!?]|$)',
-    # "I had a X"
-    r'I\s+had\s+(?:a |an )?(.+?)(?:\s+(?:yesterday|last\s+\w+|this\s+\w+|today|ago)|\s+and\s+|[.,!?]|$)',
-    # "I did X"
-    r'I\s+did\s+(?:a |an |some )?(.+?)(?:\s+(?:yesterday|last\s+\w+|this\s+\w+|today|ago)|\s+and\s+|[.,!?]|$)',
+    # === Movement/Travel ===
+    r'I\s+(went to|attended|visited|joined|signed up for|participated in|traveled to|flew to|drove to)\s+(?:a |an |the )?(.+?)(?:\s+(?:yesterday|last\s+\w+|this\s+\w+|today|ago|in\s+20\d{2})|\s+and\s+|[.,!?]|$)',
     # "went camping/hiking/etc"
-    r'(went|did)\s+(camping|hiking|running|swimming|painting|pottery|yoga)',
+    r'(went|did)\s+(camping|hiking|running|swimming|painting|pottery|yoga|fishing|skiing|surfing)',
+
+    # === Life events - starting things ===
+    r'I\s+(started|began|opened|founded|launched|created)\s+(?:a |an |the |my )?(.+?)(?:\s+(?:yesterday|last\s+\w+|in\s+20\d{2}|ago)|\s+and\s+|[.,!?]|$)',
+
+    # === Acquisition/Getting ===
+    r'I\s+(got|adopted|bought|received|acquired|picked up)\s+(?:a |an |the |my )?(.+?)(?:\s+(?:yesterday|last\s+\w+|in\s+20\d{2}|ago)|\s+and\s+|[.,!?]|$)',
+
+    # === Relationships/Meetings ===
+    r'I\s+(met|married|divorced|dated|proposed to|got engaged to)\s+(?:my\s+)?(.+?)(?:\s+(?:yesterday|last\s+\w+|in\s+20\d{2}|ago)|\s+and\s+|[.,!?]|$)',
+
+    # === Location changes ===
+    r'I\s+(moved to|relocated to|returned to|came back to|settled in)\s+(?:a |an |the )?(.+?)(?:\s+(?:yesterday|last\s+\w+|in\s+20\d{2}|ago)|\s+and\s+|[.,!?]|$)',
+
+    # === Education/Career ===
+    r'I\s+(graduated from|finished|completed|enrolled in|dropped out of|retired from|quit|left)\s+(?:a |an |the |my )?(.+?)(?:\s+(?:yesterday|last\s+\w+|in\s+20\d{2}|ago)|\s+and\s+|[.,!?]|$)',
+
+    # === Loss/Death ===
+    r'(?:My\s+)?(\w+)\s+(passed away|died|was lost|passed on)(?:\s+(?:yesterday|last\s+\w+|in\s+20\d{2}|ago))?',
+    r'I\s+lost\s+(?:my\s+)?(.+?)(?:\s+(?:yesterday|last\s+\w+|in\s+20\d{2}|ago)|\s+and\s+|[.,!?]|$)',
+
+    # === General actions ===
+    r'I\s+had\s+(?:a |an )?(.+?)(?:\s+(?:yesterday|last\s+\w+|this\s+\w+|today|ago)|\s+and\s+|[.,!?]|$)',
+    r'I\s+did\s+(?:a |an |some )?(.+?)(?:\s+(?:yesterday|last\s+\w+|this\s+\w+|today|ago)|\s+and\s+|[.,!?]|$)',
 ]
 
 
@@ -191,8 +223,17 @@ def format_natural_date(iso_date: str) -> str:
         return iso_date
 
 
-def resolve_relative_date(relative: str, context_date: datetime) -> str:
-    """Resolve relative date expression to ISO format."""
+def resolve_relative_date(relative: str, context_date: datetime, match_groups: tuple = None) -> str:
+    """Resolve relative date expression to ISO format.
+
+    Args:
+        relative: The date expression type ('yesterday', 'last week', 'year', 'month', etc.)
+        context_date: The date context for resolution
+        match_groups: Optional regex match groups for extracting specific values
+
+    Returns:
+        ISO date string (YYYY-MM-DD)
+    """
     relative = relative.lower().strip()
 
     if relative == 'yesterday':
@@ -205,12 +246,155 @@ def resolve_relative_date(relative: str, context_date: datetime) -> str:
         resolved = context_date - timedelta(days=days_since_sunday)
     elif relative == 'last month':
         resolved = context_date - timedelta(days=30)
+    elif relative == 'last year':
+        resolved = context_date.replace(year=context_date.year - 1)
     elif relative == 'this week':
         resolved = context_date
+    elif relative == 'year' and match_groups:
+        # "in 2022" - use the year, keep month/day from context or default to mid-year
+        try:
+            year = int(match_groups[0]) if match_groups else context_date.year
+            resolved = datetime(year, 6, 15)  # Mid-year as approximate
+        except:
+            resolved = context_date
+    elif relative == 'month' and match_groups:
+        # "in June 2023" or "last June"
+        months = {
+            'january': 1, 'february': 2, 'march': 3, 'april': 4,
+            'may': 5, 'june': 6, 'july': 7, 'august': 8,
+            'september': 9, 'october': 10, 'november': 11, 'december': 12
+        }
+        try:
+            month_name = match_groups[0].lower() if match_groups else 'january'
+            month = months.get(month_name, 1)
+            # Check if year is in match groups
+            year = context_date.year
+            if len(match_groups) > 1 and match_groups[1]:
+                year = int(match_groups[1])
+            resolved = datetime(year, month, 15)
+        except:
+            resolved = context_date
+    elif relative == 'specific_date' and match_groups:
+        # "on March 15" or "on the 15th of March"
+        months = {
+            'january': 1, 'february': 2, 'march': 3, 'april': 4,
+            'may': 5, 'june': 6, 'july': 7, 'august': 8,
+            'september': 9, 'october': 10, 'november': 11, 'december': 12
+        }
+        try:
+            # Match groups could be (day, month) or (month, day)
+            if match_groups[0].isdigit():
+                day = int(match_groups[0])
+                month_name = match_groups[1].lower()
+            else:
+                month_name = match_groups[0].lower()
+                day = int(match_groups[1])
+            month = months.get(month_name, 1)
+            resolved = datetime(context_date.year, month, day)
+        except:
+            resolved = context_date
+    elif relative == 'ago' and match_groups:
+        # "3 weeks ago", "a year ago"
+        try:
+            num_str = match_groups[0].lower()
+            unit = match_groups[1].lower()
+            # Convert word to number
+            word_to_num = {'a': 1, 'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5}
+            num = word_to_num.get(num_str, int(num_str) if num_str.isdigit() else 1)
+
+            if 'day' in unit:
+                resolved = context_date - timedelta(days=num)
+            elif 'week' in unit:
+                resolved = context_date - timedelta(weeks=num)
+            elif 'month' in unit:
+                resolved = context_date - timedelta(days=num * 30)
+            elif 'year' in unit:
+                resolved = context_date.replace(year=context_date.year - num)
+            else:
+                resolved = context_date
+        except:
+            resolved = context_date
     else:
         resolved = context_date
 
     return resolved.strftime('%Y-%m-%d')
+
+
+# Entity fact patterns (non-temporal facts about people/things)
+ENTITY_FACT_PATTERNS = [
+    # "I have X" - possessions, relationships
+    (r'I\s+have\s+(?:a |an |the )?(\d+\s+)?(.+?)(?:[.,!?]|\s+and\s+|$)', 'has'),
+    # "I am a X" - identity/role
+    (r"I(?:'m| am)\s+(?:a |an )?(.+?)(?:[.,!?]|\s+and\s+|$)", 'is_a'),
+    # "I work as/at X" - occupation
+    (r'I\s+work\s+(?:as|at|for)\s+(?:a |an |the )?(.+?)(?:[.,!?]|\s+and\s+|$)', 'works_at'),
+    # "I live in X" - location
+    (r'I\s+live\s+in\s+(.+?)(?:[.,!?]|\s+and\s+|$)', 'lives_in'),
+    # "I study X" - education
+    (r'I\s+(?:study|am studying|majored in)\s+(.+?)(?:[.,!?]|\s+and\s+|$)', 'studies'),
+    # "My X is/are Y" - attributes
+    (r'My\s+(\w+)\s+(?:is|are)\s+(.+?)(?:[.,!?]|\s+and\s+|$)', 'attr'),
+    # "I like/love/enjoy X" - preferences
+    (r'I\s+(?:like|love|enjoy|prefer)\s+(.+?)(?:[.,!?]|\s+and\s+|$)', 'likes'),
+    # Named entities: "X is my Y"
+    (r'([A-Z][a-z]+)\s+is\s+my\s+(\w+)', 'relation'),
+]
+
+
+def extract_entity_facts(text: str, speaker: str) -> list:
+    """Extract non-temporal facts about entities from text."""
+    facts = []
+
+    for pattern, predicate_type in ENTITY_FACT_PATTERNS:
+        matches = re.findall(pattern, text, re.IGNORECASE)
+        for match in matches:
+            if isinstance(match, tuple):
+                if predicate_type == 'has' and len(match) >= 2:
+                    # "I have 3 dogs" -> (count, object)
+                    count = match[0].strip() if match[0] else ''
+                    obj = match[1].strip()
+                    obj = f"{count}{obj}".strip() if count else obj
+                    facts.append({
+                        'subject': speaker.lower(),
+                        'predicate': 'has',
+                        'object': re.sub(r'\s+', '_', obj.lower())[:40]
+                    })
+                elif predicate_type == 'attr' and len(match) >= 2:
+                    # "My dog is Max" -> speaker.dog = Max
+                    attr_name = match[0].strip().lower()
+                    attr_value = match[1].strip()
+                    facts.append({
+                        'subject': speaker.lower(),
+                        'predicate': f'{attr_name}_is',
+                        'object': re.sub(r'\s+', '_', attr_value.lower())[:40]
+                    })
+                elif predicate_type == 'relation' and len(match) >= 2:
+                    # "Max is my dog" -> Max is_a speaker's_dog
+                    name = match[0].strip()
+                    relation = match[1].strip().lower()
+                    facts.append({
+                        'subject': name.lower(),
+                        'predicate': 'is_a',
+                        'object': f"{speaker.lower()}s_{relation}"
+                    })
+                else:
+                    obj = match[-1].strip() if match else ''
+                    if obj and len(obj) > 2:
+                        facts.append({
+                            'subject': speaker.lower(),
+                            'predicate': predicate_type,
+                            'object': re.sub(r'\s+', '_', obj.lower())[:40]
+                        })
+            else:
+                obj = match.strip()
+                if obj and len(obj) > 2:
+                    facts.append({
+                        'subject': speaker.lower(),
+                        'predicate': predicate_type,
+                        'object': re.sub(r'\s+', '_', obj.lower())[:40]
+                    })
+
+    return facts
 
 
 def extract_temporal_events(text: str, speaker: str, context_date: datetime) -> list:
@@ -218,38 +402,80 @@ def extract_temporal_events(text: str, speaker: str, context_date: datetime) -> 
     events = []
     text_lower = text.lower()
 
-    # Check for temporal markers
-    relative_date = None
-    for pattern, date_expr in TEMPORAL_PATTERNS:
-        if re.search(pattern, text_lower, re.IGNORECASE):
-            relative_date = date_expr
+    # Check for temporal markers and capture groups
+    date_type = None
+    match_groups = None
+    for pattern, expr_type in TEMPORAL_PATTERNS:
+        match = re.search(pattern, text_lower, re.IGNORECASE)
+        if match:
+            date_type = expr_type
+            match_groups = match.groups() if match.groups() else None
             break
 
-    if not relative_date:
-        return events
+    # Extract the event/activity even without temporal marker (store with context date)
+    # This ensures we capture facts even if the date resolution fails
+    use_context_date = date_type is None
 
     # Extract the event/activity
     for pattern in EVENT_PATTERNS:
         matches = re.findall(pattern, text, re.IGNORECASE)
         for match in matches:
             if isinstance(match, tuple):
-                # Handle tuple results (verb, object)
+                # Handle tuple results - extract verb and object
+                verb = None
+                activity = None
+
                 if len(match) >= 2:
+                    # Most patterns: (verb, object)
+                    verb = match[0].strip().lower() if match[0] else None
                     activity = match[-1].strip()
                 else:
                     activity = match[0].strip()
+
+                # Special handling for loss/death patterns
+                if verb and verb in ('passed away', 'died', 'was lost', 'passed on'):
+                    # Subject is the thing that died, not the speaker
+                    subject_of_event = activity.lower() if activity else speaker.lower()
+                    predicate = 'passed_away'
+                    activity = ''
+                else:
+                    subject_of_event = speaker.lower()
+                    # Map verbs to predicates
+                    verb_to_predicate = {
+                        'went to': 'attended', 'attended': 'attended', 'visited': 'visited',
+                        'joined': 'joined', 'signed up for': 'signed_up',
+                        'started': 'started', 'began': 'started', 'opened': 'opened',
+                        'founded': 'founded', 'launched': 'launched',
+                        'got': 'got', 'adopted': 'adopted', 'bought': 'bought',
+                        'received': 'received', 'acquired': 'acquired',
+                        'met': 'met', 'married': 'married', 'divorced': 'divorced',
+                        'moved to': 'moved_to', 'relocated to': 'moved_to',
+                        'graduated from': 'graduated_from', 'finished': 'completed',
+                        'completed': 'completed', 'enrolled in': 'enrolled_in',
+                        'retired from': 'retired_from', 'quit': 'quit', 'left': 'left',
+                        'lost': 'lost', 'went': 'did', 'did': 'did',
+                        'had': 'had', 'traveled to': 'traveled_to', 'flew to': 'traveled_to',
+                    }
+                    predicate = verb_to_predicate.get(verb, 'did') if verb else 'did'
             else:
+                subject_of_event = speaker.lower()
                 activity = match.strip()
+                predicate = 'did'
 
             # Clean up activity
-            activity = re.sub(r'\s+', '_', activity.lower())
-            activity = re.sub(r'[^\w_]', '', activity)
+            if activity:
+                activity = re.sub(r'\s+', '_', activity.lower())
+                activity = re.sub(r'[^\w_]', '', activity)
 
-            if len(activity) > 3 and len(activity) < 50:
-                resolved_date = resolve_relative_date(relative_date, context_date)
+            if activity and len(activity) > 2 and len(activity) < 50:
+                if use_context_date:
+                    resolved_date = context_date.strftime('%Y-%m-%d')
+                else:
+                    resolved_date = resolve_relative_date(date_type, context_date, match_groups)
+
                 events.append({
-                    'subject': speaker.lower(),
-                    'predicate': 'attended' if 'went' in text_lower or 'attended' in text_lower else 'did',
+                    'subject': subject_of_event,
+                    'predicate': predicate,
                     'object': activity,
                     'valid_from': resolved_date,
                     'context_date': context_date.strftime('%Y-%m-%d')
@@ -259,8 +485,9 @@ def extract_temporal_events(text: str, speaker: str, context_date: datetime) -> 
 
 
 def store_temporal_triplets(conv: dict, sample_id: str) -> int:
-    """Extract and store temporal triplets from conversation sessions."""
+    """Extract and store temporal + entity triplets from conversation sessions."""
     stored = 0
+    entity_stored = 0
 
     # Get session numbers
     session_nums = []
@@ -275,6 +502,9 @@ def store_temporal_triplets(conv: dict, sample_id: str) -> int:
     speaker_a = conv['conversation'].get('speaker_a', 'A').lower()
     speaker_b = conv['conversation'].get('speaker_b', 'B').lower()
 
+    # Track stored facts to avoid duplicates
+    stored_facts = set()
+
     for session_num in sorted(session_nums):
         session_key = f"session_{session_num}"
         date_key = f"session_{session_num}_date_time"
@@ -285,9 +515,6 @@ def store_temporal_triplets(conv: dict, sample_id: str) -> int:
         session = conv['conversation'][session_key]
         date_str = conv['conversation'].get(date_key, "")
         context_date = parse_session_date(date_str)
-
-        if not context_date:
-            continue
 
         for turn in session:
             speaker_raw = turn.get('speaker', '?')
@@ -301,22 +528,47 @@ def store_temporal_triplets(conv: dict, sample_id: str) -> int:
             else:
                 speaker = speaker_raw.lower()
 
-            # Extract temporal events
-            events = extract_temporal_events(text, speaker, context_date)
+            # Extract temporal events (if we have a context date)
+            if context_date:
+                events = extract_temporal_events(text, speaker, context_date)
 
-            for event in events:
-                result = chitta_rpc(
-                    "connect_temporal",
-                    subject=event['subject'],
-                    predicate=event['predicate'],
-                    object=event['object'],
-                    valid_from=event['valid_from'],
-                    context_date=event['context_date']
+                for event in events:
+                    # Dedup key
+                    key = f"{event['subject']}:{event['predicate']}:{event['object']}"
+                    if key in stored_facts:
+                        continue
+                    stored_facts.add(key)
+
+                    result = chitta_rpc(
+                        "connect_temporal",
+                        subject=event['subject'],
+                        predicate=event['predicate'],
+                        object=event['object'],
+                        valid_from=event['valid_from'],
+                        context_date=event['context_date']
+                    )
+                    if result:
+                        stored += 1
+
+            # Extract entity facts (non-temporal)
+            entity_facts = extract_entity_facts(text, speaker)
+
+            for fact in entity_facts:
+                # Dedup key
+                key = f"{fact['subject']}:{fact['predicate']}:{fact['object']}"
+                if key in stored_facts:
+                    continue
+                stored_facts.add(key)
+
+                # Store as regular triplet (no temporal component)
+                chitta_call("connect",
+                    subject=fact['subject'],
+                    predicate=fact['predicate'],
+                    object=fact['object']
                 )
-                if result:
-                    stored += 1
+                entity_stored += 1
 
-    return stored
+    return stored + entity_stored
 
 
 def query_temporal_for_question(question: str, sample_id: str) -> str:
@@ -328,10 +580,18 @@ def query_temporal_for_question(question: str, sample_id: str) -> str:
     # Extract activity keywords from question
     # "When did X run a charity race?" -> ["charity", "race"]
     # "When did X go to the museum?" -> ["museum"]
+    # "When did X adopt Ned?" -> ["ned"], predicate_hint="adopted"
     activity_match = re.search(
-        r'(?:go to|attend|visit|join|have|do|sign up for|participate in|run|paint|read|play|take|meet)\s+(?:a |an |the )?([^?]+)',
+        r'(?:go to|attend|visit|join|have|do|sign up for|participate in|run|paint|read|play|take|meet|adopt|start|buy|get|move|graduate|marry|divorce|retire|quit|leave|enroll|finish|complete)\s+(?:a |an |the |my )?([^?]+)',
         question, re.IGNORECASE
     )
+
+    # Also extract verb as predicate hint
+    verb_match = re.search(
+        r'did \w+ (go to|attend|visit|join|have|do|sign up|participate|run|paint|read|play|take|meet|adopt|start|buy|get|move|graduate|marry|divorce|retire|quit|leave|enroll|finish|complete)',
+        question, re.IGNORECASE
+    )
+    predicate_hint = verb_match.group(1).lower().replace(' ', '_') if verb_match else None
 
     activity_words = set()
     if activity_match:
@@ -364,12 +624,23 @@ def query_temporal_for_question(question: str, sample_id: str) -> str:
                 obj_normalized = obj.lower().replace('_', ' ')
                 obj_words = set(w for w in re.findall(r'\w+', obj_normalized) if len(w) > 2)
 
-                # Score based on keyword overlap
+                # Score based on keyword overlap AND predicate matching
+                predicate_matches = False
+                if predicate_hint:
+                    # Check if predicate matches hint (e.g., "adopt" matches "adopted")
+                    pred_lower = predicate.lower()
+                    hint_lower = predicate_hint.lower()
+                    predicate_matches = hint_lower in pred_lower or pred_lower.startswith(hint_lower)
+
                 if activity_words:
                     overlap = len(activity_words & obj_words)
-                    if overlap == 0:
-                        continue  # Skip non-matching triplets when we have keywords
-                    score = overlap / len(activity_words)  # 0-1 score
+                    if overlap == 0 and not predicate_matches:
+                        continue  # Skip if no keyword overlap AND predicate doesn't match
+                    score = overlap / len(activity_words) if activity_words else 0
+                    if predicate_matches:
+                        score += 0.5  # Boost score for predicate match
+                elif predicate_matches:
+                    score = 0.8  # High score for predicate match without activity words
                 else:
                     score = 0.1  # Low score for unfiltered results
 
@@ -394,7 +665,16 @@ def query_temporal_for_question(question: str, sample_id: str) -> str:
         results = [r[1] for r in scored_results[:5]]
 
     # Also query triplet history for multiple predicates
-    predicates_to_try = ['attended', 'ran', 'went', 'visited', 'painted', 'read', 'played', 'signed_up']
+    predicates_to_try = [
+        'attended', 'ran', 'went', 'visited', 'painted', 'read', 'played', 'signed_up',
+        'adopted', 'started', 'got', 'bought', 'moved_to', 'graduated_from', 'married',
+        'divorced', 'retired_from', 'quit', 'left', 'enrolled_in', 'completed', 'finished',
+        'joined', 'met', 'traveled_to', 'did', 'had'
+    ]
+    # If we have a predicate hint, prioritize it
+    if predicate_hint:
+        pred_variants = [predicate_hint, predicate_hint + 'ed', predicate_hint + 'd']
+        predicates_to_try = pred_variants + [p for p in predicates_to_try if p not in pred_variants]
     for entity in entities[:2]:
         for pred in predicates_to_try:
             response = chitta_rpc(
@@ -481,7 +761,8 @@ FULL_CONTEXT_CACHE = {}  # Cache for full conversation context
 def get_claude_env() -> dict:
     """Get environment for running claude -p (unset CLAUDECODE to allow nested calls)."""
     env = os.environ.copy()
-    env.pop('CLAUDECODE', None)
+    # Set to empty string rather than removing - Claude checks value not presence
+    env['CLAUDECODE'] = ''
     return env
 
 
@@ -640,11 +921,11 @@ def ingest_conversation(conv: dict, tag_prefix: str = "locomo", use_llm: bool = 
     sessions_stored = store_session_summaries(conv, sample_id, tag_prefix)
     print(f"{sessions_stored} sessions")
 
-    # Store temporal triplets for "when" questions
-    print(f"  Extracting temporal triplets...", end=" ", flush=True)
-    temporal_stored = store_temporal_triplets(conv, sample_id)
-    print(f"{temporal_stored} temporal triplets")
-    stored += temporal_stored
+    # Store triplets (temporal + entity facts)
+    print(f"  Extracting triplets...", end=" ", flush=True)
+    triplets_stored = store_temporal_triplets(conv, sample_id)
+    print(f"{triplets_stored} triplets (temporal + entity facts)")
+    stored += triplets_stored
 
     # In native mode, skip SSL encoding - rely on native retrieval
     if NATIVE_MODE:
@@ -826,61 +1107,62 @@ def get_full_conversation_context(conv: dict) -> str:
 
 
 def recall_for_question(question: str, sample_id: str, category: int = 0) -> str:
-    """Semantic retrieval using hybrid_recall for best results."""
+    """Unified retrieval - hybrid_recall for content, triplets with dates for facts."""
     # Full context mode - return cached full conversation (no retrieval)
     if FULL_CONTEXT_MODE and sample_id in FULL_CONTEXT_CACHE:
         return FULL_CONTEXT_CACHE[sample_id]
 
     results = []
 
-    # Extract entities from question (filter out question words)
+    # Extract entities from question
     question_words = {'When', 'What', 'Where', 'Who', 'How', 'Why', 'Which', 'Would', 'Could', 'Should', 'Did', 'Does', 'Is', 'Are', 'Was', 'Were', 'Has', 'Have', 'Had'}
     entities = [w for w in re.findall(r'\b([A-Z][a-z]+)\b', question) if w not in question_words]
-
-    # === 0. Temporal query for "when" questions ===
-    q_type = detect_question_type(question)
-    if q_type == 'when':
-        temporal_results = query_temporal_for_question(question, sample_id)
-        if temporal_results:
-            # For "when" questions, return ONLY the focused temporal answer
-            # to maximize F1 (avoid diluting with extra context)
-            return temporal_results
-
-    # === 1. Semantic recall - scoped to this conversation via tag filter ===
     entity_str = ' '.join(entities[:2]) if entities else ''
+
+    # === 1. Hybrid recall for session content (includes dates in titles) ===
     search_query = f"{entity_str} {question}"
+    hybrid_result = chitta_rpc("hybrid_recall", query=search_query, tag=sample_id, k=25)
 
-    # Use tag filter to scope results to this conversation
-    semantic = chitta_call("recall", query=search_query, tag=sample_id, limit=20)
-    if semantic:
-        results.append("=== Semantic Search ===")
-        for line in semantic.split('\n')[:30]:
-            if line.strip() and ('→' in line or any(e.lower() in line.lower() for e in entities)):
-                results.append(line[:250])
+    if hybrid_result and 'structured' in hybrid_result:
+        for mem in hybrid_result['structured'].get('memories', [])[:20]:
+            content = mem.get('content', '')
+            if content:
+                results.append(content[:400])
 
-    # === 2. Direct triplet query for entities (deduplicated) ===
-    seen_triplets = set()
+    # === 2. Triplet facts - query by subject AND filter by question keywords ===
+    seen = set()
+
+    # Extract CONTENT keywords (exclude common question words and verbs)
+    # Keep entity names as they may appear in triplet objects (e.g., "visited italy")
+    stop_words = {'when', 'what', 'where', 'who', 'how', 'why', 'which', 'did', 'does',
+                  'was', 'were', 'has', 'have', 'had', 'the', 'and', 'for', 'that', 'this',
+                  'both', 'any', 'all', 'some', 'during', 'before', 'after'}
+    # Only exclude the FIRST entity (usually the subject being queried)
+    first_entity = entities[0].lower() if entities else ''
+    q_words = set(w.lower() for w in re.findall(r'\w+', question)
+                  if len(w) > 2 and w.lower() not in stop_words and w.lower() != first_entity)
+
     for entity in entities[:2]:
-        triplets = chitta_call("query", subject=entity, limit=30)
-        if triplets and '→' in triplets:
-            results.append(f"=== {entity} facts ===")
-            for line in triplets.split('\n'):
+        # Get triplets for entity with high limit
+        regular = chitta_call("query", subject=entity.lower(), limit=150)
+        if regular and '→' in regular:
+            scored_lines = []
+            for line in regular.split('\n'):
                 line = line.strip()
-                if line and '→' in line:
-                    # Deduplicate
-                    key = line.split('@')[0].strip()  # Remove date suffix for dedup
-                    if key not in seen_triplets:
-                        seen_triplets.add(key)
-                        results.append(line[:200])
-                        if len(seen_triplets) > 25:
-                            break
+                if not line or '→' not in line:
+                    continue
+                line_lower = line.lower()
+                # Score by keyword matches
+                score = sum(1 for w in q_words if w in line_lower)
+                scored_lines.append((score, line))
 
-    # === 3. Multi-hop for complex questions ===
-    if category == 1 and entities:
-        multi = chitta_call("multi_hop", query=f"{entities[0]} {question}", limit=10)
-        if multi and '→' in str(multi):
-            results.append("=== Multi-hop ===")
-            results.append(multi[:500])
+            # Sort by score (descending), take top matches + some general ones
+            scored_lines.sort(key=lambda x: -x[0])
+            for score, line in scored_lines[:25]:
+                key = line.split('@')[0].strip()
+                if key not in seen:
+                    seen.add(key)
+                    results.append(line[:250])
 
     return '\n'.join(results[:60]) if results else ""
 
