@@ -582,6 +582,43 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
 
     {"migrate_vss", "Migrate embeddings from main DB VARCHAR to VSS DB FLOAT[768]",
      {}},
+
+    // Goal management
+    {"goal_list", "List goals with optional status filter",
+     {{"status", "Filter: active, completed, abandoned (default: active)", false, "active"},
+      {"realm", "Filter by realm", false, nullptr},
+      {"limit", "Max results", false, "20"}}},
+
+    {"goal_set", "Set a new goal",
+     {{"title", "Short goal name", true, nullptr},
+      {"description", "Detailed description", false, nullptr},
+      {"deadline", "Optional deadline (Unix timestamp)", false, nullptr},
+      {"realm", "Realm", false, nullptr}}},
+
+    {"goal_progress", "Update goal progress (0-1 float)",
+     {{"id", "Goal ID", true, nullptr},
+      {"progress", "Progress 0-1 (e.g., 0.5 = 50%)", true, nullptr},
+      {"milestone", "Milestone name to mark complete", false, nullptr}}},
+
+    // Habit tracking
+    {"habit_list", "List learned habits",
+     {{"realm", "Filter by realm", false, nullptr},
+      {"min_strength", "Minimum strength threshold", false, "0"},
+      {"limit", "Max results", false, "20"}}},
+
+    {"habit_observe", "Record a trigger→response pattern",
+     {{"trigger", "What triggers the habit", true, nullptr},
+      {"response", "What should happen when triggered", true, nullptr},
+      {"realm", "Realm", false, nullptr}}},
+
+    // Curiosity gaps
+    {"curiosity_gaps", "List unresolved curiosity gaps",
+     {{"realm", "Filter by realm", false, nullptr},
+      {"limit", "Max results", false, "10"}}},
+
+    {"curiosity_resolve", "Mark a curiosity gap as resolved",
+     {{"id", "Gap memory ID", true, nullptr},
+      {"learned", "What was learned", false, nullptr}}},
 };
 
 // Build set of known tools from specs
