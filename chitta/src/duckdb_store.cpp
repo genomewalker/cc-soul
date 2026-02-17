@@ -1527,10 +1527,11 @@ size_t DuckDBStore::migrate_embeddings_to_vss() {
 
     try {
         // Get all memories with embeddings from main DB
+        // Note: embedding column is VARCHAR, cast to FLOAT[768]
         auto result = read_query(R"(
-            SELECT id, embedding FROM memory
+            SELECT id, embedding::FLOAT[768] as embedding FROM memory
             WHERE embedding IS NOT NULL
-            AND array_length(embedding) = 768
+            AND LENGTH(embedding) > 100
         )");
 
         if (!result || result->HasError()) {
@@ -1759,10 +1760,20 @@ int64_t DuckDBStore::remember(
             std::ostringstream emb_sql;
             emb_sql << "INSERT INTO memory_embeddings (memory_id, embedding, created_at) VALUES ("
                     << id << ", " << embedding_to_sql(embedding) << ", current_timestamp)";
-            emb_conn_->Query(emb_sql.str());
+            auto result = emb_conn_->Query(emb_sql.str());
+            if (result && result->HasError()) {
+                std::cerr << "[DuckDBStore] Embeddings DB insert error: " << result->GetError() << "\n";
+            }
         } catch (const std::exception& e) {
             // Non-fatal - main DB still has embedding as backup
             std::cerr << "[DuckDBStore] VSS DB insert warning: " << e.what() << "\n";
+        }
+    } else if (!emb_conn_) {
+        // Debug: embeddings DB not available
+        static bool warned_once = false;
+        if (!warned_once) {
+            std::cerr << "[DuckDBStore] Warning: emb_conn_ is null, embeddings not stored in VSS DB\n";
+            warned_once = true;
         }
     }
 
@@ -9596,19 +9607,21 @@ std::vector<int64_t> DuckDBStore::get_orphan_memories(size_t limit, const std::s
 std::vector<DuckDBStore::OrphanMemory> DuckDBStore::get_orphan_memories_with_embeddings(
     size_t limit, const std::string& realm) {
 
+    std::vector<OrphanMemory> orphans;
+
+    // Phase 1: Get orphan memory IDs from main DB (no embedding filter - embeddings are in separate DB)
     std::ostringstream sql;
-    sql << "SELECT m.id, COALESCE(m.content, ''), COALESCE(m.kind, 'episode'), COALESCE(m.realm, 'brahman'), m.embedding FROM memory m "
-        << "WHERE NOT EXISTS (SELECT 1 FROM theme_membership tm WHERE tm.memory_id = m.id) "
-        << "AND m.embedding IS NOT NULL AND array_length(m.embedding) = 768";
+    sql << "SELECT m.id, COALESCE(m.content, ''), COALESCE(m.kind, 'episode'), COALESCE(m.realm, 'brahman') FROM memory m "
+        << "WHERE NOT EXISTS (SELECT 1 FROM theme_membership tm WHERE tm.memory_id = m.id)";
     if (!realm.empty()) {
         sql << " AND m.realm = '" << realm << "'";
     }
-    sql << " ORDER BY m.confidence DESC, m.created_at DESC LIMIT " << limit;
+    sql << " ORDER BY m.confidence DESC, m.created_at DESC LIMIT " << (limit * 2);  // Fetch extra in case some lack embeddings
 
     auto result = read_query(sql.str());
-    std::vector<OrphanMemory> orphans;
     if (!result || result->HasError()) return orphans;
 
+    std::vector<OrphanMemory> candidates;
     while (true) {
         auto chunk = result->Fetch();
         if (!chunk || chunk->size() == 0) break;
@@ -9619,30 +9632,80 @@ std::vector<DuckDBStore::OrphanMemory> DuckDBStore::get_orphan_memories_with_emb
             om.content = chunk->GetValue(1, i).ToString();
             om.kind = chunk->GetValue(2, i).ToString();
             om.realm = chunk->GetValue(3, i).ToString();
-
-            // Extract embedding
-            auto emb_val = chunk->GetValue(4, i);
-            if (!emb_val.IsNull()) {
-                auto list = duckdb::ListValue::GetChildren(emb_val);
-                om.embedding.reserve(list.size());
-                for (const auto& v : list) {
-                    om.embedding.push_back(v.GetValue<float>());
-                }
-            }
-
-            if (!om.embedding.empty()) {
-                orphans.push_back(std::move(om));
-            }
+            candidates.push_back(std::move(om));
         }
     }
+
+    if (candidates.empty()) return orphans;
+
+    // Phase 2: Batch lookup embeddings from embeddings DB
+    if (!emb_conn_) {
+        // No embeddings DB - can't get embeddings
+        return orphans;
+    }
+
+    // Build batch query for all candidate IDs
+    std::ostringstream emb_sql;
+    emb_sql << "SELECT memory_id, embedding FROM memory_embeddings WHERE memory_id IN (";
+    for (size_t i = 0; i < candidates.size(); ++i) {
+        if (i > 0) emb_sql << ",";
+        emb_sql << candidates[i].id;
+    }
+    emb_sql << ")";
+    std::cerr << "[DuckDBStore] theme orphans: " << candidates.size() << " candidates, query embeddings DB\n";
+
+    // Lookup all embeddings in one query
+    std::unordered_map<int64_t, std::vector<float>> emb_map;
+    {
+        std::lock_guard<std::mutex> lock(emb_mutex_);
+        try {
+            auto emb_result = emb_conn_->Query(emb_sql.str());
+            if (emb_result && !emb_result->HasError()) {
+                while (true) {
+                    auto emb_chunk = emb_result->Fetch();
+                    if (!emb_chunk || emb_chunk->size() == 0) break;
+
+                    for (size_t i = 0; i < emb_chunk->size(); ++i) {
+                        int64_t mem_id = emb_chunk->GetValue(0, i).GetValue<int64_t>();
+                        auto emb_val = emb_chunk->GetValue(1, i);
+                        if (!emb_val.IsNull()) {
+                            auto list = duckdb::ListValue::GetChildren(emb_val);
+                            if (list.size() == 768) {
+                                std::vector<float> emb;
+                                emb.reserve(768);
+                                for (const auto& v : list) {
+                                    emb.push_back(v.GetValue<float>());
+                                }
+                                emb_map[mem_id] = std::move(emb);
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "[DuckDBStore] Batch embedding lookup failed: " << e.what() << "\n";
+        }
+    }
+    std::cerr << "[DuckDBStore] theme orphans: found " << emb_map.size() << " embeddings\n";
+
+    // Match embeddings to candidates
+    for (auto& om : candidates) {
+        if (orphans.size() >= limit) break;
+        auto it = emb_map.find(om.id);
+        if (it != emb_map.end()) {
+            om.embedding = std::move(it->second);
+            orphans.push_back(std::move(om));
+        }
+    }
+
     return orphans;
 }
 
 size_t DuckDBStore::count_orphan_memories(const std::string& realm) const {
+    // Count memories not in any theme (simple count, no embedding check)
     std::ostringstream sql;
     sql << "SELECT COUNT(*) FROM memory m "
-        << "WHERE NOT EXISTS (SELECT 1 FROM theme_membership tm WHERE tm.memory_id = m.id) "
-        << "AND m.embedding IS NOT NULL AND array_length(m.embedding) = 768";
+        << "WHERE NOT EXISTS (SELECT 1 FROM theme_membership tm WHERE tm.memory_id = m.id)";
     if (!realm.empty()) {
         sql << " AND m.realm = '" << realm << "'";
     }

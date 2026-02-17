@@ -579,6 +579,9 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
 
     {"session_sync", "Sync session registry with running Claude processes and transcript files",
      {{"projects_dir", "Claude projects directory (default: ~/.claude/projects)", false, nullptr}}},
+
+    {"migrate_vss", "Migrate embeddings from main DB VARCHAR to VSS DB FLOAT[768]",
+     {}},
 };
 
 // Build set of known tools from specs
