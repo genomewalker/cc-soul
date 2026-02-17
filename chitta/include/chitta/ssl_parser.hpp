@@ -29,6 +29,8 @@ struct SSLTriplet {
     std::string subject;
     std::string predicate;
     std::string object;
+    std::string date_annotation;  // @YYYY-MM-DD or relative date from SSL
+    int64_t valid_from_ms = 0;    // Resolved timestamp (0 = not resolved)
 };
 
 class SSLParser {
@@ -41,6 +43,10 @@ public:
     // Parse SSL-formatted output from LLM
     Result parse(const std::string& output);
 
+    // Parse SSL output with context date for resolving @date annotations
+    // context_date_ms: reference timestamp for relative dates (e.g., session start)
+    Result parse_with_context(const std::string& output, int64_t context_date_ms);
+
     // Map SSL type to observe() category
     static std::string type_to_category(const std::string& type);
 
@@ -49,6 +55,10 @@ public:
 
     // Parse explicit [CITE] line
     static SSLCitation parse_cite_line(const std::string& line);
+
+    // Extract @date annotation from triplet object
+    // Returns (object_without_date, date_expression) or (original, "")
+    static std::pair<std::string, std::string> extract_date_from_object(const std::string& object);
 };
 
 } // namespace chitta

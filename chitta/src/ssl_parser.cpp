@@ -1,8 +1,34 @@
 #include "../include/chitta/ssl_parser.hpp"
+#include "../include/chitta/temporal.hpp"
 #include <sstream>
 #include <algorithm>
 
 namespace chitta {
+
+// Extract @date annotation from triplet object
+// Format: "object @YYYY-MM-DD" or "object @yesterday" etc.
+std::pair<std::string, std::string> SSLParser::extract_date_from_object(const std::string& object) {
+    // Match @YYYY-MM-DD or @relative_expression at end of object
+    static const std::regex date_suffix_pattern(
+        R"(^(.*?)\s*@(\d{4}-\d{2}-\d{2}|yesterday|today|last\s+\d*\s*(?:day|week|month|year)s?)$)",
+        std::regex::icase
+    );
+
+    std::smatch match;
+    if (std::regex_match(object, match, date_suffix_pattern)) {
+        std::string clean_object = match[1].str();
+        std::string date_expr = match[2].str();
+
+        // Trim trailing whitespace from clean_object
+        while (!clean_object.empty() && std::isspace(clean_object.back())) {
+            clean_object.pop_back();
+        }
+
+        return {clean_object, date_expr};
+    }
+
+    return {object, ""};
+}
 
 std::string SSLParser::type_to_category(const std::string& type) {
     if (type == "SOLUTION") return "solution";
@@ -147,12 +173,17 @@ SSLParser::Result SSLParser::parse(const std::string& output) {
             SSLTriplet triplet;
             triplet.subject = match[1].str();
             triplet.predicate = match[2].str();
-            triplet.object = match[3].str();
+            std::string raw_object = match[3].str();
 
             // Trim whitespace from object
-            while (!triplet.object.empty() && std::isspace(triplet.object.back())) {
-                triplet.object.pop_back();
+            while (!raw_object.empty() && std::isspace(raw_object.back())) {
+                raw_object.pop_back();
             }
+
+            // Extract @date annotation from object if present
+            auto [clean_object, date_expr] = extract_date_from_object(raw_object);
+            triplet.object = clean_object;
+            triplet.date_annotation = date_expr;
 
             if (!triplet.subject.empty() && !triplet.predicate.empty() && !triplet.object.empty()) {
                 result.triplets.push_back(std::move(triplet));
@@ -166,6 +197,25 @@ SSLParser::Result SSLParser::parse(const std::string& output) {
 
     // Store final marker if pending
     store_current();
+
+    return result;
+}
+
+SSLParser::Result SSLParser::parse_with_context(const std::string& output, int64_t context_date_ms) {
+    // First parse normally
+    Result result = parse(output);
+
+    // If context_date_ms is provided, resolve @date annotations in triplets
+    if (context_date_ms > 0) {
+        for (auto& triplet : result.triplets) {
+            if (!triplet.date_annotation.empty()) {
+                auto resolved = TemporalResolver::resolve(triplet.date_annotation, context_date_ms);
+                if (resolved) {
+                    triplet.valid_from_ms = resolved->timestamp_ms;
+                }
+            }
+        }
+    }
 
     return result;
 }

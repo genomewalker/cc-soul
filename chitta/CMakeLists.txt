@@ -421,6 +421,7 @@ endif()
 add_library(duckdb_store STATIC
     src/duckdb_store.cpp
     src/query_intent.cpp
+    src/temporal.cpp
 )
 target_link_libraries(duckdb_store PUBLIC chitta duckdb)
 target_include_directories(duckdb_store PUBLIC
