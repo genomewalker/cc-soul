@@ -6,6 +6,7 @@
 #include <iostream>
 #include <sstream>
 #include <cstring>
+#include <cstdlib>
 #include <cerrno>
 #include <chrono>
 #include <sys/wait.h>
@@ -66,6 +67,10 @@ BrainResult execute_with_timeout(
                 _exit(1);
             }
         }
+
+        // Unset CLAUDECODE to allow nested Claude Code sessions
+        // This is safe because we're in the forked child process
+        unsetenv("CLAUDECODE");
 
         // Build argv
         std::vector<char*> argv;

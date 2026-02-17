@@ -62,6 +62,21 @@ class AgentCard(Static, can_focus=True):
         state = sadhana.get("state", "unknown")
         self.add_class(state)
 
+    @property
+    def sadhana_id(self) -> int | None:
+        return self.sadhana.get("id")
+
+    def update_data(self, sadhana: dict, index: int) -> None:
+        """Update card data without recreating widget."""
+        old_state = self.sadhana.get("state", "unknown")
+        new_state = sadhana.get("state", "unknown")
+        if old_state != new_state:
+            self.remove_class(old_state)
+            self.add_class(new_state)
+        self.sadhana = sadhana
+        self.index = index
+        self.refresh()
+
     def watch_selected(self, selected: bool) -> None:
         self.set_class(selected, "selected")
 
@@ -826,15 +841,28 @@ class SadhanaApp(App):
         """Rebuild card list from filtered sadhanas."""
         agent_list = self.query_one("#agent-list", Horizontal)
 
-        # Remove all existing cards
-        for card in list(self.query(AgentCard)):
-            card.remove()
+        # Get existing cards and new sadhana IDs
+        existing_cards = {card.sadhana_id: card for card in self.query(AgentCard)}
+        new_ids = {s.get("id") for s in self._filtered}
 
-        # Add filtered cards
+        # Remove cards that are no longer in the list
+        for sid, card in existing_cards.items():
+            if sid not in new_ids:
+                card.remove()
+
+        # Update or add cards
         for i, s in enumerate(self._filtered):
-            card = AgentCard(s, index=i)
-            card.selected = (i == self._selected_idx)
-            agent_list.mount(card)
+            sid = s.get("id")
+            if sid in existing_cards:
+                # Update existing card
+                card = existing_cards[sid]
+                card.update_data(s, i)
+                card.selected = (i == self._selected_idx)
+            else:
+                # Add new card
+                card = AgentCard(s, index=i)
+                card.selected = (i == self._selected_idx)
+                agent_list.mount(card)
 
         # Force container refresh
         agent_list.refresh(layout=True)
@@ -847,8 +875,14 @@ class SadhanaApp(App):
     def refresh_list(self) -> None:
         try:
             new_sadhanas = self.client.sadhana_list()
-        except Exception:
-            return  # Skip on connection error
+        except Exception as e:
+            # Try to reconnect on next refresh
+            self.client.close()
+            return
+
+        if not new_sadhanas and self._sadhanas:
+            # Keep existing data if daemon returned empty (likely connection issue)
+            return
 
         self._sadhanas = new_sadhanas
         self._apply_filter(reset_selection=False)

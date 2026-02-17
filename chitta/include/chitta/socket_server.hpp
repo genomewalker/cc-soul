@@ -95,9 +95,17 @@ struct ClientConnection {
 // Unix domain socket server for JSON-RPC 2.0
 class SocketServer {
 public:
-    // UID-scoped socket path for multi-user safety (uses persistent directory)
+    // Mind-scoped socket path (matches SocketClient)
     static std::string default_socket_path() {
-        return get_socket_dir() + "/chitta-" + std::to_string(getuid()) + ".sock";
+        // Use mind path hash to match client
+        const char* db_path = std::getenv("CHITTA_DB_PATH");
+        std::string mind_path;
+        if (db_path) {
+            mind_path = db_path;
+        } else if (const char* home = std::getenv("HOME")) {
+            mind_path = std::string(home) + "/.claude/mind";
+        }
+        return socket_path_for_mind(mind_path);
     }
     static constexpr int MAX_CONNECTIONS = 32;
     static constexpr size_t MAX_MESSAGE_SIZE = 16 * 1024 * 1024;  // 16MB

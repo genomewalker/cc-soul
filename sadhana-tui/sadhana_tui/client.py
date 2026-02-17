@@ -130,7 +130,19 @@ class ChittaClient:
             if "error" in data:
                 return {"error": data["error"].get("message", str(data["error"]))}
             result = data.get("result", {})
-            return result.get("structured", result)
+            if result is None:
+                return {"error": "Null result from daemon"}
+            # Check for tool-level error (isError flag in MCP response)
+            if result.get("isError"):
+                # Extract error text from content array
+                content = result.get("content", [])
+                if content and isinstance(content, list):
+                    text = content[0].get("text", "Unknown error") if content else "Unknown error"
+                    return {"error": text}
+                return {"error": "Tool execution failed"}
+            # Return structured data if present, otherwise the full result
+            structured = result.get("structured")
+            return structured if structured is not None else result
         except json.JSONDecodeError as e:
             return {"error": f"Invalid JSON: {e}"}
 

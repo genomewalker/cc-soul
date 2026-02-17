@@ -3,6 +3,7 @@
 #include <sstream>
 #include <cmath>
 #include <chrono>
+#include <thread>
 #include <set>
 #include <unordered_set>
 #include <unordered_map>
@@ -1580,26 +1581,58 @@ size_t DuckDBStore::migrate_embeddings_to_vss() {
     return migrated;
 }
 
+// Check if error is transient (retryable)
+static bool is_transient_error(const std::string& error) {
+    return error.find("write-write conflict") != std::string::npos;
+}
+
 // Write operations - use dedicated connection with mutex (serialized)
+// Retries on transient write-write conflicts from DuckDB's optimistic concurrency
 bool DuckDBStore::write_execute(const std::string& sql) {
-    std::lock_guard lock(write_mutex_);
-    try {
-        if (!write_conn_) {
-            std::cerr << "[DuckDBStore] write_conn_ is null!\n";
-            return false;
+    constexpr int MAX_RETRIES = 3;
+    constexpr int RETRY_DELAY_MS = 10;
+
+    for (int attempt = 0; attempt < MAX_RETRIES; ++attempt) {
+        if (attempt > 0) {
+            // Backoff before retry (outside lock)
+            std::this_thread::sleep_for(std::chrono::milliseconds(RETRY_DELAY_MS * attempt));
         }
-        auto result = write_conn_->Query(sql);
-        if (result->HasError()) {
-            std::cerr << "[DuckDBStore] Query error: " << result->GetError() << "\n";
+
+        std::lock_guard lock(write_mutex_);
+        try {
+            if (!write_conn_) {
+                std::cerr << "[DuckDBStore] write_conn_ is null!\n";
+                return false;
+            }
+            auto result = write_conn_->Query(sql);
+            if (result->HasError()) {
+                std::string error = result->GetError();
+                // Retry on transient conflicts after rollback to clear error state
+                if (is_transient_error(error) && attempt < MAX_RETRIES - 1) {
+                    write_conn_->Query("ROLLBACK");
+                    continue;
+                }
+                // Log non-transient errors or final retry failure
+                std::cerr << "[DuckDBStore] Query error: " << error << "\n";
+                std::cerr << "[DuckDBStore] SQL: " << sql.substr(0, 200) << "\n";
+                // Try to recover connection state
+                write_conn_->Query("ROLLBACK");
+                return false;
+            }
+            return true;
+        } catch (const std::exception& e) {
+            std::string error = e.what();
+            if (is_transient_error(error) && attempt < MAX_RETRIES - 1) {
+                try { write_conn_->Query("ROLLBACK"); } catch (...) {}
+                continue;
+            }
+            std::cerr << "[DuckDBStore] Exception: " << error << "\n";
             std::cerr << "[DuckDBStore] SQL: " << sql.substr(0, 200) << "\n";
+            try { write_conn_->Query("ROLLBACK"); } catch (...) {}
             return false;
         }
-        return true;
-    } catch (const std::exception& e) {
-        std::cerr << "[DuckDBStore] Exception: " << e.what() << "\n";
-        std::cerr << "[DuckDBStore] SQL: " << sql.substr(0, 200) << "\n";
-        return false;
     }
+    return false;
 }
 
 std::unique_ptr<duckdb::QueryResult> DuckDBStore::write_query(const std::string& sql) {
@@ -1639,6 +1672,9 @@ std::string DuckDBStore::embedding_to_sql(const std::vector<float>& embedding) {
     return result;
 }
 
+// Maximum content size to prevent FTS index ART key overflow (DuckDB limit ~120KB)
+static constexpr size_t MAX_CONTENT_SIZE = 50000;
+
 int64_t DuckDBStore::remember(
     const std::string& content,
     const std::string& kind,
@@ -1653,9 +1689,17 @@ int64_t DuckDBStore::remember(
 
     Timestamp now_ts = now();
 
+    // Truncate oversized content to prevent FTS index corruption
+    std::string safe_content = content;
+    if (safe_content.length() > MAX_CONTENT_SIZE) {
+        safe_content = safe_content.substr(0, MAX_CONTENT_SIZE) + "... [truncated]";
+        std::cerr << "[DuckDBStore] Content truncated from " << content.length()
+                  << " to " << MAX_CONTENT_SIZE << " bytes\n";
+    }
+
     // Escape content for SQL
     std::string escaped_content;
-    for (char c : content) {
+    for (char c : safe_content) {
         if (c == '\'') escaped_content += "''";
         else escaped_content += c;
     }
@@ -2312,8 +2356,16 @@ bool DuckDBStore::update_content(int64_t id, const std::string& new_content) {
     // Lock handled in write_execute/write_query/read_query
     if (!db_) return false;
 
+    // Truncate oversized content to prevent FTS index corruption
+    std::string safe_content = new_content;
+    if (safe_content.length() > MAX_CONTENT_SIZE) {
+        safe_content = safe_content.substr(0, MAX_CONTENT_SIZE) + "... [truncated]";
+        std::cerr << "[DuckDBStore] Content truncated from " << new_content.length()
+                  << " to " << MAX_CONTENT_SIZE << " bytes in update\n";
+    }
+
     // Escape content for SQL
-    std::string escaped = new_content;
+    std::string escaped = safe_content;
     size_t pos = 0;
     while ((pos = escaped.find('\'', pos)) != std::string::npos) {
         escaped.replace(pos, 1, "''");
@@ -3546,11 +3598,16 @@ size_t DuckDBStore::connect_batch(
     return connect_batch_sql(triplets, weight);
 }
 
-// Fallback SQL-based batch insert
+// Batch SQL insert - holds mutex for entire transaction to prevent write-write conflicts
 size_t DuckDBStore::connect_batch_sql(
     const std::vector<std::tuple<std::string, std::string, std::string, std::string>>& triplets,
     float weight
 ) {
+    // Hold mutex for entire transaction (BEGIN to COMMIT) to prevent conflicts
+    std::lock_guard lock(write_mutex_);
+
+    if (!write_conn_) return 0;
+
     std::string sql;
     sql.reserve(triplets.size() * 200);
     std::string temp;
@@ -3575,7 +3632,17 @@ size_t DuckDBStore::connect_batch_sql(
         sql += temp;
     };
 
-    write_execute("BEGIN TRANSACTION");
+    // Direct query calls (mutex already held)
+    auto exec = [this](const std::string& q) -> bool {
+        auto result = write_conn_->Query(q);
+        if (result->HasError()) {
+            std::cerr << "[DuckDBStore] Batch error: " << result->GetError() << "\n";
+            return false;
+        }
+        return true;
+    };
+
+    if (!exec("BEGIN TRANSACTION")) return 0;
 
     int64_t ts = now();
     char ts_buf[32];
@@ -3586,6 +3653,7 @@ size_t DuckDBStore::connect_batch_sql(
     static constexpr size_t BATCH_SIZE = 500;
     size_t batch_count = 0;
     size_t inserted = 0;
+    bool error = false;
 
     for (const auto& [subject, predicate, object, source_file] : triplets) {
         if (batch_count == 0) {
@@ -3614,17 +3682,22 @@ size_t DuckDBStore::connect_batch_sql(
 
         if (batch_count >= BATCH_SIZE) {
             sql += " ON CONFLICT (subject, predicate, object, source_file) DO UPDATE SET weight = EXCLUDED.weight";
-            write_execute(sql);
+            if (!exec(sql)) { error = true; break; }
             batch_count = 0;
         }
     }
 
-    if (batch_count > 0) {
+    if (!error && batch_count > 0) {
         sql += " ON CONFLICT (subject, predicate, object, source_file) DO UPDATE SET weight = EXCLUDED.weight";
-        write_execute(sql);
+        if (!exec(sql)) error = true;
     }
 
-    write_execute("COMMIT");
+    if (error) {
+        exec("ROLLBACK");
+        return 0;
+    }
+
+    exec("COMMIT");
     return inserted;
 }
 

@@ -51,9 +51,26 @@ djb2_hash() {
 }
 
 MIND_HASH=$(djb2_hash "$MIND_PATH")
-LOCK_FILE="/tmp/chitta-${MIND_HASH}.lock"
-SOCKET_PATH="/tmp/chitta-${MIND_HASH}.sock"
-PID_FILE="/tmp/chitta-${MIND_HASH}.pid"  # Daemon writes PID here
+
+# Use same socket directory as C++ daemon (XDG_RUNTIME_DIR > ~/.cache > /tmp)
+get_socket_dir() {
+    if [[ -n "$XDG_RUNTIME_DIR" && -w "$XDG_RUNTIME_DIR" ]]; then
+        local dir="$XDG_RUNTIME_DIR/chitta"
+        mkdir -p "$dir" 2>/dev/null
+        echo "$dir"
+    elif [[ -n "$HOME" ]]; then
+        local dir="$HOME/.cache/chitta"
+        mkdir -p "$dir" 2>/dev/null
+        echo "$dir"
+    else
+        echo "/tmp"
+    fi
+}
+
+SOCKET_DIR="$(get_socket_dir)"
+LOCK_FILE="${SOCKET_DIR}/chitta-${MIND_HASH}.lock"
+SOCKET_PATH="${SOCKET_DIR}/chitta-${MIND_HASH}.sock"
+PID_FILE="${SOCKET_DIR}/chitta-${MIND_HASH}.pid"  # Daemon writes PID here
 
 is_running() {
     # First check PID file

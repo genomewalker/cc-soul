@@ -6,6 +6,7 @@
 #include <iostream>
 #include <sstream>
 #include <regex>
+#include <sys/wait.h>
 
 namespace chitta {
 
@@ -649,7 +650,9 @@ json SadhanaManager::sense(Sadhana& sadhana, BrainProvider& brain) {
                         break;
                     }
                 }
-                int exit_code = pclose(pipe);
+                int raw_status = pclose(pipe);
+                int exit_code = (raw_status == -1) ? -1 :
+                                (WIFEXITED(raw_status) ? WEXITSTATUS(raw_status) : -1);
 
                 observation["command"] = cmd;
                 // Truncate output for storage
@@ -822,7 +825,9 @@ json SadhanaManager::act(Sadhana& sadhana, const json& decision) {
         while (fgets(buffer, sizeof(buffer), pipe)) {
             output += buffer;
         }
-        int exit_code = pclose(pipe);
+        int raw_status = pclose(pipe);
+        int exit_code = (raw_status == -1) ? -1 :
+                        (WIFEXITED(raw_status) ? WEXITSTATUS(raw_status) : -1);
 
         result["command"] = action;
         result["output"] = output;
