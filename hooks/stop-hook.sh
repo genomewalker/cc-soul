@@ -255,30 +255,54 @@ if [[ "$CLAUDE_LEARNED" == "false" && -n "$LAST_USER_MSG" ]]; then
     # ===========================================
     # COMPLIANCE TRACKING: Did Claude learn when prompted?
     # ===========================================
-    # Check if prompt-hook detected a correction opportunity
     CORRECTION_DETECTED=false
-    if echo "$LAST_USER_MSG" | grep -qiE "(wrong|mistake|not working|incorrect|actually[, ]|that'?s not|you('re| are) (wrong|missing)|not what I|won'?t work|should be|use your memory|check.*memory|did you forget)"; then
+    CORRECTION_TEXT=""
+
+    # 1. Authoritative signal: prompt-hook wrote .last_correction_context
+    CORRECTION_CTX_FILE="$MIND_PATH/.last_correction_context"
+    if [[ -f "$CORRECTION_CTX_FILE" ]]; then
         CORRECTION_DETECTED=true
+        CORRECTION_TEXT=$(cat "$CORRECTION_CTX_FILE" 2>/dev/null)
+        echo "[soul] correction source: prompt-hook context file" >&2
     fi
 
-    # If correction was detected but Claude didn't call learn_correction, log to stderr only
-    # Don't store raw text as memory - let distillation handle it properly
-    if [[ "$CORRECTION_DETECTED" == "true" && "$CLAUDE_LEARNED" == "false" ]]; then
+    # 2. Fallback: regex on last user message
+    if [[ "$CORRECTION_DETECTED" == "false" ]]; then
+        if echo "$LAST_USER_MSG" | grep -qiE "(wrong|mistake|not working|incorrect|actually[, ]|that'?s not|you('re| are) (wrong|missing)|not what I|won'?t work|should be|use your memory|check.*memory|did you forget)"; then
+            CORRECTION_DETECTED=true
+            CORRECTION_TEXT=$(echo "$LAST_USER_MSG" | head -c 300 | tr '\n' ' ')
+            echo "[soul] correction source: regex fallback" >&2
+        fi
+    fi
+
+    # Auto-store correction if detected but Claude didn't learn
+    if [[ "$CORRECTION_DETECTED" == "true" ]]; then
         echo "[soul] ⚠️ COMPLIANCE: Correction detected but learn_correction not called" >&2
+
+        # Hash-based dedup to avoid storing the same correction twice
+        correction_hash=$(echo -n "$CORRECTION_TEXT" | md5sum | cut -d' ' -f1)
+        if ! grep -q "^${correction_hash}$" "$DEDUP_FILE" 2>/dev/null; then
+            echo "$correction_hash" >> "$DEDUP_FILE"
+
+            ssl_content="[compliance:auto] User correction: $CORRECTION_TEXT"
+            title=$(echo "$ssl_content" | head -c 100)
+            queue_write "observe" "{\"category\":\"correction\",\"title\":$(echo "$title" | jq -Rs .),\"content\":$(echo "$ssl_content" | jq -Rs .)}"
+            echo "[soul] +auto-correction stored: ${title:0:60}" >&2
+        else
+            echo "[soul] skip auto-correction: duplicate" >&2
+        fi
     fi
 
     # Direct + meta-preference patterns - detect and log, let distillation format properly
     if echo "$LAST_USER_MSG" | grep -qiE "(I (prefer|like|want|always|never)|please (don'?t|always|never)|from now on|more concise|fewer examples|go deeper|simpler please|don'?t overexplain|be more verbose)"; then
         pref_context=$(echo "$LAST_USER_MSG" | head -c 60 | tr '\n' ' ')
         echo "[soul] preference detected: ${pref_context}..." >&2
-        # Don't auto-store raw text - distillation will format it properly as SSL
     fi
 
     # If milestone detected, log it - let distillation or explicit learn_milestone handle storage
     if echo "$LAST_USER_MSG" | grep -qiE "(it works|finally|success|shipped|released|completed|finished|passed|merged|deployed)"; then
         milestone_context=$(echo "$LAST_USER_MSG" | head -c 60 | tr '\n' ' ')
         echo "[soul] milestone detected: ${milestone_context}..." >&2
-        # Don't auto-store raw text - use learn_milestone for proper formatting
     fi
 fi
 
@@ -436,7 +460,7 @@ if [[ -x "$SCRIPT_DIR/span-capture.sh" ]]; then
 fi
 
 # Clean up temp files
-rm -f "$MIND_PATH/.last_user_message" "$PREDICTIONS_FILE" "$DEDUP_FILE" 2>/dev/null
+rm -f "$MIND_PATH/.last_user_message" "$MIND_PATH/.last_correction_context" "$PREDICTIONS_FILE" "$DEDUP_FILE" 2>/dev/null
 
 # ===========================================
 # LEDGER: Rich session checkpoint for continuity

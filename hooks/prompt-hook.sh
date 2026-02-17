@@ -128,7 +128,12 @@ LEARNING_HINTS=""
 # Direct: "wrong", "mistake", "not working", "incorrect"
 # Implicit: "actually", "should be", "not what I"
 if echo "$QUERY" | grep -qiE "(wrong|mistake|not working|incorrect|actually[, ]|that'?s not|you('re| are) (wrong|missing)|I (said|meant|asked)|not what I|won'?t work|should be|not quite|use your memory|check.*memory|did you forget)"; then
-    LEARNING_HINTS="[LEARN] ⚠️ CORRECTION - call learn_correction NOW with what was wrong and what's right"
+    # Truncate to first 200 chars for context, escape for output
+    correction_ctx=$(echo "$QUERY" | head -c 200 | tr '\n' ' ')
+    LEARNING_HINTS="[LEARN] ⚠️ CORRECTION detected - call learn_correction NOW
+  User said: \"${correction_ctx}\""
+    # Signal for stop-hook: save correction context to temp file
+    echo "$QUERY" > "$MIND_PATH/.last_correction_context"
 fi
 
 # Detect PREFERENCE patterns: user expressing preferences
