@@ -763,6 +763,13 @@ public:
         const std::vector<std::string>& exclude_kinds = {}  // Filter out these kinds
     );
 
+    // Tag-filtered recall: search only within memories that have the specified tag
+    std::vector<MemoryResult> recall_with_tag(
+        const std::vector<float>& query_embedding,
+        const std::string& tag,
+        size_t k = 10
+    );
+
     // Time-bounded recall: filter memories by creation time window
     // Optionally combines with semantic search if query_embedding provided
     std::vector<MemoryResult> recall_temporal(

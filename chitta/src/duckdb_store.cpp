@@ -2063,6 +2063,124 @@ std::vector<MemoryResult> DuckDBStore::recall(
     return results;
 }
 
+std::vector<MemoryResult> DuckDBStore::recall_with_tag(
+    const std::vector<float>& query_embedding,
+    const std::string& tag,
+    size_t k
+) {
+    std::vector<MemoryResult> results;
+    if (!db_ || tag.empty() || query_embedding.empty()) return results;
+
+    // Get memory IDs with this tag
+    auto tagged_ids = tag_hits({tag});
+    if (tagged_ids.empty()) return results;
+
+    // Build IN clause for filtering
+    std::ostringstream in_clause;
+    in_clause << "(";
+    bool first = true;
+    for (int64_t id : tagged_ids) {
+        if (!first) in_clause << ",";
+        in_clause << id;
+        first = false;
+    }
+    in_clause << ")";
+
+    // Query embeddings only for tagged memories and compute similarity
+    std::vector<std::pair<int64_t, float>> candidates;
+
+    if (emb_conn_) {
+        std::lock_guard<std::mutex> lock(emb_mutex_);
+        try {
+            std::ostringstream sql;
+            sql << "SELECT memory_id, "
+                << "array_cosine_similarity(embedding, " << embedding_to_sql(query_embedding) << ") AS similarity "
+                << "FROM memory_embeddings "
+                << "WHERE memory_id IN " << in_clause.str() << " "
+                << "ORDER BY similarity DESC "
+                << "LIMIT " << k;
+
+            auto result = emb_conn_->Query(sql.str());
+            if (result && !result->HasError()) {
+                while (true) {
+                    auto chunk = result->Fetch();
+                    if (!chunk || chunk->size() == 0) break;
+                    for (size_t i = 0; i < chunk->size(); ++i) {
+                        int64_t mem_id = chunk->GetValue(0, i).GetValue<int64_t>();
+                        float sim = chunk->GetValue(1, i).GetValue<float>();
+                        candidates.emplace_back(mem_id, sim);
+                    }
+                }
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "[DuckDBStore::recall_with_tag] Embedding query error: " << e.what() << "\n";
+        }
+    }
+
+    // Fallback: brute force in main DB if embeddings DB not available
+    if (candidates.empty() && !tagged_ids.empty()) {
+        std::ostringstream sql;
+        sql << "SELECT id, content, kind, confidence, realm, visibility, created_at, accessed_at, embedding "
+            << "FROM memory WHERE id IN " << in_clause.str() << " "
+            << "AND embedding IS NOT NULL";
+
+        auto result = read_query(sql.str());
+        if (result && !result->HasError()) {
+            while (true) {
+                auto chunk = result->Fetch();
+                if (!chunk || chunk->size() == 0) break;
+                for (size_t i = 0; i < chunk->size(); ++i) {
+                    int64_t id = chunk->GetValue(0, i).GetValue<int64_t>();
+                    auto emb_val = chunk->GetValue(8, i);
+                    if (!emb_val.IsNull()) {
+                        auto emb_list = duckdb::ListValue::GetChildren(emb_val);
+                        std::vector<float> mem_emb;
+                        for (const auto& v : emb_list) {
+                            mem_emb.push_back(v.GetValue<float>());
+                        }
+                        if (mem_emb.size() == query_embedding.size()) {
+                            float sim = 0;
+                            float norm1 = 0, norm2 = 0;
+                            for (size_t j = 0; j < mem_emb.size(); ++j) {
+                                sim += query_embedding[j] * mem_emb[j];
+                                norm1 += query_embedding[j] * query_embedding[j];
+                                norm2 += mem_emb[j] * mem_emb[j];
+                            }
+                            if (norm1 > 0 && norm2 > 0) {
+                                sim /= std::sqrt(norm1) * std::sqrt(norm2);
+                                candidates.emplace_back(id, sim);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Sort by similarity
+        std::sort(candidates.begin(), candidates.end(),
+                  [](const auto& a, const auto& b) { return a.second > b.second; });
+        if (candidates.size() > k) candidates.resize(k);
+    }
+
+    // Fetch full memory data for candidates
+    for (const auto& [id, sim] : candidates) {
+        auto mem = get_memory(id);
+        if (mem) {
+            MemoryResult r;
+            r.id = mem->id;
+            r.kind = mem->kind;
+            r.content = mem->content;
+            r.similarity = sim;
+            r.confidence = mem->confidence;
+            r.realm = mem->realm;
+            r.created_at = mem->created_at;
+            r.accessed_at = mem->accessed_at;
+            results.push_back(r);
+        }
+    }
+
+    return results;
+}
+
 std::vector<MemoryResult> DuckDBStore::recall_temporal(
     const std::vector<float>& query_embedding,
     std::optional<int64_t> start_time,

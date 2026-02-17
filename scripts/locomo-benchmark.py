@@ -846,21 +846,17 @@ def recall_for_question(question: str, sample_id: str, category: int = 0) -> str
             # to maximize F1 (avoid diluting with extra context)
             return temporal_results
 
-    # === 1. Hybrid recall - semantic + keyword + graph ===
-    # Build query with entities and question
+    # === 1. Semantic recall - scoped to this conversation via tag filter ===
     entity_str = ' '.join(entities[:2]) if entities else ''
     search_query = f"{entity_str} {question}"
 
-    hybrid = chitta_rpc("hybrid_recall", query=search_query, limit=20)
-    if hybrid and 'content' in hybrid:
+    # Use tag filter to scope results to this conversation
+    semantic = chitta_call("recall", query=search_query, tag=sample_id, limit=20)
+    if semantic:
         results.append("=== Semantic Search ===")
-        for item in hybrid.get('content', []):
-            text = item.get('text', '') if isinstance(item, dict) else str(item)
-            if text:
-                # Extract relevant lines
-                for line in text.split('\n')[:30]:
-                    if line.strip() and ('→' in line or any(e.lower() in line.lower() for e in entities)):
-                        results.append(line[:250])
+        for line in semantic.split('\n')[:30]:
+            if line.strip() and ('→' in line or any(e.lower() in line.lower() for e in entities)):
+                results.append(line[:250])
 
     # === 2. Direct triplet query for entities (deduplicated) ===
     seen_triplets = set()

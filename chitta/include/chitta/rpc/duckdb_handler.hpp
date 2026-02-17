@@ -2578,6 +2578,7 @@ private:
                 {"properties", {
                     {"query", {{"type", "string"}, {"description", "Search query text"}}},
                     {"limit", {{"type", "integer"}, {"description", "Max results (default: 10)"}}},
+                    {"tag", {{"type", "string"}, {"description", "Filter by tag"}}},
                     {"realm", {{"type", "string"}, {"description", "Filter by realm"}}},
                     {"vector_weight", {{"type", "number"}, {"description", "Weight for vector similarity (default: 0.4)"}}},
                     {"bm25_weight", {{"type", "number"}, {"description", "Weight for BM25 keyword match (default: 0.3)"}}},
@@ -3206,33 +3207,57 @@ private:
 
         size_t limit = params.value("limit", 10);
         float min_confidence = params.value("min_confidence", 0.0f);
+        std::string tag = params.value("tag", "");
         std::string realm = params.value("realm", "");
         bool include_global = params.value("include_global", true);
 
-        // If realm filtering is requested, we need to use the store directly
-        std::vector<MemoryResult> store_results;
-        if (!realm.empty() && mind_->has_yantra()) {
-            // Get embedding for query and call store directly with realm filter
-            // For now, fall back to mind_->recall() and filter post-hoc
-            // TODO: Expose embedder through mind for direct store queries
+        // If tag specified, use tag-filtered recall for proper scoping
+        std::vector<Recall> results;
+        if (!tag.empty()) {
+            // Get embedding for query
+            if (!mind_->embedder_ready()) {
+                return DuckDBToolResult::error("Embedder not ready");
+            }
+            auto embedding = mind_->embedder().embed_query(query).data;
+            if (embedding.empty()) {
+                return DuckDBToolResult::error("Failed to generate query embedding");
+            }
+            // Use tag-filtered recall
+            auto store_results = mind_->store().recall_with_tag(embedding, tag, limit);
+            for (const auto& r : store_results) {
+                Recall rec;
+                rec.id = NodeId(r.id);
+                rec.text = r.content;
+                rec.type = NodeType::Episode; // Default type
+                rec.similarity = r.similarity;
+                rec.relevance = r.similarity;
+                rec.confidence = Confidence(r.confidence);
+                results.push_back(rec);
+            }
+        } else {
+            // Use normal recall
+            size_t fetch_limit = !realm.empty() ? limit * 3 : limit;
+            results = mind_->recall(query, fetch_limit);
         }
-
-        auto results = mind_->recall(query, realm.empty() ? limit : limit * 2);
 
         std::ostringstream ss;
         json results_json = json::array();
         size_t count = 0;
 
         for (const auto& r : results) {
+            int64_t mem_id = static_cast<int64_t>(r.id.low);
+
+            // Tag filtering is handled by recall_with_tag, no post-hoc filter needed
+
             // Post-hoc realm filtering if realm specified
             if (!realm.empty()) {
-                auto realms = mind_->store().get_realms(static_cast<int64_t>(r.id.low));
+                auto realms = mind_->store().get_realms(mem_id);
                 bool in_realm = false;
                 for (const auto& rm : realms) {
                     if (rm == realm) { in_realm = true; break; }
                 }
                 // Check if memory is global and include_global is true
-                auto mem = mind_->store().get_memory(static_cast<int64_t>(r.id.low));
+                auto mem = mind_->store().get_memory(mem_id);
                 if (mem && mem->visibility == RealmVisibility::Global && include_global) {
                     in_realm = true;
                 }
@@ -3251,7 +3276,7 @@ private:
             };
 
             // Include realm info in results and apply confidence filter
-            auto mem = mind_->store().get_memory(static_cast<int64_t>(r.id.low));
+            auto mem = mind_->store().get_memory(mem_id);
             if (mem) {
                 // Skip if below min_confidence threshold
                 if (mem->confidence < min_confidence) continue;
@@ -4512,6 +4537,23 @@ private:
         static const NodeId null_id{};
         if (id == null_id) {
             return DuckDBToolResult::error("Failed to observe");
+        }
+
+        // Process tags if provided
+        std::string tags = params.value("tags", "");
+        if (!tags.empty()) {
+            int64_t db_id = static_cast<int64_t>(id.low);
+            // Split comma-separated tags
+            std::istringstream tag_stream(tags);
+            std::string tag;
+            while (std::getline(tag_stream, tag, ',')) {
+                // Trim whitespace
+                while (!tag.empty() && std::isspace(static_cast<unsigned char>(tag.front()))) tag.erase(tag.begin());
+                while (!tag.empty() && std::isspace(static_cast<unsigned char>(tag.back()))) tag.pop_back();
+                if (!tag.empty()) {
+                    mind_->store().add_tag(db_id, tag);
+                }
+            }
         }
 
         return DuckDBToolResult::ok(
@@ -11519,14 +11561,8 @@ private:
         }
 
         size_t limit = params.value("limit", 10);
+        std::string tag = params.value("tag", "");
         std::string realm = params.value("realm", "");
-
-        // Build config from params
-        DuckDBStore::HybridRecallConfig config;
-        if (params.contains("vector_weight")) config.vector_weight = params["vector_weight"].get<float>();
-        if (params.contains("bm25_weight")) config.bm25_weight = params["bm25_weight"].get<float>();
-        if (params.contains("graph_weight")) config.graph_weight = params["graph_weight"].get<float>();
-        if (params.contains("recency_weight")) config.recency_weight = params["recency_weight"].get<float>();
 
         // Get embedding for query
         if (!mind_->embedder_ready()) {
@@ -11537,11 +11573,25 @@ private:
             return DuckDBToolResult::error("Failed to generate query embedding");
         }
 
-        auto results = mind_->store().hybrid_recall(embedding, query, limit, realm, true, config);
+        std::vector<chitta::MemoryResult> results;
+
+        if (!tag.empty()) {
+            // Use tag-filtered recall for proper scoping
+            results = mind_->store().recall_with_tag(embedding, tag, limit);
+        } else {
+            // Build config from params
+            DuckDBStore::HybridRecallConfig config;
+            if (params.contains("vector_weight")) config.vector_weight = params["vector_weight"].get<float>();
+            if (params.contains("bm25_weight")) config.bm25_weight = params["bm25_weight"].get<float>();
+            if (params.contains("graph_weight")) config.graph_weight = params["graph_weight"].get<float>();
+            if (params.contains("recency_weight")) config.recency_weight = params["recency_weight"].get<float>();
+
+            results = mind_->store().hybrid_recall(embedding, query, limit, realm, true, config);
+        }
 
         json result;
         result["memories"] = json::array();
-        result["count"] = results.size();
+        size_t count = 0;
 
         for (const auto& r : results) {
             json mem;
@@ -11553,14 +11603,17 @@ private:
             mem["realm"] = r.realm;
             mem["created_at"] = r.created_at;
             result["memories"].push_back(mem);
+            count++;
+            if (count >= limit) break;
         }
+        result["count"] = count;
 
-        json cfg;
-        cfg["vector_weight"] = config.vector_weight;
-        cfg["bm25_weight"] = config.bm25_weight;
-        cfg["graph_weight"] = config.graph_weight;
-        cfg["recency_weight"] = config.recency_weight;
-        result["config"] = cfg;
+        // Only include config when not using tag-filtered recall
+        if (tag.empty()) {
+            json cfg;
+            cfg["note"] = "Config only applies to hybrid mode (no tag filter)";
+            result["config"] = cfg;
+        }
 
         std::ostringstream msg;
         msg << "Found " << results.size() << " memory/memories via hybrid retrieval";
