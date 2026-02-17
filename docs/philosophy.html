@@ -3,20 +3,257 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Philosophy → System — cc-soul</title>
-<meta name="description" content="How Vedantic philosophy maps to system behavior in cc-soul. Each Sanskrit term names a measurable operation.">
+<title>Philosophy — cc-soul</title>
+<meta name="description" content="Vedantic foundations and evidence-backed design principles behind cc-soul. Each term names a behavior. Each principle has trade-offs.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
-<meta property="og:title" content="Philosophy → System — cc-soul">
-<meta property="og:description" content="How Vedantic philosophy maps to system behavior in cc-soul. Each Sanskrit term names a measurable operation.">
+<meta property="og:title" content="Philosophy — cc-soul">
+<meta property="og:description" content="Vedantic foundations and evidence-backed design principles behind cc-soul.">
 <meta property="og:type" content="website">
 <meta property="og:image" content="favicon.svg">
 <meta name="twitter:card" content="summary">
-<meta name="twitter:title" content="Philosophy → System — cc-soul">
-<meta name="twitter:description" content="How Vedantic philosophy maps to system behavior in cc-soul.">
+<meta name="twitter:title" content="Philosophy — cc-soul">
+<meta name="twitter:description" content="Vedantic foundations and evidence-backed design principles behind cc-soul.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
+<style>
+/* Section navigation */
+.section-nav {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  margin-bottom: 3rem;
+  flex-wrap: wrap;
+}
+
+.section-nav-link {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--lotus-600);
+  border-radius: 4px;
+  color: var(--lotus-300);
+  text-decoration: none;
+  transition: all 0.2s ease;
+}
+
+.section-nav-link:hover,
+.section-nav-link.active {
+  border-color: var(--sandal-400);
+  color: var(--sandal-300);
+  background: rgba(203, 175, 134, 0.05);
+}
+
+/* Principles grid */
+.principles-grid {
+  display: grid;
+  gap: 1.5rem;
+  margin-top: 2rem;
+}
+
+.principle-category {
+  margin-bottom: 3rem;
+}
+
+.principle-category-title {
+  font-family: var(--font-serif);
+  font-size: 1.5rem;
+  font-weight: 500;
+  color: var(--sandal-300);
+  margin-bottom: 1.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--lotus-600);
+}
+
+.principle-card {
+  background: var(--lotus-800);
+  border: 1px solid var(--lotus-600);
+  border-radius: 8px;
+  padding: 1.5rem;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.principle-card:hover {
+  border-color: var(--sandal-400);
+  transform: translateY(-2px);
+}
+
+.principle-title {
+  font-family: var(--font-serif);
+  font-size: 1.15rem;
+  font-weight: 500;
+  color: var(--lotus-100);
+  margin-bottom: 0.75rem;
+}
+
+.principle-desc {
+  font-size: 0.95rem;
+  color: var(--lotus-300);
+  line-height: 1.6;
+  margin-bottom: 1rem;
+}
+
+.principle-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.principle-tag {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  padding: 0.25rem 0.5rem;
+  background: var(--lotus-700);
+  border-radius: 4px;
+  color: var(--lotus-400);
+}
+
+.principle-tag--evidence {
+  color: var(--aura-300);
+  background: rgba(157, 178, 217, 0.1);
+}
+
+.principle-tag--tradeoff {
+  color: var(--ember-300);
+  background: rgba(212, 106, 76, 0.1);
+}
+
+.principle-mechanism {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  background: var(--lotus-900);
+  border: 1px solid var(--lotus-700);
+  border-radius: 4px;
+  padding: 1rem;
+  margin-top: 0.75rem;
+  color: var(--lotus-300);
+  overflow-x: auto;
+  white-space: pre-wrap;
+}
+
+.principle-mechanism code {
+  color: var(--sandal-300);
+}
+
+/* Philosophy section intro */
+.philosophy-intro {
+  max-width: 48rem;
+  margin: 0 auto 3rem;
+  text-align: center;
+}
+
+.philosophy-intro p {
+  font-size: 1.1rem;
+  color: var(--lotus-300);
+  line-height: 1.7;
+}
+
+/* Mapping section (Vedantic) */
+.mapping-section {
+  padding: 4rem 0;
+}
+
+.mapping-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.mapping-row {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 2rem;
+  padding: 1.25rem;
+  background: var(--lotus-800);
+  border: 1px solid var(--lotus-600);
+  border-radius: 8px;
+  align-items: center;
+  transition: border-color 0.2s ease;
+}
+
+.mapping-row:hover {
+  border-color: var(--sandal-400);
+}
+
+@media (max-width: 640px) {
+  .mapping-row {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+}
+
+.mapping-sanskrit {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.mapping-devanagari {
+  font-size: 1.5rem;
+  color: var(--sandal-300);
+  line-height: 1.2;
+}
+
+.mapping-transliteration {
+  font-family: var(--font-serif);
+  font-size: 1rem;
+  font-style: italic;
+  color: var(--lotus-200);
+}
+
+.mapping-meaning {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--lotus-400);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.mapping-system {
+  font-size: 0.95rem;
+  color: var(--lotus-300);
+  line-height: 1.6;
+}
+
+.mapping-arrow {
+  color: var(--sandal-400);
+  margin-right: 0.5rem;
+}
+
+/* Section dividers */
+.section-title-wrap {
+  text-align: center;
+  margin: 4rem 0 2rem;
+}
+
+.section-title-badge {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--sandal-400);
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--sandal-400);
+  border-radius: 4px;
+  margin-bottom: 1rem;
+}
+
+.section-title-text {
+  font-family: var(--font-serif);
+  font-size: 2rem;
+  font-weight: 500;
+  color: var(--lotus-100);
+  margin: 0;
+}
+
+.section-title-sub {
+  font-size: 1rem;
+  color: var(--lotus-400);
+  margin-top: 0.5rem;
+}
+</style>
 </head>
 <body>
 
@@ -45,15 +282,33 @@
 <!-- PAGE HEADER -->
 <header class="page-header">
   <div class="container">
-    <div class="page-header-badge reveal">Philosophy &rarr; System</div>
-    <h1 class="reveal reveal-delay-1">Philosophy, made operational.</h1>
-    <p class="page-header-sub reveal reveal-delay-2">Each term names a behavior. Each behavior is measurable. Vedantic philosophy isn't metaphor here&thinsp;&mdash;&thinsp;it's architecture.</p>
+    <div class="page-header-badge reveal">Philosophy</div>
+    <h1 class="reveal reveal-delay-1">Grounded in Vedanta. Validated by engineering.</h1>
+    <p class="page-header-sub reveal reveal-delay-2">Sanskrit terms name system behaviors. Design principles carry evidence and trade-offs. Philosophy isn't metaphor here&thinsp;&mdash;&thinsp;it's architecture.</p>
   </div>
 </header>
 
-<!-- MAPPING -->
-<section class="mapping-section">
+<!-- SECTION NAV -->
+<section class="container reveal">
+  <div class="section-nav">
+    <a href="#vedantic" class="section-nav-link active">Vedantic Concepts</a>
+    <a href="#memory" class="section-nav-link">Memory Architecture</a>
+    <a href="#retrieval" class="section-nav-link">Retrieval</a>
+    <a href="#learning" class="section-nav-link">Learning</a>
+    <a href="#processing" class="section-nav-link">Processing</a>
+    <a href="#integration" class="section-nav-link">Integration</a>
+  </div>
+</section>
+
+<!-- VEDANTIC CONCEPTS -->
+<section class="mapping-section" id="vedantic">
   <div class="container">
+    <div class="section-title-wrap reveal">
+      <span class="section-title-badge">Part I</span>
+      <h2 class="section-title-text">Vedantic Foundations</h2>
+      <p class="section-title-sub">Each Sanskrit term names a measurable operation</p>
+    </div>
+
     <div class="mapping-grid">
 
       <div class="mapping-row reveal">
@@ -88,43 +343,7 @@
         </div>
         <div class="mapping-system">
           <span class="mapping-arrow">&rarr;</span>
-          Six cognitive voices as memory channels. Manas captures, Buddhi discerns, Ahamkara personalizes, Chitta stores, Vikalpa generates alternatives, Sakshi witnesses. Each has a role in the pipeline.
-        </div>
-      </div>
-
-      <div class="mapping-row reveal">
-        <div class="mapping-sanskrit">
-          <span class="mapping-devanagari">मनस्</span>
-          <span class="mapping-transliteration">Manas</span>
-          <span class="mapping-meaning">Sensory mind</span>
-        </div>
-        <div class="mapping-system">
-          <span class="mapping-arrow">&rarr;</span>
-          Fast capture and hot-tier logging. The first moment of contact&thinsp;&mdash;&thinsp;raw observations flow in before judgment. Episodes accumulate here before distillation.
-        </div>
-      </div>
-
-      <div class="mapping-row reveal">
-        <div class="mapping-sanskrit">
-          <span class="mapping-devanagari">बुद्धि</span>
-          <span class="mapping-transliteration">Buddhi</span>
-          <span class="mapping-meaning">Discernment</span>
-        </div>
-        <div class="mapping-system">
-          <span class="mapping-arrow">&rarr;</span>
-          Bayesian confidence scoring and calibration. Every memory carries a probability. Observations shift beliefs. Calibration tracks whether confidence matches reality.
-        </div>
-      </div>
-
-      <div class="mapping-row reveal">
-        <div class="mapping-sanskrit">
-          <span class="mapping-devanagari">अहंकार</span>
-          <span class="mapping-transliteration">Ahamkara</span>
-          <span class="mapping-meaning">&ldquo;I&rdquo;-maker</span>
-        </div>
-        <div class="mapping-system">
-          <span class="mapping-arrow">&rarr;</span>
-          Identity reinforcement and personalization. Preferences, corrections, milestones&thinsp;&mdash;&thinsp;the accumulation of &ldquo;this is who I am with this person.&rdquo; The partnership layer.
+          Six cognitive voices as memory channels. Manas captures, Buddhi discerns, Ahamkara personalizes, Chitta stores, Vikalpa generates alternatives, Sakshi witnesses.
         </div>
       </div>
 
@@ -136,31 +355,19 @@
         </div>
         <div class="mapping-system">
           <span class="mapping-arrow">&rarr;</span>
-          Persistent embeddings and semantic indexing. The C++ daemon at the heart of the system. 384-dimensional vectors anchor meaning in stable latent space. DuckDB stores, HNSW indexes.
+          Persistent embeddings and semantic indexing. The C++ daemon at the heart of the system. 768-dimensional vectors anchor meaning in stable latent space.
         </div>
       </div>
 
       <div class="mapping-row reveal">
         <div class="mapping-sanskrit">
-          <span class="mapping-devanagari">विकल्प</span>
-          <span class="mapping-transliteration">Vikalpa</span>
-          <span class="mapping-meaning">Imagination</span>
+          <span class="mapping-devanagari">यन्त्र</span>
+          <span class="mapping-transliteration">Yantra</span>
+          <span class="mapping-meaning">Instrument</span>
         </div>
         <div class="mapping-system">
           <span class="mapping-arrow">&rarr;</span>
-          Candidate generation and alternative hypotheses. When recall surfaces memories, Vikalpa considers what else might be relevant. Theme-based retrieval explores neighborhoods, not just top-k.
-        </div>
-      </div>
-
-      <div class="mapping-row reveal">
-        <div class="mapping-sanskrit">
-          <span class="mapping-devanagari">साक्षी</span>
-          <span class="mapping-transliteration">Sakshi</span>
-          <span class="mapping-meaning">Witness</span>
-        </div>
-        <div class="mapping-system">
-          <span class="mapping-arrow">&rarr;</span>
-          Audit trail and provenance metadata. Every memory tracks its origin: which session created it, which tool, what trust score. Provenance enables debugging the soul itself.
+          VakYantra (speech instrument) transforms text into embeddings. Not passive encoding&thinsp;&mdash;&thinsp;the model shapes what becomes memorable by how it embeds.
         </div>
       </div>
 
@@ -172,7 +379,7 @@
         </div>
         <div class="mapping-system">
           <span class="mapping-arrow">&rarr;</span>
-          Decay curves and time-weighted forgetting. Memories are not permanent. Confidence decays over time. Unused memories fade. This is a feature, not a bug&thinsp;&mdash;&thinsp;noise must die for signal to survive.
+          Decay curves and time-weighted forgetting. Memories are not permanent. Confidence decays over time. Unused memories fade. Noise dies for signal to survive.
         </div>
       </div>
 
@@ -184,19 +391,7 @@
         </div>
         <div class="mapping-system">
           <span class="mapping-arrow">&rarr;</span>
-          Hebbian learning and usage-weighted strengthening. When a memory is recalled and used, it grows stronger. Frequent patterns crystallize into wisdom. The soul learns what matters by observing what you reach for.
-        </div>
-      </div>
-
-      <div class="mapping-row reveal">
-        <div class="mapping-sanskrit">
-          <span class="mapping-devanagari">यज्ञ</span>
-          <span class="mapping-transliteration">Yajña</span>
-          <span class="mapping-meaning">Sacred offering</span>
-        </div>
-        <div class="mapping-system">
-          <span class="mapping-arrow">&rarr;</span>
-          Background compression and wisdom extraction. Episodes burn down into compact seeds. Transcript distillation sacrifices verbosity to preserve essence. SSL format compresses 95% of tokens while keeping meaning.
+          Hebbian learning and usage-weighted strengthening. When a memory is recalled and used, it grows stronger. Frequent patterns crystallize into wisdom.
         </div>
       </div>
 
@@ -208,7 +403,19 @@
         </div>
         <div class="mapping-system">
           <span class="mapping-arrow">&rarr;</span>
-          Resonance-based recall on context alignment. Not search&thinsp;&mdash;&thinsp;recognition. The system doesn't wait to be asked. It anticipates. Spreading activation, attractor dynamics, and learned patterns surface what you need before you know you need it.
+          Resonance-based recall on context alignment. Not search&thinsp;&mdash;&thinsp;recognition. The system anticipates, surfaces what you need before you know you need it.
+        </div>
+      </div>
+
+      <div class="mapping-row reveal">
+        <div class="mapping-sanskrit">
+          <span class="mapping-devanagari">यज्ञ</span>
+          <span class="mapping-transliteration">Yajña</span>
+          <span class="mapping-meaning">Sacred offering</span>
+        </div>
+        <div class="mapping-system">
+          <span class="mapping-arrow">&rarr;</span>
+          Background compression and wisdom extraction. Episodes burn down into compact seeds. Transcript distillation sacrifices verbosity to preserve essence.
         </div>
       </div>
 
@@ -216,19 +423,230 @@
   </div>
 </section>
 
-<!-- PRINCIPLE -->
+<!-- MEMORY ARCHITECTURE -->
+<section class="mapping-section" id="memory">
+  <div class="container">
+    <div class="section-title-wrap reveal">
+      <span class="section-title-badge">Part II</span>
+      <h2 class="section-title-text">Memory Architecture</h2>
+      <p class="section-title-sub">Why we store what we store, how we store it</p>
+    </div>
+
+    <div class="principles-grid">
+
+      <div class="principle-card reveal">
+        <h3 class="principle-title">Chitta as substrate, not container</h3>
+        <p class="principle-desc">The memory system doesn't just hold data&thinsp;&mdash;&thinsp;it shapes retrieval. Like a musical instrument colors every note, chitta's architecture affects what surfaces and when.</p>
+        <div class="principle-meta">
+          <span class="principle-tag principle-tag--evidence">Connectionism research</span>
+          <span class="principle-tag principle-tag--tradeoff">Harder to debug</span>
+        </div>
+      </div>
+
+      <div class="principle-card reveal">
+        <h3 class="principle-title">Embeddings live separately from content</h3>
+        <p class="principle-desc">Vector embeddings stored in dedicated database, separate from memory content. Query isolation&thinsp;&mdash;&thinsp;vector search doesn't touch main storage.</p>
+        <div class="principle-meta">
+          <span class="principle-tag principle-tag--evidence">Database sharding</span>
+          <span class="principle-tag principle-tag--tradeoff">Join complexity</span>
+        </div>
+        <div class="principle-mechanism"><code>chitta_embeddings.duckdb</code> &rarr; FLOAT[768] + HNSW
+<code>chitta.duckdb</code> &rarr; content, metadata, relationships</div>
+      </div>
+
+      <div class="principle-card reveal">
+        <h3 class="principle-title">Triplets capture what embeddings miss</h3>
+        <p class="principle-desc">Semantic similarity finds related concepts. But "X caused Y" or "user prefers A over B" needs explicit relationships. Triplets encode directional knowledge.</p>
+        <div class="principle-meta">
+          <span class="principle-tag principle-tag--evidence">Knowledge graphs</span>
+          <span class="principle-tag principle-tag--tradeoff">Storage overhead</span>
+        </div>
+      </div>
+
+      <div class="principle-card reveal">
+        <h3 class="principle-title">Themes emerge from clustering</h3>
+        <p class="principle-desc">No predefined categories. Themes emerge from embedding clusters using HDBSCAN. The system discovers what concepts naturally group together based on your usage.</p>
+        <div class="principle-meta">
+          <span class="principle-tag principle-tag--evidence">xMemory paper</span>
+          <span class="principle-tag principle-tag--tradeoff">Unpredictable categories</span>
+        </div>
+      </div>
+
+      <div class="principle-card reveal">
+        <h3 class="principle-title">Confidence decays but never reaches zero</h3>
+        <p class="principle-desc">Memory confidence decreases through exponential decay, but asymptotically approaches a floor (0.1). Old memories fade but never fully disappear.</p>
+        <div class="principle-meta">
+          <span class="principle-tag principle-tag--evidence">Ebbinghaus forgetting curve</span>
+          <span class="principle-tag principle-tag--tradeoff">Unbounded storage</span>
+        </div>
+        <div class="principle-mechanism"><code>new_confidence = floor + (current - floor) * 0.995</code>
+Decay every 60s during idle. Floor = 0.1.</div>
+      </div>
+
+      <div class="principle-card reveal">
+        <h3 class="principle-title">SSL compresses without losing retrievability</h3>
+        <p class="principle-desc">Soul Shorthand Language achieves 40-60% token reduction while preserving semantic content. Embeddings still work because meaning is preserved.</p>
+        <div class="principle-meta">
+          <span class="principle-tag principle-tag--evidence">Compression benchmarks</span>
+          <span class="principle-tag principle-tag--tradeoff">Learning curve</span>
+        </div>
+        <div class="principle-mechanism">[category] Title
+- Detail (context)
+&rarr; Implication</div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- RETRIEVAL PHILOSOPHY -->
+<section class="mapping-section" id="retrieval">
+  <div class="container">
+    <div class="section-title-wrap reveal">
+      <span class="section-title-badge">Part III</span>
+      <h2 class="section-title-text">Retrieval Philosophy</h2>
+      <p class="section-title-sub">How memories surface at the right moment</p>
+    </div>
+
+    <div class="principles-grid">
+
+      <div class="principle-card reveal">
+        <h3 class="principle-title">Hybrid search beats pure approaches</h3>
+        <p class="principle-desc">Neither semantic search nor keyword search alone is sufficient. We combine vector similarity, BM25 keyword matching, and graph traversal for comprehensive retrieval.</p>
+        <div class="principle-meta">
+          <span class="principle-tag principle-tag--evidence">HyDE paper, RAG research</span>
+          <span class="principle-tag principle-tag--tradeoff">Complexity, latency</span>
+        </div>
+      </div>
+
+      <div class="principle-card reveal">
+        <h3 class="principle-title">Context window is precious</h3>
+        <p class="principle-desc">Claude's ~200K token context is finite. Every surfaced memory consumes space. Retrieval maximizes signal-to-noise, not total recall.</p>
+        <div class="principle-meta">
+          <span class="principle-tag principle-tag--evidence">LLM attention research</span>
+          <span class="principle-tag principle-tag--tradeoff">Useful memories filtered</span>
+        </div>
+        <div class="principle-mechanism">Session start: ~2000 tokens
+Per-query recall: ~500 tokens
+Correction warnings: ~100 tokens</div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- LEARNING MECHANISMS -->
+<section class="mapping-section" id="learning">
+  <div class="container">
+    <div class="section-title-wrap reveal">
+      <span class="section-title-badge">Part IV</span>
+      <h2 class="section-title-text">Learning Mechanisms</h2>
+      <p class="section-title-sub">How the system adapts to you</p>
+    </div>
+
+    <div class="principles-grid">
+
+      <div class="principle-card reveal">
+        <h3 class="principle-title">Corrections have highest learning value</h3>
+        <p class="principle-desc">When you correct Claude, that's signal gold. Corrections captured automatically, stored with boosted confidence, surfaced proactively to prevent repeat mistakes.</p>
+        <div class="principle-meta">
+          <span class="principle-tag principle-tag--evidence">Error-driven learning</span>
+          <span class="principle-tag principle-tag--tradeoff">False positive corrections</span>
+        </div>
+      </div>
+
+      <div class="principle-card reveal">
+        <h3 class="principle-title">Yantra transforms, not just encodes</h3>
+        <p class="principle-desc">VakYantra doesn't passively convert text to vectors. It actively shapes what becomes memorable by how it embeds. Different models produce different memory behaviors.</p>
+        <div class="principle-meta">
+          <span class="principle-tag principle-tag--evidence">Embedding model research</span>
+          <span class="principle-tag principle-tag--tradeoff">Model-locked</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- PROCESSING MODEL -->
+<section class="mapping-section" id="processing">
+  <div class="container">
+    <div class="section-title-wrap reveal">
+      <span class="section-title-badge">Part V</span>
+      <h2 class="section-title-text">Processing Model</h2>
+      <p class="section-title-sub">Background operations and lifecycle</p>
+    </div>
+
+    <div class="principles-grid">
+
+      <div class="principle-card reveal">
+        <h3 class="principle-title">Hooks capture what humans forget</h3>
+        <p class="principle-desc">Session boundaries, prompt submissions, tool calls&thinsp;&mdash;&thinsp;these carry learning value but users won't manually log them. Hooks automate capture at strategic points.</p>
+        <div class="principle-meta">
+          <span class="principle-tag principle-tag--evidence">Lifelogging research</span>
+          <span class="principle-tag principle-tag--tradeoff">Privacy surface</span>
+        </div>
+      </div>
+
+      <div class="principle-card reveal">
+        <h3 class="principle-title">Subconscious processes what foreground cannot</h3>
+        <p class="principle-desc">The daemon runs background tasks during idle: confidence decay, theme clustering, memory consolidation. These would interrupt conversation if done synchronously.</p>
+        <div class="principle-meta">
+          <span class="principle-tag principle-tag--evidence">OS scheduling, spaced repetition</span>
+          <span class="principle-tag principle-tag--tradeoff">Debugging difficulty</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- INTEGRATION DESIGN -->
+<section class="mapping-section" id="integration">
+  <div class="container">
+    <div class="section-title-wrap reveal">
+      <span class="section-title-badge">Part VI</span>
+      <h2 class="section-title-text">Integration Design</h2>
+      <p class="section-title-sub">How cc-soul fits into Claude Code</p>
+    </div>
+
+    <div class="principles-grid">
+
+      <div class="principle-card reveal">
+        <h3 class="principle-title">Daemon architecture enables instant recall</h3>
+        <p class="principle-desc">A persistent daemon (chittad) keeps DuckDB, HNSW indexes, and ONNX model warm. Without this, every tool call pays ~750ms cold-start costs.</p>
+        <div class="principle-meta">
+          <span class="principle-tag principle-tag--evidence">Connection pooling, model serving</span>
+          <span class="principle-tag principle-tag--tradeoff">Memory footprint (~1GB)</span>
+        </div>
+        <div class="principle-mechanism">Unix socket IPC. Thread pool (2-16 workers).
+First query as fast as hundredth.</div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- CLOSING -->
 <section class="principle">
   <div class="container">
     <p class="principle-text reveal">
-      These aren't decorative labels. Each concept was chosen because its <em>operational semantics</em> match a system behavior. The philosophy constrains the engineering&thinsp;&mdash;&thinsp;and the engineering validates the philosophy.
+      These aren't decorative labels or arbitrary choices. Each concept was chosen because its <em>operational semantics</em> match a system behavior. Each principle emerged from research and implementation. The philosophy constrains the engineering&thinsp;&mdash;&thinsp;and the engineering validates the philosophy.
     </p>
   </div>
 </section>
 
-<!-- BACK -->
+<!-- LINK TO FULL DOCS -->
 <section class="back-section">
   <div class="container">
-    <a href="index.html" class="back-link">&larr; Back to cc-soul</a>
+    <p class="reveal" style="text-align: center; color: var(--lotus-300);">
+      Full claim files with cross-references available in the <a href="https://github.com/genomewalker/cc-soul/tree/main/philosophy" class="link-sandal">philosophy/</a> directory.
+    </p>
+    <div style="text-align: center; margin-top: 1.5rem;">
+      <a href="index.html" class="back-link">&larr; Back to cc-soul</a>
+      <span style="margin: 0 1rem; color: var(--lotus-600);">|</span>
+      <a href="architecture.html" class="back-link">Architecture &rarr;</a>
+    </div>
   </div>
 </section>
 
@@ -257,6 +675,35 @@
   }, { threshold: 0.01, rootMargin: '0px 0px -20px 0px' });
   reveals.forEach(function(el) { observer.observe(el); });
 })();
+
+// Section nav active state
+document.querySelectorAll('.section-nav-link').forEach(function(link) {
+  link.addEventListener('click', function(e) {
+    document.querySelectorAll('.section-nav-link').forEach(function(l) {
+      l.classList.remove('active');
+    });
+    this.classList.add('active');
+  });
+});
+
+// Update active on scroll
+var sections = document.querySelectorAll('[id]');
+var navLinks = document.querySelectorAll('.section-nav-link');
+window.addEventListener('scroll', function() {
+  var current = '';
+  sections.forEach(function(section) {
+    var sectionTop = section.offsetTop - 200;
+    if (window.scrollY >= sectionTop) {
+      current = section.getAttribute('id');
+    }
+  });
+  navLinks.forEach(function(link) {
+    link.classList.remove('active');
+    if (link.getAttribute('href') === '#' + current) {
+      link.classList.add('active');
+    }
+  });
+});
 </script>
 </body>
 </html>
