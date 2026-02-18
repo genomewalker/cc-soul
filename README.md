@@ -6,6 +6,9 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-Plugin-blue.svg)](https://claude.ai/code)
+[![Documentation](https://img.shields.io/badge/docs-genomewalker.github.io%2Fcc--soul-blue)](https://genomewalker.github.io/cc-soul/)
+
+📖 **[Documentation & Architecture →](https://genomewalker.github.io/cc-soul/)**
 
 ## What It Does
 
