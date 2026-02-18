@@ -2940,14 +2940,15 @@ private:
 
         tools_.push_back({
             {"name", "file_timeline"},
-            {"description", "Show files modified in a time range or session (Time Machine)"},
+            {"description", "Show files modified in a time range or session (Time Machine). Use cross_session=true for history across all sessions."},
             {"inputSchema", {
                 {"type", "object"},
                 {"properties", {
                     {"query", {{"type", "string"}, {"description", "Natural language time query like 'at 22:33', 'yesterday', 'last hour'"}}},
                     {"session_id", {{"type", "string"}, {"description", "Specific session to query"}}},
                     {"file_pattern", {{"type", "string"}, {"description", "Glob pattern to filter files (e.g., '*.cpp', 'src/*')"}}},
-                    {"limit", {{"type", "integer"}, {"description", "Max results (default: 20)"}}}
+                    {"limit", {{"type", "integer"}, {"description", "Max results (default: 20)"}}},
+                    {"cross_session", {{"type", "boolean"}, {"description", "Search across all sessions (auto-indexes unindexed sessions, default: false)"}}}
                 }}
             }}
         });
@@ -2998,6 +2999,20 @@ private:
         });
         handlers_["file_index_session"] = [this](const json& p) { return tool_file_index_session(p); };
 
+        // file_index_all - index all sessions from file-history for cross-session timeline
+        tools_.push_back({
+            {"name", "file_index_all"},
+            {"description", "Index all sessions from file-history for cross-session file timeline. Run once to enable cross-session file recovery."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"force", {{"type", "boolean"}, {"description", "Re-index all sessions even if already indexed (default: false)"}}},
+                    {"limit", {{"type", "integer"}, {"description", "Max sessions to index (default: 100, 0 = all)"}}}
+                }}
+            }}
+        });
+        handlers_["file_index_all"] = [this](const json& p) { return tool_file_index_all(p); };
+
         classify_tools();
     }
 
@@ -3021,7 +3036,7 @@ private:
             "connect_batch", "research_cycle", "research_store", "research_topics",
             "cycle", "anticipation_gate_status", "anticipation_record_outcome",
             "session_register", "session_heartbeat", "session_deregister", "msg_ack",
-            "file_index_session"
+            "file_index_session", "file_index_all"
         };
 
         // Advanced tools - visible but secondary
@@ -12469,13 +12484,95 @@ private:
         );
     }
 
+    DuckDBToolResult tool_file_index_all(const json& params) {
+        bool force = params.value("force", false);
+        size_t max_sessions = params.value("limit", 100);  // Default limit to avoid long runs
+
+        std::string file_history_dir = get_file_history_dir();
+        if (!std::filesystem::exists(file_history_dir)) {
+            return DuckDBToolResult::error("File history directory not found: " + file_history_dir);
+        }
+
+        std::string projects_dir = get_claude_projects_dir();
+        size_t total_indexed = 0;
+        size_t sessions_processed = 0;
+        size_t sessions_skipped = 0;
+        std::vector<std::string> indexed_sessions;
+
+        // Iterate through file-history directories (each is a session)
+        for (const auto& session_entry : std::filesystem::directory_iterator(file_history_dir)) {
+            if (!session_entry.is_directory()) continue;
+            if (max_sessions > 0 && sessions_processed >= max_sessions) break;
+
+            std::string session_id = session_entry.path().filename().string();
+
+            // Skip if already indexed (unless force)
+            if (!force && mind_->store().session_file_edits_indexed(session_id)) {
+                sessions_skipped++;
+                continue;
+            }
+
+            // Find transcript for this session
+            std::string transcript_path;
+            std::string realm = "brahman";
+
+            for (const auto& project_entry : std::filesystem::directory_iterator(projects_dir)) {
+                if (!project_entry.is_directory()) continue;
+
+                std::string candidate = project_entry.path().string() + "/" + session_id + ".jsonl";
+                if (std::filesystem::exists(candidate)) {
+                    transcript_path = candidate;
+                    realm = "project:" + project_entry.path().filename().string();
+                    break;
+                }
+            }
+
+            if (transcript_path.empty()) {
+                // No transcript found - index directly from file-history metadata
+                // Just mark as indexed with 0 entries for now
+                mind_->store().mark_session_file_edits_indexed(session_id);
+                sessions_processed++;
+                continue;
+            }
+
+            size_t indexed = index_file_history_from_transcript(session_id, transcript_path, realm);
+            total_indexed += indexed;
+            sessions_processed++;
+
+            if (indexed > 0) {
+                indexed_sessions.push_back(session_id);
+            }
+        }
+
+        std::ostringstream text;
+        text << "Indexed " << total_indexed << " file edits from " << sessions_processed << " sessions\n";
+        text << "Skipped " << sessions_skipped << " already-indexed sessions\n";
+
+        return DuckDBToolResult::ok(
+            text.str(),
+            {
+                {"total_indexed", total_indexed},
+                {"sessions_processed", sessions_processed},
+                {"sessions_skipped", sessions_skipped},
+                {"indexed_sessions", indexed_sessions}
+            }
+        );
+    }
+
     DuckDBToolResult tool_file_timeline(const json& params) {
         std::string query = params.value("query", "");
         std::string session_id = params.value("session_id", "");
         std::string file_pattern = params.value("file_pattern", "");
         size_t limit = params.value("limit", 20);
+        bool cross_session = params.value("cross_session", false);
 
         std::vector<FileEdit> edits;
+
+        // If cross_session, auto-index recent sessions first
+        if (cross_session) {
+            // Index up to 50 recent sessions to enable cross-session queries
+            tool_file_index_all({{"limit", 50}});
+        }
 
         if (!session_id.empty()) {
             // Index this session if not already done
@@ -12490,8 +12587,8 @@ private:
                 return DuckDBToolResult::error("Could not parse time query: " + query);
             }
 
-            // Search ±30 minutes around target time
-            int64_t window_ms = 30 * 60 * 1000LL;
+            // Search ±30 minutes around target time (or wider for cross-session)
+            int64_t window_ms = cross_session ? (24 * 60 * 60 * 1000LL) : (30 * 60 * 1000LL);
             edits = mind_->store().get_file_edits_in_range(
                 target_time - window_ms,
                 target_time + window_ms,
@@ -12499,12 +12596,13 @@ private:
                 limit
             );
         } else {
-            // Default: last hour
+            // Default: last hour (or last 7 days for cross-session)
             auto now = std::chrono::system_clock::now();
             auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                 now.time_since_epoch()).count();
+            int64_t window_ms = cross_session ? (7 * 24 * 60 * 60 * 1000LL) : (60 * 60 * 1000LL);
             edits = mind_->store().get_file_edits_in_range(
-                now_ms - 60 * 60 * 1000LL,
+                now_ms - window_ms,
                 now_ms,
                 file_pattern,
                 limit
