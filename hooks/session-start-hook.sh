@@ -270,6 +270,16 @@ else
     fi
 
     # ===========================================
+    # CACHE BREAK WARNING: Surface recent cache break detections
+    # ===========================================
+    _sus3_cb_warn=$(timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "cache break session" --tag "cache-break" --limit 1 --text-only 2>/dev/null | head -c 400 || true)
+    if [[ -n "$_sus3_cb_warn" && "$_sus3_cb_warn" != *"No memories"* && "$_sus3_cb_warn" != *"0 memories"* ]]; then
+        echo ""
+        echo "⚠️ BEFORE RUNNING: [cache] Recent cache break detected:"
+        echo "$_sus3_cb_warn" | head -3
+    fi
+
+    # ===========================================
     # MEMORY.MD MERGE: Import Claude Code auto-memory into chitta
     # ===========================================
     SANITIZED_PATH=$(echo "$PROJECT_DIR" | sed 's|/|-|g')

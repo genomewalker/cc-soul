@@ -347,6 +347,46 @@ if [[ -S "$SOCKET_PATH" && -n "$RESPONSE" ]]; then
     fi
 fi
 
+# ==============================================
+# SUS Phase 3: Extract session token usage
+# ==============================================
+if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
+    _sus3_token_usage=$(grep -F '"type":"assistant"' "$TRANSCRIPT_PATH" 2>/dev/null | \
+        jq -s '[.[].message.usage // {}] |
+        {
+            total_input_tokens: (map(.input_tokens // 0) | add // 0),
+            total_output_tokens: (map(.output_tokens // 0) | add // 0),
+            total_cache_read: (map(.cache_read_input_tokens // 0) | add // 0),
+            total_cache_creation: (map(.cache_creation_input_tokens // 0) | add // 0),
+            n_messages: length
+        }' 2>/dev/null || echo '{"n_messages":0}')
+
+    _sus3_n_msg=$(echo "$_sus3_token_usage" | jq -r '.n_messages // 0')
+
+    if [[ "${_sus3_n_msg:-0}" -gt 0 ]]; then
+        _sus3_tot_in=$(echo "$_sus3_token_usage" | jq -r '.total_input_tokens // 0')
+        _sus3_tot_out=$(echo "$_sus3_token_usage" | jq -r '.total_output_tokens // 0')
+        _sus3_cache_r=$(echo "$_sus3_token_usage" | jq -r '.total_cache_read // 0')
+        _sus3_cache_c=$(echo "$_sus3_token_usage" | jq -r '.total_cache_creation // 0')
+
+        queue_write "log_session_tokens" \
+            "{\"session_id\":\"$SESSION_ID\",\"total_input_tokens\":$_sus3_tot_in,\"total_output_tokens\":$_sus3_tot_out,\"cache_read_tokens\":$_sus3_cache_r,\"cache_creation_tokens\":$_sus3_cache_c,\"n_messages\":$_sus3_n_msg}"
+
+        # Cache break detection: warn if ratio < 0.5 and enough messages
+        if [[ "${_sus3_n_msg:-0}" -gt 3 ]]; then
+            _sus3_denom=$((_sus3_cache_r + _sus3_cache_c))
+            if [[ "$_sus3_denom" -gt 0 ]]; then
+                _sus3_is_break=$(awk "BEGIN{print ($_sus3_cache_r / $_sus3_denom < 0.5) ? 1 : 0}")
+                if [[ "$_sus3_is_break" == "1" ]]; then
+                    _sus3_ratio=$(awk "BEGIN{printf \"%.2f\", $_sus3_cache_r / $_sus3_denom}")
+                    queue_write "observe" \
+                        "{\"category\":\"correction\",\"title\":\"Cache break detected\",\"content\":\"[cache:break] Session had cache_hit_ratio=$_sus3_ratio (threshold 0.5). Potential causes: model switch mid-session, tool set changes, or compaction. Review recent session patterns.\",\"tags\":[\"cache-break\",\"token-efficiency\"]}"
+                fi
+            fi
+        fi
+    fi
+fi
+
 # ===========================================
 # ANTICIPATION OUTCOME: Track prediction correctness
 # ===========================================

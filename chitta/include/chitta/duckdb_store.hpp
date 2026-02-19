@@ -1367,6 +1367,11 @@ public:
                                 const std::vector<double>& resonance_scores,
                                 const std::vector<int>& token_costs);
 
+    bool log_session_tokens(const std::string& session_id,
+                            int64_t input_tokens, int64_t output_tokens,
+                            int64_t cache_read, int64_t cache_creation,
+                            int n_messages);
+
     int64_t log_recall_query(const std::string& session_id, int turn_id,
                              const std::string& tool,
                              const std::string& query_text,

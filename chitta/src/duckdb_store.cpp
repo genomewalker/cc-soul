@@ -129,6 +129,7 @@ void DuckDBStore::fix_sequences() {
     fix_seq("sadhana_history", "sadhana_history_seq");
     fix_seq("memory_exposed", "memory_exposed_seq");
     fix_seq("memory_recall_query", "memory_recall_query_seq");
+    fix_seq("session_token_usage", "session_token_usage_seq");
 }
 
 bool DuckDBStore::open_embeddings_db(const std::string& path) {
@@ -1508,6 +1509,26 @@ bool DuckDBStore::create_schema() {
     write_execute("CREATE INDEX IF NOT EXISTS idx_mrq_session ON memory_recall_query(session_id)");
     write_execute("CREATE INDEX IF NOT EXISTS idx_mrq_created ON memory_recall_query(created_at)");
     write_execute("CREATE SEQUENCE IF NOT EXISTS memory_recall_query_seq START 1");
+
+    // SUS Phase 3: Session token usage tracking
+    if (!write_execute(R"(
+        CREATE TABLE IF NOT EXISTS session_token_usage (
+            id BIGINT,
+            session_id VARCHAR NOT NULL UNIQUE,
+            total_input_tokens BIGINT DEFAULT 0,
+            total_output_tokens BIGINT DEFAULT 0,
+            cache_read_tokens BIGINT DEFAULT 0,
+            cache_creation_tokens BIGINT DEFAULT 0,
+            n_messages INTEGER DEFAULT 0,
+            cache_hit_ratio DOUBLE DEFAULT 0.0,
+            created_at BIGINT NOT NULL
+        )
+    )")) {
+        return false;
+    }
+    write_execute("CREATE INDEX IF NOT EXISTS idx_stu_session ON session_token_usage(session_id)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_stu_created ON session_token_usage(created_at)");
+    write_execute("CREATE SEQUENCE IF NOT EXISTS session_token_usage_seq START 1");
 
     return true;
 }
@@ -11841,6 +11862,46 @@ int64_t DuckDBStore::log_recall_query(
         return chunk->GetValue(0, 0).GetValue<int64_t>();
     }
     return 0;
+}
+
+bool DuckDBStore::log_session_tokens(
+    const std::string& session_id,
+    int64_t input_tokens, int64_t output_tokens,
+    int64_t cache_read, int64_t cache_creation,
+    int n_messages) {
+    if (!db_ || session_id.empty() || n_messages <= 0) return false;
+
+    auto now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+
+    double ratio = 0.0;
+    if (cache_read + cache_creation > 0) {
+        ratio = static_cast<double>(cache_read) / (cache_read + cache_creation);
+    }
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) { if (c == '\'') result += "''"; else result += c; }
+        return result;
+    };
+
+    std::ostringstream sql;
+    sql << "INSERT INTO session_token_usage VALUES ("
+        << "nextval('session_token_usage_seq'), "
+        << "'" << escape(session_id) << "', "
+        << input_tokens << ", " << output_tokens << ", "
+        << cache_read << ", " << cache_creation << ", "
+        << n_messages << ", " << ratio << ", "
+        << now << ") "
+        << "ON CONFLICT (session_id) DO UPDATE SET "
+        << "total_input_tokens=" << input_tokens << ", "
+        << "total_output_tokens=" << output_tokens << ", "
+        << "cache_read_tokens=" << cache_read << ", "
+        << "cache_creation_tokens=" << cache_creation << ", "
+        << "n_messages=" << n_messages << ", "
+        << "cache_hit_ratio=" << ratio;
+
+    return write_execute(sql.str());
 }
 
 }  // namespace chitta

@@ -25,6 +25,7 @@
 #include <string>
 #include <cstring>
 #include <cstdlib>
+#include <algorithm>
 #include <cmath>
 #include <iomanip>
 #include <csignal>
@@ -494,6 +495,30 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                             std::cerr << "[maint] Auto-distilled " << distilled
                                       << " episode patterns into wisdom\n";
                         }
+                    }
+
+                    // Cache break pattern detection (every 10 cycles)
+                    if (cycle_count % 10 == 0) {
+                        try {
+                            auto r = mind.store().execute_sql_query(
+                                "SELECT COUNT(*) FROM session_token_usage "
+                                "WHERE cache_hit_ratio < 0.5 AND n_messages > 3 "
+                                "AND created_at >= " + std::to_string(
+                                    std::chrono::duration_cast<std::chrono::seconds>(
+                                        std::chrono::system_clock::now().time_since_epoch()
+                                    ).count() - 86400));
+                            if (r.success && !r.rows.empty() && !r.rows[0].empty()) {
+                                int64_t breaks = 0;
+                                try { breaks = std::stoll(r.rows[0][0]); } catch (...) {}
+                                if (breaks >= 3) {
+                                    std::string content = "[cache:pattern] " + std::to_string(breaks) +
+                                        " cache breaks detected in last 24h. Systematic issue likely — "
+                                        "review hook outputs, tool registrations, and model switching patterns.";
+                                    mind.remember(content, NodeType::Wisdom, "brahman",
+                                                  RealmVisibility::Private, 0.9f);
+                                }
+                            }
+                        } catch (...) {}
                     }
 
                     // Update health cache (for fast health_check/soul_context)
@@ -1051,6 +1076,20 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                             mind.store().store_relationship_event(event);
                             queue_count++;
                         }
+                    } else if (tool == "log_session_tokens") {
+                        std::string sid = args.value("session_id", "");
+                        int64_t input_tok = args.value("total_input_tokens", (int64_t)0);
+                        int64_t output_tok = args.value("total_output_tokens", (int64_t)0);
+                        int64_t cache_read = args.value("cache_read_tokens", (int64_t)0);
+                        int64_t cache_create = args.value("cache_creation_tokens", (int64_t)0);
+                        int n_msgs = args.value("n_messages", 0);
+
+                        if (!sid.empty() && n_msgs > 0) {
+                            mind.store().log_session_tokens(
+                                sid, input_tok, output_tok,
+                                cache_read, cache_create, n_msgs);
+                            queue_count++;
+                        }
                     } else if (tool == "log_exposure") {
                         std::string session_id = args.value("session_id", "");
                         int turn_id = args.value("turn_id", 0);
@@ -1340,8 +1379,32 @@ int cmd_metrics(DuckDBMind& mind, int days = 7) {
         D = static_cast<double>(n_accessed_30d) / n_memories;
     }
 
-    // Partial SUS (M and T not instrumented)
-    double sus = (R + P + D) / 3.0 * 100.0;
+    // T: average cache hit ratio across sessions in window
+    double T = -1.0;
+    {
+        std::string cutoff_sql = std::to_string(cutoff);
+        auto t_r = store.execute_sql_query(
+            "SELECT AVG(cache_hit_ratio) FROM session_token_usage "
+            "WHERE created_at >= " + cutoff_sql + " AND n_messages > 3");
+        if (t_r.success && !t_r.rows.empty() && !t_r.rows[0].empty()
+            && !t_r.rows[0][0].empty()) {
+            try { T = std::stod(t_r.rows[0][0]); } catch (...) {}
+        }
+    }
+
+    // Partial SUS (M not instrumented)
+    // Available: R(0.25) P(0.20) T(0.10) D(0.15) = 0.70
+    double avail = 0.70;
+    double r_w = 0.25 / avail;
+    double p_w = 0.20 / avail;
+    double t_w = 0.10 / avail;
+    double d_w = 0.15 / avail;
+    double p_val = (P > 0) ? P : 0.5;
+    double t_val = (T >= 0) ? T : 0.5;
+    double sus = 100.0 * std::pow(std::max(R, 1e-6), r_w)
+                       * std::pow(std::max(p_val, 1e-6), p_w)
+                       * std::pow(std::max(t_val, 1e-6), t_w)
+                       * std::pow(std::max(D, 1e-6), d_w);
 
     std::cout << std::fixed << std::setprecision(2);
     std::cout << "SUS (" << days << "d): " << static_cast<int>(std::round(sus))
@@ -1351,12 +1414,17 @@ int cmd_metrics(DuckDBMind& mind, int days = 7) {
               << ", n_sessions_with_exposures=" << n_sessions_with_exposures << ")\n";
     std::cout << "  P (precision):   " << P
               << "  (n_recalls=" << n_recalls << ", hit_rate)\n";
-    std::cout << "  M (prevention):  --    (Phase 3)\n";
-    std::cout << "  T (tokens):      --    (Phase 3)\n";
+    std::cout << "  M (prevention):  --    (Phase 4)\n";
+    if (T >= 0) {
+        std::cout << "  T (cache):       " << T
+                  << "  (cache hit ratio avg)\n";
+    } else {
+        std::cout << "  T (cache):       --    (no data yet)\n";
+    }
     std::cout << "  D (durability):  " << D
               << "  (n_memories=" << n_memories
               << ", accessed_30d/" << n_memories << ")\n";
-    std::cout << "\n  Note: SUS is partial (M, T not yet instrumented). Full SUS in Phase 3.\n";
+    std::cout << "\n  Note: SUS is partial (M not yet instrumented). T=cache_hit_ratio avg.\n";
 
     return 0;
 }

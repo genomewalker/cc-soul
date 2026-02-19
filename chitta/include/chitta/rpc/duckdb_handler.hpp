@@ -9669,10 +9669,10 @@ private:
             {"R", m.R >= 0 ? json(m.R) : json(nullptr)},
             {"P", m.P >= 0 ? json(m.P) : json(nullptr)},
             {"M", nullptr},
-            {"T", nullptr},
+            {"T", m.T >= 0 ? json(m.T) : json(nullptr)},
             {"D", m.D >= 0 ? json(m.D) : json(nullptr)},
             {"sus_partial", m.sus >= 0 ? json(m.sus) : json(nullptr)},
-            {"note", "M(prevention) and T(tokens) not yet instrumented"}
+            {"note", "M(prevention) not yet instrumented. T=cache_hit_ratio avg."}
         };
 
         std::string summary = "SUS(" + std::to_string(days) + "d): ";
@@ -11136,16 +11136,31 @@ private:
             }
         }
 
-        // Partial SUS (M and T unavailable)
+        // T: average cache hit ratio across sessions in window
+        {
+            auto r = mind_->store().execute_sql_query(
+                "SELECT AVG(cache_hit_ratio) FROM session_token_usage "
+                "WHERE created_at >= " + cs + " AND n_messages > 3");
+            if (r.success && !r.rows.empty() && !r.rows[0].empty()
+                && !r.rows[0][0].empty()) {
+                try { m.T = std::stod(r.rows[0][0]); } catch (...) {}
+            }
+        }
+
+        // Partial SUS (M still missing, Phase 4)
         // Full weights: R=0.25 P=0.20 M=0.30 T=0.10 D=0.15
-        // Available sum = 0.60; scale proportionally to 1.0
+        // Available: R(0.25) P(0.20) T(0.10) D(0.15) = 0.70
         if (m.R >= 0 && m.D >= 0) {
-            double r_w = 0.25 / 0.60;
-            double p_w = 0.20 / 0.60;
-            double d_w = 0.15 / 0.60;
-            double p_val = (m.P >= 0) ? m.P : 0.5; // neutral if no recall data yet
+            double avail = 0.70;
+            double r_w = 0.25 / avail;
+            double p_w = 0.20 / avail;
+            double t_w = 0.10 / avail;
+            double d_w = 0.15 / avail;
+            double p_val = (m.P >= 0) ? m.P : 0.5;
+            double t_val = (m.T >= 0) ? m.T : 0.5;
             m.sus = 100.0 * std::pow(std::max(m.R, 1e-6), r_w)
                           * std::pow(std::max(p_val, 1e-6), p_w)
+                          * std::pow(std::max(t_val, 1e-6), t_w)
                           * std::pow(std::max(m.D, 1e-6), d_w);
         }
 
