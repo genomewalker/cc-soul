@@ -486,6 +486,19 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
       {"outcome", "Did it help? positive|negative|neutral", true, nullptr},
       {"context", "What task triggered recall", false, nullptr}}},
 
+    // SUS Phase 1: Memory exposure logging
+    {"log_exposure", "Log memory exposure events for SUS metrics",
+     {{"session_id", "Session ID", true, nullptr},
+      {"turn_id", "Turn index (integer)", true, nullptr},
+      {"hook_type", "Hook type: session_start or user_prompt", true, nullptr},
+      {"memory_ids", "JSON array of memory IDs e.g. [1,2,3]", true, nullptr},
+      {"ranks", "JSON array of rank positions e.g. [1,2,3]", false, nullptr},
+      {"resonance_scores", "JSON array of scores e.g. [0.8,0.7]", false, nullptr}}},
+
+    // SUS Phase 1: Metrics query
+    {"get_sus_metrics", "Get Soul Utility Score metrics (SUS): R, P, D components and composite",
+     {{"days", "Lookback window in days (default: 7)", false, nullptr}}},
+
     // Episode auto-distillation
     {"episode_cluster_status", "Find clusters of similar episodes for distillation into wisdom",
      {{"similarity-threshold", "Minimum similarity for cluster", false, "0.85"},
@@ -855,7 +868,8 @@ int run_cli(const std::string& socket_path, const std::string& tool,
     static const std::set<std::string> SESSION_TOOLS = {
         "msg_inbox", "msg_send", "msg_ack", "msg_ack_all", "msg_history",
         "ledger_save", "narrative_log", "narrative_history",
-        "anticipation_filter", "anticipation_gate_status"
+        "anticipation_filter", "anticipation_gate_status",
+        "recall", "smart_recall", "hybrid_recall"
     };
     if (SESSION_TOOLS.count(tool) && !args.contains("session_id")) {
         pid_t ppid = getppid();
@@ -1233,7 +1247,8 @@ int main(int argc, char* argv[]) {
                     static const std::set<std::string> SESSION_TOOLS = {
                         "msg_inbox", "msg_send", "msg_ack", "msg_ack_all", "msg_history",
                         "ledger_save", "narrative_log", "narrative_history",
-                        "anticipation_filter", "anticipation_gate_status"
+                        "anticipation_filter", "anticipation_gate_status",
+                        "recall", "smart_recall", "hybrid_recall"
                     };
                     if (SESSION_TOOLS.count(tool_name) && !arguments.contains("session_id")) {
                         pid_t ppid = getppid();

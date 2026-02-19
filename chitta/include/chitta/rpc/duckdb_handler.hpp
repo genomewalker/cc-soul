@@ -31,6 +31,7 @@
 #include <array>
 #include <regex>
 #include <cstdio>
+#include <cmath>
 #include <unistd.h>
 
 namespace chitta {
@@ -2036,6 +2037,38 @@ private:
         });
         handlers_["learn_outcome"] = [this](const json& p) { return tool_learn_outcome(p); };
 
+        // SUS Phase 1: Log memory exposure
+        tools_.push_back({
+            {"name", "log_exposure"},
+            {"description", "Log that memories were exposed to Claude via hooks (SUS metrics)"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"session_id", {{"type", "string"}}},
+                    {"turn_id", {{"type", "integer"}}},
+                    {"hook_type", {{"type", "string"}, {"description", "session_start or user_prompt"}}},
+                    {"memory_ids", {{"type", "array"}, {"items", {{"type", "integer"}}}}},
+                    {"ranks", {{"type", "array"}, {"items", {{"type", "integer"}}}}},
+                    {"resonance_scores", {{"type", "array"}, {"items", {{"type", "number"}}}}}
+                }},
+                {"required", {"session_id", "turn_id", "hook_type", "memory_ids"}}
+            }}
+        });
+        handlers_["log_exposure"] = [this](const json& p) { return tool_log_exposure(p); };
+
+        // SUS Phase 2: Get composite metrics
+        tools_.push_back({
+            {"name", "get_sus_metrics"},
+            {"description", "Get Soul Utility Score (SUS) metrics: R(relevance), P(precision), D(durability) and composite score"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"days", {{"type", "integer"}, {"description", "Lookback window in days (default: 7)"}}}
+                }}
+            }}
+        });
+        handlers_["get_sus_metrics"] = [this](const json& p) { return tool_get_sus_metrics(p); };
+
         // Episode auto-distillation status (clusters of similar episodes for wisdom extraction)
         tools_.push_back({
             {"name", "episode_cluster_status"},
@@ -3319,6 +3352,22 @@ private:
             if (r["text"].get<std::string>().size() > 100) ss << "...";
             ss << "\n";
         }
+
+        // SUS: log recall query
+        try {
+            std::string _sus_sid = get_session_id(params);
+            if (!_sus_sid.empty() && _sus_sid != "default") {
+                json _sus_ids = json::array();
+                json _sus_scores = json::array();
+                for (const auto& rj : results_json) {
+                    _sus_ids.push_back(rj["id"]);
+                    _sus_scores.push_back(rj.value("similarity", 0.0));
+                }
+                mind_->store().log_recall_query(
+                    _sus_sid, 0, "recall", query,
+                    _sus_ids.dump(), _sus_scores.dump());
+            }
+        } catch (...) {}
 
         return DuckDBToolResult::ok(ss.str(), {{"results", results_json}, {"realm", realm}});
     }
@@ -9576,6 +9625,66 @@ private:
         });
     }
 
+    DuckDBToolResult tool_log_exposure(const json& params) {
+        auto session_id = params.value("session_id", std::string{});
+        auto turn_id = params.value("turn_id", 0);
+        auto hook_type = params.value("hook_type", std::string{});
+
+        if (session_id.empty() || hook_type.empty()) {
+            return DuckDBToolResult::error("session_id and hook_type required");
+        }
+
+        std::vector<int64_t> memory_ids;
+        if (params.contains("memory_ids") && params["memory_ids"].is_array()) {
+            for (const auto& id : params["memory_ids"]) memory_ids.push_back(id.get<int64_t>());
+        }
+        if (memory_ids.empty()) return DuckDBToolResult::error("memory_ids required");
+
+        std::vector<int> ranks;
+        if (params.contains("ranks") && params["ranks"].is_array()) {
+            for (const auto& r : params["ranks"]) ranks.push_back(r.get<int>());
+        }
+        std::vector<double> scores;
+        if (params.contains("resonance_scores") && params["resonance_scores"].is_array()) {
+            for (const auto& s : params["resonance_scores"]) scores.push_back(s.get<double>());
+        }
+
+        auto n = mind_->store().log_exposures_batch(
+            session_id, turn_id, hook_type, memory_ids, ranks, {}, scores, {});
+
+        return DuckDBToolResult::ok("Logged " + std::to_string(n) + " exposures",
+            {{"logged", n}});
+    }
+
+    DuckDBToolResult tool_get_sus_metrics(const json& params) {
+        int days = params.value("days", 7);
+        auto m = compute_sus(days);
+
+        json result = {
+            {"days", m.days},
+            {"n_sessions", m.n_sessions},
+            {"n_exposures", m.n_exposures},
+            {"n_recalls", m.n_recalls},
+            {"n_memories", m.n_memories},
+            {"R", m.R >= 0 ? json(m.R) : json(nullptr)},
+            {"P", m.P >= 0 ? json(m.P) : json(nullptr)},
+            {"M", nullptr},
+            {"T", nullptr},
+            {"D", m.D >= 0 ? json(m.D) : json(nullptr)},
+            {"sus_partial", m.sus >= 0 ? json(m.sus) : json(nullptr)},
+            {"note", "M(prevention) and T(tokens) not yet instrumented"}
+        };
+
+        std::string summary = "SUS(" + std::to_string(days) + "d): ";
+        if (m.sus >= 0) summary += std::to_string((int)m.sus);
+        else summary += "--";
+        summary += "  R:" + (m.R >= 0 ? std::to_string(m.R).substr(0,4) : "--");
+        summary += " P:" + (m.P >= 0 ? std::to_string(m.P).substr(0,4) : "--");
+        summary += " D:" + (m.D >= 0 ? std::to_string(m.D).substr(0,4) : "--");
+
+        return DuckDBToolResult::ok(summary, result);
+    }
+
     DuckDBToolResult tool_episode_cluster_status(const json& params) {
         // Accept both underscore and hyphen versions of params
         float similarity_threshold = params.contains("similarity_threshold")
@@ -10560,6 +10669,22 @@ private:
             ss << "\n";
         }
 
+        // SUS: log recall query
+        try {
+            std::string _sus_sid = get_session_id(params);
+            if (!_sus_sid.empty() && _sus_sid != "default") {
+                json _sus_ids = json::array();
+                json _sus_scores = json::array();
+                for (const auto& rj : results_json) {
+                    _sus_ids.push_back(rj["id"]);
+                    _sus_scores.push_back(rj.value("similarity", 0.0));
+                }
+                mind_->store().log_recall_query(
+                    _sus_sid, 0, "smart_recall", query,
+                    _sus_ids.dump(), _sus_scores.dump());
+            }
+        } catch (...) {}
+
         return DuckDBToolResult::ok(ss.str(), {
             {"intent", {
                 {"type", query_intent_type_to_string(intent.type)},
@@ -10940,6 +11065,91 @@ private:
         }
 
         return "default";
+    }
+
+    struct SusMetrics {
+        double R = -1.0, P = -1.0, M = -1.0, T = -1.0, D = -1.0;
+        double sus = -1.0;
+        int64_t n_sessions = 0, n_exposures = 0, n_recalls = 0, n_memories = 0;
+        int days = 7;
+    };
+
+    SusMetrics compute_sus(int days = 7) {
+        SusMetrics m;
+        m.days = days;
+
+        // Build cutoff as Unix timestamp (BIGINT)
+        auto now_sec = std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        auto cutoff = now_sec - (int64_t)(days * 86400);
+        std::string cs = std::to_string(cutoff);
+
+        // n_exposures and n_sessions (from memory_exposed)
+        {
+            auto r = mind_->store().execute_sql_query(
+                "SELECT COUNT(*), COUNT(DISTINCT session_id) FROM memory_exposed WHERE created_at >= " + cs);
+            if (r.success && !r.rows.empty() && r.rows[0].size() >= 2) {
+                try { m.n_exposures = std::stoll(r.rows[0][0]); } catch (...) {}
+                try { m.n_sessions = std::stoll(r.rows[0][1]); } catch (...) {}
+            }
+        }
+
+        // R: fraction of sessions (in window) that had at least 1 exposure
+        {
+            auto r = mind_->store().execute_sql_query(
+                "SELECT COUNT(DISTINCT session_id) FROM session_registry WHERE started_at >= " + cs);
+            int64_t total_sessions = 0;
+            if (r.success && !r.rows.empty() && !r.rows[0].empty()) {
+                try { total_sessions = std::stoll(r.rows[0][0]); } catch (...) {}
+            }
+            if (total_sessions > 0)
+                m.R = std::min(1.0, (double)m.n_sessions / total_sessions);
+        }
+
+        // P: fraction of recall queries that returned >= 1 result
+        {
+            auto r = mind_->store().execute_sql_query(
+                "SELECT COUNT(*), COUNT(CASE WHEN returned_memory_ids != '[]' AND returned_memory_ids != '' THEN 1 END) "
+                "FROM memory_recall_query WHERE created_at >= " + cs);
+            if (r.success && !r.rows.empty() && r.rows[0].size() >= 2) {
+                try { m.n_recalls = std::stoll(r.rows[0][0]); } catch (...) {}
+                if (m.n_recalls > 0) {
+                    int64_t hits = 0;
+                    try { hits = std::stoll(r.rows[0][1]); } catch (...) {}
+                    m.P = (double)hits / m.n_recalls;
+                }
+            }
+        }
+
+        // D: fraction of memories accessed in last 30 days
+        {
+            auto r = mind_->store().execute_sql_query(
+                "SELECT COUNT(*), COUNT(CASE WHEN accessed_at >= " + std::to_string(now_sec - 30*86400) +
+                " THEN 1 END) FROM memory WHERE confidence > 0.1");
+            if (r.success && !r.rows.empty() && r.rows[0].size() >= 2) {
+                try { m.n_memories = std::stoll(r.rows[0][0]); } catch (...) {}
+                if (m.n_memories > 0) {
+                    int64_t accessed = 0;
+                    try { accessed = std::stoll(r.rows[0][1]); } catch (...) {}
+                    m.D = (double)accessed / m.n_memories;
+                }
+            }
+        }
+
+        // Partial SUS (M and T unavailable)
+        // Full weights: R=0.25 P=0.20 M=0.30 T=0.10 D=0.15
+        // Available sum = 0.60; scale proportionally to 1.0
+        if (m.R >= 0 && m.D >= 0) {
+            double r_w = 0.25 / 0.60;
+            double p_w = 0.20 / 0.60;
+            double d_w = 0.15 / 0.60;
+            double p_val = (m.P >= 0) ? m.P : 0.5; // neutral if no recall data yet
+            m.sus = 100.0 * std::pow(std::max(m.R, 1e-6), r_w)
+                          * std::pow(std::max(p_val, 1e-6), p_w)
+                          * std::pow(std::max(m.D, 1e-6), d_w);
+        }
+
+        return m;
     }
 
     // Helper: detect current realm
@@ -11632,6 +11842,22 @@ private:
 
         std::ostringstream msg;
         msg << "Found " << results.size() << " memory/memories via hybrid retrieval";
+
+        // SUS: log recall query
+        try {
+            std::string _sus_sid = get_session_id(params);
+            if (!_sus_sid.empty() && _sus_sid != "default") {
+                json _sus_ids = json::array();
+                json _sus_scores = json::array();
+                for (const auto& mem : result["memories"]) {
+                    _sus_ids.push_back(mem["id"]);
+                    _sus_scores.push_back(mem.value("similarity", 0.0));
+                }
+                mind_->store().log_recall_query(
+                    _sus_sid, 0, "hybrid_recall", query,
+                    _sus_ids.dump(), _sus_scores.dump());
+            }
+        } catch (...) {}
 
         return DuckDBToolResult::ok(msg.str(), result);
     }

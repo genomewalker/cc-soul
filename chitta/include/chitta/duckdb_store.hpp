@@ -1358,6 +1358,21 @@ public:
     };
     UsageStats get_usage_stats(int64_t memory_id);
 
+    // SUS Phase 1: Memory exposure & recall query tracking
+    int64_t log_exposures_batch(const std::string& session_id, int turn_id,
+                                const std::string& hook_type,
+                                const std::vector<int64_t>& memory_ids,
+                                const std::vector<int>& ranks,
+                                const std::vector<std::string>& memory_types,
+                                const std::vector<double>& resonance_scores,
+                                const std::vector<int>& token_costs);
+
+    int64_t log_recall_query(const std::string& session_id, int turn_id,
+                             const std::string& tool,
+                             const std::string& query_text,
+                             const std::string& returned_memory_ids_json,
+                             const std::string& returned_scores_json);
+
     // Episode pattern detection for auto-distillation
     std::vector<DistillCandidate> find_distill_candidates(
         float similarity_threshold = 0.85f,

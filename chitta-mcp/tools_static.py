@@ -240,6 +240,98 @@ TOOLS = [
         }
     ),
     Tool(
+        name="query_triplets_temporal",
+        description="Query triplets at a specific point in time (temporal fact versioning)",
+        inputSchema={
+                "properties": {
+                        "at_date": {
+                                "description": "Date to query at (YYYY-MM-DD). Default: now",
+                                "type": "string"
+                        },
+                        "limit": {
+                                "description": "Max results (default 50)",
+                                "type": "integer"
+                        },
+                        "object": {
+                                "description": "Filter by object entity",
+                                "type": "string"
+                        },
+                        "predicate": {
+                                "description": "Filter by relationship type",
+                                "type": "string"
+                        },
+                        "subject": {
+                                "description": "Filter by subject entity",
+                                "type": "string"
+                        }
+                },
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="triplet_history",
+        description="Get history of a subject-predicate relationship over time",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "description": "Max results (default 20)",
+                                "type": "integer"
+                        },
+                        "predicate": {
+                                "description": "Relationship type",
+                                "type": "string"
+                        },
+                        "subject": {
+                                "description": "Subject entity",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "subject",
+                        "predicate"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="connect_temporal",
+        description="Create a triplet with temporal validity period",
+        inputSchema={
+                "properties": {
+                        "context_date": {
+                                "description": "Session date for resolving relative dates (YYYY-MM-DD)",
+                                "type": "string"
+                        },
+                        "object": {
+                                "description": "Object entity",
+                                "type": "string"
+                        },
+                        "predicate": {
+                                "description": "Relationship type",
+                                "type": "string"
+                        },
+                        "subject": {
+                                "description": "Subject entity",
+                                "type": "string"
+                        },
+                        "valid_from": {
+                                "description": "When fact became true (YYYY-MM-DD or relative like 'yesterday')",
+                                "type": "string"
+                        },
+                        "valid_to": {
+                                "description": "When fact stopped being true (YYYY-MM-DD). Omit for still valid",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "subject",
+                        "predicate",
+                        "object"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
         name="soul_context",
         description="Get current soul state and statistics",
         inputSchema={
@@ -1792,6 +1884,14 @@ TOOLS = [
         }
     ),
     Tool(
+        name="rebuild_fts_index",
+        description="Rebuild FTS index for BM25 keyword search on memory. Call this if keyword searches return no results.",
+        inputSchema={
+                "properties": {},
+                "type": "object"
+        }
+    ),
+    Tool(
         name="theme_list",
         description="List all themes with statistics",
         inputSchema={
@@ -1918,6 +2018,62 @@ TOOLS = [
                         "memory_id",
                         "outcome"
                 ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="log_exposure",
+        description="Log that memories were exposed to Claude via hooks (SUS metrics)",
+        inputSchema={
+                "properties": {
+                        "hook_type": {
+                                "description": "session_start or user_prompt",
+                                "type": "string"
+                        },
+                        "memory_ids": {
+                                "items": {
+                                        "type": "integer"
+                                },
+                                "type": "array"
+                        },
+                        "ranks": {
+                                "items": {
+                                        "type": "integer"
+                                },
+                                "type": "array"
+                        },
+                        "resonance_scores": {
+                                "items": {
+                                        "type": "number"
+                                },
+                                "type": "array"
+                        },
+                        "session_id": {
+                                "type": "string"
+                        },
+                        "turn_id": {
+                                "type": "integer"
+                        }
+                },
+                "required": [
+                        "session_id",
+                        "turn_id",
+                        "hook_type",
+                        "memory_ids"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="get_sus_metrics",
+        description="Get Soul Utility Score (SUS) metrics: R(relevance), P(precision), D(durability) and composite score",
+        inputSchema={
+                "properties": {
+                        "days": {
+                                "description": "Lookback window in days (default: 7)",
+                                "type": "integer"
+                        }
+                },
                 "type": "object"
         }
     ),
@@ -2540,9 +2696,37 @@ TOOLS = [
                                 "description": "Weight for recency bonus (default: 0.1)",
                                 "type": "number"
                         },
+                        "tag": {
+                                "description": "Filter by tag",
+                                "type": "string"
+                        },
                         "vector_weight": {
                                 "description": "Weight for vector similarity (default: 0.4)",
                                 "type": "number"
+                        }
+                },
+                "required": [
+                        "query"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="smart_recall",
+        description="Intent-aware memory retrieval. Classifies query type (temporal, entity, relational) and routes to optimal retrieval path. Returns structured results with date candidates for temporal queries.",
+        inputSchema={
+                "properties": {
+                        "limit": {
+                                "description": "Max results (default: 10)",
+                                "type": "integer"
+                        },
+                        "query": {
+                                "description": "Natural language query",
+                                "type": "string"
+                        },
+                        "realm": {
+                                "description": "Filter by realm",
+                                "type": "string"
                         }
                 },
                 "required": [
@@ -3015,9 +3199,13 @@ TOOLS = [
     ),
     Tool(
         name="file_timeline",
-        description="Show files modified in a time range or session (Time Machine)",
+        description="Show files modified in a time range or session (Time Machine). Use cross_session=true for history across all sessions.",
         inputSchema={
                 "properties": {
+                        "cross_session": {
+                                "description": "Search across all sessions (auto-indexes unindexed sessions, default: False)",
+                                "type": "boolean"
+                        },
                         "file_pattern": {
                                 "description": "Glob pattern to filter files (e.g., '*.cpp', 'src/*')",
                                 "type": "string"

@@ -120,6 +120,56 @@ while IFS= read -r line; do
 done <<< "$memories"
 
 # ===========================================
+# SUS: Log memory exposures for utility scoring (fire-and-forget)
+# ===========================================
+(
+    _sus_ids="["
+    _sus_ranks="["
+    _sus_scores="["
+    _sus_first=true
+    _sus_rank=0
+
+    while IFS= read -r _sus_line; do
+        [[ -z "$_sus_line" ]] && continue
+        [[ ! "$_sus_line" =~ \[[0-9]+%\] ]] && continue
+
+        # Extract memory ID: #NNN at start of line
+        if [[ "$_sus_line" =~ ^#([0-9]+) ]]; then
+            _sus_mid="${BASH_REMATCH[1]}"
+        else
+            continue
+        fi
+
+        # Extract confidence percentage
+        _sus_pct=$(echo "$_sus_line" | grep -oE '\[[0-9]+%\]' | head -1 | tr -d '[]%')
+        [[ -z "$_sus_pct" ]] && continue
+        [[ "$_sus_pct" -lt "$MIN_CONFIDENCE" ]] && continue
+
+        (( _sus_rank++ ))
+        if [[ "$_sus_first" == "true" ]]; then
+            _sus_first=false
+        else
+            _sus_ids+=","
+            _sus_ranks+=","
+            _sus_scores+=","
+        fi
+        _sus_ids+="$_sus_mid"
+        _sus_ranks+="$_sus_rank"
+        _sus_scores+="$(awk "BEGIN{printf \"%.2f\", $_sus_pct/100}")"
+
+        [[ $_sus_rank -ge 3 ]] && break
+    done <<< "$memories"
+
+    _sus_ids+="]"
+    _sus_ranks+="]"
+    _sus_scores+="]"
+
+    if [[ "$_sus_ids" != "[]" && -n "$SESSION_ID" ]]; then
+        queue_write "log_exposure" "{\"session_id\":\"$SESSION_ID\",\"turn_id\":$TURN_INDEX,\"hook_type\":\"user_prompt\",\"memory_ids\":$_sus_ids,\"ranks\":$_sus_ranks,\"resonance_scores\":$_sus_scores}"
+    fi
+) 2>/dev/null || true
+
+# ===========================================
 # PATTERN DETECTION: Detect learning opportunities
 # ===========================================
 LEARNING_HINTS=""

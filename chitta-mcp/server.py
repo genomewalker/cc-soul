@@ -68,6 +68,8 @@ INTERNAL_TOOLS = {
     "cycle", "anticipation_gate_status", "anticipation_record_outcome",
     "session_register", "session_heartbeat", "session_deregister",
     "msg_ack", "msg_ack_all",
+    # SUS metrics (hook-facing, not Claude-facing)
+    "log_exposure",
 }
 
 ADVANCED_TOOLS = {
@@ -118,6 +120,8 @@ ADVANCED_TOOLS = {
     "full_resonate", "grow", "connect", "query",
     # File Time Machine
     "file_timeline", "file_at_time", "file_restore", "file_index_session",
+    # SUS metrics
+    "get_sus_metrics",
 }
 
 # Combined set of tools to hide from listing (but still callable)

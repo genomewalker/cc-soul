@@ -25,6 +25,8 @@
 #include <string>
 #include <cstring>
 #include <cstdlib>
+#include <cmath>
+#include <iomanip>
 #include <csignal>
 #include <thread>
 #include <chrono>
@@ -1049,6 +1051,37 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                             mind.store().store_relationship_event(event);
                             queue_count++;
                         }
+                    } else if (tool == "log_exposure") {
+                        std::string session_id = args.value("session_id", "");
+                        int turn_id = args.value("turn_id", 0);
+                        std::string hook_type = args.value("hook_type", "");
+
+                        std::vector<int64_t> memory_ids;
+                        if (args.contains("memory_ids") && args["memory_ids"].is_array()) {
+                            for (const auto& id : args["memory_ids"]) {
+                                memory_ids.push_back(id.get<int64_t>());
+                            }
+                        }
+
+                        if (!session_id.empty() && !memory_ids.empty()) {
+                            std::vector<int> ranks;
+                            if (args.contains("ranks") && args["ranks"].is_array()) {
+                                for (const auto& r : args["ranks"]) ranks.push_back(r.get<int>());
+                            }
+                            std::vector<double> resonance_scores;
+                            if (args.contains("resonance_scores") && args["resonance_scores"].is_array()) {
+                                for (const auto& s : args["resonance_scores"]) resonance_scores.push_back(s.get<double>());
+                            }
+                            std::vector<int> token_costs;
+                            if (args.contains("token_costs") && args["token_costs"].is_array()) {
+                                for (const auto& t : args["token_costs"]) token_costs.push_back(t.get<int>());
+                            }
+
+                            mind.store().log_exposures_batch(
+                                session_id, turn_id, hook_type, memory_ids, ranks,
+                                {}, resonance_scores, token_costs);
+                            queue_count++;
+                        }
                     }
                 } catch (const std::exception& e) {
                     if (verbose_mode) {
@@ -1241,6 +1274,93 @@ int cmd_stats(DuckDBMind& mind) {
     return 0;
 }
 
+int cmd_metrics(DuckDBMind& mind, int days = 7) {
+    auto& store = mind.store();
+
+    auto now_sec = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    int64_t cutoff = now_sec - static_cast<int64_t>(days) * 86400;
+    int64_t now_30d = now_sec - 30 * 86400;
+
+    // Exposure stats
+    auto exp_r = store.execute_sql_query(
+        "SELECT COUNT(*), COUNT(DISTINCT session_id) FROM memory_exposed WHERE created_at >= " + std::to_string(cutoff));
+    int64_t n_exposures = 0, n_sessions_with_exposures = 0;
+    if (exp_r.success && !exp_r.rows.empty() && exp_r.rows[0].size() >= 2) {
+        try { n_exposures = std::stoll(exp_r.rows[0][0]); } catch (...) {}
+        try { n_sessions_with_exposures = std::stoll(exp_r.rows[0][1]); } catch (...) {}
+    }
+
+    // Recall stats
+    auto rec_r = store.execute_sql_query(
+        "SELECT COUNT(*), COUNT(CASE WHEN returned_memory_ids != '[]' AND returned_memory_ids != '' THEN 1 END) "
+        "FROM memory_recall_query WHERE created_at >= " + std::to_string(cutoff));
+    int64_t n_recalls = 0, n_recall_hits = 0;
+    if (rec_r.success && !rec_r.rows.empty() && rec_r.rows[0].size() >= 2) {
+        try { n_recalls = std::stoll(rec_r.rows[0][0]); } catch (...) {}
+        try { n_recall_hits = std::stoll(rec_r.rows[0][1]); } catch (...) {}
+    }
+
+    // Memory durability
+    auto mem_r = store.execute_sql_query(
+        "SELECT COUNT(*), COUNT(CASE WHEN accessed_at >= " + std::to_string(now_30d) + " THEN 1 END) "
+        "FROM memory WHERE confidence > 0.1");
+    int64_t n_memories = 0, n_accessed_30d = 0;
+    if (mem_r.success && !mem_r.rows.empty() && mem_r.rows[0].size() >= 2) {
+        try { n_memories = std::stoll(mem_r.rows[0][0]); } catch (...) {}
+        try { n_accessed_30d = std::stoll(mem_r.rows[0][1]); } catch (...) {}
+    }
+
+    // Session count from session_registry (uses started_at)
+    auto sess_r = store.execute_sql_query(
+        "SELECT COUNT(DISTINCT session_id) FROM session_registry WHERE started_at >= " + std::to_string(cutoff));
+    int64_t n_sessions = 0;
+    if (sess_r.success && !sess_r.rows.empty() && !sess_r.rows[0].empty()) {
+        try { n_sessions = std::stoll(sess_r.rows[0][0]); } catch (...) {}
+    }
+    // Fallback to memory_exposed if no session_registry data
+    if (n_sessions == 0) n_sessions = n_sessions_with_exposures;
+
+    // Compute R (relevance): exposures per session, sigmoid-scaled
+    double R = 0.0;
+    if (n_sessions > 0 && n_exposures > 0) {
+        double exposures_per_session = static_cast<double>(n_exposures) / n_sessions;
+        R = 1.0 / (1.0 + std::exp(-0.5 * (exposures_per_session - 5.0)));
+    }
+
+    // Compute P (precision): recall hit rate
+    double P = 0.0;
+    if (n_recalls > 0) {
+        P = static_cast<double>(n_recall_hits) / n_recalls;
+    }
+
+    // Compute D (durability): fraction accessed in last 30 days
+    double D = 0.0;
+    if (n_memories > 0) {
+        D = static_cast<double>(n_accessed_30d) / n_memories;
+    }
+
+    // Partial SUS (M and T not instrumented)
+    double sus = (R + P + D) / 3.0 * 100.0;
+
+    std::cout << std::fixed << std::setprecision(2);
+    std::cout << "SUS (" << days << "d): " << static_cast<int>(std::round(sus))
+              << "  [partial, n_sessions=" << n_sessions << "]\n\n";
+    std::cout << "  R (relevance):   " << R
+              << "  (n_exposures=" << n_exposures
+              << ", n_sessions_with_exposures=" << n_sessions_with_exposures << ")\n";
+    std::cout << "  P (precision):   " << P
+              << "  (n_recalls=" << n_recalls << ", hit_rate)\n";
+    std::cout << "  M (prevention):  --    (Phase 3)\n";
+    std::cout << "  T (tokens):      --    (Phase 3)\n";
+    std::cout << "  D (durability):  " << D
+              << "  (n_memories=" << n_memories
+              << ", accessed_30d/" << n_memories << ")\n";
+    std::cout << "\n  Note: SUS is partial (M, T not yet instrumented). Full SUS in Phase 3.\n";
+
+    return 0;
+}
+
 void print_usage(const char* prog) {
     std::cerr << "chittad " << CHITTA_VERSION << " - Soul daemon\n\n"
               << "Usage: " << prog << " <command> [options]\n\n"
@@ -1249,6 +1369,7 @@ void print_usage(const char* prog) {
               << "  shutdown   Stop running daemon\n"
               << "  status     Check daemon status\n"
               << "  stats      Show soul statistics\n"
+              << "  metrics    Show SUS (Soul Utility Score) component metrics\n"
               << "  distill    Run manual distillation on a transcript\n"
               << "  help       Show this help\n\n"
               << "Options:\n"
@@ -1436,6 +1557,8 @@ int main(int argc, char* argv[]) {
         result = cmd_daemon(mind, interval, sock_path, mind_path, pid_file, distill_config, enrich_config);
     } else if (command == "stats") {
         result = cmd_stats(mind);
+    } else if (command == "metrics") {
+        result = cmd_metrics(mind);
     } else if (command == "distill") {
         // Manual distillation command
         if (distill_transcript_path.empty()) {

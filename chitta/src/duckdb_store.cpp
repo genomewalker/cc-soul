@@ -127,6 +127,8 @@ void DuckDBStore::fix_sequences() {
     fix_seq("session_message", "session_message_seq");
     fix_seq("sadhana", "sadhana_seq");
     fix_seq("sadhana_history", "sadhana_history_seq");
+    fix_seq("memory_exposed", "memory_exposed_seq");
+    fix_seq("memory_recall_query", "memory_recall_query_seq");
 }
 
 bool DuckDBStore::open_embeddings_db(const std::string& path) {
@@ -1465,6 +1467,47 @@ bool DuckDBStore::create_schema() {
     write_execute("CREATE INDEX IF NOT EXISTS idx_file_edit_time ON file_edit(backup_time DESC)");
     write_execute("CREATE INDEX IF NOT EXISTS idx_file_edit_session ON file_edit(session_id)");
     write_execute("CREATE SEQUENCE IF NOT EXISTS file_edit_seq START 1");
+
+    // SUS Phase 1: Memory exposure tracking
+    if (!write_execute(R"(
+        CREATE TABLE IF NOT EXISTS memory_exposed (
+            id BIGINT,
+            session_id VARCHAR NOT NULL,
+            turn_id INTEGER NOT NULL,
+            hook_type VARCHAR NOT NULL,
+            memory_id BIGINT NOT NULL,
+            rank INTEGER NOT NULL,
+            memory_type VARCHAR,
+            resonance_score DOUBLE,
+            token_cost INTEGER,
+            created_at BIGINT NOT NULL
+        )
+    )")) {
+        return false;
+    }
+    write_execute("CREATE INDEX IF NOT EXISTS idx_me_session ON memory_exposed(session_id)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_me_memory ON memory_exposed(memory_id)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_me_created ON memory_exposed(created_at)");
+    write_execute("CREATE SEQUENCE IF NOT EXISTS memory_exposed_seq START 1");
+
+    // SUS Phase 1: Recall query tracking
+    if (!write_execute(R"(
+        CREATE TABLE IF NOT EXISTS memory_recall_query (
+            id BIGINT,
+            session_id VARCHAR NOT NULL,
+            turn_id INTEGER NOT NULL,
+            tool VARCHAR NOT NULL,
+            query_text TEXT,
+            returned_memory_ids TEXT,
+            returned_scores TEXT,
+            created_at BIGINT NOT NULL
+        )
+    )")) {
+        return false;
+    }
+    write_execute("CREATE INDEX IF NOT EXISTS idx_mrq_session ON memory_recall_query(session_id)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_mrq_created ON memory_recall_query(created_at)");
+    write_execute("CREATE SEQUENCE IF NOT EXISTS memory_recall_query_seq START 1");
 
     return true;
 }
@@ -11705,6 +11748,99 @@ bool DuckDBStore::mark_correction_applied(int64_t correction_id, int64_t memory_
         << "WHERE id = " << correction_id;
 
     return write_execute(sql.str());
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SUS Phase 1: Memory Exposure & Recall Query Tracking
+// ═══════════════════════════════════════════════════════════════════════════
+
+int64_t DuckDBStore::log_exposures_batch(
+    const std::string& session_id, int turn_id,
+    const std::string& hook_type,
+    const std::vector<int64_t>& memory_ids,
+    const std::vector<int>& ranks,
+    const std::vector<std::string>& memory_types,
+    const std::vector<double>& resonance_scores,
+    const std::vector<int>& token_costs) {
+    if (!db_) return 0;
+
+    auto now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    int64_t count = 0;
+    for (size_t i = 0; i < memory_ids.size(); i++) {
+        int rank = (i < ranks.size()) ? ranks[i] : static_cast<int>(i + 1);
+        std::string mtype = (i < memory_types.size()) ? memory_types[i] : "";
+        double rscore = (i < resonance_scores.size()) ? resonance_scores[i] : 0.0;
+        int tcost = (i < token_costs.size()) ? token_costs[i] : 0;
+
+        std::ostringstream sql;
+        sql << "INSERT INTO memory_exposed VALUES ("
+            << "nextval('memory_exposed_seq'), "
+            << "'" << escape(session_id) << "', "
+            << turn_id << ", "
+            << "'" << escape(hook_type) << "', "
+            << memory_ids[i] << ", "
+            << rank << ", "
+            << "'" << escape(mtype) << "', "
+            << rscore << ", "
+            << tcost << ", "
+            << now << ")";
+
+        if (write_execute(sql.str())) count++;
+    }
+    return count;
+}
+
+int64_t DuckDBStore::log_recall_query(
+    const std::string& session_id, int turn_id,
+    const std::string& tool, const std::string& query_text,
+    const std::string& returned_memory_ids_json,
+    const std::string& returned_scores_json) {
+    if (!db_) return 0;
+
+    auto now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) {
+            if (c == '\'') result += "''";
+            else result += c;
+        }
+        return result;
+    };
+
+    std::ostringstream sql;
+    sql << "INSERT INTO memory_recall_query VALUES ("
+        << "nextval('memory_recall_query_seq'), "
+        << "'" << escape(session_id) << "', "
+        << turn_id << ", "
+        << "'" << escape(tool) << "', "
+        << "'" << escape(query_text) << "', "
+        << "'" << escape(returned_memory_ids_json) << "', "
+        << "'" << escape(returned_scores_json) << "', "
+        << now << ") RETURNING id";
+
+    auto result = write_query(sql.str());
+    if (!result || result->HasError()) {
+        return 0;
+    }
+
+    auto chunk = result->Fetch();
+    if (chunk && chunk->size() > 0) {
+        return chunk->GetValue(0, 0).GetValue<int64_t>();
+    }
+    return 0;
 }
 
 }  // namespace chitta
