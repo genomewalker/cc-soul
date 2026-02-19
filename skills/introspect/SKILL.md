@@ -8,6 +8,8 @@ execution: task
 
 Self-examination for partnership improvement.
 
+For philosophical grounding of these lenses, see the [vedanta skill graph](../vedanta/index.md) — particularly [[ceremonial-framework]] (svadhyāya) and [[antahkarana]] (the cognitive voices these lenses draw from).
+
 ## Process
 
 1. **Gather context**

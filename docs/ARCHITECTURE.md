@@ -620,7 +620,7 @@ struct Confidence {
 
 ```cpp
 struct QuantizedVector {
-    int8_t data[384];   // 384 bytes (vs 1536 bytes for float32)
+    int8_t data[768];   // 768 bytes (vs 3072 bytes for float32)
     float scale, offset; // Reconstruction: float = data[i] * scale + offset
     // 74% storage savings
 };
@@ -630,7 +630,7 @@ struct QuantizedVector {
 
 ```cpp
 struct BinaryVector {
-    uint64_t bits[6];   // 48 bytes (384 bits, one per dimension)
+    uint64_t bits[12];  // 96 bytes (768 bits, one per dimension)
     // Sign of each float → 1 bit
     // Hamming distance via popcount
     // 32x compression, fast approximate similarity

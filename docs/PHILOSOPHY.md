@@ -157,7 +157,7 @@ Chitta is the C++ backend — the entire memory system:
 ```
 chitta/
 ├── include/chitta/
-│   ├── types.hpp              # NodeType enum, Vector<384>, Confidence
+│   ├── types.hpp              # NodeType enum, Vector<768>, Confidence
 │   ├── duckdb_store.hpp       # DuckDB storage (HNSW, DuckPGQ, BM25)
 │   ├── mind/
 │   │   ├── duckdb_mind.hpp    # Mind orchestrator (~1800 lines)
@@ -176,7 +176,7 @@ chitta/
 │   └── quantized.hpp          # Vector quantization (int8, binary)
 ```
 
-The name isn't arbitrary — it reflects the system's purpose as a **substrate for persistent patterns**, where every memory is a 384-dimensional embedding anchored in latent semantic space.
+The name isn't arbitrary — it reflects the system's purpose as a **substrate for persistent patterns**, where every memory is a 768-dimensional embedding anchored in latent semantic space.
 
 ---
 

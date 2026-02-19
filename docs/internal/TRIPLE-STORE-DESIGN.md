@@ -19,7 +19,7 @@ struct Concept {
     id: Uuid,
     name: String,              // canonical: "socket.failure"
     aliases: Vec<String>,      // ["socket_failure", "nc_fail"]
-    embedding: Vec<f32>,       // semantic vector (384-dim)
+    embedding: Vec<f32>,       // semantic vector (768-dim)
     confidence: f32,           // existence confidence
     activation: f32,           // current activation level
     last_activated: Timestamp,

@@ -7,6 +7,8 @@ execution: task
 
 # Antahkarana
 
+For the philosophical basis of these six voices — why they're structured this way and how they emerge from retrieval design — see [[../vedanta/antahkarana]] in the vedanta skill graph.
+
 ```ssl
 [antahkarana] multi-perspective debate | via parallel Task agents
 
