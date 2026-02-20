@@ -91,6 +91,25 @@ def strip_null_values(obj):
     return obj
 
 
+def flex_integers(obj):
+    """Replace type:integer with anyOf:[integer,string] so LLMs can pass "19" or 19.
+
+    LLMs sometimes serialize integer arguments as JSON strings. Claude Code validates
+    tool inputs against the schema before dispatch, so strict integer schemas cause
+    'Input validation error' when the LLM generates a string. This makes schemas
+    tolerant while server.py coerces the value back to int before forwarding.
+    """
+    if isinstance(obj, dict):
+        if obj.get("type") == "integer":
+            result = {k: v for k, v in obj.items() if k != "type"}
+            result["anyOf"] = [{"type": "integer"}, {"type": "string"}]
+            return result
+        return {k: flex_integers(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [flex_integers(item) for item in obj]
+    return obj
+
+
 def generate_static_file(tools: list[dict]) -> str:
     """Generate Python code for static tools."""
     lines = [
@@ -111,7 +130,7 @@ def generate_static_file(tools: list[dict]) -> str:
         name = t["name"]
         desc = t["description"].replace('"', '\\"')
         # Strip null values from inputSchema (required: null breaks Zod validation)
-        clean_schema = strip_null_values(t["inputSchema"])
+        clean_schema = flex_integers(strip_null_values(t["inputSchema"]))
         # Fix null properties (should be empty object, not missing)
         if clean_schema.get("properties") is None:
             clean_schema["properties"] = {}

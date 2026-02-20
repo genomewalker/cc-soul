@@ -46,7 +46,14 @@ TOOLS = [
                         },
                         "visibility": {
                                 "description": "0=Private, 1=Shared, 2=Global (default: 0)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         }
                 },
                 "required": [
@@ -66,7 +73,14 @@ TOOLS = [
                         },
                         "limit": {
                                 "description": "Max results (default 10)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "min_confidence": {
                                 "description": "Minimum confidence threshold (default: 0)",
@@ -106,7 +120,14 @@ TOOLS = [
                         },
                         "limit": {
                                 "description": "Max results (default 20)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "query": {
                                 "description": "Optional semantic search query",
@@ -131,7 +152,14 @@ TOOLS = [
                 "properties": {
                         "limit": {
                                 "description": "Max results (default 10)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "query": {
                                 "description": "Search query",
@@ -250,7 +278,14 @@ TOOLS = [
                         },
                         "limit": {
                                 "description": "Max results (default 50)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "object": {
                                 "description": "Filter by object entity",
@@ -275,7 +310,14 @@ TOOLS = [
                 "properties": {
                         "limit": {
                                 "description": "Max results (default 20)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "predicate": {
                                 "description": "Relationship type",
@@ -346,7 +388,14 @@ TOOLS = [
                 "properties": {
                         "batch_size": {
                                 "description": "Symbols per batch (default: 100)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "reset": {
                                 "description": "Clear all symbol embeddings before re-embedding (default: False)",
@@ -463,7 +512,14 @@ TOOLS = [
                         },
                         "k": {
                                 "description": "Max results",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "partnership_only": {
                                 "description": "Exclude code intel (symbol, projectessence, modulestate, patternstate)",
@@ -503,7 +559,14 @@ TOOLS = [
                         },
                         "max_files": {
                                 "description": "Max files to process (default 500)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "path": {
                                 "description": "Directory path to analyze",
@@ -547,7 +610,14 @@ TOOLS = [
                 "properties": {
                         "id": {
                                 "description": "Symbol ID (alternative to name)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "kind": {
                                 "description": "Filter by symbol kind when using name",
@@ -572,7 +642,14 @@ TOOLS = [
                 "properties": {
                         "id": {
                                 "description": "Symbol ID (alternative to name)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "kind": {
                                 "description": "Filter by symbol kind when using name",
@@ -597,7 +674,14 @@ TOOLS = [
                 "properties": {
                         "id": {
                                 "description": "Symbol ID (alternative to name)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "kind": {
                                 "description": "Filter by symbol kind (function, class, method)",
@@ -646,7 +730,14 @@ TOOLS = [
                         },
                         "limit": {
                                 "description": "Max results (default 10)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "project": {
                                 "description": "Filter results to symbols from this project only",
@@ -687,7 +778,14 @@ TOOLS = [
                         },
                         "limit": {
                                 "description": "Token limit (default: 300)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "memories": {
                                 "description": "Include semantic memories (default: True)",
@@ -789,7 +887,14 @@ TOOLS = [
                 "properties": {
                         "depth": {
                                 "description": "1=memory only, 2=+episode, 3=+full turns (default: 3)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "id": {
                                 "description": "Memory ID to expand",
@@ -974,7 +1079,14 @@ TOOLS = [
                         },
                         "visibility": {
                                 "description": "0=Private, 1=Shared, 2=Global",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         }
                 },
                 "required": [
@@ -1093,7 +1205,14 @@ TOOLS = [
                 "properties": {
                         "limit": {
                                 "description": "Max entries to return (default 10)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "project": {
                                 "description": "Project filter (optional)",
@@ -1110,7 +1229,14 @@ TOOLS = [
                 "properties": {
                         "id": {
                                 "description": "Checkpoint ID",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         }
                 },
                 "required": [
@@ -1126,7 +1252,14 @@ TOOLS = [
                 "properties": {
                         "id": {
                                 "description": "Checkpoint ID to delete",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         }
                 },
                 "required": [
@@ -1353,7 +1486,14 @@ TOOLS = [
                 "properties": {
                         "max_tokens": {
                                 "description": "Max output tokens (default: 2000)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "mode": {
                                 "description": "Output mode: inject (compact) or debug (verbose)",
@@ -1425,7 +1565,14 @@ TOOLS = [
                 "properties": {
                         "limit": {
                                 "description": "Max gaps (default: 20)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "realm": {
                                 "description": "Filter by realm",
@@ -1442,7 +1589,14 @@ TOOLS = [
                 "properties": {
                         "id": {
                                 "description": "Gap memory ID",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "learned": {
                                 "description": "What was learned",
@@ -1491,7 +1645,14 @@ TOOLS = [
                         },
                         "limit": {
                                 "description": "Max predictions (default: 5)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "min_confidence": {
                                 "description": "Minimum pattern confidence (default: 0.3)",
@@ -1515,7 +1676,14 @@ TOOLS = [
                 "properties": {
                         "id": {
                                 "description": "Pattern ID to mark successful",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         }
                 },
                 "required": [
@@ -1531,7 +1699,14 @@ TOOLS = [
                 "properties": {
                         "limit": {
                                 "description": "Max patterns (default: 20)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "realm": {
                                 "description": "Filter by realm",
@@ -1605,7 +1780,14 @@ TOOLS = [
                         },
                         "id": {
                                 "description": "Habit ID",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         }
                 },
                 "required": [
@@ -1625,7 +1807,14 @@ TOOLS = [
                         },
                         "id": {
                                 "description": "Habit ID",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         }
                 },
                 "required": [
@@ -1641,7 +1830,14 @@ TOOLS = [
                 "properties": {
                         "limit": {
                                 "description": "Max habits (default: 20)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "min_strength": {
                                 "description": "Minimum strength (default: 0)",
@@ -1729,7 +1925,14 @@ TOOLS = [
                 "properties": {
                         "deadline": {
                                 "description": "Unix timestamp deadline (optional)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "description": {
                                 "description": "Detailed description",
@@ -1761,7 +1964,14 @@ TOOLS = [
                 "properties": {
                         "id": {
                                 "description": "Goal ID",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         }
                 },
                 "required": [
@@ -1777,7 +1987,14 @@ TOOLS = [
                 "properties": {
                         "limit": {
                                 "description": "Max results (default: 20)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "realm": {
                                 "description": "Filter by realm",
@@ -1802,7 +2019,14 @@ TOOLS = [
                 "properties": {
                         "id": {
                                 "description": "Goal ID",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "milestone": {
                                 "description": "Milestone name to mark complete (optional)",
@@ -1827,7 +2051,14 @@ TOOLS = [
                 "properties": {
                         "id": {
                                 "description": "Goal ID",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "outcome": {
                                 "description": "Summary of what was achieved",
@@ -1898,7 +2129,14 @@ TOOLS = [
                 "properties": {
                         "limit": {
                                 "description": "Max themes to return (default: 20)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "realm": {
                                 "description": "Filter by realm",
@@ -1915,7 +2153,14 @@ TOOLS = [
                 "properties": {
                         "id": {
                                 "description": "Theme ID",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         }
                 },
                 "required": [
@@ -1931,7 +2176,14 @@ TOOLS = [
                 "properties": {
                         "limit": {
                                 "description": "Max results (default: 10)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "query": {
                                 "description": "Search query",
@@ -1981,7 +2233,14 @@ TOOLS = [
                 "properties": {
                         "batch_size": {
                                 "description": "Memories per batch (default: 100)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "realm": {
                                 "description": "Filter by realm",
@@ -2032,13 +2291,27 @@ TOOLS = [
                         },
                         "memory_ids": {
                                 "items": {
-                                        "type": "integer"
+                                        "anyOf": [
+                                                {
+                                                        "type": "integer"
+                                                },
+                                                {
+                                                        "type": "string"
+                                                }
+                                        ]
                                 },
                                 "type": "array"
                         },
                         "ranks": {
                                 "items": {
-                                        "type": "integer"
+                                        "anyOf": [
+                                                {
+                                                        "type": "integer"
+                                                },
+                                                {
+                                                        "type": "string"
+                                                }
+                                        ]
                                 },
                                 "type": "array"
                         },
@@ -2052,7 +2325,14 @@ TOOLS = [
                                 "type": "string"
                         },
                         "turn_id": {
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         }
                 },
                 "required": [
@@ -2071,7 +2351,14 @@ TOOLS = [
                 "properties": {
                         "days": {
                                 "description": "Lookback window in days (default: 7)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         }
                 },
                 "type": "object"
@@ -2084,7 +2371,14 @@ TOOLS = [
                 "properties": {
                         "min_occurrences": {
                                 "description": "Minimum episodes in cluster (default: 3)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "similarity_threshold": {
                                 "description": "Minimum similarity for cluster (default: 0.85)",
@@ -2101,7 +2395,14 @@ TOOLS = [
                 "properties": {
                         "id": {
                                 "description": "Memory ID to promote",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "reason": {
                                 "description": "Why this insight is cross-project",
@@ -2121,7 +2422,14 @@ TOOLS = [
                 "properties": {
                         "limit": {
                                 "description": "Max results (default: 20)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "tag": {
                                 "description": "Filter by tag (optional)",
@@ -2142,7 +2450,14 @@ TOOLS = [
                         },
                         "limit": {
                                 "description": "Max results (default: 30)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "min_confidence": {
                                 "description": "Minimum confidence threshold (default: 0.1)",
@@ -2174,11 +2489,25 @@ TOOLS = [
                         },
                         "limit": {
                                 "description": "Max entries (default: 200)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "priority_tier": {
                                 "description": "Filter by tier: 0=background, 1=notable, 2=critical",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "realm": {
                                 "description": "Filter by realm",
@@ -2195,11 +2524,25 @@ TOOLS = [
                 "properties": {
                         "memory_id": {
                                 "description": "Memory ID",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "tier": {
                                 "description": "Priority tier: 0=background, 1=notable, 2=critical",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         }
                 },
                 "required": [
@@ -2216,7 +2559,14 @@ TOOLS = [
                 "properties": {
                         "budget_tokens": {
                                 "description": "Token budget (default: 4000)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "include_global": {
                                 "description": "Include global memories (default: True)",
@@ -2241,7 +2591,14 @@ TOOLS = [
                 "properties": {
                         "memory_id": {
                                 "description": "Memory ID",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "type": {
                                 "description": "Memory type: decision, preference, correction, insight, milestone, approach, habit, belief, gap, wisdom, episode",
@@ -2275,7 +2632,14 @@ TOOLS = [
                 "properties": {
                         "expand_top": {
                                 "description": "Auto-expand top N results to full context: SSL\u2192episode\u2192turns (default: 2, 0=disable)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "include_global": {
                                 "description": "Include global memories (default: True)",
@@ -2283,7 +2647,14 @@ TOOLS = [
                         },
                         "limit": {
                                 "description": "Max results (default: 20)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "query": {
                                 "description": "Natural language query (e.g., 'what happened last week', 'show preferences', 'what connects X and Y')",
@@ -2362,7 +2733,14 @@ TOOLS = [
                 "properties": {
                         "limit": {
                                 "description": "Max segments to return (default 20)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "session_id": {
                                 "description": "Session ID",
@@ -2380,7 +2758,14 @@ TOOLS = [
                 "properties": {
                         "max": {
                                 "description": "Max predictions to return (default 2)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "session_id": {
                                 "description": "Session ID",
@@ -2406,7 +2791,14 @@ TOOLS = [
                         },
                         "priority": {
                                 "description": "0=info, 1=normal, 2=important, 3=urgent",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "session_id": {
                                 "description": "Sender session ID (default: from env)",
@@ -2422,7 +2814,14 @@ TOOLS = [
                         },
                         "ttl": {
                                 "description": "TTL in seconds (default: 3600, 0 = no expiry)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         }
                 },
                 "required": [
@@ -2443,11 +2842,25 @@ TOOLS = [
                         },
                         "limit": {
                                 "description": "Max messages (default: 20)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "min_priority": {
                                 "description": "Minimum priority level (default: 0)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "session_id": {
                                 "description": "Session ID (default: from env)",
@@ -2477,7 +2890,14 @@ TOOLS = [
                 "properties": {
                         "limit": {
                                 "description": "Max messages (default: 30)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "session_id": {
                                 "description": "Session ID (default: from env)",
@@ -2528,11 +2948,25 @@ TOOLS = [
                         },
                         "limit": {
                                 "description": "Max turns to return (default: 20)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "max_chars_per_turn": {
                                 "description": "Truncate turn content (default: 500, 0=full)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "metadata_only": {
                                 "description": "Return only file metadata (turn count, size) without content",
@@ -2552,7 +2986,14 @@ TOOLS = [
                         },
                         "start_turn": {
                                 "description": "Starting turn index (default: 0)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         }
                 },
                 "type": "object"
@@ -2565,7 +3006,14 @@ TOOLS = [
                 "properties": {
                         "limit": {
                                 "description": "Max turns to return (default: 50)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "session_id": {
                                 "description": "Session ID (default: current session)",
@@ -2573,7 +3021,14 @@ TOOLS = [
                         },
                         "start_index": {
                                 "description": "Starting turn index (default: 0)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         }
                 },
                 "type": "object"
@@ -2586,7 +3041,14 @@ TOOLS = [
                 "properties": {
                         "end_turn": {
                                 "description": "Ending turn index (optional, 0 = ongoing)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "episode_type": {
                                 "description": "Type: distillation, task, discussion",
@@ -2602,7 +3064,14 @@ TOOLS = [
                         },
                         "start_turn": {
                                 "description": "Starting turn index",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "title": {
                                 "description": "Episode title/topic",
@@ -2628,7 +3097,14 @@ TOOLS = [
                         },
                         "limit": {
                                 "description": "Max claims to return (default: 20)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "predicate": {
                                 "description": "Filter by predicate (e.g., 'prefers', 'was_corrected_on')",
@@ -2653,7 +3129,14 @@ TOOLS = [
                 "properties": {
                         "limit": {
                                 "description": "Max policies to return (default: 30)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "scope": {
                                 "description": "Filter by scope: session, repo, project, user, global",
@@ -2682,7 +3165,14 @@ TOOLS = [
                         },
                         "limit": {
                                 "description": "Max results (default: 10)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "query": {
                                 "description": "Search query text",
@@ -2718,7 +3208,14 @@ TOOLS = [
                 "properties": {
                         "limit": {
                                 "description": "Max results (default: 10)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "query": {
                                 "description": "Natural language query",
@@ -2742,7 +3239,14 @@ TOOLS = [
                 "properties": {
                         "limit": {
                                 "description": "Max entities to return (default: 20)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "type": {
                                 "description": "Filter by entity type: person, project, concept, tool, file",
@@ -2763,7 +3267,14 @@ TOOLS = [
                         },
                         "limit": {
                                 "description": "Max events to return (default: 20)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "session_id": {
                                 "description": "Filter by session",
@@ -2792,7 +3303,14 @@ TOOLS = [
                         },
                         "interval_seconds": {
                                 "description": "Seconds between sense-think-act cycles (default: 60)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "realm": {
                                 "description": "Realm for isolation (default: brahman)",
@@ -2812,7 +3330,14 @@ TOOLS = [
                 "properties": {
                         "id": {
                                 "description": "Sadhana ID to pause",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         }
                 },
                 "required": [
@@ -2828,7 +3353,14 @@ TOOLS = [
                 "properties": {
                         "id": {
                                 "description": "Sadhana ID to resume",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         }
                 },
                 "required": [
@@ -2844,7 +3376,14 @@ TOOLS = [
                 "properties": {
                         "id": {
                                 "description": "Sadhana ID to stop",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "reason": {
                                 "description": "Reason for stopping",
@@ -2868,11 +3407,25 @@ TOOLS = [
                 "properties": {
                         "history_limit": {
                                 "description": "Max history events to return (default: 20)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "id": {
                                 "description": "Sadhana ID",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         }
                 },
                 "required": [
@@ -2888,7 +3441,14 @@ TOOLS = [
                 "properties": {
                         "limit": {
                                 "description": "Max results (default: 50)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "realm": {
                                 "description": "Filter by realm",
@@ -2909,7 +3469,14 @@ TOOLS = [
                 "properties": {
                         "id": {
                                 "description": "Sadhana ID",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "model": {
                                 "description": "New model: opus, sonnet, haiku, etc.",
@@ -2934,7 +3501,14 @@ TOOLS = [
                         },
                         "id": {
                                 "description": "Sadhana ID",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         }
                 },
                 "required": [
@@ -2951,11 +3525,25 @@ TOOLS = [
                 "properties": {
                         "id": {
                                 "description": "Sadhana ID",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "interval": {
                                 "description": "New interval in seconds",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         }
                 },
                 "required": [
@@ -2972,11 +3560,25 @@ TOOLS = [
                 "properties": {
                         "id": {
                                 "description": "Memory ID",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "limit": {
                                 "description": "Max versions to return (default: 20)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         }
                 },
                 "required": [
@@ -2992,7 +3594,14 @@ TOOLS = [
                 "properties": {
                         "id": {
                                 "description": "Memory ID",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "reason": {
                                 "description": "Reason for reverting",
@@ -3000,7 +3609,14 @@ TOOLS = [
                         },
                         "version": {
                                 "description": "Version number to revert to",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         }
                 },
                 "required": [
@@ -3017,7 +3633,14 @@ TOOLS = [
                 "properties": {
                         "id": {
                                 "description": "Memory ID to pin",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "reason": {
                                 "description": "Why this memory should stay hot",
@@ -3037,7 +3660,14 @@ TOOLS = [
                 "properties": {
                         "id": {
                                 "description": "Memory ID to unpin",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         }
                 },
                 "required": [
@@ -3053,7 +3683,14 @@ TOOLS = [
                 "properties": {
                         "limit": {
                                 "description": "Max results (default: 50)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "realm": {
                                 "description": "Filter by realm (optional)",
@@ -3070,7 +3707,14 @@ TOOLS = [
                 "properties": {
                         "duration": {
                                 "description": "Lock duration in seconds (default: 300)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "holder_id": {
                                 "description": "ID of the session/sadhana acquiring the lock",
@@ -3082,7 +3726,14 @@ TOOLS = [
                         },
                         "id": {
                                 "description": "Memory ID to lock",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         }
                 },
                 "required": [
@@ -3103,7 +3754,14 @@ TOOLS = [
                         },
                         "id": {
                                 "description": "Memory ID to unlock",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         }
                 },
                 "required": [
@@ -3120,7 +3778,14 @@ TOOLS = [
                 "properties": {
                         "id": {
                                 "description": "Memory ID to check",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         }
                 },
                 "required": [
@@ -3140,7 +3805,14 @@ TOOLS = [
                         },
                         "id": {
                                 "description": "Memory ID to change",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "proposed_by": {
                                 "description": "ID of the proposer",
@@ -3162,7 +3834,14 @@ TOOLS = [
                 "properties": {
                         "limit": {
                                 "description": "Max results (default: 50)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "status": {
                                 "description": "Filter by status: pending, applied, rejected, conflict",
@@ -3179,7 +3858,14 @@ TOOLS = [
                 "properties": {
                         "merge_id": {
                                 "description": "Merge proposal ID",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "resolution": {
                                 "description": "Resolution notes",
@@ -3212,7 +3898,14 @@ TOOLS = [
                         },
                         "limit": {
                                 "description": "Max results (default: 20)",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         },
                         "query": {
                                 "description": "Natural language time query like 'at 22:33', 'yesterday', 'last hour'",
@@ -3269,7 +3962,14 @@ TOOLS = [
                         },
                         "version_id": {
                                 "description": "Version ID from file_timeline",
-                                "type": "integer"
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
                         }
                 },
                 "required": [

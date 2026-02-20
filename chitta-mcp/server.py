@@ -1589,6 +1589,12 @@ async def call_tool(name: str, arguments: dict):
     """Handle tool calls - composite tools handled locally, others forwarded to daemon."""
     global current_session_id
 
+    # Coerce string integers to int: LLMs sometimes generate "19" instead of 19,
+    # which fails schema validation on strict integer params.
+    for k, v in list(arguments.items()):
+        if isinstance(v, str) and v.lstrip('-').isdigit():
+            arguments[k] = int(v)
+
     # Track session_id from session_register and transcript_register for auto-defaults
     if name == "session_register" and "session_id" in arguments:
         current_session_id = arguments["session_id"]
