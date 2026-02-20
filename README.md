@@ -14,11 +14,14 @@
 
 CC-soul gives Claude Code persistent memory across sessions. It learns your preferences, remembers your codebase structure, anticipates your needs, and gets smarter the more you use it. One command to install. Zero commands to operate.
 
-## What's New in 3.38.6
+## What's New in 3.42.16
 
-- **Native MCP Tools** — Auto-detect session and realm. No manual configuration. 100+ tools just work.
-- **Intelligent Memory System** — 7 query types with intent-driven routing. 3-4x faster retrieval.
-- **13 Fact Aspects** — Every memory is classified (preference, correction, insight, etc.)
+- **Soul Utility Score (SUS)** — Five-dimensional effectiveness metric: R (relevance), P (precision), M (mistake prevention), T (cache efficiency), D (durability). View with `chitta metrics`.
+- **Auto-distillation** — Session transcripts distill automatically at session end. No manual invocation needed.
+- **Implicit resonance** — Memories that guided a response are automatically strengthened based on lexical overlap.
+- **Cache efficiency tracking** — Detects prompt cache breaks and surfaces them as correction memories.
+- **Priority tiers** — Tier memories as critical / high / normal / archive with `set_priority_tier`.
+- **Advanced tool gateway** — 100+ hidden power-user tools via the `advanced` MCP gateway.
 
 ## Before & After
 
