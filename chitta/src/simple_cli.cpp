@@ -1090,6 +1090,15 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                                 cache_read, cache_create, n_msgs);
                             queue_count++;
                         }
+                    } else if (tool == "log_correction_outcome") {
+                        std::string sid = args.value("session_id", "");
+                        int64_t mem_id = args.value("correction_memory_id", (int64_t)0);
+                        bool detected = args.value("correction_detected", false);
+                        std::string text = args.value("correction_text", "");
+                        if (!sid.empty() && mem_id > 0) {
+                            mind.store().log_correction_outcome(sid, mem_id, detected, text);
+                            queue_count++;
+                        }
                     } else if (tool == "log_exposure") {
                         std::string session_id = args.value("session_id", "");
                         int turn_id = args.value("turn_id", 0);

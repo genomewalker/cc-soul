@@ -1372,6 +1372,11 @@ public:
                             int64_t cache_read, int64_t cache_creation,
                             int n_messages);
 
+    bool log_correction_outcome(const std::string& session_id,
+                                int64_t correction_memory_id,
+                                bool correction_detected,
+                                const std::string& correction_text);
+
     int64_t log_recall_query(const std::string& session_id, int turn_id,
                              const std::string& tool,
                              const std::string& query_text,

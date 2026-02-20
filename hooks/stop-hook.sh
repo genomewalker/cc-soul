@@ -215,6 +215,50 @@ while IFS= read -r marker; do
 done <<< "$(echo "$RESPONSE" | grep -oE '\[USED:[a-zA-Z0-9_-]+\]')"
 
 # ===========================================
+# IMPLICIT RESONANCE: Detect memory usage without [USED] markers
+# ===========================================
+_ir_mem_file="${MIND_PATH}/.exposed_memories_${SESSION_ID}"
+if [[ -f "$_ir_mem_file" ]]; then
+    # Get last assistant response from transcript for comparison
+    _ir_response=$(grep -F '"role":"assistant"' "$TRANSCRIPT_PATH" 2>/dev/null | \
+        tail -3 | jq -r '.message.content[]? | select(.type=="text") | .text' 2>/dev/null | tr -d '\n' | head -c 2000 || true)
+
+    if [[ -n "$_ir_response" ]]; then
+        while IFS= read -r _ir_line; do
+            [[ -z "$_ir_line" ]] && continue
+            # Extract memory ID
+            [[ "$_ir_line" =~ ^#([0-9]+) ]] || continue
+            _ir_mid="${BASH_REMATCH[1]}"
+
+            # Skip if already explicitly marked [USED]
+            echo "$_ir_response" | grep -qF "[USED:$_ir_mid]" && continue
+
+            # Extract key terms (4+ char words, skip stopwords)
+            _ir_terms=$(echo "$_ir_line" | tr -cs '[:alnum:]' '\n' | \
+                awk 'length >= 4 && !/^[0-9]+$/ && \
+                     tolower($0) !~ /^(this|that|with|from|have|been|will|were|your|when|what|which|about|into|then|than|them|they|more|some|also|each|just|only|very|kind|conf)$/' | \
+                head -8)
+            [[ -z "$_ir_terms" ]] && continue
+
+            _ir_total=0; _ir_matched=0
+            while IFS= read -r _ir_term; do
+                [[ -z "$_ir_term" ]] && continue
+                (( _ir_total++ ))
+                echo "$_ir_response" | grep -qiF "$_ir_term" && (( _ir_matched++ ))
+            done <<< "$_ir_terms"
+
+            if [[ $_ir_total -gt 0 ]]; then
+                _ir_ratio=$(( _ir_matched * 100 / _ir_total ))
+                if [[ $_ir_ratio -ge 50 ]]; then
+                    queue_write "strengthen" "{\"id\":\"$_ir_mid\",\"amount\":0.03}"
+                fi
+            fi
+        done < "$_ir_mem_file"
+    fi
+    rm -f "$_ir_mem_file" 2>/dev/null
+fi
+
+# ===========================================
 # CURIOSITY GAPS: Detect uncertainty/knowledge gaps
 # ===========================================
 if echo "$RESPONSE" | grep -qiE "(I don.?t know|I.?m not sure|unclear|couldn.?t (find|determine)|need to check|I.?ll have to look)"; then
@@ -291,6 +335,29 @@ if [[ "$CLAUDE_LEARNED" == "false" && -n "$LAST_USER_MSG" ]]; then
         else
             echo "[soul] skip auto-correction: duplicate" >&2
         fi
+    fi
+
+    # ===========================================
+    # SUS M METRIC: Correction outcome evaluation
+    # ===========================================
+    _m_exposed_file="${MIND_PATH}/.exposed_corrections_${SESSION_ID}"
+    if [[ -f "$_m_exposed_file" ]]; then
+        _m_corr_ids=$(cat "$_m_exposed_file" 2>/dev/null)
+        if [[ -n "$_m_corr_ids" && "$_m_corr_ids" != "[]" ]]; then
+            # Was a correction detected this session?
+            _m_detected="false"
+            _m_corr_text='""'
+            if [[ "${CORRECTION_DETECTED:-false}" == "true" ]]; then
+                _m_detected="true"
+                _m_corr_text=$(printf '%s' "${CORRECTION_TEXT:-}" | head -c 200 | jq -Rs .)
+            fi
+            while IFS= read -r _m_cid; do
+                [[ -z "$_m_cid" ]] && continue
+                queue_write "log_correction_outcome" \
+                    "{\"session_id\":\"$SESSION_ID\",\"correction_memory_id\":$_m_cid,\"correction_detected\":$_m_detected,\"correction_text\":$_m_corr_text}"
+            done <<< "$(echo "$_m_corr_ids" | jq -r '.[]' 2>/dev/null || true)"
+        fi
+        rm -f "$_m_exposed_file" 2>/dev/null
     fi
 
     # Direct + meta-preference patterns - detect and log, let distillation format properly
@@ -500,7 +567,7 @@ if [[ -x "$SCRIPT_DIR/span-capture.sh" ]]; then
 fi
 
 # Clean up temp files
-rm -f "$MIND_PATH/.last_user_message" "$MIND_PATH/.last_correction_context" "$PREDICTIONS_FILE" "$DEDUP_FILE" 2>/dev/null
+rm -f "$MIND_PATH/.last_user_message" "$MIND_PATH/.last_correction_context" "$PREDICTIONS_FILE" "$DEDUP_FILE" "$MIND_PATH/.exposed_corrections_${SESSION_ID}" "$MIND_PATH/.exposed_memories_${SESSION_ID}" 2>/dev/null
 
 # ===========================================
 # LEDGER: Rich session checkpoint for continuity
@@ -566,6 +633,14 @@ if [[ "$TURNS" =~ ^[0-9]+$ && "$TURNS" -ge 3 ]]; then
     echo "[soul] +session-summary: ${SUMMARY:0:60}" >&2
 else
     echo "[soul] skip session-summary: too few turns ($TURNS<3)" >&2
+fi
+
+# ===========================================
+# AUTO-DISTILLATION: Queue session distillation at session end
+# ===========================================
+if [[ -n "$SESSION_ID" && "$SESSION_ID" != "default" && -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
+    queue_write "transcript_register" "{\"session_id\":\"$SESSION_ID\",\"transcript_path\":$(printf '%s' "$TRANSCRIPT_PATH" | jq -Rs .),\"realm\":\"$REALM\"}"
+    queue_write "distill_trigger" "{\"session_id\":\"$SESSION_ID\"}"
 fi
 
 # Build rich ledger entry

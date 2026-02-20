@@ -130,6 +130,7 @@ void DuckDBStore::fix_sequences() {
     fix_seq("memory_exposed", "memory_exposed_seq");
     fix_seq("memory_recall_query", "memory_recall_query_seq");
     fix_seq("session_token_usage", "session_token_usage_seq");
+    fix_seq("correction_outcome", "correction_outcome_seq");
 }
 
 bool DuckDBStore::open_embeddings_db(const std::string& path) {
@@ -1529,6 +1530,24 @@ bool DuckDBStore::create_schema() {
     write_execute("CREATE INDEX IF NOT EXISTS idx_stu_session ON session_token_usage(session_id)");
     write_execute("CREATE INDEX IF NOT EXISTS idx_stu_created ON session_token_usage(created_at)");
     write_execute("CREATE SEQUENCE IF NOT EXISTS session_token_usage_seq START 1");
+
+    // SUS Phase 4: Correction outcome tracking for M metric
+    if (!write_execute(R"(
+        CREATE TABLE IF NOT EXISTS correction_outcome (
+            id BIGINT PRIMARY KEY,
+            session_id VARCHAR NOT NULL,
+            correction_memory_id BIGINT NOT NULL,
+            correction_detected BOOLEAN DEFAULT FALSE,
+            correction_text VARCHAR,
+            created_at BIGINT NOT NULL
+        )
+    )")) {
+        return false;
+    }
+    write_execute("CREATE INDEX IF NOT EXISTS idx_co_session ON correction_outcome(session_id)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_co_memory ON correction_outcome(correction_memory_id)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_co_created ON correction_outcome(created_at)");
+    write_execute("CREATE SEQUENCE IF NOT EXISTS correction_outcome_seq START 1");
 
     return true;
 }
@@ -11901,6 +11920,28 @@ bool DuckDBStore::log_session_tokens(
         << "n_messages=" << n_messages << ", "
         << "cache_hit_ratio=" << ratio;
 
+    return write_execute(sql.str());
+}
+
+bool DuckDBStore::log_correction_outcome(
+    const std::string& session_id, int64_t correction_memory_id,
+    bool correction_detected, const std::string& correction_text) {
+    if (!db_ || session_id.empty()) return false;
+    auto now_ts = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    auto escape = [](const std::string& s) {
+        std::string result;
+        for (char c : s) { if (c == '\'') result += "''"; else result += c; }
+        return result;
+    };
+    std::ostringstream sql;
+    sql << "INSERT INTO correction_outcome VALUES ("
+        << "nextval('correction_outcome_seq'), "
+        << "'" << escape(session_id) << "', "
+        << correction_memory_id << ", "
+        << (correction_detected ? "true" : "false") << ", "
+        << "'" << escape(correction_text) << "', "
+        << now_ts << ")";
     return write_execute(sql.str());
 }
 

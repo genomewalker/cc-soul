@@ -169,6 +169,29 @@ done <<< "$memories"
     fi
 ) 2>/dev/null || true
 
+# Save exposed correction memory IDs for M metric (stop-hook reads this)
+_sus_corr_ids="["
+_sus_corr_first=true
+_sus_last_mid=""
+while IFS= read -r _sus_corr_line; do
+    [[ -z "$_sus_corr_line" ]] && continue
+    # Track memory IDs from #NNN lines
+    if [[ "$_sus_corr_line" =~ ^#([0-9]+) ]]; then
+        _sus_last_mid="${BASH_REMATCH[1]}"
+        continue
+    fi
+    # Check if content line has [correction] marker
+    if [[ -n "$_sus_last_mid" && "$_sus_corr_line" =~ ^[[:space:]]+\[correction\] ]]; then
+        [[ "$_sus_corr_first" == "true" ]] && _sus_corr_first=false || _sus_corr_ids+=","
+        _sus_corr_ids+="$_sus_last_mid"
+        _sus_last_mid=""
+    fi
+done <<< "${memories:-}"
+_sus_corr_ids+="]"
+if [[ "$_sus_corr_ids" != "[]" && -n "${SESSION_ID:-}" && -n "${MIND_PATH:-}" ]]; then
+    printf '%s' "$_sus_corr_ids" > "${MIND_PATH}/.exposed_corrections_${SESSION_ID}"
+fi
+
 # ===========================================
 # PATTERN DETECTION: Detect learning opportunities
 # ===========================================
@@ -439,6 +462,11 @@ fi
 # Habits (strong patterns)
 if [[ -n "$HABITS_OUTPUT" ]]; then
     echo -n "$HABITS_OUTPUT"
+fi
+
+# Save full exposed memory content for implicit resonance detection (stop-hook)
+if [[ ${COUNT:-0} -gt 0 && -n "${memories:-}" && -n "${MIND_PATH:-}" && -n "${SESSION_ID:-}" ]]; then
+    printf '%s\n' "$memories" > "${MIND_PATH}/.exposed_memories_${SESSION_ID}"
 fi
 
 # Then memories

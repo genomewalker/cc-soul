@@ -9668,11 +9668,11 @@ private:
             {"n_memories", m.n_memories},
             {"R", m.R >= 0 ? json(m.R) : json(nullptr)},
             {"P", m.P >= 0 ? json(m.P) : json(nullptr)},
-            {"M", nullptr},
+            {"M", m.M >= 0 ? json(m.M) : json(nullptr)},
             {"T", m.T >= 0 ? json(m.T) : json(nullptr)},
             {"D", m.D >= 0 ? json(m.D) : json(nullptr)},
             {"sus_partial", m.sus >= 0 ? json(m.sus) : json(nullptr)},
-            {"note", "M(prevention) not yet instrumented. T=cache_hit_ratio avg."}
+            {"note", m.M >= 0 ? "Full SUS score (all dimensions)" : "M accumulating (need >=3 correction exposures)"}
         };
 
         std::string summary = "SUS(" + std::to_string(days) + "d): ";
@@ -11147,21 +11147,40 @@ private:
             }
         }
 
-        // Partial SUS (M still missing, Phase 4)
-        // Full weights: R=0.25 P=0.20 M=0.30 T=0.10 D=0.15
-        // Available: R(0.25) P(0.20) T(0.10) D(0.15) = 0.70
+        // M: fraction of correction exposures that did NOT result in a correction detection
+        {
+            auto r = mind_->store().execute_sql_query(
+                "SELECT COUNT(*), COUNT(CASE WHEN correction_detected = false THEN 1 END) "
+                "FROM correction_outcome WHERE created_at >= " + cs);
+            if (r.success && !r.rows.empty() && r.rows[0].size() >= 2) {
+                int64_t total = 0, prevented = 0;
+                try { total = std::stoll(r.rows[0][0]); } catch (...) {}
+                try { prevented = std::stoll(r.rows[0][1]); } catch (...) {}
+                if (total >= 3) {
+                    m.M = (double)prevented / total;
+                }
+            }
+        }
+
+        // SUS score: Full weights R=0.25 P=0.20 M=0.30 T=0.10 D=0.15
         if (m.R >= 0 && m.D >= 0) {
-            double avail = 0.70;
-            double r_w = 0.25 / avail;
-            double p_w = 0.20 / avail;
-            double t_w = 0.10 / avail;
-            double d_w = 0.15 / avail;
             double p_val = (m.P >= 0) ? m.P : 0.5;
             double t_val = (m.T >= 0) ? m.T : 0.5;
-            m.sus = 100.0 * std::pow(std::max(m.R, 1e-6), r_w)
-                          * std::pow(std::max(p_val, 1e-6), p_w)
-                          * std::pow(std::max(t_val, 1e-6), t_w)
-                          * std::pow(std::max(m.D, 1e-6), d_w);
+            if (m.M >= 0) {
+                // Full SUS: R=0.25 P=0.20 M=0.30 T=0.10 D=0.15
+                m.sus = 100.0 * std::pow(std::max(m.R, 1e-6), 0.25)
+                              * std::pow(std::max(p_val, 1e-6), 0.20)
+                              * std::pow(std::max(m.M, 1e-6), 0.30)
+                              * std::pow(std::max(t_val, 1e-6), 0.10)
+                              * std::pow(std::max(m.D, 1e-6), 0.15);
+            } else {
+                // Partial (M not yet available): R(0.25) P(0.20) T(0.10) D(0.15) / 0.70
+                double avail = 0.70;
+                m.sus = 100.0 * std::pow(std::max(m.R, 1e-6), 0.25 / avail)
+                              * std::pow(std::max(p_val, 1e-6), 0.20 / avail)
+                              * std::pow(std::max(t_val, 1e-6), 0.10 / avail)
+                              * std::pow(std::max(m.D, 1e-6), 0.15 / avail);
+            }
         }
 
         return m;
