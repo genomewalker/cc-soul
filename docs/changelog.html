@@ -453,12 +453,203 @@ body::before {
 <section class="changelog-section">
   <div class="container">
 
+    <!-- 3.42.16 -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v3.42.16</span>
+        <span class="version-date">February 20, 2026</span>
+        <span class="version-latest">Latest</span>
+      </div>
+
+      <div class="change-category">
+        <h3 class="change-category-title added">Added</h3>
+        <ul class="change-list">
+          <li><strong>Soul Utility Score (SUS)</strong> &mdash; Five-dimensional metric system measuring soul effectiveness: R (relevance), P (recall precision), M (mistake prevention), T (cache efficiency), D (durability). Geometric mean formula with configurable weights. Available via <code>chitta metrics</code> CLI and <code>get_sus_metrics</code> MCP tool</li>
+          <li><strong>Cache efficiency tracking (T metric)</strong> &mdash; Extracts cache hit ratios from transcript JSONL at session end; detects cache break patterns and surfaces them as correction memories</li>
+          <li><strong>Correction outcome tracking (M metric)</strong> &mdash; Tracks whether exposed correction memories actually prevented errors; logs outcomes per session for precision scoring</li>
+          <li><strong>Auto-distillation at session end</strong> &mdash; Stop hook triggers transcript distillation automatically without manual invocation</li>
+          <li><strong>Implicit resonance feedback</strong> &mdash; Lexical overlap detection (&ge;50% key terms) between exposed memories and assistant response automatically strengthens relevant memories</li>
+          <li><strong>Integer coercion for MCP tool args</strong> &mdash; LLMs sometimes serialize integer params as JSON strings; schema now accepts both and server coerces at dispatch</li>
+        </ul>
+      </div>
+
+      <div class="change-category">
+        <h3 class="change-category-title fixed">Fixed</h3>
+        <ul class="change-list">
+          <li>Restored missing <code>cc-soul-mcp</code> skill (referenced in marketplace.json but absent from repo)</li>
+          <li><code>Input validation error: '19' is not of type integer</code> &mdash; 100 integer schema params now accept string-typed values from LLM tool calls</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 3.42.10–3.42.15 -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v3.42.10&ndash;3.42.15</span>
+        <span class="version-date">February 17&ndash;19, 2026</span>
+      </div>
+
+      <div class="change-category">
+        <h3 class="change-category-title added">Added</h3>
+        <ul class="change-list">
+          <li><strong>Cross-session file timeline</strong> &mdash; Track file edits across sessions with temporal context</li>
+          <li><strong>Temporal fact versioning</strong> &mdash; Facts can be versioned over time for LoCoMo-style benchmark accuracy</li>
+          <li><strong>Enhanced query intent routing</strong> &mdash; Temporal subtypes (before/after/during/range) for finer retrieval granularity</li>
+          <li><strong>LoCoMo benchmark improvements</strong> &mdash; Better retrieval and extraction for long-context memory evaluation</li>
+        </ul>
+      </div>
+
+      <div class="change-category">
+        <h3 class="change-category-title fixed">Fixed</h3>
+        <ul class="change-list">
+          <li>Tag filtering in <code>recall</code> and <code>hybrid_recall</code> now correctly intersects results</li>
+          <li>BM25 FTS search uses CTE for proper score filtering (no false zero-score matches)</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 3.42.0–3.42.9 -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v3.42.0&ndash;3.42.9</span>
+        <span class="version-date">February 10&ndash;16, 2026</span>
+      </div>
+
+      <div class="change-category">
+        <h3 class="change-category-title added">Added</h3>
+        <ul class="change-list">
+          <li><strong>RLM integration</strong> &mdash; Recursive Language Model patterns wired into hooks and sadhana for deep memory graph traversal</li>
+          <li><strong>soul-repl</strong> &mdash; RLM-style programmatic memory exploration: explore &rarr; peek &rarr; expand &rarr; neighbors</li>
+          <li><strong>Priority tiers and memory index</strong> &mdash; ClawVault-inspired tiered memory access (critical / high / normal / archive) with <code>set_priority_tier</code> and <code>recall_by_priority</code></li>
+          <li><strong>Goal, habit, and curiosity CLI commands</strong> &mdash; <code>chitta goal</code>, <code>chitta habit</code>, <code>chitta curiosity</code> for managing long-term objectives from the terminal</li>
+          <li><strong>Auto-configure MCP via plugin</strong> &mdash; Plugin installer now configures <code>mcpServers.chitta</code> automatically; <code>/cc-soul-mcp</code> skill deprecated for most users</li>
+          <li><strong>Brain visualization</strong> &mdash; Animated data-flow visualization on the landing page showing live memory graph activity</li>
+          <li><strong>Improved correction learning compliance</strong> &mdash; Hooks more reliably detect and persist correction patterns</li>
+        </ul>
+      </div>
+
+      <div class="change-category">
+        <h3 class="change-category-title fixed">Fixed</h3>
+        <ul class="change-list">
+          <li>Theme system embedding lookup and migration</li>
+          <li>Sadhana TUI: chronological event display, summary modal, vim-style search</li>
+          <li>Socket reliability improvements for long-running sessions</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 3.41.x -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v3.41.x</span>
+        <span class="version-date">February 10, 2026</span>
+      </div>
+
+      <div class="change-category">
+        <h3 class="change-category-title added">Added</h3>
+        <ul class="change-list">
+          <li><strong>Advanced tool gateway</strong> &mdash; <code>advanced</code> MCP tool exposes 100+ hidden power-user and system tools without polluting the main tool surface</li>
+          <li><strong>Context repository</strong> &mdash; Store and retrieve structured context documents with MCP tool deferral support</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 3.40.0 -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v3.40.0</span>
+        <span class="version-date">February 10, 2026</span>
+      </div>
+
+      <div class="change-category">
+        <h3 class="change-category-title added">Added</h3>
+        <ul class="change-list">
+          <li><strong>Memory-aware autonomous agents (Sadhana)</strong> &mdash; Agents in the sadhana pipeline can now read and write to the soul, enabling long-running workflows with persistent context</li>
+          <li><strong>Shepherd session isolation</strong> &mdash; Pipeline monitoring automatically isolates per-session state to avoid cross-contamination</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 3.39.x -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v3.39.x</span>
+        <span class="version-date">February 9&ndash;10, 2026</span>
+      </div>
+
+      <div class="change-category">
+        <h3 class="change-category-title added">Added</h3>
+        <ul class="change-list">
+          <li><strong>Ledger checkpoints</strong> &mdash; Turn-based and event-based snapshots with <code>transcript_path</code> for crash/compaction recovery</li>
+          <li><strong>read_transcript</strong> &mdash; Read raw JSONL transcript files with pagination, role filtering, and keyword search &mdash; without loading into memory</li>
+          <li><strong>Shepherd skill</strong> &mdash; Autonomous pipeline monitoring with sense-think-act loop for Snakemake, Nextflow, and Slurm jobs</li>
+          <li><strong>Citation linking</strong> &mdash; Distilled memories carry symbol bridge links back to source episodes</li>
+        </ul>
+      </div>
+
+      <div class="change-category">
+        <h3 class="change-category-title fixed">Fixed</h3>
+        <ul class="change-list">
+          <li>MCP socket path aligned with daemon (<code>XDG_RUNTIME_DIR</code> preference, persistent fallback to <code>~/.cache/chitta</code>)</li>
+          <li><code>smart_recall</code> token overflow with large result sets</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 3.38.x -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v3.38.x</span>
+        <span class="version-date">February 8&ndash;9, 2026</span>
+      </div>
+
+      <div class="change-category">
+        <h3 class="change-category-title added">Added</h3>
+        <ul class="change-list">
+          <li><strong>TOON output format</strong> &mdash; Compact MCP response serialization with ~40% token savings vs JSON</li>
+          <li><strong>Hierarchical memory retrieval</strong> &mdash; Three-level drill-down: SSL memory &rarr; episode &rarr; full conversation turns via <code>expand_memory(id, depth)</code></li>
+          <li><strong>Native C++ distillation</strong> &mdash; Replaced shell-based distill.sh; distillation now runs inside the daemon thread pool</li>
+          <li><strong>Conversational memory system</strong> &mdash; MCP tools for session-scoped turn retrieval and cross-session search</li>
+          <li><strong>Observer-effect-safe test suite</strong> &mdash; Tests validate memory behavior without mutating production state</li>
+        </ul>
+      </div>
+
+      <div class="change-category">
+        <h3 class="change-category-title fixed">Fixed</h3>
+        <ul class="change-list">
+          <li>Messaging session detection for multi-session scenarios</li>
+          <li>CLAUDE.md compressed 88% (8540 &rarr; 1024 tokens) with pointer to full version</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 3.37.x -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v3.37.x</span>
+        <span class="version-date">February 9, 2026</span>
+      </div>
+
+      <div class="change-category">
+        <h3 class="change-category-title added">Added</h3>
+        <ul class="change-list">
+          <li><strong>State-of-the-art conversational memory architecture</strong> &mdash; LoCoMo-inspired design: episodic indexing, temporal reasoning, and long-context retrieval at conversation scale</li>
+        </ul>
+      </div>
+
+      <div class="change-category">
+        <h3 class="change-category-title fixed">Fixed</h3>
+        <ul class="change-list">
+          <li>chitta-mcp version sync; <code>--force-reinstall</code> in configure-mcp.sh ensures updates are always picked up</li>
+        </ul>
+      </div>
+    </article>
+
     <!-- 3.36.0 -->
     <article class="changelog-version reveal">
       <div class="version-header">
         <span class="version-number">v3.36.0</span>
         <span class="version-date">February 8, 2026</span>
-        <span class="version-latest">Latest</span>
       </div>
 
       <div class="change-category">
