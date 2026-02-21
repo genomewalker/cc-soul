@@ -162,14 +162,14 @@ class ChittaClient:
         goal: str,
         brain: str = "claude",
         model: str = "haiku",
-        interval: int = 60
+        interval: int = 300
     ) -> dict:
         """Start a new sadhana."""
         return self.call("sadhana_start", {
             "goal": goal,
-            "brain": brain,
-            "model": model,
-            "interval": interval
+            "brain_provider": brain,
+            "brain_model": model,
+            "interval_seconds": interval
         })
 
     def sadhana_stop(self, sadhana_id: int) -> dict:

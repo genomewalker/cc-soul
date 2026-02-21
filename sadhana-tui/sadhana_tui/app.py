@@ -227,11 +227,17 @@ class EventStream(RichLog):
         duration_ms = event.get("duration_ms", 0)
 
         colors = {
+            "cycle":       "#66aa66",
+            "checkpoint":  "#aa8866",
+            "started":     "#6688aa",
+            "paused":      "#aaaa66",
+            "done":        "#66aaaa",
+            "failed":      "#aa6666",
+            # legacy event types kept for backward compat
             "sense": "#6688aa",
             "think": "#aa8866",
             "act": "#66aa66",
             "learn": "#8866aa",
-            "error": "#aa6666",
         }
         color = colors.get(event_type, "#555555")
 
@@ -256,6 +262,12 @@ class EventStream(RichLog):
         if isinstance(raw, str):
             return raw
         if isinstance(raw, dict):
+            # Agentic cycle / checkpoint: show status + summary
+            if "summary" in raw and raw["summary"]:
+                status = raw.get("status", "")
+                summary = raw["summary"]
+                return f"[{status}] {summary}" if status else summary
+            # Legacy: shell command from sense phase
             if "command" in raw:
                 cmd = raw["command"].replace("```bash", "").replace("```", "").strip()
                 return f"$ {cmd}"
@@ -350,7 +362,7 @@ class NewAgentModal(ModalScreen[dict | None]):
                     yield Select([("haiku", "haiku"), ("sonnet", "sonnet"), ("opus", "opus")], value="haiku", id="model")
                 with Vertical(classes="field-row"):
                     yield Label("interval", classes="field-label")
-                    yield Input(value="60", id="interval")
+                    yield Input(value="300", id="interval")
 
             with Horizontal(id="btn-row"):
                 yield Button("cancel", id="cancel")
@@ -499,7 +511,20 @@ class SummaryModal(ModalScreen[None]):
             event_type = event.get("event_type", "")
             content = event.get("content", {})
 
-            if event_type == "learn" and isinstance(content, dict):
+            # Agentic cycles: show cycle summaries
+            if event_type in ("cycle", "checkpoint") and isinstance(content, dict):
+                summary = content.get("summary", "")
+                status = content.get("status", "progressed")
+                if summary:
+                    if status == "achieved":
+                        learnings.append(f"[#66aaaa]◆[/] {summary[:80]}")
+                    elif status == "blocked":
+                        learnings.append(f"[#aaaa66]◑[/] {summary[:80]}")
+                    else:
+                        learnings.append(f"[#66aa66]→[/] {summary[:80]}")
+
+            # Legacy learn events
+            elif event_type == "learn" and isinstance(content, dict):
                 outcome = content.get("outcome", "")
                 context = content.get("context", "")
                 error = content.get("error", "")
@@ -508,14 +533,15 @@ class SummaryModal(ModalScreen[None]):
                 elif outcome == "failure" and error:
                     learnings.append(f"[#aa6666]✗[/] {error[:60]}")
 
+            # Legacy think events
             elif event_type == "think" and isinstance(content, dict):
                 if content.get("goal_achieved"):
                     analysis = content.get("analysis", "")
                     if analysis:
                         learnings.append(f"[#6688aa]◆[/] {analysis[:80]}")
 
-        # Return last 10 learnings
-        return "\n".join(learnings[-10:]) if learnings else "[#444444]No learnings recorded[/]"
+        # Return last 10
+        return "\n".join(learnings[-10:]) if learnings else "[#444444]No cycle summaries yet[/]"
 
     def on_button_pressed(self, event) -> None:
         self.dismiss(None)
