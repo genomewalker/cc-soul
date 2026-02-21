@@ -27,20 +27,6 @@ TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty')
 # Check chitta CLI exists
 [[ ! -x "$CHITTA_BIN" ]] && exit 0
 
-# ===========================================
-# AUTO-UPGRADE: Check version mismatch
-# ===========================================
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(dirname "$SCRIPT_DIR")}"
-PLUGIN_VERSION=$(jq -r '.version // empty' "$PLUGIN_ROOT/.claude-plugin/plugin.json" 2>/dev/null)
-INSTALLED_VERSION=$("$CHITTA_BIN" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
-
-if [[ -n "$PLUGIN_VERSION" && -n "$INSTALLED_VERSION" && "$PLUGIN_VERSION" != "$INSTALLED_VERSION" ]]; then
-    echo "[soul] Version mismatch: plugin=$PLUGIN_VERSION installed=$INSTALLED_VERSION" >&2
-    if [[ -x "$PLUGIN_ROOT/scripts/smart-install.sh" ]]; then
-        echo "[soul] Auto-upgrading in background..." >&2
-        nohup "$PLUGIN_ROOT/scripts/smart-install.sh" > /tmp/cc-soul-upgrade.log 2>&1 &
-    fi
-fi
 
 # Derive project directory from transcript path
 # Transcript path: ~/.claude/projects/-maps-projects-X-Y-Z/session.jsonl
