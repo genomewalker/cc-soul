@@ -609,6 +609,10 @@ void SadhanaManager::run_cycle(Sadhana& sadhana) {
         size_t snippet_start = clean_output.size() > 500 ? clean_output.size() - 500 : 0;
         cycle_result["output_tail"] = clean_output.substr(snippet_start);
     }
+    if (!result.error.empty()) {
+        std::string err_snippet = result.error.size() > 200 ? result.error.substr(0, 200) : result.error;
+        cycle_result["error"] = err_snippet;
+    }
 
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - start_time).count();

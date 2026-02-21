@@ -222,7 +222,7 @@ BrainResult ClaudeBrain::think(const std::string& prompt, const BrainConfig& con
     };
 
     if (!config.system_prompt.empty()) {
-        args.push_back("--system");
+        args.push_back("--system-prompt");
         args.push_back(config.system_prompt);
     }
 
