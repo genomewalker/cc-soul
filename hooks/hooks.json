@@ -7,6 +7,12 @@
         "hooks": [
           {
             "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/subconscious.sh start",
+            "timeout": 8,
+            "statusMessage": "awakening…"
+          },
+          {
+            "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-start-hook.sh",
             "timeout": 10,
             "statusMessage": "recalling context…"
