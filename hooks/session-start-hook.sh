@@ -239,9 +239,9 @@ else
     # Normal session start - just show minimal info
     soul_output=$(timeout "$MAX_WAIT" "$CHITTA_BIN" soul_context 2>/dev/null || true)
     if [[ -n "$soul_output" ]]; then
-        nodes=$(echo "$soul_output" | grep -oE 'Nodes: [0-9]+' | grep -oE '[0-9]+' || echo "0")
-        triplets=$(echo "$soul_output" | grep -oE 'Triplets: [0-9]+' | grep -oE '[0-9]+' || echo "0")
-        [[ "$nodes" != "0" ]] && echo "[soul] n=$nodes t=$triplets"
+        memories=$(echo "$soul_output" | grep -oE 'Memory: [0-9]+' | grep -oE '[0-9]+' || echo "0")
+        triplets=$(echo "$soul_output" | grep -oE '[0-9]+ triplets' | grep -oE '[0-9]+' || echo "0")
+        [[ "$memories" != "0" ]] && echo "[soul] m=$memories t=$triplets"
     fi
 
     # Quick ledger check
@@ -256,21 +256,21 @@ else
     # ═══════════════════════════════════════════
     TOPOLOGY_PARTS=()
 
-    # Top 3 active themes
+    # Top 3 active themes (show representative memory content, not internal UUID names)
     theme_out=$(timeout "$MAX_WAIT" "$CHITTA_BIN" sql_query \
-        --query "SELECT name, memory_count FROM theme WHERE memory_count > 0 ORDER BY updated_at DESC LIMIT 3" \
-        2>/dev/null || true)
+        --query "SELECT t.memory_count, substr(m.content, 1, 60) as label FROM theme t JOIN memory m ON t.representative_id = m.id WHERE t.memory_count > 0 ORDER BY t.updated_at DESC LIMIT 3" \
+        --json 2>/dev/null || true)
     if [[ -n "$theme_out" ]]; then
-        theme_str=$(echo "$theme_out" | jq -r '[.rows[]? | "\(.[0]) (\(.[1]) memories)"] | join(" | ")' 2>/dev/null || true)
+        theme_str=$(echo "$theme_out" | jq -r '[.rows[]? | "\(.memory_count)m: \(.label)"] | join(" | ")' 2>/dev/null || true)
         [[ -n "$theme_str" ]] && TOPOLOGY_PARTS+=("Themes: $theme_str")
     fi
 
     # Memory kind distribution (most active)
     kind_out=$(timeout "$MAX_WAIT" "$CHITTA_BIN" sql_query \
         --query "SELECT kind, COUNT(*) as cnt FROM memory WHERE access_count > 1 GROUP BY kind ORDER BY cnt DESC LIMIT 6" \
-        2>/dev/null || true)
+        --json 2>/dev/null || true)
     if [[ -n "$kind_out" ]]; then
-        kind_str=$(echo "$kind_out" | jq -r '[.rows[]? | "\(.[0]):\(.[1])"] | join(", ")' 2>/dev/null || true)
+        kind_str=$(echo "$kind_out" | jq -r '[.rows[]? | "\(.kind):\(.cnt)"] | join(", ")' 2>/dev/null || true)
         [[ -n "$kind_str" ]] && TOPOLOGY_PARTS+=("Active: $kind_str")
     fi
 
@@ -278,9 +278,9 @@ else
     if [[ -n "${REALM:-}" && "${REALM}" != "brahman" ]]; then
         recent_out=$(timeout "$MAX_WAIT" "$CHITTA_BIN" sql_query \
             --query "SELECT id, kind, content FROM memory WHERE realm = '${REALM}' ORDER BY accessed_at DESC LIMIT 3" \
-            2>/dev/null || true)
+            --json 2>/dev/null || true)
         if [[ -n "$recent_out" ]]; then
-            recent_str=$(echo "$recent_out" | jq -r '.rows[]? | "#\(.[0]) [\(.[1])] \(.[2] | .[0:80])"' 2>/dev/null || true)
+            recent_str=$(echo "$recent_out" | jq -r '.rows[]? | "#\(.id) [\(.kind)] \(.content[0:80])"' 2>/dev/null || true)
             if [[ -n "$recent_str" ]]; then
                 TOPOLOGY_PARTS+=("Recent (${REALM}):")
                 while IFS= read -r line; do
@@ -293,11 +293,11 @@ else
     # Summary counts
     count_out=$(timeout "$MAX_WAIT" "$CHITTA_BIN" sql_query \
         --query "SELECT COUNT(*) as total, COUNT(CASE WHEN priority_tier = 2 THEN 1 END) as critical, COUNT(CASE WHEN pinned = true THEN 1 END) as pinned FROM memory" \
-        2>/dev/null || true)
+        --json 2>/dev/null || true)
     if [[ -n "$count_out" ]]; then
-        total_mem=$(echo "$count_out" | jq -r '.rows[0]?[0] // 0' 2>/dev/null || echo "0")
-        critical_mem=$(echo "$count_out" | jq -r '.rows[0]?[1] // 0' 2>/dev/null || echo "0")
-        pinned_mem=$(echo "$count_out" | jq -r '.rows[0]?[2] // 0' 2>/dev/null || echo "0")
+        total_mem=$(echo "$count_out" | jq -r '.rows[0]?.total // 0' 2>/dev/null || echo "0")
+        critical_mem=$(echo "$count_out" | jq -r '.rows[0]?.critical // 0' 2>/dev/null || echo "0")
+        pinned_mem=$(echo "$count_out" | jq -r '.rows[0]?.pinned // 0' 2>/dev/null || echo "0")
         [[ "$total_mem" != "0" ]] && TOPOLOGY_PARTS+=("Total: ${total_mem} memories (${critical_mem} critical, ${pinned_mem} pinned)")
     fi
 

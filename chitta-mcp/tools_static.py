@@ -3202,6 +3202,22 @@ TOOLS = [
         }
     ),
     Tool(
+        name="expand_query",
+        description="Expand a query into typed variants (lex for BM25, vec for vector search, hyde as hypothetical memory excerpt) for improved hybrid retrieval",
+        inputSchema={
+                "properties": {
+                        "query": {
+                                "description": "Query to expand",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "query"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
         name="smart_recall",
         description="Intent-aware memory retrieval. Classifies query type (temporal, entity, relational) and routes to optimal retrieval path. Returns structured results with date candidates for temporal queries.",
         inputSchema={
