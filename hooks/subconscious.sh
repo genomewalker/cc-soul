@@ -18,7 +18,7 @@ LOG_FILE="${HOME}/.claude/mind/.subconscious.log"
 INTERVAL="${SUBCONSCIOUS_INTERVAL:-60}"
 TIMEOUT_CMD=()
 TIMEOUT_WARNED=false
-MAX_WAIT="${CC_SOUL_MAX_WAIT:-5}"
+MAX_WAIT="${CC_SOUL_MAX_WAIT:-10}"
 
 if [[ "$MAX_WAIT" != "0" ]] && command -v timeout >/dev/null 2>&1; then
     TIMEOUT_CMD=(timeout "$MAX_WAIT")
