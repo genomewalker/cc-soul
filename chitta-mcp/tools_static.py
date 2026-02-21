@@ -3302,7 +3302,7 @@ TOOLS = [
     ),
     Tool(
         name="sadhana_start",
-        description="Create and start a new autonomous agent (sadhana) that works toward a goal using sense-think-act loops",
+        description="Create and start a new autonomous agent (sadhana) that works toward a goal using full Claude Code sessions with tool access. Each cycle runs a complete agent with bash, file, and chitta memory tools. Default interval: 300s.",
         inputSchema={
                 "properties": {
                         "brain_model": {
@@ -3565,6 +3565,44 @@ TOOLS = [
                 "required": [
                         "id",
                         "interval"
+                ],
+                "type": "object"
+        }
+    ),
+    Tool(
+        name="sadhana_checkpoint",
+        description="Report a mid-cycle checkpoint from within an agentic sadhana. Call this from inside a running sadhana cycle to log progress and optionally signal completion. Use status='achieved' to stop the sadhana, 'blocked' to pause it, 'progressed' to continue normally.",
+        inputSchema={
+                "properties": {
+                        "id": {
+                                "description": "Sadhana ID",
+                                "anyOf": [
+                                        {
+                                                "type": "integer"
+                                        },
+                                        {
+                                                "type": "string"
+                                        }
+                                ]
+                        },
+                        "status": {
+                                "description": "Cycle status",
+                                "enum": [
+                                        "progressed",
+                                        "achieved",
+                                        "blocked"
+                                ],
+                                "type": "string"
+                        },
+                        "summary": {
+                                "description": "What was done this cycle",
+                                "type": "string"
+                        }
+                },
+                "required": [
+                        "id",
+                        "status",
+                        "summary"
                 ],
                 "type": "object"
         }

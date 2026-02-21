@@ -2,7 +2,7 @@
 // BrainProvider: LLM interface for autonomous agents
 //
 // Provides a uniform interface for interacting with different LLM backends:
-// - ClaudeBrain: Uses `claude -p --model <model>` CLI
+// - ClaudeBrain: Uses `claude --dangerously-skip-permissions --max-turns N -p`
 // - OpenCodeBrain: Uses `opencode` CLI
 //
 // Each provider executes the LLM via fork/exec with timeout handling.
@@ -27,10 +27,12 @@ struct BrainResult {
 
 // Configuration for brain invocation
 struct BrainConfig {
-    int timeout_ms = 120000;        // 2 minute default
+    int timeout_ms = 600000;        // 10 minute default (agent cycles take time)
     bool capture_stderr = true;
     std::string working_dir;        // If empty, uses current dir
     std::vector<std::string> extra_args;
+    std::string system_prompt;      // System prompt for agent identity/constraints
+    int max_turns = 20;             // Max agent turns (0 = use provider default)
 };
 
 // Abstract base class for LLM providers
@@ -51,7 +53,7 @@ public:
     virtual std::vector<std::string> available_models() const = 0;
 
     // Utility: simple blocking think with default timeout
-    std::string think_simple(const std::string& prompt, int timeout_ms = 120000) {
+    std::string think_simple(const std::string& prompt, int timeout_ms = 600000) {
         BrainConfig config;
         config.timeout_ms = timeout_ms;
         auto result = think(prompt, config);
@@ -60,7 +62,7 @@ public:
 };
 
 // Claude CLI brain provider
-// Executes: claude -p --model <model> --print
+// Executes: claude --dangerously-skip-permissions --model <model> --max-turns N [-p prompt]
 class ClaudeBrain : public BrainProvider {
 public:
     explicit ClaudeBrain(const std::string& model = "sonnet")

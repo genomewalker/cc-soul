@@ -69,7 +69,6 @@ BrainResult execute_with_timeout(
         }
 
         // Unset CLAUDECODE to allow nested Claude Code sessions
-        // This is safe because we're in the forked child process
         unsetenv("CLAUDECODE");
 
         // Build argv
@@ -131,7 +130,6 @@ BrainResult execute_with_timeout(
         }
 
         if (ret == 0) {
-            // Timeout
             timed_out = true;
             break;
         }
@@ -179,17 +177,17 @@ BrainResult execute_with_timeout(
     // Handle process termination
     int status = 0;
     if (timed_out) {
-        // Kill the process
         kill(pid, SIGKILL);
         waitpid(pid, &status, 0);
         result.error = "Timeout after " + std::to_string(timeout_ms) + "ms";
         result.exit_code = -1;
     } else {
-        // Wait for completion
         waitpid(pid, &status, 0);
         if (WIFEXITED(status)) {
             result.exit_code = WEXITSTATUS(status);
-            result.success = (result.exit_code == 0);
+            result.success = (result.exit_code == 0 ||
+                              result.exit_code == 10 ||   // achieved
+                              result.exit_code == 20);    // blocked (not an error)
         } else if (WIFSIGNALED(status)) {
             result.exit_code = -WTERMSIG(status);
             result.error = "Killed by signal " + std::to_string(WTERMSIG(status));
@@ -212,20 +210,28 @@ BrainResult execute_with_timeout(
 }  // anonymous namespace
 
 // ClaudeBrain implementation
+// Runs: claude --dangerously-skip-permissions --model <model> --max-turns N [--system <sys>] -p <prompt>
 BrainResult ClaudeBrain::think(const std::string& prompt, const BrainConfig& config) {
+    int turns = config.max_turns > 0 ? config.max_turns : 20;
+
     std::vector<std::string> args = {
         claude_path_,
-        "-p",
+        "--dangerously-skip-permissions",
         "--model", model_,
-        "--print"
+        "--max-turns", std::to_string(turns)
     };
 
-    // Add extra args
+    if (!config.system_prompt.empty()) {
+        args.push_back("--system");
+        args.push_back(config.system_prompt);
+    }
+
     for (const auto& arg : config.extra_args) {
         args.push_back(arg);
     }
 
-    // Add prompt as final argument
+    // -p triggers non-interactive print mode with full tool access
+    args.push_back("-p");
     args.push_back(prompt);
 
     return execute_with_timeout(args, "", config.timeout_ms, config.working_dir);
@@ -235,17 +241,15 @@ BrainResult ClaudeBrain::think(const std::string& prompt, const BrainConfig& con
 BrainResult OpenCodeBrain::think(const std::string& prompt, const BrainConfig& config) {
     std::vector<std::string> args = {
         opencode_path_,
-        "run",           // Required subcommand for non-interactive use
+        "run",
         "-m", model_,
-        "--print-logs"   // Output to stderr for debugging
+        "--print-logs"
     };
 
-    // Add extra args
     for (const auto& arg : config.extra_args) {
         args.push_back(arg);
     }
 
-    // Add prompt as final argument (opencode run accepts message as positional)
     args.push_back(prompt);
 
     return execute_with_timeout(args, "", config.timeout_ms, config.working_dir);

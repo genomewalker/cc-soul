@@ -1,23 +1,25 @@
 #pragma once
-// SadhanaManager: Unified Autonomous Agent System
+// SadhanaManager: Fully Agentic Autonomous Agent System
 //
-// Manages persistent autonomous agents with sense-think-act loops.
-// Each sadhana represents a goal that the agent works toward autonomously.
+// Each sadhana is a persistent goal pursued by a full Claude Code agent
+// running with complete tool access (bash, chitta MCP, file I/O, sub-tasks).
 //
 // Architecture:
 //   SadhanaManager (daemon singleton)
 //     |
-//     +-- tick() called every second from daemon loop
+//     +-- tick() called every 100ms from daemon loop
 //     |
 //     +-- For each running sadhana with elapsed interval:
 //         |
-//         +-- SENSE: LLM generates observation command
-//         +-- THINK: LLM decides if action needed
-//         +-- ACT: Execute generated action
-//         +-- LEARN: Store patterns in memory
+//         +-- Build context: memories + history + goal
+//         +-- Spawn Claude Code agent with --dangerously-skip-permissions
+//         +-- Agent runs N turns with full tool access
+//         +-- Parse final JSON status message from agent output
+//         +-- Store result, check for completion/blocking
 //
-// The brain (LLM) dynamically generates both sensors and actions,
-// rather than using pre-defined plugins.
+// The agent calls chitta tools directly to search/store memories.
+// It signals completion via exit code (10=achieved, 20=blocked) or
+// a final JSON message: {"status": "progressed|achieved|blocked", "summary": "..."}
 
 #include "brain_provider.hpp"
 #include "../duckdb_store.hpp"
@@ -74,12 +76,12 @@ struct Sadhana {
     int64_t created_at = 0;
     int64_t updated_at = 0;
     int iterations = 0;
-    json last_sense;                // Last observation
-    std::string last_action;        // Last action taken
-    json last_result;               // Result of last action
-    int brain_calls = 0;            // Total LLM invocations
-    json learned_patterns;          // Patterns learned
-    int interval_seconds = 60;      // Time between cycles
+    json last_sense;                // Legacy: last observation (unused in agentic mode)
+    std::string last_action;        // Summary of what the last cycle did
+    json last_result;               // Last cycle result: {status, summary, exit_code, duration_ms}
+    int brain_calls = 0;            // Total agent invocations
+    json learned_patterns;          // Patterns learned (legacy, agent manages its own memory)
+    int interval_seconds = 300;     // Seconds between cycles (default 5 min)
     std::string realm = "brahman";
 };
 
@@ -89,14 +91,17 @@ enum class SadhanaEventType {
     Started,
     Paused,
     Resumed,
-    Sense,
-    Think,
-    Act,
-    Learn,
+    Cycle,          // One agentic cycle completed
+    Checkpoint,     // Mid-cycle agent checkpoint
     Done,
     Failed,
     ModelChanged,
-    GoalChanged
+    GoalChanged,
+    // Legacy (kept for DB compatibility with old records)
+    Sense,
+    Think,
+    Act,
+    Learn
 };
 
 inline std::string sadhana_event_type_to_string(SadhanaEventType type) {
@@ -105,33 +110,34 @@ inline std::string sadhana_event_type_to_string(SadhanaEventType type) {
         case SadhanaEventType::Started:      return "started";
         case SadhanaEventType::Paused:       return "paused";
         case SadhanaEventType::Resumed:      return "resumed";
-        case SadhanaEventType::Sense:        return "sense";
-        case SadhanaEventType::Think:        return "think";
-        case SadhanaEventType::Act:          return "act";
-        case SadhanaEventType::Learn:        return "learn";
+        case SadhanaEventType::Cycle:        return "cycle";
+        case SadhanaEventType::Checkpoint:   return "checkpoint";
         case SadhanaEventType::Done:         return "done";
         case SadhanaEventType::Failed:       return "failed";
         case SadhanaEventType::ModelChanged: return "model_changed";
         case SadhanaEventType::GoalChanged:  return "goal_changed";
+        case SadhanaEventType::Sense:        return "sense";
+        case SadhanaEventType::Think:        return "think";
+        case SadhanaEventType::Act:          return "act";
+        case SadhanaEventType::Learn:        return "learn";
         default: return "unknown";
     }
 }
 
 // Configuration for the manager
 struct SadhanaConfig {
-    int max_concurrent = 3;         // Max running sadhanas
-    int max_brain_timeout_ms = 300000;  // 5 minute max per LLM call
-    int default_interval_seconds = 60;
-    bool enable_learning = true;    // Store learned patterns in memory
+    int max_concurrent = 3;
+    int max_agent_timeout_ms = 600000;      // 10 minutes per agent cycle
+    int max_agent_turns = 20;               // Max turns per cycle
+    int default_interval_seconds = 300;     // 5 minutes between cycles
+    bool enable_learning = true;            // Remind agent to use memory tools
     std::string default_brain_provider = "claude";
     std::string default_brain_model = "sonnet";
 
     // Hardening settings
-    int max_consecutive_failures = 5;   // Pause after N failures in a row
-    size_t max_context_chars = 500;     // Truncate observation context in prompts
-    size_t max_error_chars = 200;       // Truncate error messages
-    size_t max_output_chars = 4000;     // Truncate command output stored in DB
-    bool strip_ansi_codes = true;       // Remove terminal color codes
+    int max_consecutive_failures = 5;
+    size_t max_output_chars = 4000;         // Truncate agent output stored in DB
+    bool strip_ansi_codes = true;
 };
 
 // Statistics for monitoring
@@ -163,6 +169,9 @@ public:
     bool resume(int64_t id);
     bool stop(int64_t id, bool success = true, const std::string& reason = "");
 
+    // Agent self-reporting: called by the agent subprocess via chitta CLI
+    bool checkpoint(int64_t id, const std::string& status, const std::string& summary);
+
     // Query operations
     std::optional<Sadhana> get(int64_t id);
     std::vector<Sadhana> list(const std::string& state_filter = "",
@@ -178,7 +187,7 @@ public:
     // History
     std::vector<json> get_history(int64_t id, size_t limit = 50);
 
-    // Called from daemon's background loop every second
+    // Called from daemon's background loop every 100ms
     void tick();
 
     // Statistics
@@ -195,27 +204,30 @@ private:
     struct RunningState {
         int64_t next_run_at = 0;
         std::unique_ptr<BrainProvider> brain;
-        int consecutive_failures = 0;  // Track failure streaks
+        int consecutive_failures = 0;
     };
     std::unordered_map<int64_t, RunningState> running_;
 
     // Text sanitization helpers
     static std::string strip_ansi(const std::string& text);
     static std::string truncate(const std::string& text, size_t max_chars);
-    static std::string sanitize_for_prompt(const std::string& text, size_t max_chars, bool strip_ansi = true);
-    static bool is_valid_command(const std::string& cmd);
+    static std::string escape_sql(const std::string& text);
 
-    // Core sense-think-act cycle
+    // Context builders for agent prompt
+    std::string build_system_prompt(const Sadhana& sadhana) const;
+    std::string build_user_message(const Sadhana& sadhana,
+                                    const std::string& memory_ctx,
+                                    const std::string& history_ctx) const;
+    std::string build_memory_context(const Sadhana& sadhana);
+    std::string build_history_context(const Sadhana& sadhana);
+
+    // Parse the last JSON status object from agent output
+    static json extract_last_json(const std::string& text);
+
+    // Core agentic cycle
     void run_cycle(Sadhana& sadhana);
 
-    // Individual phases
-    json sense(Sadhana& sadhana, BrainProvider& brain);
-    json think(Sadhana& sadhana, BrainProvider& brain, const json& observation);
-    json act(Sadhana& sadhana, const json& decision);
-    void learn(Sadhana& sadhana, const json& observation, const json& decision, const json& result);
-
     // Persistence helpers
-    bool save_sadhana(const Sadhana& s);
     bool log_event(int64_t sadhana_id, SadhanaEventType type,
                    const json& content = json(), int duration_ms = 0);
 

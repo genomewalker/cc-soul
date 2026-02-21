@@ -2728,7 +2728,7 @@ private:
 
         tools_.push_back({
             {"name", "sadhana_start"},
-            {"description", "Create and start a new autonomous agent (sadhana) that works toward a goal using sense-think-act loops"},
+            {"description", "Create and start a new autonomous agent (sadhana) that works toward a goal using full Claude Code sessions with tool access. Each cycle runs a complete agent with bash, file, and chitta memory tools. Default interval: 300s."},
             {"inputSchema", {
                 {"type", "object"},
                 {"properties", {
@@ -2853,6 +2853,25 @@ private:
             }}
         });
         handlers_["sadhana_set_interval"] = [this](const json& p) { return tool_sadhana_set_interval(p); };
+
+        tools_.push_back({
+            {"name", "sadhana_checkpoint"},
+            {"description", "Report a mid-cycle checkpoint from within an agentic sadhana. "
+             "Call this from inside a running sadhana cycle to log progress and optionally signal completion. "
+             "Use status='achieved' to stop the sadhana, 'blocked' to pause it, 'progressed' to continue normally."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "integer"}, {"description", "Sadhana ID"}}},
+                    {"status", {{"type", "string"},
+                                {"enum", {"progressed", "achieved", "blocked"}},
+                                {"description", "Cycle status"}}},
+                    {"summary", {{"type", "string"}, {"description", "What was done this cycle"}}}
+                }},
+                {"required", {"id", "status", "summary"}}
+            }}
+        });
+        handlers_["sadhana_checkpoint"] = [this](const json& p) { return tool_sadhana_checkpoint(p); };
 
         // ═══════════════════════════════════════════════════════════════════════
         // Context Repository Tools (Letta-inspired)
@@ -12347,6 +12366,35 @@ private:
         result["interval"] = interval;
 
         return DuckDBToolResult::ok("Set interval to " + std::to_string(interval) + "s for sadhana " + std::to_string(id), result);
+    }
+
+    DuckDBToolResult tool_sadhana_checkpoint(const json& params) {
+        if (!sadhana_manager_) {
+            return DuckDBToolResult::error("Sadhana manager not initialized");
+        }
+
+        auto [id, id_str] = parse_id(params, "id");
+        if (id == 0) {
+            return DuckDBToolResult::error("Invalid sadhana ID");
+        }
+
+        std::string status = params.value("status", "progressed");
+        std::string summary = params.value("summary", "");
+
+        if (summary.empty()) {
+            return DuckDBToolResult::error("Summary is required");
+        }
+
+        if (!sadhana_manager_->checkpoint(id, status, summary)) {
+            return DuckDBToolResult::error("Checkpoint failed for sadhana " + std::to_string(id));
+        }
+
+        json result;
+        result["id"] = id;
+        result["status"] = status;
+        result["summary"] = summary;
+
+        return DuckDBToolResult::ok("Checkpoint [" + status + "] for sadhana " + std::to_string(id), result);
     }
 
     // ═══════════════════════════════════════════════════════════════════════
