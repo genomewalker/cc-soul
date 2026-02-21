@@ -107,7 +107,7 @@ fi
 # PPID = Claude's PID (parent of this hook script)
 if [[ -n "$SESSION_ID" ]]; then
     CLAUDE_PID=${PPID:-$$}
-    chitta session_register --session_id "$SESSION_ID" --realm "$REALM" --pid "$CLAUDE_PID" >/dev/null 2>&1 || true
+    timeout "$MAX_WAIT" chitta session_register --session_id "$SESSION_ID" --realm "$REALM" --pid "$CLAUDE_PID" >/dev/null 2>&1 || true
 
     # Export session environment variables for other processes
     SESSION_ENV_FILE="$HOME/.claude/mind/.session_env_$$"
