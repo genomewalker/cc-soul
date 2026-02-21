@@ -1018,6 +1018,12 @@ bool DuckDBStore::create_schema() {
         WHERE priority_tier = 0 AND (confidence >= 0.5 OR pinned = TRUE)
     )");
 
+    // Content-addressed deduplication: hash for exact duplicate detection
+    write_execute("ALTER TABLE memory ADD COLUMN IF NOT EXISTS content_hash VARCHAR DEFAULT ''");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_memory_content_hash ON memory(content_hash)");
+    // Backfill existing memories
+    write_execute("UPDATE memory SET content_hash = sha256(content) WHERE content_hash = '' OR content_hash IS NULL");
+
     // Memory history - git-like version control for memories
     write_execute(R"(
         CREATE TABLE IF NOT EXISTS memory_history (
@@ -1846,12 +1852,28 @@ int64_t DuckDBStore::remember(
         else escaped_realm += c;
     }
 
+    // Content-addressed dedup: skip if exact duplicate exists
+    {
+        std::ostringstream check_sql;
+        check_sql << "SELECT id FROM memory WHERE content_hash = sha256('"
+                  << escaped_content << "') LIMIT 1";
+        auto check_result = read_query(check_sql.str());
+        if (check_result && !check_result->HasError()) {
+            auto chunk = check_result->Fetch();
+            if (chunk && chunk->size() > 0) {
+                int64_t existing_id = chunk->GetValue(0, 0).GetValue<int64_t>();
+                touch(existing_id);
+                return existing_id;
+            }
+        }
+    }
+
     std::ostringstream sql;
-    sql << "INSERT INTO memory (id, kind, content, confidence, decay_rate, created_at, accessed_at, embedding, realm, visibility) "
+    sql << "INSERT INTO memory (id, kind, content, confidence, decay_rate, created_at, accessed_at, embedding, realm, visibility, content_hash) "
         << "VALUES (nextval('memory_seq'), '" << kind << "', '" << escaped_content << "', "
         << confidence << ", " << decay_rate << ", " << now_ts << ", " << now_ts << ", "
         << embedding_to_sql(embedding) << ", '" << escaped_realm << "', "
-        << static_cast<int>(visibility) << ") RETURNING id";
+        << static_cast<int>(visibility) << ", sha256('" << escaped_content << "')) RETURNING id";
 
     auto result = write_query(sql.str());
     if (!result) {
@@ -9420,7 +9442,9 @@ std::vector<MemoryResult> DuckDBStore::hybrid_recall(
     size_t k,
     const std::string& realm,
     bool include_global,
-    HybridRecallConfig config
+    HybridRecallConfig config,
+    const std::string& lex_query,
+    const std::string& hyde_query
 ) {
     std::vector<MemoryResult> results;
     if (!db_) return results;
@@ -9429,37 +9453,64 @@ std::vector<MemoryResult> DuckDBStore::hybrid_recall(
     std::unordered_map<int64_t, float> fusion_scores;
     std::unordered_map<int64_t, MemoryResult> memory_cache;
 
+    // Feature 3: Per-source RRF score tracking for position-aware blending
+    struct SourceScores {
+        float vector = 0.0f;
+        float bm25 = 0.0f;
+        float graph = 0.0f;
+        float recency = 0.0f;
+    };
+    std::unordered_map<int64_t, SourceScores> source_scores;
+
     // 1. Vector search
     auto vector_results = recall(query_embedding, k * 2, realm, include_global, {});
     for (size_t rank = 0; rank < vector_results.size(); ++rank) {
         int64_t id = vector_results[rank].id;
         float rrf_score = config.vector_weight / (config.rrf_k + rank + 1);
         fusion_scores[id] += rrf_score;
+        source_scores[id].vector += 1.0f / (config.rrf_k + rank + 1);
         memory_cache[id] = vector_results[rank];
     }
 
-    // 2. BM25 search (if text provided)
-    if (!query_text.empty() && has_fts()) {
-        auto bm25_results = bm25_search_memory(query_text, k * 2, realm);
+    // Helper to fetch and cache a memory by id
+    auto ensure_cached = [&](int64_t id) {
+        if (!memory_cache.count(id)) {
+            auto mem = get_memory(id);
+            if (mem) {
+                MemoryResult mr;
+                mr.id = mem->id;
+                mr.kind = mem->kind;
+                mr.content = mem->content;
+                mr.confidence = mem->confidence;
+                mr.created_at = mem->created_at;
+                mr.accessed_at = mem->accessed_at;
+                mr.realm = mem->realm;
+                memory_cache[id] = mr;
+            }
+        }
+    };
+
+    // 2. BM25 search using lex_query variant (Feature 1) or raw query_text
+    std::string bm25_text = lex_query.empty() ? query_text : lex_query;
+    if (!bm25_text.empty() && has_fts()) {
+        auto bm25_results = bm25_search_memory(bm25_text, k * 2, realm);
         for (size_t rank = 0; rank < bm25_results.size(); ++rank) {
             int64_t id = bm25_results[rank].first;
             float rrf_score = config.bm25_weight / (config.rrf_k + rank + 1);
             fusion_scores[id] += rrf_score;
+            source_scores[id].bm25 += 1.0f / (config.rrf_k + rank + 1);
+            ensure_cached(id);
+        }
 
-            // Fetch memory if not in cache
-            if (!memory_cache.count(id)) {
-                auto mem = get_memory(id);
-                if (mem) {
-                    MemoryResult mr;
-                    mr.id = mem->id;
-                    mr.kind = mem->kind;
-                    mr.content = mem->content;
-                    mr.confidence = mem->confidence;
-                    mr.created_at = mem->created_at;
-                    mr.accessed_at = mem->accessed_at;
-                    mr.realm = mem->realm;
-                    memory_cache[id] = mr;
-                }
+        // Feature 1: HyDE boost — run second BM25 with hypothetical memory excerpt at 0.5x weight
+        if (!hyde_query.empty()) {
+            auto hyde_results = bm25_search_memory(hyde_query, k * 2, realm);
+            for (size_t rank = 0; rank < hyde_results.size(); ++rank) {
+                int64_t id = hyde_results[rank].first;
+                float rrf_score = (config.bm25_weight * 0.5f) / (config.rrf_k + rank + 1);
+                fusion_scores[id] += rrf_score;
+                source_scores[id].bm25 += 0.5f / (config.rrf_k + rank + 1);
+                ensure_cached(id);
             }
         }
     }
@@ -9476,22 +9527,8 @@ std::vector<MemoryResult> DuckDBStore::hybrid_recall(
             int64_t id = graph_results[rank].first;
             float rrf_score = config.graph_weight / (config.rrf_k + rank + 1);
             fusion_scores[id] += rrf_score;
-
-            // Fetch memory if not in cache
-            if (!memory_cache.count(id)) {
-                auto mem = get_memory(id);
-                if (mem) {
-                    MemoryResult mr;
-                    mr.id = mem->id;
-                    mr.kind = mem->kind;
-                    mr.content = mem->content;
-                    mr.confidence = mem->confidence;
-                    mr.created_at = mem->created_at;
-                    mr.accessed_at = mem->accessed_at;
-                    mr.realm = mem->realm;
-                    memory_cache[id] = mr;
-                }
-            }
+            source_scores[id].graph += 1.0f / (config.rrf_k + rank + 1);
+            ensure_cached(id);
         }
     }
 
@@ -9506,15 +9543,34 @@ std::vector<MemoryResult> DuckDBStore::hybrid_recall(
                 float age_days = static_cast<float>(age_ms) / (86400.0f * 1000.0f);
                 float recency_bonus = std::exp(-age_days / 30.0f);  // Decay over 30 days
                 score += config.recency_weight * recency_bonus;
+                source_scores[id].recency = recency_bonus;
             }
         }
     }
 
-    // 5. Sort by fusion score and build final results
+    // 5. Sort by fusion score
     std::vector<std::pair<int64_t, float>> scored_ids;
     for (const auto& [id, score] : fusion_scores) {
         scored_ids.push_back({id, score});
     }
+    std::sort(scored_ids.begin(), scored_ids.end(),
+              [](const auto& a, const auto& b) { return a.second > b.second; });
+
+    // Feature 3: Position-aware re-blend
+    // Top positions favor retrieval (vector+graph), lower positions favor lexical (BM25)
+    for (size_t pos = 0; pos < scored_ids.size(); ++pos) {
+        int64_t id = scored_ids[pos].first;
+        auto& ss = source_scores[id];
+        float ret_w, lex_w;
+        if (pos < 3)       { ret_w = 0.75f; lex_w = 0.25f; }
+        else if (pos < 10) { ret_w = 0.60f; lex_w = 0.40f; }
+        else               { ret_w = 0.40f; lex_w = 0.60f; }
+        float retrieval = ss.vector * config.vector_weight + ss.graph * config.graph_weight;
+        float lexical = ss.bm25 * config.bm25_weight;
+        scored_ids[pos].second = ret_w * retrieval + lex_w * lexical + ss.recency * config.recency_weight;
+    }
+
+    // Final sort after position-aware blending
     std::sort(scored_ids.begin(), scored_ids.end(),
               [](const auto& a, const auto& b) { return a.second > b.second; });
 

@@ -1434,7 +1434,9 @@ public:
         size_t k = 10,
         const std::string& realm = "",
         bool include_global = true,
-        HybridRecallConfig config = HybridRecallConfig()
+        HybridRecallConfig config = HybridRecallConfig(),
+        const std::string& lex_query = "",
+        const std::string& hyde_query = ""
     );
 
     // Graph spreading: find memories connected via triplets (RWR-lite)

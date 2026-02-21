@@ -174,6 +174,50 @@ private:
         return false;
     }
 
+    // Typed query expansion: split query into BM25-optimized, vector-optimized, and HyDE variants
+    struct ExpandedQuery {
+        std::string lex;   // keyword variant for BM25
+        std::string vec;   // natural language for vector
+        std::string hyde;  // hypothetical memory excerpt
+    };
+
+    static ExpandedQuery expand_query(const std::string& query) {
+        ExpandedQuery eq;
+        eq.vec = query;
+        eq.hyde = "[memory about] " + query;
+
+        static const std::unordered_set<std::string> STOP_WORDS = {
+            "a","an","the","is","are","was","were","be","been","being","have","has","had",
+            "do","does","did","will","would","could","should","may","might","shall","can",
+            "to","of","in","for","on","with","at","by","from","as","into","through",
+            "i","me","my","we","our","you","your","he","him","his","she","her","it","its",
+            "they","them","their","what","which","who","this","that","these","those",
+            "not","only","just","about","so","than","too","very","all","both","each",
+            "more","most","other","some","such","no","own","same","here","there",
+            "when","where","why","how","then","once","am","out","off","over","under"
+        };
+
+        std::ostringstream lex_ss;
+        std::istringstream iss(query);
+        std::string word;
+        bool first = true;
+        while (iss >> word) {
+            std::string lower;
+            lower.reserve(word.size());
+            for (char c : word) {
+                unsigned char uc = static_cast<unsigned char>(c);
+                if (std::isalnum(uc)) lower += static_cast<char>(std::tolower(uc));
+            }
+            if (!lower.empty() && STOP_WORDS.find(lower) == STOP_WORDS.end()) {
+                if (!first) lex_ss << " ";
+                lex_ss << lower;
+                first = false;
+            }
+        }
+        eq.lex = lex_ss.str().empty() ? query : lex_ss.str();
+        return eq;
+    }
+
     // Helper to parse ID from JSON (accepts both string and number)
     static std::pair<int64_t, std::string> parse_id(const json& params, const std::string& key = "id") {
         int64_t db_id = 0;
@@ -2622,6 +2666,19 @@ private:
             }}
         });
         handlers_["hybrid_recall"] = [this](const json& p) { return tool_hybrid_recall(p); };
+
+        tools_.push_back({
+            {"name", "expand_query"},
+            {"description", "Expand a query into typed variants (lex for BM25, vec for vector search, hyde as hypothetical memory excerpt) for improved hybrid retrieval"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"query", {{"type", "string"}, {"description", "Query to expand"}}}
+                }},
+                {"required", {"query"}}
+            }}
+        });
+        handlers_["expand_query"] = [this](const json& p) { return tool_expand_query(p); };
 
         tools_.push_back({
             {"name", "smart_recall"},
@@ -11813,6 +11870,40 @@ private:
         return DuckDBToolResult::ok(msg.str(), result);
     }
 
+    DuckDBToolResult tool_expand_query(const json& params) {
+        std::string query = params.value("query", "");
+        if (query.empty()) return DuckDBToolResult::error("query required");
+        auto eq = expand_query(query);
+        return DuckDBToolResult::ok("Query expanded into lex/vec/hyde variants", {
+            {"lex", eq.lex}, {"vec", eq.vec}, {"hyde", eq.hyde}
+        });
+    }
+
+    bool try_bm25_short_circuit(
+        const std::string& query,
+        size_t limit,
+        const std::string& realm,
+        bool include_global,
+        std::vector<MemoryResult>& out_results
+    ) {
+        if (query.empty()) return false;
+        auto bm25_results = mind_->store().bm25_search_memory(query, limit * 2, realm, include_global);
+        if (bm25_results.size() < 2) return false;
+        float top = bm25_results[0].second;
+        float second = bm25_results[1].second;
+        if (top <= 2.0f) return false;
+        float gap = 1.0f - (second / top);
+        if (gap <= 0.15f) return false;
+        for (size_t i = 0; i < std::min(limit, bm25_results.size()); ++i) {
+            auto mem = mind_->store().get_memory(bm25_results[i].first);
+            if (mem) {
+                mem->similarity = bm25_results[i].second / top;
+                out_results.push_back(*mem);
+            }
+        }
+        return true;
+    }
+
     DuckDBToolResult tool_hybrid_recall(const json& params) {
         std::string query = params.value("query", "");
         if (query.empty()) {
@@ -11823,11 +11914,57 @@ private:
         std::string tag = params.value("tag", "");
         std::string realm = params.value("realm", "");
 
-        // Get embedding for query
+        // Feature 2: BM25 short-circuit for strong lexical matches
+        std::vector<MemoryResult> sc_results;
+        bool short_circuited = try_bm25_short_circuit(query, limit, realm, true, sc_results);
+        if (short_circuited && !sc_results.empty()) {
+            json result;
+            result["short_circuit"] = true;
+            result["memories"] = json::array();
+            size_t count = 0;
+            for (const auto& r : sc_results) {
+                json mem;
+                mem["id"] = r.id;
+                mem["kind"] = r.kind;
+                mem["content"] = r.content.substr(0, 300);
+                mem["similarity"] = r.similarity;
+                mem["confidence"] = r.confidence;
+                mem["realm"] = r.realm;
+                mem["created_at"] = r.created_at;
+                result["memories"].push_back(mem);
+                count++;
+                if (count >= limit) break;
+            }
+            result["count"] = count;
+
+            // SUS: log recall query
+            try {
+                std::string _sus_sid = get_session_id(params);
+                if (!_sus_sid.empty() && _sus_sid != "default") {
+                    json _sus_ids = json::array();
+                    json _sus_scores = json::array();
+                    for (const auto& mem : result["memories"]) {
+                        _sus_ids.push_back(mem["id"]);
+                        _sus_scores.push_back(mem.value("similarity", 0.0));
+                    }
+                    mind_->store().log_recall_query(
+                        _sus_sid, 0, "hybrid_recall", query,
+                        _sus_ids.dump(), _sus_scores.dump());
+                }
+            } catch (...) {}
+
+            return DuckDBToolResult::ok(
+                "Found " + std::to_string(count) + " memories (BM25 short-circuit)", result);
+        }
+
+        // Feature 1: Typed query expansion
+        auto eq = expand_query(query);
+
+        // Get embedding for vector-optimized query
         if (!mind_->embedder_ready()) {
             return DuckDBToolResult::error("Embedder not ready");
         }
-        auto embedding = mind_->embedder().embed_query(query).data;
+        auto embedding = mind_->embedder().embed_query(eq.vec).data;
         if (embedding.empty()) {
             return DuckDBToolResult::error("Failed to generate query embedding");
         }
@@ -11845,7 +11982,8 @@ private:
             if (params.contains("graph_weight")) config.graph_weight = params["graph_weight"].get<float>();
             if (params.contains("recency_weight")) config.recency_weight = params["recency_weight"].get<float>();
 
-            results = mind_->store().hybrid_recall(embedding, query, limit, realm, true, config);
+            // Pass lex and hyde variants to store for improved BM25 matching
+            results = mind_->store().hybrid_recall(embedding, query, limit, realm, true, config, eq.lex, eq.hyde);
         }
 
         json result;

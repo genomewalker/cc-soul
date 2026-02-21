@@ -251,6 +251,66 @@ else
         [[ -n "$session" ]] && echo "[ledger] $session ($mood)"
     fi
 
+    # ═══════════════════════════════════════════
+    # TOPOLOGY: Structural map of memory state
+    # ═══════════════════════════════════════════
+    TOPOLOGY_PARTS=()
+
+    # Top 3 active themes
+    theme_out=$(timeout "$MAX_WAIT" "$CHITTA_BIN" sql_query \
+        --query "SELECT name, memory_count FROM theme WHERE memory_count > 0 ORDER BY updated_at DESC LIMIT 3" \
+        2>/dev/null || true)
+    if [[ -n "$theme_out" ]]; then
+        theme_str=$(echo "$theme_out" | jq -r '[.rows[]? | "\(.[0]) (\(.[1]) memories)"] | join(" | ")' 2>/dev/null || true)
+        [[ -n "$theme_str" ]] && TOPOLOGY_PARTS+=("Themes: $theme_str")
+    fi
+
+    # Memory kind distribution (most active)
+    kind_out=$(timeout "$MAX_WAIT" "$CHITTA_BIN" sql_query \
+        --query "SELECT kind, COUNT(*) as cnt FROM memory WHERE access_count > 1 GROUP BY kind ORDER BY cnt DESC LIMIT 6" \
+        2>/dev/null || true)
+    if [[ -n "$kind_out" ]]; then
+        kind_str=$(echo "$kind_out" | jq -r '[.rows[]? | "\(.[0]):\(.[1])"] | join(", ")' 2>/dev/null || true)
+        [[ -n "$kind_str" ]] && TOPOLOGY_PARTS+=("Active: $kind_str")
+    fi
+
+    # Recent project memories (only if REALM is set and not brahman)
+    if [[ -n "${REALM:-}" && "${REALM}" != "brahman" ]]; then
+        recent_out=$(timeout "$MAX_WAIT" "$CHITTA_BIN" sql_query \
+            --query "SELECT id, kind, content FROM memory WHERE realm = '${REALM}' ORDER BY accessed_at DESC LIMIT 3" \
+            2>/dev/null || true)
+        if [[ -n "$recent_out" ]]; then
+            recent_str=$(echo "$recent_out" | jq -r '.rows[]? | "#\(.[0]) [\(.[1])] \(.[2] | .[0:80])"' 2>/dev/null || true)
+            if [[ -n "$recent_str" ]]; then
+                TOPOLOGY_PARTS+=("Recent (${REALM}):")
+                while IFS= read -r line; do
+                    [[ -n "$line" ]] && TOPOLOGY_PARTS+=("  $line")
+                done <<< "$recent_str"
+            fi
+        fi
+    fi
+
+    # Summary counts
+    count_out=$(timeout "$MAX_WAIT" "$CHITTA_BIN" sql_query \
+        --query "SELECT COUNT(*) as total, COUNT(CASE WHEN priority_tier = 2 THEN 1 END) as critical, COUNT(CASE WHEN pinned = true THEN 1 END) as pinned FROM memory" \
+        2>/dev/null || true)
+    if [[ -n "$count_out" ]]; then
+        total_mem=$(echo "$count_out" | jq -r '.rows[0]?[0] // 0' 2>/dev/null || echo "0")
+        critical_mem=$(echo "$count_out" | jq -r '.rows[0]?[1] // 0' 2>/dev/null || echo "0")
+        pinned_mem=$(echo "$count_out" | jq -r '.rows[0]?[2] // 0' 2>/dev/null || echo "0")
+        [[ "$total_mem" != "0" ]] && TOPOLOGY_PARTS+=("Total: ${total_mem} memories (${critical_mem} critical, ${pinned_mem} pinned)")
+    fi
+
+    # Emit topology block
+    if [[ ${#TOPOLOGY_PARTS[@]} -gt 0 ]]; then
+        echo ""
+        echo "[topology]"
+        for part in "${TOPOLOGY_PARTS[@]}"; do
+            echo "$part"
+        done
+        echo "[/topology]"
+    fi
+
     # ===========================================
     # CORRECTIONS RECAP: Surface recent high-priority corrections
     # ===========================================

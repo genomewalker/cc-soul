@@ -635,6 +635,9 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
     {"curiosity_resolve", "Mark a curiosity gap as resolved",
      {{"id", "Gap memory ID", true, nullptr},
       {"learned", "What was learned", false, nullptr}}},
+
+    {"expand_query", "Expand a query into typed variants for hybrid retrieval",
+     {{"query", "Query to expand", true, nullptr}}},
 };
 
 // Build set of known tools from specs
