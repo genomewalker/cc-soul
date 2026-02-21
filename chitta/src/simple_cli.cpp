@@ -429,6 +429,14 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
     handler.set_sadhana_manager(&sadhana_manager);
     std::cerr << "[daemon] Sadhana manager initialized\n";
 
+    // Wire up event streaming: push sadhana events to subscribed clients
+    sadhana_manager.set_stream_fn([&server](int fd, std::string line) {
+        server.queue_response(fd, std::move(line));
+    });
+    server.set_disconnect_callback([&sadhana_manager](int fd) {
+        sadhana_manager.stream_unsubscribe(fd);
+    });
+
     std::signal(SIGTERM, daemon_signal_handler);
     std::signal(SIGINT, daemon_signal_handler);
     std::signal(SIGPIPE, SIG_IGN);
@@ -1214,6 +1222,27 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                         }
                     }
                 }
+            }
+
+            // Fast-path: sadhana_watch - keep connection open for event streaming
+            // Must handle in main loop (not thread pool) to keep the fd as a subscriber
+            if (tool_name == "sadhana_watch") {
+                int64_t watch_id = 0;
+                if (parsed.contains("params") && parsed["params"].contains("arguments")) {
+                    watch_id = parsed["params"]["arguments"].value("id", (int64_t)0);
+                }
+                sadhana_manager.stream_subscribe(req.client_fd, watch_id);
+                // Send ack — connection stays open; daemon will push events as lines
+                json ack;
+                ack["jsonrpc"] = "2.0";
+                ack["id"] = parsed.value("id", json());
+                ack["result"]["content"] = json::array({
+                    json::object({{"type", "text"}, {"text", "watching"}})
+                });
+                ack["result"]["structured"]["status"] = "watching";
+                ack["result"]["structured"]["sadhana_id"] = watch_id;
+                server.respond(req.client_fd, ack.dump());
+                continue;
             }
 
             // Fast-path: health_check stays on main thread (always responsive)

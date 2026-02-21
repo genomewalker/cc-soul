@@ -369,9 +369,10 @@ void SocketServer::accept_new_connections() {
 
 void SocketServer::cleanup_closed_connections() {
     auto it = std::remove_if(connections_.begin(), connections_.end(),
-        [](const ClientConnection& conn) {
+        [this](const ClientConnection& conn) {
             if (conn.wants_close) {
                 std::cerr << "[socket_server] Client disconnected (fd=" << conn.fd << ")\n";
+                if (disconnect_cb_) disconnect_cb_(conn.fd);
                 close(conn.fd);
                 return true;
             }

@@ -12,6 +12,7 @@
 #include <vector>
 #include <atomic>
 #include <mutex>
+#include <functional>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -145,6 +146,10 @@ public:
     // Get socket path (for logging/debugging)
     const std::string& socket_path() const { return socket_path_; }
 
+    // Disconnect callback (called when a client FD closes — used for stream cleanup)
+    using DisconnectCallback = std::function<void(int fd)>;
+    void set_disconnect_callback(DisconnectCallback cb) { disconnect_cb_ = std::move(cb); }
+
 private:
     std::string socket_path_;
     int server_fd_ = -1;
@@ -154,6 +159,9 @@ private:
     // Thread-safe response queue for async RPC
     mutable std::mutex response_mutex_;
     std::vector<PendingResponse> response_queue_;
+
+    // Disconnect callback for streaming subscribers
+    DisconnectCallback disconnect_cb_;
 
     // Cached pollfd array - only rebuilt when connections change
     std::vector<struct pollfd> poll_fds_;

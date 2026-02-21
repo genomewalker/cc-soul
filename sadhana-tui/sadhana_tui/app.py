@@ -1,5 +1,7 @@
 """Sadhana TUI - Minimal control interface for autonomous agents."""
 
+import json as _json
+
 from textual.app import App, ComposeResult
 from textual.widgets import Static, Input, Label, Select, RichLog, Button, Footer
 from textual.containers import Container, Horizontal, Vertical, ScrollableContainer, HorizontalScroll
@@ -193,19 +195,33 @@ class EventStream(RichLog):
         super().__init__(highlight=True, markup=True, wrap=True, **kwargs)
         self._current_id: int | None = None
         self._seen_count: int = 0
+        self._seen_timestamps: set = set()  # Dedup between push and polling
 
     def set_sadhana(self, sadhana_id: int | None) -> None:
         if sadhana_id != self._current_id:
             self._current_id = sadhana_id
             self._seen_count = 0
+            self._seen_timestamps = set()
             self.clear()
+
+    def push_event(self, event: dict) -> None:
+        """Called from push stream — write immediately, track timestamp for dedup."""
+        ts = event.get("timestamp", 0)
+        if ts and ts in self._seen_timestamps:
+            return
+        if ts:
+            self._seen_timestamps.add(ts)
+        self._write_event(event)
 
     def refresh_events(self, client: ChittaClient) -> None:
         if self._current_id is None:
             return
 
+        # Dynamic limit: always fetch enough to cover all seen events plus buffer for new ones.
+        # This ensures the polling fallback can catch up after push-stream reconnection gaps.
+        history_limit = max(50, self._seen_count + 50)
         try:
-            status = client.sadhana_status(self._current_id, history_limit=30)
+            status = client.sadhana_status(self._current_id, history_limit=history_limit)
         except Exception:
             return  # Skip on connection error
 
@@ -213,11 +229,19 @@ class EventStream(RichLog):
             return
 
         history = status.get("history", [])
-        if len(history) > self._seen_count:
-            # History comes newest-first, reverse to show chronologically (latest at bottom)
-            new_events = list(reversed(history[self._seen_count:]))
+        # History is newest-first: [e_n, e_{n-1}, ..., e_1].
+        # New events are at the FRONT: new_count = total - previously seen.
+        # Bug was: history[_seen_count:] selected OLD events from the tail, not new ones from the front.
+        new_count = len(history) - self._seen_count
+        if new_count > 0:
+            # Slice the front (newest), then reverse to show chronologically (oldest first).
+            new_events = list(reversed(history[:new_count]))
             for event in new_events:
-                self._write_event(event)
+                ts = event.get("timestamp", 0)
+                if ts not in self._seen_timestamps:
+                    if ts:
+                        self._seen_timestamps.add(ts)
+                    self._write_event(event)
             self._seen_count = len(history)
 
     def _write_event(self, event: dict) -> None:
@@ -731,8 +755,52 @@ class SadhanaApp(App):
         self.refresh_all()
         self.set_interval(2.0, self.refresh_list)
         self.set_interval(1.0, self.refresh_events)
+        # Background push stream — supplements polling with real-time events
+        self.run_worker(self._event_stream_worker, thread=True)
         # Focus first card on start
         self.set_timer(0.1, self._focus_first_card)
+
+    def _event_stream_worker(self) -> None:
+        """Background thread: maintains a persistent subscription to the daemon's
+        event stream and delivers pushed events to the UI without polling."""
+        import time
+
+        while self.is_running:
+            try:
+                for line in self.client.watch_events(sadhana_id=0):
+                    if not self.is_running:
+                        return
+                    if line is None:
+                        continue  # 30s timeout heartbeat
+                    try:
+                        data = _json.loads(line)
+                        if "jsonrpc" in data:
+                            continue  # Skip the initial ack
+                        self.call_from_thread(self._on_stream_event, data)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            if self.is_running:
+                time.sleep(2.0)  # Brief pause before reconnecting
+
+    def _on_stream_event(self, event: dict) -> None:
+        """UI-thread handler for a pushed event from the daemon."""
+        sadhana_id = event.get("sadhana_id")
+        event_type = event.get("event_type", "")
+
+        # Push to event stream if it matches the selected sadhana
+        if self._filtered and self._selected_idx < len(self._filtered):
+            selected_id = self._filtered[self._selected_idx].get("id")
+            if sadhana_id == selected_id:
+                try:
+                    self.query_one("#events", EventStream).push_event(event)
+                except Exception:
+                    pass
+
+        # Refresh card list on state-changing events
+        if event_type in ("started", "done", "failed", "paused", "resumed"):
+            self.refresh_list()
 
     def _focus_first_card(self) -> None:
         """Focus first agent card after mount."""

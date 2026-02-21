@@ -29,6 +29,7 @@
 #include <vector>
 #include <mutex>
 #include <atomic>
+#include <functional>
 #include <chrono>
 #include <unordered_map>
 
@@ -184,6 +185,12 @@ public:
     bool set_interval(int64_t id, int interval_seconds);
     bool set_goal(int64_t id, const std::string& goal);
 
+    // Event streaming: push events to subscribed clients in real-time
+    using StreamFn = std::function<void(int fd, std::string line)>;
+    void set_stream_fn(StreamFn fn) { stream_fn_ = std::move(fn); }
+    void stream_subscribe(int fd, int64_t sadhana_id = 0);
+    void stream_unsubscribe(int fd);
+
     // History
     std::vector<json> get_history(int64_t id, size_t limit = 50);
 
@@ -199,6 +206,14 @@ private:
     SadhanaConfig config_;
     SadhanaStats stats_;
     mutable std::mutex mutex_;
+
+    // Event streaming subscribers
+    StreamFn stream_fn_;
+    struct StreamSub { int fd; int64_t sadhana_id; };
+    std::vector<StreamSub> stream_subs_;
+    mutable std::mutex stream_subs_mutex_;
+    void push_to_streams(int64_t sadhana_id, SadhanaEventType type,
+                         const json& content, int duration_ms = 0);
 
     // Cache of running sadhanas with their next run time
     struct RunningState {
@@ -224,8 +239,8 @@ private:
     // Parse the last JSON status object from agent output
     static json extract_last_json(const std::string& text);
 
-    // Core agentic cycle
-    void run_cycle(Sadhana& sadhana);
+    // Core agentic cycle — returns status: "progressed", "achieved", "blocked", "failed", "stopped"
+    std::string run_cycle(Sadhana& sadhana);
 
     // Persistence helpers
     bool log_event(int64_t sadhana_id, SadhanaEventType type,

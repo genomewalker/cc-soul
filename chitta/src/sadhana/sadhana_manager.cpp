@@ -399,13 +399,18 @@ void SadhanaManager::tick() {
             continue;
         }
 
-        run_cycle(*opt);
+        std::string cycle_status = run_cycle(*opt);
 
         {
             std::lock_guard<std::mutex> lock(mutex_);
             auto it = running_.find(id);
             if (it != running_.end()) {
-                it->second.next_run_at = now_ms() + (opt->interval_seconds * 1000LL);
+                // "progressed": agent made progress and wants to continue — run again immediately
+                // "failed"/"stopped"/other: wait the full interval before retrying
+                int64_t delay_ms = (cycle_status == "progressed")
+                    ? 0
+                    : (opt->interval_seconds * 1000LL);
+                it->second.next_run_at = now_ms() + delay_ms;
             }
         }
     }
@@ -541,7 +546,7 @@ json SadhanaManager::extract_last_json(const std::string& text) {
 // Core agentic cycle
 // ============================================================================
 
-void SadhanaManager::run_cycle(Sadhana& sadhana) {
+std::string SadhanaManager::run_cycle(Sadhana& sadhana) {
     std::cerr << "[sadhana] Cycle #" << (sadhana.iterations + 1)
               << " for sadhana " << sadhana.id << "\n";
 
@@ -550,11 +555,11 @@ void SadhanaManager::run_cycle(Sadhana& sadhana) {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = running_.find(sadhana.id);
-        if (it == running_.end()) return;
+        if (it == running_.end()) return "stopped";
         brain = it->second.brain.get();
         consecutive_failures = &it->second.consecutive_failures;
     }
-    if (!brain) return;
+    if (!brain) return "stopped";
 
     auto start_time = std::chrono::steady_clock::now();
 
@@ -642,7 +647,7 @@ void SadhanaManager::run_cycle(Sadhana& sadhana) {
             pause(sadhana.id);
             log_event(sadhana.id, SadhanaEventType::Paused,
                      {{"reason", "max_consecutive_failures"}, {"failures", *consecutive_failures}});
-            return;
+            return "failed";
         }
     } else if (consecutive_failures) {
         *consecutive_failures = 0;
@@ -655,6 +660,60 @@ void SadhanaManager::run_cycle(Sadhana& sadhana) {
         pause(sadhana.id);
         log_event(sadhana.id, SadhanaEventType::Paused,
                  {{"reason", "blocked_by_agent"}, {"summary", summary}});
+    }
+
+    return status;
+}
+
+// ============================================================================
+// Event streaming
+// ============================================================================
+
+void SadhanaManager::stream_subscribe(int fd, int64_t sadhana_id) {
+    std::lock_guard<std::mutex> lock(stream_subs_mutex_);
+    // Remove any stale subscription for this fd first
+    stream_subs_.erase(std::remove_if(stream_subs_.begin(), stream_subs_.end(),
+        [fd](const StreamSub& s) { return s.fd == fd; }), stream_subs_.end());
+    stream_subs_.push_back({fd, sadhana_id});
+    std::cerr << "[sadhana] Stream subscribe fd=" << fd
+              << " sadhana_id=" << sadhana_id << "\n";
+}
+
+void SadhanaManager::stream_unsubscribe(int fd) {
+    std::lock_guard<std::mutex> lock(stream_subs_mutex_);
+    auto before = stream_subs_.size();
+    stream_subs_.erase(std::remove_if(stream_subs_.begin(), stream_subs_.end(),
+        [fd](const StreamSub& s) { return s.fd == fd; }), stream_subs_.end());
+    if (stream_subs_.size() < before) {
+        std::cerr << "[sadhana] Stream unsubscribe fd=" << fd << "\n";
+    }
+}
+
+void SadhanaManager::push_to_streams(int64_t sadhana_id, SadhanaEventType type,
+                                      const json& content, int duration_ms) {
+    if (!stream_fn_) return;
+
+    json event;
+    event["sadhana_id"]  = sadhana_id;
+    event["event_type"]  = sadhana_event_type_to_string(type);
+    event["timestamp"]   = now_ms();
+    event["duration_ms"] = duration_ms;
+    event["content"]     = content.is_null() ? json::object() : content;
+    std::string line = event.dump();
+
+    // Collect fds under lock, then call stream_fn_ outside lock.
+    // This prevents I/O operations from stalling stream_subscribe/unsubscribe callers.
+    std::vector<int> fds_to_notify;
+    {
+        std::lock_guard<std::mutex> lock(stream_subs_mutex_);
+        for (const auto& sub : stream_subs_) {
+            if (sub.sadhana_id == 0 || sub.sadhana_id == sadhana_id) {
+                fds_to_notify.push_back(sub.fd);
+            }
+        }
+    }
+    for (int fd : fds_to_notify) {
+        stream_fn_(fd, line);
     }
 }
 
@@ -675,7 +734,9 @@ bool SadhanaManager::log_event(int64_t sadhana_id, SadhanaEventType type,
         << "'" << content_str << "', "
         << duration_ms << ")";
 
-    return store_.execute_raw(sql.str());
+    bool ok = store_.execute_raw(sql.str());
+    if (ok) push_to_streams(sadhana_id, type, content, duration_ms);
+    return ok;
 }
 
 int64_t SadhanaManager::now_ms() {

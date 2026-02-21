@@ -188,6 +188,64 @@ class ChittaClient:
         """Change the model for a sadhana."""
         return self.call("sadhana_set_model", {"id": sadhana_id, "model": model})
 
+    def watch_events(self, sadhana_id: int = 0):
+        """Generator: yields event JSON strings pushed from daemon in real-time.
+
+        First yielded line is the ack JSON (contains "jsonrpc" key).
+        Subsequent lines are pushed event JSON objects (no "jsonrpc" key).
+        Yields None on 30s timeout (heartbeat — allows caller to check liveness).
+        Returns (StopIteration) when the connection closes.
+
+        Usage:
+            for line in client.watch_events(sadhana_id=0):
+                if line is None: continue  # timeout
+                data = json.loads(line)
+                if "jsonrpc" in data: continue  # skip ack
+                handle(data)  # pushed event
+        """
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(30.0)
+        try:
+            sock.connect(self.socket_path)
+        except Exception:
+            return
+
+        self._request_id += 1
+        req = {
+            "jsonrpc": "2.0",
+            "id": self._request_id,
+            "method": "tools/call",
+            "params": {"name": "sadhana_watch", "arguments": {"id": sadhana_id}}
+        }
+        try:
+            sock.sendall((json.dumps(req) + "\n").encode())
+        except Exception:
+            sock.close()
+            return
+
+        buf = b""
+        try:
+            while True:
+                try:
+                    chunk = sock.recv(4096)
+                    if not chunk:
+                        break
+                    buf += chunk
+                    while b"\n" in buf:
+                        line, buf = buf.split(b"\n", 1)
+                        line_str = line.decode().strip()
+                        if line_str:
+                            yield line_str
+                except socket.timeout:
+                    yield None  # Heartbeat — lets caller check if it should exit
+                except Exception:
+                    break
+        finally:
+            try:
+                sock.close()
+            except Exception:
+                pass
+
     def health_check(self) -> dict:
         """Check daemon health."""
         return self.call("health_check")
