@@ -54,10 +54,10 @@ Claude Code
 
 | Component | Location |
 |-----------|----------|
-| Daemon | `chitta/src/daemon.cpp` |
-| RPC Handlers | `chitta/src/duckdb_handler.cpp` |
+| Daemon | `chitta/src/simple_cli.cpp` |
+| RPC Handlers | `chitta/include/chitta/rpc/duckdb_handler.hpp` |
 | Memory Store | `chitta/src/duckdb_store.cpp` |
-| Embedder | `chitta/src/vak_yantra.cpp` |
+| Embedder | `chitta/include/chitta/vak.hpp` |
 | MCP Server | `chitta-mcp/server.py` |
 | Hooks | `hooks/*.sh` |
 | Skills | `skills/*/SKILL.md` |
