@@ -12,6 +12,10 @@ MATCHER="${1:-}"
 CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
 [[ ! -x "$CHITTA_BIN" ]] && exit 0
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib.sh"
+daemon_available || exit 0
+
 STDIN_DATA=$(cat)
 
 json_escape() {

@@ -83,6 +83,7 @@ struct Sadhana {
     int brain_calls = 0;            // Total agent invocations
     json learned_patterns;          // Patterns learned (legacy, agent manages its own memory)
     int interval_seconds = 300;     // Seconds between cycles (default 5 min)
+    int max_turns = 0;              // Max turns per cycle (0 = use global default)
     std::string realm = "brahman";
 };
 
@@ -129,7 +130,7 @@ inline std::string sadhana_event_type_to_string(SadhanaEventType type) {
 struct SadhanaConfig {
     int max_concurrent = 3;
     int max_agent_timeout_ms = 600000;      // 10 minutes per agent cycle
-    int max_agent_turns = 20;               // Max turns per cycle
+    int max_agent_turns = 20;               // Default max turns per cycle (overridable per-sadhana)
     int default_interval_seconds = 300;     // 5 minutes between cycles
     bool enable_learning = true;            // Remind agent to use memory tools
     std::string default_brain_provider = "claude";
@@ -163,7 +164,10 @@ public:
                    const std::string& brain_model = "",
                    int interval_seconds = 0,
                    const std::string& realm = "brahman",
-                   const json& goal_dsl = json());
+                   const json& goal_dsl = json(),
+                   int max_turns = 0);
+
+    bool set_max_turns(int64_t id, int max_turns);
 
     bool start(int64_t id);
     bool pause(int64_t id);

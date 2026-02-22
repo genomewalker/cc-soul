@@ -22,6 +22,13 @@ get_socket_path() {
     echo "/tmp/chitta-${hash}.sock"
 }
 
+# Fast O(1) check: is the daemon socket present?
+# Returns 0 (true) if socket file exists, 1 (false) otherwise.
+# Use this before any blocking chitta CLI calls to skip them instantly when daemon is down.
+daemon_available() {
+    [[ -S "$(get_socket_path)" ]]
+}
+
 # Get current session ID from environment or registry
 get_session_id() {
     # First check environment

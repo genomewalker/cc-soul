@@ -24,8 +24,9 @@ INPUT=$(cat)
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
 TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty')
 
-# Check chitta CLI exists
+# Check chitta CLI exists and daemon is running
 [[ ! -x "$CHITTA_BIN" ]] && exit 0
+daemon_available || exit 0
 
 
 # Derive project directory from transcript path

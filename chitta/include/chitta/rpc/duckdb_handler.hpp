@@ -2736,6 +2736,7 @@ private:
                     {"brain_provider", {{"type", "string"}, {"description", "LLM provider: claude or opencode (default: claude)"}}},
                     {"brain_model", {{"type", "string"}, {"description", "Model to use: sonnet, opus, haiku, gpt-4o (default: sonnet)"}}},
                     {"interval_seconds", {{"type", "integer"}, {"description", "Seconds between sense-think-act cycles (default: 60)"}}},
+                    {"max_turns", {{"type", "integer"}, {"description", "Max turns per cycle (0 = use global default of 20)"}}},
                     {"realm", {{"type", "string"}, {"description", "Realm for isolation (default: brahman)"}}}
                 }},
                 {"required", {"goal"}}
@@ -2853,6 +2854,20 @@ private:
             }}
         });
         handlers_["sadhana_set_interval"] = [this](const json& p) { return tool_sadhana_set_interval(p); };
+
+        tools_.push_back({
+            {"name", "sadhana_set_max_turns"},
+            {"description", "Set the max turns per cycle for a sadhana (0 = use global default of 20)"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "integer"}, {"description", "Sadhana ID"}}},
+                    {"max_turns", {{"type", "integer"}, {"description", "Max turns per cycle (0 = use global default)"}}}
+                }},
+                {"required", {"id", "max_turns"}}
+            }}
+        });
+        handlers_["sadhana_set_max_turns"] = [this](const json& p) { return tool_sadhana_set_max_turns(p); };
 
         tools_.push_back({
             {"name", "sadhana_checkpoint"},
@@ -12184,9 +12199,10 @@ private:
         std::string provider = params.value("brain_provider", "");
         std::string model = params.value("brain_model", "");
         int interval = params.value("interval_seconds", 0);
+        int max_turns = params.value("max_turns", 0);
         std::string realm = params.value("realm", "brahman");
 
-        int64_t id = sadhana_manager_->create(goal, provider, model, interval, realm);
+        int64_t id = sadhana_manager_->create(goal, provider, model, interval, realm, json(), max_turns);
         if (id == 0) {
             return DuckDBToolResult::error("Failed to create sadhana");
         }
@@ -12298,6 +12314,7 @@ private:
         result["iterations"] = opt->iterations;
         result["brain_calls"] = opt->brain_calls;
         result["interval_seconds"] = opt->interval_seconds;
+        result["max_turns"] = opt->max_turns;
         result["realm"] = opt->realm;
         result["created_at"] = opt->created_at;
         result["updated_at"] = opt->updated_at;
@@ -12423,6 +12440,35 @@ private:
         result["interval"] = interval;
 
         return DuckDBToolResult::ok("Set interval to " + std::to_string(interval) + "s for sadhana " + std::to_string(id), result);
+    }
+
+    DuckDBToolResult tool_sadhana_set_max_turns(const json& params) {
+        if (!sadhana_manager_) {
+            return DuckDBToolResult::error("Sadhana manager not initialized");
+        }
+
+        auto [id, id_str] = parse_id(params, "id");
+        if (id == 0) {
+            return DuckDBToolResult::error("Invalid sadhana ID");
+        }
+
+        int max_turns = params.value("max_turns", -1);
+        if (max_turns < 0) {
+            return DuckDBToolResult::error("max_turns must be >= 0 (0 = use global default)");
+        }
+
+        if (!sadhana_manager_->set_max_turns(id, max_turns)) {
+            return DuckDBToolResult::error("Failed to set max_turns for sadhana " + std::to_string(id));
+        }
+
+        json result;
+        result["id"] = id;
+        result["max_turns"] = max_turns;
+
+        std::string msg = max_turns == 0
+            ? "Reset max_turns to global default for sadhana " + std::to_string(id)
+            : "Set max_turns to " + std::to_string(max_turns) + " for sadhana " + std::to_string(id);
+        return DuckDBToolResult::ok(msg, result);
     }
 
     DuckDBToolResult tool_sadhana_checkpoint(const json& params) {

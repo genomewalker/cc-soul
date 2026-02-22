@@ -62,7 +62,8 @@ int64_t SadhanaManager::create(const std::string& goal,
                                 const std::string& brain_model,
                                 int interval_seconds,
                                 const std::string& realm,
-                                const json& goal_dsl)
+                                const json& goal_dsl,
+                                int max_turns)
 {
     Sadhana s;
     s.goal = goal;
@@ -73,11 +74,12 @@ int64_t SadhanaManager::create(const std::string& goal,
     s.created_at = now_ms();
     s.updated_at = s.created_at;
     s.interval_seconds = interval_seconds > 0 ? interval_seconds : config_.default_interval_seconds;
+    s.max_turns = max_turns >= 0 ? max_turns : 0;
     s.realm = realm;
 
     std::ostringstream sql;
     sql << "INSERT INTO sadhana (id, goal, goal_dsl, state, brain_provider, brain_model, "
-        << "created_at, updated_at, iterations, brain_calls, interval_seconds, realm) "
+        << "created_at, updated_at, iterations, brain_calls, interval_seconds, max_turns, realm) "
         << "VALUES (nextval('sadhana_seq'), "
         << "'" << escape_sql(goal) << "', "
         << "'" << (goal_dsl.is_null() ? "{}" : escape_sql(goal_dsl.dump())) << "', "
@@ -88,6 +90,7 @@ int64_t SadhanaManager::create(const std::string& goal,
         << s.updated_at << ", "
         << "0, 0, "
         << s.interval_seconds << ", "
+        << s.max_turns << ", "
         << "'" << realm << "') "
         << "RETURNING id";
 
@@ -236,7 +239,7 @@ std::optional<Sadhana> SadhanaManager::get(int64_t id) {
     std::ostringstream sql;
     sql << "SELECT id, goal, goal_dsl, state, brain_provider, brain_model, "
         << "created_at, updated_at, iterations, last_sense, last_action, last_result, "
-        << "brain_calls, learned_patterns, interval_seconds, realm "
+        << "brain_calls, learned_patterns, interval_seconds, max_turns, realm "
         << "FROM sadhana WHERE id = " << id;
 
     auto result = store_.raw_query(sql.str());
@@ -261,7 +264,8 @@ std::optional<Sadhana> SadhanaManager::get(int64_t id) {
     s.brain_calls = chunk->GetValue(12, 0).GetValue<int32_t>();
     try { s.learned_patterns = json::parse(chunk->GetValue(13, 0).ToString()); } catch (...) {}
     s.interval_seconds = chunk->GetValue(14, 0).GetValue<int32_t>();
-    s.realm = chunk->GetValue(15, 0).ToString();
+    s.max_turns = chunk->GetValue(15, 0).GetValue<int32_t>();
+    s.realm = chunk->GetValue(16, 0).ToString();
 
     return s;
 }
@@ -272,7 +276,7 @@ std::vector<Sadhana> SadhanaManager::list(const std::string& state_filter,
 {
     std::ostringstream sql;
     sql << "SELECT id, goal, state, brain_provider, brain_model, "
-        << "created_at, updated_at, iterations, brain_calls, interval_seconds, realm "
+        << "created_at, updated_at, iterations, brain_calls, interval_seconds, max_turns, realm "
         << "FROM sadhana WHERE 1=1";
 
     if (!state_filter.empty()) sql << " AND state = '" << state_filter << "'";
@@ -299,7 +303,8 @@ std::vector<Sadhana> SadhanaManager::list(const std::string& state_filter,
             s.iterations = chunk->GetValue(7, i).GetValue<int32_t>();
             s.brain_calls = chunk->GetValue(8, i).GetValue<int32_t>();
             s.interval_seconds = chunk->GetValue(9, i).GetValue<int32_t>();
-            s.realm = chunk->GetValue(10, i).ToString();
+            s.max_turns = chunk->GetValue(10, i).GetValue<int32_t>();
+            s.realm = chunk->GetValue(11, i).ToString();
             sadhanas.push_back(s);
         }
     }
@@ -330,6 +335,13 @@ bool SadhanaManager::set_model(int64_t id, const std::string& model) {
 bool SadhanaManager::set_interval(int64_t id, int interval_seconds) {
     std::ostringstream sql;
     sql << "UPDATE sadhana SET interval_seconds = " << interval_seconds
+        << ", updated_at = " << now_ms() << " WHERE id = " << id;
+    return store_.execute_raw(sql.str());
+}
+
+bool SadhanaManager::set_max_turns(int64_t id, int max_turns) {
+    std::ostringstream sql;
+    sql << "UPDATE sadhana SET max_turns = " << max_turns
         << ", updated_at = " << now_ms() << " WHERE id = " << id;
     return store_.execute_raw(sql.str());
 }
@@ -597,7 +609,7 @@ std::string SadhanaManager::run_cycle(Sadhana& sadhana) {
     BrainConfig brain_config;
     brain_config.timeout_ms   = config_.max_agent_timeout_ms;
     brain_config.system_prompt = system_prompt;
-    brain_config.max_turns    = config_.max_agent_turns;
+    brain_config.max_turns    = sadhana.max_turns > 0 ? sadhana.max_turns : config_.max_agent_turns;
 
     // Run the agent
     auto result = brain->think(user_message, brain_config);

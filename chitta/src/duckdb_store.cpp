@@ -1419,6 +1419,7 @@ bool DuckDBStore::create_schema() {
             brain_calls INTEGER DEFAULT 0,
             learned_patterns JSON,
             interval_seconds INTEGER DEFAULT 60,
+            max_turns INTEGER DEFAULT 0,
             realm VARCHAR DEFAULT 'brahman'
         )
     )")) {
@@ -1427,6 +1428,8 @@ bool DuckDBStore::create_schema() {
     write_execute("CREATE INDEX IF NOT EXISTS idx_sadhana_state ON sadhana(state)");
     write_execute("CREATE INDEX IF NOT EXISTS idx_sadhana_realm ON sadhana(realm)");
     write_execute("CREATE SEQUENCE IF NOT EXISTS sadhana_seq START 1");
+    // Migration: add max_turns if upgrading from older schema
+    write_execute("ALTER TABLE sadhana ADD COLUMN IF NOT EXISTS max_turns INTEGER DEFAULT 0");
 
     // Sadhana history: append-only event log for each sadhana
     if (!write_execute(R"(

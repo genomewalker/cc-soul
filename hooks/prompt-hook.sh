@@ -48,6 +48,10 @@ queue_write "store_turn" "{\"session_id\":\"$SESSION_ID\",\"role\":\"user\",\"co
 # Increment turn index
 echo $((TURN_INDEX + 1)) > "$TURN_FILE"
 
+# Skip daemon-dependent operations immediately if daemon is not running.
+# queue_write above is file-based (no daemon needed), everything below requires it.
+daemon_available || exit 0
+
 # ===========================================
 # TURN-BASED CHECKPOINT: Save ledger every N turns
 # ===========================================

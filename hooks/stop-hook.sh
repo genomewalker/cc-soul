@@ -122,6 +122,10 @@ queue_write "store_turn" "{\"session_id\":\"$SESSION_ID\",\"role\":\"assistant\"
 # Increment turn index
 echo $((TURN_INDEX + 1)) > "$TURN_FILE"
 
+# Skip daemon-dependent operations if daemon is not running.
+# queue_write / store_turn above are file-based and always run.
+daemon_available || exit 0
+
 # Detect realm (quick CLI call with short timeout)
 REALM=$(timeout "$MAX_WAIT" "$CHITTA_BIN" realm_detect 2>/dev/null || echo "brahman")
 
