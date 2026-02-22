@@ -7,8 +7,8 @@ This file is for **contributors developing cc-soul itself**. For user-facing ins
 **Always follow all three steps after code changes:**
 ```bash
 cd chitta && cmake --build build --parallel          # 1. Build
-cp bin/chitta bin/chittad ~/.claude/bin/              # 2. Install
-pkill -TERM chittad                                  # 3. Restart daemon
+pkill -TERM chittad 2>/dev/null; sleep 1             # 2. Stop daemon (prevents ETXTBSY)
+cp bin/chitta bin/chittad ~/.claude/bin/              # 3. Install
 ```
 
 Daemon auto-starts on next tool call. If tool schemas change (new params, new tools), also restart the MCP server: `pkill -f "chitta mcp"`.

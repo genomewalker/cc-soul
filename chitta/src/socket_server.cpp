@@ -40,8 +40,14 @@ bool socket_is_active(const std::string& path) {
         return false;
     }
 
+    // EACCES often indicates a stale socket from a crashed daemon with different permissions.
+    // Treat as stale and attempt cleanup rather than falsely claiming "active".
     if (err == EACCES) {
-        return true;
+        std::cerr << "[socket_server] EACCES on " << path << ", treating as stale\n";
+        if (unlink(path.c_str()) == 0) {
+            std::cerr << "[socket_server] Removed stale socket\n";
+        }
+        return false;
     }
 
     return false;

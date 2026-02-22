@@ -53,12 +53,18 @@ public:
     using LogCallback = std::function<void(const std::string&)>;
     void set_log_callback(LogCallback cb) { log_callback_ = cb; }
 
+    // Set cancellation check callback - return true to abort distillation
+    // Checked periodically during opencode execution
+    using CancelCallback = std::function<bool()>;
+    void set_cancel_callback(CancelCallback cb) { cancel_callback_ = cb; }
+
 private:
     DuckDBMind& mind_;
     NativeDistillConfig config_;
     TranscriptParser parser_;
     SSLParser ssl_parser_;
     LogCallback log_callback_;
+    CancelCallback cancel_callback_;
 
     // Call opencode with prompt, return output
     std::string call_opencode(const std::string& prompt);

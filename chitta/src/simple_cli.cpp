@@ -168,9 +168,31 @@ void release_lock(DaemonLock& lock) {
     }
 }
 
-// Check if a process is alive
+// Check if a process is alive (not zombie)
 bool is_pid_alive(pid_t pid) {
-    return kill(pid, 0) == 0 || errno == EPERM;
+    // First check if process exists
+    if (kill(pid, 0) != 0 && errno != EPERM) {
+        return false;
+    }
+
+    // Check /proc/pid/status for zombie state
+    // Zombies respond to kill(0) but are not functional
+    std::string status_path = "/proc/" + std::to_string(pid) + "/status";
+    std::ifstream status_file(status_path);
+    if (!status_file) {
+        return false;  // Process gone
+    }
+
+    std::string line;
+    while (std::getline(status_file, line)) {
+        if (line.rfind("State:", 0) == 0) {
+            // State line format: "State:  Z (zombie)" or "State:  S (sleeping)"
+            return line.find(" Z ") == std::string::npos &&
+                   line.find("\tZ ") == std::string::npos;
+        }
+    }
+
+    return true;  // No State line found, assume alive
 }
 
 // Clean up stale daemon files from crashed daemon
@@ -285,6 +307,12 @@ bool run_distillation(DuckDBMind& mind, const TranscriptState& state,
     native_config.verbose = verbose_mode;
 
     NativeDistiller distiller(mind, native_config);
+
+    // Set cancellation callback for graceful shutdown
+    // Checks every 100ms during opencode execution
+    distiller.set_cancel_callback([]() {
+        return !daemon_running.load();
+    });
 
     // Set log callback if verbose
     if (verbose_mode) {
@@ -1341,7 +1369,8 @@ int cmd_shutdown(const std::string& socket_path) {
     }
     if (client.request_shutdown()) {
         std::cout << "Daemon shutdown requested\n";
-        client.wait_for_socket_gone(5000);
+        // 30s timeout: daemon may be finishing distillation or other long-running work
+        client.wait_for_socket_gone(30000);
         return 0;
     }
     return 1;

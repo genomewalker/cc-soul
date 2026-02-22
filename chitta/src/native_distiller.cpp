@@ -112,6 +112,15 @@ std::string NativeDistiller::call_opencode(const std::string& prompt) {
             return "";
         }
 
+        // Check cancellation (e.g., daemon shutdown)
+        if (cancel_callback_ && cancel_callback_()) {
+            kill(pid, SIGKILL);
+            waitpid(pid, nullptr, 0);
+            close(stdout_pipe[0]);
+            log("[distill] Cancelled (daemon shutdown)");
+            return "";
+        }
+
         // Check if child finished
         int status;
         int result = waitpid(pid, &status, WNOHANG);
