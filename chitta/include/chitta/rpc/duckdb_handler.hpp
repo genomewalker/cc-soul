@@ -2874,6 +2874,62 @@ private:
         handlers_["sadhana_checkpoint"] = [this](const json& p) { return tool_sadhana_checkpoint(p); };
 
         // ═══════════════════════════════════════════════════════════════════════
+        // Dream: Autonomous Curiosity-Driven Exploration (svapna)
+        // ═══════════════════════════════════════════════════════════════════════
+
+        tools_.push_back({
+            {"name", "dream_start"},
+            {"description", "Start an autonomous dream: the soul explores a topic freely using WebSearch, WebFetch, and memory tools during idle time. Dream memories are tagged with [dream]."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"topic", {{"type", "string"}, {"description", "Topic to explore (e.g. 'quantum entanglement', 'stoic philosophy')"}}},
+                    {"realm", {{"type", "string"}, {"description", "Memory realm (default: brahman)"}}}
+                }},
+                {"required", {"topic"}}
+            }}
+        });
+        handlers_["dream_start"] = [this](const json& p) { return tool_dream_start(p); };
+
+        tools_.push_back({
+            {"name", "dream_wander"},
+            {"description", "Auto-select a topic from memory gaps or curiosity seeds and start a dream. Use when you want the soul to explore freely without specifying a topic."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"realm", {{"type", "string"}, {"description", "Memory realm (default: brahman)"}}}
+                }}
+            }}
+        });
+        handlers_["dream_wander"] = [this](const json& p) { return tool_dream_wander(p); };
+
+        tools_.push_back({
+            {"name", "dream_list"},
+            {"description", "List recent dreams with their topics, status, and findings"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"limit", {{"type", "integer"}, {"description", "Max results (default: 10)"}}},
+                    {"realm", {{"type", "string"}, {"description", "Filter by realm"}}}
+                }}
+            }}
+        });
+        handlers_["dream_list"] = [this](const json& p) { return tool_dream_list(p); };
+
+        tools_.push_back({
+            {"name", "dream_status"},
+            {"description", "Get full details of a dream including its sadhana agent history"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "integer"}, {"description", "Dream ID"}}}
+                }},
+                {"required", {"id"}}
+            }}
+        });
+        handlers_["dream_status"] = [this](const json& p) { return tool_dream_status(p); };
+
+        // ═══════════════════════════════════════════════════════════════════════
         // Context Repository Tools (Letta-inspired)
         // ═══════════════════════════════════════════════════════════════════════
 
@@ -3049,15 +3105,16 @@ private:
 
         tools_.push_back({
             {"name", "file_timeline"},
-            {"description", "Show files modified in a time range or session (Time Machine). Use cross_session=true for history across all sessions."},
+            {"description", "Show files modified in a time range or session (Time Machine). Use path or file_pattern to look up all versions of a specific file across all indexed sessions. Use cross_session=true for history across all sessions."},
             {"inputSchema", {
                 {"type", "object"},
                 {"properties", {
                     {"query", {{"type", "string"}, {"description", "Natural language time query like 'at 22:33', 'yesterday', 'last hour'"}}},
                     {"session_id", {{"type", "string"}, {"description", "Specific session to query"}}},
-                    {"file_pattern", {{"type", "string"}, {"description", "Glob pattern to filter files (e.g., '*.cpp', 'src/*')"}}},
+                    {"path", {{"type", "string"}, {"description", "File path or glob pattern to look up (alias for file_pattern). When provided, searches all indexed history with no time constraint."}}},
+                    {"file_pattern", {{"type", "string"}, {"description", "Glob pattern to filter files (e.g., '*.cpp', 'src/*'). Alias: path"}}},
                     {"limit", {{"type", "integer"}, {"description", "Max results (default: 20)"}}},
-                    {"cross_session", {{"type", "boolean"}, {"description", "Search across all sessions (auto-indexes unindexed sessions, default: false)"}}}
+                    {"cross_session", {{"type", "boolean"}, {"description", "Search across all sessions (auto-indexes unindexed sessions, default: true when path is given, false otherwise)"}}}
                 }}
             }}
         });
@@ -13008,9 +13065,12 @@ private:
     DuckDBToolResult tool_file_timeline(const json& params) {
         std::string query = params.value("query", "");
         std::string session_id = params.value("session_id", "");
-        std::string file_pattern = params.value("file_pattern", "");
+        // Accept "path" as alias for "file_pattern" (matches file_at_time parameter name)
+        std::string file_pattern = params.value("file_pattern", params.value("path", ""));
         size_t limit = params.value("limit", 20);
-        bool cross_session = params.value("cross_session", false);
+        bool path_given = !file_pattern.empty();
+        // Default cross_session to true when a specific path is given (search all history)
+        bool cross_session = params.value("cross_session", path_given);
 
         std::vector<FileEdit> edits;
 
@@ -13038,6 +13098,14 @@ private:
             edits = mind_->store().get_file_edits_in_range(
                 target_time - window_ms,
                 target_time + window_ms,
+                file_pattern,
+                limit
+            );
+        } else if (path_given) {
+            // Path given but no time query: search all indexed history (no time constraint)
+            edits = mind_->store().get_file_edits_in_range(
+                0,
+                std::numeric_limits<int64_t>::max(),
                 file_pattern,
                 limit
             );
@@ -13265,6 +13333,255 @@ private:
             "Restored " + file_path + " to version from " + format_time(edit.backup_time),
             result
         );
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Dream Tool Handlers
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Escape single quotes for SQL string literals
+    static std::string esc_sql(const std::string& s) {
+        std::string r;
+        r.reserve(s.size() + 8);
+        for (char c : s) {
+            if (c == '\'') r += "''";
+            else r += c;
+        }
+        return r;
+    }
+
+    DuckDBToolResult tool_dream_start(const json& params) {
+        if (!sadhana_manager_) {
+            return DuckDBToolResult::error("Sadhana manager not initialized");
+        }
+        if (subconscious_) subconscious_->notify_query();
+
+        std::string topic = params.value("topic", "");
+        if (topic.empty()) {
+            return DuckDBToolResult::error("Topic is required");
+        }
+        std::string realm = params.value("realm", "brahman");
+
+        auto now_val = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+
+        // Insert dream record using write connection (execute_raw = write_execute)
+        if (!mind_->store().execute_raw(
+            "INSERT INTO dream (id, topic, status, sadhana_id, started_at, realm) "
+            "VALUES (nextval('dream_seq'), '" + esc_sql(topic) + "', 'dreaming', 0, " +
+            std::to_string(now_val) + ", '" + esc_sql(realm) + "')")) {
+            return DuckDBToolResult::error("Failed to create dream record");
+        }
+
+        // Retrieve the newly inserted dream ID
+        auto id_res = mind_->store().execute_sql_query(
+            "SELECT id FROM dream WHERE topic = '" + esc_sql(topic) +
+            "' AND started_at = " + std::to_string(now_val));
+        if (!id_res.success || id_res.rows.empty()) {
+            return DuckDBToolResult::error("Failed to retrieve dream ID after insert");
+        }
+        int64_t dream_id = std::stoll(id_res.rows[0][0]);
+
+        // Create sadhana with dream goal_dsl (single-cycle: agent returns "achieved")
+        json goal_dsl = {{"kind", "dream"}, {"topic", topic}, {"dream_id", dream_id}};
+        std::string goal = "[dream] Explore: " + topic;
+
+        int64_t sadhana_id = sadhana_manager_->create(goal, "claude", "sonnet", 0, realm, goal_dsl);
+        if (sadhana_id == 0) {
+            return DuckDBToolResult::error("Failed to create dream sadhana");
+        }
+
+        if (!sadhana_manager_->start(sadhana_id)) {
+            return DuckDBToolResult::error(
+                "Created dream sadhana " + std::to_string(sadhana_id) + " but failed to start");
+        }
+
+        // Link sadhana to dream record
+        mind_->store().execute_raw(
+            "UPDATE dream SET sadhana_id = " + std::to_string(sadhana_id) +
+            " WHERE id = " + std::to_string(dream_id));
+
+        json result;
+        result["dream_id"]   = dream_id;
+        result["sadhana_id"] = sadhana_id;
+        result["topic"]      = topic;
+        result["status"]     = "dreaming";
+
+        std::ostringstream msg;
+        msg << "Dream started: " << topic
+            << " (dream #" << dream_id << ", sadhana #" << sadhana_id << ")";
+        return DuckDBToolResult::ok(msg.str(), result);
+    }
+
+    DuckDBToolResult tool_dream_wander(const json& params) {
+        if (!sadhana_manager_) {
+            return DuckDBToolResult::error("Sadhana manager not initialized");
+        }
+        if (subconscious_) subconscious_->notify_query();
+
+        std::string realm = params.value("realm", "brahman");
+        std::string topic;
+
+        // Priority 1: memories tagged as gaps/unresolved
+        auto gap_res = mind_->store().execute_sql_query(
+            "SELECT content FROM memory "
+            "WHERE tags LIKE '%gap%' AND tags LIKE '%unresolved%' "
+            "ORDER BY RANDOM() LIMIT 1");
+        if (gap_res.success && !gap_res.rows.empty()) {
+            topic = gap_res.rows[0][0];
+            if (topic.size() > 100) topic = topic.substr(0, 100);
+        }
+
+        // Priority 2: low-confidence memories (uncertain knowledge)
+        if (topic.empty()) {
+            auto low_res = mind_->store().execute_sql_query(
+                "SELECT content FROM memory "
+                "WHERE confidence < 0.5 AND confidence > 0.0 "
+                "ORDER BY RANDOM() LIMIT 1");
+            if (low_res.success && !low_res.rows.empty()) {
+                topic = low_res.rows[0][0];
+                if (topic.size() > 100) topic = topic.substr(0, 100);
+            }
+        }
+
+        // Priority 3: curiosity seeds (hardcoded topics of enduring interest)
+        if (topic.empty()) {
+            static const std::vector<std::string> seeds = {
+                "consciousness and the hard problem of subjective experience",
+                "emergent complexity in distributed systems",
+                "the nature of memory and forgetting in biological brains",
+                "Vedantic philosophy and modern neuroscience",
+                "language models and the limits of statistical learning",
+                "self-organization in nature: from cells to civilizations",
+                "the history of symbolic AI versus connectionism",
+                "epistemic humility in scientific discovery",
+                "attention mechanisms and the binding problem",
+                "entropy, information, and the arrow of time"
+            };
+            auto now_val = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            topic = seeds[static_cast<size_t>(now_val) % seeds.size()];
+        }
+
+        json start_params = {{"topic", topic}, {"realm", realm}};
+        return tool_dream_start(start_params);
+    }
+
+    DuckDBToolResult tool_dream_list(const json& params) {
+        if (subconscious_) subconscious_->notify_query();
+
+        int limit = params.value("limit", 10);
+        if (limit <= 0 || limit > 100) limit = 10;
+        std::string realm = params.value("realm", "");
+
+        // Lazily update any 'dreaming' dreams whose sadhana has completed
+        mind_->store().execute_raw(
+            "UPDATE dream SET status = 'woke', ended_at = "
+            "  (SELECT COALESCE(s.updated_at, 0) FROM sadhana s WHERE s.id = dream.sadhana_id) "
+            "WHERE status = 'dreaming' AND sadhana_id > 0 AND sadhana_id IN "
+            "  (SELECT id FROM sadhana WHERE state = 'done')");
+
+        std::string where = realm.empty() ? "" : "WHERE d.realm = '" + esc_sql(realm) + "' ";
+
+        auto res = mind_->store().execute_sql_query(
+            "SELECT d.id, d.topic, d.status, d.findings, d.memories_created, "
+            "       d.started_at, d.ended_at, d.sadhana_id, d.realm, "
+            "       s.iterations, s.last_action "
+            "FROM dream d "
+            "LEFT JOIN sadhana s ON d.sadhana_id = s.id " +
+            where +
+            "ORDER BY d.started_at DESC LIMIT " + std::to_string(limit));
+
+        json dreams = json::array();
+        if (res.success) {
+            for (const auto& row : res.rows) {
+                if (row.size() < 9) continue;
+                json d;
+                d["id"]               = std::stoll(row[0]);
+                d["topic"]            = row[1];
+                d["status"]           = row[2];
+                d["findings"]         = (row[3] == "NULL") ? "" : row[3];
+                d["memories_created"] = (row[4] == "NULL") ? 0 : std::stoi(row[4]);
+                d["started_at"]       = std::stoll(row[5]);
+                d["ended_at"]         = std::stoll(row[6]);
+                d["sadhana_id"]       = std::stoll(row[7]);
+                d["realm"]            = row[8];
+                if (row.size() >= 10) d["iterations"]  = (row[9]  == "NULL") ? 0 : std::stoi(row[9]);
+                if (row.size() >= 11) d["last_action"]  = (row[10] == "NULL") ? "" : row[10];
+                dreams.push_back(d);
+            }
+        }
+
+        json result;
+        result["dreams"] = dreams;
+        result["count"]  = dreams.size();
+
+        std::ostringstream msg;
+        msg << "Found " << dreams.size() << " dream(s)";
+        return DuckDBToolResult::ok(msg.str(), result);
+    }
+
+    DuckDBToolResult tool_dream_status(const json& params) {
+        if (subconscious_) subconscious_->notify_query();
+
+        if (!params.contains("id")) {
+            return DuckDBToolResult::error("id is required");
+        }
+        int64_t dream_id = params["id"].is_string()
+            ? std::stoll(params["id"].get<std::string>())
+            : params["id"].get<int64_t>();
+
+        // Lazily update status if sadhana completed
+        mind_->store().execute_raw(
+            "UPDATE dream SET status = 'woke', ended_at = "
+            "  (SELECT COALESCE(s.updated_at, 0) FROM sadhana s WHERE s.id = dream.sadhana_id) "
+            "WHERE id = " + std::to_string(dream_id) +
+            " AND status = 'dreaming' AND sadhana_id > 0 AND sadhana_id IN "
+            "  (SELECT id FROM sadhana WHERE state = 'done')");
+
+        auto res = mind_->store().execute_sql_query(
+            "SELECT d.id, d.topic, d.status, d.findings, d.memories_created, "
+            "       d.started_at, d.ended_at, d.sadhana_id, d.realm, "
+            "       s.id, s.state, s.goal, s.iterations, s.brain_calls, s.last_action "
+            "FROM dream d "
+            "LEFT JOIN sadhana s ON d.sadhana_id = s.id "
+            "WHERE d.id = " + std::to_string(dream_id));
+
+        if (!res.success || res.rows.empty()) {
+            return DuckDBToolResult::error("Dream #" + std::to_string(dream_id) + " not found");
+        }
+
+        const auto& row = res.rows[0];
+        json dream;
+        dream["id"]               = std::stoll(row[0]);
+        dream["topic"]            = row[1];
+        dream["status"]           = row[2];
+        dream["findings"]         = (row[3] == "NULL") ? "" : row[3];
+        dream["memories_created"] = (row[4] == "NULL") ? 0 : std::stoi(row[4]);
+        dream["started_at"]       = std::stoll(row[5]);
+        dream["ended_at"]         = std::stoll(row[6]);
+        dream["sadhana_id"]       = std::stoll(row[7]);
+        dream["realm"]            = row[8];
+
+        if (row.size() >= 15 && row[9] != "NULL") {
+            json sadhana;
+            sadhana["id"]          = std::stoll(row[9]);
+            sadhana["state"]       = row[10];
+            sadhana["goal"]        = row[11];
+            sadhana["iterations"]  = (row[12] == "NULL") ? 0 : std::stoi(row[12]);
+            sadhana["brain_calls"] = (row[13] == "NULL") ? 0 : std::stoi(row[13]);
+            sadhana["last_action"] = (row[14] == "NULL") ? "" : row[14];
+            dream["sadhana"] = sadhana;
+
+            if (sadhana_manager_) {
+                int64_t sadhana_id = std::stoll(row[9]);
+                dream["sadhana_history"] = sadhana_manager_->get_history(sadhana_id, 3);
+            }
+        }
+
+        std::ostringstream msg;
+        msg << "Dream #" << dream_id << " [" << row[2] << "]: " << row[1];
+        return DuckDBToolResult::ok(msg.str(), dream);
     }
 };
 

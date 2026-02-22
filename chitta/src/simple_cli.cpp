@@ -437,6 +437,24 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
         sadhana_manager.stream_unsubscribe(fd);
     });
 
+    // Wire dream callback: auto-explore when soul has been idle for 10+ minutes
+    subconscious.set_dream_callback([&]() {
+        try {
+            json req = {
+                {"method", "tools/call"},
+                {"params", {
+                    {"name", "dream_wander"},
+                    {"arguments", json::object()}
+                }},
+                {"id", nullptr}
+            };
+            handler.handle(req);
+            std::cerr << "[dream] Auto-dream triggered\n";
+        } catch (const std::exception& e) {
+            std::cerr << "[dream] Auto-dream failed: " << e.what() << "\n";
+        }
+    });
+
     std::signal(SIGTERM, daemon_signal_handler);
     std::signal(SIGINT, daemon_signal_handler);
     std::signal(SIGPIPE, SIG_IGN);

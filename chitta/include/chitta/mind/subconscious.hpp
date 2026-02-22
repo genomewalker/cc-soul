@@ -137,6 +137,9 @@ public:
     void notify_query();
     bool is_idle() const;
 
+    // Dream callback: called when the soul has been idle long enough to dream
+    void set_dream_callback(std::function<void()> fn) { dream_callback_ = std::move(fn); }
+
 private:
     DuckDBMind* mind_;
     SubconsciousConfig config_;
@@ -226,6 +229,11 @@ private:
     bool time_for_distillation() const;
     void run_background_embedding();
     bool time_for_embedding() const;
+
+    // Dream: autonomous curiosity-driven exploration when idle
+    std::function<void()> dream_callback_;
+    std::atomic<int64_t> last_dream_triggered_at_{0};
+    bool time_for_dream() const;
 
     // Helpers
     static int64_t now_ms();

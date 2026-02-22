@@ -131,6 +131,7 @@ void DuckDBStore::fix_sequences() {
     fix_seq("memory_recall_query", "memory_recall_query_seq");
     fix_seq("session_token_usage", "session_token_usage_seq");
     fix_seq("correction_outcome", "correction_outcome_seq");
+    fix_seq("dream", "dream_seq");
 }
 
 bool DuckDBStore::open_embeddings_db(const std::string& path) {
@@ -1554,6 +1555,27 @@ bool DuckDBStore::create_schema() {
     write_execute("CREATE INDEX IF NOT EXISTS idx_co_memory ON correction_outcome(correction_memory_id)");
     write_execute("CREATE INDEX IF NOT EXISTS idx_co_created ON correction_outcome(created_at)");
     write_execute("CREATE SEQUENCE IF NOT EXISTS correction_outcome_seq START 1");
+
+    // Dream: autonomous curiosity-driven exploration (svapna)
+    if (!write_execute(R"(
+        CREATE TABLE IF NOT EXISTS dream (
+            id               BIGINT PRIMARY KEY,
+            topic            TEXT NOT NULL,
+            status           VARCHAR DEFAULT 'dreaming',
+            sadhana_id       BIGINT DEFAULT 0,
+            findings         TEXT,
+            memories_created INTEGER DEFAULT 0,
+            started_at       BIGINT NOT NULL,
+            ended_at         BIGINT DEFAULT 0,
+            realm            VARCHAR DEFAULT 'brahman'
+        )
+    )")) {
+        return false;
+    }
+    write_execute("CREATE INDEX IF NOT EXISTS idx_dream_status ON dream(status)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_dream_realm ON dream(realm)");
+    write_execute("CREATE INDEX IF NOT EXISTS idx_dream_started ON dream(started_at DESC)");
+    write_execute("CREATE SEQUENCE IF NOT EXISTS dream_seq START 1");
 
     return true;
 }

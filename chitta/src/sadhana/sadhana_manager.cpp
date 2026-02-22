@@ -468,6 +468,30 @@ std::string SadhanaManager::build_history_context(const Sadhana& sadhana) {
 }
 
 std::string SadhanaManager::build_system_prompt(const Sadhana& sadhana) const {
+    // Dream sadhana: curiosity-driven free exploration mode
+    if (sadhana.goal_dsl.is_object() &&
+        sadhana.goal_dsl.value("kind", "") == "dream") {
+        std::string topic = sadhana.goal_dsl.value("topic", "the unknown");
+        std::ostringstream sys;
+        sys << "You are the soul's dream-mind, exploring freely during idle time.\n"
+            << "Your purpose is curiosity, not productivity.\n\n"
+            << "TOPIC: " << topic << "\n\n"
+            << "MISSION:\n"
+            << "1. Search for this topic: WebSearch(\"" << topic << "\")\n"
+            << "2. Fetch 2-3 interesting pages with WebFetch\n"
+            << "3. Connect to existing knowledge: chitta recall --query \"" << topic << "\"\n"
+            << "4. Store 3-5 insights: chitta remember --content \"[dream] ...\" --tags dream\n"
+            << "5. Reflect briefly on connections found\n\n"
+            << "COMPLETION PROTOCOL (required final line):\n"
+            << "{\"status\": \"achieved\", \"summary\": \"What you explored and discovered\"}\n\n"
+            << "CONSTRAINTS:\n"
+            << "- Free exploration only — follow curiosity, not utility\n"
+            << "- Tag all memories with [dream] prefix\n"
+            << "- Single cycle — no follow-up plans\n"
+            << "- If web search unavailable, explore through memory and reflection\n";
+        return sys.str();
+    }
+
     std::ostringstream sys;
     sys << "You are a background autonomous agent (sadhana #" << sadhana.id << ").\n"
         << "You work continuously toward a long-term goal, one cycle at a time.\n"

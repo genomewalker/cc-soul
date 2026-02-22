@@ -141,6 +141,16 @@ void Subconscious::process_loop() {
         if (config_.enable_background_embedding && time_for_embedding()) {
             run_background_embedding();
         }
+
+        // Auto-dream: trigger curiosity-driven exploration when idle > 10 min
+        if (dream_callback_ && time_for_dream()) {
+            last_dream_triggered_at_ = now_ms();
+            try {
+                dream_callback_();
+            } catch (const std::exception& e) {
+                std::cerr << "[subconscious] Dream callback failed: " << e.what() << "\n";
+            }
+        }
     }
 }
 
@@ -803,6 +813,19 @@ bool Subconscious::time_for_embedding() const {
     ).count();
 
     return (now - last) >= interval_ms;
+}
+
+bool Subconscious::time_for_dream() const {
+    // Idle > 10 min (600,000ms)
+    auto last_query = stats_.last_query_at.load();
+    auto now = now_ms();
+    if (last_query != 0 && (now - last_query) < 600000LL) return false;
+
+    // Last dream trigger > 1 hour ago (3,600,000ms)
+    auto last_dream = last_dream_triggered_at_.load();
+    if (last_dream != 0 && (now - last_dream) < 3600000LL) return false;
+
+    return true;
 }
 
 // Helpers
