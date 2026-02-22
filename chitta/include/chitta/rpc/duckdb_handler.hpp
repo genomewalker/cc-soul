@@ -3105,7 +3105,7 @@ private:
 
         tools_.push_back({
             {"name", "file_timeline"},
-            {"description", "Show files modified in a time range or session (Time Machine). Use path or file_pattern to look up all versions of a specific file across all indexed sessions. Use cross_session=true for history across all sessions."},
+            {"description", "Show files modified in a time range or session (Time Machine). Default: last 24h. Use path or file_pattern to look up all versions of a specific file across all indexed sessions. Use cross_session=true for history across all sessions (7-day window)."},
             {"inputSchema", {
                 {"type", "object"},
                 {"properties", {
@@ -13110,11 +13110,11 @@ private:
                 limit
             );
         } else {
-            // Default: last hour (or last 7 days for cross-session)
+            // Default: last 24h (or last 7 days for cross-session)
             auto now = std::chrono::system_clock::now();
             auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                 now.time_since_epoch()).count();
-            int64_t window_ms = cross_session ? (7 * 24 * 60 * 60 * 1000LL) : (60 * 60 * 1000LL);
+            int64_t window_ms = cross_session ? (7 * 24 * 60 * 60 * 1000LL) : (24 * 60 * 60 * 1000LL);
             edits = mind_->store().get_file_edits_in_range(
                 now_ms - window_ms,
                 now_ms,
@@ -13467,6 +13467,49 @@ private:
         return tool_dream_start(start_params);
     }
 
+    // Finalize completed dreams: set status, ended_at, findings, memories_created.
+    // If specific_dream_id > 0, only that dream is checked.
+    void finalize_completed_dreams(int64_t specific_dream_id = 0) {
+        std::string filter = specific_dream_id > 0
+            ? " AND d.id = " + std::to_string(specific_dream_id)
+            : "";
+        auto pending = mind_->store().execute_sql_query(
+            "SELECT d.id, d.started_at, d.sadhana_id, "
+            "       COALESCE(s.updated_at, 0), COALESCE(s.last_action, '') "
+            "FROM dream d JOIN sadhana s ON d.sadhana_id = s.id "
+            "WHERE d.status = 'dreaming' AND s.state = 'done'" + filter);
+        if (!pending.success) return;
+        for (const auto& row : pending.rows) {
+            if (row.size() < 5) continue;
+            int64_t dream_id   = std::stoll(row[0]);
+            int64_t started_at = std::stoll(row[1]);
+            int64_t sadhana_id = std::stoll(row[2]);
+            int64_t ended_at   = (row[3] == "NULL") ? 0 : std::stoll(row[3]);
+            std::string findings = (row[4] == "NULL") ? "" : row[4];
+            (void)sadhana_id;
+
+            // Count memories tagged [dream] created during this dream's window
+            int64_t window_end = ended_at > 0 ? ended_at + 5000 : started_at + 3600000LL;
+            auto mc_res = mind_->store().execute_sql_query(
+                "SELECT COUNT(*) FROM memory "
+                "WHERE created_at >= " + std::to_string(started_at) +
+                " AND created_at <= " + std::to_string(window_end) +
+                " AND content LIKE '%[dream]%'");
+            int mc = 0;
+            if (mc_res.success && !mc_res.rows.empty() && !mc_res.rows[0].empty()
+                && mc_res.rows[0][0] != "NULL") {
+                mc = std::stoi(mc_res.rows[0][0]);
+            }
+
+            mind_->store().execute_raw(
+                "UPDATE dream SET status = 'woke', "
+                "  ended_at = " + std::to_string(ended_at) + ", "
+                "  memories_created = " + std::to_string(mc) + ", "
+                "  findings = '" + esc_sql(findings) + "' "
+                "WHERE id = " + std::to_string(dream_id));
+        }
+    }
+
     DuckDBToolResult tool_dream_list(const json& params) {
         if (subconscious_) subconscious_->notify_query();
 
@@ -13474,12 +13517,8 @@ private:
         if (limit <= 0 || limit > 100) limit = 10;
         std::string realm = params.value("realm", "");
 
-        // Lazily update any 'dreaming' dreams whose sadhana has completed
-        mind_->store().execute_raw(
-            "UPDATE dream SET status = 'woke', ended_at = "
-            "  (SELECT COALESCE(s.updated_at, 0) FROM sadhana s WHERE s.id = dream.sadhana_id) "
-            "WHERE status = 'dreaming' AND sadhana_id > 0 AND sadhana_id IN "
-            "  (SELECT id FROM sadhana WHERE state = 'done')");
+        // Lazily finalize any completed dreams (sets status, ended_at, findings, memories_created)
+        finalize_completed_dreams();
 
         std::string where = realm.empty() ? "" : "WHERE d.realm = '" + esc_sql(realm) + "' ";
 
@@ -13531,13 +13570,8 @@ private:
             ? std::stoll(params["id"].get<std::string>())
             : params["id"].get<int64_t>();
 
-        // Lazily update status if sadhana completed
-        mind_->store().execute_raw(
-            "UPDATE dream SET status = 'woke', ended_at = "
-            "  (SELECT COALESCE(s.updated_at, 0) FROM sadhana s WHERE s.id = dream.sadhana_id) "
-            "WHERE id = " + std::to_string(dream_id) +
-            " AND status = 'dreaming' AND sadhana_id > 0 AND sadhana_id IN "
-            "  (SELECT id FROM sadhana WHERE state = 'done')");
+        // Lazily finalize if sadhana completed (sets status, ended_at, findings, memories_created)
+        finalize_completed_dreams(dream_id);
 
         auto res = mind_->store().execute_sql_query(
             "SELECT d.id, d.topic, d.status, d.findings, d.memories_created, "

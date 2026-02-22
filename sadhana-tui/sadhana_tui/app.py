@@ -142,7 +142,7 @@ class DetailHeader(Static):
         self.refresh()
 
     def render(self) -> RenderableType:
-        if not self._status or "error" in self._status:
+        if not self._status or "error" in self._status or "goal" not in self._status:
             t = Text()
             t.append("\n  Select an agent", style="#333333")
             t.append("\n  j / k  or click", style="#222222")
@@ -154,7 +154,8 @@ class DetailHeader(Static):
 
         t = Text()
         # Line 1: id · model · provider
-        t.append(f"#{s.get('id', '?'):02d}", style="#777777")
+        sid = s.get("id", "?")
+        t.append(f"#{sid:02d}" if isinstance(sid, int) else f"#{sid}", style="#777777")
         t.append("  ")
         t.append(f"{s.get('brain_model', '?')}", style="#555555")
         t.append(" · ")
