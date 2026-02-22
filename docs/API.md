@@ -1,6 +1,6 @@
 # CC-Soul API Reference
 
-Complete reference for all tools exposed by cc-soul v3.38.6 via JSON-RPC 2.0 over Unix socket.
+Complete reference for all tools exposed by cc-soul via JSON-RPC 2.0 over Unix socket.
 
 ---
 
@@ -30,6 +30,7 @@ Complete reference for all tools exposed by cc-soul v3.38.6 via JSON-RPC 2.0 ove
 - [Calibration](#calibration)
 - [Hygiene](#hygiene)
 - [Cross-Project Insights](#cross-project-insights)
+- [Dream (Svapna)](#dream-svapna)
 - [Background Processing](#background-processing)
 - [State and Maintenance](#state-and-maintenance)
 - [Import and Export](#import-and-export)
@@ -1292,6 +1293,67 @@ Promote a memory to global visibility (applies across all projects).
 ### insight_global
 
 List all global insights.
+
+---
+
+## Dream (Svapna)
+
+Autonomous curiosity-driven exploration. Dreams are specialized sadhanas that trigger when the daemon has been idle for 10+ minutes.
+
+### dream_start
+
+Start a dream exploring a specific topic.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `topic` | string | Yes | Topic to explore (e.g. "quantum entanglement", "stoic philosophy") |
+| `realm` | string | No | Memory realm (default: brahman) |
+
+**Returns:** `{dream_id, sadhana_id, topic, status}`
+
+### dream_wander
+
+Auto-select a topic from memory gaps or curiosity seeds and start a dream. Use when you want the soul to explore freely without specifying a topic.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `realm` | string | No | Memory realm (default: brahman) |
+
+**Topic selection priority:**
+1. Memories tagged `gap` + `unresolved`
+2. Low-confidence memories (< 0.5)
+3. Hardcoded curiosity seeds (philosophy, consciousness, complexity)
+
+**Returns:** Same as `dream_start`
+
+### dream_list
+
+List recent dreams with their topics, status, and findings.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `limit` | integer | No | Max results (default: 10) |
+| `realm` | string | No | Filter by realm |
+
+**Returns:** `{dreams: [{id, topic, status, findings, memories_created, started_at, ended_at, sadhana_id, iterations}], count}`
+
+### dream_status
+
+Get full details of a dream including its sadhana agent history.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | integer | Yes | Dream ID |
+
+**Returns:** Dream record + linked sadhana details + last 3 sadhana history events
+
+### Dream Status Values
+
+| Status | Meaning |
+|--------|---------|
+| `dreaming` | Agent is actively exploring |
+| `woke` | Exploration complete, findings stored |
+| `forgotten` | Dream was abandoned (sadhana failed) |
 
 ---
 

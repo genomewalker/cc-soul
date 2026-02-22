@@ -334,6 +334,109 @@ Key principles:
 - **Autonomy** — Minimal human intervention required
 - **Transparency** — Full history and reasoning visible
 
+## Dream: Autonomous Curiosity
+
+**Dream** (Sanskrit: स्वप्न, svapna) — a specialized sadhana for curiosity-driven exploration during idle time.
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           DREAM LIFECYCLE                                │
+│                                                                          │
+│   Idle > 10 min          Auto-trigger                                    │
+│        │                      │                                          │
+│        ▼                      ▼                                          │
+│   ┌──────────┐         ┌──────────────┐                                  │
+│   │ wander   │ ──────▶ │ pick topic   │                                  │
+│   └──────────┘         │ (gaps, low   │                                  │
+│                        │  confidence, │                                  │
+│                        │  or seeds)   │                                  │
+│                        └──────┬───────┘                                  │
+│                               │                                          │
+│                               ▼                                          │
+│                        ┌──────────────┐                                  │
+│                        │ dream_start  │                                  │
+│                        │ (sadhana     │                                  │
+│                        │  kind=dream) │                                  │
+│                        └──────┬───────┘                                  │
+│                               │                                          │
+│                               ▼                                          │
+│                   ┌──────────────────────┐                               │
+│                   │   Claude Agent       │                               │
+│                   │   • WebSearch        │                               │
+│                   │   • WebFetch         │                               │
+│                   │   • chitta remember  │                               │
+│                   └──────────┬───────────┘                               │
+│                              │                                           │
+│                              ▼                                           │
+│                        {"status": "achieved"}                            │
+│                              │                                           │
+│                              ▼                                           │
+│                   [dream] memories stored                                │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### How Dreams Work
+
+1. **Auto-trigger**: When the daemon has been idle for 10+ minutes and no dream has run in the past hour, `dream_wander` is called automatically
+2. **Topic selection** (priority order):
+   - Memories tagged `gap` + `unresolved`
+   - Low-confidence memories (< 0.5)
+   - Hardcoded curiosity seeds (philosophy, consciousness, complexity)
+3. **Exploration**: Claude agent searches the web, fetches interesting pages, connects to existing knowledge
+4. **Storage**: 3-5 insights stored as `[dream]`-prefixed memories with tag `dream`
+5. **Completion**: Single cycle — agent returns `achieved`, dream status becomes `woke`
+
+### Dream Tools
+
+| Tool | Description |
+|------|-------------|
+| `dream_start` | Start a dream exploring a specific topic |
+| `dream_wander` | Auto-pick topic from gaps/seeds and start dreaming |
+| `dream_list` | List recent dreams with status |
+| `dream_status` | Full dream detail + sadhana history |
+
+### Usage
+
+```bash
+# Via skill
+/dream                    # Auto-pick topic
+/dream consciousness      # Specific topic
+/dream list               # Recent dreams
+/dream status 7           # Dream detail
+
+# Via MCP
+mcp__chitta__dream_wander {}
+mcp__chitta__dream_start {"topic": "quantum entanglement"}
+mcp__chitta__dream_list {"limit": 10}
+mcp__chitta__dream_status {"id": 7}
+```
+
+### Dream Status Values
+
+| Status | Meaning |
+|--------|---------|
+| `dreaming` | Agent is actively exploring |
+| `woke` | Exploration complete, findings stored |
+| `forgotten` | Dream was abandoned (sadhana failed) |
+
+### Dream Table Schema
+
+```sql
+CREATE TABLE dream (
+    id               BIGINT PRIMARY KEY,
+    topic            TEXT NOT NULL,
+    status           VARCHAR DEFAULT 'dreaming',
+    sadhana_id       BIGINT DEFAULT 0,
+    findings         TEXT,
+    memories_created INTEGER DEFAULT 0,
+    started_at       BIGINT NOT NULL,
+    ended_at         BIGINT DEFAULT 0,
+    realm            VARCHAR DEFAULT 'brahman'
+);
+```
+
+Dreams are linked to sadhanas via `sadhana_id`. The sadhana runs with `goal_dsl = {"kind": "dream", "topic": "..."}`, which triggers the specialized dream system prompt.
+
 ## Troubleshooting
 
 | Issue | Solution |
@@ -343,3 +446,4 @@ Key principles:
 | Too many API calls | Increase interval with `sadhana_set_interval` |
 | Brain errors | Try switching model: `sadhana_set_model --id N --model haiku` |
 | Memory not used | Ensure failures are being stored (check with `recall --query "sadhana"`) |
+| Dream not triggering | Check idle time (needs 10+ min) and cooldown (1 hour between dreams) |
