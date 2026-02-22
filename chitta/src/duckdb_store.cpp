@@ -424,6 +424,9 @@ bool DuckDBStore::create_schema() {
     write_execute("ALTER TABLE triplet ADD COLUMN IF NOT EXISTS valid_to_ms BIGINT DEFAULT 0");
     write_execute("ALTER TABLE triplet ADD COLUMN IF NOT EXISTS superseded_by BIGINT DEFAULT 0");
     write_execute("ALTER TABLE triplet ADD COLUMN IF NOT EXISTS context_date_ms BIGINT DEFAULT 0");
+    // Traversal tracking for convergence metrics
+    write_execute("ALTER TABLE triplet ADD COLUMN IF NOT EXISTS use_count INTEGER DEFAULT 0");
+    write_execute("ALTER TABLE triplet ADD COLUMN IF NOT EXISTS last_used_at BIGINT DEFAULT 0");
 
     // Indexes for triplet queries
     write_execute("CREATE INDEX IF NOT EXISTS idx_triplet_subject ON triplet(subject)");

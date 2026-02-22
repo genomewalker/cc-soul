@@ -441,6 +441,14 @@ private:
         });
         handlers_["connect_temporal"] = [this](const json& p) { return tool_connect_temporal(p); };
 
+        // convergence_metrics: measure whether self-improvement is converging or drifting
+        tools_.push_back({
+            {"name", "convergence_metrics"},
+            {"description", "Measure self-improvement convergence: correction recall rate + triplet traversal rate"},
+            {"inputSchema", {{"type", "object"}, {"properties", json::object()}}}
+        });
+        handlers_["convergence_metrics"] = [this](const json& p) { return tool_convergence_metrics(p); };
+
         // soul_context
         tools_.push_back({
             {"name", "soul_context"},
@@ -3865,6 +3873,19 @@ private:
 
         auto triplets = mind_->store().query_triplets_temporal(subject, predicate, object, at_time_ms, limit);
 
+        // Track traversal for convergence metrics
+        if (!triplets.empty()) {
+            std::ostringstream upd;
+            upd << "UPDATE triplet SET use_count = use_count + 1, last_used_at = "
+                << TemporalResolver::now_ms() << " WHERE id IN (";
+            for (size_t i = 0; i < triplets.size(); ++i) {
+                if (i > 0) upd << ",";
+                upd << triplets[i].id;
+            }
+            upd << ")";
+            mind_->store().execute_raw(upd.str());
+        }
+
         std::ostringstream ss;
         json results_json = json::array();
 
@@ -4023,6 +4044,125 @@ private:
             {"valid_from_ms", valid_from_ms},
             {"valid_to_ms", valid_to_ms}
         });
+    }
+
+    DuckDBToolResult tool_convergence_metrics(const json&) {
+        std::ostringstream ss;
+        json metrics;
+
+        // NULL-safe parsers (execute_sql_query serializes NULLs as "NULL")
+        auto to_i = [](const std::string& s) -> int64_t {
+            return (s.empty() || s == "NULL") ? 0 : std::stoll(s);
+        };
+        auto to_d = [](const std::string& s) -> double {
+            return (s.empty() || s == "NULL") ? 0.0 : std::stod(s);
+        };
+
+        // --- Correction recall rate ---
+        // Wisdom/distilled memories tagged correction/compliance: are they being recalled?
+        auto corr = mind_->store().execute_sql_query(
+            "SELECT COUNT(*) as total, "
+            "SUM(CASE WHEN access_count = 0 THEN 1 ELSE 0 END) as never_recalled, "
+            "AVG(access_count) as avg_access, "
+            "SUM(CASE WHEN access_count >= 3 THEN 1 ELSE 0 END) as well_recalled "
+            "FROM memory WHERE kind IN ('wisdom', 'distilled') "
+            "AND (content LIKE '%CORRECTION%' OR content LIKE '%[correction%' "
+            "  OR id IN (SELECT memory_id FROM memory_tags "
+            "    WHERE tag IN ('correction', 'compliance', 'gotcha')))");
+
+        int64_t total_corrections = 0, never_recalled = 0, well_recalled = 0;
+        double avg_access = 0.0;
+        if (corr.success && !corr.rows.empty() && corr.rows[0].size() >= 4) {
+            const auto& r = corr.rows[0];
+            total_corrections = to_i(r[0]);
+            never_recalled    = to_i(r[1]);
+            avg_access        = to_d(r[2]);
+            well_recalled     = to_i(r[3]);
+        }
+        double recall_rate = total_corrections > 0
+            ? 100.0 * (total_corrections - never_recalled) / total_corrections : 0.0;
+
+        ss << "=== Correction Recall ===\n";
+        ss << "  Total correction memories: " << total_corrections << "\n";
+        ss << "  Never recalled:            " << never_recalled << "\n";
+        ss << "  Well recalled (>=3x):      " << well_recalled << "\n";
+        ss << "  Avg access count:          " << std::fixed << std::setprecision(1) << avg_access << "\n";
+        ss << "  Recall rate:               " << std::fixed << std::setprecision(1) << recall_rate << "%\n\n";
+
+        metrics["correction"] = {
+            {"total", total_corrections},
+            {"never_recalled", never_recalled},
+            {"well_recalled", well_recalled},
+            {"avg_access", avg_access},
+            {"recall_rate_pct", recall_rate}
+        };
+
+        // --- Triplet traversal rate ---
+        auto trav = mind_->store().execute_sql_query(
+            "SELECT COUNT(*) as total, "
+            "SUM(CASE WHEN use_count > 0 THEN 1 ELSE 0 END) as traversed, "
+            "MAX(use_count) as max_use, "
+            "AVG(CASE WHEN use_count > 0 THEN CAST(use_count AS DOUBLE) ELSE NULL END) as avg_active_use "
+            "FROM triplet WHERE valid_to_ms = 0");
+
+        int64_t total_triplets = 0, traversed = 0, max_use = 0;
+        double avg_active_use = 0.0;
+        if (trav.success && !trav.rows.empty() && trav.rows[0].size() >= 4) {
+            const auto& r = trav.rows[0];
+            total_triplets = to_i(r[0]);
+            traversed      = to_i(r[1]);
+            max_use        = to_i(r[2]);
+            avg_active_use = to_d(r[3]);
+        }
+        double traversal_rate = total_triplets > 0
+            ? 100.0 * traversed / total_triplets : 0.0;
+
+        ss << "=== Triplet Traversal ===\n";
+        ss << "  Active triplets:           " << total_triplets << "\n";
+        ss << "  Ever traversed:            " << traversed << "\n";
+        ss << "  Traversal rate:            " << std::fixed << std::setprecision(2) << traversal_rate << "%\n";
+        ss << "  Max traversals (one edge): " << max_use << "\n";
+        ss << "  Avg traversals (active):   " << std::fixed << std::setprecision(1) << avg_active_use << "\n\n";
+
+        metrics["triplets"] = {
+            {"total_active", total_triplets},
+            {"traversed", traversed},
+            {"traversal_rate_pct", traversal_rate},
+            {"max_use", max_use},
+            {"avg_active_use", avg_active_use}
+        };
+
+        // --- Top traversed triplets ---
+        auto top = mind_->store().execute_sql_query(
+            "SELECT subject, predicate, object, use_count FROM triplet "
+            "WHERE use_count > 0 AND valid_to_ms = 0 "
+            "ORDER BY use_count DESC LIMIT 10");
+
+        ss << "=== Most Traversed Edges ===\n";
+        json top_json = json::array();
+        if (top.success) {
+            for (const auto& row : top.rows) {
+                if (row.size() < 4) continue;
+                ss << "  [" << row[3] << "x] " << row[0] << " -> " << row[1] << " -> " << row[2] << "\n";
+                top_json.push_back({
+                    {"subject", row[0]}, {"predicate", row[1]},
+                    {"object", row[2]},  {"use_count", std::stoll(row[3])}
+                });
+            }
+        }
+        if (top_json.empty()) ss << "  (none yet -- traversal tracking just started)\n";
+
+        // --- Convergence signal ---
+        ss << "\n=== Signal ===\n";
+        bool converging = recall_rate >= 60.0 && traversal_rate >= 1.0;
+        ss << "  " << (converging ? "CONVERGING" : "DRIFTING") << " -- "
+           << "corrections recalled " << std::fixed << std::setprecision(0) << recall_rate << "%, "
+           << "graph explored " << std::fixed << std::setprecision(2) << traversal_rate << "%\n";
+
+        metrics["signal"] = converging ? "converging" : "drifting";
+        metrics["top_traversed"] = top_json;
+
+        return DuckDBToolResult::ok(ss.str(), metrics);
     }
 
     DuckDBToolResult tool_soul_context(const json&) {
