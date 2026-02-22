@@ -13681,6 +13681,30 @@ private:
         }
         if (subconscious_) subconscious_->notify_query();
 
+        // Rate limit 1: no concurrent dreams (one at a time)
+        {
+            auto res = mind_->store().execute_sql_query(
+                "SELECT COUNT(*) FROM dream WHERE status = 'dreaming'");
+            if (res.success && !res.rows.empty() && std::stoi(res.rows[0][0]) > 0) {
+                return DuckDBToolResult::ok("skipped: a dream is already active",
+                    {{"skipped", true}, {"reason", "a dream is already active"}});
+            }
+        }
+
+        // Rate limit 2: max 2 auto-dreams per UTC day
+        {
+            auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            auto today_start_ms = now_ms - (now_ms % 86400000LL);
+            auto res = mind_->store().execute_sql_query(
+                "SELECT COUNT(*) FROM dream WHERE started_at >= " +
+                std::to_string(today_start_ms));
+            if (res.success && !res.rows.empty() && std::stoi(res.rows[0][0]) >= 2) {
+                return DuckDBToolResult::ok("skipped: daily dream limit reached (2/day)",
+                    {{"skipped", true}, {"reason", "daily dream limit reached (2/day)"}});
+            }
+        }
+
         std::string realm = params.value("realm", "brahman");
         std::string publish_path = params.value("publish_path", "");
         if (publish_path.empty()) {
