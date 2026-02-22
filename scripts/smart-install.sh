@@ -21,6 +21,12 @@ MARKER="$PLUGIN_DIR/.install-complete"
 GITHUB_REPO="genomewalker/cc-soul"
 RELEASE_URL="https://github.com/$GITHUB_REPO/releases/download"
 
+# Temp dir for downloaded source (cleaned up on exit)
+SOURCE_BUILD_DIR=""
+_DOWNLOAD_TMP=""
+cleanup_tmp() { [[ -n "$_DOWNLOAD_TMP" ]] && rm -rf "$_DOWNLOAD_TMP"; }
+trap cleanup_tmp EXIT
+
 # ONNX model checksums (SHA256) - empty hash = skip verification
 # TODO: compute actual checksums when models are pinned
 MODEL_CHECKSUM=""
@@ -81,6 +87,51 @@ verify_checksum() {
     fi
 
     [[ "$actual" == "$expected" ]]
+}
+
+# Fetch latest release version tag from GitHub API
+fetch_latest_version() {
+    local tmp
+    tmp=$(mktemp)
+    local api_url="https://api.github.com/repos/$GITHUB_REPO/releases/latest"
+    if download "$api_url" "$tmp" && [[ -s "$tmp" ]]; then
+        local tag
+        if command -v jq &>/dev/null; then
+            tag=$(jq -r '.tag_name // ""' "$tmp" 2>/dev/null)
+        else
+            tag=$(grep -o '"tag_name":"[^"]*"' "$tmp" | head -1 | sed 's/.*:"\([^"]*\)"/\1/')
+        fi
+        rm -f "$tmp"
+        [[ -n "$tag" ]] && echo "${tag#v}" && return 0
+    fi
+    rm -f "$tmp"
+    return 1
+}
+
+# Compare semver strings: returns 0 if $1 >= $2
+semver_gte() {
+    [[ "$(printf '%s\n' "$1" "$2" | sort -V | head -1)" == "$2" ]]
+}
+
+# Download source tarball for a given version into a temp dir.
+# Sets SOURCE_BUILD_DIR to the extracted directory containing chitta/.
+download_source_tarball() {
+    local version="$1"
+    _DOWNLOAD_TMP=$(mktemp -d)
+    local tarball="$_DOWNLOAD_TMP/cc-soul.tar.gz"
+    local url="https://github.com/$GITHUB_REPO/archive/refs/tags/v$version.tar.gz"
+
+    echo "[cc-soul] Downloading source v$version..."
+    if download "$url" "$tarball" && [[ -s "$tarball" ]]; then
+        tar -xzf "$tarball" -C "$_DOWNLOAD_TMP" 2>/dev/null
+        local extracted_dir
+        extracted_dir=$(find "$_DOWNLOAD_TMP" -maxdepth 1 -type d -name "cc-soul-*" | head -1)
+        if [[ -n "$extracted_dir" && -d "$extracted_dir/chitta" ]]; then
+            SOURCE_BUILD_DIR="$extracted_dir"
+            return 0
+        fi
+    fi
+    return 1
 }
 
 # Try to download pre-built binaries
@@ -180,7 +231,12 @@ detect_onnx_runtime() {
 }
 
 # Build from source
+# Optional first arg: path to source root (defaults to $PLUGIN_DIR)
 build_from_source() {
+    local src_root="${1:-$PLUGIN_DIR}"
+    local src_chitta="$src_root/chitta"
+    local build_dir="$src_chitta/build"
+
     echo "[cc-soul] Building from source..."
 
     # Check dependencies
@@ -194,13 +250,13 @@ build_from_source() {
         return 1
     fi
 
-    local plugin_bin="$PLUGIN_DIR/bin"
+    local plugin_bin="$src_root/bin"
     mkdir -p "$BIN_DIR" "$plugin_bin"
 
     # Clean build directory to avoid CMake cache conflicts
-    rm -rf "$BUILD_DIR"
-    mkdir -p "$BUILD_DIR"
-    cd "$BUILD_DIR"
+    rm -rf "$build_dir"
+    mkdir -p "$build_dir"
+    cd "$build_dir"
 
     # Detect ONNX Runtime for embeddings
     local cmake_args="-DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS= -DCMAKE_C_FLAGS="
@@ -218,20 +274,20 @@ build_from_source() {
         echo "[cc-soul]   Install via: conda install onnxruntime-cpp, pip install onnxruntime, or brew install onnxruntime"
     fi
 
-    # Configure - show errors now for debugging
-    if ! cmake .. $cmake_args 2>&1 | tail -10; then
+    # Configure - cmake .. runs from build_dir, so source is one level up ($src_chitta)
+    if ! cmake "$src_chitta" $cmake_args 2>&1 | tail -10; then
         echo "[cc-soul] ERROR: cmake configuration failed" >&2
         return 1
     fi
 
-    # Build (outputs to $PLUGIN_DIR/bin per CMakeLists.txt)
+    # Build (outputs to $src_root/bin per CMakeLists.txt)
     local nproc_val=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
     if ! make -j"$nproc_val" 2>&1 | tail -10; then
         echo "[cc-soul] ERROR: build failed" >&2
         return 1
     fi
 
-    # Copy binaries from plugin bin to install location (~/.claude/bin)
+    # Copy binaries from src bin to install location (~/.claude/bin)
     # Only chitta and chittad are required; migrate/import are legacy optional tools
     local all_built=true
     for bin in chitta chittad; do
@@ -562,17 +618,31 @@ validate_binaries() {
 
 # Main
 main() {
-    # Check if already installed
-    local current_version
+    # Plugin's own version (what's in the cached plugin directory)
+    local plugin_version
     if command -v jq &>/dev/null; then
-        current_version=$(jq -r '.version // "0.0.0"' "$PLUGIN_DIR/.claude-plugin/plugin.json" 2>/dev/null || echo "0.0.0")
+        plugin_version=$(jq -r '.version // "0.0.0"' "$PLUGIN_DIR/.claude-plugin/plugin.json" 2>/dev/null || echo "0.0.0")
     else
-        current_version=$(grep '"version"' "$PLUGIN_DIR/.claude-plugin/plugin.json" 2>/dev/null | head -1 | sed 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || echo "0.0.0")
+        plugin_version=$(grep '"version"' "$PLUGIN_DIR/.claude-plugin/plugin.json" 2>/dev/null | head -1 | sed 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || echo "0.0.0")
     fi
+
+    # Try to fetch the latest release from GitHub — always install the latest, not the cached plugin version
+    local current_version="$plugin_version"
+    local use_downloaded_source=false
+    local github_version
+    if github_version=$(fetch_latest_version 2>/dev/null) && [[ -n "$github_version" ]]; then
+        if ! semver_gte "$plugin_version" "$github_version"; then
+            echo "[cc-soul] Latest release v$github_version is newer than plugin cache v$plugin_version"
+            current_version="$github_version"
+            use_downloaded_source=true
+        fi
+    fi
+
     local installed_version=$(cat "$MARKER" 2>/dev/null || echo "")
 
     if [[ "$current_version" == "$installed_version" && -x "$BIN_DIR/chitta" && -f "$MODELS_DIR/model.onnx" ]]; then
-        exit 0  # Already installed
+        echo "[cc-soul] Already at v$current_version"
+        exit 0
     fi
 
     # Stop daemon before updating binaries (version mismatch can cause issues)
@@ -599,10 +669,21 @@ main() {
             has_local_onnx=true
         fi
 
+        # Determine source root: download latest if needed, otherwise use plugin cache
+        local src_root="$PLUGIN_DIR"
+        if $use_downloaded_source; then
+            if download_source_tarball "$current_version"; then
+                src_root="$SOURCE_BUILD_DIR"
+            else
+                echo "[cc-soul] WARNING: Could not download source v$current_version, falling back to plugin cache v$plugin_version"
+                current_version="$plugin_version"
+            fi
+        fi
+
         if $has_local_onnx; then
             # ONNX available: build from source to get embeddings support
             echo "[cc-soul] ONNX Runtime detected, building from source for embedding support..."
-            build_from_source || {
+            build_from_source "$src_root" || {
                 echo "[cc-soul] WARNING: Source build failed, trying pre-built (no embeddings)"
                 if [[ "$platform" != "unknown" ]]; then
                     download_binaries "$current_version" "$platform" || {
@@ -616,12 +697,12 @@ main() {
             }
         elif [[ "$platform" != "unknown" ]]; then
             # No local ONNX: try pre-built first (faster), then source
-            download_binaries "$current_version" "$platform" || build_from_source || {
+            download_binaries "$current_version" "$platform" || build_from_source "$src_root" || {
                 echo "[cc-soul] ERROR: Installation failed" >&2
                 exit 1
             }
         else
-            build_from_source || {
+            build_from_source "$src_root" || {
                 echo "[cc-soul] ERROR: Build failed and no pre-built binaries for this platform" >&2
                 exit 1
             }
