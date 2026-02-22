@@ -6,38 +6,63 @@
 .dreams-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 1.5rem;
+  gap: 1.75rem;
   margin-top: 2rem;
 }
 
 .dream-card {
-  background: var(--indigo-800);
-  border: 1px solid rgba(157, 178, 217, 0.12);
-  border-radius: 10px;
-  padding: 1.5rem;
-  transition: border-color 0.2s ease, transform 0.2s ease;
+  background: var(--indigo-700);
+  border-radius: var(--radius-md);
+  padding: var(--space-6) var(--space-5);
+  box-shadow: var(--shadow-soft);
+  border-top: 2px solid transparent;
+  border-left: 1px solid rgba(157, 178, 217, 0.08);
+  border-right: 1px solid rgba(157, 178, 217, 0.08);
+  border-bottom: 1px solid rgba(157, 178, 217, 0.08);
+  transition: transform 0.25s ease, box-shadow 0.25s ease, border-top-color 0.25s ease;
+  position: relative;
+  overflow: hidden;
 }
 
+/* Subtle top shine, same as feature-card */
+.dream-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(255,255,255,0.025) 0%, transparent 55%);
+  pointer-events: none;
+}
+
+/* Cycle accent colors so the grid has visual rhythm */
+.dream-card:nth-child(3n+1) { border-top-color: var(--sandal-300); }
+.dream-card:nth-child(3n+2) { border-top-color: var(--aura-300); }
+.dream-card:nth-child(3n+3) { border-top-color: var(--ember-400); }
+
 .dream-card:hover {
-  border-color: rgba(203, 175, 134, 0.35);
-  transform: translateY(-2px);
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-soft), 0 0 0 1px rgba(203, 175, 134, 0.12), var(--shadow-glow-sandal);
 }
 
 .dream-date {
   font-family: var(--font-mono);
-  font-size: 0.75rem;
-  color: rgba(157, 178, 217, 0.6);
-  letter-spacing: 0.05em;
-  margin-bottom: 0.5rem;
+  font-size: 0.7rem;
+  color: rgba(157, 178, 217, 0.5);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 0.65rem;
 }
 
 .dream-title {
   font-family: var(--font-display);
-  font-size: 1.25rem;
+  font-size: 1.35rem;
   font-weight: 500;
   color: var(--lotus-200);
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.8rem;
   line-height: 1.3;
+}
+
+.dream-title a {
+  transition: color 0.2s ease;
 }
 
 .dream-title a:hover {
@@ -47,7 +72,36 @@
 .dream-summary {
   font-size: 0.875rem;
   color: var(--ash-300);
-  line-height: 1.6;
+  line-height: 1.65;
+  margin-bottom: 1.25rem;
+  opacity: 0.85;
+}
+
+/* ── Dream card: tag row ──────────────────── */
+.dream-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: auto;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(157, 178, 217, 0.08);
+}
+
+.dream-meta-row span {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: rgba(157, 178, 217, 0.55);
+  background: rgba(157, 178, 217, 0.06);
+  border: 1px solid rgba(157, 178, 217, 0.1);
+  border-radius: 3px;
+  padding: 0.15em 0.5em;
+  letter-spacing: 0.03em;
+}
+
+.dream-meta-row span:first-child {
+  color: rgba(203, 175, 134, 0.7);
+  background: rgba(203, 175, 134, 0.06);
+  border-color: rgba(203, 175, 134, 0.15);
 }
 
 /* ── Dream index: empty state ─────────────── */
@@ -70,7 +124,7 @@
 
 /* ── Individual dream post ────────────────── */
 .dream-content {
-  max-width: 680px;
+  max-width: 700px;
   margin: 3rem auto 6rem;
   padding: 0 1.5rem;
 }
@@ -78,37 +132,99 @@
 .dream-content article {
   font-family: var(--font-display);
   font-size: 1.15rem;
-  line-height: 1.85;
+  line-height: 1.9;
   color: var(--lotus-200);
 }
 
-.dream-content p {
-  margin-bottom: 1.5rem;
+.dream-content article p {
+  margin-bottom: 1.6rem;
 }
 
+/* Lead paragraph — slightly larger, less opaque */
+.dream-content article > p:first-of-type {
+  font-size: 1.22rem;
+  line-height: 1.85;
+  color: var(--mist-100);
+  opacity: 0.95;
+}
+
+/* Drop cap on the opening paragraph */
+.dream-content article > p:first-of-type::first-letter {
+  font-family: var(--font-display);
+  font-size: 3.8rem;
+  font-weight: 600;
+  line-height: 0.75;
+  float: left;
+  margin: 0.05em 0.1em 0 0;
+  color: var(--sandal-300);
+  opacity: 0.85;
+}
+
+/* Section headings */
 .dream-content h2 {
   font-family: var(--font-display);
-  font-size: 1.4rem;
+  font-size: 1.35rem;
   font-weight: 500;
   color: var(--sandal-300);
-  margin: 2.5rem 0 1rem;
-  padding-bottom: 0.4rem;
-  border-bottom: 1px solid rgba(203, 175, 134, 0.2);
+  margin: 3rem 0 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid rgba(203, 175, 134, 0.18);
+  letter-spacing: 0.01em;
 }
 
+/* Inline code */
+.dream-content code {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  background: rgba(157, 178, 217, 0.08);
+  border: 1px solid rgba(157, 178, 217, 0.12);
+  border-radius: 3px;
+  padding: 0.1em 0.4em;
+  color: var(--aura-300);
+}
+
+/* Block quotes */
+.dream-content blockquote {
+  margin: 2rem 0;
+  padding: 1rem 1.5rem;
+  border-left: 3px solid var(--sandal-300);
+  background: rgba(203, 175, 134, 0.04);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  font-style: italic;
+  color: var(--lotus-200);
+  opacity: 0.9;
+}
+
+/* Post metadata line */
 .dream-content .dream-meta {
   font-family: var(--font-mono);
-  font-size: 0.8rem;
-  color: rgba(157, 178, 217, 0.55);
+  font-size: 0.78rem;
+  color: rgba(157, 178, 217, 0.5);
   margin-bottom: 3rem;
   padding-bottom: 1.5rem;
-  border-bottom: 1px solid rgba(157, 178, 217, 0.1);
+  border-bottom: 1px solid rgba(157, 178, 217, 0.08);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .dream-content .dream-meta a {
-  color: rgba(203, 175, 134, 0.7);
+  color: rgba(203, 175, 134, 0.65);
+  transition: color 0.2s ease;
 }
 
 .dream-content .dream-meta a:hover {
   color: var(--sandal-300);
+}
+
+/* ── Responsive ───────────────────────────── */
+@media (max-width: 640px) {
+  .dreams-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dream-content article > p:first-of-type::first-letter {
+    font-size: 2.8rem;
+  }
 }
