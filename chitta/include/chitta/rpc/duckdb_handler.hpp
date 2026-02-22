@@ -13468,6 +13468,7 @@ private:
     }
 
     // Finalize completed dreams: set status, ended_at, findings, memories_created.
+    // Also backfills already-woke dreams that have NULL findings (legacy from old code).
     // If specific_dream_id > 0, only that dream is checked.
     void finalize_completed_dreams(int64_t specific_dream_id = 0) {
         std::string filter = specific_dream_id > 0
@@ -13475,9 +13476,10 @@ private:
             : "";
         auto pending = mind_->store().execute_sql_query(
             "SELECT d.id, d.started_at, d.sadhana_id, "
-            "       COALESCE(s.updated_at, 0), COALESCE(s.last_action, '') "
+            "       COALESCE(d.ended_at, s.updated_at, 0), COALESCE(s.last_action, '') "
             "FROM dream d JOIN sadhana s ON d.sadhana_id = s.id "
-            "WHERE d.status = 'dreaming' AND s.state = 'done'" + filter);
+            "WHERE (d.status = 'dreaming' OR (d.status = 'woke' AND d.findings IS NULL)) "
+            "  AND s.state = 'done'" + filter);
         if (!pending.success) return;
         for (const auto& row : pending.rows) {
             if (row.size() < 5) continue;
