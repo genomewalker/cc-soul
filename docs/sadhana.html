@@ -264,260 +264,342 @@
   .memory-arrow { justify-content: center; transform: rotate(90deg); }
 }
 
-/* TUI mockup - Premium terminal look */
-.tui-mockup {
-  background: linear-gradient(180deg, #0d0d12 0%, #080810 100%);
-  border: 1px solid rgba(122, 162, 247, 0.2);
-  border-radius: var(--radius-lg);
+/* ── TUI MOCKUP — Revamped ─────────────────── */
+.tui-window {
+  background: #090b10;
+  border-radius: 12px;
   overflow: hidden;
   font-family: 'IBM Plex Mono', monospace;
   font-size: 0.8rem;
   line-height: 1.5;
   margin: var(--space-6) 0;
   box-shadow:
-    0 4px 24px rgba(0, 0, 0, 0.5),
-    0 0 0 1px rgba(122, 162, 247, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+    0 32px 80px rgba(0,0,0,0.7),
+    0 0 0 1px rgba(255,255,255,0.06),
+    inset 0 1px 0 rgba(255,255,255,0.04);
+  position: relative;
 }
-.tui-header {
-  background: linear-gradient(90deg, rgba(122, 162, 247, 0.08) 0%, rgba(15, 15, 20, 0.95) 100%);
-  padding: 12px 16px;
-  border-bottom: 1px solid rgba(122, 162, 247, 0.15);
+
+/* Scanline overlay */
+.tui-window::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.03) 2px,
+    rgba(0,0,0,0.03) 4px
+  );
+  pointer-events: none;
+  z-index: 10;
+  border-radius: 12px;
+}
+
+/* macOS-style title bar */
+.tui-titlebar {
+  background: linear-gradient(180deg, #1a1d26 0%, #141720 100%);
+  padding: 11px 16px;
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
 }
-.tui-header-title {
-  color: #c0caf5;
-  font-weight: 600;
-  font-size: 0.9rem;
-  letter-spacing: 0.02em;
+.tui-dots {
+  display: flex;
+  gap: 7px;
 }
-.tui-header-status {
-  color: #9ece6a;
-  font-size: 0.85rem;
+.tui-dot {
+  width: 12px; height: 12px;
+  border-radius: 50%;
+}
+.tui-dot--close  { background: #ff5f57; box-shadow: 0 0 6px rgba(255,95,87,0.4); }
+.tui-dot--min    { background: #febc2e; box-shadow: 0 0 6px rgba(254,188,46,0.4); }
+.tui-dot--max    { background: #28c840; box-shadow: 0 0 6px rgba(40,200,64,0.4); }
+.tui-titlebar-name {
+  flex: 1;
+  text-align: center;
+  color: #4a5175;
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+  margin-left: -60px; /* optical centering past dots */
+}
+.tui-titlebar-badge {
   display: flex;
   align-items: center;
   gap: 6px;
+  color: #9ece6a;
+  font-size: 0.72rem;
 }
-.tui-header-status::before {
-  content: '';
-  width: 8px;
-  height: 8px;
+.tui-live-dot {
+  width: 7px; height: 7px;
   background: #9ece6a;
   border-radius: 50%;
-  box-shadow: 0 0 8px rgba(158, 206, 106, 0.6);
-  animation: statusPulse 2s ease-in-out infinite;
+  box-shadow: 0 0 8px rgba(158,206,106,0.7);
+  animation: livePulse 2s ease-in-out infinite;
 }
-@keyframes statusPulse {
-  0%, 100% { opacity: 1; box-shadow: 0 0 8px rgba(158, 206, 106, 0.6); }
-  50% { opacity: 0.7; box-shadow: 0 0 4px rgba(158, 206, 106, 0.3); }
-}
-
-.tui-body {
-  padding: 16px;
-}
-.tui-agents {
-  display: flex;
-  gap: 12px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid rgba(122, 162, 247, 0.1);
-  margin-bottom: 16px;
-  overflow-x: auto;
-}
-.tui-agent {
-  min-width: 160px;
-  padding: 12px 14px;
-  background: rgba(0, 0, 0, 0.3);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  border-left: 3px solid #3b4261;
-  border-radius: 6px;
-  transition: all 0.2s ease;
-}
-.tui-agent:hover {
-  background: rgba(122, 162, 247, 0.05);
-  border-color: rgba(122, 162, 247, 0.2);
-}
-.tui-agent--active {
-  border-left-color: #9ece6a;
-  background: rgba(158, 206, 106, 0.05);
-  box-shadow: 0 0 20px rgba(158, 206, 106, 0.1);
-}
-.tui-agent-id {
-  color: #7aa2f7;
-  font-weight: 600;
-  font-size: 0.9rem;
-}
-.tui-agent-status {
-  color: #565f89;
-  font-size: 0.75rem;
-  margin-left: 8px;
-}
-.tui-agent-status--running {
-  color: #9ece6a;
-}
-.tui-agent-goal {
-  color: #a9b1d6;
-  font-size: 0.8rem;
-  margin-top: 6px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.tui-agent-cycles {
-  color: #ff9e64;
-  font-size: 0.75rem;
-  margin-top: 4px;
+@keyframes livePulse {
+  0%,100% { opacity:1; box-shadow: 0 0 8px rgba(158,206,106,0.7); }
+  50%      { opacity:0.5; box-shadow: 0 0 3px rgba(158,206,106,0.3); }
 }
 
-.tui-detail {
+/* Main layout */
+.tui-layout {
   display: grid;
-  grid-template-columns: 1fr 1.2fr;
-  gap: 20px;
+  grid-template-columns: 220px 1fr;
+  min-height: 360px;
 }
-@media (max-width: 650px) {
-  .tui-detail { grid-template-columns: 1fr; }
+@media (max-width: 640px) {
+  .tui-layout { grid-template-columns: 1fr; }
 }
 
-.tui-info {
-  color: #a9b1d6;
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 8px;
-  padding: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.03);
+/* Left sidebar — agent list */
+.tui-sidebar {
+  border-right: 1px solid rgba(255,255,255,0.05);
+  padding: 12px 0;
+  background: rgba(0,0,0,0.2);
 }
-.tui-info-title {
-  color: #7aa2f7;
-  font-size: 1rem;
-  font-weight: 600;
-  margin-bottom: 12px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.tui-info-title::before {
-  content: '●';
-  color: #9ece6a;
-  font-size: 0.7rem;
-}
-.tui-info-goal {
-  color: #c0caf5;
-  font-size: 0.85rem;
-  line-height: 1.5;
-  margin-bottom: 16px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-}
-.tui-info-meta {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
-.tui-info-item {
-  display: flex;
-  gap: 8px;
-}
-.tui-info-label {
-  color: #565f89;
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-.tui-info-value {
-  color: #a9b1d6;
-  font-size: 0.85rem;
-}
-.tui-info-value--highlight { color: #ff9e64; font-weight: 500; }
-
-.tui-events {
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 8px;
-  padding: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.03);
-}
-.tui-events-title {
-  color: #565f89;
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  margin-bottom: 12px;
-}
-.tui-event {
-  display: grid;
-  grid-template-columns: 50px 55px 1fr;
-  gap: 12px;
-  padding: 8px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.02);
-  align-items: center;
-}
-.tui-event:last-child { border-bottom: none; }
-.tui-event-time {
+.tui-sidebar-title {
   color: #3b4261;
-  font-size: 0.75rem;
-}
-.tui-event-type {
-  font-size: 0.75rem;
-  font-weight: 600;
+  font-size: 0.65rem;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  letter-spacing: 0.12em;
+  padding: 0 14px 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+  margin-bottom: 8px;
 }
-.tui-event-type::before {
+.tui-agent-row {
+  padding: 10px 14px;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  transition: all 0.15s;
+  position: relative;
+}
+.tui-agent-row:hover { background: rgba(122,162,247,0.04); }
+.tui-agent-row--active {
+  border-left-color: #9ece6a;
+  background: rgba(158,206,106,0.05);
+}
+.tui-agent-row--active::before {
   content: '';
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 0 20px rgba(158,206,106,0.03);
+  pointer-events: none;
 }
-.tui-event-type--sense { color: #7dcfff; }
-.tui-event-type--sense::before { background: #7dcfff; box-shadow: 0 0 6px rgba(125, 207, 255, 0.5); }
-.tui-event-type--think { color: #e0af68; }
-.tui-event-type--think::before { background: #e0af68; box-shadow: 0 0 6px rgba(224, 175, 104, 0.5); }
-.tui-event-type--act { color: #9ece6a; }
-.tui-event-type--act::before { background: #9ece6a; box-shadow: 0 0 6px rgba(158, 206, 106, 0.5); }
-.tui-event-type--learn { color: #bb9af7; }
-.tui-event-type--learn::before { background: #bb9af7; box-shadow: 0 0 6px rgba(187, 154, 247, 0.5); }
-.tui-event-content {
-  color: #787c99;
-  font-size: 0.8rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.tui-event-content code {
-  color: #9ece6a;
-  background: rgba(158, 206, 106, 0.1);
-  padding: 2px 6px;
-  border-radius: 3px;
-  font-size: 0.75rem;
-}
-
-.tui-footer {
-  background: linear-gradient(90deg, rgba(122, 162, 247, 0.05) 0%, rgba(15, 15, 20, 0.95) 100%);
-  padding: 10px 16px;
-  border-top: 1px solid rgba(122, 162, 247, 0.1);
+.tui-agent-top {
   display: flex;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-.tui-key {
-  display: inline-flex;
   align-items: center;
-  gap: 6px;
+  justify-content: space-between;
+  margin-bottom: 4px;
 }
-.tui-key-badge {
-  background: rgba(122, 162, 247, 0.15);
-  border: 1px solid rgba(122, 162, 247, 0.2);
-  padding: 3px 8px;
-  border-radius: 4px;
-  color: #7aa2f7;
-  font-size: 0.7rem;
+.tui-agent-id { color: #7aa2f7; font-weight: 600; font-size: 0.85rem; }
+.tui-agent-pill {
+  font-size: 0.65rem;
+  padding: 2px 7px;
+  border-radius: 20px;
   font-weight: 500;
 }
-.tui-key-label {
+.tui-agent-pill--running {
+  background: rgba(158,206,106,0.15);
+  color: #9ece6a;
+  border: 1px solid rgba(158,206,106,0.25);
+}
+.tui-agent-pill--done {
+  background: rgba(86,95,137,0.2);
   color: #565f89;
-  font-size: 0.75rem;
+  border: 1px solid rgba(86,95,137,0.2);
+}
+.tui-agent-pill--paused {
+  background: rgba(224,175,104,0.12);
+  color: #e0af68;
+  border: 1px solid rgba(224,175,104,0.2);
+}
+.tui-agent-goal { color: #6b7194; font-size: 0.75rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tui-agent-stats {
+  display: flex;
+  gap: 10px;
+  margin-top: 4px;
+}
+.tui-agent-stat { font-size: 0.65rem; color: #3b4261; }
+.tui-agent-stat span { color: #ff9e64; }
+
+/* Right panel */
+.tui-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Detail header */
+.tui-detail-header {
+  padding: 14px 18px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  background: rgba(0,0,0,0.1);
+}
+.tui-detail-id {
+  color: #7aa2f7;
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tui-detail-id::after {
+  content: '●';
+  color: #9ece6a;
+  font-size: 0.55rem;
+  animation: livePulse 2s ease-in-out infinite;
+}
+.tui-detail-goal { color: #8a8faa; font-size: 0.78rem; line-height: 1.5; }
+.tui-detail-meta {
+  display: flex;
+  gap: 18px;
+  margin-top: 10px;
+}
+.tui-meta-item { display: flex; flex-direction: column; gap: 2px; }
+.tui-meta-label { color: #3b4261; font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.08em; }
+.tui-meta-value { color: #a9b1d6; font-size: 0.78rem; }
+.tui-meta-value--hot { color: #ff9e64; }
+
+/* Event stream */
+.tui-stream {
+  flex: 1;
+  padding: 12px 18px;
+  overflow: hidden;
+  position: relative;
+}
+.tui-stream-title {
+  color: #3b4261;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 10px;
+}
+.tui-stream-events { display: flex; flex-direction: column; gap: 1px; }
+
+.tui-ev {
+  display: grid;
+  grid-template-columns: 44px 50px 1fr;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.025);
+  align-items: center;
+  opacity: 0;
+  transform: translateY(6px);
+  animation: evAppear 0.4s ease forwards;
+}
+.tui-ev:last-child { border-bottom: none; }
+@keyframes evAppear {
+  to { opacity: 1; transform: translateY(0); }
+}
+/* Staggered animation delays */
+.tui-ev:nth-child(1) { animation-delay: 0.1s; }
+.tui-ev:nth-child(2) { animation-delay: 0.6s; }
+.tui-ev:nth-child(3) { animation-delay: 1.2s; }
+.tui-ev:nth-child(4) { animation-delay: 1.9s; }
+.tui-ev:nth-child(5) { animation-delay: 2.7s; }
+.tui-ev:nth-child(6) { animation-delay: 3.6s; }
+
+.tui-ev-time { color: #2d3149; font-size: 0.7rem; }
+.tui-ev-type {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.tui-ev-type::before {
+  content: '';
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.tui-ev-type--sense  { color: #7dcfff; }
+.tui-ev-type--sense::before  { background:#7dcfff; box-shadow:0 0 5px rgba(125,207,255,0.6); }
+.tui-ev-type--think  { color: #e0af68; }
+.tui-ev-type--think::before  { background:#e0af68; box-shadow:0 0 5px rgba(224,175,104,0.6); }
+.tui-ev-type--act    { color: #9ece6a; }
+.tui-ev-type--act::before    { background:#9ece6a; box-shadow:0 0 5px rgba(158,206,106,0.6); }
+.tui-ev-type--learn  { color: #bb9af7; }
+.tui-ev-type--learn::before  { background:#bb9af7; box-shadow:0 0 5px rgba(187,154,247,0.6); }
+.tui-ev-content { color: #575d7a; font-size: 0.78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tui-ev-content code {
+  color: #9ece6a;
+  background: rgba(158,206,106,0.08);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+/* Cursor blink at bottom */
+.tui-cursor {
+  display: inline-block;
+  width: 7px; height: 13px;
+  background: #7aa2f7;
+  border-radius: 1px;
+  margin-left: 4px;
+  animation: cursorBlink 1.1s step-end infinite;
+  vertical-align: middle;
+}
+@keyframes cursorBlink {
+  0%,100% { opacity:1; }
+  50%      { opacity:0; }
+}
+
+/* Status bar */
+.tui-statusbar {
+  background: #7aa2f7;
+  padding: 4px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.tui-status-left {
+  display: flex;
+  gap: 16px;
+  color: #1a1d26;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+.tui-status-right {
+  display: flex;
+  gap: 12px;
+  color: rgba(26,29,38,0.7);
+  font-size: 0.7rem;
+}
+
+/* Keybinding bar */
+.tui-keybars {
+  background: #1a1d26;
+  padding: 8px 16px;
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  border-top: 1px solid rgba(255,255,255,0.04);
+}
+.tui-kb {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.tui-kb-key {
+  background: rgba(122,162,247,0.12);
+  border: 1px solid rgba(122,162,247,0.18);
+  padding: 2px 7px;
+  border-radius: 4px;
+  color: #7aa2f7;
+  font-size: 0.68rem;
+  font-weight: 500;
+  min-width: 22px;
+  text-align: center;
+}
+.tui-kb-label {
+  color: #3b4261;
+  font-size: 0.7rem;
 }
 
 /* Learning cards */
@@ -1204,107 +1286,158 @@
 <span class="kw">sadhana-tui</span></pre>
     </div>
 
-    <!-- TUI Mockup -->
-    <div class="tui-mockup reveal reveal-delay-2">
-      <div class="tui-header">
-        <span class="tui-header-title">sadhana</span>
-        <span class="tui-header-status">2/3 running</span>
+    <!-- TUI Mockup — Revamped -->
+    <div class="tui-window reveal reveal-delay-2">
+
+      <!-- Title bar -->
+      <div class="tui-titlebar">
+        <div class="tui-dots">
+          <div class="tui-dot tui-dot--close"></div>
+          <div class="tui-dot tui-dot--min"></div>
+          <div class="tui-dot tui-dot--max"></div>
+        </div>
+        <div class="tui-titlebar-name">sadhana-tui — 3 agents</div>
+        <div class="tui-titlebar-badge">
+          <div class="tui-live-dot"></div>
+          live
+        </div>
       </div>
-      <div class="tui-body">
-        <div class="tui-agents">
-          <div class="tui-agent tui-agent--active">
-            <div><span class="tui-agent-id">#06</span> <span class="tui-agent-status tui-agent-status--running">running</span></div>
+
+      <!-- Main layout: sidebar + panel -->
+      <div class="tui-layout">
+
+        <!-- Sidebar: agent list -->
+        <div class="tui-sidebar">
+          <div class="tui-sidebar-title">Agents</div>
+
+          <div class="tui-agent-row tui-agent-row--active">
+            <div class="tui-agent-top">
+              <span class="tui-agent-id">#22</span>
+              <span class="tui-agent-pill tui-agent-pill--running">running</span>
+            </div>
             <div class="tui-agent-goal">Monitor pipeline</div>
-            <div class="tui-agent-cycles">24 cycles</div>
+            <div class="tui-agent-stats">
+              <span class="tui-agent-stat">cycles <span id="tuiCycles">24</span></span>
+              <span class="tui-agent-stat">300s</span>
+            </div>
           </div>
-          <div class="tui-agent">
-            <div><span class="tui-agent-id">#05</span> <span class="tui-agent-status">done</span></div>
-            <div class="tui-agent-goal">Verify deploy</div>
-            <div class="tui-agent-cycles">12 cycles</div>
+
+          <div class="tui-agent-row">
+            <div class="tui-agent-top">
+              <span class="tui-agent-id">#21</span>
+              <span class="tui-agent-pill tui-agent-pill--done">done</span>
+            </div>
+            <div class="tui-agent-goal">Reliability audit</div>
+            <div class="tui-agent-stats">
+              <span class="tui-agent-stat">cycles <span>3</span></span>
+            </div>
           </div>
-          <div class="tui-agent">
-            <div><span class="tui-agent-id">#04</span> <span class="tui-agent-status">paused</span></div>
-            <div class="tui-agent-goal">Run tests</div>
-            <div class="tui-agent-cycles">8 cycles</div>
+
+          <div class="tui-agent-row">
+            <div class="tui-agent-top">
+              <span class="tui-agent-id">#20</span>
+              <span class="tui-agent-pill tui-agent-pill--paused">paused</span>
+            </div>
+            <div class="tui-agent-goal">Run test suite</div>
+            <div class="tui-agent-stats">
+              <span class="tui-agent-stat">cycles <span>8</span></span>
+            </div>
           </div>
         </div>
-        <div class="tui-detail">
-          <div class="tui-info">
-            <div class="tui-info-title">#06 running</div>
-            <div class="tui-info-goal">Monitor pipeline on denbi-h-micro until ALL jobs finished</div>
-            <div class="tui-info-meta">
-              <div class="tui-info-item">
-                <span class="tui-info-label">model</span>
-                <span class="tui-info-value">haiku</span>
+
+        <!-- Right panel -->
+        <div class="tui-panel">
+          <!-- Detail header -->
+          <div class="tui-detail-header">
+            <div class="tui-detail-id">#22  haiku · claude</div>
+            <div class="tui-detail-goal">Monitor denbi pipeline until ALL jobs finished. Alert on failure.</div>
+            <div class="tui-detail-meta">
+              <div class="tui-meta-item">
+                <span class="tui-meta-label">cycles</span>
+                <span class="tui-meta-value tui-meta-value--hot" id="tuiCycles2">24</span>
               </div>
-              <div class="tui-info-item">
-                <span class="tui-info-label">brain</span>
-                <span class="tui-info-value">claude</span>
+              <div class="tui-meta-item">
+                <span class="tui-meta-label">interval</span>
+                <span class="tui-meta-value">300s</span>
               </div>
-              <div class="tui-info-item">
-                <span class="tui-info-label">cycles</span>
-                <span class="tui-info-value tui-info-value--highlight">24</span>
+              <div class="tui-meta-item">
+                <span class="tui-meta-label">next tick</span>
+                <span class="tui-meta-value" id="tuiCountdown">4:58</span>
               </div>
-              <div class="tui-info-item">
-                <span class="tui-info-label">interval</span>
-                <span class="tui-info-value">300s</span>
+              <div class="tui-meta-item">
+                <span class="tui-meta-label">memories</span>
+                <span class="tui-meta-value">12</span>
               </div>
             </div>
           </div>
-          <div class="tui-events">
-            <div class="tui-events-title">Event Stream</div>
-            <div class="tui-event">
-              <span class="tui-event-time">01:23</span>
-              <span class="tui-event-type tui-event-type--sense">sense</span>
-              <span class="tui-event-content"><code>squeue -u user</code></span>
+
+          <!-- Event stream -->
+          <div class="tui-stream">
+            <div class="tui-stream-title">Event Stream</div>
+            <div class="tui-stream-events" id="tuiStream">
+              <div class="tui-ev">
+                <span class="tui-ev-time">01:23</span>
+                <span class="tui-ev-type tui-ev-type--sense">sense</span>
+                <span class="tui-ev-content"><code>squeue -u fguerra</code></span>
+              </div>
+              <div class="tui-ev">
+                <span class="tui-ev-time">01:23</span>
+                <span class="tui-ev-type tui-ev-type--think">think</span>
+                <span class="tui-ev-content">47 jobs pending, 12 running — waiting</span>
+              </div>
+              <div class="tui-ev">
+                <span class="tui-ev-time">01:18</span>
+                <span class="tui-ev-type tui-ev-type--act">act</span>
+                <span class="tui-ev-content"><code>sleep 300</code> (next check in 5 min)</span>
+              </div>
+              <div class="tui-ev">
+                <span class="tui-ev-time">01:13</span>
+                <span class="tui-ev-type tui-ev-type--learn">learn</span>
+                <span class="tui-ev-content">Stored: ssh pattern for denbi-h-micro</span>
+              </div>
+              <div class="tui-ev">
+                <span class="tui-ev-time">01:13</span>
+                <span class="tui-ev-type tui-ev-type--sense">sense</span>
+                <span class="tui-ev-content"><code>snakemake --summary 2>&amp;1 | tail -5</code></span>
+              </div>
+              <div class="tui-ev">
+                <span class="tui-ev-time">01:08</span>
+                <span class="tui-ev-type tui-ev-type--act">act</span>
+                <span class="tui-ev-content"><code>ssh fguerra@denbi-h-micro</code></span>
+              </div>
             </div>
-            <div class="tui-event">
-              <span class="tui-event-time">01:23</span>
-              <span class="tui-event-type tui-event-type--think">think</span>
-              <span class="tui-event-content">Jobs still running, wait for completion</span>
-            </div>
-            <div class="tui-event">
-              <span class="tui-event-time">01:18</span>
-              <span class="tui-event-type tui-event-type--act">act</span>
-              <span class="tui-event-content"><code>ssh user@denbi-h-micro</code></span>
-            </div>
-            <div class="tui-event">
-              <span class="tui-event-time">01:18</span>
-              <span class="tui-event-type tui-event-type--learn">learn</span>
-              <span class="tui-event-content">Success: SSH connection established</span>
-            </div>
-            <div class="tui-event">
-              <span class="tui-event-time">01:13</span>
-              <span class="tui-event-type tui-event-type--sense">sense</span>
-              <span class="tui-event-content"><code>snakemake --summary</code></span>
+            <div style="padding-top:6px;color:#2d3149;font-size:0.7rem;">
+              › <span class="tui-cursor"></span>
             </div>
           </div>
         </div>
       </div>
-      <div class="tui-footer">
-        <span class="tui-key"><span class="tui-key-badge">n</span> <span class="tui-key-label">new</span></span>
-        <span class="tui-key"><span class="tui-key-badge">p</span> <span class="tui-key-label">pause</span></span>
-        <span class="tui-key"><span class="tui-key-badge">r</span> <span class="tui-key-label">resume</span></span>
-        <span class="tui-key"><span class="tui-key-badge">s</span> <span class="tui-key-label">stop</span></span>
-        <span class="tui-key"><span class="tui-key-badge">j/k</span> <span class="tui-key-label">navigate</span></span>
-        <span class="tui-key"><span class="tui-key-badge">q</span> <span class="tui-key-label">quit</span></span>
+
+      <!-- Status bar -->
+      <div class="tui-statusbar">
+        <div class="tui-status-left">
+          <span>NORMAL</span>
+          <span>#22 · running</span>
+        </div>
+        <div class="tui-status-right">
+          <span>3 agents</span>
+          <span>1 active</span>
+          <span>sadhana-tui v1.0</span>
+        </div>
+      </div>
+
+      <!-- Keybinding bar -->
+      <div class="tui-keybars">
+        <span class="tui-kb"><span class="tui-kb-key">n</span><span class="tui-kb-label">new</span></span>
+        <span class="tui-kb"><span class="tui-kb-key">p</span><span class="tui-kb-label">pause</span></span>
+        <span class="tui-kb"><span class="tui-kb-key">r</span><span class="tui-kb-label">resume</span></span>
+        <span class="tui-kb"><span class="tui-kb-key">s</span><span class="tui-kb-label">stop</span></span>
+        <span class="tui-kb"><span class="tui-kb-key">j/k</span><span class="tui-kb-label">navigate</span></span>
+        <span class="tui-kb"><span class="tui-kb-key">g</span><span class="tui-kb-label">set-goal</span></span>
+        <span class="tui-kb"><span class="tui-kb-key">m</span><span class="tui-kb-label">model</span></span>
+        <span class="tui-kb"><span class="tui-kb-key">q</span><span class="tui-kb-label">quit</span></span>
       </div>
     </div>
-
-    <table class="comp-table reveal reveal-delay-3">
-      <thead>
-        <tr><th>Key</th><th>Action</th></tr>
-      </thead>
-      <tbody>
-        <tr><td class="class-name">n</td><td class="role-desc">Create new sadhana</td></tr>
-        <tr><td class="class-name">p</td><td class="role-desc">Pause selected</td></tr>
-        <tr><td class="class-name">r</td><td class="role-desc">Resume selected</td></tr>
-        <tr><td class="class-name">s</td><td class="role-desc">Stop selected</td></tr>
-        <tr><td class="class-name">j / k</td><td class="role-desc">Navigate down / up</td></tr>
-        <tr><td class="class-name">click</td><td class="role-desc">Select sadhana card</td></tr>
-        <tr><td class="class-name">q</td><td class="role-desc">Quit</td></tr>
-      </tbody>
-    </table>
   </div>
 </section>
 
@@ -1653,6 +1786,89 @@ mcp__chitta__dream_list {"limit": 10}</pre>
 </footer>
 
 <script>
+/* ═══════════════════════════════════════════
+   TUI LIVE DEMO — Countdown + Cycle + Stream
+   ═══════════════════════════════════════════ */
+(function() {
+  var countdownEl  = document.getElementById('tuiCountdown');
+  var cyclesEl     = document.getElementById('tuiCycles');
+  var cycles2El    = document.getElementById('tuiCycles2');
+  var streamEl     = document.getElementById('tuiStream');
+
+  if (!countdownEl) return;
+
+  var INTERVAL = 300; // seconds (5 min, matches the sadhana interval shown)
+  var remaining = 298; // start near the top so user sees it count down quickly at demo speed
+  var cycles = 24;
+
+  var senseEvents = [
+    ['sense', '<code>squeue -u fguerra</code>'],
+    ['think', '49 jobs pending — waiting'],
+    ['act',   '<code>sleep 300</code> (next check in 5 min)'],
+    ['sense', '<code>snakemake --summary 2>&amp;1 | tail -5</code>'],
+    ['think', 'All 12 running jobs still healthy'],
+    ['act',   'Stored observation to memory'],
+    ['learn', 'Pattern: jobs finish in ~2h batches'],
+    ['sense', '<code>sacct -u fguerra --state=FAILED</code>'],
+    ['think', 'No failures detected — continuing'],
+    ['act',   '<code>sleep 300</code>'],
+  ];
+  var evIdx = 0;
+
+  function pad(n) { return n < 10 ? '0' + n : '' + n; }
+
+  function formatTime(secs) {
+    var m = Math.floor(secs / 60);
+    var s = secs % 60;
+    return m + ':' + pad(s);
+  }
+
+  function addEvent() {
+    if (!streamEl) return;
+    var ev = senseEvents[evIdx % senseEvents.length];
+    evIdx++;
+
+    var now = new Date();
+    var timeStr = pad(now.getHours()) + ':' + pad(now.getMinutes());
+
+    var row = document.createElement('div');
+    row.className = 'tui-ev';
+    row.style.opacity = '0';
+    row.innerHTML =
+      '<span class="tui-ev-time">' + timeStr + '</span>' +
+      '<span class="tui-ev-type tui-ev-type--' + ev[0] + '">' + ev[0] + '</span>' +
+      '<span class="tui-ev-content">' + ev[1] + '</span>';
+
+    // Prepend (newest at top)
+    streamEl.insertBefore(row, streamEl.firstChild);
+
+    // Fade in
+    setTimeout(function() { row.style.transition = 'opacity 0.4s'; row.style.opacity = '1'; }, 20);
+
+    // Keep max 8 events visible
+    var rows = streamEl.querySelectorAll('.tui-ev');
+    if (rows.length > 8) {
+      var last = rows[rows.length - 1];
+      last.style.transition = 'opacity 0.3s';
+      last.style.opacity = '0';
+      setTimeout(function() { if (last.parentNode) last.parentNode.removeChild(last); }, 320);
+    }
+  }
+
+  // Tick every real second
+  setInterval(function() {
+    remaining--;
+    if (remaining < 0) {
+      remaining = INTERVAL;
+      cycles++;
+      if (cyclesEl)  cyclesEl.textContent  = cycles;
+      if (cycles2El) cycles2El.textContent = cycles;
+      addEvent();
+    }
+    if (countdownEl) countdownEl.textContent = formatTime(remaining);
+  }, 1000);
+})();
+
 /* ═══════════════════════════════════════════
    SCROLL REVEAL (IntersectionObserver)
    ═══════════════════════════════════════════ */
