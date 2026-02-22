@@ -1339,12 +1339,16 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
         }
     }
 
+    // Stop socket first — removes file immediately, prevents new connections
+    // while threads finish their current work. Lock is held until after joins
+    // to prevent DuckDB conflicts with a new daemon starting too early.
+    server.stop();
+
     maintenance.join();
     if (distillation.joinable()) distillation.join();
     if (enrichment.joinable()) enrichment.join();
     if (queue_processor.joinable()) queue_processor.join();
     subconscious.stop();
-    server.stop();
 
     if (!pid_file.empty()) std::remove(pid_file.c_str());
     release_lock(lock);

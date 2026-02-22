@@ -15,11 +15,23 @@ djb2_hash() {
     echo "$h"
 }
 
-# Compute socket path from mind path
+# Get socket directory — matches C++ get_socket_dir() priority:
+# $XDG_RUNTIME_DIR/chitta > ~/.cache/chitta > /tmp
+get_socket_dir() {
+    if [[ -n "${XDG_RUNTIME_DIR:-}" && -w "$XDG_RUNTIME_DIR" ]]; then
+        echo "${XDG_RUNTIME_DIR}/chitta"
+    elif [[ -n "${HOME:-}" ]]; then
+        echo "${HOME}/.cache/chitta"
+    else
+        echo "/tmp"
+    fi
+}
+
+# Compute socket path from mind path — matches C++ socket_path_for_mind()
 get_socket_path() {
     local mind_path="${CHITTA_DB_PATH:-${CHITTA_MIND:-$HOME/.claude/mind}}"
     local hash=$(djb2_hash "$mind_path")
-    echo "/tmp/chitta-${hash}.sock"
+    echo "$(get_socket_dir)/chitta-${hash}.sock"
 }
 
 # Fast O(1) check: is the daemon socket present?
