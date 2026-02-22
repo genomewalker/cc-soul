@@ -376,6 +376,7 @@
   transition: all 0.15s;
   position: relative;
 }
+.tui-agent-row { cursor: pointer; }
 .tui-agent-row:hover { background: rgba(122,162,247,0.04); }
 .tui-agent-row--active {
   border-left-color: #9ece6a;
@@ -1402,7 +1403,7 @@
         <div class="tui-sidebar">
           <div class="tui-sidebar-title">Agents</div>
 
-          <div class="tui-agent-row tui-agent-row--active">
+          <div class="tui-agent-row tui-agent-row--active" data-agent="22">
             <div class="tui-agent-top">
               <span class="tui-agent-id">#22</span>
               <span class="tui-agent-pill tui-agent-pill--running">running</span>
@@ -1414,7 +1415,7 @@
             </div>
           </div>
 
-          <div class="tui-agent-row">
+          <div class="tui-agent-row" data-agent="21">
             <div class="tui-agent-top">
               <span class="tui-agent-id">#21</span>
               <span class="tui-agent-pill tui-agent-pill--done">done</span>
@@ -1425,7 +1426,7 @@
             </div>
           </div>
 
-          <div class="tui-agent-row">
+          <div class="tui-agent-row" data-agent="20">
             <div class="tui-agent-top">
               <span class="tui-agent-id">#20</span>
               <span class="tui-agent-pill tui-agent-pill--paused">paused</span>
@@ -2030,6 +2031,108 @@ mcp__chitta__dream_list {"limit": 10}</pre>
     }
     if (countdownEl) countdownEl.textContent = formatTime(remaining);
   }, 1000);
+})();
+
+/* ═══════════════════════════════════════════
+   TUI SIDEBAR SWITCHING
+   ═══════════════════════════════════════════ */
+(function() {
+  var AGENTS = {
+    '22': {
+      id: '#22', model: 'haiku · claude', state: 'running',
+      goal: 'Monitor denbi pipeline until ALL jobs finished. Alert on failure.',
+      cycles: 24, interval: '300s', memories: 12,
+      events: [
+        { time: '01:23', type: 'sense', cls: 'sense', text: '<code>squeue -u fguerra</code>' },
+        { time: '01:23', type: 'think', cls: 'think', text: '47 jobs pending, 12 running — waiting' },
+        { time: '01:18', type: 'act',   cls: 'act',   text: '<code>sleep 300</code> (next check in 5 min)' },
+        { time: '01:13', type: 'learn', cls: 'learn', text: 'Stored: ssh pattern for denbi-h-micro' },
+        { time: '01:13', type: 'sense', cls: 'sense', text: '<code>snakemake --summary 2>&amp;1 | tail -5</code>' },
+        { time: '01:08', type: 'act',   cls: 'act',   text: '<code>ssh fguerra@denbi-h-micro</code>' },
+      ]
+    },
+    '21': {
+      id: '#21', model: 'sonnet · claude', state: 'done',
+      goal: 'Investigate daemon reliability — find and implement all fixes.',
+      cycles: 3, interval: '—', memories: 8,
+      events: [
+        { time: '22:41', type: 'sense', cls: 'sense', text: 'Read daemon.cpp, socket_server.cpp, simple_cli.cpp' },
+        { time: '22:41', type: 'think', cls: 'think', text: 'Found ETXTBSY: binary copied while daemon running' },
+        { time: '22:41', type: 'act',   cls: 'act',   text: 'Fix: pkill before cp in CLAUDE.md build steps' },
+        { time: '22:35', type: 'sense', cls: 'sense', text: 'Check is_pid_alive() — uses kill(0) only' },
+        { time: '22:35', type: 'think', cls: 'think', text: 'Zombie processes pass kill(0) — not detected' },
+        { time: '22:35', type: 'act',   cls: 'act',   text: 'Fix: read /proc/pid/status, check State: Z' },
+        { time: '22:28', type: 'learn', cls: 'learn', text: '[achieved] 6 reliability fixes identified and applied' },
+      ]
+    },
+    '20': {
+      id: '#20', model: 'haiku · claude', state: 'paused',
+      goal: 'Run full test suite every 30 min, alert on regressions.',
+      cycles: 8, interval: '1800s', memories: 5,
+      events: [
+        { time: '20:15', type: 'sense', cls: 'sense', text: '<code>cd chitta &amp;&amp; cmake --build build --parallel</code>' },
+        { time: '20:15', type: 'think', cls: 'think', text: 'Build succeeded — running test suite' },
+        { time: '20:14', type: 'act',   cls: 'act',   text: '<code>ctest --test-dir build -j4</code>' },
+        { time: '20:14', type: 'learn', cls: 'learn', text: '47/47 tests passed — no regressions' },
+        { time: '20:14', type: 'act',   cls: 'act',   text: 'Paused — waiting for next interval' },
+      ]
+    }
+  };
+
+  function renderEvents(events, streamEl) {
+    streamEl.innerHTML = '';
+    events.forEach(function(ev) {
+      var row = document.createElement('div');
+      row.className = 'tui-ev';
+      row.innerHTML =
+        '<span class="tui-ev-time">' + ev.time + '</span>' +
+        '<span class="tui-ev-type tui-ev-type--' + ev.cls + '">' + ev.type + '</span>' +
+        '<span class="tui-ev-content">' + ev.text + '</span>';
+      streamEl.appendChild(row);
+    });
+  }
+
+  function selectAgent(id) {
+    var a = AGENTS[id];
+    if (!a) return;
+
+    // Sidebar active state
+    document.querySelectorAll('.tui-agent-row').forEach(function(row) {
+      row.classList.toggle('tui-agent-row--active', row.getAttribute('data-agent') === id);
+    });
+
+    // Detail header
+    var detailId = document.querySelector('.tui-detail-id');
+    var detailGoal = document.querySelector('.tui-detail-goal');
+    if (detailId)   detailId.textContent   = a.id + '  ' + a.model;
+    if (detailGoal) detailGoal.textContent = a.goal;
+
+    // Meta items: cycles, interval, memories
+    var metaVals = document.querySelectorAll('.tui-detail-meta .tui-meta-value');
+    if (metaVals[0]) { metaVals[0].textContent = a.cycles; metaVals[0].id = (id === '22') ? 'tuiCycles2' : ''; }
+    if (metaVals[1]) metaVals[1].textContent = a.interval;
+    if (metaVals[2]) { metaVals[2].textContent = (id === '22') ? '—' : '—'; metaVals[2].id = (id === '22') ? 'tuiCountdown' : ''; }
+    if (metaVals[3]) metaVals[3].textContent = a.memories;
+
+    // Event stream
+    var streamEl = document.getElementById('tuiStream');
+    if (streamEl) renderEvents(a.events, streamEl);
+
+    // Status bar left
+    var sbLeft = document.querySelector('.tui-status-left span:nth-child(2)');
+    if (sbLeft) sbLeft.textContent = a.id + ' · ' + a.state;
+
+    // Sidebar cycle counter (for #22 live counter)
+    var cyclesEl = document.getElementById('tuiCycles');
+    if (cyclesEl && id === '22') cyclesEl.textContent = a.cycles;
+  }
+
+  // Wire up click handlers
+  document.querySelectorAll('.tui-agent-row[data-agent]').forEach(function(row) {
+    row.addEventListener('click', function() {
+      selectAgent(this.getAttribute('data-agent'));
+    });
+  });
 })();
 
 /* ═══════════════════════════════════════════
