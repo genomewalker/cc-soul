@@ -13577,15 +13577,15 @@ private:
             return DuckDBToolResult::error("Failed to create dream sadhana");
         }
 
+        // Link sadhana to dream record before starting (so it's always set even if start fails)
+        mind_->store().execute_raw(
+            "UPDATE dream SET sadhana_id = " + std::to_string(sadhana_id) +
+            " WHERE id = " + std::to_string(dream_id));
+
         if (!sadhana_manager_->start(sadhana_id)) {
             return DuckDBToolResult::error(
                 "Created dream sadhana " + std::to_string(sadhana_id) + " but failed to start");
         }
-
-        // Link sadhana to dream record
-        mind_->store().execute_raw(
-            "UPDATE dream SET sadhana_id = " + std::to_string(sadhana_id) +
-            " WHERE id = " + std::to_string(dream_id));
 
         json result;
         result["dream_id"]   = dream_id;
