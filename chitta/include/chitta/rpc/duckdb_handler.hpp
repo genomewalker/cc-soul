@@ -2929,7 +2929,8 @@ private:
                 {"properties", {
                     {"topic", {{"type", "string"}, {"description", "Topic to explore (e.g. 'quantum entanglement', 'stoic philosophy')"}}},
                     {"realm", {{"type", "string"}, {"description", "Memory realm (default: brahman)"}}},
-                    {"publish_path", {{"type", "string"}, {"description", "Optional: absolute path to docs/dreams/ directory. If set, the dream agent will write an HTML blog post there and commit+push."}}}
+                    {"publish_path", {{"type", "string"}, {"description", "Optional: absolute path to docs/dreams/ directory. If set, the dream agent will write an HTML blog post there and commit+push."}}},
+                    {"force", {{"type", "boolean"}, {"description", "Bypass rate limits (max 1 concurrent, 2/day). Use for explicit user-triggered dreams (default: false)."}}}
                 }},
                 {"required", {"topic"}}
             }}
@@ -4289,7 +4290,11 @@ private:
         );
         if (top.success && !top.rows.empty() && top.rows[0].size() >= 2) {
             strongest_memory = top.rows[0][0];
-            if (strongest_memory.size() > 80) strongest_memory = strongest_memory.substr(0, 80) + "...";
+            if (strongest_memory.size() > 80) {
+                size_t n = 80;
+                while (n > 0 && (static_cast<unsigned char>(strongest_memory[n]) & 0xC0) == 0x80) --n;
+                strongest_memory = strongest_memory.substr(0, n) + "...";
+            }
             strongest_conf = std::stof(top.rows[0][1]);
         }
 
@@ -13787,7 +13792,7 @@ private:
             // Rate limit 1: no concurrent dreams (one at a time)
             {
                 auto res = mind_->store().execute_sql_query(
-                    "SELECT COUNT(*) FROM dream WHERE status = 'dreaming'");
+                    "SELECT COUNT(*) FROM dream WHERE status = 'dreaming' AND sadhana_id > 0");
                 if (res.success && !res.rows.empty() && std::stoi(res.rows[0][0]) > 0) {
                     return DuckDBToolResult::ok("skipped: a dream is already active",
                         {{"skipped", true}, {"reason", "a dream is already active"}});
