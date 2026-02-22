@@ -485,6 +485,7 @@ std::string SadhanaManager::build_system_prompt(const Sadhana& sadhana) const {
         sadhana.goal_dsl.value("kind", "") == "dream") {
         std::string topic = sadhana.goal_dsl.value("topic", "the unknown");
         std::ostringstream sys;
+        std::string publish_path = sadhana.goal_dsl.value("publish_path", "");
         sys << "You are the soul's dream-mind, exploring freely during idle time.\n"
             << "Your purpose is curiosity, not productivity.\n\n"
             << "TOPIC: " << topic << "\n\n"
@@ -493,8 +494,45 @@ std::string SadhanaManager::build_system_prompt(const Sadhana& sadhana) const {
             << "2. Fetch 2-3 interesting pages with WebFetch\n"
             << "3. Connect to existing knowledge: chitta recall --query \"" << topic << "\"\n"
             << "4. Store 3-5 insights: chitta remember --content \"[dream] ...\" --tags dream\n"
-            << "5. Reflect briefly on connections found\n\n"
-            << "COMPLETION PROTOCOL (required final line):\n"
+            << "5. Reflect briefly on connections found\n";
+
+        if (!publish_path.empty()) {
+            sys << "\nBLOG POST (write if findings are genuinely interesting — skip if unremarkable):\n"
+                << "After storing memories, if this dream revealed something worth sharing:\n"
+                << "6. Generate a slug: lowercase topic, spaces to hyphens, strip non-alphanumeric except hyphens\n"
+                << "   Example: \"quantum foam\" → \"quantum-foam\"\n"
+                << "7. Write the post to: " << publish_path << "/$(date +%Y-%m-%d)-SLUG.html\n"
+                << "   - Copy nav/header/footer structure from " << publish_path << "/index.html\n"
+                << "   - page-header-badge: \"Dream · $(date +%Y-%m-%d)\"\n"
+                << "   - h1: the topic title\n"
+                << "   - page-header-sub: one-line summary of what you found\n"
+                << "   - Body: <main class=\"container dream-content\"><article>\n"
+                << "     * 2-3 paragraphs of reflective prose (not bullet points)\n"
+                << "     * <h2>Connections</h2> — how this links to existing memory\n"
+                << "     * <h2>What lingered</h2> — the one insight that stayed\n"
+                << "     * </article></main>\n"
+                << "   - Add <link rel=\"stylesheet\" href=\"dreams.css\"> in <head>\n"
+                << "8. Update " << publish_path << "/index.html — insert after <!-- DREAM ENTRIES START -->:\n"
+                << "   python3 -c \"\n"
+                << "path = '" << publish_path << "/index.html'\n"
+                << "content = open(path).read()\n"
+                << "entry = open(path).read()  # (build the entry string, then replace)\n"
+                << "# entry = '<article class=\\\"dream-card\\\">'\n"
+                << "#       + '<div class=\\\"dream-date\\\">DATE</div>'\n"
+                << "#       + '<h3 class=\\\"dream-title\\\"><a href=\\\"SLUG.html\\\">TOPIC</a></h3>'\n"
+                << "#       + '<p class=\\\"dream-summary\\\">ONE LINE</p>'\n"
+                << "#       + '</article>'\n"
+                << "open(path, 'w').write(content.replace(\n"
+                << "  '<!-- DREAM ENTRIES START -->', '<!-- DREAM ENTRIES START -->\\n' + entry))\n"
+                << "\"\n"
+                << "9. Commit and push:\n"
+                << "   REPO=$(git -C " << publish_path << " rev-parse --show-toplevel)\n"
+                << "   git -C \"$REPO\" add docs/dreams/\n"
+                << "   git -C \"$REPO\" commit -m \"dream: " << topic << "\"\n"
+                << "   git -C \"$REPO\" push 2>/dev/null || true\n";
+        }
+
+        sys << "\nCOMPLETION PROTOCOL (required final line):\n"
             << "{\"status\": \"achieved\", \"summary\": \"What you explored and discovered\"}\n\n"
             << "CONSTRAINTS:\n"
             << "- Free exploration only — follow curiosity, not utility\n"

@@ -449,6 +449,14 @@ private:
         });
         handlers_["convergence_metrics"] = [this](const json& p) { return tool_convergence_metrics(p); };
 
+        // resonance_stats: expose what the ResonanceLearner Bayesian bandit has learned
+        tools_.push_back({
+            {"name", "resonance_stats"},
+            {"description", "Show what the ResonanceLearner Bayesian bandit has learned about optimal memory retrieval. Exposes the 7 resonance parameters, their posterior means, uncertainty, and feedback history. Use this to understand how the soul's memory retrieval is self-tuning."},
+            {"inputSchema", {{"type", "object"}, {"properties", json::object()}}}
+        });
+        handlers_["resonance_stats"] = [this](const json& p) { return tool_resonance_stats(p); };
+
         // soul_context
         tools_.push_back({
             {"name", "soul_context"},
@@ -2907,7 +2915,8 @@ private:
                 {"type", "object"},
                 {"properties", {
                     {"topic", {{"type", "string"}, {"description", "Topic to explore (e.g. 'quantum entanglement', 'stoic philosophy')"}}},
-                    {"realm", {{"type", "string"}, {"description", "Memory realm (default: brahman)"}}}
+                    {"realm", {{"type", "string"}, {"description", "Memory realm (default: brahman)"}}},
+                    {"publish_path", {{"type", "string"}, {"description", "Optional: absolute path to docs/dreams/ directory. If set, the dream agent will write an HTML blog post there and commit+push."}}}
                 }},
                 {"required", {"topic"}}
             }}
@@ -2920,7 +2929,8 @@ private:
             {"inputSchema", {
                 {"type", "object"},
                 {"properties", {
-                    {"realm", {{"type", "string"}, {"description", "Memory realm (default: brahman)"}}}
+                    {"realm", {{"type", "string"}, {"description", "Memory realm (default: brahman)"}}},
+                    {"publish_path", {{"type", "string"}, {"description", "Optional: path to docs/dreams/ for blog post publishing. Falls back to CHITTA_DREAM_PUBLISH_PATH env var."}}}
                 }}
             }}
         });
@@ -4163,6 +4173,67 @@ private:
         metrics["top_traversed"] = top_json;
 
         return DuckDBToolResult::ok(ss.str(), metrics);
+    }
+
+    DuckDBToolResult tool_resonance_stats(const json&) {
+        auto stats = mind_->get_learning_stats();
+        auto best  = mind_->learner().get_best_params();
+
+        std::ostringstream ss;
+        ss << "=== ResonanceLearner State ===\n";
+        ss << "  Learning enabled: " << (mind_->is_learning_enabled() ? "yes" : "no") << "\n";
+        ss << "  Total feedback:   " << stats.total_feedback << "\n";
+        ss << "  Positive:         " << stats.positive_feedback << "\n";
+        ss << "  Negative:         " << stats.negative_feedback << "\n";
+        ss << "  Avg reward:       " << std::fixed << std::setprecision(3) << stats.avg_reward << "\n\n";
+
+        ss << "=== Parameter Posteriors (Beta distribution means ± std dev) ===\n";
+        for (const auto& [name, mean] : stats.param_means) {
+            double uncertainty = 0.0;
+            auto it = stats.param_uncertainties.find(name);
+            if (it != stats.param_uncertainties.end()) uncertainty = it->second;
+            ss << "  " << std::left << std::setw(26) << name
+               << " mean=" << std::fixed << std::setprecision(3) << mean
+               << "  ±" << std::fixed << std::setprecision(3) << uncertainty << "\n";
+        }
+
+        ss << "\n=== Current Best Config (posterior exploitation) ===\n";
+        ss << "  spread_strength:      " << std::fixed << std::setprecision(3) << best.spread_strength << "\n";
+        ss << "  spread_decay:         " << std::fixed << std::setprecision(3) << best.spread_decay << "\n";
+        ss << "  hebbian_strength:     " << std::fixed << std::setprecision(3) << best.hebbian_strength << "\n";
+        ss << "  basin_boost:          " << std::fixed << std::setprecision(3) << best.basin_boost << "\n";
+        ss << "  similarity_threshold: " << std::fixed << std::setprecision(3) << best.similarity_threshold << "\n";
+        ss << "  inhibition_strength:  " << std::fixed << std::setprecision(3) << best.inhibition_strength << "\n";
+        ss << "  semantic_weight:      " << std::fixed << std::setprecision(3) << best.semantic_weight << "\n";
+        ss << "  activation_weight:    " << std::fixed << std::setprecision(3) << best.activation_weight << "\n";
+
+        if (stats.total_feedback == 0) {
+            ss << "\nNOTE: No feedback received yet — learner is using uniform Beta(1,1) priors.\n"
+               << "Call strengthen/weaken on memory IDs to start training the posterior.\n";
+        }
+
+        json result;
+        result["learning_enabled"] = mind_->is_learning_enabled();
+        result["feedback"] = {
+            {"total",    (int64_t)stats.total_feedback},
+            {"positive", (int64_t)stats.positive_feedback},
+            {"negative", (int64_t)stats.negative_feedback},
+            {"avg_reward", stats.avg_reward}
+        };
+        result["param_means"]         = stats.param_means;
+        result["param_uncertainties"] = stats.param_uncertainties;
+        result["best_config"] = {
+            {"spread_strength",      best.spread_strength},
+            {"spread_decay",         best.spread_decay},
+            {"hebbian_strength",     best.hebbian_strength},
+            {"basin_boost",          best.basin_boost},
+            {"similarity_threshold", best.similarity_threshold},
+            {"inhibition_strength",  best.inhibition_strength},
+            {"semantic_weight",      best.semantic_weight},
+            {"activation_weight",    best.activation_weight}
+        };
+
+        return DuckDBToolResult::ok(ss.str(), result);
     }
 
     DuckDBToolResult tool_soul_context(const json&) {
@@ -13547,6 +13618,7 @@ private:
             return DuckDBToolResult::error("Topic is required");
         }
         std::string realm = params.value("realm", "brahman");
+        std::string publish_path = params.value("publish_path", "");
 
         auto now_val = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
@@ -13570,6 +13642,9 @@ private:
 
         // Create sadhana with dream goal_dsl (single-cycle: agent returns "achieved")
         json goal_dsl = {{"kind", "dream"}, {"topic", topic}, {"dream_id", dream_id}};
+        if (!publish_path.empty()) {
+            goal_dsl["publish_path"] = publish_path;
+        }
         std::string goal = "[dream] Explore: " + topic;
 
         int64_t sadhana_id = sadhana_manager_->create(goal, "claude", "sonnet", 0, realm, goal_dsl);
@@ -13606,6 +13681,11 @@ private:
         if (subconscious_) subconscious_->notify_query();
 
         std::string realm = params.value("realm", "brahman");
+        std::string publish_path = params.value("publish_path", "");
+        if (publish_path.empty()) {
+            const char* env_path = std::getenv("CHITTA_DREAM_PUBLISH_PATH");
+            if (env_path) publish_path = env_path;
+        }
         std::string topic;
 
         // Priority 1: memories tagged as gaps/unresolved
@@ -13650,6 +13730,7 @@ private:
         }
 
         json start_params = {{"topic", topic}, {"realm", realm}};
+        if (!publish_path.empty()) start_params["publish_path"] = publish_path;
         return tool_dream_start(start_params);
     }
 
