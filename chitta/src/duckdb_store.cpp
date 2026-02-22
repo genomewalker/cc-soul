@@ -1436,6 +1436,15 @@ bool DuckDBStore::create_schema() {
     write_execute("ALTER TABLE sadhana ADD COLUMN IF NOT EXISTS max_turns INTEGER DEFAULT 0");
     write_execute("ALTER TABLE sadhana ADD COLUMN IF NOT EXISTS cost_usd REAL DEFAULT 0.0");
 
+    // Migration: strip stale line numbers from [code] memories.
+    // Old format: "[code] KIND NAME @file.cpp:LINE\nDESC"
+    // New format: "[code] KIND NAME @file.cpp\nDESC"
+    // The symbol table holds the authoritative current line_start; memory content shouldn't.
+    write_execute(
+        "UPDATE memory "
+        "SET content = regexp_replace(content, '(@[A-Za-z0-9_.\\-]+):[0-9]+', '\\1', 'g') "
+        "WHERE content LIKE '[code]%' AND content ~ '@[A-Za-z0-9_.\\-]+:[0-9]+'");
+
     // Sadhana history: append-only event log for each sadhana
     if (!write_execute(R"(
         CREATE TABLE IF NOT EXISTS sadhana_history (

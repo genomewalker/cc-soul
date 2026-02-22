@@ -98,7 +98,7 @@ DESCRIPTION=$(echo "$RESULT" | head -1 | sed 's/^[`*#]*//; s/[`*#]*$//')
 
 # Store as memory with code-intel tag
 BASENAME=$(basename "$FILE_PATH")
-CONTENT="[code] $KIND $NAME @$BASENAME:$LINE_START
+CONTENT="[code] $KIND $NAME @$BASENAME
 $DESCRIPTION"
 
 # Store and get memory ID
