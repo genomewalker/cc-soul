@@ -5,7 +5,7 @@ import time as _time
 from datetime import datetime
 
 from textual.app import App, ComposeResult
-from textual.widgets import Static, Input, Label, Select, RichLog, Button
+from textual.widgets import Static, Input, Label, Select, Button
 from textual.containers import Container, Horizontal, Vertical, ScrollableContainer
 from textual.screen import ModalScreen
 from textual.binding import Binding
@@ -179,38 +179,144 @@ class DetailHeader(Static):
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# EVENT STREAM
+# EVENT ROW + EVENT STREAM
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-class EventStream(RichLog):
-    """Live event feed."""
+def _extract_event_content(raw) -> str:
+    if isinstance(raw, str):
+        return raw
+    if isinstance(raw, dict):
+        if "summary" in raw and raw["summary"]:
+            status = raw.get("status", "")
+            summary = raw["summary"]
+            return f"[{status}] {summary}" if status else summary
+        if "command" in raw:
+            cmd = raw["command"].replace("```bash", "").replace("```", "").strip()
+            return f"$ {cmd}"
+        for key in ("decision", "reasoning", "action", "output"):
+            if key in raw and raw[key]:
+                return str(raw[key])
+        return str(list(raw.keys()))
+    return str(raw)
+
+
+_EV_COLORS: dict[str, str] = {
+    "cycle":      "#7bb3f5",
+    "checkpoint": "#d4a76a",
+    "started":    "#7bb3f5",
+    "paused":     "#d4d46a",
+    "done":       "#6ad4d4",
+    "failed":     "#d46a6a",
+    "sense":      "#7bb3f5",
+    "think":      "#d4a76a",
+    "act":        "#80cc80",
+    "learn":      "#b08ad4",
+}
+
+
+class EventRow(Static, can_focus=True):
+    """One event in the stream — click to expand."""
+
+    expanded = reactive(False)
+
+    DEFAULT_CSS = """
+    EventRow {
+        height: 1;
+        padding: 0 0;
+    }
+    EventRow.expanded {
+        height: auto;
+        min-height: 4;
+        padding-bottom: 1;
+        border-bottom: solid #181818;
+    }
+    EventRow:hover { background: #111111; }
+    EventRow:focus { background: #111111; }
+    """
+
+    def __init__(self, event: dict, **kwargs):
+        super().__init__(**kwargs)
+        self._event = event
+
+    def on_click(self) -> None:
+        self.expanded = not self.expanded
+
+    def watch_expanded(self, expanded: bool) -> None:
+        self.styles.height = "auto" if expanded else 1
+        self.set_class(expanded, "expanded")
+
+    def render(self) -> Text:
+        e = self._event
+        event_type  = e.get("event_type", "unknown")
+        timestamp   = e.get("timestamp", 0)
+        duration_ms = e.get("duration_ms", 0)
+        raw_content = e.get("content", "")
+        fg  = _EV_COLORS.get(event_type, "#555555")
+        tag = event_type[:5]
+
+        time_short = time_long = ""
+        if timestamp:
+            try:
+                dt = datetime.fromtimestamp(timestamp / 1000)
+                time_short = dt.strftime("%H:%M")
+                time_long  = dt.strftime("%H:%M:%S")
+            except Exception:
+                pass
+
+        t = Text()
+
+        if not self.expanded:
+            content = _extract_event_content(raw_content)
+            if len(content) > 68:
+                content = content[:68] + "…"
+            t.append(f"{time_short}  ", style="#383838")
+            t.append(f"{tag}  ", style=f"bold {fg}")
+            t.append(content, style="#666666")
+        else:
+            # Header
+            t.append(f"{time_long}  ", style="#555555")
+            t.append(event_type, style=f"bold {fg}")
+            if duration_ms:
+                t.append(f"  {duration_ms}ms", style="#444444")
+            t.append("\n")
+            t.append("─" * 50, style="#1e1e1e")
+            t.append("\n")
+            # Full content
+            if isinstance(raw_content, dict):
+                try:
+                    lines = _json.dumps(raw_content, indent=2).split("\n")
+                    for line in lines[:30]:
+                        t.append(line + "\n", style="#555555")
+                    if len(lines) > 30:
+                        t.append(f"  … ({len(lines) - 30} more lines)\n", style="#333333")
+                except Exception:
+                    t.append(str(raw_content) + "\n", style="#555555")
+            else:
+                full = str(raw_content)
+                for i in range(0, min(len(full), 700), 70):
+                    t.append(full[i:i + 70] + "\n", style="#777777")
+                if len(full) > 700:
+                    t.append("…\n", style="#333333")
+            t.append("[dim]click to collapse[/dim]", style="#222222")
+
+        return t
+
+
+class EventStream(ScrollableContainer):
+    """Live event feed with clickable/expandable rows."""
 
     DEFAULT_CSS = """
     EventStream {
         height: 1fr;
         background: #080808;
-        border: none;
         padding: 0 1;
+        overflow-y: auto;
         scrollbar-size: 0 0;
     }
     """
 
-    # (fg_color, bg_hint) — bg_hint unused in terminal but documents intent
-    _COLORS: dict[str, str] = {
-        "cycle":      "#7bb3f5",
-        "checkpoint": "#d4a76a",
-        "started":    "#7bb3f5",
-        "paused":     "#d4d46a",
-        "done":       "#6ad4d4",
-        "failed":     "#d46a6a",
-        "sense":      "#7bb3f5",
-        "think":      "#d4a76a",
-        "act":        "#80cc80",
-        "learn":      "#b08ad4",
-    }
-
     def __init__(self, **kwargs):
-        super().__init__(highlight=False, markup=True, wrap=True, **kwargs)
+        super().__init__(**kwargs)
         self._current_id: int | None = None
         self._seen_count: int = 0
         self._seen_timestamps: set = set()
@@ -220,7 +326,8 @@ class EventStream(RichLog):
             self._current_id = sadhana_id
             self._seen_count = 0
             self._seen_timestamps = set()
-            self.clear()
+            for row in list(self.query(EventRow)):
+                row.remove()
 
     def push_event(self, event: dict) -> None:
         ts = event.get("timestamp", 0)
@@ -228,7 +335,7 @@ class EventStream(RichLog):
             return
         if ts:
             self._seen_timestamps.add(ts)
-        self._write_event(event)
+        self._add_row(event)
 
     def refresh_events(self, client: ChittaClient) -> None:
         if self._current_id is None:
@@ -249,54 +356,16 @@ class EventStream(RichLog):
                 if ts not in self._seen_timestamps:
                     if ts:
                         self._seen_timestamps.add(ts)
-                    self._write_event(event)
+                    self._add_row(event)
             self._seen_count = len(history)
 
-    def _write_event(self, event: dict) -> None:
-        event_type = event.get("event_type", "unknown")
-        raw_content = event.get("content", "")
-        timestamp = event.get("timestamp", 0)
-        duration_ms = event.get("duration_ms", 0)
-
-        fg = self._COLORS.get(event_type, "#555555")
-
-        time_str = ""
-        if timestamp:
-            try:
-                dt = datetime.fromtimestamp(timestamp / 1000)
-                time_str = dt.strftime("%H:%M")
-            except Exception:
-                pass
-
-        content = self._extract_content(raw_content)
-        if len(content) > 72:
-            content = content[:72] + "…"
-
-        dur = f" {duration_ms}ms" if duration_ms else ""
-        tag = event_type[:5]
-
-        self.write(
-            f"[#383838]{time_str}[/]  "
-            f"[bold {fg}]{tag}[/]  "
-            f"[#666666]{content}[/][#383838]{dur}[/]"
-        )
-
-    def _extract_content(self, raw) -> str:
-        if isinstance(raw, str):
-            return raw
-        if isinstance(raw, dict):
-            if "summary" in raw and raw["summary"]:
-                status = raw.get("status", "")
-                summary = raw["summary"]
-                return f"[{status}] {summary}" if status else summary
-            if "command" in raw:
-                cmd = raw["command"].replace("```bash", "").replace("```", "").strip()
-                return f"$ {cmd}"
-            for key in ("decision", "reasoning", "action", "output"):
-                if key in raw and raw[key]:
-                    return str(raw[key])
-            return str(list(raw.keys()))
-        return str(raw)
+    def _add_row(self, event: dict) -> None:
+        self.mount(EventRow(event))
+        # Cap at 100 rows to avoid memory growth
+        rows = list(self.query(EventRow))
+        if len(rows) > 100:
+            rows[0].remove()
+        self.scroll_end(animate=False)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
