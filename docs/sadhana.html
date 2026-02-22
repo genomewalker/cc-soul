@@ -1036,6 +1036,98 @@
   .improve-node-icon  { font-size: 1.1rem; }
   .improve-node-title { font-size: var(--text-xs); }
 }
+
+/* ── Mechanism cards ────────────────────────────── */
+.improve-mechs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+  margin-top: var(--space-6);
+}
+@media (max-width: 700px) { .improve-mechs { grid-template-columns: 1fr; } }
+
+.improve-mech {
+  display: flex;
+  gap: var(--space-3);
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 10px;
+  padding: var(--space-4);
+}
+.improve-mech-num {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: rgba(203,175,134,0.12);
+  border: 1px solid rgba(203,175,134,0.25);
+  color: var(--lotus-200);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 2px;
+}
+.improve-mech-title {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  margin-bottom: var(--space-2);
+}
+.improve-mech-body p {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.7;
+  margin: 0;
+}
+
+/* ── Compounding cascade ────────────────────────── */
+.cascade {
+  margin-top: var(--space-6);
+  max-width: 560px;
+}
+.cascade-step {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+}
+.cascade-step-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-top: 7px;
+}
+.cascade-step-text {
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+.cascade-step-text code {
+  font-size: var(--text-xs);
+  color: var(--lotus-200);
+  background: rgba(203,175,134,0.08);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+.cascade-connector {
+  width: 1px;
+  height: 18px;
+  background: linear-gradient(to bottom, rgba(255,255,255,0.08), rgba(255,255,255,0.03));
+  margin-left: 3px;
+}
+.cascade-loop {
+  margin-top: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid rgba(203,175,134,0.2);
+  border-radius: 8px;
+  background: rgba(203,175,134,0.04);
+  font-size: var(--text-sm);
+  color: var(--lotus-200);
+  text-align: center;
+}
 </style>
 </head>
 <body>
@@ -1673,7 +1765,7 @@ mcp__chitta__dream_list {"limit": 10}</pre>
     <div class="reveal">
       <div class="section-divider"></div>
       <h2 class="heading-section">Autonomous Self-Improvement</h2>
-      <p class="section-intro">Dreams and sadhanas compose into a closed self-improvement cycle. Seed curiosity gaps, let dreams explore them, run a synthesis sadhana to bridge findings into the knowledge graph — then let new gaps emerge naturally.</p>
+      <p class="section-intro">Sadhanas close the loop on their own substrate. Four interlocking mechanisms let the soul investigate bugs, distil learnings from every session, explore gaps during idle time, and synthesise findings into code changes — compounding with each cycle.</p>
     </div>
 
     <!-- Self-Improvement Cycle Diagram -->
@@ -1735,7 +1827,91 @@ mcp__chitta__dream_list {"limit": 10}</pre>
       </div>
     </div>
 
+    <!-- 4 mechanisms -->
     <div class="reveal reveal-delay-2">
+      <div class="improve-mechs">
+
+        <div class="improve-mech">
+          <div class="improve-mech-num">1</div>
+          <div>
+            <div class="improve-mech-title">Investigation sadhanas</div>
+            <div class="improve-mech-body"><p>A sadhana given a goal like <em>"investigate daemon reliability — find and fix issues"</em> runs sense-think-act cycles reading source files, grepping logs, and checking health outputs — then writes fixes directly. Sadhana #21 found all 6 daemon reliability bugs that shipped in v3.43.6.</p></div>
+          </div>
+        </div>
+
+        <div class="improve-mech">
+          <div class="improve-mech-num">2</div>
+          <div>
+            <div class="improve-mech-title">SSL distillation</div>
+            <div class="improve-mech-body"><p>After every session, <code>NativeDistiller</code> reads the transcript and extracts <code>[correction]</code>, <code>[pattern]</code>, and <code>[gotcha]</code> memories. The <code>UserPromptSubmit</code> hook surfaces them at session start — mistakes made in session 10 become warnings in session 11.</p></div>
+          </div>
+        </div>
+
+        <div class="improve-mech">
+          <div class="improve-mech-num">3</div>
+          <div>
+            <div class="improve-mech-title">Dream → synthesis loop</div>
+            <div class="improve-mech-body"><p><code>dream_wander</code> picks unresolved memory gaps and launches an exploration sadhana that web-searches the topic and stores <code>[dream]</code> findings. A synthesis sadhana runs every 15 min, connecting dream findings to existing code knowledge and filing new investigation tasks.</p></div>
+          </div>
+        </div>
+
+        <div class="improve-mech">
+          <div class="improve-mech-num">4</div>
+          <div>
+            <div class="improve-mech-title">The compounding effect</div>
+            <div class="improve-mech-body"><p>The soul runs <em>on</em> chitta — improving chitta's reliability directly improves the quality of every future session and every sadhana cycle. Each fix raises the floor for the next investigation. The substrate bootstraps itself.</p></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Compounding cascade -->
+    <div class="reveal reveal-delay-3">
+      <h3 class="heading-sub" style="margin-top:var(--space-8)">The Compounding Cycle</h3>
+      <div class="cascade">
+
+        <div class="cascade-step">
+          <div class="cascade-step-dot" style="background:#55bb55"></div>
+          <div class="cascade-step-text">Code runs — bugs and gaps surface naturally</div>
+        </div>
+        <div class="cascade-connector"></div>
+
+        <div class="cascade-step">
+          <div class="cascade-step-dot" style="background:#7bb3f5"></div>
+          <div class="cascade-step-text"><code>NativeDistiller</code> stores <code>[failure]</code> and <code>[gap]</code> memories from each session transcript</div>
+        </div>
+        <div class="cascade-connector"></div>
+
+        <div class="cascade-step">
+          <div class="cascade-step-dot" style="background:#d4a76a"></div>
+          <div class="cascade-step-text"><code>dream_wander</code> picks gaps during idle time — explores solutions via web search</div>
+        </div>
+        <div class="cascade-connector"></div>
+
+        <div class="cascade-step">
+          <div class="cascade-step-dot" style="background:#b08ad4"></div>
+          <div class="cascade-step-text">Synthesis sadhana connects dream findings to existing code knowledge, files investigation tasks</div>
+        </div>
+        <div class="cascade-connector"></div>
+
+        <div class="cascade-step">
+          <div class="cascade-step-dot" style="background:#d46a6a"></div>
+          <div class="cascade-step-text">Investigation sadhana reads source, implements fix, builds and tests</div>
+        </div>
+        <div class="cascade-connector"></div>
+
+        <div class="cascade-step">
+          <div class="cascade-step-dot" style="background:#6ad4d4"></div>
+          <div class="cascade-step-text">Release — better code runs, raising the floor for every future cycle</div>
+        </div>
+
+        <div class="cascade-loop">↻ &nbsp; each cycle, the substrate improves the substrate</div>
+      </div>
+    </div>
+
+    <!-- Setting it up -->
+    <div class="reveal reveal-delay-3" style="margin-top:var(--space-8)">
       <h3 class="heading-sub">Setting It Up</h3>
 
       <p style="color:var(--text-secondary);margin-bottom:var(--space-3)"><strong style="color:var(--text-primary)">Step 1 — Seed curiosity gaps</strong></p>
@@ -1753,22 +1929,9 @@ mcp__chitta__dream_list {"limit": 10}</pre>
   "goal": "Each cycle: review recent dreams (dream_list, dream_status),
   extract key insights, connect them to existing memories via
   connect_temporal, store synthesis as [auto-improve] tagged wisdom.
-  Also expand curiosity gaps based on what you find.",
+  Also file new investigation tasks based on what you find.",
   "interval_seconds": 900
 }</pre>
-
-      <h3 class="heading-sub" style="margin-top:var(--space-6)">What Each Component Does</h3>
-      <div class="table-wrap">
-        <table class="data-table">
-          <thead><tr><th>Component</th><th>Role</th></tr></thead>
-          <tbody>
-            <tr><td>Curiosity gap memories</td><td>Directs <code>dream_wander</code> to meaningful topics</td></tr>
-            <tr><td>Dreams</td><td>Explore topics via web search, store <code>[dream]</code> memories</td></tr>
-            <tr><td>Synthesis sadhana</td><td>Bridges dream findings to existing knowledge graph</td></tr>
-            <tr><td>New gaps</td><td>Emerge naturally from synthesis, feeding the next cycle</td></tr>
-          </tbody>
-        </table>
-      </div>
     </div>
   </div>
 </section>
