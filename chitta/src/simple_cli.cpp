@@ -1344,11 +1344,19 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
     // to prevent DuckDB conflicts with a new daemon starting too early.
     server.stop();
 
+    // Watchdog: force-exit if background threads don't finish within 15s.
+    // Socket is already closed so no clients will be left hanging.
+    // cleanup_stale_daemon() handles any leftover pid/lock files on next start.
+    std::signal(SIGALRM, [](int) { std::_Exit(0); });
+    alarm(15);
+
     maintenance.join();
     if (distillation.joinable()) distillation.join();
     if (enrichment.joinable()) enrichment.join();
     if (queue_processor.joinable()) queue_processor.join();
     subconscious.stop();
+
+    alarm(0);  // Cancel watchdog — all threads finished normally
 
     if (!pid_file.empty()) std::remove(pid_file.c_str());
     release_lock(lock);
