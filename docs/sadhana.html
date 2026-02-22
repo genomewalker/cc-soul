@@ -656,6 +656,261 @@
 .submenu-toc-link--tui:hover, .submenu-toc-link--tui.active { color: #7aa2f7; }
 .submenu-toc-link--usage:hover, .submenu-toc-link--usage.active { color: #9ece6a; }
 .submenu-toc-link--cases:hover, .submenu-toc-link--cases.active { color: #f7768e; }
+
+/* ── DREAM FLOW DIAGRAM ───────────────────────── */
+.dream-flow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  margin: var(--space-6) auto;
+  max-width: 560px;
+}
+
+.dream-trigger-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-bottom: 0;
+}
+.dream-trigger-card {
+  background: rgba(26,27,38,0.8);
+  border: 1px solid rgba(157,178,217,0.18);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  text-align: center;
+  min-width: 110px;
+}
+.dream-trigger-card--fire {
+  border-color: rgba(203,175,134,0.4);
+  background: rgba(203,175,134,0.06);
+  box-shadow: 0 0 20px rgba(203,175,134,0.08);
+}
+.dream-trigger-icon { font-size: 1.4rem; margin-bottom: 4px; }
+.dream-trigger-label { font-size: var(--text-xs); color: var(--ash-300); }
+.dream-trigger-plus  { color: rgba(157,178,217,0.4); font-size: 1.1rem; }
+.dream-trigger-arrow { color: rgba(203,175,134,0.6); font-size: 1.4rem; }
+
+.dream-connector-v {
+  width: 1px;
+  height: 32px;
+  background: linear-gradient(to bottom, rgba(157,178,217,0.3), rgba(203,175,134,0.3));
+  margin: 0 auto;
+  position: relative;
+}
+.dream-connector-v::after {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 6px solid rgba(203,175,134,0.5);
+}
+
+.dream-step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  background: rgba(26,27,38,0.9);
+  border: 1px solid rgba(157,178,217,0.15);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-5);
+  width: 100%;
+  position: relative;
+  transition: border-color 0.3s;
+}
+.dream-step:hover { border-color: rgba(203,175,134,0.35); }
+.dream-step--wander { border-color: rgba(157,178,217,0.25); }
+.dream-step--start  { border-color: rgba(203,175,134,0.25); }
+.dream-step-badge {
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: rgba(203,175,134,0.15);
+  border: 1px solid rgba(203,175,134,0.4);
+  display: flex; align-items: center; justify-content: center;
+  font-size: var(--text-xs);
+  color: var(--sandal-300);
+  flex-shrink: 0;
+}
+.dream-step-icon { font-size: 1.2rem; flex-shrink: 0; }
+.dream-step-title { font-size: var(--text-sm); color: var(--lotus-200); font-family: var(--font-mono); }
+.dream-step-desc  { font-size: var(--text-xs); color: var(--ash-300); margin-top: 2px; }
+
+.dream-topic-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-2);
+  width: 100%;
+}
+@media (max-width: 500px) { .dream-topic-row { grid-template-columns: 1fr; } }
+.dream-topic-card {
+  background: rgba(15,16,24,0.8);
+  border: 1px solid rgba(157,178,217,0.1);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  text-align: center;
+  font-size: var(--text-xs);
+}
+.dream-topic-card--gap  { border-color: rgba(203,175,134,0.25); }
+.dream-topic-card--low  { border-color: rgba(157,178,217,0.2); }
+.dream-topic-card--seed { border-color: rgba(185,189,199,0.15); }
+.dream-topic-prio { color: var(--sandal-300); font-size: 0.65rem; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.08em; }
+.dream-topic-hint { color: rgba(185,189,199,0.5); font-size: 0.65rem; margin-top: 4px; }
+
+.dream-agent-card {
+  width: 100%;
+  background: linear-gradient(135deg, rgba(26,27,38,0.95), rgba(36,40,58,0.95));
+  border: 1px solid rgba(157,178,217,0.2);
+  border-radius: var(--radius-md);
+  padding: var(--space-4) var(--space-5);
+  position: relative;
+  overflow: hidden;
+}
+.dream-agent-title {
+  font-size: var(--text-sm);
+  color: var(--aura-300);
+  margin-bottom: var(--space-3);
+  font-weight: 500;
+}
+.dream-agent-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.dream-tool {
+  background: rgba(157,178,217,0.08);
+  border: 1px solid rgba(157,178,217,0.18);
+  border-radius: 4px;
+  padding: 2px 10px;
+  font-size: var(--text-xs);
+  color: var(--ash-300);
+  font-family: var(--font-mono);
+}
+.dream-agent-pulse {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-md);
+  box-shadow: 0 0 0 0 rgba(157,178,217,0.3);
+  animation: dream-pulse 3s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes dream-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(157,178,217,0.25); }
+  50%       { box-shadow: 0 0 0 8px rgba(157,178,217,0); }
+}
+
+.dream-result-card {
+  width: 100%;
+  background: rgba(203,175,134,0.07);
+  border: 1px solid rgba(203,175,134,0.3);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-5);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.dream-result-icon { font-size: 1.2rem; }
+.dream-result-text { font-size: var(--text-sm); color: var(--ash-300); }
+
+/* ── SELF-IMPROVEMENT ORBIT DIAGRAM ──────────── */
+.improve-cycle {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: var(--space-6) 0;
+}
+.improve-orbit {
+  position: relative;
+  width: 420px;
+  height: 420px;
+  max-width: 90vw;
+  max-height: 90vw;
+}
+.improve-orbit-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.orbit-ring {
+  animation: orbit-spin 20s linear infinite;
+  transform-origin: 200px 200px;
+  transform-box: fill-box;
+}
+@keyframes orbit-spin {
+  from { stroke-dashoffset: 0; }
+  to   { stroke-dashoffset: -100; }
+}
+
+.improve-center {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  pointer-events: none;
+}
+.improve-center-symbol {
+  font-size: 2rem;
+  color: rgba(203,175,134,0.4);
+  animation: improve-spin 8s linear infinite;
+  display: block;
+}
+@keyframes improve-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+.improve-center-label {
+  font-size: var(--text-xs);
+  color: rgba(185,189,199,0.4);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-top: 4px;
+}
+
+.improve-node {
+  position: absolute;
+  background: rgba(15,16,24,0.95);
+  border: 1px solid rgba(157,178,217,0.18);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  text-align: center;
+  width: 115px;
+  transition: border-color 0.3s, box-shadow 0.3s;
+  cursor: default;
+}
+.improve-node:hover {
+  border-color: rgba(203,175,134,0.5);
+  box-shadow: 0 0 24px rgba(203,175,134,0.12);
+  z-index: 10;
+}
+/* compass positioning — centered on the orbit circle edges */
+.improve-node--top    { top: 0;   left: 50%; transform: translateX(-50%); border-color: rgba(203,175,134,0.3); }
+.improve-node--right  { right: 0; top: 50%;  transform: translateY(-50%); border-color: rgba(157,178,217,0.3); }
+.improve-node--bottom { bottom: 0; left: 50%; transform: translateX(-50%); border-color: rgba(157,178,217,0.25); }
+.improve-node--left   { left: 0;  top: 50%;  transform: translateY(-50%); border-color: rgba(185,189,199,0.2); }
+
+.improve-node-num {
+  font-size: var(--text-xs);
+  color: var(--sandal-300);
+  opacity: 0.7;
+  margin-bottom: 2px;
+  font-family: var(--font-mono);
+}
+.improve-node-icon  { font-size: 1.4rem; margin-bottom: 4px; }
+.improve-node-title { font-size: var(--text-sm); color: var(--lotus-200); font-weight: 500; margin-bottom: 4px; }
+.improve-node-desc  { font-size: 0.65rem; color: var(--ash-300); line-height: 1.5; }
+.improve-node-desc code { font-size: 0.6rem; }
+
+@media (max-width: 500px) {
+  .improve-orbit { width: 320px; height: 320px; }
+  .improve-node  { width: 90px; padding: var(--space-2) var(--space-3); }
+  .improve-node-icon  { font-size: 1.1rem; }
+  .improve-node-title { font-size: var(--text-xs); }
+}
 </style>
 </head>
 <body>
@@ -1102,38 +1357,88 @@
       <p class="section-intro">A specialized sadhana for curiosity-driven exploration during idle time. When the daemon has been idle for 10+ minutes and no dream has run in the past hour, it wanders autonomously — picking topics from memory gaps, searching the web, and storing what it finds.</p>
     </div>
 
+    <!-- Dream Lifecycle Flow Diagram -->
     <div class="reveal reveal-delay-1">
-      <pre class="arch-diagram">┌─────────────────────────────────────────────────────────────────────────┐
-│                           DREAM LIFECYCLE                                │
-│                                                                          │
-│   Idle &gt; 10 min          Auto-trigger                                    │
-│        │                      │                                          │
-│        ▼                      ▼                                          │
-│   ┌──────────┐         ┌──────────────┐                                  │
-│   │ wander   │ ──────▶ │ pick topic   │                                  │
-│   └──────────┘         │ (gaps, low   │                                  │
-│                        │  confidence, │                                  │
-│                        │  or seeds)   │                                  │
-│                        └──────┬───────┘                                  │
-│                               │                                          │
-│                               ▼                                          │
-│                        ┌──────────────┐                                  │
-│                        │ dream_start  │                                  │
-│                        │ (sadhana     │                                  │
-│                        │  kind=dream) │                                  │
-│                        └──────┬───────┘                                  │
-│                               │                                          │
-│                               ▼                                          │
-│                   ┌──────────────────────┐                               │
-│                   │   Claude Agent       │                               │
-│                   │   • WebSearch        │                               │
-│                   │   • WebFetch         │                               │
-│                   │   • chitta remember  │                               │
-│                   └──────────┬───────────┘                               │
-│                              │                                           │
-│                              ▼                                           │
-│                   [dream] memories stored                                │
-└─────────────────────────────────────────────────────────────────────────┘</pre>
+      <div class="dream-flow" id="dreamFlow">
+        <div class="dream-trigger-row">
+          <div class="dream-trigger-card">
+            <div class="dream-trigger-icon">⏱</div>
+            <div class="dream-trigger-label">Idle &gt; 10 min</div>
+          </div>
+          <div class="dream-trigger-plus">+</div>
+          <div class="dream-trigger-card">
+            <div class="dream-trigger-icon">🕐</div>
+            <div class="dream-trigger-label">Cooldown &gt; 1 hr</div>
+          </div>
+          <div class="dream-trigger-arrow">→</div>
+          <div class="dream-trigger-card dream-trigger-card--fire">
+            <div class="dream-trigger-icon">✦</div>
+            <div class="dream-trigger-label">Auto-trigger</div>
+          </div>
+        </div>
+
+        <div class="dream-connector-v"></div>
+
+        <div class="dream-step dream-step--wander">
+          <div class="dream-step-badge">1</div>
+          <div class="dream-step-icon">🌀</div>
+          <div class="dream-step-body">
+            <div class="dream-step-title">dream_wander()</div>
+            <div class="dream-step-desc">Auto-select topic from memory</div>
+          </div>
+        </div>
+
+        <div class="dream-connector-v"></div>
+
+        <div class="dream-topic-row">
+          <div class="dream-topic-card dream-topic-card--gap">
+            <div class="dream-topic-prio">① priority</div>
+            <code>gap + unresolved</code>
+            <div class="dream-topic-hint">memory gaps</div>
+          </div>
+          <div class="dream-topic-card dream-topic-card--low">
+            <div class="dream-topic-prio">② fallback</div>
+            <code>confidence &lt; 0.5</code>
+            <div class="dream-topic-hint">low confidence</div>
+          </div>
+          <div class="dream-topic-card dream-topic-card--seed">
+            <div class="dream-topic-prio">③ default</div>
+            <code>curiosity seeds</code>
+            <div class="dream-topic-hint">philosophy, etc</div>
+          </div>
+        </div>
+
+        <div class="dream-connector-v"></div>
+
+        <div class="dream-step dream-step--start">
+          <div class="dream-step-badge">2</div>
+          <div class="dream-step-icon">✦</div>
+          <div class="dream-step-body">
+            <div class="dream-step-title">dream_start(topic)</div>
+            <div class="dream-step-desc">Spawn sadhana with kind=dream</div>
+          </div>
+        </div>
+
+        <div class="dream-connector-v"></div>
+
+        <div class="dream-agent-card">
+          <div class="dream-agent-title">Claude Agent</div>
+          <div class="dream-agent-tools">
+            <span class="dream-tool">WebSearch</span>
+            <span class="dream-tool">WebFetch</span>
+            <span class="dream-tool">chitta recall</span>
+            <span class="dream-tool">chitta remember</span>
+          </div>
+          <div class="dream-agent-pulse"></div>
+        </div>
+
+        <div class="dream-connector-v"></div>
+
+        <div class="dream-result-card">
+          <div class="dream-result-icon">💾</div>
+          <div class="dream-result-text"><code>[dream]</code> memories stored · status → <code>woke</code></div>
+        </div>
+      </div>
     </div>
 
     <div class="reveal reveal-delay-2">
@@ -1195,27 +1500,63 @@ mcp__chitta__dream_list {"limit": 10}</pre>
       <p class="section-intro">Dreams and sadhanas compose into a closed self-improvement cycle. Seed curiosity gaps, let dreams explore them, run a synthesis sadhana to bridge findings into the knowledge graph — then let new gaps emerge naturally.</p>
     </div>
 
+    <!-- Self-Improvement Cycle Diagram -->
     <div class="reveal reveal-delay-1">
-      <pre class="arch-diagram">┌─────────────────────────────────────────────────────────────────────────┐
-│                    SELF-IMPROVEMENT CYCLE                                │
-│                                                                          │
-│   1. SEED curiosity gaps                                                 │
-│      observe(title="[gap] ...", tags="gap,unresolved,curiosity")        │
-│                         │                                                │
-│                         ▼                                                │
-│   2. DREAM picks gaps automatically (idle &gt; 10min)                      │
-│      dream_wander() → selects gap memories → explores via web/code      │
-│                         │                                                │
-│                         ▼                                                │
-│   3. SYNTHESIS sadhana reviews dream findings                            │
-│      • dream_list() → find completed dreams                              │
-│      • dream_status() → extract findings                                 │
-│      • connect_temporal() → link insights to existing memories           │
-│      • observe() → store synthesis tagged [auto-improve]                 │
-│                         │                                                │
-│                         ▼                                                │
-│   4. NEW GAPS emerge from synthesis → back to step 1          ↻          │
-└─────────────────────────────────────────────────────────────────────────┘</pre>
+      <div class="improve-cycle">
+        <div class="improve-orbit">
+          <svg class="improve-orbit-svg" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="orbitGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" style="stop-color:#CBAF86;stop-opacity:0.4"/>
+                <stop offset="50%" style="stop-color:#9DB2D9;stop-opacity:0.4"/>
+                <stop offset="100%" style="stop-color:#CBAF86;stop-opacity:0.4"/>
+              </linearGradient>
+              <marker id="arrowOrbit" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
+                <path d="M0,0 L0,6 L6,3 z" fill="rgba(203,175,134,0.6)"/>
+              </marker>
+            </defs>
+            <!-- Orbit ring -->
+            <circle cx="200" cy="200" r="130" fill="none" stroke="url(#orbitGrad)" stroke-width="1.5" stroke-dasharray="6 4" class="orbit-ring"/>
+            <!-- Arrows along the ring at cardinal points -->
+            <path d="M200,70 A130,130 0 0,1 330,200" fill="none" stroke="rgba(203,175,134,0.5)" stroke-width="1.5" marker-end="url(#arrowOrbit)"/>
+            <path d="M330,200 A130,130 0 0,1 200,330" fill="none" stroke="rgba(203,175,134,0.5)" stroke-width="1.5" marker-end="url(#arrowOrbit)"/>
+            <path d="M200,330 A130,130 0 0,1 70,200" fill="none" stroke="rgba(203,175,134,0.5)" stroke-width="1.5" marker-end="url(#arrowOrbit)"/>
+            <path d="M70,200 A130,130 0 0,1 200,70" fill="none" stroke="rgba(203,175,134,0.5)" stroke-width="1.5" marker-end="url(#arrowOrbit)"/>
+          </svg>
+
+          <!-- Center label -->
+          <div class="improve-center">
+            <div class="improve-center-symbol">↻</div>
+            <div class="improve-center-label">perpetual</div>
+          </div>
+
+          <!-- 4 nodes at compass points -->
+          <div class="improve-node improve-node--top" data-step="1">
+            <div class="improve-node-num">1</div>
+            <div class="improve-node-icon">🌱</div>
+            <div class="improve-node-title">Seed</div>
+            <div class="improve-node-desc">Curiosity gaps<br><code>gap + unresolved</code></div>
+          </div>
+          <div class="improve-node improve-node--right" data-step="2">
+            <div class="improve-node-num">2</div>
+            <div class="improve-node-icon">🌙</div>
+            <div class="improve-node-title">Dream</div>
+            <div class="improve-node-desc">Web exploration<br><code>dream_wander</code></div>
+          </div>
+          <div class="improve-node improve-node--bottom" data-step="3">
+            <div class="improve-node-num">3</div>
+            <div class="improve-node-icon">🔗</div>
+            <div class="improve-node-title">Synthesize</div>
+            <div class="improve-node-desc">Bridge findings<br><code>connect_temporal</code></div>
+          </div>
+          <div class="improve-node improve-node--left" data-step="4">
+            <div class="improve-node-num">4</div>
+            <div class="improve-node-icon">✨</div>
+            <div class="improve-node-title">Emerge</div>
+            <div class="improve-node-desc">New gaps surface<br>cycle continues</div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="reveal reveal-delay-2">
