@@ -23,6 +23,8 @@ struct BrainResult {
     std::string error;
     int exit_code = -1;
     int duration_ms = 0;
+    double cost_usd = 0.0;   // cost from --output-format json wrapper
+    int num_turns = 0;        // conversation turns within the agent session
 };
 
 // Configuration for brain invocation

@@ -239,7 +239,7 @@ std::optional<Sadhana> SadhanaManager::get(int64_t id) {
     std::ostringstream sql;
     sql << "SELECT id, goal, goal_dsl, state, brain_provider, brain_model, "
         << "created_at, updated_at, iterations, last_sense, last_action, last_result, "
-        << "brain_calls, learned_patterns, interval_seconds, max_turns, realm "
+        << "brain_calls, learned_patterns, interval_seconds, max_turns, realm, cost_usd "
         << "FROM sadhana WHERE id = " << id;
 
     auto result = store_.raw_query(sql.str());
@@ -266,6 +266,7 @@ std::optional<Sadhana> SadhanaManager::get(int64_t id) {
     s.interval_seconds = chunk->GetValue(14, 0).GetValue<int32_t>();
     s.max_turns = chunk->GetValue(15, 0).GetValue<int32_t>();
     s.realm = chunk->GetValue(16, 0).ToString();
+    try { s.cost_usd = chunk->GetValue(17, 0).GetValue<double>(); } catch (...) {}
 
     return s;
 }
@@ -276,7 +277,7 @@ std::vector<Sadhana> SadhanaManager::list(const std::string& state_filter,
 {
     std::ostringstream sql;
     sql << "SELECT id, goal, state, brain_provider, brain_model, "
-        << "created_at, updated_at, iterations, brain_calls, interval_seconds, max_turns, realm "
+        << "created_at, updated_at, iterations, brain_calls, interval_seconds, max_turns, realm, cost_usd "
         << "FROM sadhana WHERE 1=1";
 
     if (!state_filter.empty()) sql << " AND state = '" << state_filter << "'";
@@ -305,6 +306,7 @@ std::vector<Sadhana> SadhanaManager::list(const std::string& state_filter,
             s.interval_seconds = chunk->GetValue(9, i).GetValue<int32_t>();
             s.max_turns = chunk->GetValue(10, i).GetValue<int32_t>();
             s.realm = chunk->GetValue(11, i).ToString();
+            try { s.cost_usd = chunk->GetValue(12, i).GetValue<double>(); } catch (...) {}
             sadhanas.push_back(s);
         }
     }
@@ -654,8 +656,10 @@ std::string SadhanaManager::run_cycle(Sadhana& sadhana) {
     stats_.total_brain_calls++;
     stats_.total_actions++;
 
-    store_.execute_raw("UPDATE sadhana SET brain_calls = brain_calls + 1 WHERE id = " +
-                       std::to_string(sadhana.id));
+    store_.execute_raw(
+        "UPDATE sadhana SET brain_calls = brain_calls + 1, "
+        "cost_usd = cost_usd + " + std::to_string(result.cost_usd) +
+        " WHERE id = " + std::to_string(sadhana.id));
 
     // Determine status from exit code first, then from last JSON in output
     std::string status  = "progressed";
@@ -683,6 +687,8 @@ std::string SadhanaManager::run_cycle(Sadhana& sadhana) {
     cycle_result["summary"]     = summary;
     cycle_result["exit_code"]   = result.exit_code;
     cycle_result["duration_ms"] = result.duration_ms;
+    cycle_result["cost_usd"]    = result.cost_usd;
+    cycle_result["num_turns"]   = result.num_turns;
     // Keep a snippet of the output for diagnostics (last 500 chars, most informative)
     if (!clean_output.empty()) {
         size_t snippet_start = clean_output.size() > 500 ? clean_output.size() - 500 : 0;

@@ -85,6 +85,7 @@ struct Sadhana {
     int interval_seconds = 300;     // Seconds between cycles (default 5 min)
     int max_turns = 0;              // Max turns per cycle (0 = use global default)
     std::string realm = "brahman";
+    double cost_usd = 0.0;         // Cumulative cost across all cycles
 };
 
 // Sadhana history event types

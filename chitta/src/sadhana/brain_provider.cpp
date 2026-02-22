@@ -3,6 +3,7 @@
 // Uses fork/exec to run CLI tools with timeout handling.
 
 #include <chitta/sadhana/brain_provider.hpp>
+#include <nlohmann/json.hpp>
 #include <iostream>
 #include <sstream>
 #include <cstring>
@@ -218,7 +219,8 @@ BrainResult ClaudeBrain::think(const std::string& prompt, const BrainConfig& con
         claude_path_,
         "--dangerously-skip-permissions",
         "--model", model_,
-        "--max-turns", std::to_string(turns)
+        "--max-turns", std::to_string(turns),
+        "--output-format", "json"
     };
 
     if (!config.system_prompt.empty()) {
@@ -234,7 +236,27 @@ BrainResult ClaudeBrain::think(const std::string& prompt, const BrainConfig& con
     args.push_back("-p");
     args.push_back(prompt);
 
-    return execute_with_timeout(args, "", config.timeout_ms, config.working_dir);
+    auto result = execute_with_timeout(args, "", config.timeout_ms, config.working_dir);
+
+    // Parse the JSON wrapper from --output-format json to extract cost/turns,
+    // then replace output with the inner result text for downstream parsing.
+    if (!result.output.empty()) {
+        try {
+            auto j = nlohmann::json::parse(result.output);
+            result.cost_usd  = j.value("cost_usd",  0.0);
+            result.num_turns = j.value("num_turns",  0);
+            if (j.contains("result") && j["result"].is_string()) {
+                result.output = j["result"].get<std::string>();
+            }
+            if (j.value("is_error", false) && result.exit_code == 0) {
+                result.exit_code = 1;
+            }
+        } catch (...) {
+            // Not a JSON wrapper (old claude version or crash) — use raw output as-is
+        }
+    }
+
+    return result;
 }
 
 // OpenCodeBrain implementation

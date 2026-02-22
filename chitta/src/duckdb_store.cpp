@@ -1423,7 +1423,8 @@ bool DuckDBStore::create_schema() {
             learned_patterns JSON,
             interval_seconds INTEGER DEFAULT 60,
             max_turns INTEGER DEFAULT 0,
-            realm VARCHAR DEFAULT 'brahman'
+            realm VARCHAR DEFAULT 'brahman',
+            cost_usd REAL DEFAULT 0.0
         )
     )")) {
         return false;
@@ -1433,6 +1434,7 @@ bool DuckDBStore::create_schema() {
     write_execute("CREATE SEQUENCE IF NOT EXISTS sadhana_seq START 1");
     // Migration: add max_turns if upgrading from older schema
     write_execute("ALTER TABLE sadhana ADD COLUMN IF NOT EXISTS max_turns INTEGER DEFAULT 0");
+    write_execute("ALTER TABLE sadhana ADD COLUMN IF NOT EXISTS cost_usd REAL DEFAULT 0.0");
 
     // Sadhana history: append-only event log for each sadhana
     if (!write_execute(R"(

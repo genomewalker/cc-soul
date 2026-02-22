@@ -12524,6 +12524,7 @@ private:
         result["brain_model"] = opt->brain_model;
         result["iterations"] = opt->iterations;
         result["brain_calls"] = opt->brain_calls;
+        result["cost_usd"] = opt->cost_usd;
         result["interval_seconds"] = opt->interval_seconds;
         result["max_turns"] = opt->max_turns;
         result["realm"] = opt->realm;
