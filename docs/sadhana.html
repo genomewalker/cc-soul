@@ -18,6 +18,49 @@
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
 <style>
+/* ── MISSING GLOBAL ALIASES ────────────────────── */
+:root {
+  --text-primary:   var(--lotus-200);
+  --text-secondary: var(--ash-300);
+}
+
+.heading-sub {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  color: var(--lotus-200);
+  margin: var(--space-6) 0 var(--space-3);
+  font-weight: 500;
+}
+
+.table-wrap { overflow-x: auto; margin: var(--space-3) 0; }
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+.data-table th {
+  text-align: left;
+  padding: var(--space-2) var(--space-4);
+  color: var(--sandal-300);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border-bottom: 1px solid rgba(203,175,134,0.2);
+  font-weight: 500;
+}
+.data-table td {
+  padding: var(--space-2) var(--space-4);
+  color: var(--ash-300);
+  border-bottom: 1px solid rgba(157,178,217,0.07);
+  vertical-align: top;
+  line-height: 1.6;
+}
+.data-table tr:hover td { background: rgba(203,175,134,0.03); }
+.data-table td:first-child { color: var(--lotus-200); }
+
+.code-comment { color: rgba(185,189,199,0.45); font-style: italic; }
+
 /* Sadhana-specific styles */
 .cycle-grid {
   display: grid;
