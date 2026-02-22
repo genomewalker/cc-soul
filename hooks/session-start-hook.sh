@@ -76,7 +76,7 @@ PLUGIN_DIR="${CC_SOUL_PLUGIN_DIR:-$(dirname "$(dirname "$(realpath "${BASH_SOURC
 if [[ -n "$PROJECT_DIR" && -d "$PROJECT_DIR" ]]; then
     AUTO_INDEX_SCRIPT="$PLUGIN_DIR/scripts/auto-index.sh"
     if [[ -x "$AUTO_INDEX_SCRIPT" ]]; then
-        (cd "$PROJECT_DIR" && "$AUTO_INDEX_SCRIPT") >/dev/null 2>&1 &
+        (cd "$PROJECT_DIR" && "$AUTO_INDEX_SCRIPT") </dev/null >/dev/null 2>&1 &
         disown
     fi
 fi
@@ -84,7 +84,7 @@ fi
 # Realm retag (daily rate limit built into script)
 REALM_RETAG_SCRIPT="$PLUGIN_DIR/scripts/realm-retag.sh"
 if [[ -x "$REALM_RETAG_SCRIPT" ]]; then
-    "$REALM_RETAG_SCRIPT" >/dev/null 2>&1 &
+    "$REALM_RETAG_SCRIPT" </dev/null >/dev/null 2>&1 &
     disown
 fi
 
