@@ -700,6 +700,8 @@
     <a href="#tui" class="submenu-toc-link submenu-toc-link--tui" data-section="tui">TUI</a>
     <a href="#usage" class="submenu-toc-link submenu-toc-link--usage" data-section="usage">Usage</a>
     <a href="#use-cases" class="submenu-toc-link submenu-toc-link--cases" data-section="use-cases">Use Cases</a>
+    <a href="#dream" class="submenu-toc-link submenu-toc-link--dream" data-section="dream">Dream</a>
+    <a href="#self-improve" class="submenu-toc-link submenu-toc-link--self" data-section="self-improve">Self-Improve</a>
   </div>
 </nav>
 
@@ -1083,6 +1085,172 @@
         <h4 class="usecase-title">Deployment Verification</h4>
         <div class="usecase-cmd">sadhana_start --goal "Verify deployment succeeded"</div>
         <p class="usecase-desc">Post-deployment monitoring until stability confirmed.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════
+     DREAM (SVAPNA)
+     ═══════════════════════════════════════════ -->
+<section class="arch-section" id="dream">
+  <div class="container">
+    <div class="reveal">
+      <div class="section-divider"></div>
+      <h2 class="heading-section">Dream <span style="font-style:italic;opacity:0.6;font-size:0.7em">svapna</span></h2>
+      <p class="section-intro">A specialized sadhana for curiosity-driven exploration during idle time. When the daemon has been idle for 10+ minutes and no dream has run in the past hour, it wanders autonomously — picking topics from memory gaps, searching the web, and storing what it finds.</p>
+    </div>
+
+    <div class="reveal reveal-delay-1">
+      <pre class="arch-diagram">┌─────────────────────────────────────────────────────────────────────────┐
+│                           DREAM LIFECYCLE                                │
+│                                                                          │
+│   Idle &gt; 10 min          Auto-trigger                                    │
+│        │                      │                                          │
+│        ▼                      ▼                                          │
+│   ┌──────────┐         ┌──────────────┐                                  │
+│   │ wander   │ ──────▶ │ pick topic   │                                  │
+│   └──────────┘         │ (gaps, low   │                                  │
+│                        │  confidence, │                                  │
+│                        │  or seeds)   │                                  │
+│                        └──────┬───────┘                                  │
+│                               │                                          │
+│                               ▼                                          │
+│                        ┌──────────────┐                                  │
+│                        │ dream_start  │                                  │
+│                        │ (sadhana     │                                  │
+│                        │  kind=dream) │                                  │
+│                        └──────┬───────┘                                  │
+│                               │                                          │
+│                               ▼                                          │
+│                   ┌──────────────────────┐                               │
+│                   │   Claude Agent       │                               │
+│                   │   • WebSearch        │                               │
+│                   │   • WebFetch         │                               │
+│                   │   • chitta remember  │                               │
+│                   └──────────┬───────────┘                               │
+│                              │                                           │
+│                              ▼                                           │
+│                   [dream] memories stored                                │
+└─────────────────────────────────────────────────────────────────────────┘</pre>
+    </div>
+
+    <div class="reveal reveal-delay-2">
+      <h3 class="heading-sub">Topic Selection Priority</h3>
+      <ol style="color: var(--text-secondary); line-height: 1.9; margin: var(--space-4) 0 var(--space-4) var(--space-5);">
+        <li>Memories tagged <code>gap</code> + <code>unresolved</code></li>
+        <li>Low-confidence memories (below 0.5)</li>
+        <li>Hardcoded curiosity seeds (philosophy, consciousness, complexity)</li>
+      </ol>
+
+      <h3 class="heading-sub">Tools</h3>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead><tr><th>Tool</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>dream_start</code></td><td>Start a dream exploring a specific topic</td></tr>
+            <tr><td><code>dream_wander</code></td><td>Auto-pick topic from gaps/seeds and start dreaming</td></tr>
+            <tr><td><code>dream_list</code></td><td>List recent dreams with status</td></tr>
+            <tr><td><code>dream_status</code></td><td>Full dream detail + sadhana history</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 class="heading-sub">Dream Status</h3>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead><tr><th>Status</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><code>dreaming</code></td><td>Agent is actively exploring</td></tr>
+            <tr><td><code>woke</code></td><td>Exploration complete, findings stored</td></tr>
+            <tr><td><code>forgotten</code></td><td>Dream was abandoned (sadhana failed)</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 class="heading-sub">Usage</h3>
+      <pre class="code-block"><span class="code-comment"># Via skill</span>
+/dream                    <span class="code-comment"># Auto-pick topic</span>
+/dream consciousness      <span class="code-comment"># Specific topic</span>
+/dream list               <span class="code-comment"># Recent dreams</span>
+
+<span class="code-comment"># Via MCP</span>
+mcp__chitta__dream_wander {}
+mcp__chitta__dream_start {"topic": "quantum entanglement"}
+mcp__chitta__dream_list {"limit": 10}</pre>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════
+     SELF-IMPROVEMENT LOOP
+     ═══════════════════════════════════════════ -->
+<section class="arch-section alt-bg" id="self-improve">
+  <div class="container">
+    <div class="reveal">
+      <div class="section-divider"></div>
+      <h2 class="heading-section">Autonomous Self-Improvement</h2>
+      <p class="section-intro">Dreams and sadhanas compose into a closed self-improvement cycle. Seed curiosity gaps, let dreams explore them, run a synthesis sadhana to bridge findings into the knowledge graph — then let new gaps emerge naturally.</p>
+    </div>
+
+    <div class="reveal reveal-delay-1">
+      <pre class="arch-diagram">┌─────────────────────────────────────────────────────────────────────────┐
+│                    SELF-IMPROVEMENT CYCLE                                │
+│                                                                          │
+│   1. SEED curiosity gaps                                                 │
+│      observe(title="[gap] ...", tags="gap,unresolved,curiosity")        │
+│                         │                                                │
+│                         ▼                                                │
+│   2. DREAM picks gaps automatically (idle &gt; 10min)                      │
+│      dream_wander() → selects gap memories → explores via web/code      │
+│                         │                                                │
+│                         ▼                                                │
+│   3. SYNTHESIS sadhana reviews dream findings                            │
+│      • dream_list() → find completed dreams                              │
+│      • dream_status() → extract findings                                 │
+│      • connect_temporal() → link insights to existing memories           │
+│      • observe() → store synthesis tagged [auto-improve]                 │
+│                         │                                                │
+│                         ▼                                                │
+│   4. NEW GAPS emerge from synthesis → back to step 1          ↻          │
+└─────────────────────────────────────────────────────────────────────────┘</pre>
+    </div>
+
+    <div class="reveal reveal-delay-2">
+      <h3 class="heading-sub">Setting It Up</h3>
+
+      <p style="color:var(--text-secondary);margin-bottom:var(--space-3)"><strong style="color:var(--text-primary)">Step 1 — Seed curiosity gaps</strong></p>
+      <pre class="code-block">mcp__chitta__observe {
+  "title": "[gap] Why does X happen?",
+  "content": "Detailed question and context...",
+  "tags": "gap,unresolved,curiosity,topic-name"
+}</pre>
+
+      <p style="color:var(--text-secondary);margin:var(--space-4) 0 var(--space-3)"><strong style="color:var(--text-primary)">Step 2 — Dreams auto-trigger from gaps</strong></p>
+      <p style="color:var(--text-secondary);margin-bottom:var(--space-4)">When the daemon is idle for 10+ minutes, <code>dream_wander</code> picks the highest-priority gap and launches an exploration sadhana. No manual trigger needed.</p>
+
+      <p style="color:var(--text-secondary);margin-bottom:var(--space-3)"><strong style="color:var(--text-primary)">Step 3 — Start a synthesis sadhana</strong></p>
+      <pre class="code-block">mcp__chitta__sadhana_start {
+  "goal": "Each cycle: review recent dreams (dream_list, dream_status),
+  extract key insights, connect them to existing memories via
+  connect_temporal, store synthesis as [auto-improve] tagged wisdom.
+  Also expand curiosity gaps based on what you find.",
+  "interval_seconds": 900
+}</pre>
+
+      <h3 class="heading-sub" style="margin-top:var(--space-6)">What Each Component Does</h3>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead><tr><th>Component</th><th>Role</th></tr></thead>
+          <tbody>
+            <tr><td>Curiosity gap memories</td><td>Directs <code>dream_wander</code> to meaningful topics</td></tr>
+            <tr><td>Dreams</td><td>Explore topics via web search, store <code>[dream]</code> memories</td></tr>
+            <tr><td>Synthesis sadhana</td><td>Bridges dream findings to existing knowledge graph</td></tr>
+            <tr><td>New gaps</td><td>Emerge naturally from synthesis, feeding the next cycle</td></tr>
+          </tbody>
+        </table>
       </div>
     </div>
   </div>

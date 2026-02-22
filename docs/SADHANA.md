@@ -437,6 +437,81 @@ CREATE TABLE dream (
 
 Dreams are linked to sadhanas via `sadhana_id`. The sadhana runs with `goal_dsl = {"kind": "dream", "topic": "..."}`, which triggers the specialized dream system prompt.
 
+## Autonomous Self-Improvement Loop
+
+Dreams and sadhanas can be combined into a closed self-improvement cycle:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    SELF-IMPROVEMENT CYCLE                                │
+│                                                                          │
+│   1. SEED curiosity gaps                                                 │
+│      observe(title="[gap] ...", tags="gap,unresolved,curiosity")        │
+│                         │                                                │
+│                         ▼                                                │
+│   2. DREAM picks gaps automatically                                      │
+│      dream_wander() → selects gap memories → explores via web/code      │
+│                         │                                                │
+│                         ▼                                                │
+│   3. SYNTHESIS sadhana reviews dream findings                            │
+│      • dream_list() → find completed dreams                              │
+│      • dream_status() → extract findings                                 │
+│      • connect_temporal() → link insights to existing memories           │
+│      • observe() → store synthesis tagged [auto-improve]                 │
+│                         │                                                │
+│                         ▼                                                │
+│   4. NEW GAPS emerge from synthesis → back to step 1                    │
+│                         ↻                                                │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Setting It Up
+
+**Step 1: Seed curiosity gaps**
+```bash
+# Via MCP
+mcp__chitta__observe {
+  "title": "[gap] Why does X happen?",
+  "content": "Detailed question and context...",
+  "tags": "gap,unresolved,curiosity,topic-name"
+}
+```
+
+**Step 2: Dreams auto-trigger from gaps**
+
+When the daemon is idle for 10+ minutes, `dream_wander` picks the gap with highest priority and launches an exploration sadhana. No manual trigger needed.
+
+**Step 3: Start a synthesis sadhana**
+```bash
+mcp__chitta__sadhana_start {
+  "goal": "Each cycle: review recent dreams (dream_list, dream_status), extract key insights, connect them to existing memories via connect_temporal, store synthesis as [auto-improve] tagged wisdom. Also expand curiosity gaps based on what you find.",
+  "interval_seconds": 900
+}
+```
+
+### What Each Component Does
+
+| Component | Role |
+|-----------|------|
+| Curiosity gap memories | Directs dream_wander to meaningful topics |
+| Dreams | Explore topics via web search, store `[dream]` memories |
+| Synthesis sadhana | Bridges dream findings to existing knowledge graph |
+| New gaps | Emerge naturally from synthesis, feeding the next cycle |
+
+### Example: Philosophy Exploration
+
+```
+Seed: "[gap] Vedantic philosophy — are the mappings deep or just naming?"
+  ↓
+Dream: Searches "chitta Vedanta philosophy consciousness", finds academic sources
+       Stores: "[dream] Chitta in Advaita Vedanta means..."
+  ↓
+Synthesis: Links "[dream] Chitta..." to existing memory about cc-soul architecture
+           Stores: "[auto-improve] The brahman/chitta mapping is philosophically grounded..."
+  ↓
+New gap: "[gap] What would samadhi look like computationally?"
+```
+
 ## Troubleshooting
 
 | Issue | Solution |
