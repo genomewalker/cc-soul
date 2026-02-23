@@ -229,7 +229,19 @@ bool cleanup_stale_daemon(const std::string& mind_path) {
 
     // Check if that process is still alive
     if (is_pid_alive(old_pid)) {
-        return false;  // Process exists, don't clean
+        // Process is alive — check if it's actually responsive
+        if (socket_responds(sock_path)) {
+            return false;  // Alive and responsive, leave it alone
+        }
+        // Alive but socket is dead (hung daemon) — kill it
+        std::cerr << "[daemon] Hung daemon detected (PID " << old_pid
+                  << " alive but socket unresponsive), sending SIGKILL\n";
+        kill(old_pid, SIGKILL);
+        // Wait up to 2s for it to die
+        for (int i = 0; i < 20; ++i) {
+            usleep(100000);  // 100ms
+            if (!is_pid_alive(old_pid)) break;
+        }
     }
 
     // Process is dead, clean up stale files
