@@ -2950,6 +2950,19 @@ private:
         handlers_["dream_cancel"] = [this](const json& p) { return tool_dream_cancel(p); };
 
         tools_.push_back({
+            {"name", "dream_force_woke"},
+            {"description", "Force a stuck dreaming dream to woke status without findings. Stops the sadhana and marks the dream as complete so new dreams can start."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "integer"}, {"description", "Dream ID to force-wake"}}}
+                }},
+                {"required", {"id"}}
+            }}
+        });
+        handlers_["dream_force_woke"] = [this](const json& p) { return tool_dream_force_woke(p); };
+
+        tools_.push_back({
             {"name", "dream_list"},
             {"description", "List recent dreams with their topics, status, and findings"},
             {"inputSchema", {
@@ -13835,6 +13848,12 @@ private:
             " WHERE id = " + std::to_string(dream_id));
 
         if (!sadhana_manager_->start(sadhana_id)) {
+            // Roll back dream status so it doesn't clog the rate limit
+            int64_t ts = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            mind_->store().execute_raw(
+                "UPDATE dream SET status = 'cancelled', ended_at = " + std::to_string(ts) +
+                " WHERE id = " + std::to_string(dream_id));
             return DuckDBToolResult::error(
                 "Created dream sadhana " + std::to_string(sadhana_id) + " but failed to start");
         }

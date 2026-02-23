@@ -129,7 +129,7 @@ inline std::string sadhana_event_type_to_string(SadhanaEventType type) {
 
 // Configuration for the manager
 struct SadhanaConfig {
-    int max_concurrent = 5;
+    int max_concurrent = 10;
     int max_agent_timeout_ms = 600000;      // 10 minutes per agent cycle
     int max_agent_turns = 20;               // Default max turns per cycle (overridable per-sadhana)
     int default_interval_seconds = 300;     // 5 minutes between cycles

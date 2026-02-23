@@ -659,6 +659,13 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
 
     {"dream_cancel", "Cancel an active dream (stops sadhana, marks cancelled)",
      {{"id", "Dream ID", true, nullptr}}},
+
+    // Sadhana lifecycle
+    {"sadhana_stop", "Stop a running sadhana permanently",
+     {{"id", "Sadhana ID", true, nullptr}}},
+
+    {"sadhana_pause", "Pause a running sadhana (can be resumed)",
+     {{"id", "Sadhana ID", true, nullptr}}},
 };
 
 // Build set of known tools from specs
