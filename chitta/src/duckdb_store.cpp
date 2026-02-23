@@ -136,12 +136,19 @@ void DuckDBStore::fix_sequences() {
 
 bool DuckDBStore::open_embeddings_db(const std::string& path) {
     try {
-        // Simple initialization for compatibility
-        emb_db_ = std::make_unique<duckdb::DuckDB>(path);
+        // Open embeddings DB — if corrupt, delete and recreate (HNSW index rebuilds in memory)
+        try {
+            emb_db_ = std::make_unique<duckdb::DuckDB>(path);
+        } catch (const std::exception& e) {
+            std::cerr << "[DuckDBStore] Embeddings DB corrupt (" << e.what() << "), deleting and recreating\n";
+            std::remove(path.c_str());
+            std::remove((path + ".wal").c_str());
+            emb_db_ = std::make_unique<duckdb::DuckDB>(path);
+        }
         emb_conn_ = std::make_unique<duckdb::Connection>(*emb_db_);
 
-        // Set thread limits via PRAGMA
-        emb_conn_->Query("PRAGMA threads=2");
+        // Set thread limits via PRAGMA — threads=1 avoids internal HNSW parallelism races
+        emb_conn_->Query("PRAGMA threads=1");
         emb_conn_->Query("PRAGMA enable_external_access=true");
 
         // Load VSS extension for embeddings DB too
@@ -177,9 +184,6 @@ bool DuckDBStore::create_embeddings_schema() {
     if (!emb_conn_) return false;
 
     try {
-        // Enable experimental persistence for HNSW in embeddings DB
-        emb_conn_->Query("SET hnsw_enable_experimental_persistence = true");
-
         // Migration: detect old 384-dim embedding tables and drop them
         // Embeddings are regenerated via embed_symbols --reset
         try {
@@ -1628,7 +1632,6 @@ bool DuckDBStore::rebuild_vector_index() {
     try {
         // Drop and recreate index in embeddings DB
         emb_conn_->Query("DROP INDEX IF EXISTS memory_emb_hnsw_idx");
-        emb_conn_->Query("SET hnsw_enable_experimental_persistence = true");
         emb_conn_->Query(R"(
             CREATE INDEX memory_emb_hnsw_idx
             ON memory_embeddings USING HNSW (embedding)
