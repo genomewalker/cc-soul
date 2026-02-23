@@ -13780,6 +13780,44 @@ private:
             {{"dream_id", dream_id}, {"sadhana_id", sadhana_id}, {"status", "cancelled"}});
     }
 
+    DuckDBToolResult tool_dream_force_woke(const json& params) {
+        if (!params.contains("id")) {
+            return DuckDBToolResult::error("id is required");
+        }
+        int64_t dream_id = params["id"].is_string()
+            ? std::stoll(params["id"].get<std::string>())
+            : params["id"].get<int64_t>();
+
+        auto res = mind_->store().execute_sql_query(
+            "SELECT sadhana_id, status FROM dream WHERE id = " + std::to_string(dream_id));
+        if (!res.success || res.rows.empty()) {
+            return DuckDBToolResult::error("Dream " + std::to_string(dream_id) + " not found");
+        }
+        std::string status = res.rows[0][1];
+        if (status == "woke") {
+            return DuckDBToolResult::ok("Dream " + std::to_string(dream_id) + " already woke", {});
+        }
+
+        int64_t sadhana_id = 0;
+        if (res.rows[0][0] != "NULL" && !res.rows[0][0].empty()) {
+            try { sadhana_id = std::stoll(res.rows[0][0]); } catch (...) {}
+        }
+        if (sadhana_manager_ && sadhana_id > 0) {
+            sadhana_manager_->stop(sadhana_id);
+        }
+
+        auto now_val = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        mind_->store().execute_raw(
+            "UPDATE dream SET status = 'woke', findings = '[force-woke]', ended_at = " +
+            std::to_string(now_val) + " WHERE id = " + std::to_string(dream_id));
+
+        return DuckDBToolResult::ok(
+            "Force-woke dream #" + std::to_string(dream_id) +
+            (sadhana_id > 0 ? " (stopped sadhana #" + std::to_string(sadhana_id) + ")" : ""),
+            {{"dream_id", dream_id}, {"sadhana_id", sadhana_id}, {"status", "woke"}});
+    }
+
     DuckDBToolResult tool_dream_start(const json& params) {
         if (!sadhana_manager_) {
             return DuckDBToolResult::error("Sadhana manager not initialized");
