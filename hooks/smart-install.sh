@@ -389,7 +389,13 @@ configure_hooks() {
 stop_daemon() {
     # Try graceful shutdown via chittad
     if [[ -x "$BIN_DIR/chittad" ]]; then
-        "$BIN_DIR/chittad" shutdown 2>/dev/null && sleep 1 && return 0
+        if "$BIN_DIR/chittad" shutdown 2>/dev/null; then
+            for i in $(seq 1 20); do
+                pgrep -f "chittad daemon" >/dev/null 2>&1 || break
+                sleep 0.5
+            done
+            return 0
+        fi
     fi
 
     # Fallback: signal daemon directly
@@ -397,7 +403,10 @@ stop_daemon() {
     if [[ -n "$daemon_pid" ]]; then
         echo "[cc-soul] Stopping daemon (pid $daemon_pid)..."
         kill -TERM "$daemon_pid" 2>/dev/null || true
-        sleep 1
+        for i in $(seq 1 20); do
+            kill -0 "$daemon_pid" 2>/dev/null || break
+            sleep 0.5
+        done
         kill -0 "$daemon_pid" 2>/dev/null && kill -9 "$daemon_pid" 2>/dev/null || true
     fi
 

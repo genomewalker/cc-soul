@@ -7,7 +7,7 @@ This file is for **contributors developing cc-soul itself**. For user-facing ins
 **Always follow all three steps after code changes:**
 ```bash
 cd chitta && cmake --build build --parallel          # 1. Build
-pkill -TERM chittad 2>/dev/null; sleep 1             # 2. Stop daemon (prevents ETXTBSY)
+pkill -TERM chittad 2>/dev/null; for i in $(seq 1 20); do pgrep -x chittad >/dev/null || break; sleep 0.5; done  # 2. Wait for daemon exit
 cp bin/chitta bin/chittad ~/.claude/bin/              # 3. Install
 ```
 
