@@ -74,9 +74,8 @@ bool DuckDBStore::open(const std::string& path) {
             std::cerr << "[DuckDBStore] Warning: Embeddings DB failed, using main DB\n";
         } else {
             // HNSW not persisted (experimental persistence removed for stability).
-            // Schedule rebuild on first maintenance cycle.
-            index_exists_.store(false);
-            needs_reindex_.store(true);
+            // Rebuild immediately at startup — safe now that threads=1 and no persistence.
+            rebuild_vector_index();
         }
 
         std::cerr << "[DuckDBStore] Opened database at " << path_ << "\n";
