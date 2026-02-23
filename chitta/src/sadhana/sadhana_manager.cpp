@@ -544,6 +544,32 @@ std::string SadhanaManager::build_system_prompt(const Sadhana& sadhana) const {
         return sys.str();
     }
 
+    // Dream synthesis sadhana: bridge dream findings to actionable code gaps
+    if (sadhana.goal_dsl.is_object() &&
+        sadhana.goal_dsl.value("kind", "") == "dream_synthesis") {
+        int64_t dream_id = sadhana.goal_dsl.value("dream_id", int64_t(0));
+        std::string topic = sadhana.goal_dsl.value("topic", "");
+        std::ostringstream sys;
+        sys << "You are a dream synthesis agent. A dream has just completed and you must\n"
+            << "bridge its findings into concrete, actionable memory for the codebase.\n\n"
+            << "DREAM: #" << dream_id << (topic.empty() ? "" : " — " + topic) << "\n\n"
+            << "MISSION (single cycle, then status=achieved):\n"
+            << "1. Retrieve dream memories: chitta recall --query \"[dream]\" --limit 20\n"
+            << "2. For each finding that points to a code gap or missing feature:\n"
+            << "   chitta remember --content \"[gap] <file:function> — <what is missing>\" "
+            << "--tags gap,dream_synthesis\n"
+            << "3. For each open question raised by the dream:\n"
+            << "   chitta remember --content \"[curiosity] <question>\" --tags curiosity,dream_synthesis\n"
+            << "4. Record a synthesis triplet:\n"
+            << "   chitta connect --subject \"dream:" << dream_id << "\" "
+            << "--predicate synthesized_by --object \"sadhana:" << sadhana.id << "\"\n\n"
+            << "CONSTRAINTS:\n"
+            << "- Extract only concrete, actionable gaps — not philosophical observations\n"
+            << "- Maximum 5 gap memories and 3 curiosity memories\n"
+            << "- Single cycle — end with {\"status\": \"achieved\", \"summary\": \"...\"}\n";
+        return sys.str();
+    }
+
     std::ostringstream sys;
     sys << "You are a background autonomous agent (sadhana #" << sadhana.id << ").\n"
         << "You work continuously toward a long-term goal, one cycle at a time.\n"

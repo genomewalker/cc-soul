@@ -238,6 +238,8 @@ private:
     // Helpers
     static int64_t now_ms();
     std::optional<SubconsciousEvent> pop_event_with_timeout(std::chrono::seconds timeout);
+    static float score_correction_quality(const std::string& correction,
+                                          const std::string& context);
 };
 
 }  // namespace chitta

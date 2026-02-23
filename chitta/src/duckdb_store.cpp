@@ -12044,7 +12044,21 @@ bool DuckDBStore::log_correction_outcome(
         << (correction_detected ? "true" : "false") << ", "
         << "'" << escape(correction_text) << "', "
         << now_ts << ")";
-    return write_execute(sql.str());
+    if (!write_execute(sql.str())) return false;
+
+    // Feedback loop: adjust confidence of the source correction memory
+    if (correction_memory_id > 0) {
+        if (correction_detected) {
+            // Mistake was repeated — memory not working, weaken it
+            write_execute("UPDATE memory SET confidence = GREATEST(0.30, confidence * 0.82) "
+                          "WHERE id = " + std::to_string(correction_memory_id));
+        } else {
+            // Correction was followed — reinforce the memory
+            write_execute("UPDATE memory SET confidence = LEAST(0.95, confidence + 0.03) "
+                          "WHERE id = " + std::to_string(correction_memory_id));
+        }
+    }
+    return true;
 }
 
 }  // namespace chitta

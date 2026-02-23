@@ -3226,6 +3226,14 @@ private:
         });
         handlers_["file_index_all"] = [this](const json& p) { return tool_file_index_all(p); };
 
+        // chitta_health - soul feedback loop health diagnostics
+        tools_.push_back({
+            {"name", "chitta_health"},
+            {"description", "Report feedback loop health: correction learning rate, recurring mistakes, dream synthesis lag, and memory type distribution."},
+            {"inputSchema", {{"type", "object"}, {"properties", json::object()}}}
+        });
+        handlers_["chitta_health"] = [this](const json& p) { return tool_chitta_health(p); };
+
         classify_tools();
     }
 
@@ -3249,7 +3257,8 @@ private:
             "connect_batch", "research_cycle", "research_store", "research_topics",
             "cycle", "anticipation_gate_status", "anticipation_record_outcome",
             "session_register", "session_heartbeat", "session_deregister", "msg_ack",
-            "file_index_session", "file_index_all"
+            "file_index_session", "file_index_all",
+            "chitta_health"
         };
 
         // Advanced tools - visible but secondary
@@ -8219,6 +8228,101 @@ private:
             {"failed", failed},
             {"success_rate", success_rate}
         });
+    }
+
+    DuckDBToolResult tool_chitta_health(const json& /*params*/) {
+        json metrics;
+        std::ostringstream report;
+        bool healthy = true;
+
+        // 1. Correction implementation rate
+        // correction_detected=true means mistake was repeated (bad); false means followed (good)
+        {
+            auto r = mind_->store().execute_sql_query(
+                "SELECT COUNT(*) AS total, "
+                "       COUNT(CASE WHEN correction_detected = false THEN 1 END) AS followed "
+                "FROM correction_outcome");
+            int64_t total = 0, followed = 0;
+            if (r.success && !r.rows.empty() && r.rows[0].size() >= 2) {
+                try { total   = std::stoll(r.rows[0][0]); } catch (...) {}
+                try { followed = std::stoll(r.rows[0][1]); } catch (...) {}
+            }
+            double rate = total > 0 ? (double)followed / total : -1.0;
+            metrics["correction_implementation_rate"] = rate < 0 ? "no_data" : std::to_string((int)(rate * 100)) + "%";
+            if (rate >= 0 && rate < 0.60) healthy = false;
+            report << "Correction follow rate: "
+                   << (rate < 0 ? "no data" : std::to_string((int)(rate * 100)) + "% (" + std::to_string(followed) + "/" + std::to_string(total) + ")")
+                   << (rate >= 0 && rate < 0.60 ? " ⚠ NEEDS ATTENTION" : "") << "\n";
+        }
+
+        // 2. Recurring corrections (same mistake repeated 2+ times)
+        {
+            auto r = mind_->store().execute_sql_query(
+                "SELECT correction_memory_id, COUNT(*) AS repeats "
+                "FROM correction_outcome WHERE correction_detected = true "
+                "GROUP BY correction_memory_id HAVING COUNT(*) >= 2 "
+                "ORDER BY repeats DESC LIMIT 5");
+            int recurring = r.success ? (int)r.rows.size() : 0;
+            if (recurring > 0) healthy = false;
+            json arr = json::array();
+            for (const auto& row : r.rows) {
+                if (row.size() >= 2) arr.push_back({{"memory_id", row[0]}, {"repeats", row[1]}});
+            }
+            metrics["recurring_corrections"] = arr;
+            report << "Recurring mistakes: " << recurring
+                   << (recurring > 0 ? " ⚠ NEEDS ATTENTION — see recurring_corrections" : " (none)") << "\n";
+        }
+
+        // 3. Dream synthesis lag — dreams completed without synthesis
+        {
+            auto r = mind_->store().execute_sql_query(
+                "SELECT COUNT(*) FROM dream d "
+                "WHERE d.status = 'woke' AND d.memories_created >= 3 "
+                "  AND NOT EXISTS ("
+                "    SELECT 1 FROM triplets t "
+                "    WHERE t.subject = 'dream:' || CAST(d.id AS VARCHAR) "
+                "      AND t.predicate = 'synthesized_by'"
+                "  )");
+            int unsynth = 0;
+            if (r.success && !r.rows.empty() && !r.rows[0].empty()) {
+                try { unsynth = std::stoi(r.rows[0][0]); } catch (...) {}
+            }
+            if (unsynth > 2) healthy = false;
+            metrics["unsynth_dreams"] = unsynth;
+            report << "Dreams awaiting synthesis: " << unsynth
+                   << (unsynth > 2 ? " ⚠ NEEDS ATTENTION" : "") << "\n";
+        }
+
+        // 4. Memory type distribution
+        {
+            auto r = mind_->store().execute_sql_query(
+                "SELECT "
+                "  COUNT(CASE WHEN content LIKE '%[correction]%' THEN 1 END) AS corrections, "
+                "  COUNT(CASE WHEN content LIKE '%[gap]%' THEN 1 END) AS gaps, "
+                "  COUNT(CASE WHEN content LIKE '%[curiosity]%' THEN 1 END) AS curiosity, "
+                "  COUNT(CASE WHEN content LIKE '%[dream]%' THEN 1 END) AS dreams, "
+                "  COUNT(CASE WHEN content LIKE '%[meta-correction]%' THEN 1 END) AS meta_corrections "
+                "FROM memory");
+            if (r.success && !r.rows.empty() && r.rows[0].size() >= 5) {
+                json dist;
+                dist["corrections"]      = r.rows[0][0];
+                dist["gaps"]             = r.rows[0][1];
+                dist["curiosity"]        = r.rows[0][2];
+                dist["dreams"]           = r.rows[0][3];
+                dist["meta_corrections"] = r.rows[0][4];
+                metrics["memory_type_distribution"] = dist;
+                report << "Memory types — corrections:" << r.rows[0][0]
+                       << " gaps:" << r.rows[0][1]
+                       << " curiosity:" << r.rows[0][2]
+                       << " dreams:" << r.rows[0][3]
+                       << " meta-corrections:" << r.rows[0][4] << "\n";
+            }
+        }
+
+        std::string status = healthy ? "HEALTHY" : "NEEDS ATTENTION";
+        metrics["status"] = status;
+        report << "\nOverall: " << status << "\n";
+        return DuckDBToolResult::ok(report.str(), metrics);
     }
 
     DuckDBToolResult tool_metacognition_evaluate(const json& params) {
@@ -14024,6 +14128,27 @@ private:
                 "  memories_created = " + std::to_string(mc) + ", "
                 "  findings = '" + esc_sql(findings) + "' "
                 "WHERE id = " + std::to_string(dream_id));
+
+            // Spawn a synthesis sadhana if the dream produced meaningful memories
+            if (sadhana_manager_ && mc >= 3) {
+                // Retrieve dream topic for the synthesis goal
+                auto topic_res = mind_->store().execute_sql_query(
+                    "SELECT topic FROM dream WHERE id = " + std::to_string(dream_id));
+                std::string topic;
+                if (topic_res.success && !topic_res.rows.empty() && !topic_res.rows[0].empty()) {
+                    topic = topic_res.rows[0][0];
+                }
+                json dsl;
+                dsl["kind"]     = "dream_synthesis";
+                dsl["dream_id"] = dream_id;
+                dsl["topic"]    = topic;
+                std::string goal = "Synthesize dream #" + std::to_string(dream_id)
+                                 + (topic.empty() ? "" : " (" + topic + ")")
+                                 + " findings into actionable code gaps";
+                int64_t synth_id = sadhana_manager_->create(
+                    goal, "", "", 0, "brahman", dsl, 1);
+                if (synth_id > 0) sadhana_manager_->start(synth_id);
+            }
         }
     }
 
