@@ -534,7 +534,15 @@ std::string SadhanaManager::build_system_prompt(const Sadhana& sadhana) const {
                 << "   git -C \"$REPO\" push 2>/dev/null || true\n";
         }
 
-        sys << "\nCOMPLETION PROTOCOL (required final line):\n"
+        sys << "\nARCHITECTURAL REFLECTION:\n"
+            << "Before completing, ask: does anything you found have direct implications\n"
+            << "for how cc-soul stores, retrieves, or reasons about memory?\n"
+            << "If yes, store it explicitly with the impl tag:\n"
+            << "  chitta remember --content \"[dream][impl] ...\" --tags dream impl\n"
+            << "Be concrete: a specific mechanism, a flaw in confidence scoring,\n"
+            << "a missing memory type, a retrieval strategy, a decay model.\n"
+            << "Skip this step entirely if nothing genuinely applies — do not force it.\n\n"
+            << "COMPLETION PROTOCOL (required final line):\n"
             << "{\"status\": \"achieved\", \"summary\": \"What you explored and discovered\"}\n\n"
             << "CONSTRAINTS:\n"
             << "- Free exploration only — follow curiosity, not utility\n"
