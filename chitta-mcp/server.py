@@ -74,6 +74,8 @@ INTERNAL_TOOLS = {
     "chitta_health",
     # File indexing
     "file_index_all",
+    # Dream management
+    "dream_cancel",
 }
 
 ADVANCED_TOOLS = {

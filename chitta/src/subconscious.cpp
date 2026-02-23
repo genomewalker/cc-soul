@@ -854,9 +854,9 @@ bool Subconscious::time_for_dream() const {
     auto now = now_ms();
     if (last_query != 0 && (now - last_query) < 600000LL) return false;
 
-    // Last dream trigger > 1 hour ago (3,600,000ms)
+    // Last dream trigger > 4 hours ago (14,400,000ms)
     auto last_dream = last_dream_triggered_at_.load();
-    if (last_dream != 0 && (now - last_dream) < 3600000LL) return false;
+    if (last_dream != 0 && (now - last_dream) < 14400000LL) return false;
 
     return true;
 }
