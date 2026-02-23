@@ -70,6 +70,10 @@ INTERNAL_TOOLS = {
     "msg_ack", "msg_ack_all",
     # SUS metrics (hook-facing, not Claude-facing)
     "log_exposure",
+    # Feedback loop health diagnostics
+    "chitta_health",
+    # File indexing
+    "file_index_all",
 }
 
 ADVANCED_TOOLS = {
