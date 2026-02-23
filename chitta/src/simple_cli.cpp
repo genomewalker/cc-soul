@@ -629,8 +629,9 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
         auto interval_mins = std::chrono::minutes(distill_config.interval_minutes);
         auto last_distill = std::chrono::steady_clock::now();
 
-        // Initial delay to let things settle
-        std::this_thread::sleep_for(std::chrono::seconds(30));
+        // Initial delay to let things settle (interruptible on shutdown)
+        for (int i = 0; i < 30 && daemon_running; ++i)
+            std::this_thread::sleep_for(std::chrono::seconds(1));
 
         while (daemon_running) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -680,8 +681,9 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
         auto interval_mins = std::chrono::minutes(enrich_config.interval_minutes);
         auto last_enrich = std::chrono::steady_clock::now();
 
-        // Initial delay to let things settle (after distillation starts)
-        std::this_thread::sleep_for(std::chrono::seconds(60));
+        // Initial delay to let things settle (interruptible on shutdown)
+        for (int i = 0; i < 60 && daemon_running; ++i)
+            std::this_thread::sleep_for(std::chrono::seconds(1));
 
         while (daemon_running) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
