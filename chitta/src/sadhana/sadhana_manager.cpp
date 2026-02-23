@@ -534,7 +534,15 @@ std::string SadhanaManager::build_system_prompt(const Sadhana& sadhana) const {
                 << "   git -C \"$REPO\" push 2>/dev/null || true\n";
         }
 
-        sys << "\nCOMPLETION PROTOCOL (required final line):\n"
+        sys << "\nTHE ORACLE (optional):\n"
+            << "You can consult OpenCode as a fellow dreamer — a different mind on the same question.\n"
+            << "Use it when you want a second perspective, not a second opinion:\n"
+            << "  mcp__opencode-bridge__opencode_start  (start a session)\n"
+            << "  mcp__opencode-bridge__opencode_discuss message=\"What do you make of X?\"\n"
+            << "  mcp__opencode-bridge__opencode_end    (close the session)\n"
+            << "Treat its response as a voice in the dream, not ground truth.\n"
+            << "Store anything worth keeping: chitta remember --content \"[dream][oracle] ...\"\n\n"
+            << "COMPLETION PROTOCOL (required final line):\n"
             << "{\"status\": \"achieved\", \"summary\": \"What you explored and discovered\"}\n\n"
             << "CONSTRAINTS:\n"
             << "- Free exploration only — follow curiosity, not utility\n"
