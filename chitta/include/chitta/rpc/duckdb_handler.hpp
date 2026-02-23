@@ -2937,6 +2937,19 @@ private:
         handlers_["dream_wander"] = [this](const json& p) { return tool_dream_wander(p); };
 
         tools_.push_back({
+            {"name", "dream_cancel"},
+            {"description", "Cancel a stuck or unwanted dream. Stops the underlying sadhana and marks the dream as cancelled."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"id", {{"type", "integer"}, {"description", "Dream ID to cancel"}}}
+                }},
+                {"required", {"id"}}
+            }}
+        });
+        handlers_["dream_cancel"] = [this](const json& p) { return tool_dream_cancel(p); };
+
+        tools_.push_back({
             {"name", "dream_list"},
             {"description", "List recent dreams with their topics, status, and findings"},
             {"inputSchema", {
@@ -13712,6 +13725,48 @@ private:
         return r;
     }
 
+    DuckDBToolResult tool_dream_cancel(const json& params) {
+        if (!params.contains("id")) {
+            return DuckDBToolResult::error("id is required");
+        }
+        int64_t dream_id = params["id"].is_string()
+            ? std::stoll(params["id"].get<std::string>())
+            : params["id"].get<int64_t>();
+
+        // Get sadhana_id for this dream
+        auto res = mind_->store().execute_sql_query(
+            "SELECT sadhana_id, status FROM dream WHERE id = " + std::to_string(dream_id));
+        if (!res.success || res.rows.empty()) {
+            return DuckDBToolResult::error("Dream " + std::to_string(dream_id) + " not found");
+        }
+        std::string status = res.rows[0][1];
+        if (status == "cancelled" || status == "woke") {
+            return DuckDBToolResult::ok("Dream " + std::to_string(dream_id) + " already " + status, {});
+        }
+
+        int64_t sadhana_id = 0;
+        if (res.rows[0][0] != "NULL" && !res.rows[0][0].empty()) {
+            try { sadhana_id = std::stoll(res.rows[0][0]); } catch (...) {}
+        }
+
+        // Stop the underlying sadhana
+        if (sadhana_manager_ && sadhana_id > 0) {
+            sadhana_manager_->stop(sadhana_id);
+        }
+
+        // Mark dream as cancelled
+        auto now_val = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        mind_->store().execute_raw(
+            "UPDATE dream SET status = 'cancelled', ended_at = " + std::to_string(now_val) +
+            " WHERE id = " + std::to_string(dream_id));
+
+        return DuckDBToolResult::ok(
+            "Cancelled dream #" + std::to_string(dream_id) +
+            (sadhana_id > 0 ? " (stopped sadhana #" + std::to_string(sadhana_id) + ")" : ""),
+            {{"dream_id", dream_id}, {"sadhana_id", sadhana_id}, {"status", "cancelled"}});
+    }
+
     DuckDBToolResult tool_dream_start(const json& params) {
         if (!sadhana_manager_) {
             return DuckDBToolResult::error("Sadhana manager not initialized");
@@ -13724,9 +13779,26 @@ private:
         }
         std::string realm = params.value("realm", "brahman");
         std::string publish_path = params.value("publish_path", "");
+        std::string brain_provider = params.value("brain_provider", "claude");
+        std::string brain_model   = params.value("brain_model", "sonnet");
+        int max_concurrent = params.value("max_concurrent", 2);
 
         auto now_val = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
+
+        // Rate limit: check active dream count
+        auto active_res = mind_->store().execute_sql_query(
+            "SELECT COUNT(*) FROM dream WHERE status = 'dreaming'");
+        if (active_res.success && !active_res.rows.empty() && !active_res.rows[0].empty()) {
+            int active = 0;
+            try { active = std::stoi(active_res.rows[0][0]); } catch (...) {}
+            if (active >= max_concurrent) {
+                return DuckDBToolResult::error(
+                    "Dream rate limit: " + std::to_string(active) +
+                    " dreams already active (max " + std::to_string(max_concurrent) + "). "
+                    "Wait for a dream to finish or use dream_cancel to clear a stuck one.");
+            }
+        }
 
         // Insert dream record using write connection (execute_raw = write_execute)
         if (!mind_->store().execute_raw(
@@ -13752,7 +13824,7 @@ private:
         }
         std::string goal = "[dream] Explore: " + topic;
 
-        int64_t sadhana_id = sadhana_manager_->create(goal, "claude", "sonnet", 0, realm, goal_dsl);
+        int64_t sadhana_id = sadhana_manager_->create(goal, brain_provider, brain_model, 0, realm, goal_dsl);
         if (sadhana_id == 0) {
             return DuckDBToolResult::error("Failed to create dream sadhana");
         }
@@ -13834,7 +13906,16 @@ private:
             topic = seeds[static_cast<size_t>(now_val) % seeds.size()];
         }
 
-        json start_params = {{"topic", topic}, {"realm", realm}};
+        json start_params = {
+            {"topic", topic},
+            {"realm", realm},
+            // Oracle pattern: use opencode (cheap) for autonomous dreaming;
+            // Claude is reserved for interactive sessions.
+            {"brain_provider", "opencode"},
+            {"brain_model", "gpt-4o"},
+            // Hard cap: never more than 2 concurrent wandering dreams
+            {"max_concurrent", 2}
+        };
         if (!publish_path.empty()) start_params["publish_path"] = publish_path;
         return tool_dream_start(start_params);
     }
