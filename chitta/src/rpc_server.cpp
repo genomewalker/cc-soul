@@ -638,6 +638,27 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
 
     {"expand_query", "Expand a query into typed variants for hybrid retrieval",
      {{"query", "Query to expand", true, nullptr}}},
+
+    // Dream (autonomous curiosity exploration)
+    {"dream_start", "Start a dream: autonomous web exploration on a topic",
+     {{"topic", "Topic to explore", true, nullptr},
+      {"realm", "Realm", false, nullptr},
+      {"brain_provider", "Brain provider (claude/opencode)", false, "opencode"},
+      {"brain_model", "Brain model name", false, "gpt-4o"},
+      {"max_concurrent", "Max concurrent dreams allowed", false, "2"}}},
+
+    {"dream_wander", "Auto-pick a topic from curiosity gaps and start dreaming",
+     {{"realm", "Realm", false, nullptr}}},
+
+    {"dream_list", "List recent dreams",
+     {{"limit", "Max results", false, "10"},
+      {"realm", "Filter by realm", false, nullptr}}},
+
+    {"dream_status", "Get full status of a dream including sadhana history",
+     {{"id", "Dream ID", true, nullptr}}},
+
+    {"dream_cancel", "Cancel an active dream (stops sadhana, marks cancelled)",
+     {{"id", "Dream ID", true, nullptr}}},
 };
 
 // Build set of known tools from specs
