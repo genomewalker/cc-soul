@@ -321,6 +321,38 @@ void Subconscious::detect_uncertainty(const std::string& content, const std::str
 // Auto-learning Storage
 // Uses mind_->remember() to generate proper embeddings via yantra
 
+// Score correction quality [0.5, 0.95] based on specificity and context richness.
+// Higher score → stored with higher confidence → more weight in recall.
+float Subconscious::score_correction_quality(const std::string& correction,
+                                              const std::string& context) {
+    float score = 0.60f;
+
+    // More detail = higher quality
+    if (correction.size() > 50)  score += 0.08f;
+    if (correction.size() > 120) score += 0.05f;
+
+    // Context provided = correction is grounded
+    if (!context.empty()) score += 0.08f;
+
+    // References specific code artefacts (file, function, namespace)
+    if (correction.find(".cpp") != std::string::npos ||
+        correction.find(".hpp") != std::string::npos ||
+        correction.find("::") != std::string::npos ||
+        correction.find("()") != std::string::npos) {
+        score += 0.07f;
+    }
+
+    // Actionable language — tells what to do, not just what's wrong
+    static const std::vector<std::string> action_words = {
+        "always", "never", "use", "prefer", "avoid", "instead", "should", "must"
+    };
+    for (const auto& w : action_words) {
+        if (correction.find(w) != std::string::npos) { score += 0.05f; break; }
+    }
+
+    return std::max(0.50f, std::min(0.95f, score));
+}
+
 void Subconscious::store_correction(const std::string& context, const std::string& correction,
                                      const std::string& realm) {
     std::ostringstream content;
@@ -330,12 +362,13 @@ void Subconscious::store_correction(const std::string& context, const std::strin
     }
     content << "Correction: " << correction;
 
-    // Use mind->remember which generates proper embeddings
+    float confidence = score_correction_quality(correction, context);
+
     auto id = mind_->remember(content.str(), NodeType::Wisdom,
                               realm.empty() ? "brahman" : realm,
-                              RealmVisibility::Global);  // Corrections are global
+                              RealmVisibility::Global,
+                              confidence);
     if (id != NodeId{}) {
-        // Set visibility to global
         mind_->store().set_visibility(static_cast<int64_t>(id.low), RealmVisibility::Global);
     }
 }

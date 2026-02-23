@@ -42,6 +42,8 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 
 using namespace chitta;
 using json = nlohmann::json;
@@ -193,6 +195,21 @@ bool is_pid_alive(pid_t pid) {
     }
 
     return true;  // No State line found, assume alive
+}
+
+// Check if the daemon socket at path accepts connections (responsive)
+static bool socket_responds(const std::string& path) {
+    int fd = ::socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0) return true;  // Can't check, assume alive
+    struct sockaddr_un addr = {};
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, path.c_str(), sizeof(addr.sun_path) - 1);
+    bool active = (::connect(fd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == 0);
+    int err = errno;
+    ::close(fd);
+    if (active) return true;
+    // ECONNREFUSED/ENOENT/EACCES all mean socket is not usable
+    return err != ECONNREFUSED && err != ENOENT && err != EACCES;
 }
 
 // Clean up stale daemon files from crashed daemon
