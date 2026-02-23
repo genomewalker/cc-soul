@@ -72,6 +72,11 @@ bool DuckDBStore::open(const std::string& path) {
         }
         if (!open_embeddings_db(emb_path)) {
             std::cerr << "[DuckDBStore] Warning: Embeddings DB failed, using main DB\n";
+        } else {
+            // HNSW not persisted (experimental persistence removed for stability).
+            // Schedule rebuild on first maintenance cycle.
+            index_exists_.store(false);
+            needs_reindex_.store(true);
         }
 
         std::cerr << "[DuckDBStore] Opened database at " << path_ << "\n";
