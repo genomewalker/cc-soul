@@ -660,6 +660,9 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
     {"dream_cancel", "Cancel an active dream (stops sadhana, marks cancelled)",
      {{"id", "Dream ID", true, nullptr}}},
 
+    {"dream_force_woke", "Force a stuck dream to woke status (marks complete, stops sadhana)",
+     {{"id", "Dream ID", true, nullptr}}},
+
     // Sadhana lifecycle
     {"sadhana_stop", "Stop a running sadhana permanently",
      {{"id", "Sadhana ID", true, nullptr}}},
