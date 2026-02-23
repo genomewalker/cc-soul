@@ -1189,7 +1189,8 @@ int main(int argc, char* argv[]) {
         }
         if (client.request_shutdown()) {
             std::cout << "Daemon shutdown requested\n";
-            if (client.wait_for_socket_gone(5000)) {
+            // 30s timeout: daemon may be finishing distillation or other long-running work
+            if (client.wait_for_socket_gone(30000)) {
                 std::cout << "Daemon stopped\n";
             }
             return 0;
