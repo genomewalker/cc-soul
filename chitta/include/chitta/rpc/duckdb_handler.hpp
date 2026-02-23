@@ -14052,7 +14052,8 @@ private:
         auto res = mind_->store().execute_sql_query(
             "SELECT d.id, d.topic, d.status, d.findings, d.memories_created, "
             "       d.started_at, d.ended_at, d.sadhana_id, d.realm, "
-            "       s.id, s.state, s.goal, s.iterations, s.brain_calls, s.last_action "
+            "       s.id, s.state, s.goal, s.iterations, s.brain_calls, s.last_action, "
+            "       s.brain_provider, s.brain_model "
             "FROM dream d "
             "LEFT JOIN sadhana s ON d.sadhana_id = s.id "
             "WHERE d.id = " + std::to_string(dream_id));
@@ -14075,12 +14076,14 @@ private:
 
         if (row.size() >= 15 && row[9] != "NULL") {
             json sadhana;
-            sadhana["id"]          = std::stoll(row[9]);
-            sadhana["state"]       = row[10];
-            sadhana["goal"]        = row[11];
-            sadhana["iterations"]  = (row[12] == "NULL") ? 0 : std::stoi(row[12]);
-            sadhana["brain_calls"] = (row[13] == "NULL") ? 0 : std::stoi(row[13]);
-            sadhana["last_action"] = (row[14] == "NULL") ? "" : row[14];
+            sadhana["id"]             = std::stoll(row[9]);
+            sadhana["state"]          = row[10];
+            sadhana["goal"]           = row[11];
+            sadhana["iterations"]     = (row[12] == "NULL") ? 0 : std::stoi(row[12]);
+            sadhana["brain_calls"]    = (row[13] == "NULL") ? 0 : std::stoi(row[13]);
+            sadhana["last_action"]    = (row[14] == "NULL") ? "" : row[14];
+            sadhana["brain_provider"] = (row.size() > 15 && row[15] != "NULL") ? row[15] : "";
+            sadhana["brain_model"]    = (row.size() > 16 && row[16] != "NULL") ? row[16] : "";
             dream["sadhana"] = sadhana;
 
             if (sadhana_manager_) {
