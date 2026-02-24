@@ -13922,10 +13922,20 @@ private:
         }
         std::string topic;
 
+        // Exclude internal/code topics that can't be web-searched meaningfully
+        const std::string exclude_code =
+            " AND content NOT LIKE '[code]%' "
+            " AND content NOT LIKE '[training]%' "
+            " AND content NOT LIKE '[symbol]%' "
+            " AND content NOT LIKE '[distilled]%' "
+            " AND content NOT LIKE '[locomo%' "
+            " AND tags NOT LIKE '%symbol%' ";
+
         // Priority 1: memories tagged as gaps/unresolved
         auto gap_res = mind_->store().execute_sql_query(
             "SELECT content FROM memory "
-            "WHERE tags LIKE '%gap%' AND tags LIKE '%unresolved%' "
+            "WHERE tags LIKE '%gap%' AND tags LIKE '%unresolved%' " +
+            exclude_code +
             "ORDER BY RANDOM() LIMIT 1");
         if (gap_res.success && !gap_res.rows.empty()) {
             topic = gap_res.rows[0][0];
@@ -13936,7 +13946,8 @@ private:
         if (topic.empty()) {
             auto low_res = mind_->store().execute_sql_query(
                 "SELECT content FROM memory "
-                "WHERE confidence < 0.5 AND confidence > 0.0 "
+                "WHERE confidence < 0.5 AND confidence > 0.0 " +
+                exclude_code +
                 "ORDER BY RANDOM() LIMIT 1");
             if (low_res.success && !low_res.rows.empty()) {
                 topic = low_res.rows[0][0];
