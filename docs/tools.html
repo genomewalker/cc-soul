@@ -656,6 +656,53 @@
       </div>
     </div>
 
+    <!-- SADHANA -->
+    <div class="tools-category" id="cat-sadhana">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="#CBAF86" stroke-width="1.2"/><path d="M10 6 L10 10 L13 8" stroke="#CBAF86" stroke-width="1" opacity="0.8"/><circle cx="10" cy="10" r="1.5" fill="#CBAF86" opacity="0.4"/></svg>
+        </div>
+        <span class="tools-category-name">Sadhana (Autonomous Agents)</span>
+        <span class="tools-category-count">12 tools</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">sadhana_start</span><span class="tool-desc">Start an autonomous agent with a goal, model, interval, and optional goal_dsl for typed behavior</span></div>
+        <div class="tool-row"><span class="tool-name">sadhana_list</span><span class="tool-desc">List sadhanas filtered by status (running, paused, done) and realm</span></div>
+        <div class="tool-row"><span class="tool-name">sadhana_status</span><span class="tool-desc">Full detail for one sadhana &mdash; goal, state, iterations, last action, history</span></div>
+        <div class="tool-row"><span class="tool-name">sadhana_pause</span><span class="tool-desc">Pause a running sadhana (can be resumed later)</span></div>
+        <div class="tool-row"><span class="tool-name">sadhana_resume</span><span class="tool-desc">Resume a paused sadhana</span></div>
+        <div class="tool-row"><span class="tool-name">sadhana_stop</span><span class="tool-desc">Stop a sadhana and mark it as done</span></div>
+        <div class="tool-row"><span class="tool-name">sadhana_set_goal</span><span class="tool-desc">Update the goal text for a sadhana</span></div>
+        <div class="tool-row"><span class="tool-name">sadhana_set_interval</span><span class="tool-desc">Change the tick interval (seconds) for a sadhana</span></div>
+        <div class="tool-row"><span class="tool-name">sadhana_set_model</span><span class="tool-desc">Switch the model a sadhana uses (e.g. claude/sonnet, openai/gpt-4o)</span></div>
+        <div class="tool-row"><span class="tool-name">sadhana_set_max_turns</span><span class="tool-desc">Set maximum agent turns per cycle for a sadhana</span></div>
+        <div class="tool-row"><span class="tool-name">sadhana_history</span><span class="tool-desc">Get recent cycle history for a sadhana &mdash; decisions, tool calls, outcomes</span></div>
+        <div class="tool-row"><span class="tool-name">sadhana_checkpoint</span><span class="tool-desc">Save a checkpoint for a sadhana (state snapshot for recovery)</span></div>
+      </div>
+    </div>
+
+    <!-- DREAMS -->
+    <div class="tools-category" id="cat-dreams">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M10 3 Q17 7 17 12 Q17 17 10 17 Q6 17 4 14 Q8 14 8 10 Q8 6 10 3Z" stroke="#9DB2D9" stroke-width="1.2" fill="none"/><circle cx="13" cy="8" r="1" fill="#9DB2D9" opacity="0.5"/></svg>
+        </div>
+        <span class="tools-category-name">Dreams &amp; Self-Improvement</span>
+        <span class="tools-category-count">7 tools</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">dream_wander</span><span class="tool-desc">Auto-pick a topic from memory gaps or curiosity seeds and start a dream sadhana</span></div>
+        <div class="tool-row"><span class="tool-name">dream_start</span><span class="tool-desc">Start a dream exploring a specific topic &mdash; web-searches and stores [dream] memories</span></div>
+        <div class="tool-row"><span class="tool-name">dream_list</span><span class="tool-desc">List recent dreams with status, topic, findings summary, and memories created</span></div>
+        <div class="tool-row"><span class="tool-name">dream_status</span><span class="tool-desc">Full detail for one dream &mdash; joined sadhana record and last cycle events</span></div>
+        <div class="tool-row"><span class="tool-name">dream_force_woke</span><span class="tool-desc">Force a stuck dream to woke status, finalizing its findings</span></div>
+        <div class="tool-row"><span class="tool-name">dream_cancel</span><span class="tool-desc">Cancel a dream and mark it as forgotten</span></div>
+        <div class="tool-row"><span class="tool-name">impl_start</span><span class="tool-desc">Start the daily self-improvement sadhana &mdash; reads [impl] memories, implements changes, commits if review gate passes</span></div>
+      </div>
+    </div>
+
     <!-- SUGGESTIONS -->
     <div class="tools-category" id="cat-suggestions">
       <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">

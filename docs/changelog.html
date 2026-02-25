@@ -454,12 +454,114 @@ body::before {
 <section class="changelog-section">
   <div class="container">
 
+    <!-- 3.43.x -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v3.43.35</span>
+        <span class="version-date">February 25, 2026</span>
+        <span class="version-latest">Latest</span>
+      </div>
+
+      <div class="change-category">
+        <h3 class="change-category-title added">Added</h3>
+        <ul class="change-list">
+          <li><strong>Self-improvement loop (<code>impl_start</code>)</strong> &mdash; Dedicated tool that creates an impl sadhana with <code>goal_dsl={"kind":"impl"}</code>. Each daily cycle reads pending <code>[impl]</code> / <code>[dream][impl]</code> memories, implements the change in the repo, runs an opencode review gate, and commits only if approved</li>
+          <li><strong>Architectural reflection in dreams</strong> &mdash; Dream system prompt now includes an ARCHITECTURAL REFLECTION step: before completing, the agent checks whether findings have direct implications for memory storage, retrieval, or reasoning, and stores them as <code>[dream][impl]</code> memories if so</li>
+          <li><strong><code>goal_dsl</code> parameter for <code>sadhana_start</code></strong> &mdash; Optional JSON object that selects a typed system prompt in <code>build_system_prompt()</code>; <code>kind:"dream"</code> triggers the dream prompt, <code>kind:"impl"</code> triggers the impl prompt</li>
+          <li><strong>REINFORCE-style credit attribution in ResonanceLearner</strong> &mdash; <code>process_feedback()</code> now scales each BetaPrior update by the sampled parameter&rsquo;s deviation from its current mean, breaking the 7-prior convergence lockstep that caused uniform-reward degeneracy</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 3.43.28–3.43.32 -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v3.43.28&ndash;3.43.32</span>
+        <span class="version-date">February 23&ndash;24, 2026</span>
+      </div>
+
+      <div class="change-category">
+        <h3 class="change-category-title added">Added</h3>
+        <ul class="change-list">
+          <li><strong><code>dream_cancel</code> and Oracle pattern</strong> &mdash; Cancel a dream and mark as forgotten; <code>dream_wander</code> now consults an opencode oracle to select the most productive topic from candidate gaps</li>
+          <li><strong><code>dream_force_woke</code></strong> &mdash; Force a stuck or overlong dream to woke status, backfilling findings and memories_created from sadhana history</li>
+          <li><strong><code>sadhana_stop</code> / <code>sadhana_pause</code> in CLI</strong> &mdash; Both tools added to KNOWN_TOOLS so they&rsquo;re callable from the command line</li>
+          <li><strong>Max concurrent dreams raised to 10</strong> &mdash; Up from 5; rate limit now enforces max 2 concurrent active dreams with 4&ndash;hour minimum interval</li>
+        </ul>
+      </div>
+
+      <div class="change-category">
+        <h3 class="change-category-title fixed">Fixed</h3>
+        <ul class="change-list">
+          <li><code>dream_status</code> now shows <code>brain_provider</code> and <code>brain_model</code> fields</li>
+          <li>Dream rollback on sadhana start failure cleans up orphaned dream records correctly</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 3.43.6–3.43.27 -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v3.43.6&ndash;3.43.27</span>
+        <span class="version-date">February 21&ndash;23, 2026</span>
+      </div>
+
+      <div class="change-category">
+        <h3 class="change-category-title added">Added</h3>
+        <ul class="change-list">
+          <li><strong>Full dream tool suite</strong> &mdash; <code>dream_start</code>, <code>dream_wander</code>, <code>dream_list</code>, <code>dream_status</code> added to CLI KNOWN_TOOLS and MCP surface</li>
+          <li><strong>Convergence metrics (<code>convergence_metrics</code>)</strong> &mdash; Tracks triplet traversal depth and graph convergence across recall cycles</li>
+          <li><strong>Resonance stats (<code>resonance_stats</code>)</strong> &mdash; Per-memory resonance history with decay curve visualization</li>
+          <li><strong>Per-sadhana <code>max_turns</code></strong> &mdash; Each sadhana can cap agent turns per cycle independently</li>
+          <li><strong>Feedback loop improvements</strong> &mdash; Dream deduplication, correction memory decay, sadhana performance stats</li>
+          <li><strong>Kriya skill (<code>/kriya</code>)</strong> &mdash; Review soul findings one by one, accept or discard, implement accepted ones, build and optionally release</li>
+          <li><strong>Sadhana TUI redesign</strong> &mdash; Clickable event rows with inline expansion, animated terminal mockup, live JS effects</li>
+          <li><strong>Cost tracking</strong> &mdash; <code>cost_usd</code> recorded per sadhana cycle</li>
+        </ul>
+      </div>
+
+      <div class="change-category">
+        <h3 class="change-category-title fixed">Fixed</h3>
+        <ul class="change-list">
+          <li>HNSW index crash loop resolved &mdash; dropped experimental persistence, threads=1, added corruption recovery and synchronous rebuild at startup</li>
+          <li>Background hooks now close stdin and redirect stdout to <code>/dev/null</code> (prevented terminal input theft and new-folder freeze)</li>
+          <li>Ghost line problem &mdash; strip line numbers from code memories before storage</li>
+          <li><code>alarm(15)</code> watchdog ensures daemon exits if threads hang on shutdown</li>
+          <li>Smart-install always fetches latest release from GitHub (was caching stale version)</li>
+          <li>All 6 daemon reliability bugs found and fixed by sadhana #21 investigation</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 3.43.1–3.43.5 -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v3.43.1&ndash;3.43.5</span>
+        <span class="version-date">February 20&ndash;21, 2026</span>
+      </div>
+
+      <div class="change-category">
+        <h3 class="change-category-title added">Added</h3>
+        <ul class="change-list">
+          <li><strong>Soul dreams &mdash; svapna (<code>dream_start</code>, <code>dream_wander</code>)</strong> &mdash; When the daemon is idle for &gt;10 minutes, it picks a topic from memory gaps or curiosity seeds, web-searches it, and stores what it finds as <code>[dream]</code>-tagged memories. Dreams run as typed sadhanas with a dedicated exploration prompt</li>
+          <li><strong>Real-time sadhana event streaming</strong> &mdash; Persistent socket connections stream live cycle events for monitoring sadhanas as they run</li>
+          <li><strong><code>dream</code> table in DuckDB</strong> &mdash; Stores dream records with topic, status (<code>dreaming</code> / <code>woke</code> / <code>forgotten</code>), findings, memories_created, and sadhana linkage</li>
+        </ul>
+      </div>
+
+      <div class="change-category">
+        <h3 class="change-category-title fixed">Fixed</h3>
+        <ul class="change-list">
+          <li>Use <code>--system-prompt</code> flag for claude CLI (was <code>--system</code>, caused silent 365ms failures per cycle)</li>
+        </ul>
+      </div>
+    </article>
+
     <!-- 3.42.16 -->
     <article class="changelog-version reveal">
       <div class="version-header">
         <span class="version-number">v3.42.16</span>
         <span class="version-date">February 20, 2026</span>
-        <span class="version-latest">Latest</span>
       </div>
 
       <div class="change-category">
