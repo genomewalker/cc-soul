@@ -378,14 +378,27 @@ private:
                 float position_weight = 1.0f / (1.0f + position * 0.2f);
                 float weighted_reward = reward * position_weight;
 
-                // Update all parameter priors
-                spread_strength_.update(weighted_reward);
-                spread_decay_.update(weighted_reward);
-                hebbian_strength_.update(weighted_reward);
-                basin_boost_.update(weighted_reward);
-                similarity_threshold_.update(weighted_reward);
-                inhibition_strength_.update(weighted_reward);
-                semantic_weight_.update(weighted_reward);
+                // Per-parameter REINFORCE-style credit attribution:
+                // Parameters sampled above mean that caused good outcomes get
+                // extra credit; those sampled above mean that caused bad outcomes
+                // get extra blame. This breaks the uniform-reward degeneracy and
+                // allows priors to specialize toward their optimal values.
+                auto reinforce_update = [&](BetaPrior& prior, float sampled,
+                                            float min_val, float max_val) {
+                    float range = max_val - min_val;
+                    float mean_mapped = min_val + prior.mean() * range;
+                    float deviation = (range > 0.0f) ? (sampled - mean_mapped) / range : 0.0f;
+                    float attributed_reward = weighted_reward * (1.0f + 0.5f * deviation);
+                    prior.update(attributed_reward);
+                };
+
+                reinforce_update(spread_strength_,      outcome.params_used.spread_strength,      0.2f, 0.8f);
+                reinforce_update(spread_decay_,         outcome.params_used.spread_decay,          0.3f, 0.7f);
+                reinforce_update(hebbian_strength_,     outcome.params_used.hebbian_strength,      0.01f, 0.1f);
+                reinforce_update(basin_boost_,          outcome.params_used.basin_boost,           1.0f, 1.5f);
+                reinforce_update(similarity_threshold_, outcome.params_used.similarity_threshold,  0.7f, 0.95f);
+                reinforce_update(inhibition_strength_,  outcome.params_used.inhibition_strength,   0.3f, 0.9f);
+                reinforce_update(semantic_weight_,      outcome.params_used.semantic_weight,       0.4f, 0.8f);
 
                 // Remove this id from the outcome (don't double-count)
                 outcome.id_to_position.erase(it);
