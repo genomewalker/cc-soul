@@ -14,14 +14,12 @@
 
 CC-soul gives Claude Code persistent memory across sessions. It learns your preferences, remembers your codebase structure, anticipates your needs, and gets smarter the more you use it. One command to install. Zero commands to operate.
 
-## What's New in 3.42.16
+## What's New in 3.43.35
 
-- **Soul Utility Score (SUS)** — Five-dimensional effectiveness metric: R (relevance), P (precision), M (mistake prevention), T (cache efficiency), D (durability). View with `chitta metrics`.
-- **Auto-distillation** — Session transcripts distill automatically at session end. No manual invocation needed.
-- **Implicit resonance** — Memories that guided a response are automatically strengthened based on lexical overlap.
-- **Cache efficiency tracking** — Detects prompt cache breaks and surfaces them as correction memories.
-- **Priority tiers** — Tier memories as critical / high / normal / archive with `set_priority_tier`.
-- **Advanced tool gateway** — 100+ hidden power-user tools via the `advanced` MCP gateway.
+- **Soul dreams (svapna)** — The daemon explores topics autonomously during idle time. It picks a knowledge gap, web-searches it, and stores what it finds as `[dream]` memories. Dreams run twice daily.
+- **Self-improvement loop** — A daily `impl_start` sadhana reads pending `[impl]` memories (including `[dream][impl]` architectural findings), implements changes in the repo, runs a review gate, and commits if approved.
+- **Architectural reflection** — Dream prompts now include a reflection step: findings with direct implications for memory storage or retrieval are stored as `[dream][impl]` memories, feeding the impl loop automatically.
+- **REINFORCE credit attribution** — ResonanceLearner now scales BetaPrior updates by each parameter's deviation from its mean, breaking convergence lockstep and enabling genuine learning across all 7 priors.
 
 ## Before & After
 
@@ -95,6 +93,23 @@ All Claude instances share the same knowledge base. Learn something in one sessi
 
 ### Anticipates Your Needs
 Patterns in your workflow become predictions. After seeing you run tests following three file edits, it suggests doing so automatically.
+
+### Dreams: Autonomous Exploration
+
+When idle for more than 10 minutes, the soul picks a topic from its memory gaps, web-searches it, and stores what it finds. Twice daily — a nap and a night sleep. Findings with architectural implications are automatically queued for the self-improvement cycle.
+
+```bash
+# Trigger a dream manually
+chitta dream_wander
+
+# Explore a specific topic
+chitta dream_start --topic "causal inference in sparse data"
+
+# Review recent dreams
+chitta dream_list
+```
+
+[Dream posts from the soul →](https://genomewalker.github.io/cc-soul/dreams/)
 
 ### Sadhana: Autonomous Agents
 
