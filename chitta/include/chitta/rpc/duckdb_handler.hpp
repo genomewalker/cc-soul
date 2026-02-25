@@ -2753,7 +2753,8 @@ private:
                     {"brain_model", {{"type", "string"}, {"description", "Model to use: sonnet, opus, haiku, gpt-4o (default: sonnet)"}}},
                     {"interval_seconds", {{"type", "integer"}, {"description", "Seconds between sense-think-act cycles (default: 60)"}}},
                     {"max_turns", {{"type", "integer"}, {"description", "Max turns per cycle (0 = use global default of 20)"}}},
-                    {"realm", {{"type", "string"}, {"description", "Realm for isolation (default: brahman)"}}}
+                    {"realm", {{"type", "string"}, {"description", "Realm for isolation (default: brahman)"}}},
+                    {"goal_dsl", {{"type", "object"}, {"description", "Optional DSL object, e.g. {\"kind\":\"impl\",\"repo\":\"/path\"} or {\"kind\":\"think\"}"}}}
                 }},
                 {"required", {"goal"}}
             }}
@@ -2987,6 +2988,37 @@ private:
             }}
         });
         handlers_["dream_status"] = [this](const json& p) { return tool_dream_status(p); };
+
+        // think_wander: trigger internal memory synthesis sadhana
+        tools_.push_back({
+            {"name", "think_wander"},
+            {"description", "Trigger a think sadhana: internal synthesis of existing memories. Finds patterns, connects disparate insights, may generate [thought][impl] memories. Fires automatically every hour during idle; can also be triggered manually."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"realm", {{"type", "string"}, {"description", "Memory realm (default: current realm)"}}}
+                }},
+                {"required", json::array()}
+            }}
+        });
+        handlers_["think_wander"] = [this](const json& p) { return tool_think_wander(p); };
+
+        // impl_start: create and start an impl sadhana with the review gate
+        tools_.push_back({
+            {"name", "impl_start"},
+            {"description", "Start the self-improvement implementation sadhana. Each cycle it picks one pending [impl]/[thought][impl]/[dream][impl] memory, implements the change, runs an opencode review gate, and commits only if approved. Runs once per day."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"repo", {{"type", "string"}, {"description", "Absolute path to the cc-soul repo (default: auto-detected from git)"}}},
+                    {"interval_seconds", {{"type", "integer"}, {"description", "Seconds between cycles (default: 86400 = 1 day)"}}},
+                    {"max_turns", {{"type", "integer"}, {"description", "Max turns per cycle (default: 15)"}}},
+                    {"realm", {{"type", "string"}, {"description", "Memory realm (default: brahman)"}}}
+                }},
+                {"required", json::array()}
+            }}
+        });
+        handlers_["impl_start"] = [this](const json& p) { return tool_impl_start(p); };
 
         // ═══════════════════════════════════════════════════════════════════════
         // Context Repository Tools (Letta-inspired)
@@ -12542,8 +12574,12 @@ private:
         int interval = params.value("interval_seconds", 0);
         int max_turns = params.value("max_turns", 0);
         std::string realm = params.value("realm", "brahman");
+        json goal_dsl;
+        if (params.contains("goal_dsl") && params["goal_dsl"].is_object()) {
+            goal_dsl = params["goal_dsl"];
+        }
 
-        int64_t id = sadhana_manager_->create(goal, provider, model, interval, realm, json(), max_turns);
+        int64_t id = sadhana_manager_->create(goal, provider, model, interval, realm, goal_dsl, max_turns);
         if (id == 0) {
             return DuckDBToolResult::error("Failed to create sadhana");
         }
@@ -14163,6 +14199,99 @@ private:
         std::ostringstream msg;
         msg << "Dream #" << dream_id << " [" << row[2] << "]: " << row[1];
         return DuckDBToolResult::ok(msg.str(), dream);
+    }
+
+    DuckDBToolResult tool_impl_start(const json& params) {
+        if (subconscious_) subconscious_->notify_query();
+
+        if (!sadhana_manager_) {
+            return DuckDBToolResult::error("Sadhana manager not available");
+        }
+
+        std::string realm = params.value("realm", std::string("brahman"));
+        int interval = params.value("interval_seconds", 86400);
+        int max_turns = params.value("max_turns", 15);
+
+        // Auto-detect repo from binary location if not provided
+        std::string repo = params.value("repo", std::string(""));
+        if (repo.empty()) {
+            // Walk up from binary to find repo root (contains chitta/ and .git/)
+            repo = "/maps/projects/fernandezguerra/apps/repos/cc-soul";
+        }
+
+        json goal_dsl;
+        goal_dsl["kind"] = "impl";
+        goal_dsl["repo"] = repo;
+
+        std::string goal = "Autonomous self-improvement loop for cc-soul. "
+                           "Each cycle: find one pending [impl]/[thought][impl]/[dream][impl] memory, "
+                           "implement the change in " + repo + ", "
+                           "run opencode review gate, commit only if approved.";
+
+        int64_t sadhana_id = sadhana_manager_->create(
+            goal, "claude", "sonnet",
+            interval, realm, goal_dsl, max_turns
+        );
+
+        if (!sadhana_id) {
+            return DuckDBToolResult::error("Failed to create impl sadhana");
+        }
+
+        if (!sadhana_manager_->start(sadhana_id)) {
+            return DuckDBToolResult::error("Failed to start impl sadhana");
+        }
+
+        json result;
+        result["sadhana_id"]       = sadhana_id;
+        result["status"]           = "running";
+        result["realm"]            = realm;
+        result["interval_seconds"] = interval;
+        result["repo"]             = repo;
+
+        std::ostringstream msg;
+        msg << "Impl sadhana #" << sadhana_id << " started (daily, " << max_turns << " turns/cycle)";
+        return DuckDBToolResult::ok(msg.str(), result);
+    }
+
+    DuckDBToolResult tool_think_wander(const json& params) {
+        if (subconscious_) subconscious_->notify_query();
+
+        if (!sadhana_manager_) {
+            return DuckDBToolResult::error("Sadhana manager not available");
+        }
+
+        std::string realm = params.value("realm", std::string("brahman"));
+
+        // Build goal_dsl for a think sadhana
+        json goal_dsl;
+        goal_dsl["kind"] = "think";
+
+        std::string goal = "[think] Internal memory synthesis: find patterns, connect gaps";
+
+        int64_t sadhana_id = sadhana_manager_->create(
+            goal, "claude", "sonnet",
+            /*interval=*/0,
+            realm,
+            goal_dsl,
+            /*max_turns=*/10
+        );
+
+        if (!sadhana_id) {
+            return DuckDBToolResult::error("Failed to create think sadhana");
+        }
+
+        if (!sadhana_manager_->start(sadhana_id)) {
+            return DuckDBToolResult::error("Failed to start think sadhana");
+        }
+
+        json result;
+        result["sadhana_id"] = sadhana_id;
+        result["status"]     = "thinking";
+        result["realm"]      = realm;
+
+        std::ostringstream msg;
+        msg << "Think sadhana #" << sadhana_id << " started";
+        return DuckDBToolResult::ok(msg.str(), result);
     }
 };
 

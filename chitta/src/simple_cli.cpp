@@ -512,6 +512,24 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
         }
     });
 
+    // Wire think callback: internal memory synthesis when idle 5+ min, hourly
+    subconscious.set_think_callback([&]() {
+        try {
+            json req = {
+                {"method", "tools/call"},
+                {"params", {
+                    {"name", "think_wander"},
+                    {"arguments", json::object()}
+                }},
+                {"id", nullptr}
+            };
+            handler.handle(req);
+            std::cerr << "[think] Auto-think triggered\n";
+        } catch (const std::exception& e) {
+            std::cerr << "[think] Auto-think failed: " << e.what() << "\n";
+        }
+    });
+
     std::signal(SIGTERM, daemon_signal_handler);
     std::signal(SIGINT, daemon_signal_handler);
     std::signal(SIGPIPE, SIG_IGN);

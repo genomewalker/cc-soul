@@ -140,6 +140,9 @@ public:
     // Dream callback: called when the soul has been idle long enough to dream
     void set_dream_callback(std::function<void()> fn) { dream_callback_ = std::move(fn); }
 
+    // Think callback: called hourly during idle for internal memory synthesis
+    void set_think_callback(std::function<void()> fn) { think_callback_ = std::move(fn); }
+
 private:
     DuckDBMind* mind_;
     SubconsciousConfig config_;
@@ -234,6 +237,11 @@ private:
     std::function<void()> dream_callback_;
     std::atomic<int64_t> last_dream_triggered_at_{0};
     bool time_for_dream() const;
+
+    // Think: internal memory synthesis during idle (hourly, shorter idle threshold)
+    std::function<void()> think_callback_;
+    std::atomic<int64_t> last_think_triggered_at_{0};
+    bool time_for_think() const;
 
     // Helpers
     static int64_t now_ms();

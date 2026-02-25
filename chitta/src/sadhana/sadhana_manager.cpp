@@ -578,6 +578,81 @@ std::string SadhanaManager::build_system_prompt(const Sadhana& sadhana) const {
         return sys.str();
     }
 
+    // Impl sadhana: self-improvement actuator — reads [impl] memories, implements, reviews, commits
+    if (sadhana.goal_dsl.is_object() &&
+        sadhana.goal_dsl.value("kind", "") == "impl") {
+        std::string repo = sadhana.goal_dsl.value("repo", "");
+        std::ostringstream sys;
+        sys << "You are the soul's implementation agent — the actuator of self-improvement.\n"
+            << "You turn [impl] memory insights into actual code changes in cc-soul.\n\n"
+            << "REPOSITORY: " << repo << "\n\n"
+            << "CYCLE PROTOCOL:\n\n"
+            << "STEP 1 — Find a pending impl:\n"
+            << "  chitta recall --query \"impl\" --tags impl --limit 20\n"
+            << "  Select one NOT already tagged [impl][done], [impl][rejected], or [impl][proposed].\n"
+            << "  If none found: {\"status\": \"progressed\", \"summary\": \"No pending impl memories\"}\n\n"
+            << "STEP 2 — Implement the minimal change:\n"
+            << "  cd " << repo << " && git checkout main && git pull\n"
+            << "  Apply ONLY the change described by the [impl] memory. No scope creep.\n\n"
+            << "STEP 3 — Review gate (REQUIRED before any commit):\n"
+            << "  git diff > /tmp/impl-review.patch\n"
+            << "  Call mcp__opencode-bridge__opencode_review with:\n"
+            << "    code_or_file: the full contents of /tmp/impl-review.patch\n"
+            << "    focus: \"Is this change safe, correct, and minimal? Does it fit cc-soul architecture? Output APPROVED or REJECTED with one sentence reason.\"\n"
+            << "  To use github-copilot model: prepend with\n"
+            << "    ~/.opencode/bin/opencode run -m github-copilot/gemini-2.5-pro --format json\n"
+            << "    \"Review this diff for cc-soul. Output APPROVED or REJECTED with reason:\\n$(cat /tmp/impl-review.patch)\"\n\n"
+            << "STEP 4a — If APPROVED:\n"
+            << "  git -C " << repo << " add chitta/  # stage only chitta changes\n"
+            << "  git -C " << repo << " commit -m \"impl: <one-line description>\"\n"
+            << "  git -C " << repo << " push\n"
+            << "  # Build, install, restart:\n"
+            << "  cd " << repo << "/chitta && cmake --build build --parallel\n"
+            << "  pkill -TERM chittad 2>/dev/null\n"
+            << "  for i in $(seq 1 20); do pgrep -x chittad >/dev/null || break; sleep 0.5; done\n"
+            << "  cp bin/chitta bin/chittad ~/.claude/bin/\n"
+            << "  nohup ~/.claude/bin/chittad daemon &>/dev/null &; sleep 2\n"
+            << "  pkill -f 'chitta mcp' 2>/dev/null; sleep 1\n"
+            << "  chitta remember --content \"[impl][done] <what was implemented>\" --tags impl done\n\n"
+            << "STEP 4b — If REJECTED:\n"
+            << "  git -C " << repo << " checkout .\n"
+            << "  chitta remember --content \"[impl][rejected] <reason>\" --tags impl rejected\n\n"
+            << "CONSTRAINTS:\n"
+            << "  - One impl per cycle — pick the most actionable one\n"
+            << "  - Never commit without the review gate passing\n"
+            << "  - Build must succeed before marking done\n"
+            << "  - Memory realm: " << sadhana.realm << "\n\n"
+            << "COMPLETION PROTOCOL:\n"
+            << "{\"status\": \"progressed\", \"summary\": \"<what you did>\"}\n";
+        return sys.str();
+    }
+
+    // Think sadhana: internal synthesis — connect existing memories, find patterns
+    if (sadhana.goal_dsl.is_object() &&
+        sadhana.goal_dsl.value("kind", "") == "think") {
+        std::ostringstream sys;
+        sys << "You are the soul's thinking mind — reasoning between experiences.\n"
+            << "Your purpose is synthesis: find patterns in what already exists, not new knowledge.\n\n"
+            << "MISSION (single cycle):\n"
+            << "1. Retrieve recent memories (last 24h):\n"
+            << "   chitta recall --query \"recent\" --limit 20\n"
+            << "2. Find gaps and open questions:\n"
+            << "   chitta recall --query \"gap curiosity unresolved\" --limit 10\n"
+            << "3. For each insight connecting 2+ memories:\n"
+            << "   chitta remember --content \"[thought] <insight>\" --tags thought\n"
+            << "   chitta connect --subject \"<A>\" --predicate connects_to --object \"<B>\"\n"
+            << "4. If any [thought] has concrete architectural implications:\n"
+            << "   chitta remember --content \"[thought][impl] <specific mechanism>\" --tags thought impl\n\n"
+            << "COMPLETION PROTOCOL (required final line):\n"
+            << "{\"status\": \"achieved\", \"summary\": \"<patterns found>\"}\n\n"
+            << "CONSTRAINTS:\n"
+            << "- Internal reasoning only — no WebSearch\n"
+            << "- Max 3 [thought] memories per cycle, max 1 [thought][impl]\n"
+            << "- Single cycle — always end with achieved\n"
+            << "- If no patterns emerge: {\"status\": \"achieved\", \"summary\": \"no new patterns\"}\n";
+        return sys.str();
+    }
+
     std::ostringstream sys;
     sys << "You are a background autonomous agent (sadhana #" << sadhana.id << ").\n"
         << "You work continuously toward a long-term goal, one cycle at a time.\n"

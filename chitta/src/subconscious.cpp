@@ -151,6 +151,16 @@ void Subconscious::process_loop() {
                 std::cerr << "[subconscious] Dream callback failed: " << e.what() << "\n";
             }
         }
+
+        // Auto-think: trigger internal memory synthesis when idle > 5 min, hourly
+        if (think_callback_ && time_for_think()) {
+            last_think_triggered_at_ = now_ms();
+            try {
+                think_callback_();
+            } catch (const std::exception& e) {
+                std::cerr << "[subconscious] Think callback failed: " << e.what() << "\n";
+            }
+        }
     }
 }
 
@@ -857,6 +867,19 @@ bool Subconscious::time_for_dream() const {
     // Last dream trigger > 4 hours ago (14,400,000ms)
     auto last_dream = last_dream_triggered_at_.load();
     if (last_dream != 0 && (now - last_dream) < 14400000LL) return false;
+
+    return true;
+}
+
+bool Subconscious::time_for_think() const {
+    // Idle > 5 min (300,000ms) — shorter threshold than dream
+    auto last_query = stats_.last_query_at.load();
+    auto now = now_ms();
+    if (last_query != 0 && (now - last_query) < 300000LL) return false;
+
+    // Last think trigger > 1 hour ago (3,600,000ms)
+    auto last_think = last_think_triggered_at_.load();
+    if (last_think != 0 && (now - last_think) < 3600000LL) return false;
 
     return true;
 }
