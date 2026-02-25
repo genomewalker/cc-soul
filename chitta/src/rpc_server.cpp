@@ -663,6 +663,12 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
     {"dream_force_woke", "Force a stuck dream to woke status (marks complete, stops sadhana)",
      {{"id", "Dream ID", true, nullptr}}},
 
+    {"impl_start", "Start the self-improvement implementation sadhana (reads [impl] memories, implements changes, review gate, commits if approved)",
+     {{"repo", "Absolute path to cc-soul repo (default: auto-detected)", false, nullptr},
+      {"interval_seconds", "Seconds between cycles (default: 86400)", false, "86400"},
+      {"max_turns", "Max turns per cycle (default: 15)", false, "15"},
+      {"realm", "Memory realm (default: brahman)", false, "brahman"}}},
+
     // Sadhana lifecycle
     {"sadhana_stop", "Stop a running sadhana permanently",
      {{"id", "Sadhana ID", true, nullptr}}},
