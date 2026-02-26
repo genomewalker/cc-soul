@@ -161,6 +161,9 @@ struct GaussianPrior {
             mu -= learning_rate * (observed_value - mu) * 0.5f;  // Move away slower
         }
         n += std::abs(reward);
+        // Cap effective sample count to preserve plasticity (symmetric with BetaPrior MAX_EVIDENCE)
+        constexpr float MAX_N = 50.0f;
+        if (n > MAX_N) n = MAX_N;
         // Reduce variance as we learn
         sigma = std::max(0.1f, sigma * (1.0f - learning_rate * 0.1f));
     }
