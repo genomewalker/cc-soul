@@ -3786,17 +3786,23 @@ size_t DuckDBStore::apply_decay() {
     Timestamp current = now();
 
     // DESIGN NOTE: apply_decay is idempotent. It recomputes confidence from the
-    // elapsed time since last access using: confidence * exp(-decay_rate / usage_factor * dt).
+    // elapsed time since last access using: confidence * exp(-decay_rate * realm_multiplier / usage_factor * dt).
     // The usage_factor = 1 + ln(1 + access_count) means frequently-accessed memories
     // decay slower (logarithmic dampening). Calling it multiple times in succession
     // produces the same result because the formula is based on absolute time difference,
     // not incremental reduction. This means it's safe to call from cron jobs, background
     // tasks, or multiple sessions without risk of double-decaying memories.
     //
+    // Realm-dependent decay: brahman realm memories get 0.01x effective decay rate,
+    // mimicking anoxic isolation — near-zero forgetting for stable structural knowledge.
+    // Project/episode realm memories decay at the full rate (1.0x), allowing corrections
+    // and observations to expire naturally.
+    //
     // Apply exponential decay based on time since last access, dampened by usage
     // Single atomic UPDATE - DuckDB handles locking internally
     std::ostringstream sql;
     sql << "UPDATE memory SET confidence = confidence * exp(-decay_rate "
+        << "* CASE WHEN realm = 'brahman' THEN 0.01 ELSE 1.0 END "
         << "/ (1.0 + ln(1.0 + COALESCE(access_count, 0))) * "
         << "(" << current << " - accessed_at) / 86400000.0) "
         << "WHERE decay_rate > 0 AND accessed_at < " << (current - 60000);  // Only decay if >1min since access
