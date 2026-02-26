@@ -26,6 +26,9 @@ This will:
 3. Install to ~/.claude/bin/
 4. Download embedding model if needed
 5. Install hooks and configure permissions
-6. Run database migrations if needed
+6. Set up systemd user service (Linux only) and start the daemon
+7. Run database migrations if needed
 
 If cmake is not available and pre-built binaries aren't found, suggest using `/cc-soul-update` to download pre-built binaries instead.
+
+After setup, the daemon is managed by systemd (`systemctl --user status chittad`). It starts automatically and restarts on crash.

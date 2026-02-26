@@ -15,6 +15,7 @@ CHITTA_DIR="$PLUGIN_DIR/chitta"
 BUILD_DIR="$CHITTA_DIR/build"
 BIN_DIR="${HOME}/.claude/bin"
 MODELS_DIR="${HOME}/.claude/models"
+MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
 MARKER="$PLUGIN_DIR/.install-complete"
 
 # GitHub release URL base
@@ -289,10 +290,18 @@ build_from_source() {
 
     # Copy binaries from src bin to install location (~/.claude/bin)
     # Only chitta and chittad are required; migrate/import are legacy optional tools
+    # Skip cp when BIN_DIR already symlinks to the same binary (dev install)
     local all_built=true
     for bin in chitta chittad; do
         if [[ -x "$plugin_bin/$bin" ]]; then
-            cp -f "$plugin_bin/$bin" "$BIN_DIR/$bin"
+            local src_real dst_real
+            src_real=$(readlink -f "$plugin_bin/$bin" 2>/dev/null || echo "")
+            dst_real=$(readlink -f "$BIN_DIR/$bin" 2>/dev/null || echo "")
+            if [[ -L "$BIN_DIR/$bin" && "$src_real" == "$dst_real" && -n "$src_real" ]]; then
+                true  # symlink already points to the built binary
+            else
+                cp -f "$plugin_bin/$bin" "$BIN_DIR/$bin"
+            fi
         else
             echo "[cc-soul] ERROR: $bin not built" >&2
             all_built=false
@@ -363,7 +372,7 @@ configure_permissions() {
         'Bash(~/.claude/bin/chittad:*)'
         'Bash(chitta:*)'
         'Bash(chittad:*)'
-        'Bash(pkill -f "chittad daemon":*)'
+        'Bash(systemctl --user * chittad:*)'
     )
 
     # Always use global settings.json
@@ -575,9 +584,16 @@ configure_hooks() {
     fi
 }
 
-# Stop any running daemon (gracefully via chittad shutdown, fallback to signals)
+# Stop any running daemon (systemd first, then fallback to signals)
 stop_daemon() {
-    # Try graceful shutdown via chittad
+    # Use systemd if the service is active
+    if command -v systemctl &>/dev/null && systemctl --user is-active chittad &>/dev/null 2>&1; then
+        echo "[cc-soul] Stopping daemon via systemd..."
+        systemctl --user stop chittad
+        return 0
+    fi
+
+    # Try graceful shutdown via chittad CLI
     if [[ -x "$BIN_DIR/chittad" ]]; then
         if "$BIN_DIR/chittad" shutdown 2>/dev/null; then
             for i in $(seq 1 20); do
@@ -589,7 +605,8 @@ stop_daemon() {
     fi
 
     # Fallback: signal daemon directly
-    local daemon_pid=$(pgrep -f "chittad daemon" 2>/dev/null || true)
+    local daemon_pid
+    daemon_pid=$(pgrep -f "chittad daemon" 2>/dev/null || true)
     if [[ -n "$daemon_pid" ]]; then
         echo "[cc-soul] Stopping daemon (pid $daemon_pid)..."
         kill -TERM "$daemon_pid" 2>/dev/null || true
@@ -602,6 +619,42 @@ stop_daemon() {
 
     # Clean up stale files
     rm -f /tmp/chitta-*.sock /tmp/chitta-*.lock /tmp/chitta-*.pid 2>/dev/null || true
+}
+
+# Install and enable the systemd user service for chittad (Linux only)
+setup_systemd_service() {
+    # Only Linux with systemd user session
+    [[ "$(uname -s)" != "Linux" ]] && return 0
+    command -v systemctl &>/dev/null || return 0
+    systemctl --user status &>/dev/null 2>&1 || return 0
+
+    local service_dir="${HOME}/.config/systemd/user"
+    local service_file="$service_dir/chittad.service"
+
+    mkdir -p "$service_dir"
+
+    # Write service file (always update to pick up path changes)
+    cat > "$service_file" << EOF
+[Unit]
+Description=chittad — cc-soul memory daemon
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=$BIN_DIR/chittad daemon --path $MIND_PATH --foreground
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
+EOF
+
+    systemctl --user daemon-reload
+    systemctl --user enable chittad 2>/dev/null || true
+    systemctl --user start chittad 2>/dev/null || true
+    echo "[cc-soul] systemd user service installed and enabled (chittad.service)"
 }
 
 validate_binaries() {
@@ -735,6 +788,9 @@ main() {
 
     # Install Python packages (MCP server, TUI)
     install_python_packages
+
+    # Set up systemd user service (Linux only, no-op on macOS)
+    setup_systemd_service
 
     if ! validate_binaries; then
         echo "[cc-soul] ERROR: Installation incomplete (invalid binaries)" >&2
