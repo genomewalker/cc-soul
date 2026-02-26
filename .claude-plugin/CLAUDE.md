@@ -256,6 +256,6 @@ Then use chitta tools for memory access:
 | Issue | Fix |
 |-------|-----|
 | search_symbols empty | Run `embed_symbols` |
-| Connection error | `pkill -TERM chittad` |
+| Connection error | `systemctl --user restart chittad` |
 | MCP schema stale | `pkill -f "chitta mcp"` |
 | Teammate can't find tools | Add ToolSearch instruction to prompt |

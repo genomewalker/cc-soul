@@ -4,14 +4,14 @@ This file is for **contributors developing cc-soul itself**. For user-facing ins
 
 ## Building Chitta
 
-**Always follow all five steps after code changes:**
+**Always follow all three steps after code changes:**
 ```bash
-cd chitta && cmake --build build --parallel          # 1. Build
-pkill -TERM chittad 2>/dev/null; for i in $(seq 1 20); do pgrep -x chittad >/dev/null || break; sleep 0.5; done  # 2. Wait for daemon exit
-cp bin/chitta bin/chittad ~/.claude/bin/              # 3. Install
-nohup ~/.claude/bin/chittad daemon &>/dev/null &; sleep 2  # 4. Restart daemon
-pkill -f "chitta mcp" 2>/dev/null; sleep 1           # 5. Restart MCP server (clears stale socket connection)
+cd chitta && cmake --build build --parallel   # 1. Build (output to cc-soul/bin/ via symlinks)
+systemctl --user restart chittad              # 2. Restart daemon (managed by systemd)
+pkill -f "chitta mcp" 2>/dev/null; sleep 1   # 3. Restart MCP server (clears stale connection)
 ```
+
+`~/.claude/bin/chitta` and `~/.claude/bin/chittad` are symlinks to `cc-soul/bin/` — no `cp` needed.
 
 ## Release
 

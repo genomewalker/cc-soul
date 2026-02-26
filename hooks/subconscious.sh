@@ -72,6 +72,13 @@ LOCK_FILE="${SOCKET_DIR}/chitta-${MIND_HASH}.lock"
 SOCKET_PATH="${SOCKET_DIR}/chitta-${MIND_HASH}.sock"
 PID_FILE="${SOCKET_DIR}/chitta-${MIND_HASH}.pid"  # Daemon writes PID here
 
+# Check if daemon is managed by systemd (service file exists + user session active)
+uses_systemd() {
+    [[ -f "${HOME}/.config/systemd/user/chittad.service" ]] && \
+    command -v systemctl &>/dev/null && \
+    systemctl --user status &>/dev/null 2>&1
+}
+
 is_running() {
     # First check PID file
     if [[ -f "$PID_FILE" ]]; then
@@ -136,6 +143,36 @@ kill_unresponsive() {
 }
 
 cmd_start() {
+    # When systemd manages the daemon, delegate to it and just wait for readiness
+    if uses_systemd; then
+        systemctl --user start chittad 2>/dev/null || true
+        # Wait for socket to become responsive
+        local daemon_ready=false
+        local wait_start
+        wait_start=$(date +%s)
+        while true; do
+            if is_responsive; then
+                daemon_ready=true
+                break
+            fi
+            if [[ "$MAX_WAIT" != "0" ]]; then
+                local now
+                now=$(date +%s)
+                if (( now - wait_start >= MAX_WAIT )); then
+                    break
+                fi
+            fi
+            sleep 0.1
+        done
+        if $daemon_ready; then
+            echo "[subconscious] Started via systemd (healthy)"
+        else
+            echo "[subconscious] Daemon still initializing (will retry on next tool call)" >&2
+        fi
+        return 0
+    fi
+
+    # Non-systemd path: manage daemon directly
     # First: kill ALL existing daemon processes to ensure clean state
     # This prevents multiple daemons from accumulating
     local existing_pids
@@ -259,7 +296,8 @@ cmd_start() {
     trap - EXIT
 
     if $daemon_ready && is_running; then
-        local pid=$(cat "$PID_FILE" 2>/dev/null || pgrep -f "chittad daemon.*--path $MIND_PATH" | head -1)
+        local pid
+        pid=$(cat "$PID_FILE" 2>/dev/null || pgrep -f "chittad daemon.*--path $MIND_PATH" | head -1)
         echo "[subconscious] Started (pid=$pid, socket=$SOCKET_PATH, heartbeat=ok)"
     else
         # Don't fail the hook - daemon may still be initializing
@@ -272,6 +310,13 @@ cmd_stop() {
     # Clean up any stale lock directories first
     local lock_dir="/tmp/chitta-${MIND_HASH}.startlock"
     rmdir "$lock_dir" 2>/dev/null || true
+
+    # When systemd manages the daemon, delegate to it
+    if uses_systemd; then
+        systemctl --user stop chittad 2>/dev/null || true
+        echo "[subconscious] Stopped via systemd"
+        return 0
+    fi
 
     if ! is_running; then
         # Also clean up sockets/files even if not running
