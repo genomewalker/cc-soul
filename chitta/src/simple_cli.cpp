@@ -394,7 +394,8 @@ std::string generate_stats(DuckDBMind& mind) {
 
 int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                const std::string& mind_path, const std::string& pid_file,
-               const DistillConfig& distill_config, EnrichConfig& enrich_config) {
+               const DistillConfig& distill_config, EnrichConfig& enrich_config,
+               const SubconsciousConfig& subconscious_config) {
     // Automatically reap child processes to prevent zombie accumulation
     signal(SIGCHLD, SIG_IGN);
 
@@ -477,7 +478,7 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
     DuckDBRpcHandler handler(&mind);
 
     // Start subconscious background processor
-    Subconscious subconscious(&mind);
+    Subconscious subconscious(&mind, subconscious_config);
     subconscious.start();
     handler.set_subconscious(&subconscious);
 
@@ -1609,6 +1610,8 @@ void print_usage(const char* prog) {
               << "  --enrich-batch N         Symbols per batch (default: 10)\n"
               << "  --enrich-model MODEL     OpenCode model (default: github-copilot/gpt-5-mini)\n"
               << "  --no-enrich              Disable code enrichment\n"
+              << "\nSubconscious (background processing):\n"
+              << "  --no-hygiene             Disable hygiene (decay, pruning, consolidation)\n"
               ;
 }
 
@@ -1634,6 +1637,9 @@ int main(int argc, char* argv[]) {
     // Code enrichment config
     EnrichConfig enrich_config;
     enrich_config.script_path = default_enrich_script();
+
+    // Subconscious config
+    SubconsciousConfig subconscious_config;
 
     // Manual distill command args
     std::string distill_transcript_path;
@@ -1687,6 +1693,8 @@ int main(int argc, char* argv[]) {
             enrich_config.model = argv[++i];
         } else if (strcmp(argv[i], "--no-enrich") == 0) {
             enrich_config.enabled = false;
+        } else if (strcmp(argv[i], "--no-hygiene") == 0) {
+            subconscious_config.enable_hygiene = false;
         } else if (strcmp(argv[i], "--transcript-path") == 0 && i + 1 < argc) {
             distill_transcript_path = argv[++i];
         } else if (strcmp(argv[i], "--session-id") == 0 && i + 1 < argc) {
@@ -1768,7 +1776,7 @@ int main(int argc, char* argv[]) {
 
     int result = 0;
     if (command == "daemon") {
-        result = cmd_daemon(mind, interval, sock_path, mind_path, pid_file, distill_config, enrich_config);
+        result = cmd_daemon(mind, interval, sock_path, mind_path, pid_file, distill_config, enrich_config, subconscious_config);
     } else if (command == "stats") {
         result = cmd_stats(mind);
     } else if (command == "metrics") {
