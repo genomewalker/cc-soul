@@ -3580,9 +3580,10 @@ private:
         ss << ":\n";
         for (const auto& r : results_json) {
             int pct = static_cast<int>(r["relevance"].get<double>() * 100);
-            ss << "[" << pct << "%] [" << r["type"].get<std::string>() << "] "
-               << r["text"].get<std::string>().substr(0, 100);
-            if (r["text"].get<std::string>().size() > 100) ss << "...";
+            std::string r_type = r["type"].is_string() ? r["type"].get<std::string>() : "?";
+            std::string r_text = r["text"].is_string() ? r["text"].get<std::string>() : "";
+            ss << "[" << pct << "%] [" << r_type << "] " << r_text.substr(0, 100);
+            if (r_text.size() > 100) ss << "...";
             ss << "\n";
         }
 
@@ -8701,7 +8702,7 @@ private:
                         } else if (msg_content.is_array()) {
                             // Array of content blocks
                             for (const auto& block : msg_content) {
-                                if (block.contains("text")) {
+                                if (block.contains("text") && block["text"].is_string()) {
                                     if (!content.empty()) content += "\n";
                                     content += block["text"].get<std::string>();
                                 }
@@ -8853,7 +8854,7 @@ private:
                                 content = msg_content.get<std::string>();
                             } else if (msg_content.is_array()) {
                                 for (const auto& block : msg_content) {
-                                    if (block.contains("text")) {
+                                    if (block.contains("text") && block["text"].is_string()) {
                                         if (!content.empty()) content += "\n";
                                         content += block["text"].get<std::string>();
                                     }
@@ -10714,7 +10715,10 @@ private:
             return DuckDBToolResult::error("memory_id and type required");
         }
 
-        int64_t memory_id = params["memory_id"].get<int64_t>();
+        int64_t memory_id = params["memory_id"].is_number() ? params["memory_id"].get<int64_t>() : std::stoll(params["memory_id"].get<std::string>());
+        if (!params["type"].is_string()) {
+            return DuckDBToolResult::error("type must be a string");
+        }
         std::string type = params["type"].get<std::string>();
 
         // Validate type
