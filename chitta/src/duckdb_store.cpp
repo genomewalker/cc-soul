@@ -2567,9 +2567,12 @@ bool DuckDBStore::strengthen(int64_t id, float amount) {
     // Lock handled in write_execute/write_query/read_query
     if (!db_) return false;
 
+    // Selective strengthen: only UPDATE if confidence would actually change
+    // Skip if confidence >= (1.0 - amount) since LEAST would cap at 1.0 anyway
+    // Also skip accessed_at update here - touch() handles that
     std::ostringstream sql;
-    sql << "UPDATE memory SET confidence = LEAST(confidence + " << amount << ", 1.0), "
-        << "accessed_at = " << now() << " WHERE id = " << id;
+    sql << "UPDATE memory SET confidence = LEAST(confidence + " << amount << ", 1.0) "
+        << "WHERE id = " << id << " AND confidence < " << (1.0f - amount * 0.5f);
 
     return write_execute(sql.str());
 }
@@ -2631,9 +2634,16 @@ bool DuckDBStore::touch(int64_t id) {
     // Lock handled in write_execute/write_query/read_query
     if (!db_) return false;
 
+    // Lazy touch: only UPDATE if last access was >5 minutes ago
+    // This dramatically reduces MVCC bloat from hot-key churn
+    Timestamp current = now();
+    constexpr int64_t TOUCH_THRESHOLD_MS = 5 * 60 * 1000;  // 5 minutes
+
     std::ostringstream sql;
-    sql << "UPDATE memory SET accessed_at = " << now()
-        << ", access_count = COALESCE(access_count, 0) + 1 WHERE id = " << id;
+    sql << "UPDATE memory SET accessed_at = " << current
+        << ", access_count = COALESCE(access_count, 0) + 1 "
+        << "WHERE id = " << id
+        << " AND accessed_at < " << (current - TOUCH_THRESHOLD_MS);
 
     return write_execute(sql.str());
 }
