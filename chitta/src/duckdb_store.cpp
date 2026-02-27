@@ -3809,6 +3809,11 @@ size_t DuckDBStore::apply_decay() {
     //
     // Apply exponential decay based on time since last access, dampened by usage
     // Single atomic UPDATE - DuckDB handles locking internally
+    //
+    // SELECTIVE UPDATE: Only update rows where decay factor changes confidence by >1%.
+    // This prevents DuckDB MVCC bloat from updating 15k rows every hygiene cycle.
+    // The decay_factor is computed inline and we check (1 - decay_factor) > 0.01
+    // meaning we only write when the memory would lose >1% of its confidence.
     std::ostringstream sql;
     sql << "UPDATE memory SET confidence = confidence * exp(-decay_rate "
         << "* CASE WHEN realm = 'brahman' THEN 0.01 ELSE 1.0 END "
@@ -3816,7 +3821,13 @@ size_t DuckDBStore::apply_decay() {
         << "  AND mt.tag IN ('architecture', 'synthesis', 'impl')) THEN 0.1 ELSE 1.0 END "
         << "/ (1.0 + ln(1.0 + COALESCE(access_count, 0))) * "
         << "(" << current << " - accessed_at) / 86400000.0) "
-        << "WHERE decay_rate > 0 AND accessed_at < " << (current - 60000);  // Only decay if >1min since access
+        << "WHERE decay_rate > 0 AND accessed_at < " << (current - 60000)
+        << " AND (1.0 - exp(-decay_rate "
+        << "* CASE WHEN realm = 'brahman' THEN 0.01 ELSE 1.0 END "
+        << "* CASE WHEN EXISTS (SELECT 1 FROM memory_tags mt WHERE mt.memory_id = memory.id "
+        << "  AND mt.tag IN ('architecture', 'synthesis', 'impl')) THEN 0.1 ELSE 1.0 END "
+        << "/ (1.0 + ln(1.0 + COALESCE(access_count, 0))) * "
+        << "(" << current << " - accessed_at) / 86400000.0)) > 0.01";  // Only update if >1% decay
 
     write_execute(sql.str());
 
