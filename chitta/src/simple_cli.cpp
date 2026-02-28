@@ -395,7 +395,7 @@ std::string generate_stats(DuckDBMind& mind) {
 int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                const std::string& mind_path, const std::string& pid_file,
                const DistillConfig& distill_config, EnrichConfig& enrich_config,
-               const SubconsciousConfig& subconscious_config) {
+               const SubconsciousConfig& subconscious_config, bool no_autonomous) {
     // Automatically reap child processes to prevent zombie accumulation
     signal(SIGCHLD, SIG_IGN);
 
@@ -495,41 +495,44 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
         sadhana_manager.stream_unsubscribe(fd);
     });
 
-    // Wire dream callback: auto-explore when soul has been idle for 10+ minutes
-    subconscious.set_dream_callback([&]() {
-        try {
-            json req = {
-                {"method", "tools/call"},
-                {"params", {
-                    {"name", "dream_wander"},
-                    {"arguments", json::object()}
-                }},
-                {"id", nullptr}
-            };
-            handler.handle(req);
-            std::cerr << "[dream] Auto-dream triggered\n";
-        } catch (const std::exception& e) {
-            std::cerr << "[dream] Auto-dream failed: " << e.what() << "\n";
-        }
-    });
+    // Wire dream/think callbacks (unless --no-autonomous)
+    if (!no_autonomous) {
+        // Wire dream callback: auto-explore when soul has been idle for 10+ minutes
+        subconscious.set_dream_callback([&]() {
+            try {
+                json req = {
+                    {"method", "tools/call"},
+                    {"params", {
+                        {"name", "dream_wander"},
+                        {"arguments", json::object()}
+                    }},
+                    {"id", nullptr}
+                };
+                handler.handle(req);
+                std::cerr << "[dream] Auto-dream triggered\n";
+            } catch (const std::exception& e) {
+                std::cerr << "[dream] Auto-dream failed: " << e.what() << "\n";
+            }
+        });
 
-    // Wire think callback: internal memory synthesis when idle 5+ min, hourly
-    subconscious.set_think_callback([&]() {
-        try {
-            json req = {
-                {"method", "tools/call"},
-                {"params", {
-                    {"name", "think_wander"},
-                    {"arguments", json::object()}
-                }},
-                {"id", nullptr}
-            };
-            handler.handle(req);
-            std::cerr << "[think] Auto-think triggered\n";
-        } catch (const std::exception& e) {
-            std::cerr << "[think] Auto-think failed: " << e.what() << "\n";
-        }
-    });
+        // Wire think callback: internal memory synthesis when idle 5+ min, hourly
+        subconscious.set_think_callback([&]() {
+            try {
+                json req = {
+                    {"method", "tools/call"},
+                    {"params", {
+                        {"name", "think_wander"},
+                        {"arguments", json::object()}
+                    }},
+                    {"id", nullptr}
+                };
+                handler.handle(req);
+                std::cerr << "[think] Auto-think triggered\n";
+            } catch (const std::exception& e) {
+                std::cerr << "[think] Auto-think failed: " << e.what() << "\n";
+            }
+        });
+    }
 
     std::signal(SIGTERM, daemon_signal_handler);
     std::signal(SIGINT, daemon_signal_handler);
@@ -1612,6 +1615,7 @@ void print_usage(const char* prog) {
               << "  --no-enrich              Disable code enrichment\n"
               << "\nSubconscious (background processing):\n"
               << "  --no-hygiene             Disable hygiene (decay, pruning, consolidation)\n"
+              << "  --no-autonomous          Disable autonomous agents (dream, think)\n"
               ;
 }
 
@@ -1640,6 +1644,7 @@ int main(int argc, char* argv[]) {
 
     // Subconscious config
     SubconsciousConfig subconscious_config;
+    bool no_autonomous = false;  // Disable dream/think callbacks
 
     // Manual distill command args
     std::string distill_transcript_path;
@@ -1695,6 +1700,8 @@ int main(int argc, char* argv[]) {
             enrich_config.enabled = false;
         } else if (strcmp(argv[i], "--no-hygiene") == 0) {
             subconscious_config.enable_hygiene = false;
+        } else if (strcmp(argv[i], "--no-autonomous") == 0) {
+            no_autonomous = true;
         } else if (strcmp(argv[i], "--transcript-path") == 0 && i + 1 < argc) {
             distill_transcript_path = argv[++i];
         } else if (strcmp(argv[i], "--session-id") == 0 && i + 1 < argc) {
@@ -1776,7 +1783,7 @@ int main(int argc, char* argv[]) {
 
     int result = 0;
     if (command == "daemon") {
-        result = cmd_daemon(mind, interval, sock_path, mind_path, pid_file, distill_config, enrich_config, subconscious_config);
+        result = cmd_daemon(mind, interval, sock_path, mind_path, pid_file, distill_config, enrich_config, subconscious_config, no_autonomous);
     } else if (command == "stats") {
         result = cmd_stats(mind);
     } else if (command == "metrics") {
