@@ -546,6 +546,18 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
     std::cerr << "[daemon] Initial stats: " << initial_health.total_nodes << " memories, "
               << mind.triplet_count() << " triplets\n";
 
+    // Check for DB bloat at startup
+    double bloat = mind.store().bloat_ratio();
+    size_t file_mb = mind.store().file_size_bytes() / (1024 * 1024);
+    size_t data_mb = mind.store().data_size_bytes() / (1024 * 1024);
+    if (bloat >= 4.0) {
+        std::cerr << "[daemon] WARNING: DB bloat detected (" << std::fixed << std::setprecision(1)
+                  << bloat << "x, file=" << file_mb << "MB, data=" << data_mb << "MB)\n";
+        if (bloat >= 10.0) {
+            std::cerr << "[daemon] CRITICAL: Consider compacting before continuing.\n";
+        }
+    }
+
     // Maintenance thread - sync and apply decay periodically
     std::atomic<size_t> cycle_count{0};
     std::thread maintenance([&]() {
