@@ -137,10 +137,15 @@ struct SadhanaConfig {
     std::string default_brain_provider = "claude";
     std::string default_brain_model = "sonnet";
 
-    // Hardening settings
+    // Hardening settings (guardrails)
     int max_consecutive_failures = 5;
     size_t max_output_chars = 4000;         // Truncate agent output stored in DB
     bool strip_ansi_codes = true;
+
+    // Circuit breakers (prevent runaway sadhanas)
+    int max_iterations = 10000;             // Hard limit on total iterations (auto-pause at limit)
+    int max_runtime_hours = 168;            // Max runtime in hours (1 week)
+    int max_iterations_per_hour = 500;      // Rate limit (auto-pause if exceeded)
 };
 
 // Statistics for monitoring

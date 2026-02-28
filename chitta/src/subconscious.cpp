@@ -6,6 +6,7 @@
 #include <chitta/mind/subconscious.hpp>
 #include <iostream>
 #include <sstream>
+#include <iomanip>
 
 namespace chitta {
 
@@ -647,9 +648,17 @@ void Subconscious::run_hygiene() {
     stats_.hygiene_runs++;
     stats_.last_hygiene_at = now_ms();
 
+    // Get write metrics for observability
+    const auto& wm = mind_->store().write_metrics();
+    double bloat = mind_->store().bloat_ratio();
+
     std::cerr << "[subconscious] Hygiene run: decayed=" << result.decayed
               << ", pruned=" << result.pruned
-              << ", consolidated=" << result.consolidated << "\n";
+              << ", consolidated=" << result.consolidated
+              << " | writes=" << wm.total_writes.load()
+              << " (touch:" << wm.touch_applied.load() << "/" << wm.touch_skipped.load()
+              << ", str:" << wm.strengthen_applied.load() << "/" << wm.strengthen_skipped.load()
+              << "), bloat=" << std::fixed << std::setprecision(1) << bloat << "x\n";
 
     // Heal session registry - check if PIDs are still alive
     size_t healed_sessions = mind_->store().session_heal();

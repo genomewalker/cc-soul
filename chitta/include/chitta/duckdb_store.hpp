@@ -631,6 +631,38 @@ struct HygieneStats {
     float growth_rate_per_day = 0.0f;  // Recent memory growth
 };
 
+// Write metrics for MVCC bloat monitoring
+struct WriteMetrics {
+    std::atomic<size_t> touch_applied{0};
+    std::atomic<size_t> touch_skipped{0};
+    std::atomic<size_t> strengthen_applied{0};
+    std::atomic<size_t> strengthen_skipped{0};
+    std::atomic<size_t> decay_applied{0};
+    std::atomic<size_t> decay_skipped{0};
+    std::atomic<size_t> total_writes{0};
+    std::atomic<int64_t> last_reset_at{0};
+
+    void reset() {
+        touch_applied = 0;
+        touch_skipped = 0;
+        strengthen_applied = 0;
+        strengthen_skipped = 0;
+        decay_applied = 0;
+        decay_skipped = 0;
+        total_writes = 0;
+        last_reset_at = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+    }
+
+    double writes_per_minute() const {
+        auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        auto elapsed_ms = now_ms - last_reset_at.load();
+        if (elapsed_ms <= 0) return 0;
+        return (total_writes.load() * 60000.0) / elapsed_ms;
+    }
+};
+
 // ═══════════════════════════════════════════════════════════════════════════
 // xMemory-Inspired Theme System
 // ═══════════════════════════════════════════════════════════════════════════
@@ -941,6 +973,15 @@ public:
 
     // Apply decay to all memories (returns count updated)
     size_t apply_decay();
+
+    // Write metrics for bloat monitoring
+    const WriteMetrics& write_metrics() const { return write_metrics_; }
+    void reset_write_metrics() { write_metrics_.reset(); }
+
+    // File size and bloat detection
+    size_t file_size_bytes() const;
+    size_t data_size_bytes() const;
+    double bloat_ratio() const;  // file_size / data_size (1.0 = no bloat)
 
     // Prune weak memories (returns count removed)
     size_t prune(float threshold = 0.1f, float min_age_days = 7.0f);
@@ -1778,6 +1819,9 @@ private:
     std::atomic<bool> needs_reindex_{false};  // Flag for deferred index rebuild
     std::atomic<bool> index_exists_{false};   // Track if HNSW index is present
 
+    // Write metrics for MVCC bloat monitoring
+    mutable WriteMetrics write_metrics_;
+
     // Cached health for non-blocking health_check
     mutable StoreHealth cached_health_;
     mutable std::mutex health_cache_mutex_;
@@ -1805,6 +1849,7 @@ private:
     // write_execute/write_query: use write connection with mutex (for INSERT/UPDATE/DELETE)
     // read_query: use pool connection (for SELECT) - concurrent safe
     bool write_execute(const std::string& sql);
+    int64_t write_execute_count(const std::string& sql);  // Returns affected row count
     std::unique_ptr<duckdb::QueryResult> write_query(const std::string& sql);
     std::unique_ptr<duckdb::QueryResult> read_query(const std::string& sql) const;
 
