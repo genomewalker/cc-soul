@@ -666,6 +666,25 @@ void Subconscious::run_hygiene() {
               << ", str:" << wm.strengthen_applied.load() << "/" << wm.strengthen_skipped.load()
               << "), bloat=" << std::fixed << std::setprecision(1) << bloat << "x\n";
 
+    // Bloat warning thresholds
+    constexpr double BLOAT_WARNING_THRESHOLD = 4.0;
+    constexpr double BLOAT_CRITICAL_THRESHOLD = 10.0;
+
+    if (bloat >= BLOAT_CRITICAL_THRESHOLD) {
+        std::cerr << "[subconscious] CRITICAL: DB bloat at " << std::fixed << std::setprecision(1)
+                  << bloat << "x! File: " << (mind_->store().file_size_bytes() / (1024*1024))
+                  << "MB, Data: " << (mind_->store().data_size_bytes() / (1024*1024))
+                  << "MB. Run compaction: systemctl --user stop chittad && "
+                  << "duckdb -c \"ATTACH 'chitta.duckdb' AS old (READ_ONLY); "
+                  << "ATTACH 'chitta_new.duckdb' AS new; COPY FROM DATABASE old TO new;\"\n";
+    } else if (bloat >= BLOAT_WARNING_THRESHOLD) {
+        std::cerr << "[subconscious] WARNING: DB bloat at " << std::fixed << std::setprecision(1)
+                  << bloat << "x. Consider compaction when convenient.\n";
+    }
+
+    // Reset write metrics after reporting
+    mind_->store().reset_write_metrics();
+
     // Heal session registry - check if PIDs are still alive
     size_t healed_sessions = mind_->store().session_heal();
     if (healed_sessions > 0) {
