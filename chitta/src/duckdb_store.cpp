@@ -2687,6 +2687,116 @@ bool DuckDBStore::touch(int64_t id) {
     return affected >= 0;
 }
 
+// ============================================================================
+// Batched write operations (coalesce updates, reduce MVCC churn)
+// ============================================================================
+
+void DuckDBStore::touch_batched(int64_t id) {
+    std::lock_guard<std::mutex> lock(pending_mutex_);
+    auto& pending = pending_updates_[id];
+    int64_t now_val = now();
+    if (pending.memory_id == 0) {
+        pending.memory_id = id;
+        pending.first_touch_at = now_val;
+    }
+    pending.access_count_delta++;
+    pending.last_touch_at = now_val;
+}
+
+void DuckDBStore::strengthen_batched(int64_t id, float amount) {
+    std::lock_guard<std::mutex> lock(pending_mutex_);
+    auto& pending = pending_updates_[id];
+    int64_t now_val = now();
+    if (pending.memory_id == 0) {
+        pending.memory_id = id;
+        pending.first_touch_at = now_val;
+    }
+    pending.strengthen_amount += amount;
+    pending.last_touch_at = now_val;
+}
+
+size_t DuckDBStore::pending_update_count() const {
+    std::lock_guard<std::mutex> lock(pending_mutex_);
+    return pending_updates_.size();
+}
+
+bool DuckDBStore::should_flush() const {
+    int64_t now_val = now();
+    size_t count = pending_update_count();
+    return count > 0 && (
+        count >= FLUSH_SIZE_THRESHOLD ||
+        (now_val - last_flush_at_.load()) >= FLUSH_INTERVAL_MS
+    );
+}
+
+size_t DuckDBStore::flush_pending_updates() {
+    std::unordered_map<int64_t, PendingUpdate> to_flush;
+    {
+        std::lock_guard<std::mutex> lock(pending_mutex_);
+        if (pending_updates_.empty()) return 0;
+        to_flush = std::move(pending_updates_);
+        pending_updates_.clear();
+    }
+
+    if (to_flush.empty()) return 0;
+
+    // Build batch UPDATE statements
+    size_t updated = 0;
+    int64_t current = now();
+
+    for (const auto& [id, pending] : to_flush) {
+        // Only update if enough time has passed (lazy touch threshold)
+        constexpr int64_t TOUCH_THRESHOLD_MS = 5 * 60 * 1000;  // 5 minutes
+
+        std::ostringstream sql;
+        sql << "UPDATE memory SET ";
+
+        bool has_update = false;
+
+        // Update access_count and accessed_at if delta > 0
+        if (pending.access_count_delta > 0) {
+            sql << "accessed_at = " << current
+                << ", access_count = COALESCE(access_count, 0) + " << pending.access_count_delta;
+            has_update = true;
+        }
+
+        // Update confidence if strengthen_amount > 0
+        if (pending.strengthen_amount > 0) {
+            if (has_update) sql << ", ";
+            sql << "confidence = LEAST(confidence + " << pending.strengthen_amount << ", 1.0)";
+            has_update = true;
+        }
+
+        if (!has_update) continue;
+
+        sql << " WHERE id = " << id;
+
+        // Apply lazy threshold for touch
+        if (pending.access_count_delta > 0) {
+            sql << " AND accessed_at < " << (current - TOUCH_THRESHOLD_MS);
+        }
+
+        // Apply selective threshold for strengthen
+        if (pending.strengthen_amount > 0) {
+            sql << " AND confidence < " << (1.0f - pending.strengthen_amount * 0.5f);
+        }
+
+        int64_t affected = write_execute_count(sql.str());
+        if (affected > 0) {
+            updated++;
+            write_metrics_.total_writes++;
+            if (pending.access_count_delta > 0) write_metrics_.touch_applied++;
+            if (pending.strengthen_amount > 0) write_metrics_.strengthen_applied++;
+        } else {
+            if (pending.access_count_delta > 0) write_metrics_.touch_skipped++;
+            if (pending.strengthen_amount > 0) write_metrics_.strengthen_skipped++;
+        }
+    }
+
+    last_flush_at_ = current;
+    return updated;
+}
+
 std::optional<MemoryResult> DuckDBStore::get_memory(int64_t id) {
     // Lock handled in write_execute/write_query/read_query
     if (!db_) return std::nullopt;

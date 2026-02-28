@@ -736,13 +736,18 @@ public:
             }
         }  // shared_lock released
 
-        // Write phase: unique lock for reinforcement (touch/strengthen)
+        // Write phase: use batched operations for MVCC efficiency
+        // Updates are coalesced and flushed periodically (every 30s or 100 updates)
         {
             std::unique_lock lock(mutex_);
             for (const auto& recall : recalls) {
                 int64_t id = nodeid_to_int64(recall.id);
-                store_.touch(id);
-                store_.strengthen(id, config_.reinforce_amount);
+                store_.touch_batched(id);
+                store_.strengthen_batched(id, config_.reinforce_amount);
+            }
+            // Auto-flush if threshold reached
+            if (store_.should_flush()) {
+                store_.flush_pending_updates();
             }
         }
 

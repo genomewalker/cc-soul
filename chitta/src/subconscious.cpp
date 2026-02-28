@@ -638,12 +638,18 @@ void Subconscious::observe_tool_for_habit(const std::string& tool_name, const st
 // Periodic Tasks
 
 void Subconscious::run_hygiene() {
+    // Flush any pending batched writes before hygiene
+    size_t flushed = mind_->store().flush_pending_updates();
+
     auto result = mind_->store().hygiene_run(
         0.1f,   // prune_threshold
         7.0f,   // min_age_days
         0.85f,  // consolidation_threshold
         10      // max_consolidations
     );
+
+    // Include flushed count in result for logging
+    result.decayed += flushed;  // Approximate - some may have been touches
 
     stats_.hygiene_runs++;
     stats_.last_hygiene_at = now_ms();
