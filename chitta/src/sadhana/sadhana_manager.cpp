@@ -413,6 +413,33 @@ void SadhanaManager::tick() {
             continue;
         }
 
+        // Circuit breaker: check iteration limits
+        if (opt->iterations >= config_.max_iterations) {
+            std::cerr << "[sadhana] Auto-pausing sadhana " << id
+                      << ": max_iterations limit (" << config_.max_iterations << ") reached\n";
+            pause(id);
+            log_event(id, SadhanaEventType::Paused, {
+                {"reason", "max_iterations_exceeded"},
+                {"iterations", opt->iterations},
+                {"limit", config_.max_iterations}
+            });
+            continue;
+        }
+
+        // Circuit breaker: check runtime limit
+        int64_t runtime_hours = (now_ms() - opt->created_at) / (1000LL * 60 * 60);
+        if (runtime_hours >= config_.max_runtime_hours) {
+            std::cerr << "[sadhana] Auto-pausing sadhana " << id
+                      << ": max_runtime limit (" << config_.max_runtime_hours << "h) reached\n";
+            pause(id);
+            log_event(id, SadhanaEventType::Paused, {
+                {"reason", "max_runtime_exceeded"},
+                {"runtime_hours", runtime_hours},
+                {"limit", config_.max_runtime_hours}
+            });
+            continue;
+        }
+
         std::string cycle_status = run_cycle(*opt);
 
         {

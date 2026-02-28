@@ -1823,6 +1823,31 @@ bool DuckDBStore::write_execute(const std::string& sql) {
     return false;
 }
 
+int64_t DuckDBStore::write_execute_count(const std::string& sql) {
+    // Execute UPDATE/DELETE and return number of affected rows
+    std::lock_guard lock(write_mutex_);
+    try {
+        if (!write_conn_) return -1;
+        auto result = write_conn_->Query(sql);
+        if (result->HasError()) {
+            std::cerr << "[DuckDBStore] Query error: " << result->GetError() << "\n";
+            return -1;
+        }
+        // Get changes count
+        auto changes_result = write_conn_->Query("SELECT changes()");
+        if (changes_result && !changes_result->HasError()) {
+            auto chunk = changes_result->Fetch();
+            if (chunk && chunk->size() > 0) {
+                return chunk->GetValue(0, 0).GetValue<int64_t>();
+            }
+        }
+        return 0;
+    } catch (const std::exception& e) {
+        std::cerr << "[DuckDBStore] Exception: " << e.what() << "\n";
+        return -1;
+    }
+}
+
 std::unique_ptr<duckdb::QueryResult> DuckDBStore::write_query(const std::string& sql) {
     std::lock_guard lock(write_mutex_);
     try {
@@ -2574,7 +2599,14 @@ bool DuckDBStore::strengthen(int64_t id, float amount) {
     sql << "UPDATE memory SET confidence = LEAST(confidence + " << amount << ", 1.0) "
         << "WHERE id = " << id << " AND confidence < " << (1.0f - amount * 0.5f);
 
-    return write_execute(sql.str());
+    int64_t affected = write_execute_count(sql.str());
+    if (affected > 0) {
+        write_metrics_.strengthen_applied++;
+        write_metrics_.total_writes++;
+    } else if (affected == 0) {
+        write_metrics_.strengthen_skipped++;
+    }
+    return affected >= 0;
 }
 
 bool DuckDBStore::weaken(int64_t id, float amount) {
@@ -2645,7 +2677,14 @@ bool DuckDBStore::touch(int64_t id) {
         << "WHERE id = " << id
         << " AND accessed_at < " << (current - TOUCH_THRESHOLD_MS);
 
-    return write_execute(sql.str());
+    int64_t affected = write_execute_count(sql.str());
+    if (affected > 0) {
+        write_metrics_.touch_applied++;
+        write_metrics_.total_writes++;
+    } else if (affected == 0) {
+        write_metrics_.touch_skipped++;
+    }
+    return affected >= 0;
 }
 
 std::optional<MemoryResult> DuckDBStore::get_memory(int64_t id) {
@@ -3839,16 +3878,24 @@ size_t DuckDBStore::apply_decay() {
         << "/ (1.0 + ln(1.0 + COALESCE(access_count, 0))) * "
         << "(" << current << " - accessed_at) / 86400000.0)) > 0.01";  // Only update if >1% decay
 
-    write_execute(sql.str());
+    int64_t affected = write_execute_count(sql.str());
+    if (affected > 0) {
+        write_metrics_.decay_applied += affected;
+        write_metrics_.total_writes += affected;
+    }
 
-    // Return count of memories with decay
+    // Count memories that could decay but didn't (for metrics)
     auto result = read_query("SELECT COUNT(*) FROM memory WHERE decay_rate > 0");
+    size_t total_decayable = 0;
     if (result && !result->HasError()) {
         auto chunk = result->Fetch();
         if (chunk && chunk->size() > 0) {
-            return chunk->GetValue(0, 0).GetValue<int64_t>();
+            total_decayable = chunk->GetValue(0, 0).GetValue<int64_t>();
         }
     }
+    write_metrics_.decay_skipped += (total_decayable - (affected > 0 ? affected : 0));
+
+    return affected > 0 ? affected : 0;
     return 0;
 }
 
@@ -4732,6 +4779,43 @@ size_t DuckDBStore::symbol_count() {
         }
     }
     return 0;
+}
+
+size_t DuckDBStore::file_size_bytes() const {
+    if (path_.empty()) return 0;
+    try {
+        std::filesystem::path db_path(path_);
+        db_path /= "chitta.duckdb";
+        if (std::filesystem::exists(db_path)) {
+            return std::filesystem::file_size(db_path);
+        }
+    } catch (...) {}
+    return 0;
+}
+
+size_t DuckDBStore::data_size_bytes() const {
+    // Use PRAGMA database_size to get actual data size
+    if (!db_) return 0;
+    try {
+        auto result = read_query("SELECT SUM(estimated_size) FROM pragma_database_size()");
+        if (result && !result->HasError()) {
+            auto chunk = result->Fetch();
+            if (chunk && chunk->size() > 0) {
+                auto val = chunk->GetValue(0, 0);
+                if (!val.IsNull()) {
+                    return val.GetValue<int64_t>();
+                }
+            }
+        }
+    } catch (...) {}
+    return 0;
+}
+
+double DuckDBStore::bloat_ratio() const {
+    size_t file_sz = file_size_bytes();
+    size_t data_sz = data_size_bytes();
+    if (data_sz == 0) return 1.0;
+    return static_cast<double>(file_sz) / static_cast<double>(data_sz);
 }
 
 std::vector<std::pair<std::string, size_t>> DuckDBStore::get_top_connected_entities(size_t limit) {
