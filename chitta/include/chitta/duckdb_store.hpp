@@ -826,6 +826,13 @@ public:
     bool forget(int64_t id);
     bool touch(int64_t id);  // Update accessed_at
 
+    // Batched write operations (coalesce updates, flush periodically)
+    void touch_batched(int64_t id);
+    void strengthen_batched(int64_t id, float amount = 0.1f);
+    size_t flush_pending_updates();  // Flush all pending updates to DB
+    size_t pending_update_count() const;
+    bool should_flush() const;  // Check if flush is needed (time or size)
+
     // Get memory by ID
     std::optional<MemoryResult> get_memory(int64_t id);
 
@@ -1821,6 +1828,20 @@ private:
 
     // Write metrics for MVCC bloat monitoring
     mutable WriteMetrics write_metrics_;
+
+    // Batched write buffer for touch/strengthen coalescing
+    struct PendingUpdate {
+        int64_t memory_id = 0;
+        int access_count_delta = 0;
+        float strengthen_amount = 0.0f;
+        int64_t first_touch_at = 0;
+        int64_t last_touch_at = 0;
+    };
+    mutable std::unordered_map<int64_t, PendingUpdate> pending_updates_;
+    mutable std::mutex pending_mutex_;
+    mutable std::atomic<int64_t> last_flush_at_{0};
+    static constexpr int64_t FLUSH_INTERVAL_MS = 30000;  // 30 seconds
+    static constexpr size_t FLUSH_SIZE_THRESHOLD = 100;  // Flush if 100+ pending
 
     // Cached health for non-blocking health_check
     mutable StoreHealth cached_health_;
