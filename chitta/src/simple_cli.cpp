@@ -487,6 +487,17 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
     handler.set_sadhana_manager(&sadhana_manager);
     std::cerr << "[daemon] Sadhana manager initialized\n";
 
+    // Auto-pause all running sadhanas if --no-autonomous
+    if (no_autonomous) {
+        auto running = sadhana_manager.list("running");
+        if (!running.empty()) {
+            std::cerr << "[daemon] --no-autonomous: pausing " << running.size() << " running sadhana(s)\n";
+            for (const auto& s : running) {
+                sadhana_manager.pause(s.id);
+            }
+        }
+    }
+
     // Wire up event streaming: push sadhana events to subscribed clients
     sadhana_manager.set_stream_fn([&server](int fd, std::string line) {
         server.queue_response(fd, std::move(line));
