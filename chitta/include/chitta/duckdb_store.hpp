@@ -932,7 +932,9 @@ public:
     std::vector<MemoryResult> list_by_aspect(
         const std::string& aspect,
         size_t limit = 50,
-        float min_confidence = 0.1f
+        float min_confidence = 0.1f,
+        const std::string& realm = "",
+        bool include_global = true
     );
 
     // ═══════════════════════════════════════════════════════════════════════

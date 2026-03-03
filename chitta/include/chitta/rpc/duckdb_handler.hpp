@@ -10854,9 +10854,9 @@ private:
         // 2. Route based on intent type
         switch (intent.type) {
             case QueryIntentType::Aspect: {
-                // Use list_by_aspect with the detected aspect
+                // Use list_by_aspect with the detected aspect (with realm filtering)
                 if (intent.aspect) {
-                    results = mind_->store().list_by_aspect(*intent.aspect, limit, 0.1f);
+                    results = mind_->store().list_by_aspect(*intent.aspect, limit, 0.1f, realm, include_global);
                     route_taken = "aspect:" + *intent.aspect;
                 }
                 break;
