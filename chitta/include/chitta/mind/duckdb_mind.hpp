@@ -83,6 +83,14 @@ struct DuckDBResonanceConfig {
     float surprise_low_threshold = 0.15f;
     float surprise_high_threshold = 0.5f;
     float surprise_confidence_boost = 0.3f;
+
+    // Memory reconsolidation (Nader et al.)
+    // Retrieved memories enter a labile window where similar new content
+    // updates them instead of creating duplicates.
+    bool enable_reconsolidation = true;
+    int64_t labile_window_ms = 1800000;        // 30 minutes
+    float reconsolidation_threshold = 0.88f;   // Cosine similarity to trigger update
+    size_t max_labile_tracked = 50;            // Max labile memories to track
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -454,8 +462,31 @@ struct DuckDBSessionContext {
         recent_observations_order.clear();
         recent_observations_set.clear();
         active_topics.clear();
+        labile_memories.clear();
         centroid_initialized = false;
         centroid_observations = 0;
+    }
+
+    // Reconsolidation: recently retrieved memories in labile state
+    struct LabileMemory {
+        int64_t memory_id;
+        int64_t retrieved_at_ms;
+        Vector embedding;
+    };
+    std::deque<LabileMemory> labile_memories;
+
+    void mark_labile(int64_t id, int64_t now_ms, const Vector& emb) {
+        // Avoid duplicates
+        for (const auto& lm : labile_memories) {
+            if (lm.memory_id == id) return;
+        }
+        labile_memories.push_back({id, now_ms, emb});
+    }
+
+    void prune_labile(int64_t now_ms, int64_t window_ms) {
+        while (!labile_memories.empty() &&
+               now_ms - labile_memories.front().retrieved_at_ms > window_ms)
+            labile_memories.pop_front();
     }
 
     Vector context_centroid;
@@ -649,6 +680,21 @@ public:
             session_context_.update_centroid(artha.nu, resonance_config_.surprise_centroid_alpha);
         }
 
+        // Reconsolidation: if a labile memory is similar enough, update it
+        if (resonance_config_.enable_reconsolidation && !artha.nu.is_zero()) {
+            auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            session_context_.prune_labile(now, resonance_config_.labile_window_ms);
+            for (const auto& lm : session_context_.labile_memories) {
+                float sim = lm.embedding.cosine(artha.nu);
+                if (sim >= resonance_config_.reconsolidation_threshold) {
+                    store_.strengthen(lm.memory_id, config_.reinforce_amount);
+                    store_.touch(lm.memory_id);
+                    return int64_to_nodeid(lm.memory_id);
+                }
+            }
+        }
+
         // Deduplication check
         if (config_.enable_deduplication) {
             auto existing = find_duplicate(artha.nu, text);
@@ -691,7 +737,7 @@ public:
     //
     // Lock strategy: shared_lock for read phases (embedding, DB query, scoring),
     // then upgrade to unique_lock only for write operations (touch/strengthen).
-    std::vector<Recall> recall(const std::string& query, size_t limit = 10) {
+    std::vector<Recall> recall(const std::string& query, size_t limit = 10, bool separation_mode = false) {
         std::vector<Recall> recalls;
 
         {
@@ -795,6 +841,11 @@ public:
             if (store_.should_flush()) {
                 store_.flush_pending_updates();
             }
+        }
+
+        // Pattern separation: MMR reranking for maximally diverse results
+        if (separation_mode && recalls.size() > 1) {
+            recalls = mmr_rerank(std::move(recalls), limit, 0.3f);
         }
 
         return recalls;
@@ -1098,8 +1149,70 @@ public:
     // Lock strategy: shared_lock for read phases (embedding, DB queries, scoring,
     // lateral inhibition), then briefly upgrade to unique_lock for write phases
     // (Hebbian update, bandit state, session context, learner state).
+    // MMR (Maximal Marginal Relevance) reranking for pattern separation.
+    // Selects results that are relevant to the query but maximally diverse from each other.
+    // Uses SDR IoU for inter-result similarity (orthogonal to cosine).
+    // lambda: 0=max diversity, 1=max relevance. 0.3 = separation mode default.
+    std::vector<Recall> mmr_rerank(std::vector<Recall> candidates,
+                                    size_t k,
+                                    float lambda = 0.3f) {
+        if (candidates.size() <= 1) return candidates;
+
+        // Load SDRs for all candidates
+        std::vector<SparseVector> sdrs;
+        sdrs.reserve(candidates.size());
+        for (const auto& c : candidates) {
+            int64_t mem_id = static_cast<int64_t>(c.id.low);
+            std::string sdr_str = store_.get_sdr(mem_id);
+            sdrs.push_back(SparseVector::deserialize(sdr_str));
+        }
+
+        std::vector<Recall> selected;
+        std::vector<bool> chosen(candidates.size(), false);
+        selected.reserve(std::min(k, candidates.size()));
+
+        while (selected.size() < k && selected.size() < candidates.size()) {
+            float best_score = -1e9f;
+            size_t best_idx = 0;
+            bool found = false;
+
+            for (size_t j = 0; j < candidates.size(); j++) {
+                if (chosen[j]) continue;
+
+                float relevance = candidates[j].relevance;
+                float max_sim = 0.0f;
+
+                for (size_t si = 0; si < selected.size(); si++) {
+                    // Use SDR IoU for inter-result similarity
+                    size_t sel_orig_idx = 0;
+                    for (size_t idx = 0; idx < candidates.size(); idx++) {
+                        if (candidates[idx].id == selected[si].id) {
+                            sel_orig_idx = idx;
+                            break;
+                        }
+                    }
+                    float sim = sdrs[j].iou(sdrs[sel_orig_idx]);
+                    max_sim = std::max(max_sim, sim);
+                }
+
+                float score = lambda * relevance - (1.0f - lambda) * max_sim;
+                if (!found || score > best_score) {
+                    best_score = score;
+                    best_idx = j;
+                    found = true;
+                }
+            }
+
+            if (!found) break;
+            chosen[best_idx] = true;
+            selected.push_back(std::move(candidates[best_idx]));
+        }
+        return selected;
+    }
+
     std::vector<Recall> full_resonate(const std::string& query, size_t k = 10,
-                                        const std::vector<std::string>& exclude_kinds = {}) {
+                                        const std::vector<std::string>& exclude_kinds = {},
+                                        bool separation_mode = false) {
         std::vector<Recall> results;
         DuckDBResonanceConfig active_config;
         QueryContext context;
@@ -1279,6 +1392,21 @@ public:
                 session_context_.observe(id);
             }
 
+            // Phase 6b: Mark recalled memories as labile for reconsolidation
+            if (active_config.enable_reconsolidation && !results.empty()) {
+                auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count();
+                session_context_.prune_labile(now, active_config.labile_window_ms);
+                size_t to_mark = std::min(results.size(), active_config.max_labile_tracked);
+                for (size_t i = 0; i < to_mark; ++i) {
+                    int64_t mem_id = static_cast<int64_t>(results[i].id.low);
+                    auto emb_opt = store_.get_memory_embedding(mem_id);
+                    if (emb_opt && emb_opt->size() == EMBED_DIM) {
+                        session_context_.mark_labile(mem_id, now, Vector(std::move(*emb_opt)));
+                    }
+                }
+            }
+
             // Phase 7: Hebbian learning - strengthen triplet connections
             if (results.size() >= 2) {
                 hebbian_update_unlocked(results, active_config);
@@ -1293,6 +1421,11 @@ public:
                 }
                 learner_.record_outcome(result_ids, active_config, context);
             }
+        }
+
+        // Pattern separation: MMR reranking for maximally diverse results
+        if (separation_mode && results.size() > 1) {
+            results = mmr_rerank(std::move(results), k, 0.3f);
         }
 
         return results;

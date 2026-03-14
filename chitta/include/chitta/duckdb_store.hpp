@@ -933,6 +933,9 @@ public:
     // Update memory embedding (for re-embedding with better vectors)
     bool set_memory_embedding(int64_t id, const std::vector<float>& embedding);
 
+    // Retrieve memory embedding vector (for reconsolidation comparisons)
+    std::optional<std::vector<float>> get_memory_embedding(int64_t id);
+
     // List global memories (cross-project insights)
     std::vector<MemoryResult> list_global_memories(size_t limit = 20, const std::string& kind = "");
 
