@@ -1030,6 +1030,9 @@ bool DuckDBStore::create_schema() {
         WHERE priority_tier = 0 AND (confidence >= 0.5 OR pinned = TRUE)
     )");
 
+    // Sparse Distributed Representation for pattern matching via IoU
+    write_execute("ALTER TABLE memory ADD COLUMN IF NOT EXISTS sdr VARCHAR DEFAULT ''");
+
     // Content-addressed deduplication: hash for exact duplicate detection
     write_execute("ALTER TABLE memory ADD COLUMN IF NOT EXISTS content_hash VARCHAR DEFAULT ''");
     write_execute("CREATE INDEX IF NOT EXISTS idx_memory_content_hash ON memory(content_hash)");
@@ -2898,6 +2901,26 @@ bool DuckDBStore::update_visibility(int64_t id, RealmVisibility visibility) {
     return write_execute(sql.str());
 }
 
+void DuckDBStore::store_sdr(int64_t memory_id, const std::string& sdr_str) {
+    if (!db_) return;
+    std::ostringstream sql;
+    sql << "UPDATE memory SET sdr = '" << sdr_str << "' WHERE id = " << memory_id;
+    write_execute(sql.str());
+}
+
+std::string DuckDBStore::get_sdr(int64_t memory_id) {
+    if (!db_) return "";
+    std::ostringstream sql;
+    sql << "SELECT sdr FROM memory WHERE id = " << memory_id;
+    auto res = read_query(sql.str());
+    if (!res || res->HasError()) return "";
+    auto chunk = res->Fetch();
+    if (!chunk || chunk->size() == 0) return "";
+    auto val = chunk->GetValue(0, 0);
+    if (val.IsNull()) return "";
+    return val.GetValue<std::string>();
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Context Repository: Version Control
 // ═══════════════════════════════════════════════════════════════════════════
@@ -3167,6 +3190,56 @@ bool DuckDBStore::is_pinned(int64_t memory_id) {
     if (!chunk || chunk->size() == 0) return false;
 
     return chunk->GetValue(0, 0).GetValue<bool>();
+}
+
+std::vector<MemoryResult> DuckDBStore::sample_fast_memories(size_t n, int64_t since_ms) {
+    std::vector<MemoryResult> result;
+    if (!db_) return result;
+
+    std::ostringstream sql;
+    sql << "SELECT id, COALESCE(kind, 'episode'), COALESCE(content, ''), "
+        << "COALESCE(confidence, 0.5), created_at, accessed_at, "
+        << "COALESCE(realm, 'brahman'), COALESCE(priority_tier, 0) "
+        << "FROM memory WHERE kind IN ('episode', 'wisdom', 'belief') "
+        << "AND (content LIKE '[correction]%' OR content LIKE '[preference]%' "
+        << "OR content LIKE '[approach]%' OR content LIKE '[milestone]%' "
+        << "OR content LIKE '[gap]%' OR kind = 'episode') "
+        << "AND created_at > " << since_ms << " "
+        << "AND pinned = false "
+        << "ORDER BY random() LIMIT " << n;
+
+    auto res = read_query(sql.str());
+    if (!res) return result;
+
+    auto chunk = res->Fetch();
+    while (chunk && chunk->size() > 0) {
+        for (size_t i = 0; i < chunk->size(); i++) {
+            MemoryResult mr;
+            mr.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            mr.kind = chunk->GetValue(1, i).GetValue<std::string>();
+            mr.content = chunk->GetValue(2, i).GetValue<std::string>();
+            mr.confidence = chunk->GetValue(3, i).GetValue<float>();
+            mr.similarity = 0.0f;
+            mr.created_at = chunk->GetValue(4, i).GetValue<int64_t>();
+            mr.accessed_at = chunk->GetValue(5, i).GetValue<int64_t>();
+            mr.realm = chunk->GetValue(6, i).GetValue<std::string>();
+            mr.priority_tier = static_cast<PriorityTier>(chunk->GetValue(7, i).GetValue<int32_t>());
+            result.push_back(std::move(mr));
+        }
+        chunk = res->Fetch();
+    }
+
+    return result;
+}
+
+void DuckDBStore::accelerate_decay(int64_t id, float factor) {
+    if (!db_) return;
+
+    std::ostringstream sql;
+    sql << "UPDATE memory SET decay_rate = LEAST(1.0, decay_rate * "
+        << factor << ") WHERE id = " << id;
+
+    write_execute(sql.str());
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
