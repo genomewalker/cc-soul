@@ -3502,7 +3502,9 @@ static const std::unordered_map<std::string, std::vector<std::string>> ASPECT_TO
 std::vector<MemoryResult> DuckDBStore::list_by_aspect(
     const std::string& aspect,
     size_t limit,
-    float min_confidence
+    float min_confidence,
+    const std::string& realm,
+    bool include_global
 ) {
     std::vector<MemoryResult> results;
     if (!db_) return results;
@@ -3542,8 +3544,18 @@ std::vector<MemoryResult> DuckDBStore::list_by_aspect(
         sql << " OR (kind = 'episode' AND content LIKE '[analysis:%')";
     }
 
-    sql << ") AND confidence >= " << min_confidence << " "
-        << "ORDER BY confidence DESC, created_at DESC "
+    sql << ") AND confidence >= " << min_confidence;
+
+    // Add realm filtering if specified
+    if (!realm.empty()) {
+        if (include_global) {
+            sql << " AND (realm = '" << realm << "' OR visibility >= 2)";
+        } else {
+            sql << " AND realm = '" << realm << "'";
+        }
+    }
+
+    sql << " ORDER BY confidence DESC, created_at DESC "
         << "LIMIT " << limit;
 
     auto result = read_query(sql.str());
