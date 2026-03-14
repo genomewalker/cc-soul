@@ -279,7 +279,8 @@ private:
                     {"min_confidence", {{"type", "number"}, {"description", "Minimum confidence threshold (default: 0)"}}},
                     {"tag", {{"type", "string"}, {"description", "Filter by tag"}}},
                     {"realm", {{"type", "string"}, {"description", "Filter by realm (empty = all realms)"}}},
-                    {"include_global", {{"type", "boolean"}, {"description", "Include global memories (default: true)"}}}
+                    {"include_global", {{"type", "boolean"}, {"description", "Include global memories (default: true)"}}},
+                    {"separation_mode", {{"type", "boolean"}, {"description", "Return maximally diverse results via MMR reranking (pattern separation, default: false)"}}}
                 }},
                 {"required", {"query"}}
             }}
@@ -637,7 +638,8 @@ private:
                     {"realm", {{"type", "string"}, {"description", "Filter by realm (e.g., 'project:my-project')"}}},
                     {"include_global", {{"type", "boolean"}, {"description", "Include global memories (default true)"}}},
                     {"exclude_kinds", {{"type", "array"}, {"items", {{"type", "string"}}}, {"description", "Memory kinds to exclude from results"}}},
-                    {"partnership_only", {{"type", "boolean"}, {"description", "Exclude code intel (symbol, projectessence, modulestate, patternstate)"}}}
+                    {"partnership_only", {{"type", "boolean"}, {"description", "Exclude code intel (symbol, projectessence, modulestate, patternstate)"}}},
+                    {"separation_mode", {{"type", "boolean"}, {"description", "Return maximally diverse results via MMR reranking (pattern separation, default: false)"}}}
                 }},
                 {"required", {"query"}}
             }}
@@ -2314,7 +2316,8 @@ private:
                     {"limit", {{"type", "integer"}, {"description", "Max results (default: 20)"}}},
                     {"expand_top", {{"type", "integer"}, {"description", "Auto-expand top N results to full context: SSL→episode→turns (default: 2, 0=disable)"}}},
                     {"realm", {{"type", "string"}, {"description", "Filter by realm (empty = all realms)"}}},
-                    {"include_global", {{"type", "boolean"}, {"description", "Include global memories (default: true)"}}}
+                    {"include_global", {{"type", "boolean"}, {"description", "Include global memories (default: true)"}}},
+                    {"separation_mode", {{"type", "boolean"}, {"description", "Return maximally diverse results via MMR reranking (pattern separation, default: false)"}}}
                 }},
                 {"required", {"query"}}
             }}

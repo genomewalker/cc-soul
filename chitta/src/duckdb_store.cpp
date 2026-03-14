@@ -3514,6 +3514,59 @@ bool DuckDBStore::set_memory_embedding(int64_t id, const std::vector<float>& emb
     return write_execute(sql.str());
 }
 
+std::optional<std::vector<float>> DuckDBStore::get_memory_embedding(int64_t id) {
+    if (!db_) return std::nullopt;
+
+    // Try embeddings DB first (HNSW index store)
+    if (emb_conn_) {
+        std::lock_guard<std::mutex> lock(emb_mutex_);
+        try {
+            std::ostringstream sql;
+            sql << "SELECT embedding FROM memory_embeddings WHERE memory_id = " << id;
+            auto result = emb_conn_->Query(sql.str());
+            if (result && !result->HasError()) {
+                auto chunk = result->Fetch();
+                if (chunk && chunk->size() > 0) {
+                    auto emb_val = chunk->GetValue(0, 0);
+                    if (!emb_val.IsNull()) {
+                        auto emb_list = duckdb::ListValue::GetChildren(emb_val);
+                        std::vector<float> emb;
+                        emb.reserve(emb_list.size());
+                        for (const auto& v : emb_list) {
+                            emb.push_back(v.GetValue<float>());
+                        }
+                        return emb;
+                    }
+                }
+            }
+        } catch (const std::exception&) {
+            // Fall through to main DB
+        }
+    }
+
+    // Fallback: main DB embedding column
+    std::ostringstream sql;
+    sql << "SELECT embedding FROM memory WHERE id = " << id
+        << " AND embedding IS NOT NULL";
+    auto result = read_query(sql.str());
+    if (result && !result->HasError()) {
+        auto chunk = result->Fetch();
+        if (chunk && chunk->size() > 0) {
+            auto emb_val = chunk->GetValue(0, 0);
+            if (!emb_val.IsNull()) {
+                auto emb_list = duckdb::ListValue::GetChildren(emb_val);
+                std::vector<float> emb;
+                emb.reserve(emb_list.size());
+                for (const auto& v : emb_list) {
+                    emb.push_back(v.GetValue<float>());
+                }
+                return emb;
+            }
+        }
+    }
+    return std::nullopt;
+}
+
 std::vector<MemoryResult> DuckDBStore::list_global_memories(size_t limit, const std::string& kind) {
     std::vector<MemoryResult> results;
     if (!db_) return results;
