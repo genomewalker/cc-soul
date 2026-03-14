@@ -280,7 +280,8 @@ private:
                     {"tag", {{"type", "string"}, {"description", "Filter by tag"}}},
                     {"realm", {{"type", "string"}, {"description", "Filter by realm (empty = all realms)"}}},
                     {"include_global", {{"type", "boolean"}, {"description", "Include global memories (default: true)"}}},
-                    {"separation_mode", {{"type", "boolean"}, {"description", "Return maximally diverse results via MMR reranking (pattern separation, default: false)"}}}
+                    {"separation_mode", {{"type", "boolean"}, {"description", "Return maximally diverse results via MMR reranking (pattern separation, default: false)"}}},
+                    {"gwt_mode", {{"type", "boolean"}, {"description", "Global Workspace Theory mode: broad search → salience competition → focused expansion from winner (default: false)"}}}
                 }},
                 {"required", {"query"}}
             }}
@@ -2317,7 +2318,8 @@ private:
                     {"expand_top", {{"type", "integer"}, {"description", "Auto-expand top N results to full context: SSL→episode→turns (default: 2, 0=disable)"}}},
                     {"realm", {{"type", "string"}, {"description", "Filter by realm (empty = all realms)"}}},
                     {"include_global", {{"type", "boolean"}, {"description", "Include global memories (default: true)"}}},
-                    {"separation_mode", {{"type", "boolean"}, {"description", "Return maximally diverse results via MMR reranking (pattern separation, default: false)"}}}
+                    {"separation_mode", {{"type", "boolean"}, {"description", "Return maximally diverse results via MMR reranking (pattern separation, default: false)"}}},
+                    {"gwt_mode", {{"type", "boolean"}, {"description", "Global Workspace Theory mode: broad search → salience competition → focused expansion from winner. Bypasses intent classification (default: false)"}}}
                 }},
                 {"required", {"query"}}
             }}

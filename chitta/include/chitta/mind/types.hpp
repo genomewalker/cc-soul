@@ -84,6 +84,10 @@ struct Recall {
     QuantizedVector qnu;
     bool has_embedding = false;
 
+    // GWT: Global Workspace Theory broadcast fields
+    bool broadcast = false;   // This memory won the global workspace competition
+    float salience = 0.0f;    // Computed salience score (relevance × priority × recency)
+
     // Phase 7: Conflict info from TruthMaintenance
     bool has_conflict = false;
     std::vector<NodeId> conflicting_nodes;

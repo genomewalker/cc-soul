@@ -1432,6 +1432,108 @@ public:
     }
 
     // ═══════════════════════════════════════════════════════════════════════
+    // GLOBAL WORKSPACE THEORY (GWT) RETRIEVAL
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Two-phase GWT recall: broad retrieval → salience competition → focused expansion
+    // Phase 1: Broad candidate retrieval via full_resonate (2x k)
+    // Phase 2: Salience scoring (relevance × priority × recency) → winner-take-all
+    // Phase 3: One-hop graph expansion from winner for focused context
+    std::vector<Recall> gwt_recall(const std::string& query, size_t k = 10,
+                                    const std::string& realm = "",
+                                    bool separation_mode = false) {
+        // Phase 1: Broad retrieval (2x candidates)
+        auto candidates = full_resonate(query, k * 2, {}, separation_mode);
+        if (candidates.empty()) return {};
+
+        // Phase 2: Salience competition — score each candidate
+        auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+
+        for (auto& c : candidates) {
+            int64_t mem_id = static_cast<int64_t>(c.id.low);
+            float priority_weight = 1.0f;
+            float recency = 0.5f;
+
+            auto mem = store_.get_memory(mem_id);
+            if (mem) {
+                // Priority boost: Background=1.0, Notable=1.3, Critical=1.6
+                priority_weight = 1.0f + 0.3f * static_cast<float>(static_cast<uint8_t>(mem->priority_tier));
+                // Recency decay: half-life of 7 days
+                if (mem->accessed_at > 0) {
+                    float age_days = static_cast<float>(now - mem->accessed_at) / (86400.0f * 1000.0f);
+                    recency = std::exp(-age_days / 7.0f);
+                }
+            }
+
+            c.salience = c.relevance * priority_weight * (0.5f + 0.5f * recency);
+        }
+
+        // Winner-take-all: highest salience wins the broadcast
+        auto winner_it = std::max_element(candidates.begin(), candidates.end(),
+                                          [](const Recall& a, const Recall& b) {
+                                              return a.salience < b.salience;
+                                          });
+        winner_it->broadcast = true;
+
+        // Phase 3: Focused one-hop expansion from winner via spreading activation
+        {
+            std::shared_lock lock(mutex_);
+
+            // Extract terms from winner's text for graph traversal
+            auto winner_terms = extract_terms_unlocked(winner_it->text);
+
+            // Build activation map seeded from winner
+            std::unordered_map<int64_t, float> expansion_activation;
+            int64_t winner_mem_id = static_cast<int64_t>(winner_it->id.low);
+            expansion_activation[winner_mem_id] = 1.0f;
+
+            // One-hop config: single hop, strong signal
+            DuckDBResonanceConfig one_hop_config = resonance_config_;
+            one_hop_config.max_hops = 1;
+            one_hop_config.spread_strength = 0.8f;
+            one_hop_config.spread_decay = 0.6f;
+
+            spread_activation_unlocked(winner_terms, expansion_activation, one_hop_config);
+
+            // Collect existing candidate IDs for dedup
+            std::unordered_set<int64_t> seen;
+            for (const auto& c : candidates) {
+                seen.insert(static_cast<int64_t>(c.id.low));
+            }
+
+            // Add activated neighbors not already in candidates
+            for (const auto& [id, act] : expansion_activation) {
+                if (seen.count(id) || act < 0.1f) continue;
+
+                auto mem_opt = store_.get_memory(id);
+                if (!mem_opt) continue;
+
+                Recall recall;
+                recall.id = int64_to_nodeid(id);
+                recall.text = mem_opt->content;
+                recall.type = string_to_node_type(mem_opt->kind);
+                recall.confidence = Confidence(mem_opt->confidence);
+                recall.relevance = act * 0.5f;  // Expansion results get dampened relevance
+                recall.salience = recall.relevance;
+                candidates.push_back(std::move(recall));
+                seen.insert(id);
+            }
+        }
+
+        // Sort: broadcast winner first, then by salience
+        std::sort(candidates.begin(), candidates.end(),
+                  [](const Recall& a, const Recall& b) {
+                      if (a.broadcast != b.broadcast) return a.broadcast > b.broadcast;
+                      return a.salience > b.salience;
+                  });
+
+        // Return top k
+        if (candidates.size() > k) candidates.resize(k);
+        return candidates;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     // xMemory THEME-BASED RETRIEVAL
     // ═══════════════════════════════════════════════════════════════════════
 
