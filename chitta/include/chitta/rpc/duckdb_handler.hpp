@@ -2697,21 +2697,6 @@ private:
         handlers_["expand_query"] = [this](const json& p) { return tool_expand_query(p); };
 
         tools_.push_back({
-            {"name", "smart_recall"},
-            {"description", "Intent-aware memory retrieval. Classifies query type (temporal, entity, relational) and routes to optimal retrieval path. Returns structured results with date candidates for temporal queries."},
-            {"inputSchema", {
-                {"type", "object"},
-                {"properties", {
-                    {"query", {{"type", "string"}, {"description", "Natural language query"}}},
-                    {"limit", {{"type", "integer"}, {"description", "Max results (default: 10)"}}},
-                    {"realm", {{"type", "string"}, {"description", "Filter by realm"}}}
-                }},
-                {"required", {"query"}}
-            }}
-        });
-        handlers_["smart_recall"] = [this](const json& p) { return tool_smart_recall(p); };
-
-        tools_.push_back({
             {"name", "get_entities"},
             {"description", "Get tracked entities (user, assistant, projects, concepts) with salience scores."},
             {"inputSchema", {
@@ -3500,46 +3485,6 @@ private:
         return exact[0];
     }
 
-    // ========================================================================
-    // Smart Context - Unified agentic search combining all search capabilities
-    // ========================================================================
-
-    // Essential memory tool implementations
-
-    // Maintenance tool implementations
-
-    // Import/Export tool implementations
-
-    // Realm tool implementations
-
-    // Ledger tool implementations
-
-    // Long-running task tools
-
-    // Unified checkpoint - consolidates ledger + task_event
-
-    // Suggestion tracking (loop closure)
-
-    // Memory consolidation
-
-    // Meta-cognition (self-reflection)
-
-    // Curiosity (knowledge gaps)
-
-    // Transcript tools
-
-    // ========================================================================
-    // Anticipation: context→action pattern learning
-    // ========================================================================
-
-    // ========================================================================
-    // Habit Formation: repeated patterns that strengthen
-    // ========================================================================
-
-    // ========================================================================
-    // Background Processing: daemon-level tasks
-    // ========================================================================
-
     // Helpers
     json tool_list() {
         json filtered = json::array();
@@ -3593,30 +3538,6 @@ private:
     }
 
     // ========================================================================
-    // Profile Tool Implementations
-    // ========================================================================
-
-    // ========================================================================
-    // Goal Tool Implementations
-    // ========================================================================
-
-    // ========================================================================
-    // Calibration Tool Implementations
-    // ========================================================================
-
-    // ========================================================================
-    // Hygiene Tool Implementations
-    // ========================================================================
-
-    // ========================================================================
-    // xMemory Theme System Tool Implementations
-    // ========================================================================
-
-    // ========================================================================
-    // Cross-Project Learning: insight promotion across realms
-    // ========================================================================
-
-    // ========================================================================
     // Aspect-based memory access
     // ========================================================================
 
@@ -3638,35 +3559,11 @@ private:
         {"analyses", {"analysis"}}
     };
 
-    // ========================================================================
-    // Memory Index: Fast pre-retrieval scanning (ClawVault-inspired)
-    // ========================================================================
-
-    // ========================================================================
-    // Memory Type Taxonomy (formalized aspect system)
-    // ========================================================================
-
     // Valid memory types (normalized from aspect system)
     static constexpr std::array<const char*, 11> VALID_MEMORY_TYPES = {
         "decision", "preference", "correction", "insight", "milestone",
         "approach", "habit", "belief", "gap", "wisdom", "episode"
     };
-
-    // ========================================================================
-    // Smart Recall: unified query intent classification and routing
-    // ========================================================================
-
-    // ========================================================================
-    // SSL conversion tool
-    // ========================================================================
-
-    // ========================================================================
-    // Narrative and Anticipation Tools
-    // ========================================================================
-
-    // ========================================================================
-    // Cross-Session Messaging Tool Implementations
-    // ========================================================================
 
     // Helper: get parent PID from /proc (Linux)
     int64_t get_parent_pid(int64_t pid) {
