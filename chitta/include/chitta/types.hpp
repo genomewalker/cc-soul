@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cinttypes>
 #include <cstdint>
+#include <sstream>
 #include <string>
 #include <vector>
 #include <random>
@@ -171,6 +172,61 @@ inline float cosine_similarity(const std::vector<float>& a, const std::vector<fl
     float denom = std::sqrt(norm_a) * std::sqrt(norm_b);
     return denom > 0.0f ? dot / denom : 0.0f;
 }
+
+// Sparse Distributed Representation (SDR)
+// Stores indices of the top-k active dimensions from a dense embedding.
+// Similarity via intersection-over-union (IoU) is more orthogonal than cosine.
+struct SparseVector {
+    std::vector<uint16_t> active; // sorted active dimension indices
+
+    static SparseVector from_dense(const std::vector<float>& dense, float k_pct = 0.05f) {
+        size_t k = std::max(size_t(1), size_t(dense.size() * k_pct));
+        std::vector<std::pair<float, uint16_t>> indexed;
+        indexed.reserve(dense.size());
+        for (size_t i = 0; i < dense.size(); i++)
+            indexed.push_back({std::abs(dense[i]), static_cast<uint16_t>(i)});
+        std::partial_sort(indexed.begin(), indexed.begin() + k, indexed.end(),
+                          [](const auto& a, const auto& b) { return a.first > b.first; });
+        SparseVector sv;
+        sv.active.reserve(k);
+        for (size_t i = 0; i < k; i++) sv.active.push_back(indexed[i].second);
+        std::sort(sv.active.begin(), sv.active.end());
+        return sv;
+    }
+
+    float iou(const SparseVector& other) const {
+        if (active.empty() && other.active.empty()) return 1.0f;
+        size_t inter = 0, i = 0, j = 0;
+        while (i < active.size() && j < other.active.size()) {
+            if (active[i] == other.active[j]) { inter++; i++; j++; }
+            else if (active[i] < other.active[j]) i++;
+            else j++;
+        }
+        size_t union_sz = active.size() + other.active.size() - inter;
+        return union_sz ? static_cast<float>(inter) / union_sz : 0.0f;
+    }
+
+    std::string serialize() const {
+        std::string s;
+        for (size_t i = 0; i < active.size(); i++) {
+            if (i) s += ',';
+            s += std::to_string(active[i]);
+        }
+        return s;
+    }
+
+    static SparseVector deserialize(const std::string& s) {
+        SparseVector sv;
+        if (s.empty()) return sv;
+        std::istringstream ss(s);
+        std::string tok;
+        while (std::getline(ss, tok, ','))
+            if (!tok.empty()) sv.active.push_back(static_cast<uint16_t>(std::stoi(tok)));
+        return sv;
+    }
+
+    bool empty() const { return active.empty(); }
+};
 
 // Confidence: not a float, a distribution
 // Distinguishes "90% sure, very confident" from

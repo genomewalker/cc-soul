@@ -76,6 +76,13 @@ struct DuckDBResonanceConfig {
     // Code intelligence integration
     float code_symbol_weight = 0.5f;    // Relevance weight for matching code symbols
     size_t max_code_symbols = 5;        // Maximum code symbols to include in results
+
+    // Surprise-gated encoding (Titans-style)
+    bool enable_surprise_gating = true;
+    float surprise_centroid_alpha = 0.1f;
+    float surprise_low_threshold = 0.15f;
+    float surprise_high_threshold = 0.5f;
+    float surprise_confidence_boost = 0.3f;
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -447,6 +454,29 @@ struct DuckDBSessionContext {
         recent_observations_order.clear();
         recent_observations_set.clear();
         active_topics.clear();
+        centroid_initialized = false;
+        centroid_observations = 0;
+    }
+
+    Vector context_centroid;
+    size_t centroid_observations = 0;
+    bool centroid_initialized = false;
+
+    void update_centroid(const Vector& emb, float alpha = 0.1f) {
+        if (!centroid_initialized) {
+            context_centroid = emb;
+            centroid_initialized = true;
+        } else {
+            for (size_t i = 0; i < emb.size(); i++)
+                context_centroid[i] = alpha * emb[i] + (1.0f - alpha) * context_centroid[i];
+        }
+        centroid_observations++;
+    }
+
+    float compute_surprise(const Vector& emb) const {
+        if (!centroid_initialized || centroid_observations < 3) return 0.5f;
+        float cosine = context_centroid.cosine(emb);
+        return 1.0f - std::max(-1.0f, std::min(1.0f, cosine));
     }
 };
 
@@ -609,6 +639,16 @@ public:
 
         Artha artha = embedder_.transform(text);
 
+        // Surprise-gated encoding
+        if (resonance_config_.enable_surprise_gating) {
+            float surprise = session_context_.compute_surprise(artha.nu);
+            float t = std::clamp((surprise - resonance_config_.surprise_low_threshold) /
+                                 (resonance_config_.surprise_high_threshold - resonance_config_.surprise_low_threshold),
+                                 0.0f, 1.0f);
+            confidence = std::min(1.0f, confidence + t * resonance_config_.surprise_confidence_boost);
+            session_context_.update_centroid(artha.nu, resonance_config_.surprise_centroid_alpha);
+        }
+
         // Deduplication check
         if (config_.enable_deduplication) {
             auto existing = find_duplicate(artha.nu, text);
@@ -625,6 +665,12 @@ public:
         int64_t id = store_.remember(text, kind, artha.nu.data, confidence, decay_rate, realm, visibility);
         if (id < 0) {
             return NodeId{};
+        }
+
+        // Generate and store SDR for pattern matching
+        if (!artha.nu.data.empty()) {
+            auto sdr = SparseVector::from_dense(artha.nu.data);
+            store_.store_sdr(id, sdr.serialize());
         }
 
         return int64_to_nodeid(id);
