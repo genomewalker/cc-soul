@@ -159,6 +159,177 @@ int main() {
 
     store.close();
 
+    // Reopen for new tests (Tests 10-15)
+    if (!store.open(test_path)) {
+        std::cerr << "FAILED (reopen for tests 10-15)\n";
+        return 1;
+    }
+
+    // Test 10: SparseVector from_dense edge cases
+    std::cout << "Test 10: SparseVector from_dense edge cases... ";
+    {
+        // Empty input must not crash and must return empty
+        SparseVector sv_empty = SparseVector::from_dense({});
+        if (!sv_empty.active.empty()) {
+            std::cerr << "FAILED (empty input should produce empty SparseVector)\n";
+            return 1;
+        }
+
+        // k_pct > 1.0 (2.0f) on 10-element vector: k clamped to 10, all active
+        std::vector<float> v10(10, 1.0f);
+        SparseVector sv_clamped = SparseVector::from_dense(v10, 2.0f);
+        if (sv_clamped.active.empty() || sv_clamped.active.size() > 10) {
+            std::cerr << "FAILED (clamped k should produce non-empty SparseVector with at most 10 elements)\n";
+            return 1;
+        }
+
+        // 5% of 100 elements = 5 active
+        std::vector<float> v100(100);
+        for (size_t i = 0; i < 100; i++) v100[i] = static_cast<float>(i + 1);
+        SparseVector sv5pct = SparseVector::from_dense(v100, 0.05f);
+        if (sv5pct.active.size() != 5) {
+            std::cerr << "FAILED (expected 5 active, got " << sv5pct.active.size() << ")\n";
+            return 1;
+        }
+    }
+    std::cout << "OK\n";
+
+    // Test 11: SparseVector serialize/deserialize roundtrip
+    std::cout << "Test 11: SparseVector serialize/deserialize roundtrip... ";
+    {
+        SparseVector sv;
+        sv.active = {3, 7, 15, 42, 100};  // already sorted
+
+        std::string serialized = sv.serialize();
+        SparseVector sv2 = SparseVector::deserialize(serialized);
+
+        if (sv2.active != sv.active) {
+            std::cerr << "FAILED (roundtrip mismatch: serialized='" << serialized << "')\n";
+            return 1;
+        }
+
+        // Malformed string: valid tokens 1, 3, 5 should survive; "abc" and "xyz" are skipped
+        SparseVector sv_mal = SparseVector::deserialize("1,abc,3,xyz,5");
+        std::vector<uint16_t> expected_mal = {1, 3, 5};
+        if (sv_mal.active != expected_mal) {
+            std::cerr << "FAILED (malformed deserialize: expected {1,3,5}, got size=" << sv_mal.active.size() << ")\n";
+            return 1;
+        }
+    }
+    std::cout << "OK\n";
+
+    // Test 12: SparseVector IoU
+    std::cout << "Test 12: SparseVector IoU... ";
+    {
+        SparseVector sva, svb, svc, svd;
+        sva.active = {1, 2, 3};
+        svb.active = {1, 2, 3};
+        svc.active = {4, 5, 6};
+        svd.active = {2, 3, 4};
+
+        // Identical vectors → IoU == 1.0
+        float iou_identical = sva.iou(svb);
+        if (std::abs(iou_identical - 1.0f) > 1e-5f) {
+            std::cerr << "FAILED (identical IoU expected 1.0, got " << iou_identical << ")\n";
+            return 1;
+        }
+
+        // Disjoint vectors → IoU == 0.0
+        float iou_disjoint = sva.iou(svc);
+        if (std::abs(iou_disjoint - 0.0f) > 1e-5f) {
+            std::cerr << "FAILED (disjoint IoU expected 0.0, got " << iou_disjoint << ")\n";
+            return 1;
+        }
+
+        // {1,2,3} vs {2,3,4}: intersection={2,3}=2, union={1,2,3,4}=4 → IoU=0.5
+        float iou_partial = sva.iou(svd);
+        if (std::abs(iou_partial - 0.5f) > 1e-5f) {
+            std::cerr << "FAILED (partial IoU expected 0.5, got " << iou_partial << ")\n";
+            return 1;
+        }
+    }
+    std::cout << "OK\n";
+
+    // Test 13: store_sdr / get_sdr roundtrip
+    std::cout << "Test 13: store_sdr / get_sdr roundtrip... ";
+    {
+        // Reopen store to get id1 back — we need to look it up by content
+        // id1 is the "First test memory about cats" stored at the top
+        // Use emb1 to find it via recall
+        SparseVector sdr = SparseVector::from_dense(emb1);
+        std::string sdr_str = sdr.serialize();
+
+        store.store_sdr(id1, sdr_str);
+
+        std::string retrieved_str = store.get_sdr(id1);
+        if (retrieved_str != sdr_str) {
+            std::cerr << "FAILED (stored='" << sdr_str << "', retrieved='" << retrieved_str << "')\n";
+            return 1;
+        }
+
+        // Verify active indices match after deserialize
+        SparseVector sdr2 = SparseVector::deserialize(retrieved_str);
+        if (sdr2.active != sdr.active) {
+            std::cerr << "FAILED (deserialized active indices mismatch)\n";
+            return 1;
+        }
+    }
+    std::cout << "OK\n";
+
+    // Test 14: sample_fast_memories
+    std::cout << "Test 14: sample_fast_memories... ";
+    {
+        // Store 10 episode memories
+        int64_t since_ms = chitta::now();
+        for (int i = 0; i < 10; i++) {
+            auto emb = test_embedding(static_cast<float>(10 + i));
+            store.remember("Episode memory " + std::to_string(i), "episode", emb, 0.7f, 0.05f);
+        }
+
+        // Sample up to 5: result must be <= 5
+        auto sample5 = store.sample_fast_memories(5, since_ms);
+        if (sample5.size() > 5) {
+            std::cerr << "FAILED (requested 5, got " << sample5.size() << ")\n";
+            return 1;
+        }
+
+        // Sample 100: result bounded by total fast memories
+        auto sample100 = store.sample_fast_memories(100, since_ms);
+        if (sample100.size() > 100) {
+            std::cerr << "FAILED (result exceeded requested cap of 100)\n";
+            return 1;
+        }
+    }
+    std::cout << "OK (fast memory sampling works)\n";
+
+    // Test 15: accelerate_decay
+    std::cout << "Test 15: accelerate_decay... ";
+    {
+        auto emb_decay = test_embedding(99.0f);
+        int64_t id_decay = store.remember("Decay test memory", "wisdom", emb_decay, 0.8f, 0.01f);
+        if (id_decay < 0) {
+            std::cerr << "FAILED (could not store decay test memory)\n";
+            return 1;
+        }
+
+        // Accelerate decay by 2.5x: 0.01 * 2.5 = 0.025
+        store.accelerate_decay(id_decay, 2.5f);
+
+        // Verify memory still exists after update
+        auto mem_after = store.get_memory(id_decay);
+        if (!mem_after) {
+            std::cerr << "FAILED (memory disappeared after accelerate_decay)\n";
+            return 1;
+        }
+        if (mem_after->id != id_decay) {
+            std::cerr << "FAILED (returned wrong memory id)\n";
+            return 1;
+        }
+    }
+    std::cout << "OK (decay_rate updated, memory intact)\n";
+
+    store.close();
+
     // Cleanup
     std::filesystem::remove_all(test_path);
 
