@@ -1030,6 +1030,9 @@ bool DuckDBStore::create_schema() {
         WHERE priority_tier = 0 AND (confidence >= 0.5 OR pinned = TRUE)
     )");
 
+    // Sparse Distributed Representation for pattern matching via IoU
+    write_execute("ALTER TABLE memory ADD COLUMN IF NOT EXISTS sdr VARCHAR DEFAULT ''");
+
     // Content-addressed deduplication: hash for exact duplicate detection
     write_execute("ALTER TABLE memory ADD COLUMN IF NOT EXISTS content_hash VARCHAR DEFAULT ''");
     write_execute("CREATE INDEX IF NOT EXISTS idx_memory_content_hash ON memory(content_hash)");
@@ -2898,6 +2901,33 @@ bool DuckDBStore::update_visibility(int64_t id, RealmVisibility visibility) {
     return write_execute(sql.str());
 }
 
+void DuckDBStore::store_sdr(int64_t memory_id, const std::string& sdr_str) {
+    if (!db_) return;
+    // Escape single quotes to prevent SQL injection (replace ' with '')
+    std::string escaped;
+    escaped.reserve(sdr_str.size());
+    for (char c : sdr_str) {
+        if (c == '\'') escaped += "''";
+        else escaped += c;
+    }
+    std::ostringstream sql;
+    sql << "UPDATE memory SET sdr = '" << escaped << "' WHERE id = " << memory_id;
+    write_execute(sql.str());
+}
+
+std::string DuckDBStore::get_sdr(int64_t memory_id) {
+    if (!db_) return "";
+    std::ostringstream sql;
+    sql << "SELECT sdr FROM memory WHERE id = " << memory_id;
+    auto res = read_query(sql.str());
+    if (!res || res->HasError()) return "";
+    auto chunk = res->Fetch();
+    if (!chunk || chunk->size() == 0) return "";
+    auto val = chunk->GetValue(0, 0);
+    if (val.IsNull()) return "";
+    return val.GetValue<std::string>();
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Context Repository: Version Control
 // ═══════════════════════════════════════════════════════════════════════════
@@ -3167,6 +3197,56 @@ bool DuckDBStore::is_pinned(int64_t memory_id) {
     if (!chunk || chunk->size() == 0) return false;
 
     return chunk->GetValue(0, 0).GetValue<bool>();
+}
+
+std::vector<MemoryResult> DuckDBStore::sample_fast_memories(size_t n, int64_t since_ms) {
+    std::vector<MemoryResult> result;
+    if (!db_) return result;
+
+    std::ostringstream sql;
+    sql << "SELECT id, COALESCE(kind, 'episode'), COALESCE(content, ''), "
+        << "COALESCE(confidence, 0.5), created_at, accessed_at, "
+        << "COALESCE(realm, 'brahman'), COALESCE(priority_tier, 0) "
+        << "FROM memory WHERE kind IN ('episode', 'wisdom', 'belief') "
+        << "AND (content LIKE '[correction]%' OR content LIKE '[preference]%' "
+        << "OR content LIKE '[approach]%' OR content LIKE '[milestone]%' "
+        << "OR content LIKE '[gap]%' OR kind = 'episode') "
+        << "AND created_at > " << since_ms << " "
+        << "AND pinned = false "
+        << "USING SAMPLE " << n << " ROWS";
+
+    auto res = read_query(sql.str());
+    if (!res) return result;
+
+    auto chunk = res->Fetch();
+    while (chunk && chunk->size() > 0) {
+        for (size_t i = 0; i < chunk->size(); i++) {
+            MemoryResult mr;
+            mr.id = chunk->GetValue(0, i).GetValue<int64_t>();
+            mr.kind = chunk->GetValue(1, i).GetValue<std::string>();
+            mr.content = chunk->GetValue(2, i).GetValue<std::string>();
+            mr.confidence = chunk->GetValue(3, i).GetValue<float>();
+            mr.similarity = 0.0f;
+            mr.created_at = chunk->GetValue(4, i).GetValue<int64_t>();
+            mr.accessed_at = chunk->GetValue(5, i).GetValue<int64_t>();
+            mr.realm = chunk->GetValue(6, i).GetValue<std::string>();
+            mr.priority_tier = static_cast<PriorityTier>(chunk->GetValue(7, i).GetValue<int32_t>());
+            result.push_back(std::move(mr));
+        }
+        chunk = res->Fetch();
+    }
+
+    return result;
+}
+
+void DuckDBStore::accelerate_decay(int64_t id, float factor) {
+    if (!db_) return;
+
+    std::ostringstream sql;
+    sql << "UPDATE memory SET decay_rate = LEAST(1.0, decay_rate * "
+        << factor << ") WHERE id = " << id;
+
+    write_execute(sql.str());
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -3439,6 +3519,59 @@ bool DuckDBStore::set_memory_embedding(int64_t id, const std::vector<float>& emb
         << ", accessed_at = " << now() << " WHERE id = " << id;
 
     return write_execute(sql.str());
+}
+
+std::optional<std::vector<float>> DuckDBStore::get_memory_embedding(int64_t id) {
+    if (!db_) return std::nullopt;
+
+    // Try embeddings DB first (HNSW index store)
+    if (emb_conn_) {
+        std::lock_guard<std::mutex> lock(emb_mutex_);
+        try {
+            std::ostringstream sql;
+            sql << "SELECT embedding FROM memory_embeddings WHERE memory_id = " << id;
+            auto result = emb_conn_->Query(sql.str());
+            if (result && !result->HasError()) {
+                auto chunk = result->Fetch();
+                if (chunk && chunk->size() > 0) {
+                    auto emb_val = chunk->GetValue(0, 0);
+                    if (!emb_val.IsNull()) {
+                        auto emb_list = duckdb::ListValue::GetChildren(emb_val);
+                        std::vector<float> emb;
+                        emb.reserve(emb_list.size());
+                        for (const auto& v : emb_list) {
+                            emb.push_back(v.GetValue<float>());
+                        }
+                        return emb;
+                    }
+                }
+            }
+        } catch (const std::exception&) {
+            // Fall through to main DB
+        }
+    }
+
+    // Fallback: main DB embedding column
+    std::ostringstream sql;
+    sql << "SELECT embedding FROM memory WHERE id = " << id
+        << " AND embedding IS NOT NULL";
+    auto result = read_query(sql.str());
+    if (result && !result->HasError()) {
+        auto chunk = result->Fetch();
+        if (chunk && chunk->size() > 0) {
+            auto emb_val = chunk->GetValue(0, 0);
+            if (!emb_val.IsNull()) {
+                auto emb_list = duckdb::ListValue::GetChildren(emb_val);
+                std::vector<float> emb;
+                emb.reserve(emb_list.size());
+                for (const auto& v : emb_list) {
+                    emb.push_back(v.GetValue<float>());
+                }
+                return emb;
+            }
+        }
+    }
+    return std::nullopt;
 }
 
 std::vector<MemoryResult> DuckDBStore::list_global_memories(size_t limit, const std::string& kind) {
