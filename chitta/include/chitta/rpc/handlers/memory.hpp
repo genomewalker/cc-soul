@@ -112,10 +112,16 @@
         std::string tag = params.value("tag", "");
         std::string realm = params.value("realm", "");
         bool include_global = params.value("include_global", true);
+        bool separation_mode = params.value("separation_mode", false);
+
+        bool gwt_mode = params.value("gwt_mode", false);
 
         // If tag specified, use tag-filtered recall for proper scoping
         std::vector<Recall> results;
-        if (!tag.empty()) {
+        if (gwt_mode && tag.empty()) {
+            // GWT mode: broad retrieval → salience competition → focused expansion
+            results = mind_->gwt_recall(query, limit, realm, separation_mode);
+        } else if (!tag.empty()) {
             // Get embedding for query
             if (!mind_->embedder_ready()) {
                 return DuckDBToolResult::error("Embedder not ready");
@@ -139,7 +145,7 @@
         } else {
             // Use normal recall
             size_t fetch_limit = !realm.empty() ? limit * 3 : limit;
-            results = mind_->recall(query, fetch_limit);
+            results = mind_->recall(query, fetch_limit, separation_mode);
         }
 
         std::ostringstream ss;
@@ -176,6 +182,12 @@
                 {"type", type_name},
                 {"text", r.text}
             };
+
+            // GWT fields (only present when gwt_mode is active)
+            if (gwt_mode) {
+                result_entry["salience"] = r.salience;
+                result_entry["broadcast"] = r.broadcast;
+            }
 
             // Include realm info in results and apply confidence filter
             auto mem = mind_->store().get_memory(mem_id);
@@ -224,7 +236,17 @@
             }
         } catch (...) {}
 
-        return DuckDBToolResult::ok(ss.str(), {{"results", results_json}, {"realm", realm}});
+        json result_data = {{"results", results_json}, {"realm", realm}};
+        if (gwt_mode) {
+            // Find broadcast winner ID
+            for (const auto& rj : results_json) {
+                if (rj.value("broadcast", false)) {
+                    result_data["broadcast_winner"] = rj["id"];
+                    break;
+                }
+            }
+        }
+        return DuckDBToolResult::ok(ss.str(), result_data);
     }
 
     DuckDBToolResult tool_recall_temporal(const json& params) {
@@ -707,7 +729,8 @@
         // 3. Attractor Dynamics - results pulled toward conceptual gravity wells
         // 4. Lateral Inhibition - similar patterns compete
         // 5. Hebbian Learning - co-activated nodes strengthen connections
-        auto general_results = mind_->full_resonate(query, realm.empty() ? k : k * 2, exclude_kinds);
+        bool separation_mode = params.value("separation_mode", false);
+        auto general_results = mind_->full_resonate(query, realm.empty() ? k : k * 2, exclude_kinds, separation_mode);
 
         // Merge: partnership memories first, then general
         std::vector<Recall> results;
@@ -1553,6 +1576,67 @@
         size_t expand_top = params.value("expand_top", 2);
         std::string realm = params.value("realm", "");
         bool include_global = params.value("include_global", true);
+        bool separation_mode = params.value("separation_mode", false);
+        bool gwt_mode = params.value("gwt_mode", false);
+
+        // GWT mode: bypass intent classification, use salience competition
+        if (gwt_mode) {
+            auto gwt_results = mind_->gwt_recall(query, limit, realm, separation_mode);
+            if (gwt_results.empty()) {
+                return DuckDBToolResult::error("GWT recall returned no results");
+            }
+
+            std::ostringstream ss;
+            ss << "GWT Recall Results (" << gwt_results.size() << " found)\n";
+            ss << "Route: gwt | Mode: Global Workspace Theory\n";
+            ss << "══════════════════════════════\n\n";
+
+            json results_json = json::array();
+            std::string broadcast_winner_id;
+
+            for (const auto& r : gwt_results) {
+                int64_t mem_id = static_cast<int64_t>(r.id.low);
+                std::string id_str = r.id.to_string();
+
+                json entry = {
+                    {"id", id_str},
+                    {"relevance", r.relevance},
+                    {"similarity", r.similarity},
+                    {"salience", r.salience},
+                    {"broadcast", r.broadcast},
+                    {"type", node_type_name(r.type)},
+                    {"text", r.text}
+                };
+
+                // Enrich with store metadata if available
+                auto mem = mind_->store().get_memory(mem_id);
+                if (mem) {
+                    entry["kind"] = mem->kind;
+                    entry["confidence"] = mem->confidence;
+                    entry["realm"] = mem->realm;
+                    entry["priority_tier"] = static_cast<int>(mem->priority_tier);
+                }
+
+                if (r.broadcast) {
+                    broadcast_winner_id = id_str;
+                    ss << "★ BROADCAST WINNER: ";
+                }
+
+                int sal_pct = static_cast<int>(r.salience * 100);
+                ss << "#" << mem_id << " [salience:" << sal_pct << "%]";
+                if (r.broadcast) ss << " ★";
+                ss << "\n  " << r.text.substr(0, 100) << (r.text.size() > 100 ? "..." : "") << "\n";
+
+                results_json.push_back(entry);
+            }
+
+            return DuckDBToolResult::ok(ss.str(), {
+                {"results", results_json},
+                {"route", "gwt"},
+                {"broadcast_winner", broadcast_winner_id},
+                {"count", gwt_results.size()}
+            });
+        }
 
         // 1. Classify the query intent
         QueryIntentClassifier classifier;
@@ -1804,6 +1888,53 @@
                 }
                 break;
             }
+        }
+
+        // Pattern separation: MMR reranking for maximally diverse results
+        if (separation_mode && results.size() > 1) {
+            // Load SDRs and apply MMR on MemoryResult vector
+            std::vector<SparseVector> sdrs;
+            sdrs.reserve(results.size());
+            for (const auto& r : results) {
+                std::string sdr_str = mind_->store().get_sdr(r.id);
+                sdrs.push_back(SparseVector::deserialize(sdr_str));
+            }
+
+            std::vector<MemoryResult> selected;
+            std::vector<bool> chosen(results.size(), false);
+            selected.reserve(std::min(limit, results.size()));
+            constexpr float lambda = 0.3f;
+
+            while (selected.size() < limit && selected.size() < results.size()) {
+                float best_score = -1e9f;
+                size_t best_idx = 0;
+                bool found = false;
+
+                for (size_t j = 0; j < results.size(); j++) {
+                    if (chosen[j]) continue;
+                    float relevance = results[j].similarity;
+                    float max_sim = 0.0f;
+                    for (const auto& s : selected) {
+                        // Find original index of selected item
+                        for (size_t si = 0; si < results.size(); si++) {
+                            if (results[si].id == s.id) {
+                                max_sim = std::max(max_sim, sdrs[j].iou(sdrs[si]));
+                                break;
+                            }
+                        }
+                    }
+                    float score = lambda * relevance - (1.0f - lambda) * max_sim;
+                    if (!found || score > best_score) {
+                        best_score = score;
+                        best_idx = j;
+                        found = true;
+                    }
+                }
+                if (!found) break;
+                chosen[best_idx] = true;
+                selected.push_back(std::move(results[best_idx]));
+            }
+            results = std::move(selected);
         }
 
         // Format results (for non-special cases)

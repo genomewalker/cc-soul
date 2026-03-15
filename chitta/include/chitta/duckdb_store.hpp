@@ -845,6 +845,10 @@ public:
     // Update memory visibility (for cross-project promotion)
     bool update_visibility(int64_t id, RealmVisibility visibility);
 
+    // SDR (Sparse Distributed Representation) storage
+    void store_sdr(int64_t memory_id, const std::string& sdr_str);
+    std::string get_sdr(int64_t memory_id);
+
     // ═══════════════════════════════════════════════════════════════════════
     // Context Repository: Version Control (Letta-inspired)
     // ═══════════════════════════════════════════════════════════════════════
@@ -885,6 +889,12 @@ public:
     // Check if a memory is pinned
     bool is_pinned(int64_t memory_id);
 
+    // CLS: Sample recent fast-store memories (hippocampal layer)
+    std::vector<MemoryResult> sample_fast_memories(size_t n, int64_t since_ms);
+
+    // CLS: Accelerate decay rate of a memory post-consolidation
+    void accelerate_decay(int64_t id, float factor);
+
     // ═══════════════════════════════════════════════════════════════════════
     // Context Repository: Concurrent Coordination (Locking)
     // ═══════════════════════════════════════════════════════════════════════
@@ -922,6 +932,9 @@ public:
 
     // Update memory embedding (for re-embedding with better vectors)
     bool set_memory_embedding(int64_t id, const std::vector<float>& embedding);
+
+    // Retrieve memory embedding vector (for reconsolidation comparisons)
+    std::optional<std::vector<float>> get_memory_embedding(int64_t id);
 
     // List global memories (cross-project insights)
     std::vector<MemoryResult> list_global_memories(size_t limit = 20, const std::string& kind = "");

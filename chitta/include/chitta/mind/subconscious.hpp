@@ -63,6 +63,10 @@ struct SubconsciousConfig {
     bool enable_suggestion_tracking{true};
     bool enable_background_embedding{false};      // Disabled by default - use embed_symbols tool
     bool enable_habit_formation{true};            // Auto-detect tool patterns and form habits
+    bool enable_cls_replay{true};                 // CLS offline replay consolidation
+    std::chrono::minutes cls_replay_interval{60}; // CLS replay every hour
+    size_t cls_replay_batch_size{20};             // Memories to sample per replay
+    size_t cls_replay_min_cluster{3};             // Min cluster size to distill
 };
 
 // Queued embedding result (computed in background, flushed by main thread)
@@ -93,10 +97,14 @@ struct SubconsciousStats {
     std::atomic<size_t> embedding_skips{0};       // Skipped due to busy state
     std::atomic<size_t> habits_formed{0};         // Habits auto-created from tool patterns
     std::atomic<size_t> habits_matched{0};        // Existing habits matched by patterns
+    std::atomic<size_t> cls_replay_runs{0};       // CLS offline replay runs
+    std::atomic<size_t> cls_memories_consolidated{0}; // Memories consolidated by CLS
+    std::atomic<size_t> cls_wisdom_created{0};    // Wisdom nodes created by CLS replay
     std::atomic<int64_t> last_hygiene_at{0};
     std::atomic<int64_t> last_theme_maintenance_at{0};
     std::atomic<int64_t> last_distillation_at{0};
     std::atomic<int64_t> last_embedding_at{0};
+    std::atomic<int64_t> last_cls_replay_at{0};
     std::atomic<int64_t> last_query_at{0};        // Last RPC query timestamp
     std::atomic<int64_t> started_at{0};
 };
@@ -232,6 +240,8 @@ private:
     bool time_for_distillation() const;
     void run_background_embedding();
     bool time_for_embedding() const;
+    void run_cls_replay();
+    bool time_for_cls_replay() const;
 
     // Dream: autonomous curiosity-driven exploration when idle
     std::function<void()> dream_callback_;

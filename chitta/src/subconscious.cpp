@@ -7,6 +7,7 @@
 #include <iostream>
 #include <sstream>
 #include <iomanip>
+#include <unordered_map>
 
 namespace chitta {
 
@@ -136,6 +137,11 @@ void Subconscious::process_loop() {
         // Check for auto-distillation (episodes -> wisdom)
         if (config_.enable_distillation && time_for_distillation()) {
             run_auto_distillation();
+        }
+
+        // Check for CLS offline replay (fast -> slow store consolidation)
+        if (config_.enable_cls_replay && time_for_cls_replay()) {
+            run_cls_replay();
         }
 
         // Check for background embedding
@@ -779,6 +785,73 @@ bool Subconscious::time_for_distillation() const {
     auto now = now_ms();
     auto interval_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         config_.distillation_interval
+    ).count();
+
+    return (now - last) >= interval_ms;
+}
+
+void Subconscious::run_cls_replay() {
+    if (!is_idle()) return;
+
+    auto now_epoch = now_ms();
+    int64_t since_ms = now_epoch - 24LL * 3600 * 1000; // last 24 hours
+
+    auto fast_memories = mind_->store().sample_fast_memories(
+        config_.cls_replay_batch_size, since_ms);
+
+    stats_.cls_replay_runs++;
+    stats_.last_cls_replay_at = now_epoch;
+
+    if (fast_memories.size() < config_.cls_replay_min_cluster) return;
+
+    // Group by realm
+    std::unordered_map<std::string, std::vector<const MemoryResult*>> by_realm;
+    for (const auto& m : fast_memories) by_realm[m.realm].push_back(&m);
+
+    std::vector<int64_t> consolidated_ids;
+    size_t wisdom_count = 0;
+
+    for (const auto& [realm, mems] : by_realm) {
+        if (mems.size() < config_.cls_replay_min_cluster) continue;
+
+        std::ostringstream digest;
+        digest << "[cls-replay] Consolidating " << mems.size()
+               << " recent memories from realm " << realm << ":\n";
+        std::vector<int64_t> cluster_ids;
+        for (const auto* m : mems) {
+            digest << "- " << m->content.substr(0, 120) << "\n";
+            cluster_ids.push_back(m->id);
+        }
+
+        auto id = mind_->remember(digest.str(), NodeType::Wisdom,
+                                  realm, RealmVisibility::Private, 0.7f);
+        if (id.valid()) {
+            wisdom_count++;
+            // Only accelerate decay when wisdom was successfully created
+            for (int64_t mem_id : cluster_ids) {
+                mind_->store().accelerate_decay(mem_id, 2.5f);
+                consolidated_ids.push_back(mem_id);
+            }
+        }
+    }
+
+    stats_.cls_memories_consolidated += consolidated_ids.size();
+    stats_.cls_wisdom_created += wisdom_count;
+
+    if (!consolidated_ids.empty()) {
+        std::cerr << "[subconscious] CLS replay: consolidated="
+                  << consolidated_ids.size()
+                  << ", wisdom_created=" << wisdom_count << "\n";
+    }
+}
+
+bool Subconscious::time_for_cls_replay() const {
+    auto last = stats_.last_cls_replay_at.load();
+    if (last == 0) return true;  // Never run
+
+    auto now = now_ms();
+    auto interval_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        config_.cls_replay_interval
     ).count();
 
     return (now - last) >= interval_ms;
