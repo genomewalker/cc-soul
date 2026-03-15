@@ -817,21 +817,22 @@ void Subconscious::run_cls_replay() {
         std::ostringstream digest;
         digest << "[cls-replay] Consolidating " << mems.size()
                << " recent memories from realm " << realm << ":\n";
+        std::vector<int64_t> cluster_ids;
         for (const auto* m : mems) {
             digest << "- " << m->content.substr(0, 120) << "\n";
-            consolidated_ids.push_back(m->id);
+            cluster_ids.push_back(m->id);
         }
 
         auto id = mind_->remember(digest.str(), NodeType::Wisdom,
                                   realm, RealmVisibility::Private, 0.7f);
         if (id.valid()) {
             wisdom_count++;
+            // Only accelerate decay when wisdom was successfully created
+            for (int64_t mem_id : cluster_ids) {
+                mind_->store().accelerate_decay(mem_id, 2.5f);
+                consolidated_ids.push_back(mem_id);
+            }
         }
-    }
-
-    // Accelerate decay on consolidated fast memories
-    for (int64_t id : consolidated_ids) {
-        mind_->store().accelerate_decay(id, 2.5f);
     }
 
     stats_.cls_memories_consolidated += consolidated_ids.size();
