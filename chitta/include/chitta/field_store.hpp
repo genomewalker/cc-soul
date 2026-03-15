@@ -264,6 +264,95 @@ public:
         return handle_ != nullptr;
     }
 
+    // ── Code Intelligence ────────────────────────────────────────────────────
+
+    /// Upsert a symbol. Returns its SymbolId.
+    uint64_t upsert_symbol(
+        const std::string& kind,
+        const std::string& name,
+        const std::string& signature,
+        const std::string& file_path,
+        uint32_t line_start,
+        uint32_t line_end,
+        uint64_t repo_id,
+        const std::vector<float>& embedding,
+        const std::string& description = "",
+        uint64_t memory_id = 0
+    ) {
+        uint64_t id = 0;
+        const char* desc_ptr = description.empty() ? nullptr : description.c_str();
+        int r = cf_upsert_symbol(handle_,
+            kind.c_str(), name.c_str(), signature.c_str(), file_path.c_str(),
+            line_start, line_end, repo_id,
+            embedding.data(), embedding.size(),
+            desc_ptr, memory_id, &id);
+        if (r != 0) throw std::runtime_error(last_error());
+        return id;
+    }
+
+    void remove_symbol(uint64_t symbol_id) {
+        cf_remove_symbol(handle_, symbol_id);
+    }
+
+    std::vector<CfSymbolHit> search_symbols_by_name(const std::string& query, size_t limit) {
+        constexpr size_t MAX = 256;
+        CfSymbolHit buf[MAX];
+        size_t written = 0;
+        cf_search_symbols_by_name(handle_, query.c_str(), limit, buf, MAX, &written);
+        return std::vector<CfSymbolHit>(buf, buf + written);
+    }
+
+    std::vector<CfSymbolHit> search_symbols_semantic(const std::vector<float>& query, size_t k) {
+        constexpr size_t MAX = 256;
+        CfSymbolHit buf[MAX];
+        size_t written = 0;
+        cf_search_symbols_semantic(handle_, query.data(), query.size(), k, buf, MAX, &written);
+        return std::vector<CfSymbolHit>(buf, buf + written);
+    }
+
+    std::vector<CfSymbolHit> symbols_in_file(const std::string& file_path) {
+        constexpr size_t MAX = 1024;
+        CfSymbolHit buf[MAX];
+        size_t written = 0;
+        cf_symbols_in_file(handle_, file_path.c_str(), buf, MAX, &written);
+        return std::vector<CfSymbolHit>(buf, buf + written);
+    }
+
+    void add_sym_call_edge(uint64_t caller_id, uint64_t callee_id) {
+        cf_add_sym_call_edge(handle_, caller_id, callee_id);
+    }
+
+    std::vector<uint64_t> get_callees(uint64_t symbol_id) {
+        constexpr size_t MAX = 1024;
+        uint64_t buf[MAX];
+        size_t written = 0;
+        cf_get_callees(handle_, symbol_id, buf, MAX, &written);
+        return std::vector<uint64_t>(buf, buf + written);
+    }
+
+    std::vector<uint64_t> get_callers(uint64_t symbol_id) {
+        constexpr size_t MAX = 1024;
+        uint64_t buf[MAX];
+        size_t written = 0;
+        cf_get_callers(handle_, symbol_id, buf, MAX, &written);
+        return std::vector<uint64_t>(buf, buf + written);
+    }
+
+    uint64_t upsert_code_file(const std::string& path, const std::string& project, int64_t mtime) {
+        uint64_t id = 0;
+        int r = cf_upsert_code_file(handle_, path.c_str(), project.c_str(), mtime, &id);
+        if (r != 0) throw std::runtime_error(last_error());
+        return id;
+    }
+
+    size_t symbol_count() const {
+        return cf_symbol_count(handle_);
+    }
+
+    size_t code_file_count() const {
+        return cf_code_file_count(handle_);
+    }
+
 private:
     CfHandle* handle_ = nullptr;
 
