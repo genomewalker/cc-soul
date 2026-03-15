@@ -180,7 +180,8 @@ struct SparseVector {
     std::vector<uint16_t> active; // sorted active dimension indices
 
     static SparseVector from_dense(const std::vector<float>& dense, float k_pct = 0.05f) {
-        size_t k = std::max(size_t(1), size_t(dense.size() * k_pct));
+        if (dense.empty()) return SparseVector{};
+        size_t k = std::clamp(size_t(dense.size() * k_pct), size_t(1), dense.size());
         std::vector<std::pair<float, uint16_t>> indexed;
         indexed.reserve(dense.size());
         for (size_t i = 0; i < dense.size(); i++)
@@ -220,8 +221,16 @@ struct SparseVector {
         if (s.empty()) return sv;
         std::istringstream ss(s);
         std::string tok;
-        while (std::getline(ss, tok, ','))
-            if (!tok.empty()) sv.active.push_back(static_cast<uint16_t>(std::stoi(tok)));
+        while (std::getline(ss, tok, ',')) {
+            if (tok.empty()) continue;
+            try {
+                sv.active.push_back(static_cast<uint16_t>(std::stoi(tok)));
+            } catch (const std::exception&) {
+                // skip malformed token
+            }
+        }
+        std::sort(sv.active.begin(), sv.active.end());
+        sv.active.erase(std::unique(sv.active.begin(), sv.active.end()), sv.active.end());
         return sv;
     }
 
