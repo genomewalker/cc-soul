@@ -442,6 +442,20 @@ add_executable(chittad
 )
 target_link_libraries(chittad PRIVATE chitta duckdb_store)
 
+# chitta-field integration
+set(CHITTA_FIELD_ROOT "/maps/projects/fernandezguerra/apps/repos/chitta-field")
+set(CHITTA_FIELD_LIB "${CHITTA_FIELD_ROOT}/target/release/libchitta_field.a")
+set(CHITTA_FIELD_INCLUDE "${CHITTA_FIELD_ROOT}/include")
+
+if(EXISTS "${CHITTA_FIELD_LIB}")
+    message(STATUS "chitta-field: ${CHITTA_FIELD_LIB}")
+    target_include_directories(chittad PRIVATE "${CHITTA_FIELD_INCLUDE}")
+    target_link_libraries(chittad PRIVATE "${CHITTA_FIELD_LIB}" dl pthread)
+    target_compile_definitions(chittad PRIVATE CHITTA_FIELD_AVAILABLE=1)
+else()
+    message(WARNING "chitta-field lib not found at ${CHITTA_FIELD_LIB} — FieldStore unavailable")
+endif()
+
 # CLI tool for memory operations (thin client + MCP server)
 # Output as 'chitta' binary (target named chitta_tool to avoid library conflict)
 if(CHITTA_BUILD_RPC)
