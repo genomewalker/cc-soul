@@ -215,6 +215,50 @@ public:
         cf_flush(handle_);
     }
 
+    /// Apply outcome feedback for a retrieval episode (route learning).
+    void feedback(uint64_t episode_id, float reward) {
+        cf_feedback(handle_, episode_id, reward);
+    }
+
+    /// Get recommended working memory window size for a session type.
+    size_t recommended_window(const std::string& session_type) const {
+        return cf_recommended_window(handle_, session_type.c_str());
+    }
+
+    /// BM25 keyword recall.
+    std::vector<FieldRecallHit> recall_keyword(const std::string& query, size_t k) {
+        constexpr size_t MAX_HITS = 256;
+        CfRecallHit buf[MAX_HITS];
+        size_t written = 0;
+        int r = cf_recall_keyword(handle_, query.c_str(), k, buf, MAX_HITS, &written);
+        if (r != 0) throw std::runtime_error(last_error());
+        return hits_to_results(buf, written);
+    }
+
+    /// Add an SPO triplet fact.
+    uint64_t add_triplet(const std::string& subject, const std::string& predicate,
+                         const std::string& object, float weight = 1.0f,
+                         uint64_t source_memory_id = 0) {
+        uint64_t id = 0;
+        cf_add_triplet(handle_, subject.c_str(), predicate.c_str(), object.c_str(),
+                       weight, source_memory_id, &id);
+        return id;
+    }
+
+    /// Query triplets by subject, returns JSON string.
+    std::string query_subject(const std::string& subject) {
+        char buf[65536]; size_t written = 0;
+        cf_query_subject(handle_, subject.c_str(), buf, sizeof(buf), &written);
+        return std::string(buf, written);
+    }
+
+    /// Query triplets by object, returns JSON string.
+    std::string query_object(const std::string& object) {
+        char buf[65536]; size_t written = 0;
+        cf_query_object(handle_, object.c_str(), buf, sizeof(buf), &written);
+        return std::string(buf, written);
+    }
+
     /// Health check — returns true if store is accessible.
     bool healthy() const {
         return handle_ != nullptr;
