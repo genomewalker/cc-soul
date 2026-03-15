@@ -2903,8 +2903,15 @@ bool DuckDBStore::update_visibility(int64_t id, RealmVisibility visibility) {
 
 void DuckDBStore::store_sdr(int64_t memory_id, const std::string& sdr_str) {
     if (!db_) return;
+    // Escape single quotes to prevent SQL injection (replace ' with '')
+    std::string escaped;
+    escaped.reserve(sdr_str.size());
+    for (char c : sdr_str) {
+        if (c == '\'') escaped += "''";
+        else escaped += c;
+    }
     std::ostringstream sql;
-    sql << "UPDATE memory SET sdr = '" << sdr_str << "' WHERE id = " << memory_id;
+    sql << "UPDATE memory SET sdr = '" << escaped << "' WHERE id = " << memory_id;
     write_execute(sql.str());
 }
 
@@ -3206,7 +3213,7 @@ std::vector<MemoryResult> DuckDBStore::sample_fast_memories(size_t n, int64_t si
         << "OR content LIKE '[gap]%' OR kind = 'episode') "
         << "AND created_at > " << since_ms << " "
         << "AND pinned = false "
-        << "ORDER BY random() LIMIT " << n;
+        << "USING SAMPLE " << n << " ROWS";
 
     auto res = read_query(sql.str());
     if (!res) return result;
