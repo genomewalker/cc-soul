@@ -1,6 +1,6 @@
 #pragma once
 
-#define CHITTA_VERSION "4.0.3"
+#define CHITTA_VERSION "4.0.4"
 #define CHITTA_PROTOCOL_VERSION_MAJOR 1
 #define CHITTA_PROTOCOL_VERSION_MINOR 0
 
