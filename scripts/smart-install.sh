@@ -271,9 +271,10 @@ build_chitta_field() {
     fi
 
     echo "[cc-soul] Building chitta-field ($(basename "$cargo_bin"))..."
-    # Unset conda linker flags to avoid ABI conflicts; rust-toolchain.toml pins the version
-    env -u LDFLAGS -u CFLAGS -u CXXFLAGS \
-        "$cargo_bin" build --release --manifest-path "$cf_dir/Cargo.toml" 2>&1 | tail -5
+    # cd into cf_dir so rustup auto-selects the pinned toolchain from rust-toolchain.toml
+    # Unset conda linker flags to avoid ABI conflicts
+    (cd "$cf_dir" && env -u LDFLAGS -u CFLAGS -u CXXFLAGS \
+        "$cargo_bin" build --release 2>&1 | tail -5)
 
     if [[ ! -f "$cf_dir/target/release/libchitta_field.a" ]]; then
         echo "[cc-soul] ERROR: chitta-field build failed" >&2
