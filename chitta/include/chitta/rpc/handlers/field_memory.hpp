@@ -70,6 +70,8 @@
         std::string realm = params.value("realm", "");
         size_t limit      = static_cast<size_t>(params.value("limit", 20));
 
+        int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
         int64_t start_ms = 0, end_ms = 0;
         if (params.contains("start")) {
             auto ts = parse_timestamp_str(params["start"].get<std::string>());
@@ -80,11 +82,14 @@
             if (ts) end_ms = *ts;
         }
 
-        // Default: last 7 days
+        // Default: last 7 days when neither specified
         if (start_ms == 0 && end_ms == 0) {
-            end_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::system_clock::now().time_since_epoch()).count();
+            end_ms = now_ms;
             start_ms = end_ms - (7LL * 24 * 3600 * 1000);
+        }
+        // If only start specified, default end to now
+        if (end_ms == 0) {
+            end_ms = now_ms;
         }
 
         auto hits = field_store_->recall_temporal(start_ms, end_ms, limit, realm);
