@@ -6,7 +6,7 @@
 // 2. Build SSL prompt
 // 3. Call opencode for extraction (model is user-configurable)
 // 4. Parse SSL output
-// 5. Store via FieldStore (primary) or DuckDBMind (legacy fallback)
+// 5. Store via FieldStore
 //    - Dedup: if a near-identical memory exists (cosine > threshold), strengthen
 //      the existing one instead of creating a duplicate
 //
@@ -14,18 +14,22 @@
 
 #include "transcript_parser.hpp"
 #include "ssl_parser.hpp"
-#include "mind/duckdb_mind.hpp"
-#ifdef CHITTA_FIELD_AVAILABLE
 #include "field_store.hpp"
-#endif
 #include <string>
 #include <functional>
 #include <vector>
 
 namespace chitta {
 
+struct TranscriptState {
+    std::string session_id;
+    std::string transcript_path;
+    std::string realm = "brahman";
+    int64_t last_processed_line = 0;
+};
+
 struct NativeDistillConfig {
-    std::string model = "gemini-2.0-flash";  // LLM model — overridden by --distill-model
+    std::string model = "opencode/minimax-m2.5-free";  // LLM model — overridden by --distill-model
     int timeout_secs = 120;                   // Timeout for opencode call
     int min_turns = 5;                        // Minimum turns for distillation
     bool verbose = false;                     // Enable verbose logging
@@ -49,13 +53,7 @@ using EmbedFn = std::function<std::vector<float>(const std::string&)>;
 
 class NativeDistiller {
 public:
-    // FieldStore backend (primary path)
-#ifdef CHITTA_FIELD_AVAILABLE
     NativeDistiller(FieldStore& field, EmbedFn embedder, const NativeDistillConfig& config = {});
-#endif
-
-    // DuckDBMind backend (legacy fallback)
-    NativeDistiller(DuckDBMind& mind, const NativeDistillConfig& config = {});
 
     // Main entry point - distill a session transcript
     // Returns result with counts of stored learnings/triplets
@@ -77,11 +75,8 @@ public:
     void set_cancel_callback(CancelCallback cb) { cancel_callback_ = cb; }
 
 private:
-#ifdef CHITTA_FIELD_AVAILABLE
     FieldStore* field_store_ = nullptr;
     EmbedFn embedder_;
-#endif
-    DuckDBMind* mind_ = nullptr;
 
     NativeDistillConfig config_;
     TranscriptParser parser_;
@@ -92,31 +87,11 @@ private:
     // Call opencode with prompt, return output
     std::string call_opencode(const std::string& prompt);
 
-    // Store learnings — dispatches to field or duckdb backend
+    // Store learnings via FieldStore with dedup
     void store_learnings(
-        const SSLParser::Result& ssl_result,
-        const std::string& session_id,
-        const std::string& realm,
-        int64_t episode_id,
-        DistillResult& result
-    );
-
-#ifdef CHITTA_FIELD_AVAILABLE
-    // FieldStore implementation of store_learnings with dedup
-    void store_learnings_field(
         const SSLParser::Result& ssl_result,
         const std::string& realm,
         uint64_t episode_mem_id,
-        DistillResult& result
-    );
-#endif
-
-    // DuckDBMind implementation (legacy)
-    void store_learnings_duckdb(
-        const SSLParser::Result& ssl_result,
-        const std::string& session_id,
-        const std::string& realm,
-        int64_t episode_id,
         DistillResult& result
     );
 

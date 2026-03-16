@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cmath>
 #include <limits>
+#include <nlohmann/json.hpp>
 #include "chitta_field.h"
 
 namespace chitta {
@@ -669,6 +670,63 @@ public:
                                             buf.data(), buf.size(), &written);
         if (r != 0) return "[]";
         return std::string(buf.data(), written);
+    }
+
+    // ── DuckDB removal: new query/management methods ────────────────────────
+
+    std::string list_code_files(const std::string& project = "") {
+        std::vector<uint8_t> buf(131072);
+        size_t written = 0;
+        const char* proj_ptr = project.empty() ? nullptr : project.c_str();
+        int r = cf_list_code_files(handle_, proj_ptr, buf.data(), buf.size(), &written);
+        if (r != 0 && r != -2) return "[]";
+        return std::string(reinterpret_cast<char*>(buf.data()), written);
+    }
+
+    int clear_project(const std::string& project) {
+        return cf_clear_project(handle_, project.c_str());
+    }
+
+    int set_symbol_description(uint64_t symbol_id, const std::string& desc) {
+        return cf_set_symbol_description(handle_, symbol_id, desc.c_str(), desc.size());
+    }
+
+    int update_memory_content(uint64_t id, const std::string& content,
+                              const std::vector<float>& embedding = {}) {
+        const float* emb_ptr = embedding.empty() ? nullptr : embedding.data();
+        return cf_update_memory_content(handle_, id,
+            reinterpret_cast<const uint8_t*>(content.data()), content.size(),
+            emb_ptr, embedding.size());
+    }
+
+    std::string realm_list() {
+        std::vector<uint8_t> buf(32768);
+        size_t written = 0;
+        int r = cf_realm_list(handle_, buf.data(), buf.size(), &written);
+        if (r != 0) return "[]";
+        return std::string(reinterpret_cast<char*>(buf.data()), written);
+    }
+
+    std::vector<FieldRecallHit> recall_by_kind(const std::string& kind, size_t limit) {
+        std::vector<uint8_t> buf(131072);
+        size_t written = 0;
+        int r = cf_recall_by_kind(handle_, kind.c_str(), limit, buf.data(), buf.size(), &written);
+        if (r != 0 && r != -2) return {};
+        auto json_str = std::string(reinterpret_cast<char*>(buf.data()), written);
+        try {
+            auto arr = nlohmann::json::parse(json_str, nullptr, false);
+            if (arr.is_discarded() || !arr.is_array()) return {};
+            std::vector<FieldRecallHit> hits;
+            for (const auto& item : arr) {
+                FieldRecallHit h;
+                h.memory_id = item.value("id", uint64_t(0));
+                h.confidence = item.value("confidence", 0.0f);
+                h.content = item.value("content", std::string{});
+                h.kind = kind;
+                hits.push_back(h);
+            }
+            return hits;
+        } catch (...) { return {}; }
     }
 
 private:

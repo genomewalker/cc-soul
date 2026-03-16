@@ -18,8 +18,6 @@
 //   --toon              CLI mode: output TOON format (compact, shell-friendly)
 
 #include <chitta/socket_client.hpp>
-#include <chitta/mind/duckdb_mind.hpp>
-#include <chitta/rpc/duckdb_handler.hpp>
 #include <unistd.h>  // getppid
 #ifdef CHITTA_WITH_ONNX
 #include <chitta/vak_onnx.hpp>

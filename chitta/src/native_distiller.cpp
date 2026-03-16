@@ -6,6 +6,7 @@
 #include <chrono>
 #include <thread>
 #include <cmath>
+#include <iostream>
 
 // POSIX
 #include <unistd.h>
@@ -15,19 +16,13 @@
 
 namespace chitta {
 
-// ── Constructors ──────────────────────────────────────────────────────────────
+// ── Constructor ──────────────────────────────────────────────────────────────
 
-#ifdef CHITTA_FIELD_AVAILABLE
 NativeDistiller::NativeDistiller(FieldStore& field, EmbedFn embedder,
                                  const NativeDistillConfig& config)
-    : field_store_(&field), embedder_(std::move(embedder)),
-      mind_(nullptr), config_(config) {}
-#endif
+    : field_store_(&field), embedder_(std::move(embedder)), config_(config) {}
 
-NativeDistiller::NativeDistiller(DuckDBMind& mind, const NativeDistillConfig& config)
-    : mind_(&mind), config_(config) {}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
 float NativeDistiller::category_to_confidence(const std::string& category) {
     if (category == "correction") return 0.95f;
@@ -57,7 +52,7 @@ void NativeDistiller::log(const std::string& msg) {
     }
 }
 
-// ── opencode call ─────────────────────────────────────────────────────────────
+// ── opencode call ────────────────────────────────────────────────────────────
 
 std::string NativeDistiller::call_opencode(const std::string& prompt) {
     int stdin_pipe[2];
@@ -162,29 +157,9 @@ std::string NativeDistiller::call_opencode(const std::string& prompt) {
     return output;
 }
 
-// ── store_learnings dispatcher ────────────────────────────────────────────────
+// ── store_learnings (FieldStore) ─────────────────────────────────────────────
 
 void NativeDistiller::store_learnings(
-    const SSLParser::Result& ssl_result,
-    const std::string& session_id,
-    const std::string& realm,
-    int64_t episode_id,
-    DistillResult& result
-) {
-#ifdef CHITTA_FIELD_AVAILABLE
-    if (field_store_) {
-        store_learnings_field(ssl_result, realm,
-                              static_cast<uint64_t>(episode_id), result);
-        return;
-    }
-#endif
-    store_learnings_duckdb(ssl_result, session_id, realm, episode_id, result);
-}
-
-// ── FieldStore backend ────────────────────────────────────────────────────────
-
-#ifdef CHITTA_FIELD_AVAILABLE
-void NativeDistiller::store_learnings_field(
     const SSLParser::Result& ssl_result,
     const std::string& realm,
     uint64_t episode_mem_id,
@@ -275,74 +250,8 @@ void NativeDistiller::store_learnings_field(
             triplet.predicate + "→" + triplet.object);
     }
 }
-#endif
 
-// ── DuckDBMind backend (legacy) ───────────────────────────────────────────────
-
-void NativeDistiller::store_learnings_duckdb(
-    const SSLParser::Result& ssl_result,
-    const std::string& session_id,
-    const std::string& realm,
-    int64_t episode_id,
-    DistillResult& result
-) {
-    if (!mind_) return;
-
-    for (const auto& learning : ssl_result.learnings) {
-        float confidence = category_to_confidence(learning.category);
-        std::string full_text = learning.title + "\n" + learning.content;
-
-        NodeId nid = mind_->remember(
-            full_text,
-            NodeType::Wisdom,
-            realm,
-            RealmVisibility::Private,
-            confidence
-        );
-
-        int64_t id = static_cast<int64_t>(nid.low);
-        if (nid.low != 0) {
-            result.learnings_stored++;
-            log("[distill]   +" + learning.category + ": " +
-                learning.title.substr(0, 60) + "...");
-
-            if (episode_id > 0) {
-                mind_->connect(std::to_string(id), "derived_from",
-                               std::to_string(episode_id));
-            }
-
-            for (const auto& cite : learning.citations) {
-                std::string cite_target = cite.file;
-                if (cite.line > 0) {
-                    cite_target += ":" + std::to_string(cite.line);
-                }
-                if (mind_->connect(std::to_string(id), "cites", cite_target)) {
-                    result.citations_linked++;
-                    log("[distill]     cite: " + cite_target);
-                }
-                if (cite.line > 0) {
-                    auto symbol = mind_->store().find_symbol_at_line(cite.file, cite.line);
-                    if (symbol) {
-                        std::string symbol_ref = "symbol:" + std::to_string(symbol->id);
-                        if (mind_->connect(std::to_string(id), "cites", symbol_ref)) {
-                            log("[distill]     → symbol: " + symbol->name +
-                                " (" + symbol->kind + ")");
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    for (const auto& triplet : ssl_result.triplets) {
-        if (mind_->connect(triplet.subject, triplet.predicate, triplet.object)) {
-            log("[distill]   triplet: " + triplet.subject + "→" +
-                triplet.predicate + "→" + triplet.object);
-        }
-    }
-}
-
-// ── distill_session ───────────────────────────────────────────────────────────
+// ── distill_session ──────────────────────────────────────────────────────────
 
 DistillResult NativeDistiller::distill_session(
     const std::string& session_id,
@@ -385,40 +294,17 @@ DistillResult NativeDistiller::distill_session(
     int start_turn = turns.empty() ? 0 : turns.front().turn_index;
     int end_turn   = turns.empty() ? 0 : turns.back().turn_index;
 
-    // 6. Create episode record
+    // 6. Create episode record in FieldStore
     int64_t episode_id = 0;
-#ifdef CHITTA_FIELD_AVAILABLE
-    if (field_store_) {
-        // Store episode as a "episode" kind memory with metadata
-        std::ostringstream ep_content;
-        ep_content << "[episode] session=" << session_id
-                   << " turns=" << start_turn << "-" << end_turn
-                   << " realm=" << realm;
-        try {
-            episode_id = static_cast<int64_t>(
-                field_store_->remember("episode", realm, ep_content.str(),
-                                       {}, 1.0f, 0.0f));
-        } catch (...) {}
-    } else
-#endif
-    if (mind_) {
-        episode_id = mind_->store().create_dialogue_episode(
-            session_id,
-            "Distillation " + std::to_string(
-                std::chrono::duration_cast<std::chrono::seconds>(
-                    std::chrono::system_clock::now().time_since_epoch()).count()),
-            start_turn,
-            "distillation",
-            realm
-        );
-        if (episode_id > 0) {
-            std::ostringstream sql;
-            sql << "UPDATE dialogue_episode SET end_turn = " << end_turn
-                << ", turn_count = " << (end_turn - start_turn + 1)
-                << ", outcome = 'completed' WHERE id = " << episode_id;
-            mind_->store().execute_raw(sql.str());
-        }
-    }
+    std::ostringstream ep_content;
+    ep_content << "[episode] session=" << session_id
+               << " turns=" << start_turn << "-" << end_turn
+               << " realm=" << realm;
+    try {
+        episode_id = static_cast<int64_t>(
+            field_store_->remember("episode", realm, ep_content.str(),
+                                   {}, 1.0f, 0.0f));
+    } catch (...) {}
 
     if (episode_id > 0) {
         result.episode_id = episode_id;
@@ -440,7 +326,7 @@ DistillResult NativeDistiller::distill_session(
     auto ssl_result = ssl_parser_.parse(llm_output);
 
     // 9. Store learnings and citations
-    store_learnings(ssl_result, session_id, realm, episode_id, result);
+    store_learnings(ssl_result, realm, static_cast<uint64_t>(episode_id), result);
     result.triplets_created = static_cast<int>(ssl_result.triplets.size());
 
     log("[distill] Session " + session_id + ": Done (+" +

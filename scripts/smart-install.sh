@@ -231,6 +231,59 @@ detect_onnx_runtime() {
     return 1
 }
 
+# Locate cargo, preferring rustup's toolchain over conda/system cargo
+find_cargo() {
+    # rustup gives us the toolchain-pinned cargo (respects rust-toolchain.toml)
+    local rc
+    rc=$(rustup which cargo 2>/dev/null) && echo "$rc" && return 0
+    # Fall back to PATH, skip conda wrappers that may carry an old version
+    command -v cargo 2>/dev/null && return 0
+    return 1
+}
+
+# Build chitta-field Rust library (prerequisite for chittad)
+# Sets CHITTA_FIELD_ROOT for the subsequent cmake call.
+build_chitta_field() {
+    local src_root="$1"
+    local cf_dir="$src_root/chitta-field"
+
+    # Already built?
+    if [[ -f "$cf_dir/target/release/libchitta_field.a" ]]; then
+        echo "[cc-soul] chitta-field already built"
+        export CHITTA_FIELD_ROOT="$cf_dir"
+        return 0
+    fi
+
+    # Clone submodule if absent (source tarball won't include it)
+    if [[ ! -f "$cf_dir/Cargo.toml" ]]; then
+        if ! command -v git &>/dev/null; then
+            echo "[cc-soul] ERROR: git not found, cannot fetch chitta-field" >&2
+            return 1
+        fi
+        echo "[cc-soul] Fetching chitta-field..."
+        git clone --depth 1 https://github.com/genomewalker/chitta-field.git "$cf_dir" 2>&1 | tail -3
+    fi
+
+    local cargo_bin
+    if ! cargo_bin=$(find_cargo); then
+        echo "[cc-soul] ERROR: cargo (Rust) not found. Install rustup: https://rustup.rs" >&2
+        return 1
+    fi
+
+    echo "[cc-soul] Building chitta-field ($(basename "$cargo_bin"))..."
+    # Unset conda linker flags to avoid ABI conflicts; rust-toolchain.toml pins the version
+    env -u LDFLAGS -u CFLAGS -u CXXFLAGS \
+        "$cargo_bin" build --release --manifest-path "$cf_dir/Cargo.toml" 2>&1 | tail -5
+
+    if [[ ! -f "$cf_dir/target/release/libchitta_field.a" ]]; then
+        echo "[cc-soul] ERROR: chitta-field build failed" >&2
+        return 1
+    fi
+
+    export CHITTA_FIELD_ROOT="$cf_dir"
+    echo "[cc-soul] chitta-field built"
+}
+
 # Build from source
 # Optional first arg: path to source root (defaults to $PLUGIN_DIR)
 build_from_source() {
@@ -251,6 +304,9 @@ build_from_source() {
         return 1
     fi
 
+    # Build chitta-field first (sets CHITTA_FIELD_ROOT)
+    build_chitta_field "$src_root" || return 1
+
     local plugin_bin="$src_root/bin"
     mkdir -p "$BIN_DIR" "$plugin_bin"
 
@@ -261,6 +317,10 @@ build_from_source() {
 
     # Detect ONNX Runtime for embeddings
     local cmake_args="-DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS= -DCMAKE_C_FLAGS="
+    # Pass chitta-field root to cmake (set by build_chitta_field)
+    if [[ -n "$CHITTA_FIELD_ROOT" ]]; then
+        cmake_args="$cmake_args -DCHITTA_FIELD_ROOT=$CHITTA_FIELD_ROOT"
+    fi
     local onnx_info
     if onnx_info=$(detect_onnx_runtime); then
         local onnx_include="${onnx_info%%|*}"
