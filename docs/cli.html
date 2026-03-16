@@ -96,6 +96,7 @@
       <li><a href="getting-started.html">Get Started</a></li>
       <li><a href="philosophy.html">Philosophy</a></li>
       <li><a href="architecture.html">Architecture</a></li>
+      <li><a href="chitta-field.html">chitta-field</a></li>
       <li><a href="sadhana.html">Sadhana</a></li>
       <li><a href="tools.html">Tools</a></li>
       <li><a href="cli.html" class="active">CLI</a></li>
@@ -147,7 +148,7 @@
         <div class="tools-list">
           <div class="tool-row">
             <span class="tool-name">chittad daemon [--foreground] [--path PATH] [--interval SECS]</span>
-            <span class="tool-desc">Run background daemon. Self-daemonizes by default (double-fork). Opens DuckDB, loads ONNX model, creates Unix socket, starts thread pool.</span>
+            <span class="tool-desc">Run background daemon. Self-daemonizes by default (double-fork). Opens chitta-field memory substrate, loads ONNX model, creates Unix socket, starts thread pool.</span>
           </div>
           <div class="tool-row">
             <span class="tool-name">chittad shutdown</span>
@@ -376,7 +377,7 @@
       <div class="category-body">
         <p class="section-intro">What happens when <code>chittad daemon</code> starts:</p>
         <ul class="internals-list">
-          <li>Opens DuckDB at <code>{path}/chitta.duckdb</code></li>
+          <li>Opens chitta-field at <code>{path}/chitta-field/</code></li>
           <li>Loads ONNX model (<code>bge-base-en-v1.5</code>, 768 dimensions)</li>
           <li>Creates Unix socket at <code>/tmp/chitta-{hash}.sock</code></li>
           <li>Starts thread pool (2&ndash;16 workers)</li>

@@ -269,6 +269,7 @@
       <li><a href="getting-started.html">Get Started</a></li>
       <li><a href="philosophy.html" class="active">Philosophy</a></li>
       <li><a href="architecture.html">Architecture</a></li>
+      <li><a href="chitta-field.html">chitta-field</a></li>
       <li><a href="sadhana.html">Sadhana</a></li>
       <li><a href="tools.html">Tools</a></li>
       <li><a href="cli.html">CLI</a></li>
@@ -451,8 +452,8 @@
           <span class="principle-tag principle-tag--evidence">Database sharding</span>
           <span class="principle-tag principle-tag--tradeoff">Join complexity</span>
         </div>
-        <div class="principle-mechanism"><code>chitta_embeddings.duckdb</code> &rarr; FLOAT[768] + HNSW
-<code>chitta.duckdb</code> &rarr; content, metadata, relationships</div>
+        <div class="principle-mechanism"><code>chitta-field</code> &rarr; sparse codes (64/16K) + cortical posting index
+<code>WAL segments</code> &rarr; content, metadata, relationships, durable log</div>
       </div>
 
       <div class="principle-card reveal">
@@ -615,7 +616,7 @@ Correction warnings: ~100 tokens</div>
 
       <div class="principle-card reveal">
         <h3 class="principle-title">Daemon architecture enables instant recall</h3>
-        <p class="principle-desc">A persistent daemon (chittad) keeps DuckDB, HNSW indexes, and ONNX model warm. Without this, every tool call pays ~750ms cold-start costs.</p>
+        <p class="principle-desc">A persistent daemon (chittad) keeps the chitta-field memory substrate and ONNX model warm in memory. Without this, every tool call pays ~750ms cold-start costs.</p>
         <div class="principle-meta">
           <span class="principle-tag principle-tag--evidence">Connection pooling, model serving</span>
           <span class="principle-tag principle-tag--tradeoff">Memory footprint (~1GB)</span>
