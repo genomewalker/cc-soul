@@ -640,10 +640,21 @@ else
 fi
 
 # ===========================================
-# AUTO-DISTILLATION: Queue session distillation at session end
+# AUTO-DISTILLATION: Periodic mid-session + end-of-session
 # ===========================================
 if [[ -n "$SESSION_ID" && "$SESSION_ID" != "default" && -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
     queue_write "transcript_register" "{\"session_id\":\"$SESSION_ID\",\"transcript_path\":$(printf '%s' "$TRANSCRIPT_PATH" | jq -Rs .),\"realm\":\"$REALM\"}"
+
+    # Mid-session distillation every 20 turns so knowledge is available within the session
+    DISTILL_MARKER="$MIND_PATH/.last_distill_turn_${SESSION_ID}"
+    LAST_DISTILL=$(cat "$DISTILL_MARKER" 2>/dev/null || echo 0)
+    DISTILL_INTERVAL=20
+    if (( TURN_INDEX - LAST_DISTILL >= DISTILL_INTERVAL )); then
+        queue_write "distill_trigger" "{\"session_id\":\"$SESSION_ID\"}"
+        echo "$TURN_INDEX" > "$DISTILL_MARKER"
+    fi
+
+    # Always distill at session end (stop_hook_active check prevents double-fire)
     queue_write "distill_trigger" "{\"session_id\":\"$SESSION_ID\"}"
 fi
 
