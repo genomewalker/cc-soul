@@ -300,10 +300,14 @@ DistillResult NativeDistiller::distill_session(
     ep_content << "[episode] session=" << session_id
                << " turns=" << start_turn << "-" << end_turn
                << " realm=" << realm;
+    std::vector<float> ep_embedding;
+    if (embedder_) {
+        ep_embedding = embedder_(ep_content.str());
+    }
     try {
         episode_id = static_cast<int64_t>(
             field_store_->remember("episode", realm, ep_content.str(),
-                                   {}, 1.0f, 0.0f));
+                                   ep_embedding, 1.0f, 0.0f));
     } catch (...) {}
 
     if (episode_id > 0) {

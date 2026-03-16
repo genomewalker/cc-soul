@@ -19,6 +19,9 @@ import asyncio
 import logging
 import re
 from typing import Optional, Dict, Any, List
+from concurrent.futures import ThreadPoolExecutor
+
+_executor = ThreadPoolExecutor(max_workers=4)
 
 # Suppress MCP SDK validation warnings (Claude Code sends incomplete initialize requests)
 logging.getLogger("root").setLevel(logging.ERROR)
@@ -229,7 +232,7 @@ def to_toon(obj: Any, indent: int = 0) -> str:
 
     if isinstance(obj, str):
         # Escape newlines and pipes for TOON rows
-        return obj.replace('\n', '\\n').replace('|', '/')
+        return obj.replace('\n', '\\n').replace('|', '\\|')
 
     if isinstance(obj, list):
         if not obj:
@@ -248,7 +251,7 @@ def to_toon(obj: Any, indent: int = 0) -> str:
                         v = item.get(k, '')
                         # Truncate long strings, escape newlines
                         s = str(v) if v is not None else ''
-                        s = s.replace('\n', ' ').replace('|', '/')[:80]
+                        s = s.replace('\n', ' ').replace('|', '\\|')[:80]
                         vals.append(s)
                     rows.append(" " + "|".join(vals))
                 return header + "\n" + "\n".join(rows)
@@ -1635,11 +1638,12 @@ async def call_tool(name: str, arguments: dict):
             arguments["realm"] = realm
 
     # Check if this is a composite tool
+    loop = asyncio.get_event_loop()
     if name in COMPOSITE_HANDLERS:
-        result = COMPOSITE_HANDLERS[name](arguments)
+        result = await loop.run_in_executor(_executor, COMPOSITE_HANDLERS[name], arguments)
     else:
         # Forward to daemon
-        result = daemon_call(name, arguments)
+        result = await loop.run_in_executor(_executor, daemon_call, name, arguments)
 
     return [TextContent(type="text", text=result)]
 

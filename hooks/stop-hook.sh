@@ -101,8 +101,7 @@ RESPONSE=$(tac "$TRANSCRIPT_PATH" | grep -m1 '"role":"assistant"' | \
 # LOSSLESS STORAGE: Store assistant turn
 # ===========================================
 # Get turn index from counter file
-TURN_FILE="$MIND_PATH/.turn_index_$SESSION_ID"
-TURN_INDEX=$(cat "$TURN_FILE" 2>/dev/null || echo "1")
+TURN_INDEX=$(get_next_turn "$SESSION_ID")
 
 # Extract tools used from transcript for this turn
 TOOLS_JSON=$(jq -r '[.[] | select(.role=="assistant") | .message.content[]? | select(.type=="tool_use") | .name] | unique' "$TRANSCRIPT_PATH" 2>/dev/null || echo "[]")
@@ -118,9 +117,6 @@ echo "$RESPONSE" | grep -qiE '(error|failed|exception|traceback)' && HAS_ERROR=t
 
 # Store assistant turn
 queue_write "store_turn" "{\"session_id\":\"$SESSION_ID\",\"role\":\"assistant\",\"content\":$(echo "$RESPONSE" | jq -Rs .),\"turn_index\":$TURN_INDEX,\"tools_used\":$TOOLS_JSON,\"files_touched\":$FILES_JSON,\"has_error\":$HAS_ERROR}"
-
-# Increment turn index
-echo $((TURN_INDEX + 1)) > "$TURN_FILE"
 
 # Skip daemon-dependent operations if daemon is not running.
 # queue_write / store_turn above are file-based and always run.
@@ -164,7 +160,7 @@ if [[ "$EVENT_CHECKPOINT" == "true" ]]; then
 fi
 
 # Quality gate: dedup file for this session
-DEDUP_FILE="$MIND_PATH/.stop_dedup"
+DEDUP_FILE="$MIND_PATH/.stop_dedup_${SESSION_ID}"
 touch "$DEDUP_FILE"
 
 # Extract typed learnings → convert to SSL → queue
@@ -195,7 +191,7 @@ while IFS= read -r line; do
         title=$(echo "$ssl_content" | head -c 100)
 
         # Queue observe with SSL-formatted content
-        queue_write "observe" "{\"category\":\"$category\",\"title\":$(echo "$title" | jq -Rs .),\"content\":$(echo "$ssl_content" | jq -Rs .)}"
+        queue_write "observe" "{\"category\":\"$category\",\"title\":$(echo "$title" | jq -Rs .),\"content\":$(echo "$ssl_content" | jq -Rs .),\"realm\":\"$REALM\"}"
         echo "[soul] +${type,,}: ${title:0:60}" >&2
         ((LEARNED++)) || true
     fi
@@ -334,7 +330,7 @@ if [[ "$CLAUDE_LEARNED" == "false" && -n "$LAST_USER_MSG" ]]; then
 
             ssl_content="[compliance:auto] User correction: $CORRECTION_TEXT"
             title=$(echo "$ssl_content" | head -c 100)
-            queue_write "observe" "{\"category\":\"correction\",\"title\":$(echo "$title" | jq -Rs .),\"content\":$(echo "$ssl_content" | jq -Rs .)}"
+            queue_write "observe" "{\"category\":\"correction\",\"title\":$(echo "$title" | jq -Rs .),\"content\":$(echo "$ssl_content" | jq -Rs .),\"realm\":\"$REALM\"}"
             echo "[soul] +auto-correction stored: ${title:0:60}" >&2
         else
             echo "[soul] skip auto-correction: duplicate" >&2
@@ -451,7 +447,7 @@ if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
                 if [[ "$_sus3_is_break" == "1" ]]; then
                     _sus3_ratio=$(awk "BEGIN{printf \"%.2f\", $_sus3_cache_r / $_sus3_denom}")
                     queue_write "observe" \
-                        "{\"category\":\"correction\",\"title\":\"Cache break detected\",\"content\":\"[cache:break] Session had cache_hit_ratio=$_sus3_ratio (threshold 0.5). Potential causes: model switch mid-session, tool set changes, or compaction. Review recent session patterns.\",\"tags\":[\"cache-break\",\"token-efficiency\"]}"
+                        "{\"category\":\"correction\",\"title\":\"Cache break detected\",\"content\":\"[cache:break] Session had cache_hit_ratio=$_sus3_ratio (threshold 0.5). Potential causes: model switch mid-session, tool set changes, or compaction. Review recent session patterns.\",\"tags\":[\"cache-break\",\"token-efficiency\"],\"realm\":\"$REALM\"}"
                 fi
             fi
         fi
@@ -571,7 +567,7 @@ if [[ -x "$SCRIPT_DIR/span-capture.sh" ]]; then
 fi
 
 # Clean up temp files
-rm -f "$MIND_PATH/.last_user_message" "$MIND_PATH/.last_correction_context" "$PREDICTIONS_FILE" "$DEDUP_FILE" "$MIND_PATH/.exposed_corrections_${SESSION_ID}" "$MIND_PATH/.exposed_memories_${SESSION_ID}" 2>/dev/null
+rm -f "$MIND_PATH/.last_user_message" "$MIND_PATH/.last_correction_context" "$PREDICTIONS_FILE" "$MIND_PATH/.exposed_corrections_${SESSION_ID}" "$MIND_PATH/.exposed_memories_${SESSION_ID}" 2>/dev/null
 
 # ===========================================
 # LEDGER: Rich session checkpoint for continuity
@@ -633,7 +629,7 @@ snapshot=$(echo "$ASSISTANT_TEXT" | grep -v '^$' | tail -20 | head -c 1000)
 if [[ "$TURNS" =~ ^[0-9]+$ && "$TURNS" -ge 3 ]]; then
     SUMMARY="[session:$SESSION_ID] ${mood}→${TURNS} turns"
     [[ -n "$TOOLS_USED" ]] && SUMMARY="$SUMMARY | tools: ${TOOLS_USED:0:100}"
-    queue_write "observe" "{\"category\":\"session_summary\",\"title\":\"Session $SESSION_ID\",\"content\":$(echo "$SUMMARY" | jq -Rs .)}"
+    queue_write "observe" "{\"category\":\"session_summary\",\"title\":\"Session $SESSION_ID\",\"content\":$(echo "$SUMMARY" | jq -Rs .),\"realm\":\"$REALM\"}"
     echo "[soul] +session-summary: ${SUMMARY:0:60}" >&2
 else
     echo "[soul] skip session-summary: too few turns ($TURNS<3)" >&2
@@ -731,14 +727,6 @@ if echo "$RESPONSE" | grep -qiE "(I found|the answer is|it turns out|the reason 
             echo "[soul] +curiosity resolved: gap $gap_id" >&2
         fi
     fi
-fi
-
-# ===========================================
-# CROSS-SESSION MESSAGING: Deregister session
-# ===========================================
-DEREGISTER_SESSION="${SESSION_ID_INPUT:-${CLAUDE_SESSION_ID:-}}"
-if [[ -n "$DEREGISTER_SESSION" ]]; then
-    "$CHITTA_BIN" session_deregister --session_id "$DEREGISTER_SESSION" 2>/dev/null || true
 fi
 
 exit 0

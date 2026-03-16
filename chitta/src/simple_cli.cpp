@@ -672,6 +672,8 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
         for (int _i = 0; _i < 30 && daemon_running; ++_i)
             std::this_thread::sleep_for(std::chrono::seconds(1));
 
+        auto last_busy_skip_start = std::chrono::steady_clock::now();
+
         while (daemon_running) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
 
@@ -679,11 +681,16 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
             if (now_time - last_distill >= interval_mins) {
                 // Skip if daemon is actively handling queries (prevent blocking)
                 if (!subconscious.is_idle()) {
-                    if (verbose_mode) {
-                        std::cerr << "[distill] Skipping - daemon is busy\n";
+                    auto busy_duration = now_time - last_busy_skip_start;
+                    if (busy_duration < std::chrono::minutes(5)) {
+                        if (verbose_mode) {
+                            std::cerr << "[distill] Skipping - daemon is busy\n";
+                        }
+                        continue;  // Still within cap, skip
                     }
-                    continue;  // Don't update last_distill, try again next second
+                    std::cerr << "[distill] Busy-skip cap reached, running distillation anyway\n";
                 }
+                last_busy_skip_start = now_time;
 
                 last_distill = now_time;
 
@@ -700,6 +707,14 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                             ts.session_id = path.stem().string();
                             ts.transcript_path = path.string();
                             ts.realm = "brahman";
+                            // Look up realm from transcript registry
+                            auto reg = field_store.get_latest_event("transcript", "register", ts.session_id);
+                            if (reg) {
+                                try {
+                                    auto r = json::parse(*reg);
+                                    ts.realm = r.value("realm", "brahman");
+                                } catch (...) {}
+                            }
                             ts.last_processed_line = 0;
                             // Check FieldStore for last progress event
                             auto progress = field_store.get_latest_event("transcript", "progress", ts.session_id);
@@ -827,7 +842,8 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                                 ? args.value("confidence", 0.8f)
                                 : category_to_confidence(category);
                             std::string full_text = title.empty() ? content : title + "\n" + content;
-                            field_store.remember(category_to_kind(category), "brahman",
+                            std::string realm = args.value("realm", "brahman");
+                            field_store.remember(category_to_kind(category), realm,
                                                   full_text, embed_text(full_text),
                                                   confidence, 0.01f);
                             queue_count++;
@@ -995,9 +1011,44 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                             queue_count++;
                         }
                     } else if (tool == "distill_trigger") {
-                        // distillation disabled (--no-distill); log and skip
-                        if (verbose_mode)
-                            std::cerr << "[queue] distill_trigger ignored (distillation disabled)\n";
+                        if (!distill_config.enabled) {
+                            if (verbose_mode)
+                                std::cerr << "[queue] distill_trigger ignored (distillation disabled)\n";
+                        } else {
+                            std::string session_id = args.value("session_id", "");
+                            if (!session_id.empty()) {
+                                // Look up transcript path from registry event
+                                std::string transcript_path;
+                                std::string realm = "brahman";
+                                auto reg = field_store.get_latest_event("transcript", "register", session_id);
+                                if (reg) {
+                                    try {
+                                        auto r = json::parse(*reg);
+                                        transcript_path = r.value("transcript_path", "");
+                                        realm = r.value("realm", "brahman");
+                                    } catch (...) {}
+                                }
+                                if (!transcript_path.empty()) {
+                                    TranscriptState ts;
+                                    ts.session_id = session_id;
+                                    ts.transcript_path = transcript_path;
+                                    ts.realm = realm;
+                                    ts.last_processed_line = 0;
+                                    auto progress = field_store.get_latest_event("transcript", "progress", session_id);
+                                    if (progress) {
+                                        try {
+                                            auto p = json::parse(*progress);
+                                            ts.last_processed_line = p.value("last_line", (int64_t)0);
+                                        } catch (...) {}
+                                    }
+                                    if (run_distillation(field_store, yantra, ts, distill_config, &handler, true)) {
+                                        queue_distill_count++;
+                                    }
+                                } else if (verbose_mode) {
+                                    std::cerr << "[queue] distill_trigger: no transcript registered for " << session_id << "\n";
+                                }
+                            }
+                        }
                     }
                 } catch (const std::exception& e) {
                     if (verbose_mode) {

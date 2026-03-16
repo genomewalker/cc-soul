@@ -38,15 +38,11 @@ TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null 
 mkdir -p "$MIND_PATH"
 echo "$QUERY" > "$MIND_PATH/.last_user_message"
 
-# Get turn index from counter file
-TURN_FILE="$MIND_PATH/.turn_index_$SESSION_ID"
-TURN_INDEX=$(cat "$TURN_FILE" 2>/dev/null || echo "0")
+# Get turn index (locked read+increment via lib.sh)
+TURN_INDEX=$(get_next_turn "$SESSION_ID")
 
 # Store user turn in lossless conversation storage (uses lib.sh queue_write with ack_id)
 queue_write "store_turn" "{\"session_id\":\"$SESSION_ID\",\"role\":\"user\",\"content\":$(echo "$QUERY" | jq -Rs .),\"turn_index\":$TURN_INDEX}"
-
-# Increment turn index
-echo $((TURN_INDEX + 1)) > "$TURN_FILE"
 
 # Skip daemon-dependent operations immediately if daemon is not running.
 # queue_write above is file-based (no daemon needed), everything below requires it.

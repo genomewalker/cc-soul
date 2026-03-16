@@ -24,6 +24,12 @@ INPUT=$(cat)
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
 TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty')
 
+# Clean stale per-session sentinels so continuity fires on every new session
+MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
+rm -f "$MIND_PATH/.session_active" "$MIND_PATH/.gaps_surfaced"
+# Clean stale dedup files from previous sessions
+rm -f "$MIND_PATH/.stop_dedup_"* 2>/dev/null || true
+
 # Check chitta CLI exists and daemon is running
 [[ ! -x "$CHITTA_BIN" ]] && exit 0
 daemon_available || exit 0
