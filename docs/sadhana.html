@@ -1145,6 +1145,7 @@
       <li><a href="getting-started.html">Get Started</a></li>
       <li><a href="philosophy.html">Philosophy</a></li>
       <li><a href="architecture.html">Architecture</a></li>
+      <li><a href="chitta-field.html">chitta-field</a></li>
       <li><a href="sadhana.html" class="active">Sadhana</a></li>
       <li><a href="tools.html">Tools</a></li>
       <li><a href="cli.html">CLI</a></li>
@@ -1277,7 +1278,7 @@
       </div>
 
       <div class="arch-layer arch-layer--storage">
-        <div class="arch-layer-label">DuckDB Storage</div>
+        <div class="arch-layer-label">chitta-field Storage</div>
         <div class="arch-boxes">
           <div class="arch-box arch-box--green">sadhana table</div>
           <div class="arch-box arch-box--green">history table</div>
@@ -1292,7 +1293,7 @@
       <div class="config-block-title">Components</div>
       <pre><span class="kw">SadhanaManager</span>   <span class="cm">Orchestrates all sadhanas, runs tick loop every 100ms</span>
 <span class="kw">BrainProvider</span>    <span class="cm">LLM abstraction — Claude API or OpenCode local</span>
-<span class="kw">DuckDB Storage</span>   <span class="cm">Persistent state, history, and memory integration</span>
+<span class="kw">chitta-field</span>     <span class="cm">Persistent state, history, and memory integration (Rust WAL)</span>
 <span class="kw">Sadhana TUI</span>      <span class="cm">Optional terminal interface for real-time monitoring</span></pre>
     </div>
   </div>

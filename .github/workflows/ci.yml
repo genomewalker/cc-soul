@@ -12,6 +12,18 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.92.0"
+
+      - name: Build chitta-field
+        run: |
+          cd chitta-field
+          ./build.sh build --release
 
       - name: Setup Miniconda
         uses: conda-incubator/setup-miniconda@v3
@@ -23,8 +35,7 @@ jobs:
       - name: Install dependencies
         shell: bash -l {0}
         run: |
-          conda install -y cmake nlohmann_json sqlite libduckdb-devel
-          # Install ONNX Runtime C++ library with headers from conda-forge
+          conda install -y cmake nlohmann_json sqlite
           conda install -y -c conda-forge onnxruntime-cpp
 
       - name: Build
@@ -33,22 +44,19 @@ jobs:
           mkdir -p chitta/build
           cd chitta/build
           cmake .. -DCMAKE_BUILD_TYPE=Release
-          make -j$(nproc)
+          cmake --build . --parallel
 
       - name: Verify binaries
         run: |
           ls -la bin/
           test -x bin/chitta
           test -x bin/chittad
-          test -x bin/duckdb_test
 
       - name: Run tests
         shell: bash -l {0}
         run: |
           cd chitta/build
-          # Skip duckdb_test for now - conda DuckDB 1.4.x has compatibility issues
-          # The test passes locally and in the Build workflow (DuckDB 1.1.3)
-          ctest --output-on-failure --exclude-regex duckdb_test || true
+          ctest --output-on-failure || true
 
   lint-shell:
     runs-on: ubuntu-latest

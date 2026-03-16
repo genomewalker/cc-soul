@@ -14,12 +14,12 @@
 
 CC-soul gives Claude Code persistent memory across sessions. It learns your preferences, remembers your codebase structure, anticipates your needs, and gets smarter the more you use it. One command to install. Zero commands to operate.
 
-## What's New in 3.43.35
+## What's New in 3.43.38
 
+- **chitta-field** — DuckDB replaced entirely with a pure Rust organic memory substrate. No external database, no NFS locks, no D-state hangs. Memory is now statically linked and multi-instance safe.
 - **Soul dreams (svapna)** — The daemon explores topics autonomously during idle time. It picks a knowledge gap, web-searches it, and stores what it finds as `[dream]` memories. Dreams run twice daily.
 - **Self-improvement loop** — A daily `impl_start` sadhana reads pending `[impl]` memories (including `[dream][impl]` architectural findings), implements changes in the repo, runs a review gate, and commits if approved.
 - **Architectural reflection** — Dream prompts now include a reflection step: findings with direct implications for memory storage or retrieval are stored as `[dream][impl]` memories, feeding the impl loop automatically.
-- **REINFORCE credit attribution** — ResonanceLearner now scales BetaPrior updates by each parameter's deviation from its mean, breaking convergence lockstep and enabling genuine learning across all 7 priors.
 
 ## Before & After
 
@@ -69,9 +69,9 @@ cd cc-soul && ./scripts/smart-install.sh
 │                 ↓                                            │
 ├─────────────────────────────────────────────────────────────┤
 │                   LONG-TERM MEMORY                           │
-│          (DuckDB - persistent semantic graph)               │
+│         (chitta-field — Rust organic memory substrate)      │
 │                                                              │
-│   Nodes │ Triplets │ HNSW Index │ BM25 │ Themes             │
+│   Memories │ Triplets │ Sparse Codes │ WAL │ Embeddings     │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -217,15 +217,59 @@ The soul is not a database. It is who Claude becomes through working with you.
 
 **[Full Documentation Site](https://genomewalker.github.io/cc-soul/)**
 
+## chitta-field: The Memory Substrate
+
+CC-soul's memory lives in chitta-field — a pure Rust cognitive substrate that replaces relational databases entirely. Designed for one purpose: to be a memory system that behaves like memory.
+
+**What makes it different:**
+
+- **Sparse associative codes** — each memory activates 64 of 16,384 feature dimensions. Recall is driven by pattern overlap, not keyword search. Related memories cluster naturally.
+- **Write-ahead log** — every operation is durable before it applies in-memory. Restart the daemon; it replays the log and picks up exactly where it left off.
+- **Multi-instance writes** — multiple Claude windows share the same memory field simultaneously. Each writer owns its own segment file; no locking, no contention.
+- **Statically linked** — compiled into `libchitta_field.a`, then linked into the daemon. No database server, no IPC sockets, no NFS file handles to hang on.
+- **Organic decay** — memories fade through a demotion tier system driven by access patterns, not arbitrary TTLs. What you use survives. What you don't, fades.
+
+```
+Memory written                        Memory recalled
+┌──────────────┐                     ┌──────────────┐
+│ Raw content  │ ──embed──▶ [64/16K  │ sparse code  │
+│ + embedding  │            active   │ overlap ]    │
+│ + metadata   │            neurons] │ ──▶ top-K    │
+└──────────────┘                     └──────────────┘
+        │                                    ▲
+        ▼                                    │
+   WAL segment                        cortical index
+   (durable)                          (sub-ms recall)
+        │
+        ▼
+   in-memory field
+   (searchable)
+```
+
+[chitta-field on GitHub →](https://github.com/genomewalker/chitta-field)
+
 ## Building from Source
 
-Requirements: CMake 3.14+, C++17 compiler, DuckDB, ONNX Runtime
+Requirements: CMake 3.14+, C++17 compiler, Rust 1.92+, ONNX Runtime
 
 ```bash
-cd chitta
-mkdir build && cd build
+# Clone with submodule
+git clone --recurse-submodules https://github.com/genomewalker/cc-soul.git
+cd cc-soul
+
+# Build chitta-field first (Rust static library)
+cd chitta-field && ./build.sh build --release && cd ..
+
+# Build the daemon
+cd chitta && mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j$(nproc)
+```
+
+Or use the all-in-one installer:
+
+```bash
+./scripts/smart-install.sh
 ```
 
 The embedding model (bge-base-en-v1.5) downloads automatically during setup.
