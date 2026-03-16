@@ -41,6 +41,7 @@
 #include <unordered_map>
 #include <mutex>
 #include <unistd.h>
+#include <climits>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -544,6 +545,10 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
     std::cerr << "[daemon] Started (socket=" << socket_path
               << ", interval=" << interval << "s, pid=" << getpid() << ")\n";
 
+    // Record binary mtime at startup for self-update detection.
+    // /proc/self/exe resolves to the actual binary path even through symlinks.
+    auto startup_binary_mtime = std::filesystem::last_write_time("/proc/self/exe");
+
     // Maintenance thread - sync and apply decay periodically
     std::atomic<size_t> cycle_count{0};
     std::thread maintenance([&]() {
@@ -551,8 +556,10 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
         auto last_sync = std::chrono::steady_clock::now();
         auto last_embedding_flush = std::chrono::steady_clock::now();
         auto last_foreign_sync = std::chrono::steady_clock::now();
+        auto last_binary_check = std::chrono::steady_clock::now();
         auto embedding_flush_interval = std::chrono::seconds(5);  // Flush queued embeddings every 5s
         auto foreign_sync_interval = std::chrono::seconds(5);    // Ingest peer segment files every 5s
+        auto binary_check_interval = std::chrono::seconds(60);   // Check for updated binary every 60s
 
         // inotify watcher on segments/ dir for same-host peer writes
         int inotify_fd = inotify_init1(IN_NONBLOCK);
@@ -602,6 +609,30 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                 } catch (const std::exception& e) {
                     std::cerr << "[maint] sync_foreign failed: " << e.what() << "\n";
                 }
+            }
+
+            // Self-update detection: restart if binary has been replaced on disk.
+            if (now_time - last_binary_check >= binary_check_interval) {
+                last_binary_check = now_time;
+                try {
+                    auto current_mtime = std::filesystem::last_write_time("/proc/self/exe");
+                    if (current_mtime != startup_binary_mtime) {
+                        std::cerr << "[maint] Binary updated, restarting daemon...\n";
+                        field_store.flush();
+                        daemon_running = false;
+                        // execv replaces process image — argv[0] resolves via PATH or symlink
+                        // systemctl restart is cleaner: it waits for shutdown then relaunches
+                        ::execlp("systemctl", "systemctl", "--user", "restart", "chittad", nullptr);
+                        // If systemctl not found, fall back to direct exec
+                        char self_path[PATH_MAX];
+                        ssize_t len = ::readlink("/proc/self/exe", self_path, sizeof(self_path) - 1);
+                        if (len > 0) {
+                            self_path[len] = '\0';
+                            ::execv(self_path, nullptr);
+                        }
+                        ::exit(0);
+                    }
+                } catch (...) {}
             }
 
             if (now_time - last_sync >= interval_secs) {
