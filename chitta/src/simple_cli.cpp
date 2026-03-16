@@ -367,7 +367,7 @@ bool run_distillation(FieldStore& field_store, VakYantra* yantra,
     );
 
     if (!result.success) {
-        if (verbose_mode && !result.error.empty()) {
+        if (!result.error.empty()) {
             std::cerr << "[distill] " << state.session_id << ": " << result.error << "\n";
         }
         return false;
@@ -800,6 +800,10 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
     };
 
     std::thread queue_processor([&]() {
+        // In-process transcript registry: session_id -> {transcript_path, realm, last_line}
+        // Updated by transcript_register/transcript_progress ops; queried by distill_trigger.
+        std::unordered_map<std::string, json> transcript_reg;
+
         while (daemon_running) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
@@ -932,6 +936,8 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                         std::string session_id = args.value("session_id", "");
                         std::string path = args.value("transcript_path", "");
                         if (!path.empty()) {
+                            std::cerr << "[queue] transcript_register: session=" << session_id << " path=" << path << "\n";
+                            transcript_reg[session_id] = args;
                             field_store.emit_event("transcript", "register",
                                                     session_id, args.dump());
                             queue_count++;
@@ -1017,34 +1023,50 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                         } else {
                             std::string session_id = args.value("session_id", "");
                             if (!session_id.empty()) {
-                                // Look up transcript path from registry event
+                                // Look up transcript path from in-process registry first,
+                                // then fall back to FieldStore event log.
                                 std::string transcript_path;
                                 std::string realm = "brahman";
-                                auto reg = field_store.get_latest_event("transcript", "register", session_id);
-                                if (reg) {
-                                    try {
-                                        auto r = json::parse(*reg);
-                                        transcript_path = r.value("transcript_path", "");
-                                        realm = r.value("realm", "brahman");
-                                    } catch (...) {}
+                                auto it = transcript_reg.find(session_id);
+                                if (it != transcript_reg.end()) {
+                                    transcript_path = it->second.value("transcript_path", "");
+                                    realm = it->second.value("realm", "brahman");
+                                } else {
+                                    auto reg = field_store.get_latest_event("transcript", "register", session_id);
+                                    if (reg) {
+                                        try {
+                                            auto r = json::parse(*reg);
+                                            transcript_path = r.value("transcript_path", "");
+                                            realm = r.value("realm", "brahman");
+                                        } catch (...) {}
+                                    }
                                 }
                                 if (!transcript_path.empty()) {
+                                    std::cerr << "[queue] distill_trigger: path=" << transcript_path << " realm=" << realm << "\n";
                                     TranscriptState ts;
                                     ts.session_id = session_id;
                                     ts.transcript_path = transcript_path;
                                     ts.realm = realm;
                                     ts.last_processed_line = 0;
-                                    auto progress = field_store.get_latest_event("transcript", "progress", session_id);
-                                    if (progress) {
-                                        try {
-                                            auto p = json::parse(*progress);
-                                            ts.last_processed_line = p.value("last_line", (int64_t)0);
-                                        } catch (...) {}
+                                    // Check progress from in-process registry
+                                    if (it != transcript_reg.end()) {
+                                        ts.last_processed_line = it->second.value("last_line", (int64_t)0);
+                                    } else {
+                                        auto progress = field_store.get_latest_event("transcript", "progress", session_id);
+                                        if (progress) {
+                                            try {
+                                                auto p = json::parse(*progress);
+                                                ts.last_processed_line = p.value("last_line", (int64_t)0);
+                                            } catch (...) {}
+                                        }
                                     }
                                     if (run_distillation(field_store, yantra, ts, distill_config, &handler, true)) {
                                         queue_distill_count++;
+                                        std::cerr << "[queue] distill_trigger: success (total=" << queue_distill_count.load() << ")\n";
+                                    } else {
+                                        std::cerr << "[queue] distill_trigger: run_distillation returned false\n";
                                     }
-                                } else if (verbose_mode) {
+                                } else {
                                     std::cerr << "[queue] distill_trigger: no transcript registered for " << session_id << "\n";
                                 }
                             }

@@ -74,11 +74,11 @@ std::string NativeDistiller::call_opencode(const std::string& prompt) {
         close(stdout_pipe[0]);
 
         dup2(stdin_pipe[0], STDIN_FILENO);
-        dup2(stdout_pipe[1], STDOUT_FILENO);
-
+        // opencode writes the LLM response to stderr; stdout is progress noise
+        dup2(stdout_pipe[1], STDERR_FILENO);
         int devnull = open("/dev/null", O_WRONLY);
         if (devnull >= 0) {
-            dup2(devnull, STDERR_FILENO);
+            dup2(devnull, STDOUT_FILENO);
             close(devnull);
         }
 
