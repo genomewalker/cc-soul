@@ -701,7 +701,7 @@ After=default.target
 
 [Service]
 Type=simple
-ExecStart=$BIN_DIR/chittad daemon --path $MIND_PATH --foreground
+ExecStart=$BIN_DIR/chittad daemon --path $MIND_PATH --foreground --no-autonomous --distill-interval 60 --no-enrich
 Restart=always
 RestartSec=5
 StandardOutput=journal

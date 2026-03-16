@@ -8,6 +8,7 @@
 //   status     Check daemon status
 //   stats      Show soul statistics
 
+#include <sys/inotify.h>
 #include <chitta/field_store.hpp>
 #include <chitta/rpc/field_handler.hpp>
 #include <chitta/mind/subconscious.hpp>
@@ -551,7 +552,15 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
         auto last_embedding_flush = std::chrono::steady_clock::now();
         auto last_foreign_sync = std::chrono::steady_clock::now();
         auto embedding_flush_interval = std::chrono::seconds(5);  // Flush queued embeddings every 5s
-        auto foreign_sync_interval = std::chrono::seconds(30);    // Ingest peer segment files every 30s
+        auto foreign_sync_interval = std::chrono::seconds(5);    // Ingest peer segment files every 5s
+
+        // inotify watcher on segments/ dir for same-host peer writes
+        int inotify_fd = inotify_init1(IN_NONBLOCK);
+        std::string seg_dir = mind_path + "/chitta-field/segments";
+        if (inotify_fd >= 0) {
+            inotify_add_watch(inotify_fd, seg_dir.c_str(),
+                              IN_CREATE | IN_MODIFY | IN_CLOSE_WRITE);
+        }
 
         while (daemon_running) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -575,8 +584,15 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                 std::cerr << "[maint] Sadhana tick failed: " << e.what() << "\n";
             }
 
-            // Ingest new ops from peer instances on shared NFS storage.
-            if (now_time - last_foreign_sync >= foreign_sync_interval) {
+            // Ingest new ops from peer instances.
+            // Triggered immediately by inotify (same-host) or every 5s (NFS fallback).
+            bool seg_event = false;
+            if (inotify_fd >= 0) {
+                alignas(struct inotify_event) char ibuf[4096];
+                ssize_t len = ::read(inotify_fd, ibuf, sizeof(ibuf));
+                if (len > 0) seg_event = true;
+            }
+            if (seg_event || (now_time - last_foreign_sync >= foreign_sync_interval)) {
                 last_foreign_sync = now_time;
                 try {
                     int applied = field_store.sync_foreign();
@@ -610,6 +626,7 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                 }
             }
         }
+        if (inotify_fd >= 0) close(inotify_fd);
     });
 
     // Distillation thread - process transcripts periodically
