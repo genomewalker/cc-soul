@@ -1306,6 +1306,40 @@
             tier = static_cast<PriorityTier>(params["priority_tier"].get<int>());
         }
 
+#ifdef CHITTA_FIELD_AVAILABLE
+        if (field_store_) {
+            auto json_str = field_store_->list_memories(kind, realm, "recency", limit, 0);
+            json arr;
+            try { arr = json::parse(json_str); } catch (...) { arr = json::array(); }
+            std::ostringstream ss;
+            ss << "Memory Index (" << arr.size() << " entries):\n";
+            ss << "══════════════════════════════════════════════════════════════════\n";
+            ss << "ID       | Conf | Kind       | Date       | Preview\n";
+            ss << "---------|------|------------|------------|---------------------------\n";
+            json items = json::array();
+            for (const auto& r : arr) {
+                int64_t ts = r.value("ts_ms", (int64_t)0);
+                auto ms = std::chrono::milliseconds(ts);
+                auto tp = std::chrono::system_clock::time_point(ms);
+                auto tt = std::chrono::system_clock::to_time_t(tp);
+                std::tm tm_buf = *std::localtime(&tt);
+                char date_buf[16];
+                std::strftime(date_buf, sizeof(date_buf), "%Y-%m-%d", &tm_buf);
+                std::string preview = r.value("content", "");
+                if (preview.size() > 40) preview = preview.substr(0, 37) + "...";
+                float conf = r.value("confidence", 0.0f);
+                std::string rkind = r.value("kind", "");
+                uint64_t id = r.value("id", (uint64_t)0);
+                ss << std::setw(8) << id << " | "
+                   << std::fixed << std::setprecision(2) << conf << " | "
+                   << std::setw(10) << rkind.substr(0, 10) << " | "
+                   << date_buf << " | " << preview << "\n";
+                items.push_back({{"id", id}, {"kind", rkind}, {"confidence", conf},
+                                 {"created_at", ts}, {"one_liner", preview}});
+            }
+            return DuckDBToolResult::ok(ss.str(), {{"count", arr.size()}, {"entries", items}});
+        }
+#endif
         auto entries = mind_->store().list_memories_brief(limit, realm, kind, tier);
 
         std::ostringstream ss;

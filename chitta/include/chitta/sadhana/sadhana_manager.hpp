@@ -22,7 +22,7 @@
 // a final JSON message: {"status": "progressed|achieved|blocked", "summary": "..."}
 
 #include "brain_provider.hpp"
-#include "../duckdb_store.hpp"
+#include <chitta/field_store.hpp>
 #include <nlohmann/json.hpp>
 #include <memory>
 #include <string>
@@ -161,7 +161,7 @@ struct SadhanaStats {
 
 class SadhanaManager {
 public:
-    explicit SadhanaManager(DuckDBStore& store, SadhanaConfig config = {});
+    explicit SadhanaManager(FieldStore& field_store, SadhanaConfig config = {});
     ~SadhanaManager() = default;
 
     // CRUD operations
@@ -212,7 +212,7 @@ public:
     const SadhanaConfig& config() const { return config_; }
 
 private:
-    DuckDBStore& store_;
+    FieldStore& field_store_;
     SadhanaConfig config_;
     SadhanaStats stats_;
     mutable std::mutex mutex_;

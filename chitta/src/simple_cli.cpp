@@ -8,10 +8,10 @@
 //   status     Check daemon status
 //   stats      Show soul statistics
 
-#include <chitta/mind/duckdb_mind.hpp>
+#include <chitta/field_store.hpp>
+#include <chitta/rpc/field_handler.hpp>
 #include <chitta/mind/subconscious.hpp>
 #include <chitta/sadhana/sadhana_manager.hpp>
-#include <chitta/rpc/duckdb_handler.hpp>
 #include <chitta/rpc/thread_pool.hpp>
 #include <chitta/socket_server.hpp>
 #include <chitta/socket_client.hpp>
@@ -34,6 +34,7 @@
 #include <atomic>
 #include <fstream>
 #include <sstream>
+#include <filesystem>
 #include <nlohmann/json.hpp>
 #include <set>
 #include <unordered_map>
@@ -326,32 +327,36 @@ std::string default_enrich_script() {
 // Run distillation for a single transcript using native C++ distiller
 // Returns true if distillation was successful
 // queue_triggered: if true, uses min_turns=1 (for pre-compact immediate distillation)
-bool run_distillation(DuckDBMind& mind, const TranscriptState& state,
-                      const DistillConfig& config, bool queue_triggered = false) {
-    // Configure native distiller
+// handler: used to read current distill model (settable at runtime via MCP)
+bool run_distillation(FieldStore& field_store, VakYantra* yantra,
+                      const TranscriptState& state,
+                      const DistillConfig& config,
+                      FieldRpcHandler* handler = nullptr,
+                      bool queue_triggered = false) {
     NativeDistillConfig native_config;
-    native_config.model = config.model;
-    native_config.timeout_secs = 150;  // Same as old shell timeout
+    native_config.model = handler ? handler->get_distill_model() : config.model;
+    native_config.timeout_secs = 150;
     native_config.min_turns = config.min_turns;
     native_config.verbose = verbose_mode;
 
-    NativeDistiller distiller(mind, native_config);
+    auto embed_fn = [yantra](const std::string& text) -> std::vector<float> {
+        if (!yantra) return {};
+        try { return yantra->transform(text).nu.data; } catch (...) {}
+        return {};
+    };
+    auto distiller = std::make_unique<NativeDistiller>(field_store, embed_fn, native_config);
 
-    // Set cancellation callback for graceful shutdown
-    // Checks every 100ms during opencode execution
-    distiller.set_cancel_callback([]() {
+    distiller->set_cancel_callback([]() {
         return !daemon_running.load();
     });
 
-    // Set log callback if verbose
     if (verbose_mode) {
-        distiller.set_log_callback([](const std::string& msg) {
+        distiller->set_log_callback([](const std::string& msg) {
             std::cerr << msg << "\n";
         });
     }
 
-    // Run distillation
-    auto result = distiller.distill_session(
+    auto result = distiller->distill_session(
         state.session_id,
         state.transcript_path,
         state.realm,
@@ -366,14 +371,18 @@ bool run_distillation(DuckDBMind& mind, const TranscriptState& state,
         return false;
     }
 
-    // Update progress (using thread-safe methods)
-    mind.update_transcript_progress(state.session_id, result.last_line);
-    mind.mark_transcript_distilled(state.session_id);
+    // Transcript progress tracking via FieldStore events
+    field_store.emit_event("transcript", "progress",
+                           state.session_id,
+                           "{\"last_line\":" + std::to_string(result.last_line) + "}");
+    field_store.emit_event("transcript", "distilled",
+                           state.session_id, "{}");
 
     if (verbose_mode) {
         std::cerr << "[distill] Completed " << state.session_id
                   << " (line " << result.last_line << ", +"
-                  << result.learnings_stored << " learnings, "
+                  << result.learnings_stored << " new, "
+                  << result.learnings_deduped << " deduped, "
                   << result.triplets_created << " triplets)\n";
     }
 
@@ -381,19 +390,20 @@ bool run_distillation(DuckDBMind& mind, const TranscriptState& state,
 }
 
 // Generate stats JSON
-std::string generate_stats(DuckDBMind& mind) {
+std::string generate_stats(FieldStore& field_store, VakYantra* yantra) {
     std::ostringstream oss;
     oss << "{"
         << "\"version\":\"" << CHITTA_VERSION << "\","
-        << "\"nodes\":" << mind.size() << ","
-        << "\"triplets\":" << mind.triplet_count() << ","
-        << "\"yantra\":" << (mind.has_yantra() ? "true" : "false")
+        << "\"memories\":" << field_store.memory_count() << ","
+        << "\"symbols\":" << field_store.symbol_count() << ","
+        << "\"yantra\":" << (yantra ? "true" : "false")
         << "}";
     return oss.str();
 }
 
-int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
-               const std::string& mind_path, const std::string& pid_file,
+int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
+               const std::string& socket_path, const std::string& mind_path,
+               const std::string& pid_file,
                const DistillConfig& distill_config, EnrichConfig& enrich_config,
                const SubconsciousConfig& subconscious_config, bool no_autonomous) {
     // Automatically reap child processes to prevent zombie accumulation
@@ -455,11 +465,9 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
             }
         }
         if (enrich_config.enabled) {
-            size_t pending = mind.store().count_undescribed_symbols();
             std::cerr << "[daemon] Code enrichment enabled (interval=" << enrich_config.interval_minutes
                       << "m, batch=" << enrich_config.batch_size
-                      << ", idle=" << enrich_config.idle_seconds << "s"
-                      << ", pending=" << pending << ")\n";
+                      << ", idle=" << enrich_config.idle_seconds << "s)\n";
         }
     }
 
@@ -475,36 +483,19 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
         return 1;
     }
 
-    DuckDBRpcHandler handler(&mind);
+    FieldRpcHandler handler(&field_store, yantra);
+    handler.set_distill_model(distill_config.model);
+    handler.set_distill_enabled(distill_config.enabled);
 
     // Start subconscious background processor
-    Subconscious subconscious(&mind, subconscious_config);
+    Subconscious subconscious(&field_store, yantra, subconscious_config);
+
     subconscious.start();
     handler.set_subconscious(&subconscious);
 
-    // Start sadhana manager for autonomous agents
-    SadhanaManager sadhana_manager(mind.store());
-    handler.set_sadhana_manager(&sadhana_manager);
-    std::cerr << "[daemon] Sadhana manager initialized\n";
-
-    // Auto-pause all running sadhanas if --no-autonomous
-    if (no_autonomous) {
-        auto running = sadhana_manager.list("running");
-        if (!running.empty()) {
-            std::cerr << "[daemon] --no-autonomous: pausing " << running.size() << " running sadhana(s)\n";
-            for (const auto& s : running) {
-                sadhana_manager.pause(s.id);
-            }
-        }
-    }
-
-    // Wire up event streaming: push sadhana events to subscribed clients
-    sadhana_manager.set_stream_fn([&server](int fd, std::string line) {
-        server.queue_response(fd, std::move(line));
-    });
-    server.set_disconnect_callback([&sadhana_manager](int fd) {
-        sadhana_manager.stream_unsubscribe(fd);
-    });
+    // Sadhana manager — deferred until FieldStore is ready
+    std::unique_ptr<SadhanaManager> sadhana_manager;
+    std::cerr << "[daemon] Sadhana manager will init when chitta-field is ready\n";
 
     // Wire dream/think callbacks (unless --no-autonomous)
     if (!no_autonomous) {
@@ -552,23 +543,6 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
     std::cerr << "[daemon] Started (socket=" << socket_path
               << ", interval=" << interval << "s, pid=" << getpid() << ")\n";
 
-    // Initial health check to populate cache
-    auto initial_health = mind.health();
-    std::cerr << "[daemon] Initial stats: " << initial_health.total_nodes << " memories, "
-              << mind.triplet_count() << " triplets\n";
-
-    // Check for DB bloat at startup
-    double bloat = mind.store().bloat_ratio();
-    size_t file_mb = mind.store().file_size_bytes() / (1024 * 1024);
-    size_t data_mb = mind.store().data_size_bytes() / (1024 * 1024);
-    if (bloat >= 4.0) {
-        std::cerr << "[daemon] WARNING: DB bloat detected (" << std::fixed << std::setprecision(1)
-                  << bloat << "x, file=" << file_mb << "MB, data=" << data_mb << "MB)\n";
-        if (bloat >= 10.0) {
-            std::cerr << "[daemon] CRITICAL: Consider compacting before continuing.\n";
-        }
-    }
-
     // Maintenance thread - sync and apply decay periodically
     std::atomic<size_t> cycle_count{0};
     std::thread maintenance([&]() {
@@ -594,7 +568,7 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
 
             // Tick sadhana manager for autonomous agents (runs every 100ms loop)
             try {
-                sadhana_manager.tick();
+                if (sadhana_manager) sadhana_manager->tick();
             } catch (const std::exception& e) {
                 std::cerr << "[maint] Sadhana tick failed: " << e.what() << "\n";
             }
@@ -604,60 +578,17 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                 cycle_count++;
 
                 try {
-                    // Apply decay and prune weak nodes
-                    size_t decayed = mind.tick();
-
-                    // Sync to disk
-                    mind.sync();
-
-                    // Rebuild vector index if needed (deferred rebuild for stability)
-                    if (mind.store().needs_reindex()) {
-                        std::cerr << "[maint] Rebuilding vector index...\n";
-                        mind.store().rebuild_vector_index();
-                    }
-
-                    // Auto-distill episode patterns into wisdom (every 10 cycles)
-                    if (cycle_count % 10 == 0) {
-                        size_t distilled = mind.auto_distill_episodes(5);
-                        if (distilled > 0) {
-                            std::cerr << "[maint] Auto-distilled " << distilled
-                                      << " episode patterns into wisdom\n";
-                        }
-                    }
-
-                    // Cache break pattern detection (every 10 cycles)
-                    if (cycle_count % 10 == 0) {
-                        try {
-                            auto r = mind.store().execute_sql_query(
-                                "SELECT COUNT(*) FROM session_token_usage "
-                                "WHERE cache_hit_ratio < 0.5 AND n_messages > 3 "
-                                "AND created_at >= " + std::to_string(
-                                    std::chrono::duration_cast<std::chrono::seconds>(
-                                        std::chrono::system_clock::now().time_since_epoch()
-                                    ).count() - 86400));
-                            if (r.success && !r.rows.empty() && !r.rows[0].empty()) {
-                                int64_t breaks = 0;
-                                try { breaks = std::stoll(r.rows[0][0]); } catch (...) {}
-                                if (breaks >= 3) {
-                                    std::string content = "[cache:pattern] " + std::to_string(breaks) +
-                                        " cache breaks detected in last 24h. Systematic issue likely — "
-                                        "review hook outputs, tool registrations, and model switching patterns.";
-                                    mind.remember(content, NodeType::Wisdom, "brahman",
-                                                  RealmVisibility::Private, 0.9f);
-                                }
-                            }
-                        } catch (...) {}
-                    }
-
-                    // Update health cache (for fast health_check/soul_context)
-                    auto health = mind.health();
-
-                    if (verbose_mode) {
+                    field_store.flush();
+                    auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::system_clock::now().time_since_epoch()).count();
+                    auto [demoted, pruned] = field_store.run_demotion(now_ms);
+                    if (verbose_mode && (demoted > 0 || pruned > 0)) {
                         std::cerr << "[maint] Cycle " << cycle_count
-                                  << ": " << health.total_nodes << " nodes"
-                                  << ", " << health.active_nodes << " active"
-                                  << ", " << decayed << " decayed"
-                                  << ", status=" << health.status() << "\n";
+                                  << ": demoted=" << demoted
+                                  << ", pruned=" << pruned << "\n";
+                    }
+                    if (verbose_mode) {
+                        std::cerr << "[maint] Cycle " << cycle_count << " complete\n";
                     }
                 } catch (const std::exception& e) {
                     std::cerr << "[maint] Cycle failed: " << e.what() << "\n";
@@ -694,14 +625,38 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                 last_distill = now_time;
 
                 try {
-                    // Get all registered transcripts (thread-safe method)
-                    auto transcripts = mind.get_pending_transcripts();
+                    // Scan transcript directory for pending transcripts
+                    std::vector<TranscriptState> transcripts;
+                    std::string transcript_dir = mind_path + "/transcripts";
+                    try {
+                        for (const auto& entry : std::filesystem::directory_iterator(transcript_dir)) {
+                            if (!entry.is_regular_file()) continue;
+                            auto path = entry.path();
+                            if (path.extension() != ".jsonl") continue;
+                            TranscriptState ts;
+                            ts.session_id = path.stem().string();
+                            ts.transcript_path = path.string();
+                            ts.realm = "brahman";
+                            ts.last_processed_line = 0;
+                            // Check FieldStore for last progress event
+                            auto progress = field_store.get_latest_event("transcript", "progress", ts.session_id);
+                            if (progress) {
+                                try {
+                                    auto p = json::parse(*progress);
+                                    ts.last_processed_line = p.value("last_line", (int64_t)0);
+                                } catch (...) {}
+                            }
+                            transcripts.push_back(ts);
+                        }
+                    } catch (const std::filesystem::filesystem_error&) {
+                        // transcript_dir may not exist yet
+                    }
 
                     size_t processed = 0;
                     for (const auto& state : transcripts) {
                         if (!daemon_running) break;
 
-                        if (run_distillation(mind, state, distill_config)) {
+                        if (run_distillation(field_store, yantra, state, distill_config, &handler)) {
                             processed++;
                             distill_count++;
                         }
@@ -718,141 +673,13 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
         }
     });
 
-    // Code enrichment thread - generate semantic descriptions for symbols
+    // Code enrichment thread — disabled pending CfSymbolHit description field in FFI
     std::atomic<size_t> enrich_count{0};
     std::thread enrichment([&]() {
-        if (!enrich_config.enabled) return;
-
-        auto interval_mins = std::chrono::minutes(enrich_config.interval_minutes);
-        auto last_enrich = std::chrono::steady_clock::now();
-
-        // Initial delay to let things settle (after distillation starts) — interruptible on shutdown
-        for (int _i = 0; _i < 60 && daemon_running; ++_i)
-            std::this_thread::sleep_for(std::chrono::seconds(1));
-
-        while (daemon_running) {
-            std::this_thread::sleep_for(std::chrono::seconds(1));
-
-            auto now_time = std::chrono::steady_clock::now();
-            if (now_time - last_enrich >= interval_mins) {
-                // Skip if daemon is actively handling queries (prevent blocking)
-                if (!subconscious.is_idle()) {
-                    if (verbose_mode) {
-                        std::cerr << "[enrich] Skipping - daemon is busy\n";
-                    }
-                    continue;  // Don't update last_enrich, try again next second
-                }
-
-                last_enrich = now_time;
-
-                try {
-                    // Get undescribed symbols (prioritized by importance)
-                    auto symbols = mind.store().get_undescribed_symbols(enrich_config.batch_size);
-
-                    if (symbols.empty()) {
-                        if (verbose_mode) {
-                            std::cerr << "[enrich] No symbols pending description\n";
-                        }
-                        continue;
-                    }
-
-                    size_t processed = 0;
-                    for (const auto& sym : symbols) {
-                        if (!daemon_running) break;
-
-                        // Create temp file with symbol info
-                        std::string tmp_file = "/tmp/enrich-" + std::to_string(getpid())
-                                             + "-" + std::to_string(sym.id) + ".txt";
-                        {
-                            std::ofstream ofs(tmp_file);
-                            ofs << "SYMBOL_ID=" << sym.id << "\n";
-                            ofs << "KIND=" << sym.kind << "\n";
-                            ofs << "NAME=" << sym.name << "\n";
-                            ofs << "FILE_PATH=" << sym.file_path << "\n";
-                            ofs << "LINE_START=" << sym.line_start << "\n";
-                            ofs << "LINE_END=" << sym.line_end << "\n";
-                            ofs << "MODEL=" << enrich_config.model << "\n";
-                        }
-
-                        // Run enrichment script non-blocking with timeout
-                        std::string out_file = tmp_file + ".out";
-                        pid_t pid = fork();
-                        if (pid == 0) {
-                            // Child - run script with output capture
-                            std::string cmd = enrich_config.script_path + " " + tmp_file + " > " + out_file + " 2>&1";
-                            execl("/bin/sh", "sh", "-c", cmd.c_str(), nullptr);
-                            _exit(1);
-                        } else if (pid > 0) {
-                            // Parent - wait with timeout (30 seconds max)
-                            int status = 0;
-                            bool finished = false;
-                            for (int i = 0; i < 30 && daemon_running; i++) {
-                                int result = waitpid(pid, &status, WNOHANG);
-                                if (result > 0) {
-                                    finished = true;
-                                    break;
-                                }
-                                std::this_thread::sleep_for(std::chrono::seconds(1));
-                            }
-
-                            if (!finished) {
-                                // Timeout - kill child
-                                kill(pid, SIGKILL);
-                                waitpid(pid, &status, 0);
-                                if (verbose_mode) {
-                                    std::cerr << "[enrich] Timeout for symbol " << sym.id << "\n";
-                                }
-                            } else if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
-                                // Read output file
-                                std::ifstream ifs(out_file);
-                                if (ifs) {
-                                    std::string output((std::istreambuf_iterator<char>(ifs)),
-                                                       std::istreambuf_iterator<char>());
-
-                                    // Check if description was set successfully
-                                    // New format: DESCRIBED=true (description stored directly in symbol table)
-                                    // Legacy format: MEMORY_ID=<id> (separate wisdom memory)
-                                    if (output.find("DESCRIBED=true") != std::string::npos) {
-                                        processed++;
-                                        enrich_count++;
-                                    } else {
-                                        // Legacy support: look for MEMORY_ID
-                                        size_t pos = output.find("MEMORY_ID=");
-                                        if (pos != std::string::npos) {
-                                            std::string id_str = output.substr(pos + 10);
-                                            size_t nl = id_str.find('\n');
-                                            if (nl != std::string::npos) id_str = id_str.substr(0, nl);
-
-                                            try {
-                                                int64_t memory_id = std::stoll(id_str);
-                                                mind.store().set_symbol_memory(sym.id, memory_id);
-                                                processed++;
-                                                enrich_count++;
-                                            } catch (...) {}
-                                        }
-                                    }
-
-                                    if (verbose_mode) {
-                                        std::cerr << output;
-                                    }
-                                }
-                            }
-
-                            // Cleanup
-                            std::remove(out_file.c_str());
-                        }
-                        std::remove(tmp_file.c_str());
-                    }
-
-                    if (processed > 0) {
-                        std::cerr << "[enrich] Described " << processed << " symbol(s), total="
-                                  << enrich_count << "\n";
-                    }
-                } catch (const std::exception& e) {
-                    std::cerr << "[enrich] Error: " << e.what() << "\n";
-                }
-            }
-        }
+        // Enrichment requires CfSymbolHit.description field (not yet in C FFI).
+        // Will be re-enabled when FieldRpcHandler is fully migrated.
+        (void)enrich_config;
+        (void)enrich_count;
     });
 
     // Category to confidence mapping for high-value learnings
@@ -878,6 +705,22 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
     std::unordered_map<std::string, std::chrono::steady_clock::time_point> session_last_distill;
     std::mutex session_accum_mutex;  // Protect the maps
 
+    // Helper: embed text via yantra if available, return empty vector otherwise
+    auto embed_text = [yantra](const std::string& text) -> std::vector<float> {
+        if (!yantra) return {};
+        try {
+            return yantra->transform(text).nu.data;
+        } catch (...) {}
+        return {};
+    };
+
+    // Helper: map category name to chitta-field memory kind
+    auto category_to_kind = [](const std::string& cat) -> std::string {
+        if (cat == "episode") return "episode";
+        if (cat == "belief")  return "belief";
+        return "wisdom";
+    };
+
     std::thread queue_processor([&]() {
         while (daemon_running) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -901,7 +744,7 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
 
             if (lines.empty()) continue;
 
-            // Process each queued request
+            // Process each queued request — all writes go to chitta-field
             for (const auto& line : lines) {
                 if (!daemon_running) break;
 
@@ -910,356 +753,188 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                     std::string tool = j.value("tool", "");
                     auto args = j.value("args", json::object());
 
+                    // FieldStore is always ready (synchronous init)
+
                     if (tool == "observe") {
                         std::string category = args.value("category", "wisdom");
                         std::string title = args.value("title", "");
                         std::string content = args.value("content", "");
                         if (!content.empty()) {
-                            NodeType type = NodeType::Wisdom;
-                            if (category == "episode") type = NodeType::Episode;
-                            else if (category == "belief") type = NodeType::Belief;
-                            // Derive confidence from category (or use explicit override)
                             float confidence = args.contains("confidence")
                                 ? args.value("confidence", 0.8f)
                                 : category_to_confidence(category);
                             std::string full_text = title.empty() ? content : title + "\n" + content;
-                            mind.remember(full_text, type, "brahman", RealmVisibility::Private, confidence);
+                            field_store.remember(category_to_kind(category), "brahman",
+                                                  full_text, embed_text(full_text),
+                                                  confidence, 0.01f);
                             queue_count++;
                         }
                     } else if (tool == "strengthen") {
                         std::string id_str = args.value("id", "");
-                        double amount = args.value("amount", 0.1);
+                        float amount = static_cast<float>(args.value("amount", 0.1));
                         if (!id_str.empty()) {
                             try {
-                                int64_t db_id = std::stoll(id_str);
-                                mind.store().strengthen(db_id, static_cast<float>(amount));
+                                uint64_t cf_id = std::stoull(id_str);
+                                field_store.strengthen(cf_id, amount);
                                 queue_count++;
-                            } catch (...) {
-                                // Non-numeric ID: search by content prefix
-                                auto results = mind.recall(id_str, 1);
-                                if (!results.empty() && results[0].similarity > 0.9f) {
-                                    mind.store().strengthen(static_cast<int64_t>(results[0].id.low), static_cast<float>(amount));
-                                    queue_count++;
-                                }
-                            }
-                        }
-                    } else if (tool == "ledger_save") {
-                        std::string session_id = args.value("session_id", "");
-                        std::string project = args.value("project", "");
-                        std::string mood = args.value("mood", "working");
-                        std::string snapshot = args.value("snapshot", "");
-                        if (!session_id.empty()) {
-                            LedgerEntry entry;
-                            entry.session_id = session_id;
-                            entry.project = project;
-                            entry.mood = mood;
-                            entry.snapshot = snapshot;
-                            // Extract all session state fields (JSON arrays → strings)
-                            if (args.contains("active_files")) {
-                                entry.active_files = args["active_files"].dump();
-                            }
-                            if (args.contains("decisions")) {
-                                entry.decisions = args["decisions"].dump();
-                            }
-                            if (args.contains("todos")) {
-                                entry.todos = args["todos"].dump();
-                            }
-                            if (args.contains("blockers")) {
-                                entry.blockers = args["blockers"].dump();
-                            }
-                            if (args.contains("discoveries")) {
-                                entry.discoveries = args["discoveries"].dump();
-                            }
-                            if (args.contains("next_steps")) {
-                                entry.next_steps = args["next_steps"].dump();
-                            }
-                            mind.store().save_ledger(entry);
-                            queue_count++;
+                            } catch (...) {}
                         }
                     } else if (tool == "connect") {
                         std::string subj = args.value("subject", "");
                         std::string pred = args.value("predicate", "");
                         std::string obj = args.value("object", "");
                         if (!subj.empty() && !pred.empty() && !obj.empty()) {
-                            mind.connect(subj, pred, obj);
+                            field_store.add_triplet(subj, pred, obj);
                             queue_count++;
                         }
-                    } else if (tool == "transcript_register") {
-                        std::string session_id = args.value("session_id", "");
-                        std::string path = args.value("transcript_path", "");
-                        std::string realm = args.value("realm", "brahman");
-                        if (!path.empty()) {
-                            mind.store().register_transcript(session_id, path, realm);
+                    } else if (tool == "curiosity_note_gap") {
+                        std::string gap = args.value("gap", "");
+                        if (!gap.empty()) {
+                            std::string content = "[curiosity] " + gap;
+                            field_store.remember("episode", "brahman", content,
+                                                  embed_text(content), 0.7f, 0.0f);
+                            queue_count++;
+                        }
+                    } else if (tool == "store_policy") {
+                        std::string policy_type = args.value("type", "");
+                        std::string content = args.value("content", "");
+                        float confidence = args.value("confidence", 0.5f);
+                        if (!policy_type.empty() && !content.empty()) {
+                            std::string full = "[policy:" + policy_type + "] " + content;
+                            field_store.remember("wisdom", "brahman", full,
+                                                  embed_text(full), confidence, 0.0f);
+                            queue_count++;
+                        }
+                    } else if (tool == "store_claim") {
+                        std::string subject = args.value("subject", "");
+                        std::string predicate = args.value("predicate", "");
+                        std::string object_norm = args.value("object", "");
+                        if (!subject.empty() && !predicate.empty() && !object_norm.empty()) {
+                            field_store.add_triplet(subject, predicate, object_norm);
                             queue_count++;
                         }
                     } else if (tool == "learn_outcome") {
-                        // Handle both hyphen and underscore param names
                         std::string id_str = args.contains("memory-id")
                             ? args.value("memory-id", "")
                             : args.value("memory_id", "");
                         std::string outcome = args.value("outcome", "");
                         std::string context = args.value("context", "");
                         if (!id_str.empty() && !outcome.empty()) {
-                            int64_t memory_id = -1;
                             try {
-                                memory_id = std::stoll(id_str);
-                            } catch (...) {
-                                // Non-numeric ID: search by content prefix
-                                auto results = mind.recall(id_str, 1);
-                                if (!results.empty() && results[0].similarity > 0.9f) {
-                                    memory_id = static_cast<int64_t>(results[0].id.low);
-                                }
-                            }
-                            if (memory_id > 0) {
-                                mind.store().record_usage_outcome(memory_id, "hook", outcome, context);
-                                if (outcome == "positive") {
-                                    mind.store().strengthen(memory_id, 0.1f);
-                                } else if (outcome == "negative") {
-                                    mind.store().weaken(memory_id, 0.15f);
-                                }
+                                uint64_t cf_id = std::stoull(id_str);
+                                json payload = {{"outcome", outcome}, {"context", context}};
+                                field_store.emit_event("analytics", "outcome",
+                                                        id_str, payload.dump());
+                                if (outcome == "positive") field_store.strengthen(cf_id, 0.1f);
+                                else if (outcome == "negative") field_store.weaken(cf_id, 0.15f);
                                 queue_count++;
-                            }
-                        }
-                    } else if (tool == "anticipation_success") {
-                        int64_t id = args.value("id", 0);
-                        if (id > 0) {
-                            mind.store().anticipation_success(id);
-                            queue_count++;
-                        }
-                    } else if (tool == "narrative_log") {
-                        std::string session_id = args.value("session_id", "");
-                        std::string kind_str = args.value("kind", "user_message");
-                        std::string summary = args.value("summary", "");
-                        std::string tool_name = args.value("tool_name", "");
-                        bool success = args.value("success", true);
-                        if (!session_id.empty() && !summary.empty()) {
-                            SessionEvent event;
-                            event.session_id = session_id;
-                            event.kind = string_to_session_event_kind(kind_str);
-                            event.summary = summary;
-                            event.tool_name = tool_name;
-                            event.success = success;
-                            mind.store().event_log_append(event);
-                            if (mind.narrative()) {
-                                mind.narrative()->evaluate(session_id, event);
-                            }
-                            queue_count++;
-                        }
-                    } else if (tool == "calibration_record") {
-                        std::string domain = args.value("domain", "");
-                        bool success = args.value("success", true);
-                        if (!domain.empty()) {
-                            mind.store().calibration_record(domain, success);
-                            queue_count++;
-                        }
-                    } else if (tool == "curiosity_note_gap") {
-                        std::string gap = args.value("gap", "");
-                        if (!gap.empty()) {
-                            // Create memory with "gap" and "unresolved" tags
-                            std::string content = "[curiosity] " + gap;
-                            mind.remember(content, NodeType::Episode, "brahman",
-                                          RealmVisibility::Private, 0.7f);
-                            queue_count++;
-                        }
-                    } else if (tool == "habit_observe") {
-                        std::string trigger = args.value("trigger", "");
-                        std::string response = args.value("response", "");
-                        std::string realm = args.value("realm", "brahman");
-                        if (!trigger.empty() && !response.empty()) {
-                            mind.store().habit_observe(trigger, response, realm);
-                            queue_count++;
+                            } catch (...) {}
                         }
                     } else if (tool == "session_register") {
                         std::string sid = args.value("session_id", "");
-                        std::string realm = args.value("realm", "brahman");
-                        int32_t pid = args.value("pid", 0);
-                        std::string metadata = args.value("metadata", "{}");
                         if (!sid.empty()) {
-                            mind.store().session_register(sid, realm, pid, metadata);
+                            field_store.emit_event("session", "register", sid, args.dump());
                             queue_count++;
                         }
                     } else if (tool == "session_heartbeat") {
                         std::string sid = args.value("session_id", "");
-                        std::string metadata = args.value("metadata", "");
                         if (!sid.empty()) {
-                            mind.store().session_heartbeat(sid, metadata);
+                            field_store.emit_event("session", "heartbeat", sid,
+                                                    args.value("metadata", "{}"));
                             queue_count++;
                         }
                     } else if (tool == "session_deregister") {
                         std::string sid = args.value("session_id", "");
                         if (!sid.empty()) {
-                            mind.store().session_deregister(sid);
+                            field_store.emit_event("session", "deregister", sid, "{}");
                             queue_count++;
                         }
-                    } else if (tool == "distill_trigger") {
-                        // Immediate distillation trigger (used by PreCompact hook)
-                        std::string sid = args.value("session_id", "");
-                        if (!sid.empty() && distill_config.enabled) {
-                            auto state_opt = mind.store().get_transcript(sid);
-                            if (state_opt) {
-                                std::cerr << "[queue] Pre-compact distillation triggered for " << sid << "\n";
-                                // Use queue_triggered=true for min_turns=1
-                                bool success = run_distillation(mind, *state_opt, distill_config, true);
-                                if (success) {
-                                    queue_distill_count++;
-                                    std::cerr << "[queue] Pre-compact distillation succeeded for " << sid
-                                              << " (total=" << queue_distill_count << ")\n";
-                                } else {
-                                    std::cerr << "[queue] Pre-compact distillation failed for " << sid
-                                              << " (will not retry)\n";
-                                }
-                                queue_count++;
-                            } else {
-                                std::cerr << "[queue] No transcript found for session " << sid << "\n";
-                            }
+                    } else if (tool == "transcript_register") {
+                        std::string session_id = args.value("session_id", "");
+                        std::string path = args.value("transcript_path", "");
+                        if (!path.empty()) {
+                            field_store.emit_event("transcript", "register",
+                                                    session_id, args.dump());
+                            queue_count++;
+                        }
+                    } else if (tool == "ledger_save") {
+                        std::string session_id = args.value("session_id", "");
+                        if (!session_id.empty()) {
+                            field_store.emit_event("admin", "ledger_save",
+                                                    session_id, args.dump());
+                            queue_count++;
+                        }
+                    } else if (tool == "narrative_log") {
+                        std::string session_id = args.value("session_id", "");
+                        std::string summary = args.value("summary", "");
+                        if (!session_id.empty() && !summary.empty()) {
+                            field_store.emit_event("analytics", "narrative_log",
+                                                    session_id, args.dump());
+                            queue_count++;
+                        }
+                    } else if (tool == "calibration_record") {
+                        std::string domain = args.value("domain", "");
+                        if (!domain.empty()) {
+                            field_store.emit_event("analytics", "calibration",
+                                                    domain, args.dump());
+                            queue_count++;
+                        }
+                    } else if (tool == "habit_observe") {
+                        std::string trigger = args.value("trigger", "");
+                        std::string response = args.value("response", "");
+                        if (!trigger.empty() && !response.empty()) {
+                            field_store.emit_event("narrative", "habit",
+                                                    trigger, args.dump());
+                            queue_count++;
+                        }
+                    } else if (tool == "anticipation_success") {
+                        int64_t id = args.value("id", (int64_t)0);
+                        if (id > 0) {
+                            field_store.emit_event("narrative", "anticipation_success",
+                                                    std::to_string(id), "{}");
+                            queue_count++;
                         }
                     } else if (tool == "store_turn") {
-                        // Store conversation turn for lossless memory
                         std::string session_id = args.value("session_id", "");
-                        std::string role = args.value("role", "");
                         std::string content = args.value("content", "");
-                        int turn_index = args.value("turn_index", -1);
-                        if (!session_id.empty() && !role.empty() && !content.empty()) {
-                            DuckDBStore::ConversationTurn turn;
-                            turn.session_id = session_id;
-                            turn.role = role;
-                            turn.content = content;
-                            turn.turn_index = turn_index >= 0 ? turn_index : 0;
-                            turn.token_count = static_cast<int>(content.size() / 4);  // Rough token estimate
-                            turn.realm = args.value("realm", "brahman");
-                            turn.intent_type = args.value("intent_type", "");
-                            turn.tools_used = args.value("tools_used", "[]");
-                            turn.files_touched = args.value("files_touched", "[]");
-                            turn.has_error = args.value("has_error", false);
-                            mind.store().store_conversation_turn(turn);
-                            queue_count++;
-
-                            // Token-triggered distillation: accumulate content and check threshold
-                            if (distill_config.enabled && distill_config.token_trigger_chars > 0) {
-                                std::lock_guard<std::mutex> lock(session_accum_mutex);
-                                session_content_accum[session_id] += static_cast<int64_t>(content.size());
-
-                                if (session_content_accum[session_id] >= distill_config.token_trigger_chars) {
-                                    auto now = std::chrono::steady_clock::now();
-                                    auto cooldown = std::chrono::seconds(distill_config.cooldown_seconds);
-                                    auto& last = session_last_distill[session_id];
-
-                                    if (now - last >= cooldown) {
-                                        // Look up transcript for this session and trigger distillation
-                                        auto state_opt = mind.store().get_transcript(session_id);
-                                        if (state_opt) {
-                                            std::cerr << "[queue] Token-triggered distillation for " << session_id
-                                                      << " (" << session_content_accum[session_id] << " chars)\n";
-                                            bool success = run_distillation(mind, *state_opt, distill_config, false);
-                                            if (success) {
-                                                queue_distill_count++;
-                                            }
-                                        }
-                                        last = now;
-                                        session_content_accum[session_id] = 0;
-                                    }
-                                }
-                            }
-                        }
-                    } else if (tool == "store_claim") {
-                        // Store semantic claim
-                        std::string subject = args.value("subject", "");
-                        std::string predicate = args.value("predicate", "");
-                        std::string object_norm = args.value("object", "");
-                        if (!subject.empty() && !predicate.empty() && !object_norm.empty()) {
-                            DuckDBStore::Claim claim;
-                            claim.subject = subject;
-                            claim.predicate = predicate;
-                            claim.object_norm = object_norm;
-                            claim.scope_key = args.value("scope", "session");
-                            claim.polarity = args.value("polarity", 1);
-                            claim.confidence = args.value("confidence", 0.7f);
-                            claim.source_class = args.value("source", "hook");
-                            mind.store().store_claim(claim);
-                            queue_count++;
-                        }
-                    } else if (tool == "store_policy") {
-                        // Store policy memory
-                        std::string policy_type = args.value("type", "");
-                        std::string content = args.value("content", "");
-                        if (!policy_type.empty() && !content.empty()) {
-                            DuckDBStore::PolicyMemory policy;
-                            policy.policy_type = policy_type;
-                            policy.content = content;
-                            policy.scope_key = args.value("scope", "session");
-                            policy.state = args.value("state", "ephemeral");
-                            policy.confidence = args.value("confidence", 0.5f);
-                            mind.store().store_policy(policy);
+                        if (!session_id.empty() && !content.empty()) {
+                            field_store.emit_event("transcript", "turn",
+                                                    session_id, args.dump());
                             queue_count++;
                         }
                     } else if (tool == "store_relationship_event") {
-                        // Store relationship event (correction, praise, etc.)
                         std::string event_type = args.value("event_type", "");
-                        std::string content = args.value("content", "");
                         std::string session_id = args.value("session_id", "");
-                        if (!event_type.empty() && !content.empty()) {
-                            DuckDBStore::RelationshipEvent event;
-                            event.session_id = session_id;
-                            event.event_type = event_type;
-                            event.content = content;
-                            event.context = args.value("context", "");
-                            mind.store().store_relationship_event(event);
+                        if (!event_type.empty()) {
+                            field_store.emit_event("relationship", event_type,
+                                                    session_id, args.dump());
                             queue_count++;
                         }
                     } else if (tool == "log_session_tokens") {
                         std::string sid = args.value("session_id", "");
-                        int64_t input_tok = args.value("total_input_tokens", (int64_t)0);
-                        int64_t output_tok = args.value("total_output_tokens", (int64_t)0);
-                        int64_t cache_read = args.value("cache_read_tokens", (int64_t)0);
-                        int64_t cache_create = args.value("cache_creation_tokens", (int64_t)0);
-                        int n_msgs = args.value("n_messages", 0);
-
-                        if (!sid.empty() && n_msgs > 0) {
-                            mind.store().log_session_tokens(
-                                sid, input_tok, output_tok,
-                                cache_read, cache_create, n_msgs);
+                        if (!sid.empty()) {
+                            field_store.emit_event("analytics", "session_tokens",
+                                                    sid, args.dump());
                             queue_count++;
                         }
                     } else if (tool == "log_correction_outcome") {
                         std::string sid = args.value("session_id", "");
-                        int64_t mem_id = args.value("correction_memory_id", (int64_t)0);
-                        bool detected = args.value("correction_detected", false);
-                        std::string text = args.value("correction_text", "");
-                        if (!sid.empty() && mem_id > 0) {
-                            mind.store().log_correction_outcome(sid, mem_id, detected, text);
+                        if (!sid.empty()) {
+                            field_store.emit_event("analytics", "correction_outcome",
+                                                    sid, args.dump());
                             queue_count++;
                         }
                     } else if (tool == "log_exposure") {
                         std::string session_id = args.value("session_id", "");
-                        int turn_id = args.value("turn_id", 0);
-                        std::string hook_type = args.value("hook_type", "");
-
-                        std::vector<int64_t> memory_ids;
-                        if (args.contains("memory_ids") && args["memory_ids"].is_array()) {
-                            for (const auto& id : args["memory_ids"]) {
-                                memory_ids.push_back(id.get<int64_t>());
-                            }
-                        }
-
-                        if (!session_id.empty() && !memory_ids.empty()) {
-                            std::vector<int> ranks;
-                            if (args.contains("ranks") && args["ranks"].is_array()) {
-                                for (const auto& r : args["ranks"]) ranks.push_back(r.get<int>());
-                            }
-                            std::vector<double> resonance_scores;
-                            if (args.contains("resonance_scores") && args["resonance_scores"].is_array()) {
-                                for (const auto& s : args["resonance_scores"]) resonance_scores.push_back(s.get<double>());
-                            }
-                            std::vector<int> token_costs;
-                            if (args.contains("token_costs") && args["token_costs"].is_array()) {
-                                for (const auto& t : args["token_costs"]) token_costs.push_back(t.get<int>());
-                            }
-
-                            mind.store().log_exposures_batch(
-                                session_id, turn_id, hook_type, memory_ids, ranks,
-                                {}, resonance_scores, token_costs);
+                        if (!session_id.empty()) {
+                            field_store.emit_event("analytics", "exposure",
+                                                    session_id, args.dump());
                             queue_count++;
                         }
+                    } else if (tool == "distill_trigger") {
+                        // distillation disabled (--no-distill); log and skip
+                        if (verbose_mode)
+                            std::cerr << "[queue] distill_trigger ignored (distillation disabled)\n";
                     }
                 } catch (const std::exception& e) {
                     if (verbose_mode) {
@@ -1277,27 +952,36 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
     // Thread pool for async RPC handling (scales 2-16 workers based on load)
     ThreadPool pool(2, 16);
 
-    // Configure circuit breaker for embedder
-    mind.embedder().configure_circuit_breaker({
-        .failure_threshold = 3,
-        .cooldown = std::chrono::seconds(60)
+    // Watchdog callback - log stuck operations
+    pool.set_watchdog_callback([]([[maybe_unused]] const std::string& method, [[maybe_unused]] int64_t secs) {
+        std::cerr << "[watchdog] Stuck operation: " << method << " (" << secs << "s)\n";
     });
-
-    // Watchdog callback - trip circuit breaker on stuck embedding operations
-    pool.set_watchdog_callback([&mind](const std::string& method, int64_t secs) {
-        // Only trip circuit breaker for embedding-related operations
-        if (method.find("search_symbols") != std::string::npos ||
-            method.find("smart_context") != std::string::npos ||
-            method.find("recall") != std::string::npos ||
-            method.find("full_resonate") != std::string::npos) {
-            std::cerr << "[watchdog] Forcing circuit breaker trip due to stuck " << method << "\n";
-            mind.embedder().force_trip();
-        }
-    });
-    pool.set_escalation_threshold(std::chrono::seconds(30));  // Trip after 30s
+    pool.set_escalation_threshold(std::chrono::seconds(30));
 
     std::cerr << "[daemon] Thread pool started (" << pool.worker_count() << " workers)\n";
     std::cerr << "[daemon] Queue processor started (path=" << queue_path << ")\n";
+
+    // SadhanaManager init — FieldStore is ready synchronously
+    sadhana_manager = std::make_unique<SadhanaManager>(field_store);
+    handler.set_sadhana_manager(sadhana_manager.get());
+    sadhana_manager->set_stream_fn([&server](int fd, std::string line) {
+        server.queue_response(fd, std::move(line));
+    });
+    server.set_disconnect_callback([&sadhana_manager](int fd) {
+        if (sadhana_manager) sadhana_manager->stream_unsubscribe(fd);
+    });
+    if (no_autonomous) {
+        auto running = sadhana_manager->list("running");
+        if (!running.empty()) {
+            std::cerr << "[daemon] --no-autonomous: pausing " << running.size() << " running sadhana(s)\n";
+            for (const auto& s : running) {
+                sadhana_manager->pause(s.id);
+            }
+        }
+    }
+    std::cerr << "[daemon] Sadhana manager initialized\n";
+    std::cerr << "[daemon] chitta-field active: " << field_store.memory_count()
+              << " memories, " << field_store.symbol_count() << " symbols\n";
 
     // Main loop - handle socket I/O (never blocks on RPC)
     auto last_stats = std::chrono::steady_clock::now();
@@ -1309,12 +993,12 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
         for (const auto& req : requests) {
             // Special commands (fast, handle directly)
             if (req.data == "stats") {
-                server.respond(req.client_fd, generate_stats(mind));
+                server.respond(req.client_fd, generate_stats(field_store, yantra));
                 continue;
             }
             if (req.data == "shutdown") {
                 server.respond(req.client_fd, R"({"status":"shutting_down"})");
-                mind.sync();
+                field_store.flush();
                 daemon_running = false;
                 continue;
             }
@@ -1353,7 +1037,7 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                 if (parsed.contains("params") && parsed["params"].contains("arguments")) {
                     watch_id = parsed["params"]["arguments"].value("id", (int64_t)0);
                 }
-                sadhana_manager.stream_subscribe(req.client_fd, watch_id);
+                if (sadhana_manager) sadhana_manager->stream_subscribe(req.client_fd, watch_id);
                 // Send ack — connection stays open; daemon will push events as lines
                 json ack;
                 ack["jsonrpc"] = "2.0";
@@ -1417,7 +1101,7 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
 
     // Stop socket first — removes file immediately, prevents new connections
     // while threads finish their current work. Lock is held until after joins
-    // to prevent DuckDB conflicts with a new daemon starting too early.
+    // to prevent conflicts with a new daemon starting too early.
     server.stop();
 
     // Watchdog: force-exit if background threads don't finish within 15s.
@@ -1477,127 +1161,25 @@ int cmd_status(const std::string& socket_path) {
     return 0;
 }
 
-int cmd_stats(DuckDBMind& mind) {
-    std::cout << "Soul Statistics (DuckDB)\n";
+int cmd_stats(FieldStore& field_store, VakYantra* yantra) {
+    std::cout << "Soul Statistics (chitta-field)\n";
     std::cout << "═══════════════════════════════\n";
-    std::cout << "  Nodes:    " << mind.size() << "\n";
-    std::cout << "  Triplets: " << mind.triplet_count() << "\n";
-    std::cout << "  Yantra:   " << (mind.has_yantra() ? "ready" : "not attached") << "\n";
+    std::cout << "  Memories: " << field_store.memory_count() << "\n";
+    std::cout << "  Symbols:  " << field_store.symbol_count() << "\n";
+    std::cout << "  Yantra:   " << (yantra ? "ready" : "not attached") << "\n";
     return 0;
 }
 
-int cmd_metrics(DuckDBMind& mind, int days = 7) {
-    auto& store = mind.store();
-
-    auto now_sec = std::chrono::duration_cast<std::chrono::seconds>(
-        std::chrono::system_clock::now().time_since_epoch()).count();
-    int64_t cutoff = now_sec - static_cast<int64_t>(days) * 86400;
-    int64_t now_30d = now_sec - 30 * 86400;
-
-    // Exposure stats
-    auto exp_r = store.execute_sql_query(
-        "SELECT COUNT(*), COUNT(DISTINCT session_id) FROM memory_exposed WHERE created_at >= " + std::to_string(cutoff));
-    int64_t n_exposures = 0, n_sessions_with_exposures = 0;
-    if (exp_r.success && !exp_r.rows.empty() && exp_r.rows[0].size() >= 2) {
-        try { n_exposures = std::stoll(exp_r.rows[0][0]); } catch (...) {}
-        try { n_sessions_with_exposures = std::stoll(exp_r.rows[0][1]); } catch (...) {}
-    }
-
-    // Recall stats
-    auto rec_r = store.execute_sql_query(
-        "SELECT COUNT(*), COUNT(CASE WHEN returned_memory_ids != '[]' AND returned_memory_ids != '' THEN 1 END) "
-        "FROM memory_recall_query WHERE created_at >= " + std::to_string(cutoff));
-    int64_t n_recalls = 0, n_recall_hits = 0;
-    if (rec_r.success && !rec_r.rows.empty() && rec_r.rows[0].size() >= 2) {
-        try { n_recalls = std::stoll(rec_r.rows[0][0]); } catch (...) {}
-        try { n_recall_hits = std::stoll(rec_r.rows[0][1]); } catch (...) {}
-    }
-
-    // Memory durability
-    auto mem_r = store.execute_sql_query(
-        "SELECT COUNT(*), COUNT(CASE WHEN accessed_at >= " + std::to_string(now_30d) + " THEN 1 END) "
-        "FROM memory WHERE confidence > 0.1");
-    int64_t n_memories = 0, n_accessed_30d = 0;
-    if (mem_r.success && !mem_r.rows.empty() && mem_r.rows[0].size() >= 2) {
-        try { n_memories = std::stoll(mem_r.rows[0][0]); } catch (...) {}
-        try { n_accessed_30d = std::stoll(mem_r.rows[0][1]); } catch (...) {}
-    }
-
-    // Session count from session_registry (uses started_at)
-    auto sess_r = store.execute_sql_query(
-        "SELECT COUNT(DISTINCT session_id) FROM session_registry WHERE started_at >= " + std::to_string(cutoff));
-    int64_t n_sessions = 0;
-    if (sess_r.success && !sess_r.rows.empty() && !sess_r.rows[0].empty()) {
-        try { n_sessions = std::stoll(sess_r.rows[0][0]); } catch (...) {}
-    }
-    // Fallback to memory_exposed if no session_registry data
-    if (n_sessions == 0) n_sessions = n_sessions_with_exposures;
-
-    // Compute R (relevance): exposures per session, sigmoid-scaled
-    double R = 0.0;
-    if (n_sessions > 0 && n_exposures > 0) {
-        double exposures_per_session = static_cast<double>(n_exposures) / n_sessions;
-        R = 1.0 / (1.0 + std::exp(-0.5 * (exposures_per_session - 5.0)));
-    }
-
-    // Compute P (precision): recall hit rate
-    double P = 0.0;
-    if (n_recalls > 0) {
-        P = static_cast<double>(n_recall_hits) / n_recalls;
-    }
-
-    // Compute D (durability): fraction accessed in last 30 days
-    double D = 0.0;
-    if (n_memories > 0) {
-        D = static_cast<double>(n_accessed_30d) / n_memories;
-    }
-
-    // T: average cache hit ratio across sessions in window
-    double T = -1.0;
-    {
-        std::string cutoff_sql = std::to_string(cutoff);
-        auto t_r = store.execute_sql_query(
-            "SELECT AVG(cache_hit_ratio) FROM session_token_usage "
-            "WHERE created_at >= " + cutoff_sql + " AND n_messages > 3");
-        if (t_r.success && !t_r.rows.empty() && !t_r.rows[0].empty()
-            && !t_r.rows[0][0].empty()) {
-            try { T = std::stod(t_r.rows[0][0]); } catch (...) {}
-        }
-    }
-
-    // Partial SUS (M not instrumented)
-    // Available: R(0.25) P(0.20) T(0.10) D(0.15) = 0.70
-    double avail = 0.70;
-    double r_w = 0.25 / avail;
-    double p_w = 0.20 / avail;
-    double t_w = 0.10 / avail;
-    double d_w = 0.15 / avail;
-    double p_val = (P > 0) ? P : 0.5;
-    double t_val = (T >= 0) ? T : 0.5;
-    double sus = 100.0 * std::pow(std::max(R, 1e-6), r_w)
-                       * std::pow(std::max(p_val, 1e-6), p_w)
-                       * std::pow(std::max(t_val, 1e-6), t_w)
-                       * std::pow(std::max(D, 1e-6), d_w);
+int cmd_metrics(FieldStore& field_store, [[maybe_unused]] int days = 7) {
+    int64_t n_memories = field_store.memory_count();
+    int64_t n_symbols = field_store.symbol_count();
 
     std::cout << std::fixed << std::setprecision(2);
-    std::cout << "SUS (" << days << "d): " << static_cast<int>(std::round(sus))
-              << "  [partial, n_sessions=" << n_sessions << "]\n\n";
-    std::cout << "  R (relevance):   " << R
-              << "  (n_exposures=" << n_exposures
-              << ", n_sessions_with_exposures=" << n_sessions_with_exposures << ")\n";
-    std::cout << "  P (precision):   " << P
-              << "  (n_recalls=" << n_recalls << ", hit_rate)\n";
-    std::cout << "  M (prevention):  --    (Phase 4)\n";
-    if (T >= 0) {
-        std::cout << "  T (cache):       " << T
-                  << "  (cache hit ratio avg)\n";
-    } else {
-        std::cout << "  T (cache):       --    (no data yet)\n";
-    }
-    std::cout << "  D (durability):  " << D
-              << "  (n_memories=" << n_memories
-              << ", accessed_30d/" << n_memories << ")\n";
-    std::cout << "\n  Note: SUS is partial (M not yet instrumented). T=cache_hit_ratio avg.\n";
+    std::cout << "Soul Metrics (" << days << "d)\n";
+    std::cout << "═══════════════════════════════\n";
+    std::cout << "  Memories: " << n_memories << "\n";
+    std::cout << "  Symbols:  " << n_symbols << "\n";
+    std::cout << "\n  Note: Detailed SUS metrics require SoulProjection (future work).\n";
 
     return 0;
 }
@@ -1614,7 +1196,7 @@ void print_usage(const char* prog) {
               << "  distill    Run manual distillation on a transcript\n"
               << "  help       Show this help\n\n"
               << "Options:\n"
-              << "  --path PATH        Mind storage path (DuckDB)\n"
+              << "  --path PATH        Mind storage path (chitta-field)\n"
               << "  --interval SECS    Sync interval (default: 60)\n"
               << "  -f, --foreground   Run in foreground\n"
               << "  --verbose          Verbose logging\n"
@@ -1788,29 +1370,29 @@ int main(int argc, char* argv[]) {
     }
 #endif
 
-    // DuckDB backend
-    DuckDBMindConfig config;
-    config.path = mind_path;
-    DuckDBMind mind(config);
-
-#ifdef CHITTA_WITH_ONNX
-    if (yantra) mind.attach_yantra(yantra);
-#endif
-
-    if (!mind.open()) {
-        std::cerr << "Failed to open mind at " << mind_path << "\n";
+    // Open chitta-field store — the sole storage backend
+    std::string field_path = mind_path + "/chitta-field";
+    std::unique_ptr<FieldStore> field_store_ptr;
+    try {
+        field_store_ptr = std::make_unique<FieldStore>(field_path, field_path);
+    } catch (const std::exception& e) {
+        std::cerr << "[daemon] Failed to open chitta-field store at " << field_path << ": " << e.what() << "\n";
         return 1;
     }
-
-    std::cerr << "[Backend] DuckDB (" << mind_path << ")\n";
+    FieldStore& field_store = *field_store_ptr;
+    VakYantra* yantra_raw = nullptr;
+#ifdef CHITTA_WITH_ONNX
+    yantra_raw = yantra.get();
+#endif
+    std::cerr << "[Backend] chitta-field (" << field_store.memory_count() << " memories)\n";
 
     int result = 0;
     if (command == "daemon") {
-        result = cmd_daemon(mind, interval, sock_path, mind_path, pid_file, distill_config, enrich_config, subconscious_config, no_autonomous);
+        result = cmd_daemon(field_store, yantra_raw, interval, sock_path, mind_path, pid_file, distill_config, enrich_config, subconscious_config, no_autonomous);
     } else if (command == "stats") {
-        result = cmd_stats(mind);
+        result = cmd_stats(field_store, yantra_raw);
     } else if (command == "metrics") {
-        result = cmd_metrics(mind);
+        result = cmd_metrics(field_store);
     } else if (command == "distill") {
         // Manual distillation command
         if (distill_transcript_path.empty()) {
@@ -1843,7 +1425,7 @@ int main(int argc, char* argv[]) {
         state.realm = distill_realm;
         state.last_processed_line = 0;  // Process from beginning
 
-        bool success = run_distillation(mind, state, distill_config, false);
+        bool success = run_distillation(field_store, yantra_raw, state, distill_config, nullptr, false);
         result = success ? 0 : 1;
     } else {
         std::cerr << "Unknown command: " << command << "\n";
@@ -1851,6 +1433,5 @@ int main(int argc, char* argv[]) {
         result = 1;
     }
 
-    mind.close();
     return result;
 }
