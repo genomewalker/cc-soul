@@ -22,10 +22,7 @@
 // a final JSON message: {"status": "progressed|achieved|blocked", "summary": "..."}
 
 #include "brain_provider.hpp"
-#include "../duckdb_store.hpp"
-#ifdef CHITTA_FIELD_AVAILABLE
 #include <chitta/field_store.hpp>
-#endif
 #include <nlohmann/json.hpp>
 #include <memory>
 #include <string>
@@ -164,7 +161,7 @@ struct SadhanaStats {
 
 class SadhanaManager {
 public:
-    explicit SadhanaManager(DuckDBStore& store, SadhanaConfig config = {});
+    explicit SadhanaManager(FieldStore& field_store, SadhanaConfig config = {});
     ~SadhanaManager() = default;
 
     // CRUD operations
@@ -198,10 +195,6 @@ public:
     bool set_interval(int64_t id, int interval_seconds);
     bool set_goal(int64_t id, const std::string& goal);
 
-#ifdef CHITTA_FIELD_AVAILABLE
-    void set_field_store(FieldStore* fs) { field_store_ = fs; }
-#endif
-
     // Event streaming: push events to subscribed clients in real-time
     using StreamFn = std::function<void(int fd, std::string line)>;
     void set_stream_fn(StreamFn fn) { stream_fn_ = std::move(fn); }
@@ -219,11 +212,8 @@ public:
     const SadhanaConfig& config() const { return config_; }
 
 private:
-    DuckDBStore& store_;
+    FieldStore& field_store_;
     SadhanaConfig config_;
-#ifdef CHITTA_FIELD_AVAILABLE
-    FieldStore* field_store_ = nullptr;
-#endif
     SadhanaStats stats_;
     mutable std::mutex mutex_;
 

@@ -355,9 +355,13 @@
         bool using_field = false;
 
 #ifdef CHITTA_FIELD_AVAILABLE
+        bool field_init_pending = field_initializing_.load(std::memory_order_acquire);
         if (field_store_) {
             total_memories = static_cast<int64_t>(field_store_->memory_count());
             total_symbols  = static_cast<int64_t>(field_store_->symbol_count());
+            using_field = true;
+        } else if (field_init_pending) {
+            // Async init in progress — report chitta-field as backend but not yet ready
             using_field = true;
         }
 #endif
@@ -409,20 +413,35 @@
         std::ostringstream ss;
         ss << "Health Check:\n";
         ss << "  Status: OK\n";
-        ss << "  Backend: " << (using_field ? "chitta-field" : "DuckDB") << "\n";
+#ifdef CHITTA_FIELD_AVAILABLE
+        if (field_store_)          ss << "  Backend: chitta-field\n";
+        else if (field_initializing_.load(std::memory_order_acquire))
+                                   ss << "  Backend: chitta-field (initializing)\n";
+        else                       ss << "  Backend: DuckDB\n";
+#else
+        ss << "  Backend: DuckDB\n";
+#endif
         ss << "  Memories: " << total_memories << "\n";
         ss << "  Symbols: " << total_symbols << "\n";
-        if (!using_field) ss << "  Triplets: " << total_triplets << "\n";
+        if (!using_field)
+            ss << "  Triplets: " << total_triplets << "\n";
         ss << "  Yantra: " << (yantra ? "ready" : "not attached") << "\n";
         ss << "  Execution: " << exec_provider << "\n";
         ss << "  Stale Sessions: " << stale_sessions << "\n";
         ss << "  Queue Depth: " << queue_depth << "\n";
         ss << "  Failed Observations: " << failed_observations << "\n";
 
+#ifdef CHITTA_FIELD_AVAILABLE
+        std::string backend_id = field_store_ ? "chitta-field"
+                               : (field_initializing_.load() ? "chitta-field-init" : "duckdb");
+#else
+        std::string backend_id = "duckdb";
+#endif
+
         return DuckDBToolResult::ok(ss.str(), {
             {"status", "ok"},
             {"daemon", "healthy"},
-            {"backend", using_field ? "chitta-field" : "duckdb"},
+            {"backend", backend_id},
             {"software_version", CHITTA_VERSION},
             {"protocol_major", CHITTA_PROTOCOL_VERSION_MAJOR},
             {"protocol_minor", CHITTA_PROTOCOL_VERSION_MINOR},

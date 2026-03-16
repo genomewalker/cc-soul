@@ -5,19 +5,15 @@
 // user/assistant messages and closing feedback loops automatically.
 //
 // Architecture:
-//   DuckDBMind ← Subconscious (background thread) ← Event Queue ← Hooks/RPC
+//   FieldStore + VakYantra ← Subconscious (background thread) ← Event Queue ← Hooks/RPC
 //
 // Capabilities:
 //   - Pattern detection (correction, preference, frustration, milestone)
 //   - Suggestion tracking with outcome verification
 //   - Anticipation pattern learning
-//   - Periodic hygiene (memory consolidation)
 //   - Sleep consolidation (chitta-field encode + snapshot + demotion)
 
-#include "duckdb_mind.hpp"
-#ifdef CHITTA_FIELD_AVAILABLE
-#include <chitta/field_store.hpp>
-#endif
+#include <chitta/vak.hpp>
 #include <string>
 #include <deque>
 #include <thread>
@@ -28,6 +24,9 @@
 #include <chrono>
 
 namespace chitta {
+
+// Forward declaration — full header in .cpp only (chitta_field.h needs special include path)
+class FieldStore;
 
 // Event types the subconscious processes
 enum class SubconsciousEventType {
@@ -133,7 +132,7 @@ struct TrackedSuggestion {
 
 class Subconscious {
 public:
-    explicit Subconscious(DuckDBMind* mind, SubconsciousConfig config = {});
+    explicit Subconscious(FieldStore* field_store, VakYantra* embedder, SubconsciousConfig config = {});
     ~Subconscious();
 
     // Lifecycle
@@ -164,20 +163,18 @@ public:
     // Think callback: called hourly during idle for internal memory synthesis
     void set_think_callback(std::function<void()> fn) { think_callback_ = std::move(fn); }
 
-#ifdef CHITTA_FIELD_AVAILABLE
-    // Wire in a FieldStore for sleep consolidation (encode, snapshot, demotion).
+    // Wire in FieldStore (may be initialized async after construction).
     // Pointer is not owned; must outlive this Subconscious instance.
     void set_field_store(FieldStore* fs) { field_store_ = fs; }
-#endif
+
+    // Wire in embedder (may be initialized after construction).
+    void set_embedder(VakYantra* e) { embedder_ = e; }
 
 private:
-    DuckDBMind* mind_;
+    FieldStore* field_store_;
+    VakYantra* embedder_;
     SubconsciousConfig config_;
     SubconsciousStats stats_;
-
-#ifdef CHITTA_FIELD_AVAILABLE
-    FieldStore* field_store_{nullptr};
-#endif
 
     // Threading
     std::thread process_thread_;
@@ -232,7 +229,7 @@ private:
     void detect_milestone(const std::string& content, const std::string& realm);
     void detect_uncertainty(const std::string& content, const std::string& realm);
 
-    // Auto-learning (stores to DuckDBStore)
+    // Auto-learning (stores to FieldStore)
     void store_correction(const std::string& context, const std::string& correction,
                           const std::string& realm);
     void store_preference(const std::string& preference, const std::string& realm);
@@ -255,22 +252,12 @@ private:
                                  const std::string& realm);
 
     // Periodic tasks
-    void run_hygiene();
-    bool time_for_hygiene() const;
     void run_theme_maintenance();
     bool time_for_theme_maintenance() const;
-    void run_auto_distillation();
-    bool time_for_distillation() const;
-    void run_background_embedding();
-    bool time_for_embedding() const;
-    void run_cls_replay();
-    bool time_for_cls_replay() const;
-#ifdef CHITTA_FIELD_AVAILABLE
     void run_sleep_consolidation();
     bool time_for_sleep_consolidation() const;
     void run_demotion_pass();
     bool time_for_demotion() const;
-#endif
 
     // Dream: autonomous curiosity-driven exploration when idle
     std::function<void()> dream_callback_;
@@ -287,6 +274,9 @@ private:
     std::optional<SubconsciousEvent> pop_event_with_timeout(std::chrono::seconds timeout);
     static float score_correction_quality(const std::string& correction,
                                           const std::string& context);
+
+    // Embed text via VakYantra and return the float vector (empty on failure)
+    std::vector<float> embed(const std::string& text);
 };
 
 }  // namespace chitta

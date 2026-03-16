@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include <optional>
+#include <functional>
 #include <stdexcept>
 #include <cstring>
 #include <cstdint>
@@ -441,6 +442,17 @@ public:
             now_ms, fencing_token) == 0;
     }
 
+    /// List tasks by kind. Returns JSON array. active_only=true filters non-terminal.
+    std::string task_list(const std::string& kind = "", bool active_only = false) {
+        std::vector<uint8_t> buf(262144);
+        size_t written = 0;
+        const char* kind_ptr = kind.empty() ? nullptr : kind.c_str();
+        int r = cf_task_list(handle_, kind_ptr, active_only ? 1 : 0,
+                             buf.data(), buf.size(), &written);
+        if (r != 0 || written == 0) return "[]";
+        return std::string(reinterpret_cast<char*>(buf.data()), written);
+    }
+
     // ── Domain Event Log ─────────────────────────────────────────────────────
 
     /// Emit a domain event. Returns the assigned event_id.
@@ -556,6 +568,107 @@ public:
             return std::string(reinterpret_cast<char*>(buf.data()), written);
         }
         return std::nullopt;
+    }
+
+    // ── Phase 0: New query/management methods ───────────────────────────────
+
+    /// 1. Filtered recall — returns JSON array of matching memories.
+    std::string recall_filtered(const std::string& kind = "", const std::string& realm = "",
+                                float min_confidence = 0.0f, float min_strength = 0.0f,
+                                size_t limit = 50) {
+        std::vector<uint8_t> buf(262144);
+        size_t written = 0;
+        const char* kind_ptr = kind.empty() ? nullptr : kind.c_str();
+        const char* realm_ptr = realm.empty() ? nullptr : realm.c_str();
+        int r = cf_recall_filtered(handle_, kind_ptr, realm_ptr,
+                                   min_confidence, min_strength, limit,
+                                   buf.data(), buf.size(), &written);
+        if (r != 0 && r != -2) return "[]";
+        return std::string(reinterpret_cast<char*>(buf.data()), written);
+    }
+
+    /// 2. Paginated memory listing sorted by strength/recency/confidence.
+    std::string list_memories(const std::string& kind = "", const std::string& realm = "",
+                              const std::string& sort_by = "recency",
+                              size_t limit = 50, size_t offset = 0) {
+        std::vector<uint8_t> buf(262144);
+        size_t written = 0;
+        const char* kind_ptr = kind.empty() ? nullptr : kind.c_str();
+        const char* realm_ptr = realm.empty() ? nullptr : realm.c_str();
+        int r = cf_list_memories(handle_, kind_ptr, realm_ptr,
+                                 sort_by.c_str(), limit, offset,
+                                 buf.data(), buf.size(), &written);
+        if (r != 0 && r != -2) return "[]";
+        return std::string(reinterpret_cast<char*>(buf.data()), written);
+    }
+
+    /// 3. Aggregate memory stats. Returns JSON with count_by_kind, avg_confidence, etc.
+    std::string memory_stats(const std::string& realm = "") {
+        std::vector<uint8_t> buf(65536);
+        size_t written = 0;
+        const char* realm_ptr = realm.empty() ? nullptr : realm.c_str();
+        int r = cf_memory_stats(handle_, realm_ptr, buf.data(), buf.size(), &written);
+        if (r != 0) return "{}";
+        return std::string(reinterpret_cast<char*>(buf.data()), written);
+    }
+
+    /// 4. Get single task by ID. Returns JSON string, or empty on not found.
+    std::string task_get(const std::string& task_id) {
+        std::vector<uint8_t> buf(65536);
+        size_t written = 0;
+        int r = cf_task_get(handle_, task_id.c_str(), buf.data(), buf.size(), &written);
+        if (r != 0 || written == 0) return "";
+        return std::string(reinterpret_cast<char*>(buf.data()), written);
+    }
+
+    /// 5. Update task payload. Returns true on success.
+    bool task_update_payload(const std::string& task_id,
+                             const std::string& payload_json, int64_t now_ms) {
+        return cf_task_update_payload(handle_, task_id.c_str(),
+                                      payload_json.c_str(), now_ms) == 0;
+    }
+
+    /// 6. List sessions as JSON array. active_only=true filters by active status.
+    std::string session_list(bool active_only = false) {
+        std::vector<uint8_t> buf(65536);
+        size_t written = 0;
+        int r = cf_session_list(handle_, active_only ? 1 : 0,
+                                buf.data(), buf.size(), &written);
+        if (r != 0) return "[]";
+        return std::string(reinterpret_cast<char*>(buf.data()), written);
+    }
+
+    /// 7. List transcripts as JSON array, most recent first.
+    std::string transcript_list(size_t limit = 50) {
+        std::vector<uint8_t> buf(65536);
+        size_t written = 0;
+        int r = cf_transcript_list(handle_, limit, buf.data(), buf.size(), &written);
+        if (r != 0) return "[]";
+        return std::string(reinterpret_cast<char*>(buf.data()), written);
+    }
+
+    /// 8. Get memory metadata by ID. Returns JSON string, or empty on not found.
+    std::string get_memory_metadata(uint64_t memory_id) {
+        std::vector<uint8_t> buf(4096);
+        size_t written = 0;
+        int r = cf_get_memory_metadata(handle_, memory_id, buf.data(), buf.size(), &written);
+        if (r != 0 || written == 0) return "";
+        return std::string(reinterpret_cast<char*>(buf.data()), written);
+    }
+
+    /// 9. Update memory kind field. Returns true on success.
+    bool update_memory_kind(uint64_t memory_id, const std::string& new_kind) {
+        return cf_update_memory_kind(handle_, memory_id, new_kind.c_str()) == 0;
+    }
+
+    /// 10. List all triplets where entity is subject OR object. Returns JSON string.
+    std::string list_triplets_for_entity(const std::string& entity, size_t limit = 100) {
+        std::vector<char> buf(65536);
+        size_t written = 0;
+        int r = cf_list_triplets_for_entity(handle_, entity.c_str(), limit,
+                                            buf.data(), buf.size(), &written);
+        if (r != 0) return "[]";
+        return std::string(buf.data(), written);
     }
 
 private:

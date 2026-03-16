@@ -1,13 +1,11 @@
 // SadhanaManager: Fully Agentic Autonomous Agent System implementation
+// Backed by chitta-field task/event APIs (no DuckDB SQL).
 
 #include <chitta/sadhana/sadhana_manager.hpp>
 #include <iostream>
 #include <sstream>
 #include <regex>
 #include <sys/wait.h>
-#ifdef CHITTA_FIELD_AVAILABLE
-#include <nlohmann/json.hpp>
-#endif
 
 namespace chitta {
 
@@ -36,11 +34,64 @@ std::string SadhanaManager::escape_sql(const std::string& text) {
 }
 
 // ============================================================================
+// JSON helpers for Sadhana <-> task payload conversion
+// ============================================================================
+
+static json sadhana_to_payload(const Sadhana& s) {
+    json p;
+    p["goal"]            = s.goal;
+    p["goal_dsl"]        = s.goal_dsl.is_null() ? json::object() : s.goal_dsl;
+    p["state"]           = sadhana_state_to_string(s.state);
+    p["brain_provider"]  = s.brain_provider;
+    p["brain_model"]     = s.brain_model;
+    p["created_at"]      = s.created_at;
+    p["updated_at"]      = s.updated_at;
+    p["iterations"]      = s.iterations;
+    p["last_sense"]      = s.last_sense.is_null() ? json::object() : s.last_sense;
+    p["last_action"]     = s.last_action;
+    p["last_result"]     = s.last_result.is_null() ? json::object() : s.last_result;
+    p["brain_calls"]     = s.brain_calls;
+    p["learned_patterns"]= s.learned_patterns.is_null() ? json::object() : s.learned_patterns;
+    p["interval_seconds"]= s.interval_seconds;
+    p["max_turns"]       = s.max_turns;
+    p["realm"]           = s.realm;
+    p["cost_usd"]        = s.cost_usd;
+    return p;
+}
+
+static Sadhana payload_to_sadhana(int64_t id, const json& p) {
+    Sadhana s;
+    s.id               = id;
+    s.goal             = p.value("goal", "");
+    if (p.contains("goal_dsl") && p["goal_dsl"].is_object())
+        s.goal_dsl = p["goal_dsl"];
+    s.state            = string_to_sadhana_state(p.value("state", "pending"));
+    s.brain_provider   = p.value("brain_provider", "claude");
+    s.brain_model      = p.value("brain_model", "sonnet");
+    s.created_at       = p.value("created_at", int64_t(0));
+    s.updated_at       = p.value("updated_at", int64_t(0));
+    s.iterations       = p.value("iterations", 0);
+    if (p.contains("last_sense") && !p["last_sense"].is_null())
+        s.last_sense = p["last_sense"];
+    s.last_action      = p.value("last_action", "");
+    if (p.contains("last_result") && !p["last_result"].is_null())
+        s.last_result = p["last_result"];
+    s.brain_calls      = p.value("brain_calls", 0);
+    if (p.contains("learned_patterns") && !p["learned_patterns"].is_null())
+        s.learned_patterns = p["learned_patterns"];
+    s.interval_seconds = p.value("interval_seconds", 300);
+    s.max_turns        = p.value("max_turns", 0);
+    s.realm            = p.value("realm", "brahman");
+    s.cost_usd         = p.value("cost_usd", 0.0);
+    return s;
+}
+
+// ============================================================================
 // Constructor
 // ============================================================================
 
-SadhanaManager::SadhanaManager(DuckDBStore& store, SadhanaConfig config)
-    : store_(store)
+SadhanaManager::SadhanaManager(FieldStore& field_store, SadhanaConfig config)
+    : field_store_(field_store)
     , config_(std::move(config))
 {
     auto active = list_active();
@@ -80,49 +131,22 @@ int64_t SadhanaManager::create(const std::string& goal,
     s.max_turns = max_turns >= 0 ? max_turns : 0;
     s.realm = realm;
 
-    std::ostringstream sql;
-    sql << "INSERT INTO sadhana (id, goal, goal_dsl, state, brain_provider, brain_model, "
-        << "created_at, updated_at, iterations, brain_calls, interval_seconds, max_turns, realm) "
-        << "VALUES (nextval('sadhana_seq'), "
-        << "'" << escape_sql(goal) << "', "
-        << "'" << (goal_dsl.is_null() ? "{}" : escape_sql(goal_dsl.dump())) << "', "
-        << "'pending', "
-        << "'" << s.brain_provider << "', "
-        << "'" << s.brain_model << "', "
-        << s.created_at << ", "
-        << s.updated_at << ", "
-        << "0, 0, "
-        << s.interval_seconds << ", "
-        << s.max_turns << ", "
-        << "'" << realm << "') "
-        << "RETURNING id";
+    // Generate a numeric ID from timestamp + counter for uniqueness
+    static std::atomic<int64_t> id_counter{0};
+    int64_t id = (now_ms() / 1000) * 1000 + (id_counter++ % 1000);
+    s.id = id;
 
-    auto result = store_.raw_query(sql.str());
-    if (!result || result->HasError()) {
-        std::cerr << "[sadhana] Create failed: " << (result ? result->GetError() : "null result") << "\n";
+    std::string task_id = std::to_string(id);
+    json payload = sadhana_to_payload(s);
+
+    int rc = field_store_.task_create(task_id, "sadhana", payload.dump(), s.created_at);
+    if (rc != 0) {
+        std::cerr << "[sadhana] Create failed: task_create returned " << rc << "\n";
         return 0;
     }
 
-    auto chunk = result->Fetch();
-    if (!chunk || chunk->size() == 0) {
-        std::cerr << "[sadhana] Create failed: no ID returned\n";
-        return 0;
-    }
-
-    int64_t id = chunk->GetValue(0, 0).GetValue<int64_t>();
     log_event(id, SadhanaEventType::Created, {{"goal", goal}, {"brain", s.brain_provider}});
     stats_.total_created++;
-
-#ifdef CHITTA_FIELD_AVAILABLE
-    if (field_store_) {
-        nlohmann::json meta;
-        meta["goal"]      = s.goal;
-        meta["model"]     = s.brain_model;
-        meta["max_turns"] = s.max_turns;
-        field_store_->task_create(std::to_string(id), "sadhana", meta.dump(),
-                                  now_ms(), 0 /*fencing_token*/);
-    }
-#endif
 
     std::cerr << "[sadhana] Created sadhana " << id << ": " << goal.substr(0, 60) << "\n";
     return id;
@@ -149,13 +173,17 @@ bool SadhanaManager::start(int64_t id) {
         }
     }
 
-    std::ostringstream sql;
-    sql << "UPDATE sadhana SET state = 'running', updated_at = " << now_ms()
-        << " WHERE id = " << id;
-    if (!store_.execute_raw(sql.str())) {
-        std::cerr << "[sadhana] Start failed: database update failed\n";
+    // Update payload state
+    s.state = SadhanaState::Running;
+    s.updated_at = now_ms();
+    json payload = sadhana_to_payload(s);
+    if (!field_store_.task_update_payload(std::to_string(id), payload.dump(), now_ms())) {
+        std::cerr << "[sadhana] Start failed: task_update_payload failed\n";
         return false;
     }
+
+    // Transition task status
+    field_store_.task_transition(std::to_string(id), "start", now_ms());
 
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -167,11 +195,6 @@ bool SadhanaManager::start(int64_t id) {
     }
 
     log_event(id, SadhanaEventType::Started);
-#ifdef CHITTA_FIELD_AVAILABLE
-    if (field_store_) {
-        field_store_->task_transition(std::to_string(id), "start", now_ms(), 0);
-    }
-#endif
     std::cerr << "[sadhana] Started sadhana " << id << "\n";
     return true;
 }
@@ -188,17 +211,16 @@ bool SadhanaManager::pause(int64_t id) {
         stats_.active_count = running_.size();
     }
 
-    std::ostringstream sql;
-    sql << "UPDATE sadhana SET state = 'paused', updated_at = " << now_ms()
-        << " WHERE id = " << id;
-    if (!store_.execute_raw(sql.str())) return false;
+    auto opt = get(id);
+    if (opt) {
+        opt->state = SadhanaState::Paused;
+        opt->updated_at = now_ms();
+        json payload = sadhana_to_payload(*opt);
+        field_store_.task_update_payload(std::to_string(id), payload.dump(), now_ms());
+    }
+    field_store_.task_transition(std::to_string(id), "pause", now_ms());
 
     log_event(id, SadhanaEventType::Paused);
-#ifdef CHITTA_FIELD_AVAILABLE
-    if (field_store_) {
-        field_store_->task_transition(std::to_string(id), "pause", now_ms(), 0);
-    }
-#endif
     std::cerr << "[sadhana] Paused sadhana " << id << "\n";
     return true;
 }
@@ -215,21 +237,18 @@ bool SadhanaManager::stop(int64_t id, bool success, const std::string& reason) {
     }
 
     std::string new_state = success ? "done" : "failed";
-    std::ostringstream sql;
-    sql << "UPDATE sadhana SET state = '" << new_state << "', updated_at = " << now_ms()
-        << " WHERE id = " << id;
-    if (!store_.execute_raw(sql.str())) return false;
+
+    auto opt = get(id);
+    if (opt) {
+        opt->state = success ? SadhanaState::Done : SadhanaState::Failed;
+        opt->updated_at = now_ms();
+        json payload = sadhana_to_payload(*opt);
+        field_store_.task_update_payload(std::to_string(id), payload.dump(), now_ms());
+    }
+    field_store_.task_transition(std::to_string(id), success ? "complete" : "fail", now_ms());
 
     auto event_type = success ? SadhanaEventType::Done : SadhanaEventType::Failed;
     log_event(id, event_type, {{"reason", reason}});
-
-#ifdef CHITTA_FIELD_AVAILABLE
-    if (field_store_) {
-        field_store_->task_transition(std::to_string(id),
-                                      success ? "complete" : "fail",
-                                      now_ms(), 0);
-    }
-#endif
 
     if (success) stats_.total_completed++;
     else stats_.total_failed++;
@@ -249,13 +268,15 @@ bool SadhanaManager::checkpoint(int64_t id, const std::string& status, const std
     content["summary"] = summary;
     log_event(id, SadhanaEventType::Checkpoint, content);
 
-    // Update last_action immediately for live monitoring visibility
+    // Update last_action for live monitoring visibility
     if (!summary.empty()) {
-        std::ostringstream sql;
-        sql << "UPDATE sadhana SET last_action = '" << escape_sql(summary)
-            << "', updated_at = " << now_ms()
-            << " WHERE id = " << id;
-        store_.execute_raw(sql.str());
+        auto opt = get(id);
+        if (opt) {
+            opt->last_action = summary;
+            opt->updated_at = now_ms();
+            json payload = sadhana_to_payload(*opt);
+            field_store_.task_update_payload(std::to_string(id), payload.dump(), now_ms());
+        }
     }
 
     std::cerr << "[sadhana] Checkpoint " << id << ": [" << status << "] "
@@ -268,79 +289,64 @@ bool SadhanaManager::checkpoint(int64_t id, const std::string& status, const std
 // ============================================================================
 
 std::optional<Sadhana> SadhanaManager::get(int64_t id) {
-    std::ostringstream sql;
-    sql << "SELECT id, goal, goal_dsl, state, brain_provider, brain_model, "
-        << "created_at, updated_at, iterations, last_sense, last_action, last_result, "
-        << "brain_calls, learned_patterns, interval_seconds, max_turns, realm, cost_usd "
-        << "FROM sadhana WHERE id = " << id;
+    std::string task_json = field_store_.task_get(std::to_string(id));
+    if (task_json.empty()) return std::nullopt;
 
-    auto result = store_.raw_query(sql.str());
-    if (!result || result->HasError()) return std::nullopt;
-
-    auto chunk = result->Fetch();
-    if (!chunk || chunk->size() == 0) return std::nullopt;
-
-    Sadhana s;
-    s.id = chunk->GetValue(0, 0).GetValue<int64_t>();
-    s.goal = chunk->GetValue(1, 0).ToString();
-    try { s.goal_dsl = json::parse(chunk->GetValue(2, 0).ToString()); } catch (...) {}
-    s.state = string_to_sadhana_state(chunk->GetValue(3, 0).ToString());
-    s.brain_provider = chunk->GetValue(4, 0).ToString();
-    s.brain_model = chunk->GetValue(5, 0).ToString();
-    s.created_at = chunk->GetValue(6, 0).GetValue<int64_t>();
-    s.updated_at = chunk->GetValue(7, 0).GetValue<int64_t>();
-    s.iterations = chunk->GetValue(8, 0).GetValue<int32_t>();
-    try { s.last_sense = json::parse(chunk->GetValue(9, 0).ToString()); } catch (...) {}
-    s.last_action = chunk->GetValue(10, 0).ToString();
-    try { s.last_result = json::parse(chunk->GetValue(11, 0).ToString()); } catch (...) {}
-    s.brain_calls = chunk->GetValue(12, 0).GetValue<int32_t>();
-    try { s.learned_patterns = json::parse(chunk->GetValue(13, 0).ToString()); } catch (...) {}
-    s.interval_seconds = chunk->GetValue(14, 0).GetValue<int32_t>();
-    s.max_turns = chunk->GetValue(15, 0).GetValue<int32_t>();
-    s.realm = chunk->GetValue(16, 0).ToString();
-    try { s.cost_usd = chunk->GetValue(17, 0).GetValue<double>(); } catch (...) {}
-
-    return s;
+    try {
+        json task = json::parse(task_json);
+        // task_get returns: {task_id, kind, status, payload, created_at, updated_at}
+        json payload;
+        if (task.contains("payload") && task["payload"].is_string()) {
+            payload = json::parse(task["payload"].get<std::string>());
+        } else if (task.contains("payload") && task["payload"].is_object()) {
+            payload = task["payload"];
+        } else {
+            return std::nullopt;
+        }
+        return payload_to_sadhana(id, payload);
+    } catch (const std::exception& e) {
+        std::cerr << "[sadhana] get(" << id << ") parse error: " << e.what() << "\n";
+        return std::nullopt;
+    }
 }
 
 std::vector<Sadhana> SadhanaManager::list(const std::string& state_filter,
                                            const std::string& realm,
                                            size_t limit)
 {
-    std::ostringstream sql;
-    sql << "SELECT id, goal, state, brain_provider, brain_model, "
-        << "created_at, updated_at, iterations, brain_calls, interval_seconds, max_turns, realm, cost_usd "
-        << "FROM sadhana WHERE 1=1";
-
-    if (!state_filter.empty()) sql << " AND state = '" << state_filter << "'";
-    if (!realm.empty()) sql << " AND realm = '" << realm << "'";
-    sql << " ORDER BY created_at DESC LIMIT " << limit;
-
-    auto result = store_.raw_query(sql.str());
+    std::string list_json = field_store_.task_list("sadhana", false);
     std::vector<Sadhana> sadhanas;
-    if (!result || result->HasError()) return sadhanas;
 
-    while (true) {
-        auto chunk = result->Fetch();
-        if (!chunk || chunk->size() == 0) break;
+    try {
+        json tasks = json::parse(list_json);
+        if (!tasks.is_array()) return sadhanas;
 
-        for (size_t i = 0; i < chunk->size(); ++i) {
-            Sadhana s;
-            s.id = chunk->GetValue(0, i).GetValue<int64_t>();
-            s.goal = chunk->GetValue(1, i).ToString();
-            s.state = string_to_sadhana_state(chunk->GetValue(2, i).ToString());
-            s.brain_provider = chunk->GetValue(3, i).ToString();
-            s.brain_model = chunk->GetValue(4, i).ToString();
-            s.created_at = chunk->GetValue(5, i).GetValue<int64_t>();
-            s.updated_at = chunk->GetValue(6, i).GetValue<int64_t>();
-            s.iterations = chunk->GetValue(7, i).GetValue<int32_t>();
-            s.brain_calls = chunk->GetValue(8, i).GetValue<int32_t>();
-            s.interval_seconds = chunk->GetValue(9, i).GetValue<int32_t>();
-            s.max_turns = chunk->GetValue(10, i).GetValue<int32_t>();
-            s.realm = chunk->GetValue(11, i).ToString();
-            try { s.cost_usd = chunk->GetValue(12, i).GetValue<double>(); } catch (...) {}
-            sadhanas.push_back(s);
+        for (const auto& task : tasks) {
+            if (sadhanas.size() >= limit) break;
+
+            json payload;
+            if (task.contains("payload") && task["payload"].is_string()) {
+                payload = json::parse(task["payload"].get<std::string>());
+            } else if (task.contains("payload") && task["payload"].is_object()) {
+                payload = task["payload"];
+            } else {
+                continue;
+            }
+
+            // Apply filters
+            if (!state_filter.empty() && payload.value("state", "") != state_filter)
+                continue;
+            if (!realm.empty() && payload.value("realm", "") != realm)
+                continue;
+
+            std::string task_id = task.value("task_id", "0");
+            int64_t id = 0;
+            try { id = std::stoll(task_id); } catch (...) { continue; }
+
+            sadhanas.push_back(payload_to_sadhana(id, payload));
         }
+    } catch (const std::exception& e) {
+        std::cerr << "[sadhana] list parse error: " << e.what() << "\n";
     }
 
     return sadhanas;
@@ -351,10 +357,14 @@ std::vector<Sadhana> SadhanaManager::list_active() {
 }
 
 bool SadhanaManager::set_model(int64_t id, const std::string& model) {
-    std::ostringstream sql;
-    sql << "UPDATE sadhana SET brain_model = '" << model << "', updated_at = " << now_ms()
-        << " WHERE id = " << id;
-    if (!store_.execute_raw(sql.str())) return false;
+    auto opt = get(id);
+    if (!opt) return false;
+
+    opt->brain_model = model;
+    opt->updated_at = now_ms();
+    json payload = sadhana_to_payload(*opt);
+    if (!field_store_.task_update_payload(std::to_string(id), payload.dump(), now_ms()))
+        return false;
 
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -367,55 +377,68 @@ bool SadhanaManager::set_model(int64_t id, const std::string& model) {
 }
 
 bool SadhanaManager::set_interval(int64_t id, int interval_seconds) {
-    std::ostringstream sql;
-    sql << "UPDATE sadhana SET interval_seconds = " << interval_seconds
-        << ", updated_at = " << now_ms() << " WHERE id = " << id;
-    return store_.execute_raw(sql.str());
+    auto opt = get(id);
+    if (!opt) return false;
+
+    opt->interval_seconds = interval_seconds;
+    opt->updated_at = now_ms();
+    json payload = sadhana_to_payload(*opt);
+    return field_store_.task_update_payload(std::to_string(id), payload.dump(), now_ms());
 }
 
 bool SadhanaManager::set_max_turns(int64_t id, int max_turns) {
-    std::ostringstream sql;
-    sql << "UPDATE sadhana SET max_turns = " << max_turns
-        << ", updated_at = " << now_ms() << " WHERE id = " << id;
-    return store_.execute_raw(sql.str());
+    auto opt = get(id);
+    if (!opt) return false;
+
+    opt->max_turns = max_turns;
+    opt->updated_at = now_ms();
+    json payload = sadhana_to_payload(*opt);
+    return field_store_.task_update_payload(std::to_string(id), payload.dump(), now_ms());
 }
 
 bool SadhanaManager::set_goal(int64_t id, const std::string& goal) {
-    std::ostringstream sql;
-    sql << "UPDATE sadhana SET goal = '" << escape_sql(goal) << "', updated_at = " << now_ms()
-        << " WHERE id = " << id;
-    if (!store_.execute_raw(sql.str())) return false;
+    auto opt = get(id);
+    if (!opt) return false;
+
+    opt->goal = goal;
+    opt->updated_at = now_ms();
+    json payload = sadhana_to_payload(*opt);
+    if (!field_store_.task_update_payload(std::to_string(id), payload.dump(), now_ms()))
+        return false;
+
     log_event(id, SadhanaEventType::GoalChanged, {{"goal", goal}});
     return true;
 }
 
 std::vector<json> SadhanaManager::get_history(int64_t id, size_t limit) {
-    std::ostringstream sql;
-    sql << "SELECT timestamp, event_type, content, duration_ms "
-        << "FROM sadhana_history WHERE sadhana_id = " << id
-        << " ORDER BY timestamp DESC LIMIT " << limit;
-
-    auto result = store_.raw_query(sql.str());
     std::vector<json> history;
-    if (!result || result->HasError()) return history;
+    std::string entity_id = std::to_string(id);
 
-    while (true) {
-        auto chunk = result->Fetch();
-        if (!chunk || chunk->size() == 0) break;
+    // Iterate the event log looking for events matching this sadhana
+    field_store_.iterate_log(0, [&](const std::string& op_json, uint64_t /*seqno*/) {
+        if (history.size() >= limit) return;
+        try {
+            json op = json::parse(op_json);
+            // Event log entries have: domain, kind, entity_id, payload
+            if (op.value("domain", "") != "sadhana") return;
+            if (op.value("entity_id", "") != entity_id) return;
 
-        for (size_t i = 0; i < chunk->size(); ++i) {
             json event;
-            event["timestamp"] = chunk->GetValue(0, i).GetValue<int64_t>();
-            event["event_type"] = chunk->GetValue(1, i).ToString();
-            try {
-                event["content"] = json::parse(chunk->GetValue(2, i).ToString());
-            } catch (...) {
-                event["content"] = chunk->GetValue(2, i).ToString();
+            event["event_type"] = op.value("kind", "");
+
+            json payload;
+            if (op.contains("payload") && op["payload"].is_string()) {
+                payload = json::parse(op["payload"].get<std::string>());
+            } else if (op.contains("payload") && op["payload"].is_object()) {
+                payload = op["payload"];
             }
-            event["duration_ms"] = chunk->GetValue(3, i).GetValue<int32_t>();
+            event["content"] = payload.value("content", json::object());
+            event["timestamp"] = payload.value("timestamp", int64_t(0));
+            event["duration_ms"] = payload.value("duration_ms", 0);
+
             history.push_back(event);
-        }
-    }
+        } catch (...) {}
+    });
 
     return history;
 }
@@ -478,8 +501,6 @@ void SadhanaManager::tick() {
             std::lock_guard<std::mutex> lock(mutex_);
             auto it = running_.find(id);
             if (it != running_.end()) {
-                // "progressed": agent made progress and wants to continue — run again immediately
-                // "failed"/"stopped"/other: wait the full interval before retrying
                 int64_t delay_ms = (cycle_status == "progressed")
                     ? 0
                     : (opt->interval_seconds * 1000LL);
@@ -495,17 +516,16 @@ void SadhanaManager::tick() {
 
 std::string SadhanaManager::build_memory_context(const Sadhana& sadhana) {
     try {
-        auto hits = store_.bm25_search_memory(sadhana.goal, 10, sadhana.realm, true);
+        auto hits = field_store_.recall_keyword(sadhana.goal, 10);
         if (hits.empty()) return "";
 
         std::ostringstream ctx;
         ctx << "Relevant memories from past experience:\n";
         int shown = 0;
-        for (const auto& [mem_id, score] : hits) {
-            if (score < 0.05f) continue;
-            auto mem = store_.get_memory(mem_id);
-            if (mem && !mem->content.empty()) {
-                ctx << "- " << mem->content.substr(0, 200) << "\n";
+        for (const auto& hit : hits) {
+            if (hit.score < 0.05f) continue;
+            if (!hit.content.empty()) {
+                ctx << "- " << hit.content.substr(0, 200) << "\n";
                 if (++shown >= 8) break;
             }
         }
@@ -637,7 +657,7 @@ std::string SadhanaManager::build_system_prompt(const Sadhana& sadhana) const {
         return sys.str();
     }
 
-    // Impl sadhana: self-improvement actuator — reads [impl] memories, implements, reviews, commits
+    // Impl sadhana: self-improvement actuator
     if (sadhana.goal_dsl.is_object() &&
         sadhana.goal_dsl.value("kind", "") == "impl") {
         std::string repo = sadhana.goal_dsl.value("repo", "");
@@ -684,7 +704,7 @@ std::string SadhanaManager::build_system_prompt(const Sadhana& sadhana) const {
         return sys.str();
     }
 
-    // Think sadhana: internal synthesis — connect existing memories, find patterns
+    // Think sadhana: internal synthesis
     if (sadhana.goal_dsl.is_object() &&
         sadhana.goal_dsl.value("kind", "") == "think") {
         std::ostringstream sys;
@@ -777,7 +797,6 @@ json SadhanaManager::extract_last_json(const std::string& text) {
 
     try {
         auto j = json::parse(text.substr(start, last_close - start + 1));
-        // Only return if it looks like a status object
         if (j.contains("status") || j.contains("summary")) return j;
     } catch (...) {}
 
@@ -822,10 +841,9 @@ std::string SadhanaManager::run_cycle(Sadhana& sadhana) {
     stats_.total_brain_calls++;
     stats_.total_actions++;
 
-    store_.execute_raw(
-        "UPDATE sadhana SET brain_calls = brain_calls + 1, "
-        "cost_usd = cost_usd + " + std::to_string(result.cost_usd) +
-        " WHERE id = " + std::to_string(sadhana.id));
+    // Update brain_calls and cost via payload
+    sadhana.brain_calls++;
+    sadhana.cost_usd += result.cost_usd;
 
     // Determine status from exit code first, then from last JSON in output
     std::string status  = "progressed";
@@ -834,7 +852,6 @@ std::string SadhanaManager::run_cycle(Sadhana& sadhana) {
     if (result.exit_code == 10)      status = "achieved";
     else if (result.exit_code == 20) status = "blocked";
 
-    // Override/augment from agent's final JSON status message
     std::string clean_output = config_.strip_ansi_codes ? strip_ansi(result.output) : result.output;
     auto last_json = extract_last_json(clean_output);
     if (!last_json.is_null()) {
@@ -843,7 +860,6 @@ std::string SadhanaManager::run_cycle(Sadhana& sadhana) {
         summary = last_json.value("summary", "");
     }
 
-    // Treat timeout with empty output as a failure for circuit-breaker purposes
     bool cycle_failed = (result.exit_code == -1 && clean_output.empty()) ||
                         (status == "error");
 
@@ -855,7 +871,6 @@ std::string SadhanaManager::run_cycle(Sadhana& sadhana) {
     cycle_result["duration_ms"] = result.duration_ms;
     cycle_result["cost_usd"]    = result.cost_usd;
     cycle_result["num_turns"]   = result.num_turns;
-    // Keep a snippet of the output for diagnostics (last 500 chars, most informative)
     if (!clean_output.empty()) {
         size_t snippet_start = clean_output.size() > 500 ? clean_output.size() - 500 : 0;
         cycle_result["output_tail"] = clean_output.substr(snippet_start);
@@ -868,18 +883,14 @@ std::string SadhanaManager::run_cycle(Sadhana& sadhana) {
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - start_time).count();
 
-    // Persist to DB
-    std::string escaped_summary = escape_sql(summary.empty() ? status : summary);
-    std::string escaped_result  = escape_sql(cycle_result.dump());
+    // Persist cycle result to task payload
+    sadhana.last_action = summary.empty() ? status : summary;
+    sadhana.last_result = cycle_result;
+    sadhana.iterations++;
+    sadhana.updated_at = now_ms();
 
-    std::ostringstream sql;
-    sql << "UPDATE sadhana SET "
-        << "last_action = '" << escaped_summary << "', "
-        << "last_result = '" << escaped_result  << "', "
-        << "iterations = iterations + 1, "
-        << "updated_at = " << now_ms()
-        << " WHERE id = " << sadhana.id;
-    store_.execute_raw(sql.str());
+    json payload = sadhana_to_payload(sadhana);
+    field_store_.task_update_payload(std::to_string(sadhana.id), payload.dump(), now_ms());
 
     log_event(sadhana.id, SadhanaEventType::Cycle, cycle_result, static_cast<int>(elapsed));
 
@@ -917,7 +928,6 @@ std::string SadhanaManager::run_cycle(Sadhana& sadhana) {
 
 void SadhanaManager::stream_subscribe(int fd, int64_t sadhana_id) {
     std::lock_guard<std::mutex> lock(stream_subs_mutex_);
-    // Remove any stale subscription for this fd first
     stream_subs_.erase(std::remove_if(stream_subs_.begin(), stream_subs_.end(),
         [fd](const StreamSub& s) { return s.fd == fd; }), stream_subs_.end());
     stream_subs_.push_back({fd, sadhana_id});
@@ -947,8 +957,6 @@ void SadhanaManager::push_to_streams(int64_t sadhana_id, SadhanaEventType type,
     event["content"]     = content.is_null() ? json::object() : content;
     std::string line = event.dump();
 
-    // Collect fds under lock, then call stream_fn_ outside lock.
-    // This prevents I/O operations from stalling stream_subscribe/unsubscribe callers.
     std::vector<int> fds_to_notify;
     {
         std::lock_guard<std::mutex> lock(stream_subs_mutex_);
@@ -970,19 +978,22 @@ void SadhanaManager::push_to_streams(int64_t sadhana_id, SadhanaEventType type,
 bool SadhanaManager::log_event(int64_t sadhana_id, SadhanaEventType type,
                                 const json& content, int duration_ms)
 {
-    std::string content_str = content.is_null() ? "{}" : escape_sql(content.dump());
-    std::ostringstream sql;
-    sql << "INSERT INTO sadhana_history (id, sadhana_id, timestamp, event_type, content, duration_ms) "
-        << "VALUES (nextval('sadhana_history_seq'), "
-        << sadhana_id << ", "
-        << now_ms() << ", "
-        << "'" << sadhana_event_type_to_string(type) << "', "
-        << "'" << content_str << "', "
-        << duration_ms << ")";
+    json event_payload;
+    event_payload["content"] = content.is_null() ? json::object() : content;
+    event_payload["timestamp"] = now_ms();
+    event_payload["duration_ms"] = duration_ms;
 
-    bool ok = store_.execute_raw(sql.str());
-    if (ok) push_to_streams(sadhana_id, type, content, duration_ms);
-    return ok;
+    try {
+        field_store_.emit_event("sadhana",
+                                sadhana_event_type_to_string(type),
+                                std::to_string(sadhana_id),
+                                event_payload.dump());
+        push_to_streams(sadhana_id, type, content, duration_ms);
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "[sadhana] log_event failed: " << e.what() << "\n";
+        return false;
+    }
 }
 
 int64_t SadhanaManager::now_ms() {

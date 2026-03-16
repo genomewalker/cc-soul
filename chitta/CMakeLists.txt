@@ -483,6 +483,9 @@ if(CHITTA_BUILD_RPC)
         target_link_libraries(chitta_tool PRIVATE onnx_yantra)
         target_compile_definitions(chitta_tool PRIVATE CHITTA_WITH_ONNX)
     endif()
+    if(EXISTS "${CHITTA_FIELD_INCLUDE}")
+        target_include_directories(chitta_tool PRIVATE "${CHITTA_FIELD_INCLUDE}")
+    endif()
 endif()
 
 

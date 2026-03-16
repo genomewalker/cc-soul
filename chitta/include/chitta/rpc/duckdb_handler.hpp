@@ -98,6 +98,7 @@ public:
     // Connect chitta-field handler.
     void set_field_handler(ChittaFieldHandler* h);  // defined after ChittaFieldHandler is complete
     void set_field_store(FieldStore* fs) { field_store_ = fs; }
+    void set_field_initializing(bool v) { field_initializing_.store(v, std::memory_order_release); }
 #endif
 
     json handle(const json& request) {
@@ -138,6 +139,7 @@ private:
 #ifdef CHITTA_FIELD_AVAILABLE
     ChittaFieldHandler* field_handler_ = nullptr;
     FieldStore* field_store_ = nullptr;  // Direct pointer for use before ChittaFieldHandler is complete
+    std::atomic<bool> field_initializing_{false};  // True during async init window
 
     // Defined after chitta_field_handler.hpp is included (bottom of file).
     json dispatch_to_field_handler(const json& id, const std::string& name, const json& args);
@@ -1173,7 +1175,8 @@ private:
         });
         handlers_["realm_detect"] = [this](const json&) { return tool_realm_detect(); };
 
-        // Ledger tools (session continuity)
+        // Ledger + long-task tools require chitta-field
+#ifdef CHITTA_FIELD_AVAILABLE
         tools_.push_back({
             {"name", "ledger_save"},
             {"description", "Save session checkpoint for continuity"},
@@ -1387,6 +1390,7 @@ private:
             }}
         });
         handlers_["long_task_evaluate"] = [this](const json& p) { return tool_long_task_evaluate(p); };
+#endif  // CHITTA_FIELD_AVAILABLE
 
         // Suggestion tracking (loop closure)
         tools_.push_back({
@@ -4139,8 +4143,10 @@ private:
     #include "handlers/sadhana.hpp"
     #include "handlers/session.hpp"
     #include "handlers/realm.hpp"
+#ifdef CHITTA_FIELD_AVAILABLE
     #include "handlers/ledger.hpp"
     #include "handlers/long_task.hpp"
+#endif
     #include "handlers/system.hpp"
     #include "handlers/narrative.hpp"
     #include "handlers/theme.hpp"

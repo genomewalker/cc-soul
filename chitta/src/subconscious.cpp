@@ -3,6 +3,7 @@
 // Detects patterns in user/assistant messages and automatically stores
 // learnings without requiring explicit calls.
 
+#include <chitta/field_store.hpp>
 #include <chitta/mind/subconscious.hpp>
 #include <iostream>
 #include <sstream>
@@ -11,8 +12,9 @@
 
 namespace chitta {
 
-Subconscious::Subconscious(DuckDBMind* mind, SubconsciousConfig config)
-    : mind_(mind)
+Subconscious::Subconscious(FieldStore* field_store, VakYantra* embedder, SubconsciousConfig config)
+    : field_store_(field_store)
+    , embedder_(embedder)
     , config_(std::move(config))
 {
     // Compile pattern matchers
@@ -102,8 +104,6 @@ void Subconscious::push_event(SubconsciousEvent event) {
 }
 
 void Subconscious::process_loop() {
-    auto last_hygiene = std::chrono::steady_clock::now();
-
     while (running_.load()) {
         auto event_opt = pop_event_with_timeout(config_.process_interval);
 
@@ -123,33 +123,11 @@ void Subconscious::process_loop() {
             }
         }
 
-        // Check for periodic hygiene
-        if (config_.enable_hygiene && time_for_hygiene()) {
-            run_hygiene();
-            last_hygiene = std::chrono::steady_clock::now();
-        }
-
-        // Check for theme maintenance (xMemory)
+        // Theme maintenance via FieldStore
         if (config_.enable_theme_maintenance && time_for_theme_maintenance()) {
             run_theme_maintenance();
         }
 
-        // Check for auto-distillation (episodes -> wisdom)
-        if (config_.enable_distillation && time_for_distillation()) {
-            run_auto_distillation();
-        }
-
-        // Check for CLS offline replay (fast -> slow store consolidation)
-        if (config_.enable_cls_replay && time_for_cls_replay()) {
-            run_cls_replay();
-        }
-
-        // Check for background embedding
-        if (config_.enable_background_embedding && time_for_embedding()) {
-            run_background_embedding();
-        }
-
-#ifdef CHITTA_FIELD_AVAILABLE
         // Sleep consolidation: encode new memories into cortical index + snapshot
         if (config_.enable_sleep_consolidation && field_store_ && time_for_sleep_consolidation()) {
             run_sleep_consolidation();
@@ -159,7 +137,6 @@ void Subconscious::process_loop() {
         if (config_.enable_sleep_consolidation && field_store_ && time_for_demotion()) {
             run_demotion_pass();
         }
-#endif
 
         // Auto-dream: trigger curiosity-driven exploration when idle > 10 min
         if (dream_callback_ && time_for_dream()) {
@@ -196,27 +173,22 @@ void Subconscious::process_user_message(const SubconsciousEvent& event) {
     }
 
     if (config_.enable_anticipation) {
-        // User message can verify a prediction about what they would ask/do
         verify_prediction(event.content, event.realm);
     }
 }
 
 void Subconscious::process_assistant_message(const SubconsciousEvent& event) {
-    // Detect uncertainty/knowledge gaps in assistant responses
     if (config_.enable_pattern_detection) {
         detect_uncertainty(event.content, event.realm);
     }
 
     if (config_.enable_suggestion_tracking) {
-        // Look for suggestions in assistant output
         std::smatch match;
         if (std::regex_search(event.content, match, suggestion_pattern_)) {
-            // Extract context (first 200 chars before the suggestion)
             size_t pos = match.position();
             size_t start = (pos > 200) ? (pos - 200) : 0;
             std::string context = event.content.substr(start, pos - start);
 
-            // Extract suggestion (the matching part plus 100 chars after)
             size_t end = std::min(pos + match.length() + 100, event.content.size());
             std::string suggestion = event.content.substr(pos, end - pos);
 
@@ -225,14 +197,10 @@ void Subconscious::process_assistant_message(const SubconsciousEvent& event) {
     }
 
     if (config_.enable_anticipation) {
-        // Assistant messages represent actions taken - observe patterns
-        // Context = what was being discussed, Action = what assistant did
-        // This is simplified - in practice, would track more context
         std::lock_guard<std::mutex> lock(anticipation_mutex_);
         if (!last_context_.empty()) {
             observe_pattern(last_context_, event.content.substr(0, 200), event.realm);
         }
-        // Update context for next observation
         last_context_ = event.content.substr(0, 200);
     }
 }
@@ -242,14 +210,12 @@ void Subconscious::process_tool_result(const SubconsciousEvent& event) {
         verify_prediction(event.content, event.realm);
     }
 
-    // Extract tool name from content (format: "tool_name: result" or just tool_name)
     if (config_.enable_habit_formation) {
         std::string tool_name;
         size_t colon_pos = event.content.find(':');
         if (colon_pos != std::string::npos && colon_pos < 50) {
             tool_name = event.content.substr(0, colon_pos);
         } else {
-            // Try to extract first word as tool name
             size_t space_pos = event.content.find(' ');
             if (space_pos != std::string::npos && space_pos < 50) {
                 tool_name = event.content.substr(0, space_pos);
@@ -267,7 +233,6 @@ void Subconscious::process_tool_result(const SubconsciousEvent& event) {
 void Subconscious::detect_correction(const std::string& content, const std::string& realm) {
     std::smatch match;
     if (std::regex_search(content, match, correction_pattern_)) {
-        // Extract the correction context (what comes after the correction word)
         size_t pos = match.position() + match.length();
         std::string correction;
         if (pos < content.size()) {
@@ -275,7 +240,6 @@ void Subconscious::detect_correction(const std::string& content, const std::stri
             correction = content.substr(pos, end - pos);
         }
 
-        // Extract what was being corrected (what comes before)
         std::string context;
         if (match.position() > 0) {
             size_t start = (match.position() > 100) ? (match.position() - 100) : 0;
@@ -290,7 +254,6 @@ void Subconscious::detect_correction(const std::string& content, const std::stri
 void Subconscious::detect_preference(const std::string& content, const std::string& realm) {
     std::smatch match;
     if (std::regex_search(content, match, preference_pattern_)) {
-        // Extract the preference statement (surrounding text)
         size_t pos = static_cast<size_t>(match.position());
         size_t len = static_cast<size_t>(match.length());
         size_t start = (pos > 50) ? (pos - 50) : 0;
@@ -305,7 +268,6 @@ void Subconscious::detect_preference(const std::string& content, const std::stri
 void Subconscious::detect_frustration(const std::string& content, const std::string& realm) {
     std::smatch match;
     if (std::regex_search(content, match, frustration_pattern_)) {
-        // Extract frustration context
         size_t pos = static_cast<size_t>(match.position());
         size_t len = static_cast<size_t>(match.length());
         size_t start = (pos > 100) ? (pos - 100) : 0;
@@ -320,7 +282,6 @@ void Subconscious::detect_frustration(const std::string& content, const std::str
 void Subconscious::detect_milestone(const std::string& content, const std::string& realm) {
     std::smatch match;
     if (std::regex_search(content, match, milestone_pattern_)) {
-        // Extract milestone achievement
         size_t pos = static_cast<size_t>(match.position());
         size_t len = static_cast<size_t>(match.length());
         size_t start = (pos > 50) ? (pos - 50) : 0;
@@ -335,7 +296,6 @@ void Subconscious::detect_milestone(const std::string& content, const std::strin
 void Subconscious::detect_uncertainty(const std::string& content, const std::string& realm) {
     std::smatch match;
     if (std::regex_search(content, match, uncertainty_pattern_)) {
-        // Extract uncertainty context
         size_t pos = static_cast<size_t>(match.position());
         size_t len = static_cast<size_t>(match.length());
         size_t start = (pos > 100) ? (pos - 100) : 0;
@@ -348,22 +308,26 @@ void Subconscious::detect_uncertainty(const std::string& content, const std::str
 }
 
 // Auto-learning Storage
-// Uses mind_->remember() to generate proper embeddings via yantra
+// Uses FieldStore::remember() with embeddings from VakYantra
+
+std::vector<float> Subconscious::embed(const std::string& text) {
+    if (!embedder_ || !embedder_->ready()) return {};
+    Artha artha = embedder_->transform(text);
+    if (artha.nu.is_zero()) return {};
+    return artha.nu.data;
+}
 
 // Score correction quality [0.5, 0.95] based on specificity and context richness.
-// Higher score → stored with higher confidence → more weight in recall.
+// Higher score -> stored with higher confidence -> more weight in recall.
 float Subconscious::score_correction_quality(const std::string& correction,
                                               const std::string& context) {
     float score = 0.60f;
 
-    // More detail = higher quality
     if (correction.size() > 50)  score += 0.08f;
     if (correction.size() > 120) score += 0.05f;
 
-    // Context provided = correction is grounded
     if (!context.empty()) score += 0.08f;
 
-    // References specific code artefacts (file, function, namespace)
     if (correction.find(".cpp") != std::string::npos ||
         correction.find(".hpp") != std::string::npos ||
         correction.find("::") != std::string::npos ||
@@ -371,7 +335,6 @@ float Subconscious::score_correction_quality(const std::string& correction,
         score += 0.07f;
     }
 
-    // Actionable language — tells what to do, not just what's wrong
     static const std::vector<std::string> action_words = {
         "always", "never", "use", "prefer", "avoid", "instead", "should", "must"
     };
@@ -392,27 +355,23 @@ void Subconscious::store_correction(const std::string& context, const std::strin
     content << "Correction: " << correction;
 
     float confidence = score_correction_quality(correction, context);
+    auto embedding = embed(content.str());
+    if (embedding.empty()) return;
 
-    auto id = mind_->remember(content.str(), NodeType::Wisdom,
-                              realm.empty() ? "brahman" : realm,
-                              RealmVisibility::Global,
-                              confidence);
-    if (id != NodeId{}) {
-        mind_->store().set_visibility(static_cast<int64_t>(id.low), RealmVisibility::Global);
-    }
+    field_store_->remember("wisdom",
+                           realm.empty() ? "brahman" : realm,
+                           content.str(), embedding, confidence, 0.005f);
 }
 
 void Subconscious::store_preference(const std::string& preference, const std::string& realm) {
     std::ostringstream content;
     content << "[preference] " << preference;
 
-    // Preferences are global beliefs
-    auto id = mind_->remember(content.str(), NodeType::Belief,
-                              "brahman",  // Global realm
-                              RealmVisibility::Global);
-    if (id != NodeId{}) {
-        mind_->store().set_visibility(static_cast<int64_t>(id.low), RealmVisibility::Global);
-    }
+    auto embedding = embed(content.str());
+    if (embedding.empty()) return;
+
+    field_store_->remember("belief", "brahman",
+                           content.str(), embedding, 0.8f, 0.0f);
 }
 
 void Subconscious::store_frustration(const std::string& context, const std::string& realm) {
@@ -420,58 +379,59 @@ void Subconscious::store_frustration(const std::string& context, const std::stri
     content << "[approach] User was frustrated/stuck\n";
     content << "Context: " << context;
 
-    mind_->remember(content.str(), NodeType::Episode,
-                    realm.empty() ? "default" : realm,
-                    RealmVisibility::Private);
+    auto embedding = embed(content.str());
+    if (embedding.empty()) return;
+
+    field_store_->remember("episode",
+                           realm.empty() ? "default" : realm,
+                           content.str(), embedding, 0.8f, 0.03f);
 }
 
 void Subconscious::store_milestone(const std::string& achievement, const std::string& realm) {
     std::ostringstream content;
     content << "[milestone] " << achievement;
 
-    auto id = mind_->remember(content.str(), NodeType::Wisdom,
-                              realm.empty() ? "default" : realm,
-                              RealmVisibility::Shared);
-    if (id != NodeId{}) {
-        mind_->store().set_visibility(static_cast<int64_t>(id.low), RealmVisibility::Shared);
-    }
+    auto embedding = embed(content.str());
+    if (embedding.empty()) return;
+
+    field_store_->remember("wisdom",
+                           realm.empty() ? "default" : realm,
+                           content.str(), embedding, 0.8f, 0.005f);
 }
 
 void Subconscious::store_uncertainty(const std::string& context, const std::string& realm) {
-    // Store uncertainty as a curiosity gap (integrates with curiosity system)
     std::ostringstream content;
     content << "[gap] " << context;
 
-    // Use mind->remember which generates proper embeddings
-    auto id = mind_->remember(content.str(), NodeType::Episode,  // Use Episode, will be tagged as gap
-                              realm.empty() ? "brahman" : realm,
-                              RealmVisibility::Private);
+    auto embedding = embed(content.str());
+    if (embedding.empty()) return;
 
-    if (id != NodeId{}) {
-        // Tag as gap and unresolved for the curiosity system
-        mind_->store().add_tag(static_cast<int64_t>(id.low), "gap");
-        mind_->store().add_tag(static_cast<int64_t>(id.low), "unresolved");
-    }
+    field_store_->remember("episode",
+                           realm.empty() ? "brahman" : realm,
+                           content.str(), embedding, 0.8f, 0.03f);
 }
 
 // Suggestion Tracking
+// Suggestions are stored as memories in FieldStore (no separate suggestions table)
 
 void Subconscious::track_suggestion(const std::string& content, const std::string& context,
                                      const std::string& realm) {
-    Suggestion suggestion;
-    suggestion.content = content;
-    suggestion.context = context;
-    suggestion.realm = realm;
-    suggestion.status = "pending";
-    suggestion.suggested_at = now_ms();
+    std::ostringstream text;
+    text << "[suggestion] " << content;
+    if (!context.empty()) {
+        text << "\nContext: " << context;
+    }
 
-    int64_t id = mind_->store().suggestion_track(suggestion);
+    auto embedding = embed(text.str());
+    if (embedding.empty()) return;
+
+    uint64_t id = field_store_->remember("episode", realm.empty() ? "brahman" : realm,
+                                          text.str(), embedding, 0.6f, 0.03f);
 
     if (id > 0) {
         std::lock_guard<std::mutex> lock(suggestions_mutex_);
-        pending_suggestions_.push_back({content, context, realm, suggestion.suggested_at, id});
+        pending_suggestions_.push_back({content, context, realm, now_ms(), static_cast<int64_t>(id)});
 
-        // Limit pending suggestions
         if (pending_suggestions_.size() > MAX_PENDING_SUGGESTIONS) {
             pending_suggestions_.erase(pending_suggestions_.begin());
         }
@@ -483,19 +443,20 @@ void Subconscious::track_suggestion(const std::string& content, const std::strin
 void Subconscious::check_outcomes(const std::string& user_message, const std::string& realm) {
     std::lock_guard<std::mutex> lock(suggestions_mutex_);
 
-    // Check if user message indicates success or failure of a suggestion
     bool indicates_success = std::regex_search(user_message, milestone_pattern_);
     bool indicates_failure = std::regex_search(user_message, frustration_pattern_);
 
     if (!indicates_success && !indicates_failure) return;
 
-    // Look for pending suggestions in the same realm
     for (auto it = pending_suggestions_.begin(); it != pending_suggestions_.end(); ) {
         if (it->realm == realm || realm.empty()) {
-            // Resolve the suggestion
-            mind_->store().suggestion_resolve(it->db_id, indicates_success, user_message, 0);
+            // Strengthen or weaken the suggestion memory based on outcome
+            if (indicates_success) {
+                field_store_->strengthen(static_cast<uint64_t>(it->db_id), 0.2f);
+            } else {
+                field_store_->weaken(static_cast<uint64_t>(it->db_id), 0.2f);
+            }
             stats_.outcomes_verified++;
-
             it = pending_suggestions_.erase(it);
         } else {
             ++it;
@@ -504,21 +465,26 @@ void Subconscious::check_outcomes(const std::string& user_message, const std::st
 }
 
 // Anticipation
+// Simplified: patterns are stored as memories tagged with [anticipation]
 
 void Subconscious::observe_pattern(const std::string& context, const std::string& action,
                                     const std::string& realm) {
-    // Simplified pattern: store what action was taken in what context
-    mind_->store().anticipation_observe(context, action, realm);
+    std::ostringstream text;
+    text << "[anticipation] context: " << context.substr(0, 200)
+         << " -> action: " << action.substr(0, 200);
+
+    auto embedding = embed(text.str());
+    if (embedding.empty()) return;
+
+    field_store_->remember("episode", realm.empty() ? "brahman" : realm,
+                           text.str(), embedding, 0.5f, 0.03f);
 }
 
 void Subconscious::verify_prediction(const std::string& actual_action, const std::string& realm) {
     std::lock_guard<std::mutex> lock(anticipation_mutex_);
-
     if (last_predicted_action_.empty()) return;
 
-    // Simple similarity check: does actual action contain key words from prediction?
-    // This is a heuristic - production would use embedding similarity
-    bool match = false;
+    // Simple word-overlap heuristic
     std::istringstream iss(last_predicted_action_);
     std::string word;
     int matches = 0;
@@ -532,62 +498,34 @@ void Subconscious::verify_prediction(const std::string& actual_action, const std
         }
     }
 
-    if (total > 0 && (static_cast<float>(matches) / total) > 0.3f) {
-        // Prediction was roughly correct
-        auto patterns = mind_->store().anticipation_predict(last_context_, 1, realm);
-        for (const auto& p : patterns) {
-            mind_->store().anticipation_success(p.id);
-        }
-    }
-
+    // No DB-backed anticipation success tracking; just clear the prediction
     last_predicted_action_.clear();
 }
 
 // Habit Formation from Tool Sequences
+// Habits are stored as memories tagged with [habit]
 
 void Subconscious::observe_tool_for_habit(const std::string& tool_name, const std::string& context,
                                            const std::string& realm) {
     std::lock_guard<std::mutex> lock(tool_sequence_mutex_);
 
-    // Add to sequence
     recent_tool_sequence_.push_back({tool_name, context.substr(0, 100)});
     if (recent_tool_sequence_.size() > MAX_TOOL_SEQUENCE) {
         recent_tool_sequence_.pop_front();
     }
 
-    // Need at least 3 tools to detect a pattern
     if (recent_tool_sequence_.size() < 3) return;
 
-    // Categorize tools into groups for pattern detection
     auto categorize_tool = [](const std::string& name) -> std::string {
-        // File reading tools
-        if (name == "Read" || name == "cat" || name == "head" || name == "tail") {
-            return "read";
-        }
-        // File editing tools
-        if (name == "Edit" || name == "Write" || name == "sed" || name == "awk") {
-            return "edit";
-        }
-        // Search tools
-        if (name == "Grep" || name == "Glob" || name == "find" || name == "rg") {
-            return "search";
-        }
-        // Git tools
-        if (name.find("git") == 0 || name == "gh") {
-            return "git";
-        }
-        // Build tools
-        if (name == "make" || name == "cmake" || name == "npm" || name == "cargo") {
-            return "build";
-        }
-        // Test tools
-        if (name == "pytest" || name == "jest" || name == "test" || name.find("test") != std::string::npos) {
-            return "test";
-        }
-        return name;  // Use tool name as category if unrecognized
+        if (name == "Read" || name == "cat" || name == "head" || name == "tail") return "read";
+        if (name == "Edit" || name == "Write" || name == "sed" || name == "awk") return "edit";
+        if (name == "Grep" || name == "Glob" || name == "find" || name == "rg") return "search";
+        if (name.find("git") == 0 || name == "gh") return "git";
+        if (name == "make" || name == "cmake" || name == "npm" || name == "cargo") return "build";
+        if (name == "pytest" || name == "jest" || name == "test" || name.find("test") != std::string::npos) return "test";
+        return name;
     };
 
-    // Check for pattern: 3 consecutive same-category tools -> next action
     size_t seq_size = recent_tool_sequence_.size();
     if (seq_size < 3) return;
 
@@ -597,12 +535,6 @@ void Subconscious::observe_tool_for_habit(const std::string& tool_name, const st
 
     // Pattern: Same category repeated 3 times suggests a workflow
     if (cat1 == cat2 && cat2 == cat3) {
-        // Build trigger pattern
-        std::string trigger = cat1 + "," + cat1 + "," + cat1;
-        std::string response = "likely_" + cat1 + "_workflow";
-
-        // Check if we've seen this pattern before (look for repeat in history)
-        // by scanning our sequence for previous occurrences
         int pattern_count = 0;
         for (size_t i = 2; i < seq_size; ++i) {
             std::string c1 = categorize_tool(recent_tool_sequence_[i - 2].first);
@@ -613,41 +545,45 @@ void Subconscious::observe_tool_for_habit(const std::string& tool_name, const st
             }
         }
 
-        // If pattern has occurred 2+ times, form a habit
         if (pattern_count >= 2) {
-            int64_t id = mind_->store().habit_observe(trigger, response, realm.empty() ? "brahman" : realm);
-            if (id > 0) {
+            std::string trigger = cat1 + "," + cat1 + "," + cat1;
+            std::string response = "likely_" + cat1 + "_workflow";
+
+            std::ostringstream text;
+            text << "[habit] trigger: " << trigger << " -> response: " << response;
+
+            auto embedding = embed(text.str());
+            if (!embedding.empty()) {
+                field_store_->remember("wisdom", realm.empty() ? "brahman" : realm,
+                                       text.str(), embedding, 0.6f, 0.005f);
                 stats_.habits_formed++;
             }
         }
     }
 
-    // Also check for transition patterns: A,A -> B suggests "after reading, edit"
-    if (seq_size >= 3) {
-        std::string prev_cat = categorize_tool(recent_tool_sequence_[seq_size - 2].first);
-        std::string curr_cat = cat3;
-
-        // If previous two were same category and now different, it's a transition
-        if (cat1 == cat2 && cat2 != curr_cat) {
-            std::string trigger = cat1 + "," + cat1;
-            std::string response = curr_cat;
-
-            // Count how often this transition occurs
-            int transition_count = 0;
-            for (size_t i = 2; i < seq_size; ++i) {
-                std::string c1 = categorize_tool(recent_tool_sequence_[i - 2].first);
-                std::string c2 = categorize_tool(recent_tool_sequence_[i - 1].first);
-                std::string c3 = categorize_tool(recent_tool_sequence_[i].first);
-                if (c1 == cat1 && c2 == cat1 && c3 == curr_cat) {
-                    transition_count++;
-                }
+    // Transition patterns: A,A -> B
+    if (seq_size >= 3 && cat1 == cat2 && cat2 != cat3) {
+        int transition_count = 0;
+        for (size_t i = 2; i < seq_size; ++i) {
+            std::string c1 = categorize_tool(recent_tool_sequence_[i - 2].first);
+            std::string c2 = categorize_tool(recent_tool_sequence_[i - 1].first);
+            std::string c3 = categorize_tool(recent_tool_sequence_[i].first);
+            if (c1 == cat1 && c2 == cat1 && c3 == cat3) {
+                transition_count++;
             }
+        }
 
-            if (transition_count >= 2) {
-                int64_t id = mind_->store().habit_observe(trigger, response, realm.empty() ? "brahman" : realm);
-                if (id > 0) {
-                    stats_.habits_formed++;
-                }
+        if (transition_count >= 2) {
+            std::string trigger = cat1 + "," + cat1;
+
+            std::ostringstream text;
+            text << "[habit] trigger: " << trigger << " -> response: " << cat3;
+
+            auto embedding = embed(text.str());
+            if (!embedding.empty()) {
+                field_store_->remember("wisdom", realm.empty() ? "brahman" : realm,
+                                       text.str(), embedding, 0.6f, 0.005f);
+                stats_.habits_formed++;
             }
         }
     }
@@ -655,109 +591,23 @@ void Subconscious::observe_tool_for_habit(const std::string& tool_name, const st
 
 // Periodic Tasks
 
-void Subconscious::run_hygiene() {
-    // Flush any pending batched writes before hygiene
-    size_t flushed = mind_->store().flush_pending_updates();
-
-    auto result = mind_->store().hygiene_run(
-        0.1f,   // prune_threshold
-        7.0f,   // min_age_days
-        0.85f,  // consolidation_threshold
-        10      // max_consolidations
-    );
-
-    // Include flushed count in result for logging
-    result.decayed += flushed;  // Approximate - some may have been touches
-
-    stats_.hygiene_runs++;
-    stats_.last_hygiene_at = now_ms();
-
-    // Get write metrics for observability
-    const auto& wm = mind_->store().write_metrics();
-    double bloat = mind_->store().bloat_ratio();
-
-    std::cerr << "[subconscious] Hygiene run: decayed=" << result.decayed
-              << ", pruned=" << result.pruned
-              << ", consolidated=" << result.consolidated
-              << " | writes=" << wm.total_writes.load()
-              << " (touch:" << wm.touch_applied.load() << "/" << wm.touch_skipped.load()
-              << ", str:" << wm.strengthen_applied.load() << "/" << wm.strengthen_skipped.load()
-              << "), bloat=" << std::fixed << std::setprecision(1) << bloat << "x\n";
-
-    // Bloat warning thresholds
-    constexpr double BLOAT_WARNING_THRESHOLD = 4.0;
-    constexpr double BLOAT_CRITICAL_THRESHOLD = 10.0;
-
-    if (bloat >= BLOAT_CRITICAL_THRESHOLD) {
-        std::cerr << "[subconscious] CRITICAL: DB bloat at " << std::fixed << std::setprecision(1)
-                  << bloat << "x! File: " << (mind_->store().file_size_bytes() / (1024*1024))
-                  << "MB, Data: " << (mind_->store().data_size_bytes() / (1024*1024))
-                  << "MB. Run compaction: systemctl --user stop chittad && "
-                  << "duckdb -c \"ATTACH 'chitta.duckdb' AS old (READ_ONLY); "
-                  << "ATTACH 'chitta_new.duckdb' AS new; COPY FROM DATABASE old TO new;\"\n";
-    } else if (bloat >= BLOAT_WARNING_THRESHOLD) {
-        std::cerr << "[subconscious] WARNING: DB bloat at " << std::fixed << std::setprecision(1)
-                  << bloat << "x. Consider compaction when convenient.\n";
-    }
-
-    // Reset write metrics after reporting
-    mind_->store().reset_write_metrics();
-
-    // Heal session registry - check if PIDs are still alive
-    size_t healed_sessions = mind_->store().session_heal();
-    if (healed_sessions > 0) {
-        std::cerr << "[subconscious] Healed " << healed_sessions << " stale sessions (dead PIDs)\n";
-    }
-
-    // Clean dead sessions (no heartbeat for 10+ minutes)
-    size_t dead_sessions = mind_->store().session_cleanup_dead(600000);
-    if (dead_sessions > 0) {
-        std::cerr << "[subconscious] Cleaned " << dead_sessions << " dead sessions\n";
-    }
-
-    // Clean expired messages
-    size_t expired_msgs = mind_->store().msg_cleanup_expired();
-    if (expired_msgs > 0) {
-        std::cerr << "[subconscious] Cleaned " << expired_msgs << " expired messages\n";
-    }
-}
-
-bool Subconscious::time_for_hygiene() const {
-    auto last = stats_.last_hygiene_at.load();
-    if (last == 0) return true;  // Never run
-
-    auto now = now_ms();
-    auto interval_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        config_.hygiene_interval
-    ).count();
-
-    return (now - last) >= interval_ms;
-}
-
 void Subconscious::run_theme_maintenance() {
-    // Skip if daemon is busy with queries
-    if (!is_idle()) {
-        return;
+    if (!is_idle() || !field_store_) return;
+
+    try {
+        auto result_json = field_store_->theme_maintain();
+        stats_.theme_maintenance_runs++;
+        stats_.last_theme_maintenance_at = now_ms();
+
+        std::cerr << "[subconscious] Theme maintenance via FieldStore: " << result_json << "\n";
+    } catch (const std::exception& e) {
+        std::cerr << "[subconscious] Theme maintenance failed: " << e.what() << "\n";
     }
-
-    auto result = mind_->run_theme_maintenance();
-
-    stats_.theme_maintenance_runs++;
-    stats_.themes_split += result.themes_split;
-    stats_.themes_merged += result.themes_merged;
-    stats_.memories_reassigned += result.memories_reassigned;
-    stats_.last_theme_maintenance_at = now_ms();
-
-    std::cerr << "[subconscious] Theme maintenance: split=" << result.themes_split
-              << ", merged=" << result.themes_merged
-              << ", reassigned=" << result.memories_reassigned
-              << ", reps_updated=" << result.representatives_updated
-              << ", centroids=" << result.centroids_recomputed << "\n";
 }
 
 bool Subconscious::time_for_theme_maintenance() const {
     auto last = stats_.last_theme_maintenance_at.load();
-    if (last == 0) return true;  // Never run
+    if (last == 0) return true;
 
     auto now = now_ms();
     auto interval_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -766,244 +616,6 @@ bool Subconscious::time_for_theme_maintenance() const {
 
     return (now - last) >= interval_ms;
 }
-
-void Subconscious::run_auto_distillation() {
-    // Skip if daemon is busy with queries
-    if (!is_idle()) {
-        return;
-    }
-
-    // Run auto-distillation to convert repeated episode patterns into wisdom
-    size_t created = mind_->auto_distill_episodes(
-        5,      // max_distillations per run
-        0.85f,  // similarity_threshold
-        3       // min_occurrences
-    );
-
-    stats_.distillation_runs++;
-    stats_.wisdom_created += created;
-    stats_.last_distillation_at = now_ms();
-
-    if (created > 0) {
-        std::cerr << "[subconscious] Auto-distillation: created " << created
-                  << " wisdom nodes from episode patterns\n";
-    }
-}
-
-bool Subconscious::time_for_distillation() const {
-    auto last = stats_.last_distillation_at.load();
-    if (last == 0) return true;  // Never run
-
-    auto now = now_ms();
-    auto interval_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        config_.distillation_interval
-    ).count();
-
-    return (now - last) >= interval_ms;
-}
-
-void Subconscious::run_cls_replay() {
-    if (!is_idle()) return;
-
-    auto now_epoch = now_ms();
-    int64_t since_ms = now_epoch - 24LL * 3600 * 1000; // last 24 hours
-
-    auto fast_memories = mind_->store().sample_fast_memories(
-        config_.cls_replay_batch_size, since_ms);
-
-    stats_.cls_replay_runs++;
-    stats_.last_cls_replay_at = now_epoch;
-
-    if (fast_memories.size() < config_.cls_replay_min_cluster) return;
-
-    // Group by realm
-    std::unordered_map<std::string, std::vector<const MemoryResult*>> by_realm;
-    for (const auto& m : fast_memories) by_realm[m.realm].push_back(&m);
-
-    std::vector<int64_t> consolidated_ids;
-    size_t wisdom_count = 0;
-
-    for (const auto& [realm, mems] : by_realm) {
-        if (mems.size() < config_.cls_replay_min_cluster) continue;
-
-        std::ostringstream digest;
-        digest << "[cls-replay] Consolidating " << mems.size()
-               << " recent memories from realm " << realm << ":\n";
-        std::vector<int64_t> cluster_ids;
-        for (const auto* m : mems) {
-            digest << "- " << m->content.substr(0, 120) << "\n";
-            cluster_ids.push_back(m->id);
-        }
-
-        auto id = mind_->remember(digest.str(), NodeType::Wisdom,
-                                  realm, RealmVisibility::Private, 0.7f);
-        if (id.valid()) {
-            wisdom_count++;
-            // Only accelerate decay when wisdom was successfully created
-            for (int64_t mem_id : cluster_ids) {
-                mind_->store().accelerate_decay(mem_id, 2.5f);
-                consolidated_ids.push_back(mem_id);
-            }
-        }
-    }
-
-    stats_.cls_memories_consolidated += consolidated_ids.size();
-    stats_.cls_wisdom_created += wisdom_count;
-
-    if (!consolidated_ids.empty()) {
-        std::cerr << "[subconscious] CLS replay: consolidated="
-                  << consolidated_ids.size()
-                  << ", wisdom_created=" << wisdom_count << "\n";
-    }
-}
-
-bool Subconscious::time_for_cls_replay() const {
-    auto last = stats_.last_cls_replay_at.load();
-    if (last == 0) return true;  // Never run
-
-    auto now = now_ms();
-    auto interval_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        config_.cls_replay_interval
-    ).count();
-
-    return (now - last) >= interval_ms;
-}
-
-void Subconscious::run_background_embedding() {
-    // Always update timestamp to prevent tight loop
-    stats_.last_embedding_at = now_ms();
-
-    // Skip if daemon is busy with queries (idle-based scheduling)
-    if (!is_idle()) {
-        stats_.embedding_skips++;
-        return;
-    }
-
-    if (!mind_->has_yantra()) return;
-
-    try {
-        // Get small batch of unembedded symbols (quick DB read)
-        auto symbols = mind_->store().get_unembedded_symbols(config_.embedding_batch_size);
-        if (symbols.empty()) return;
-
-        // Build embedding texts
-        std::vector<std::string> texts;
-        std::vector<int64_t> ids;
-        for (const auto& sym : symbols) {
-            std::string text = sym.kind + " " + sym.name;
-            if (!sym.signature.empty()) text += " " + sym.signature;
-            texts.push_back(text);
-            ids.push_back(sym.id);
-        }
-
-        // Generate embeddings (CPU-bound, no DB access)
-        auto embeddings = mind_->embedder().embed_batch(texts);
-
-        // Queue results for main thread to flush (no DB write here)
-        {
-            std::lock_guard<std::mutex> lock(embedding_queue_mutex_);
-            for (size_t i = 0; i < embeddings.size(); ++i) {
-                if (!embeddings[i].is_zero()) {
-                    embedding_queue_.push_back({ids[i], embeddings[i].data});
-                    stats_.embeddings_queued++;
-                }
-            }
-        }
-
-        if (!embeddings.empty()) {
-            std::cerr << "[subconscious] Queued " << embeddings.size() << " embeddings for flush\n";
-        }
-    } catch (const std::exception& e) {
-        std::cerr << "[subconscious] Embedding error: " << e.what() << "\n";
-    }
-}
-
-size_t Subconscious::flush_embedding_queue() {
-    std::vector<QueuedEmbedding> to_flush;
-
-    // Quickly grab queued embeddings
-    {
-        std::lock_guard<std::mutex> lock(embedding_queue_mutex_);
-        if (embedding_queue_.empty()) return 0;
-        to_flush.swap(embedding_queue_);
-    }
-
-    // Write to DB (on main thread, no contention)
-    size_t flushed = 0;
-    for (const auto& qe : to_flush) {
-        if (mind_->store().set_symbol_embedding(qe.symbol_id, qe.embedding)) {
-            flushed++;
-        }
-    }
-
-    if (flushed > 0) {
-        stats_.symbols_embedded += flushed;
-        std::cerr << "[subconscious] Flushed " << flushed << " embeddings to DB\n";
-    }
-
-    return flushed;
-}
-
-size_t Subconscious::embedding_queue_size() const {
-    std::lock_guard<std::mutex> lock(embedding_queue_mutex_);
-    return embedding_queue_.size();
-}
-
-void Subconscious::notify_query() {
-    stats_.last_query_at = now_ms();
-}
-
-bool Subconscious::is_idle() const {
-    auto last_query = stats_.last_query_at.load();
-    if (last_query == 0) return true;  // Never queried = idle
-
-    auto now = now_ms();
-    auto threshold_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        config_.idle_threshold
-    ).count();
-
-    return (now - last_query) >= threshold_ms;
-}
-
-bool Subconscious::time_for_embedding() const {
-    auto last = stats_.last_embedding_at.load();
-    if (last == 0) return true;  // Never run
-
-    auto now = now_ms();
-    auto interval_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        config_.embedding_interval
-    ).count();
-
-    return (now - last) >= interval_ms;
-}
-
-bool Subconscious::time_for_dream() const {
-    // Idle > 10 min (600,000ms)
-    auto last_query = stats_.last_query_at.load();
-    auto now = now_ms();
-    if (last_query != 0 && (now - last_query) < 600000LL) return false;
-
-    // Last dream trigger > 4 hours ago (14,400,000ms)
-    auto last_dream = last_dream_triggered_at_.load();
-    if (last_dream != 0 && (now - last_dream) < 14400000LL) return false;
-
-    return true;
-}
-
-bool Subconscious::time_for_think() const {
-    // Idle > 5 min (300,000ms) — shorter threshold than dream
-    auto last_query = stats_.last_query_at.load();
-    auto now = now_ms();
-    if (last_query != 0 && (now - last_query) < 300000LL) return false;
-
-    // Last think trigger > 1 hour ago (3,600,000ms)
-    auto last_think = last_think_triggered_at_.load();
-    if (last_think != 0 && (now - last_think) < 3600000LL) return false;
-
-    return true;
-}
-
-#ifdef CHITTA_FIELD_AVAILABLE
 
 void Subconscious::run_sleep_consolidation() {
     stats_.last_sleep_consolidation_at = now_ms();
@@ -1074,7 +686,56 @@ bool Subconscious::time_for_demotion() const {
     return (now_ms() - last) >= interval_ms;
 }
 
-#endif  // CHITTA_FIELD_AVAILABLE
+size_t Subconscious::flush_embedding_queue() {
+    // Background embedding no longer uses DuckDB store.
+    // Queue is kept for API compatibility but returns 0.
+    std::lock_guard<std::mutex> lock(embedding_queue_mutex_);
+    embedding_queue_.clear();
+    return 0;
+}
+
+size_t Subconscious::embedding_queue_size() const {
+    std::lock_guard<std::mutex> lock(embedding_queue_mutex_);
+    return embedding_queue_.size();
+}
+
+void Subconscious::notify_query() {
+    stats_.last_query_at = now_ms();
+}
+
+bool Subconscious::is_idle() const {
+    auto last_query = stats_.last_query_at.load();
+    if (last_query == 0) return true;
+
+    auto now = now_ms();
+    auto threshold_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        config_.idle_threshold
+    ).count();
+
+    return (now - last_query) >= threshold_ms;
+}
+
+bool Subconscious::time_for_dream() const {
+    auto last_query = stats_.last_query_at.load();
+    auto now = now_ms();
+    if (last_query != 0 && (now - last_query) < 600000LL) return false;
+
+    auto last_dream = last_dream_triggered_at_.load();
+    if (last_dream != 0 && (now - last_dream) < 14400000LL) return false;
+
+    return true;
+}
+
+bool Subconscious::time_for_think() const {
+    auto last_query = stats_.last_query_at.load();
+    auto now = now_ms();
+    if (last_query != 0 && (now - last_query) < 300000LL) return false;
+
+    auto last_think = last_think_triggered_at_.load();
+    if (last_think != 0 && (now - last_think) < 3600000LL) return false;
+
+    return true;
+}
 
 // Helpers
 

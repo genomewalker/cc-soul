@@ -480,7 +480,8 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
     DuckDBRpcHandler handler(&mind);
 
     // Start subconscious background processor
-    Subconscious subconscious(&mind, subconscious_config);
+    // FieldStore is wired in later (async init). VakYantra is available now via mind.
+    Subconscious subconscious(nullptr, mind.embedder().yantra().get(), subconscious_config);
 
 #ifdef CHITTA_FIELD_AVAILABLE
     // Async init: chitta-field on NFS replays a large op log on open.
@@ -517,8 +518,10 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
         } catch (const std::exception& e) {
             std::cerr << "[daemon] WARNING: chitta-field store unavailable: " << e.what() << "\n";
             field_init_done.store(true, std::memory_order_release);
+            // Note: field_initializing_ is cleared in the main loop when field_init_done+!field_pending
         }
     });
+    handler.set_field_initializing(true);
     field_init_thread.detach();
     std::cerr << "[soul] chitta-field initializing async (NFS replay in background)\n";
 #endif
@@ -526,30 +529,9 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
     subconscious.start();
     handler.set_subconscious(&subconscious);
 
-    // Start sadhana manager for autonomous agents
-    SadhanaManager sadhana_manager(mind.store());
-    handler.set_sadhana_manager(&sadhana_manager);
-    // Note: sadhana_manager.set_field_store() called later when field init completes
-    std::cerr << "[daemon] Sadhana manager initialized\n";
-
-    // Auto-pause all running sadhanas if --no-autonomous
-    if (no_autonomous) {
-        auto running = sadhana_manager.list("running");
-        if (!running.empty()) {
-            std::cerr << "[daemon] --no-autonomous: pausing " << running.size() << " running sadhana(s)\n";
-            for (const auto& s : running) {
-                sadhana_manager.pause(s.id);
-            }
-        }
-    }
-
-    // Wire up event streaming: push sadhana events to subscribed clients
-    sadhana_manager.set_stream_fn([&server](int fd, std::string line) {
-        server.queue_response(fd, std::move(line));
-    });
-    server.set_disconnect_callback([&sadhana_manager](int fd) {
-        sadhana_manager.stream_unsubscribe(fd);
-    });
+    // Sadhana manager — deferred until FieldStore is ready
+    std::unique_ptr<SadhanaManager> sadhana_manager;
+    std::cerr << "[daemon] Sadhana manager will init when chitta-field is ready\n";
 
     // Wire dream/think callbacks (unless --no-autonomous)
     if (!no_autonomous) {
@@ -622,7 +604,7 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
 
             // Tick sadhana manager for autonomous agents (runs every 100ms loop)
             try {
-                sadhana_manager.tick();
+                if (sadhana_manager) sadhana_manager->tick();
             } catch (const std::exception& e) {
                 std::cerr << "[maint] Sadhana tick failed: " << e.what() << "\n";
             }
@@ -1199,9 +1181,33 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
             subconscious.set_field_store(field_store.get());
             mind.set_field_store(field_store.get());
             handler.set_field_handler(cf_handler.get());
-            sadhana_manager.set_field_store(field_store.get());
+            handler.set_field_initializing(false);
+            // Create SadhanaManager now that FieldStore is ready
+            if (!sadhana_manager) {
+                sadhana_manager = std::make_unique<SadhanaManager>(*field_store);
+                handler.set_sadhana_manager(sadhana_manager.get());
+                sadhana_manager->set_stream_fn([&server](int fd, std::string line) {
+                    server.queue_response(fd, std::move(line));
+                });
+                server.set_disconnect_callback([&sadhana_manager](int fd) {
+                    if (sadhana_manager) sadhana_manager->stream_unsubscribe(fd);
+                });
+                if (no_autonomous) {
+                    auto running = sadhana_manager->list("running");
+                    if (!running.empty()) {
+                        std::cerr << "[daemon] --no-autonomous: pausing " << running.size() << " running sadhana(s)\n";
+                        for (const auto& s : running) {
+                            sadhana_manager->pause(s.id);
+                        }
+                    }
+                }
+                std::cerr << "[daemon] Sadhana manager initialized with chitta-field\n";
+            }
             std::cerr << "[daemon] chitta-field active: " << field_store->memory_count()
                       << " memories, " << field_store->symbol_count() << " symbols\n";
+        } else if (!field_store && field_init_done.load(std::memory_order_acquire) && !field_pending) {
+            // Init completed but failed — clear initializing flag so health_check falls back to DuckDB
+            handler.set_field_initializing(false);
         }
 #endif
 
@@ -1258,7 +1264,7 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                 if (parsed.contains("params") && parsed["params"].contains("arguments")) {
                     watch_id = parsed["params"]["arguments"].value("id", (int64_t)0);
                 }
-                sadhana_manager.stream_subscribe(req.client_fd, watch_id);
+                if (sadhana_manager) sadhana_manager->stream_subscribe(req.client_fd, watch_id);
                 // Send ack — connection stays open; daemon will push events as lines
                 json ack;
                 ack["jsonrpc"] = "2.0";

@@ -1,140 +1,183 @@
-// Included into DuckDBHandler class body — not a standalone header
+// Included into ChittaFieldHandler or DuckDBHandler class body — not a standalone header.
+// Migrated from DuckDB SQL to chitta-field event log.
+//
+// Storage model: each ledger entry is a domain event with domain="ledger".
+//   save:   emit_event("ledger", "save",   key, payload_json)
+//   delete: emit_event("ledger", "delete", key, "")       (tombstone)
+//   load:   get_latest_event("ledger", "save", key)
+//   get:    same as load, by key
+//   list:   iterate_log scanning for domain="ledger" events
+//
+// The key is: "{session_id}:{project}" (colon-joined).
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+
+    static std::string ledger_key(const std::string& session_id, const std::string& project) {
+        return session_id + ":" + project;
+    }
+
+    static json parse_json_safe(const std::string& s) {
+        if (s.empty()) return json::object();
+        try { return json::parse(s); } catch (...) { return json::object(); }
+    }
+
+    static json parse_json_array_safe(const std::string& s) {
+        if (s.empty()) return json::array();
+        try { return json::parse(s); } catch (...) { return json::array(); }
+    }
+
+    // ── tool implementations ─────────────────────────────────────────────────
 
     DuckDBToolResult tool_ledger_save(const json& params) {
         std::string session_id = get_session_id(params);
+        std::string project = params.value("project", "default");
+        std::string key = ledger_key(session_id, project);
 
-        LedgerEntry entry;
-        entry.session_id = session_id;
-        entry.project = params.value("project", "default");
-        entry.transcript_path = params.value("transcript_path", "");
-        entry.mood = params.value("mood", "");
-        entry.coherence = params.value("coherence", 0.0f);
-        entry.confidence = params.value("confidence", 0.0f);
+        json payload = {
+            {"session_id", session_id},
+            {"project", project},
+            {"transcript_path", params.value("transcript_path", "")},
+            {"mood", params.value("mood", "")},
+            {"coherence", params.value("coherence", 0.0f)},
+            {"confidence", params.value("confidence", 0.0f)},
+            {"snapshot", params.value("snapshot", "")}
+        };
 
-        // Convert arrays to JSON strings
-        if (params.contains("todos") && params["todos"].is_array()) {
-            entry.todos = params["todos"].dump();
-        }
-        if (params.contains("active_files") && params["active_files"].is_array()) {
-            entry.active_files = params["active_files"].dump();
-        }
-        if (params.contains("decisions") && params["decisions"].is_array()) {
-            entry.decisions = params["decisions"].dump();
-        }
-        if (params.contains("next_steps") && params["next_steps"].is_array()) {
-            entry.next_steps = params["next_steps"].dump();
-        }
-        if (params.contains("blockers") && params["blockers"].is_array()) {
-            entry.blockers = params["blockers"].dump();
-        }
-        if (params.contains("discoveries") && params["discoveries"].is_array()) {
-            entry.discoveries = params["discoveries"].dump();
-        }
+        auto store_array = [&](const char* field) {
+            if (params.contains(field) && params[field].is_array()) {
+                payload[field] = params[field];
+            } else {
+                payload[field] = json::array();
+            }
+        };
 
-        entry.snapshot = params.value("snapshot", "");
+        store_array("todos");
+        store_array("active_files");
+        store_array("decisions");
+        store_array("next_steps");
+        store_array("blockers");
+        store_array("discoveries");
 
-        int64_t id = mind_->store().save_ledger(entry);
-        if (id < 0) {
-            return DuckDBToolResult::error("Failed to save checkpoint");
-        }
+        uint64_t event_id = field_store_->emit_event("ledger", "save", key, payload.dump());
 
         std::ostringstream ss;
         ss << "Checkpoint saved:\n";
-        ss << "  ID: " << id << "\n";
+        ss << "  Event: " << event_id << "\n";
         ss << "  Session: " << session_id << "\n";
-        ss << "  Project: " << entry.project << "\n";
-        if (!entry.mood.empty()) ss << "  Mood: " << entry.mood << "\n";
+        ss << "  Project: " << project << "\n";
+        if (!payload["mood"].get<std::string>().empty()) {
+            ss << "  Mood: " << payload["mood"].get<std::string>() << "\n";
+        }
 
         return DuckDBToolResult::ok(ss.str(), {
-            {"id", id},
+            {"event_id", event_id},
             {"session_id", session_id},
-            {"project", entry.project}
+            {"project", project}
         });
     }
 
     DuckDBToolResult tool_ledger_load(const json& params) {
         std::string session_id = params.value("session_id", "");
         std::string project = params.value("project", "");
+        std::string key = ledger_key(session_id, project);
 
-        auto entry = mind_->store().load_ledger(session_id, project);
-        if (!entry) {
+        auto payload_str = field_store_->get_latest_event("ledger", "save", key);
+        if (!payload_str) {
             return DuckDBToolResult::ok("No checkpoint found", {{"found", false}});
         }
 
+        json entry = parse_json_safe(*payload_str);
+
         std::ostringstream ss;
         ss << "Checkpoint loaded:\n";
-        ss << "  ID: " << entry->id << "\n";
-        ss << "  Session: " << entry->session_id << "\n";
-        ss << "  Project: " << entry->project << "\n";
-        if (!entry->transcript_path.empty()) ss << "  Transcript: " << entry->transcript_path << "\n";
-        if (!entry->mood.empty()) ss << "  Mood: " << entry->mood << "\n";
-        if (entry->coherence > 0) ss << "  Coherence: " << entry->coherence << "\n";
-        if (entry->confidence > 0) ss << "  Confidence: " << entry->confidence << "\n";
+        ss << "  Session: " << entry.value("session_id", "") << "\n";
+        ss << "  Project: " << entry.value("project", "") << "\n";
+        if (!entry.value("transcript_path", "").empty())
+            ss << "  Transcript: " << entry.value("transcript_path", "") << "\n";
+        if (!entry.value("mood", "").empty())
+            ss << "  Mood: " << entry.value("mood", "") << "\n";
+        float coherence = entry.value("coherence", 0.0f);
+        float confidence = entry.value("confidence", 0.0f);
+        if (coherence > 0) ss << "  Coherence: " << coherence << "\n";
+        if (confidence > 0) ss << "  Confidence: " << confidence << "\n";
 
-        // Parse JSON fields back to arrays for structured output
         json result = {
             {"found", true},
-            {"id", entry->id},
-            {"session_id", entry->session_id},
-            {"project", entry->project},
-            {"transcript_path", entry->transcript_path},
-            {"created_at", entry->created_at},
-            {"mood", entry->mood},
-            {"coherence", entry->coherence},
-            {"confidence", entry->confidence},
-            {"snapshot", entry->snapshot}
+            {"session_id", entry.value("session_id", "")},
+            {"project", entry.value("project", "")},
+            {"transcript_path", entry.value("transcript_path", "")},
+            {"mood", entry.value("mood", "")},
+            {"coherence", coherence},
+            {"confidence", confidence},
+            {"snapshot", entry.value("snapshot", "")},
+            {"todos", entry.value("todos", json::array())},
+            {"active_files", entry.value("active_files", json::array())},
+            {"decisions", entry.value("decisions", json::array())},
+            {"next_steps", entry.value("next_steps", json::array())},
+            {"blockers", entry.value("blockers", json::array())},
+            {"discoveries", entry.value("discoveries", json::array())}
         };
-
-        // Parse JSON strings back to JSON arrays
-        auto parse_json_field = [](const std::string& s) -> json {
-            if (s.empty()) return json::array();
-            try {
-                return json::parse(s);
-            } catch (...) {
-                return json::array();
-            }
-        };
-
-        result["todos"] = parse_json_field(entry->todos);
-        result["active_files"] = parse_json_field(entry->active_files);
-        result["decisions"] = parse_json_field(entry->decisions);
-        result["next_steps"] = parse_json_field(entry->next_steps);
-        result["blockers"] = parse_json_field(entry->blockers);
-        result["discoveries"] = parse_json_field(entry->discoveries);
 
         return DuckDBToolResult::ok(ss.str(), result);
     }
 
     DuckDBToolResult tool_ledger_list(const json& params) {
-        std::string project = params.value("project", "");
+        std::string filter_project = params.value("project", "");
         size_t limit = params.value("limit", 10);
 
-        auto entries = mind_->store().list_ledgers(project, limit);
+        // Scan the event log for ledger save events, collect unique keys
+        // keeping only the latest event per key (skipping tombstoned ones).
+        struct LedgerEntry {
+            std::string key;
+            uint64_t seqno;
+            json payload;
+        };
+        std::unordered_map<std::string, LedgerEntry> latest;
+        std::unordered_set<std::string> deleted;
+
+        field_store_->iterate_log(0, [&](const std::string& op_json, uint64_t seqno) {
+            json op = parse_json_safe(op_json);
+            if (op.value("domain", "") != "ledger") return;
+
+            std::string kind = op.value("kind", "");
+            std::string entity_id = op.value("entity_id", "");
+
+            if (kind == "delete") {
+                deleted.insert(entity_id);
+                latest.erase(entity_id);
+            } else if (kind == "save") {
+                if (deleted.count(entity_id)) return;
+                json payload = parse_json_safe(op.value("payload", ""));
+                if (!filter_project.empty() && payload.value("project", "") != filter_project) return;
+                latest[entity_id] = {entity_id, seqno, payload};
+            }
+        });
+
+        // Sort by seqno descending (most recent first)
+        std::vector<LedgerEntry> entries;
+        entries.reserve(latest.size());
+        for (auto& [k, v] : latest) entries.push_back(std::move(v));
+        std::sort(entries.begin(), entries.end(),
+                  [](const LedgerEntry& a, const LedgerEntry& b) { return a.seqno > b.seqno; });
+        if (entries.size() > limit) entries.resize(limit);
 
         std::ostringstream ss;
         ss << "Checkpoints";
-        if (!project.empty()) ss << " for project '" << project << "'";
+        if (!filter_project.empty()) ss << " for project '" << filter_project << "'";
         ss << " (" << entries.size() << "):\n\n";
 
         json entries_json = json::array();
-        for (const auto& entry : entries) {
-            // Format timestamp
-            auto ts = entry.created_at / 1000;
-            std::time_t t = static_cast<std::time_t>(ts);
-            char time_buf[32];
-            std::strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M", std::localtime(&t));
-
-            ss << "  [" << entry.id << "] " << time_buf << " - " << entry.session_id;
-            if (!entry.mood.empty()) ss << " (" << entry.mood << ")";
+        for (const auto& e : entries) {
+            ss << "  [" << e.seqno << "] " << e.payload.value("session_id", "");
+            std::string mood = e.payload.value("mood", "");
+            if (!mood.empty()) ss << " (" << mood << ")";
             ss << "\n";
 
             entries_json.push_back({
-                {"id", entry.id},
-                {"session_id", entry.session_id},
-                {"project", entry.project},
-                {"transcript_path", entry.transcript_path},
-                {"created_at", entry.created_at},
-                {"mood", entry.mood}
+                {"key", e.key},
+                {"session_id", e.payload.value("session_id", "")},
+                {"project", e.payload.value("project", "")},
+                {"mood", mood}
             });
         }
 
@@ -142,68 +185,73 @@
     }
 
     DuckDBToolResult tool_ledger_get(const json& params) {
-        int64_t id = params.value("id", 0LL);
-        if (id <= 0) {
-            return DuckDBToolResult::error("Valid ID is required");
+        // Accept either "id" (legacy numeric) or "key" (session:project).
+        // For field-based storage, key is the canonical identifier.
+        std::string key = params.value("key", "");
+        if (key.empty()) {
+            // Legacy: build key from session_id + project
+            std::string session_id = params.value("session_id", "");
+            std::string project = params.value("project", "");
+            if (session_id.empty()) {
+                return DuckDBToolResult::error("key or session_id required");
+            }
+            key = ledger_key(session_id, project);
         }
 
-        auto entry = mind_->store().get_ledger(id);
-        if (!entry) {
-            return DuckDBToolResult::error("Checkpoint not found: " + std::to_string(id));
+        auto payload_str = field_store_->get_latest_event("ledger", "save", key);
+        if (!payload_str) {
+            return DuckDBToolResult::error("Checkpoint not found: " + key);
         }
+
+        json entry = parse_json_safe(*payload_str);
 
         std::ostringstream ss;
-        ss << "Checkpoint " << id << ":\n";
-        ss << "  Session: " << entry->session_id << "\n";
-        ss << "  Project: " << entry->project << "\n";
-        if (!entry->transcript_path.empty()) ss << "  Transcript: " << entry->transcript_path << "\n";
-        if (!entry->mood.empty()) ss << "  Mood: " << entry->mood << "\n";
-        if (entry->coherence > 0) ss << "  Coherence: " << entry->coherence << "\n";
-        if (entry->confidence > 0) ss << "  Confidence: " << entry->confidence << "\n";
-        if (!entry->snapshot.empty()) {
-            ss << "\nSnapshot:\n" << entry->snapshot << "\n";
+        ss << "Checkpoint " << key << ":\n";
+        ss << "  Session: " << entry.value("session_id", "") << "\n";
+        ss << "  Project: " << entry.value("project", "") << "\n";
+        if (!entry.value("transcript_path", "").empty())
+            ss << "  Transcript: " << entry.value("transcript_path", "") << "\n";
+        if (!entry.value("mood", "").empty())
+            ss << "  Mood: " << entry.value("mood", "") << "\n";
+        float coherence = entry.value("coherence", 0.0f);
+        float confidence = entry.value("confidence", 0.0f);
+        if (coherence > 0) ss << "  Coherence: " << coherence << "\n";
+        if (confidence > 0) ss << "  Confidence: " << confidence << "\n";
+        if (!entry.value("snapshot", "").empty()) {
+            ss << "\nSnapshot:\n" << entry.value("snapshot", "") << "\n";
         }
 
-        auto parse_json_field = [](const std::string& s) -> json {
-            if (s.empty()) return json::array();
-            try {
-                return json::parse(s);
-            } catch (...) {
-                return json::array();
-            }
-        };
-
         json result = {
-            {"id", entry->id},
-            {"session_id", entry->session_id},
-            {"project", entry->project},
-            {"transcript_path", entry->transcript_path},
-            {"created_at", entry->created_at},
-            {"mood", entry->mood},
-            {"coherence", entry->coherence},
-            {"confidence", entry->confidence},
-            {"snapshot", entry->snapshot},
-            {"todos", parse_json_field(entry->todos)},
-            {"active_files", parse_json_field(entry->active_files)},
-            {"decisions", parse_json_field(entry->decisions)},
-            {"next_steps", parse_json_field(entry->next_steps)},
-            {"blockers", parse_json_field(entry->blockers)},
-            {"discoveries", parse_json_field(entry->discoveries)}
+            {"key", key},
+            {"session_id", entry.value("session_id", "")},
+            {"project", entry.value("project", "")},
+            {"transcript_path", entry.value("transcript_path", "")},
+            {"mood", entry.value("mood", "")},
+            {"coherence", coherence},
+            {"confidence", confidence},
+            {"snapshot", entry.value("snapshot", "")},
+            {"todos", entry.value("todos", json::array())},
+            {"active_files", entry.value("active_files", json::array())},
+            {"decisions", entry.value("decisions", json::array())},
+            {"next_steps", entry.value("next_steps", json::array())},
+            {"blockers", entry.value("blockers", json::array())},
+            {"discoveries", entry.value("discoveries", json::array())}
         };
 
         return DuckDBToolResult::ok(ss.str(), result);
     }
 
     DuckDBToolResult tool_ledger_delete(const json& params) {
-        int64_t id = params.value("id", 0LL);
-        if (id <= 0) {
-            return DuckDBToolResult::error("Valid ID is required");
+        std::string key = params.value("key", "");
+        if (key.empty()) {
+            std::string session_id = params.value("session_id", "");
+            std::string project = params.value("project", "");
+            if (session_id.empty()) {
+                return DuckDBToolResult::error("key or session_id required");
+            }
+            key = ledger_key(session_id, project);
         }
 
-        bool ok = mind_->store().delete_ledger(id);
-        if (!ok) {
-            return DuckDBToolResult::error("Failed to delete checkpoint " + std::to_string(id));
-        }
-
-        return DuckDBToolResult::ok("Deleted checkpoint " + std::to_string(id), {{"id", id}, {"deleted", true}});
+        field_store_->emit_event("ledger", "delete", key, "");
+        return DuckDBToolResult::ok("Deleted checkpoint " + key, {{"key", key}, {"deleted", true}});
     }

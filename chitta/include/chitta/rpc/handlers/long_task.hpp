@@ -1,4 +1,33 @@
-// Included into DuckDBHandler class body — not a standalone header
+// Included into ChittaFieldHandler or DuckDBHandler class body — not a standalone header.
+// Migrated from DuckDB SQL to chitta-field task + event APIs.
+//
+// Storage model:
+//   task_create()          — creates a task record in chitta-field
+//   task_get()             — returns JSON payload for a task_id
+//   task_transition()      — moves task through lifecycle states
+//   task_update_payload()  — updates the task's payload blob
+//   emit_event()           — domain event log for fine-grained tracking
+//   get_latest_event()     — read back latest event for a task
+//   iterate_log()          — scan log for listing/filtering
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+
+    static int64_t field_now_ms() {  // Prefixed to avoid shadowing local now_ms vars
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+    }
+
+    static json parse_json_obj(const std::string& s) {
+        if (s.empty()) return json::object();
+        try { return json::parse(s); } catch (...) { return json::object(); }
+    }
+
+    static json parse_json_arr(const std::string& s) {
+        if (s.empty()) return json::array();
+        try { return json::parse(s); } catch (...) { return json::array(); }
+    }
+
+    // ── tool implementations ─────────────────────────────────────────────────
 
     DuckDBToolResult tool_long_task_start(const json& params) {
         std::string task_id = params.value("task_id", "");
@@ -8,36 +37,44 @@
             return DuckDBToolResult::error("task_id and goal are required");
         }
 
-        LongTask task;
-        task.task_id = task_id;
-        task.goal = goal;
-        task.realm = params.value("realm", "brahman");
+        std::string realm = params.value("realm", "brahman");
 
-        if (params.contains("hard_checks") && params["hard_checks"].is_array()) {
-            task.hard_checks = params["hard_checks"].dump();
-        }
-        if (params.contains("soft_checks") && params["soft_checks"].is_array()) {
-            task.soft_checks = params["soft_checks"].dump();
-        }
-        if (params.contains("work_items") && params["work_items"].is_array()) {
-            task.work_items = params["work_items"].dump();
+        json payload = {
+            {"goal", goal},
+            {"realm", realm},
+            {"status", "active"},
+            {"iterations", 0},
+            {"completed_summary", ""}
+        };
+
+        if (params.contains("hard_checks") && params["hard_checks"].is_array())
+            payload["hard_checks"] = params["hard_checks"];
+        if (params.contains("soft_checks") && params["soft_checks"].is_array())
+            payload["soft_checks"] = params["soft_checks"];
+        if (params.contains("work_items") && params["work_items"].is_array())
+            payload["work_items"] = params["work_items"];
+
+        payload["blockers"] = json::array();
+
+        int64_t ts = field_now_ms();
+        int rc = field_store_->task_create(task_id, "long_task", payload.dump(), ts);
+        if (rc != 0) {
+            return DuckDBToolResult::error("Failed to create task: " + task_id);
         }
 
-        int64_t id = mind_->store().task_start(task);
-        if (id < 0) {
-            return DuckDBToolResult::error("Failed to start task: " + mind_->store().last_error());
-        }
+        // Start the task
+        field_store_->task_transition(task_id, "start", ts);
+        field_store_->emit_event("long_task", "start", task_id, payload.dump());
 
         std::ostringstream ss;
         ss << "Started long task:\n"
            << "  ID: " << task_id << "\n"
            << "  Goal: " << goal.substr(0, 100) << (goal.size() > 100 ? "..." : "") << "\n"
-           << "  Realm: " << task.realm;
+           << "  Realm: " << realm;
 
         return DuckDBToolResult::ok(ss.str(), {
             {"task_id", task_id},
-            {"db_id", id},
-            {"realm", task.realm},
+            {"realm", realm},
             {"status", "active"}
         });
     }
@@ -48,65 +85,91 @@
             return DuckDBToolResult::error("task_id is required");
         }
 
-        auto task = mind_->store().task_get(task_id);
-        if (!task) {
+        std::string raw = field_store_->task_get(task_id);
+        if (raw.empty()) {
             return DuckDBToolResult::error("Task not found: " + task_id);
         }
 
+        json task = parse_json_obj(raw);
+        json payload = parse_json_obj(task.value("payload", ""));
+
         json result = {
-            {"task_id", task->task_id},
-            {"goal", task->goal},
-            {"realm", task->realm},
-            {"status", task->status},
-            {"iterations", task->iterations},
-            {"started_at", task->started_at},
-            {"updated_at", task->updated_at}
+            {"task_id", task_id},
+            {"goal", payload.value("goal", "")},
+            {"realm", payload.value("realm", "")},
+            {"status", payload.value("status", task.value("status", ""))},
+            {"iterations", payload.value("iterations", 0)},
+            {"hard_checks", payload.value("hard_checks", json::array())},
+            {"soft_checks", payload.value("soft_checks", json::array())},
+            {"work_items", payload.value("work_items", json::array())},
+            {"blockers", payload.value("blockers", json::array())}
         };
 
-        // Parse JSON fields
-        auto parse_json = [](const std::string& s) -> json {
-            if (s.empty()) return json::array();
-            try { return json::parse(s); } catch (...) { return json::array(); }
-        };
+        std::string summary = payload.value("completed_summary", "");
+        if (!summary.empty()) result["completed_summary"] = summary;
+        std::string outcome = payload.value("outcome", "");
+        if (!outcome.empty()) result["outcome"] = outcome;
 
-        result["hard_checks"] = parse_json(task->hard_checks);
-        result["soft_checks"] = parse_json(task->soft_checks);
-        result["work_items"] = parse_json(task->work_items);
-        result["blockers"] = parse_json(task->blockers);
-
-        if (!task->completed_summary.empty()) result["completed_summary"] = task->completed_summary;
-        if (!task->outcome.empty()) result["outcome"] = task->outcome;
-        if (task->completed_at > 0) result["completed_at"] = task->completed_at;
-
+        std::string goal = payload.value("goal", "");
         std::ostringstream ss;
-        ss << "Task: " << task->task_id << " [" << task->status << "]\n"
-           << "Goal: " << task->goal.substr(0, 200) << "\n"
-           << "Iterations: " << task->iterations;
+        ss << "Task: " << task_id << " [" << result.value("status", "?") << "]\n"
+           << "Goal: " << goal.substr(0, 200) << "\n"
+           << "Iterations: " << payload.value("iterations", 0);
 
         return DuckDBToolResult::ok(ss.str(), result);
     }
 
     DuckDBToolResult tool_long_task_active(const json& params) {
-        std::string realm = params.value("realm", "");
+        std::string filter_realm = params.value("realm", "");
 
-        auto task = mind_->store().task_get_active(realm);
-        if (!task) {
-            return DuckDBToolResult::ok("No active task" + (realm.empty() ? "" : " in realm " + realm),
-                                        {{"found", false}});
+        // Scan event log for active tasks.
+        // Track which task_ids have been started vs completed/failed.
+        std::unordered_map<std::string, json> active_tasks;
+        std::unordered_set<std::string> finished;
+
+        field_store_->iterate_log(0, [&](const std::string& op_json, uint64_t) {
+            json op = parse_json_obj(op_json);
+            if (op.value("domain", "") != "long_task") return;
+            std::string entity_id = op.value("entity_id", "");
+            std::string kind = op.value("kind", "");
+
+            if (kind == "start") {
+                json payload = parse_json_obj(op.value("payload", ""));
+                if (!filter_realm.empty() && payload.value("realm", "") != filter_realm) return;
+                active_tasks[entity_id] = payload;
+                finished.erase(entity_id);
+            } else if (kind == "complete" || kind == "fail") {
+                active_tasks.erase(entity_id);
+                finished.insert(entity_id);
+            }
+        });
+
+        if (active_tasks.empty()) {
+            return DuckDBToolResult::ok(
+                "No active task" + (filter_realm.empty() ? "" : " in realm " + filter_realm),
+                {{"found", false}});
         }
+
+        // Return the first active task (unordered_map has no stable order)
+        auto& [tid, payload] = *active_tasks.begin();
+
+        // Fetch current state from task store for up-to-date iterations
+        std::string raw = field_store_->task_get(tid);
+        json current_payload = parse_json_obj(parse_json_obj(raw).value("payload", ""));
 
         json result = {
             {"found", true},
-            {"task_id", task->task_id},
-            {"goal", task->goal},
-            {"realm", task->realm},
-            {"iterations", task->iterations}
+            {"task_id", tid},
+            {"goal", current_payload.value("goal", payload.value("goal", ""))},
+            {"realm", current_payload.value("realm", payload.value("realm", ""))},
+            {"iterations", current_payload.value("iterations", 0)}
         };
 
+        std::string goal = result.value("goal", "");
         std::ostringstream ss;
-        ss << "Active task: " << task->task_id << "\n"
-           << "Goal: " << task->goal.substr(0, 200) << "\n"
-           << "Iterations: " << task->iterations;
+        ss << "Active task: " << tid << "\n"
+           << "Goal: " << goal.substr(0, 200) << "\n"
+           << "Iterations: " << result.value("iterations", 0);
 
         return DuckDBToolResult::ok(ss.str(), result);
     }
@@ -117,22 +180,31 @@
             return DuckDBToolResult::error("task_id is required");
         }
 
-        LongTask updates;
-        updates.completed_summary = params.value("completed_summary", "");
+        // Get current payload
+        std::string raw = field_store_->task_get(task_id);
+        if (raw.empty()) {
+            return DuckDBToolResult::error("Task not found: " + task_id);
+        }
 
+        json task = parse_json_obj(raw);
+        json payload = parse_json_obj(task.value("payload", ""));
+
+        // Apply updates
+        if (params.contains("completed_summary")) {
+            payload["completed_summary"] = params["completed_summary"];
+        }
         if (params.contains("work_items") && params["work_items"].is_array()) {
-            updates.work_items = params["work_items"].dump();
+            payload["work_items"] = params["work_items"];
         }
         if (params.contains("blockers") && params["blockers"].is_array()) {
-            updates.blockers = params["blockers"].dump();
+            payload["blockers"] = params["blockers"];
         }
 
-        updates.iterations = 1;  // Signal to increment
+        payload["iterations"] = payload.value("iterations", 0) + 1;
 
-        bool ok = mind_->store().task_update(task_id, updates);
-        if (!ok) {
-            return DuckDBToolResult::error("Failed to update task: " + task_id);
-        }
+        int64_t ts = field_now_ms();
+        field_store_->task_update_payload(task_id, payload.dump(), ts);
+        field_store_->emit_event("long_task", "update", task_id, payload.dump());
 
         return DuckDBToolResult::ok("Updated task: " + task_id, {{"task_id", task_id}, {"updated", true}});
     }
@@ -145,10 +217,20 @@
             return DuckDBToolResult::error("task_id and outcome are required");
         }
 
-        bool ok = mind_->store().task_complete(task_id, outcome);
-        if (!ok) {
-            return DuckDBToolResult::error("Failed to complete task: " + task_id);
+        // Update payload with outcome
+        std::string raw = field_store_->task_get(task_id);
+        if (!raw.empty()) {
+            json task = parse_json_obj(raw);
+            json payload = parse_json_obj(task.value("payload", ""));
+            payload["status"] = "completed";
+            payload["outcome"] = outcome;
+            int64_t ts = field_now_ms();
+            field_store_->task_update_payload(task_id, payload.dump(), ts);
         }
+
+        int64_t ts = field_now_ms();
+        field_store_->task_transition(task_id, "complete", ts);
+        field_store_->emit_event("long_task", "complete", task_id, json({{"outcome", outcome}}).dump());
 
         return DuckDBToolResult::ok("Completed task: " + task_id, {
             {"task_id", task_id},
@@ -165,24 +247,18 @@
             return DuckDBToolResult::error("task_id and kind are required");
         }
 
-        TaskEvent event;
-        event.task_id = task_id;
-        event.kind = kind;
-        event.payload = params.value("payload", "");
+        json event_payload = {{"payload", params.value("payload", "")}};
 
         if (params.contains("tags") && params["tags"].is_array()) {
-            event.tags = params["tags"].dump();
+            event_payload["tags"] = params["tags"];
         }
         if (params.contains("related_entities") && params["related_entities"].is_array()) {
-            event.related_entities = params["related_entities"].dump();
+            event_payload["related_entities"] = params["related_entities"];
         }
 
-        int64_t id = mind_->store().event_append(event);
-        if (id < 0) {
-            return DuckDBToolResult::error("Failed to append event: " + mind_->store().last_error());
-        }
+        uint64_t event_id = field_store_->emit_event("long_task", kind, task_id, event_payload.dump());
 
-        return DuckDBToolResult::ok("Event logged", {{"event_id", id}, {"task_id", task_id}, {"kind", kind}});
+        return DuckDBToolResult::ok("Event logged", {{"event_id", event_id}, {"task_id", task_id}, {"kind", kind}});
     }
 
     DuckDBToolResult tool_unified_checkpoint(const json& params) {
@@ -190,73 +266,73 @@
         std::string mood = params.value("mood", "flowing");
         std::string summary = params.value("summary", "");
 
-        // Check for active long task in this realm
-        auto active_task = mind_->store().task_get_active(realm);
+        // Check for active long task in this realm by scanning events
+        std::string active_task_id;
+        field_store_->iterate_log(0, [&](const std::string& op_json, uint64_t) {
+            json op = parse_json_obj(op_json);
+            if (op.value("domain", "") != "long_task") return;
+            std::string kind = op.value("kind", "");
+            std::string entity_id = op.value("entity_id", "");
 
-        json payload = {
+            if (kind == "start") {
+                json payload = parse_json_obj(op.value("payload", ""));
+                if (payload.value("realm", "") == realm || realm.empty()) {
+                    active_task_id = entity_id;
+                }
+            } else if (kind == "complete" || kind == "fail") {
+                if (entity_id == active_task_id) active_task_id.clear();
+            }
+        });
+
+        json ckpt_payload = {
             {"mood", mood},
             {"summary", summary}
         };
 
-        if (params.contains("next_steps")) payload["next_steps"] = params["next_steps"];
-        if (params.contains("active_files")) payload["active_files"] = params["active_files"];
-        if (params.contains("discoveries")) payload["discoveries"] = params["discoveries"];
+        if (params.contains("next_steps")) ckpt_payload["next_steps"] = params["next_steps"];
+        if (params.contains("active_files")) ckpt_payload["active_files"] = params["active_files"];
+        if (params.contains("discoveries")) ckpt_payload["discoveries"] = params["discoveries"];
 
-        if (active_task) {
-            // Use long task event system
-            TaskEvent event;
-            event.task_id = active_task->task_id;
-            event.kind = "checkpoint";
-            event.payload = payload.dump();
+        if (!active_task_id.empty()) {
+            // Checkpoint as a long_task event
+            uint64_t event_id = field_store_->emit_event("long_task", "checkpoint", active_task_id, ckpt_payload.dump());
 
-            if (params.contains("active_files") && params["active_files"].is_array()) {
-                event.related_entities = params["active_files"].dump();
-            }
-
-            int64_t id = mind_->store().event_append(event);
-
-            // Also update task's completed_summary if summary provided
+            // Also update task summary if provided
             if (!summary.empty()) {
-                LongTask updates;
-                updates.completed_summary = summary;
-                mind_->store().task_update(active_task->task_id, updates);
+                std::string raw = field_store_->task_get(active_task_id);
+                if (!raw.empty()) {
+                    json task = parse_json_obj(raw);
+                    json payload = parse_json_obj(task.value("payload", ""));
+                    payload["completed_summary"] = summary;
+                    field_store_->task_update_payload(active_task_id, payload.dump(), field_now_ms());
+                }
             }
 
             std::ostringstream ss;
-            ss << "Checkpoint saved to long task: " << active_task->task_id << "\n"
-               << "  Event #" << id << " (kind: checkpoint)\n"
+            ss << "Checkpoint saved to long task: " << active_task_id << "\n"
+               << "  Event #" << event_id << " (kind: checkpoint)\n"
                << "  Mood: " << mood;
 
             return DuckDBToolResult::ok(ss.str(), {
                 {"mode", "long_task"},
-                {"task_id", active_task->task_id},
-                {"event_id", id}
+                {"task_id", active_task_id},
+                {"event_id", event_id}
             });
         } else {
-            // Fallback to standalone ledger
-            LedgerEntry entry;
-            entry.session_id = "checkpoint-" + std::to_string(std::time(nullptr));
-            entry.project = realm;
-            entry.mood = mood;
-            entry.coherence = 0.85f;
-            entry.confidence = 0.85f;
+            // Fallback to standalone ledger checkpoint
+            std::string key = "checkpoint-" + std::to_string(std::time(nullptr));
+            json ledger_payload = ckpt_payload;
+            ledger_payload["session_id"] = key;
+            ledger_payload["project"] = realm;
+            ledger_payload["coherence"] = 0.85f;
+            ledger_payload["confidence"] = 0.85f;
+            ledger_payload["snapshot"] = summary;
 
-            if (params.contains("next_steps") && params["next_steps"].is_array()) {
-                entry.next_steps = params["next_steps"].dump();
-            }
-            if (params.contains("active_files") && params["active_files"].is_array()) {
-                entry.active_files = params["active_files"].dump();
-            }
-            if (params.contains("discoveries") && params["discoveries"].is_array()) {
-                entry.discoveries = params["discoveries"].dump();
-            }
-            entry.snapshot = summary;
-
-            int64_t id = mind_->store().save_ledger(entry);
+            uint64_t event_id = field_store_->emit_event("ledger", "save", key, ledger_payload.dump());
 
             return DuckDBToolResult::ok(
-                "Checkpoint saved to ledger #" + std::to_string(id) + " (no active long task)",
-                {{"mode", "ledger"}, {"ledger_id", id}}
+                "Checkpoint saved to ledger event #" + std::to_string(event_id) + " (no active long task)",
+                {{"mode", "ledger"}, {"event_id", event_id}}
             );
         }
     }
@@ -265,46 +341,57 @@
         std::string task_id = params.value("task_id", "");
         std::string mode = params.value("mode", "inject");
         size_t max_tokens = params.value("max_tokens", 2000);
-        size_t max_chars = max_tokens * 4;  // Rough estimate: ~4 chars per token
+        size_t max_chars = max_tokens * 4;
 
         if (task_id.empty()) {
             return DuckDBToolResult::error("task_id is required");
         }
 
-        auto task = mind_->store().task_get(task_id);
-        if (!task) {
+        std::string raw = field_store_->task_get(task_id);
+        if (raw.empty()) {
             return DuckDBToolResult::error("Task not found: " + task_id);
         }
 
-        // Get recent events
-        auto events = mind_->store().event_get_recent(task_id, "", 20);
+        json task = parse_json_obj(raw);
+        json payload = parse_json_obj(task.value("payload", ""));
 
-        // Parse JSON fields
-        auto parse_json = [](const std::string& s) -> json {
-            if (s.empty()) return json::array();
-            try { return json::parse(s); } catch (...) { return json::array(); }
-        };
+        json work_items = payload.value("work_items", json::array());
+        json blockers = payload.value("blockers", json::array());
+        std::string goal = payload.value("goal", "");
+        int iterations = payload.value("iterations", 0);
+        std::string status = payload.value("status", task.value("status", ""));
 
-        json work_items = parse_json(task->work_items);
-        json blockers = parse_json(task->blockers);
+        // Collect recent events for this task
+        struct RecentEvent { std::string kind; std::string event_payload; };
+        std::vector<RecentEvent> events;
+        field_store_->iterate_log(0, [&](const std::string& op_json, uint64_t) {
+            json op = parse_json_obj(op_json);
+            if (op.value("domain", "") != "long_task") return;
+            if (op.value("entity_id", "") != task_id) return;
+            events.push_back({op.value("kind", ""), op.value("payload", "")});
+        });
+        // Keep only last 20
+        if (events.size() > 20) {
+            events.erase(events.begin(), events.end() - 20);
+        }
 
-        // Build snapshot
         std::ostringstream ss;
 
         if (mode == "inject") {
-            // Compact format for context injection
-            ss << "[LONG_TASK:" << task_id << "] " << task->goal << "\n";
-            ss << "Iteration: " << task->iterations << " | Status: " << task->status << "\n";
+            ss << "[LONG_TASK:" << task_id << "] " << goal << "\n";
+            ss << "Iteration: " << iterations << " | Status: " << status << "\n";
 
-            if (!task->completed_summary.empty()) {
-                ss << "Done: " << task->completed_summary.substr(0, 200) << "\n";
+            std::string summary = payload.value("completed_summary", "");
+            if (!summary.empty()) {
+                ss << "Done: " << summary.substr(0, 200) << "\n";
             }
 
             if (!work_items.empty()) {
                 ss << "Pending: ";
                 for (size_t i = 0; i < std::min(work_items.size(), size_t(3)); i++) {
                     if (i > 0) ss << "; ";
-                    ss << work_items[i].get<std::string>().substr(0, 50);
+                    std::string item = work_items[i].get<std::string>();
+                    ss << item.substr(0, 50);
                 }
                 if (work_items.size() > 3) ss << " (+" << (work_items.size() - 3) << " more)";
                 ss << "\n";
@@ -314,23 +401,21 @@
                 ss << "BLOCKED: " << blockers[0].get<std::string>() << "\n";
             }
 
-            // Recent significant events
             int event_count = 0;
             for (const auto& e : events) {
                 if (e.kind == "error" || e.kind == "decision") {
-                    ss << "[" << e.kind << "] " << e.payload.substr(0, 100) << "\n";
+                    ss << "[" << e.kind << "] " << e.event_payload.substr(0, 100) << "\n";
                     if (++event_count >= 2) break;
                 }
             }
         } else {
-            // Verbose debug format
             ss << "=== Task Snapshot: " << task_id << " ===\n\n";
-            ss << "Goal: " << task->goal << "\n";
-            ss << "Status: " << task->status << "\n";
-            ss << "Realm: " << task->realm << "\n";
-            ss << "Iterations: " << task->iterations << "\n\n";
+            ss << "Goal: " << goal << "\n";
+            ss << "Status: " << status << "\n";
+            ss << "Realm: " << payload.value("realm", "") << "\n";
+            ss << "Iterations: " << iterations << "\n\n";
 
-            ss << "Completed: " << task->completed_summary << "\n\n";
+            ss << "Completed: " << payload.value("completed_summary", "") << "\n\n";
 
             ss << "Work Items:\n";
             for (const auto& item : work_items) {
@@ -344,7 +429,7 @@
 
             ss << "\nRecent Events (" << events.size() << "):\n";
             for (const auto& e : events) {
-                ss << "  [" << e.kind << "] " << e.payload.substr(0, 200) << "\n";
+                ss << "  [" << e.kind << "] " << e.event_payload.substr(0, 200) << "\n";
             }
         }
 
@@ -357,8 +442,8 @@
 
         json result = {
             {"task_id", task_id},
-            {"status", task->status},
-            {"iterations", task->iterations},
+            {"status", status},
+            {"iterations", iterations},
             {"event_count", events.size()},
             {"truncated", truncated},
             {"snapshot", snapshot}
@@ -373,24 +458,16 @@
             return DuckDBToolResult::error("task_id is required");
         }
 
-        auto task = mind_->store().task_get(task_id);
-        if (!task) {
+        std::string raw = field_store_->task_get(task_id);
+        if (raw.empty()) {
             return DuckDBToolResult::error("Task not found: " + task_id);
         }
 
-        // Parse hard_checks
-        auto parse_json = [](const std::string& s) -> json {
-            if (s.empty()) return json::array();
-            try { return json::parse(s); } catch (...) { return json::array(); }
-        };
+        json task = parse_json_obj(raw);
+        json payload = parse_json_obj(task.value("payload", ""));
 
-        json hard_checks = parse_json(task->hard_checks);
-        json blockers = parse_json(task->blockers);
-
-        // For now, basic evaluation:
-        // - If blockers exist -> blocked
-        // - If hard_checks empty -> continue (no criteria defined)
-        // - Otherwise -> continue (need semantic evaluation)
+        json hard_checks = payload.value("hard_checks", json::array());
+        json blockers = payload.value("blockers", json::array());
 
         std::string decision = "continue";
         std::vector<std::string> missing;
@@ -405,13 +482,10 @@
             }
             next_prompt = "Task is blocked. Blockers: " + blockers.dump();
         } else if (hard_checks.empty()) {
-            // No completion criteria defined
             decision = "continue";
             confidence = 0.3f;
-            next_prompt = "Continue working on: " + task->goal;
+            next_prompt = "Continue working on: " + payload.value("goal", "");
         } else {
-            // Has criteria but we can't evaluate them automatically yet
-            // This would need shell command execution or semantic evaluation
             decision = "continue";
             confidence = 0.5f;
             next_prompt = "Continue task. Check completion criteria when ready.";
@@ -435,7 +509,7 @@
             {"confidence", confidence},
             {"missing", missing},
             {"next_prompt", next_prompt},
-            {"iterations", task->iterations}
+            {"iterations", payload.value("iterations", 0)}
         };
 
         return DuckDBToolResult::ok(ss.str(), result);
