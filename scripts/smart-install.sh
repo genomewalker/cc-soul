@@ -282,9 +282,16 @@ build_chitta_field() {
     echo "[cc-soul] Building chitta-field (toolchain: $toolchain)..."
     # Ensure the pinned toolchain is installed
     rustup toolchain install "$toolchain" --no-self-update 2>/dev/null || true
-    # Unset conda linker flags to avoid ABI conflicts
-    (cd "$cf_dir" && env -u LDFLAGS -u CFLAGS -u CXXFLAGS \
-        rustup run "$toolchain" cargo build --release 2>&1 | tail -5)
+    # Use build.sh if present — it handles conda linker and toolchain PATH correctly
+    if [[ -x "$cf_dir/build.sh" ]]; then
+        echo "[cc-soul] Using build.sh"
+        (cd "$cf_dir" && ./build.sh build --release 2>&1 | tail -8)
+    else
+        # Manual fallback: unset conda vars, put rustup toolchain first in PATH
+        local tc_bin="${RUSTUP_HOME:-$HOME/.rustup}/toolchains/${toolchain}-$(rustup show active-toolchain 2>/dev/null | grep -oP '\S+-\S+-\S+$' || echo "x86_64-unknown-linux-gnu")/bin"
+        (cd "$cf_dir" && env -u LDFLAGS -u CFLAGS -u CXXFLAGS -u CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER \
+            PATH="/usr/bin:$tc_bin:$PATH" cargo build --release 2>&1 | tail -8)
+    fi
 
     if [[ ! -f "$cf_dir/target/release/libchitta_field.a" ]]; then
         echo "[cc-soul] ERROR: chitta-field build failed" >&2
