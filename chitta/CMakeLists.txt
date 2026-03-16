@@ -14,28 +14,6 @@ set(ROARING_BUILD_STATIC ON CACHE BOOL "" FORCE)
 set(ENABLE_ROARING_TESTS OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(roaring)
 
-# DuckDB - embedded database with vector search and graph queries
-# Uses system/conda installation, or custom paths via DUCKDB_INCLUDE_DIR/DUCKDB_LIB_DIR
-find_library(DUCKDB_LIB duckdb HINTS
-    "${DUCKDB_LIB_DIR}"
-    "$ENV{CONDA_PREFIX}/lib"
-    "/usr/local/lib"
-)
-find_path(DUCKDB_INCLUDE duckdb.hpp HINTS
-    "${DUCKDB_INCLUDE_DIR}"
-    "$ENV{CONDA_PREFIX}/include"
-    "/usr/local/include"
-)
-if(DUCKDB_LIB AND DUCKDB_INCLUDE)
-    # Use INTERFACE library instead of IMPORTED for better cross-platform compatibility
-    add_library(duckdb INTERFACE)
-    target_include_directories(duckdb INTERFACE "${DUCKDB_INCLUDE}")
-    target_link_libraries(duckdb INTERFACE "${DUCKDB_LIB}")
-    message(STATUS "DuckDB found: ${DUCKDB_LIB}")
-else()
-    message(FATAL_ERROR "DuckDB not found. Install with: mamba install libduckdb-devel")
-endif()
-
 # Tree-sitter - incremental parsing for code intelligence
 FetchContent_Declare(
     tree-sitter
@@ -255,7 +233,7 @@ target_include_directories(chitta INTERFACE
 
 # Find threads
 find_package(Threads REQUIRED)
-target_link_libraries(chitta INTERFACE Threads::Threads roaring tree-sitter-parsers duckdb)
+target_link_libraries(chitta INTERFACE Threads::Threads roaring tree-sitter-parsers)
 
 # nlohmann/json for RPC server
 find_package(nlohmann_json CONFIG QUIET)
@@ -407,26 +385,27 @@ if(CHITTA_WITH_ONNX)
     endif()
 endif()
 
-# Tests
-if(CHITTA_BUILD_TESTS)
-    enable_testing()
 
-    # DuckDB store test
-    add_executable(duckdb_test src/duckdb_test.cpp)
-    target_link_libraries(duckdb_test PRIVATE duckdb_store duckdb)
-    add_test(NAME duckdb_test COMMAND duckdb_test)
+# chitta-field — required storage backend
+# Resolve root: prefer CHITTA_FIELD_ROOT env/cmake var, then sibling submodule, then legacy path
+if(NOT CHITTA_FIELD_ROOT)
+    # Submodule path: cc-soul/chitta-field (one level up from chitta/)
+    set(_CF_SUBMODULE "${CMAKE_CURRENT_SOURCE_DIR}/../chitta-field")
+    if(EXISTS "${_CF_SUBMODULE}/Cargo.toml")
+        set(CHITTA_FIELD_ROOT "${_CF_SUBMODULE}")
+    else()
+        message(FATAL_ERROR "chitta-field submodule not found at ${_CF_SUBMODULE}.\n"
+            "Run: git submodule update --init chitta-field && cd chitta-field && ./build.sh\n"
+            "Or set -DCHITTA_FIELD_ROOT=/path/to/chitta-field on the cmake command line.")
+    endif()
 endif()
+set(CHITTA_FIELD_LIB "${CHITTA_FIELD_ROOT}/target/release/libchitta_field.a")
+set(CHITTA_FIELD_INCLUDE "${CHITTA_FIELD_ROOT}/include")
 
-# DuckDBStore library
-add_library(duckdb_store STATIC
-    src/duckdb_store.cpp
-    src/query_intent.cpp
-    src/temporal.cpp
-)
-target_link_libraries(duckdb_store PUBLIC chitta duckdb)
-target_include_directories(duckdb_store PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-)
+if(NOT EXISTS "${CHITTA_FIELD_LIB}")
+    message(FATAL_ERROR "chitta-field lib not found at ${CHITTA_FIELD_LIB} — build it first: cd chitta-field && ./build.sh")
+endif()
+message(STATUS "chitta-field: ${CHITTA_FIELD_LIB}")
 
 # Daemon/admin tool
 add_executable(chittad
@@ -438,37 +417,14 @@ add_executable(chittad
     src/transcript_parser.cpp
     src/ssl_parser.cpp
     src/native_distiller.cpp
+    src/temporal.cpp
+    src/query_intent.cpp
     src/sadhana/brain_provider.cpp
     src/sadhana/sadhana_manager.cpp
-    src/soul_projection.cpp
 )
-target_link_libraries(chittad PRIVATE chitta duckdb_store)
-
-# chitta-field integration
-set(CHITTA_FIELD_ROOT "/maps/projects/fernandezguerra/apps/repos/chitta-field")
-set(CHITTA_FIELD_LIB "${CHITTA_FIELD_ROOT}/target/release/libchitta_field.a")
-set(CHITTA_FIELD_INCLUDE "${CHITTA_FIELD_ROOT}/include")
-
-if(EXISTS "${CHITTA_FIELD_LIB}")
-    message(STATUS "chitta-field: ${CHITTA_FIELD_LIB}")
-    target_include_directories(chittad PRIVATE "${CHITTA_FIELD_INCLUDE}")
-    target_link_libraries(chittad PRIVATE "${CHITTA_FIELD_LIB}" dl pthread)
-    target_compile_definitions(chittad PRIVATE CHITTA_FIELD_AVAILABLE=1)
-
-    # Bulk import tool: DuckDB → chitta-field one-shot migration
-    add_executable(chitta_import src/import_tool.cpp)
-    target_link_libraries(chitta_import PRIVATE chitta duckdb_store "${CHITTA_FIELD_LIB}" dl pthread)
-    target_include_directories(chitta_import PRIVATE "${CHITTA_FIELD_INCLUDE}")
-    target_compile_definitions(chitta_import PRIVATE CHITTA_FIELD_AVAILABLE=1)
-    if(TARGET onnx_yantra)
-        target_link_libraries(chitta_import PRIVATE onnx_yantra)
-        target_compile_definitions(chitta_import PRIVATE CHITTA_WITH_ONNX=1)
-        message(STATUS "chitta_import: ONNX embedder enabled")
-    endif()
-    install(TARGETS chitta_import DESTINATION bin)
-else()
-    message(WARNING "chitta-field lib not found at ${CHITTA_FIELD_LIB} — FieldStore unavailable")
-endif()
+target_include_directories(chittad PRIVATE "${CHITTA_FIELD_INCLUDE}")
+target_link_libraries(chittad PRIVATE chitta "${CHITTA_FIELD_LIB}" dl pthread)
+target_compile_definitions(chittad PRIVATE CHITTA_FIELD_AVAILABLE=1)
 
 # CLI tool for memory operations (thin client + MCP server)
 # Output as 'chitta' binary (target named chitta_tool to avoid library conflict)
@@ -478,25 +434,19 @@ if(CHITTA_BUILD_RPC)
         src/socket_client.cpp
     )
     set_target_properties(chitta_tool PROPERTIES OUTPUT_NAME chitta)
-    target_link_libraries(chitta_tool PRIVATE chitta duckdb_store)
+    target_link_libraries(chitta_tool PRIVATE chitta)
+    target_include_directories(chitta_tool PRIVATE "${CHITTA_FIELD_INCLUDE}")
     if(TARGET onnx_yantra)
         target_link_libraries(chitta_tool PRIVATE onnx_yantra)
         target_compile_definitions(chitta_tool PRIVATE CHITTA_WITH_ONNX)
-    endif()
-    if(EXISTS "${CHITTA_FIELD_INCLUDE}")
-        target_include_directories(chitta_tool PRIVATE "${CHITTA_FIELD_INCLUDE}")
     endif()
 endif()
 
 
 # RPATH configuration for runtime library discovery
-# Collects library directories from DuckDB and ONNX Runtime
 # CI builds can override with CMAKE_INSTALL_RPATH=$ORIGIN to bundle libs
 set(CHITTA_RUNTIME_LIBS "")
 
-# Get DuckDB library directory
-get_filename_component(DUCKDB_LIB_DIR "${DUCKDB_LIB}" DIRECTORY)
-list(APPEND CHITTA_RUNTIME_LIBS "${DUCKDB_LIB_DIR}")
 
 # Get ONNX Runtime library directory if enabled
 if(CHITTA_WITH_ONNX AND ONNXRUNTIME_LIB_DIR)
@@ -534,19 +484,6 @@ if(TARGET chitta_tool)
     )
 endif()
 
-if(TARGET duckdb_test)
-    set_target_properties(duckdb_test PROPERTIES
-        BUILD_RPATH "${CHITTA_RPATH}"
-        INSTALL_RPATH "${CHITTA_RPATH}"
-    )
-endif()
-
-if(TARGET chitta_import)
-    set_target_properties(chitta_import PROPERTIES
-        BUILD_RPATH "${CHITTA_RPATH}"
-        INSTALL_RPATH "${CHITTA_RPATH}"
-    )
-endif()
 
 # Install
 install(DIRECTORY include/ DESTINATION include)

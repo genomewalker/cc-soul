@@ -1,0 +1,3 @@
+[submodule "chitta-field"]
+	path = chitta-field
+	url = https://github.com/genomewalker/chitta-field.git
