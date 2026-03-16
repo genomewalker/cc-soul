@@ -101,6 +101,22 @@ public:
     void set_field_initializing(bool v) { field_initializing_.store(v, std::memory_order_release); }
 #endif
 
+    // Distillation config — settable at runtime by MCP tool or CLI
+    void set_distill_model(const std::string& model) {
+        std::lock_guard<std::mutex> lk(distill_mutex_);
+        distill_model_ = model;
+    }
+    std::string get_distill_model() const {
+        std::lock_guard<std::mutex> lk(distill_mutex_);
+        return distill_model_;
+    }
+    void set_distill_enabled(bool v) { distill_enabled_.store(v); }
+    bool get_distill_enabled() const { return distill_enabled_.load(); }
+
+#ifdef CHITTA_FIELD_AVAILABLE
+    FieldStore* get_field_store() const { return field_store_; }
+#endif
+
     json handle(const json& request) {
         std::string method = request.value("method", "");
         json params = request.value("params", json::object());
@@ -136,6 +152,12 @@ private:
     DuckDBMind* mind_;
     Subconscious* subconscious_;
     SadhanaManager* sadhana_manager_;
+
+    // Distillation config — shared between handler (MCP tool) and distillation thread
+    mutable std::mutex distill_mutex_;
+    std::string distill_model_ = "github-copilot/gpt-5-mini";
+    std::atomic<bool> distill_enabled_{true};
+
 #ifdef CHITTA_FIELD_AVAILABLE
     ChittaFieldHandler* field_handler_ = nullptr;
     FieldStore* field_store_ = nullptr;  // Direct pointer for use before ChittaFieldHandler is complete
@@ -1675,6 +1697,20 @@ private:
             }}
         });
         handlers_["distill_status"] = [this](const json& p) { return tool_distill_status(p); };
+
+        tools_.push_back({
+            {"name", "distill_set_model"},
+            {"description", "Change the LLM model used for transcript distillation. Takes effect immediately without restarting the daemon."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"model", {{"type", "string"}, {"description", "OpenCode model string, e.g. gemini-2.0-flash, claude-opus-4-5, gpt-4o"}}},
+                    {"enabled", {{"type", "boolean"}, {"description", "Enable or disable distillation (optional)"}}}
+                }},
+                {"required", {"model"}}
+            }}
+        });
+        handlers_["distill_set_model"] = [this](const json& p) { return tool_distill_set_model(p); };
 
         // Epiplexity tools
         tools_.push_back({

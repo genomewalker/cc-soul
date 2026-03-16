@@ -5,6 +5,7 @@
 #include <sstream>
 #include <chrono>
 #include <thread>
+#include <cmath>
 
 // POSIX
 #include <unistd.h>
@@ -14,8 +15,19 @@
 
 namespace chitta {
 
+// ── Constructors ──────────────────────────────────────────────────────────────
+
+#ifdef CHITTA_FIELD_AVAILABLE
+NativeDistiller::NativeDistiller(FieldStore& field, EmbedFn embedder,
+                                 const NativeDistillConfig& config)
+    : field_store_(&field), embedder_(std::move(embedder)),
+      mind_(nullptr), config_(config) {}
+#endif
+
 NativeDistiller::NativeDistiller(DuckDBMind& mind, const NativeDistillConfig& config)
-    : mind_(mind), config_(config) {}
+    : mind_(&mind), config_(config) {}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 float NativeDistiller::category_to_confidence(const std::string& category) {
     if (category == "correction") return 0.95f;
@@ -28,6 +40,15 @@ float NativeDistiller::category_to_confidence(const std::string& category) {
     return 0.80f;  // wisdom, etc.
 }
 
+float NativeDistiller::category_to_decay(const std::string& category) {
+    // Corrections and preferences are long-lived; general wisdom decays faster
+    if (category == "correction") return 0.0001f;
+    if (category == "preference") return 0.0001f;
+    if (category == "solution")   return 0.001f;
+    if (category == "decision")   return 0.001f;
+    return 0.005f;
+}
+
 void NativeDistiller::log(const std::string& msg) {
     if (log_callback_) {
         log_callback_(msg);
@@ -36,8 +57,9 @@ void NativeDistiller::log(const std::string& msg) {
     }
 }
 
+// ── opencode call ─────────────────────────────────────────────────────────────
+
 std::string NativeDistiller::call_opencode(const std::string& prompt) {
-    // Create pipes for stdin and stdout
     int stdin_pipe[2];
     int stdout_pipe[2];
 
@@ -53,14 +75,12 @@ std::string NativeDistiller::call_opencode(const std::string& prompt) {
     }
 
     if (pid == 0) {
-        // Child process
-        close(stdin_pipe[1]);  // Close write end of stdin
-        close(stdout_pipe[0]); // Close read end of stdout
+        close(stdin_pipe[1]);
+        close(stdout_pipe[0]);
 
         dup2(stdin_pipe[0], STDIN_FILENO);
         dup2(stdout_pipe[1], STDOUT_FILENO);
 
-        // Redirect stderr to /dev/null
         int devnull = open("/dev/null", O_WRONLY);
         if (devnull >= 0) {
             dup2(devnull, STDERR_FILENO);
@@ -70,14 +90,12 @@ std::string NativeDistiller::call_opencode(const std::string& prompt) {
         close(stdin_pipe[0]);
         close(stdout_pipe[1]);
 
-        // Execute opencode run -m <model>
         execlp("opencode", "opencode", "run", "-m", config_.model.c_str(), nullptr);
         _exit(1);
     }
 
-    // Parent process
-    close(stdin_pipe[0]);   // Close read end of stdin
-    close(stdout_pipe[1]);  // Close write end of stdout
+    close(stdin_pipe[0]);
+    close(stdout_pipe[1]);
 
     // Write prompt to stdin
     ssize_t written = 0;
@@ -88,13 +106,11 @@ std::string NativeDistiller::call_opencode(const std::string& prompt) {
         if (n <= 0) break;
         written += n;
     }
-    close(stdin_pipe[1]);  // Signal EOF
+    close(stdin_pipe[1]);
 
-    // Read stdout with timeout
     std::string output;
     std::array<char, 4096> buffer;
 
-    // Set non-blocking read
     int flags = fcntl(stdout_pipe[0], F_GETFL, 0);
     fcntl(stdout_pipe[0], F_SETFL, flags | O_NONBLOCK);
 
@@ -104,7 +120,6 @@ std::string NativeDistiller::call_opencode(const std::string& prompt) {
     while (!finished) {
         auto elapsed = std::chrono::steady_clock::now() - start;
         if (std::chrono::duration_cast<std::chrono::seconds>(elapsed).count() >= config_.timeout_secs) {
-            // Timeout
             kill(pid, SIGKILL);
             waitpid(pid, nullptr, 0);
             close(stdout_pipe[0]);
@@ -112,7 +127,6 @@ std::string NativeDistiller::call_opencode(const std::string& prompt) {
             return "";
         }
 
-        // Check cancellation (e.g., daemon shutdown)
         if (cancel_callback_ && cancel_callback_()) {
             kill(pid, SIGKILL);
             waitpid(pid, nullptr, 0);
@@ -121,7 +135,6 @@ std::string NativeDistiller::call_opencode(const std::string& prompt) {
             return "";
         }
 
-        // Check if child finished
         int status;
         int result = waitpid(pid, &status, WNOHANG);
         if (result > 0) {
@@ -130,7 +143,6 @@ std::string NativeDistiller::call_opencode(const std::string& prompt) {
             finished = true;
         }
 
-        // Read available data
         ssize_t n;
         while ((n = read(stdout_pipe[0], buffer.data(), buffer.size())) > 0) {
             output.append(buffer.data(), n);
@@ -141,7 +153,6 @@ std::string NativeDistiller::call_opencode(const std::string& prompt) {
         }
     }
 
-    // Final read
     ssize_t n;
     while ((n = read(stdout_pipe[0], buffer.data(), buffer.size())) > 0) {
         output.append(buffer.data(), n);
@@ -151,6 +162,8 @@ std::string NativeDistiller::call_opencode(const std::string& prompt) {
     return output;
 }
 
+// ── store_learnings dispatcher ────────────────────────────────────────────────
+
 void NativeDistiller::store_learnings(
     const SSLParser::Result& ssl_result,
     const std::string& session_id,
@@ -158,14 +171,128 @@ void NativeDistiller::store_learnings(
     int64_t episode_id,
     DistillResult& result
 ) {
+#ifdef CHITTA_FIELD_AVAILABLE
+    if (field_store_) {
+        store_learnings_field(ssl_result, realm,
+                              static_cast<uint64_t>(episode_id), result);
+        return;
+    }
+#endif
+    store_learnings_duckdb(ssl_result, session_id, realm, episode_id, result);
+}
+
+// ── FieldStore backend ────────────────────────────────────────────────────────
+
+#ifdef CHITTA_FIELD_AVAILABLE
+void NativeDistiller::store_learnings_field(
+    const SSLParser::Result& ssl_result,
+    const std::string& realm,
+    uint64_t episode_mem_id,
+    DistillResult& result
+) {
     for (const auto& learning : ssl_result.learnings) {
         float confidence = category_to_confidence(learning.category);
-
-        // Combine title and content
+        float decay      = category_to_decay(learning.category);
         std::string full_text = learning.title + "\n" + learning.content;
 
-        // Store via DuckDBMind::remember (handles embedding internally)
-        NodeId nid = mind_.remember(
+        // Embed the learning text
+        std::vector<float> embedding;
+        if (embedder_) {
+            embedding = embedder_(full_text);
+        }
+
+        // Dedup: if a near-identical memory exists, strengthen it instead
+        bool deduped = false;
+        if (!embedding.empty() && config_.dedup_threshold > 0.0f) {
+            auto hits = field_store_->recall(embedding, 5, realm);
+            for (const auto& hit : hits) {
+                if (hit.semantic_score >= config_.dedup_threshold) {
+                    field_store_->strengthen(hit.memory_id, 0.05f);
+                    result.learnings_deduped++;
+                    log("[distill]   ~dup " + learning.category + ": " +
+                        learning.title.substr(0, 50) + " (strengthened existing)");
+                    deduped = true;
+                    break;
+                }
+            }
+        }
+
+        if (deduped) continue;
+
+        uint64_t mem_id = 0;
+        try {
+            mem_id = field_store_->remember("wisdom", realm, full_text,
+                                            embedding, confidence, decay);
+        } catch (...) {
+            continue;
+        }
+
+        if (mem_id == 0) continue;
+
+        result.learnings_stored++;
+        log("[distill]   +" + learning.category + ": " +
+            learning.title.substr(0, 60) + "...");
+
+        // Link to episode memory via DerivedFrom edge (edge_type=0)
+        if (episode_mem_id > 0) {
+            field_store_->add_edge(mem_id, episode_mem_id, 0, 1.0f);
+            field_store_->add_triplet(std::to_string(mem_id),
+                                      "derived_from",
+                                      std::to_string(episode_mem_id));
+        }
+
+        // Code citations
+        for (const auto& cite : learning.citations) {
+            std::string cite_target = cite.file;
+            if (cite.line > 0) {
+                cite_target += ":" + std::to_string(cite.line);
+            }
+            field_store_->add_triplet(std::to_string(mem_id), "cites", cite_target);
+            result.citations_linked++;
+            log("[distill]     cite: " + cite_target);
+
+            // Bridge to symbol at that file:line if available
+            if (cite.line > 0) {
+                auto syms = field_store_->symbols_in_file(cite.file);
+                for (const auto& sym : syms) {
+                    if (sym.line_start <= static_cast<uint32_t>(cite.line) &&
+                        static_cast<uint32_t>(cite.line) <= sym.line_end) {
+                        std::string sym_ref = "symbol:" + std::to_string(sym.symbol_id);
+                        field_store_->add_triplet(std::to_string(mem_id), "cites", sym_ref);
+                        log("[distill]     → symbol: " +
+                            std::string(reinterpret_cast<const char*>(sym.name)));
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // Store triplets
+    for (const auto& triplet : ssl_result.triplets) {
+        field_store_->add_triplet(triplet.subject, triplet.predicate, triplet.object);
+        log("[distill]   triplet: " + triplet.subject + "→" +
+            triplet.predicate + "→" + triplet.object);
+    }
+}
+#endif
+
+// ── DuckDBMind backend (legacy) ───────────────────────────────────────────────
+
+void NativeDistiller::store_learnings_duckdb(
+    const SSLParser::Result& ssl_result,
+    const std::string& session_id,
+    const std::string& realm,
+    int64_t episode_id,
+    DistillResult& result
+) {
+    if (!mind_) return;
+
+    for (const auto& learning : ssl_result.learnings) {
+        float confidence = category_to_confidence(learning.category);
+        std::string full_text = learning.title + "\n" + learning.content;
+
+        NodeId nid = mind_->remember(
             full_text,
             NodeType::Wisdom,
             realm,
@@ -176,34 +303,30 @@ void NativeDistiller::store_learnings(
         int64_t id = static_cast<int64_t>(nid.low);
         if (nid.low != 0) {
             result.learnings_stored++;
-            log("[distill]   +" + learning.category + ": " + learning.title.substr(0, 60) + "...");
+            log("[distill]   +" + learning.category + ": " +
+                learning.title.substr(0, 60) + "...");
 
-            // Link to episode if we have one
             if (episode_id > 0) {
-                mind_.connect(std::to_string(id), "derived_from", std::to_string(episode_id));
+                mind_->connect(std::to_string(id), "derived_from",
+                               std::to_string(episode_id));
             }
 
-            // Store citation triplets: memory --cites--> file:line
-            // Also bridge to symbols if a symbol exists at that location
             for (const auto& cite : learning.citations) {
                 std::string cite_target = cite.file;
                 if (cite.line > 0) {
                     cite_target += ":" + std::to_string(cite.line);
                 }
-
-                // Always store raw file:line citation
-                if (mind_.connect(std::to_string(id), "cites", cite_target)) {
+                if (mind_->connect(std::to_string(id), "cites", cite_target)) {
                     result.citations_linked++;
                     log("[distill]     cite: " + cite_target);
                 }
-
-                // Try to bridge to a symbol at this location
                 if (cite.line > 0) {
-                    auto symbol = mind_.store().find_symbol_at_line(cite.file, cite.line);
+                    auto symbol = mind_->store().find_symbol_at_line(cite.file, cite.line);
                     if (symbol) {
                         std::string symbol_ref = "symbol:" + std::to_string(symbol->id);
-                        if (mind_.connect(std::to_string(id), "cites", symbol_ref)) {
-                            log("[distill]     → symbol: " + symbol->name + " (" + symbol->kind + ")");
+                        if (mind_->connect(std::to_string(id), "cites", symbol_ref)) {
+                            log("[distill]     → symbol: " + symbol->name +
+                                " (" + symbol->kind + ")");
                         }
                     }
                 }
@@ -211,13 +334,15 @@ void NativeDistiller::store_learnings(
         }
     }
 
-    // Store triplets
     for (const auto& triplet : ssl_result.triplets) {
-        if (mind_.connect(triplet.subject, triplet.predicate, triplet.object)) {
-            log("[distill]   triplet: " + triplet.subject + "→" + triplet.predicate + "→" + triplet.object);
+        if (mind_->connect(triplet.subject, triplet.predicate, triplet.object)) {
+            log("[distill]   triplet: " + triplet.subject + "→" +
+                triplet.predicate + "→" + triplet.object);
         }
     }
 }
+
+// ── distill_session ───────────────────────────────────────────────────────────
 
 DistillResult NativeDistiller::distill_session(
     const std::string& session_id,
@@ -258,36 +383,55 @@ DistillResult NativeDistiller::distill_session(
 
     // 5. Get turn range for episode
     int start_turn = turns.empty() ? 0 : turns.front().turn_index;
-    int end_turn = turns.empty() ? 0 : turns.back().turn_index;
+    int end_turn   = turns.empty() ? 0 : turns.back().turn_index;
 
-    // 6. Create dialogue episode
-    int64_t episode_id = mind_.store().create_dialogue_episode(
-        session_id,
-        "Distillation " + std::to_string(std::chrono::duration_cast<std::chrono::seconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count()),
-        start_turn,
-        "distillation",
-        realm
-    );
+    // 6. Create episode record
+    int64_t episode_id = 0;
+#ifdef CHITTA_FIELD_AVAILABLE
+    if (field_store_) {
+        // Store episode as a "episode" kind memory with metadata
+        std::ostringstream ep_content;
+        ep_content << "[episode] session=" << session_id
+                   << " turns=" << start_turn << "-" << end_turn
+                   << " realm=" << realm;
+        try {
+            episode_id = static_cast<int64_t>(
+                field_store_->remember("episode", realm, ep_content.str(),
+                                       {}, 1.0f, 0.0f));
+        } catch (...) {}
+    } else
+#endif
+    if (mind_) {
+        episode_id = mind_->store().create_dialogue_episode(
+            session_id,
+            "Distillation " + std::to_string(
+                std::chrono::duration_cast<std::chrono::seconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count()),
+            start_turn,
+            "distillation",
+            realm
+        );
+        if (episode_id > 0) {
+            std::ostringstream sql;
+            sql << "UPDATE dialogue_episode SET end_turn = " << end_turn
+                << ", turn_count = " << (end_turn - start_turn + 1)
+                << ", outcome = 'completed' WHERE id = " << episode_id;
+            mind_->store().execute_raw(sql.str());
+        }
+    }
 
     if (episode_id > 0) {
-        // Set end_turn
-        std::ostringstream sql;
-        sql << "UPDATE dialogue_episode SET end_turn = " << end_turn
-            << ", turn_count = " << (end_turn - start_turn + 1)
-            << ", outcome = 'completed' WHERE id = " << episode_id;
-        mind_.store().execute_raw(sql.str());
         result.episode_id = episode_id;
         log("[distill]   Episode: " + std::to_string(episode_id) +
             " (turns " + std::to_string(start_turn) + "-" + std::to_string(end_turn) + ")");
     }
 
     // 7. Call opencode for distillation
-    log("[distill] Calling OpenCode (" + config_.model + ")...");
+    log("[distill] Calling opencode (" + config_.model + ")...");
     auto llm_output = call_opencode(prompt);
 
     if (llm_output.empty()) {
-        result.error = "No result from OpenCode";
+        result.error = "No result from opencode";
         return result;
     }
 
@@ -300,7 +444,8 @@ DistillResult NativeDistiller::distill_session(
     result.triplets_created = static_cast<int>(ssl_result.triplets.size());
 
     log("[distill] Session " + session_id + ": Done (+" +
-        std::to_string(result.learnings_stored) + " learnings, " +
+        std::to_string(result.learnings_stored) + " new, " +
+        std::to_string(result.learnings_deduped) + " deduped, " +
         std::to_string(result.triplets_created) + " triplets, " +
         std::to_string(result.citations_linked) + " citations)");
 

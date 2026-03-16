@@ -857,3 +857,30 @@
             {"domain", domain}
         });
     }
+
+
+    DuckDBToolResult tool_distill_set_model(const json& params) {
+        std::string model = params.value("model", "");
+        if (model.empty()) {
+            return DuckDBToolResult::error("model is required");
+        }
+
+        std::string prev = get_distill_model();
+        set_distill_model(model);
+
+        if (params.contains("enabled")) {
+            bool en = params["enabled"].get<bool>();
+            set_distill_enabled(en);
+        }
+
+        std::ostringstream ss;
+        ss << "Distillation model updated: " << prev << " -> " << model << "\n";
+        ss << "Enabled: " << (get_distill_enabled() ? "yes" : "no") << "\n";
+        ss << "Takes effect on the next distillation run.";
+
+        return DuckDBToolResult::ok(ss.str(), {
+            {"previous_model", prev},
+            {"model", model},
+            {"enabled", get_distill_enabled()}
+        });
+    }
