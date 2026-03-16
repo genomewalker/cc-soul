@@ -1729,6 +1729,7 @@ section {
   color: var(--ash-300);
   overflow-x: auto;
   margin: var(--space-3) 0;
+  white-space: pre;
 }
 
 .command { color: var(--sandal-300); }
