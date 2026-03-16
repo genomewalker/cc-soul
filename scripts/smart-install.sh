@@ -701,11 +701,15 @@ After=default.target
 
 [Service]
 Type=simple
+Environment="PATH=$HOME/.bun/bin:$HOME/.local/bin:$HOME/.claude/bin:/usr/local/bin:/usr/bin:/bin"
 ExecStart=$BIN_DIR/chittad daemon --path $MIND_PATH --foreground --no-autonomous --distill-interval 60 --no-enrich
 Restart=always
-RestartSec=5
-StandardOutput=journal
-StandardError=journal
+RestartSec=10
+KillMode=mixed
+TimeoutStartSec=120
+TimeoutStopSec=30
+StandardOutput=append:/tmp/chittad.log
+StandardError=append:/tmp/chittad.log
 
 [Install]
 WantedBy=default.target
