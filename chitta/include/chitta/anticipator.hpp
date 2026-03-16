@@ -13,6 +13,8 @@
 #include "narrative.hpp"
 #ifdef CHITTA_FIELD_AVAILABLE
 #include "field_store.hpp"
+#else
+namespace chitta { class FieldStore; }
 #endif
 #include <nlohmann/json.hpp>
 #include <string>
@@ -27,17 +29,23 @@ using json = nlohmann::json;
 
 class Anticipator {
 public:
+    // New constructor: FieldStore-first, DuckDB optional (for migration)
+    Anticipator(FieldStore* field_store, NarrativeEngine* narrative,
+                DuckDBStore* legacy_store = nullptr)
+        : field_store_(field_store), narrative_(narrative), store_(legacy_store) {}
+
+    // Legacy constructor: DuckDB-first (deprecated, for backward compat)
     Anticipator(DuckDBStore* store, NarrativeEngine* narrative)
         : store_(store), narrative_(narrative) {}
 
-#ifdef CHITTA_FIELD_AVAILABLE
     void set_field_store(FieldStore* fs) { field_store_ = fs; }
-#endif
+    void set_legacy_store(DuckDBStore* s) { store_ = s; }
 
     // Generate anticipation candidates for a session
     // Calls rule-based and sequence-based generators
     // Returns number of candidates generated
     size_t generate(const std::string& session_id) {
+        if (!store_) return 0;  // DuckDB needed for event log + candidates
         size_t count = 0;
 
         // Get current session state from narrative engine
@@ -56,6 +64,7 @@ public:
     // Adjust annoyance gate parameters based on current work mode
     // Call this before filter() to adapt gate to context
     void adjust_gate_for_mode(const std::string& session_id) {
+        if (!store_) return;
         WorkMode mode = narrative_->current_mode(session_id);
 
         float confidence_floor;
@@ -108,6 +117,7 @@ public:
     // Returns candidates that pass the gate (up to max)
     // Note: Automatically calls adjust_gate_for_mode() for state-adaptive behavior
     std::vector<AnticipationCandidate> filter(const std::string& session_id, size_t max = 2) {
+        if (!store_) return {};
         // Adjust gate for current mode before filtering
         adjust_gate_for_mode(session_id);
 
@@ -132,6 +142,7 @@ public:
 
     // Record the outcome of a surfaced prediction
     void record_outcome(int64_t candidate_id, bool correct) {
+        if (!store_) return;
         std::string outcome = correct ? "correct" : "incorrect";
         store_->candidate_resolve(candidate_id, outcome);
 
@@ -143,11 +154,9 @@ public:
     }
 
 private:
-    DuckDBStore* store_;
+    DuckDBStore* store_ = nullptr;
     NarrativeEngine* narrative_;
-#ifdef CHITTA_FIELD_AVAILABLE
     FieldStore* field_store_ = nullptr;
-#endif
 
     // Rule-based generator: switch on current WorkMode
     size_t generate_rule_based(const std::string& session_id, WorkMode mode, float mode_confidence) {
