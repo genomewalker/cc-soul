@@ -330,32 +330,46 @@ std::string default_enrich_script() {
 // Run distillation for a single transcript using native C++ distiller
 // Returns true if distillation was successful
 // queue_triggered: if true, uses min_turns=1 (for pre-compact immediate distillation)
+// handler: used to read current distill model (settable at runtime via MCP)
 bool run_distillation(DuckDBMind& mind, const TranscriptState& state,
-                      const DistillConfig& config, bool queue_triggered = false) {
-    // Configure native distiller
+                      const DistillConfig& config,
+                      DuckDBRpcHandler* handler = nullptr,
+                      bool queue_triggered = false) {
     NativeDistillConfig native_config;
-    native_config.model = config.model;
-    native_config.timeout_secs = 150;  // Same as old shell timeout
+    // Read model from handler if available so runtime MCP changes take effect immediately
+    native_config.model = handler ? handler->get_distill_model() : config.model;
+    native_config.timeout_secs = 150;
     native_config.min_turns = config.min_turns;
     native_config.verbose = verbose_mode;
 
-    NativeDistiller distiller(mind, native_config);
+    std::unique_ptr<NativeDistiller> distiller;
 
-    // Set cancellation callback for graceful shutdown
-    // Checks every 100ms during opencode execution
-    distiller.set_cancel_callback([]() {
+#ifdef CHITTA_FIELD_AVAILABLE
+    // Use FieldStore backend if available — stores to chitta-field, includes dedup
+    FieldStore* fs = handler ? handler->get_field_store() : nullptr;
+    if (fs) {
+        auto embed_fn = [&mind](const std::string& text) -> std::vector<float> {
+            try { return mind.embedder().embed(text).data; } catch (...) {}
+            return {};
+        };
+        distiller = std::make_unique<NativeDistiller>(*fs, embed_fn, native_config);
+    }
+#endif
+    if (!distiller) {
+        distiller = std::make_unique<NativeDistiller>(mind, native_config);
+    }
+
+    distiller->set_cancel_callback([]() {
         return !daemon_running.load();
     });
 
-    // Set log callback if verbose
     if (verbose_mode) {
-        distiller.set_log_callback([](const std::string& msg) {
+        distiller->set_log_callback([](const std::string& msg) {
             std::cerr << msg << "\n";
         });
     }
 
-    // Run distillation
-    auto result = distiller.distill_session(
+    auto result = distiller->distill_session(
         state.session_id,
         state.transcript_path,
         state.realm,
@@ -370,14 +384,14 @@ bool run_distillation(DuckDBMind& mind, const TranscriptState& state,
         return false;
     }
 
-    // Update progress (using thread-safe methods)
     mind.update_transcript_progress(state.session_id, result.last_line);
     mind.mark_transcript_distilled(state.session_id);
 
     if (verbose_mode) {
         std::cerr << "[distill] Completed " << state.session_id
                   << " (line " << result.last_line << ", +"
-                  << result.learnings_stored << " learnings, "
+                  << result.learnings_stored << " new, "
+                  << result.learnings_deduped << " deduped, "
                   << result.triplets_created << " triplets)\n";
     }
 
@@ -478,6 +492,9 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
     }
 
     DuckDBRpcHandler handler(&mind);
+    // Sync initial distill model from CLI config into handler so MCP tool reads correct default
+    handler.set_distill_model(distill_config.model);
+    handler.set_distill_enabled(distill_config.enabled);
 
     // Start subconscious background processor
     // FieldStore is wired in later (async init). VakYantra is available now via mind.
@@ -673,7 +690,7 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                     for (const auto& state : transcripts) {
                         if (!daemon_running) break;
 
-                        if (run_distillation(mind, state, distill_config)) {
+                        if (run_distillation(mind, state, distill_config, &handler)) {
                             processed++;
                             distill_count++;
                         }
@@ -1754,7 +1771,7 @@ int main(int argc, char* argv[]) {
         state.realm = distill_realm;
         state.last_processed_line = 0;  // Process from beginning
 
-        bool success = run_distillation(mind, state, distill_config, false);
+        bool success = run_distillation(mind, state, distill_config, nullptr, false);
         result = success ? 0 : 1;
     } else {
         std::cerr << "Unknown command: " << command << "\n";
