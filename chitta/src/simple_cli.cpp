@@ -21,6 +21,10 @@
 #include <chitta/vak_onnx.hpp>
 #include <chitta/vak_timeout.hpp>
 #endif
+#ifdef CHITTA_FIELD_AVAILABLE
+#include <chitta/field_store.hpp>
+#include <chitta/soul_projection.hpp>
+#endif
 #include <iostream>
 #include <string>
 #include <cstring>
@@ -455,11 +459,9 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
             }
         }
         if (enrich_config.enabled) {
-            size_t pending = mind.store().count_undescribed_symbols();
             std::cerr << "[daemon] Code enrichment enabled (interval=" << enrich_config.interval_minutes
                       << "m, batch=" << enrich_config.batch_size
-                      << ", idle=" << enrich_config.idle_seconds << "s"
-                      << ", pending=" << pending << ")\n";
+                      << ", idle=" << enrich_config.idle_seconds << "s)\n";
         }
     }
 
@@ -479,12 +481,55 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
 
     // Start subconscious background processor
     Subconscious subconscious(&mind, subconscious_config);
+
+#ifdef CHITTA_FIELD_AVAILABLE
+    // Async init: chitta-field on NFS replays a large op log on open.
+    // Do this in a background thread so the RPC loop starts immediately.
+    std::unique_ptr<FieldStore>        field_store;
+    std::unique_ptr<ChittaFieldHandler> cf_handler;
+    std::unique_ptr<SoulProjection>    soul_proj;
+    // Atomic raw pointer: safe to read from maintenance/queue threads.
+    // Lifetime managed by field_store unique_ptr (main thread only).
+    std::atomic<FieldStore*>           field_store_raw{nullptr};
+
+    struct FieldInitResult {
+        std::unique_ptr<FieldStore>        store;
+        std::unique_ptr<ChittaFieldHandler> handler;
+        std::unique_ptr<SoulProjection>    proj;
+    };
+    std::unique_ptr<FieldInitResult> field_pending;
+    std::atomic<bool> field_init_done{false};
+
+    std::thread field_init_thread([&]() {
+        try {
+            auto r = std::make_unique<FieldInitResult>();
+            r->store   = std::make_unique<FieldStore>(mind_path + "/chitta-field",
+                                                      mind_path + "/chitta-field");
+            r->handler = std::make_unique<ChittaFieldHandler>(r->store.get());
+            // SoulProjection replay is skipped here — it reads the full NFS op log
+            // synchronously and causes D-state. The projection starts empty and
+            // rebuilds incrementally from new events.
+            r->proj    = std::make_unique<SoulProjection>(mind.store().db(), r->store.get());
+            r->handler->set_soul_projection(r->proj.get());
+            field_pending.reset(r.release());
+            field_init_done.store(true, std::memory_order_release);
+            std::cerr << "[soul] chitta-field active\n";
+        } catch (const std::exception& e) {
+            std::cerr << "[daemon] WARNING: chitta-field store unavailable: " << e.what() << "\n";
+            field_init_done.store(true, std::memory_order_release);
+        }
+    });
+    field_init_thread.detach();
+    std::cerr << "[soul] chitta-field initializing async (NFS replay in background)\n";
+#endif
+
     subconscious.start();
     handler.set_subconscious(&subconscious);
 
     // Start sadhana manager for autonomous agents
     SadhanaManager sadhana_manager(mind.store());
     handler.set_sadhana_manager(&sadhana_manager);
+    // Note: sadhana_manager.set_field_store() called later when field init completes
     std::cerr << "[daemon] Sadhana manager initialized\n";
 
     // Auto-pause all running sadhanas if --no-autonomous
@@ -552,23 +597,6 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
     std::cerr << "[daemon] Started (socket=" << socket_path
               << ", interval=" << interval << "s, pid=" << getpid() << ")\n";
 
-    // Initial health check to populate cache
-    auto initial_health = mind.health();
-    std::cerr << "[daemon] Initial stats: " << initial_health.total_nodes << " memories, "
-              << mind.triplet_count() << " triplets\n";
-
-    // Check for DB bloat at startup
-    double bloat = mind.store().bloat_ratio();
-    size_t file_mb = mind.store().file_size_bytes() / (1024 * 1024);
-    size_t data_mb = mind.store().data_size_bytes() / (1024 * 1024);
-    if (bloat >= 4.0) {
-        std::cerr << "[daemon] WARNING: DB bloat detected (" << std::fixed << std::setprecision(1)
-                  << bloat << "x, file=" << file_mb << "MB, data=" << data_mb << "MB)\n";
-        if (bloat >= 10.0) {
-            std::cerr << "[daemon] CRITICAL: Consider compacting before continuing.\n";
-        }
-    }
-
     // Maintenance thread - sync and apply decay periodically
     std::atomic<size_t> cycle_count{0};
     std::thread maintenance([&]() {
@@ -604,60 +632,22 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                 cycle_count++;
 
                 try {
-                    // Apply decay and prune weak nodes
-                    size_t decayed = mind.tick();
-
-                    // Sync to disk
-                    mind.sync();
-
-                    // Rebuild vector index if needed (deferred rebuild for stability)
-                    if (mind.store().needs_reindex()) {
-                        std::cerr << "[maint] Rebuilding vector index...\n";
-                        mind.store().rebuild_vector_index();
-                    }
-
-                    // Auto-distill episode patterns into wisdom (every 10 cycles)
-                    if (cycle_count % 10 == 0) {
-                        size_t distilled = mind.auto_distill_episodes(5);
-                        if (distilled > 0) {
-                            std::cerr << "[maint] Auto-distilled " << distilled
-                                      << " episode patterns into wisdom\n";
+#ifdef CHITTA_FIELD_AVAILABLE
+                    FieldStore* fs = field_store_raw.load(std::memory_order_acquire);
+                    if (fs) {
+                        fs->flush();
+                        auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::system_clock::now().time_since_epoch()).count();
+                        auto [demoted, pruned] = fs->run_demotion(now_ms);
+                        if (verbose_mode && (demoted > 0 || pruned > 0)) {
+                            std::cerr << "[maint] Cycle " << cycle_count
+                                      << ": demoted=" << demoted
+                                      << ", pruned=" << pruned << "\n";
                         }
                     }
-
-                    // Cache break pattern detection (every 10 cycles)
-                    if (cycle_count % 10 == 0) {
-                        try {
-                            auto r = mind.store().execute_sql_query(
-                                "SELECT COUNT(*) FROM session_token_usage "
-                                "WHERE cache_hit_ratio < 0.5 AND n_messages > 3 "
-                                "AND created_at >= " + std::to_string(
-                                    std::chrono::duration_cast<std::chrono::seconds>(
-                                        std::chrono::system_clock::now().time_since_epoch()
-                                    ).count() - 86400));
-                            if (r.success && !r.rows.empty() && !r.rows[0].empty()) {
-                                int64_t breaks = 0;
-                                try { breaks = std::stoll(r.rows[0][0]); } catch (...) {}
-                                if (breaks >= 3) {
-                                    std::string content = "[cache:pattern] " + std::to_string(breaks) +
-                                        " cache breaks detected in last 24h. Systematic issue likely — "
-                                        "review hook outputs, tool registrations, and model switching patterns.";
-                                    mind.remember(content, NodeType::Wisdom, "brahman",
-                                                  RealmVisibility::Private, 0.9f);
-                                }
-                            }
-                        } catch (...) {}
-                    }
-
-                    // Update health cache (for fast health_check/soul_context)
-                    auto health = mind.health();
-
+#endif
                     if (verbose_mode) {
-                        std::cerr << "[maint] Cycle " << cycle_count
-                                  << ": " << health.total_nodes << " nodes"
-                                  << ", " << health.active_nodes << " active"
-                                  << ", " << decayed << " decayed"
-                                  << ", status=" << health.status() << "\n";
+                        std::cerr << "[maint] Cycle " << cycle_count << " complete\n";
                     }
                 } catch (const std::exception& e) {
                     std::cerr << "[maint] Cycle failed: " << e.what() << "\n";
@@ -878,6 +868,22 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
     std::unordered_map<std::string, std::chrono::steady_clock::time_point> session_last_distill;
     std::mutex session_accum_mutex;  // Protect the maps
 
+    // Helper: embed text via mind's yantra if available, return empty vector otherwise
+    auto embed_text = [&mind](const std::string& text) -> std::vector<float> {
+        try {
+            Vector emb = mind.embedder().embed(text);
+            return emb.data;
+        } catch (...) {}
+        return {};
+    };
+
+    // Helper: map category name to chitta-field memory kind
+    auto category_to_kind = [](const std::string& cat) -> std::string {
+        if (cat == "episode") return "episode";
+        if (cat == "belief")  return "belief";
+        return "wisdom";
+    };
+
     std::thread queue_processor([&]() {
         while (daemon_running) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -901,7 +907,7 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
 
             if (lines.empty()) continue;
 
-            // Process each queued request
+            // Process each queued request — all writes go to chitta-field
             for (const auto& line : lines) {
                 if (!daemon_running) break;
 
@@ -910,356 +916,237 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
                     std::string tool = j.value("tool", "");
                     auto args = j.value("args", json::object());
 
+#ifdef CHITTA_FIELD_AVAILABLE
+                    FieldStore* field_store = field_store_raw.load(std::memory_order_acquire);
+                    if (!field_store) {
+                        if (verbose_mode)
+                            std::cerr << "[queue] chitta-field not ready, dropping: " << tool << "\n";
+                        continue;
+                    }
+#endif
+
                     if (tool == "observe") {
                         std::string category = args.value("category", "wisdom");
                         std::string title = args.value("title", "");
                         std::string content = args.value("content", "");
                         if (!content.empty()) {
-                            NodeType type = NodeType::Wisdom;
-                            if (category == "episode") type = NodeType::Episode;
-                            else if (category == "belief") type = NodeType::Belief;
-                            // Derive confidence from category (or use explicit override)
                             float confidence = args.contains("confidence")
                                 ? args.value("confidence", 0.8f)
                                 : category_to_confidence(category);
                             std::string full_text = title.empty() ? content : title + "\n" + content;
-                            mind.remember(full_text, type, "brahman", RealmVisibility::Private, confidence);
+#ifdef CHITTA_FIELD_AVAILABLE
+                            field_store->remember(category_to_kind(category), "brahman",
+                                                  full_text, embed_text(full_text),
+                                                  confidence, 0.01f);
+#endif
                             queue_count++;
                         }
                     } else if (tool == "strengthen") {
                         std::string id_str = args.value("id", "");
-                        double amount = args.value("amount", 0.1);
+                        float amount = static_cast<float>(args.value("amount", 0.1));
                         if (!id_str.empty()) {
                             try {
-                                int64_t db_id = std::stoll(id_str);
-                                mind.store().strengthen(db_id, static_cast<float>(amount));
+                                uint64_t cf_id = std::stoull(id_str);
+#ifdef CHITTA_FIELD_AVAILABLE
+                                field_store->strengthen(cf_id, amount);
+#endif
                                 queue_count++;
-                            } catch (...) {
-                                // Non-numeric ID: search by content prefix
-                                auto results = mind.recall(id_str, 1);
-                                if (!results.empty() && results[0].similarity > 0.9f) {
-                                    mind.store().strengthen(static_cast<int64_t>(results[0].id.low), static_cast<float>(amount));
-                                    queue_count++;
-                                }
-                            }
-                        }
-                    } else if (tool == "ledger_save") {
-                        std::string session_id = args.value("session_id", "");
-                        std::string project = args.value("project", "");
-                        std::string mood = args.value("mood", "working");
-                        std::string snapshot = args.value("snapshot", "");
-                        if (!session_id.empty()) {
-                            LedgerEntry entry;
-                            entry.session_id = session_id;
-                            entry.project = project;
-                            entry.mood = mood;
-                            entry.snapshot = snapshot;
-                            // Extract all session state fields (JSON arrays → strings)
-                            if (args.contains("active_files")) {
-                                entry.active_files = args["active_files"].dump();
-                            }
-                            if (args.contains("decisions")) {
-                                entry.decisions = args["decisions"].dump();
-                            }
-                            if (args.contains("todos")) {
-                                entry.todos = args["todos"].dump();
-                            }
-                            if (args.contains("blockers")) {
-                                entry.blockers = args["blockers"].dump();
-                            }
-                            if (args.contains("discoveries")) {
-                                entry.discoveries = args["discoveries"].dump();
-                            }
-                            if (args.contains("next_steps")) {
-                                entry.next_steps = args["next_steps"].dump();
-                            }
-                            mind.store().save_ledger(entry);
-                            queue_count++;
+                            } catch (...) {}
                         }
                     } else if (tool == "connect") {
                         std::string subj = args.value("subject", "");
                         std::string pred = args.value("predicate", "");
                         std::string obj = args.value("object", "");
                         if (!subj.empty() && !pred.empty() && !obj.empty()) {
-                            mind.connect(subj, pred, obj);
+#ifdef CHITTA_FIELD_AVAILABLE
+                            field_store->add_triplet(subj, pred, obj);
+#endif
                             queue_count++;
                         }
-                    } else if (tool == "transcript_register") {
-                        std::string session_id = args.value("session_id", "");
-                        std::string path = args.value("transcript_path", "");
-                        std::string realm = args.value("realm", "brahman");
-                        if (!path.empty()) {
-                            mind.store().register_transcript(session_id, path, realm);
+                    } else if (tool == "curiosity_note_gap") {
+                        std::string gap = args.value("gap", "");
+                        if (!gap.empty()) {
+                            std::string content = "[curiosity] " + gap;
+#ifdef CHITTA_FIELD_AVAILABLE
+                            field_store->remember("episode", "brahman", content,
+                                                  embed_text(content), 0.7f, 0.0f);
+#endif
+                            queue_count++;
+                        }
+                    } else if (tool == "store_policy") {
+                        std::string policy_type = args.value("type", "");
+                        std::string content = args.value("content", "");
+                        float confidence = args.value("confidence", 0.5f);
+                        if (!policy_type.empty() && !content.empty()) {
+                            std::string full = "[policy:" + policy_type + "] " + content;
+#ifdef CHITTA_FIELD_AVAILABLE
+                            field_store->remember("wisdom", "brahman", full,
+                                                  embed_text(full), confidence, 0.0f);
+#endif
+                            queue_count++;
+                        }
+                    } else if (tool == "store_claim") {
+                        std::string subject = args.value("subject", "");
+                        std::string predicate = args.value("predicate", "");
+                        std::string object_norm = args.value("object", "");
+                        if (!subject.empty() && !predicate.empty() && !object_norm.empty()) {
+#ifdef CHITTA_FIELD_AVAILABLE
+                            field_store->add_triplet(subject, predicate, object_norm);
+#endif
                             queue_count++;
                         }
                     } else if (tool == "learn_outcome") {
-                        // Handle both hyphen and underscore param names
                         std::string id_str = args.contains("memory-id")
                             ? args.value("memory-id", "")
                             : args.value("memory_id", "");
                         std::string outcome = args.value("outcome", "");
                         std::string context = args.value("context", "");
                         if (!id_str.empty() && !outcome.empty()) {
-                            int64_t memory_id = -1;
                             try {
-                                memory_id = std::stoll(id_str);
-                            } catch (...) {
-                                // Non-numeric ID: search by content prefix
-                                auto results = mind.recall(id_str, 1);
-                                if (!results.empty() && results[0].similarity > 0.9f) {
-                                    memory_id = static_cast<int64_t>(results[0].id.low);
-                                }
-                            }
-                            if (memory_id > 0) {
-                                mind.store().record_usage_outcome(memory_id, "hook", outcome, context);
-                                if (outcome == "positive") {
-                                    mind.store().strengthen(memory_id, 0.1f);
-                                } else if (outcome == "negative") {
-                                    mind.store().weaken(memory_id, 0.15f);
-                                }
+                                uint64_t cf_id = std::stoull(id_str);
+#ifdef CHITTA_FIELD_AVAILABLE
+                                json payload = {{"outcome", outcome}, {"context", context}};
+                                field_store->emit_event("analytics", "outcome",
+                                                        id_str, payload.dump());
+                                if (outcome == "positive") field_store->strengthen(cf_id, 0.1f);
+                                else if (outcome == "negative") field_store->weaken(cf_id, 0.15f);
+#endif
                                 queue_count++;
-                            }
-                        }
-                    } else if (tool == "anticipation_success") {
-                        int64_t id = args.value("id", 0);
-                        if (id > 0) {
-                            mind.store().anticipation_success(id);
-                            queue_count++;
-                        }
-                    } else if (tool == "narrative_log") {
-                        std::string session_id = args.value("session_id", "");
-                        std::string kind_str = args.value("kind", "user_message");
-                        std::string summary = args.value("summary", "");
-                        std::string tool_name = args.value("tool_name", "");
-                        bool success = args.value("success", true);
-                        if (!session_id.empty() && !summary.empty()) {
-                            SessionEvent event;
-                            event.session_id = session_id;
-                            event.kind = string_to_session_event_kind(kind_str);
-                            event.summary = summary;
-                            event.tool_name = tool_name;
-                            event.success = success;
-                            mind.store().event_log_append(event);
-                            if (mind.narrative()) {
-                                mind.narrative()->evaluate(session_id, event);
-                            }
-                            queue_count++;
-                        }
-                    } else if (tool == "calibration_record") {
-                        std::string domain = args.value("domain", "");
-                        bool success = args.value("success", true);
-                        if (!domain.empty()) {
-                            mind.store().calibration_record(domain, success);
-                            queue_count++;
-                        }
-                    } else if (tool == "curiosity_note_gap") {
-                        std::string gap = args.value("gap", "");
-                        if (!gap.empty()) {
-                            // Create memory with "gap" and "unresolved" tags
-                            std::string content = "[curiosity] " + gap;
-                            mind.remember(content, NodeType::Episode, "brahman",
-                                          RealmVisibility::Private, 0.7f);
-                            queue_count++;
-                        }
-                    } else if (tool == "habit_observe") {
-                        std::string trigger = args.value("trigger", "");
-                        std::string response = args.value("response", "");
-                        std::string realm = args.value("realm", "brahman");
-                        if (!trigger.empty() && !response.empty()) {
-                            mind.store().habit_observe(trigger, response, realm);
-                            queue_count++;
+                            } catch (...) {}
                         }
                     } else if (tool == "session_register") {
                         std::string sid = args.value("session_id", "");
-                        std::string realm = args.value("realm", "brahman");
-                        int32_t pid = args.value("pid", 0);
-                        std::string metadata = args.value("metadata", "{}");
                         if (!sid.empty()) {
-                            mind.store().session_register(sid, realm, pid, metadata);
+#ifdef CHITTA_FIELD_AVAILABLE
+                            field_store->emit_event("session", "register", sid, args.dump());
+#endif
                             queue_count++;
                         }
                     } else if (tool == "session_heartbeat") {
                         std::string sid = args.value("session_id", "");
-                        std::string metadata = args.value("metadata", "");
                         if (!sid.empty()) {
-                            mind.store().session_heartbeat(sid, metadata);
+#ifdef CHITTA_FIELD_AVAILABLE
+                            field_store->emit_event("session", "heartbeat", sid,
+                                                    args.value("metadata", "{}"));
+#endif
                             queue_count++;
                         }
                     } else if (tool == "session_deregister") {
                         std::string sid = args.value("session_id", "");
                         if (!sid.empty()) {
-                            mind.store().session_deregister(sid);
+#ifdef CHITTA_FIELD_AVAILABLE
+                            field_store->emit_event("session", "deregister", sid, "{}");
+#endif
                             queue_count++;
                         }
-                    } else if (tool == "distill_trigger") {
-                        // Immediate distillation trigger (used by PreCompact hook)
-                        std::string sid = args.value("session_id", "");
-                        if (!sid.empty() && distill_config.enabled) {
-                            auto state_opt = mind.store().get_transcript(sid);
-                            if (state_opt) {
-                                std::cerr << "[queue] Pre-compact distillation triggered for " << sid << "\n";
-                                // Use queue_triggered=true for min_turns=1
-                                bool success = run_distillation(mind, *state_opt, distill_config, true);
-                                if (success) {
-                                    queue_distill_count++;
-                                    std::cerr << "[queue] Pre-compact distillation succeeded for " << sid
-                                              << " (total=" << queue_distill_count << ")\n";
-                                } else {
-                                    std::cerr << "[queue] Pre-compact distillation failed for " << sid
-                                              << " (will not retry)\n";
-                                }
-                                queue_count++;
-                            } else {
-                                std::cerr << "[queue] No transcript found for session " << sid << "\n";
-                            }
+                    } else if (tool == "transcript_register") {
+                        std::string session_id = args.value("session_id", "");
+                        std::string path = args.value("transcript_path", "");
+                        if (!path.empty()) {
+#ifdef CHITTA_FIELD_AVAILABLE
+                            field_store->emit_event("transcript", "register",
+                                                    session_id, args.dump());
+#endif
+                            queue_count++;
+                        }
+                    } else if (tool == "ledger_save") {
+                        std::string session_id = args.value("session_id", "");
+                        if (!session_id.empty()) {
+#ifdef CHITTA_FIELD_AVAILABLE
+                            field_store->emit_event("admin", "ledger_save",
+                                                    session_id, args.dump());
+#endif
+                            queue_count++;
+                        }
+                    } else if (tool == "narrative_log") {
+                        std::string session_id = args.value("session_id", "");
+                        std::string summary = args.value("summary", "");
+                        if (!session_id.empty() && !summary.empty()) {
+#ifdef CHITTA_FIELD_AVAILABLE
+                            field_store->emit_event("analytics", "narrative_log",
+                                                    session_id, args.dump());
+#endif
+                            queue_count++;
+                        }
+                    } else if (tool == "calibration_record") {
+                        std::string domain = args.value("domain", "");
+                        if (!domain.empty()) {
+#ifdef CHITTA_FIELD_AVAILABLE
+                            field_store->emit_event("analytics", "calibration",
+                                                    domain, args.dump());
+#endif
+                            queue_count++;
+                        }
+                    } else if (tool == "habit_observe") {
+                        std::string trigger = args.value("trigger", "");
+                        std::string response = args.value("response", "");
+                        if (!trigger.empty() && !response.empty()) {
+#ifdef CHITTA_FIELD_AVAILABLE
+                            field_store->emit_event("narrative", "habit",
+                                                    trigger, args.dump());
+#endif
+                            queue_count++;
+                        }
+                    } else if (tool == "anticipation_success") {
+                        int64_t id = args.value("id", (int64_t)0);
+                        if (id > 0) {
+#ifdef CHITTA_FIELD_AVAILABLE
+                            field_store->emit_event("narrative", "anticipation_success",
+                                                    std::to_string(id), "{}");
+#endif
+                            queue_count++;
                         }
                     } else if (tool == "store_turn") {
-                        // Store conversation turn for lossless memory
                         std::string session_id = args.value("session_id", "");
-                        std::string role = args.value("role", "");
                         std::string content = args.value("content", "");
-                        int turn_index = args.value("turn_index", -1);
-                        if (!session_id.empty() && !role.empty() && !content.empty()) {
-                            DuckDBStore::ConversationTurn turn;
-                            turn.session_id = session_id;
-                            turn.role = role;
-                            turn.content = content;
-                            turn.turn_index = turn_index >= 0 ? turn_index : 0;
-                            turn.token_count = static_cast<int>(content.size() / 4);  // Rough token estimate
-                            turn.realm = args.value("realm", "brahman");
-                            turn.intent_type = args.value("intent_type", "");
-                            turn.tools_used = args.value("tools_used", "[]");
-                            turn.files_touched = args.value("files_touched", "[]");
-                            turn.has_error = args.value("has_error", false);
-                            mind.store().store_conversation_turn(turn);
-                            queue_count++;
-
-                            // Token-triggered distillation: accumulate content and check threshold
-                            if (distill_config.enabled && distill_config.token_trigger_chars > 0) {
-                                std::lock_guard<std::mutex> lock(session_accum_mutex);
-                                session_content_accum[session_id] += static_cast<int64_t>(content.size());
-
-                                if (session_content_accum[session_id] >= distill_config.token_trigger_chars) {
-                                    auto now = std::chrono::steady_clock::now();
-                                    auto cooldown = std::chrono::seconds(distill_config.cooldown_seconds);
-                                    auto& last = session_last_distill[session_id];
-
-                                    if (now - last >= cooldown) {
-                                        // Look up transcript for this session and trigger distillation
-                                        auto state_opt = mind.store().get_transcript(session_id);
-                                        if (state_opt) {
-                                            std::cerr << "[queue] Token-triggered distillation for " << session_id
-                                                      << " (" << session_content_accum[session_id] << " chars)\n";
-                                            bool success = run_distillation(mind, *state_opt, distill_config, false);
-                                            if (success) {
-                                                queue_distill_count++;
-                                            }
-                                        }
-                                        last = now;
-                                        session_content_accum[session_id] = 0;
-                                    }
-                                }
-                            }
-                        }
-                    } else if (tool == "store_claim") {
-                        // Store semantic claim
-                        std::string subject = args.value("subject", "");
-                        std::string predicate = args.value("predicate", "");
-                        std::string object_norm = args.value("object", "");
-                        if (!subject.empty() && !predicate.empty() && !object_norm.empty()) {
-                            DuckDBStore::Claim claim;
-                            claim.subject = subject;
-                            claim.predicate = predicate;
-                            claim.object_norm = object_norm;
-                            claim.scope_key = args.value("scope", "session");
-                            claim.polarity = args.value("polarity", 1);
-                            claim.confidence = args.value("confidence", 0.7f);
-                            claim.source_class = args.value("source", "hook");
-                            mind.store().store_claim(claim);
-                            queue_count++;
-                        }
-                    } else if (tool == "store_policy") {
-                        // Store policy memory
-                        std::string policy_type = args.value("type", "");
-                        std::string content = args.value("content", "");
-                        if (!policy_type.empty() && !content.empty()) {
-                            DuckDBStore::PolicyMemory policy;
-                            policy.policy_type = policy_type;
-                            policy.content = content;
-                            policy.scope_key = args.value("scope", "session");
-                            policy.state = args.value("state", "ephemeral");
-                            policy.confidence = args.value("confidence", 0.5f);
-                            mind.store().store_policy(policy);
+                        if (!session_id.empty() && !content.empty()) {
+#ifdef CHITTA_FIELD_AVAILABLE
+                            field_store->emit_event("transcript", "turn",
+                                                    session_id, args.dump());
+#endif
                             queue_count++;
                         }
                     } else if (tool == "store_relationship_event") {
-                        // Store relationship event (correction, praise, etc.)
                         std::string event_type = args.value("event_type", "");
-                        std::string content = args.value("content", "");
                         std::string session_id = args.value("session_id", "");
-                        if (!event_type.empty() && !content.empty()) {
-                            DuckDBStore::RelationshipEvent event;
-                            event.session_id = session_id;
-                            event.event_type = event_type;
-                            event.content = content;
-                            event.context = args.value("context", "");
-                            mind.store().store_relationship_event(event);
+                        if (!event_type.empty()) {
+#ifdef CHITTA_FIELD_AVAILABLE
+                            field_store->emit_event("relationship", event_type,
+                                                    session_id, args.dump());
+#endif
                             queue_count++;
                         }
                     } else if (tool == "log_session_tokens") {
                         std::string sid = args.value("session_id", "");
-                        int64_t input_tok = args.value("total_input_tokens", (int64_t)0);
-                        int64_t output_tok = args.value("total_output_tokens", (int64_t)0);
-                        int64_t cache_read = args.value("cache_read_tokens", (int64_t)0);
-                        int64_t cache_create = args.value("cache_creation_tokens", (int64_t)0);
-                        int n_msgs = args.value("n_messages", 0);
-
-                        if (!sid.empty() && n_msgs > 0) {
-                            mind.store().log_session_tokens(
-                                sid, input_tok, output_tok,
-                                cache_read, cache_create, n_msgs);
+                        if (!sid.empty()) {
+#ifdef CHITTA_FIELD_AVAILABLE
+                            field_store->emit_event("analytics", "session_tokens",
+                                                    sid, args.dump());
+#endif
                             queue_count++;
                         }
                     } else if (tool == "log_correction_outcome") {
                         std::string sid = args.value("session_id", "");
-                        int64_t mem_id = args.value("correction_memory_id", (int64_t)0);
-                        bool detected = args.value("correction_detected", false);
-                        std::string text = args.value("correction_text", "");
-                        if (!sid.empty() && mem_id > 0) {
-                            mind.store().log_correction_outcome(sid, mem_id, detected, text);
+                        if (!sid.empty()) {
+#ifdef CHITTA_FIELD_AVAILABLE
+                            field_store->emit_event("analytics", "correction_outcome",
+                                                    sid, args.dump());
+#endif
                             queue_count++;
                         }
                     } else if (tool == "log_exposure") {
                         std::string session_id = args.value("session_id", "");
-                        int turn_id = args.value("turn_id", 0);
-                        std::string hook_type = args.value("hook_type", "");
-
-                        std::vector<int64_t> memory_ids;
-                        if (args.contains("memory_ids") && args["memory_ids"].is_array()) {
-                            for (const auto& id : args["memory_ids"]) {
-                                memory_ids.push_back(id.get<int64_t>());
-                            }
-                        }
-
-                        if (!session_id.empty() && !memory_ids.empty()) {
-                            std::vector<int> ranks;
-                            if (args.contains("ranks") && args["ranks"].is_array()) {
-                                for (const auto& r : args["ranks"]) ranks.push_back(r.get<int>());
-                            }
-                            std::vector<double> resonance_scores;
-                            if (args.contains("resonance_scores") && args["resonance_scores"].is_array()) {
-                                for (const auto& s : args["resonance_scores"]) resonance_scores.push_back(s.get<double>());
-                            }
-                            std::vector<int> token_costs;
-                            if (args.contains("token_costs") && args["token_costs"].is_array()) {
-                                for (const auto& t : args["token_costs"]) token_costs.push_back(t.get<int>());
-                            }
-
-                            mind.store().log_exposures_batch(
-                                session_id, turn_id, hook_type, memory_ids, ranks,
-                                {}, resonance_scores, token_costs);
+                        if (!session_id.empty()) {
+#ifdef CHITTA_FIELD_AVAILABLE
+                            field_store->emit_event("analytics", "exposure",
+                                                    session_id, args.dump());
+#endif
                             queue_count++;
                         }
+                    } else if (tool == "distill_trigger") {
+                        // distillation disabled (--no-distill); log and skip
+                        if (verbose_mode)
+                            std::cerr << "[queue] distill_trigger ignored (distillation disabled)\n";
                     }
                 } catch (const std::exception& e) {
                     if (verbose_mode) {
@@ -1284,8 +1171,7 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
     });
 
     // Watchdog callback - trip circuit breaker on stuck embedding operations
-    pool.set_watchdog_callback([&mind](const std::string& method, int64_t secs) {
-        // Only trip circuit breaker for embedding-related operations
+    pool.set_watchdog_callback([&mind](const std::string& method, [[maybe_unused]] int64_t secs) {
         if (method.find("search_symbols") != std::string::npos ||
             method.find("smart_context") != std::string::npos ||
             method.find("recall") != std::string::npos ||
@@ -1302,6 +1188,23 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
     // Main loop - handle socket I/O (never blocks on RPC)
     auto last_stats = std::chrono::steady_clock::now();
     while (daemon_running) {
+        // 0. Wire up chitta-field once async background init completes
+#ifdef CHITTA_FIELD_AVAILABLE
+        if (!field_store && field_init_done.load(std::memory_order_acquire) && field_pending) {
+            field_store  = std::move(field_pending->store);
+            cf_handler   = std::move(field_pending->handler);
+            soul_proj    = std::move(field_pending->proj);
+            field_pending.reset();
+            field_store_raw.store(field_store.get(), std::memory_order_release);
+            subconscious.set_field_store(field_store.get());
+            mind.set_field_store(field_store.get());
+            handler.set_field_handler(cf_handler.get());
+            sadhana_manager.set_field_store(field_store.get());
+            std::cerr << "[daemon] chitta-field active: " << field_store->memory_count()
+                      << " memories, " << field_store->symbol_count() << " symbols\n";
+        }
+#endif
+
         // 1. Poll for I/O (fast, non-blocking)
         auto requests = server.poll(50);  // 50ms timeout for responsiveness
 
@@ -1314,7 +1217,9 @@ int cmd_daemon(DuckDBMind& mind, int interval, const std::string& socket_path,
             }
             if (req.data == "shutdown") {
                 server.respond(req.client_fd, R"({"status":"shutting_down"})");
-                mind.sync();
+#ifdef CHITTA_FIELD_AVAILABLE
+                if (FieldStore* fs = field_store_raw.load(std::memory_order_acquire)) fs->flush();
+#endif
                 daemon_running = false;
                 continue;
             }
@@ -1788,21 +1693,21 @@ int main(int argc, char* argv[]) {
     }
 #endif
 
-    // DuckDB backend
-    DuckDBMindConfig config;
-    config.path = mind_path;
-    DuckDBMind mind(config);
-
+    // chitta-field is always present and is the primary store.
+    // DuckDB is only used for ephemeral metadata (session tracking, transcript registry).
+    // It never touches the NFS path — always in-memory.
+    DuckDBMindConfig duckdb_cfg;
+    duckdb_cfg.path = ":memory:";
+    auto mind_ptr = std::make_unique<DuckDBMind>(duckdb_cfg);
 #ifdef CHITTA_WITH_ONNX
-    if (yantra) mind.attach_yantra(yantra);
+    if (yantra) mind_ptr->attach_yantra(yantra);
 #endif
-
-    if (!mind.open()) {
-        std::cerr << "Failed to open mind at " << mind_path << "\n";
+    if (!mind_ptr->open()) {
+        std::cerr << "[daemon] Failed to open in-memory DuckDB\n";
         return 1;
     }
-
-    std::cerr << "[Backend] DuckDB (" << mind_path << ")\n";
+    std::cerr << "[Backend] chitta-field (DuckDB in-memory for session metadata)\n";
+    DuckDBMind& mind = *mind_ptr;
 
     int result = 0;
     if (command == "daemon") {

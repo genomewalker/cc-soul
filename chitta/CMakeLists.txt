@@ -434,11 +434,13 @@ add_executable(chittad
     src/socket_server.cpp
     src/socket_client.cpp
     src/subconscious.cpp
+    src/soul_controller.cpp
     src/transcript_parser.cpp
     src/ssl_parser.cpp
     src/native_distiller.cpp
     src/sadhana/brain_provider.cpp
     src/sadhana/sadhana_manager.cpp
+    src/soul_projection.cpp
 )
 target_link_libraries(chittad PRIVATE chitta duckdb_store)
 
@@ -452,6 +454,18 @@ if(EXISTS "${CHITTA_FIELD_LIB}")
     target_include_directories(chittad PRIVATE "${CHITTA_FIELD_INCLUDE}")
     target_link_libraries(chittad PRIVATE "${CHITTA_FIELD_LIB}" dl pthread)
     target_compile_definitions(chittad PRIVATE CHITTA_FIELD_AVAILABLE=1)
+
+    # Bulk import tool: DuckDB → chitta-field one-shot migration
+    add_executable(chitta_import src/import_tool.cpp)
+    target_link_libraries(chitta_import PRIVATE chitta duckdb_store "${CHITTA_FIELD_LIB}" dl pthread)
+    target_include_directories(chitta_import PRIVATE "${CHITTA_FIELD_INCLUDE}")
+    target_compile_definitions(chitta_import PRIVATE CHITTA_FIELD_AVAILABLE=1)
+    if(TARGET onnx_yantra)
+        target_link_libraries(chitta_import PRIVATE onnx_yantra)
+        target_compile_definitions(chitta_import PRIVATE CHITTA_WITH_ONNX=1)
+        message(STATUS "chitta_import: ONNX embedder enabled")
+    endif()
+    install(TARGETS chitta_import DESTINATION bin)
 else()
     message(WARNING "chitta-field lib not found at ${CHITTA_FIELD_LIB} — FieldStore unavailable")
 endif()
@@ -519,6 +533,13 @@ endif()
 
 if(TARGET duckdb_test)
     set_target_properties(duckdb_test PROPERTIES
+        BUILD_RPATH "${CHITTA_RPATH}"
+        INSTALL_RPATH "${CHITTA_RPATH}"
+    )
+endif()
+
+if(TARGET chitta_import)
+    set_target_properties(chitta_import PROPERTIES
         BUILD_RPATH "${CHITTA_RPATH}"
         INSTALL_RPATH "${CHITTA_RPATH}"
     )

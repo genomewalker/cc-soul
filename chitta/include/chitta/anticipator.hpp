@@ -11,6 +11,9 @@
 
 #include "duckdb_store.hpp"
 #include "narrative.hpp"
+#ifdef CHITTA_FIELD_AVAILABLE
+#include "field_store.hpp"
+#endif
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
@@ -26,6 +29,10 @@ class Anticipator {
 public:
     Anticipator(DuckDBStore* store, NarrativeEngine* narrative)
         : store_(store), narrative_(narrative) {}
+
+#ifdef CHITTA_FIELD_AVAILABLE
+    void set_field_store(FieldStore* fs) { field_store_ = fs; }
+#endif
 
     // Generate anticipation candidates for a session
     // Calls rule-based and sequence-based generators
@@ -138,6 +145,9 @@ public:
 private:
     DuckDBStore* store_;
     NarrativeEngine* narrative_;
+#ifdef CHITTA_FIELD_AVAILABLE
+    FieldStore* field_store_ = nullptr;
+#endif
 
     // Rule-based generator: switch on current WorkMode
     size_t generate_rule_based(const std::string& session_id, WorkMode mode, float mode_confidence) {
@@ -359,6 +369,35 @@ private:
             for (const auto& file : files) {
                 std::string filename = extract_filename(file);
 
+#ifdef CHITTA_FIELD_AVAILABLE
+                if (field_store_) {
+                    auto hits = field_store_->recall_keyword(filename, 5);
+                    for (const auto& hit : hits) {
+                        if (hit.score < 0.5f) continue;
+                        if (hit.kind != "gotcha") continue;
+
+                        // Higher confidence for blocked state (0.7-0.85)
+                        float confidence = 0.7f + (hit.confidence * 0.15f);
+
+                        std::ostringstream evidence;
+                        evidence << "{\"file\":\"" << filename << "\","
+                                 << "\"memory_id\":" << hit.memory_id << ","
+                                 << "\"bm25_score\":" << hit.score << ","
+                                 << "\"blocked\":true}";
+
+                        std::string prediction = "Gotcha: " + hit.content.substr(0, 120);
+                        if (hit.content.length() > 120) prediction += "...";
+                        prediction += " (in " + filename + ")";
+
+                        create_candidate(session_id, prediction,
+                                         AnticipationSource::EpisodeMatch, confidence,
+                                         WorkMode::Blocked, evidence.str());
+                        count++;
+
+                        if (count >= 2) return count;
+                    }
+                } else {
+#endif
                 // BM25 search for memories mentioning this file
                 auto hits = store_->bm25_search_memory(filename, 5, "", true);
 
@@ -388,6 +427,9 @@ private:
 
                     if (count >= 2) return count;
                 }
+#ifdef CHITTA_FIELD_AVAILABLE
+                }
+#endif
             }
         }
 
@@ -402,8 +444,35 @@ private:
             }
 
             if (!context.empty()) {
+                std::string ctx_query = context.substr(0, 100);
+#ifdef CHITTA_FIELD_AVAILABLE
+                if (field_store_) {
+                    auto hits = field_store_->recall_keyword(ctx_query, 3);
+                    for (const auto& hit : hits) {
+                        if (hit.score < 0.3f) continue;
+                        if (hit.kind != "gotcha") continue;
+
+                        float confidence = 0.65f + (hit.confidence * 0.15f);
+
+                        std::ostringstream evidence;
+                        evidence << "{\"memory_id\":" << hit.memory_id << ","
+                                 << "\"bm25_score\":" << hit.score << ","
+                                 << "\"blocked\":true,\"context_match\":true}";
+
+                        std::string prediction = "Check: " + hit.content.substr(0, 120);
+                        if (hit.content.length() > 120) prediction += "...";
+
+                        create_candidate(session_id, prediction,
+                                         AnticipationSource::EpisodeMatch, confidence,
+                                         WorkMode::Blocked, evidence.str());
+                        count++;
+
+                        if (count >= 1) return count;
+                    }
+                } else {
+#endif
                 // Search for gotchas matching the context
-                auto hits = store_->bm25_search_memory(context.substr(0, 100), 3, "", true);
+                auto hits = store_->bm25_search_memory(ctx_query, 3, "", true);
 
                 for (const auto& [memory_id, score] : hits) {
                     if (score < 0.3f) continue;
@@ -428,6 +497,9 @@ private:
 
                     if (count >= 1) return count;
                 }
+#ifdef CHITTA_FIELD_AVAILABLE
+                }
+#endif
             }
         }
 
@@ -484,6 +556,34 @@ private:
         for (const auto& file : files) {
             std::string filename = extract_filename(file);
 
+#ifdef CHITTA_FIELD_AVAILABLE
+            if (field_store_) {
+                auto hits = field_store_->recall_keyword(filename, 5);
+                for (const auto& hit : hits) {
+                    if (hit.score < 0.5f) continue;
+                    if (hit.kind != "gotcha") continue;
+
+                    float confidence = 0.6f + (hit.confidence * 0.2f);
+
+                    std::ostringstream evidence;
+                    evidence << "{\"file\":\"" << filename << "\","
+                             << "\"memory_id\":" << hit.memory_id << ","
+                             << "\"bm25_score\":" << hit.score << ","
+                             << "\"memory_confidence\":" << hit.confidence << "}";
+
+                    std::string prediction = "Watch out: " + hit.content.substr(0, 100);
+                    if (hit.content.length() > 100) prediction += "...";
+                    prediction += " (when editing " + filename + ")";
+
+                    create_candidate(session_id, prediction,
+                                     AnticipationSource::EpisodeMatch, confidence,
+                                     WorkMode::Implementing, evidence.str());
+                    count++;
+
+                    if (count >= 2) return count;
+                }
+            } else {
+#endif
             // BM25 search for memories mentioning this file
             auto hits = store_->bm25_search_memory(filename, 5, "", true);
 
@@ -518,6 +618,9 @@ private:
                 // Limit to 2 gotchas per session to avoid noise
                 if (count >= 2) return count;
             }
+#ifdef CHITTA_FIELD_AVAILABLE
+            }
+#endif
         }
 
         return count;

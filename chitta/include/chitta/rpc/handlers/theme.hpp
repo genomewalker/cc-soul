@@ -158,26 +158,6 @@
     }
 
     DuckDBToolResult tool_theme_assign_orphans(const json& params) {
-        size_t batch_size = params.value("batch_size", 100);
-        std::string realm = params.value("realm", "");
-
-        auto* theme_mgr = mind_->theme_manager();
-        if (!theme_mgr) {
-            return DuckDBToolResult::error("ThemeManager not initialized");
-        }
-
-        size_t assigned = theme_mgr->assign_orphans(batch_size, realm);
-        size_t remaining = theme_mgr->orphan_count(realm);
-        size_t theme_count = mind_->store().theme_list(realm).size();
-
-        std::ostringstream ss;
-        ss << "Assigned " << assigned << " orphan memories to themes\n"
-           << "Remaining orphans: " << remaining << "\n"
-           << "Total themes: " << theme_count;
-
-        return DuckDBToolResult::ok(ss.str(), {
-            {"assigned", assigned},
-            {"remaining_orphans", remaining},
-            {"theme_count", theme_count}
-        });
+        // ThemeManager removed; this tool is now routed to ChittaFieldHandler.
+        return DuckDBToolResult::error("theme_assign_orphans requires chitta-field (ThemeManager removed)");
     }

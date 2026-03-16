@@ -353,6 +353,211 @@ public:
         return cf_code_file_count(handle_);
     }
 
+    /// Encode all unindexed memories into sparse codes. Returns count encoded.
+    size_t encode_all() {
+        return cf_encode_all(handle_);
+    }
+
+    /// Get cortical index size (how many memories have sparse codes).
+    size_t cortical_count() const {
+        return cf_cortical_count(handle_);
+    }
+
+    /// Get number of prototype clusters in the cortical index.
+    size_t prototype_count() {
+        return cf_prototype_count(handle_);
+    }
+
+    /// Save the cortical index to a binary snapshot file. Returns true on success.
+    bool save_snapshot() const {
+        return cf_save_snapshot(handle_);
+    }
+
+    /// Save the full in-memory state to a binary snapshot file. Returns true on success.
+    bool save_full_snapshot() const {
+        return cf_save_full_snapshot(handle_);
+    }
+
+    // ── Lite Encoder ─────────────────────────────────────────────────────────
+
+    /// Check if the lite encoder is trained and ready.
+    bool lite_encoder_ready() const {
+        return cf_lite_encoder_ready(handle_) != 0;
+    }
+
+    /// Train the lite encoder from all memories with sparse codes.
+    /// Returns true if at least one training example was used.
+    bool train_lite_encoder() {
+        return cf_train_lite_encoder(handle_) > 0;
+    }
+
+    /// Save the lite encoder to disk. Returns true on success.
+    bool save_lite_encoder() {
+        return cf_save_lite_encoder(handle_) == 0;
+    }
+
+    /// Encode text via lite encoder. Returns (atom_idx, weight) pairs.
+    /// Returns empty vector if not trained or no words match vocab.
+    std::vector<std::pair<uint32_t, float>> encode_lite(const std::string& text) {
+        static constexpr size_t K_ACTIVE = 64;
+        uint32_t atoms[K_ACTIVE] = {};
+        float weights[K_ACTIVE] = {};
+        int32_t n = cf_encode_lite(handle_,
+            reinterpret_cast<const uint8_t*>(text.data()), text.size(),
+            atoms, weights);
+        if (n <= 0) return {};
+        std::vector<std::pair<uint32_t, float>> result;
+        result.reserve(static_cast<size_t>(n));
+        for (int32_t i = 0; i < n; ++i) {
+            result.emplace_back(atoms[i], weights[i]);
+        }
+        return result;
+    }
+
+    /// Run a tier demotion pass. Returns (demoted_count, deleted_count).
+    std::pair<size_t, size_t> run_demotion(int64_t now_ms) const {
+        uint64_t r = cf_run_demotion(handle_, now_ms);
+        return {static_cast<size_t>(r & 0xFFFFFFFF), static_cast<size_t>(r >> 32)};
+    }
+
+    // ── Task / Sadhana organ ─────────────────────────────────────────────────
+
+    /// Create a task entry in chitta-field. Returns 0 on success.
+    int task_create(const std::string& task_id, const std::string& kind,
+                    const std::string& payload_json, int64_t now_ms,
+                    uint64_t fencing_token = 0) {
+        return cf_task_create(handle_,
+            task_id.c_str(), kind.c_str(),
+            reinterpret_cast<const uint8_t*>(payload_json.data()), payload_json.size(),
+            now_ms, fencing_token);
+    }
+
+    /// Transition a task status. new_status: "start"|"pause"|"resume"|"complete"|"fail".
+    /// Returns true on success.
+    bool task_transition(const std::string& task_id, const std::string& new_status,
+                         int64_t now_ms, uint64_t fencing_token = 0) {
+        return cf_task_transition(handle_,
+            task_id.c_str(), new_status.c_str(),
+            now_ms, fencing_token) == 0;
+    }
+
+    // ── Domain Event Log ─────────────────────────────────────────────────────
+
+    /// Emit a domain event. Returns the assigned event_id.
+    /// fencing_token=0 means intent/report tier; non-zero means authoritative (leader-only).
+    uint64_t emit_event(const std::string& domain, const std::string& kind,
+                        const std::string& entity_id, const std::string& payload_json,
+                        uint64_t fencing_token = 0, const std::string& realm = "") {
+        uint64_t event_id = 0;
+        int r = cf_emit_event(handle_,
+            domain.c_str(), kind.c_str(), entity_id.c_str(),
+            reinterpret_cast<const uint8_t*>(payload_json.data()), payload_json.size(),
+            realm.empty() ? nullptr : realm.c_str(),
+            fencing_token, &event_id);
+        if (r != 0) throw std::runtime_error(last_error());
+        return event_id;
+    }
+
+    /// Iterate the event log from from_seqno, invoking cb(op_json, seqno) for each entry.
+    void iterate_log(uint64_t from_seqno,
+                     std::function<void(const std::string& op_json, uint64_t seqno)> cb) {
+        struct Ctx { std::function<void(const std::string&, uint64_t)>* fn; };
+        Ctx ctx{&cb};
+        cf_iterate_log(handle_, from_seqno,
+            [](const uint8_t* op_json, size_t op_len, uint64_t seqno, void* raw) {
+                auto* c = static_cast<Ctx*>(raw);
+                (*c->fn)(std::string(reinterpret_cast<const char*>(op_json), op_len), seqno);
+            }, &ctx);
+    }
+
+    /// Upsert a user model entity (key: entity_id, tag: entity_type).
+    /// Returns 0 on success, negative on error.
+    int user_model_upsert(const std::string& entity_id, const std::string& entity_type,
+                          const std::string& payload_json, int64_t now_ms) {
+        return cf_user_model_upsert(handle_,
+            entity_id.c_str(), entity_type.c_str(),
+            reinterpret_cast<const uint8_t*>(payload_json.data()), payload_json.size(),
+            now_ms);
+    }
+
+    // ── Theme Management ─────────────────────────────────────────────────────
+
+    /// List all themes. Returns JSON string array.
+    std::string theme_list() {
+        std::vector<uint8_t> buf(65536);
+        size_t written = 0;
+        cf_theme_list(handle_, buf.data(), buf.size(), &written);
+        return std::string(reinterpret_cast<char*>(buf.data()), written);
+    }
+
+    /// Get a single theme by ID. Returns JSON string or empty on not found.
+    std::string theme_get(uint64_t theme_id) {
+        std::vector<uint8_t> buf(65536);
+        size_t written = 0;
+        int r = cf_theme_get(handle_, theme_id, buf.data(), buf.size(), &written);
+        if (r != 0 || written == 0) return "";
+        return std::string(reinterpret_cast<char*>(buf.data()), written);
+    }
+
+    /// Get theme statistics. Returns JSON string.
+    std::string theme_stats(const std::string& realm = "") {
+        std::vector<uint8_t> buf(65536);
+        size_t written = 0;
+        const char* realm_ptr = realm.empty() ? nullptr : realm.c_str();
+        cf_theme_stats(handle_, realm_ptr, buf.data(), buf.size(), &written);
+        return std::string(reinterpret_cast<char*>(buf.data()), written);
+    }
+
+    /// Recall themes by embedding similarity. Returns JSON string array of {theme_id, score}.
+    std::string theme_recall(const std::vector<float>& embedding,
+                             size_t k,
+                             const std::string& realm = "") {
+        std::vector<uint8_t> buf(65536);
+        size_t written = 0;
+        const char* realm_ptr = realm.empty() ? nullptr : realm.c_str();
+        cf_theme_recall(handle_,
+            embedding.data(), embedding.size(),
+            k, realm_ptr,
+            buf.data(), buf.size(), &written);
+        return std::string(reinterpret_cast<char*>(buf.data()), written);
+    }
+
+    /// Run theme maintenance (split/merge/reassign). Returns JSON result.
+    std::string theme_maintain() {
+        std::vector<uint8_t> buf(65536);
+        size_t written = 0;
+        cf_theme_maintain(handle_, buf.data(), buf.size(), &written);
+        return std::string(reinterpret_cast<char*>(buf.data()), written);
+    }
+
+    /// Assign orphan memories to themes. Returns JSON with {assigned, remaining}.
+    std::string theme_assign_orphans(size_t batch_size = 500,
+                                     const std::string& realm = "") {
+        std::vector<uint8_t> buf(65536);
+        size_t written = 0;
+        const char* realm_ptr = realm.empty() ? nullptr : realm.c_str();
+        cf_theme_assign_orphans(handle_, batch_size, realm_ptr,
+                                buf.data(), buf.size(), &written);
+        return std::string(reinterpret_cast<char*>(buf.data()), written);
+    }
+
+    /// Get the payload of the most recent domain event matching domain+kind+entity_id.
+    /// Currently supports domain="user_model"; kind matches entity_type.
+    /// Returns the JSON payload string if found, or nullopt if not found or on error.
+    std::optional<std::string> get_latest_event(
+        const std::string& domain,
+        const std::string& kind,
+        const std::string& entity_id) {
+        std::vector<uint8_t> buf(65536);
+        size_t written = 0;
+        int rc = cf_get_latest_event(handle_, domain.c_str(), kind.c_str(), entity_id.c_str(),
+                                     buf.data(), buf.size(), &written);
+        if (rc == 0 && written > 0) {
+            return std::string(reinterpret_cast<char*>(buf.data()), written);
+        }
+        return std::nullopt;
+    }
+
 private:
     CfHandle* handle_ = nullptr;
 

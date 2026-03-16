@@ -5,6 +5,9 @@
 #include <sstream>
 #include <regex>
 #include <sys/wait.h>
+#ifdef CHITTA_FIELD_AVAILABLE
+#include <nlohmann/json.hpp>
+#endif
 
 namespace chitta {
 
@@ -110,6 +113,17 @@ int64_t SadhanaManager::create(const std::string& goal,
     log_event(id, SadhanaEventType::Created, {{"goal", goal}, {"brain", s.brain_provider}});
     stats_.total_created++;
 
+#ifdef CHITTA_FIELD_AVAILABLE
+    if (field_store_) {
+        nlohmann::json meta;
+        meta["goal"]      = s.goal;
+        meta["model"]     = s.brain_model;
+        meta["max_turns"] = s.max_turns;
+        field_store_->task_create(std::to_string(id), "sadhana", meta.dump(),
+                                  now_ms(), 0 /*fencing_token*/);
+    }
+#endif
+
     std::cerr << "[sadhana] Created sadhana " << id << ": " << goal.substr(0, 60) << "\n";
     return id;
 }
@@ -153,6 +167,11 @@ bool SadhanaManager::start(int64_t id) {
     }
 
     log_event(id, SadhanaEventType::Started);
+#ifdef CHITTA_FIELD_AVAILABLE
+    if (field_store_) {
+        field_store_->task_transition(std::to_string(id), "start", now_ms(), 0);
+    }
+#endif
     std::cerr << "[sadhana] Started sadhana " << id << "\n";
     return true;
 }
@@ -175,6 +194,11 @@ bool SadhanaManager::pause(int64_t id) {
     if (!store_.execute_raw(sql.str())) return false;
 
     log_event(id, SadhanaEventType::Paused);
+#ifdef CHITTA_FIELD_AVAILABLE
+    if (field_store_) {
+        field_store_->task_transition(std::to_string(id), "pause", now_ms(), 0);
+    }
+#endif
     std::cerr << "[sadhana] Paused sadhana " << id << "\n";
     return true;
 }
@@ -198,6 +222,14 @@ bool SadhanaManager::stop(int64_t id, bool success, const std::string& reason) {
 
     auto event_type = success ? SadhanaEventType::Done : SadhanaEventType::Failed;
     log_event(id, event_type, {{"reason", reason}});
+
+#ifdef CHITTA_FIELD_AVAILABLE
+    if (field_store_) {
+        field_store_->task_transition(std::to_string(id),
+                                      success ? "complete" : "fail",
+                                      now_ms(), 0);
+    }
+#endif
 
     if (success) stats_.total_completed++;
     else stats_.total_failed++;

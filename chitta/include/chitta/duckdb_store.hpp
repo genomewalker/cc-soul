@@ -1828,6 +1828,9 @@ public:
     // Error tracking
     std::string last_error() const { return last_error_; }
 
+    // Access the underlying DuckDB instance (for SoulProjection read model).
+    duckdb::DuckDB& db() { return *db_; }
+
 private:
     mutable std::string last_error_;  // Last error message for debugging
     std::unique_ptr<duckdb::DuckDB> db_;

@@ -12,8 +12,12 @@
 //   - Suggestion tracking with outcome verification
 //   - Anticipation pattern learning
 //   - Periodic hygiene (memory consolidation)
+//   - Sleep consolidation (chitta-field encode + snapshot + demotion)
 
 #include "duckdb_mind.hpp"
+#ifdef CHITTA_FIELD_AVAILABLE
+#include <chitta/field_store.hpp>
+#endif
 #include <string>
 #include <deque>
 #include <thread>
@@ -52,6 +56,8 @@ struct SubconsciousConfig {
     std::chrono::minutes distillation_interval{120};      // Auto-distillation every 2 hours
     std::chrono::seconds embedding_interval{30};  // Background embedding interval (30s to reduce CPU)
     std::chrono::seconds idle_threshold{30};      // Only embed when no queries for this long
+    std::chrono::minutes sleep_consolidation_interval{10};  // encode_all + save_snapshot every 10 min
+    std::chrono::minutes demotion_interval{60};             // run_demotion pass every hour
     size_t max_queue_size{1000};
     size_t embedding_batch_size{20};              // Small batches to avoid blocking
     float correction_confidence{0.8f};
@@ -64,6 +70,7 @@ struct SubconsciousConfig {
     bool enable_background_embedding{false};      // Disabled by default - use embed_symbols tool
     bool enable_habit_formation{true};            // Auto-detect tool patterns and form habits
     bool enable_cls_replay{true};                 // CLS offline replay consolidation
+    bool enable_sleep_consolidation{true};        // chitta-field encode + snapshot + demotion
     std::chrono::minutes cls_replay_interval{60}; // CLS replay every hour
     size_t cls_replay_batch_size{20};             // Memories to sample per replay
     size_t cls_replay_min_cluster{3};             // Min cluster size to distill
@@ -100,11 +107,17 @@ struct SubconsciousStats {
     std::atomic<size_t> cls_replay_runs{0};       // CLS offline replay runs
     std::atomic<size_t> cls_memories_consolidated{0}; // Memories consolidated by CLS
     std::atomic<size_t> cls_wisdom_created{0};    // Wisdom nodes created by CLS replay
+    std::atomic<size_t> sleep_consolidation_runs{0};  // encode_all + save_snapshot runs
+    std::atomic<size_t> demotion_runs{0};             // run_demotion pass runs
+    std::atomic<size_t> field_demoted{0};             // Total memories demoted across all passes
+    std::atomic<size_t> field_deleted{0};             // Total memories deleted across all passes
     std::atomic<int64_t> last_hygiene_at{0};
     std::atomic<int64_t> last_theme_maintenance_at{0};
     std::atomic<int64_t> last_distillation_at{0};
     std::atomic<int64_t> last_embedding_at{0};
     std::atomic<int64_t> last_cls_replay_at{0};
+    std::atomic<int64_t> last_sleep_consolidation_at{0};
+    std::atomic<int64_t> last_demotion_at{0};
     std::atomic<int64_t> last_query_at{0};        // Last RPC query timestamp
     std::atomic<int64_t> started_at{0};
 };
@@ -151,10 +164,20 @@ public:
     // Think callback: called hourly during idle for internal memory synthesis
     void set_think_callback(std::function<void()> fn) { think_callback_ = std::move(fn); }
 
+#ifdef CHITTA_FIELD_AVAILABLE
+    // Wire in a FieldStore for sleep consolidation (encode, snapshot, demotion).
+    // Pointer is not owned; must outlive this Subconscious instance.
+    void set_field_store(FieldStore* fs) { field_store_ = fs; }
+#endif
+
 private:
     DuckDBMind* mind_;
     SubconsciousConfig config_;
     SubconsciousStats stats_;
+
+#ifdef CHITTA_FIELD_AVAILABLE
+    FieldStore* field_store_{nullptr};
+#endif
 
     // Threading
     std::thread process_thread_;
@@ -242,6 +265,12 @@ private:
     bool time_for_embedding() const;
     void run_cls_replay();
     bool time_for_cls_replay() const;
+#ifdef CHITTA_FIELD_AVAILABLE
+    void run_sleep_consolidation();
+    bool time_for_sleep_consolidation() const;
+    void run_demotion_pass();
+    bool time_for_demotion() const;
+#endif
 
     // Dream: autonomous curiosity-driven exploration when idle
     std::function<void()> dream_callback_;
