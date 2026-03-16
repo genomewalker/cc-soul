@@ -137,11 +137,9 @@ void SocketServer::stop() {
 }
 
 bool SocketServer::create_socket() {
-    if (socket_is_active(socket_path_)) {
-        std::cerr << "[socket_server] Socket already active at " << socket_path_ << "\n";
-        return false;
-    }
-
+    // Always force-remove any existing socket file.
+    // cleanup_stale_daemon() already verified no live chittad is running,
+    // so any remaining socket holder is stale (e.g. inherited fd in a bash subprocess).
     if (access(socket_path_.c_str(), F_OK) == 0) {
         if (unlink(socket_path_.c_str()) != 0) {
             std::cerr << "[socket_server] Failed to remove stale socket: " << strerror(errno) << "\n";
