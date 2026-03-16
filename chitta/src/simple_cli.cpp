@@ -549,7 +549,9 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
         auto interval_secs = std::chrono::seconds(interval);
         auto last_sync = std::chrono::steady_clock::now();
         auto last_embedding_flush = std::chrono::steady_clock::now();
+        auto last_foreign_sync = std::chrono::steady_clock::now();
         auto embedding_flush_interval = std::chrono::seconds(5);  // Flush queued embeddings every 5s
+        auto foreign_sync_interval = std::chrono::seconds(30);    // Ingest peer segment files every 30s
 
         while (daemon_running) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -571,6 +573,19 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                 if (sadhana_manager) sadhana_manager->tick();
             } catch (const std::exception& e) {
                 std::cerr << "[maint] Sadhana tick failed: " << e.what() << "\n";
+            }
+
+            // Ingest new ops from peer instances on shared NFS storage.
+            if (now_time - last_foreign_sync >= foreign_sync_interval) {
+                last_foreign_sync = now_time;
+                try {
+                    int applied = field_store.sync_foreign();
+                    if (verbose_mode && applied > 0) {
+                        std::cerr << "[maint] sync_foreign: applied " << applied << " peer ops\n";
+                    }
+                } catch (const std::exception& e) {
+                    std::cerr << "[maint] sync_foreign failed: " << e.what() << "\n";
+                }
             }
 
             if (now_time - last_sync >= interval_secs) {

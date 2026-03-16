@@ -217,6 +217,12 @@ public:
         cf_flush(handle_);
     }
 
+    /// Ingest new ops from foreign-instance segment files on shared storage.
+    /// Returns number of ops applied, or -1 on error.
+    int sync_foreign() {
+        return cf_sync_foreign(handle_);
+    }
+
     /// Apply outcome feedback for a retrieval episode (route learning).
     void feedback(uint64_t episode_id, float reward) {
         cf_feedback(handle_, episode_id, reward);
