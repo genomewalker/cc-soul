@@ -12,7 +12,6 @@
 // 5. Hebbian Learning: Co-activated nodes strengthen connections
 
 #include "../duckdb_store.hpp"
-#include "../theme_manager.hpp"
 #include "../narrative.hpp"
 #include "../anticipator.hpp"
 #include "embedder.hpp"
@@ -21,6 +20,9 @@
 #include "../rpc/types.hpp"
 #ifdef CHITTA_WITH_ONNX
 #include "../vak_onnx.hpp"
+#endif
+#ifdef CHITTA_FIELD_AVAILABLE
+#include "../field_store.hpp"
 #endif
 #include <memory>
 #include <shared_mutex>
@@ -598,7 +600,9 @@ public:
         std::unique_lock lock(mutex_);
         // Path convention: if path is a directory, use chitta.duckdb inside it
         std::string db_path = config_.path;
-        if (std::filesystem::is_directory(config_.path)) {
+        if (config_.path == ":memory:") {
+            // DuckDB in-memory — no path modification
+        } else if (std::filesystem::is_directory(config_.path)) {
             db_path = config_.path + "/chitta.duckdb";
         } else if (!config_.path.ends_with(".duckdb")) {
             db_path = config_.path + ".duckdb";
@@ -609,8 +613,6 @@ public:
         running_ = true;
         // Auto-load learner state on startup
         load_learner_state_unlocked();
-        // Initialize theme manager
-        theme_manager_ = std::make_unique<ThemeManager>(&store_, &embedder_, theme_config_);
         // Initialize narrative engine and anticipator
         narrative_engine_ = std::make_unique<NarrativeEngine>(store_);
         anticipator_ = std::make_unique<Anticipator>(&store_, narrative_engine_.get());
@@ -932,8 +934,8 @@ public:
             store_.set_provenance(wisdom_id, "auto_distill", "auto_distill_episodes",
                                    c.avg_confidence, c.episode_ids[0]);
 
-            // Assign to theme if theme_manager is available
-            if (theme_manager_) {
+            // Assign to theme if themes exist
+            {
                 auto themes = store_.themes_by_relevance(artha.nu.data, 1);
                 if (!themes.empty()) {
                     store_.theme_assign(wisdom_id, themes[0].id, 0.8f);
@@ -1538,73 +1540,24 @@ public:
     // ═══════════════════════════════════════════════════════════════════════
 
     // Two-stage theme recall (xMemory architecture)
-    // Stage 1: Find relevant themes, select representatives
-    // Stage 2: Adaptive expansion from high-relevance themes
+    // ThemeManager removed; theme_recall is now routed through ChittaFieldHandler.
     std::vector<Recall> theme_recall(const std::string& query, size_t k = 10,
                                       const std::string& realm = "",
                                       const std::vector<std::string>& exclude_kinds = {}) {
-        std::unique_lock lock(mutex_);
-
-        if (!theme_manager_ || !embedder_.ready()) {
-            // Fall back to full_resonate if theme manager not initialized
-            return {};
-        }
-
-        // Transform query to embedding (query mode — adds instruction prefix for BGE)
-        Artha artha = embedder_.transform_query(query);
-        if (artha.nu.size() == 0) return {};
-
-        // Two-stage retrieval
-        auto memory_results = theme_manager_->two_stage_recall(artha.nu.data, k, realm);
-
-        // Convert to Recall format
-        std::vector<Recall> recalls;
-        recalls.reserve(memory_results.size());
-
-        for (const auto& mr : memory_results) {
-            Recall recall;
-            recall.id = int64_to_nodeid(mr.id);
-            recall.text = mr.content;
-            recall.similarity = mr.similarity;
-            recall.type = string_to_node_type(mr.kind);
-            recall.confidence = Confidence(mr.confidence);
-            recall.relevance = mr.similarity;  // Theme-based relevance
-            recall.created = mr.created_at;
-            recall.accessed = mr.accessed_at;
-            recalls.push_back(std::move(recall));
-        }
-
-        // Touch retrieved memories
-        for (const auto& recall : recalls) {
-            int64_t id = nodeid_to_int64(recall.id);
-            store_.touch(id);
-            store_.strengthen(id, config_.reinforce_amount);
-        }
-
-        return recalls;
+        return {};
     }
 
     // Get theme retrieval results (full detail with theme info)
+    // ThemeManager removed; returns empty. Use ChittaFieldHandler::theme_recall instead.
     std::vector<ThemeResult> theme_recall_detailed(const std::string& query,
                                                     size_t max_themes = 5,
                                                     const std::string& realm = "") {
-        std::shared_lock lock(mutex_);
-
-        if (!theme_manager_ || !embedder_.ready()) {
-            return {};
-        }
-
-        Artha artha = embedder_.transform_query(query);
-        if (artha.nu.size() == 0) return {};
-
-        return theme_manager_->retrieve_representatives(artha.nu.data, max_themes, realm);
+        return {};
     }
 
     // Assign a memory to a theme (manual override)
     bool assign_to_theme(NodeId memory_id, int64_t theme_id) {
         std::unique_lock lock(mutex_);
-        if (!theme_manager_) return false;
-
         return store_.theme_assign(nodeid_to_int64(memory_id), theme_id);
     }
 
@@ -1621,17 +1574,11 @@ public:
     }
 
     // Run theme maintenance
+    // ThemeManager removed; returns empty result. Theme maintenance is now via
+    // ChittaFieldHandler::handle_theme_maintain (FieldStore::theme_maintain).
     DuckDBStore::ThemeMaintenanceResult run_theme_maintenance(const std::string& realm = "") {
-        std::unique_lock lock(mutex_);
-        if (!theme_manager_) {
-            return {};
-        }
-        return theme_manager_->run_maintenance(realm);
+        return {};
     }
-
-    // Access to theme manager
-    ThemeManager* theme_manager() { return theme_manager_.get(); }
-    const ThemeManager* theme_manager() const { return theme_manager_.get(); }
 
     // Access to narrative engine
     NarrativeEngine* narrative() { return narrative_engine_.get(); }
@@ -1640,14 +1587,6 @@ public:
     // Access to anticipator
     Anticipator* anticipator() { return anticipator_.get(); }
     const Anticipator* anticipator() const { return anticipator_.get(); }
-
-    // Access to theme config
-    ThemeConfig& theme_config() { return theme_config_; }
-    const ThemeConfig& theme_config() const { return theme_config_; }
-
-    // Enable/disable theme-based recall
-    void set_theme_recall_enabled(bool enabled) { enable_theme_recall_ = enabled; }
-    bool is_theme_recall_enabled() const { return enable_theme_recall_; }
 
     // Access to session context
     DuckDBSessionContext& session_context() { return session_context_; }
@@ -1681,6 +1620,14 @@ public:
         std::unique_lock lock(mutex_);
         return load_learner_state_unlocked();
     }
+
+#ifdef CHITTA_FIELD_AVAILABLE
+    // Wire up a FieldStore so learner state is persisted via chitta-field events.
+    void set_field_store(FieldStore* fs) {
+        field_store_ = fs;
+        if (anticipator_) anticipator_->set_field_store(fs);
+    }
+#endif
 
     // Find attractors (public interface)
     std::vector<DuckDBAttractor> find_attractors() {
@@ -2062,14 +2009,22 @@ private:
     // Persistence helpers (unlocked - caller must hold mutex)
     bool save_learner_state_unlocked() {
         std::string state = learner_.serialize();
-        // Delete old learner state first
-        // (In production, would use UPDATE or dedicated metadata table)
+#ifdef CHITTA_FIELD_AVAILABLE
+        if (field_store_) {
+            using namespace std::chrono;
+            int64_t now_ms = duration_cast<milliseconds>(
+                system_clock::now().time_since_epoch()).count();
+            return field_store_->user_model_upsert(
+                "learner_state_global", "resonance_state", state, now_ms) == 0;
+        }
+#endif
+        // Fallback: persist via DuckDB memory node
         int64_t id = store_.remember(
             "[LEARNER_STATE] " + state,
             "system",
-            {},  // No embedding needed
-            1.0f,  // Max confidence
-            0.0f,  // No decay
+            {},
+            1.0f,
+            0.0f,
             "brahman",
             RealmVisibility::Private
         );
@@ -2077,8 +2032,17 @@ private:
     }
 
     bool load_learner_state_unlocked() {
-        // Search for most recent learner state by scanning system nodes
-        // This is a simplified approach - production would use dedicated table
+#ifdef CHITTA_FIELD_AVAILABLE
+        if (field_store_) {
+            auto payload = field_store_->get_latest_event(
+                "user_model", "resonance_state", "learner_state_global");
+            if (payload) {
+                return learner_.deserialize(*payload);
+            }
+            return false;
+        }
+#endif
+        // Fallback: scan DuckDB system nodes for [LEARNER_STATE] tag
         auto results = store_.recall({}, 50, "", true);
         for (const auto& r : results) {
             if (r.content.find("[LEARNER_STATE]") == 0) {
@@ -2104,11 +2068,9 @@ private:
     Embedder embedder_;
     mutable std::shared_mutex mutex_;
     bool running_;
-
-    // xMemory Theme System
-    ThemeConfig theme_config_;
-    mutable std::unique_ptr<ThemeManager> theme_manager_;
-    bool enable_theme_recall_ = true;  // Use theme-based retrieval
+#ifdef CHITTA_FIELD_AVAILABLE
+    FieldStore* field_store_ = nullptr;
+#endif
 
     // Narrative and Anticipation
     std::unique_ptr<NarrativeEngine> narrative_engine_;

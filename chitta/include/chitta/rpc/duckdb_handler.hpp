@@ -38,6 +38,23 @@ namespace chitta {
 
 using json = nlohmann::json;
 
+#ifdef CHITTA_FIELD_AVAILABLE
+// Forward declaration — full definition is included at the bottom of this file.
+class ChittaFieldHandler;
+
+// Free function for routing check — usable before ChittaFieldHandler is complete.
+// Must stay in sync with ChittaFieldHandler::is_field_routable().
+inline bool cf_is_field_routable(const std::string& method) {
+    static const std::unordered_set<std::string> routable = {
+        "remember", "recall", "strengthen", "weaken", "forget", "touch",
+        "connect", "hybrid_recall", "smart_recall", "recall_temporal", "recall_keyword",
+        "theme_list", "theme_get", "theme_stats", "theme_recall",
+        "theme_maintain", "theme_assign_orphans",
+    };
+    return routable.count(method) > 0;
+}
+#endif
+
 struct DuckDBToolResult {
     bool is_error = false;
     std::string text;
@@ -77,6 +94,12 @@ public:
     // Connect sadhana manager for autonomous agents
     void set_sadhana_manager(SadhanaManager* sm) { sadhana_manager_ = sm; }
 
+#ifdef CHITTA_FIELD_AVAILABLE
+    // Connect chitta-field handler.
+    void set_field_handler(ChittaFieldHandler* h);  // defined after ChittaFieldHandler is complete
+    void set_field_store(FieldStore* fs) { field_store_ = fs; }
+#endif
+
     json handle(const json& request) {
         std::string method = request.value("method", "");
         json params = request.value("params", json::object());
@@ -89,6 +112,12 @@ public:
         if (method == "tools/call") {
             std::string name = params.value("name", "");
             json args = params.value("arguments", json::object());
+
+#ifdef CHITTA_FIELD_AVAILABLE
+            if (field_handler_ && cf_is_field_routable(name)) {
+                return dispatch_to_field_handler(id, name, args);
+            }
+#endif
 
             auto it = handlers_.find(name);
             if (it == handlers_.end()) {
@@ -106,6 +135,13 @@ private:
     DuckDBMind* mind_;
     Subconscious* subconscious_;
     SadhanaManager* sadhana_manager_;
+#ifdef CHITTA_FIELD_AVAILABLE
+    ChittaFieldHandler* field_handler_ = nullptr;
+    FieldStore* field_store_ = nullptr;  // Direct pointer for use before ChittaFieldHandler is complete
+
+    // Defined after chitta_field_handler.hpp is included (bottom of file).
+    json dispatch_to_field_handler(const json& id, const std::string& name, const json& args);
+#endif
     std::vector<json> tools_;
     std::unordered_map<std::string, std::function<DuckDBToolResult(const json&)>> handlers_;
     std::unordered_map<std::string, std::string> tool_visibility_;
@@ -3527,6 +3563,7 @@ private:
         };
     }
 
+
     static std::string node_type_name(NodeType t) {
         switch (t) {
             case NodeType::Wisdom: return "wisdom";
@@ -4112,3 +4149,47 @@ private:
 };
 
 }  // namespace chitta
+
+#ifdef CHITTA_FIELD_AVAILABLE
+// Include the full ChittaFieldHandler definition after DuckDBRpcHandler is complete.
+// This resolves the forward-declaration: DuckDBRpcHandler forward-declares
+// ChittaFieldHandler above; ChittaFieldHandler only needs DuckDBToolResult which
+// is already defined — by including here, both are fully defined.
+#include "chitta_field_handler.hpp"
+
+namespace chitta {
+
+// dispatch_to_field_handler: defined here so ChittaFieldHandler is complete.
+// For semantic recall methods, embed the query text using DuckDBMind's yantra
+// before forwarding to chitta-field, which expects a float embedding vector.
+inline void DuckDBRpcHandler::set_field_handler(ChittaFieldHandler* h) {
+    field_handler_ = h;
+    field_store_ = h ? h->field_store() : nullptr;
+}
+
+inline json DuckDBRpcHandler::dispatch_to_field_handler(const json& id,
+                                                         const std::string& name,
+                                                         const json& args) {
+    json enriched = args;
+    if (mind_ && !enriched.contains("embedding")) {
+        // Embed query for semantic recall methods.
+        static const std::unordered_set<std::string> query_methods = {
+            "recall", "hybrid_recall", "smart_recall", "theme_recall"
+        };
+        if (query_methods.count(name) && enriched.contains("query")) {
+            Vector emb = mind_->embedder().embed_query(enriched["query"].get<std::string>());
+            if (!emb.data.empty()) enriched["embedding"] = emb.data;
+        }
+        // Embed content for remember so stored memories are semantically searchable.
+        if (name == "remember" && enriched.contains("content")) {
+            Vector emb = mind_->embedder().embed(enriched["content"].get<std::string>());
+            if (!emb.data.empty()) enriched["embedding"] = emb.data;
+        }
+    }
+
+    auto result = field_handler_->dispatch(name, enriched);
+    return make_tool_response(id, result);
+}
+
+} // namespace chitta
+#endif

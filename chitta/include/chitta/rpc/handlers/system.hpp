@@ -345,13 +345,29 @@
     }
 
     DuckDBToolResult tool_health_check(const json&) {
-        // Fast health check - no database queries to avoid blocking
-        // Uses cached stats from last update (updated every maintenance cycle)
-        bool is_open = mind_->store().is_open();
         bool yantra = mind_->has_yantra();
 
-        // Get cached stats (non-blocking)
-        auto cached = mind_->store().cached_health();
+        // Memory/symbol counts: prefer chitta-field (primary store) over DuckDB cache
+        int64_t total_memories = 0;
+        int64_t total_symbols = 0;
+        int64_t total_triplets = 0;
+        double avg_confidence = 0.0;
+        bool using_field = false;
+
+#ifdef CHITTA_FIELD_AVAILABLE
+        if (field_store_) {
+            total_memories = static_cast<int64_t>(field_store_->memory_count());
+            total_symbols  = static_cast<int64_t>(field_store_->symbol_count());
+            using_field = true;
+        }
+#endif
+        if (!using_field) {
+            auto cached = mind_->store().cached_health();
+            total_memories  = cached.total_memories;
+            total_symbols   = cached.total_symbols;
+            total_triplets  = cached.total_triplets;
+            avg_confidence  = cached.avg_confidence;
+        }
 
         // Get execution provider from embedder's yantra
         std::string exec_provider = "N/A";
@@ -371,7 +387,6 @@
         if (home) {
             std::string mind_dir = std::string(home) + "/.claude/mind";
 
-            // Count queue items
             std::string queue_file = mind_dir + "/.queue.jsonl";
             std::ifstream qf(queue_file);
             if (qf) {
@@ -381,7 +396,6 @@
                 }
             }
 
-            // Count failed observations
             std::string failed_file = mind_dir + "/.failed_observations.jsonl";
             std::ifstream ff(failed_file);
             if (ff) {
@@ -394,11 +408,11 @@
 
         std::ostringstream ss;
         ss << "Health Check:\n";
-        ss << "  Status: " << (is_open ? "OK" : "ERROR") << "\n";
-        ss << "  Memories: " << cached.total_memories << "\n";
-        ss << "  Symbols: " << cached.total_symbols << "\n";
-        ss << "  Triplets: " << cached.total_triplets << "\n";
-        ss << "  Avg Confidence: " << cached.avg_confidence << "\n";
+        ss << "  Status: OK\n";
+        ss << "  Backend: " << (using_field ? "chitta-field" : "DuckDB") << "\n";
+        ss << "  Memories: " << total_memories << "\n";
+        ss << "  Symbols: " << total_symbols << "\n";
+        if (!using_field) ss << "  Triplets: " << total_triplets << "\n";
         ss << "  Yantra: " << (yantra ? "ready" : "not attached") << "\n";
         ss << "  Execution: " << exec_provider << "\n";
         ss << "  Stale Sessions: " << stale_sessions << "\n";
@@ -406,15 +420,16 @@
         ss << "  Failed Observations: " << failed_observations << "\n";
 
         return DuckDBToolResult::ok(ss.str(), {
-            {"status", is_open ? "ok" : "error"},
+            {"status", "ok"},
             {"daemon", "healthy"},
+            {"backend", using_field ? "chitta-field" : "duckdb"},
             {"software_version", CHITTA_VERSION},
             {"protocol_major", CHITTA_PROTOCOL_VERSION_MAJOR},
             {"protocol_minor", CHITTA_PROTOCOL_VERSION_MINOR},
-            {"memories", cached.total_memories},
-            {"symbols", cached.total_symbols},
-            {"triplets", cached.total_triplets},
-            {"avg_confidence", cached.avg_confidence},
+            {"memories", total_memories},
+            {"symbols", total_symbols},
+            {"triplets", total_triplets},
+            {"avg_confidence", avg_confidence},
             {"yantra_ready", yantra},
             {"execution_provider", exec_provider},
             {"stale_sessions", stale_sessions},

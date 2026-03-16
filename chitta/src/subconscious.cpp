@@ -149,6 +149,18 @@ void Subconscious::process_loop() {
             run_background_embedding();
         }
 
+#ifdef CHITTA_FIELD_AVAILABLE
+        // Sleep consolidation: encode new memories into cortical index + snapshot
+        if (config_.enable_sleep_consolidation && field_store_ && time_for_sleep_consolidation()) {
+            run_sleep_consolidation();
+        }
+
+        // Demotion pass: tier demotion + hard-deletion of weak memories
+        if (config_.enable_sleep_consolidation && field_store_ && time_for_demotion()) {
+            run_demotion_pass();
+        }
+#endif
+
         // Auto-dream: trigger curiosity-driven exploration when idle > 10 min
         if (dream_callback_ && time_for_dream()) {
             last_dream_triggered_at_ = now_ms();
@@ -990,6 +1002,79 @@ bool Subconscious::time_for_think() const {
 
     return true;
 }
+
+#ifdef CHITTA_FIELD_AVAILABLE
+
+void Subconscious::run_sleep_consolidation() {
+    stats_.last_sleep_consolidation_at = now_ms();
+
+    try {
+        size_t encoded = field_store_->encode_all();
+        bool snapped      = field_store_->save_snapshot();
+        bool full_snapped = field_store_->save_full_snapshot();
+
+        stats_.sleep_consolidation_runs++;
+
+        std::cerr << "[subconscious] Sleep consolidation: encoded=" << encoded
+                  << ", cortical_snapshot=" << (snapped ? "ok" : "failed")
+                  << ", full_snapshot=" << (full_snapped ? "ok" : "failed") << "\n";
+
+        // Train lite encoder if enough memories with sparse codes and not yet trained
+        if (!field_store_->lite_encoder_ready()) {
+            size_t mem_count = field_store_->memory_count();
+            if (mem_count >= 500) {
+                std::cerr << "[subconscious] Training lite encoder from " << mem_count << " memories...\n";
+                if (field_store_->train_lite_encoder()) {
+                    field_store_->save_lite_encoder();
+                    std::cerr << "[subconscious] Lite encoder trained and saved.\n";
+                }
+            }
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "[subconscious] Sleep consolidation failed: " << e.what() << "\n";
+    }
+}
+
+bool Subconscious::time_for_sleep_consolidation() const {
+    auto last = stats_.last_sleep_consolidation_at.load();
+    if (last == 0) return true;
+
+    auto interval_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        config_.sleep_consolidation_interval
+    ).count();
+
+    return (now_ms() - last) >= interval_ms;
+}
+
+void Subconscious::run_demotion_pass() {
+    stats_.last_demotion_at = now_ms();
+
+    try {
+        auto [demoted, deleted] = field_store_->run_demotion(now_ms());
+
+        stats_.demotion_runs++;
+        stats_.field_demoted += demoted;
+        stats_.field_deleted += deleted;
+
+        std::cerr << "[subconscious] Demotion pass: demoted=" << demoted
+                  << ", deleted=" << deleted << "\n";
+    } catch (const std::exception& e) {
+        std::cerr << "[subconscious] Demotion pass failed: " << e.what() << "\n";
+    }
+}
+
+bool Subconscious::time_for_demotion() const {
+    auto last = stats_.last_demotion_at.load();
+    if (last == 0) return true;
+
+    auto interval_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        config_.demotion_interval
+    ).count();
+
+    return (now_ms() - last) >= interval_ms;
+}
+
+#endif  // CHITTA_FIELD_AVAILABLE
 
 // Helpers
 

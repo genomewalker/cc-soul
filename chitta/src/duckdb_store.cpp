@@ -63,12 +63,17 @@ bool DuckDBStore::open(const std::string& path) {
         fix_sequences();
 
         // Open separate embeddings database (for contention-free embedding writes)
-        std::string emb_path = path_;
-        size_t dot_pos = emb_path.rfind('.');
-        if (dot_pos != std::string::npos) {
-            emb_path = emb_path.substr(0, dot_pos) + "_embeddings.duckdb";
+        std::string emb_path;
+        if (path_ == ":memory:") {
+            emb_path = ":memory:";
         } else {
-            emb_path += "_embeddings.duckdb";
+            emb_path = path_;
+            size_t dot_pos = emb_path.rfind('.');
+            if (dot_pos != std::string::npos) {
+                emb_path = emb_path.substr(0, dot_pos) + "_embeddings.duckdb";
+            } else {
+                emb_path += "_embeddings.duckdb";
+            }
         }
         if (!open_embeddings_db(emb_path)) {
             std::cerr << "[DuckDBStore] Warning: Embeddings DB failed, using main DB\n";
@@ -130,7 +135,6 @@ void DuckDBStore::fix_sequences() {
     fix_seq("theme", "theme_seq");
     fix_seq("session_message", "session_message_seq");
     fix_seq("sadhana", "sadhana_seq");
-    fix_seq("sadhana_history", "sadhana_history_seq");
     fix_seq("memory_exposed", "memory_exposed_seq");
     fix_seq("memory_recall_query", "memory_recall_query_seq");
     fix_seq("session_token_usage", "session_token_usage_seq");
@@ -1230,27 +1234,6 @@ bool DuckDBStore::create_schema() {
     write_execute("CREATE INDEX IF NOT EXISTS idx_episode_realm ON dialogue_episode(realm)");
     write_execute("CREATE SEQUENCE IF NOT EXISTS dialogue_episode_seq START 1");
 
-    // Dialogue threads - multi-session topic continuity
-    if (!write_execute(R"(
-        CREATE TABLE IF NOT EXISTS dialogue_thread (
-            id BIGINT PRIMARY KEY,
-            realm VARCHAR DEFAULT 'brahman',
-            title VARCHAR NOT NULL,
-            summary TEXT,
-            session_count INTEGER DEFAULT 1,
-            episode_count INTEGER DEFAULT 1,
-            total_turns INTEGER DEFAULT 0,
-            status VARCHAR DEFAULT 'active',
-            last_active_at BIGINT NOT NULL,
-            created_at BIGINT NOT NULL
-        )
-    )")) {
-        return false;
-    }
-    write_execute("CREATE INDEX IF NOT EXISTS idx_thread_realm ON dialogue_thread(realm)");
-    write_execute("CREATE INDEX IF NOT EXISTS idx_thread_status ON dialogue_thread(status)");
-    write_execute("CREATE SEQUENCE IF NOT EXISTS dialogue_thread_seq START 1");
-
     // First-class entity registry
     if (!write_execute(R"(
         CREATE TABLE IF NOT EXISTS entity (
@@ -1272,21 +1255,6 @@ bool DuckDBStore::create_schema() {
     write_execute("CREATE INDEX IF NOT EXISTS idx_entity_type ON entity(entity_type)");
     write_execute("CREATE INDEX IF NOT EXISTS idx_entity_salience ON entity(salience_score DESC)");
     write_execute("CREATE SEQUENCE IF NOT EXISTS entity_seq START 1");
-
-    // Entity mentions in turns
-    if (!write_execute(R"(
-        CREATE TABLE IF NOT EXISTS entity_mention (
-            turn_id BIGINT NOT NULL,
-            entity_id BIGINT NOT NULL,
-            mention_type VARCHAR,
-            span_start INTEGER DEFAULT 0,
-            span_end INTEGER DEFAULT 0,
-            PRIMARY KEY(turn_id, entity_id, span_start)
-        )
-    )")) {
-        return false;
-    }
-    write_execute("CREATE INDEX IF NOT EXISTS idx_mention_entity ON entity_mention(entity_id)");
 
     // Claim-based semantic memory (Mem0-style)
     if (!write_execute(R"(
@@ -1388,29 +1356,6 @@ bool DuckDBStore::create_schema() {
     write_execute("CREATE INDEX IF NOT EXISTS idx_correction_session ON correction_log(session_id)");
     write_execute("CREATE SEQUENCE IF NOT EXISTS correction_log_seq START 1");
 
-    // Outcome traces for causal chains
-    if (!write_execute(R"(
-        CREATE TABLE IF NOT EXISTS outcome_trace (
-            id BIGINT PRIMARY KEY,
-            session_id VARCHAR NOT NULL,
-            trigger_turn_id BIGINT DEFAULT 0,
-            action_turn_id BIGINT DEFAULT 0,
-            outcome_turn_id BIGINT DEFAULT 0,
-            trigger_intent VARCHAR,
-            action_type VARCHAR,
-            outcome_type VARCHAR,
-            lesson TEXT,
-            memory_id BIGINT DEFAULT 0,
-            realm VARCHAR DEFAULT 'brahman',
-            created_at BIGINT NOT NULL
-        )
-    )")) {
-        return false;
-    }
-    write_execute("CREATE INDEX IF NOT EXISTS idx_outcome_session ON outcome_trace(session_id)");
-    write_execute("CREATE INDEX IF NOT EXISTS idx_outcome_type ON outcome_trace(outcome_type)");
-    write_execute("CREATE SEQUENCE IF NOT EXISTS outcome_trace_seq START 1");
-
     // ═══════════════════════════════════════════════════════════════════════
     // Sadhana: Unified Autonomous Agent System
     // ═══════════════════════════════════════════════════════════════════════
@@ -1455,23 +1400,6 @@ bool DuckDBStore::create_schema() {
         "UPDATE memory "
         "SET content = regexp_replace(content, '(@[A-Za-z0-9_.\\-]+):[0-9]+', '\\1', 'g') "
         "WHERE content LIKE '[code]%' AND content ~ '@[A-Za-z0-9_.\\-]+:[0-9]+'");
-
-    // Sadhana history: append-only event log for each sadhana
-    if (!write_execute(R"(
-        CREATE TABLE IF NOT EXISTS sadhana_history (
-            id BIGINT PRIMARY KEY,
-            sadhana_id BIGINT NOT NULL,
-            timestamp BIGINT NOT NULL,
-            event_type VARCHAR NOT NULL,
-            content JSON,
-            duration_ms INTEGER DEFAULT 0
-        )
-    )")) {
-        return false;
-    }
-    write_execute("CREATE INDEX IF NOT EXISTS idx_sadhana_history_id ON sadhana_history(sadhana_id)");
-    write_execute("CREATE INDEX IF NOT EXISTS idx_sadhana_history_type ON sadhana_history(event_type)");
-    write_execute("CREATE SEQUENCE IF NOT EXISTS sadhana_history_seq START 1");
 
     // Pre-seed user and assistant entities
     write_execute(R"(
@@ -1885,6 +1813,25 @@ std::string DuckDBStore::embedding_to_sql(const std::vector<float>& embedding) {
         result += std::to_string(embedding[i]);
     }
     result += "]::FLOAT[768]";
+    return result;
+}
+
+// Parse a JSON float array string (e.g. "[0.1, -0.2, ...]") into a vector<float>.
+static std::vector<float> parse_embedding_json(const std::string& s) {
+    std::vector<float> result;
+    if (s.size() < 2 || s.front() != '[') return result;
+    result.reserve(768);
+    const char* p = s.c_str() + 1;
+    char* end = nullptr;
+    while (*p && *p != ']') {
+        while (*p == ' ' || *p == ',') ++p;
+        if (*p == ']' || *p == '\0') break;
+        float v = std::strtof(p, &end);
+        if (end == p) break;
+        result.push_back(v);
+        p = end;
+    }
+    if (result.size() != 768) result.clear();
     return result;
 }
 
@@ -10609,25 +10556,49 @@ std::vector<DuckDBStore::OrphanMemory> DuckDBStore::get_orphan_memories_with_emb
 
     if (candidates.empty()) return orphans;
 
-    // Phase 2: Batch lookup embeddings from embeddings DB
-    if (!emb_conn_) {
-        // No embeddings DB - can't get embeddings
-        return orphans;
-    }
+    // Phase 2: Batch lookup embeddings — prefer main DB embedding column (VARCHAR JSON)
+    // Fall back to separate embeddings DB if present (legacy path).
+    std::cerr << "[DuckDBStore] theme orphans: " << candidates.size() << " candidates, fetching embeddings\n";
 
-    // Build batch query for all candidate IDs
-    std::ostringstream emb_sql;
-    emb_sql << "SELECT memory_id, embedding FROM memory_embeddings WHERE memory_id IN (";
-    for (size_t i = 0; i < candidates.size(); ++i) {
-        if (i > 0) emb_sql << ",";
-        emb_sql << candidates[i].id;
-    }
-    emb_sql << ")";
-    std::cerr << "[DuckDBStore] theme orphans: " << candidates.size() << " candidates, query embeddings DB\n";
-
-    // Lookup all embeddings in one query
     std::unordered_map<int64_t, std::vector<float>> emb_map;
+
+    // Build candidate ID list for batch query
+    std::ostringstream id_list;
+    for (size_t i = 0; i < candidates.size(); ++i) {
+        if (i > 0) id_list << ",";
+        id_list << candidates[i].id;
+    }
+
+    // Primary: read from memory.embedding (VARCHAR JSON array) in main DB
     {
+        std::ostringstream emb_sql;
+        emb_sql << "SELECT id, embedding FROM memory WHERE id IN (" << id_list.str() << ")"
+                << " AND embedding IS NOT NULL AND embedding != ''";
+        try {
+            auto emb_result = read_query(emb_sql.str());
+            if (emb_result && !emb_result->HasError()) {
+                while (true) {
+                    auto emb_chunk = emb_result->Fetch();
+                    if (!emb_chunk || emb_chunk->size() == 0) break;
+                    for (size_t i = 0; i < emb_chunk->size(); ++i) {
+                        int64_t mem_id = emb_chunk->GetValue(0, i).GetValue<int64_t>();
+                        std::string emb_str = emb_chunk->GetValue(1, i).ToString();
+                        auto emb = parse_embedding_json(emb_str);
+                        if (!emb.empty()) {
+                            emb_map[mem_id] = std::move(emb);
+                        }
+                    }
+                }
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "[DuckDBStore] Main DB embedding lookup failed: " << e.what() << "\n";
+        }
+    }
+
+    // Fallback: separate embeddings DB if present and we still have gaps
+    if (emb_map.size() < candidates.size() && emb_conn_) {
+        std::ostringstream emb_sql;
+        emb_sql << "SELECT memory_id, embedding FROM memory_embeddings WHERE memory_id IN (" << id_list.str() << ")";
         std::lock_guard<std::mutex> lock(emb_mutex_);
         try {
             auto emb_result = emb_conn_->Query(emb_sql.str());
@@ -10635,18 +10606,16 @@ std::vector<DuckDBStore::OrphanMemory> DuckDBStore::get_orphan_memories_with_emb
                 while (true) {
                     auto emb_chunk = emb_result->Fetch();
                     if (!emb_chunk || emb_chunk->size() == 0) break;
-
                     for (size_t i = 0; i < emb_chunk->size(); ++i) {
                         int64_t mem_id = emb_chunk->GetValue(0, i).GetValue<int64_t>();
+                        if (emb_map.count(mem_id)) continue;
                         auto emb_val = emb_chunk->GetValue(1, i);
                         if (!emb_val.IsNull()) {
                             auto list = duckdb::ListValue::GetChildren(emb_val);
                             if (list.size() == 768) {
                                 std::vector<float> emb;
                                 emb.reserve(768);
-                                for (const auto& v : list) {
-                                    emb.push_back(v.GetValue<float>());
-                                }
+                                for (const auto& v : list) emb.push_back(v.GetValue<float>());
                                 emb_map[mem_id] = std::move(emb);
                             }
                         }
@@ -10654,9 +10623,10 @@ std::vector<DuckDBStore::OrphanMemory> DuckDBStore::get_orphan_memories_with_emb
                 }
             }
         } catch (const std::exception& e) {
-            std::cerr << "[DuckDBStore] Batch embedding lookup failed: " << e.what() << "\n";
+            std::cerr << "[DuckDBStore] Fallback embedding lookup failed: " << e.what() << "\n";
         }
     }
+
     std::cerr << "[DuckDBStore] theme orphans: found " << emb_map.size() << " embeddings\n";
 
     // Match embeddings to candidates
