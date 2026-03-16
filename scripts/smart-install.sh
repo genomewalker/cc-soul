@@ -264,17 +264,27 @@ build_chitta_field() {
         git clone --depth 1 https://github.com/genomewalker/chitta-field.git "$cf_dir" 2>&1 | tail -3
     fi
 
-    local cargo_bin
-    if ! cargo_bin=$(find_cargo); then
-        echo "[cc-soul] ERROR: cargo (Rust) not found. Install rustup: https://rustup.rs" >&2
-        return 1
+    if ! command -v rustup &>/dev/null; then
+        if ! find_cargo &>/dev/null; then
+            echo "[cc-soul] ERROR: cargo/rustup not found. Install rustup: https://rustup.rs" >&2
+            return 1
+        fi
     fi
 
-    echo "[cc-soul] Building chitta-field ($(basename "$cargo_bin"))..."
-    # cd into cf_dir so rustup auto-selects the pinned toolchain from rust-toolchain.toml
+    # Read pinned toolchain from rust-toolchain.toml, fall back to stable
+    local toolchain="stable"
+    if [[ -f "$cf_dir/rust-toolchain.toml" ]]; then
+        toolchain=$(grep -oP '(?<=channel = ")[^"]+' "$cf_dir/rust-toolchain.toml" 2>/dev/null || echo "stable")
+    elif [[ -f "$cf_dir/rust-toolchain" ]]; then
+        toolchain=$(cat "$cf_dir/rust-toolchain" | tr -d '[:space:]')
+    fi
+
+    echo "[cc-soul] Building chitta-field (toolchain: $toolchain)..."
+    # Ensure the pinned toolchain is installed
+    rustup toolchain install "$toolchain" --no-self-update 2>/dev/null || true
     # Unset conda linker flags to avoid ABI conflicts
     (cd "$cf_dir" && env -u LDFLAGS -u CFLAGS -u CXXFLAGS \
-        "$cargo_bin" build --release 2>&1 | tail -5)
+        rustup run "$toolchain" cargo build --release 2>&1 | tail -5)
 
     if [[ ! -f "$cf_dir/target/release/libchitta_field.a" ]]; then
         echo "[cc-soul] ERROR: chitta-field build failed" >&2
