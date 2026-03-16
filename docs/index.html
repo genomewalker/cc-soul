@@ -31,6 +31,7 @@
       <li><a href="getting-started.html">Get Started</a></li>
       <li><a href="philosophy.html">Philosophy</a></li>
       <li><a href="architecture.html">Architecture</a></li>
+      <li><a href="chitta-field.html">chitta-field</a></li>
       <li><a href="sadhana.html">Sadhana</a></li>
       <li><a href="tools.html">Tools</a></li>
       <li><a href="cli.html">CLI</a></li>
@@ -81,9 +82,10 @@
       <div class="whats-new-header">
         <span class="whats-new-badge">New in v3.43.38</span>
       </div>
-      <p class="whats-new-title">Autonomous dreams and self-improvement</p>
+      <p class="whats-new-title">chitta-field: DuckDB replaced with a Rust memory substrate</p>
       <p class="whats-new-desc">
-        The soul now explores topics independently during idle time &mdash; web-searching, forming memories, and filing architectural improvements. A daily impl sadhana closes the loop by reading those findings and committing code changes.
+        The soul's storage layer is now <strong>chitta-field</strong> &mdash; a pure Rust organic memory substrate, statically linked into the daemon. No external database. No NFS locks. No D-state hangs. Multi-instance writes, write-ahead log, sparse associative codes.
+        Also: autonomous dreams during idle time, self-improvement loop, and architectural reflection.
         <a href="https://github.com/genomewalker/cc-soul/releases" class="link-sandal">See release notes &rarr;</a>
       </p>
     </div>
@@ -308,6 +310,195 @@
   </div>
 </section>
 
+
+<!-- CHITTA-FIELD -->
+<section class="chitta-field-section" id="chitta-field">
+  <div class="container">
+    <div class="chitta-field-header reveal">
+      <div class="section-divider"></div>
+      <h2 class="heading-section"><span class="vignette-title-sanskrit">chitta-field</span>&thinsp;&mdash;&thinsp;memory as a living substrate.</h2>
+    </div>
+
+    <div class="chitta-field-body">
+      <div class="chitta-field-prose reveal reveal-delay-1">
+        <p>Under the hood, cc-soul stores nothing in a database. Memory lives in <strong>chitta-field</strong> &mdash; a pure Rust substrate compiled directly into the daemon. No external server. No network socket. No NFS file handles.</p>
+        <p>Each memory is encoded as a <em>sparse code</em>: exactly 64 of 16,384 feature dimensions activate. Recall is driven by overlap between patterns, not keyword matching. Related memories find each other because they share activated neurons &mdash; the same way biological associative memory works.</p>
+        <p>Every write is durable before it applies in memory. A write-ahead log captures every operation. Restart the daemon at any point; the field rebuilds from the log in milliseconds.</p>
+      </div>
+
+      <div class="chitta-field-stats reveal reveal-delay-2">
+        <div class="cf-stat">
+          <span class="cf-stat-value">16,384</span>
+          <span class="cf-stat-label">feature dimensions</span>
+        </div>
+        <div class="cf-stat">
+          <span class="cf-stat-value">64</span>
+          <span class="cf-stat-label">active per memory</span>
+        </div>
+        <div class="cf-stat">
+          <span class="cf-stat-value">0.4%</span>
+          <span class="cf-stat-label">sparsity &mdash; signal, not noise</span>
+        </div>
+        <div class="cf-stat">
+          <span class="cf-stat-value">&lt;1ms</span>
+          <span class="cf-stat-label">recall via cortical index</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- SPARSE FIELD CANVAS -->
+    <div class="cf-canvas-wrap reveal reveal-delay-3">
+      <p class="cf-canvas-label">Sparse field activation &mdash; each pulse is one memory encoding 64&thinsp;/&thinsp;16,384 features</p>
+      <canvas id="chitta-field-canvas"></canvas>
+      <div class="canvas-legend">
+        <div class="legend-item"><span class="legend-dot" style="background:rgba(203,175,134,0.7)"></span><span class="legend-text">Active feature (sparse code)</span></div>
+        <div class="legend-item"><span class="legend-dot" style="background:rgba(157,178,217,0.25)"></span><span class="legend-text">Inactive dimension</span></div>
+        <div class="legend-item"><span class="legend-dot" style="background:rgba(212,106,76,0.8)"></span><span class="legend-text">Overlap &mdash; associative recall</span></div>
+      </div>
+    </div>
+
+    <div class="cf-details reveal reveal-delay-2">
+      <div class="cf-detail-card">
+        <h4 class="cf-detail-title">Write-Ahead Log</h4>
+        <p class="cf-detail-desc">Every operation is appended to a segment file before applying in-memory. CRC-validated. Segment rotation at 256 MB. Multi-writer safe: each Claude instance owns its own segment.</p>
+      </div>
+      <div class="cf-detail-card">
+        <h4 class="cf-detail-title">Cortical Posting Index</h4>
+        <p class="cf-detail-desc">Each active feature maintains an inverted list of memories it belongs to. Recall intersects the k posting lists for the query's top-k features. Sub-millisecond, no HNSW graph traversal.</p>
+      </div>
+      <div class="cf-detail-card">
+        <h4 class="cf-detail-title">Organic Decay</h4>
+        <p class="cf-detail-desc">Memories move through tiers based on access frequency and recency. Hot memories stay warm. Cold memories demote over time. What you use survives; what you don't, fades into the background.</p>
+      </div>
+    </div>
+
+    <p class="bridge-link reveal reveal-delay-3">
+      <a href="https://github.com/genomewalker/chitta-field" target="_blank" rel="noopener">chitta-field on GitHub &rarr;</a>
+    </p>
+  </div>
+</section>
+
+<style>
+/* ─── chitta-field section ─── */
+.chitta-field-section { padding: var(--space-10) 0; }
+
+.chitta-field-header { margin-bottom: var(--space-7); }
+
+.chitta-field-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-7);
+  margin-bottom: var(--space-7);
+  align-items: start;
+}
+@media (max-width: 768px) {
+  .chitta-field-body { grid-template-columns: 1fr; }
+}
+
+.chitta-field-prose p {
+  color: var(--ash-300);
+  margin-bottom: var(--space-4);
+  font-size: var(--text-sm);
+  line-height: 1.8;
+}
+.chitta-field-prose p:last-child { margin-bottom: 0; }
+.chitta-field-prose strong { color: var(--lotus-200); font-weight: 500; }
+.chitta-field-prose em { color: var(--sandal-300); font-style: normal; }
+
+.chitta-field-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+}
+
+.cf-stat {
+  background: rgba(26, 29, 43, 0.6);
+  border: 1px solid rgba(157, 178, 217, 0.08);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.cf-stat-value {
+  font-family: var(--font-mono);
+  font-size: var(--text-xl);
+  color: var(--sandal-300);
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.cf-stat-label {
+  font-size: var(--text-xs);
+  color: rgba(185, 189, 199, 0.55);
+  line-height: 1.4;
+}
+
+.cf-canvas-wrap {
+  position: relative;
+  width: 100%;
+  height: 220px;
+  margin-bottom: var(--space-7);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: rgba(11, 11, 16, 0.7);
+  border: 1px solid rgba(157, 178, 217, 0.07);
+}
+
+.cf-canvas-label {
+  position: absolute;
+  top: var(--space-3);
+  left: var(--space-4);
+  font-size: var(--text-xs);
+  color: rgba(185, 189, 199, 0.4);
+  z-index: 2;
+  pointer-events: none;
+}
+
+#chitta-field-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.cf-canvas-wrap .canvas-legend {
+  position: absolute;
+  bottom: var(--space-3);
+  left: var(--space-4);
+}
+
+.cf-details {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+@media (max-width: 768px) {
+  .cf-details { grid-template-columns: 1fr; }
+}
+
+.cf-detail-card {
+  padding: var(--space-5);
+  background: rgba(26, 29, 43, 0.4);
+  border: 1px solid rgba(203, 175, 134, 0.07);
+  border-radius: var(--radius-md);
+}
+
+.cf-detail-title {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--lotus-200);
+  margin-bottom: var(--space-3);
+}
+
+.cf-detail-desc {
+  font-size: var(--text-xs);
+  color: rgba(185, 189, 199, 0.6);
+  line-height: 1.7;
+}
+</style>
 
 <!-- FIRST 30 DAYS -->
 <section class="progression" id="progression">
@@ -664,6 +855,175 @@
   }, { threshold: 0.1 });
 
   resObs.observe(canvas.parentElement);
+})();
+
+/* ═══════════════════════════════════════════
+   CHITTA-FIELD SPARSE ACTIVATION (Canvas)
+   ═══════════════════════════════════════════ */
+(function() {
+  const canvas = document.getElementById('chitta-field-canvas');
+  if (!canvas) return;
+
+  const ctx = canvas.getContext('2d');
+  let w, h, dpr;
+
+  // Grid of feature neurons
+  const COLS = 80;
+  const ROWS = 20;
+  const SPARSE_K = 64; // active per memory
+  const TOTAL = COLS * ROWS; // 1600 — representative subset of 16K
+
+  // Memory pulses in the field
+  const MAX_PULSES = 4;
+  const PULSE_DURATION = 180; // frames
+  const COLORS_PULSE = [
+    [203, 175, 134], // sandal
+    [157, 178, 217], // aura
+    [212, 106,  76], // ember
+    [130, 180, 140], // muted green
+  ];
+
+  let cells = []; // base brightness per cell (0..1)
+  let pulses = [];
+  let frame = 0;
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const rect = canvas.parentElement.getBoundingClientRect();
+    w = rect.width;
+    h = rect.height;
+    canvas.width  = w * dpr;
+    canvas.height = h * dpr;
+    canvas.style.width  = w + 'px';
+    canvas.style.height = h + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function cellRect(idx) {
+    const col = idx % COLS;
+    const row = Math.floor(idx / COLS);
+    const cw = w / COLS;
+    const ch = h / ROWS;
+    const gap = Math.min(cw, ch) * 0.28;
+    return {
+      x: col * cw + gap / 2,
+      y: row * ch + gap / 2,
+      w: cw - gap,
+      h: ch - gap,
+    };
+  }
+
+  function spawnPulse() {
+    // Pick SPARSE_K random distinct indices
+    const indices = new Set();
+    while (indices.size < SPARSE_K) {
+      // Bias toward clusters (more realistic)
+      const center = Math.floor(Math.random() * TOTAL);
+      const spread = Math.floor(Math.random() * 60) + 10;
+      for (let attempt = 0; attempt < 12 && indices.size < SPARSE_K; attempt++) {
+        const idx = Math.max(0, Math.min(TOTAL - 1,
+          center + Math.round((Math.random() - 0.5) * spread * 2)));
+        indices.add(idx);
+      }
+    }
+    const colorIdx = pulses.length % COLORS_PULSE.length;
+    pulses.push({
+      indices: Array.from(indices),
+      color: COLORS_PULSE[colorIdx],
+      born: frame,
+      age: 0,
+    });
+  }
+
+  function draw() {
+    frame++;
+    ctx.clearRect(0, 0, w, h);
+
+    // Spawn pulses on schedule
+    if (frame === 1 || (frame % 60 === 0 && pulses.length < MAX_PULSES)) {
+      spawnPulse();
+    }
+
+    // Update pulse ages, remove expired
+    pulses = pulses.filter(p => { p.age = frame - p.born; return p.age < PULSE_DURATION; });
+
+    // Build per-cell activation
+    const activation = new Float32Array(TOTAL); // 0..1
+    const overlapCount = new Uint8Array(TOTAL);
+
+    for (let p = 0; p < pulses.length; p++) {
+      const pulse = pulses[p];
+      // Envelope: rise 20f, sustain, fall 40f
+      let env;
+      if (pulse.age < 20) env = pulse.age / 20;
+      else if (pulse.age > PULSE_DURATION - 40) env = (PULSE_DURATION - pulse.age) / 40;
+      else env = 1;
+
+      for (let k = 0; k < pulse.indices.length; k++) {
+        const idx = pulse.indices[k];
+        activation[idx] = Math.max(activation[idx], env);
+        overlapCount[idx]++;
+      }
+    }
+
+    // Draw cells
+    for (let i = 0; i < TOTAL; i++) {
+      const r = cellRect(i);
+      const act = activation[i];
+      const overlap = overlapCount[i] > 1;
+
+      if (act < 0.01) {
+        // Inactive: dim dot
+        ctx.fillStyle = 'rgba(157,178,217,0.06)';
+        ctx.fillRect(r.x, r.y, r.w, r.h);
+      } else {
+        // Find dominant pulse color for this cell
+        let pulseColor = COLORS_PULSE[0];
+        for (let p = 0; p < pulses.length; p++) {
+          if (pulses[p].indices.includes(i)) {
+            pulseColor = pulses[p].color;
+            break;
+          }
+        }
+
+        if (overlap) {
+          // Overlap cell: ember glow = associative recall
+          const a = act * 0.9;
+          ctx.fillStyle = 'rgba(212,106,76,' + a + ')';
+          // Outer glow
+          const grd = ctx.createRadialGradient(
+            r.x + r.w/2, r.y + r.h/2, 0,
+            r.x + r.w/2, r.y + r.h/2, r.w * 3
+          );
+          grd.addColorStop(0, 'rgba(212,106,76,' + (a * 0.35) + ')');
+          grd.addColorStop(1, 'rgba(212,106,76,0)');
+          ctx.fillStyle = grd;
+          ctx.fillRect(r.x - r.w*2.5, r.y - r.h*2.5, r.w*6, r.h*6);
+          ctx.fillStyle = 'rgba(212,106,76,' + a + ')';
+          ctx.fillRect(r.x, r.y, r.w, r.h);
+        } else {
+          const [cr, cg, cb] = pulseColor;
+          const a = act * 0.85;
+          ctx.fillStyle = 'rgba(' + cr + ',' + cg + ',' + cb + ',' + a + ')';
+          ctx.fillRect(r.x, r.y, r.w, r.h);
+        }
+      }
+    }
+
+    requestAnimationFrame(draw);
+  }
+
+  function init() {
+    resize();
+    window.addEventListener('resize', resize);
+    requestAnimationFrame(draw);
+  }
+
+  const obs = new IntersectionObserver(function(entries) {
+    if (entries[0].isIntersecting) { init(); obs.disconnect(); }
+  }, { threshold: 0.05 });
+
+  obs.observe(canvas.parentElement);
 })();
 
 /* ═══════════════════════════════════════════

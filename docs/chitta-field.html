@@ -1,0 +1,912 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>chitta-field — Organic Memory Substrate — cc-soul</title>
+<meta name="description" content="chitta-field: a pure Rust organic memory substrate for cc-soul. Sparse associative codes, write-ahead log, multi-writer design, and sub-millisecond recall via cortical posting index.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<meta property="og:title" content="chitta-field — Organic Memory Substrate — cc-soul">
+<meta property="og:description" content="A pure Rust organic memory substrate. Sparse associative codes, WAL, multi-writer, sub-millisecond recall.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="favicon.svg">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="chitta-field — Organic Memory Substrate">
+<meta name="twitter:description" content="Pure Rust memory substrate. Sparse codes, WAL durability, multi-writer, cortical posting index.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<style>
+/* Sticky Top Submenu TOC */
+.submenu-toc {
+  position: sticky;
+  top: 60px;
+  z-index: 90;
+  background: linear-gradient(180deg, rgba(11,11,16,0.98) 0%, rgba(11,11,16,0.95) 100%);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(203,175,134,0.08);
+  padding: 0;
+  margin-top: -1px;
+}
+.submenu-toc-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 var(--space-5);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.submenu-toc-inner::-webkit-scrollbar { display: none; }
+.submenu-toc-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px;
+  color: #565f89;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+  position: relative;
+}
+.submenu-toc-link:hover { color: var(--sandal-300); }
+.submenu-toc-link.active { color: var(--sandal-300); }
+.submenu-toc-link.active::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 16px;
+  right: 16px;
+  height: 1px;
+  background: var(--sandal-300);
+  opacity: 0.5;
+}
+
+/* Page sections */
+.cf-page-section {
+  padding: var(--space-9) 0;
+  border-bottom: 1px solid rgba(157,178,217,0.06);
+}
+.cf-page-section.alt-bg {
+  background: rgba(26,29,43,0.3);
+}
+.section-intro {
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  max-width: 680px;
+  line-height: 1.8;
+  margin-bottom: var(--space-6);
+}
+
+/* Canvas */
+.cf-canvas-hero {
+  position: relative;
+  width: 100%;
+  height: 280px;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: rgba(11,11,16,0.8);
+  border: 1px solid rgba(203,175,134,0.08);
+  margin: var(--space-6) 0;
+}
+.cf-canvas-label {
+  position: absolute;
+  top: var(--space-3);
+  left: var(--space-4);
+  font-size: var(--text-xs);
+  color: rgba(185,189,199,0.4);
+  z-index: 2;
+  pointer-events: none;
+}
+#cf-main-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Stats row */
+.cf-stats-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-4);
+  margin: var(--space-6) 0;
+}
+@media (max-width: 768px) {
+  .cf-stats-row { grid-template-columns: repeat(2, 1fr); }
+}
+.cf-stat-box {
+  background: rgba(26,29,43,0.6);
+  border: 1px solid rgba(157,178,217,0.08);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+}
+.cf-stat-box .val {
+  font-family: var(--font-mono);
+  font-size: var(--text-xl);
+  color: var(--sandal-300);
+  letter-spacing: -0.02em;
+  line-height: 1;
+  display: block;
+  margin-bottom: var(--space-2);
+}
+.cf-stat-box .lbl {
+  font-size: var(--text-xs);
+  color: rgba(185,189,199,0.5);
+  line-height: 1.4;
+}
+
+/* Two-col layout */
+.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-7);
+  align-items: start;
+}
+@media (max-width: 768px) { .two-col { grid-template-columns: 1fr; } }
+
+/* Code blocks */
+.cf-code {
+  background: rgba(11,11,16,0.8);
+  border: 1px solid rgba(157,178,217,0.08);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.8;
+  color: var(--ash-300);
+  overflow-x: auto;
+}
+.cf-code .kw { color: var(--aura-300); }
+.cf-code .val { color: var(--sandal-300); }
+.cf-code .cm { color: rgba(185,189,199,0.4); }
+.cf-code .ty { color: var(--ember-400); }
+.cf-code .str { color: #9ece6a; }
+
+/* Prose */
+.cf-prose p {
+  font-size: var(--text-sm);
+  color: var(--ash-300);
+  line-height: 1.8;
+  margin-bottom: var(--space-4);
+}
+.cf-prose p:last-child { margin-bottom: 0; }
+.cf-prose strong { color: var(--lotus-200); font-weight: 500; }
+.cf-prose em { color: var(--sandal-300); font-style: normal; }
+.cf-prose code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  color: var(--aura-300);
+  background: rgba(157,178,217,0.07);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+/* Detail cards */
+.cf-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-4);
+  margin-top: var(--space-6);
+}
+@media (max-width: 900px) { .cf-cards { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 600px) { .cf-cards { grid-template-columns: 1fr; } }
+.cf-card {
+  padding: var(--space-5);
+  background: rgba(26,29,43,0.5);
+  border: 1px solid rgba(203,175,134,0.07);
+  border-radius: var(--radius-md);
+  transition: border-color 0.2s;
+}
+.cf-card:hover { border-color: rgba(203,175,134,0.18); }
+.cf-card-title {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--lotus-200);
+  margin-bottom: var(--space-3);
+}
+.cf-card-desc {
+  font-size: var(--text-xs);
+  color: rgba(185,189,199,0.6);
+  line-height: 1.7;
+}
+
+/* Op table */
+.op-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-xs);
+  margin-top: var(--space-5);
+}
+.op-table th {
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  color: rgba(185,189,199,0.5);
+  border-bottom: 1px solid rgba(157,178,217,0.1);
+  font-weight: 400;
+}
+.op-table td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid rgba(157,178,217,0.04);
+  vertical-align: top;
+}
+.op-table tr:hover td { background: rgba(157,178,217,0.03); }
+.op-name { font-family: var(--font-mono); color: var(--sandal-300); }
+.op-byte { font-family: var(--font-mono); color: var(--aura-300); }
+.op-desc { color: var(--ash-300); }
+
+/* WAL entry diagram */
+.wal-entry {
+  display: flex;
+  align-items: stretch;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  margin: var(--space-5) 0;
+  border: 1px solid rgba(157,178,217,0.08);
+}
+.wal-field {
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border-right: 1px solid rgba(157,178,217,0.08);
+}
+.wal-field:last-child { border-right: none; }
+.wal-field-label { color: rgba(185,189,199,0.4); font-size: 0.65rem; letter-spacing: 0.05em; text-transform: uppercase; }
+.wal-field-val { color: var(--sandal-300); }
+.wal-field-size { color: rgba(185,189,199,0.3); font-size: 0.65rem; }
+.wal-field--len { background: rgba(157,178,217,0.06); }
+.wal-field--seqno { background: rgba(157,178,217,0.04); }
+.wal-field--type { background: rgba(203,175,134,0.06); }
+.wal-field--payload { background: rgba(26,29,43,0.4); flex: 1; }
+.wal-field--crc { background: rgba(212,106,76,0.06); }
+
+/* Canvas legend inline */
+.cf-legend {
+  display: flex;
+  gap: var(--space-5);
+  flex-wrap: wrap;
+  margin-top: var(--space-3);
+}
+.cf-legend-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: rgba(185,189,199,0.5);
+}
+.cf-legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+/* Phase diagram for cortical index */
+.cortical-diagram {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin: var(--space-5) 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+.cortical-box {
+  background: rgba(26,29,43,0.6);
+  border: 1px solid rgba(157,178,217,0.1);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  color: var(--ash-300);
+  text-align: center;
+}
+.cortical-box.highlight { border-color: rgba(203,175,134,0.3); color: var(--sandal-300); }
+.cortical-arrow { color: rgba(185,189,199,0.3); }
+
+/* Tier decay */
+.tier-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+.tier-item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: rgba(26,29,43,0.4);
+  border-radius: var(--radius-sm);
+  border-left: 2px solid transparent;
+  font-size: var(--text-xs);
+}
+.tier-item--0 { border-color: var(--sandal-300); }
+.tier-item--1 { border-color: var(--aura-300); }
+.tier-item--2 { border-color: rgba(157,178,217,0.4); }
+.tier-item--3 { border-color: rgba(157,178,217,0.2); }
+.tier-num { font-family: var(--font-mono); color: var(--sandal-300); min-width: 20px; }
+.tier-name { color: var(--lotus-200); min-width: 90px; }
+.tier-desc { color: rgba(185,189,199,0.5); }
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="index.html" class="nav-brand">cc<span>-</span>soul</a>
+    <button class="nav-hamburger" onclick="document.querySelector('.nav').classList.toggle('nav-open')" aria-label="Menu">
+      <span></span><span></span><span></span>
+    </button>
+    <ul class="nav-links">
+      <li><a href="index.html">Home</a></li>
+      <li><a href="getting-started.html">Get Started</a></li>
+      <li><a href="philosophy.html">Philosophy</a></li>
+      <li><a href="architecture.html">Architecture</a></li>
+      <li><a href="chitta-field.html" class="active">chitta-field</a></li>
+      <li><a href="sadhana.html">Sadhana</a></li>
+      <li><a href="tools.html">Tools</a></li>
+      <li><a href="cli.html">CLI</a></li>
+      <li><a href="hooks.html">Hooks</a></li>
+      <li><a href="skills.html">Skills</a></li>
+      <li><a href="dreams/index.html">Dreams</a></li>
+      <li><a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+  </div>
+</nav>
+
+<!-- PAGE HEADER -->
+<header class="page-header">
+  <div class="container">
+    <div class="page-header-badge reveal">Memory Substrate</div>
+    <h1 class="reveal reveal-delay-1"><span style="font-style:italic">chitta-field</span></h1>
+    <p class="page-header-sub reveal reveal-delay-2">A pure Rust organic memory substrate&thinsp;&mdash;&thinsp;sparse associative codes, write-ahead log, multi-writer, sub-millisecond recall. No external database. No NFS locks.</p>
+  </div>
+</header>
+
+<!-- STICKY TOC -->
+<nav class="submenu-toc">
+  <div class="submenu-toc-inner">
+    <a href="#overview"   class="submenu-toc-link" data-section="overview">Overview</a>
+    <a href="#sparse"     class="submenu-toc-link" data-section="sparse">Sparse Codes</a>
+    <a href="#wal"        class="submenu-toc-link" data-section="wal">Write-Ahead Log</a>
+    <a href="#cortical"   class="submenu-toc-link" data-section="cortical">Cortical Index</a>
+    <a href="#multiwrite" class="submenu-toc-link" data-section="multiwrite">Multi-Writer</a>
+    <a href="#decay"      class="submenu-toc-link" data-section="decay">Organic Decay</a>
+    <a href="#ops"        class="submenu-toc-link" data-section="ops">Op Catalog</a>
+    <a href="#integration" class="submenu-toc-link" data-section="integration">Integration</a>
+  </div>
+</nav>
+
+
+<!-- ═══ OVERVIEW ═══ -->
+<section class="cf-page-section" id="overview">
+  <div class="container">
+    <div class="reveal"><div class="section-divider"></div><h2 class="heading-section">What it is</h2></div>
+    <p class="section-intro reveal reveal-delay-1">chitta-field is the sole storage substrate for cc-soul. It replaced DuckDB in v3.43.38 to eliminate NFS file handle issues and D-state hangs on shared filesystems. It is a pure Rust library compiled to <code>libchitta_field.a</code>, statically linked into the C++ daemon. Zero external processes. Zero network sockets. Zero OS file handles on startup beyond the WAL segments.</p>
+
+    <!-- Canvas animation -->
+    <div class="cf-canvas-hero reveal reveal-delay-2">
+      <p class="cf-canvas-label">Sparse field activation &mdash; each pulse encodes one memory as 64&thinsp;/&thinsp;16,384 features</p>
+      <canvas id="cf-main-canvas"></canvas>
+    </div>
+    <div class="cf-legend reveal reveal-delay-3">
+      <div class="cf-legend-item"><span class="cf-legend-dot" style="background:rgba(203,175,134,0.8)"></span>Active feature (sparse code)</div>
+      <div class="cf-legend-item"><span class="cf-legend-dot" style="background:rgba(157,178,217,0.15)"></span>Inactive dimension</div>
+      <div class="cf-legend-item"><span class="cf-legend-dot" style="background:rgba(212,106,76,0.85)"></span>Overlap &mdash; associative recall signal</div>
+    </div>
+
+    <!-- Stats -->
+    <div class="cf-stats-row">
+      <div class="cf-stat-box reveal reveal-delay-1">
+        <span class="val">16,384</span>
+        <span class="lbl">feature dimensions in the sparse field</span>
+      </div>
+      <div class="cf-stat-box reveal reveal-delay-2">
+        <span class="val">64</span>
+        <span class="lbl">active features per memory (0.4% sparsity)</span>
+      </div>
+      <div class="cf-stat-box reveal reveal-delay-3">
+        <span class="val">&lt;1ms</span>
+        <span class="lbl">recall via cortical posting index</span>
+      </div>
+      <div class="cf-stat-box reveal reveal-delay-4">
+        <span class="val">768</span>
+        <span class="lbl">dense embedding dims (bge-base-en-v1.5)</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══ SPARSE CODES ═══ -->
+<section class="cf-page-section alt-bg" id="sparse">
+  <div class="container">
+    <div class="reveal"><div class="section-divider"></div><h2 class="heading-section">Sparse associative codes</h2></div>
+    <div class="two-col">
+      <div class="cf-prose reveal reveal-delay-1">
+        <p>Each memory is encoded as a <strong>sparse code</strong>: exactly 64 of 16,384 feature dimensions activate. The rest are zero. This is the same principle behind sparse distributed representations in biological cortex — high capacity, collision-resistant, and inherently associative.</p>
+        <p>Sparse codes are derived from the dense 768-dim BGE embedding by projecting through a learned sparse encoder. The result: two memories about the same concept share many active features. Two unrelated memories share almost none.</p>
+        <p>This makes retrieval geometric: <em>find memories whose active features overlap most with the query's active features</em>. No distance function. No HNSW graph traversal. Just intersection and counting.</p>
+      </div>
+      <div class="reveal reveal-delay-2">
+        <div class="cf-code">
+<span class="cm">// Sparse code stored per memory</span>
+<span class="kw">struct</span> <span class="ty">SparseCode</span> {
+    memory_id: <span class="ty">MemoryId</span>,
+    feature_ids: [<span class="ty">u32</span>; 64],   <span class="cm">// which features</span>
+    activations: [<span class="ty">f32</span>; 64],  <span class="cm">// how strongly</span>
+    ts_ms: <span class="ty">i64</span>,               <span class="cm">// when encoded</span>
+}
+
+<span class="cm">// Cortical posting index</span>
+<span class="cm">// feature_id → sorted list of memory_ids</span>
+posting_index: HashMap&lt;<span class="ty">u32</span>, Vec&lt;<span class="ty">u64</span>&gt;&gt;
+
+<span class="cm">// Recall: intersect top-k posting lists</span>
+<span class="cm">// from the query's 64 active features</span>
+</div>
+        <p style="font-size:var(--text-xs);color:rgba(185,189,199,0.45);margin-top:var(--space-3);">The posting index enables sub-millisecond recall without HNSW or any graph traversal. Each feature maintains a sorted list; recall intersects k lists and scores by hit count.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══ WRITE-AHEAD LOG ═══ -->
+<section class="cf-page-section" id="wal">
+  <div class="container">
+    <div class="reveal"><div class="section-divider"></div><h2 class="heading-section">Write-ahead log</h2></div>
+    <p class="section-intro reveal reveal-delay-1">Every state change is an <code>Op</code> — a typed, serializable operation. Ops are appended to a segment file before they are applied in-memory. On restart, the daemon replays all segments in order and the field rebuilds in milliseconds from the WAL alone. No snapshots. No checkpoints. Just the log.</p>
+
+    <!-- WAL entry format -->
+    <div class="wal-entry reveal reveal-delay-2">
+      <div class="wal-field wal-field--len">
+        <span class="wal-field-label">len</span>
+        <span class="wal-field-val">u32</span>
+        <span class="wal-field-size">4 bytes</span>
+      </div>
+      <div class="wal-field wal-field--seqno">
+        <span class="wal-field-label">seqno</span>
+        <span class="wal-field-val">u64</span>
+        <span class="wal-field-size">8 bytes</span>
+      </div>
+      <div class="wal-field wal-field--type">
+        <span class="wal-field-label">op_type</span>
+        <span class="wal-field-val">u8</span>
+        <span class="wal-field-size">1 byte</span>
+      </div>
+      <div class="wal-field wal-field--payload">
+        <span class="wal-field-label">payload (msgpack)</span>
+        <span class="wal-field-val">Vec&lt;u8&gt;</span>
+        <span class="wal-field-size">len bytes</span>
+      </div>
+      <div class="wal-field wal-field--crc">
+        <span class="wal-field-label">crc32</span>
+        <span class="wal-field-val">u32</span>
+        <span class="wal-field-size">4 bytes</span>
+      </div>
+    </div>
+
+    <div class="two-col">
+      <div class="cf-prose reveal reveal-delay-3">
+        <p><strong>Durability</strong>: the write buffer is flushed to the OS after every append. An Op that returned a seqno is guaranteed to survive a crash.</p>
+        <p><strong>Integrity</strong>: each entry carries a CRC32 over <code>[seqno][op_type][payload]</code>. On replay, a mismatch aborts with a <code>CrcMismatch</code> error rather than silently accepting corrupted state.</p>
+        <p><strong>Segment rotation</strong>: segments rotate at 256 MB. Segment filenames encode instance ID and first seqno: <code>{instance_id:08x}_{first_seqno:012}.seg</code>. This makes ordering unambiguous across multiple writers.</p>
+      </div>
+      <div class="cf-code reveal reveal-delay-4">
+<span class="cm">~/.claude/mind/chitta/chitta-field/segments/</span>
+<span class="str">00000001_000000000000.seg</span>  <span class="cm">// instance 1, starts at seqno 0</span>
+<span class="str">00000001_000000012847.seg</span>  <span class="cm">// instance 1, rotated at 12847</span>
+<span class="str">00000002_000000000000.seg</span>  <span class="cm">// instance 2, separate writer</span>
+
+<span class="cm">// Segment header (16 bytes)</span>
+<span class="val">CFLOG001</span>  <span class="cm">// magic (8 bytes)</span>
+<span class="val">u64</span>        <span class="cm">// first_seqno (8 bytes)</span>
+
+<span class="cm">// Replay order: alphabetical sort</span>
+<span class="cm">// instance_id prefix ensures stable interleaving</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══ CORTICAL INDEX ═══ -->
+<section class="cf-page-section alt-bg" id="cortical">
+  <div class="container">
+    <div class="reveal"><div class="section-divider"></div><h2 class="heading-section">Cortical posting index</h2></div>
+    <p class="section-intro reveal reveal-delay-1">The recall path uses an inverted index over sparse feature activations — the same structure as a text search engine's posting list, applied to neural feature dimensions instead of words. This is why recall is sub-millisecond with no HNSW graph.</p>
+
+    <div class="cortical-diagram reveal reveal-delay-2">
+      <div class="cortical-box highlight">Query embedding<br><span style="font-size:0.65rem;opacity:0.6">768-dim dense</span></div>
+      <span class="cortical-arrow">&rarr;</span>
+      <div class="cortical-box highlight">Sparse encode<br><span style="font-size:0.65rem;opacity:0.6">64 active features</span></div>
+      <span class="cortical-arrow">&rarr;</span>
+      <div class="cortical-box">Lookup each feature<br><span style="font-size:0.65rem;opacity:0.6">in posting index</span></div>
+      <span class="cortical-arrow">&rarr;</span>
+      <div class="cortical-box">Intersect lists<br><span style="font-size:0.65rem;opacity:0.6">count overlap hits</span></div>
+      <span class="cortical-arrow">&rarr;</span>
+      <div class="cortical-box highlight">Top-K memories<br><span style="font-size:0.65rem;opacity:0.6">by overlap score</span></div>
+    </div>
+
+    <div class="two-col">
+      <div class="cf-prose reveal reveal-delay-3">
+        <p><strong>Why it's fast</strong>: each of the 64 query features maps to a pre-sorted posting list. Intersecting 64 small lists is O(k·log n) in the worst case, but in practice the lists are small because each feature is shared by only a fraction of all memories (sparsity guarantees this).</p>
+        <p><strong>Associativity</strong>: two memories about the same topic will share many active features. When you recall one, the other lights up because it appears repeatedly in the posting lists being scanned. This is associative retrieval — not a similarity metric, but emergent from the index structure.</p>
+        <p><strong>Hybrid recall</strong>: the posting index handles semantic overlap. A BM25 keyword index handles exact term matches. Both scores are fused in the resonance pipeline's early phases.</p>
+      </div>
+      <div class="cf-code reveal reveal-delay-4">
+<span class="cm">// Posting index: feature → memories</span>
+<span class="ty">posting_index</span>: HashMap&lt;<span class="ty">u32</span>, Vec&lt;<span class="ty">u64</span>&gt;&gt;
+
+<span class="cm">// On store: for each active feature,</span>
+<span class="cm">// append memory_id to its posting list</span>
+<span class="kw">fn</span> <span class="ty">index_sparse_code</span>(code: &amp;<span class="ty">SparseCode</span>) {
+    <span class="kw">for</span> fid <span class="kw">in</span> code.feature_ids {
+        posting_index[fid].push(code.memory_id);
+    }
+}
+
+<span class="cm">// On recall: intersect and score</span>
+<span class="kw">fn</span> <span class="ty">recall_sparse</span>(query_features: &amp;[<span class="ty">u32</span>; 64])
+  -&gt; Vec&lt;(<span class="ty">u64</span>, <span class="ty">u32</span>)&gt;
+{
+    <span class="kw">let mut</span> hits: HashMap&lt;<span class="ty">u64</span>, <span class="ty">u32</span>&gt; = Default::default();
+    <span class="kw">for</span> fid <span class="kw">in</span> query_features {
+        <span class="kw">for</span> mid <span class="kw">in</span> &amp;posting_index[fid] {
+            *hits.entry(*mid).or_insert(0) += 1;
+        }
+    }
+    <span class="cm">// sort by hit count, return top-K</span>
+}
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══ MULTI-WRITER ═══ -->
+<section class="cf-page-section" id="multiwrite">
+  <div class="container">
+    <div class="reveal"><div class="section-divider"></div><h2 class="heading-section">Multi-writer design</h2></div>
+    <p class="section-intro reveal reveal-delay-1">Multiple Claude Code windows can write to the same chitta-field simultaneously. Each daemon instance gets a unique 32-bit instance ID and writes exclusively to its own segment files. There is no shared write lock. No WAL contention. Readers replay all segments sorted alphabetically — the interleaving is always deterministic.</p>
+
+    <div class="two-col">
+      <div class="cf-prose reveal reveal-delay-2">
+        <p>This model is called <strong>Upanishads-style concurrency</strong>: one source, many windows onto it. Each writer is authoritative for its own segment range; no writer can corrupt another's data. Readers see a merged view by replaying all segment files in order.</p>
+        <p>On startup, <code>OpLog::open()</code> scans the segments directory, finds the last segment for this instance ID, and continues appending there. If the last segment is at or above 256 MB, a new segment is created.</p>
+        <p>The manifest tracks the maximum seqno seen per instance, so a new instance knows where to start its own sequence without colliding with others.</p>
+      </div>
+      <div class="cf-code reveal reveal-delay-3">
+<span class="cm">// Each instance owns its own segment files</span>
+<span class="cm">// Writer 1:</span>
+<span class="str">00000001_000000000000.seg</span>
+<span class="str">00000001_000000018432.seg</span>  <span class="cm">// rotated</span>
+
+<span class="cm">// Writer 2 (different Claude window):</span>
+<span class="str">00000002_000000000000.seg</span>
+
+<span class="cm">// Reader sees all, sorted:</span>
+<span class="str">00000001_000000000000.seg</span>  <span class="cm">// first</span>
+<span class="str">00000001_000000018432.seg</span>
+<span class="str">00000002_000000000000.seg</span>  <span class="cm">// interleaved</span>
+
+<span class="cm">// No locks. No contention.</span>
+<span class="cm">// Each instance_id prefix is globally unique.</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══ ORGANIC DECAY ═══ -->
+<section class="cf-page-section alt-bg" id="decay">
+  <div class="container">
+    <div class="reveal"><div class="section-divider"></div><h2 class="heading-section">Organic decay</h2></div>
+    <p class="section-intro reveal reveal-delay-1">Memories do not live forever. They decay through a demotion tier system driven by access recency and frequency. The daemon's subconscious thread runs demotion periodically — memories that are not accessed slide down the tiers and eventually become dormant. Frequent access promotes a memory back toward tier 0.</p>
+
+    <ul class="tier-list reveal reveal-delay-2">
+      <li class="tier-item tier-item--0"><span class="tier-num">0</span><span class="tier-name">Hot</span><span class="tier-desc">Freshly accessed or recently stored. Full recall weight. Promoted on each access.</span></li>
+      <li class="tier-item tier-item--1"><span class="tier-num">1</span><span class="tier-name">Warm</span><span class="tier-desc">Accessed in the last week. Present in recall. Slightly reduced score weight.</span></li>
+      <li class="tier-item tier-item--2"><span class="tier-num">2</span><span class="tier-name">Cool</span><span class="tier-desc">Not accessed in weeks. Still recallable but deprioritized. Fade in resonance scoring.</span></li>
+      <li class="tier-item tier-item--3"><span class="tier-num">3</span><span class="tier-name">Cold</span><span class="tier-desc">Long-dormant. Excluded from default recall unless explicitly requested. Candidates for eviction.</span></li>
+    </ul>
+
+    <div class="cf-prose reveal reveal-delay-3" style="margin-top:var(--space-5);max-width:640px">
+      <p>Demotion is logged as a <code>DemoteMemory</code> Op, so it survives restarts. A memory that was cold before a restart is still cold after replay. The tier is part of the persisted state, not recomputed on load.</p>
+      <p>The <code>StateDelta</code> Op handles strength and confidence adjustments separately — the ResonanceLearner applies Bayesian updates via <code>UpdateState</code> ops, which are also WAL-logged before application.</p>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══ OP CATALOG ═══ -->
+<section class="cf-page-section" id="ops">
+  <div class="container">
+    <div class="reveal"><div class="section-divider"></div><h2 class="heading-section">Op catalog</h2></div>
+    <p class="section-intro reveal reveal-delay-1">Every state change is one of these typed operations. The op_type byte is written to the WAL alongside the msgpack payload, and validated on replay to detect corruption.</p>
+
+    <table class="op-table reveal reveal-delay-2">
+      <thead>
+        <tr><th>Op</th><th>Byte</th><th>Description</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="op-name">PutPayload</td><td class="op-byte">0</td><td class="op-desc">Store a new memory with content, embedding, metadata, and artifact refs.</td></tr>
+        <tr><td class="op-name">UpdateState</td><td class="op-byte">1</td><td class="op-desc">Adjust strength, confidence, decay_rate, or touch last_accessed_ms on an existing memory.</td></tr>
+        <tr><td class="op-name">DeleteMemory</td><td class="op-byte">2</td><td class="op-desc">Soft-delete a memory at a given timestamp.</td></tr>
+        <tr><td class="op-name">AddAssocEdge</td><td class="op-byte">3</td><td class="op-desc">Add a typed association edge between two memories (DerivedFrom, SameSession, CoRetrieved, Contradicts, Supports…).</td></tr>
+        <tr><td class="op-name">UpsertArtifact</td><td class="op-byte">4</td><td class="op-desc">Register a file artifact (normalized path, repo root).</td></tr>
+        <tr><td class="op-name">AddTriplet</td><td class="op-byte">5</td><td class="op-desc">Add a knowledge graph triplet (subject, predicate, object, weight, valid_from_ms).</td></tr>
+        <tr><td class="op-name">InvalidateTriplet</td><td class="op-byte">6</td><td class="op-desc">Mark a triplet as superseded at a given timestamp.</td></tr>
+        <tr><td class="op-name">UpsertSymbol</td><td class="op-byte">7</td><td class="op-desc">Insert or update a code symbol (function, class, method) with its embedding.</td></tr>
+        <tr><td class="op-name">RemoveSymbol</td><td class="op-byte">8</td><td class="op-desc">Remove a code symbol and clean up call graph edges.</td></tr>
+        <tr><td class="op-name">AddSymCallEdge</td><td class="op-byte">9</td><td class="op-desc">Add a caller→callee edge in the symbol call graph.</td></tr>
+        <tr><td class="op-name">RemoveSymCallEdge</td><td class="op-byte">10</td><td class="op-desc">Remove a call graph edge.</td></tr>
+        <tr><td class="op-name">UpsertCodeFile</td><td class="op-byte">11</td><td class="op-desc">Register or update a code file (path, project, mtime).</td></tr>
+        <tr><td class="op-name">UpdateSparseCode</td><td class="op-byte">12</td><td class="op-desc">Store sparse code for a memory (feature_ids + activations).</td></tr>
+        <tr><td class="op-name">DemoteMemory</td><td class="op-byte">13</td><td class="op-desc">Move a memory to a lower decay tier.</td></tr>
+        <tr><td class="op-name">TrainPQ</td><td class="op-byte">14</td><td class="op-desc">Persist trained Product Quantizer codebooks (bincode-serialized).</td></tr>
+        <tr><td class="op-name">UpdateResidualPQ</td><td class="op-byte">15</td><td class="op-desc">Store PQ residual codes for a single memory (32-byte compressed embedding).</td></tr>
+        <tr><td class="op-name">SessionEvent</td><td class="op-byte">16</td><td class="op-desc">Session lifecycle event (register, heartbeat, deregister, message_send, message_ack).</td></tr>
+        <tr><td class="op-name">TranscriptEvent</td><td class="op-byte">17</td><td class="op-desc">Transcript lifecycle event (register, update_progress, add_turn, create_episode).</td></tr>
+        <tr><td class="op-name">TaskEvent</td><td class="op-byte">18</td><td class="op-desc">Task lifecycle event for sadhana, long_task, dream, background workers.</td></tr>
+        <tr><td class="op-name">UserModelEvent</td><td class="op-byte">19</td><td class="op-desc">User model entity event (profile, goal, habit, anticipation, calibration).</td></tr>
+        <tr><td class="op-name">ThemeEvent</td><td class="op-byte">20</td><td class="op-desc">Theme graph event (create, update_centroid, assign_member, remove_member).</td></tr>
+        <tr><td class="op-name">AnalyticsEvent</td><td class="op-byte">21</td><td class="op-desc">Analytics event (exposure, recall_query, correction, usage_outcome).</td></tr>
+        <tr><td class="op-name">ClearProject</td><td class="op-byte">22</td><td class="op-desc">Remove all code files and associated symbols for a project.</td></tr>
+        <tr><td class="op-name">UpdateSymbolDescription</td><td class="op-byte">23</td><td class="op-desc">Update the description string for a symbol.</td></tr>
+        <tr><td class="op-name">UpdateMemoryContent</td><td class="op-byte">24</td><td class="op-desc">Update content and/or embedding for an existing memory in-place.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+
+<!-- ═══ INTEGRATION ═══ -->
+<section class="cf-page-section alt-bg" id="integration">
+  <div class="container">
+    <div class="reveal"><div class="section-divider"></div><h2 class="heading-section">Integration with cc-soul</h2></div>
+    <p class="section-intro reveal reveal-delay-1">chitta-field is a separate Rust repository included as a git submodule. The C++ daemon calls into it exclusively via a C FFI layer (<code>chitta_field.h</code>), keeping the Rust and C++ build systems fully independent.</p>
+
+    <div class="cf-cards reveal reveal-delay-2">
+      <div class="cf-card">
+        <h4 class="cf-card-title">Build</h4>
+        <p class="cf-card-desc">chitta-field builds to <code>libchitta_field.a</code> via <code>./build.sh build --release</code>. The CMake build picks it up from <code>../chitta-field/</code> (relative to <code>chitta/CMakeLists.txt</code>) or from a <code>-DCHITTA_FIELD_ROOT</code> override. The smart-installer runs the Rust build automatically before cmake.</p>
+      </div>
+      <div class="cf-card">
+        <h4 class="cf-card-title">FFI layer</h4>
+        <p class="cf-card-desc">All calls go through <code>cf_*</code> C functions defined in <code>chitta_field.h</code>. The C++ side calls <code>cf_open()</code>, gets back an opaque <code>FieldHandle*</code>, and uses it for all subsequent ops. No C++ knows about Rust internals.</p>
+      </div>
+      <div class="cf-card">
+        <h4 class="cf-card-title">ChittaFieldHandler</h4>
+        <p class="cf-card-desc">The RPC handler that registers all 100+ tools wraps <code>FieldStore</code> via the FFI. <code>ChittaFieldHandler</code> in <code>rpc/chitta_field_handler.hpp</code> replaced <code>DuckDBRpcHandler</code> entirely.</p>
+      </div>
+    </div>
+
+    <div class="cf-code reveal reveal-delay-3" style="margin-top:var(--space-6)">
+<span class="cm">// Build from source (git clone with submodule)</span>
+git clone --recurse-submodules https://github.com/genomewalker/cc-soul.git
+<span class="cm">// Build chitta-field (Rust, requires 1.92+)</span>
+cd chitta-field &amp;&amp; ./build.sh build --release &amp;&amp; cd ..
+<span class="cm">// Build the daemon (C++17 + ONNX Runtime)</span>
+cd chitta &amp;&amp; mkdir build &amp;&amp; cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release
+make -j$(nproc)
+<span class="cm">// Or use the all-in-one installer:</span>
+./scripts/smart-install.sh
+    </div>
+
+    <p class="bridge-link reveal reveal-delay-4" style="margin-top:var(--space-6)">
+      <a href="https://github.com/genomewalker/chitta-field" target="_blank" rel="noopener">chitta-field source on GitHub &rarr;</a>
+      &ensp;&ensp;
+      <a href="architecture.html">Full system architecture &rarr;</a>
+    </p>
+  </div>
+</section>
+
+
+<!-- CLOSING -->
+<section class="closing">
+  <div class="container">
+    <h2 class="closing-title heading-display reveal">Memory that behaves like memory.</h2>
+    <p class="closing-body reveal reveal-delay-1">No external database. No NFS handles. No D-state. Just a field of patterns, each memory a sparse activation, decaying and strengthening over time.</p>
+    <div class="reveal reveal-delay-2">
+      <a href="https://github.com/genomewalker/chitta-field" target="_blank" rel="noopener" class="btn btn-primary">Explore the source</a>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer class="footer">
+  <div class="container">
+    <p class="footer-text">
+      Built with conviction. Grounded in philosophy.
+      <span class="footer-sep"></span>
+      <a href="https://github.com/genomewalker/cc-soul" target="_blank" rel="noopener">GitHub</a>
+    </p>
+  </div>
+</footer>
+
+<script>
+/* ═══════════════════════════════════════════
+   SCROLL REVEAL
+   ═══════════════════════════════════════════ */
+(function() {
+  const reveals = document.querySelectorAll('.reveal');
+  if (!reveals.length) return;
+  const observer = new IntersectionObserver(function(entries) {
+    entries.forEach(function(entry) {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.01, rootMargin: '0px 0px -20px 0px' });
+  reveals.forEach(function(el) { observer.observe(el); });
+})();
+
+/* ═══════════════════════════════════════════
+   ACTIVE TOC SECTION TRACKING
+   ═══════════════════════════════════════════ */
+(function() {
+  const links = document.querySelectorAll('.submenu-toc-link[data-section]');
+  const sections = Array.from(links).map(l => document.getElementById(l.dataset.section)).filter(Boolean);
+  function update() {
+    let active = sections[0];
+    for (const s of sections) {
+      if (s.getBoundingClientRect().top <= 120) active = s;
+    }
+    links.forEach(l => {
+      l.classList.toggle('active', l.dataset.section === active.id);
+    });
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  update();
+})();
+
+/* ═══════════════════════════════════════════
+   SPARSE FIELD CANVAS ANIMATION
+   ═══════════════════════════════════════════ */
+(function() {
+  const canvas = document.getElementById('cf-main-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  let w, h, dpr;
+
+  const COLS = 96;
+  const ROWS = 24;
+  const SPARSE_K = 64;
+  const TOTAL = COLS * ROWS;
+  const MAX_PULSES = 5;
+  const PULSE_DURATION = 200;
+  const COLORS_PULSE = [
+    [203, 175, 134],
+    [157, 178, 217],
+    [130, 180, 145],
+    [180, 157, 217],
+    [203, 175, 134],
+  ];
+
+  let pulses = [];
+  let frame = 0;
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const rect = canvas.parentElement.getBoundingClientRect();
+    w = rect.width; h = rect.height;
+    canvas.width = w * dpr; canvas.height = h * dpr;
+    canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function cellRect(idx) {
+    const col = idx % COLS;
+    const row = Math.floor(idx / COLS);
+    const cw = w / COLS, ch = h / ROWS;
+    const gap = Math.min(cw, ch) * 0.3;
+    return { x: col * cw + gap/2, y: row * ch + gap/2, w: cw - gap, h: ch - gap };
+  }
+
+  function spawnPulse() {
+    const indices = new Set();
+    while (indices.size < SPARSE_K) {
+      const center = Math.floor(Math.random() * TOTAL);
+      const spread = Math.floor(Math.random() * 80) + 20;
+      for (let a = 0; a < 16 && indices.size < SPARSE_K; a++) {
+        const idx = Math.max(0, Math.min(TOTAL - 1, center + Math.round((Math.random() - 0.5) * spread * 2)));
+        indices.add(idx);
+      }
+    }
+    const colorIdx = pulses.length % COLORS_PULSE.length;
+    pulses.push({ indices: Array.from(indices), color: COLORS_PULSE[colorIdx], born: frame, age: 0 });
+  }
+
+  function draw() {
+    frame++;
+    ctx.clearRect(0, 0, w, h);
+
+    if (frame === 1 || (frame % 55 === 0 && pulses.length < MAX_PULSES)) spawnPulse();
+    pulses = pulses.filter(p => { p.age = frame - p.born; return p.age < PULSE_DURATION; });
+
+    const activation = new Float32Array(TOTAL);
+    const overlapCount = new Uint8Array(TOTAL);
+
+    for (const pulse of pulses) {
+      let env;
+      if (pulse.age < 25) env = pulse.age / 25;
+      else if (pulse.age > PULSE_DURATION - 50) env = (PULSE_DURATION - pulse.age) / 50;
+      else env = 1;
+      for (const idx of pulse.indices) {
+        activation[idx] = Math.max(activation[idx], env);
+        overlapCount[idx]++;
+      }
+    }
+
+    for (let i = 0; i < TOTAL; i++) {
+      const r = cellRect(i);
+      const act = activation[i];
+      if (act < 0.01) {
+        ctx.fillStyle = 'rgba(157,178,217,0.055)';
+        ctx.fillRect(r.x, r.y, r.w, r.h);
+      } else {
+        let pulseColor = COLORS_PULSE[0];
+        for (const p of pulses) {
+          if (p.indices.includes(i)) { pulseColor = p.color; break; }
+        }
+        if (overlapCount[i] > 1) {
+          const a = act * 0.9;
+          const grd = ctx.createRadialGradient(r.x+r.w/2, r.y+r.h/2, 0, r.x+r.w/2, r.y+r.h/2, r.w*4);
+          grd.addColorStop(0, 'rgba(212,106,76,' + (a*0.3) + ')');
+          grd.addColorStop(1, 'rgba(212,106,76,0)');
+          ctx.fillStyle = grd;
+          ctx.fillRect(r.x - r.w*3, r.y - r.h*3, r.w*7, r.h*7);
+          ctx.fillStyle = 'rgba(212,106,76,' + a + ')';
+          ctx.fillRect(r.x, r.y, r.w, r.h);
+        } else {
+          const [cr, cg, cb] = pulseColor;
+          ctx.fillStyle = 'rgba(' + cr + ',' + cg + ',' + cb + ',' + (act * 0.88) + ')';
+          ctx.fillRect(r.x, r.y, r.w, r.h);
+        }
+      }
+    }
+    requestAnimationFrame(draw);
+  }
+
+  function init() {
+    resize();
+    window.addEventListener('resize', resize);
+    requestAnimationFrame(draw);
+  }
+
+  const obs = new IntersectionObserver(function(entries) {
+    if (entries[0].isIntersecting) { init(); obs.disconnect(); }
+  }, { threshold: 0.05 });
+  obs.observe(canvas.parentElement);
+})();
+
+/* ═══════════════════════════════════════════
+   SMOOTH SCROLL
+   ═══════════════════════════════════════════ */
+document.querySelectorAll('a[href^="#"]').forEach(function(anchor) {
+  anchor.addEventListener('click', function(e) {
+    const target = document.querySelector(this.getAttribute('href'));
+    if (target) {
+      e.preventDefault();
+      const top = target.getBoundingClientRect().top + window.pageYOffset - 80;
+      window.scrollTo({ top: top, behavior: 'smooth' });
+    }
+  });
+});
+</script>
+</body>
+</html>

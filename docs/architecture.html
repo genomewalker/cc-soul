@@ -4,15 +4,15 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Architecture — cc-soul</title>
-<meta name="description" content="Technical architecture of cc-soul: DuckDB storage, 8-phase resonance engine, Bayesian self-tuning, tree-sitter code intelligence, and the Vak embedding pipeline.">
+<meta name="description" content="Technical architecture of cc-soul: chitta-field Rust memory substrate, 8-phase resonance engine, Bayesian self-tuning, tree-sitter code intelligence, and the Vak embedding pipeline.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <meta property="og:title" content="Architecture — cc-soul">
-<meta property="og:description" content="Technical architecture of cc-soul: DuckDB storage, 8-phase resonance engine, Bayesian self-tuning, tree-sitter code intelligence, and the Vak embedding pipeline.">
+<meta property="og:description" content="Technical architecture of cc-soul: chitta-field Rust memory substrate, 8-phase resonance engine, Bayesian self-tuning, tree-sitter code intelligence, and the Vak embedding pipeline.">
 <meta property="og:type" content="website">
 <meta property="og:image" content="favicon.svg">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="Architecture — cc-soul">
-<meta name="twitter:description" content="Technical architecture of cc-soul: DuckDB storage, 8-phase resonance engine, and Bayesian self-tuning.">
+<meta name="twitter:description" content="Technical architecture of cc-soul: chitta-field Rust memory substrate, 8-phase resonance engine, and Bayesian self-tuning.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
@@ -96,6 +96,7 @@
       <li><a href="getting-started.html">Get Started</a></li>
       <li><a href="philosophy.html">Philosophy</a></li>
       <li><a href="architecture.html">Architecture</a></li>
+      <li><a href="chitta-field.html">chitta-field</a></li>
       <li><a href="sadhana.html">Sadhana</a></li>
       <li><a href="tools.html">Tools</a></li>
       <li><a href="cli.html">CLI</a></li>
@@ -112,7 +113,7 @@
   <div class="container">
     <div class="page-header-badge reveal">Technical Architecture</div>
     <h1 class="reveal reveal-delay-1">How cc-soul thinks.</h1>
-    <p class="page-header-sub reveal reveal-delay-2">DuckDB storage, 8-phase resonance, Bayesian self-tuning, and tree-sitter code intelligence&thinsp;&mdash;&thinsp;in a single C++ daemon.</p>
+    <p class="page-header-sub reveal reveal-delay-2">chitta-field Rust memory substrate, 8-phase resonance, Bayesian self-tuning, and tree-sitter code intelligence&thinsp;&mdash;&thinsp;in a single C++ daemon.</p>
   </div>
 </header>
 
@@ -141,7 +142,7 @@
       <div class="section-divider"></div>
       <h2 class="heading-section">System Overview</h2>
     </div>
-    <p class="section-intro reveal reveal-delay-1">Three layers, one process. Claude Code hooks and the MCP server communicate with the <code>chittad</code> daemon over a Unix domain socket. Inside, <code>DuckDBMind</code> orchestrates storage, embedding, resonance, and self-tuning.</p>
+    <p class="section-intro reveal reveal-delay-1">Three layers, one process. Claude Code hooks and the MCP server communicate with the <code>chittad</code> daemon over a Unix domain socket. Inside, <code>chitta-field</code> (a statically-linked Rust library) is the sole storage substrate — orchestrating memory, embedding, resonance, and decay.</p>
 
     <div class="sys-diagram reveal reveal-delay-2">
 
@@ -182,14 +183,14 @@
 
       <!-- Mind Layer -->
       <div class="diagram-layer layer-mind">
-        <span class="diagram-layer-label">DuckDBMind</span>
+        <span class="diagram-layer-label">chitta-field (Rust, statically linked)</span>
         <div class="diagram-boxes">
           <div class="diagram-box highlight-ember">Embedder &amp; V&#x101;k (ONNX)</div>
           <div class="diagram-box highlight-ember">ResonanceLearner</div>
           <div class="diagram-box highlight-ember">ThemeManager (xMemory)</div>
           <div class="diagram-box highlight-ember">SessionContext</div>
-          <div class="diagram-box highlight-ember">DuckDBStore</div>
-          <div class="diagram-box highlight-ember">Embeddings DB (HNSW)</div>
+          <div class="diagram-box highlight-ember">FieldStore (WAL + sparse codes)</div>
+          <div class="diagram-box highlight-ember">Cortical Index (sub-ms recall)</div>
         </div>
       </div>
 
@@ -198,12 +199,12 @@
     <!-- Key Design Decisions -->
     <div class="config-block reveal reveal-delay-3">
       <div class="config-block-title">Key Design Decisions</div>
-      <pre><span class="cm">// Single storage engine, no tiers</span>
-<span class="kw">DuckDB</span>     <span class="cm">HNSW vectors + BM25 full-text + graph queries + ACID</span>
-<span class="kw">Separate</span>   <span class="cm">Embeddings DB avoids write contention during HNSW rebuilds</span>
-<span class="kw">Pool</span>       <span class="cm">ConnectionPool for concurrent reads, serialized writes</span>
-<span class="kw">Socket</span>     <span class="cm">Unix domain socket IPC between Claude Code and daemon</span>
-<span class="kw">Scaling</span>    <span class="cm">Auto-scaling thread pool (2-16) with watchdog for slow requests</span></pre>
+      <pre><span class="cm">// chitta-field: organic Rust memory substrate</span>
+<span class="kw">FieldStore</span>     <span class="cm">WAL-backed in-memory field, sparse codes, cortical index</span>
+<span class="kw">Sparse</span>         <span class="cm">64 of 16,384 features active per memory — 0.4% sparsity</span>
+<span class="kw">MultiWriter</span>    <span class="cm">Each daemon instance owns its own segment file, no locking</span>
+<span class="kw">Socket</span>         <span class="cm">Unix domain socket IPC between Claude Code and daemon</span>
+<span class="kw">Scaling</span>        <span class="cm">Auto-scaling thread pool (2-16) with watchdog for slow requests</span></pre>
     </div>
   </div>
 </section>
@@ -218,7 +219,7 @@
       <div class="section-divider"></div>
       <h2 class="heading-section">Core Components</h2>
     </div>
-    <p class="section-intro reveal reveal-delay-1">Eleven classes form the skeleton. Each handles one concern, composed at the <code>DuckDBMind</code> level.</p>
+    <p class="section-intro reveal reveal-delay-1">Core components. Each handles one concern; <code>chitta-field</code> (Rust) is the storage substrate that the C++ daemon links against.</p>
 
     <table class="comp-table reveal reveal-delay-2">
       <thead>
@@ -229,12 +230,11 @@
         </tr>
       </thead>
       <tbody>
-        <tr><td class="class-name">DuckDBMind</td><td class="file-name">mind/duckdb_mind.hpp</td><td class="role-desc">Central orchestrator: remember, recall, resonate, self-tune</td></tr>
-        <tr><td class="class-name">DuckDBStore</td><td class="file-name">duckdb_store.hpp</td><td class="role-desc">Storage: all DuckDB operations, schema, queries</td></tr>
-        <tr><td class="class-name">DuckDBRpcHandler</td><td class="file-name">rpc/duckdb_handler.hpp</td><td class="role-desc">JSON-RPC 2.0 handler, 100+ registered tools</td></tr>
+        <tr><td class="class-name">FieldStore</td><td class="file-name">chitta-field/src/field.rs</td><td class="role-desc">Central memory substrate: WAL, sparse codes, cortical index, decay</td></tr>
+        <tr><td class="class-name">ChittaFieldHandler</td><td class="file-name">rpc/chitta_field_handler.hpp</td><td class="role-desc">JSON-RPC 2.0 handler, 100+ registered tools, backed by FieldStore</td></tr>
         <tr><td class="class-name">Embedder</td><td class="file-name">mind/embedder.hpp</td><td class="role-desc">Embedding with LRU cache and circuit breaker</td></tr>
         <tr><td class="class-name">AntahkaranaYantra</td><td class="file-name">vak_onnx.hpp</td><td class="role-desc">ONNX Runtime inference for bge-base-en-v1.5</td></tr>
-        <tr><td class="class-name">Subconscious</td><td class="file-name">mind/subconscious.hpp</td><td class="role-desc">Background thread: patterns, hygiene, embedding</td></tr>
+        <tr><td class="class-name">Subconscious</td><td class="file-name">mind/subconscious.hpp</td><td class="role-desc">Background thread: patterns, hygiene, demotion, embedding</td></tr>
         <tr><td class="class-name">ThemeManager</td><td class="file-name">theme_manager.hpp</td><td class="role-desc">xMemory hierarchical memory organization</td></tr>
         <tr><td class="class-name">CodeIntel</td><td class="file-name">code_intel.hpp</td><td class="role-desc">Tree-sitter symbol extraction (9 languages)</td></tr>
         <tr><td class="class-name">SymbolResolver</td><td class="file-name">symbol_resolver.hpp</td><td class="role-desc">Cross-file symbol resolution for call graphs</td></tr>
@@ -255,7 +255,7 @@
       <div class="section-divider"></div>
       <h2 class="heading-section">The Resonance Engine</h2>
     </div>
-    <p class="section-intro reveal reveal-delay-1">The core of memory retrieval. <code>DuckDBMind::full_resonate()</code> runs 8 phases to find relevant memories&thinsp;&mdash;&thinsp;not search, but resonance. Each phase adds signal; post-processing refines it.</p>
+    <p class="section-intro reveal reveal-delay-1">The core of memory retrieval. <code>full_resonate()</code> runs 8 phases to find relevant memories&thinsp;&mdash;&thinsp;not search, but resonance. Each phase adds signal; post-processing refines it. Backed by chitta-field's cortical posting index for sub-millisecond retrieval.</p>
 
     <!-- Interactive Pipeline Canvas -->
     <div class="pipeline-canvas-wrap reveal reveal-delay-2">
@@ -372,8 +372,8 @@
 
     <!-- Config struct -->
     <div class="config-block reveal">
-      <div class="config-block-title">DuckDBResonanceConfig</div>
-      <pre><span class="kw">struct</span> <span class="ty">DuckDBResonanceConfig</span> {
+      <div class="config-block-title">ResonanceConfig</div>
+      <pre><span class="kw">struct</span> <span class="ty">ResonanceConfig</span> {
     <span class="ty">float</span> spread_strength     = <span class="val">0.5f</span>;
     <span class="ty">float</span> spread_decay        = <span class="val">0.5f</span>;
     <span class="ty">int</span>   max_hops            = <span class="val">3</span>;
@@ -401,63 +401,62 @@
       <div class="section-divider"></div>
       <h2 class="heading-section">Storage Layer</h2>
     </div>
-    <p class="section-intro reveal reveal-delay-1">DuckDB is an embedded analytical database. CC-Soul uses it for HNSW vector search, BM25 full-text, graph queries via DuckPGQ, and ACID transactions with WAL-based crash recovery.</p>
+    <p class="section-intro reveal reveal-delay-1">chitta-field is a pure Rust organic memory substrate, statically linked into the daemon. No external process. No NFS file handles. Each operation is appended to a write-ahead log before applying in-memory, giving crash-safe durability with millisecond recovery on restart.</p>
 
-    <!-- Database paths -->
+    <!-- Field paths -->
     <div class="db-paths reveal reveal-delay-2">
-      <span class="path">~/.claude/mind/chitta/</span><br>
-      &ensp;&ensp;<span class="path">chitta.duckdb</span> &ensp;<span class="comment">// Main database (memories, triplets, symbols, ledger)</span><br>
-      &ensp;&ensp;<span class="path">chitta_emb.duckdb</span> &ensp;<span class="comment">// Embeddings database (HNSW index, separate to avoid contention)</span><br>
-      &ensp;&ensp;<span class="path">chitta.duckdb.wal</span> &ensp;<span class="comment">// Write-ahead log (auto-managed)</span>
+      <span class="path">~/.claude/mind/chitta/chitta-field/</span><br>
+      &ensp;&ensp;<span class="path">segments/</span> &ensp;<span class="comment">// WAL segment files ({instance_id}_{seqno}.seg)</span><br>
+      &ensp;&ensp;<span class="path">manifest.json</span> &ensp;<span class="comment">// Instance registry and seqno tracking</span>
     </div>
 
-    <!-- Key Tables -->
-    <h3 style="font-family: var(--font-display); font-size: var(--text-xl); color: var(--lotus-200); font-weight: 500; margin-bottom: var(--space-4);" class="reveal">Key Tables</h3>
+    <!-- Key Structures -->
+    <h3 style="font-family: var(--font-display); font-size: var(--text-xl); color: var(--lotus-200); font-weight: 500; margin-bottom: var(--space-4);" class="reveal">In-Memory Structures</h3>
 
     <table class="comp-table reveal">
       <thead>
-        <tr><th>Table</th><th>Columns</th><th>Purpose</th></tr>
+        <tr><th>Structure</th><th>Fields</th><th>Purpose</th></tr>
       </thead>
       <tbody>
         <tr>
-          <td class="class-name">memory</td>
-          <td class="file-name">id, kind, content, confidence, decay_rate, tags, realm, visibility, timestamps, access_count</td>
-          <td class="role-desc">Core unit of storage. Each memory has Bayesian confidence and configurable decay.</td>
+          <td class="class-name">MemoryEntry</td>
+          <td class="file-name">id, kind, content, embedding, confidence, decay_rate, realm, timestamps, tier</td>
+          <td class="role-desc">Core unit of storage. Bayesian confidence and demotion-tier decay.</td>
         </tr>
         <tr>
-          <td class="class-name">triplet</td>
-          <td class="file-name">subject, predicate, object, weight</td>
-          <td class="role-desc">Knowledge graph with string-based entities. Predicates: calls, contains, imports, inherits, corrects, relates_to.</td>
+          <td class="class-name">TripletEntry</td>
+          <td class="file-name">id, subject, predicate, object, weight, valid_from_ms, invalidated_at_ms</td>
+          <td class="role-desc">Temporal knowledge graph. Predicates: calls, contains, imports, inherits, corrects, relates_to.</td>
         </tr>
         <tr>
-          <td class="class-name">symbol</td>
-          <td class="file-name">id, name, kind, signature, file_path, line_start, line_end, parent, project, description</td>
+          <td class="class-name">SymbolEntry</td>
+          <td class="file-name">id, name, kind, signature, file_path, line_start, line_end, repo_id, embedding, description</td>
           <td class="role-desc">Code intelligence: functions, classes, methods extracted by tree-sitter.</td>
         </tr>
         <tr>
-          <td class="class-name">call_edge</td>
-          <td class="file-name">caller_id, callee_id</td>
-          <td class="role-desc">Call graph edges, populated by SymbolResolver.</td>
+          <td class="class-name">call_graph</td>
+          <td class="file-name">HashMap&lt;SymbolId, HashSet&lt;SymbolId&gt;&gt;</td>
+          <td class="role-desc">Call graph edges, populated by SymbolResolver via AddSymCallEdge ops.</td>
         </tr>
         <tr>
-          <td class="class-name">ledger</td>
-          <td class="file-name">session_id, mood, todos, decisions, next_steps, blockers, snapshot</td>
-          <td class="role-desc">Session checkpoints for continuity across conversations.</td>
+          <td class="class-name">SparseCode</td>
+          <td class="file-name">memory_id, feature_ids[64], activations[64]</td>
+          <td class="role-desc">Sparse associative encoding. Cortical posting index maps feature → memory list.</td>
         </tr>
       </tbody>
     </table>
 
-    <!-- Connection Pool -->
+    <!-- WAL Details -->
     <div class="config-block reveal">
-      <div class="config-block-title">Connection Pool</div>
-      <pre><span class="cm">// Pre-allocated connections for concurrent reads</span>
-<span class="cm">// Write operations go through a dedicated write connection</span>
-<span class="cm">// ScopedConnection: RAII wrapper that returns connection on destruction</span>
+      <div class="config-block-title">Write-Ahead Log (WAL)</div>
+      <pre><span class="cm">// Every Op is appended before applying in-memory</span>
+<span class="cm">// Entry format: [len:u32][seqno:u64][op_type:u8][msgpack_payload][crc32:u32]</span>
+<span class="cm">// Segment rotation at 256 MB; each instance owns its own segment files</span>
 
-<span class="kw">Default pool</span>: <span class="val">4-8 connections</span>
-<span class="kw">Reads</span>:        <span class="val">shared, parallel</span>
-<span class="kw">Writes</span>:       <span class="val">serialized, single connection</span>
-<span class="kw">Overflow</span>:     <span class="val">emergency connections created when pool exhausted</span></pre>
+<span class="kw">Durability</span>:    <span class="val">flush to OS after every append</span>
+<span class="kw">Recovery</span>:      <span class="val">replay all segments on open (fast — in-memory rebuild)</span>
+<span class="kw">Multi-writer</span>:  <span class="val">each daemon instance writes to {instance_id}_{seqno}.seg</span>
+<span class="kw">Integrity</span>:     <span class="val">CRC32 per entry; corrupt entries abort replay</span></pre>
     </div>
   </div>
 </section>
@@ -732,7 +731,7 @@
     <h3 style="font-family: var(--font-display); font-size: var(--text-xl); color: var(--lotus-200); font-weight: 500; margin-top: var(--space-7); margin-bottom: var(--space-3);" class="reveal">Quality Gate</h3>
 
     <div class="config-block reveal">
-      <div class="config-block-title">Before storing, DuckDBMind::remember() applies</div>
+      <div class="config-block-title">Before storing, remember() applies</div>
       <pre><span class="val">1.</span> <span class="kw">Minimum length</span>:       Content must be &gt;= <span class="val">10 characters</span>
 <span class="val">2.</span> <span class="kw">Deduplication</span>:        Cosine similarity check (threshold: <span class="val">0.95</span>)
 <span class="val">3.</span> <span class="kw">Diversity sampling</span>:   Avoids storing too many similar memories in quick succession</pre>
