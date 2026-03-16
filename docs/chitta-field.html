@@ -392,7 +392,7 @@
 <section class="cf-page-section" id="overview">
   <div class="container">
     <div class="reveal"><div class="section-divider"></div><h2 class="heading-section">What it is</h2></div>
-    <p class="section-intro reveal reveal-delay-1">chitta-field is the sole storage substrate for cc-soul. It replaced DuckDB in v3.43.38 to eliminate NFS file handle issues and D-state hangs on shared filesystems. It is a pure Rust library compiled to <code>libchitta_field.a</code>, statically linked into the C++ daemon. Zero external processes. Zero network sockets. Zero OS file handles on startup beyond the WAL segments.</p>
+    <p class="section-intro reveal reveal-delay-1">chitta-field is the sole storage substrate for cc-soul. It was designed to eliminate NFS file handle issues and D-state hangs on shared filesystems. It is a pure Rust library compiled to <code>libchitta_field.a</code>, statically linked into the C++ daemon. Zero external processes. Zero network sockets. Zero OS file handles on startup beyond the WAL segments.</p>
 
     <!-- Canvas animation -->
     <div class="cf-canvas-hero reveal reveal-delay-2">
@@ -689,7 +689,7 @@ posting_index: HashMap&lt;<span class="ty">u32</span>, Vec&lt;<span class="ty">u
       </div>
       <div class="cf-card">
         <h4 class="cf-card-title">ChittaFieldHandler</h4>
-        <p class="cf-card-desc">The RPC handler that registers all 100+ tools wraps <code>FieldStore</code> via the FFI. <code>ChittaFieldHandler</code> in <code>rpc/chitta_field_handler.hpp</code> replaced <code>DuckDBRpcHandler</code> entirely.</p>
+        <p class="cf-card-desc">The RPC handler that registers all 100+ tools wraps <code>FieldStore</code> via the FFI. <code>ChittaFieldHandler</code> in <code>rpc/chitta_field_handler.hpp</code> is the sole RPC handler for all memory operations.</p>
       </div>
     </div>
 
