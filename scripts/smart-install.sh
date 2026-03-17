@@ -247,11 +247,16 @@ build_chitta_field() {
     local src_root="$1"
     local cf_dir="$src_root/chitta-field"
 
-    # Already built?
-    if [[ -f "$cf_dir/target/release/libchitta_field.a" ]]; then
-        echo "[cc-soul] chitta-field already built"
-        export CHITTA_FIELD_ROOT="$cf_dir"
-        return 0
+    # Already built? Check if .a exists AND is newer than the source (ffi.rs is the key file)
+    local lib_a="$cf_dir/target/release/libchitta_field.a"
+    if [[ -f "$lib_a" ]]; then
+        local ffi_src="$cf_dir/src/ffi.rs"
+        if [[ ! -f "$ffi_src" ]] || [[ "$lib_a" -nt "$ffi_src" ]]; then
+            echo "[cc-soul] chitta-field already built (up to date)"
+            export CHITTA_FIELD_ROOT="$cf_dir"
+            return 0
+        fi
+        echo "[cc-soul] chitta-field source changed, rebuilding..."
     fi
 
     # Clone submodule if absent (source tarball won't include it)
@@ -282,16 +287,21 @@ build_chitta_field() {
     echo "[cc-soul] Building chitta-field (toolchain: $toolchain)..."
     # Ensure the pinned toolchain is installed
     rustup toolchain install "$toolchain" --no-self-update 2>/dev/null || true
-    # Use build.sh if present — it handles conda linker and toolchain PATH correctly
-    if [[ -x "$cf_dir/build.sh" ]]; then
-        echo "[cc-soul] Using build.sh"
-        (cd "$cf_dir" && ./build.sh build --release 2>&1 | tail -8)
-    else
-        # Manual fallback: unset conda vars, put rustup toolchain first in PATH
-        local tc_bin="${RUSTUP_HOME:-$HOME/.rustup}/toolchains/${toolchain}-$(rustup show active-toolchain 2>/dev/null | grep -oP '\S+-\S+-\S+$' || echo "x86_64-unknown-linux-gnu")/bin"
-        (cd "$cf_dir" && env -u LDFLAGS -u CFLAGS -u CXXFLAGS -u CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER \
-            PATH="/usr/bin:$tc_bin:$PATH" cargo build --release 2>&1 | tail -8)
+
+    # Resolve rustup-managed cargo and rustc explicitly.
+    # This bypasses conda or system rustc (e.g. 1.70.0) that may appear first in PATH.
+    local cargo_cmd rustc_cmd
+    cargo_cmd=$(rustup which cargo 2>/dev/null) || cargo_cmd=$(find_cargo)
+    rustc_cmd=$(rustup which rustc 2>/dev/null) || rustc_cmd=$(command -v rustc 2>/dev/null)
+
+    if [[ -z "$cargo_cmd" || -z "$rustc_cmd" ]]; then
+        echo "[cc-soul] ERROR: could not locate cargo/rustc via rustup" >&2
+        return 1
     fi
+
+    (cd "$cf_dir" && \
+        unset CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER LDFLAGS CFLAGS CXXFLAGS && \
+        RUSTC="$rustc_cmd" "$cargo_cmd" build --release 2>&1 | tail -8)
 
     if [[ ! -f "$cf_dir/target/release/libchitta_field.a" ]]; then
         echo "[cc-soul] ERROR: chitta-field build failed" >&2

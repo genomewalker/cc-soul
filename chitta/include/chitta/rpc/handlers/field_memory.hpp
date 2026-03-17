@@ -385,6 +385,10 @@
             }
         }
 
+        if (recall_callback_ && !prev_top_ids.empty()) {
+            recall_callback_(prev_top_ids, passes_run);
+        }
+
         std::ostringstream ss;
         ss << "Found " << final_merged.size() << " results (" << passes_run << " pass"
            << (passes_run > 1 ? "es" : "") << "):\n";

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 chitta mind-viz server — real-time memory graph visualization backend.
+Talks to chittad daemon via Unix socket (JSON-RPC tools/call protocol).
 """
 
 import argparse
@@ -8,52 +9,103 @@ import glob
 import json
 import os
 import re
-import subprocess
+import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
-CHITTA = os.path.expanduser("~/.claude/bin/chitta")
 VERSION = "4.0.14"
-MIND_DIR = os.path.expanduser("~/.claude/mind")
 CLAUDE_PROJECTS = os.path.expanduser("~/.claude/projects")
 STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "mind-viz")
 
+
+# ── Daemon socket ─────────────────────────────────────────────────────────────
+
+def djb2_hash(s: str) -> int:
+    h = 5381
+    for c in s:
+        h = ((h << 5) + h + ord(c)) & 0xFFFFFFFF
+    return h
+
+
+def get_socket_path() -> str:
+    mind_path = os.path.join(os.path.expanduser("~"), ".claude", "mind")
+    h = djb2_hash(mind_path)
+    xdg = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+    return os.path.join(xdg, "chitta", f"chitta-{h}.sock")
+
+
+class ChittaClient:
+    def __init__(self):
+        self.sock_path = get_socket_path()
+        self._sock = None
+        self._lock = threading.Lock()
+
+    def _connect(self):
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(10)
+        s.connect(self.sock_path)
+        return s
+
+    def call(self, tool_name: str, arguments: dict = None) -> dict | None:
+        req = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": tool_name, "arguments": arguments or {}},
+        }) + "\n"
+
+        with self._lock:
+            try:
+                s = self._connect()
+                s.sendall(req.encode())
+                buf = b""
+                while True:
+                    chunk = s.recv(65536)
+                    if not chunk:
+                        break
+                    buf += chunk
+                    if b"\n" in buf:
+                        break
+                s.close()
+                data = json.loads(buf.decode().strip())
+                result = data.get("result", {})
+                # structured field is our primary target
+                if "structured" in result:
+                    return result["structured"]
+                # fall back to parsing text content
+                content = result.get("content", [])
+                if content and isinstance(content, list):
+                    for item in content:
+                        if isinstance(item, dict) and item.get("type") == "text":
+                            try:
+                                return json.loads(item["text"])
+                            except (json.JSONDecodeError, KeyError):
+                                return {"text": item.get("text", "")}
+                return result
+            except Exception:
+                return None
+
+
+_client = ChittaClient()
+
 # Module-level caches
-_graph_cache = {}          # id -> full node dict
+_graph_cache: dict[str, dict] = {}
 _graph_cache_lock = threading.Lock()
 _sse_lock = threading.Lock()
-_sse_clients = []
-_last_stats = {"total": 0, "recent_recalls": 0, "triplets": 0}
+_sse_clients: list = []
+_last_stats: dict = {"total": 0, "recent_recalls": 0}
 _instance_colors = [
     "#89b4fa", "#a6e3a1", "#f9e2af", "#cba6f7",
     "#f38ba8", "#94e2d5", "#fab387", "#89dceb",
 ]
 
 
-def find_socket():
-    matches = glob.glob("/run/user/*/chitta/*.sock")
-    return matches[0] if matches else None
+# ── Data fetchers ─────────────────────────────────────────────────────────────
 
-
-def run_chitta(*args):
-    sock = find_socket()
-    cmd = [CHITTA]
-    if sock:
-        cmd += ["--socket-path", sock]
-    cmd += list(args)
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        if result.returncode != 0:
-            return None
-        return json.loads(result.stdout)
-    except (subprocess.TimeoutExpired, subprocess.SubprocessError, json.JSONDecodeError, ValueError):
-        return None
-
-
-def fetch_graph(limit=200):
-    data = run_chitta("list_memories_brief", "--limit", str(limit))
+def fetch_graph(limit: int = 200) -> dict:
+    data = _client.call("list_memories_brief", {"limit": limit})
     if not data:
         return {"nodes": [], "edges": []}
 
@@ -65,7 +117,7 @@ def fetch_graph(limit=200):
             mid = str(m.get("id", ""))
             if not mid:
                 continue
-            content = m.get("content", m.get("text", ""))
+            content = m.get("content", m.get("text", m.get("body", "")))
             kind = m.get("memory_type", m.get("kind", "episodic"))
             node = {
                 "id": mid,
@@ -75,7 +127,7 @@ def fetch_graph(limit=200):
                 "strength": float(m.get("strength", m.get("resonance", 0.5))),
                 "priority": int(m.get("priority", m.get("priority_tier", 1))),
                 "ts_ms": int(m.get("ts_ms", m.get("created_at", 0))),
-                "recall_count": int(m.get("recall_count", 0)),
+                "recall_count": int(m.get("recall_count", m.get("access_count", 0))),
                 "tags": m.get("tags", []),
                 "realm": m.get("realm", ""),
             }
@@ -84,13 +136,18 @@ def fetch_graph(limit=200):
 
     node_ids = {n["id"] for n in nodes}
     edges = []
-    seen = set()
+    seen: set = set()
 
-    for node in nodes[:50]:
-        triplets = run_chitta("query_triplets", "--subject", node["id"], "--limit", "20")
-        if not triplets:
+    # Fetch associations for a sample of nodes
+    sample = nodes[:40]
+    for node in sample:
+        result = _client.call("query_triplets_temporal", {
+            "subject": node["id"],
+            "limit": 15,
+        })
+        if not result:
             continue
-        items = triplets if isinstance(triplets, list) else triplets.get("triplets", [])
+        items = result if isinstance(result, list) else result.get("triplets", [])
         for t in items:
             src = str(t.get("subject", node["id"]))
             tgt = str(t.get("object", ""))
@@ -110,16 +167,17 @@ def fetch_graph(limit=200):
     return {"nodes": nodes, "edges": edges}
 
 
-def fetch_memory_detail(memory_id):
-    """Full memory detail for inspector panel."""
+def fetch_memory_detail(memory_id: str) -> dict:
     with _graph_cache_lock:
         node = _graph_cache.get(memory_id, {}).copy()
 
-    # Fetch associations
-    triplets = run_chitta("query_triplets", "--subject", memory_id, "--limit", "30")
+    result = _client.call("query_triplets_temporal", {
+        "subject": memory_id,
+        "limit": 30,
+    })
     associations = []
-    if triplets:
-        items = triplets if isinstance(triplets, list) else triplets.get("triplets", [])
+    if result:
+        items = result if isinstance(result, list) else result.get("triplets", [])
         for t in items:
             tgt = str(t.get("object", ""))
             if not tgt:
@@ -139,30 +197,30 @@ def fetch_memory_detail(memory_id):
     return node
 
 
-def fetch_stats():
-    data = run_chitta("stats")
-    if not data:
+def fetch_stats() -> dict:
+    result = _client.call("health_check", {})
+    if not result:
         return _last_stats.copy()
-    return {
-        "total": int(data.get("total_memories", data.get("total", 0))),
-        "recent_recalls": int(data.get("recent_recalls", data.get("recalls_last_hour", 0))),
-        "triplets": int(data.get("triplets", data.get("total_triplets", 0))),
-        "edges": int(data.get("assoc_edges", data.get("edges", 0))),
-    }
+
+    # health_check returns various fields; normalise
+    total = int(result.get("total_memories", result.get("memories", result.get("total", 0))))
+    recalls = int(result.get("recent_recalls", result.get("recalls_last_hour", 0)))
+    triplets = int(result.get("triplets", result.get("total_triplets", 0)))
+    edges = int(result.get("assoc_edges", result.get("edges", 0)))
+    return {"total": total, "recent_recalls": recalls, "triplets": triplets, "edges": edges}
 
 
-def fetch_coactivation(top=40):
-    data = run_chitta("list_memories_brief", "--limit", str(top), "--sort", "recall_count")
+def fetch_coactivation(top: int = 40) -> dict:
+    data = _client.call("list_memories_brief", {"limit": top})
     if not data:
         return {"ids": [], "labels": [], "matrix": []}
 
     memories = data if isinstance(data, list) else data.get("memories", [])
-    memories = memories[:top]
+    memories = sorted(memories, key=lambda m: -int(m.get("recall_count", m.get("access_count", 0))))[:top]
 
     ids = [str(m.get("id", "")) for m in memories]
     labels = [m.get("content", m.get("text", ""))[:30] for m in memories]
     n = len(ids)
-
     matrix = [[0.0] * n for _ in range(n)]
     for i in range(n):
         matrix[i][i] = 1.0
@@ -170,10 +228,10 @@ def fetch_coactivation(top=40):
     id_index = {mid: i for i, mid in enumerate(ids)}
 
     for i, mid in enumerate(ids):
-        triplets = run_chitta("query_triplets", "--subject", mid, "--limit", "30")
-        if not triplets:
+        result = _client.call("query_triplets_temporal", {"subject": mid, "limit": 30})
+        if not result:
             continue
-        items = triplets if isinstance(triplets, list) else triplets.get("triplets", [])
+        items = result if isinstance(result, list) else result.get("triplets", [])
         for t in items:
             tgt = str(t.get("object", ""))
             if tgt in id_index:
@@ -185,36 +243,32 @@ def fetch_coactivation(top=40):
     return {"ids": ids, "labels": labels, "matrix": matrix}
 
 
-def fetch_instances():
-    """Detect active Claude Code sessions by scanning transcript files."""
+def fetch_instances() -> dict:
     instances = []
     now_ms = int(time.time() * 1000)
-    cutoff_ms = now_ms - 30 * 60 * 1000  # 30 minutes
+    cutoff_ms = now_ms - 30 * 60 * 1000
 
     if os.path.isdir(CLAUDE_PROJECTS):
-        for proj_dir in glob.glob(os.path.join(CLAUDE_PROJECTS, "*")):
-            for jl_file in glob.glob(os.path.join(proj_dir, "*.jsonl")):
-                try:
-                    mtime_ms = int(os.path.getmtime(jl_file) * 1000)
-                    if mtime_ms < cutoff_ms:
-                        continue
-                    session_id = os.path.splitext(os.path.basename(jl_file))[0]
-                    proj_name = os.path.basename(proj_dir).replace("-", "/").lstrip("/")[:40]
-                    age_secs = (now_ms - mtime_ms) // 1000
-                    status = "active" if age_secs < 120 else "idle"
-                    instances.append({
-                        "id": session_id,
-                        "short_id": session_id[-8:],
-                        "project": proj_name,
-                        "last_active_ms": mtime_ms,
-                        "age_secs": age_secs,
-                        "status": status,
-                    })
-                except OSError:
+        for jl_file in glob.glob(os.path.join(CLAUDE_PROJECTS, "*", "*.jsonl")):
+            try:
+                mtime_ms = int(os.path.getmtime(jl_file) * 1000)
+                if mtime_ms < cutoff_ms:
                     continue
+                session_id = os.path.splitext(os.path.basename(jl_file))[0]
+                proj_name = os.path.basename(os.path.dirname(jl_file)).replace("-", "/").lstrip("/")[:40]
+                age_secs = (now_ms - mtime_ms) // 1000
+                instances.append({
+                    "id": session_id,
+                    "short_id": session_id[-8:],
+                    "project": proj_name,
+                    "last_active_ms": mtime_ms,
+                    "age_secs": int(age_secs),
+                    "status": "active" if age_secs < 120 else "idle",
+                })
+            except OSError:
+                continue
 
     instances.sort(key=lambda x: -x["last_active_ms"])
-    # Assign stable color indices by short_id hash
     for inst in instances:
         h = sum(ord(c) for c in inst["id"])
         inst["color"] = _instance_colors[h % len(_instance_colors)]
@@ -222,7 +276,8 @@ def fetch_instances():
     return {"instances": instances[:10]}
 
 
-# SSE broadcaster
+# ── SSE broadcaster ───────────────────────────────────────────────────────────
+
 def sse_broadcaster():
     global _last_stats
     tick = 0
@@ -237,18 +292,15 @@ def sse_broadcaster():
             curr_recalls = stats.get("recent_recalls", 0)
 
             if curr_recalls != prev_recalls:
-                recent = run_chitta("list_memories_brief", "--limit", "15", "--sort", "recent")
+                recent = _client.call("list_memories_brief", {"limit": 15})
                 if recent:
-                    memories = recent if isinstance(recent, list) else recent.get("memories", [])
-                    ids = [str(m.get("id", "")) for m in memories]
-                    # Try to attribute to an instance (last-modified session)
+                    mems = recent if isinstance(recent, list) else recent.get("memories", [])
+                    ids = [str(m.get("id", "")) for m in mems]
                     instance_id = None
                     if os.path.isdir(CLAUDE_PROJECTS):
-                        newest = max(
-                            (f for f in glob.glob(os.path.join(CLAUDE_PROJECTS, "*", "*.jsonl"))),
-                            key=os.path.getmtime, default=None
-                        )
-                        if newest:
+                        all_jl = glob.glob(os.path.join(CLAUDE_PROJECTS, "*", "*.jsonl"))
+                        if all_jl:
+                            newest = max(all_jl, key=os.path.getmtime)
                             instance_id = os.path.splitext(os.path.basename(newest))[0][-8:]
                     events.append(("recall", {
                         "memory_ids": ids,
@@ -263,21 +315,17 @@ def sse_broadcaster():
                 "triplets": stats.get("triplets", 0),
                 "edges": stats.get("edges", 0),
             }))
-
             _last_stats = stats
 
-            # Every 30 ticks (~60s), broadcast instance list
             if tick % 30 == 0:
-                inst_data = fetch_instances()
-                events.append(("instances", inst_data))
+                events.append(("instances", fetch_instances()))
 
             _broadcast(events)
-
         except Exception:
             pass
 
 
-def _broadcast(events):
+def _broadcast(events: list):
     with _sse_lock:
         dead = []
         for client in _sse_clients:
@@ -292,27 +340,29 @@ def _broadcast(events):
             _sse_clients.remove(d)
 
 
+# ── HTTP handler ──────────────────────────────────────────────────────────────
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
 
-    def send_cors_headers(self):
+    def cors(self):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
-    def send_json(self, data, status=200):
+    def json(self, data, status=200):
         body = json.dumps(data).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
-        self.send_cors_headers()
+        self.cors()
         self.end_headers()
         self.wfile.write(body)
 
     def do_OPTIONS(self):
         self.send_response(204)
-        self.send_cors_headers()
+        self.cors()
         self.end_headers()
 
     def do_GET(self):
@@ -320,30 +370,7 @@ class Handler(BaseHTTPRequestHandler):
         qs = parse_qs(parsed.query)
         path = parsed.path
 
-        if path == "/health":
-            self.send_json({"status": "ok", "version": VERSION})
-
-        elif path == "/graph":
-            limit = int(qs.get("limit", ["200"])[0])
-            self.send_json(fetch_graph(limit))
-
-        elif path == "/coactivation":
-            top = int(qs.get("top", ["40"])[0])
-            self.send_json(fetch_coactivation(top))
-
-        elif path == "/instances":
-            self.send_json(fetch_instances())
-
-        elif re.match(r"^/memory/(\d+)$", path):
-            m = re.match(r"^/memory/(\d+)$", path)
-            memory_id = m.group(1)
-            detail = fetch_memory_detail(memory_id)
-            if not detail:
-                self.send_json({"error": "not found"}, 404)
-            else:
-                self.send_json(detail)
-
-        elif path in ("/", "/index.html"):
+        if path in ("/", "/index.html"):
             html_path = os.path.join(STATIC_DIR, "index.html")
             try:
                 with open(html_path, "rb") as f:
@@ -351,38 +378,50 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
-                self.send_cors_headers()
+                self.cors()
                 self.end_headers()
                 self.wfile.write(body)
             except OSError:
-                self.send_response(404)
-                self.end_headers()
+                self.send_response(404); self.end_headers()
+
+        elif path == "/health":
+            ok = _client.call("health_check", {}) is not None
+            self.json({"status": "ok" if ok else "daemon_unreachable", "version": VERSION})
+
+        elif path == "/graph":
+            limit = int(qs.get("limit", ["200"])[0])
+            self.json(fetch_graph(limit))
+
+        elif path == "/coactivation":
+            top = int(qs.get("top", ["40"])[0])
+            self.json(fetch_coactivation(top))
+
+        elif path == "/instances":
+            self.json(fetch_instances())
+
+        elif re.match(r"^/memory/(\d+)$", path):
+            memory_id = re.match(r"^/memory/(\d+)$", path).group(1)
+            detail = fetch_memory_detail(memory_id)
+            self.json(detail if detail else {"error": "not found"}, 200 if detail else 404)
 
         elif path == "/events":
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-cache")
             self.send_header("Connection", "keep-alive")
-            self.send_cors_headers()
+            self.cors()
             self.end_headers()
-
-            # Send initial data burst
             try:
                 stats = fetch_stats()
-                self.wfile.write(
-                    f"event: stats\ndata: {json.dumps(stats)}\n\n".encode()
-                )
-                instances = fetch_instances()
-                self.wfile.write(
-                    f"event: instances\ndata: {json.dumps(instances)}\n\n".encode()
-                )
+                self.wfile.write(f"event: stats\ndata: {json.dumps(stats)}\n\n".encode())
+                inst = fetch_instances()
+                self.wfile.write(f"event: instances\ndata: {json.dumps(inst)}\n\n".encode())
                 self.wfile.flush()
             except OSError:
                 return
 
             with _sse_lock:
                 _sse_clients.append(self)
-
             try:
                 while True:
                     time.sleep(30)
@@ -394,9 +433,7 @@ class Handler(BaseHTTPRequestHandler):
                         _sse_clients.remove(self)
 
         else:
-            self.send_response(404)
-            self.send_cors_headers()
-            self.end_headers()
+            self.send_response(404); self.cors(); self.end_headers()
 
 
 def main():
@@ -404,11 +441,10 @@ def main():
     parser.add_argument("--port", type=int, default=8765)
     args = parser.parse_args()
 
-    # Pre-warm graph cache in background
+    # Pre-warm graph cache
     threading.Thread(target=lambda: fetch_graph(300), daemon=True).start()
 
-    broadcaster = threading.Thread(target=sse_broadcaster, daemon=True)
-    broadcaster.start()
+    threading.Thread(target=sse_broadcaster, daemon=True).start()
 
     server = HTTPServer(("", args.port), Handler)
     print(f"chitta mind-viz running at http://localhost:{args.port}")

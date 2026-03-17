@@ -17,6 +17,7 @@
 #include <chitta/socket_server.hpp>
 #include <chitta/socket_client.hpp>
 #include <chitta/native_distiller.hpp>
+#include <chitta/http_viz.hpp>
 #include <chitta/version.hpp>
 #ifdef CHITTA_WITH_ONNX
 #include <chitta/vak_onnx.hpp>
@@ -407,7 +408,8 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                const std::string& socket_path, const std::string& mind_path,
                const std::string& pid_file,
                const DistillConfig& distill_config, EnrichConfig& enrich_config,
-               const SubconsciousConfig& subconscious_config, bool no_autonomous) {
+               const SubconsciousConfig& subconscious_config, bool no_autonomous,
+               int http_port, const std::string& http_static_dir) {
     // Automatically reap child processes to prevent zombie accumulation
     signal(SIGCHLD, SIG_IGN);
 
@@ -494,6 +496,25 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
 
     subconscious.start();
     handler.set_subconscious(&subconscious);
+
+    // HTTP visualization server (optional)
+    std::unique_ptr<VizServer> viz_server;
+    if (http_port > 0) {
+        std::string viz_dir = http_static_dir;
+        if (viz_dir.empty()) {
+            // Derive from executable path: go up to cc-soul/, then docs/mind-viz/
+            auto exe_path = std::filesystem::read_symlink("/proc/self/exe");
+            viz_dir = exe_path.parent_path().parent_path().string() + "/docs/mind-viz";
+        }
+        viz_server = std::make_unique<VizServer>(http_port, viz_dir, &field_store);
+        viz_server->start();
+        std::cerr << "[VizServer] listening on :" << http_port
+                  << " (static=" << viz_dir << ")\n";
+        handler.set_recall_callback(
+            [&viz_server](const std::vector<uint64_t>& ids, int passes) {
+                if (viz_server) viz_server->push_recall_event(ids, passes);
+            });
+    }
 
     // Sadhana manager — deferred until FieldStore is ready
     std::unique_ptr<SadhanaManager> sadhana_manager;
@@ -1239,6 +1260,7 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
     // while threads finish their current work. Lock is held until after joins
     // to prevent conflicts with a new daemon starting too early.
     server.stop();
+    if (viz_server) viz_server->stop();
 
     // Watchdog: force-exit if background threads don't finish within 15s.
     // Socket is already closed so no clients will be left hanging.
@@ -1357,6 +1379,9 @@ void print_usage(const char* prog) {
               << "\nSubconscious (background processing):\n"
               << "  --no-hygiene             Disable hygiene (decay, pruning, consolidation)\n"
               << "  --no-autonomous          Disable autonomous agents (dream, think)\n"
+              << "\nHTTP Visualization Server:\n"
+              << "  --http-port PORT         Enable HTTP viz server on PORT (0=disabled, default)\n"
+              << "  --http-static-dir PATH   Static file directory (default: auto-detect docs/mind-viz/)\n"
               ;
 }
 
@@ -1386,6 +1411,10 @@ int main(int argc, char* argv[]) {
     // Subconscious config
     SubconsciousConfig subconscious_config;
     bool no_autonomous = false;  // Disable dream/think callbacks
+
+    // HTTP viz server config
+    int http_port = 0;
+    std::string http_static_dir;
 
     // Manual distill command args
     std::string distill_transcript_path;
@@ -1443,6 +1472,10 @@ int main(int argc, char* argv[]) {
             subconscious_config.enable_hygiene = false;
         } else if (strcmp(argv[i], "--no-autonomous") == 0) {
             no_autonomous = true;
+        } else if (strcmp(argv[i], "--http-port") == 0 && i + 1 < argc) {
+            http_port = safe_stoi(argv[++i], "--http-port");
+        } else if (strcmp(argv[i], "--http-static-dir") == 0 && i + 1 < argc) {
+            http_static_dir = argv[++i];
         } else if (strcmp(argv[i], "--transcript-path") == 0 && i + 1 < argc) {
             distill_transcript_path = argv[++i];
         } else if (strcmp(argv[i], "--session-id") == 0 && i + 1 < argc) {
@@ -1524,7 +1557,7 @@ int main(int argc, char* argv[]) {
 
     int result = 0;
     if (command == "daemon") {
-        result = cmd_daemon(field_store, yantra_raw, interval, sock_path, mind_path, pid_file, distill_config, enrich_config, subconscious_config, no_autonomous);
+        result = cmd_daemon(field_store, yantra_raw, interval, sock_path, mind_path, pid_file, distill_config, enrich_config, subconscious_config, no_autonomous, http_port, http_static_dir);
     } else if (command == "stats") {
         result = cmd_stats(field_store, yantra_raw);
     } else if (command == "metrics") {

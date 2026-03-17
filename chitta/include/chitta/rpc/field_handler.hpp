@@ -65,6 +65,8 @@ public:
 
     void set_subconscious(Subconscious* s) { subconscious_ = s; }
     void set_sadhana_manager(SadhanaManager* sm) { sadhana_manager_ = sm; }
+    using RecallCallback = std::function<void(const std::vector<uint64_t>&, int)>;
+    void set_recall_callback(RecallCallback cb) { recall_callback_ = std::move(cb); }
     FieldStore* get_field_store() const { return field_store_; }
     VakYantra* get_yantra() const { return yantra_; }
 
@@ -105,6 +107,7 @@ private:
     VakYantra* yantra_;
     Subconscious* subconscious_ = nullptr;
     SadhanaManager* sadhana_manager_ = nullptr;
+    RecallCallback recall_callback_;
 
     mutable std::mutex distill_mutex_;
     std::string distill_model_ = "github-copilot/gpt-5-mini";
