@@ -241,6 +241,51 @@ A `ProductQuantizer` compresses residual embeddings (32 subvectors, 256 centroid
 
 ---
 
+## Iterative Resonance (CTM-inspired)
+
+Inspired by the Continuous Thought Machine (Sakana AI, 2025), recall is not a single forward pass. `full_resonate()` runs up to 3 iterative passes per query, refining the query embedding toward the retrieved memory centroid each pass.
+
+### Pass loop
+
+```
+q₀ = original query embedding (anchor — never modified)
+qₜ = q₀
+
+for t in 0..3:
+    results = semantic_recall(qₜ) + bm25(qₜ) + spreading_activation(results)
+    H_t = entropy(score_distribution(results))
+
+    if |H_t - H_{t-1}| < 0.01 or top-k IDs unchanged:
+        break  ← early stop
+
+    qₜ₊₁ = normalize(0.7·q₀ + 0.3·mean(top-k embeddings))
+            ↑ anchored to q₀ — prevents drift
+```
+
+### Post-pass learning
+
+After the final pass, `cf_record_recall_batch` atomically commits all learning in chitta-field (Rust):
+
+| Learning | Mechanism |
+|----------|-----------|
+| Access touch | `access_count++`, `last_accessed_ms` updated per retrieved memory |
+| Retrieval context | 32-dim quantized query sketch appended to `RetrievalHistory` (FIFO, 8 entries) |
+| Retrieval signature | Cached mean of stored context sketches — used to boost future recall |
+| Co-activation stats | `CoActivationStats.sim_count` and `diversity_count` updated for every co-retrieved pair |
+| Hebbian edges | `CoRetrieved` assoc edge weight += `base_delta × (sim_count × diversity_count)`, capped at 16× |
+
+### Context-aware reranking
+
+`SemanticIndex::search_with_signature_boost` adds a retrieval-signature prior to cosine scoring:
+
+```
+final_score = cosine(query, embedding) + β × max(0, dot(query_ctx_32, memory_signature_32))
+```
+
+Memories with empty retrieval history receive zero boost. The C++ layer passes a 32-dim projected query sketch; the boost is computed entirely in Rust during the final reranking step.
+
+---
+
 ## Embedding Engine (Vāk)
 
 The embedding pipeline follows a Vedantic naming convention:
