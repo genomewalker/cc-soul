@@ -18,6 +18,7 @@ CHITTA = os.path.expanduser("~/.claude/bin/chitta")
 VERSION = "4.0.14"
 MIND_DIR = os.path.expanduser("~/.claude/mind")
 CLAUDE_PROJECTS = os.path.expanduser("~/.claude/projects")
+STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "mind-viz")
 
 # Module-level caches
 _graph_cache = {}          # id -> full node dict
@@ -342,6 +343,21 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self.send_json(detail)
 
+        elif path in ("/", "/index.html"):
+            html_path = os.path.join(STATIC_DIR, "index.html")
+            try:
+                with open(html_path, "rb") as f:
+                    body = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_cors_headers()
+                self.end_headers()
+                self.wfile.write(body)
+            except OSError:
+                self.send_response(404)
+                self.end_headers()
+
         elif path == "/events":
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
@@ -396,6 +412,8 @@ def main():
 
     server = HTTPServer(("", args.port), Handler)
     print(f"chitta mind-viz running at http://localhost:{args.port}")
+    print(f"  SSH tunnel: ssh -L {args.port}:localhost:{args.port} <user>@<host>")
+    print(f"  Then open:  http://localhost:{args.port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
