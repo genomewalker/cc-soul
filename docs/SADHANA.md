@@ -68,7 +68,7 @@ This continues until the goal is achieved or the sadhana is stopped.
 │  │           │                                                       │   │
 │  │           ▼                                                       │   │
 │  │  ┌─────────────────────────────────────────────────────────────┐ │   │
-│  │  │                     DuckDB Storage                           │ │   │
+│  │  │                   chitta-field Storage                        │ │   │
 │  │  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌─────────────┐ │ │   │
 │  │  │  │ sadhana  │  │ history  │  │ memories │  │  triplets   │ │ │   │
 │  │  │  │  table   │  │  table   │  │  (recall)│  │  (graph)    │ │ │   │
@@ -84,7 +84,7 @@ This continues until the goal is achieved or the sadhana is stopped.
 |-----------|---------|
 | **SadhanaManager** | Orchestrates all sadhanas, runs tick loop every 100ms |
 | **BrainProvider** | LLM abstraction (Claude API or OpenCode local) |
-| **DuckDB Storage** | Persistent state, history, and memory integration |
+| **chitta-field Storage** | Persistent state, history, and memory integration |
 | **Sadhana TUI** | Optional terminal interface for monitoring |
 
 ## Memory Integration

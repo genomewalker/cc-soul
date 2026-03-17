@@ -1,6 +1,6 @@
 # CC-Soul Architecture
 
-Technical architecture of cc-soul v3.38.6, a persistent identity and memory system for Claude Code.
+Technical architecture of cc-soul v4.0, a persistent identity and memory system for Claude Code.
 
 ---
 
@@ -8,7 +8,9 @@ Technical architecture of cc-soul v3.38.6, a persistent identity and memory syst
 
 - [System Overview](#system-overview)
 - [Components](#components)
-- [Storage Layer (DuckDB)](#storage-layer-duckdb)
+- [Storage Layer (chitta-field)](#storage-layer-chitta-field)
+- [Semantic Index (ANN)](#semantic-index-ann)
+- [Cortical Index (SDR)](#cortical-index-sdr)
 - [Embedding Engine (Vāk)](#embedding-engine-vāk)
 - [Resonance Engine](#resonance-engine)
 - [Theme System (xMemory)](#theme-system-xmemory)
@@ -43,7 +45,7 @@ Technical architecture of cc-soul v3.38.6, a persistent identity and memory syst
 │         └────────────┬───────────────────┘                   │
 │                      ▼                                       │
 │  ┌─────────────────────────────────────────────────────────┐ │
-│  │                    CHITTAD DAEMON                        │ │
+│  │                    CHITTAD DAEMON (C++)                  │ │
 │  │                                                         │ │
 │  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │ │
 │  │  │ Thread Pool   │  │ RPC Handler  │  │ Subconscious │  │ │
@@ -53,20 +55,31 @@ Technical architecture of cc-soul v3.38.6, a persistent identity and memory syst
 │  │         └────────────┬────┘──────────────────┘          │ │
 │  │                      ▼                                  │ │
 │  │  ┌─────────────────────────────────────────────────┐    │ │
-│  │  │              DuckDBMind                          │    │ │
+│  │  │              DuckDBMind (C++ orchestrator)       │    │ │
 │  │  │                                                  │    │ │
 │  │  │  Embedder ←→ VakYantra (ONNX)                   │    │ │
 │  │  │  ResonanceLearner (Bayesian self-tuning)         │    │ │
 │  │  │  ThemeManager (xMemory)                          │    │ │
 │  │  │  SessionContext (priming, topics)                 │    │ │
-│  │  │                                                  │    │ │
-│  │  │      ┌──────────────┐  ┌──────────────────┐     │    │ │
-│  │  │      │ DuckDBStore  │  │ Embeddings DB    │     │    │ │
-│  │  │      │ (memories,   │  │ (HNSW vectors,   │     │    │ │
-│  │  │      │  triplets,   │  │  separate file)  │     │    │ │
-│  │  │      │  symbols,    │  │                  │     │    │ │
-│  │  │      │  ledger)     │  │                  │     │    │ │
-│  │  │      └──────────────┘  └──────────────────┘     │    │ │
+│  │  │                    │                             │    │ │
+│  │  │          C FFI boundary                         │    │ │
+│  │  │                    ▼                             │    │ │
+│  │  │  ┌───────────────────────────────────────────┐  │    │ │
+│  │  │  │        chitta-field (Rust library)         │  │    │ │
+│  │  │  │                                            │  │    │ │
+│  │  │  │  SemanticIndex (IVF + LSH ANN)             │  │    │ │
+│  │  │  │  CorticalIndex (SDR sparse codes)          │  │    │ │
+│  │  │  │  KeywordIndex (BM25)                       │  │    │ │
+│  │  │  │  TripletStore (knowledge graph)            │  │    │ │
+│  │  │  │  SymbolIndex + CallGraph (code intel)      │  │    │ │
+│  │  │  │  TemporalIndex, ThemeOrgan, Registries     │  │    │ │
+│  │  │  │            │                               │  │    │ │
+│  │  │  │  ┌─────────┴──────────────────────────┐   │  │    │ │
+│  │  │  │  │  ~/.claude/mind/chitta-field/       │   │  │    │ │
+│  │  │  │  │  {inst_id}_{seqno}.seg (op logs)   │   │  │    │ │
+│  │  │  │  │  chitta.snapshot (periodic dump)   │   │  │    │ │
+│  │  │  │  └────────────────────────────────────┘   │  │    │ │
+│  │  │  └───────────────────────────────────────────┘  │    │ │
 │  │  └─────────────────────────────────────────────────┘    │ │
 │  └─────────────────────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────┘
@@ -74,9 +87,9 @@ Technical architecture of cc-soul v3.38.6, a persistent identity and memory syst
 
 ### Key Design Decisions
 
-- **DuckDB** as the single storage engine (not SQLite, not tiered hot/warm/cold)
-- **Separate embeddings database** to avoid write contention between HNSW rebuilds and memory writes
-- **ConnectionPool** for concurrent read access with RAII-based connection scoping
+- **chitta-field** (pure Rust static library) as the storage layer — no external database, no NFS locks
+- **Per-instance segment files** for multi-writer safety: each chittad instance owns its `{inst_id}_{seqno}.seg`
+- **In-RAM indexes** rebuilt from op log on open; snapshots accelerate cold start
 - **Unix domain socket** for IPC between Claude Code and the daemon
 - **Auto-scaling thread pool** (2-16 workers) with watchdog for slow request detection
 
@@ -88,15 +101,14 @@ Technical architecture of cc-soul v3.38.6, a persistent identity and memory syst
 
 | Binary | Purpose | Source |
 |--------|---------|--------|
-| `chittad` | Daemon: socket server + RPC handler + subconscious | `chitta/src/rpc_server.cpp` |
+| `chittad` | Daemon: socket server + RPC handler + subconscious | `chitta/src/simple_cli.cpp` |
 | `chitta` | CLI tool: direct command-line access | `chitta/src/simple_cli.cpp` |
 
-### Core Classes
+### Core Classes (C++ daemon)
 
 | Class | File | Role |
 |-------|------|------|
 | `DuckDBMind` | `mind/duckdb_mind.hpp` | Central orchestrator: remember, recall, resonate, self-tune |
-| `DuckDBStore` | `duckdb_store.hpp` | Storage: all DuckDB operations, schema, queries |
 | `DuckDBRpcHandler` | `rpc/duckdb_handler.hpp` | JSON-RPC 2.0 handler, 100+ registered tools |
 | `Embedder` | `mind/embedder.hpp` | Embedding with LRU cache and circuit breaker |
 | `AntahkaranaYantra` | `vak_onnx.hpp` | ONNX Runtime inference for bge-base-en-v1.5 |
@@ -107,96 +119,125 @@ Technical architecture of cc-soul v3.38.6, a persistent identity and memory syst
 | `ThreadPool` | `rpc/thread_pool.hpp` | Auto-scaling worker pool with watchdog |
 | `ProvenanceSpine` | `provenance.hpp` | Knowledge source tracking and trust scoring |
 
+### Core Modules (Rust — chitta-field)
+
+| Module | File | Role |
+|--------|------|------|
+| `ChittaField` | `field.rs` | Unified API: open, put_memory, recall, flush, snapshot |
+| `SemanticIndex` | `hnsw.rs` | ANN search: IVF coarse quantizer + LSH probing |
+| `CorticalIndex` | `organ/cortex.rs` | SDR sparse codes (64-of-16384 active bits), sub-ms recall |
+| `KeywordIndex` | `organ/keyword.rs` | BM25 full-text search |
+| `TripletStore` | `organ/triplet.rs` | Subject/predicate/object knowledge graph |
+| `SymbolIndex` | `organ/symbol.rs` | Code symbols with semantic search |
+| `CallGraph` | `organ/callgraph.rs` | Function call edges |
+| `TemporalIndex` | `organ/temporal.rs` | Time-range queries with kind/realm filters |
+
 ---
 
-## Storage Layer (DuckDB)
+## Storage Layer (chitta-field)
 
-### Why DuckDB
+### Design
 
-DuckDB is an embedded analytical database. CC-Soul uses it for:
-
-- **HNSW vector search** via the VSS extension (cosine similarity on 768-dim embeddings)
-- **Graph queries** via DuckPGQ extension (triplet traversal)
-- **Full-text search** via BM25 (keyword matching as complement to semantic search)
-- **ACID transactions** with WAL-based crash recovery
-- **Concurrent reads** through a connection pool (write-serialized, read-parallel)
-
-### Database Files
+chitta-field is a pure Rust static library — no external database engine, no NFS lock manager. All state lives in RAM, written through to an append-only op log on disk.
 
 ```
-~/.claude/mind/chitta/
-├── chitta.duckdb          # Main database (memories, triplets, symbols, ledger)
-├── chitta_emb.duckdb      # Embeddings database (HNSW index, separate to avoid contention)
-└── chitta.duckdb.wal      # Write-ahead log (auto-managed)
+~/.claude/mind/chitta-field/
+├── {instance_id}_{first_seqno}.seg   # Op log segment (one per writer process)
+├── chitta.snapshot                    # Full state snapshot (accelerates cold start)
+└── cortex.snapshot                    # Cortical index snapshot (optional)
 ```
 
-### Schema (Main Database)
+### Multi-writer model (Upanishads)
 
-**memory** table — the core unit of storage:
+Each process that opens `ChittaField` is assigned a unique `InstanceId`. All writes go to `{instance_id}_{seqno}.seg`, owned exclusively by that process — no cross-process coordination required. On open, the library scans all `*.seg` files, replays them in sequence-number order, and reconstructs the full in-RAM state. This is safe on NFS without lock managers.
 
-| Column | Type | Purpose |
-|--------|------|---------|
-| `id` | INTEGER (PK) | Auto-incrementing ID |
-| `kind` | VARCHAR | Memory type (wisdom, belief, episode, etc.) |
-| `content` | TEXT | The actual content (often in SSL format) |
-| `confidence` | DOUBLE | Bayesian confidence (0.0-1.0) |
-| `decay_rate` | DOUBLE | How fast this memory fades |
-| `tags` | VARCHAR | Comma-separated tags |
-| `realm` | VARCHAR | Primary realm (default: "brahman") |
-| `visibility` | INTEGER | 0=Private, 1=Shared, 2=Global |
-| `created_at` | TIMESTAMP | Creation time |
-| `updated_at` | TIMESTAMP | Last modification |
-| `accessed_at` | TIMESTAMP | Last access (for freshness) |
-| `access_count` | INTEGER | How often accessed |
+### Op Log
 
-**triplet** table — knowledge graph:
+Each op log entry is a length-prefixed MessagePack frame with a CRC32 checksum:
 
-| Column | Type | Purpose |
-|--------|------|---------|
-| `subject` | VARCHAR | Source entity (string, not ID) |
-| `predicate` | VARCHAR | Relationship type |
-| `object` | VARCHAR | Target entity (string, not ID) |
-| `weight` | DOUBLE | Edge strength |
-
-**symbol** table — code intelligence:
-
-| Column | Type | Purpose |
-|--------|------|---------|
-| `id` | INTEGER (PK) | Symbol ID |
-| `name` | VARCHAR | Symbol name |
-| `kind` | VARCHAR | function, class, method, etc. |
-| `signature` | VARCHAR | Full signature |
-| `file_path` | VARCHAR | Source file |
-| `line_start` | INTEGER | Start line |
-| `line_end` | INTEGER | End line |
-| `parent` | VARCHAR | Parent symbol (for nested) |
-| `project` | VARCHAR | Project name |
-| `description` | VARCHAR | Semantic description |
-
-Additional tables: `call_edge`, `code_file`, `ledger`, `long_task`, `long_task_event`, `suggestion`, `anticipation`, `habit`, `background_task`, `user_profile`, `goal`, `calibration`, `theme`, `theme_memory`, `realm_membership`, `transcript_state`.
-
-### Connection Pool
-
-```cpp
-class ConnectionPool {
-    // Pre-allocated connections for concurrent reads
-    // Write operations go through a dedicated write connection
-    // ScopedConnection: RAII wrapper that returns connection on destruction
-    // Timeout: waits up to N ms, creates emergency overflow if needed
-};
+```
+[frame_len: u32] [crc32: u32] [op: msgpack]
 ```
 
-- Default pool size: configurable (typically 4-8 connections)
-- Read connections are shared; writes are serialized through a single connection
-- Emergency overflow connections created when pool is exhausted under load
+Op types include: `PutMemory`, `UpdateState`, `Forget`, `AddAssocEdge`, `AddTriplet`, `UpsertSymbol`, `AddCallEdge`, `TranscriptEvent`, `TaskEvent`, `SessionEvent`.
 
-### Embeddings Database (Separate)
+### Memory record
 
-The HNSW index is stored in a separate DuckDB file (`chitta_emb.duckdb`) because:
+| Field | Type | Description |
+|-------|------|-------------|
+| `memory_id` | `u64` | Monotonically allocated, per-instance |
+| `chunk_hash` | `[u8; 32]` | SHA-256 of (kind, realm, content, embedding) for dedup |
+| `kind` | `String` | Semantic category (wisdom, episode, ssl, fact, ...) |
+| `realm` | `String` | Namespace / project scope |
+| `content` | `Vec<u8>` | Raw bytes (typically UTF-8 text) |
+| `embedding` | `Vec<f32>` | 768-dim BGE embedding |
+| `confidence` | `f32` | 0.0-1.0 |
+| `decay_rate` | `f32` | Strength loss per time unit; 0.0 = pinned |
+| `strength` | `f32` | Current salience (decays over time) |
+| `sparse_code` | `Option<SparseCode>` | 64 active bit indices into 16,384-dim cortex |
+| `authored_at_ms` | `i64` | Original authorship timestamp |
 
-1. HNSW index rebuilds are expensive and can block writes
-2. Read-heavy semantic search shouldn't contend with memory writes
-3. The embeddings database can be rebuilt from the main database if corrupted
+### Snapshot acceleration
+
+`cf_save_full_snapshot` serializes the entire in-RAM state (payloads, states, all indexes) to a single bincode file. On next open, the library reads the snapshot magic, finds the snapshot with the highest seqno using only 16 bytes per file (`peek_seqno`), loads that one, then replays only the op log entries that follow it.
+
+Snapshot format is versioned (magic `0xF011_5741_7E00_0004`). Old snapshots (magic `...0003`) are transparently migrated on load.
+
+---
+
+## Semantic Index (ANN)
+
+The `SemanticIndex` (in `hnsw.rs`) replaces brute-force cosine search with a two-tier approximate nearest-neighbour strategy.
+
+### Architecture
+
+```
+Query embedding
+      │
+      ▼
+┌─────────────────────────────────┐
+│  LSH probing (primary path)     │  4 tables, 12 bits each
+│  • Hash query → bucket          │  + 1-bit-flip Hamming neighbours
+│  • Collect candidates           │
+└──────────────┬──────────────────┘
+               │ (if empty)
+               ▼
+┌─────────────────────────────────┐
+│  IVF coarse quantizer (fallback)│  256 random-projection centroids
+│  • Score query vs centroids     │  Top 6-24 probes
+│  • Collect members from buckets │
+└──────────────┬──────────────────┘
+               │
+               ▼
+┌─────────────────────────────────┐
+│  Exact cosine reranking         │  1024-16384 candidates → top-k
+└─────────────────────────────────┘
+```
+
+### Parameters
+
+| Constant | Value | Meaning |
+|----------|-------|---------|
+| `COARSE_CENTROIDS` | 256 | Number of random-projection partitions |
+| `COARSE_ASSIGNMENTS` | 2 | Centroids each memory is assigned to |
+| `LSH_TABLES` | 4 | Number of LSH hash tables |
+| `LSH_BITS` | 12 | Bits per hash signature (4096 buckets/table) |
+| `MIN_PROBES` | 6 | Min centroid probes per query |
+| `MAX_CANDIDATES` | 16384 | Candidate cap before exact reranking |
+
+The centroids and LSH planes are fixed random unit vectors (seeded deterministically). The coarse index is persisted in snapshots; LSH structures are rebuilt from the stored embeddings on load (since planes are deterministic).
+
+---
+
+## Cortical Index (SDR)
+
+The `CorticalIndex` (in `organ/cortex.rs`) provides sub-millisecond associative recall without a learned ANN structure.
+
+Each memory's 768-dim embedding is encoded into a **Sparse Distributed Representation**: exactly K=64 active features out of N=16,384. Encoding uses a product-key decomposition: the embedding is split into two 384-dim halves, each scored against 128-centroid sub-dictionaries, and the top-K atoms are selected from the 256-candidate shortlist — O(√N · d) instead of O(N · d).
+
+Recall is a bitset intersection: query SDR vs memory SDR, count shared active bits. This is O(K) per candidate and runs in sub-millisecond at tens of thousands of memories.
+
+A `ProductQuantizer` compresses residual embeddings (32 subvectors, 256 centroids each) to 32 bytes for scale.
 
 ---
 
@@ -248,7 +289,7 @@ The resonance engine is the core of memory retrieval. `DuckDBMind::full_resonate
 
 ### Phase 1: Semantic Seeds
 
-Vector similarity search using HNSW index. Returns top-k memories by cosine distance to query embedding.
+Vector similarity search via chitta-field's `SemanticIndex` (IVF + LSH ANN). Returns top-k memories by cosine similarity to query embedding. For small pre-filtered candidate sets (realm filter), falls back to exact cosine over the allowed set.
 
 ### Phase 2: BM25 Hybrid
 
@@ -586,7 +627,7 @@ enum class NodeType {
 
 ### Quality Gate
 
-Before storing, `DuckDBMind::remember()` applies:
+Before storing, `DuckDBMind::remember()` applies (pre-flight in C++ before calling the chitta-field FFI):
 
 1. **Minimum length**: Content must be >= 10 characters
 2. **Deduplication**: Cosine similarity check against recent memories (threshold: 0.95)
@@ -755,6 +796,10 @@ The key integration pattern:
 ## Build System
 
 ```bash
+# 1. Build chitta-field (Rust static library)
+cd chitta-field && ./build.sh build --release && cd ..
+
+# 2. Build C++ daemon (links libchitta_field.a)
 cd chitta && cmake --build build --parallel
 ```
 
@@ -762,7 +807,7 @@ cd chitta && cmake --build build --parallel
 
 | Library | Purpose |
 |---------|---------|
-| DuckDB | Storage engine |
+| chitta-field | Memory substrate (Rust static lib, included as submodule) |
 | ONNX Runtime | Embedding inference |
 | tree-sitter | Code parsing (+ 9 language grammars) |
 | nlohmann_json | JSON handling |
@@ -774,8 +819,8 @@ cd chitta && cmake --build build --parallel
 |--------|-------------|
 | `chittad` | Daemon binary |
 | `chitta` | CLI binary |
-| `duckdb_test` | Test binary |
+| `libchitta_field.a` | Rust memory substrate (linked into chittad) |
 
 ---
 
-*Version 3.38.6 — DuckDB backend, 8-phase resonance, self-tuning, xMemory themes, cross-session messaging.*
+*Version 4.0 — chitta-field backend (Rust organic substrate), ANN semantic index (IVF + LSH), SDR cortical index, 8-phase resonance, self-tuning, xMemory themes, cross-session messaging.*
