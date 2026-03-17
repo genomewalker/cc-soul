@@ -62,7 +62,9 @@
                << r.value("text", "").substr(0, 100) << "\n";
         }
 
-        return DuckDBToolResult::ok(ss.str(), {{"results", results_json}, {"realm", realm}});
+        auto result = DuckDBToolResult::ok(ss.str(), {{"results", results_json}, {"realm", realm}});
+        fire_recall_callback(results_json, 1);
+        return result;
     }
 
     DuckDBToolResult tool_recall_temporal(const json& params) {
@@ -161,7 +163,9 @@
             int pct = static_cast<int>(r.value("relevance", 0.0f) * 100);
             ss << "[" << pct << "%] " << r.value("text", "").substr(0, 100) << "\n";
         }
-        return DuckDBToolResult::ok(ss.str(), {{"results", merged}, {"realm", realm}});
+        auto result = DuckDBToolResult::ok(ss.str(), {{"results", merged}, {"realm", realm}});
+        fire_recall_callback(merged, 1);
+        return result;
     }
 
     DuckDBToolResult tool_smart_recall(const json& params) {
@@ -207,7 +211,22 @@
             ss << "[" << pct << "%] [" << r.value("type", "?") << "] "
                << r.value("text", "").substr(0, 100) << "\n";
         }
-        return DuckDBToolResult::ok(ss.str(), {{"results", results}, {"intent", is_code ? "code" : "semantic"}});
+        auto result = DuckDBToolResult::ok(ss.str(), {{"results", results}, {"intent", is_code ? "code" : "semantic"}});
+        fire_recall_callback(results, 1);
+        return result;
+    }
+
+    void fire_recall_callback(const json& results, int passes) {
+        if (!recall_callback_ || !results.is_array() || results.empty()) return;
+        std::vector<uint64_t> ids;
+        ids.reserve(results.size());
+        for (const auto& r : results) {
+            std::string id_str = r.value("id", "");
+            if (!id_str.empty()) {
+                try { ids.push_back(std::stoull(id_str)); } catch (...) {}
+            }
+        }
+        if (!ids.empty()) recall_callback_(ids, passes);
     }
 
     // ── Iterative resonance helpers ────────────────────────────────────────
