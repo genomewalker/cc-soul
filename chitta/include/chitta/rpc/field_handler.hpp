@@ -26,6 +26,7 @@
 #include <cctype>
 #include <cstdio>
 #include <cmath>
+#include <cstring>
 #include <regex>
 #include <array>
 #include <unistd.h>

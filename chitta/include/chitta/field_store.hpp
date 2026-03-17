@@ -735,6 +735,8 @@ public:
         } catch (...) { return {}; }
     }
 
+    CfHandle* handle() const { return handle_; }
+
 private:
     CfHandle* handle_ = nullptr;
 
