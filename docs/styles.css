@@ -196,9 +196,19 @@ section {
   color: var(--lotus-200);
   letter-spacing: 0.05em;
   flex-shrink: 0;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+.nav-brand:hover {
+  background: rgba(203,175,134,0.08);
+  color: var(--lotus-200);
 }
 
 .nav-brand span {
+  color: var(--sandal-300);
+}
+.nav-brand:hover span {
   color: var(--sandal-300);
 }
 
