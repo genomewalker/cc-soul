@@ -181,12 +181,12 @@ section {
 }
 
 .nav-inner {
-  max-width: 1080px;
+  max-width: 1200px;
   margin: 0 auto;
-  padding: 0 var(--space-5);
+  padding: 0 var(--space-4);
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: var(--space-4);
 }
 
 .nav-brand {
@@ -195,6 +195,7 @@ section {
   font-weight: 500;
   color: var(--lotus-200);
   letter-spacing: 0.05em;
+  flex-shrink: 0;
 }
 
 .nav-brand span {
@@ -203,18 +204,24 @@ section {
 
 .nav-links {
   display: flex;
-  gap: var(--space-5);
+  gap: var(--space-3);
   list-style: none;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  flex: 1;
 }
+.nav-links::-webkit-scrollbar { display: none; }
 
 .nav-links a {
   font-family: var(--font-mono);
-  font-size: var(--text-xs);
+  font-size: 0.7rem;
   color: var(--ash-300);
-  letter-spacing: 0.04em;
+  letter-spacing: 0.03em;
   text-transform: uppercase;
   transition: color 0.25s ease;
   position: relative;
+  white-space: nowrap;
 }
 
 .nav-links a::after {
