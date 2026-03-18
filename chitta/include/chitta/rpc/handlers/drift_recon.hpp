@@ -75,9 +75,14 @@
                     int64_t last_accessed = m.value("last_accessed_ms", int64_t(0));
                     if (last_accessed >= cutoff_ms) {
                         std::string content = m.value("content", "");
+                        std::string id_str;
+                        if (m.contains("id")) {
+                            if (m["id"].is_string()) id_str = m["id"].get<std::string>();
+                            else id_str = std::to_string(m["id"].get<int64_t>());
+                        }
                         results.push_back({
-                            {"id", m.value("id", 0)},
-                            {"preview", content.substr(0, 100)},
+                            {"id", id_str},
+                            {"preview", content.substr(0, std::min(content.size(), size_t(100)))},
                             {"access_count", m.value("access_count", 0)},
                             {"last_accessed_ms", last_accessed}
                         });
@@ -103,7 +108,7 @@
         std::ostringstream ss;
         ss << results.size() << " labile memories (last " << window_hours << "h):\n";
         for (const auto& r : results) {
-            ss << "#" << r.value("id", 0) << " " << r.value("preview", "") << "\n";
+            ss << "#" << r.value("id", std::string("?")) << " " << r.value("preview", "") << "\n";
         }
 
         return DuckDBToolResult::ok(ss.str(),
