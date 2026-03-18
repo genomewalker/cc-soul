@@ -457,6 +457,7 @@ private:
     #include "handlers/drift_5w.hpp"
     #include "handlers/drift_consolidation.hpp"
     #include "handlers/drift_recall.hpp"
+    #include "handlers/drift_probe.hpp"
 
     // ═══════════════════════════════════════════════════════════════════════
     // register_tools() — all tool schemas and handler bindings
@@ -2068,6 +2069,32 @@ private:
                 {"limit",{{"type","integer"},{"description","Max results (default 20)"}}}
             }}}}});
         handlers_["labile_memories_top"] = [this](const json& p) { return tool_labile_memories_top(p); };
+
+        // ── Behavioral Probe ──────────────────────────────────────────────────
+        tools_.push_back({{"name","probe_seed"},{"description","Store an exemplar text as a centroid for a behavioral class (sycophantic/hedging/shallow/direct). Bootstrap the probe with representative examples."},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"class",{{"type","string"},{"description","Behavioral class: sycophantic | hedging | shallow | direct"}}},
+                {"text",{{"type","string"},{"description","Exemplar text for this class"}}},
+                {"note",{{"type","string"},{"description","Optional annotation"}}}
+            }},{"required",{"class","text"}}}}});
+        handlers_["probe_seed"] = [this](const json& p) { return tool_probe_seed(p); };
+
+        tools_.push_back({{"name","behavioral_probe"},{"description","Score text against behavioral centroid clusters. Returns per-class similarity scores (sycophantic/hedging/shallow/direct) and overall quality estimate. Requires prior probe_seed calls."},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"text",{{"type","string"},{"description","Text to probe (e.g. a Claude response)"}}}
+            }},{"required",{"text"}}}}});
+        handlers_["behavioral_probe"] = [this](const json& p) { return tool_behavioral_probe(p); };
+
+        tools_.push_back({{"name","probe_calibrate"},{"description","Add a confirmed exemplar to a behavioral class to refine its centroid. Use when you have a clear example of the behavior."},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"class",{{"type","string"},{"description","Behavioral class to update"}}},
+                {"text",{{"type","string"},{"description","Confirmed exemplar text"}}}
+            }},{"required",{"class","text"}}}}});
+        handlers_["probe_calibrate"] = [this](const json& p) { return tool_probe_calibrate(p); };
+
+        tools_.push_back({{"name","probe_status"},{"description","Show how many exemplars exist per behavioral class. Use to verify the probe is seeded before running behavioral_probe."},
+            {"inputSchema",{{"type","object"}}}});
+        handlers_["probe_status"] = [this](const json& p) { return tool_probe_status(p); };
 
         classify_tools();
     }

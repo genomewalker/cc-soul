@@ -673,6 +673,21 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
 
     {"sadhana_pause", "Pause a running sadhana (can be resumed)",
      {{"id", "Sadhana ID", true, nullptr}}},
+
+    // Behavioral probe (drift-memory feature)
+    {"probe_seed", "Store an exemplar text as a centroid for a behavioral class",
+     {{"class", "Behavioral class: sycophantic|hedging|shallow|direct", true, nullptr},
+      {"text", "Exemplar text for this class", true, nullptr},
+      {"note", "Optional annotation", false, nullptr}}},
+
+    {"behavioral_probe", "Score text against behavioral centroid clusters",
+     {{"text", "Text to probe (e.g. a Claude response)", true, nullptr}}},
+
+    {"probe_calibrate", "Add a confirmed exemplar to a behavioral class to refine its centroid",
+     {{"class", "Behavioral class to update", true, nullptr},
+      {"text", "Confirmed exemplar text", true, nullptr}}},
+
+    {"probe_status", "Show how many exemplars exist per behavioral class", {}},
 };
 
 // Build set of known tools from specs

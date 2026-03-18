@@ -559,6 +559,38 @@ if echo "$RESPONSE" | grep -qiE '(architecture|design pattern|refactor|abstracti
 fi
 
 # ===========================================
+# BEHAVIORAL PROBE: Score response for sycophancy/hedging/shallow reasoning
+# Only runs if probe centroids are seeded (probe_status check is cheap).
+# Stores result as a triplet for session-start hook to read next session.
+# ===========================================
+if [[ ${#RESPONSE} -gt 100 ]]; then
+    # Sample the first 400 chars — enough for a signal, cheap to embed
+    PROBE_TEXT=$(echo "$RESPONSE" | head -c 400 | tr '\n' ' ')
+
+    # Check if any centroids exist (fast recall with tiny limit)
+    _probe_status=$(timeout 1 "$CHITTA_BIN" probe_status 2>/dev/null || true)
+    if [[ -n "$_probe_status" && "$_probe_status" != *"No probe centroids"* ]]; then
+        _probe_result=$(timeout 2 "$CHITTA_BIN" behavioral_probe --text "$PROBE_TEXT" --json 2>/dev/null || true)
+        if [[ -n "$_probe_result" ]]; then
+            _dominant=$(echo "$_probe_result" | jq -r '.metadata.dominant // empty' 2>/dev/null || true)
+            _dom_score=$(echo "$_probe_result" | jq -r '.metadata.dominant_score // 0' 2>/dev/null || true)
+            _quality=$(echo "$_probe_result" | jq -r '.metadata.quality // 0' 2>/dev/null || true)
+
+            if [[ -n "$_dominant" && "$_dominant" != "direct" ]]; then
+                # Non-direct dominant behavior detected — store as triplet
+                _dom_pct=$(awk "BEGIN{printf \"%.0f\", ${_dom_score:-0}*100}")
+                if [[ "$_dom_pct" -ge 55 ]]; then
+                    queue_write "add_triplet" "{\"subject\":\"$SESSION_ID\",\"predicate\":\"probe_signal\",\"object\":\"${_dominant}:${_dom_pct}pct\",\"weight\":${_dom_score:-0}}"
+                    echo "[soul] behavioral probe: ${_dominant} ${_dom_pct}% (quality=${_quality})" >&2
+                fi
+            else
+                echo "[soul] behavioral probe: direct response (quality=${_quality})" >&2
+            fi
+        fi
+    fi
+fi
+
+# ===========================================
 # STRUCTURED SPANS: Capture tool uses with outcomes
 # ===========================================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -323,6 +323,33 @@ else
     fi
 
     # ===========================================
+    # BEHAVIORAL PROBE NUDGE: Surface chronic behavioral patterns from recent sessions
+    # Reads probe_signal triplets stored by the stop hook over the last 5 sessions.
+    # If a pattern is chronic (>=3 occurrences), inject a direct behavioral nudge.
+    # ===========================================
+    _probe_nudge=""
+    _probe_triplets=$(timeout 1 "$CHITTA_BIN" query_triplets --predicate "probe_signal" --limit 10 2>/dev/null || true)
+    if [[ -n "$_probe_triplets" && "$_probe_triplets" != *"No triplets"* ]]; then
+        _hedge_count=$(echo "$_probe_triplets" | grep -c "hedging" || true)
+        _syco_count=$(echo "$_probe_triplets" | grep -c "sycophantic" || true)
+        _shallow_count=$(echo "$_probe_triplets" | grep -c "shallow" || true)
+
+        if [[ "${_hedge_count:-0}" -ge 3 ]]; then
+            _probe_nudge="${_probe_nudge}[probe] Chronic hedging detected (${_hedge_count} recent sessions) — be direct and assertive, drop qualifiers.\n"
+        fi
+        if [[ "${_syco_count:-0}" -ge 3 ]]; then
+            _probe_nudge="${_probe_nudge}[probe] Chronic sycophancy detected (${_syco_count} recent sessions) — push back when needed, prioritize accuracy over agreement.\n"
+        fi
+        if [[ "${_shallow_count:-0}" -ge 3 ]]; then
+            _probe_nudge="${_probe_nudge}[probe] Chronic shallow reasoning detected (${_shallow_count} recent sessions) — go deeper, think step by step before answering.\n"
+        fi
+    fi
+    if [[ -n "$_probe_nudge" ]]; then
+        echo ""
+        echo -e "$_probe_nudge"
+    fi
+
+    # ===========================================
     # CACHE BREAK WARNING: Surface recent cache break detections
     # ===========================================
     _sus3_cb_warn=$(timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "cache break session" --tag "cache-break" --limit 1 --text-only 2>/dev/null | head -c 400 || true)
