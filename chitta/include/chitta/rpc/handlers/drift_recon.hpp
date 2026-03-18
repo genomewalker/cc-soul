@@ -59,21 +59,26 @@
     DuckDBToolResult tool_labile_memories(const json& params) {
         std::string realm = params.value("realm", "");
         size_t limit = static_cast<size_t>(params.value("limit", 20));
-        double window_hours = params.value("window_hours", 24.0);
+        double window_hours = params.value("window_hours", 48.0);
+        // min_access: must have been recalled at least this many times to be "labile"
+        // Excludes freshly-written hook memories that were never recalled
+        int min_access = params.value("min_access", 2);
 
         int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
         int64_t cutoff_ms = now_ms - static_cast<int64_t>(window_hours * 3600.0 * 1000.0);
 
-        // List recent memories sorted by recency, then filter by last_accessed_ms
-        std::string raw = field_store_->list_memories("", realm, "recency", limit * 5, 0);
+        // Fetch a broad set sorted by recency, filter to actually-recalled memories
+        std::string raw = field_store_->list_memories("", realm, "recency", limit * 20, 0);
         json results = json::array();
         try {
             auto arr = json::parse(raw);
             if (arr.is_array()) {
                 for (const auto& m : arr) {
                     int64_t last_accessed = m.value("last_accessed_ms", int64_t(0));
-                    if (last_accessed >= cutoff_ms) {
+                    int access_count = m.value("access_count", 0);
+                    // Labile = recently accessed AND recalled multiple times (not just written once)
+                    if (last_accessed >= cutoff_ms && access_count >= min_access) {
                         std::string content = m.value("content", "");
                         std::string id_str;
                         if (m.contains("id")) {
@@ -83,7 +88,7 @@
                         results.push_back({
                             {"id", id_str},
                             {"preview", content.substr(0, std::min(content.size(), size_t(100)))},
-                            {"access_count", m.value("access_count", 0)},
+                            {"access_count", access_count},
                             {"last_accessed_ms", last_accessed}
                         });
                         if (results.size() >= limit) break;
@@ -92,27 +97,23 @@
             }
         } catch (...) {}
 
-        // Fallback: if no last_accessed_ms data, use temporal recall
+        std::ostringstream ss;
         if (results.empty()) {
-            auto hits = field_store_->recall_temporal(cutoff_ms, now_ms, limit, realm);
-            for (const auto& h : hits) {
-                results.push_back({
-                    {"id", std::to_string(h.memory_id)},
-                    {"preview", h.content.substr(0, 100)},
-                    {"access_count", 0},
-                    {"last_accessed_ms", h.ts_ms}
-                });
+            ss << "No labile memories found (requires access_count>=" << min_access
+               << " within last " << window_hours << "h)";
+        } else {
+            ss << results.size() << " labile memories (access>=" << min_access
+               << ", last " << window_hours << "h):\n";
+            for (const auto& r : results) {
+                ss << "[" << r.value("access_count", 0) << "x] #"
+                   << r.value("id", std::string("?")) << " "
+                   << r.value("preview", "") << "\n";
             }
         }
 
-        std::ostringstream ss;
-        ss << results.size() << " labile memories (last " << window_hours << "h):\n";
-        for (const auto& r : results) {
-            ss << "#" << r.value("id", std::string("?")) << " " << r.value("preview", "") << "\n";
-        }
-
         return DuckDBToolResult::ok(ss.str(),
-            {{"memories", results}, {"count", results.size()}, {"window_hours", window_hours}});
+            {{"memories", results}, {"count", results.size()},
+             {"window_hours", window_hours}, {"min_access", min_access}});
     }
 
     DuckDBToolResult tool_reconsolidate(const json& params) {

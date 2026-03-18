@@ -1999,11 +1999,12 @@ private:
             }},{"required",{"id"}}}}});
         handlers_["get_evidence_type"] = [this](const json& p) { return tool_get_evidence_type(p); };
 
-        tools_.push_back({{"name","labile_memories"},{"description","List recently-accessed memories in the labile (updateable) window"},
+        tools_.push_back({{"name","labile_memories"},{"description","List memories recalled multiple times recently — candidates for reconsolidation (excludes freshly-written hook memories)"},
             {"inputSchema",{{"type","object"},{"properties",{
                 {"realm",{{"type","string"},{"description","Filter by realm"}}},
                 {"limit",{{"type","integer"},{"description","Max results (default 20)"}}},
-                {"window_hours",{{"type","number"},{"description","Recency window in hours (default 24)"}}}
+                {"window_hours",{{"type","number"},{"description","Recency window in hours (default 48)"}}},
+                {"min_access",{{"type","integer"},{"description","Min recall count to qualify (default 2)"}}}
             }}}}});
         handlers_["labile_memories"] = [this](const json& p) { return tool_labile_memories(p); };
 
