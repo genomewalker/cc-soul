@@ -29,6 +29,7 @@
 #include <cstring>
 #include <regex>
 #include <array>
+#include <numeric>
 #include <unistd.h>
 #include <glob.h>
 
@@ -451,6 +452,7 @@ private:
     #include "handlers/field_misc.hpp"
     #include "handlers/ledger.hpp"
     #include "handlers/long_task.hpp"
+    #include "handlers/compact.hpp"
 
     // ═══════════════════════════════════════════════════════════════════════
     // register_tools() — all tool schemas and handler bindings
@@ -1960,6 +1962,24 @@ private:
             }}}}
         });
         handlers_["get_relationship_events"] = [this](const json& p) { return tool_get_relationship_events(p); };
+
+        // ── Context compaction ─────────────────────────────────────────────
+        tools_.push_back({
+            {"name", "compact_context"},
+            {"description", "Memory-aware context compaction. Scores conversation messages by recency, "
+                "semantic relevance to query, and memory coverage (content already in memory is safer to drop). "
+                "Returns a subset of messages fitting the target token budget."},
+            {"inputSchema", {{"type", "object"},
+                {"properties", {
+                    {"messages", {{"type", "array"}, {"description", "Conversation messages [{role,content}]"},
+                        {"items", {{"type", "object"}}}}},
+                    {"query", {{"type", "string"}, {"description", "Upcoming task hint for semantic scoring"}}},
+                    {"target_ratio", {{"type", "number"}, {"description", "Fraction of tokens to KEEP (default 0.4)"}}},
+                    {"distill_novel", {{"type", "boolean"}, {"description", "Reserved for future use"}}}
+                }}, {"required", {"messages"}}
+            }}
+        });
+        handlers_["compact_context"] = [this](const json& p) { return tool_compact_context(p); };
 
         classify_tools();
     }

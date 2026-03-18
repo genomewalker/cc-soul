@@ -250,6 +250,48 @@ Build intelligent context combining memories, code symbols, and graph relationsh
 
 ---
 
+## Context Management
+
+### compact_context
+
+Memory-aware context compaction. Scores each conversation turn by recency, semantic relevance to the upcoming task, and *memory coverage* — how well the turn's content is already captured in soul memories. Turns with high coverage are safely droppable without information loss. Survivors are returned verbatim in original order.
+
+Unlike generic compaction approaches, chitta can answer: *"Is this turn's knowledge already in the graph?"* — enabling more aggressive reduction without losing anything novel.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `messages` | array | Yes | Conversation turns in `[{role, content}]` format (OpenAI/Claude compatible) |
+| `query` | string | No | Upcoming task hint — biases semantic scoring toward what's needed next |
+| `target_ratio` | float | No | Fraction of tokens to **keep** (default: `0.4`, range: 0.05–1.0) |
+| `distill_novel` | boolean | No | Reserved — accepted but not yet active |
+
+**Scoring formula** per turn (system messages always kept):
+```
+score = structural_weight × (0.3·recency + 0.4·semantic_sim + 0.3·(1 − memory_coverage))
+```
+- `structural_weight`: system=2.0, user=1.0, assistant=0.8, tool=0.5
+- `recency`: linear 0.1 (oldest) → 1.0 (most recent)
+- `semantic_sim`: cosine similarity of turn embedding vs. `query` embedding (0.5 if no query)
+- `memory_coverage`: max cosine similarity of turn embedding vs. nearest 3 soul memories (high = already learned)
+
+**Response:**
+```json
+{
+  "messages": [...],
+  "stats": {
+    "before_tokens": 48000,
+    "after_tokens": 18200,
+    "dropped": 34,
+    "dropped_pct": 62.5,
+    "embedding": true
+  }
+}
+```
+
+**Hook integration:** call from `UserPromptSubmit` with the incoming user message as `query` to auto-compact before each turn. The hook receives the full conversation history via environment; pass it through `compact_context` before injecting context.
+
+---
+
 ## Graph (Triplets)
 
 ### connect

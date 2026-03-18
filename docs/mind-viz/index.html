@@ -3,29 +3,28 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>chitta — mind observatory</title>
+<title>chitta — neural interface</title>
 <script src="https://unpkg.com/3d-force-graph@1/dist/3d-force-graph.min.js"></script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
-  --bg:      #070710;
-  --glass:   rgba(7,7,20,0.86);
-  --glass2:  rgba(12,12,28,0.92);
-  --border:  rgba(89,179,250,0.14);
-  --border2: rgba(89,179,250,0.22);
-  --text:    #cdd6f4;
-  --dim:     #585b70;
-  --dimmer:  #313244;
-  --accent:  #89b4fa;
-  --green:   #a6e3a1;
-  --yellow:  #f9e2af;
-  --red:     #f38ba8;
-  --peach:   #fab387;
-  --mauve:   #cba6f7;
-  --teal:    #94e2d5;
-  --sky:     #89dceb;
-  --sapphire:#74c7ec;
+  --bg:       #00040a;
+  --cyan:     #00d4ff;
+  --violet:   #9b5fff;
+  --green:    #00ff8c;
+  --amber:    #ffaa00;
+  --red:      #ff2255;
+  --pink:     #ff55cc;
+  --text:     #b8d8f0;
+  --dim:      #2a4a6a;
+  --dim2:     #1a2a3a;
+  --panel-bg: rgba(0,8,20,0.90);
+  --b-cyan:   rgba(0,212,255,0.25);
+  --b-violet: rgba(155,95,255,0.25);
+  --glow-c:   0 0 16px rgba(0,212,255,0.15), inset 0 0 30px rgba(0,212,255,0.03);
+  --glow-v:   0 0 16px rgba(155,95,255,0.2), inset 0 0 30px rgba(155,95,255,0.03);
 }
+
 body {
   background: var(--bg);
   color: var(--text);
@@ -35,352 +34,450 @@ body {
   width: 100vw;
   height: 100vh;
 }
+
+/* ── Background grid ───────────────────────────────────────────────────────── */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(0,212,255,0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,212,255,0.025) 1px, transparent 1px);
+  background-size: 60px 60px;
+  pointer-events: none;
+  z-index: 0;
+}
+
 #graph-container {
   position: absolute;
-  top: 0; left: 0;
-  width: 100vw;
-  height: 100vh;
+  inset: 0;
+  z-index: 1;
 }
-.hud {
+
+/* ── Panel base ────────────────────────────────────────────────────────────── */
+.panel {
   position: fixed;
-  background: var(--glass);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  padding: 10px 14px;
+  background: var(--panel-bg);
+  border: 1px solid var(--b-cyan);
+  box-shadow: var(--glow-c);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   z-index: 100;
+  overflow: hidden;
   pointer-events: auto;
 }
-.hud-title {
-  color: var(--dim);
-  text-transform: uppercase;
-  letter-spacing: 1.5px;
-  font-size: 9px;
-  margin-bottom: 7px;
+
+/* Scanline overlay */
+.panel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg, transparent, transparent 3px,
+    rgba(0,212,255,0.008) 3px, rgba(0,212,255,0.008) 4px
+  );
+  pointer-events: none;
+  z-index: 0;
 }
 
-/* header */
-#hud-header {
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
+/* Scan sweep */
+.panel::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0;
+  height: 50px;
+  background: linear-gradient(transparent, rgba(0,212,255,0.04), transparent);
+  animation: sweep 8s linear infinite;
+  pointer-events: none;
+  z-index: 0;
+}
+@keyframes sweep {
+  0%   { top: -60px; }
+  100% { top: calc(100% + 60px); }
+}
+
+.panel-violet {
+  border-color: var(--b-violet);
+  box-shadow: var(--glow-v);
+}
+.panel-violet::after {
+  background: linear-gradient(transparent, rgba(155,95,255,0.04), transparent);
+}
+
+/* Corner brackets */
+.panel .bk {
+  position: absolute;
+  width: 10px; height: 10px;
+  border-color: var(--cyan);
+  border-style: solid;
+  z-index: 2;
+}
+.panel-violet .bk { border-color: var(--violet); }
+.bk.tl { top: -1px; left: -1px;   border-width: 2px 0 0 2px; }
+.bk.tr { top: -1px; right: -1px;  border-width: 2px 2px 0 0; }
+.bk.bl { bottom: -1px; left: -1px;  border-width: 0 0 2px 2px; }
+.bk.br { bottom: -1px; right: -1px; border-width: 0 2px 2px 0; }
+
+/* Panel header */
+.ph {
   display: flex;
   align-items: center;
-  gap: 14px;
-  white-space: nowrap;
-  padding: 7px 20px;
+  gap: 7px;
+  padding: 5px 10px;
+  border-bottom: 1px solid rgba(0,212,255,0.12);
+  position: relative;
+  z-index: 2;
 }
-#hud-header h1 { font-size: 13px; color: var(--accent); letter-spacing: 3px; font-weight: 400; }
-.sep { color: var(--dimmer); }
-#memory-count { color: var(--mauve); }
-#connection-dot {
-  width: 7px; height: 7px; border-radius: 50%;
-  background: var(--red);
-  display: inline-block;
-  transition: background 0.5s;
-  box-shadow: 0 0 0 0 rgba(243,139,168,0);
-}
-#connection-dot.ok {
+.panel-violet .ph { border-bottom-color: rgba(155,95,255,0.15); }
+.ph-dot {
+  width: 5px; height: 5px; border-radius: 50%;
   background: var(--green);
-  animation: dot-pulse 3s infinite;
+  animation: blink 2s infinite;
+  flex-shrink: 0;
 }
-@keyframes dot-pulse {
-  0%   { box-shadow: 0 0 0 0 rgba(166,227,161,0.6); }
-  70%  { box-shadow: 0 0 0 5px rgba(166,227,161,0); }
-  100% { box-shadow: 0 0 0 0 rgba(166,227,161,0); }
+.ph-dot.amber { background: var(--amber); }
+.ph-dot.violet { background: var(--violet); }
+.ph-dot.cyan { background: var(--cyan); }
+@keyframes blink {
+  0%,100% { opacity: 1; }
+  50%      { opacity: 0.3; }
+}
+.ph-label {
+  font-size: 8px;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  color: var(--cyan);
+  font-weight: 600;
+}
+.panel-violet .ph-label { color: var(--violet); }
+.ph-right { margin-left: auto; color: var(--dim); font-size: 8px; letter-spacing: 1px; }
+
+/* Panel body */
+.pb {
+  padding: 8px 10px;
+  position: relative;
+  z-index: 2;
 }
 
-/* search */
-#hud-search {
-  top: 12px;
-  left: 12px;
+/* ── Header bar ────────────────────────────────────────────────────────────── */
+#hud-header {
+  top: 0; left: 0; right: 0;
+  height: 38px;
+  border-left: none; border-right: none; border-top: none;
+  border-bottom: 1px solid rgba(0,212,255,0.18);
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 14px;
+  padding: 0 16px;
+  gap: 20px;
+  background: rgba(0,6,16,0.92);
+  box-shadow: 0 2px 30px rgba(0,212,255,0.08);
 }
-#search-icon { color: var(--dim); font-size: 14px; }
+#hud-header::after { display: none; }
+#hud-header::before { display: none; }
+
+.hdr-logo {
+  font-size: 14px;
+  letter-spacing: 6px;
+  color: var(--cyan);
+  text-shadow: 0 0 20px rgba(0,212,255,0.6);
+  font-weight: 300;
+}
+.hdr-sep { color: var(--dim); }
+.hdr-status {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 8px; letter-spacing: 1.5px; text-transform: uppercase;
+}
+.hdr-badge {
+  padding: 2px 7px;
+  border: 1px solid rgba(0,255,140,0.3);
+  color: var(--green);
+  font-size: 8px;
+  letter-spacing: 1.5px;
+  background: rgba(0,255,140,0.06);
+}
+.hdr-badge.warn {
+  border-color: rgba(255,34,85,0.3);
+  color: var(--red);
+  background: rgba(255,34,85,0.06);
+}
+#hdr-total { color: var(--violet); }
+#hdr-time { color: var(--dim); font-size: 9px; margin-left: auto; letter-spacing: 1px; }
+
+/* ── Search ────────────────────────────────────────────────────────────────── */
+#hud-search {
+  top: 50px; left: 12px;
+  width: 240px;
+}
+.search-wrap {
+  display: flex; align-items: center; gap: 7px;
+  position: relative; z-index: 2;
+  padding: 5px 10px;
+}
+.search-icon { color: var(--cyan); font-size: 13px; opacity: 0.7; }
 #search {
-  background: transparent;
-  border: none;
-  outline: none;
-  color: var(--text);
-  font: inherit;
-  font-size: 11px;
-  width: 200px;
+  background: transparent; border: none; outline: none;
+  color: var(--text); font: inherit; font-size: 11px; flex: 1;
 }
 #search::placeholder { color: var(--dim); }
-#search-count { color: var(--dim); font-size: 10px; min-width: 40px; text-align: right; }
+#search-count { color: var(--violet); font-size: 9px; white-space: nowrap; }
 
-/* stats */
+/* ── Stats ─────────────────────────────────────────────────────────────────── */
 #hud-stats {
-  top: 12px;
-  right: 12px;
-  min-width: 190px;
+  top: 50px; right: 12px;
+  width: 210px;
 }
-.stat-row { display: flex; justify-content: space-between; gap: 20px; margin: 2px 0; }
-.stat-label { color: var(--dim); }
-.stat-val   { color: var(--accent); }
+.stat-row {
+  display: flex; justify-content: space-between;
+  padding: 2px 0; border-bottom: 1px solid rgba(0,212,255,0.05);
+}
+.stat-row:last-child { border-bottom: none; }
+.sl { color: var(--dim); letter-spacing: 0.5px; }
+.sv { color: var(--cyan); }
 .kind-bar { margin-top: 8px; }
 .kind-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 2px 0;
-  cursor: pointer;
-  border-radius: 3px;
-  padding: 1px 3px;
-  transition: background 0.15s;
+  display: flex; align-items: center; gap: 5px;
+  padding: 2px 3px; border-radius: 2px; cursor: pointer;
+  transition: background 0.12s;
 }
-.kind-row:hover { background: rgba(89,179,250,0.08); }
-.kind-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-.kind-name { color: var(--dim); flex: 1; }
-.kind-bar-fill { height: 3px; border-radius: 2px; margin-top: 2px; opacity: 0.5; }
-.kind-count { color: var(--text); margin-left: auto; }
+.kind-row:hover { background: rgba(0,212,255,0.06); }
+.kind-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.kind-name { color: var(--dim); flex: 1; font-size: 10px; }
+.kind-pct  { height: 2px; background: currentColor; opacity: 0.4; border-radius: 1px; }
+.kind-count { color: var(--text); margin-left: auto; font-size: 10px; }
 
-/* instances */
+/* ── Instances ─────────────────────────────────────────────────────────────── */
 #hud-instances {
-  bottom: 20px;
-  right: 12px;
-  min-width: 230px;
+  bottom: 12px; right: 12px;
+  width: 250px;
   max-height: 200px;
-  overflow-y: auto;
 }
+.inst-list { overflow-y: auto; max-height: 160px; scrollbar-width: none; }
 .inst-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  display: flex; align-items: center; gap: 7px;
   padding: 4px 0;
-  border-bottom: 1px solid rgba(255,255,255,0.04);
+  border-bottom: 1px solid rgba(0,212,255,0.04);
 }
 .inst-item:last-child { border-bottom: none; }
-.inst-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-.inst-dot.active { animation: glow-pulse 2s infinite; }
-@keyframes glow-pulse {
-  0%,100% { opacity: 1; transform: scale(1); }
-  50%      { opacity: 0.5; transform: scale(0.8); }
-}
+.inst-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.inst-dot.active { animation: blink 1.8s infinite; }
 .inst-project {
-  color: var(--text);
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 150px;
+  flex: 1; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-size: 10px; color: var(--text);
 }
-.inst-id { color: var(--dimmer); font-size: 9px; }
-.inst-age { color: var(--dim); font-size: 10px; margin-left: auto; white-space: nowrap; }
+.inst-id  { color: var(--dim); font-size: 8px; letter-spacing: 0.5px; }
+.inst-age { color: var(--dim); font-size: 9px; margin-left: auto; }
+.inst-status {
+  font-size: 7px; letter-spacing: 1px; padding: 1px 4px;
+  border: 1px solid;
+}
+.inst-status.active { color: var(--green); border-color: rgba(0,255,140,0.3); }
+.inst-status.idle   { color: var(--dim);   border-color: var(--dim2); }
 
-/* inspector */
+/* ── Inspector ─────────────────────────────────────────────────────────────── */
 #hud-inspector {
-  top: 60px;
-  right: 12px;
-  width: 290px;
-  max-height: calc(100vh - 280px);
-  overflow-y: auto;
+  top: 50px; right: 12px;
+  width: 300px;
+  max-height: calc(100vh - 230px);
   display: none;
-  scrollbar-width: thin;
-  scrollbar-color: var(--dimmer) transparent;
 }
 #hud-inspector.visible { display: block; }
-.insp-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-.insp-kind-badge {
-  padding: 2px 8px;
-  border-radius: 10px;
-  font-size: 9px;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  background: rgba(255,255,255,0.06);
+.insp-kind-row {
+  display: flex; align-items: center; gap: 7px;
+  margin-bottom: 8px; position: relative; z-index: 2;
+}
+.insp-kind-tag {
+  font-size: 8px; letter-spacing: 2px; text-transform: uppercase;
+  padding: 2px 8px; border: 1px solid; border-radius: 1px;
 }
 .insp-close {
-  margin-left: auto;
-  cursor: pointer;
-  color: var(--dim);
-  font-size: 14px;
-  line-height: 1;
-  user-select: none;
+  margin-left: auto; cursor: pointer; color: var(--dim);
+  font-size: 14px; line-height: 1; transition: color 0.1s;
 }
-.insp-close:hover { color: var(--text); }
+.insp-close:hover { color: var(--red); }
 .insp-content {
-  color: var(--text);
-  line-height: 1.55;
-  margin-bottom: 10px;
-  word-break: break-word;
-  font-size: 11px;
+  color: var(--text); line-height: 1.55; margin-bottom: 8px;
+  word-break: break-word; font-size: 10.5px;
+  position: relative; z-index: 2;
 }
-.insp-meta { color: var(--dim); font-size: 10px; margin-bottom: 6px; }
-.insp-assoc-title {
-  color: var(--dim);
-  text-transform: uppercase;
-  font-size: 9px;
-  letter-spacing: 1px;
-  margin: 8px 0 4px;
+.insp-meta {
+  color: var(--dim); font-size: 9px; margin-bottom: 8px;
+  border-top: 1px solid var(--dim2); padding-top: 5px;
+  position: relative; z-index: 2;
 }
+.insp-assoc-hdr {
+  font-size: 8px; letter-spacing: 2px; text-transform: uppercase;
+  color: var(--violet); margin: 6px 0 4px;
+  position: relative; z-index: 2;
+}
+.assoc-list { overflow-y: auto; max-height: 200px; position: relative; z-index: 2; scrollbar-width: thin; scrollbar-color: var(--dim2) transparent; }
 .assoc-item {
-  padding: 4px 8px;
-  margin: 2px 0;
-  border-radius: 4px;
-  cursor: pointer;
-  background: rgba(89,179,250,0.05);
-  border: 1px solid transparent;
-  transition: all 0.15s;
-  word-break: break-word;
-  line-height: 1.4;
+  padding: 4px 6px; margin: 2px 0; cursor: pointer;
+  border: 1px solid transparent; border-radius: 2px;
+  transition: all 0.12s;
 }
-.assoc-item:hover {
-  background: rgba(89,179,250,0.12);
-  border-color: var(--border);
-}
-.assoc-rel {
-  color: var(--dim);
-  font-size: 9px;
-  display: block;
-  margin-bottom: 2px;
-}
+.assoc-item:hover { border-color: var(--b-violet); background: rgba(155,95,255,0.06); }
+.assoc-rel { color: var(--dim); font-size: 8px; letter-spacing: 0.5px; display: block; margin-bottom: 2px; }
+.assoc-text { color: var(--text); font-size: 10px; line-height: 1.4; word-break: break-word; }
 
-/* recall feed */
+/* ── Recall stream ─────────────────────────────────────────────────────────── */
 #hud-recall {
-  bottom: 20px;
-  left: 12px;
-  width: 310px;
-  max-height: 160px;
-  overflow: hidden;
+  bottom: 12px; left: 12px;
+  width: 360px;
+  max-height: 300px;
 }
+.recall-list { overflow-y: auto; max-height: 240px; scrollbar-width: thin; scrollbar-color: var(--dim2) transparent; }
 .recall-item {
-  padding: 3px 0;
-  border-bottom: 1px solid rgba(255,255,255,0.03);
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-  animation: fadeInDown 0.25s ease;
+  padding: 5px 3px;
+  border-bottom: 1px solid rgba(155,95,255,0.08);
+  cursor: pointer;
+  border-radius: 2px;
+  transition: background 0.1s;
+  animation: fadeInDown 0.2s ease;
 }
+.recall-item:hover { background: rgba(155,95,255,0.05); }
 .recall-item:last-child { border-bottom: none; }
-.recall-count { color: var(--mauve); }
-.recall-time { color: var(--dim); font-size: 10px; margin-left: auto; }
+.recall-header {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 4px;
+}
+.recall-count { color: var(--violet); font-size: 9px; letter-spacing: 1px; }
+.recall-pass  { color: var(--dim); font-size: 8px; }
+.recall-time  { color: var(--dim); font-size: 8px; margin-left: auto; }
+.recall-mems  { display: flex; flex-direction: column; gap: 2px; }
+.recall-mem {
+  display: flex; align-items: flex-start; gap: 5px;
+  padding: 2px 5px; border-radius: 2px; cursor: pointer;
+  transition: background 0.1s;
+  border: 1px solid transparent;
+}
+.recall-mem:hover { background: rgba(155,95,255,0.1); border-color: rgba(155,95,255,0.2); }
+.recall-mem-dot  { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; margin-top: 4px; }
+.recall-mem-text { color: var(--text); font-size: 9.5px; line-height: 1.4; word-break: break-word; flex: 1; }
+.recall-mem-kind { color: var(--dim); font-size: 8px; white-space: nowrap; margin-left: 4px; letter-spacing: 0.5px; }
 @keyframes fadeInDown {
-  from { opacity: 0; transform: translateY(-6px); }
+  from { opacity: 0; transform: translateY(-5px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* legend */
+/* ── Legend ────────────────────────────────────────────────────────────────── */
 #hud-legend {
-  bottom: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  gap: 14px;
-  flex-wrap: wrap;
-  justify-content: center;
-  padding: 7px 18px;
+  bottom: 12px; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 12px; flex-wrap: wrap; justify-content: center;
+  padding: 6px 16px;
   pointer-events: none;
+  border-top-color: rgba(0,212,255,0.1);
 }
-.legend-item { display: flex; align-items: center; gap: 5px; }
-.legend-dot { width: 7px; height: 7px; border-radius: 50%; }
-.legend-label { color: var(--dim); font-size: 10px; }
+.legend-item { display: flex; align-items: center; gap: 4px; }
+.legend-dot  { width: 6px; height: 6px; border-radius: 50%; }
+.legend-lbl  { color: var(--dim); font-size: 9px; letter-spacing: 0.5px; }
 
-/* controls hint */
-#hud-controls {
-  position: fixed;
-  bottom: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  margin-top: 6px;
-  color: var(--dimmer);
-  font-size: 9px;
-  text-align: center;
-  pointer-events: none;
-  z-index: 99;
-}
-
-/* scrollbar */
-::-webkit-scrollbar { width: 4px; }
+/* ── Scrollbars ────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 3px; height: 3px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--dimmer); border-radius: 2px; }
+::-webkit-scrollbar-thumb { background: var(--dim2); border-radius: 2px; }
 </style>
 </head>
 <body>
 <div id="graph-container"></div>
 
-<!-- header -->
-<div class="hud" id="hud-header">
-  <h1>chitta</h1>
-  <span class="sep">·</span>
-  <span id="memory-count">loading…</span>
-  <span class="sep">·</span>
-  <span id="connection-dot"></span>
-  <span id="conn-label" style="color:var(--dim)">connecting…</span>
-</div>
-
-<!-- search -->
-<div class="hud" id="hud-search">
-  <span id="search-icon">⌕</span>
-  <input id="search" type="text" placeholder="search memories…" autocomplete="off" spellcheck="false">
-  <span id="search-count"></span>
-</div>
-
-<!-- stats -->
-<div class="hud" id="hud-stats">
-  <div class="hud-title">stats</div>
-  <div class="stat-row"><span class="stat-label">total</span><span class="stat-val" id="s-total">—</span></div>
-  <div class="stat-row"><span class="stat-label">symbols</span><span class="stat-val" id="s-symbols">—</span></div>
-  <div class="stat-row"><span class="stat-label">triplets</span><span class="stat-val" id="s-triplets">—</span></div>
-  <div class="kind-bar" id="kind-bar"></div>
-</div>
-
-<!-- instances -->
-<div class="hud" id="hud-instances">
-  <div class="hud-title">active instances</div>
-  <div id="instances-list"><span style="color:var(--dim)">loading…</span></div>
-</div>
-
-<!-- inspector -->
-<div class="hud" id="hud-inspector">
-  <div class="insp-header">
-    <span class="insp-kind-badge" id="insp-kind-badge" style="color:var(--dim)">—</span>
-    <span class="insp-close" onclick="closeInspector()">✕</span>
+<!-- Header -->
+<div class="panel" id="hud-header">
+  <span class="bk tl"></span><span class="bk tr"></span>
+  <div class="hdr-logo">CHITTA</div>
+  <span class="hdr-sep">◈</span>
+  <div class="hdr-status">
+    <span class="ph-dot" id="conn-dot"></span>
+    <span id="conn-label" style="color:var(--dim);font-size:8px;letter-spacing:1.5px">CONNECTING</span>
   </div>
-  <div class="insp-content" id="insp-content">—</div>
-  <div class="insp-meta" id="insp-meta"></div>
-  <div class="insp-assoc-title">associations</div>
-  <div id="insp-assocs"><span style="color:var(--dim)">—</span></div>
+  <span class="hdr-sep">·</span>
+  <div class="hdr-badge" id="hdr-mem-badge">— MEM</div>
+  <span id="hdr-total" style="font-size:9px;letter-spacing:1px"></span>
+  <span id="hdr-time" style="font-size:8px;letter-spacing:1px;color:var(--dim)"></span>
 </div>
 
-<!-- recall feed -->
-<div class="hud" id="hud-recall">
-  <div class="hud-title">recall feed</div>
-  <div id="recall-feed"></div>
+<!-- Search -->
+<div class="panel" id="hud-search">
+  <span class="bk tl"></span><span class="bk tr"></span><span class="bk bl"></span><span class="bk br"></span>
+  <div class="ph"><span class="ph-dot cyan"></span><span class="ph-label">query</span></div>
+  <div class="search-wrap">
+    <span class="search-icon">⌕</span>
+    <input id="search" type="text" placeholder="search memory space…" autocomplete="off" spellcheck="false">
+    <span id="search-count"></span>
+  </div>
 </div>
 
-<!-- legend -->
-<div class="hud" id="hud-legend">
-  <div class="legend-item"><div class="legend-dot" style="background:#cba6f7"></div><span class="legend-label">wisdom</span></div>
-  <div class="legend-item"><div class="legend-dot" style="background:#89b4fa"></div><span class="legend-label">belief</span></div>
-  <div class="legend-item"><div class="legend-dot" style="background:#a6e3a1"></div><span class="legend-label">habit</span></div>
-  <div class="legend-item"><div class="legend-dot" style="background:#f9e2af"></div><span class="legend-label">episode</span></div>
-  <div class="legend-item"><div class="legend-dot" style="background:#fab387"></div><span class="legend-label">milestone</span></div>
-  <div class="legend-item"><div class="legend-dot" style="background:#f38ba8"></div><span class="legend-label">correction</span></div>
-  <div class="legend-item"><div class="legend-dot" style="background:#94e2d5"></div><span class="legend-label">preference</span></div>
-  <div class="legend-item"><div class="legend-dot" style="background:#89dceb"></div><span class="legend-label">dream</span></div>
+<!-- Stats -->
+<div class="panel" id="hud-stats">
+  <span class="bk tl"></span><span class="bk tr"></span><span class="bk bl"></span><span class="bk br"></span>
+  <div class="ph"><span class="ph-dot"></span><span class="ph-label">neural metrics</span><span class="ph-right" id="stats-ts">--:--:--</span></div>
+  <div class="pb">
+    <div class="stat-row"><span class="sl">total memories</span><span class="sv" id="s-total">—</span></div>
+    <div class="stat-row"><span class="sl">symbols</span><span class="sv" id="s-symbols">—</span></div>
+    <div class="stat-row"><span class="sl">triplets</span><span class="sv" id="s-triplets">—</span></div>
+    <div class="kind-bar" id="kind-bar"></div>
+  </div>
+</div>
+
+<!-- Instances -->
+<div class="panel" id="hud-instances">
+  <span class="bk tl"></span><span class="bk tr"></span><span class="bk bl"></span><span class="bk br"></span>
+  <div class="ph"><span class="ph-dot amber"></span><span class="ph-label">active instances</span><span class="ph-right" id="inst-count">0</span></div>
+  <div class="inst-list pb" id="instances-list"><span style="color:var(--dim)">scanning…</span></div>
+</div>
+
+<!-- Inspector -->
+<div class="panel panel-violet" id="hud-inspector">
+  <span class="bk tl"></span><span class="bk tr"></span><span class="bk bl"></span><span class="bk br"></span>
+  <div class="ph"><span class="ph-dot violet"></span><span class="ph-label">memory inspector</span></div>
+  <div class="pb" style="overflow-y:auto;max-height:calc(100% - 36px);scrollbar-width:thin;scrollbar-color:var(--dim2) transparent;">
+    <div class="insp-kind-row">
+      <span class="insp-kind-tag" id="insp-kind-tag">—</span>
+      <span class="insp-close" onclick="closeInspector()">✕</span>
+    </div>
+    <div class="insp-content" id="insp-content">—</div>
+    <div class="insp-meta" id="insp-meta"></div>
+    <div class="insp-assoc-hdr">▸ associations</div>
+    <div class="assoc-list" id="insp-assocs"><span style="color:var(--dim)">—</span></div>
+  </div>
+</div>
+
+<!-- Recall stream -->
+<div class="panel panel-violet" id="hud-recall">
+  <span class="bk tl"></span><span class="bk tr"></span><span class="bk bl"></span><span class="bk br"></span>
+  <div class="ph"><span class="ph-dot violet"></span><span class="ph-label">recall stream</span><span class="ph-right">click → focus</span></div>
+  <div class="recall-list pb" id="recall-feed"></div>
+</div>
+
+<!-- Legend -->
+<div class="panel" id="hud-legend">
+  <span class="bk tl"></span><span class="bk tr"></span><span class="bk bl"></span><span class="bk br"></span>
+  <div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center;position:relative;z-index:2">
+    <div class="legend-item"><div class="legend-dot" style="background:#bf5fff"></div><span class="legend-lbl">wisdom</span></div>
+    <div class="legend-item"><div class="legend-dot" style="background:#00d4ff"></div><span class="legend-lbl">belief</span></div>
+    <div class="legend-item"><div class="legend-dot" style="background:#00ff8c"></div><span class="legend-lbl">habit</span></div>
+    <div class="legend-item"><div class="legend-dot" style="background:#ffcc00"></div><span class="legend-lbl">episode</span></div>
+    <div class="legend-item"><div class="legend-dot" style="background:#ff7b00"></div><span class="legend-lbl">milestone</span></div>
+    <div class="legend-item"><div class="legend-dot" style="background:#ff2266"></div><span class="legend-lbl">correction</span></div>
+    <div class="legend-item"><div class="legend-dot" style="background:#00ffee"></div><span class="legend-lbl">preference</span></div>
+    <div class="legend-item"><div class="legend-dot" style="background:#ff66cc"></div><span class="legend-lbl">dream</span></div>
+  </div>
 </div>
 
 <script>
-// ── Constants ────────────────────────────────────────────────────────────────
+// ── Constants ─────────────────────────────────────────────────────────────────
 const KIND_COLOR = {
-  wisdom:     '#cba6f7',
-  belief:     '#89b4fa',
-  habit:      '#a6e3a1',
-  episode:    '#f9e2af',
-  milestone:  '#fab387',
-  correction: '#f38ba8',
-  preference: '#94e2d5',
-  dream:      '#89dceb',
-  fact:       '#74c7ec',
-  unknown:    '#6e6e8e',
-  symbol:     '#2a2a3e',
+  wisdom:     '#bf5fff',
+  belief:     '#00d4ff',
+  habit:      '#00ff8c',
+  episode:    '#ffcc00',
+  milestone:  '#ff7b00',
+  correction: '#ff2266',
+  preference: '#00ffee',
+  dream:      '#ff66cc',
+  fact:       '#4488ff',
+  unknown:    '#2a4a6a',
+  symbol:     '#101820',
 };
-const DIM_COLOR = '#1a1a2a';
-
+const DIM_COLOR = '#0a1520';
 const serverUrl = `${location.protocol}//${location.hostname}:8765`;
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -388,27 +485,32 @@ let graphData = { nodes: [], links: [] };
 let totalMemories = 0;
 let searchQuery = '';
 let searchMatches = new Set();
-
-// recallGlow: nodeId → expiry timestamp
 const recallGlow = new Map();
 let glowTimer = null;
-
-// Subgraph highlight: selected node + its direct neighbors
 let selectedNodeId = null;
-const neighborSet = new Set(); // ids of neighbors of selected node
-
+const neighborSet = new Set();
 let graph = null;
+
+// ── Color fns ─────────────────────────────────────────────────────────────────
+function hexToRgb(hex) {
+  const h = parseInt(hex.replace(/^#/,'').padStart(6,'0'), 16);
+  return [(h>>16)&0xff,(h>>8)&0xff,h&0xff];
+}
+function lerpColor(a, b, t) {
+  const [ar,ag,ab]=hexToRgb(a), [br,bg,bb]=hexToRgb(b);
+  const r=Math.round(ar+(br-ar)*t), g=Math.round(ag+(bg-ag)*t), bv=Math.round(ab+(bb-ab)*t);
+  return `#${r.toString(16).padStart(2,'0')}${g.toString(16).padStart(2,'0')}${bv.toString(16).padStart(2,'0')}`;
+}
+
+// ── Node / link fns ───────────────────────────────────────────────────────────
 const nodeColorFn = node => {
   const nid = String(node.id);
-  // Recalled: lerp towards white then fade back to kind color
   const expiry = recallGlow.get(nid);
   if (expiry) {
     const ratio = Math.max(0, (expiry - Date.now()) / 3200);
-    return lerpColor(KIND_COLOR[node.kind] || DIM_COLOR, '#ffffff', ratio * 0.85);
+    return lerpColor(KIND_COLOR[node.kind] || DIM_COLOR, '#ffffff', ratio * 0.9);
   }
-  // Search dim
   if (searchQuery && !searchMatches.has(nid)) return DIM_COLOR;
-  // Subgraph: dim nodes not in neighborhood
   if (selectedNodeId) {
     if (nid === selectedNodeId) return KIND_COLOR[node.kind] || DIM_COLOR;
     if (neighborSet.has(nid)) return lerpColor(KIND_COLOR[node.kind] || DIM_COLOR, '#ffffff', 0.3);
@@ -420,214 +522,169 @@ const nodeValFn = node => {
   const nid = String(node.id);
   const base = 1 + (node.strength || 0.3) * 6;
   const expiry = recallGlow.get(nid);
-  if (expiry) {
-    const ratio = Math.max(0, (expiry - Date.now()) / 3200);
-    return base * (1 + ratio * 4);
-  }
-  // Selected node: bigger
-  if (selectedNodeId && nid === selectedNodeId) return base * 2;
+  if (expiry) return base * (1 + Math.max(0,(expiry-Date.now())/3200) * 4);
+  if (selectedNodeId && nid === selectedNodeId) return base * 2.2;
   return base;
 };
 const linkColorFn = link => {
-  if (!selectedNodeId) return 'rgba(89,179,250,0.1)';
-  const src = String(typeof link.source === 'object' ? link.source.id : link.source);
-  const tgt = String(typeof link.target === 'object' ? link.target.id : link.target);
-  if (src === selectedNodeId || tgt === selectedNodeId) return 'rgba(203,166,247,0.7)';
-  return 'rgba(89,179,250,0.04)';
+  if (!selectedNodeId) return 'rgba(0,212,255,0.08)';
+  const src = String(typeof link.source==='object' ? link.source.id : link.source);
+  const tgt = String(typeof link.target==='object' ? link.target.id : link.target);
+  if (src===selectedNodeId||tgt===selectedNodeId) return 'rgba(155,95,255,0.7)';
+  return 'rgba(0,212,255,0.02)';
 };
 const linkWidthFn = link => {
-  if (!selectedNodeId) return Math.max(0.2, (link.weight || 0.3));
-  const src = String(typeof link.source === 'object' ? link.source.id : link.source);
-  const tgt = String(typeof link.target === 'object' ? link.target.id : link.target);
-  if (src === selectedNodeId || tgt === selectedNodeId) return 2;
-  return 0.2;
+  if (!selectedNodeId) return Math.max(0.15,(link.weight||0.3)*0.4);
+  const src = String(typeof link.source==='object' ? link.source.id : link.source);
+  const tgt = String(typeof link.target==='object' ? link.target.id : link.target);
+  return (src===selectedNodeId||tgt===selectedNodeId) ? 2 : 0.1;
 };
 
-// ── Color utility ─────────────────────────────────────────────────────────────
-function hexToRgb(hex) {
-  const h = parseInt(hex.slice(1), 16);
-  return [(h >> 16) & 0xff, (h >> 8) & 0xff, h & 0xff];
+// ── Clock ─────────────────────────────────────────────────────────────────────
+function tickClock() {
+  document.getElementById('hdr-time').textContent =
+    new Date().toLocaleTimeString('en-GB', {hour12:false}) + ' UTC' +
+    (new Date().getTimezoneOffset()<0?'+':'-') +
+    String(Math.abs(new Date().getTimezoneOffset()/60)).padStart(2,'0');
+  document.getElementById('stats-ts').textContent = new Date().toLocaleTimeString('en-GB',{hour12:false});
 }
-function lerpColor(a, b, t) {
-  const [ar,ag,ab] = hexToRgb(a);
-  const [br,bg,bb] = hexToRgb(b);
-  const r = Math.round(ar + (br-ar)*t);
-  const g = Math.round(ag + (bg-ag)*t);
-  const bv = Math.round(ab + (bb-ab)*t);
-  return `#${r.toString(16).padStart(2,'0')}${g.toString(16).padStart(2,'0')}${bv.toString(16).padStart(2,'0')}`;
-}
+setInterval(tickClock, 1000);
+tickClock();
 
-// ── Graph init ─────────────────────────────────────────────────────────────────
+// ── Graph ─────────────────────────────────────────────────────────────────────
 function initGraph() {
   graph = ForceGraph3D()(document.getElementById('graph-container'))
-    .backgroundColor('#070710')
+    .backgroundColor('#00040a')
     .showNavInfo(false)
     .nodeLabel(node => {
-      const color = KIND_COLOR[node.kind] || '#888';
-      return `<div style="background:rgba(7,7,20,0.95);border:1px solid ${color}40;border-radius:5px;padding:7px 11px;font-family:monospace;font-size:11px;color:#cdd6f4;max-width:280px;line-height:1.5">
-        <div style="color:${color};font-size:9px;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">${node.kind}</div>
+      const c = KIND_COLOR[node.kind] || '#888';
+      return `<div style="background:rgba(0,4,12,0.97);border:1px solid ${c}55;padding:7px 11px;font-family:monospace;font-size:10px;color:#b8d8f0;max-width:280px;line-height:1.5;box-shadow:0 0 12px ${c}22">
+        <div style="color:${c};font-size:8px;text-transform:uppercase;letter-spacing:2px;margin-bottom:4px">${node.kind}</div>
         ${node.label}
       </div>`;
     })
     .nodeColor(nodeColorFn)
     .nodeVal(nodeValFn)
-    .nodeOpacity(0.92)
+    .nodeOpacity(0.95)
     .linkColor(linkColorFn)
     .linkWidth(linkWidthFn)
-    .linkOpacity(0.35)
+    .linkOpacity(0.5)
     .onNodeClick(node => { selectNode(node); showInspector(node); })
     .onBackgroundClick(() => {
       if (selectedNodeId) {
-        selectedNodeId = null;
-        neighborSet.clear();
-        graph.nodeColor(nodeColorFn).nodeVal(nodeValFn)
-             .linkColor(linkColorFn).linkWidth(linkWidthFn);
+        selectedNodeId = null; neighborSet.clear();
+        graph.nodeColor(nodeColorFn).nodeVal(nodeValFn).linkColor(linkColorFn).linkWidth(linkWidthFn);
       }
-      if (document.getElementById('hud-inspector').classList.contains('visible')) {
-        closeInspector();
-      }
+      if (document.getElementById('hud-inspector').classList.contains('visible')) closeInspector();
     });
-
-  // Warm-up physics with faster simulation
-  graph.d3Force('charge').strength(-80);
+  graph.d3Force('charge').strength(-90);
 }
 
-// ── Glow animation ────────────────────────────────────────────────────────────
+// ── Glow ──────────────────────────────────────────────────────────────────────
 function triggerGlowUpdate() {
   if (glowTimer) return;
   glowTimer = setInterval(() => {
     const now = Date.now();
-    let anyAlive = false;
-    for (const [id, expiry] of recallGlow) {
-      if (expiry < now) { recallGlow.delete(id); }
-      else anyAlive = true;
-    }
-    // Re-assign functions to trigger 3d-force-graph re-render
-    graph.nodeColor(nodeColorFn).nodeVal(nodeValFn)
-         .linkColor(linkColorFn).linkWidth(linkWidthFn);
-    if (!anyAlive) {
-      clearInterval(glowTimer);
-      glowTimer = null;
-    }
+    let alive = false;
+    for (const [id,exp] of recallGlow) { if (exp<now) recallGlow.delete(id); else alive=true; }
+    graph.nodeColor(nodeColorFn).nodeVal(nodeValFn).linkColor(linkColorFn).linkWidth(linkWidthFn);
+    if (!alive) { clearInterval(glowTimer); glowTimer=null; }
   }, 80);
 }
 
-// ── Load graph data ───────────────────────────────────────────────────────────
+// ── Load graph ────────────────────────────────────────────────────────────────
 async function loadGraph() {
   const url = `${serverUrl}/graph?limit=500&kinds=wisdom,belief,habit,episode,milestone,correction,preference,dream,fact,unknown`;
   try {
     const r = await fetch(url);
     const d = await r.json();
     graphData.nodes = d.nodes || [];
-    graphData.links = (d.edges || []).map(e => ({
-      source: e.source,
-      target: e.target,
-      weight: e.weight || 0.3,
-    }));
+    graphData.links = (d.edges||[]).map(e => ({source:e.source,target:e.target,weight:e.weight||0.3}));
     graph.graphData(graphData);
-    updateMemoryCount();
-  } catch(e) {
-    console.error('[chitta] graph load failed', e);
-  }
+    updateMemCount();
+  } catch(e) { console.error('[chitta] graph load failed',e); }
 }
 
-function updateMemoryCount() {
+function updateMemCount() {
   const shown = graphData.nodes.length;
   const total = totalMemories || shown;
-  document.getElementById('memory-count').textContent =
-    `${shown.toLocaleString()} shown · ${total.toLocaleString()} total`;
+  document.getElementById('hdr-mem-badge').textContent = `${shown} SHOWN`;
+  document.getElementById('hdr-total').textContent = `/ ${total.toLocaleString()} TOTAL`;
 }
 
-// ── Subgraph selection ────────────────────────────────────────────────────────
+// ── Subgraph ──────────────────────────────────────────────────────────────────
 function selectNode(node) {
   const nid = String(node.id);
   if (selectedNodeId === nid) {
-    // Deselect on second click
-    selectedNodeId = null;
-    neighborSet.clear();
+    selectedNodeId = null; neighborSet.clear();
   } else {
-    selectedNodeId = nid;
-    neighborSet.clear();
-    // Build neighbor set from current links
+    selectedNodeId = nid; neighborSet.clear();
     for (const link of graphData.links) {
-      const src = String(typeof link.source === 'object' ? link.source.id : link.source);
-      const tgt = String(typeof link.target === 'object' ? link.target.id : link.target);
-      if (src === nid) neighborSet.add(tgt);
-      if (tgt === nid) neighborSet.add(src);
+      const src = String(typeof link.source==='object'?link.source.id:link.source);
+      const tgt = String(typeof link.target==='object'?link.target.id:link.target);
+      if (src===nid) neighborSet.add(tgt);
+      if (tgt===nid) neighborSet.add(src);
     }
   }
-  graph.nodeColor(nodeColorFn).nodeVal(nodeValFn)
-       .linkColor(linkColorFn).linkWidth(linkWidthFn);
+  graph.nodeColor(nodeColorFn).nodeVal(nodeValFn).linkColor(linkColorFn).linkWidth(linkWidthFn);
 }
 
 // ── Inspector ─────────────────────────────────────────────────────────────────
-let selectedNode = null;
 async function showInspector(node) {
-  selectedNode = node;
-  const insp = document.getElementById('hud-inspector');
-  insp.classList.add('visible');
+  document.getElementById('hud-inspector').classList.add('visible');
   document.getElementById('hud-instances').style.display = 'none';
 
   const color = KIND_COLOR[node.kind] || '#888';
-  const badge = document.getElementById('insp-kind-badge');
-  badge.textContent = node.kind || 'unknown';
-  badge.style.color = color;
-  badge.style.borderColor = color + '40';
-  badge.style.background = color + '18';
+  const tag = document.getElementById('insp-kind-tag');
+  tag.textContent = node.kind || 'unknown';
+  tag.style.color = color;
+  tag.style.borderColor = color + '55';
+  tag.style.background = color + '12';
 
   document.getElementById('insp-content').textContent = node.label;
-  const ts = node.ts_ms && node.ts_ms > 0
-    ? new Date(node.ts_ms).toLocaleString()
-    : '—';
+  const ts = node.ts_ms && node.ts_ms>0 ? new Date(node.ts_ms).toLocaleString() : '—';
   document.getElementById('insp-meta').innerHTML =
-    `id: ${node.id} · str: ${(node.strength||0).toFixed(3)}` +
-    (node.realm ? ` · realm: ${node.realm}` : '') +
-    `<br>${ts}`;
+    `id: ${node.id}<br>str: ${(node.strength||0).toFixed(3)} · ${ts}` +
+    (node.realm ? ` · ${node.realm}` : '');
 
-  document.getElementById('insp-assocs').innerHTML =
-    '<span style="color:var(--dim)">loading…</span>';
+  document.getElementById('insp-assocs').innerHTML = '<span style="color:var(--dim)">loading…</span>';
   try {
     const r = await fetch(`${serverUrl}/memory/${node.id}`);
     const d = await r.json();
     const assocs = d.associations || [];
     if (assocs.length > 0) {
-      document.getElementById('insp-assocs').innerHTML = assocs.slice(0, 12).map(a =>
+      document.getElementById('insp-assocs').innerHTML = assocs.slice(0,12).map(a =>
         `<div class="assoc-item" onclick="focusNode('${a.id}')">
-          <span class="assoc-rel">${a.kind || ''} · ${(a.score||0).toFixed(3)}</span>
-          ${a.preview || a.label || a.id}
+          <span class="assoc-rel">${a.kind||''} · ${(a.score||0).toFixed(3)}</span>
+          <span class="assoc-text">${a.preview||a.label||a.id}</span>
         </div>`
       ).join('');
     } else {
-      document.getElementById('insp-assocs').innerHTML =
-        '<span style="color:var(--dim)">no associations found</span>';
+      document.getElementById('insp-assocs').innerHTML = '<span style="color:var(--dim)">no associations found</span>';
     }
   } catch(e) {
-    document.getElementById('insp-assocs').innerHTML =
-      '<span style="color:var(--red)">fetch failed</span>';
+    document.getElementById('insp-assocs').innerHTML = '<span style="color:var(--red)">fetch failed</span>';
   }
 }
 
 function closeInspector() {
   document.getElementById('hud-inspector').classList.remove('visible');
   document.getElementById('hud-instances').style.display = 'block';
-  selectedNode = null;
-  selectedNodeId = null;
-  neighborSet.clear();
-  graph.nodeColor(nodeColorFn).nodeVal(nodeValFn)
-       .linkColor(linkColorFn).linkWidth(linkWidthFn);
+  selectedNodeId = null; neighborSet.clear();
+  graph.nodeColor(nodeColorFn).nodeVal(nodeValFn).linkColor(linkColorFn).linkWidth(linkWidthFn);
 }
 
 function focusNode(nodeId) {
-  const node = graphData.nodes.find(n => String(n.id) === String(nodeId));
+  const node = graphData.nodes.find(n => String(n.id)===String(nodeId));
   if (!node) return;
-  // Fly camera to node
   const dist = 80;
-  const distRatio = 1 + dist / Math.hypot(node.x||0, node.y||0, node.z||0);
+  const dr = 1 + dist / Math.hypot(node.x||0,node.y||0,node.z||0);
   graph.cameraPosition(
-    { x: (node.x||0) * distRatio, y: (node.y||0) * distRatio, z: (node.z||0) * distRatio },
-    { x: node.x||0, y: node.y||0, z: node.z||0 },
+    {x:(node.x||0)*dr, y:(node.y||0)*dr, z:(node.z||0)*dr},
+    {x:node.x||0, y:node.y||0, z:node.z||0},
     800
   );
+  selectNode(node);
   showInspector(node);
 }
 
@@ -637,88 +694,75 @@ document.getElementById('search').addEventListener('input', e => {
   searchMatches.clear();
   if (searchQuery) {
     graphData.nodes.forEach(n => {
-      if ((n.label||'').toLowerCase().includes(searchQuery)) {
-        searchMatches.add(String(n.id));
-      }
+      if ((n.label||'').toLowerCase().includes(searchQuery)) searchMatches.add(String(n.id));
     });
-    document.getElementById('search-count').textContent = `${searchMatches.size} hits`;
+    document.getElementById('search-count').textContent = `${searchMatches.size}`;
   } else {
     document.getElementById('search-count').textContent = '';
   }
   graph.nodeColor(nodeColorFn).linkColor(linkColorFn);
 });
 
-// ── Stats panel ───────────────────────────────────────────────────────────────
+// ── Stats ─────────────────────────────────────────────────────────────────────
 function updateStats(s) {
   const total = s.memories ?? s.total ?? 0;
   if (total) totalMemories = total;
   document.getElementById('s-total').textContent = total.toLocaleString();
-  document.getElementById('s-symbols').textContent = (s.symbols ?? 0).toLocaleString();
-  const trips = s.stats?.total_triplets ?? s.triplets ?? 0;
-  document.getElementById('s-triplets').textContent = trips.toLocaleString();
-  updateMemoryCount();
+  document.getElementById('s-symbols').textContent = (s.symbols??0).toLocaleString();
+  document.getElementById('s-triplets').textContent = (s.stats?.total_triplets??s.triplets??0).toLocaleString();
+  updateMemCount();
 
   const kinds = s.stats?.count_by_kind || {};
   if (Object.keys(kinds).length > 0) {
-    const maxCount = Math.max(...Object.values(kinds));
-    const bar = document.getElementById('kind-bar');
-    bar.innerHTML = Object.entries(kinds)
-      .filter(([k]) => k !== 'symbol')
-      .sort(([,a],[,b]) => b - a)
-      .map(([k, n]) => {
-        const color = KIND_COLOR[k] || '#6e6e8e';
-        const pct = Math.round((n / maxCount) * 100);
+    const max = Math.max(...Object.values(kinds));
+    document.getElementById('kind-bar').innerHTML = Object.entries(kinds)
+      .filter(([k])=>k!=='symbol')
+      .sort(([,a],[,b])=>b-a)
+      .map(([k,n]) => {
+        const color = KIND_COLOR[k]||'#2a4a6a';
+        const pct = Math.round((n/max)*100);
         return `<div class="kind-row" onclick="filterByKind('${k}')">
           <span class="kind-dot" style="background:${color}"></span>
           <span class="kind-name">${k}</span>
+          <div class="kind-pct" style="width:${pct*0.6}px;color:${color}"></div>
           <span class="kind-count">${n.toLocaleString()}</span>
-        </div>
-        <div class="kind-bar-fill" style="background:${color};width:${pct}%"></div>`;
+        </div>`;
       }).join('');
   }
 }
 
 function filterByKind(kind) {
-  // Toggle kind filter in search
-  if (searchQuery === `kind:${kind}`) {
-    document.getElementById('search').value = '';
-    document.getElementById('search').dispatchEvent(new Event('input'));
-  } else {
-    // Highlight nodes of this kind
+  searchMatches.clear();
+  if (searchQuery === `\x00${kind}`) {
     searchQuery = '';
-    searchMatches.clear();
-    graphData.nodes.forEach(n => {
-      if (n.kind === kind) searchMatches.add(String(n.id));
-    });
-    // Use searchQuery trick: set a special query that won't match text but use searchMatches
-    searchQuery = '\x00kind\x00'; // sentinel value that won't match text
-    document.getElementById('search-count').textContent = `${searchMatches.size} ${kind}`;
-    graph.nodeColor(nodeColorFn).linkColor(linkColorFn);
+    document.getElementById('search-count').textContent = '';
+  } else {
+    graphData.nodes.forEach(n => { if(n.kind===kind) searchMatches.add(String(n.id)); });
+    searchQuery = `\x00${kind}`;
+    document.getElementById('search-count').textContent = `${searchMatches.size}`;
   }
+  graph.nodeColor(nodeColorFn).linkColor(linkColorFn);
 }
 
 // ── Instances ─────────────────────────────────────────────────────────────────
 function updateInstances(data) {
-  const list = document.getElementById('instances-list');
   const insts = data.instances || [];
-  if (!insts.length) {
-    list.innerHTML = '<span style="color:var(--dim)">none active</span>';
-    return;
-  }
+  document.getElementById('inst-count').textContent = insts.length;
+  const list = document.getElementById('instances-list');
+  if (!insts.length) { list.innerHTML = '<span style="color:var(--dim)">no active sessions</span>'; return; }
   list.innerHTML = insts.map(i => {
-    const secs = i.age_secs || 0;
-    const age = secs < 60 ? `${secs}s`
-               : secs < 3600 ? `${Math.floor(secs/60)}m`
-               : `${Math.floor(secs/3600)}h`;
+    const secs = i.age_secs||0;
+    const age = secs<60?`${secs}s`:secs<3600?`${Math.floor(secs/60)}m`:`${Math.floor(secs/3600)}h`;
     return `<div class="inst-item">
       <span class="inst-dot ${i.status==='active'?'active':''}" style="background:${i.color}"></span>
       <span class="inst-project" title="${i.id}">${i.project}</span>
+      <span class="inst-status ${i.status}">${i.status.toUpperCase()}</span>
       <span class="inst-age">${age}</span>
     </div>`;
   }).join('');
 }
 
-// ── Recall events ─────────────────────────────────────────────────────────────
+// ── Recall stream ─────────────────────────────────────────────────────────────
 function handleRecall(data) {
   const ids = data.ids || data.memory_ids || [];
   if (!ids.length) return;
@@ -727,55 +771,112 @@ function handleRecall(data) {
   ids.forEach(id => recallGlow.set(String(id), expiry));
   triggerGlowUpdate();
 
-  // Feed
-  const feed = document.getElementById('recall-feed');
+  const nodeMap = new Map(graphData.nodes.map(n=>[String(n.id),n]));
+  const recalled = ids.map(id=>nodeMap.get(String(id))).filter(Boolean);
+  const unknown = ids.length - recalled.length;
+  const t = new Date(data.ts_ms||Date.now()).toLocaleTimeString('en-GB',{hour12:false});
+
+  const memsHtml = recalled.slice(0,5).map(n => {
+    const color = KIND_COLOR[n.kind]||'#2a4a6a';
+    return `<div class="recall-mem" onclick="event.stopPropagation();focusNode('${n.id}')">
+      <span class="recall-mem-dot" style="background:${color}"></span>
+      <span class="recall-mem-text">${(n.label||'').slice(0,72)}</span>
+      <span class="recall-mem-kind">${n.kind}</span>
+    </div>`;
+  }).join('');
+
+  const extra = unknown>0
+    ? `<div style="color:var(--dim);font-size:8px;padding:1px 5px">+${unknown} not in view</div>`
+    : '';
+
   const item = document.createElement('div');
   item.className = 'recall-item';
-  const t = new Date(data.ts_ms || Date.now()).toLocaleTimeString();
   item.innerHTML = `
-    <span class="recall-count">${ids.length} mem</span>
-    <span style="color:var(--dim)">·</span>
-    <span style="color:var(--dim)">${data.passes||1} pass</span>
-    <span class="recall-time">${t}</span>`;
+    <div class="recall-header">
+      <span class="recall-count">▶ ${ids.length} RECALLED</span>
+      <span class="recall-pass">· ${data.passes||1} pass</span>
+      <span class="recall-time">${t}</span>
+    </div>
+    <div class="recall-mems">${memsHtml}${extra}</div>`;
+  if (recalled.length>0) item.addEventListener('click', ()=>focusNode(recalled[0].id));
+
+  const feed = document.getElementById('recall-feed');
   feed.prepend(item);
-  while (feed.children.length > 8) feed.removeChild(feed.lastChild);
+  while (feed.children.length>12) feed.removeChild(feed.lastChild);
 }
 
-// ── SSE connection ────────────────────────────────────────────────────────────
+// ── SSE ───────────────────────────────────────────────────────────────────────
 function connectSSE() {
-  const dot = document.getElementById('connection-dot');
+  const dot = document.getElementById('conn-dot');
   const lbl = document.getElementById('conn-label');
-
   const es = new EventSource(`${serverUrl}/events`);
   es.onopen = () => {
-    dot.className = 'ok';
-    lbl.textContent = 'live';
+    dot.style.background='var(--green)'; dot.style.animation='blink 2s infinite';
+    lbl.style.color='var(--green)'; lbl.textContent='NEURAL LINK ACTIVE';
+    setTimeout(()=>{ lbl.style.color='var(--dim)'; lbl.textContent='LIVE'; }, 2000);
   };
   es.onerror = () => {
-    dot.className = '';
-    lbl.textContent = 'reconnecting…';
-    setTimeout(connectSSE, 5000);
-    es.close();
+    dot.style.background='var(--red)'; lbl.style.color='var(--red)'; lbl.textContent='LINK LOST';
+    setTimeout(connectSSE, 5000); es.close();
   };
   es.addEventListener('stats',     e => updateStats(JSON.parse(e.data)));
   es.addEventListener('instances', e => updateInstances(JSON.parse(e.data)));
   es.addEventListener('recall',    e => handleRecall(JSON.parse(e.data)));
 }
 
-// ── Boot ────────────────────────────────────────────────────────────────────
+// ── Draggable panels ──────────────────────────────────────────────────────────
+function makeDraggable(panel) {
+  const handle = panel.querySelector('.ph');
+  if (!handle) return;
+  handle.style.cursor = 'grab';
+
+  handle.addEventListener('mousedown', e => {
+    if (e.target.closest('.insp-close, input, button')) return;
+
+    // Materialise position as explicit top/left (clearing right/bottom/transform)
+    const rect = panel.getBoundingClientRect();
+    panel.style.left      = rect.left + 'px';
+    panel.style.top       = rect.top  + 'px';
+    panel.style.right     = 'auto';
+    panel.style.bottom    = 'auto';
+    panel.style.transform = 'none';
+
+    const startX = e.clientX, startY = e.clientY;
+    const startL = rect.left,  startT = rect.top;
+
+    handle.style.cursor = 'grabbing';
+    document.body.style.userSelect = 'none';
+
+    const onMove = ev => {
+      const maxL = window.innerWidth  - panel.offsetWidth;
+      const maxT = window.innerHeight - panel.offsetHeight;
+      panel.style.left = Math.max(0, Math.min(maxL, startL + ev.clientX - startX)) + 'px';
+      panel.style.top  = Math.max(0, Math.min(maxT, startT + ev.clientY - startY)) + 'px';
+    };
+    const onUp = () => {
+      handle.style.cursor = 'grab';
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup',   onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup',   onUp);
+    e.preventDefault();
+  });
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
 initGraph();
 loadGraph();
 connectSSE();
-
-// Initial data fetch
 fetch(`${serverUrl}/instances`).then(r=>r.json()).then(updateInstances).catch(()=>{});
-fetch(`${serverUrl}/health`).then(r=>r.json()).then(d => {
-  // Pre-populate total so memory-count shows right away
-  if (d.memories) {
-    totalMemories = d.memories;
-    updateMemoryCount();
-  }
+fetch(`${serverUrl}/health`).then(r=>r.json()).then(d=>{
+  if (d.memories) { totalMemories=d.memories; updateMemCount(); }
 }).catch(()=>{});
+
+// Make all panels draggable (skip header which is full-width)
+['hud-search','hud-stats','hud-inspector','hud-recall','hud-instances','hud-legend']
+  .forEach(id => { const el = document.getElementById(id); if (el) makeDraggable(el); });
 </script>
 </body>
 </html>

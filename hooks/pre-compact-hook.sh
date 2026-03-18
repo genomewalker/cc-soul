@@ -220,4 +220,68 @@ if [[ -n "$DISTILL_SESSION_ID" && -n "$TRANSCRIPT_PATH" ]]; then
     echo "[distill] Triggered for $DISTILL_SESSION_ID" >&2
 fi
 
+# ═══════════════════════════════════════════════════════════════════════════
+# COMPACT_CONTEXT: Memory-aware turn scoring before compaction
+#
+# Uses chitta's semantic memory to identify which conversation turns are
+# already captured as memories (safe to drop) vs novel content (must keep).
+# Stores a scored snapshot so the soul knows what was semantically important.
+# ═══════════════════════════════════════════════════════════════════════════
+if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" && -x "$CHITTA_BIN" ]]; then
+    # Parse JSONL transcript → messages array (last 60 turns, skip empty content)
+    MESSAGES_JSON=$(jq -sc '[
+        .[] |
+        select(.type == "user" or .type == "assistant") |
+        {
+            role: .type,
+            content: (
+                if .type == "assistant" then
+                    ((.message.content // []) | map(select(.type == "text") | .text) | join(" "))
+                else
+                    (.message.content // "" | if type == "array" then (map(.text // "") | join(" ")) else tostring end)
+                end
+            )
+        } |
+        select((.content | length) > 0)
+    ] | .[-60:]' "$TRANSCRIPT_PATH" 2>/dev/null || echo "[]")
+
+    if [[ "$MESSAGES_JSON" != "[]" && "$MESSAGES_JSON" != "null" ]]; then
+        # Build JSON-RPC request — use thin client mode (stdin) for complex nested params
+        COMPACT_RPC=$(jq -n \
+            --argjson messages "$MESSAGES_JSON" \
+            --arg query "${SNAPSHOT:0:300}" \
+            '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"compact_context","arguments":{
+                "messages": $messages,
+                "query": $query,
+                "target_ratio": 0.4
+            }}}')
+
+        COMPACT_RESULT=$(printf '%s' "$COMPACT_RPC" | \
+            timeout 15 "$CHITTA_BIN" 2>/dev/null || true)
+
+        if [[ -n "$COMPACT_RESULT" ]]; then
+            before=$(printf '%s' "$COMPACT_RESULT" | jq -r '.result.stats.before_tokens // 0' 2>/dev/null || echo 0)
+            after=$(printf '%s' "$COMPACT_RESULT"  | jq -r '.result.stats.after_tokens // 0' 2>/dev/null || echo 0)
+            dropped=$(printf '%s' "$COMPACT_RESULT" | jq -r '.result.stats.dropped_pct // 0' 2>/dev/null || echo 0)
+            embedded=$(printf '%s' "$COMPACT_RESULT" | jq -r '.result.stats.embedding // false' 2>/dev/null || echo false)
+
+            echo "[compact_context] ${before}→${after} tok | ${dropped}% memory-covered drops | embedding=${embedded}" >&2
+
+            # Persist compaction metadata as an episode so the soul tracks what survived
+            if [[ -n "$before" && "$before" != "0" ]]; then
+                queue_write "observe" "$(jq -n \
+                    --arg realm "$REALM" \
+                    --arg sid "${REAL_SESSION_ID:-$SESSION_ID}" \
+                    --arg before "$before" \
+                    --arg after "$after" \
+                    --arg dropped "$dropped" \
+                    '{category: "episode",
+                      content: ("[pre-compact:\($realm)] Memory-aware compaction: \($before)→\($after) tokens (\($dropped)% dropped as memory-covered). Session: \($sid)"),
+                      realm: $realm,
+                      confidence: 0.7}')"
+            fi
+        fi
+    fi
+fi
+
 exit 0

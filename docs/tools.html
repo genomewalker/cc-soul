@@ -98,6 +98,7 @@
       <li><a href="architecture.html">Architecture</a></li>
       <li><a href="chitta-field.html">chitta-field</a></li>
       <li><a href="sadhana.html">Sadhana</a></li>
+      <li><a href="context.html">Context</a></li>
       <li><a href="tools.html" class="active">Tools</a></li>
       <li><a href="cli.html">CLI</a></li>
       <li><a href="hooks.html">Hooks</a></li>
@@ -134,6 +135,7 @@
     <a href="#cat-graph" class="submenu-toc-link" data-section="cat-graph">Graph &amp; Triplets</a>
     <a href="#cat-hooks" class="submenu-toc-link" data-section="cat-hooks">Hook Integration</a>
     <a href="#cat-context" class="submenu-toc-link" data-section="cat-context">Context &amp; Status</a>
+    <a href="#cat-compaction" class="submenu-toc-link" data-section="cat-compaction">Context Management</a>
     <a href="#cat-code" class="submenu-toc-link" data-section="cat-code">Code Intelligence</a>
     <a href="#cat-codewisdom" class="submenu-toc-link" data-section="cat-codewisdom">Code Wisdom</a>
     <a href="#cat-realm" class="submenu-toc-link" data-section="cat-realm">Realms</a>
@@ -292,6 +294,205 @@
         <div class="tool-row"><span class="tool-name">subconscious_stats</span><span class="tool-desc">Get subconscious background processor statistics</span></div>
       </div>
     </div>
+
+    <!-- CONTEXT MANAGEMENT -->
+    <div class="tools-category" id="cat-compaction">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none">
+            <rect x="3" y="5" width="14" height="2.5" rx="1" stroke="#9DB2D9" stroke-width="1.2"/>
+            <rect x="3" y="9" width="10" height="2.5" rx="1" stroke="#9DB2D9" stroke-width="1.2" opacity="0.5"/>
+            <rect x="3" y="13" width="6" height="2.5" rx="1" stroke="#9DB2D9" stroke-width="1.2" opacity="0.25"/>
+            <path d="M16 10 L18 10 M17 9 L18 10 L17 11" stroke="#9DB2D9" stroke-width="0.9" opacity="0.7"/>
+          </svg>
+        </div>
+        <span class="tools-category-name">Context Management</span>
+        <span class="tools-category-count">1 tool</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">compact_context</span><span class="tool-desc">Memory-aware context compaction &mdash; drops conversation turns already covered by soul memories, scores survivors by recency and semantic relevance to next task</span></div>
+      </div>
+      <div style="padding: 16px 20px 20px; border-top: 1px solid rgba(157,178,217,0.08);">
+        <p style="font-size: 0.8rem; color: #565f89; line-height: 1.7; margin: 0 0 12px;">
+          Unlike token-budget truncation or generic compaction (e.g. Morph Compact), chitta scores each conversation turn against what it already knows. A turn whose content is already distilled into a memory can be dropped without information loss &mdash; the knowledge lives in the graph. Turns with novel content are preserved.
+        </p>
+        <p style="font-size: 0.8rem; color: #565f89; line-height: 1.7; margin: 0 0 12px;">
+          <strong style="color: #a9b1d6;">Hook integration:</strong> wire <code>compact_context</code> into your <code>UserPromptSubmit</code> hook to auto-compact before each turn when the session is long. Pass the user&rsquo;s message as <code>query</code> so the scoring biases toward what is relevant <em>next</em>, not just what was relevant historically.
+        </p>
+        <div style="background: rgba(157,178,217,0.04); border: 1px solid rgba(157,178,217,0.1); border-radius: 4px; padding: 12px 14px; font-family: var(--font-mono); font-size: 0.75rem; color: #7aa2f7; line-height: 1.8; margin-bottom: 20px;">
+          score(msg) = weight &times; (0.3&thinsp;&middot;&thinsp;recency &nbsp;+&nbsp; 0.4&thinsp;&middot;&thinsp;semantic_sim &nbsp;+&nbsp; 0.3&thinsp;&middot;&thinsp;(1 &minus; memory_coverage))<br>
+          <span style="color: #565f89;">// high memory_coverage → already learned → safe to drop</span>
+        </div>
+
+        <!-- Live animation -->
+        <div id="compact-demo" style="font-family: var(--font-mono); font-size: 0.72rem;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <span style="color:#565f89; font-size:0.7rem; letter-spacing:.08em; text-transform:uppercase;">live demo</span>
+            <button id="compact-replay" style="background:none;border:1px solid rgba(157,178,217,0.2);color:#7aa2f7;font-family:inherit;font-size:0.68rem;padding:3px 10px;cursor:pointer;border-radius:3px;letter-spacing:.05em;">replay</button>
+          </div>
+          <div id="compact-msgs" style="display:flex;flex-direction:column;gap:4px;"></div>
+          <div id="compact-stats" style="margin-top:12px;display:flex;gap:16px;opacity:0;transition:opacity .4s;">
+            <span style="color:#565f89;">before: <span id="cs-before" style="color:#a9b1d6;">—</span></span>
+            <span style="color:#565f89;">after: <span id="cs-after" style="color:#7aa2f7;">—</span></span>
+            <span style="color:#565f89;">dropped: <span id="cs-pct" style="color:#D46A4C;">—</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+<style>
+.cmsg {
+  display: grid;
+  grid-template-columns: 70px 1fr 90px 36px;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  transition: background .25s, opacity .5s, transform .5s, border-color .25s;
+}
+.cmsg-role  { color: #565f89; font-size: 0.68rem; letter-spacing: .06em; }
+.cmsg-text  { color: #a9b1d6; font-size: 0.7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmsg-score { height: 4px; border-radius: 2px; transition: width .6s cubic-bezier(.4,0,.2,1); }
+.cmsg-badge { font-size: 0.62rem; letter-spacing:.05em; padding: 1px 5px; border-radius: 2px; text-align:center; }
+.cmsg.dropped { opacity: 0.12; transform: translateX(8px); }
+.cmsg.kept    { border-color: rgba(122,162,247,0.18); background: rgba(122,162,247,0.04); }
+</style>
+
+<script>
+(function(){
+  const MSGS = [
+    { role:'system',    text:'You are a helpful assistant.',                       tokens:6  },
+    { role:'user',      text:'How do I fix the embedder crash?',                   tokens:9  },
+    { role:'assistant', text:'The crash is in vak.hpp line 42 — null ptr check.',  tokens:13 },
+    { role:'tool',      text:'tool_result: embedder loaded, 384 dims',             tokens:8  },
+    { role:'user',      text:'What about the HNSW index rebuild?',                 tokens:9  },
+    { role:'assistant', text:'Use rebuild_fts_index after adding memories.',       tokens:10 },
+    { role:'tool',      text:'tool_result: index rebuilt in 142ms',                tokens:7  },
+    { role:'user',      text:'Does smart_recall use BM25 or just vectors?',        tokens:11 },
+    { role:'assistant', text:'Both — hybrid: cosine + BM25 re-ranked.',            tokens:11 },
+    { role:'user',      text:'Now implement compact_context for chitta.',           tokens:9  },
+  ];
+
+  // Simulate scores for demo (high memory_coverage → likely dropped)
+  const SCORES = [
+    { recency:0.10, sem:0.30, cov:0.90, keep:true  }, // system — always keep
+    { recency:0.20, sem:0.60, cov:0.85, keep:false }, // low novel, in memory
+    { recency:0.30, sem:0.55, cov:0.80, keep:false }, // in memory
+    { recency:0.40, sem:0.20, cov:0.30, keep:false }, // tool result, low relevance
+    { recency:0.50, sem:0.50, cov:0.70, keep:false }, // semi-covered
+    { recency:0.60, sem:0.45, cov:0.60, keep:true  }, // rebuild — still useful
+    { recency:0.70, sem:0.25, cov:0.40, keep:false }, // tool result
+    { recency:0.80, sem:0.70, cov:0.30, keep:true  }, // about smart_recall — novel
+    { recency:0.90, sem:0.75, cov:0.20, keep:true  }, // hybrid — very relevant
+    { recency:1.00, sem:0.95, cov:0.05, keep:true  }, // current task — keep
+  ];
+
+  const ROLE_COLOR = { system:'#CBAF86', user:'#9DB2D9', assistant:'#c0caf5', tool:'#565f89' };
+
+  function scoreColor(s) {
+    if (s > 0.65) return '#7aa2f7';
+    if (s > 0.40) return '#9DB2D9';
+    return '#D46A4C';
+  }
+
+  function calcScore(s, role) {
+    if (role === 'system') return 1.0;
+    const w = { system:2.0, user:1.0, assistant:0.8, tool:0.5 }[role] || 0.6;
+    return w * (0.3*s.recency + 0.4*s.sem + 0.3*(1-s.cov)) / 2.0;
+  }
+
+  function runDemo() {
+    const container = document.getElementById('compact-msgs');
+    const statsEl   = document.getElementById('compact-stats');
+    const beforeEl  = document.getElementById('cs-before');
+    const afterEl   = document.getElementById('cs-after');
+    const pctEl     = document.getElementById('cs-pct');
+    statsEl.style.opacity = '0';
+    container.innerHTML = '';
+
+    const rows = [];
+    let totalTok = 0;
+    MSGS.forEach((m, i) => {
+      totalTok += m.tokens;
+      const sc = calcScore(SCORES[i], m.role);
+      const row = document.createElement('div');
+      row.className = 'cmsg';
+      row.innerHTML = `
+        <span class="cmsg-role" style="color:${ROLE_COLOR[m.role]||'#565f89'}">${m.role}</span>
+        <span class="cmsg-text">${m.text}</span>
+        <div style="display:flex;align-items:center;gap:4px;min-width:90px;">
+          <div class="cmsg-score" style="width:0;background:${scoreColor(sc)}" data-w="${Math.round(sc*80)}"></div>
+        </div>
+        <span class="cmsg-badge" data-keep="${SCORES[i].keep}" style="opacity:0"></span>`;
+      container.appendChild(row);
+      rows.push({ row, sc, keep: SCORES[i].keep, tok: m.tokens });
+    });
+
+    // Phase 1: animate score bars
+    setTimeout(() => {
+      rows.forEach((r, i) => {
+        setTimeout(() => {
+          const bar = r.row.querySelector('.cmsg-score');
+          bar.style.width = bar.dataset.w + 'px';
+        }, i * 80);
+      });
+    }, 300);
+
+    // Phase 2: show keep/drop badges
+    setTimeout(() => {
+      rows.forEach((r, i) => {
+        setTimeout(() => {
+          const badge = r.row.querySelector('.cmsg-badge');
+          badge.style.opacity = '1';
+          badge.style.transition = 'opacity .3s';
+          if (r.keep) {
+            badge.textContent = 'KEEP';
+            badge.style.background = 'rgba(122,162,247,0.12)';
+            badge.style.color = '#7aa2f7';
+          } else {
+            badge.textContent = 'DROP';
+            badge.style.background = 'rgba(212,106,76,0.10)';
+            badge.style.color = '#D46A4C';
+          }
+        }, i * 80);
+      });
+    }, 1400);
+
+    // Phase 3: apply drop animation
+    let keptTok = 0;
+    let droppedCount = 0;
+    setTimeout(() => {
+      rows.forEach(r => {
+        if (!r.keep) {
+          r.row.classList.add('dropped');
+          droppedCount++;
+        } else {
+          r.row.classList.add('kept');
+          keptTok += r.tok;
+        }
+      });
+
+      // Stats
+      setTimeout(() => {
+        beforeEl.textContent = totalTok + ' tok';
+        afterEl.textContent  = keptTok  + ' tok';
+        pctEl.textContent    = Math.round(droppedCount/MSGS.length*100) + '% dropped';
+        statsEl.style.opacity = '1';
+      }, 600);
+    }, 2800);
+  }
+
+  document.getElementById('compact-replay').addEventListener('click', runDemo);
+
+  // Auto-run when section scrolls into view
+  const observer = new IntersectionObserver(entries => {
+    if (entries[0].isIntersecting) { runDemo(); observer.disconnect(); }
+  }, { threshold: 0.3 });
+  observer.observe(document.getElementById('compact-demo'));
+})();
+</script>
 
     <!-- REALMS -->
     <div class="tools-category" id="cat-realm">
