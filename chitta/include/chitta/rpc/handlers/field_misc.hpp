@@ -668,19 +668,40 @@
         std::string trigger  = params.value("trigger", "");
         std::string response = params.value("response", "");
         std::string realm    = params.value("realm", "brahman");
+        static constexpr int MIN_OBSERVATIONS = 3;
 
         if (trigger.empty() || response.empty())
             return DuckDBToolResult::error("trigger and response are required");
 
+        // Always strengthen the triplet edge (tracks frequency as weight)
         field_store_->add_triplet(trigger, "triggers", response);
+
+        // Count how many times this exact pair has been observed via triplet query
+        std::string triplets_raw = field_store_->query_subject(trigger);
+        int count = 0;
+        try {
+            auto arr = json::parse(triplets_raw);
+            for (const auto& t : arr) {
+                if (t.value("predicate","") == "triggers" && t.value("object","") == response)
+                    ++count;
+            }
+        } catch (...) {}
+
+        // Only store a habit memory once the pair has been seen MIN_OBSERVATIONS times
+        if (count < MIN_OBSERVATIONS) {
+            return DuckDBToolResult::ok(
+                "Habit observed (" + std::to_string(count) + "/" +
+                std::to_string(MIN_OBSERVATIONS) + " before stored)",
+                {{"count", count}, {"threshold", MIN_OBSERVATIONS}});
+        }
 
         std::string text = "habit: " + trigger + " → " + response;
         auto embedding = embed_text(text);
         uint64_t id = field_store_->remember("habit", realm, text, embedding, 0.7f, 0.001f);
 
         return DuckDBToolResult::ok(
-            "Habit recorded/strengthened (id: " + std::to_string(id) + ")",
-            {{"id", std::to_string(id)}});
+            "Habit stored (id: " + std::to_string(id) + ", observations=" + std::to_string(count) + ")",
+            {{"id", std::to_string(id)}, {"count", count}});
     }
 
     DuckDBToolResult tool_habit_match(const json& params) {

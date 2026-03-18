@@ -823,6 +823,35 @@
         }
     }
 
+    DuckDBToolResult tool_forget_kind(const json& params) {
+        std::string kind  = params.value("kind", "");
+        std::string realm = params.value("realm", "");
+        size_t limit      = static_cast<size_t>(params.value("limit", 5000));
+        if (kind.empty()) return DuckDBToolResult::error("kind is required");
+
+        std::string raw = field_store_->list_memories(kind, realm, "recency", limit, 0);
+        json arr;
+        try { arr = json::parse(raw); } catch (...) {
+            return DuckDBToolResult::error("failed to list memories");
+        }
+
+        size_t deleted = 0, failed = 0;
+        for (const auto& m : arr) {
+            uint64_t id = 0;
+            if (m["id"].is_number()) id = m["id"].get<uint64_t>();
+            else if (m["id"].is_string()) {
+                try { id = std::stoull(m["id"].get<std::string>()); } catch (...) {}
+            }
+            if (id == 0) { ++failed; continue; }
+            try { field_store_->forget(id); ++deleted; } catch (...) { ++failed; }
+        }
+
+        return DuckDBToolResult::ok(
+            "Deleted " + std::to_string(deleted) + " " + kind + " memories"
+            + (failed ? " (" + std::to_string(failed) + " failed)" : ""),
+            {{"deleted", deleted}, {"failed", failed}, {"kind", kind}});
+    }
+
     DuckDBToolResult tool_set_priority_tier(const json& params) {
         // Priority tiers stored as triplets
         uint64_t id = extract_id(params, "memory_id");

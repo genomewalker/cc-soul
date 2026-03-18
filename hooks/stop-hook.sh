@@ -508,21 +508,8 @@ if [[ -f "$PREDICTIONS_FILE" ]]; then
     fi
 fi
 
-# ===========================================
-# HABIT OBSERVATION: Learn trigger→response patterns
-# ===========================================
-if [[ -n "$LAST_USER_MSG" && -n "$TOOLS_FROM_TRANSCRIPT" ]]; then
-    # Extract trigger: first 5 meaningful words from user message
-    trigger=$(echo "$LAST_USER_MSG" | tr -cs '[:alnum:]' ' ' | awk '{for(i=1;i<=5 && i<=NF;i++) printf "%s ", $i}' | sed 's/ $//')
-
-    # Extract response: first 5 tools used
-    response=$(echo "$TOOLS_FROM_TRANSCRIPT" | head -5 | tr '\n' ',' | sed 's/,$//')
-
-    if [[ -n "$trigger" && -n "$response" ]]; then
-        queue_write "habit_observe" "{\"trigger\":$(echo "$trigger" | jq -Rs .),\"response\":$(echo "$response" | jq -Rs .)}"
-        echo "[soul] +habit: ${trigger:0:30}→${response:0:30}" >&2
-    fi
-fi
+# HABIT OBSERVATION: Handled entirely by post-bash-hook (command name sequences only).
+# stop-hook previously stored noisy user-message-word → tools-used habits — removed.
 
 # ===========================================
 # CALIBRATION: Track prediction accuracy by domain

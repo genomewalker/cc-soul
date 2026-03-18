@@ -1440,6 +1440,14 @@ private:
         });
         handlers_["memory_type_stats"] = [this](const json& p) { return tool_memory_type_stats(p); };
 
+        tools_.push_back({{"name","forget_kind"},{"description","Bulk-delete all memories of a given kind (e.g. 'habit'). Optionally filter by realm."},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"kind",{{"type","string"},{"description","Memory kind to delete (e.g. habit, unknown)"}}},
+                {"realm",{{"type","string"},{"description","Optional realm filter"}}},
+                {"limit",{{"type","integer"},{"description","Max to delete (default 5000)"}}}
+            }},{"required",{"kind"}}}}});
+        handlers_["forget_kind"] = [this](const json& p) { return tool_forget_kind(p); };
+
         tools_.push_back({{"name","smart_recall"},{"description","Intelligent memory recall with hierarchical expansion"},
             {"inputSchema",{{"type","object"},{"properties",{
                 {"query",{{"type","string"}}},{"limit",{{"type","integer"}}},

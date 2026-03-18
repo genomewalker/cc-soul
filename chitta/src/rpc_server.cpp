@@ -453,10 +453,11 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
       {"seed", "Compressed SSL seed", true, nullptr},
       {"reconstructed", "Text reconstructed from seed", true, nullptr}}},
 
-    // Debug/analysis tools
-    {"sql_query", "Run read-only SQL query against the soul database",
-     {{"query", "SQL SELECT query", true, nullptr},
-      {"limit", "Max rows to return", false, "100"}}},
+    // Bulk operations
+    {"forget_kind", "Bulk-delete all memories of a given kind (e.g. habit, unknown)",
+     {{"kind", "Memory kind to delete", true, nullptr},
+      {"realm", "Optional realm filter", false, nullptr},
+      {"limit", "Max to delete (default 5000)", false, "5000"}}},
 
     // Embedding tools
     {"embed_symbols", "Fast embed symbol metadata (~100/sec, no LLM needed)",
@@ -784,7 +785,7 @@ void print_usage(const char* prog) {
               << "  Transcript:  read_transcript, transcript_register, transcript_get, transcript_list, transcript_update, transcript_remove\n"
               << "  Learning:    learn_outcome, episode_cluster_status, calibration_record, calibration_score\n"
               << "  Theme:       theme_list, theme_get, theme_recall, theme_stats, theme_maintain, theme_assign_orphans\n"
-              << "  Debug:       sql_query\n"
+              << "  Bulk ops:    forget_kind\n"
               << "\n"
               << "Global options:\n"
               << "  --socket-path PATH  Unix socket path\n"
