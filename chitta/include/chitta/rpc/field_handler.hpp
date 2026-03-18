@@ -453,6 +453,10 @@ private:
     #include "handlers/ledger.hpp"
     #include "handlers/long_task.hpp"
     #include "handlers/compact.hpp"
+    #include "handlers/drift_recon.hpp"
+    #include "handlers/drift_5w.hpp"
+    #include "handlers/drift_consolidation.hpp"
+    #include "handlers/drift_recall.hpp"
 
     // ═══════════════════════════════════════════════════════════════════════
     // register_tools() — all tool schemas and handler bindings
@@ -1980,6 +1984,89 @@ private:
             }}
         });
         handlers_["compact_context"] = [this](const json& p) { return tool_compact_context(p); };
+
+        // ── Drift-memory tools ───────────────────────────────────────────────
+        tools_.push_back({{"name","set_evidence_type"},{"description","Tag a memory with its epistemological evidence class (observation/inference/hearsay/authoritative/prediction)"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"id",{{"type","string"},{"description","Memory ID"}}},
+                {"evidence_type",{{"type","string"},{"description","One of: observation, inference, hearsay, authoritative, prediction"}}}
+            }},{"required",{"id","evidence_type"}}}}});
+        handlers_["set_evidence_type"] = [this](const json& p) { return tool_set_evidence_type(p); };
+
+        tools_.push_back({{"name","get_evidence_type"},{"description","Retrieve the evidence type tag of a memory"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"id",{{"type","string"},{"description","Memory ID"}}}
+            }},{"required",{"id"}}}}});
+        handlers_["get_evidence_type"] = [this](const json& p) { return tool_get_evidence_type(p); };
+
+        tools_.push_back({{"name","labile_memories"},{"description","List recently-accessed memories in the labile (updateable) window"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"realm",{{"type","string"},{"description","Filter by realm"}}},
+                {"limit",{{"type","integer"},{"description","Max results (default 20)"}}},
+                {"window_hours",{{"type","number"},{"description","Recency window in hours (default 24)"}}}
+            }}}}});
+        handlers_["labile_memories"] = [this](const json& p) { return tool_labile_memories(p); };
+
+        tools_.push_back({{"name","reconsolidate"},{"description","Update content of a memory during its labile window (reconsolidation)"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"id",{{"type","string"},{"description","Memory ID to update"}}},
+                {"content",{{"type","string"},{"description","New/corrected content"}}},
+                {"reason",{{"type","string"},{"description","Optional reason for reconsolidation"}}}
+            }},{"required",{"id","content"}}}}});
+        handlers_["reconsolidate"] = [this](const json& p) { return tool_reconsolidate(p); };
+
+        tools_.push_back({{"name","5w_search"},{"description","Multi-dimensional semantic search across who/what/when/where/why axes"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"who",{{"type","string"},{"description","Who is involved"}}},
+                {"what",{{"type","string"},{"description","What is happening/topic"}}},
+                {"when",{{"type","string"},{"description","Temporal description"}}},
+                {"where",{{"type","string"},{"description","Location or context"}}},
+                {"why",{{"type","string"},{"description","Motivation or reason"}}},
+                {"realm",{{"type","string"},{"description","Filter by realm"}}},
+                {"limit",{{"type","integer"},{"description","Max results (default 10)"}}}
+            }}}}});
+        handlers_["5w_search"] = [this](const json& p) { return tool_5w_search(p); };
+
+        tools_.push_back({{"name","recall_ucb1"},{"description","Recall with UCB1 exploration bonus — surfaces novel under-accessed memories alongside relevant ones"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"query",{{"type","string"},{"description","Search query"}}},
+                {"realm",{{"type","string"},{"description","Filter by realm"}}},
+                {"limit",{{"type","integer"},{"description","Max results (default 10)"}}},
+                {"exploration",{{"type","number"},{"description","Exploration weight sqrt(2)≈1.414 (default)"}}},
+                {"fetch_k",{{"type","integer"},{"description","Candidate pool size before re-ranking (default 40)"}}}
+            }},{"required",{"query"}}}}});
+        handlers_["recall_ucb1"] = [this](const json& p) { return tool_recall_ucb1(p); };
+
+        tools_.push_back({{"name","find_near_duplicates"},{"description","Find memory pairs with high semantic similarity (near-duplicates)"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"realm",{{"type","string"},{"description","Filter by realm"}}},
+                {"limit",{{"type","integer"},{"description","Max pairs to return (default 20)"}}},
+                {"threshold",{{"type","number"},{"description","Cosine similarity threshold (default 0.90)"}}}
+            }}}}});
+        handlers_["find_near_duplicates"] = [this](const json& p) { return tool_find_near_duplicates(p); };
+
+        tools_.push_back({{"name","consolidate_similar"},{"description","Merge near-duplicate memories — keeps stronger, soft-deletes weaker"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"realm",{{"type","string"},{"description","Filter by realm"}}},
+                {"threshold",{{"type","number"},{"description","Similarity threshold (default 0.92)"}}},
+                {"dry_run",{{"type","boolean"},{"description","Preview without deleting (default true)"}}},
+                {"limit",{{"type","integer"},{"description","Max pairs to merge (default 10)"}}}
+            }}}}});
+        handlers_["consolidate_similar"] = [this](const json& p) { return tool_consolidate_similar(p); };
+
+        tools_.push_back({{"name","cooccurrence_graph"},{"description","Show top co-activated memory associations for a given memory"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"id",{{"type","string"},{"description","Memory ID"}}},
+                {"limit",{{"type","integer"},{"description","Max edges to return (default 10)"}}}
+            }},{"required",{"id"}}}}});
+        handlers_["cooccurrence_graph"] = [this](const json& p) { return tool_cooccurrence_graph(p); };
+
+        tools_.push_back({{"name","labile_memories_top"},{"description","List the most-accessed (most labile) memories — candidates for reconsolidation"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"realm",{{"type","string"},{"description","Filter by realm"}}},
+                {"limit",{{"type","integer"},{"description","Max results (default 20)"}}}
+            }}}}});
+        handlers_["labile_memories_top"] = [this](const json& p) { return tool_labile_memories_top(p); };
 
         classify_tools();
     }

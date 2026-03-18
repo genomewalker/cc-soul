@@ -729,4 +729,14 @@ if echo "$RESPONSE" | grep -qiE "(I found|the answer is|it turns out|the reason 
     fi
 fi
 
+# ═══════════════════════════════════════════════════════════════════════════
+# SLEEP CONSOLIDATION: queue memory consolidation for background processing
+# ═══════════════════════════════════════════════════════════════════════════
+if [[ -x "$CHITTA_BIN" ]]; then
+    queue_write "consolidate_request" "$(jq -n \
+        --arg realm "${REALM:-brahman}" \
+        '{realm: $realm, threshold: 0.92, dry_run: false, limit: 20}')"
+    echo "[consolidation] Queued sleep consolidation for realm=${REALM:-brahman}" >&2
+fi
+
 exit 0

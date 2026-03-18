@@ -50,6 +50,38 @@
         if (embedding.empty()) return DuckDBToolResult::error("Failed to embed query");
 
         auto hits = field_store_->recall(embedding, limit, realm);
+
+        // Hebbian co-occurrence: strengthen associations between co-retrieved memories
+        if (hits.size() >= 2) {
+            std::vector<uint64_t> ids;
+            ids.reserve(hits.size());
+            for (const auto& h : hits) ids.push_back(h.memory_id);
+            field_store_->record_co_retrieval(ids);
+        }
+
+        // Drift scoring: anti-perseveration penalty + curiosity boost
+        {
+            const size_t total = field_store_->memory_count();
+            if (total >= 5 && !hits.empty()) {
+                const float max_access = 10.0f;
+                const float exploration = 1.0f;
+                for (auto& h : hits) {
+                    float saturation = std::min(1.0f, static_cast<float>(h.access_count) / max_access);
+                    float anti_perserv = 1.0f - 0.25f * saturation;
+                    float curiosity = (total > 0)
+                        ? exploration * std::sqrt(std::log(static_cast<float>(total) + 1.0f) /
+                                                  (static_cast<float>(h.access_count) + 1.0f))
+                        : 0.0f;
+                    curiosity = std::min(curiosity, 0.3f);
+                    h.score = h.score * anti_perserv + curiosity;
+                }
+                std::sort(hits.begin(), hits.end(),
+                          [](const FieldRecallHit& a, const FieldRecallHit& b) {
+                              return a.score > b.score;
+                          });
+            }
+        }
+
         json results_json = hits_to_results_json(hits);
 
         std::ostringstream ss;
@@ -151,8 +183,32 @@
         auto embedding = embed_query(query);
         if (embedding.empty()) return DuckDBToolResult::error("Failed to embed query");
 
-        json semantic = hits_to_results_json(field_store_->recall(embedding, limit, realm));
-        json keyword  = hits_to_results_json(field_store_->recall_keyword(query, limit));
+        auto semantic_hits = field_store_->recall(embedding, limit, realm);
+        auto keyword_hits  = field_store_->recall_keyword(query, limit);
+
+        // Drift scoring on each source's raw hits (no Hebbian — merged sources would over-count)
+        {
+            const size_t total = field_store_->memory_count();
+            if (total >= 5) {
+                auto apply_drift = [&](std::vector<FieldRecallHit>& hits) {
+                    const float max_access = 10.0f;
+                    const float exploration = 1.0f;
+                    for (auto& h : hits) {
+                        float saturation = std::min(1.0f, static_cast<float>(h.access_count) / max_access);
+                        float anti_perserv = 1.0f - 0.25f * saturation;
+                        float curiosity = exploration * std::sqrt(std::log(static_cast<float>(total) + 1.0f) /
+                                                                  (static_cast<float>(h.access_count) + 1.0f));
+                        curiosity = std::min(curiosity, 0.3f);
+                        h.score = h.score * anti_perserv + curiosity;
+                    }
+                };
+                apply_drift(semantic_hits);
+                apply_drift(keyword_hits);
+            }
+        }
+
+        json semantic = hits_to_results_json(semantic_hits);
+        json keyword  = hits_to_results_json(keyword_hits);
         json merged   = merge_results(semantic, keyword);
 
         if (merged.size() > limit) merged.erase(merged.begin() + static_cast<int>(limit), merged.end());
@@ -179,14 +235,36 @@
         auto eq = expand_query(query);
         bool is_code = looks_like_code_query(query);
 
+        // Drift scoring lambda (no Hebbian — merged sources would over-count)
+        auto apply_drift_smart = [&](std::vector<FieldRecallHit>& hits) {
+            const size_t total = field_store_->memory_count();
+            if (total < 5 || hits.empty()) return;
+            const float max_access = 10.0f;
+            const float exploration = 1.0f;
+            for (auto& h : hits) {
+                float saturation = std::min(1.0f, static_cast<float>(h.access_count) / max_access);
+                float anti_perserv = 1.0f - 0.25f * saturation;
+                float curiosity = exploration * std::sqrt(std::log(static_cast<float>(total) + 1.0f) /
+                                                          (static_cast<float>(h.access_count) + 1.0f));
+                curiosity = std::min(curiosity, 0.3f);
+                h.score = h.score * anti_perserv + curiosity;
+            }
+        };
+
         json results;
         if (is_code) {
-            results = hits_to_results_json(field_store_->recall_keyword(eq.lex, limit));
+            auto kw_hits = field_store_->recall_keyword(eq.lex, limit);
+            apply_drift_smart(kw_hits);
+            results = hits_to_results_json(kw_hits);
         } else {
             auto embedding = embed_query(eq.vec);
             if (embedding.empty()) return DuckDBToolResult::error("Failed to embed query");
-            json semantic = hits_to_results_json(field_store_->recall(embedding, limit, realm));
-            json keyword  = hits_to_results_json(field_store_->recall_keyword(eq.lex, limit));
+            auto sem_hits = field_store_->recall(embedding, limit, realm);
+            auto kw_hits  = field_store_->recall_keyword(eq.lex, limit);
+            apply_drift_smart(sem_hits);
+            apply_drift_smart(kw_hits);
+            json semantic = hits_to_results_json(sem_hits);
+            json keyword  = hits_to_results_json(kw_hits);
             results = merge_results(semantic, keyword);
         }
 

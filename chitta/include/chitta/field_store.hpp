@@ -5,6 +5,7 @@
 #include <functional>
 #include <stdexcept>
 #include <cstring>
+#include <chrono>
 #include <cstdint>
 #include <cmath>
 #include <limits>
@@ -21,6 +22,7 @@ struct FieldRecallHit {
     int64_t     ts_ms;
     float       strength;
     float       confidence;
+    uint32_t    access_count;
     std::string kind;
     std::string realm;
     std::string content;
@@ -735,6 +737,38 @@ public:
         } catch (...) { return {}; }
     }
 
+    /// Record co-retrieval for Hebbian association strengthening.
+    void record_co_retrieval(const std::vector<uint64_t>& memory_ids,
+                             float base_assoc_delta = 0.05f) {
+        if (memory_ids.size() < 2) return;
+        int64_t ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        cf_record_recall_batch(handle_,
+            memory_ids.data(), memory_ids.size(),
+            nullptr, 0, 1.0f, 0, ts_ms, base_assoc_delta);
+    }
+
+    /// Get association edges for a memory as JSON string.
+    std::string get_assoc_edges(uint64_t memory_id, size_t limit = 20) {
+        char buf[32768];
+        size_t written = 0;
+        int r = cf_get_assoc_edges(handle_, memory_id, limit,
+                                    buf, sizeof(buf), &written);
+        if (r != 0) return "[]";
+        return std::string(buf, written);
+    }
+
+    /// Batch-fetch embeddings for multiple memories as JSON.
+    std::string get_memory_embeddings_batch(const std::vector<uint64_t>& ids) {
+        if (ids.empty()) return "{}";
+        char buf[1 << 20]; // 1MB
+        size_t written = 0;
+        int r = cf_get_memory_embeddings_batch(handle_,
+            ids.data(), ids.size(), buf, sizeof(buf), &written);
+        if (r != 0) return "{}";
+        return std::string(buf, written);
+    }
+
     CfHandle* handle() const { return handle_; }
 
 private:
@@ -762,6 +796,7 @@ private:
             h.ts_ms          = buf[i].ts_ms;
             h.strength       = buf[i].strength;
             h.confidence     = buf[i].confidence;
+            h.access_count   = buf[i].access_count;
 
             // Fetch content (has written out-param)
             written = 0;
