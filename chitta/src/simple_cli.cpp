@@ -17,6 +17,7 @@
 #include <chitta/socket_server.hpp>
 #include <chitta/socket_client.hpp>
 #include <chitta/native_distiller.hpp>
+#include <chitta/gradmem_writer.hpp>
 #include <chitta/http_viz.hpp>
 #include <chitta/version.hpp>
 #ifdef CHITTA_WITH_ONNX
@@ -64,9 +65,22 @@ struct DistillConfig {
     int min_turns = 4;              // Minimum turns before distilling
     std::string script_path;        // Path to distillation script
     std::string model = "github-copilot/gpt-5-mini";  // OpenCode model
+    std::string local_model_path;   // If set, use llama-cli with this GGUF instead of opencode
     bool enabled = true;
     int64_t token_trigger_chars = 120000;  // Token-triggered: ~30k tokens (chars/4), 0 = disabled
     int cooldown_seconds = 180;     // Minimum seconds between token-triggered distillations per session
+};
+
+// GradMem write configuration
+struct GradMemDaemonConfig {
+    bool        enabled       = false;   // Off until model is prepared
+    std::string gradmemd_path;           // ~/.claude/bin/gradmemd
+    std::string model_ts_path;           // ~/.claude/bin/qwen_gradmem.pt
+    std::string gguf_path;               // ~/.claude/bin/ssl_distiller_dpo.gguf
+    int         n_mem_tokens  = 8;
+    int         K             = 2;
+    float       inner_lr      = 0.04f;
+    int         max_ctx_tokens = 512;
 };
 
 // Code enrichment configuration (semantic descriptions for symbols)
@@ -338,6 +352,7 @@ bool run_distillation(FieldStore& field_store, VakYantra* yantra,
                       bool queue_triggered = false) {
     NativeDistillConfig native_config;
     native_config.model = handler ? handler->get_distill_model() : config.model;
+    native_config.local_model_path = config.local_model_path;
     native_config.timeout_secs = 150;
     native_config.min_turns = config.min_turns;
     native_config.verbose = verbose_mode;
@@ -409,7 +424,8 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                const std::string& pid_file,
                const DistillConfig& distill_config, EnrichConfig& enrich_config,
                const SubconsciousConfig& subconscious_config, bool no_autonomous,
-               int http_port, const std::string& http_static_dir) {
+               int http_port, const std::string& http_static_dir,
+               const GradMemDaemonConfig& gradmem_config = {}) {
     // Automatically reap child processes to prevent zombie accumulation
     signal(SIGCHLD, SIG_IGN);
 
@@ -1037,6 +1053,100 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                                                     session_id, args.dump());
                             queue_count++;
                         }
+                    } else if (tool == "gradmem_trigger") {
+                        if (!gradmem_config.enabled) {
+                            if (verbose_mode)
+                                std::cerr << "[queue] gradmem_trigger ignored (gradmem disabled)\n";
+                        } else {
+                            std::string session_id = args.value("session_id", "");
+                            if (!session_id.empty()) {
+                                // Look up transcript text from registry
+                                std::string transcript_path;
+                                std::string realm = "brahman";
+                                auto it = transcript_reg.find(session_id);
+                                if (it != transcript_reg.end()) {
+                                    transcript_path = it->second.value("transcript_path", "");
+                                    realm = it->second.value("realm", "brahman");
+                                }
+                                if (!transcript_path.empty()) {
+                                    // Read last max_ctx_tokens worth of transcript text
+                                    std::string transcript_text;
+                                    try {
+                                        std::ifstream tf(transcript_path);
+                                        std::string line;
+                                        std::vector<std::string> lines;
+                                        while (std::getline(tf, line)) lines.push_back(line);
+                                        // Take last N lines as context
+                                        int n_lines = std::min((int)lines.size(), 200);
+                                        for (int li = (int)lines.size() - n_lines; li < (int)lines.size(); li++) {
+                                            auto obj = json::parse(lines[li], nullptr, false);
+                                            if (obj.is_discarded()) continue;
+                                            auto role = obj.value("type", obj.value("role", ""));
+                                            if (role != "user" && role != "assistant") continue;
+                                            auto content = obj.value("message", json{}).value("content", json{});
+                                            std::string text;
+                                            if (content.is_string()) text = content.get<std::string>();
+                                            else if (content.is_array()) {
+                                                for (auto& b : content)
+                                                    if (b.value("type","") == "text") text += b.value("text","") + " ";
+                                            }
+                                            if (!text.empty())
+                                                transcript_text += (role == "user" ? "USER: " : "ASSISTANT: ") + text.substr(0, 500) + "\n\n";
+                                        }
+                                    } catch (...) {}
+
+                                    if (!transcript_text.empty()) {
+                                        std::cerr << "[queue] gradmem_trigger: session=" << session_id << "\n";
+                                        GradMemConfig gm_cfg;
+                                        gm_cfg.gradmemd_path  = gradmem_config.gradmemd_path;
+                                        gm_cfg.model_ts_path  = gradmem_config.model_ts_path;
+                                        gm_cfg.gguf_path      = gradmem_config.gguf_path;
+                                        gm_cfg.n_mem_tokens   = gradmem_config.n_mem_tokens;
+                                        gm_cfg.K              = gradmem_config.K;
+                                        gm_cfg.inner_lr       = gradmem_config.inner_lr;
+                                        gm_cfg.max_ctx_tokens = gradmem_config.max_ctx_tokens;
+                                        gm_cfg.enabled        = true;
+                                        GradMemWriter gw(field_store, gm_cfg);
+                                        gw.write_async(session_id, transcript_text, realm);
+                                    }
+                                } else {
+                                    std::cerr << "[queue] gradmem_trigger: no transcript for " << session_id << "\n";
+                                }
+                            }
+                        }
+                    } else if (tool == "gradmem_result") {
+                        // Async result from gradmemd child process
+                        std::string result_path = args.value("result_path", "");
+                        std::string session_id  = args.value("session_id",  "");
+                        std::string realm       = args.value("realm",       "brahman");
+                        if (!result_path.empty()) {
+                            try {
+                                std::ifstream rf(result_path);
+                                if (rf.good()) {
+                                    std::string rstr((std::istreambuf_iterator<char>(rf)), {});
+                                    auto rj = json::parse(rstr);
+                                    GradMemResult gmr;
+                                    gmr.session_id    = rj.value("session_id",   session_id);
+                                    gmr.M_fp16_b64    = rj.value("M_fp16_b64",   "");
+                                    gmr.write_loss    = rj.value("write_loss",   0.f);
+                                    gmr.n_mem_tokens  = rj.value("n_mem_tokens", 0);
+                                    gmr.d_model       = rj.value("d_model",      (int64_t)0);
+                                    gmr.K             = rj.value("K",            0);
+                                    if (rj.contains("proxy_embedding") && rj["proxy_embedding"].is_array())
+                                        gmr.proxy_embedding = rj["proxy_embedding"].get<std::vector<float>>();
+                                    gmr.success = !gmr.M_fp16_b64.empty();
+                                    if (gmr.success) {
+                                        GradMemConfig gm_cfg;
+                                        GradMemWriter gw(field_store, gm_cfg);
+                                        gw.store_result(gmr);
+                                        std::cerr << "[queue] gradmem_result: stored for " << gmr.session_id << "\n";
+                                    }
+                                    std::remove(result_path.c_str());
+                                }
+                            } catch (const std::exception& ex) {
+                                std::cerr << "[queue] gradmem_result error: " << ex.what() << "\n";
+                            }
+                        }
                     } else if (tool == "distill_trigger") {
                         if (!distill_config.enabled) {
                             if (verbose_mode)
@@ -1217,7 +1327,7 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                     response["result"]["structured"]["pool_active"] = pool.active_count();
                     response["result"]["structured"]["pool_pending"] = pool.pending();
                 }
-                server.respond(req.client_fd, response.dump());
+                server.respond(req.client_fd, response.dump(-1, ' ', false, json::error_handler_t::replace));
                 continue;
             }
 
@@ -1226,7 +1336,7 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                 [&handler, data = req.data]() {
                     auto request = json::parse(data);
                     auto response = handler.handle(request);
-                    return response.dump();
+                    return response.dump(-1, ' ', false, json::error_handler_t::replace);
                 },
                 [&server](int fd, std::string response) {
                     server.queue_response(fd, std::move(response));
@@ -1368,6 +1478,7 @@ void print_usage(const char* prog) {
               << "  --distill-min-turns N    Min turns before distilling (default: 4)\n"
               << "  --distill-script PATH    Distillation script path (ignored, uses native)\n"
               << "  --distill-model MODEL    OpenCode model (default: github-copilot/gpt-5-mini)\n"
+              << "  --distill-local-model PATH  Local GGUF model via llama-cli (overrides opencode)\n"
               << "  --distill-token-trigger N  Token-triggered: chars threshold (default: 120000 ~30k tokens, 0=off)\n"
               << "  --distill-cooldown SECS  Min seconds between token-triggered distillations (default: 180)\n"
               << "  --no-distill             Disable automatic distillation\n"
@@ -1403,6 +1514,16 @@ int main(int argc, char* argv[]) {
     // Distillation config
     DistillConfig distill_config;
     distill_config.script_path = default_distill_script();
+
+    // GradMem config
+    GradMemDaemonConfig gradmem_config;
+    {
+        const char* home = getenv("HOME");
+        std::string bin = home ? std::string(home) + "/.claude/bin" : "";
+        gradmem_config.gradmemd_path = bin + "/gradmemd";
+        gradmem_config.model_ts_path = bin + "/qwen_gradmem.pt";
+        gradmem_config.gguf_path     = bin + "/ssl_distiller_dpo.gguf";
+    }
 
     // Code enrichment config
     EnrichConfig enrich_config;
@@ -1452,12 +1573,26 @@ int main(int argc, char* argv[]) {
             distill_config.script_path = argv[++i];
         } else if (strcmp(argv[i], "--distill-model") == 0 && i + 1 < argc) {
             distill_config.model = argv[++i];
+        } else if (strcmp(argv[i], "--distill-local-model") == 0 && i + 1 < argc) {
+            distill_config.local_model_path = argv[++i];
         } else if (strcmp(argv[i], "--distill-token-trigger") == 0 && i + 1 < argc) {
             distill_config.token_trigger_chars = safe_stoi(argv[++i], "--distill-token-trigger");
         } else if (strcmp(argv[i], "--distill-cooldown") == 0 && i + 1 < argc) {
             distill_config.cooldown_seconds = safe_stoi(argv[++i], "--distill-cooldown");
         } else if (strcmp(argv[i], "--no-distill") == 0) {
             distill_config.enabled = false;
+        } else if (strcmp(argv[i], "--gradmem") == 0) {
+            gradmem_config.enabled = true;
+        } else if (strcmp(argv[i], "--gradmem-model") == 0 && i + 1 < argc) {
+            gradmem_config.model_ts_path = argv[++i];
+        } else if (strcmp(argv[i], "--gradmem-gguf") == 0 && i + 1 < argc) {
+            gradmem_config.gguf_path = argv[++i];
+        } else if (strcmp(argv[i], "--gradmem-K") == 0 && i + 1 < argc) {
+            gradmem_config.K = safe_stoi(argv[++i], "--gradmem-K");
+        } else if (strcmp(argv[i], "--gradmem-mem") == 0 && i + 1 < argc) {
+            gradmem_config.n_mem_tokens = safe_stoi(argv[++i], "--gradmem-mem");
+        } else if (strcmp(argv[i], "--gradmem-ctx") == 0 && i + 1 < argc) {
+            gradmem_config.max_ctx_tokens = safe_stoi(argv[++i], "--gradmem-ctx");
         } else if (strcmp(argv[i], "--enrich-interval") == 0 && i + 1 < argc) {
             enrich_config.interval_minutes = safe_stoi(argv[++i], "--enrich-interval");
         } else if (strcmp(argv[i], "--enrich-batch") == 0 && i + 1 < argc) {
@@ -1557,7 +1692,7 @@ int main(int argc, char* argv[]) {
 
     int result = 0;
     if (command == "daemon") {
-        result = cmd_daemon(field_store, yantra_raw, interval, sock_path, mind_path, pid_file, distill_config, enrich_config, subconscious_config, no_autonomous, http_port, http_static_dir);
+        result = cmd_daemon(field_store, yantra_raw, interval, sock_path, mind_path, pid_file, distill_config, enrich_config, subconscious_config, no_autonomous, http_port, http_static_dir, gradmem_config);
     } else if (command == "stats") {
         result = cmd_stats(field_store, yantra_raw);
     } else if (command == "metrics") {

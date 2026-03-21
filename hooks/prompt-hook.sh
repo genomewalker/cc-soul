@@ -66,6 +66,10 @@ if [[ $((TURN_INDEX % CHECKPOINT_INTERVAL)) -eq 0 && $TURN_INDEX -gt 0 ]]; then
 
     queue_write "ledger_save" "$CHECKPOINT_ARGS"
     echo "[ledger] checkpoint at turn $TURN_INDEX" >&2
+
+    # Incremental distillation every N turns (fire-and-forget, non-blocking)
+    queue_write "distill_trigger" "{\"session_id\":\"$SESSION_ID\"}"
+    echo "[distill] queued incremental distillation at turn $TURN_INDEX" >&2
 fi
 
 # ===========================================

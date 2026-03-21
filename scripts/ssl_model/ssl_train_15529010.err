@@ -1,0 +1,46 @@
+`torch_dtype` is deprecated! Use `dtype` instead!
+Traceback (most recent call last):
+  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/huggingface_hub/utils/_http.py", line 402, in hf_raise_for_status
+    response.raise_for_status()
+  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/requests/models.py", line 1026, in raise_for_status
+    raise HTTPError(http_error_msg, response=self)
+requests.exceptions.HTTPError: 429 Client Error: Too Many Requests for url: https://huggingface.co/api/models/Qwen/Qwen2.5-1.5B-Instruct
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/maps/projects/fernandezguerra/apps/repos/cc-soul/scripts/ssl_model/02_finetune.py", line 242, in <module>
+    main()
+  File "/maps/projects/fernandezguerra/apps/repos/cc-soul/scripts/ssl_model/02_finetune.py", line 238, in main
+    train(args)
+  File "/maps/projects/fernandezguerra/apps/repos/cc-soul/scripts/ssl_model/02_finetune.py", line 150, in train
+    model, tokenizer = load_model(args.model, use_4bit=not args.no_4bit)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/maps/projects/fernandezguerra/apps/repos/cc-soul/scripts/ssl_model/02_finetune.py", line 125, in load_model
+    tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/transformers/models/auto/tokenization_auto.py", line 1156, in from_pretrained
+    return tokenizer_class.from_pretrained(pretrained_model_name_or_path, *inputs, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/transformers/tokenization_utils_base.py", line 2113, in from_pretrained
+    return cls._from_pretrained(
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/transformers/tokenization_utils_base.py", line 2395, in _from_pretrained
+    tokenizer = cls._patch_mistral_regex(
+                ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/transformers/tokenization_utils_base.py", line 2438, in _patch_mistral_regex
+    if _is_local or is_base_mistral(pretrained_model_name_or_path):
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/transformers/tokenization_utils_base.py", line 2432, in is_base_mistral
+    model = model_info(model_id)
+            ^^^^^^^^^^^^^^^^^^^^
+  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/huggingface_hub/utils/_validators.py", line 114, in _inner_fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/huggingface_hub/hf_api.py", line 2661, in model_info
+    hf_raise_for_status(r)
+  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/huggingface_hub/utils/_http.py", line 475, in hf_raise_for_status
+    raise _format(HfHubHTTPError, str(e), response) from e
+huggingface_hub.errors.HfHubHTTPError: 429 Client Error: Too Many Requests for url: https://huggingface.co/api/models/Qwen/Qwen2.5-1.5B-Instruct (Request ID: Root=1-69bb0bd8-25c80a1d11afb6ce7b4848c6;30ed1224-4e77-4d18-87b2-190318480a06)
+
+We had to rate limit your IP (130.226.236.96). To continue using our service, create a HF account or login to your existing account, and make sure you pass a HF_TOKEN if you're using the API.

@@ -1,0 +1,4 @@
+  File "/maps/projects/fernandezguerra/apps/repos/cc-soul/scripts/ssl_model/02_finetune.py", line 205
+    data_collator=data_collator,
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+SyntaxError: keyword argument repeated: data_collator

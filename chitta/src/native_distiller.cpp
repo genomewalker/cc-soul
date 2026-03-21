@@ -13,6 +13,7 @@
 #include <sys/wait.h>
 #include <signal.h>
 #include <fcntl.h>
+#include <cstdlib>  // mkstemp
 
 namespace chitta {
 
@@ -154,6 +155,124 @@ std::string NativeDistiller::call_opencode(const std::string& prompt) {
     }
 
     close(stdout_pipe[0]);
+    return output;
+}
+
+// ── local model call (llama-cli) ─────────────────────────────────────────────
+
+std::string NativeDistiller::call_local_model(const std::string& prompt) {
+    // Build argument list for llama-cli
+    // We write the prompt to a temp file to avoid shell quoting issues
+    char tmp_path[] = "/tmp/chitta_prompt_XXXXXX";
+    int tmp_fd = mkstemp(tmp_path);
+    if (tmp_fd < 0) {
+        log("[distill] call_local_model: mkstemp failed");
+        return "";
+    }
+    {
+        ssize_t written = 0;
+        size_t total = prompt.size();
+        const char* data = prompt.data();
+        while (written < static_cast<ssize_t>(total)) {
+            ssize_t n = write(tmp_fd, data + written, total - written);
+            if (n <= 0) break;
+            written += n;
+        }
+        close(tmp_fd);
+    }
+
+    int stdout_pipe[2];
+    if (pipe(stdout_pipe) < 0) {
+        unlink(tmp_path);
+        return "";
+    }
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(stdout_pipe[0]); close(stdout_pipe[1]);
+        unlink(tmp_path);
+        return "";
+    }
+
+    if (pid == 0) {
+        close(stdout_pipe[0]);
+        dup2(stdout_pipe[1], STDOUT_FILENO);
+        // Suppress stderr (progress bars, model loading noise)
+        int devnull = open("/dev/null", O_WRONLY);
+        if (devnull >= 0) {
+            dup2(devnull, STDERR_FILENO);
+            close(devnull);
+        }
+        close(stdout_pipe[1]);
+
+        // llama-cli -m <path> -f <prompt_file> -n 512 --temp 0.1 --no-display-prompt -e
+        execlp("llama-cli", "llama-cli",
+               "-m", config_.local_model_path.c_str(),
+               "-f", tmp_path,
+               "-n", "512",
+               "--temp", "0.1",
+               "--no-display-prompt",
+               "-e",   // process escape sequences in prompt
+               nullptr);
+        _exit(1);
+    }
+
+    close(stdout_pipe[1]);
+
+    std::string output;
+    std::array<char, 4096> buffer;
+
+    int flags = fcntl(stdout_pipe[0], F_GETFL, 0);
+    fcntl(stdout_pipe[0], F_SETFL, flags | O_NONBLOCK);
+
+    auto start = std::chrono::steady_clock::now();
+    bool finished = false;
+
+    while (!finished) {
+        auto elapsed = std::chrono::steady_clock::now() - start;
+        if (std::chrono::duration_cast<std::chrono::seconds>(elapsed).count() >= config_.timeout_secs) {
+            kill(pid, SIGKILL);
+            waitpid(pid, nullptr, 0);
+            close(stdout_pipe[0]);
+            unlink(tmp_path);
+            log("[distill] Local model timeout after " + std::to_string(config_.timeout_secs) + "s");
+            return "";
+        }
+
+        if (cancel_callback_ && cancel_callback_()) {
+            kill(pid, SIGKILL);
+            waitpid(pid, nullptr, 0);
+            close(stdout_pipe[0]);
+            unlink(tmp_path);
+            log("[distill] Local model cancelled");
+            return "";
+        }
+
+        int status;
+        int result = waitpid(pid, &status, WNOHANG);
+        if (result > 0) {
+            finished = true;
+        } else if (result < 0) {
+            finished = true;
+        }
+
+        ssize_t n;
+        while ((n = read(stdout_pipe[0], buffer.data(), buffer.size())) > 0) {
+            output.append(buffer.data(), n);
+        }
+
+        if (!finished) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    }
+
+    ssize_t n;
+    while ((n = read(stdout_pipe[0], buffer.data(), buffer.size())) > 0) {
+        output.append(buffer.data(), n);
+    }
+
+    close(stdout_pipe[0]);
+    unlink(tmp_path);
     return output;
 }
 
@@ -316,12 +435,22 @@ DistillResult NativeDistiller::distill_session(
             " (turns " + std::to_string(start_turn) + "-" + std::to_string(end_turn) + ")");
     }
 
-    // 7. Call opencode for distillation
-    log("[distill] Calling opencode (" + config_.model + ")...");
-    auto llm_output = call_opencode(prompt);
+    // 7. Call LLM for distillation (local GGUF or opencode)
+    std::string llm_output;
+    if (!config_.local_model_path.empty()) {
+        log("[distill] Calling local model (" + config_.local_model_path + ")...");
+        llm_output = call_local_model(prompt);
+        if (llm_output.empty()) {
+            log("[distill] Local model returned nothing, falling back to opencode");
+            llm_output = call_opencode(prompt);
+        }
+    } else {
+        log("[distill] Calling opencode (" + config_.model + ")...");
+        llm_output = call_opencode(prompt);
+    }
 
     if (llm_output.empty()) {
-        result.error = "No result from opencode";
+        result.error = "No result from LLM";
         return result;
     }
 

@@ -966,9 +966,9 @@ int run_cli(const std::string& socket_path, const std::string& tool,
             case OutputFormat::Json:
                 // Raw JSON output
                 if (result.contains("result") && result["result"].contains("structured")) {
-                    std::cout << result["result"]["structured"].dump(2) << "\n";
+                    std::cout << result["result"]["structured"].dump(2, ' ', false, json::error_handler_t::replace) << "\n";
                 } else {
-                    std::cout << result.dump(2) << "\n";
+                    std::cout << result.dump(2, ' ', false, json::error_handler_t::replace) << "\n";
                 }
                 break;
 

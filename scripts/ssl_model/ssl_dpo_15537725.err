@@ -1,0 +1,14 @@
+
+[notice] A new release of pip is available: 25.3 -> 26.0.1
+[notice] To update, run: pip install --upgrade pip
+`torch_dtype` is deprecated! Use `dtype` instead!
+Map:   0%|          | 0/84 [00:00<?, ? examples/s]Map: 100%|██████████| 84/84 [00:00<00:00, 2510.97 examples/s]
+Traceback (most recent call last):
+  File "/maps/projects/fernandezguerra/apps/repos/cc-soul/scripts/ssl_model/02b_dpo_finetune.py", line 167, in <module>
+    main()
+  File "/maps/projects/fernandezguerra/apps/repos/cc-soul/scripts/ssl_model/02b_dpo_finetune.py", line 163, in main
+    train(args)
+  File "/maps/projects/fernandezguerra/apps/repos/cc-soul/scripts/ssl_model/02b_dpo_finetune.py", line 100, in train
+    training_args = DPOConfig(
+                    ^^^^^^^^^^
+TypeError: DPOConfig.__init__() got an unexpected keyword argument 'max_prompt_length'

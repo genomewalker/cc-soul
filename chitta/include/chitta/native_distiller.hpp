@@ -30,7 +30,8 @@ struct TranscriptState {
 
 struct NativeDistillConfig {
     std::string model = "opencode/minimax-m2.5-free";  // LLM model — overridden by --distill-model
-    int timeout_secs = 120;                   // Timeout for opencode call
+    std::string local_model_path = "";        // If set, use llama-cli instead of opencode
+    int timeout_secs = 120;                   // Timeout for opencode/llama-cli call
     int min_turns = 5;                        // Minimum turns for distillation
     bool verbose = false;                     // Enable verbose logging
     float dedup_threshold = 0.92f;            // Cosine similarity above which we strengthen
@@ -86,6 +87,9 @@ private:
 
     // Call opencode with prompt, return output
     std::string call_opencode(const std::string& prompt);
+
+    // Call local GGUF model via llama-cli, return output
+    std::string call_local_model(const std::string& prompt);
 
     // Store learnings via FieldStore with dedup
     void store_learnings(
