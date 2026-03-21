@@ -103,3 +103,4 @@ chitta/Testing/
 .clangd/
 chitta/.cache/clangd/
 nohup.out
+scripts/ssl_model/*.gguf
