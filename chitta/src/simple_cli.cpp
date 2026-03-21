@@ -75,8 +75,8 @@ struct DistillConfig {
 struct GradMemDaemonConfig {
     bool        enabled       = false;   // Off until model is prepared
     std::string gradmemd_path;           // ~/.claude/bin/gradmemd
-    std::string model_ts_path;           // ~/.claude/bin/qwen_gradmem.pt
-    std::string gguf_path;               // ~/.claude/bin/ssl_distiller_dpo.gguf
+    std::string python_script;           // scripts/gradmem/gradmemd.py
+    std::string model_path;              // HF model snapshot path
     int         n_mem_tokens  = 8;
     int         K             = 2;
     float       inner_lr      = 0.04f;
@@ -1099,8 +1099,8 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                                         std::cerr << "[queue] gradmem_trigger: session=" << session_id << "\n";
                                         GradMemConfig gm_cfg;
                                         gm_cfg.gradmemd_path  = gradmem_config.gradmemd_path;
-                                        gm_cfg.model_ts_path  = gradmem_config.model_ts_path;
-                                        gm_cfg.gguf_path      = gradmem_config.gguf_path;
+                                        gm_cfg.python_script  = gradmem_config.python_script;
+                                        gm_cfg.model_path     = gradmem_config.model_path;
                                         gm_cfg.n_mem_tokens   = gradmem_config.n_mem_tokens;
                                         gm_cfg.K              = gradmem_config.K;
                                         gm_cfg.inner_lr       = gradmem_config.inner_lr;
@@ -1136,8 +1136,8 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                                         gmr.proxy_embedding = rj["proxy_embedding"].get<std::vector<float>>();
                                     gmr.success = !gmr.M_fp16_b64.empty();
                                     if (gmr.success) {
-                                        GradMemConfig gm_cfg;
-                                        GradMemWriter gw(field_store, gm_cfg);
+                                        GradMemConfig gm_cfg2;
+                                        GradMemWriter gw(field_store, gm_cfg2);
                                         gw.store_result(gmr);
                                         std::cerr << "[queue] gradmem_result: stored for " << gmr.session_id << "\n";
                                     }
@@ -1520,9 +1520,12 @@ int main(int argc, char* argv[]) {
     {
         const char* home = getenv("HOME");
         std::string bin = home ? std::string(home) + "/.claude/bin" : "";
-        gradmem_config.gradmemd_path = bin + "/gradmemd";
-        gradmem_config.model_ts_path = bin + "/qwen_gradmem.pt";
-        gradmem_config.gguf_path     = bin + "/ssl_distiller_dpo.gguf";
+        std::string cc_soul_dir = bin + "/../../repos/cc-soul";  // best-effort
+        gradmem_config.gradmemd_path  = bin + "/gradmemd";
+        gradmem_config.python_script  = "/maps/projects/fernandezguerra/apps/repos/cc-soul/scripts/gradmem/gradmemd.py";
+        gradmem_config.model_path     = std::string(home ? home : "") +
+            "/.cache/huggingface/hub/models--Qwen--Qwen2.5-1.5B-Instruct/snapshots"
+            "/989aa7980e4cf806f80c7fef2b1adb7bc71aa306";
     }
 
     // Code enrichment config
@@ -1584,9 +1587,9 @@ int main(int argc, char* argv[]) {
         } else if (strcmp(argv[i], "--gradmem") == 0) {
             gradmem_config.enabled = true;
         } else if (strcmp(argv[i], "--gradmem-model") == 0 && i + 1 < argc) {
-            gradmem_config.model_ts_path = argv[++i];
-        } else if (strcmp(argv[i], "--gradmem-gguf") == 0 && i + 1 < argc) {
-            gradmem_config.gguf_path = argv[++i];
+            gradmem_config.model_path = argv[++i];
+        } else if (strcmp(argv[i], "--gradmem-script") == 0 && i + 1 < argc) {
+            gradmem_config.python_script = argv[++i];
         } else if (strcmp(argv[i], "--gradmem-K") == 0 && i + 1 < argc) {
             gradmem_config.K = safe_stoi(argv[++i], "--gradmem-K");
         } else if (strcmp(argv[i], "--gradmem-mem") == 0 && i + 1 < argc) {

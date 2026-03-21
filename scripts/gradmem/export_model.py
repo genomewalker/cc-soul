@@ -32,11 +32,11 @@ def export(hf_model_path: str, output_path: str) -> None:
     base.eval()
 
     class QwenGradMemWrapper(torch.nn.Module):
+        """Wrapper using the decoder stack directly to avoid positional-arg ambiguity."""
         def __init__(self, model):
             super().__init__()
             self.embed_tokens = model.model.embed_tokens
-            self.layers       = model.model.layers
-            self.norm         = model.model.norm
+            self.decoder      = model.model   # QwenModel (decoder stack)
             self.lm_head      = model.lm_head
             self._vocab_size  = model.config.vocab_size
 
@@ -44,43 +44,65 @@ def export(hf_model_path: str, output_path: str) -> None:
             return self.embed_tokens(input_ids)
 
         def forward_from_embeds(self, embeds: torch.Tensor) -> torch.Tensor:
-            hidden = embeds
-            seq_len = hidden.size(1)
-            position_ids = torch.arange(seq_len, device=hidden.device).unsqueeze(0)
-            for layer in self.layers:
-                # Most Qwen layers accept (hidden_states, attention_mask, position_ids)
-                # passing None for attention_mask triggers causal masking internally.
-                layer_out = layer(hidden, attention_mask=None, position_ids=position_ids)
-                hidden = layer_out[0]
-            hidden = self.norm(hidden)
-            return self.lm_head(hidden)
+            # use_cache=False avoids KV cache shape being baked into the trace
+            out = self.decoder(inputs_embeds=embeds, use_cache=False)
+            return self.lm_head(out.last_hidden_state)
 
         def vocab_size(self) -> int:
             return self._vocab_size
 
+    # Disable Flash Attention — tracing requires standard eager attention
+    base.config._attn_implementation = "eager"
+    # Re-init attention with eager implementation
+    for layer in base.model.layers:
+        if hasattr(layer.self_attn, '_attn_implementation'):
+            layer.self_attn._attn_implementation = "eager"
+
     wrapper = QwenGradMemWrapper(base)
     wrapper.eval()
 
-    print("Scripting wrapper ...")
-    scripted = torch.jit.script(wrapper)
+    # Sequence length must match production use — attention mask is baked into trace.
+    # gradmemd pads/truncates all inputs to exactly SEQ_LEN tokens.
+    SEQ_LEN = 512
+
+    print(f"Tracing wrapper via trace_module (seq_len={SEQ_LEN}) ...")
+    example_ids   = torch.zeros((1, SEQ_LEN), dtype=torch.long)
+    example_embed = torch.zeros((1, SEQ_LEN, base.config.hidden_size))
+
+    with torch.no_grad():
+        scripted = torch.jit.trace_module(
+            wrapper,
+            inputs={
+                "embed":              (example_ids,),
+                "forward_from_embeds": (example_embed,),
+            },
+            strict=False,
+        )
+
+    # Save vocab_size alongside the model as a sidecar JSON
+    import json, os
+    meta = {"vocab_size": base.config.vocab_size, "hidden_size": base.config.hidden_size}
+    meta_path = output_path.replace(".pt", ".json")
+    with open(meta_path, "w") as f:
+        json.dump(meta, f)
+    print(f"Saved metadata → {meta_path}: {meta}")
 
     print(f"Saving to {output_path} ...")
     scripted.save(output_path)
+    print(f"Model size: {os.path.getsize(output_path) / 1e9:.2f} GB")
 
-    # Quick smoke test
+    # Quick smoke test — must use same SEQ_LEN as tracing
     print("Smoke test ...")
     loaded = torch.jit.load(output_path)
     loaded.eval()
-    test_ids = torch.tensor([[1, 100, 200, 300]])
+    test_ids = torch.zeros((1, SEQ_LEN), dtype=torch.long)
     with torch.no_grad():
         embeds = loaded.embed(test_ids)
         logits = loaded.forward_from_embeds(embeds)
-        vsize  = loaded.vocab_size()
     print(f"  embed:   {tuple(embeds.shape)}")
     print(f"  logits:  {tuple(logits.shape)}")
-    print(f"  vocab:   {vsize}")
     assert embeds.shape[0] == 1
-    assert logits.shape[-1] == vsize
+    assert logits.shape[-1] == meta["vocab_size"]
     print(f"OK — {output_path}")
 
 

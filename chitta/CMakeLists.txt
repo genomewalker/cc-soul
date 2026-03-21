@@ -430,50 +430,15 @@ target_compile_definitions(chittad PRIVATE CHITTA_FIELD_AVAILABLE=1)
 # ── gradmemd: GradMem write subprocess (optional, requires libtorch) ──────────
 option(CHITTA_WITH_TORCH "Build gradmemd with libtorch (requires libtorch installation)" OFF)
 
-if(CHITTA_WITH_TORCH)
-    find_package(Torch QUIET HINTS
-        "$ENV{LIBTORCH_PATH}"
-        "$ENV{HOME}/libtorch"
-        "/opt/libtorch"
-        "/usr/local/libtorch"
-    )
-    if(Torch_FOUND)
-        message(STATUS "libtorch found: ${TORCH_INSTALL_PREFIX}")
-
-        set(GRADMEMD_SOURCES src/gradmemd.cpp)
-        set(GRADMEMD_DEFS "")
-
-        # Optional: link against llama.cpp for proper Qwen tokenization
-        if(LLAMA_CPP_DIR)
-            set(LLAMA_LIB "${LLAMA_CPP_DIR}/build/src/libllama.so")
-            set(LLAMA_INCLUDE "${LLAMA_CPP_DIR}/include")
-            if(EXISTS "${LLAMA_LIB}")
-                list(APPEND GRADMEMD_DEFS CHITTA_GRADMEM_WITH_LLAMA=1)
-                message(STATUS "gradmemd: llama.cpp tokenizer enabled")
-            else()
-                message(STATUS "gradmemd: llama.cpp not found at ${LLAMA_LIB}, using fallback tokenizer")
-                unset(LLAMA_LIB)
-            endif()
-        endif()
-
-        add_executable(gradmemd ${GRADMEMD_SOURCES})
-        target_compile_definitions(gradmemd PRIVATE ${GRADMEMD_DEFS})
-        target_include_directories(gradmemd PRIVATE
-            ${TORCH_INCLUDE_DIRS}
-            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        )
-        if(DEFINED LLAMA_LIB AND EXISTS "${LLAMA_LIB}")
-            target_include_directories(gradmemd PRIVATE "${LLAMA_INCLUDE}")
-            target_link_libraries(gradmemd PRIVATE "${TORCH_LIBRARIES}" "${LLAMA_LIB}" nlohmann_json::nlohmann_json)
-        else()
-            target_link_libraries(gradmemd PRIVATE "${TORCH_LIBRARIES}" nlohmann_json::nlohmann_json)
-        endif()
-        set_property(TARGET gradmemd PROPERTY CXX_STANDARD 20)
-        message(STATUS "gradmemd target configured")
-    else()
-        message(WARNING "CHITTA_WITH_TORCH=ON but libtorch not found. Set -DLIBTORCH_PATH=/path/to/libtorch")
-    endif()
-endif()
+# ── gradmemd: thin C++ launcher that exec's gradmemd.py ──────────────────────
+# No libtorch dependency — pure C++, always built with chittad.
+add_executable(gradmemd src/gradmemd.cpp)
+target_include_directories(gradmemd PRIVATE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+)
+target_link_libraries(gradmemd PRIVATE chitta)
+set_property(TARGET gradmemd PROPERTY CXX_STANDARD 20)
+message(STATUS "gradmemd target configured (Python launcher)")
 
 # CLI tool for memory operations (thin client + MCP server)
 # Output as 'chitta' binary (target named chitta_tool to avoid library conflict)

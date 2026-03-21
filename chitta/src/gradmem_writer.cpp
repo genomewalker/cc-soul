@@ -26,8 +26,7 @@ std::string GradMemWriter::build_job_json(
         {"session_id",    session_id},
         {"realm",         realm},
         {"text",          transcript_text},
-        {"model_ts",      config_.model_ts_path},
-        {"gguf",          config_.gguf_path},
+        {"model_path",    config_.model_path},
         {"n_mem_tokens",  config_.n_mem_tokens},
         {"K",             config_.K},
         {"inner_lr",      config_.inner_lr},
@@ -101,7 +100,11 @@ GradMemResult GradMemWriter::write_sync(
         // Redirect stderr to /dev/null to avoid polluting daemon logs
         int devnull = open("/dev/null", O_WRONLY);
         if (devnull >= 0) dup2(devnull, STDERR_FILENO);
-        execl(config_.gradmemd_path.c_str(), "gradmemd", nullptr);
+        // Pass python_script and model_path as argv[1], argv[2]
+        execl(config_.gradmemd_path.c_str(), "gradmemd",
+              config_.python_script.c_str(),
+              config_.model_path.c_str(),
+              nullptr);
         // exec failed — write error to stdout and exit
         const char* err = R"({"error":"execl failed"})";
         write(STDOUT_FILENO, err, strlen(err));

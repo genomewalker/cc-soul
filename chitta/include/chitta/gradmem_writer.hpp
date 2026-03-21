@@ -20,9 +20,10 @@
 namespace chitta {
 
 struct GradMemConfig {
-    std::string gradmemd_path;     // Path to gradmemd binary (~/.claude/bin/gradmemd)
-    std::string model_ts_path;     // TorchScript Qwen model (~/.claude/bin/qwen_gradmem.pt)
-    std::string gguf_path;         // GGUF for tokenization (~/.claude/bin/ssl_distiller_dpo.gguf)
+    std::string gradmemd_path;     // Path to gradmemd launcher (~/.claude/bin/gradmemd)
+    std::string python_script;     // Path to gradmemd.py (the actual ML logic)
+    std::string model_path;        // HF model path for gradmemd.py
+    std::string python_bin;        // Python binary with torch+transformers
     int n_mem_tokens  = 8;         // Number of memory prefix tokens
     int K             = 2;         // Inner loop gradient steps
     float inner_lr    = 0.04f;     // SGD learning rate for M
