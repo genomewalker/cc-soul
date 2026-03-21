@@ -104,3 +104,4 @@ chitta/Testing/
 chitta/.cache/clangd/
 nohup.out
 scripts/ssl_model/*.gguf
+.claude/worktrees/
