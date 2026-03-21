@@ -21,6 +21,9 @@ import json
 import base64
 import struct
 
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = ""  # CPU-only — no GPU dependency
+
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 

@@ -99,11 +99,11 @@ int main(int argc, char* argv[]) {
     // Use sh -c to handle stdin redirection
     std::string cmd = python_bin + " " + script_path + " < " + tmp_path;
 
-    // Set CUDA lib path for torch
-    std::string ld_path = "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo"
-                          "/lib/python3.12/site-packages/torch/lib"
-                          ":/opt/software/cuda/12.8/lib64";
+    // Ensure torch libs are findable (no CUDA dependency — CPU-only inference)
+    std::string torch_lib = "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo"
+                            "/lib/python3.12/site-packages/torch/lib";
     const char* existing_ld = getenv("LD_LIBRARY_PATH");
+    std::string ld_path = torch_lib;
     if (existing_ld && existing_ld[0]) {
         ld_path += ":";
         ld_path += existing_ld;
