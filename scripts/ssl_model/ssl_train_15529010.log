@@ -1,6 +1,0 @@
-=== SSL Distiller Fine-tuning ===
-Job: 15529010 on dandygpun01fl.unicph.domain
-GPU: NVIDIA A100-PCIE-40GB
-Start: Wed Mar 18 18:31:36 CET 2026
-Training on 1988 examples
-Loading model: Qwen/Qwen2.5-1.5B-Instruct

@@ -1,115 +1,0 @@
-`torch_dtype` is deprecated! Use `dtype` instead!
-Map:   0%|          | 0/1988 [00:00<?, ? examples/s]Map:  46%|████▌     | 913/1988 [00:00<00:00, 9079.66 examples/s]Map: 100%|██████████| 1988/1988 [00:00<00:00, 6689.08 examples/s]Map: 100%|██████████| 1988/1988 [00:00<00:00, 6916.92 examples/s]
-Map:   0%|          | 0/1988 [00:00<?, ? examples/s]Map:   1%|          | 12/1988 [00:00<00:18, 109.72 examples/s]Map:   1%|          | 24/1988 [00:00<00:17, 111.00 examples/s]Map:   2%|▏         | 37/1988 [00:00<00:16, 115.32 examples/s]Map:   3%|▎         | 54/1988 [00:00<00:17, 109.33 examples/s]Map:   4%|▎         | 72/1988 [00:00<00:17, 108.69 examples/s]Map:   4%|▍         | 86/1988 [00:00<00:16, 113.76 examples/s]Map:   5%|▍         | 99/1988 [00:00<00:16, 117.03 examples/s]Map:   6%|▌         | 115/1988 [00:00<00:14, 128.24 examples/s]Map:   7%|▋         | 130/1988 [00:01<00:13, 133.11 examples/s]Map:   7%|▋         | 147/1988 [00:01<00:15, 120.21 examples/s]Map:   8%|▊         | 160/1988 [00:01<00:15, 117.36 examples/s]Map:   9%|▊         | 173/1988 [00:01<00:15, 119.11 examples/s]Map:  10%|▉         | 189/1988 [00:01<00:14, 126.59 examples/s]Map:  10%|█         | 204/1988 [00:01<00:13, 128.88 examples/s]Map:  11%|█▏        | 224/1988 [00:01<00:14, 125.43 examples/s]Map:  12%|█▏        | 239/1988 [00:01<00:13, 126.77 examples/s]Map:  13%|█▎        | 253/1988 [00:02<00:13, 127.82 examples/s]Map:  14%|█▎        | 270/1988 [00:02<00:12, 134.99 examples/s]Map:  14%|█▍        | 287/1988 [00:02<00:12, 141.64 examples/s]Map:  16%|█▌        | 310/1988 [00:02<00:11, 142.63 examples/s]Map:  16%|█▋        | 326/1988 [00:02<00:11, 142.16 examples/s]Map:  17%|█▋        | 343/1988 [00:02<00:12, 129.35 examples/s]Map:  18%|█▊        | 360/1988 [00:02<00:11, 137.28 examples/s]Map:  19%|█▉        | 379/1988 [00:02<00:10, 147.31 examples/s]Map:  20%|█▉        | 395/1988 [00:03<00:11, 144.75 examples/s]Map:  21%|██        | 410/1988 [00:03<00:10, 144.02 examples/s]Map:  22%|██▏       | 430/1988 [00:03<00:09, 155.81 examples/s]Map:  22%|██▏       | 446/1988 [00:03<00:11, 133.17 examples/s]Map:  23%|██▎       | 461/1988 [00:03<00:11, 132.30 examples/s]Map:  24%|██▍       | 477/1988 [00:03<00:11, 135.94 examples/s]Map:  25%|██▍       | 491/1988 [00:03<00:11, 132.09 examples/s]Map:  25%|██▌       | 505/1988 [00:03<00:11, 132.50 examples/s]Map:  27%|██▋       | 527/1988 [00:04<00:11, 131.38 examples/s]Map:  27%|██▋       | 545/1988 [00:04<00:10, 135.00 examples/s]Map:  28%|██▊       | 564/1988 [00:04<00:09, 147.72 examples/s]Map:  29%|██▉       | 582/1988 [00:04<00:10, 128.54 examples/s]Map:  30%|███       | 600/1988 [00:04<00:10, 135.54 examples/s]Map:  31%|███       | 619/1988 [00:04<00:09, 146.27 examples/s]Map:  32%|███▏      | 641/1988 [00:04<00:09, 142.33 examples/s]Map:  33%|███▎      | 658/1988 [00:05<00:18, 73.28 examples/s] Map:  34%|███▍      | 677/1988 [00:05<00:15, 82.32 examples/s]Map:  35%|███▍      | 694/1988 [00:05<00:13, 94.95 examples/s]Map:  36%|███▌      | 714/1988 [00:05<00:11, 112.70 examples/s]Map:  37%|███▋      | 733/1988 [00:05<00:09, 127.83 examples/s]Map:  38%|███▊      | 755/1988 [00:06<00:09, 132.29 examples/s]Map:  39%|███▉      | 776/1988 [00:06<00:09, 132.06 examples/s]Map:  40%|███▉      | 793/1988 [00:06<00:09, 123.56 examples/s]Map:  41%|████      | 809/1988 [00:06<00:10, 113.42 examples/s]Map:  41%|████▏     | 825/1988 [00:06<00:10, 107.40 examples/s]Map:  42%|████▏     | 840/1988 [00:06<00:11, 101.65 examples/s]Map:  43%|████▎     | 857/1988 [00:06<00:09, 115.58 examples/s]Map:  44%|████▍     | 875/1988 [00:07<00:08, 128.21 examples/s]Map:  45%|████▍     | 893/1988 [00:07<00:07, 137.81 examples/s]Map:  46%|████▌     | 911/1988 [00:07<00:08, 127.83 examples/s]Map:  47%|████▋     | 928/1988 [00:07<00:08, 120.09 examples/s]Map:  48%|████▊     | 945/1988 [00:07<00:09, 115.01 examples/s]Map:  48%|████▊     | 961/1988 [00:07<00:08, 121.64 examples/s]Map:  49%|████▉     | 975/1988 [00:07<00:08, 123.33 examples/s]Map:  50%|████▉     | 988/1988 [00:07<00:08, 120.42 examples/s]Map:  51%|█████     | 1009/1988 [00:08<00:17, 56.23 examples/s]Map:  52%|█████▏    | 1030/1988 [00:08<00:12, 74.46 examples/s]Map:  53%|█████▎    | 1045/1988 [00:08<00:11, 84.81 examples/s]Map:  54%|█████▎    | 1065/1988 [00:09<00:08, 103.67 examples/s]Map:  55%|█████▍    | 1089/1988 [00:09<00:06, 129.90 examples/s]Map:  56%|█████▌    | 1109/1988 [00:09<00:06, 130.21 examples/s]Map:  57%|█████▋    | 1130/1988 [00:09<00:06, 128.36 examples/s]Map:  58%|█████▊    | 1145/1988 [00:09<00:06, 131.11 examples/s]Map:  59%|█████▊    | 1163/1988 [00:09<00:06, 125.99 examples/s]Map:  59%|█████▉    | 1182/1988 [00:09<00:06, 122.91 examples/s]Map:  60%|██████    | 1196/1988 [00:09<00:06, 123.86 examples/s]Map:  61%|██████    | 1209/1988 [00:10<00:10, 77.02 examples/s] Map:  62%|██████▏   | 1223/1988 [00:10<00:08, 87.46 examples/s]Map:  62%|██████▏   | 1238/1988 [00:10<00:07, 97.16 examples/s]Map:  63%|██████▎   | 1252/1988 [00:10<00:07, 101.36 examples/s]Map:  64%|██████▎   | 1265/1988 [00:10<00:06, 107.40 examples/s]Map:  64%|██████▍   | 1282/1988 [00:10<00:06, 106.52 examples/s]Map:  65%|██████▌   | 1297/1988 [00:11<00:05, 115.63 examples/s]Map:  66%|██████▌   | 1313/1988 [00:11<00:05, 124.44 examples/s]Map:  67%|██████▋   | 1330/1988 [00:11<00:05, 130.26 examples/s]Map:  68%|██████▊   | 1344/1988 [00:11<00:04, 131.16 examples/s]Map:  68%|██████▊   | 1359/1988 [00:11<00:04, 132.08 examples/s]Map:  69%|██████▉   | 1375/1988 [00:11<00:04, 138.49 examples/s]Map:  70%|██████▉   | 1390/1988 [00:11<00:04, 139.09 examples/s]Map:  71%|███████   | 1405/1988 [00:11<00:04, 137.12 examples/s]Map:  71%|███████▏  | 1421/1988 [00:11<00:03, 141.78 examples/s]Map:  72%|███████▏  | 1438/1988 [00:12<00:03, 146.38 examples/s]Map:  73%|███████▎  | 1453/1988 [00:12<00:04, 123.94 examples/s]Map:  74%|███████▍  | 1468/1988 [00:12<00:04, 129.64 examples/s]Map:  75%|███████▍  | 1483/1988 [00:12<00:03, 128.18 examples/s]Map:  75%|███████▌  | 1497/1988 [00:12<00:03, 128.57 examples/s]Map:  76%|███████▌  | 1514/1988 [00:12<00:03, 133.16 examples/s]Map:  77%|███████▋  | 1528/1988 [00:12<00:03, 133.70 examples/s]Map:  78%|███████▊  | 1548/1988 [00:12<00:03, 129.17 examples/s]Map:  79%|███████▊  | 1565/1988 [00:13<00:03, 137.60 examples/s]Map:  80%|███████▉  | 1583/1988 [00:13<00:03, 125.94 examples/s]Map:  81%|████████  | 1602/1988 [00:13<00:03, 121.28 examples/s]Map:  81%|████████▏ | 1616/1988 [00:13<00:02, 124.55 examples/s]Map:  82%|████████▏ | 1630/1988 [00:13<00:02, 127.68 examples/s]Map:  83%|████████▎ | 1646/1988 [00:13<00:02, 135.23 examples/s]Map:  84%|████████▎ | 1663/1988 [00:13<00:02, 141.08 examples/s]Map:  84%|████████▍ | 1678/1988 [00:13<00:02, 135.37 examples/s]Map:  85%|████████▌ | 1694/1988 [00:14<00:02, 138.28 examples/s]Map:  86%|████████▌ | 1709/1988 [00:14<00:02, 136.69 examples/s]Map:  87%|████████▋ | 1725/1988 [00:14<00:01, 135.62 examples/s]Map:  88%|████████▊ | 1741/1988 [00:14<00:01, 140.23 examples/s]Map:  89%|████████▊ | 1763/1988 [00:14<00:01, 139.10 examples/s]Map:  89%|████████▉ | 1779/1988 [00:14<00:01, 139.97 examples/s]Map:  90%|█████████ | 1797/1988 [00:14<00:01, 147.55 examples/s]Map:  91%|█████████ | 1814/1988 [00:14<00:01, 150.77 examples/s]Map:  92%|█████████▏| 1836/1988 [00:14<00:00, 166.63 examples/s]Map:  93%|█████████▎| 1853/1988 [00:15<00:00, 164.63 examples/s]Map:  94%|█████████▍| 1875/1988 [00:15<00:00, 176.26 examples/s]Map:  95%|█████████▌| 1897/1988 [00:15<00:00, 186.54 examples/s]Map:  97%|█████████▋| 1923/1988 [00:15<00:00, 203.50 examples/s]Map:  98%|█████████▊| 1944/1988 [00:15<00:00, 202.57 examples/s]Map:  99%|█████████▉| 1967/1988 [00:15<00:00, 207.81 examples/s]Map: 100%|██████████| 1988/1988 [00:16<00:00, 80.84 examples/s] Map: 100%|██████████| 1988/1988 [00:16<00:00, 119.97 examples/s]
-[RANK 0] Detected kernel version 4.18.0, which is below the recommended minimum of 5.5.0; this can cause the process to hang. It is recommended to upgrade the kernel to the minimum version or higher.
-The model is already on multiple devices. Skipping the move to device specified in `args`.
-  0%|          | 0/336 [00:00<?, ?it/s]huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
-To disable this warning, you can either:
-	- Avoid using `tokenizers` before the fork if possible
-	- Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
-huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
-To disable this warning, you can either:
-	- Avoid using `tokenizers` before the fork if possible
-	- Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
-Traceback (most recent call last):
-  File "/maps/projects/fernandezguerra/apps/repos/cc-soul/scripts/ssl_model/02_finetune.py", line 228, in <module>
-    main()
-  File "/maps/projects/fernandezguerra/apps/repos/cc-soul/scripts/ssl_model/02_finetune.py", line 224, in main
-    train(args)
-  File "/maps/projects/fernandezguerra/apps/repos/cc-soul/scripts/ssl_model/02_finetune.py", line 194, in train
-    trainer.train()
-  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/transformers/trainer.py", line 2325, in train
-    return inner_training_loop(
-           ^^^^^^^^^^^^^^^^^^^^
-  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/transformers/trainer.py", line 2674, in _inner_training_loop
-    tr_loss_step = self.training_step(model, inputs, num_items_in_batch)
-                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/transformers/trainer.py", line 4020, in training_step
-    loss = self.compute_loss(model, inputs, num_items_in_batch=num_items_in_batch)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/transformers/trainer.py", line 4110, in compute_loss
-    outputs = model(**inputs)
-              ^^^^^^^^^^^^^^^
-  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
-    return self._call_impl(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
-    return forward_call(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/accelerate/utils/operations.py", line 823, in forward
-    return model_forward(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/accelerate/utils/operations.py", line 811, in __call__
-    return convert_to_fp32(self.model_forward(*args, **kwargs))
-                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/torch/amp/autocast_mode.py", line 44, in decorate_autocast
-    return func(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^
-  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/peft/peft_model.py", line 1923, in forward
-    return self.base_model(
-           ^^^^^^^^^^^^^^^^
-  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
-    return self._call_impl(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
-    return forward_call(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/peft/tuners/tuners_utils.py", line 311, in forward
-    return self.model.forward(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/transformers/utils/generic.py", line 918, in wrapper
-    output = func(self, *args, **kwargs)
-             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/transformers/models/qwen2/modeling_qwen2.py", line 449, in forward
-    outputs: BaseModelOutputWithPast = self.model(
-                                       ^^^^^^^^^^^
-  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
-    return self._call_impl(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
-    return forward_call(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/transformers/utils/generic.py", line 1072, in wrapper
-    outputs = func(self, *args, **kwargs)
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/transformers/models/qwen2/modeling_qwen2.py", line 384, in forward
-    hidden_states = decoder_layer(
-                    ^^^^^^^^^^^^^^
-  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/transformers/modeling_layers.py", line 94, in __call__
-    return super().__call__(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
-    return self._call_impl(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
-    return forward_call(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/transformers/utils/deprecation.py", line 172, in wrapped_func
-    return func(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^
-  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/transformers/models/qwen2/modeling_qwen2.py", line 249, in forward
-    hidden_states = self.mlp(hidden_states)
-                    ^^^^^^^^^^^^^^^^^^^^^^^
-  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
-    return self._call_impl(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
-    return forward_call(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/transformers/models/qwen2/modeling_qwen2.py", line 46, in forward
-    down_proj = self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
-                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
-    return self._call_impl(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
-    return forward_call(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/peft/tuners/lora/layer.py", line 805, in forward
-    x = self._cast_input_dtype(x, lora_A.weight.dtype)
-        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/maps/projects/fernandezguerra/apps/opt/conda/envs/bioinfo/lib/python3.12/site-packages/peft/tuners/tuners_utils.py", line 1553, in _cast_input_dtype
-    return x.to(dtype=dtype)
-           ^^^^^^^^^^^^^^^^^
-torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 350.00 MiB. GPU 0 has a total capacity of 39.49 GiB of which 235.38 MiB is free. Including non-PyTorch memory, this process has 39.26 GiB memory in use. Of the allocated memory 37.56 GiB is allocated by PyTorch, and 1.20 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
-  0%|          | 0/336 [01:29<?, ?it/s]

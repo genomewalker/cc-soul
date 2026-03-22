@@ -10,20 +10,32 @@
 namespace chitta {
 namespace ssl {
 
-// SSL v0.2 extraction prompt (~3KB)
-// Includes type definitions, symbols, and examples
+// SSL v0.2 extraction prompt — 6-lens structured extraction
+// Scans conversation across six extraction lenses before emitting SSL output.
 constexpr const char* EXTRACTION_PROMPT = R"(Extract learnings from this conversation in SSL v0.2 format.
 
-## SSL Format
+## Step 1: Scan across six lenses
 
-Each learning has a TYPE and uses SSL compression:
+Before writing any output, mentally scan the conversation for each lens:
 
+1. **Identity & context** — who is the user, their role, project, environment, constraints
+2. **Preferences & working style** — how they like things done, what to avoid, communication style
+3. **Events & actions** — what was attempted, decided, built, or changed in this session
+4. **Time-sensitive facts** — things that will change or expire (versions, deadlines, states, corrections to prior beliefs)
+5. **Corrections** — explicit or implicit updates to something previously believed or done differently
+6. **Technical knowledge** — patterns, solutions, failures, gotchas, design decisions with lasting value
+
+Emit SSL lines only for findings that are non-obvious and worth remembering.
+
+## Step 2: Output SSL v0.2
+
+Format:
 ```
 [TYPE] [domain] subject→action→result @location
 [ε] exact_command_or_code_verbatim
 ```
 
-## Types (choose most specific)
+Types:
 
 | Type | Use for |
 |------|---------|
@@ -31,86 +43,68 @@ Each learning has a TYPE and uses SSL compression:
 | [GOTCHA] | Traps: counterintuitive behavior, silent failures, edge cases |
 | [DECISION] | Design choices: why X over Y, tradeoffs considered |
 | [PATTERN] | Reusable techniques: approaches that generalize |
-| [PREFERENCE] | User preferences: workflow, style, communication |
-| [FAILURE] | What did not work and why (valuable negative knowledge) |
+| [PREFERENCE] | User preferences, working style, identity facts |
+| [FAILURE] | What did not work and why |
+| [CORRECTION] | Updates to prior beliefs: supersedes earlier knowledge |
+| [EVENT] | Significant action taken this session (deployed, merged, configured) |
 
-## SSL Symbols
+SSL symbols:
 
-| Symbol | Meaning | Example |
-|--------|---------|---------|
-| → | produces/leads to | cmake→build→binary |
-| | | or/alternative | patch|minor|major |
-| + | with/and | config+flags |
-| @ | location | @simple_cli.cpp:720 |
-| ! | negation | →!working |
-| ? | uncertainty | regulates? |
+| Symbol | Meaning |
+|--------|---------|
+| → | produces/leads to |
+| \| | or/alternative |
+| + | with/and |
+| @ | location/file:line |
+| ! | negation |
+| ? | uncertainty |
 
-## Relationships
-
+Relationships:
 ```
 [TRIPLET] subject predicate object
 ```
-
-Use for: calls, uses, contains, implements, depends_on, derived_from
+Use for: calls, uses, contains, implements, depends_on, derived_from, supersedes
 
 ## Citations
 
-**IMPORTANT**: When a learning references specific code, include citations with @file:line syntax:
-
+When referencing specific code, include @file:line. Use [CITE] for multiple:
 ```
-[SOLUTION] [build] parallel-cmake→4x-faster @CMakeLists.txt:45 @src/main.cpp:12
-```
-
-Or use explicit [CITE] lines for multiple citations with context:
-
-```
-[SOLUTION] [auth] token-refresh→must-check-expiry-first
-[ε] if (token.expired()) refresh();
+[SOLUTION] [build] parallel-cmake→4x-faster @CMakeLists.txt:45
+[GOTCHA] [auth] token-refresh→must-check-expiry-first
 [CITE] src/auth/token.cpp:234 expiry check
-[CITE] src/api/client.cpp:89 refresh call site
 ```
-
-Citations enable verification: before surfacing a memory, we can check if the code still matches.
 
 ## Rules
 
-1. **Preserve verbatim**: Commands, code, formulas, thresholds go in [ε] lines
-2. **Compress prose**: Convert explanations to SSL arrows
-3. **Be specific**: Include file paths, line numbers, exact values
-4. **No fluff**: Skip obvious/trivial learnings
-5. **High signal**: Each learning should be reconstructable from SSL alone
+1. **Verbatim**: Commands, code, exact values go in [ε] lines
+2. **Compress**: Convert explanations to SSL arrows
+3. **Specific**: File paths, line numbers, exact values when available
+4. **No fluff**: Skip obvious things
+5. **Corrections are first-class**: If something was previously wrong, emit [CORRECTION] — these supersede old beliefs
 
-## Good Examples
+## Examples
 
 ```
 [SOLUTION] [chitta] parallel-build→4x-faster @cmake
 [ε] cmake --build build --parallel
 
 [GOTCHA] [daemon] thread_pool→blocks-if-handler-throws @simple_cli.cpp:776
-[ε] wrap handler.handle() in try-catch, return error JSON
 
-[DECISION] [rpc] async-response-queue→eventfd-wake→poll-returns-immediately
-[ε] write(wake_fd_, &val, sizeof(val)) after queue_response()
+[DECISION] [rpc] async-queue→eventfd-wake→poll-returns-immediately
 
 [PATTERN] [hooks] fire-and-forget→queue-file→daemon-processes-async
-[ε] echo json >> /tmp/chitta-queue.jsonl
 
 [PREFERENCE] [partnership] Antonio→no-shortcuts+proper-solutions-only
 
 [FAILURE] [http] http-daemon→too-slow-for-hooks→switched-to-unix-socket
-[ε] PreToolUse needs <50ms, HTTP added 200ms latency
 
-[TRIPLET] ThreadPool contains worker_loop
-[TRIPLET] daemon uses ThreadPool
-[TRIPLET] health_check bypasses ThreadPool
+[CORRECTION] [embeddings] :memory:→was-wrong-path→correct-path-is-~/.claude/mind
+
+[EVENT] [release] v4.0.26→deployed→gradmem-active @2026-03-21
+
+[TRIPLET] GradMemWriter uses FieldStore
+[TRIPLET] gradmemd_snapshot supersedes session_embedding
 ```
-
-## Bad (avoid)
-
-- Generic summaries without specifics
-- Learnings without [ε] when code/commands are involved
-- Obvious things (e.g., "files should be saved")
-- Duplicating what is already in code comments
 
 ---
 

@@ -410,6 +410,8 @@ message(STATUS "chitta-field: ${CHITTA_FIELD_LIB}")
 # Daemon/admin tool
 add_executable(chittad
     src/simple_cli.cpp
+    src/daemon_lifecycle.cpp
+    src/distillation.cpp
     src/socket_server.cpp
     src/socket_client.cpp
     src/subconscious.cpp

@@ -1,4 +1,0 @@
-
-[notice] A new release of pip is available: 25.3 -> 26.0.1
-[notice] To update, run: pip install --upgrade pip
-python3: can't open file '/var/spool/slurm/job15528920/01_extract_data.py': [Errno 2] No such file or directory

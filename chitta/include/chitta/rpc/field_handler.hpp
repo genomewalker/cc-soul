@@ -444,7 +444,9 @@ private:
     // Handler file includes — tool implementations (must be before register_tools)
     // ═══════════════════════════════════════════════════════════════════════
 
-    #include "handlers/field_memory.hpp"
+    #include "handlers/field_memory_recall.hpp"
+    #include "handlers/field_memory_ops.hpp"
+    #include "handlers/field_memory_structured.hpp"
     #include "handlers/field_code_intel.hpp"
     #include "handlers/field_system.hpp"
     #include "handlers/field_session.hpp"
@@ -1467,6 +1469,22 @@ private:
             }},{"required",{"query"}}}}
         });
         handlers_["hybrid_recall"] = [this](const json& p) { return tool_hybrid_recall(p); };
+
+        tools_.push_back({{"name","structured_recall"},{"description","Three-lens recall: facts, context, and temporal agents merged for high-fidelity retrieval"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"query",{{"type","string"}}},{"limit",{{"type","integer"}}},
+                {"realm",{{"type","string"}}}
+            }},{"required",{"query"}}}}
+        });
+        handlers_["structured_recall"] = [this](const json& p) { return tool_structured_recall(p); };
+
+        tools_.push_back({{"name","ask"},{"description","Natural language insight query: retrieves and synthesizes memories to answer a question about the user, session, or project"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"question",{{"type","string"}}},{"limit",{{"type","integer"}}},
+                {"realm",{{"type","string"}}}
+            }},{"required",{"question"}}}}
+        });
+        handlers_["ask"] = [this](const json& p) { return tool_ask(p); };
 
         tools_.push_back({{"name","expand_query"},{"description","Expand query into typed variants"},
             {"inputSchema",{{"type","object"},{"properties",{

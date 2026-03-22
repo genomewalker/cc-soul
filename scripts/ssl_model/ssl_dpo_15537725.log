@@ -1,8 +1,0 @@
-=== SSL DPO Fine-tuning ===
-Job: 15537725 on dandygpun01fl.unicph.domain
-GPU: NVIDIA A100-PCIE-40GB
-Start: Fri Mar 20 06:10:28 CET 2026
-DPO training on 84 pairs
-Loading model: /home/kbd606/.cache/huggingface/hub/models--Qwen--Qwen2.5-1.5B-Instruct/snapshots/989aa7980e4cf806f80c7fef2b1adb7bc71aa306
-Loaded 84 DPO pairs
-Train: 76, Val: 8

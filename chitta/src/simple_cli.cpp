@@ -18,6 +18,9 @@
 #include <chitta/socket_client.hpp>
 #include <chitta/native_distiller.hpp>
 #include <chitta/gradmem_writer.hpp>
+#include <chitta/daemon_config.hpp>
+#include <chitta/daemon_lifecycle.hpp>
+#include <chitta/distillation.hpp>
 #include <chitta/http_viz.hpp>
 #include <chitta/version.hpp>
 #ifdef CHITTA_WITH_ONNX
@@ -56,367 +59,16 @@ using json = nlohmann::json;
 // Global flags
 // Verify lock-free for async-signal-safety in daemon_signal_handler
 static_assert(std::atomic<bool>::is_always_lock_free, "atomic<bool> must be lock-free for signal handler");
-static std::atomic<bool> daemon_running{true};
-static std::atomic<bool> verbose_mode{false};
+std::atomic<bool> daemon_running{true};
+std::atomic<bool> verbose_mode{false};
 
 // Distillation configuration
-struct DistillConfig {
-    int interval_minutes = 15;      // Timer-based check interval (safety net, reduced from 5)
-    int min_turns = 4;              // Minimum turns before distilling
-    std::string script_path;        // Path to distillation script
-    std::string model = "github-copilot/gpt-5-mini";  // OpenCode model
-    std::string local_model_path;   // If set, use llama-cli with this GGUF instead of opencode
-    bool enabled = true;
-    int64_t token_trigger_chars = 120000;  // Token-triggered: ~30k tokens (chars/4), 0 = disabled
-    int cooldown_seconds = 180;     // Minimum seconds between token-triggered distillations per session
-};
-
-// GradMem write configuration
-struct GradMemDaemonConfig {
-    bool        enabled       = false;   // Off until model is prepared
-    std::string gradmemd_path;           // ~/.claude/bin/gradmemd
-    std::string python_script;           // scripts/gradmem/gradmemd.py
-    std::string model_path;              // HF model snapshot path
-    int         n_mem_tokens  = 8;
-    int         K             = 2;
-    float       inner_lr      = 0.04f;
-    int         max_ctx_tokens = 512;
-};
-
-// Code enrichment configuration (semantic descriptions for symbols)
-struct EnrichConfig {
-    int interval_minutes = 10;      // How often to process batches (was 2, increased to reduce load)
-    int batch_size = 3;             // Symbols per batch (was 10, reduced to minimize blocking)
-    int idle_seconds = 30;          // Only run if no queries for this long
-    std::string script_path;        // Path to enrichment script
-    std::string model = "github-copilot/gpt-5-mini";  // OpenCode model
-    bool enabled = true;
-};
+// Config structs, path resolution, daemon lifecycle, distillation:
+// → daemon_config.hpp, daemon_lifecycle.hpp, distillation.hpp
 
 void daemon_signal_handler(int sig) {
     std::cerr << "[daemon] Signal " << sig << " received, shutting down\n";
     daemon_running = false;
-}
-
-// Daemonize using double-fork
-bool daemonize(const std::string& log_path) {
-    pid_t pid = fork();
-    if (pid < 0) return false;
-    if (pid > 0) _exit(0);
-
-    if (setsid() < 0) return false;
-
-    pid = fork();
-    if (pid < 0) return false;
-    if (pid > 0) _exit(0);
-
-    umask(077);
-    chdir("/");
-
-    int null_fd = open("/dev/null", O_RDONLY);
-    if (null_fd >= 0) {
-        if (dup2(null_fd, STDIN_FILENO) < 0) {
-            // Log to file since stderr may not be available
-            int err_fd = open("/tmp/chittad-daemonize.err", O_WRONLY | O_CREAT | O_APPEND, 0600);
-            if (err_fd >= 0) {
-                const char msg[] = "dup2(STDIN) failed\n";
-                [[maybe_unused]] auto _ = write(err_fd, msg, sizeof(msg) - 1);
-                close(err_fd);
-            }
-            close(null_fd);
-            return false;
-        }
-        close(null_fd);
-    }
-
-    const char* out_path = log_path.empty() ? "/dev/null" : log_path.c_str();
-    int log_fd = open(out_path, O_WRONLY | O_CREAT | O_APPEND, 0644);
-    if (log_fd >= 0) {
-        if (dup2(log_fd, STDOUT_FILENO) < 0 || dup2(log_fd, STDERR_FILENO) < 0) {
-            int err_fd = open("/tmp/chittad-daemonize.err", O_WRONLY | O_CREAT | O_APPEND, 0600);
-            if (err_fd >= 0) {
-                const char msg[] = "dup2(STDOUT/STDERR) failed\n";
-                [[maybe_unused]] auto _ = write(err_fd, msg, sizeof(msg) - 1);
-                close(err_fd);
-            }
-            close(log_fd);
-            return false;
-        }
-        close(log_fd);
-    }
-
-    return true;
-}
-
-// Lock management
-struct DaemonLock {
-    int fd = -1;
-    std::string path;
-};
-
-bool acquire_lock(const std::string& mind_path, DaemonLock& lock) {
-    lock.path = lock_path_for_mind(mind_path);
-    lock.fd = open(lock.path.c_str(), O_CREAT | O_RDWR, 0600);
-    if (lock.fd < 0) return false;
-
-    struct flock fl;
-    fl.l_type = F_WRLCK;
-    fl.l_whence = SEEK_SET;
-    fl.l_start = 0;
-    fl.l_len = 0;
-
-    if (fcntl(lock.fd, F_SETLK, &fl) != 0) {
-        close(lock.fd);
-        lock.fd = -1;
-        return false;
-    }
-
-    std::string pid = std::to_string(getpid()) + "\n";
-    if (ftruncate(lock.fd, 0) < 0) {
-        std::cerr << "[daemon] Warning: ftruncate lock file failed: " << strerror(errno) << "\n";
-    }
-    if (write(lock.fd, pid.data(), pid.size()) < 0) {
-        std::cerr << "[daemon] Warning: write PID to lock file failed: " << strerror(errno) << "\n";
-    }
-    return true;
-}
-
-void release_lock(DaemonLock& lock) {
-    if (lock.fd >= 0) {
-        close(lock.fd);
-        unlink(lock.path.c_str());
-    }
-}
-
-// Check if a process is alive (not zombie)
-bool is_pid_alive(pid_t pid) {
-    // First check if process exists
-    if (kill(pid, 0) != 0 && errno != EPERM) {
-        return false;
-    }
-
-    // Check /proc/pid/status for zombie state
-    // Zombies respond to kill(0) but are not functional
-    std::string status_path = "/proc/" + std::to_string(pid) + "/status";
-    std::ifstream status_file(status_path);
-    if (!status_file) {
-        return false;  // Process gone
-    }
-
-    std::string line;
-    while (std::getline(status_file, line)) {
-        if (line.rfind("State:", 0) == 0) {
-            // State line format: "State:  Z (zombie)" or "State:  S (sleeping)"
-            return line.find(" Z ") == std::string::npos &&
-                   line.find("\tZ ") == std::string::npos;
-        }
-    }
-
-    return true;  // No State line found, assume alive
-}
-
-// Check if the daemon socket at path accepts connections (responsive)
-static bool socket_responds(const std::string& path) {
-    int fd = ::socket(AF_UNIX, SOCK_STREAM, 0);
-    if (fd < 0) return true;  // Can't check, assume alive
-    struct sockaddr_un addr = {};
-    addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, path.c_str(), sizeof(addr.sun_path) - 1);
-    bool active = (::connect(fd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == 0);
-    int err = errno;
-    ::close(fd);
-    if (active) return true;
-    // ECONNREFUSED/ENOENT/EACCES all mean socket is not usable
-    return err != ECONNREFUSED && err != ENOENT && err != EACCES;
-}
-
-// Clean up stale daemon files from crashed daemon
-// Returns true if cleanup succeeded or nothing to clean, false if daemon is alive
-bool cleanup_stale_daemon(const std::string& mind_path) {
-    std::string pid_path = pid_path_for_mind(mind_path);
-    std::string sock_path = socket_path_for_mind(mind_path);
-    std::string lock_path = lock_path_for_mind(mind_path);
-
-    // Check if PID file exists
-    std::ifstream pf(pid_path);
-    if (!pf) return true;  // No PID file, nothing to clean
-
-    pid_t old_pid;
-    if (!(pf >> old_pid)) return true;  // Invalid PID file
-    pf.close();
-
-    // Check if that process is still alive
-    if (is_pid_alive(old_pid)) {
-        // Process is alive — check if it's actually responsive
-        if (socket_responds(sock_path)) {
-            return false;  // Alive and responsive, leave it alone
-        }
-        // Alive but socket is dead (hung daemon) — kill it
-        std::cerr << "[daemon] Hung daemon detected (PID " << old_pid
-                  << " alive but socket unresponsive), sending SIGKILL\n";
-        kill(old_pid, SIGKILL);
-        // Wait up to 2s for it to die
-        for (int i = 0; i < 20; ++i) {
-            usleep(100000);  // 100ms
-            if (!is_pid_alive(old_pid)) break;
-        }
-    }
-
-    // Process is dead, clean up stale files
-    std::cerr << "[daemon] Cleaning stale files from dead PID " << old_pid << "\n";
-    unlink(sock_path.c_str());
-    unlink(pid_path.c_str());
-    unlink(lock_path.c_str());
-    return true;
-}
-
-std::string default_mind_path() {
-    const char* home = std::getenv("HOME");
-    return std::string(home ? home : ".") + "/.claude/mind";
-}
-
-std::string default_model_path() {
-    const char* home = std::getenv("HOME");
-    std::string home_str = home ? home : ".";
-
-    // Check plugin path first if set
-    if (const char* plugin_root = std::getenv("CLAUDE_PLUGIN_ROOT")) {
-        std::string plugin_path = std::string(plugin_root) + "/chitta/models/model.onnx";
-        if (std::ifstream(plugin_path).good()) {
-            return plugin_path;
-        }
-    }
-    // Fall back to ~/.claude/models (where smart-install puts it)
-    std::string models_path = home_str + "/.claude/models/model.onnx";
-    if (std::ifstream(models_path).good()) {
-        return models_path;
-    }
-    // Legacy path
-    return home_str + "/.claude/mind/model.onnx";
-}
-
-std::string default_vocab_path() {
-    const char* home = std::getenv("HOME");
-    std::string home_str = home ? home : ".";
-
-    // Check plugin path first if set
-    if (const char* plugin_root = std::getenv("CLAUDE_PLUGIN_ROOT")) {
-        std::string plugin_path = std::string(plugin_root) + "/chitta/models/vocab.txt";
-        if (std::ifstream(plugin_path).good()) {
-            return plugin_path;
-        }
-    }
-    // Fall back to ~/.claude/models (where smart-install puts it)
-    std::string models_path = home_str + "/.claude/models/vocab.txt";
-    if (std::ifstream(models_path).good()) {
-        return models_path;
-    }
-    // Legacy path
-    return home_str + "/.claude/mind/vocab.txt";
-}
-
-std::string default_distill_script() {
-    // Check plugin root first if set and file exists
-    if (const char* plugin_root = std::getenv("CLAUDE_PLUGIN_ROOT")) {
-        std::string plugin_path = std::string(plugin_root) + "/scripts/distill.sh";
-        if (std::ifstream(plugin_path).good()) {
-            return plugin_path;
-        }
-    }
-    // Fall back to user hooks directory
-    const char* home = std::getenv("HOME");
-    return std::string(home ? home : ".") + "/.claude/hooks/distill.sh";
-}
-
-std::string default_enrich_script() {
-    // Check plugin root first if set and file exists
-    if (const char* plugin_root = std::getenv("CLAUDE_PLUGIN_ROOT")) {
-        std::string plugin_path = std::string(plugin_root) + "/scripts/enrich-code.sh";
-        if (std::ifstream(plugin_path).good()) {
-            return plugin_path;
-        }
-    }
-    // Fall back to user hooks directory
-    const char* home = std::getenv("HOME");
-    return std::string(home ? home : ".") + "/.claude/hooks/enrich-code.sh";
-}
-
-// Run distillation for a single transcript using native C++ distiller
-// Returns true if distillation was successful
-// queue_triggered: if true, uses min_turns=1 (for pre-compact immediate distillation)
-// handler: used to read current distill model (settable at runtime via MCP)
-bool run_distillation(FieldStore& field_store, VakYantra* yantra,
-                      const TranscriptState& state,
-                      const DistillConfig& config,
-                      FieldRpcHandler* handler = nullptr,
-                      bool queue_triggered = false) {
-    NativeDistillConfig native_config;
-    native_config.model = handler ? handler->get_distill_model() : config.model;
-    native_config.local_model_path = config.local_model_path;
-    native_config.timeout_secs = 150;
-    native_config.min_turns = config.min_turns;
-    native_config.verbose = verbose_mode;
-
-    auto embed_fn = [yantra](const std::string& text) -> std::vector<float> {
-        if (!yantra) return {};
-        try { return yantra->transform(text).nu.data; } catch (...) {}
-        return {};
-    };
-    auto distiller = std::make_unique<NativeDistiller>(field_store, embed_fn, native_config);
-
-    distiller->set_cancel_callback([]() {
-        return !daemon_running.load();
-    });
-
-    if (verbose_mode) {
-        distiller->set_log_callback([](const std::string& msg) {
-            std::cerr << msg << "\n";
-        });
-    }
-
-    auto result = distiller->distill_session(
-        state.session_id,
-        state.transcript_path,
-        state.realm,
-        state.last_processed_line,
-        queue_triggered
-    );
-
-    if (!result.success) {
-        if (!result.error.empty()) {
-            std::cerr << "[distill] " << state.session_id << ": " << result.error << "\n";
-        }
-        return false;
-    }
-
-    // Transcript progress tracking via FieldStore events
-    field_store.emit_event("transcript", "progress",
-                           state.session_id,
-                           "{\"last_line\":" + std::to_string(result.last_line) + "}");
-    field_store.emit_event("transcript", "distilled",
-                           state.session_id, "{}");
-
-    if (verbose_mode) {
-        std::cerr << "[distill] Completed " << state.session_id
-                  << " (line " << result.last_line << ", +"
-                  << result.learnings_stored << " new, "
-                  << result.learnings_deduped << " deduped, "
-                  << result.triplets_created << " triplets)\n";
-    }
-
-    return true;
-}
-
-// Generate stats JSON
-std::string generate_stats(FieldStore& field_store, VakYantra* yantra) {
-    std::ostringstream oss;
-    oss << "{"
-        << "\"version\":\"" << CHITTA_VERSION << "\","
-        << "\"memories\":" << field_store.memory_count() << ","
-        << "\"symbols\":" << field_store.symbol_count() << ","
-        << "\"yantra\":" << (yantra ? "true" : "false")
-        << "}";
-    return oss.str();
 }
 
 int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
@@ -425,7 +77,7 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                const DistillConfig& distill_config, EnrichConfig& enrich_config,
                const SubconsciousConfig& subconscious_config, bool no_autonomous,
                int http_port, const std::string& http_static_dir,
-               const GradMemDaemonConfig& gradmem_config = {}) {
+               const GradMemConfig& gradmem_config = {}) {
     // Automatically reap child processes to prevent zombie accumulation
     signal(SIGCHLD, SIG_IGN);
 
@@ -1097,15 +749,8 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
 
                                     if (!transcript_text.empty()) {
                                         std::cerr << "[queue] gradmem_trigger: session=" << session_id << "\n";
-                                        GradMemConfig gm_cfg;
-                                        gm_cfg.gradmemd_path  = gradmem_config.gradmemd_path;
-                                        gm_cfg.python_script  = gradmem_config.python_script;
-                                        gm_cfg.model_path     = gradmem_config.model_path;
-                                        gm_cfg.n_mem_tokens   = gradmem_config.n_mem_tokens;
-                                        gm_cfg.K              = gradmem_config.K;
-                                        gm_cfg.inner_lr       = gradmem_config.inner_lr;
-                                        gm_cfg.max_ctx_tokens = gradmem_config.max_ctx_tokens;
-                                        gm_cfg.enabled        = true;
+                                        GradMemConfig gm_cfg = gradmem_config;
+                                        gm_cfg.enabled = true;
                                         GradMemWriter gw(field_store, gm_cfg);
                                         gw.write_async(session_id, transcript_text, realm);
                                     }
@@ -1515,17 +1160,23 @@ int main(int argc, char* argv[]) {
     DistillConfig distill_config;
     distill_config.script_path = default_distill_script();
 
-    // GradMem config
-    GradMemDaemonConfig gradmem_config;
+    // GradMem config — paths resolved at runtime, overridable via CLI flags
+    GradMemConfig gradmem_config;
     {
         const char* home = getenv("HOME");
         std::string bin = home ? std::string(home) + "/.claude/bin" : "";
-        std::string cc_soul_dir = bin + "/../../repos/cc-soul";  // best-effort
-        gradmem_config.gradmemd_path  = bin + "/gradmemd";
-        gradmem_config.python_script  = "/maps/projects/fernandezguerra/apps/repos/cc-soul/scripts/gradmem/gradmemd.py";
-        gradmem_config.model_path     = std::string(home ? home : "") +
-            "/.cache/huggingface/hub/models--Qwen--Qwen2.5-1.5B-Instruct/snapshots"
-            "/989aa7980e4cf806f80c7fef2b1adb7bc71aa306";
+        gradmem_config.gradmemd_path = bin + "/gradmemd";
+        // python_script: check CLAUDE_PLUGIN_ROOT first, then sibling of gradmemd_path
+        if (const char* pr = getenv("CLAUDE_PLUGIN_ROOT"))
+            gradmem_config.python_script = std::string(pr) + "/scripts/gradmem/gradmemd.py";
+        else
+            gradmem_config.python_script = bin + "/../repos/cc-soul/scripts/gradmem/gradmemd.py";
+        // model_path: check GRADMEM_MODEL env var first
+        if (const char* m = getenv("GRADMEM_MODEL"))
+            gradmem_config.model_path = m;
+        // python_bin: check GRADMEM_PYTHON env var first
+        if (const char* p = getenv("GRADMEM_PYTHON"))
+            gradmem_config.python_bin = p;
     }
 
     // Code enrichment config

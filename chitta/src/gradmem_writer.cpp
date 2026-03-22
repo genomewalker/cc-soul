@@ -100,6 +100,9 @@ GradMemResult GradMemWriter::write_sync(
         // Redirect stderr to /dev/null to avoid polluting daemon logs
         int devnull = open("/dev/null", O_WRONLY);
         if (devnull >= 0) dup2(devnull, STDERR_FILENO);
+        // Pass configurable paths via env vars (gradmemd.cpp reads them)
+        if (!config_.python_bin.empty())
+            setenv("GRADMEM_PYTHON", config_.python_bin.c_str(), 1);
         // Pass python_script and model_path as argv[1], argv[2]
         execl(config_.gradmemd_path.c_str(), "gradmemd",
               config_.python_script.c_str(),

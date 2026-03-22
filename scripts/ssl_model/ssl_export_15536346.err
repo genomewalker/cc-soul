@@ -1,4 +1,0 @@
-
-[notice] A new release of pip is available: 25.3 -> 26.0.1
-[notice] To update, run: pip install --upgrade pip
-slurmstepd: error: *** JOB 15536346 ON dandycmpn02fl CANCELLED AT 2026-03-19T14:07:24 ***

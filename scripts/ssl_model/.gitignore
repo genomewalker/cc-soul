@@ -1,0 +1,6 @@
+*.gguf
+*.jsonl
+*.log
+*.err
+ssl_lora_*/
+llama.cpp/
