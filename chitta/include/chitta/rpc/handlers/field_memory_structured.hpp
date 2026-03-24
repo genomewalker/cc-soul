@@ -10,7 +10,7 @@
 
         // ── Lens 1: direct facts — semantic + keyword on raw query ────────────
         auto emb1 = embed_query(query);
-        json lens1_results;
+        json lens1_results = json::array();
         if (!emb1.empty()) {
             auto sem_hits = field_store_->recall(emb1, limit, realm);
             auto kw_hits  = field_store_->recall_keyword(query, limit);
@@ -21,7 +21,7 @@
         // Expand: prepend domain framing to pick up related background knowledge
         std::string ctx_query = "context background implications related to: " + query;
         auto emb2 = embed_query(ctx_query);
-        json lens2_results;
+        json lens2_results = json::array();
         if (!emb2.empty()) {
             auto ctx_hits = field_store_->recall(emb2, limit, realm);
             lens2_results = hits_to_results_json(ctx_hits);
@@ -47,14 +47,14 @@
         // Tag each result with which lens(es) found it
         std::unordered_set<std::string> lens1_ids, lens2_ids, lens3_ids;
         auto collect_ids = [](const json& arr, std::unordered_set<std::string>& ids) {
-            for (auto& r : arr) ids.insert(std::to_string(r.value("id", (uint64_t)0)));
+            for (auto& r : arr) ids.insert(r.value("id", std::string{}));
         };
         collect_ids(lens1_results, lens1_ids);
         collect_ids(lens2_results, lens2_ids);
         collect_ids(lens3_results, lens3_ids);
 
         for (auto& r : merged) {
-            std::string id = std::to_string(r.value("id", (uint64_t)0));
+            std::string id = r.value("id", std::string{});
             std::string lens;
             if (lens1_ids.count(id)) lens += "F";   // Facts
             if (lens2_ids.count(id)) lens += "C";   // Context
