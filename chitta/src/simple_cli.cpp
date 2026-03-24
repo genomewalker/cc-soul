@@ -17,7 +17,6 @@
 #include <chitta/socket_server.hpp>
 #include <chitta/socket_client.hpp>
 #include <chitta/native_distiller.hpp>
-#include <chitta/gradmem_writer.hpp>
 #include <chitta/daemon_config.hpp>
 #include <chitta/daemon_lifecycle.hpp>
 #include <chitta/distillation.hpp>
@@ -76,8 +75,7 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                const std::string& pid_file,
                const DistillConfig& distill_config, EnrichConfig& enrich_config,
                const SubconsciousConfig& subconscious_config, bool no_autonomous,
-               int http_port, const std::string& http_static_dir,
-               const GradMemConfig& gradmem_config = {}) {
+               int http_port, const std::string& http_static_dir) {
     // Automatically reap child processes to prevent zombie accumulation
     signal(SIGCHLD, SIG_IGN);
 
@@ -705,93 +703,6 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                                                     session_id, args.dump());
                             queue_count++;
                         }
-                    } else if (tool == "gradmem_trigger") {
-                        if (!gradmem_config.enabled) {
-                            if (verbose_mode)
-                                std::cerr << "[queue] gradmem_trigger ignored (gradmem disabled)\n";
-                        } else {
-                            std::string session_id = args.value("session_id", "");
-                            if (!session_id.empty()) {
-                                // Look up transcript text from registry
-                                std::string transcript_path;
-                                std::string realm = "brahman";
-                                auto it = transcript_reg.find(session_id);
-                                if (it != transcript_reg.end()) {
-                                    transcript_path = it->second.value("transcript_path", "");
-                                    realm = it->second.value("realm", "brahman");
-                                }
-                                if (!transcript_path.empty()) {
-                                    // Read last max_ctx_tokens worth of transcript text
-                                    std::string transcript_text;
-                                    try {
-                                        std::ifstream tf(transcript_path);
-                                        std::string line;
-                                        std::vector<std::string> lines;
-                                        while (std::getline(tf, line)) lines.push_back(line);
-                                        // Take last N lines as context
-                                        int n_lines = std::min((int)lines.size(), 200);
-                                        for (int li = (int)lines.size() - n_lines; li < (int)lines.size(); li++) {
-                                            auto obj = json::parse(lines[li], nullptr, false);
-                                            if (obj.is_discarded()) continue;
-                                            auto role = obj.value("type", obj.value("role", ""));
-                                            if (role != "user" && role != "assistant") continue;
-                                            auto content = obj.value("message", json{}).value("content", json{});
-                                            std::string text;
-                                            if (content.is_string()) text = content.get<std::string>();
-                                            else if (content.is_array()) {
-                                                for (auto& b : content)
-                                                    if (b.value("type","") == "text") text += b.value("text","") + " ";
-                                            }
-                                            if (!text.empty())
-                                                transcript_text += (role == "user" ? "USER: " : "ASSISTANT: ") + text.substr(0, 500) + "\n\n";
-                                        }
-                                    } catch (...) {}
-
-                                    if (!transcript_text.empty()) {
-                                        std::cerr << "[queue] gradmem_trigger: session=" << session_id << "\n";
-                                        GradMemConfig gm_cfg = gradmem_config;
-                                        gm_cfg.enabled = true;
-                                        GradMemWriter gw(field_store, gm_cfg);
-                                        gw.write_async(session_id, transcript_text, realm);
-                                    }
-                                } else {
-                                    std::cerr << "[queue] gradmem_trigger: no transcript for " << session_id << "\n";
-                                }
-                            }
-                        }
-                    } else if (tool == "gradmem_result") {
-                        // Async result from gradmemd child process
-                        std::string result_path = args.value("result_path", "");
-                        std::string session_id  = args.value("session_id",  "");
-                        std::string realm       = args.value("realm",       "brahman");
-                        if (!result_path.empty()) {
-                            try {
-                                std::ifstream rf(result_path);
-                                if (rf.good()) {
-                                    std::string rstr((std::istreambuf_iterator<char>(rf)), {});
-                                    auto rj = json::parse(rstr);
-                                    GradMemResult gmr;
-                                    gmr.session_id    = rj.value("session_id",   session_id);
-                                    gmr.M_fp16_b64    = rj.value("M_fp16_b64",   "");
-                                    gmr.write_loss    = rj.value("write_loss",   0.f);
-                                    gmr.n_mem_tokens  = rj.value("n_mem_tokens", 0);
-                                    gmr.d_model       = rj.value("d_model",      (int64_t)0);
-                                    gmr.K             = rj.value("K",            0);
-                                    if (rj.contains("proxy_embedding") && rj["proxy_embedding"].is_array())
-                                        gmr.proxy_embedding = rj["proxy_embedding"].get<std::vector<float>>();
-                                    gmr.success = !gmr.M_fp16_b64.empty();
-                                    if (gmr.success) {
-                                        GradMemConfig gm_cfg2;
-                                        GradMemWriter gw(field_store, gm_cfg2);
-                                        gw.store_result(gmr);
-                                        std::cerr << "[queue] gradmem_result: stored for " << gmr.session_id << "\n";
-                                    }
-                                    std::remove(result_path.c_str());
-                                }
-                            } catch (const std::exception& ex) {
-                                std::cerr << "[queue] gradmem_result error: " << ex.what() << "\n";
-                            }
-                        }
                     } else if (tool == "distill_trigger") {
                         if (!distill_config.enabled) {
                             if (verbose_mode)
@@ -1160,25 +1071,6 @@ int main(int argc, char* argv[]) {
     DistillConfig distill_config;
     distill_config.script_path = default_distill_script();
 
-    // GradMem config — paths resolved at runtime, overridable via CLI flags
-    GradMemConfig gradmem_config;
-    {
-        const char* home = getenv("HOME");
-        std::string bin = home ? std::string(home) + "/.claude/bin" : "";
-        gradmem_config.gradmemd_path = bin + "/gradmemd";
-        // python_script: check CLAUDE_PLUGIN_ROOT first, then sibling of gradmemd_path
-        if (const char* pr = getenv("CLAUDE_PLUGIN_ROOT"))
-            gradmem_config.python_script = std::string(pr) + "/scripts/gradmem/gradmemd.py";
-        else
-            gradmem_config.python_script = bin + "/../repos/cc-soul/scripts/gradmem/gradmemd.py";
-        // model_path: check GRADMEM_MODEL env var first
-        if (const char* m = getenv("GRADMEM_MODEL"))
-            gradmem_config.model_path = m;
-        // python_bin: check GRADMEM_PYTHON env var first
-        if (const char* p = getenv("GRADMEM_PYTHON"))
-            gradmem_config.python_bin = p;
-    }
-
     // Code enrichment config
     EnrichConfig enrich_config;
     enrich_config.script_path = default_enrich_script();
@@ -1235,26 +1127,6 @@ int main(int argc, char* argv[]) {
             distill_config.cooldown_seconds = safe_stoi(argv[++i], "--distill-cooldown");
         } else if (strcmp(argv[i], "--no-distill") == 0) {
             distill_config.enabled = false;
-        } else if (strcmp(argv[i], "--gradmem") == 0) {
-            gradmem_config.enabled = true;
-        } else if (strcmp(argv[i], "--gradmem-model") == 0 && i + 1 < argc) {
-            gradmem_config.model_path = argv[++i];
-        } else if (strcmp(argv[i], "--gradmem-script") == 0 && i + 1 < argc) {
-            gradmem_config.python_script = argv[++i];
-        } else if (strcmp(argv[i], "--gradmem-K") == 0 && i + 1 < argc) {
-            gradmem_config.K = safe_stoi(argv[++i], "--gradmem-K");
-        } else if (strcmp(argv[i], "--gradmem-mem") == 0 && i + 1 < argc) {
-            gradmem_config.n_mem_tokens = safe_stoi(argv[++i], "--gradmem-mem");
-        } else if (strcmp(argv[i], "--gradmem-ctx") == 0 && i + 1 < argc) {
-            gradmem_config.max_ctx_tokens = safe_stoi(argv[++i], "--gradmem-ctx");
-        } else if (strcmp(argv[i], "--enrich-interval") == 0 && i + 1 < argc) {
-            enrich_config.interval_minutes = safe_stoi(argv[++i], "--enrich-interval");
-        } else if (strcmp(argv[i], "--enrich-batch") == 0 && i + 1 < argc) {
-            enrich_config.batch_size = safe_stoi(argv[++i], "--enrich-batch");
-        } else if (strcmp(argv[i], "--enrich-idle") == 0 && i + 1 < argc) {
-            enrich_config.idle_seconds = safe_stoi(argv[++i], "--enrich-idle");
-        } else if (strcmp(argv[i], "--enrich-model") == 0 && i + 1 < argc) {
-            enrich_config.model = argv[++i];
         } else if (strcmp(argv[i], "--no-enrich") == 0) {
             enrich_config.enabled = false;
         } else if (strcmp(argv[i], "--no-hygiene") == 0) {
@@ -1346,7 +1218,7 @@ int main(int argc, char* argv[]) {
 
     int result = 0;
     if (command == "daemon") {
-        result = cmd_daemon(field_store, yantra_raw, interval, sock_path, mind_path, pid_file, distill_config, enrich_config, subconscious_config, no_autonomous, http_port, http_static_dir, gradmem_config);
+        result = cmd_daemon(field_store, yantra_raw, interval, sock_path, mind_path, pid_file, distill_config, enrich_config, subconscious_config, no_autonomous, http_port, http_static_dir);
     } else if (command == "stats") {
         result = cmd_stats(field_store, yantra_raw);
     } else if (command == "metrics") {

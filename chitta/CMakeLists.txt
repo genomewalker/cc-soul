@@ -419,7 +419,6 @@ add_executable(chittad
     src/transcript_parser.cpp
     src/ssl_parser.cpp
     src/native_distiller.cpp
-    src/gradmem_writer.cpp
     src/temporal.cpp
     src/query_intent.cpp
     src/sadhana/brain_provider.cpp
@@ -428,36 +427,6 @@ add_executable(chittad
 target_include_directories(chittad PRIVATE "${CHITTA_FIELD_INCLUDE}")
 target_link_libraries(chittad PRIVATE chitta "${CHITTA_FIELD_LIB}" dl pthread)
 target_compile_definitions(chittad PRIVATE CHITTA_FIELD_AVAILABLE=1)
-
-# ── gradmemd: GradMem write subprocess (optional, requires libtorch) ──────────
-option(CHITTA_WITH_TORCH "Build gradmemd with libtorch (requires libtorch installation)" OFF)
-
-# ── gradmemd: thin C++ launcher that exec's gradmemd.py ──────────────────────
-# No libtorch dependency — pure C++, always built with chittad.
-add_executable(gradmemd src/gradmemd.cpp)
-target_include_directories(gradmemd PRIVATE
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-)
-target_link_libraries(gradmemd PRIVATE chitta)
-set_property(TARGET gradmemd PROPERTY CXX_STANDARD 20)
-message(STATUS "gradmemd target configured (Python launcher)")
-
-# CLI tool for memory operations (thin client + MCP server)
-# Output as 'chitta' binary (target named chitta_tool to avoid library conflict)
-if(CHITTA_BUILD_RPC)
-    add_executable(chitta_tool
-        src/rpc_server.cpp
-        src/socket_client.cpp
-    )
-    set_target_properties(chitta_tool PROPERTIES OUTPUT_NAME chitta)
-    target_link_libraries(chitta_tool PRIVATE chitta)
-    target_include_directories(chitta_tool PRIVATE "${CHITTA_FIELD_INCLUDE}")
-    if(TARGET onnx_yantra)
-        target_link_libraries(chitta_tool PRIVATE onnx_yantra)
-        target_compile_definitions(chitta_tool PRIVATE CHITTA_WITH_ONNX)
-    endif()
-endif()
-
 
 # RPATH configuration for runtime library discovery
 # CI builds can override with CMAKE_INSTALL_RPATH=$ORIGIN to bundle libs
