@@ -991,17 +991,7 @@ private:
         });
         handlers_["theme_stats"] = [this](const json& p) { return tool_theme_stats(p); };
 
-        tools_.push_back({{"name","theme_maintain"},{"description","Force theme maintenance cycle"},
-            {"inputSchema",{{"type","object"},{"properties",{{"realm",{{"type","string"}}}}}}}
-        });
-        handlers_["theme_maintain"] = [this](const json& p) { return tool_theme_maintain(p); };
-
-        tools_.push_back({{"name","theme_assign_orphans"},{"description","Assign orphan memories to themes"},
-            {"inputSchema",{{"type","object"},{"properties",{
-                {"batch_size",{{"type","integer"}}},{"realm",{{"type","string"}}}
-            }}}}
-        });
-        handlers_["theme_assign_orphans"] = [this](const json& p) { return tool_theme_assign_orphans(p); };
+        // theme_maintain and theme_assign_orphans removed — no theme engine backend
 
         // ── Realm tools ─────────────────────────────────────────────────────
         tools_.push_back({{"name","realm_list"},{"description","List all known realms"},

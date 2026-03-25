@@ -533,19 +533,6 @@
         return DuckDBToolResult::ok("Theme stats", {{"total_themes", hits.size()}});
     }
 
-    DuckDBToolResult tool_theme_maintain(const json& params) {
-        field_store_->emit_event("theme", "maintain", params.value("realm", "brahman"), "{}");
-        return DuckDBToolResult::ok("Theme maintenance triggered");
-    }
-
-    DuckDBToolResult tool_theme_assign_orphans(const json& params) {
-        size_t batch = params.value("batch_size", 10);
-        std::string realm = params.value("realm", "brahman");
-        field_store_->emit_event("theme", "assign_orphans", realm,
-                                 "{\"batch_size\":" + std::to_string(batch) + "}");
-        return DuckDBToolResult::ok("Orphan assignment triggered", {{"batch_size", batch}});
-    }
-
     // ── Realm tools ─────────────────────────────────────────────────────────
 
     DuckDBToolResult tool_realm_list() {

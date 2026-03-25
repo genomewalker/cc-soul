@@ -581,8 +581,9 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                                                 std::to_string(h.memory_id),
                                                 1.0f, new_id
                                             );
-                                            // Weaken the superseded memory
+                                            // Weaken + mark status=Superseded
                                             field_store.weaken(h.memory_id, 0.15f);
+                                            field_store.set_memory_status(h.memory_id, 1);
                                         }
                                     }
                                 }
