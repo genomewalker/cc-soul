@@ -12,6 +12,16 @@
 #include <nlohmann/json.hpp>
 #include "chitta_field.h"
 
+// Explicit forward declarations for functions added in a later chitta-field version.
+// These ensure the symbols are visible even if chitta_field.h was included earlier
+// from a different path that predates these additions.
+extern "C" {
+int cf_backfill_embedding(struct CfHandle* h, uint64_t memory_id,
+    const float* embedding_ptr, size_t embedding_len);
+int cf_pending_embeddings(struct CfHandle* h,
+    uint64_t* out_ids, size_t max_ids, size_t* out_count);
+}
+
 namespace chitta {
 
 /// A single recall result from FieldStore.
@@ -74,6 +84,22 @@ public:
         );
         if (r != 0) throw std::runtime_error(last_error());
         return id;
+    }
+
+    /// Backfill embedding for a memory stored without one (embed_pending=true).
+    void backfill_embedding(uint64_t id, const std::vector<float>& embedding) {
+        int r = cf_backfill_embedding(handle_, id,
+            embedding.data(), embedding.size());
+        if (r != 0) throw std::runtime_error(last_error());
+    }
+
+    /// Return IDs of memories waiting for an embedding (embed_pending=true).
+    std::vector<uint64_t> pending_embeddings(size_t limit = 100) {
+        std::vector<uint64_t> ids(limit);
+        size_t written = 0;
+        cf_pending_embeddings(handle_, ids.data(), limit, &written);
+        ids.resize(written);
+        return ids;
     }
 
     /// Strengthen a memory (positive feedback).
