@@ -121,3 +121,36 @@ queue_write() {
 
     echo "{\"ack_id\":\"$ack_id\",\"tool\":\"$tool\",\"args\":$args,\"ts\":$(date +%s)}" >> "$queue_file"
 }
+
+# emit_event — structured soul event with provenance.
+# Usage: emit_event <dedup_file> <category> <source> <content> <confidence> <evidence> <realm>
+#   category:   solution|gotcha|preference|decision|failure|pattern|correction|curiosity_gap
+#   source:     hook_regex|hook_compliance|distillation|mcp_tool
+#   content:    raw learning text (SSL-formatted by caller or this function)
+#   confidence: 0.5 (provisional/hook) or 0.85 (distillation) or 1.0 (explicit)
+#   evidence:   what triggered this (e.g. "regex match on [SOLUTION]")
+emit_event() {
+    local dedup_file="$1"
+    local category="$2"
+    local source="$3"
+    local content="$4"
+    local confidence="${5:-0.7}"
+    local evidence="${6:-}"
+    local realm="${7:-brahman}"
+
+    # Quality gate: minimum length
+    if [[ ${#content} -lt 30 ]]; then return; fi
+
+    # Quality gate: dedup
+    local content_hash
+    content_hash=$(echo -n "$content" | md5sum | cut -d' ' -f1)
+    if [[ -n "$dedup_file" ]] && grep -q "^${content_hash}$" "$dedup_file" 2>/dev/null; then
+        return
+    fi
+    [[ -n "$dedup_file" ]] && echo "$content_hash" >> "$dedup_file"
+
+    local title
+    title=$(echo "$content" | head -c 100)
+
+    queue_write "observe" "{\"category\":\"$category\",\"title\":$(echo "$title" | jq -Rs .),\"content\":$(echo "$content" | jq -Rs .),\"confidence\":$confidence,\"source\":$(echo "$source" | jq -Rs .),\"evidence\":$(echo "$evidence" | jq -Rs .),\"realm\":$(echo "$realm" | jq -Rs .)}"
+}

@@ -163,37 +163,17 @@ fi
 DEDUP_FILE="$MIND_PATH/.stop_dedup_${SESSION_ID}"
 touch "$DEDUP_FILE"
 
-# Extract typed learnings → convert to SSL → queue
+# Extract typed learnings → convert to SSL → queue with provenance
 LEARNED=0
 while IFS= read -r line; do
-    if [[ "$line" =~ ^\[(SOLUTION|GOTCHA|PREFERENCE|DECISION|FAILURE|PATTERN|LEARN)\] ]]; then
+    if [[ "$line" =~ ^\[(SOLUTION|GOTCHA|PREFERENCE|DECISION|FAILURE|PATTERN|LEARN|CORRECTION|EVENT)\] ]]; then
         type="${BASH_REMATCH[1]}"
         raw_content="${line#\[$type\] }"
         category=$(map_category "$type")
-
-        # Convert to SSL format
         ssl_content=$(to_ssl "$category" "$raw_content")
-
-        # Quality gate: minimum content length (30 chars)
-        if [[ ${#ssl_content} -lt 30 ]]; then
-            echo "[soul] skip ${type,,}: too short (${#ssl_content}<30)" >&2
-            continue
-        fi
-
-        # Quality gate: hash-based deduplication
-        content_hash=$(echo -n "$ssl_content" | md5sum | cut -d' ' -f1)
-        if grep -q "^${content_hash}$" "$DEDUP_FILE" 2>/dev/null; then
-            echo "[soul] skip ${type,,}: duplicate" >&2
-            continue
-        fi
-        echo "$content_hash" >> "$DEDUP_FILE"
-
-        title=$(echo "$ssl_content" | head -c 100)
-
-        # Queue observe with SSL-formatted content
-        queue_write "observe" "{\"category\":\"$category\",\"title\":$(echo "$title" | jq -Rs .),\"content\":$(echo "$ssl_content" | jq -Rs .),\"realm\":\"$REALM\"}"
-        echo "[soul] +${type,,}: ${title:0:60}" >&2
-        ((LEARNED++)) || true
+        title=$(echo "$ssl_content" | head -c 60)
+        emit_event "$DEDUP_FILE" "$category" "hook_regex" "$ssl_content" "0.7" "regex match on [$type]" "$REALM"
+        [[ $? -eq 0 ]] && { echo "[soul] +${type,,}: $title" >&2; ((LEARNED++)) || true; }
     fi
 done <<< "$RESPONSE"
 
@@ -322,19 +302,9 @@ if [[ "$CLAUDE_LEARNED" == "false" && -n "$LAST_USER_MSG" ]]; then
     # Auto-store correction if detected but Claude didn't learn
     if [[ "$CORRECTION_DETECTED" == "true" ]]; then
         echo "[soul] ⚠️ COMPLIANCE: Correction detected but learn_correction not called" >&2
-
-        # Hash-based dedup to avoid storing the same correction twice
-        correction_hash=$(echo -n "$CORRECTION_TEXT" | md5sum | cut -d' ' -f1)
-        if ! grep -q "^${correction_hash}$" "$DEDUP_FILE" 2>/dev/null; then
-            echo "$correction_hash" >> "$DEDUP_FILE"
-
-            ssl_content="[compliance:auto] User correction: $CORRECTION_TEXT"
-            title=$(echo "$ssl_content" | head -c 100)
-            queue_write "observe" "{\"category\":\"correction\",\"title\":$(echo "$title" | jq -Rs .),\"content\":$(echo "$ssl_content" | jq -Rs .),\"realm\":\"$REALM\"}"
-            echo "[soul] +auto-correction stored: ${title:0:60}" >&2
-        else
-            echo "[soul] skip auto-correction: duplicate" >&2
-        fi
+        ssl_content="[compliance:auto] User correction: $CORRECTION_TEXT"
+        emit_event "$DEDUP_FILE" "correction" "hook_compliance" "$ssl_content" "0.95" "compliance detector: user corrected assistant" "$REALM"
+        [[ $? -eq 0 ]] && echo "[soul] +auto-correction stored: ${ssl_content:0:60}" >&2
     fi
 
     # ===========================================
@@ -446,8 +416,7 @@ if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
                 _sus3_is_break=$(awk "BEGIN{print ($_sus3_cache_r / $_sus3_denom < 0.5) ? 1 : 0}")
                 if [[ "$_sus3_is_break" == "1" ]]; then
                     _sus3_ratio=$(awk "BEGIN{printf \"%.2f\", $_sus3_cache_r / $_sus3_denom}")
-                    queue_write "observe" \
-                        "{\"category\":\"correction\",\"title\":\"Cache break detected\",\"content\":\"[cache:break] Session had cache_hit_ratio=$_sus3_ratio (threshold 0.5). Potential causes: model switch mid-session, tool set changes, or compaction. Review recent session patterns.\",\"tags\":[\"cache-break\",\"token-efficiency\"],\"realm\":\"$REALM\"}"
+                    emit_event "$DEDUP_FILE" "gotcha" "hook_regex" "[cache:break] Session had cache_hit_ratio=$_sus3_ratio (threshold 0.5). Potential causes: model switch mid-session, tool set changes, or compaction." "0.6" "SUS-M cache break detection" "$REALM"
                 fi
             fi
         fi
@@ -648,7 +617,7 @@ snapshot=$(echo "$ASSISTANT_TEXT" | grep -v '^$' | tail -20 | head -c 1000)
 if [[ "$TURNS" =~ ^[0-9]+$ && "$TURNS" -ge 3 ]]; then
     SUMMARY="[session:$SESSION_ID] ${mood}→${TURNS} turns"
     [[ -n "$TOOLS_USED" ]] && SUMMARY="$SUMMARY | tools: ${TOOLS_USED:0:100}"
-    queue_write "observe" "{\"category\":\"session_summary\",\"title\":\"Session $SESSION_ID\",\"content\":$(echo "$SUMMARY" | jq -Rs .),\"realm\":\"$REALM\"}"
+    emit_event "" "session_summary" "hook_regex" "$SUMMARY" "0.5" "end-of-session summary" "$REALM"
     echo "[soul] +session-summary: ${SUMMARY:0:60}" >&2
 else
     echo "[soul] skip session-summary: too few turns ($TURNS<3)" >&2
