@@ -608,3 +608,23 @@
         std::string realm = env ? env : "brahman";
         return DuckDBToolResult::ok("Realm: " + realm, {{"realm", realm}});
     }
+
+    DuckDBToolResult tool_queue_status(const json&) {
+        size_t processed = queue_count_ ? queue_count_->load() : 0;
+        size_t failed    = queue_fail_count_ ? queue_fail_count_->load() : 0;
+        size_t in_file   = 0;
+        if (!failed_queue_path_.empty()) {
+            std::ifstream f(failed_queue_path_);
+            std::string ln;
+            while (std::getline(f, ln)) if (!ln.empty()) in_file++;
+        }
+        json s;
+        s["processed"]        = processed;
+        s["failed"]           = failed;
+        s["dead_letter_count"] = in_file;
+        s["dead_letter_path"] = failed_queue_path_;
+        std::ostringstream ss;
+        ss << "Queue: " << processed << " processed, " << failed << " failed";
+        if (in_file > 0) ss << " (" << in_file << " in dead-letter)";
+        return DuckDBToolResult::ok(ss.str(), s);
+    }

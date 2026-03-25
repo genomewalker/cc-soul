@@ -66,6 +66,10 @@ public:
 
     void set_subconscious(Subconscious* s) { subconscious_ = s; }
     void set_sadhana_manager(SadhanaManager* sm) { sadhana_manager_ = sm; }
+    void set_queue_stats(std::atomic<size_t>* count, std::atomic<size_t>* fails,
+                         const std::string& failed_path) {
+        queue_count_ = count; queue_fail_count_ = fails; failed_queue_path_ = failed_path;
+    }
     using RecallCallback = std::function<void(const std::vector<uint64_t>&, int)>;
     void set_recall_callback(RecallCallback cb) { recall_callback_ = std::move(cb); }
     FieldStore* get_field_store() const { return field_store_; }
@@ -108,6 +112,9 @@ private:
     VakYantra* yantra_;
     Subconscious* subconscious_ = nullptr;
     SadhanaManager* sadhana_manager_ = nullptr;
+    std::atomic<size_t>* queue_count_ = nullptr;
+    std::atomic<size_t>* queue_fail_count_ = nullptr;
+    std::string failed_queue_path_;
     RecallCallback recall_callback_;
 
     mutable std::mutex distill_mutex_;
@@ -852,6 +859,11 @@ private:
         handlers_["enrichment_status"] = [this](const json& p) { return tool_enrichment_status(p); };
 
         // ── System tools ────────────────────────────────────────────────────
+        tools_.push_back({{"name","queue_status"},{"description","Show async queue stats: processed, failed, dead-letter path"},
+            {"inputSchema",{{"type","object"},{"properties",json::object()}}}
+        });
+        handlers_["queue_status"] = [this](const json& p) { return tool_queue_status(p); };
+
         tools_.push_back({{"name","health_check"},{"description","Check daemon health"},
             {"inputSchema",{{"type","object"},{"properties",json::object()}}}
         });

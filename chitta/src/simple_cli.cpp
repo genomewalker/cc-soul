@@ -463,7 +463,9 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
     // Queue processor thread - handles fire-and-forget writes from hooks
     std::atomic<size_t> queue_count{0};
     std::atomic<size_t> queue_distill_count{0};  // Separate counter for pre-compact distillations
+    std::atomic<size_t> queue_fail_count{0};
     std::string queue_path = "/tmp/chitta-queue.jsonl";
+    std::string failed_queue_path = mind_path + "/.failed_queue.jsonl";
 
     // Token-triggered distillation: per-session content accumulators
     std::unordered_map<std::string, int64_t> session_content_accum;
@@ -760,9 +762,26 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                         }
                     }
                 } catch (const std::exception& e) {
-                    if (verbose_mode) {
-                        std::cerr << "[queue] Error processing: " << e.what() << "\n";
-                    }
+                    // Always log — never silently drop a learning event
+                    std::cerr << "[queue] FAILED: " << e.what() << "\n";
+                    // Write to dead-letter file for inspection/retry
+                    try {
+                        json entry;
+                        entry["error"] = e.what();
+                        entry["retry_count"] = 0;
+                        entry["timestamp"] = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::system_clock::now().time_since_epoch()).count();
+                        auto parsed = json::parse(line, nullptr, false);
+                        if (!parsed.is_discarded()) {
+                            entry["tool"] = parsed.value("tool", "unknown");
+                            entry["args"] = parsed.value("args", json::object());
+                        } else {
+                            entry["raw"] = line.substr(0, 300);
+                        }
+                        std::ofstream dlf(failed_queue_path, std::ios::app);
+                        dlf << entry.dump(-1, ' ', false, json::error_handler_t::replace) << "\n";
+                        queue_fail_count++;
+                    } catch (...) {}
                 }
             }
 
@@ -787,6 +806,7 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
     // SadhanaManager init — FieldStore is ready synchronously
     sadhana_manager = std::make_unique<SadhanaManager>(field_store);
     handler.set_sadhana_manager(sadhana_manager.get());
+    handler.set_queue_stats(&queue_count, &queue_fail_count, failed_queue_path);
     sadhana_manager->set_stream_fn([&server](int fd, std::string line) {
         server.queue_response(fd, std::move(line));
     });

@@ -36,20 +36,22 @@ Claude Code
     +---- chitta CLI -------> CHITTAD DAEMON
          (Unix socket)        |
                               +-- Thread Pool (2-16)
-                              +-- RPC Handler (137 tools)
+                              +-- RPC Handler (175+ tools)
                               +-- Subconscious (background)
                               |
-                              +-- DuckDBMind
+                              +-- chitta-field (Rust)
                               |   +-- VakYantra (ONNX embedder)
-                              |   +-- ResonanceLearner
-                              |   +-- ThemeManager
-                              |   +-- Anticipator
+                              |   +-- OpLog (append-only WAL)
+                              |   +-- HNSW (semantic recall)
+                              |   +-- BM25 (keyword recall)
+                              |   +-- Cortex (sparse codes)
+                              |   +-- Route/Plasticity Learners
                               |
-                              +-- DuckDB Storage
+                              +-- Storage (memory-mapped files)
                                   +-- memories, triplets, symbols
-                                  +-- VSS (HNSW vector index)
-                                  +-- DuckPGQ (graph queries)
-                                  +-- FTS (BM25 search)
+                                  +-- HNSW vector index
+                                  +-- Keyword index (BM25)
+                                  +-- Temporal + Artifact indexes
 ```
 
 ## Key Files
@@ -57,8 +59,9 @@ Claude Code
 | Component | Location |
 |-----------|----------|
 | Daemon | `chitta/src/simple_cli.cpp` |
-| RPC Handlers | `chitta/include/chitta/rpc/duckdb_handler.hpp` |
-| Memory Store | `chitta/src/duckdb_store.cpp` |
+| RPC Handlers | `chitta/include/chitta/rpc/field_handler.hpp` |
+| Field C++ Wrapper | `chitta/include/chitta/field_store.hpp` |
+| Memory Store | `chitta-field/src/store.rs` (Rust) |
 | Embedder | `chitta/include/chitta/vak.hpp` |
 | MCP Server | `chitta-mcp/server.py` |
 | Hooks | `hooks/*.sh` |
