@@ -244,9 +244,11 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
         auto last_embedding_flush = std::chrono::steady_clock::now();
         auto last_foreign_sync = std::chrono::steady_clock::now();
         auto last_binary_check = std::chrono::steady_clock::now();
-        auto embedding_flush_interval = std::chrono::seconds(5);  // Flush queued embeddings every 5s
-        auto foreign_sync_interval = std::chrono::seconds(5);    // Ingest peer segment files every 5s
-        auto binary_check_interval = std::chrono::seconds(60);   // Check for updated binary every 60s
+        auto embedding_flush_interval = std::chrono::seconds(5);   // Flush queued embeddings every 5s
+        auto foreign_sync_interval   = std::chrono::seconds(5);   // Ingest peer segment files every 5s
+        auto binary_check_interval   = std::chrono::seconds(60);  // Check for updated binary every 60s
+        auto pending_embed_interval  = std::chrono::seconds(30);  // Backfill embed_pending memories
+        auto last_pending_embed = std::chrono::steady_clock::now();
 
         // inotify watcher on segments/ dir for same-host peer writes
         int inotify_fd = inotify_init1(IN_NONBLOCK);
@@ -268,6 +270,29 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                     subconscious.flush_embedding_queue();
                 } catch (const std::exception& e) {
                     std::cerr << "[maint] Embedding flush failed: " << e.what() << "\n";
+                }
+            }
+
+            // Backfill embeddings for memories stored while yantra was unavailable
+            if (yantra && (now_time - last_pending_embed >= pending_embed_interval)) {
+                last_pending_embed = now_time;
+                try {
+                    auto pending = field_store.pending_embeddings(50);
+                    if (!pending.empty()) {
+                        std::cerr << "[maint] Backfilling " << pending.size() << " pending embeddings\n";
+                        for (uint64_t id : pending) {
+                            auto mem = field_store.get_content(id);
+                            if (!mem.empty()) {
+                                auto emb = yantra->transform(mem).nu.data;
+                                if (emb.size() == 768) {
+                                    field_store.backfill_embedding(id, emb);
+                                }
+                            }
+                        }
+                    }
+                } catch (const std::exception& e) {
+                    if (verbose_mode)
+                        std::cerr << "[maint] Backfill error: " << e.what() << "\n";
                 }
             }
 
@@ -536,10 +561,32 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                                 : category_to_confidence(category);
                             std::string full_text = title.empty() ? content : title + "\n" + content;
                             std::string realm = args.value("realm", "brahman");
-                            field_store.remember(category_to_kind(category), realm,
+                            auto new_id = field_store.remember(category_to_kind(category), realm,
                                                   full_text, embed_text(full_text),
                                                   confidence, 0.01f);
                             queue_count++;
+                            // Correction supersession: find semantically similar memories
+                            // and mark them as superseded via a triplet relation
+                            if (category == "correction" && new_id > 0) {
+                                auto emb = embed_text(full_text);
+                                if (!emb.empty()) {
+                                    auto hits = field_store.recall(emb, 5, realm);
+                                    for (const auto& h : hits) {
+                                        if (h.memory_id == new_id) continue;
+                                        if (h.score > 0.85f && h.kind != "correction") {
+                                            // Add supersedes triplet
+                                            field_store.add_triplet(
+                                                std::to_string(new_id),
+                                                "supersedes",
+                                                std::to_string(h.memory_id),
+                                                1.0f, new_id
+                                            );
+                                            // Weaken the superseded memory
+                                            field_store.weaken(h.memory_id, 0.15f);
+                                        }
+                                    }
+                                }
+                            }
                         }
                     } else if (tool == "strengthen") {
                         std::string id_str = args.value("id", "");

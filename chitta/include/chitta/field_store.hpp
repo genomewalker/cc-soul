@@ -20,6 +20,8 @@ int cf_backfill_embedding(struct CfHandle* h, uint64_t memory_id,
     const float* embedding_ptr, size_t embedding_len);
 int cf_pending_embeddings(struct CfHandle* h,
     uint64_t* out_ids, size_t max_ids, size_t* out_count);
+int cf_forget_triplet(struct CfHandle* h,
+    const char* subject, const char* predicate, const char* object);
 }
 
 namespace chitta {
@@ -279,6 +281,13 @@ public:
         cf_add_triplet(handle_, subject.c_str(), predicate.c_str(), object.c_str(),
                        weight, source_memory_id, &id);
         return id;
+    }
+
+    /// Remove triplet by subject+predicate+object (invalidates matching entry).
+    bool forget_triplet(const std::string& subject, const std::string& predicate,
+                        const std::string& object) {
+        return cf_forget_triplet(handle_, subject.c_str(), predicate.c_str(),
+                                 object.c_str()) == 0;
     }
 
     /// Query triplets by subject, returns JSON string.

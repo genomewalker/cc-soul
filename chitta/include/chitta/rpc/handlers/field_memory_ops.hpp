@@ -229,9 +229,9 @@
         if (!add_tag.empty()) {
             field_store_->add_triplet(std::to_string(id), "tagged", add_tag);
         }
-        // Remove is a no-op for now (triplet removal not in FieldStore API)
         if (!rm_tag.empty()) {
-            return DuckDBToolResult::ok("Tag removal not supported in chitta-field (stub)");
+            bool removed = field_store_->forget_triplet(std::to_string(id), "tagged", rm_tag);
+            if (!removed) return DuckDBToolResult::ok("Tag not found", {{"id", std::to_string(id)}, {"tag", rm_tag}});
         }
 
         return DuckDBToolResult::ok("OK", {{"id", std::to_string(id)}});
