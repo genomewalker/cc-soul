@@ -859,6 +859,13 @@ private:
         handlers_["enrichment_status"] = [this](const json& p) { return tool_enrichment_status(p); };
 
         // ── System tools ────────────────────────────────────────────────────
+        tools_.push_back({{"name","memory_status"},{"description","Get effective status of a memory: active, superseded, or contradicted — checks incoming supersedes triplets"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"id",{{"type","string"}}},{"memory_id",{{"type","integer"}}}
+            }},{"required",json::array()}}}
+        });
+        handlers_["memory_status"] = [this](const json& p) { return tool_memory_status(p); };
+
         tools_.push_back({{"name","queue_status"},{"description","Show async queue stats: processed, failed, dead-letter path"},
             {"inputSchema",{{"type","object"},{"properties",json::object()}}}
         });

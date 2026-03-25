@@ -234,11 +234,17 @@
         size_t limit       = static_cast<size_t>(params.value("limit", 20));
         std::string realm  = params.value("realm", "");
 
-        // Classify query intent
+        // Ask route learner for best retrieval strategy
+        auto route_sel = field_store_->select_route(query);
+        uint64_t episode_id = route_sel.episode_id;
+        uint8_t  route      = route_sel.route;
+        // 0=Semantic, 1=Keyword, 2=Temporal, 3=Artifact, 4=Hybrid, 5=Full
+
         auto eq = expand_query(query);
         bool is_code = looks_like_code_query(query);
+        if (is_code) route = 1;  // code queries always keyword
 
-        // Drift scoring lambda (no Hebbian — merged sources would over-count)
+        // Drift scoring lambda
         auto apply_drift_smart = [&](std::vector<FieldRecallHit>& hits) {
             const size_t total = field_store_->memory_count();
             if (total < 5 || hits.empty()) return;
@@ -255,20 +261,40 @@
         };
 
         json results;
-        if (is_code) {
+        static const char* route_names[] = {"semantic","keyword","temporal","artifact","hybrid","full"};
+        std::string route_name = route < 6 ? route_names[route] : "hybrid";
+
+        if (route == 1) {  // Keyword
             auto kw_hits = field_store_->recall_keyword(eq.lex, limit);
             apply_drift_smart(kw_hits);
             results = hits_to_results_json(kw_hits);
-        } else {
+        } else if (route == 2) {  // Temporal
+            int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            auto temp_hits = field_store_->recall_temporal(now_ms - (int64_t)30*24*3600*1000, now_ms, limit, realm);
+            apply_drift_smart(temp_hits);
+            results = hits_to_results_json(temp_hits);
+        } else {  // Semantic / Hybrid / Full / Artifact — all use semantic+keyword merge
             auto embedding = embed_query(eq.vec);
-            if (embedding.empty()) return DuckDBToolResult::error("Failed to embed query");
-            auto sem_hits = field_store_->recall(embedding, limit, realm);
-            auto kw_hits  = field_store_->recall_keyword(eq.lex, limit);
-            apply_drift_smart(sem_hits);
-            apply_drift_smart(kw_hits);
-            json semantic = hits_to_results_json(sem_hits);
-            json keyword  = hits_to_results_json(kw_hits);
-            results = merge_results(semantic, keyword);
+            if (embedding.empty()) {
+                // Fallback to keyword if embedding fails
+                auto kw_hits = field_store_->recall_keyword(eq.lex, limit);
+                apply_drift_smart(kw_hits);
+                results = hits_to_results_json(kw_hits);
+                field_store_->route_feedback(episode_id, -0.1f);  // slight penalty for forced fallback
+                episode_id = 0;  // skip normal feedback
+            } else {
+                auto sem_hits = field_store_->recall(embedding, limit, realm);
+                if (route == 0) {  // Semantic only
+                    apply_drift_smart(sem_hits);
+                    results = hits_to_results_json(sem_hits);
+                } else {  // Hybrid / Full
+                    auto kw_hits = field_store_->recall_keyword(eq.lex, limit);
+                    apply_drift_smart(sem_hits);
+                    apply_drift_smart(kw_hits);
+                    results = merge_results(hits_to_results_json(sem_hits), hits_to_results_json(kw_hits));
+                }
+            }
         }
 
         if (results.size() > limit) results.erase(results.begin() + static_cast<int>(limit), results.end());
@@ -286,7 +312,7 @@
         }
 
         std::ostringstream ss;
-        ss << "Smart recall (" << (is_code ? "keyword" : "hybrid") << "): " << results.size() << " results\n";
+        ss << "Smart recall (" << route_name << ", ep=" << episode_id << "): " << results.size() << " results\n";
         for (const auto& r : results) {
             int pct = static_cast<int>(r.value("relevance", 0.0f) * 100);
             ss << "[" << pct << "%] [" << r.value("type", "?") << "] "

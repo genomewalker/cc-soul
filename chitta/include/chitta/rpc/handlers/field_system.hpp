@@ -628,3 +628,45 @@
         if (in_file > 0) ss << " (" << in_file << " in dead-letter)";
         return DuckDBToolResult::ok(ss.str(), s);
     }
+
+    // ── Memory effective status ────────────────────────────────────────────────
+    // Determines if a memory is active, superseded, or contradicted by
+    // inspecting incoming "supersedes" triplets (no new Rust field needed).
+    DuckDBToolResult tool_memory_status(const json& params) {
+        auto [id, id_str] = parse_id(params);
+        if (id_str.empty()) return DuckDBToolResult::error("id is required");
+
+        // Check if any other memory supersedes this one
+        auto raw = field_store_->query_object(std::to_string(id));
+        json triplets = json::parse(raw, nullptr, false);
+        std::string status = "active";
+        uint64_t superseded_by = 0;
+        if (!triplets.is_discarded() && triplets.is_array()) {
+            for (const auto& t : triplets) {
+                if (t.value("predicate", "") == "supersedes") {
+                    status = "superseded";
+                    try { superseded_by = std::stoull(t.value("subject", "0")); } catch (...) {}
+                    break;
+                }
+            }
+        }
+        // Check if this memory supersedes others (it's a correction)
+        auto raw2 = field_store_->query_subject(std::to_string(id));
+        json out_trips = json::parse(raw2, nullptr, false);
+        std::vector<uint64_t> supersedes_ids;
+        if (!out_trips.is_discarded() && out_trips.is_array()) {
+            for (const auto& t : out_trips) {
+                if (t.value("predicate", "") == "supersedes") {
+                    try { supersedes_ids.push_back(std::stoull(t.value("object", "0"))); } catch (...) {}
+                }
+            }
+        }
+        json result;
+        result["id"]            = std::to_string(id);
+        result["status"]        = status;
+        result["superseded_by"] = superseded_by;
+        result["supersedes"]    = supersedes_ids;
+        std::string text = "Memory " + std::to_string(id) + ": " + status;
+        if (superseded_by > 0) text += " (by " + std::to_string(superseded_by) + ")";
+        return DuckDBToolResult::ok(text, result);
+    }

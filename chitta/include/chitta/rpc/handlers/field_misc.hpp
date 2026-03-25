@@ -1256,14 +1256,23 @@
 
         field_store_->emit_event("outcome", outcome, memory_str, context);
 
+        float reward = 0.0f;
         if (outcome == "positive" || outcome == "helpful" || outcome == "correct") {
             field_store_->strengthen(static_cast<uint64_t>(memory_id), 0.1f);
+            reward = 0.5f;
         } else if (outcome == "negative" || outcome == "unhelpful" || outcome == "incorrect") {
             field_store_->weaken(static_cast<uint64_t>(memory_id), 0.05f);
+            reward = -0.3f;
+        }
+
+        // Feed reward back to route learner if episode_id provided
+        uint64_t episode_id = params.value("episode_id", (uint64_t)0);
+        if (episode_id > 0 && reward != 0.0f) {
+            field_store_->route_feedback(episode_id, reward);
         }
 
         return DuckDBToolResult::ok("Outcome recorded for memory #" + memory_str,
-            {{"memory_id", memory_str}, {"outcome", outcome}});
+            {{"memory_id", memory_str}, {"outcome", outcome}, {"reward", reward}});
     }
 
     DuckDBToolResult tool_log_exposure(const json& params) {

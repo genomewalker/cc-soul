@@ -22,6 +22,9 @@ int cf_pending_embeddings(struct CfHandle* h,
     uint64_t* out_ids, size_t max_ids, size_t* out_count);
 int cf_forget_triplet(struct CfHandle* h,
     const char* subject, const char* predicate, const char* object);
+int cf_select_route(struct CfHandle* h, const char* query,
+    uint64_t* out_episode_id, uint8_t* out_route);
+int cf_route_feedback(struct CfHandle* h, uint64_t episode_id, float reward);
 }
 
 namespace chitta {
@@ -281,6 +284,20 @@ public:
         cf_add_triplet(handle_, subject.c_str(), predicate.c_str(), object.c_str(),
                        weight, source_memory_id, &id);
         return id;
+    }
+
+    /// Select retrieval route for query. Returns {episode_id, route} where
+    /// route: 0=Semantic, 1=Keyword, 2=Temporal, 3=Artifact, 4=Hybrid, 5=Full
+    struct RouteSelection { uint64_t episode_id; uint8_t route; };
+    RouteSelection select_route(const std::string& query) {
+        RouteSelection sel{0, 4};  // default Hybrid
+        cf_select_route(handle_, query.c_str(), &sel.episode_id, &sel.route);
+        return sel;
+    }
+
+    /// Record retrieval outcome for a route episode. reward in [-1, 1].
+    void route_feedback(uint64_t episode_id, float reward) {
+        cf_route_feedback(handle_, episode_id, reward);
     }
 
     /// Remove triplet by subject+predicate+object (invalidates matching entry).
