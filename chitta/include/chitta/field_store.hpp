@@ -135,6 +135,17 @@ public:
         );
     }
 
+    /// Update confidence directly (used to promote provisional→durable).
+    void update_confidence(uint64_t id, float delta) {
+        cf_update_state(handle_, id,
+            std::numeric_limits<float>::quiet_NaN(),
+            delta,
+            std::numeric_limits<float>::quiet_NaN(),
+            0,
+            static_cast<int8_t>(-1)
+        );
+    }
+
     /// Touch (update access time without changing strength).
     void touch(uint64_t id) {
         cf_update_state(handle_, id,

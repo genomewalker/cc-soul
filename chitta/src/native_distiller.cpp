@@ -302,6 +302,13 @@ void NativeDistiller::store_learnings(
             for (const auto& hit : hits) {
                 if (hit.semantic_score >= config_.dedup_threshold) {
                     field_store_->strengthen(hit.memory_id, 0.05f);
+                    // Promote provisional hook memories to distillation-tier confidence
+                    if (hit.confidence < 0.75f) {
+                        float target = category_to_confidence(learning.category);
+                        field_store_->update_confidence(hit.memory_id, target - hit.confidence);
+                        log("[distill]   promoted confidence: " + learning.category +
+                            " " + std::to_string(hit.confidence) + "→" + std::to_string(target));
+                    }
                     result.learnings_deduped++;
                     log("[distill]   ~dup " + learning.category + ": " +
                         learning.title.substr(0, 50) + " (strengthened existing)");

@@ -556,14 +556,33 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                         std::string title = args.value("title", "");
                         std::string content = args.value("content", "");
                         if (!content.empty()) {
-                            float confidence = args.contains("confidence")
-                                ? args.value("confidence", 0.8f)
-                                : category_to_confidence(category);
+                            std::string source   = args.value("source", "hook_regex");
+                            std::string evidence = args.value("evidence", "");
+                            // Distillation-first: hook events are provisional (0.50, fast decay)
+                            // distillation/mcp_tool events are durable (category confidence, slow decay)
+                            float confidence, decay;
+                            if (source == "hook_regex" || source == "hook_compliance") {
+                                confidence = args.contains("confidence")
+                                    ? args.value("confidence", 0.50f)
+                                    : 0.50f;
+                                decay = 0.02f;  // decays if never confirmed by distillation
+                            } else {
+                                confidence = args.contains("confidence")
+                                    ? args.value("confidence", 0.8f)
+                                    : category_to_confidence(category);
+                                decay = 0.005f;
+                            }
                             std::string full_text = title.empty() ? content : title + "\n" + content;
                             std::string realm = args.value("realm", "brahman");
                             auto new_id = field_store.remember(category_to_kind(category), realm,
                                                   full_text, embed_text(full_text),
-                                                  confidence, 0.01f);
+                                                  confidence, decay);
+                            // Store provenance as triplets
+                            if (new_id > 0 && !source.empty()) {
+                                field_store.add_triplet(std::to_string(new_id), "source", source);
+                                if (!evidence.empty())
+                                    field_store.add_triplet(std::to_string(new_id), "evidence", evidence);
+                            }
                             queue_count++;
                             // Correction supersession: find semantically similar memories
                             // and mark them as superseded via a triplet relation
