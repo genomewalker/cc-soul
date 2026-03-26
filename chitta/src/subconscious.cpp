@@ -138,6 +138,18 @@ void Subconscious::process_loop() {
             run_demotion_pass();
         }
 
+        // Belief maintenance: stale demotion + contradiction resolution + duplicate consolidation
+        if (config_.enable_belief_maintenance && maintenance_cb_ && time_for_belief_maintenance()) {
+            last_belief_maintenance_ = std::chrono::steady_clock::now();
+            stats_.belief_maintenance_runs++;
+            stats_.last_belief_maintenance_at = now_ms();
+            try {
+                maintenance_cb_();
+            } catch (const std::exception& e) {
+                std::cerr << "[subconscious] Belief maintenance failed: " << e.what() << "\n";
+            }
+        }
+
         // Auto-dream: trigger curiosity-driven exploration when idle > 10 min
         if (dream_callback_ && time_for_dream()) {
             last_dream_triggered_at_ = now_ms();
@@ -684,6 +696,12 @@ bool Subconscious::time_for_demotion() const {
     ).count();
 
     return (now_ms() - last) >= interval_ms;
+}
+
+bool Subconscious::time_for_belief_maintenance() const {
+    auto elapsed = std::chrono::duration_cast<std::chrono::minutes>(
+        std::chrono::steady_clock::now() - last_belief_maintenance_).count();
+    return elapsed >= config_.belief_maintenance_interval.count();
 }
 
 size_t Subconscious::flush_embedding_queue() {

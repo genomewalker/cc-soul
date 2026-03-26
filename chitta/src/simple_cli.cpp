@@ -224,6 +224,11 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                 std::cerr << "[think] Auto-think failed: " << e.what() << "\n";
             }
         });
+
+        // Wire belief maintenance callback
+        subconscious.set_maintenance_callback([&handler]() {
+            handler.run_belief_maintenance();
+        });
     }
 
     std::signal(SIGTERM, daemon_signal_handler);

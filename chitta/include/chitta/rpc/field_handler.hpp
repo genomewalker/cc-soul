@@ -33,6 +33,7 @@
 #include <numeric>
 #include <unistd.h>
 #include <glob.h>
+#include <iostream>
 
 namespace chitta {
 
@@ -86,6 +87,97 @@ public:
     }
     bool get_distill_enabled() const { return distill_enabled_.load(); }
     void set_distill_enabled(bool e) { distill_enabled_.store(e); }
+
+    void run_belief_maintenance(float stale_strength_threshold = 0.1f,
+                                int stale_days = 30,
+                                float dup_threshold = 0.97f,
+                                size_t max_dups = 5) {
+        size_t demoted = 0, contradictions_archived = 0, dups_merged = 0;
+
+        // 1. Stale belief demotion: archive Active memories with decayed strength below threshold
+        {
+            std::string raw = field_store_->list_memories("", "", "recency", 2000, 0);
+            try {
+                auto arr = json::parse(raw);
+                auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count();
+                for (const auto& m : arr) {
+                    uint64_t id = m.value("id", uint64_t(0));
+                    if (id == 0) continue;
+                    std::string meta_json = field_store_->get_memory_metadata(id);
+                    if (meta_json.empty()) continue;
+                    auto meta = json::parse(meta_json, nullptr, false);
+                    if (meta.is_discarded()) continue;
+                    std::string status = meta.value("status", "Active");
+                    if (status != "Active") continue;
+                    float strength = meta.value("strength", 1.0f);
+                    float decay_rate = meta.value("decay_rate", 0.001f);
+                    int64_t last_ms = meta.value("last_strengthened_ms", int64_t(0));
+                    if (last_ms == 0) last_ms = meta.value("created_at_ms", int64_t(0));
+                    if (last_ms == 0) continue;
+                    double age_days = static_cast<double>(now_ms - last_ms) / 86400000.0;
+                    if (age_days < stale_days) continue;
+                    double effective = strength * std::exp(-decay_rate * age_days);
+                    if (effective < stale_strength_threshold) {
+                        field_store_->set_memory_status(id, 3); // Archived
+                        ++demoted;
+                    }
+                }
+            } catch (...) {}
+        }
+
+        // 2. Contradiction resolution: archive Contradicted memories whose contradictors are gone
+        {
+            std::string raw = field_store_->list_memories("", "", "recency", 2000, 0);
+            try {
+                auto arr = json::parse(raw);
+                for (const auto& m : arr) {
+                    uint64_t id = m.value("id", uint64_t(0));
+                    if (id == 0) continue;
+                    std::string meta_json = field_store_->get_memory_metadata(id);
+                    if (meta_json.empty()) continue;
+                    auto meta = json::parse(meta_json, nullptr, false);
+                    if (meta.is_discarded()) continue;
+                    std::string status = meta.value("status", "Active");
+                    if (status != "Contradicted") continue;
+                    auto conflicts = field_store_->get_conflicts(id);
+                    bool any_active = false;
+                    for (uint64_t cid : conflicts) {
+                        std::string cmeta_json = field_store_->get_memory_metadata(cid);
+                        if (cmeta_json.empty()) continue;
+                        auto cmeta = json::parse(cmeta_json, nullptr, false);
+                        if (cmeta.is_discarded()) continue;
+                        std::string cs = cmeta.value("status", "Active");
+                        if (cs == "Active" || cs == "Verified") { any_active = true; break; }
+                    }
+                    if (!any_active) {
+                        field_store_->set_memory_status(id, 3); // Archived
+                        ++contradictions_archived;
+                    }
+                }
+            } catch (...) {}
+        }
+
+        // 3. Duplicate consolidation: merge highest-similarity pairs
+        {
+            auto pairs = find_dup_pairs("", 200, dup_threshold);
+            if (pairs.size() > max_dups) pairs.resize(max_dups);
+            std::unordered_set<uint64_t> processed;
+            for (const auto& p : pairs) {
+                if (processed.count(p.a_id) || processed.count(p.b_id)) continue;
+                uint64_t weaker_id = (p.a_score >= p.b_score) ? p.b_id : p.a_id;
+                try {
+                    field_store_->forget(weaker_id);
+                    processed.insert(weaker_id);
+                    ++dups_merged;
+                } catch (...) {}
+            }
+        }
+
+        std::cerr << "[belief_maintenance] demoted=" << demoted
+                  << " contradictions_archived=" << contradictions_archived
+                  << " dups_merged=" << dups_merged << "\n";
+    }
 
     json handle(const json& request) {
         std::string method = request.value("method", "");

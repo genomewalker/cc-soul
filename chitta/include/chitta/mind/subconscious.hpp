@@ -57,6 +57,8 @@ struct SubconsciousConfig {
     std::chrono::seconds idle_threshold{30};      // Only embed when no queries for this long
     std::chrono::minutes sleep_consolidation_interval{10};  // encode_all + save_snapshot every 10 min
     std::chrono::minutes demotion_interval{60};             // run_demotion pass every hour
+    std::chrono::minutes belief_maintenance_interval{120};  // Belief maintenance every 2 hours
+    bool enable_belief_maintenance{true};
     size_t max_queue_size{1000};
     size_t embedding_batch_size{20};              // Small batches to avoid blocking
     float correction_confidence{0.8f};
@@ -110,6 +112,8 @@ struct SubconsciousStats {
     std::atomic<size_t> demotion_runs{0};             // run_demotion pass runs
     std::atomic<size_t> field_demoted{0};             // Total memories demoted across all passes
     std::atomic<size_t> field_deleted{0};             // Total memories deleted across all passes
+    std::atomic<size_t> belief_maintenance_runs{0};
+    std::atomic<int64_t> last_belief_maintenance_at{0};
     std::atomic<int64_t> last_hygiene_at{0};
     std::atomic<int64_t> last_theme_maintenance_at{0};
     std::atomic<int64_t> last_distillation_at{0};
@@ -159,6 +163,9 @@ public:
 
     // Dream callback: called when the soul has been idle long enough to dream
     void set_dream_callback(std::function<void()> fn) { dream_callback_ = std::move(fn); }
+
+    // Belief maintenance callback: periodic stale demotion + contradiction resolution
+    void set_maintenance_callback(std::function<void()> fn) { maintenance_cb_ = std::move(fn); }
 
     // Think callback: called hourly during idle for internal memory synthesis
     void set_think_callback(std::function<void()> fn) { think_callback_ = std::move(fn); }
@@ -258,6 +265,11 @@ private:
     bool time_for_sleep_consolidation() const;
     void run_demotion_pass();
     bool time_for_demotion() const;
+
+    // Belief maintenance
+    std::function<void()> maintenance_cb_;
+    std::chrono::steady_clock::time_point last_belief_maintenance_{std::chrono::steady_clock::now()};
+    bool time_for_belief_maintenance() const;
 
     // Dream: autonomous curiosity-driven exploration when idle
     std::function<void()> dream_callback_;
