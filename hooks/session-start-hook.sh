@@ -305,14 +305,42 @@ else
     fi
 
     # ===========================================
-    # CORRECTIONS RECAP: Surface recent high-priority corrections
+    # CORRECTIONS RECAP: Surface recent corrections (with suppression after N surfaces)
+    # Corrections tagged 'wontfix' or 'verified' are suppressed.
+    # Others are suppressed after CORRECTION_MAX_SURFACES sessions without action.
     # ===========================================
-    corrections=$(timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "correction" --tag "correction" --limit 3 --text-only 2>/dev/null | head -c 600 || true)
-    if [[ -n "$corrections" && "$corrections" != *"No memories"* ]]; then
-        echo ""
-        echo "[recent-corrections]"
-        echo "$corrections" | head -5
-        echo "[/recent-corrections]"
+    CORRECTION_MAX_SURFACES=5
+    SURFACE_COUNT_FILE="${MIND_PATH}/.correction_surfaces"
+    touch "$SURFACE_COUNT_FILE" 2>/dev/null
+
+    corrections_raw=$(timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "correction" --tag "correction" --limit 5 --json 2>/dev/null || true)
+    if [[ -n "$corrections_raw" && "$corrections_raw" != *"No memories"* ]]; then
+        corrections_out=""
+        while IFS= read -r corr_line; do
+            [[ -z "$corr_line" ]] && continue
+            corr_id=$(echo "$corr_line" | python3 -c "import sys,json; d=json.loads(sys.stdin.read()); print(d.get('id',''))" 2>/dev/null || true)
+            corr_text=$(echo "$corr_line" | python3 -c "import sys,json; d=json.loads(sys.stdin.read()); print(d.get('text','')[:120])" 2>/dev/null || true)
+            [[ -z "$corr_id" || -z "$corr_text" ]] && continue
+
+            # Skip if tagged wontfix or verified
+            tags=$(timeout 0.5 "$CHITTA_BIN" triplet_history --id "$corr_id" --predicate "tagged" --json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(' '.join(t.get('object','') for t in d.get('triplets',[])))" 2>/dev/null || echo "")
+            [[ "$tags" =~ wontfix|verified ]] && continue
+
+            # Track surface count
+            current=$(grep -c "^${corr_id}$" "$SURFACE_COUNT_FILE" 2>/dev/null || echo "0")
+            if [[ "$current" -ge "$CORRECTION_MAX_SURFACES" ]]; then
+                continue  # Suppressed after N surfaces without action
+            fi
+            echo "$corr_id" >> "$SURFACE_COUNT_FILE"
+            corrections_out="${corrections_out}${corr_text}\n"
+        done <<< "$(echo "$corrections_raw" | python3 -c "import sys,json; d=json.load(sys.stdin); [print(json.dumps(r)) for r in d.get('results',[])]" 2>/dev/null)"
+
+        if [[ -n "$corrections_out" ]]; then
+            echo ""
+            echo "[recent-corrections]"
+            printf '%b' "$corrections_out" | head -5
+            echo "[/recent-corrections]"
+        fi
     fi
 
     # Check for compliance failures (missed learning opportunities)

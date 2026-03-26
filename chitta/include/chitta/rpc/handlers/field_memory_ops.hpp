@@ -90,6 +90,32 @@
             }
         }
 
+        // Explicit supersession: force_supersede_ids bypasses cosine threshold
+        // Accepts both JSON array ["id1","id2"] and comma-separated string "id1,id2"
+        if (id > 0 && params.contains("force_supersede_ids")) {
+            std::vector<std::string> supersede_ids;
+            const auto& fsi = params["force_supersede_ids"];
+            if (fsi.is_array()) {
+                for (const auto& v : fsi) supersede_ids.push_back(v.get<std::string>());
+            } else if (fsi.is_string()) {
+                std::istringstream ss(fsi.get<std::string>());
+                std::string tok;
+                while (std::getline(ss, tok, ',')) {
+                    tok.erase(0, tok.find_first_not_of(' '));
+                    tok.erase(tok.find_last_not_of(' ') + 1);
+                    if (!tok.empty()) supersede_ids.push_back(tok);
+                }
+            }
+            for (const auto& sid_str : supersede_ids) {
+                try {
+                    uint64_t sid = std::stoull(sid_str);
+                    field_store_->add_triplet(std::to_string(id), "supersedes", sid_str, 1.0f, id);
+                    field_store_->weaken(sid, 0.15f);
+                    field_store_->set_memory_status(sid, 1); // Superseded
+                } catch (...) {}
+            }
+        }
+
         // Correction supersession: when category=correction, weaken semantically similar memories
         if (category == "correction" && id > 0 && !embedding.empty()) {
             auto hits = field_store_->recall(embedding, 5, realm);

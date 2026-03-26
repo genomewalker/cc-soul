@@ -260,7 +260,8 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
       {"realm", "Primary realm (default: brahman)", false, nullptr},
       {"source", "Source: hook_regex|hook_compliance|distillation|mcp_tool", false, "mcp_tool"},
       {"confidence", "Override confidence (0.0-1.0)", false, nullptr},
-      {"evidence", "What triggered this observation", false, nullptr}}},
+      {"evidence", "What triggered this observation", false, nullptr},
+      {"force_supersede_ids", "Comma-separated memory IDs to explicitly supersede", false, nullptr}}},
 
     {"full_resonate", "Semantic search with full context (for hooks)",
      {{"query", "Search query", true, nullptr},

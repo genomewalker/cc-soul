@@ -609,6 +609,30 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                                 // 1. If target_id is explicit → supersede that specific memory
                                 // 2. Otherwise → same realm + cosine > 0.92 (tight threshold)
                                 //    AND same kind (corrections don't supersede different memory types)
+                                // force_supersede_ids: explicit list bypasses cosine threshold
+                                if (args.contains("force_supersede_ids")) {
+                                    auto fsi = args["force_supersede_ids"];
+                                    std::vector<std::string> ids;
+                                    if (fsi.is_array()) {
+                                        for (auto& v : fsi) ids.push_back(v.get<std::string>());
+                                    } else if (fsi.is_string()) {
+                                        std::istringstream ss(fsi.get<std::string>());
+                                        std::string tok;
+                                        while (std::getline(ss, tok, ',')) {
+                                            tok.erase(0, tok.find_first_not_of(' '));
+                                            tok.erase(tok.find_last_not_of(' ') + 1);
+                                            if (!tok.empty()) ids.push_back(tok);
+                                        }
+                                    }
+                                    for (const auto& sid : ids) {
+                                        try {
+                                            uint64_t tid = std::stoull(sid);
+                                            field_store.add_triplet(std::to_string(new_id), "supersedes", sid, 1.0f, new_id);
+                                            field_store.weaken(tid, 0.15f);
+                                            field_store.set_memory_status(tid, 1);
+                                        } catch (...) {}
+                                    }
+                                }
                                 auto emb = embed_text(full_text);
                                 std::string target_id_str = args.value("target_id", "");
                                 if (!target_id_str.empty()) {
