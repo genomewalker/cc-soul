@@ -518,15 +518,27 @@
         std::string session_id = params.value("session_id", get_session_id());
         size_t limit           = static_cast<size_t>(params.value("limit", 20));
 
-        // Attempt keyword recall for messages directed at this session
-        auto hits = field_store_->recall_keyword("msg send " + session_id, limit);
+        auto events_json_str = field_store_->get_events_by_target("msg", "send", session_id, limit);
+
+        json events = json::parse(events_json_str, nullptr, false);
+        if (events.is_discarded() || !events.is_array()) {
+            return DuckDBToolResult::ok("No messages found", {
+                {"session_id", session_id},
+                {"count",      0},
+                {"messages",   json::array()}
+            });
+        }
 
         json msg_list = json::array();
-        for (const auto& h : hits) {
+        for (const auto& ev : events) {
+            json payload = ev.value("payload", json::object());
             msg_list.push_back({
-                {"memory_id", h.memory_id},
-                {"content",   h.content},
-                {"score",     h.score}
+                {"memory_id",         ev.value("event_id", 0)},
+                {"content",           payload.value("content", "")},
+                {"sender_session_id", payload.value("sender_session_id", "")},
+                {"content_type",      payload.value("content_type", "text")},
+                {"score",             payload.value("priority", 1)},
+                {"ts_ms",             ev.value("ts_ms", 0)}
             });
         }
 
@@ -534,8 +546,7 @@
             return DuckDBToolResult::ok("No messages found", {
                 {"session_id", session_id},
                 {"count",      0},
-                {"messages",   json::array()},
-                {"note",       "session state tracked via events"}
+                {"messages",   json::array()}
             });
         }
 
@@ -583,18 +594,22 @@
         std::string session_id = params.value("session_id", get_session_id());
         size_t limit           = static_cast<size_t>(params.value("limit", 30));
 
-        std::string kw_query = "msg";
-        if (!session_id.empty()) kw_query = "msg " + session_id;
+        auto events_json_str = field_store_->get_events_by_target("msg", "send", session_id, limit);
 
-        auto hits = field_store_->recall_keyword(kw_query, limit);
+        json events = json::parse(events_json_str, nullptr, false);
+        if (events.is_discarded() || !events.is_array()) events = json::array();
 
         json msg_list = json::array();
-        for (const auto& h : hits) {
+        for (const auto& ev : events) {
+            json payload = ev.value("payload", json::object());
             msg_list.push_back({
-                {"memory_id", h.memory_id},
-                {"content",   h.content},
-                {"score",     h.score},
-                {"kind",      h.kind}
+                {"memory_id",         ev.value("event_id", 0)},
+                {"content",           payload.value("content", "")},
+                {"sender_session_id", payload.value("sender_session_id", "")},
+                {"content_type",      payload.value("content_type", "text")},
+                {"score",             payload.value("priority", 1)},
+                {"ts_ms",             ev.value("ts_ms", 0)},
+                {"kind",              "msg_send"}
             });
         }
 
