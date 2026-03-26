@@ -694,7 +694,7 @@ std::string SadhanaManager::build_system_prompt(const Sadhana& sadhana) const {
         } else {
             sys << "  # DRY RUN: allow_deploy not set — do NOT push or deploy\n"
                 << "  git -C " << repo << " diff > /tmp/impl-ready.patch\n"
-                << "  git -C " << repo << " checkout .\n"
+                << "  git -C " << repo << " stash push -m \"impl-proposed\"\n"
                 << "  chitta remember --content \"[impl][proposed] <description>\\n[e] patch at /tmp/impl-ready.patch\" --tags impl proposed\n"
                 << "  # Human must review patch and set allow_deploy:true in goal_dsl to deploy\n\n";
         }
