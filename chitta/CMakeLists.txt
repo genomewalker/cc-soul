@@ -428,6 +428,22 @@ target_include_directories(chittad PRIVATE "${CHITTA_FIELD_INCLUDE}")
 target_link_libraries(chittad PRIVATE chitta "${CHITTA_FIELD_LIB}" dl pthread)
 target_compile_definitions(chittad PRIVATE CHITTA_FIELD_AVAILABLE=1)
 
+# CLI tool for memory operations (thin client + MCP server)
+# Output as 'chitta' binary (target named chitta_tool to avoid library conflict)
+if(CHITTA_BUILD_RPC)
+    add_executable(chitta_tool
+        src/rpc_server.cpp
+        src/socket_client.cpp
+    )
+    set_target_properties(chitta_tool PROPERTIES OUTPUT_NAME chitta)
+    target_link_libraries(chitta_tool PRIVATE chitta)
+    target_include_directories(chitta_tool PRIVATE "${CHITTA_FIELD_INCLUDE}")
+    if(TARGET onnx_yantra)
+        target_link_libraries(chitta_tool PRIVATE onnx_yantra)
+        target_compile_definitions(chitta_tool PRIVATE CHITTA_WITH_ONNX)
+    endif()
+endif()
+
 # RPATH configuration for runtime library discovery
 # CI builds can override with CMAKE_INSTALL_RPATH=$ORIGIN to bundle libs
 set(CHITTA_RUNTIME_LIBS "")
