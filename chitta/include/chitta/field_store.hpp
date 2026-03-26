@@ -44,6 +44,10 @@ struct FieldRecallHit {
     std::string kind;
     std::string realm;
     std::string content;
+    float       semantic_weight  = 0.0f;
+    float       status_mul       = 0.0f;
+    float       epistemic_mul    = 0.0f;
+    float       strength_factor  = 0.0f;
 };
 
 /// Thin RAII C++ wrapper around the chitta-field C FFI.
@@ -871,13 +875,17 @@ private:
 
         for (size_t i = 0; i < n; ++i) {
             FieldRecallHit h;
-            h.memory_id      = buf[i].memory_id;
-            h.score          = buf[i].score;
-            h.semantic_score = buf[i].semantic_score;
-            h.ts_ms          = buf[i].ts_ms;
-            h.strength       = buf[i].strength;
-            h.confidence     = buf[i].confidence;
-            h.access_count   = buf[i].access_count;
+            h.memory_id        = buf[i].memory_id;
+            h.score            = buf[i].score;
+            h.semantic_score   = buf[i].semantic_score;
+            h.ts_ms            = buf[i].ts_ms;
+            h.strength         = buf[i].strength;
+            h.confidence       = buf[i].confidence;
+            h.access_count     = buf[i].access_count;
+            h.semantic_weight  = buf[i].semantic_weight;
+            h.status_mul       = buf[i].status_mul;
+            h.epistemic_mul    = buf[i].epistemic_mul;
+            h.strength_factor  = buf[i].strength_factor;
 
             // Fetch content (has written out-param)
             written = 0;

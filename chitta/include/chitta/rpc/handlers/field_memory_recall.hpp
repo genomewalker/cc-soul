@@ -85,7 +85,8 @@
             }
         }
 
-        json results_json = hits_to_results_json(hits);
+        bool explain = params.value("explain", false);
+        json results_json = hits_to_results_json(hits, explain);
 
         std::ostringstream ss;
         ss << "Found " << hits.size() << " results";
@@ -165,7 +166,8 @@
         size_t k = static_cast<size_t>(params.value("limit", 10));
 
         auto hits = field_store_->recall_keyword(query, k);
-        json results_json = hits_to_results_json(hits);
+        bool explain = params.value("explain", false);
+        json results_json = hits_to_results_json(hits, explain);
 
         std::ostringstream ss;
         ss << "Found " << hits.size() << " keyword results for '" << query << "':\n";
@@ -210,8 +212,9 @@
             }
         }
 
-        json semantic = hits_to_results_json(semantic_hits);
-        json keyword  = hits_to_results_json(keyword_hits);
+        bool explain = params.value("explain", false);
+        json semantic = hits_to_results_json(semantic_hits, explain);
+        json keyword  = hits_to_results_json(keyword_hits, explain);
         json merged   = merge_results(semantic, keyword);
 
         if (merged.size() > limit) merged.erase(merged.begin() + static_cast<int>(limit), merged.end());

@@ -169,10 +169,10 @@ private:
 
     // ── Result conversion helpers ───────────────────────────────────────────
 
-    static json hits_to_results_json(const std::vector<FieldRecallHit>& hits) {
+    static json hits_to_results_json(const std::vector<FieldRecallHit>& hits, bool explain = false) {
         json arr = json::array();
         for (const auto& h : hits) {
-            arr.push_back({
+            json entry = {
                 {"id",         std::to_string(h.memory_id)},
                 {"relevance",  h.score},
                 {"similarity", h.semantic_score},
@@ -180,7 +180,16 @@ private:
                 {"text",       h.content},
                 {"realm",      h.realm},
                 {"confidence", h.confidence},
-            });
+            };
+            if (explain) {
+                entry["explain"] = {
+                    {"semantic_weight",  h.semantic_weight},
+                    {"status_mul",       h.status_mul},
+                    {"epistemic_mul",    h.epistemic_mul},
+                    {"strength_factor",  h.strength_factor},
+                };
+            }
+            arr.push_back(std::move(entry));
         }
         return arr;
     }
@@ -503,7 +512,8 @@ private:
                     {"realm", {{"type", "string"}, {"description", "Filter by realm"}}},
                     {"include_global", {{"type", "boolean"}, {"description", "Include global memories (default: true)"}}},
                     {"separation_mode", {{"type", "boolean"}, {"description", "Diverse results via MMR (default: false)"}}},
-                    {"gwt_mode", {{"type", "boolean"}, {"description", "Global Workspace Theory mode (default: false)"}}}
+                    {"gwt_mode", {{"type", "boolean"}, {"description", "Global Workspace Theory mode (default: false)"}}},
+                    {"explain", {{"type", "boolean"}, {"description", "Include score decomposition per hit (default: false)"}}}
                 }}, {"required", {"query"}}
             }}
         });
@@ -528,7 +538,8 @@ private:
         tools_.push_back({{"name","recall_keyword"},{"description","BM25 keyword search"},
             {"inputSchema",{{"type","object"},{"properties",{
                 {"query",{{"type","string"},{"description","Search query"}}},
-                {"limit",{{"type","integer"},{"description","Max results (default 10)"}}}
+                {"limit",{{"type","integer"},{"description","Max results (default 10)"}}},
+                {"explain",{{"type","boolean"},{"description","Include score decomposition per hit (default: false)"}}}
             }},{"required",{"query"}}}}
         });
         handlers_["recall_keyword"] = [this](const json& p) { return tool_recall_keyword(p); };
@@ -1496,7 +1507,8 @@ private:
                 {"query",{{"type","string"}}},{"limit",{{"type","integer"}}},
                 {"tag",{{"type","string"}}},{"realm",{{"type","string"}}},
                 {"vector_weight",{{"type","number"}}},{"bm25_weight",{{"type","number"}}},
-                {"graph_weight",{{"type","number"}}},{"recency_weight",{{"type","number"}}}
+                {"graph_weight",{{"type","number"}}},{"recency_weight",{{"type","number"}}},
+                {"explain",{{"type","boolean"},{"description","Include score decomposition per hit (default: false)"}}}
             }},{"required",{"query"}}}}
         });
         handlers_["hybrid_recall"] = [this](const json& p) { return tool_hybrid_recall(p); };
