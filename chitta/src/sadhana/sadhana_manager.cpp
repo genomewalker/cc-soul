@@ -699,7 +699,7 @@ std::string SadhanaManager::build_system_prompt(const Sadhana& sadhana) const {
                 << "  # Human must review patch and set allow_deploy:true in goal_dsl to deploy\n\n";
         }
         sys << "STEP 4b — If REJECTED:\n"
-            << "  git -C " << repo << " restore .\n"
+            << "  git -C " << repo << " stash push -m \"impl-rejected\"\n"
             << "  chitta remember --content \"[impl][rejected] <reason>\" --tags impl rejected\n\n"
             << "CONSTRAINTS:\n"
             << "  - One impl per cycle — pick the most actionable one\n"

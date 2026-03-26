@@ -211,7 +211,7 @@ BrainResult execute_with_timeout(
 }  // anonymous namespace
 
 // ClaudeBrain implementation
-// Runs: claude --dangerously-skip-permissions --model <model> --max-turns N [--system <sys>] -p <prompt>
+// Runs: claude --allowedTools Bash,Edit,Write,Read,Glob,Grep --model <model> --max-turns N [--system <sys>] -p <prompt>
 BrainResult ClaudeBrain::think(const std::string& prompt, const BrainConfig& config) {
     int turns = config.max_turns > 0 ? config.max_turns : 20;
 
