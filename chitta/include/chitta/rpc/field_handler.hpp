@@ -469,6 +469,7 @@ private:
     #include "handlers/field_distill.hpp"
     #include "handlers/field_misc.hpp"
     #include "handlers/field_contradiction.hpp"
+    #include "handlers/field_operator.hpp"
     #include "handlers/ledger.hpp"
     #include "handlers/long_task.hpp"
     #include "handlers/compact.hpp"
@@ -2194,6 +2195,40 @@ private:
             }},{"required",{"query"}}}}
         });
         handlers_["show_conflicts"] = [this](const json& p) { return tool_show_conflicts(p); };
+
+        // Operator controls
+        tools_.push_back({{"name","approve_memory"},{"description","Approve a Proposed memory, promoting it to Active"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"id",{{"type","string"},{"description","Memory ID to approve"}}}
+            }},{"required",{"id"}}}}
+        });
+        handlers_["approve_memory"] = [this](const json& p) { return tool_approve_memory(p); };
+
+        tools_.push_back({{"name","reject_memory"},{"description","Reject a Proposed memory, archiving it"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"id",{{"type","string"},{"description","Memory ID to reject"}}}
+            }},{"required",{"id"}}}}
+        });
+        handlers_["reject_memory"] = [this](const json& p) { return tool_reject_memory(p); };
+
+        tools_.push_back({{"name","conflict_inspector"},{"description","Semantic search + show status and contradiction partners for each hit"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"query",{{"type","string"},{"description","Search query"}}},
+                {"limit",{{"type","integer"},{"description","Max memories to scan (default 10)"}}},
+                {"realm",{{"type","string"},{"description","Filter by realm"}}}
+            }},{"required",{"query"}}}}
+        });
+        handlers_["conflict_inspector"] = [this](const json& p) { return tool_conflict_inspector(p); };
+
+        tools_.push_back({{"name","disable_source"},{"description","Add a source to the deny-list via triplet"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"source",{{"type","string"},{"description","Source identifier to deny"}}}
+            }},{"required",{"source"}}}}
+        });
+        handlers_["disable_source"] = [this](const json& p) { return tool_disable_source(p); };
+
+        // Override memory_history handler with richer operator version
+        handlers_["memory_history"] = [this](const json& p) { return tool_operator_memory_history(p); };
 
         classify_tools();
     }
