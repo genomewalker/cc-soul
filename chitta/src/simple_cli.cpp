@@ -558,19 +558,29 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                         if (!content.empty()) {
                             std::string source   = args.value("source", "hook_regex");
                             std::string evidence = args.value("evidence", "");
-                            // Distillation-first: hook events are provisional (0.50, fast decay)
-                            // distillation/mcp_tool events are durable (category confidence, slow decay)
-                            float confidence, decay;
-                            if (source == "hook_regex" || source == "hook_compliance") {
-                                confidence = args.contains("confidence")
-                                    ? args.value("confidence", 0.50f)
-                                    : 0.50f;
-                                decay = 0.02f;  // decays if never confirmed by distillation
-                            } else {
-                                confidence = args.contains("confidence")
-                                    ? args.value("confidence", 0.8f)
-                                    : category_to_confidence(category);
-                                decay = 0.005f;
+
+                            // ── Source trust policy (contract enforcement) ─────
+                            auto policy = source_policy(source);
+                            float confidence = args.contains("confidence")
+                                ? args.value("confidence", 0.50f)
+                                : category_to_confidence(category);
+                            float decay = policy.allow_durable ? 0.005f : 0.02f;
+
+                            // Clamp confidence to policy bounds
+                            float orig_confidence = confidence;
+                            confidence = std::min(confidence, policy.max_confidence);
+                            confidence = std::max(confidence, policy.min_confidence);
+                            if (orig_confidence != confidence) {
+                                std::cerr << "[contract] confidence clamped for source=" << source
+                                          << ": " << orig_confidence << "→" << confidence << "\n";
+                            }
+                            // Reject: distillation below floor is a bug, not a policy violation
+                            if (source == "distillation" && confidence < policy.min_confidence) {
+                                std::cerr << "[contract] REJECT: distillation event confidence="
+                                          << confidence << " below floor=" << policy.min_confidence
+                                          << " — check distillation pipeline\n";
+                                queue_fail_count++;
+                                continue;  // skip this queue item
                             }
                             std::string full_text = title.empty() ? content : title + "\n" + content;
                             std::string realm = args.value("realm", "brahman");

@@ -10,6 +10,26 @@
 
 namespace chitta {
 
+/// Source trust hierarchy — defines confidence bounds per event source.
+/// Enforced at write time in the queue processor.
+/// Any violation is logged as a dead-letter entry and the event is adjusted.
+struct SourcePolicy {
+    float max_confidence = 1.0f;   ///< Cap: event confidence must be <= this
+    float min_confidence = 0.0f;   ///< Floor: event confidence must be >= this
+    bool  allow_durable  = true;   ///< If false, confidence is capped at 0.74 (provisional tier)
+};
+
+/// Return the policy for a given source string.
+/// Sources not in the table default to: max=0.7, min=0.0, durable=false
+inline SourcePolicy source_policy(const std::string& source) {
+    if (source == "hook_regex")       return {0.70f, 0.00f, false};  // provisional, decays
+    if (source == "hook_compliance")  return {0.90f, 0.50f, false};  // high-signal corrections but still provisional
+    if (source == "distillation")     return {1.00f, 0.75f, true};   // durable: min 0.75
+    if (source == "mcp_tool")         return {1.00f, 0.60f, true};   // explicit human intent: durable
+    if (source == "system")           return {1.00f, 0.80f, true};   // internal system ops
+    return {0.70f, 0.00f, false};  // unknown source → provisional
+}
+
 struct DistillConfig {
     int interval_minutes = 15;
     int min_turns = 4;
