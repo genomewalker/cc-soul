@@ -57,6 +57,9 @@ Autonomous agents (sadhana impl loop) are constrained to:
 - `allow_deploy: true` requires explicit human opt-in in goal_dsl
 - When deploying: only commits `chitta/` directory, not full repo
 
+Impl sadhana creates an isolated git worktree at `/tmp/impl-worktree-{id}` for the propose
+phase, never mutating the main worktree directly. The worktree is cleaned up after each cycle.
+
 Memory produced by autonomous agents carries `source=mcp_tool` (via chitta CLI calls).
 This makes them durable but limited to the `mcp_tool` confidence range.
 

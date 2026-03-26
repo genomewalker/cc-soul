@@ -587,6 +587,13 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                             auto new_id = field_store.remember(category_to_kind(category), realm,
                                                   full_text, embed_text(full_text),
                                                   confidence, decay);
+                            // Set initial epistemic status and memory status based on source
+                            if (new_id > 0) {
+                                uint8_t es = epistemic_status_for_source(source);
+                                uint8_t ms = initial_status_for_source(source);
+                                if (es != 1) field_store.set_epistemic_status(new_id, es);
+                                if (ms != 0) field_store.set_memory_status(new_id, ms);
+                            }
                             // Store provenance as triplets
                             if (new_id > 0 && !source.empty()) {
                                 field_store.add_triplet(std::to_string(new_id), "source", source);

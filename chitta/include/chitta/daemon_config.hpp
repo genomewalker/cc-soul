@@ -97,4 +97,20 @@ inline std::string default_enrich_script() {
     return std::string(home ? home : ".") + "/.claude/hooks/enrich.sh";
 }
 
+// Returns epistemic status code (0=UserStated,1=ToolDerived,2=ModelInferred,3=AutonomousSynthesis)
+inline uint8_t epistemic_status_for_source(const std::string& source) {
+    if (source == "mcp_tool")     return 0;  // UserStated
+    if (source == "distillation") return 2;  // ModelInferred
+    if (source == "system")       return 2;  // ModelInferred
+    return 1;  // ToolDerived (hook_regex, hook_compliance, unknown)
+}
+
+// Returns initial MemoryStatus code for source (4=Proposed, 5=Observed, 0=Active)
+inline uint8_t initial_status_for_source(const std::string& source) {
+    if (source == "hook_regex" || source == "hook_compliance") return 4; // Proposed
+    if (source == "distillation") return 0; // Active (already verified)
+    if (source == "mcp_tool")    return 0;  // Active (explicit user intent)
+    return 5; // Observed (other sources)
+}
+
 } // namespace chitta

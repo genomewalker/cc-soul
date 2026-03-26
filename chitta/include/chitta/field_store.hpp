@@ -26,6 +26,7 @@ int cf_select_route(struct CfHandle* h, const char* query,
     uint64_t* out_episode_id, uint8_t* out_route);
 int cf_route_feedback(struct CfHandle* h, uint64_t episode_id, float reward);
 int cf_set_memory_status(struct CfHandle* h, uint64_t memory_id, uint8_t status);
+int cf_set_epistemic_status(struct CfHandle* h, uint64_t memory_id, uint8_t epistemic_status);
 int64_t cf_compact_wal(struct CfHandle* h);
 }
 
@@ -93,9 +94,14 @@ public:
         return id;
     }
 
-    /// Set memory lifecycle status: 0=Active 1=Superseded 2=Contradicted 3=Archived
+    /// Set memory lifecycle status: 0=Active 1=Superseded 2=Contradicted 3=Archived 4=Proposed 5=Observed 6=Verified
     void set_memory_status(uint64_t id, uint8_t status) {
         cf_set_memory_status(handle_, id, status);
+    }
+
+    /// Set epistemic status: 0=UserStated 1=ToolDerived 2=ModelInferred 3=AutonomousSynthesis
+    void set_epistemic_status(uint64_t id, uint8_t es) {
+        cf_set_epistemic_status(handle_, id, es);
     }
 
     /// Compact WAL: save full snapshot then delete covered segments. Returns deleted count or -1.

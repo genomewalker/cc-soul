@@ -671,6 +671,10 @@ std::string SadhanaManager::build_system_prompt(const Sadhana& sadhana) const {
 
         if (phase == "deploy") {
             sys << "CYCLE PROTOCOL (phase: deploy):\n\n"
+                << "STEP 0 — Create isolated worktree:\n"
+                << "  WORKTREE=\"/tmp/impl-worktree-" << sadhana.id << "\"\n"
+                << "  cd " << repo << " && git worktree add \"$WORKTREE\" main 2>/dev/null || cd \"$WORKTREE\" && git pull\n"
+                << "  cd \"$WORKTREE\"\n\n"
                 << "STEP 1 — Find the proposed patch:\n"
                 << "  ls /tmp/impl-*.patch 2>/dev/null\n"
                 << "  Select the most recent patch file. If none: {\"status\": \"blocked\", \"summary\": \"No proposed patch found — run propose phase first\"}\n\n"
@@ -680,10 +684,10 @@ std::string SadhanaManager::build_system_prompt(const Sadhana& sadhana) const {
                 << "    focus: \"Is this change safe, correct, and minimal? Does it fit cc-soul architecture? Output APPROVED or REJECTED with one sentence reason.\"\n\n"
                 << "STEP 3a — If APPROVED:\n";
             if (allow_deploy) {
-                sys << "  cd " << repo << " && git stash pop\n"
-                    << "  git -C " << repo << " add chitta/\n"
-                    << "  git -C " << repo << " commit -m \"impl: <one-line description>\"\n"
-                    << "  git -C " << repo << " push\n"
+                sys << "  cd \"$WORKTREE\" && git apply /tmp/impl-" << sadhana.id << ".patch\n"
+                    << "  git -C \"$WORKTREE\" add chitta/\n"
+                    << "  git -C \"$WORKTREE\" commit -m \"impl: <one-line description>\"\n"
+                    << "  git -C \"$WORKTREE\" push\n"
                     << "  cd " << repo << "/chitta && cmake --build build --parallel\n"
                     << "  systemctl --user restart chittad && sleep 3\n"
                     << "  chitta remember --content \"[impl][done] <what was implemented>\" --tags impl done\n\n";
@@ -693,8 +697,9 @@ std::string SadhanaManager::build_system_prompt(const Sadhana& sadhana) const {
             }
             sys << "STEP 3b — If REJECTED:\n"
                 << "  rm -f <patch file>\n"
-                << "  cd " << repo << " && git stash drop\n"
                 << "  chitta remember --content \"[impl][rejected] <reason>\" --tags impl rejected\n\n"
+                << "CLEANUP (always run even on failure):\n"
+                << "  cd " << repo << " && git worktree remove /tmp/impl-worktree-" << sadhana.id << " --force 2>/dev/null || true\n\n"
                 << "CONSTRAINTS:\n"
                 << "  - Never deploy without the review gate passing\n"
                 << "  - Build must succeed before marking done\n"
@@ -704,19 +709,23 @@ std::string SadhanaManager::build_system_prompt(const Sadhana& sadhana) const {
         } else {
             // Default: propose phase
             sys << "CYCLE PROTOCOL (phase: propose):\n\n"
+                << "STEP 0 — Create isolated worktree:\n"
+                << "  WORKTREE=\"/tmp/impl-worktree-" << sadhana.id << "\"\n"
+                << "  cd " << repo << " && git worktree add \"$WORKTREE\" main 2>/dev/null || cd \"$WORKTREE\" && git pull\n"
+                << "  cd \"$WORKTREE\"\n\n"
                 << "STEP 1 — Find a pending impl:\n"
                 << "  chitta recall --query \"impl\" --limit 20\n"
                 << "  Select one NOT tagged [impl][done], [impl][rejected], [impl][proposed], or [impl][deploying].\n"
                 << "  If none: {\"status\": \"progressed\", \"summary\": \"No pending impl memories\"}\n\n"
                 << "STEP 2 — Implement and propose:\n"
-                << "  cd " << repo << " && git checkout main && git pull\n"
                 << "  Apply ONLY the minimal change from the [impl] memory. No scope creep.\n"
-                << "  git diff > /tmp/impl-{session_id}.patch\n"
-                << "  git stash push -m \"impl-proposed-{memory_id}\"\n"
-                << "  chitta remember --content \"[impl][proposed] <description>\\n[ε] patch at /tmp/impl-{session_id}.patch\" --tags impl proposed\n\n"
+                << "  git diff > /tmp/impl-" << sadhana.id << ".patch\n"
+                << "  chitta remember --content \"[impl][proposed] <description>\\n[ε] patch at /tmp/impl-" << sadhana.id << ".patch\" --tags impl proposed\n\n"
+                << "CLEANUP (always run even on failure):\n"
+                << "  cd " << repo << " && git worktree remove /tmp/impl-worktree-" << sadhana.id << " --force 2>/dev/null || true\n\n"
                 << "CONSTRAINTS:\n"
                 << "  - One impl per cycle — pick the most actionable one\n"
-                << "  - Stop after stashing — do NOT review or deploy\n"
+                << "  - Stop after proposing — do NOT review or deploy\n"
                 << "  - Memory realm: " << sadhana.realm << "\n\n"
                 << "COMPLETION PROTOCOL:\n"
                 << "{\"status\": \"progressed\", \"summary\": \"Proposed: <description>\"}\n";
