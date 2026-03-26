@@ -2,7 +2,7 @@
 # UserPromptSubmit hook: Surface relevant memories + detect learning opportunities
 #
 # HIGH PERFORMANCE: Single call with smart routing
-# - Uses smart_recall (auto-classifies query intent and routes optimally)
+# - Uses structured_recall (three-lens: facts/context/temporal, falls back to smart_recall)
 # - Handles temporal, aspect, entity, code, and exploratory queries
 # - Minimum 30% confidence threshold
 # - Detects patterns for proactive learning
@@ -76,7 +76,7 @@ fi
 # MEMORY RETRIEVAL: Choose strategy based on mode
 # ===========================================
 # RLM mode: Use soul_repl for dynamic exploration (more powerful but slower)
-# Standard mode: Use smart_recall for fast retrieval
+# Standard mode: Use structured_recall (three-lens: facts/context/temporal)
 RLM_MODE="${CC_SOUL_RLM_MODE:-}"
 
 if [[ -n "$RLM_MODE" ]]; then
@@ -89,10 +89,10 @@ result = handle_smart_context({'mode': 'rlm', 'task': '''$QUERY'''})
 print(result)
 " 2>/dev/null || true)
 else
-    # Standard: smart_recall for intelligent query routing
-    # - Automatically classifies query intent (temporal, aspect, entity, code, etc.)
-    # - Routes to optimal retrieval strategy
-    memories=$(timeout "$MAX_WAIT" "$CHITTA_BIN" smart_recall --query "$QUERY" --limit 6 2>/dev/null || true)
+    # Structured recall: facts (F) + context (C) + temporal (T) lenses merged
+    # Falls back to smart_recall if structured_recall unavailable
+    memories=$(timeout "$MAX_WAIT" "$CHITTA_BIN" structured_recall --query "$QUERY" --limit 8 2>/dev/null || \
+               timeout "$MAX_WAIT" "$CHITTA_BIN" smart_recall --query "$QUERY" --limit 6 2>/dev/null || true)
 fi
 
 if [[ -z "$memories" || "$memories" == *"No memories"* ]]; then

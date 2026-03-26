@@ -69,7 +69,7 @@
         for (const auto& r : merged) {
             int pct = static_cast<int>(r.value("relevance", 0.0f) * 100);
             ss << "[" << pct << "% " << r.value("lens","?") << "] "
-               << r.value("text","").substr(0, 120) << "\n";
+               << r.value("text","").substr(0, 500) << "\n";
         }
         return DuckDBToolResult::ok(ss.str(), {{"results", merged}, {"realm", realm}});
     }
@@ -114,21 +114,21 @@
         if (!facts.empty()) {
             answer << "**Direct knowledge:**\n";
             for (const auto& m : facts) {
-                answer << "- " << m.value("text", "").substr(0, 200) << "\n";
+                answer << "- " << m.value("text", "").substr(0, 500) << "\n";
             }
             answer << "\n";
         }
         if (!context.empty()) {
             answer << "**Related context:**\n";
             for (const auto& m : context) {
-                answer << "- " << m.value("text", "").substr(0, 200) << "\n";
+                answer << "- " << m.value("text", "").substr(0, 500) << "\n";
             }
             answer << "\n";
         }
         if (!temporal.empty()) {
             answer << "**Recent / updates:**\n";
             for (const auto& m : temporal) {
-                answer << "- " << m.value("text", "").substr(0, 200) << "\n";
+                answer << "- " << m.value("text", "").substr(0, 500) << "\n";
             }
             answer << "\n";
         }

@@ -94,7 +94,7 @@
         for (const auto& r : results_json) {
             int pct = static_cast<int>(r.value("relevance", 0.0f) * 100);
             ss << "[" << pct << "%] [" << r.value("type", "?") << "] "
-               << r.value("text", "").substr(0, 100) << "\n";
+               << r.value("text", "").substr(0, 400) << "\n";
         }
 
         auto result = DuckDBToolResult::ok(ss.str(), {{"results", results_json}, {"realm", realm}});
@@ -144,7 +144,7 @@
                 std::ostringstream ss;
                 ss << "Found " << merged.size() << " temporal+semantic results:\n";
                 for (const auto& r : merged) {
-                    ss << "[" << r.value("type", "?") << "] " << r.value("text", "").substr(0, 100) << "\n";
+                    ss << "[" << r.value("type", "?") << "] " << r.value("text", "").substr(0, 400) << "\n";
                 }
                 return DuckDBToolResult::ok(ss.str(), {{"results", merged}, {"count", merged.size()}, {"realm", realm}});
             }
@@ -154,7 +154,7 @@
         std::ostringstream ss;
         ss << "Found " << hits.size() << " memories:\n";
         for (const auto& r : results_json) {
-            ss << "[" << r.value("type", "?") << "] " << r.value("text", "").substr(0, 100) << "\n";
+            ss << "[" << r.value("type", "?") << "] " << r.value("text", "").substr(0, 400) << "\n";
         }
         return DuckDBToolResult::ok(ss.str(), {{"results", results_json}, {"count", hits.size()}, {"realm", realm}});
     }
@@ -171,7 +171,7 @@
         ss << "Found " << hits.size() << " keyword results for '" << query << "':\n";
         for (const auto& r : results_json) {
             int pct = static_cast<int>(r.value("relevance", 0.0f) * 100);
-            ss << "[" << pct << "%] " << r.value("text", "").substr(0, 100) << "\n";
+            ss << "[" << pct << "%] " << r.value("text", "").substr(0, 400) << "\n";
         }
         return DuckDBToolResult::ok(ss.str(), {{"results", results_json}});
     }
@@ -220,7 +220,7 @@
         ss << "Hybrid recall: " << merged.size() << " results\n";
         for (const auto& r : merged) {
             int pct = static_cast<int>(r.value("relevance", 0.0f) * 100);
-            ss << "[" << pct << "%] " << r.value("text", "").substr(0, 100) << "\n";
+            ss << "[" << pct << "%] " << r.value("text", "").substr(0, 400) << "\n";
         }
         auto result = DuckDBToolResult::ok(ss.str(), {{"results", merged}, {"realm", realm}});
         fire_recall_callback(merged, 1);
@@ -316,7 +316,7 @@
         for (const auto& r : results) {
             int pct = static_cast<int>(r.value("relevance", 0.0f) * 100);
             ss << "[" << pct << "%] [" << r.value("type", "?") << "] "
-               << r.value("text", "").substr(0, 100) << "\n";
+               << r.value("text", "").substr(0, 400) << "\n";
         }
         auto result = DuckDBToolResult::ok(ss.str(), {{"results", results}, {"intent", is_code ? "code" : "semantic"}});
         fire_recall_callback(results, 1);
@@ -521,7 +521,7 @@
         for (const auto& r : final_merged) {
             int pct = static_cast<int>(r.value("relevance", 0.0f) * 100);
             ss << "[" << pct << "%] [" << r.value("type", "?") << "] "
-               << r.value("text", "").substr(0, 100) << "\n";
+               << r.value("text", "").substr(0, 400) << "\n";
         }
         return DuckDBToolResult::ok(ss.str(), {{"results", final_merged}, {"passes", passes_run}});
     }
