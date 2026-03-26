@@ -154,3 +154,19 @@ emit_event() {
 
     queue_write "observe" "{\"category\":\"$category\",\"title\":$(echo "$title" | jq -Rs .),\"content\":$(echo "$content" | jq -Rs .),\"confidence\":$confidence,\"source\":$(echo "$source" | jq -Rs .),\"evidence\":$(echo "$evidence" | jq -Rs .),\"realm\":$(echo "$realm" | jq -Rs .)}"
 }
+
+# Guard: fail if CHITTA_SANDBOX=1 and running in main worktree
+worktree_guard() {
+    if [[ "${CHITTA_SANDBOX:-0}" != "1" ]]; then
+        return 0
+    fi
+    local main_wt
+    main_wt="$(git rev-parse --show-toplevel 2>/dev/null)" || return 0
+    local cwd="$PWD"
+    # Allow if inside a named worktree directory
+    if [[ "$cwd" != "$main_wt"* ]] || [[ "$cwd" == */worktrees/* ]]; then
+        return 0
+    fi
+    echo "ERROR: CHITTA_SANDBOX=1 but operating in main worktree. Use EnterWorktree first." >&2
+    return 1
+}

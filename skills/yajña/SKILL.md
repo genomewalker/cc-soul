@@ -50,6 +50,11 @@ WHILE tasks_remain AND no_blocker:
      If wrong files → retry with explicit paths
 
   4. ADHVARYU - Implement
+     BEFORE ANY CODE CHANGES:
+       a. Call EnterWorktree to create isolated workspace
+       b. All Read/Edit/Write/Bash file mutations must happen in the worktree path
+       c. On completion or failure, call ExitWorktree
+       d. Proposed patches are stored as artifacts, not applied directly to main
      Task(general-purpose) with EXPLICIT file paths
      Prompt MUST include: "Edit file X at path Y"
      VALIDATE: Check file was actually modified

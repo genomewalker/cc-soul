@@ -89,3 +89,20 @@ After `compact_wal`, startup replay only needs segments from the snapshot seqno 
 - Retrieval completeness: recall is approximate (HNSW + BM25, not exhaustive)
 - Deduplication completeness: exact-match dedup only; near-duplicate merge requires distillation
 - Autonomous agent correctness: impl loop is supervised, not formally verified
+
+## 8. Worktree Isolation Contract
+
+All autonomous implementation loops (yajna, sadhana impl phases) MUST:
+1. Call `EnterWorktree` before any file mutations
+2. Operate exclusively within the isolated worktree path
+3. Call `ExitWorktree` on completion or failure
+4. Store proposed patches as artifacts before applying
+5. Require explicit promotion from proposed → applied
+
+When `CHITTA_SANDBOX=1` is set:
+- Direct mutations to the main worktree are forbidden
+- Only worktree-isolated changes are permitted
+- The daemon logs sandbox violations as dead-letter entries
+
+Sources: mcp_tool, distillation can bypass sandbox (human-approved)
+Sources: hook_regex, hook_compliance must never bypass sandbox
