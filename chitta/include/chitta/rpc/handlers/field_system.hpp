@@ -616,6 +616,72 @@
         return DuckDBToolResult::ok(ss.str(), s);
     }
 
+    // ── Memory provenance ────────────────────────────────────────────────────
+    DuckDBToolResult tool_memory_provenance(const json& params) {
+        auto [id, id_str] = parse_id(params);
+        if (id_str.empty()) return DuckDBToolResult::error("id is required");
+
+        // 1. Basic metadata
+        auto meta_raw = field_store_->get_memory_metadata(id);
+        json meta = json::parse(meta_raw, nullptr, false);
+
+        // 2. Outgoing triplets (what this memory claims)
+        auto out_raw = field_store_->query_subject(id_str);
+        json out_trips = json::parse(out_raw, nullptr, false);
+
+        // 3. Incoming triplets (what claims about this memory)
+        auto in_raw = field_store_->query_object(id_str);
+        json in_trips = json::parse(in_raw, nullptr, false);
+
+        // 4. Source/evidence triplets
+        json source, evidence, superseded_by, supersedes;
+        if (!out_trips.is_discarded() && out_trips.is_array()) {
+            for (auto& t : out_trips) {
+                auto pred = t.value("predicate", "");
+                if (pred == "supersedes") supersedes.push_back(t.value("object",""));
+                if (pred == "source")     source = t.value("object","");
+                if (pred == "evidence")   evidence = t.value("object","");
+            }
+        }
+        if (!in_trips.is_discarded() && in_trips.is_array()) {
+            for (auto& t : in_trips) {
+                if (t.value("predicate","") == "supersedes")
+                    superseded_by.push_back(t.value("subject",""));
+            }
+        }
+
+        // 5. Memory status
+        auto ms_params = json{{"id", id_str}};
+        auto ms = tool_memory_status(ms_params);
+
+        // Build output
+        std::ostringstream ss;
+        ss << "Memory #" << id_str << " provenance:\n";
+        if (meta.is_object()) {
+            ss << "  kind:       " << meta.value("kind","?") << "\n";
+            ss << "  confidence: " << meta.value("confidence", 0.0f) << "\n";
+            ss << "  strength:   " << meta.value("strength", 0.0f) << "\n";
+            ss << "  access_count: " << meta.value("access_count", 0) << "\n";
+            ss << "  created_at: " << meta.value("created_at_ms", 0) << "\n";
+        }
+        ss << "  status:     " << ms.structured.value("status","active") << "\n";
+        if (!source.is_null())   ss << "  source:     " << source.dump() << "\n";
+        if (!evidence.is_null()) ss << "  evidence:   " << evidence.dump() << "\n";
+        if (!superseded_by.empty()) ss << "  superseded_by: " << superseded_by.dump() << "\n";
+        if (!supersedes.empty())    ss << "  supersedes:    " << supersedes.dump() << "\n";
+
+        json result = {
+            {"id", id_str},
+            {"status", ms.structured.value("status","active")},
+            {"source", source},
+            {"evidence", evidence},
+            {"superseded_by", superseded_by},
+            {"supersedes", supersedes},
+            {"meta", meta},
+        };
+        return DuckDBToolResult::ok(ss.str(), result);
+    }
+
     // ── Memory effective status ────────────────────────────────────────────────
     // Determines if a memory is active, superseded, or contradicted by
     // inspecting incoming "supersedes" triplets (no new Rust field needed).
@@ -656,4 +722,16 @@
         std::string text = "Memory " + std::to_string(id) + ": " + status;
         if (superseded_by > 0) text += " (by " + std::to_string(superseded_by) + ")";
         return DuckDBToolResult::ok(text, result);
+    }
+
+    // ── WAL compaction ────────────────────────────────────────────────────────
+    DuckDBToolResult tool_compact_wal(const json&) {
+        if (!field_store_) return DuckDBToolResult::error("field store unavailable");
+        // cf_compact_wal saves full snapshot then deletes covered WAL segments
+        extern int64_t cf_compact_wal(void*);
+        // Use via FieldStore method
+        auto raw = field_store_->compact_wal();
+        if (raw < 0) return DuckDBToolResult::error("compaction failed");
+        std::string msg = "WAL compacted: snapshot saved, " + std::to_string(raw) + " segment(s) deleted";
+        return DuckDBToolResult::ok(msg, {{"segments_deleted", raw}});
     }

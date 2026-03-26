@@ -866,6 +866,28 @@ private:
         });
         handlers_["memory_status"] = [this](const json& p) { return tool_memory_status(p); };
 
+        tools_.push_back({{"name","memory_provenance"},{"description","Show why a memory exists: source, evidence, superseded_by, supersedes relations"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"id",{{"type","string"},{"description","Memory ID to inspect"}}},
+                {"memory_id",{{"type","integer"},{"description","Memory ID (numeric)"}}}
+            }},{"required",json::array()}}}
+        });
+        handlers_["memory_provenance"] = [this](const json& p) { return tool_memory_provenance(p); };
+
+        tools_.push_back({{"name","list_by_status"},{"description","List memories filtered by lifecycle status (active/superseded/contradicted/archived)"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"status",{{"type","string"},{"description","Filter: active, superseded, contradicted, archived, or all"},{"default","superseded"}}},
+                {"limit",{{"type","integer"},{"description","Max results"},{"default",50}}},
+                {"realm",{{"type","string"},{"description","Filter by realm"}}}
+            }},{"required",json::array()}}}
+        });
+        handlers_["list_by_status"] = [this](const json& p) { return tool_list_by_status(p); };
+
+        tools_.push_back({{"name","compact_wal"},{"description","Compact WAL: save full snapshot then delete covered segments"},
+            {"inputSchema",{{"type","object"},{"properties",json::object()}}}
+        });
+        handlers_["compact_wal"] = [this](const json& p) { return tool_compact_wal(p); };
+
         tools_.push_back({{"name","queue_status"},{"description","Show async queue stats: processed, failed, dead-letter path"},
             {"inputSchema",{{"type","object"},{"properties",json::object()}}}
         });

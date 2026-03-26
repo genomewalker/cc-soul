@@ -26,6 +26,7 @@ int cf_select_route(struct CfHandle* h, const char* query,
     uint64_t* out_episode_id, uint8_t* out_route);
 int cf_route_feedback(struct CfHandle* h, uint64_t episode_id, float reward);
 int cf_set_memory_status(struct CfHandle* h, uint64_t memory_id, uint8_t status);
+int64_t cf_compact_wal(struct CfHandle* h);
 }
 
 namespace chitta {
@@ -95,6 +96,11 @@ public:
     /// Set memory lifecycle status: 0=Active 1=Superseded 2=Contradicted 3=Archived
     void set_memory_status(uint64_t id, uint8_t status) {
         cf_set_memory_status(handle_, id, status);
+    }
+
+    /// Compact WAL: save full snapshot then delete covered segments. Returns deleted count or -1.
+    int64_t compact_wal() {
+        return cf_compact_wal(handle_);
     }
 
     /// Backfill embedding for a memory stored without one (embed_pending=true).

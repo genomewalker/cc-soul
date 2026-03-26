@@ -493,6 +493,47 @@
             {{"triplets", results}, {"count", results.size()}});
     }
 
+    // ── List by lifecycle status ────────────────────────────────────────────────
+    DuckDBToolResult tool_list_by_status(const json& params) {
+        std::string status_filter = params.value("status", "superseded");
+        size_t limit = params.value("limit", 50);
+        std::string realm = params.value("realm", "");
+
+        // Over-fetch to account for filtering
+        std::string raw = field_store_->list_memories("", realm, "recency", limit * 3, 0);
+        json all_mems = json::parse(raw, nullptr, false);
+        if (all_mems.is_discarded() || !all_mems.is_array()) {
+            return DuckDBToolResult::ok("0 memories with status=" + status_filter,
+                {{"memories", json::array()}, {"status_filter", status_filter}});
+        }
+
+        json filtered = json::array();
+        for (const auto& m : all_mems) {
+            if (filtered.size() >= limit) break;
+            auto mid = std::to_string(m.value("id", uint64_t(0)));
+            auto ms_params = json{{"id", mid}};
+            auto ms = tool_memory_status(ms_params);
+            auto status = ms.structured.value("status", "active");
+            if (status_filter == "all" || status == status_filter) {
+                json entry = {
+                    {"id", mid},
+                    {"status", status},
+                    {"kind", m.value("kind", "")},
+                    {"text", m.value("content", "").substr(0, 120)},
+                    {"confidence", m.value("confidence", 0.0f)},
+                };
+                filtered.push_back(entry);
+            }
+        }
+        std::ostringstream ss;
+        ss << filtered.size() << " memories with status=" << status_filter << "\n";
+        for (const auto& entry : filtered) {
+            ss << "  [" << entry.value("status","?") << "] #" << entry.value("id","?")
+               << " " << entry.value("text","").substr(0,80) << "\n";
+        }
+        return DuckDBToolResult::ok(ss.str(), {{"memories", filtered}, {"status_filter", status_filter}});
+    }
+
     // ── Structured recall: three-lens retrieval ───────────────────────────────
     // Lens 1 (facts):    semantic search on the raw query
     // Lens 2 (context):  semantic search on an expanded contextual variant
