@@ -420,4 +420,25 @@ else
     fi
 fi
 
+# ===========================================
+# MSG-NOTIFY DAEMON: Launch background message polling for this session
+# ===========================================
+if [[ -n "$SESSION_ID" && "$SESSION_ID" != "default" ]]; then
+    NOTIFY_SCRIPT="${SCRIPT_DIR}/../scripts/msg-notify.sh"
+    if [[ -f "$NOTIFY_SCRIPT" ]]; then
+        # Kill any stale notify daemon for this session
+        PID_FILE="${MIND_PATH}/.msg_notify_pids/${SESSION_ID}.pid"
+        if [[ -f "$PID_FILE" ]]; then
+            old_pid=$(cat "$PID_FILE" 2>/dev/null || true)
+            if [[ -n "$old_pid" ]]; then
+                kill "$old_pid" 2>/dev/null || true
+            fi
+            rm -f "$PID_FILE"
+        fi
+        # Start fresh daemon (background, detached)
+        bash "$NOTIFY_SCRIPT" "$SESSION_ID" 5 </dev/null >/dev/null 2>&1 &
+        disown $! 2>/dev/null || true
+    fi
+fi
+
 exit 0

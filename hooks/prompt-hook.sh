@@ -417,7 +417,17 @@ if [[ -n "$MSG_SESSION_ID" && "$MSG_SESSION_ID" != "default" ]]; then
     CLAUDE_PID=${PPID:-$$}
     timeout 0.3 "$CHITTA_BIN" session_register --session_id "$MSG_SESSION_ID" --realm "${REALM:-brahman}" --pid "$CLAUDE_PID" >/dev/null 2>&1 || true
 
-    # Check for cross-session messages
+    # Check notification file from msg-notify daemon first (fast-poll messages)
+    NOTIFY_FILE="${MIND_PATH}/.msg_notify/${MSG_SESSION_ID}"
+    if [[ -f "$NOTIFY_FILE" && -s "$NOTIFY_FILE" ]]; then
+        FAST_MSGS=$(cat "$NOTIFY_FILE" 2>/dev/null || true)
+        > "$NOTIFY_FILE"  # Clear after reading
+        if [[ -n "$FAST_MSGS" ]]; then
+            CROSS_SESSION_MSGS="${FAST_MSGS}"
+        fi
+    fi
+
+    # Check for cross-session messages via daemon (authoritative)
     response=$(timeout 1 "$CHITTA_BIN" msg_inbox --session_id "$MSG_SESSION_ID" --limit 3 --min_priority 1 --auto_ack --json 2>/dev/null || true)
     if [[ -n "$response" ]]; then
         msg_count=$(echo "$response" | jq -r '.count // 0' 2>/dev/null)
