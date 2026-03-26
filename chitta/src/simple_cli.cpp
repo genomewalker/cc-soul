@@ -597,23 +597,34 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                             // Correction supersession: find semantically similar memories
                             // and mark them as superseded via a triplet relation
                             if (category == "correction" && new_id > 0) {
+                                // Hard contradiction policy (CONTRACTS.md §3):
+                                // A correction supersedes ONLY:
+                                // 1. If target_id is explicit → supersede that specific memory
+                                // 2. Otherwise → same realm + cosine > 0.92 (tight threshold)
+                                //    AND same kind (corrections don't supersede different memory types)
                                 auto emb = embed_text(full_text);
-                                if (!emb.empty()) {
+                                std::string target_id_str = args.value("target_id", "");
+                                if (!target_id_str.empty()) {
+                                    // Explicit target: targeted supersession
+                                    try {
+                                        uint64_t tid = std::stoull(target_id_str);
+                                        field_store.add_triplet(std::to_string(new_id), "supersedes", target_id_str, 1.0f, new_id);
+                                        field_store.weaken(tid, 0.15f);
+                                        field_store.set_memory_status(tid, 1);
+                                        std::cerr << "[contract] explicit supersession: " << new_id << "→" << target_id_str << "\n";
+                                    } catch (...) {}
+                                } else if (!emb.empty()) {
+                                    // Semantic supersession: strict — same realm, same kind, very high threshold
                                     auto hits = field_store.recall(emb, 5, realm);
                                     for (const auto& h : hits) {
                                         if (h.memory_id == new_id) continue;
-                                        if (h.score > 0.85f && h.kind != "correction") {
-                                            // Add supersedes triplet
-                                            field_store.add_triplet(
-                                                std::to_string(new_id),
-                                                "supersedes",
-                                                std::to_string(h.memory_id),
-                                                1.0f, new_id
-                                            );
-                                            // Weaken + mark status=Superseded
-                                            field_store.weaken(h.memory_id, 0.15f);
-                                            field_store.set_memory_status(h.memory_id, 1);
-                                        }
+                                        if (h.realm != realm) continue;           // same realm only
+                                        if (h.kind == "correction") continue;     // don't supersede other corrections
+                                        if (h.score < 0.92f) continue;            // tight: 0.92 not 0.85
+                                        field_store.add_triplet(std::to_string(new_id), "supersedes", std::to_string(h.memory_id), 1.0f, new_id);
+                                        field_store.weaken(h.memory_id, 0.15f);
+                                        field_store.set_memory_status(h.memory_id, 1);
+                                        std::cerr << "[contract] semantic supersession: " << new_id << "→" << h.memory_id << " (score=" << h.score << ")\n";
                                     }
                                 }
                             }

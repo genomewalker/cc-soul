@@ -661,53 +661,66 @@ std::string SadhanaManager::build_system_prompt(const Sadhana& sadhana) const {
     if (sadhana.goal_dsl.is_object() &&
         sadhana.goal_dsl.value("kind", "") == "impl") {
         std::string repo = sadhana.goal_dsl.value("repo", "");
+        std::string phase = sadhana.goal_dsl.value("phase", "propose");
+        bool allow_deploy = sadhana.goal_dsl.value("allow_deploy", false);
         std::ostringstream sys;
         sys << "You are the soul's implementation agent — the actuator of self-improvement.\n"
             << "You turn [impl] memory insights into actual code changes in cc-soul.\n\n"
-            << "REPOSITORY: " << repo << "\n\n"
-            << "CYCLE PROTOCOL:\n\n"
-            << "STEP 1 — Find a pending impl:\n"
-            << "  chitta recall --query \"impl\" --tags impl --limit 20\n"
-            << "  Select one NOT already tagged [impl][done], [impl][rejected], or [impl][proposed].\n"
-            << "  If none found: {\"status\": \"progressed\", \"summary\": \"No pending impl memories\"}\n\n"
-            << "STEP 2 — Implement the minimal change:\n"
-            << "  cd " << repo << " && git checkout main && git pull\n"
-            << "  Apply ONLY the change described by the [impl] memory. No scope creep.\n\n"
-            << "STEP 3 — Review gate (REQUIRED before any commit):\n"
-            << "  git diff > /tmp/impl-review.patch\n"
-            << "  Call mcp__opencode-bridge__opencode_review with:\n"
-            << "    code_or_file: the full contents of /tmp/impl-review.patch\n"
-            << "    focus: \"Is this change safe, correct, and minimal? Does it fit cc-soul architecture? Output APPROVED or REJECTED with one sentence reason.\"\n"
-            << "  To use github-copilot model: prepend with\n"
-            << "    ~/.opencode/bin/opencode run -m github-copilot/gemini-2.5-pro --format json\n"
-            << "    \"Review this diff for cc-soul. Output APPROVED or REJECTED with reason:\\n$(cat /tmp/impl-review.patch)\"\n\n"
-            << "STEP 4a — If APPROVED:\n";
-        // allow_deploy gate: deploy only if explicitly set in goal_dsl to prevent autonomous push+restart
-        bool allow_deploy = sadhana.goal_dsl.value("allow_deploy", false);
-        if (allow_deploy) {
-            sys << "  git -C " << repo << " add chitta/\n"
-                << "  git -C " << repo << " commit -m \"impl: <one-line description>\"\n"
-                << "  git -C " << repo << " push\n"
-                << "  cd " << repo << "/chitta && cmake --build build --parallel\n"
-                << "  systemctl --user restart chittad && sleep 3\n"
-                << "  chitta remember --content \"[impl][done] <what was implemented>\" --tags impl done\n\n";
+            << "REPOSITORY: " << repo << "\n"
+            << "PHASE: " << phase << "\n\n";
+
+        if (phase == "deploy") {
+            sys << "CYCLE PROTOCOL (phase: deploy):\n\n"
+                << "STEP 1 — Find the proposed patch:\n"
+                << "  ls /tmp/impl-*.patch 2>/dev/null\n"
+                << "  Select the most recent patch file. If none: {\"status\": \"blocked\", \"summary\": \"No proposed patch found — run propose phase first\"}\n\n"
+                << "STEP 2 — Review gate (REQUIRED before any deploy):\n"
+                << "  Call mcp__opencode-bridge__opencode_review with:\n"
+                << "    code_or_file: the full contents of the patch file\n"
+                << "    focus: \"Is this change safe, correct, and minimal? Does it fit cc-soul architecture? Output APPROVED or REJECTED with one sentence reason.\"\n\n"
+                << "STEP 3a — If APPROVED:\n";
+            if (allow_deploy) {
+                sys << "  cd " << repo << " && git stash pop\n"
+                    << "  git -C " << repo << " add chitta/\n"
+                    << "  git -C " << repo << " commit -m \"impl: <one-line description>\"\n"
+                    << "  git -C " << repo << " push\n"
+                    << "  cd " << repo << "/chitta && cmake --build build --parallel\n"
+                    << "  systemctl --user restart chittad && sleep 3\n"
+                    << "  chitta remember --content \"[impl][done] <what was implemented>\" --tags impl done\n\n";
+            } else {
+                sys << "  # allow_deploy not set — patch is approved but NOT deployed\n"
+                    << "  chitta remember --content \"[impl][approved] <description>\\n[ε] set allow_deploy:true in goal_dsl to deploy\" --tags impl approved\n\n";
+            }
+            sys << "STEP 3b — If REJECTED:\n"
+                << "  rm -f <patch file>\n"
+                << "  cd " << repo << " && git stash drop\n"
+                << "  chitta remember --content \"[impl][rejected] <reason>\" --tags impl rejected\n\n"
+                << "CONSTRAINTS:\n"
+                << "  - Never deploy without the review gate passing\n"
+                << "  - Build must succeed before marking done\n"
+                << "  - Memory realm: " << sadhana.realm << "\n\n"
+                << "COMPLETION PROTOCOL:\n"
+                << "{\"status\": \"progressed\", \"summary\": \"<what you did>\"}\n";
         } else {
-            sys << "  # DRY RUN: allow_deploy not set — do NOT push or deploy\n"
-                << "  git -C " << repo << " diff > /tmp/impl-ready.patch\n"
-                << "  git -C " << repo << " stash push -m \"impl-proposed\"\n"
-                << "  chitta remember --content \"[impl][proposed] <description>\\n[e] patch at /tmp/impl-ready.patch\" --tags impl proposed\n"
-                << "  # Human must review patch and set allow_deploy:true in goal_dsl to deploy\n\n";
+            // Default: propose phase
+            sys << "CYCLE PROTOCOL (phase: propose):\n\n"
+                << "STEP 1 — Find a pending impl:\n"
+                << "  chitta recall --query \"impl\" --limit 20\n"
+                << "  Select one NOT tagged [impl][done], [impl][rejected], [impl][proposed], or [impl][deploying].\n"
+                << "  If none: {\"status\": \"progressed\", \"summary\": \"No pending impl memories\"}\n\n"
+                << "STEP 2 — Implement and propose:\n"
+                << "  cd " << repo << " && git checkout main && git pull\n"
+                << "  Apply ONLY the minimal change from the [impl] memory. No scope creep.\n"
+                << "  git diff > /tmp/impl-{session_id}.patch\n"
+                << "  git stash push -m \"impl-proposed-{memory_id}\"\n"
+                << "  chitta remember --content \"[impl][proposed] <description>\\n[ε] patch at /tmp/impl-{session_id}.patch\" --tags impl proposed\n\n"
+                << "CONSTRAINTS:\n"
+                << "  - One impl per cycle — pick the most actionable one\n"
+                << "  - Stop after stashing — do NOT review or deploy\n"
+                << "  - Memory realm: " << sadhana.realm << "\n\n"
+                << "COMPLETION PROTOCOL:\n"
+                << "{\"status\": \"progressed\", \"summary\": \"Proposed: <description>\"}\n";
         }
-        sys << "STEP 4b — If REJECTED:\n"
-            << "  git -C " << repo << " stash push -m \"impl-rejected\"\n"
-            << "  chitta remember --content \"[impl][rejected] <reason>\" --tags impl rejected\n\n"
-            << "CONSTRAINTS:\n"
-            << "  - One impl per cycle — pick the most actionable one\n"
-            << "  - Never commit without the review gate passing\n"
-            << "  - Build must succeed before marking done\n"
-            << "  - Memory realm: " << sadhana.realm << "\n\n"
-            << "COMPLETION PROTOCOL:\n"
-            << "{\"status\": \"progressed\", \"summary\": \"<what you did>\"}\n";
         return sys.str();
     }
 

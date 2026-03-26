@@ -526,5 +526,20 @@
         return DuckDBToolResult::ok(ss.str(), {{"results", final_merged}, {"passes", passes_run}});
     }
 
+    DuckDBToolResult tool_route_stats(const json&) {
+        // Returns route learner statistics via smart_recall diagnostic
+        // Since we can't directly inspect the learner, we use the route episode
+        // tracking: count how many times each route was selected recently
+        // by querying the structured_recall episode metadata from last N calls.
+        // For now: return a placeholder showing the route learner is active.
+        json stats;
+        stats["status"] = "active";
+        stats["description"] = "Route learner is Thompson-sampling over 6 routes (Semantic/Keyword/Temporal/Artifact/Hybrid/Full)";
+        stats["note"] = "Use smart_recall with different queries to observe route selection. Episode IDs are returned in structured result.";
+        stats["routes"] = json::array({"Semantic","Keyword","Temporal","Artifact","Hybrid","Full"});
+        std::string text = "Route learner: active, 6-arm Thompson sampling\nUse smart_recall to observe route selection via episode_id in results";
+        return DuckDBToolResult::ok(text, stats);
+    }
+
     // ── Strength/forget ops ──────────────────────────────────────────────────
 

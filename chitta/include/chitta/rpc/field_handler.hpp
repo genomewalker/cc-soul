@@ -1509,6 +1509,11 @@ private:
         });
         handlers_["structured_recall"] = [this](const json& p) { return tool_structured_recall(p); };
 
+        tools_.push_back({{"name","route_stats"},{"description","Show route learner status and arm configuration for smart_recall"},
+            {"inputSchema",{{"type","object"},{"properties",json::object()}}}
+        });
+        handlers_["route_stats"] = [this](const json& p) { return tool_route_stats(p); };
+
         tools_.push_back({{"name","ask"},{"description","Natural language insight query: retrieves and synthesizes memories to answer a question about the user, session, or project"},
             {"inputSchema",{{"type","object"},{"properties",{
                 {"question",{{"type","string"}}},{"limit",{{"type","integer"}}},
