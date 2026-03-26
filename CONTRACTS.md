@@ -37,7 +37,7 @@ confirms → promoted to category confidence (0.75–0.95, durable).
 
 A memory M2 supersedes M1 when:
 1. M2 is stored with category `correction`
-2. M1 has semantic similarity ≥ 0.85 to M2
+2. M1 has semantic similarity ≥ 0.92 to M2 (queue processor) or ≥ 0.88 (RPC direct call)
 3. M1 has kind ≠ `correction` (corrections don't supersede other corrections)
 
 Effects:
@@ -106,3 +106,43 @@ When `CHITTA_SANDBOX=1` is set:
 
 Sources: mcp_tool, distillation can bypass sandbox (human-approved)
 Sources: hook_regex, hook_compliance must never bypass sandbox
+
+## 9. Memory Lifecycle Tiers
+
+Memories progress through a trust hierarchy before becoming fully durable.
+
+| Status | Code | Recall Score Multiplier | Meaning |
+|--------|------|------------------------|---------|
+| Proposed | 4 | 0.65x | Raw hook observation, not yet trusted |
+| Observed | 5 | 0.85x | Seen but not verified |
+| Verified | 6 | 1.15x | Confirmed by distillation or recurrence |
+| Active | 0 | 1.00x | Standard durable memory |
+| Contradicted | 2 | excluded | Overridden by newer evidence |
+| Superseded | 1 | excluded | Replaced by a newer version |
+| Archived | 3 | excluded | Stale or explicitly archived |
+
+Recall exclusion means `status_score_multiplier()` returns `None`, so the memory
+is filtered out of all recall results (`chitta-field/src/store.rs:30`).
+
+### Initial Status Assignment
+
+Source determines initial status at write time (`daemon_config.hpp:109`):
+
+| Source | Initial Status |
+|--------|---------------|
+| `hook_regex` | Proposed (4) |
+| `hook_compliance` | Proposed (4) |
+| `distillation` | Active (0) |
+| `mcp_tool` | Active (0) |
+| *(other)* | Observed (5) |
+
+### Promotion Path
+
+`Proposed -> Observed -> Verified -> Active` via the `promote_memory` tool.
+Each step requires evidence of recurrence or explicit confirmation.
+
+### Auto-Demotion (belief_maintenance pass, every 2 hours)
+
+- Active memories with `effective_strength < 0.1` AND `last_accessed > 30 days` -> Archived
+- Contradicted memories with no Active contradictor -> Archived
+- Near-duplicate pairs (cosine > 0.97) -> weaker one forgotten, stronger reinforced
