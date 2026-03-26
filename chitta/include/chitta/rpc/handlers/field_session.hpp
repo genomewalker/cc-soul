@@ -497,18 +497,52 @@
             {"priority",          priority},
             {"content_type",      content_type}
         };
+        std::string payload_str = payload.dump();
 
-        uint64_t event_id = field_store_->emit_event(
-            "msg", "send", target, payload.dump());
+        // Resolve target sessions for broadcast targets
+        std::vector<std::string> targets;
+        if (target == "*" || target.rfind("realm:", 0) == 0) {
+            std::string raw = field_store_->session_list(true);
+            json sessions = json::parse(raw, nullptr, false);
+            if (!sessions.is_discarded() && sessions.is_array()) {
+                std::string realm_filter;
+                if (target.rfind("realm:", 0) == 0) {
+                    realm_filter = target.substr(6);
+                }
+                for (const auto& s : sessions) {
+                    std::string sid = s.value("session_id", "");
+                    if (sid.empty() || sid == sender_session_id) continue;
+                    if (!realm_filter.empty() && s.value("realm", "") != realm_filter) continue;
+                    targets.push_back(sid);
+                }
+            }
+        } else {
+            targets.push_back(target);
+        }
 
-        if (event_id == 0) return DuckDBToolResult::error("Failed to send message");
+        if (targets.empty()) {
+            return DuckDBToolResult::ok("No recipients found", {
+                {"target",            target},
+                {"recipients",        0},
+                {"sender_session_id", sender_session_id}
+            });
+        }
+
+        json delivered = json::array();
+        for (const auto& t : targets) {
+            uint64_t eid = field_store_->emit_event("msg", "send", t, payload_str);
+            if (eid != 0) {
+                delivered.push_back({{"session_id", t}, {"event_id", eid}});
+            }
+        }
 
         std::ostringstream ss;
-        ss << "Message sent to " << target << " (event #" << event_id << ")";
+        ss << "Message sent to " << delivered.size() << " recipient(s)";
 
         return DuckDBToolResult::ok(ss.str(), {
-            {"message_id",        event_id},
             {"target",            target},
+            {"recipients",        delivered.size()},
+            {"delivered_to",      delivered},
             {"priority",          priority},
             {"sender_session_id", sender_session_id}
         });
@@ -650,7 +684,7 @@
         };
 
         uint64_t event_id = field_store_->emit_event(
-            "session", "register", session_id, payload.dump());
+            "session", "register", session_id, payload.dump(), 0, realm);
 
         if (event_id == 0) return DuckDBToolResult::error("Failed to register session");
 
