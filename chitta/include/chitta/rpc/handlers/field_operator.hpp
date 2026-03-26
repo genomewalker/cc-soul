@@ -55,6 +55,45 @@
         );
     }
 
+    DuckDBToolResult tool_promote_memory(const json& params) {
+        std::string id_str = params.value("id", "");
+        if (id_str.empty()) return DuckDBToolResult::error("id is required");
+
+        uint64_t id = 0;
+        try { id = std::stoull(id_str); } catch (...) {
+            return DuckDBToolResult::error("invalid id");
+        }
+
+        std::string meta_json = field_store_->get_memory_metadata(id);
+        if (meta_json.empty()) return DuckDBToolResult::error("memory not found");
+
+        auto meta = json::parse(meta_json, nullptr, false);
+        if (meta.is_discarded()) return DuckDBToolResult::error("failed to parse metadata");
+
+        std::string status = meta.value("status", "Active");
+
+        // Promotion chain: Proposed(4)->Observed(5)->Verified(6)->Active(0)
+        static const std::map<std::string, std::pair<uint8_t, std::string>> chain = {
+            {"Proposed", {5, "Observed"}},
+            {"Observed", {6, "Verified"}},
+            {"Verified", {0, "Active"}},
+        };
+
+        auto it = chain.find(status);
+        if (it == chain.end()) {
+            return DuckDBToolResult::error(
+                "cannot promote memory in status " + status +
+                " (only Proposed/Observed/Verified can be promoted)");
+        }
+
+        field_store_->set_memory_status(id, it->second.first);
+        std::string new_status = it->second.second;
+        return DuckDBToolResult::ok(
+            "Memory #" + id_str + " promoted: " + status + " → " + new_status,
+            {{"id", id_str}, {"old_status", status}, {"new_status", new_status}}
+        );
+    }
+
     DuckDBToolResult tool_conflict_inspector(const json& params) {
         std::string query = params.value("query", "");
         if (query.empty()) return DuckDBToolResult::error("query is required");

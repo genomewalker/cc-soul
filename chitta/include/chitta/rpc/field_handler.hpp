@@ -2212,6 +2212,13 @@ private:
         });
         handlers_["reject_memory"] = [this](const json& p) { return tool_reject_memory(p); };
 
+        tools_.push_back({{"name","promote_memory"},{"description","Promote a memory one tier: Proposed→Observed→Verified→Active"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"id",{{"type","string"},{"description","Memory ID"}}}
+            }},{"required",{"id"}}}}
+        });
+        handlers_["promote_memory"] = [this](const json& p) { return tool_promote_memory(p); };
+
         tools_.push_back({{"name","conflict_inspector"},{"description","Semantic search + show status and contradiction partners for each hit"},
             {"inputSchema",{{"type","object"},{"properties",{
                 {"query",{{"type","string"},{"description","Search query"}}},
