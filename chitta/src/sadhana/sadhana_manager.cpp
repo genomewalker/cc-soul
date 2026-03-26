@@ -681,17 +681,24 @@ std::string SadhanaManager::build_system_prompt(const Sadhana& sadhana) const {
             << "  To use github-copilot model: prepend with\n"
             << "    ~/.opencode/bin/opencode run -m github-copilot/gemini-2.5-pro --format json\n"
             << "    \"Review this diff for cc-soul. Output APPROVED or REJECTED with reason:\\n$(cat /tmp/impl-review.patch)\"\n\n"
-            << "STEP 4a — If APPROVED:\n"
-            << "  git -C " << repo << " add chitta/  # stage only chitta changes\n"
-            << "  git -C " << repo << " commit -m \"impl: <one-line description>\"\n"
-            << "  git -C " << repo << " push\n"
-            << "  # Build, install, restart:\n"
-            << "  cd " << repo << "/chitta && cmake --build build --parallel\n"
-            << "  systemctl --user restart chittad\n"
-            << "  sleep 3\n"
-            << "  pkill -f 'chitta mcp' 2>/dev/null; sleep 1\n"
-            << "  chitta remember --content \"[impl][done] <what was implemented>\" --tags impl done\n\n"
-            << "STEP 4b — If REJECTED:\n"
+            << "STEP 4a — If APPROVED:\n";
+        // allow_deploy gate: deploy only if explicitly set in goal_dsl to prevent autonomous push+restart
+        bool allow_deploy = sadhana.goal_dsl.value("allow_deploy", false);
+        if (allow_deploy) {
+            sys << "  git -C " << repo << " add chitta/\n"
+                << "  git -C " << repo << " commit -m \"impl: <one-line description>\"\n"
+                << "  git -C " << repo << " push\n"
+                << "  cd " << repo << "/chitta && cmake --build build --parallel\n"
+                << "  systemctl --user restart chittad && sleep 3\n"
+                << "  chitta remember --content \"[impl][done] <what was implemented>\" --tags impl done\n\n";
+        } else {
+            sys << "  # DRY RUN: allow_deploy not set — do NOT push or deploy\n"
+                << "  git -C " << repo << " diff > /tmp/impl-ready.patch\n"
+                << "  git -C " << repo << " checkout .\n"
+                << "  chitta remember --content \"[impl][proposed] <description>\\n[e] patch at /tmp/impl-ready.patch\" --tags impl proposed\n"
+                << "  # Human must review patch and set allow_deploy:true in goal_dsl to deploy\n\n";
+        }
+        sys << "STEP 4b — If REJECTED:\n"
             << "  git -C " << repo << " checkout .\n"
             << "  chitta remember --content \"[impl][rejected] <reason>\" --tags impl rejected\n\n"
             << "CONSTRAINTS:\n"
