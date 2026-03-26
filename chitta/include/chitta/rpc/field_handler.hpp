@@ -468,6 +468,7 @@ private:
     #include "handlers/field_session.hpp"
     #include "handlers/field_distill.hpp"
     #include "handlers/field_misc.hpp"
+    #include "handlers/field_contradiction.hpp"
     #include "handlers/ledger.hpp"
     #include "handlers/long_task.hpp"
     #include "handlers/compact.hpp"
@@ -2169,6 +2170,30 @@ private:
         tools_.push_back({{"name","probe_status"},{"description","Show how many exemplars exist per behavioral class. Use to verify the probe is seeded before running behavioral_probe."},
             {"inputSchema",{{"type","object"}}}});
         handlers_["probe_status"] = [this](const json& p) { return tool_probe_status(p); };
+
+        // Contradiction engine
+        tools_.push_back({{"name","why_active"},{"description","Explain why a memory is active: status, epistemic source, confirmations, contradictions"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"id",{{"type","string"},{"description","Memory ID to inspect"}}}
+            }},{"required",{"id"}}}}
+        });
+        handlers_["why_active"] = [this](const json& p) { return tool_why_active(p); };
+
+        tools_.push_back({{"name","what_superseded"},{"description","Show the full supersession chain for a memory"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"id",{{"type","string"},{"description","Memory ID to trace"}}}
+            }},{"required",{"id"}}}}
+        });
+        handlers_["what_superseded"] = [this](const json& p) { return tool_what_superseded(p); };
+
+        tools_.push_back({{"name","show_conflicts"},{"description","Semantic search + show contradiction pairs for matching memories"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"query",{{"type","string"},{"description","Search query"}}},
+                {"limit",{{"type","integer"},{"description","Max memories to scan (default 20)"}}},
+                {"realm",{{"type","string"},{"description","Filter by realm"}}}
+            }},{"required",{"query"}}}}
+        });
+        handlers_["show_conflicts"] = [this](const json& p) { return tool_show_conflicts(p); };
 
         classify_tools();
     }

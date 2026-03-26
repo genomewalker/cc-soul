@@ -433,6 +433,30 @@ public:
         return std::vector<uint64_t>(buf, buf + written);
     }
 
+    std::vector<uint64_t> get_conflicts(uint64_t memory_id) {
+        constexpr size_t MAX = 256;
+        uint64_t buf[MAX];
+        size_t written = 0;
+        cf_get_conflicts(handle_, memory_id, buf, MAX, &written);
+        return std::vector<uint64_t>(buf, buf + written);
+    }
+
+    std::vector<uint64_t> get_supersession_chain(uint64_t memory_id) {
+        constexpr size_t MAX = 256;
+        uint64_t buf[MAX];
+        size_t written = 0;
+        cf_get_supersession_chain(handle_, memory_id, buf, MAX, &written);
+        return std::vector<uint64_t>(buf, buf + written);
+    }
+
+    std::vector<uint64_t> get_confirmations(uint64_t memory_id) {
+        constexpr size_t MAX = 256;
+        uint64_t buf[MAX];
+        size_t written = 0;
+        cf_get_confirmations(handle_, memory_id, buf, MAX, &written);
+        return std::vector<uint64_t>(buf, buf + written);
+    }
+
     uint64_t upsert_code_file(const std::string& path, const std::string& project, int64_t mtime) {
         uint64_t id = 0;
         int r = cf_upsert_code_file(handle_, path.c_str(), project.c_str(), mtime, &id);
