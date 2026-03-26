@@ -54,6 +54,9 @@
         if (content.empty()) return DuckDBToolResult::error("content is required");
 
         std::string category = params.value("category", "episode");
+        std::string realm    = params.value("realm", "brahman");
+        std::string source   = params.value("source", "mcp_tool");
+        std::string evidence = params.value("evidence", "");
         float confidence = params.contains("confidence")
             ? params["confidence"].get<float>()
             : category_to_confidence(category);
@@ -61,8 +64,20 @@
         std::string ssl_content = to_ssl_format(content, category);
 
         auto embedding = embed_text(ssl_content);
-        uint64_t id = field_store_->remember(category, "brahman", ssl_content, embedding, confidence, 0.001f);
+        uint64_t id = field_store_->remember(category, realm, ssl_content, embedding, confidence, 0.001f);
 
+        // Provenance: source + evidence + epistemic status + initial lifecycle status
+        if (id > 0 && !source.empty()) {
+            field_store_->add_triplet(std::to_string(id), "source", source);
+            if (!evidence.empty())
+                field_store_->add_triplet(std::to_string(id), "evidence", evidence);
+            // Epistemic: 0=UserStated,1=ToolDerived(default),2=ModelInferred,3=AutonomousSynthesis
+            uint8_t es = (source == "mcp_tool") ? 0 : (source == "distillation" || source == "system") ? 2 : 1;
+            // Initial lifecycle: 4=Proposed(hooks), 0=Active(distillation/mcp)
+            uint8_t ms = (source == "hook_regex" || source == "hook_compliance") ? 4 : 0;
+            if (es != 1) field_store_->set_epistemic_status(id, es);
+            if (ms != 0) field_store_->set_memory_status(id, ms);
+        }
         if (params.contains("tags") && params["tags"].is_string()) {
             std::istringstream iss(params["tags"].get<std::string>());
             std::string tag;
@@ -71,6 +86,31 @@
                 tag.erase(tag.find_last_not_of(' ') + 1);
                 if (!tag.empty()) {
                     field_store_->add_triplet(std::to_string(id), "tagged", tag);
+                }
+            }
+        }
+
+        // Correction supersession: when category=correction, weaken semantically similar memories
+        if (category == "correction" && id > 0 && !embedding.empty()) {
+            auto hits = field_store_->recall(embedding, 5, realm);
+            std::string target_id = params.value("target_id", "");
+            if (!target_id.empty()) {
+                // Explicit target
+                try {
+                    uint64_t tid = std::stoull(target_id);
+                    field_store_->add_triplet(std::to_string(id), "supersedes", target_id, 1.0f, id);
+                    field_store_->weaken(tid, 0.15f);
+                    field_store_->set_memory_status(tid, 1); // Superseded
+                } catch (...) {}
+            } else {
+                for (const auto& h : hits) {
+                    if (h.memory_id == id) continue;
+                    if (h.realm != realm) continue;
+                    if (h.kind == "correction") continue;
+                    if (h.semantic_score < 0.88f) continue;  // slightly lower threshold for direct calls
+                    field_store_->add_triplet(std::to_string(id), "supersedes", std::to_string(h.memory_id), 1.0f, id);
+                    field_store_->weaken(h.memory_id, 0.15f);
+                    field_store_->set_memory_status(h.memory_id, 1);
                 }
             }
         }

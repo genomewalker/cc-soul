@@ -257,7 +257,10 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
       {"content", "Full content", true, nullptr},
       {"category", "Category: wisdom|insight|signal|episode", false, "episode"},
       {"tags", "Comma-separated tags", false, nullptr},
-      {"realm", "Primary realm (default: brahman)", false, nullptr}}},
+      {"realm", "Primary realm (default: brahman)", false, nullptr},
+      {"source", "Source: hook_regex|hook_compliance|distillation|mcp_tool", false, "mcp_tool"},
+      {"confidence", "Override confidence (0.0-1.0)", false, nullptr},
+      {"evidence", "What triggered this observation", false, nullptr}}},
 
     {"full_resonate", "Semantic search with full context (for hooks)",
      {{"query", "Search query", true, nullptr},
