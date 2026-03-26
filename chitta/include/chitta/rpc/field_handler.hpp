@@ -8,6 +8,7 @@
 #include "../mind/subconscious.hpp"
 #include "../sadhana/sadhana_manager.hpp"
 #include "../version.hpp"
+#include "../daemon_config.hpp"
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>

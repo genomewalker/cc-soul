@@ -71,10 +71,8 @@
             field_store_->add_triplet(std::to_string(id), "source", source);
             if (!evidence.empty())
                 field_store_->add_triplet(std::to_string(id), "evidence", evidence);
-            // Epistemic: 0=UserStated,1=ToolDerived(default),2=ModelInferred,3=AutonomousSynthesis
-            uint8_t es = (source == "mcp_tool") ? 0 : (source == "distillation" || source == "system") ? 2 : 1;
-            // Initial lifecycle: 4=Proposed(hooks), 0=Active(distillation/mcp)
-            uint8_t ms = (source == "hook_regex" || source == "hook_compliance") ? 4 : 0;
+            uint8_t es = epistemic_status_for_source(source);
+            uint8_t ms = initial_status_for_source(source);
             if (es != 1) field_store_->set_epistemic_status(id, es);
             if (ms != 0) field_store_->set_memory_status(id, ms);
         }
