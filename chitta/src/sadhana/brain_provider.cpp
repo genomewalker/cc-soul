@@ -217,7 +217,7 @@ BrainResult ClaudeBrain::think(const std::string& prompt, const BrainConfig& con
 
     std::vector<std::string> args = {
         claude_path_,
-        "--dangerously-skip-permissions",
+        "--allowedTools", "Bash,Edit,Write,Read,Glob,Grep",
         "--model", model_,
         "--max-turns", std::to_string(turns),
         "--output-format", "json"
