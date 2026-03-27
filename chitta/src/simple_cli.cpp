@@ -8,7 +8,9 @@
 //   status     Check daemon status
 //   stats      Show soul statistics
 
+#ifdef __linux__
 #include <sys/inotify.h>
+#endif
 #include <chitta/field_store.hpp>
 #include <chitta/rpc/field_handler.hpp>
 #include <chitta/mind/subconscious.hpp>
@@ -170,8 +172,13 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
         std::string viz_dir = http_static_dir;
         if (viz_dir.empty()) {
             // Derive from executable path: go up to cc-soul/, then docs/mind-viz/
+#ifdef __linux__
             auto exe_path = std::filesystem::read_symlink("/proc/self/exe");
             viz_dir = exe_path.parent_path().parent_path().string() + "/docs/mind-viz";
+#else
+            // Fallback: derive from argv[0] or current working directory
+            viz_dir = std::filesystem::current_path().string() + "/docs/mind-viz";
+#endif
         }
         viz_server = std::make_unique<VizServer>(http_port, viz_dir, &field_store);
         viz_server->start();
@@ -238,9 +245,11 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
     std::cerr << "[daemon] Started (socket=" << socket_path
               << ", interval=" << interval << "s, pid=" << getpid() << ")\n";
 
+#ifdef __linux__
     // Record binary mtime at startup for self-update detection.
     // /proc/self/exe resolves to the actual binary path even through symlinks.
     auto startup_binary_mtime = std::filesystem::last_write_time("/proc/self/exe");
+#endif
 
     // Maintenance thread - sync and apply decay periodically
     std::atomic<size_t> cycle_count{0};
@@ -256,6 +265,7 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
         auto pending_embed_interval  = std::chrono::seconds(30);  // Backfill embed_pending memories
         auto last_pending_embed = std::chrono::steady_clock::now();
 
+#ifdef __linux__
         // inotify watcher on segments/ dir for same-host peer writes
         int inotify_fd = inotify_init1(IN_NONBLOCK);
         std::string seg_dir = mind_path + "/chitta-field/segments";
@@ -263,6 +273,9 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
             inotify_add_watch(inotify_fd, seg_dir.c_str(),
                               IN_CREATE | IN_MODIFY | IN_CLOSE_WRITE);
         }
+#else
+        int inotify_fd = -1;  // No inotify on non-Linux; rely on polling fallback
+#endif
 
         while (daemon_running) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -312,11 +325,13 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
             // Ingest new ops from peer instances.
             // Triggered immediately by inotify (same-host) or every 5s (NFS fallback).
             bool seg_event = false;
+#ifdef __linux__
             if (inotify_fd >= 0) {
                 alignas(struct inotify_event) char ibuf[4096];
                 ssize_t len = ::read(inotify_fd, ibuf, sizeof(ibuf));
                 if (len > 0) seg_event = true;
             }
+#endif
             if (seg_event || (now_time - last_foreign_sync >= foreign_sync_interval)) {
                 last_foreign_sync = now_time;
                 try {
@@ -329,7 +344,9 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                 }
             }
 
+#ifdef __linux__
             // Self-update detection: restart if binary has been replaced on disk.
+            // Uses /proc/self/exe and systemctl — Linux only.
             if (now_time - last_binary_check >= binary_check_interval) {
                 last_binary_check = now_time;
                 try {
@@ -338,10 +355,7 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                         std::cerr << "[maint] Binary updated, restarting daemon...\n";
                         field_store.flush();
                         daemon_running = false;
-                        // execv replaces process image — argv[0] resolves via PATH or symlink
-                        // systemctl restart is cleaner: it waits for shutdown then relaunches
                         ::execlp("systemctl", "systemctl", "--user", "restart", "chittad", nullptr);
-                        // If systemctl not found, fall back to direct exec
                         char self_path[PATH_MAX];
                         ssize_t len = ::readlink("/proc/self/exe", self_path, sizeof(self_path) - 1);
                         if (len > 0) {
@@ -352,6 +366,7 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                     }
                 } catch (...) {}
             }
+#endif
 
             if (now_time - last_sync >= interval_secs) {
                 last_sync = now_time;
@@ -375,7 +390,9 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
                 }
             }
         }
+#ifdef __linux__
         if (inotify_fd >= 0) close(inotify_fd);
+#endif
     });
 
     // Distillation thread - process transcripts periodically
