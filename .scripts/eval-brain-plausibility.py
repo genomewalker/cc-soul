@@ -30,6 +30,7 @@ warnings.filterwarnings("ignore")
 
 CHITTA = Path.home() / ".claude/bin/chitta"
 ONNX_MODEL = Path(__file__).parent.parent / "chitta/models/model.onnx"
+TRIBE_PYTHON = Path("/maps/projects/fernandezguerra/apps/opt/conda/envs/tribev2/bin/python")
 
 SEED_QUERIES = [
     "memory recall architecture design",
@@ -128,7 +129,10 @@ def try_import_tribe():
     try:
         from tribev2 import TribeModel
         return TribeModel
-    except ImportError:
+    except (ImportError, Exception):
+        # Try via dedicated tribev2 conda env if not importable in current env
+        if TRIBE_PYTHON.exists():
+            return "subprocess"
         return None
 
 
@@ -184,6 +188,69 @@ def brain_similarity_matrix_random(passages: list[str], n_perms: int = 100,
         vecs = vecs / norms
         sims.append(vecs @ vecs.T)
     return np.mean(sims, axis=0), np.std(sims, axis=0)
+
+
+def brain_similarity_matrix_subprocess(passages: list[str], cache_dir: Path) -> np.ndarray:
+    """Run TRIBE v2 in its dedicated conda env via subprocess worker script."""
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    worker = Path(__file__).parent / "_tribe_worker.py"
+    if not worker.exists():
+        _write_tribe_worker(worker)
+
+    # Write passages to temp JSON
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+        json.dump(passages, f)
+        passages_file = f.name
+
+    out_file = cache_dir / "brain_vectors.npy"
+    try:
+        result = subprocess.run(
+            [str(TRIBE_PYTHON), str(worker), passages_file, str(out_file), str(cache_dir)],
+            capture_output=True, text=True, timeout=1800
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr[-500:])
+        mat = np.load(str(out_file))  # (N, 20484)
+        norms = np.linalg.norm(mat, axis=1, keepdims=True) + 1e-9
+        mat = mat / norms
+        return mat @ mat.T
+    finally:
+        os.unlink(passages_file)
+
+
+def _write_tribe_worker(path: Path):
+    path.write_text('''#!/usr/bin/env python3
+"""Worker: runs TRIBE v2 in its own env, writes (N, 20484) numpy array."""
+import sys, json, os, tempfile, warnings
+import numpy as np
+warnings.filterwarnings("ignore")
+
+passages_file, out_file, cache_dir = sys.argv[1], sys.argv[2], sys.argv[3]
+passages = json.load(open(passages_file))
+
+from tribev2 import TribeModel
+model = TribeModel.from_pretrained("facebook/tribev2", cache_folder=cache_dir)
+
+vectors = []
+for i, passage in enumerate(passages):
+    print(f"  brain-encoding {i+1}/{len(passages)}...", end="\\r", flush=True)
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write(passage[:1000])
+            tmp = f.name
+        events = model.get_events_dataframe(text_path=tmp)
+        preds, _ = model.predict(events, verbose=False)
+        vectors.append(preds.mean(axis=0) if preds.shape[0] > 0 else np.zeros(20484))
+    except Exception as e:
+        print(f"\\n  warn passage {i}: {e}", file=sys.stderr)
+        vectors.append(np.zeros(20484))
+    finally:
+        try: os.unlink(tmp)
+        except: pass
+
+np.save(out_file, np.array(vectors))
+print(f"\\nSaved {len(vectors)} brain vectors to {out_file}")
+''')
 
 
 # ── 4. Correlation ────────────────────────────────────────────────────────────
@@ -276,7 +343,17 @@ def main():
     print("  done.")
 
     tribe = try_import_tribe()
-    if tribe is not None:
+    if tribe == "subprocess":
+        print("[3/4] Computing brain similarity matrix via tribev2 env...", flush=True)
+        try:
+            brain_sim = brain_similarity_matrix_subprocess(passages, args.cache_dir)
+            backend = "TRIBE v2 subprocess (LLaMA 3.2-3B → fMRI cortical predictions)"
+        except Exception as e:
+            print(f"  TRIBE v2 subprocess failed: {e}\n  falling back to random baseline.",
+                  file=sys.stderr)
+            brain_sim, _ = brain_similarity_matrix_random(passages, args.random_perms)
+            backend = "random baseline (TRIBE v2 subprocess failed)"
+    elif tribe is not None:
         print("[3/4] Computing brain similarity matrix (TRIBE v2)...", flush=True)
         try:
             brain_sim = brain_similarity_matrix_tribe(passages, args.cache_dir)
