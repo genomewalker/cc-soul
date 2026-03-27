@@ -156,7 +156,7 @@ chitta recall --query "memory storage class" --tag code-intel
 - Daemon processes ~10 symbols every 2 minutes
 - Priority: classes → functions → methods
 - Each symbol gets a 1-2 sentence description
-- Enables semantic search: "persistent storage" → `DuckDBStore @duckdb_store.hpp:45`
+- Enables semantic search: "persistent storage" → `ChittaField @store.rs:29`
 
 **Daemon options:**
 ```bash

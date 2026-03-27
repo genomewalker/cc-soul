@@ -515,19 +515,16 @@ ToolSearch({ query: "zellij tail_pane read_pane list_named_panes" });
 
 ```javascript
 // Get all active shepherd tasks
-tasks = mcp__chitta__sql_query({
-  query: "SELECT task_id, goal, status, iterations, updated_at FROM long_task WHERE task_id LIKE 'shepherd-%' ORDER BY updated_at DESC",
-  text_only: true
+tasks = mcp__chitta__advanced({
+  tool: "long_task_active",
+  arguments: {}
 });
 
-// Get recent events across all shepherd tasks
-events = mcp__chitta__sql_query({
-  query: `SELECT t.task_id, e.kind, e.payload, e.created_at
-          FROM task_event e
-          JOIN long_task t ON e.task_id = t.id
-          WHERE t.task_id LIKE 'shepherd-%'
-          ORDER BY e.created_at DESC LIMIT 10`,
-  text_only: true
+// Get recent shepherd task events
+events = mcp__chitta__recall({
+  query: "shepherd pipeline task event",
+  tag: "shepherd",
+  limit: 10
 });
 
 // Get pipeline-related habits

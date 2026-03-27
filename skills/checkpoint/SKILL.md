@@ -87,8 +87,8 @@ chitta ledger_save \
   --mood "confident" \
   --coherence 0.85 \
   --todos '[{"content":"Implement ledger","status":"done"},{"content":"Test ledger","status":"in_progress"}]' \
-  --active-files '["chitta/src/duckdb_store.cpp","chitta/include/chitta/duckdb_store.hpp"]' \
-  --decisions '["Use DuckDB for ledger storage"]' \
+  --active-files '["chitta/src/simple_cli.cpp","chitta-field/src/store.rs"]' \
+  --decisions '["Use chitta-field as memory substrate"]' \
   --next-steps '["Build and test","Update skills"]' \
   --snapshot "# Checkpoint: Implementing ledger continuity system"
 ```
