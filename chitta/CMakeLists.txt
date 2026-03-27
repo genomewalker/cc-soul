@@ -445,6 +445,13 @@ if(CHITTA_BUILD_RPC)
     endif()
 endif()
 
+# Unified migration tool: chitta_migrate
+# Handles all source formats (DuckDB, soul.db) with auto-detection
+add_executable(chitta_migrate src/migrate.cpp)
+target_link_libraries(chitta_migrate PRIVATE chitta)
+target_include_directories(chitta_migrate PRIVATE "${CHITTA_FIELD_INCLUDE}")
+install(TARGETS chitta_migrate DESTINATION bin)
+
 # RPATH configuration for runtime library discovery
 # CI builds can override with CMAKE_INSTALL_RPATH=$ORIGIN to bundle libs
 set(CHITTA_RUNTIME_LIBS "")
