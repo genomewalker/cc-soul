@@ -156,6 +156,7 @@
         }
 
         json out = {
+            {"version",         CHITTA_VERSION},
             {"total_memories",  total_memories},
             {"wisdom_nodes",    wisdom_nodes},
             {"beliefs",         beliefs},
