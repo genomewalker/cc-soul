@@ -30,6 +30,14 @@ rm -f "$MIND_PATH/.session_active" "$MIND_PATH/.gaps_surfaced"
 # Clean stale dedup files from previous sessions
 rm -f "$MIND_PATH/.stop_dedup_"* 2>/dev/null || true
 
+# Initialize turn-discipline counter to current turn so the discipline nudge
+# measures idle turns within THIS session, not across session boundaries.
+if [[ -n "$SESSION_ID" ]]; then
+    TURN_FILE="${MIND_PATH}/.turn_index_${SESSION_ID}"
+    CURRENT_TURN=$(cat "$TURN_FILE" 2>/dev/null || echo 0)
+    echo "$CURRENT_TURN" > "${MIND_PATH}/.last_store_turn_${SESSION_ID}"
+fi
+
 # Check chitta CLI exists and daemon is running
 [[ ! -x "$CHITTA_BIN" ]] && exit 0
 daemon_available || exit 0
