@@ -240,6 +240,18 @@ if echo "$QUERY" | grep -qiE "(it works|finally|success|done|shipped|released|co
 fi
 
 # ===========================================
+# TURN DISCIPLINE: Nudge if too many turns without storing
+# Inspired by SAGE's 7-call enforcement. We warn, not block.
+# ===========================================
+STORE_INTERVAL="${CC_SOUL_STORE_INTERVAL:-15}"
+LAST_STORE_FILE="${MIND_PATH}/.last_store_turn_${SESSION_ID}"
+last_store_turn=$(cat "$LAST_STORE_FILE" 2>/dev/null || echo "0")
+turns_since_store=$((TURN_INDEX - last_store_turn))
+if [[ $turns_since_store -ge $STORE_INTERVAL && $TURN_INDEX -gt 0 ]]; then
+    LEARNING_HINTS="${LEARNING_HINTS:+$LEARNING_HINTS; }[DISCIPLINE] $turns_since_store turns without storing — consider remember/learn_correction/learn_milestone"
+fi
+
+# ===========================================
 # NARRATIVE: Get current work mode and log user message
 # ===========================================
 NARRATIVE_STATUS=""

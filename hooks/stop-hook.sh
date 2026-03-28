@@ -274,6 +274,11 @@ if echo "$RESPONSE" | grep -qiE '(learn_correction|learn_preference|learn_insigh
     CLAUDE_LEARNED=true
 fi
 
+# Update last-store turn counter whenever something was stored this turn
+if [[ "$CLAUDE_LEARNED" == "true" ]]; then
+    echo "$TURN_INDEX" > "${MIND_PATH}/.last_store_turn_${SESSION_ID}"
+fi
+
 # If user correction detected but Claude didn't learn, auto-store
 if [[ "$CLAUDE_LEARNED" == "false" && -n "$LAST_USER_MSG" ]]; then
     # ===========================================
