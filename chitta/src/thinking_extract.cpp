@@ -140,14 +140,16 @@ int main(int argc, char* argv[]) {
     // State file: tracks byte offset of last processed position
     if (state_file_path.empty()) state_file_path = transcript_path + ".thinking_pos";
 
-    // Read last processed offset
+    // Read last processed offset and turn count
     std::streampos last_pos = 0;
+    long long last_turns = 0;
     {
         std::ifstream sf(state_file_path);
         if (sf) {
             long long p = 0;
             sf >> p;
             last_pos = p;
+            sf >> last_turns; // second line — may be absent in old state files
         }
     }
 
@@ -164,6 +166,7 @@ int main(int argc, char* argv[]) {
 
     std::string line;
     std::streampos new_pos = last_pos;
+    long long turn_count = last_turns;
     while (std::getline(f, line)) {
         new_pos = f.tellg();
         if (line.empty()) continue;
@@ -172,6 +175,7 @@ int main(int argc, char* argv[]) {
         try { event = json::parse(line); } catch (...) { continue; }
 
         if (event.value("type", "") != "assistant") continue;
+        ++turn_count;
         auto& content = event["message"]["content"];
         if (!content.is_array()) continue;
 
@@ -197,17 +201,22 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    if (verbose) {
+        std::cerr << "[thinking] Scanned turns " << last_turns << "–" << turn_count
+                  << " (+" << (turn_count - last_turns) << " new)\n";
+    }
+
     if (insights.empty()) {
         if (verbose) std::cerr << "[thinking] No new perception-change moments found\n";
-        // Update state file even if nothing found
         if (!dry_run) {
             std::ofstream sf(state_file_path);
-            sf << (long long)new_pos;
+            sf << (long long)new_pos << "\n" << turn_count;
         }
         return 0;
     }
 
-    std::cerr << "[thinking] Found " << insights.size() << " perception-change moments\n";
+    std::cerr << "[thinking] Found " << insights.size() << " perception-change moments"
+              << " (turns " << last_turns << "–" << turn_count << ")\n";
 
     if (dry_run) {
         for (auto& [label, snippet] : insights) {
@@ -255,9 +264,9 @@ int main(int argc, char* argv[]) {
 
     std::cerr << "[thinking] Stored " << stored << "/" << insights.size() << "\n";
 
-    // Save new offset
+    // Save new offset and turn count
     std::ofstream sf(state_file_path);
-    sf << (long long)new_pos;
+    sf << (long long)new_pos << "\n" << turn_count;
 
     return 0;
 }
