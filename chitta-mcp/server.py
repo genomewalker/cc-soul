@@ -121,7 +121,7 @@ ADVANCED_TOOLS = {
     "get_entities", "get_policies", "get_relationship_events", "query_claims",
     # Learning (specialized - composite tools)
     "learn_analysis", "learn_approach", "learn_codebase", "learn_correction",
-    "learn_insight", "learn_outcome", "learn_preference",
+    "learn_insight", "learn_milestone", "learn_outcome", "learn_preference",
     # Research (internal - composite tools)
     "research_cycle", "research_store", "research_topics",
     # Misc advanced

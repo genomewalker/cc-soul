@@ -233,9 +233,10 @@ if echo "$QUERY" | grep -qiE "(frustrated|annoyed|confused|stuck|lost|this is (h
     LEARNING_HINTS="${LEARNING_HINTS:+$LEARNING_HINTS; }[LEARN] User state detected → use learn_approach if something helps"
 fi
 
-# Detect MILESTONE patterns: achievement
+# Detect MILESTONE patterns: store directly via daemon (no MCP tool needed)
 if echo "$QUERY" | grep -qiE "(it works|finally|success|done|shipped|released|completed|finished|passed|merged|deployed)"; then
-    LEARNING_HINTS="${LEARNING_HINTS:+$LEARNING_HINTS; }[LEARN] Milestone detected → use learn_milestone tool"
+    milestone_text=$(echo "$QUERY" | head -c 300 | tr '\n' ' ')
+    queue_write "remember" "{\"content\":\"[milestone] $milestone_text\",\"kind\":\"milestone\",\"tags\":[\"milestone\"]}"
 fi
 
 # ===========================================
