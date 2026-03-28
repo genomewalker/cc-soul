@@ -70,6 +70,12 @@ if [[ $((TURN_INDEX % CHECKPOINT_INTERVAL)) -eq 0 && $TURN_INDEX -gt 0 ]]; then
     # Incremental distillation every N turns (fire-and-forget, non-blocking)
     queue_write "distill_trigger" "{\"session_id\":\"$SESSION_ID\"}"
     echo "[distill] queued incremental distillation at turn $TURN_INDEX" >&2
+
+    # Mine thinking blocks for perception-change insights (fast C++ binary, non-blocking)
+    THINKING_BIN="${HOME}/.claude/bin/chitta_thinking"
+    if [[ -x "$THINKING_BIN" && -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
+        "$THINKING_BIN" --transcript "$TRANSCRIPT_PATH" >/dev/null 2>&1 &
+    fi
 fi
 
 # ===========================================

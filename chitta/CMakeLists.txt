@@ -445,6 +445,12 @@ if(CHITTA_BUILD_RPC)
     endif()
 endif()
 
+# Thinking block insight extractor — perception-change mining from session JSONL
+add_executable(chitta_thinking src/thinking_extract.cpp src/socket_client.cpp)
+target_link_libraries(chitta_thinking PRIVATE chitta)
+target_include_directories(chitta_thinking PRIVATE "${CHITTA_FIELD_INCLUDE}")
+install(TARGETS chitta_thinking DESTINATION bin)
+
 # Unified migration tool: chitta_migrate
 # Handles all source formats (DuckDB, soul.db) with auto-detection
 add_executable(chitta_migrate src/migrate.cpp)
