@@ -245,7 +245,11 @@ fi
 # ===========================================
 STORE_INTERVAL="${CC_SOUL_STORE_INTERVAL:-15}"
 LAST_STORE_FILE="${MIND_PATH}/.last_store_turn_${SESSION_ID}"
-last_store_turn=$(cat "$LAST_STORE_FILE" 2>/dev/null || echo "0")
+# Initialize on first prompt of a session (state file absent = fresh or resumed session)
+if [[ ! -f "$LAST_STORE_FILE" ]]; then
+    echo "$TURN_INDEX" > "$LAST_STORE_FILE"
+fi
+last_store_turn=$(cat "$LAST_STORE_FILE" 2>/dev/null || echo "$TURN_INDEX")
 turns_since_store=$((TURN_INDEX - last_store_turn))
 if [[ $turns_since_store -ge $STORE_INTERVAL && $TURN_INDEX -gt 0 ]]; then
     LEARNING_HINTS="${LEARNING_HINTS:+$LEARNING_HINTS; }[DISCIPLINE] $turns_since_store turns without storing — consider remember/learn_correction/learn_milestone"
