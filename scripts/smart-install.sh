@@ -768,6 +768,7 @@ validate_binaries() {
     if ! echo "$cli_help" | grep -q -- "--socket-path"; then
         echo "[cc-soul] WARNING: chitta missing --socket-path support" >&2
     fi
+    return 0
 }
 
 # Main
