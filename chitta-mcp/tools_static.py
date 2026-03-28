@@ -34,11 +34,8 @@ TOOLS = [
                                 "type": "array"
                         },
                         "tags": {
-                                "description": "Optional tags",
-                                "items": {
-                                        "type": "string"
-                                },
-                                "type": "array"
+                                "description": "Optional tags (comma-separated string or JSON array)",
+                                "type": "string"
                         },
                         "type": {
                                 "description": "Node type (wisdom, insight, signal, episode)",
@@ -1419,11 +1416,8 @@ TOOLS = [
                                 "type": "array"
                         },
                         "tags": {
-                                "description": "Tags for filtering",
-                                "items": {
-                                        "type": "string"
-                                },
-                                "type": "array"
+                                "description": "Tags for filtering (comma-separated string or JSON array)",
+                                "type": "string"
                         },
                         "task_id": {
                                 "description": "Task identifier",

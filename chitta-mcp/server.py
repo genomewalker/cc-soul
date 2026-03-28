@@ -121,7 +121,7 @@ ADVANCED_TOOLS = {
     "get_entities", "get_policies", "get_relationship_events", "query_claims",
     # Learning (specialized - composite tools)
     "learn_analysis", "learn_approach", "learn_codebase", "learn_correction",
-    "learn_insight", "learn_milestone", "learn_outcome", "learn_preference",
+    "learn_insight", "learn_outcome", "learn_preference",
     # Research (internal - composite tools)
     "research_cycle", "research_store", "research_topics",
     # Misc advanced
@@ -429,6 +429,27 @@ def ensure_daemon() -> bool:
     return False
 
 
+def _normalize_args(arguments: dict) -> dict:
+    """Coerce Claude Code MCP serialization quirks.
+
+    Claude Code serializes array parameters as JSON-encoded strings
+    (e.g. tags='["a","b"]' instead of tags=["a","b"]).
+    This normalizer detects and unwraps them before forwarding to the daemon.
+    """
+    ARRAY_KEYS = {"tags", "shared_realms", "data_paths", "script_paths", "realms"}
+    result = {}
+    for k, v in arguments.items():
+        if k in ARRAY_KEYS and isinstance(v, str):
+            stripped = v.strip()
+            if stripped.startswith("["):
+                try:
+                    v = json.loads(stripped)
+                except json.JSONDecodeError:
+                    pass  # leave as-is; daemon handles comma-separated strings
+        result[k] = v
+    return result
+
+
 def daemon_call(tool_name: str, arguments: dict, structured: bool = False) -> str:
     """Call a tool on the daemon.
 
@@ -441,6 +462,8 @@ def daemon_call(tool_name: str, arguments: dict, structured: bool = False) -> st
 
     if not ensure_daemon():
         return "Error: Failed to connect to daemon"
+
+    arguments = _normalize_args(arguments)
 
     req = {
         "jsonrpc": "2.0",
