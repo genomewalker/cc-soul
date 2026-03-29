@@ -26,15 +26,15 @@ classify_and_rewrite() {
     local cmd="$1"
 
     if echo "$cmd" | grep -qE '^\s*rm\s+-rf\s+(/|~/?\s*$)'; then
-        echo '{"permissionDecision":"block","reason":"rm -rf on / or ~ is destructive"}'
+        echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"block","additionalContext":"rm -rf on / or ~ is destructive"}}'
         return 2
     fi
     if echo "$cmd" | grep -qE '^\s*chmod\s+-R\s+777\s+/\s*$'; then
-        echo '{"permissionDecision":"block","reason":"chmod -R 777 / is destructive"}'
+        echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"block","additionalContext":"chmod -R 777 / is destructive"}}'
         return 2
     fi
     if echo "$cmd" | grep -qE '^\s*dd\s+.*of=/dev/sd[a-z]'; then
-        echo '{"permissionDecision":"block","reason":"dd writing to raw disk device"}'
+        echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"block","additionalContext":"dd writing to raw disk device"}}'
         return 2
     fi
 
@@ -77,7 +77,8 @@ classify_and_rewrite() {
         local esc_cmd esc_reason
         esc_cmd=$(echo -n "$rewritten" | jq -Rs .)
         esc_reason=$(echo -n "$reason" | jq -Rs .)
-        echo "{\"permissionDecision\":\"allow\",\"updatedInput\":{\"command\":${esc_cmd}},\"reason\":${esc_reason}}"
+        # Claude Code requires hookSpecificOutput wrapper for updatedInput to take effect
+        echo "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\",\"updatedInput\":{\"command\":${esc_cmd}},\"additionalContext\":${esc_reason}}}"
         return 0
     fi
 
