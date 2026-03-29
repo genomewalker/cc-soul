@@ -93,7 +93,14 @@ case "$MATCHER" in
                 echo "$rewrite_result"
                 exit 2
             elif [[ $rewrite_rc -eq 0 && -n "$rewrite_result" ]]; then
-                printf '⚠️ BEFORE RUNNING: %s\n' "$rewrite_result"
+                # Execute the safer command ourselves, return its output, block the original.
+                # This is the key: Claude gets compact output without seeing the full 43KB response.
+                _safer_cmd=$(echo "$rewrite_result" | grep -o 'instead: .*' | sed 's/instead: //')
+                if [[ -n "$_safer_cmd" ]]; then
+                    _safer_output=$(eval "$_safer_cmd" 2>&1 | head -250)
+                    printf '⚠️ BEFORE RUNNING: Large output — showing compact version instead of running: %s\n\n%s\n' "$command" "$_safer_output"
+                    exit 2
+                fi
             fi
         fi
 
