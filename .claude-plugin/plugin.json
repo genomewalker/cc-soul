@@ -20,5 +20,9 @@
     "continuity",
     "soul"
   ],
-  "skills": "./skills/"
+  "skills": "./skills/",
+  "compatibility": {
+    "chitta-research": ">=1.0.0",
+    "chitta-field": ">=5.0.0"
+  }
 }
