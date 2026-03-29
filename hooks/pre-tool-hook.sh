@@ -74,11 +74,9 @@ classify_and_rewrite() {
     fi
 
     if [[ -n "$rewritten" ]]; then
-        local esc_cmd esc_reason
-        esc_cmd=$(echo -n "$rewritten" | jq -Rs .)
-        esc_reason=$(echo -n "$reason" | jq -Rs .)
-        # Claude Code requires hookSpecificOutput wrapper for updatedInput to take effect
-        echo "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\",\"updatedInput\":{\"command\":${esc_cmd}},\"additionalContext\":${esc_reason}}}"
+        # updatedInput not supported in current Claude Code — inject strong advisory instead
+        echo "⚠️ RTK-rewrite: $reason"
+        echo "Run this instead: $rewritten"
         return 0
     fi
 
