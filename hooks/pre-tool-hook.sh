@@ -10,12 +10,10 @@ MATCHER="${1:-}"
 [[ -z "$MATCHER" ]] && exit 0
 
 CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
-STDIN_DATA=$(cat)   # Read stdin before daemon gate so rewrite fires unconditionally
+STDIN_DATA=$(cat)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-[[ ! -x "$CHITTA_BIN" ]] && exit 0
-source "${SCRIPT_DIR}/lib.sh"
-daemon_available || exit 0
+source "${SCRIPT_DIR}/lib.sh" 2>/dev/null || true
 
 json_escape() {
     echo -n "$1" | jq -Rs '.' | sed 's/^"//;s/"$//'
@@ -95,10 +93,13 @@ case "$MATCHER" in
                 echo "$rewrite_result"
                 exit 2
             elif [[ $rewrite_rc -eq 0 && -n "$rewrite_result" ]]; then
-                # Output advisory but continue to chitta recall (accumulates in additionalContext)
                 printf '%s\n' "$rewrite_result"
             fi
         fi
+
+        # Daemon gate: chitta recall only runs when daemon is available
+        [[ ! -x "$CHITTA_BIN" ]] && exit 0
+        daemon_available || exit 0
 
         query=""
         tags=""
