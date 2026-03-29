@@ -32,6 +32,7 @@
       <li><a href="philosophy.html">Philosophy</a></li>
       <li><a href="architecture.html">Architecture</a></li>
       <li><a href="chitta-field.html">chitta-field</a></li>
+      <li><a href="https://github.com/genomewalker/chitta-research" target="_blank" rel="noopener">chitta-research</a></li>
       <li><a href="sadhana.html">Sadhana</a></li>
       <li><a href="context.html">Context</a></li>
       <li><a href="tools.html">Tools</a></li>
@@ -83,10 +84,15 @@
       <div class="whats-new-header">
         <span class="whats-new-badge">New in v5.0.0</span>
       </div>
-      <p class="whats-new-title">chitta-field: DuckDB replaced with a Rust memory substrate</p>
+      <p class="whats-new-title">HNSW, PoE reliability, chitta_thinking, and chitta-research</p>
       <p class="whats-new-desc">
-        The soul's storage layer is now <strong>chitta-field</strong> &mdash; a pure Rust organic memory substrate, statically linked into the daemon. No external database. No NFS locks. No D-state hangs. Multi-instance writes, write-ahead log, sparse associative codes.
-        Also: autonomous dreams during idle time, self-improvement loop, and architectural reflection.
+        <strong>HNSW semantic index</strong> activates above 2,000 memories for dense recall at scale.
+        <strong>PoE domain reliability</strong> lowers realm recall scores automatically when corrections arrive.
+        <strong>chitta_thinking</strong> mines Claude&rsquo;s <code>thinking</code> blocks for perception-change moments every 10 turns.
+        <strong>chitta_migrate</strong> auto-detects <code>soul.db</code> or <code>chitta.duckdb</code> and handles either.
+        <strong>recall_with_fallback</strong> chain (semantic &rarr; BM25 &rarr; recency) means recall never returns empty.
+        Pre-tool hook now flags large files and routes output types (TestResults, BuildOutput, LogOutput) separately.
+        And <strong>chitta-research</strong> &mdash; a new autonomous research OS built on chitta-field.
         <a href="https://github.com/genomewalker/cc-soul/releases" class="link-sandal">See release notes &rarr;</a>
       </p>
     </div>
@@ -500,6 +506,63 @@
   line-height: 1.7;
 }
 </style>
+
+<!-- CHITTA-RESEARCH -->
+<section class="chitta-research-section" id="chitta-research">
+  <div class="container">
+    <div class="chitta-field-header reveal">
+      <div class="section-divider"></div>
+      <h2 class="heading-section"><span class="vignette-title-sanskrit">chitta-research</span>&thinsp;&mdash;&thinsp;autonomous research, grounded in memory.</h2>
+    </div>
+
+    <div class="chitta-field-body">
+      <div class="chitta-field-prose reveal reveal-delay-1">
+        <p>chitta-research is a high-performance autonomous research system built on chitta-field. Seven specialized agents work in concert to explore a research agenda, build a structured belief graph, and store durable findings across sessions.</p>
+        <p>Each research session accumulates into a <em>belief graph</em>: ResearchProgram &rarr; Question &rarr; Hypothesis &rarr; ExperimentPlan &rarr; Run &rarr; Observation &rarr; Claim &rarr; Method. Findings persist in chittad &mdash; the same daemon that powers cc-soul.</p>
+        <p>Brahman, the coordinating agent, enforces a research constitution: self-improvement depth cap, hard novelty stop, and a hypothesis backlog gate that prevents runaway recursion.</p>
+      </div>
+
+      <div class="chitta-field-stats reveal reveal-delay-2">
+        <div class="cf-stat">
+          <span class="cf-stat-value">7</span>
+          <span class="cf-stat-label">specialized agents</span>
+        </div>
+        <div class="cf-stat">
+          <span class="cf-stat-value">4</span>
+          <span class="cf-stat-label">sources: arXiv, bioRxiv, Semantic Scholar, GitHub</span>
+        </div>
+        <div class="cf-stat">
+          <span class="cf-stat-value">8</span>
+          <span class="cf-stat-label">belief graph node types</span>
+        </div>
+        <div class="cf-stat">
+          <span class="cf-stat-value">chittad</span>
+          <span class="cf-stat-label">persistent memory across sessions</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="cf-details reveal reveal-delay-2">
+      <div class="cf-detail-card">
+        <h4 class="cf-detail-title">Belief Graph</h4>
+        <p class="cf-detail-desc">Research accumulates as a typed graph: Programs link to Questions, Questions to Hypotheses, Hypotheses to ExperimentPlans and Runs. Claims and Methods are first-class nodes. Nothing is lost between sessions.</p>
+      </div>
+      <div class="cf-detail-card">
+        <h4 class="cf-detail-title">Brahman Constitution</h4>
+        <p class="cf-detail-desc">The coordinating agent enforces hard limits: self-improvement depth cap prevents recursive self-modification spirals; novelty stop halts when marginal gain drops below threshold; hypothesis backlog gate prevents queue saturation.</p>
+      </div>
+      <div class="cf-detail-card">
+        <h4 class="cf-detail-title">Install &amp; Run</h4>
+        <p class="cf-detail-desc"><code>make install</code> drops <code>cresearch</code> into your PATH. Point it at an agenda YAML and it runs. Findings surface in cc-soul memory automatically &mdash; the same <code>chitta recall</code> that powers your daily sessions.</p>
+      </div>
+    </div>
+
+    <div class="reveal reveal-delay-3" style="display:flex;gap:var(--space-5);flex-wrap:wrap;margin-top:var(--space-5);">
+      <a href="https://github.com/genomewalker/chitta-research" target="_blank" rel="noopener" class="tools-link">chitta-research on GitHub &rarr;</a>
+      <a href="https://genomewalker.github.io/chitta-research/" target="_blank" rel="noopener" class="tools-link">Documentation &rarr;</a>
+    </div>
+  </div>
+</section>
 
 <!-- FIRST 30 DAYS -->
 <section class="progression" id="progression">

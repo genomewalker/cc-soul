@@ -14,12 +14,19 @@
 
 CC-soul gives Claude Code persistent memory across sessions. It learns your preferences, remembers your codebase structure, anticipates your needs, and gets smarter the more you use it. One command to install. Zero commands to operate.
 
-## What's New in 3.43.38
+## What's New in v5.0.0
 
-- **chitta-field** — DuckDB replaced entirely with a pure Rust organic memory substrate. No external database, no NFS locks, no D-state hangs. Memory is now statically linked and multi-instance safe.
-- **Soul dreams (svapna)** — The daemon explores topics autonomously during idle time. It picks a knowledge gap, web-searches it, and stores what it finds as `[dream]` memories. Dreams run twice daily.
-- **Self-improvement loop** — A daily `impl_start` sadhana reads pending `[impl]` memories (including `[dream][impl]` architectural findings), implements changes in the repo, runs a review gate, and commits if approved.
-- **Architectural reflection** — Dream prompts now include a reflection step: findings with direct implications for memory storage or retrieval are stored as `[dream][impl]` memories, feeding the impl loop automatically.
+- **HNSW semantic index** — activates automatically above 2,000 memories; falls back to IVF+LSH below that threshold. Dense recall at scale without configuration.
+- **PoE domain reliability** — corrections automatically lower recall scores for the domain they target. Mistakes don't just get overwritten — the field learns not to trust that area.
+- **chitta_thinking** — mines Claude's `thinking` blocks for perception-change moments every 10 turns. Internal reasoning becomes a memory source.
+- **chitta_migrate** — unified migration tool that auto-detects `soul.db` or `chitta.duckdb` and handles either without manual configuration.
+- **MacOS portability** — all Linux-only APIs guarded with `#ifdef __linux__`. The daemon builds and runs on macOS.
+- **FilterLevel on BM25 code ingestion** — Signatures-only or MinimalContext modes for leaner code indexing in chitta-field.
+- **recall_with_fallback chain** — semantic → BM25 → recency. Recall never returns empty.
+- **Pre-tool hook improvements** — large-file advisory (`cat` on files >500 lines runs `head -200` and blocks the original call); output-type-aware recall (TestResults, BuildOutput, LogOutput recognized and routed separately).
+- **Turn discipline** — warns after 15 turns without storing a memory, prompting consolidation.
+- **Milestone auto-detection** — milestones detected in conversation are stored directly via the write queue.
+- **chitta-research** — autonomous research system built on chitta-field. See section below.
 
 ## Before & After
 
@@ -224,6 +231,7 @@ CC-soul's memory lives in chitta-field — a pure Rust cognitive substrate that 
 **What makes it different:**
 
 - **Sparse associative codes** — each memory activates 64 of 16,384 feature dimensions. Recall is driven by pattern overlap, not keyword search. Related memories cluster naturally.
+- **HNSW semantic index** — activates above 2,000 memories for dense vector recall; falls back to IVF+LSH below that threshold. No manual tuning.
 - **Write-ahead log** — every operation is durable before it applies in-memory. Restart the daemon; it replays the log and picks up exactly where it left off.
 - **Multi-instance writes** — multiple Claude windows share the same memory field simultaneously. Each writer owns its own segment file; no locking, no contention.
 - **Statically linked** — compiled into `libchitta_field.a`, then linked into the daemon. No database server, no IPC sockets, no NFS file handles to hang on.
@@ -238,7 +246,7 @@ Memory written                        Memory recalled
 └──────────────┘                     └──────────────┘
         │                                    ▲
         ▼                                    │
-   WAL segment                        cortical index
+   WAL segment                        HNSW / cortical index
    (durable)                          (sub-ms recall)
         │
         ▼
@@ -247,6 +255,30 @@ Memory written                        Memory recalled
 ```
 
 [chitta-field on GitHub →](https://github.com/genomewalker/chitta-field)
+
+## chitta-research: Autonomous Research System
+
+chitta-research is a high-performance autonomous research OS built on chitta-field. Designed for deep, multi-session research that accumulates structured knowledge over time.
+
+**Architecture:**
+- 7 specialized agents: Scout, Researcher, Hotr, Adhvaryu, Udgatr, Kriya, Brahman
+- Sources: arXiv, bioRxiv, Semantic Scholar, GitHub
+- Belief graph: `ResearchProgram → Question → Hypothesis → ExperimentPlan → Run → Observation → Claim → Method`
+- Brahman research constitution: self-improvement depth cap, hard novelty stop, hypothesis backlog gate
+- Connects to chittad for persistent memory across research sessions
+
+```bash
+# Install
+make install
+
+# Run with an agenda file
+cresearch --agenda agenda.yaml
+```
+
+| Resource | Link |
+|----------|------|
+| Repository | [github.com/genomewalker/chitta-research](https://github.com/genomewalker/chitta-research) |
+| Documentation | [genomewalker.github.io/chitta-research](https://genomewalker.github.io/chitta-research/) |
 
 ## Building from Source
 
