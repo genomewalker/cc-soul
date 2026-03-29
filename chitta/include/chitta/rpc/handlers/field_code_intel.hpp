@@ -235,15 +235,91 @@
         return DuckDBToolResult::ok(ss.str(), {{"symbols", symbols_json}, {"count", symbols.size()}});
     }
 
+    // Returns true if the string looks like a remote URL (https://, git://, git@, ssh://).
+    static bool is_remote_url(const std::string& s) {
+        return s.find("://") != std::string::npos ||
+               s.rfind("git@", 0) == 0 ||
+               s.rfind("ssh://", 0) == 0;
+    }
+
+    // Derive a short project name from a remote URL.
+    // "https://github.com/owner/repo.git" → "repo"
+    static std::string project_from_url(const std::string& url) {
+        std::string u = url;
+        if (!u.empty() && u.back() == '/') u.pop_back();
+        if (u.size() >= 4 && u.substr(u.size() - 4) == ".git") u = u.substr(0, u.size() - 4);
+        auto pos = u.rfind('/');
+        if (pos != std::string::npos) return u.substr(pos + 1);
+        pos = u.rfind(':');
+        if (pos != std::string::npos) return u.substr(pos + 1);
+        return u;
+    }
+
+    // Shallow-clone a remote URL into a temporary directory.
+    // Returns the tmpdir path on success, empty string on failure.
+    static std::string clone_remote(const std::string& url,
+                                    const std::string& branch,
+                                    std::string& error_out) {
+        // mkdtemp requires a writable template
+        char tmpl[] = "/tmp/chitta-clone-XXXXXX";
+        char* tmpdir = mkdtemp(tmpl);
+        if (!tmpdir) { error_out = "mkdtemp failed"; return ""; }
+
+        std::string cmd = "git clone --depth 1 --quiet";
+        if (!branch.empty()) cmd += " --branch " + branch;
+        cmd += " -- " + url + " " + std::string(tmpdir) + " 2>&1";
+
+        FILE* fp = popen(cmd.c_str(), "r");
+        if (!fp) { error_out = "popen failed"; return ""; }
+        char buf[256];
+        while (fgets(buf, sizeof(buf), fp)) error_out += buf;
+        int rc = pclose(fp);
+        if (rc != 0) return "";  // error_out has the git output
+        error_out.clear();
+        return std::string(tmpdir);
+    }
+
     DuckDBToolResult tool_learn_codebase(const json& params) {
         if (subconscious_) subconscious_->notify_query();
 
         std::string path = params.value("path", "");
         if (path.empty()) return DuckDBToolResult::error("Path is required");
-        if (!std::filesystem::exists(path)) return DuckDBToolResult::error("Path does not exist: " + path);
+
+        std::string branch = params.value("branch", "");
+        bool cloned = false;
+        std::string clone_tmpdir;
+
+        if (is_remote_url(path)) {
+            std::string clone_err;
+            clone_tmpdir = clone_remote(path, branch, clone_err);
+            if (clone_tmpdir.empty()) {
+                return DuckDBToolResult::error("git clone failed for " + path + ": " + clone_err);
+            }
+            cloned = true;
+            path = clone_tmpdir;
+        } else {
+            if (!std::filesystem::exists(path))
+                return DuckDBToolResult::error("Path does not exist: " + path);
+        }
+
+        // Cleanup guard — removes tmpdir when we exit this scope (cloned repos only)
+        struct CloneGuard {
+            std::string dir;
+            bool active;
+            ~CloneGuard() {
+                if (active && !dir.empty()) {
+                    std::string cmd = "rm -rf " + dir;
+                    (void)system(cmd.c_str());
+                }
+            }
+        } guard{clone_tmpdir, cloned};
 
         std::string project = params.value("project", "");
-        if (project.empty()) project = std::filesystem::path(path).filename().string();
+        if (project.empty()) {
+            project = cloned
+                ? project_from_url(params.value("path", path))
+                : std::filesystem::path(path).filename().string();
+        }
 
         size_t max_files = static_cast<size_t>(params.value("max_files", 500));
 
@@ -309,7 +385,12 @@
 
         std::ostringstream ss;
         ss << "Learned codebase: " << project << "\n";
-        ss << "  Path: " << path << "\n";
+        if (cloned) {
+            ss << "  Source: " << params.value("path", path) << "\n";
+            if (!branch.empty()) ss << "  Branch: " << branch << "\n";
+        } else {
+            ss << "  Path: " << path << "\n";
+        }
         ss << "  Symbols: " << symbols_stored << "\n";
         ss << "  Symbols embedded: " << symbols_embedded << "\n";
         ss << "  Callsites: " << callsites_stored << "\n";

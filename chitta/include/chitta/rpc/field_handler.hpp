@@ -818,9 +818,11 @@ private:
         });
         handlers_["extract_symbols"] = [this](const json& p) { return tool_extract_symbols(p); };
 
-        tools_.push_back({{"name","learn_codebase"},{"description","Learn codebase incrementally"},
+        tools_.push_back({{"name","learn_codebase"},{"description","Learn codebase by extracting symbols. path can be a local directory or a remote git URL (https://github.com/..., git@github.com:...). Remote repos are shallow-cloned into a temp dir, indexed, then deleted."},
             {"inputSchema",{{"type","object"},{"properties",{
-                {"path",{{"type","string"}}},{"project",{{"type","string"}}},
+                {"path",{{"type","string"},{"description","Local path or remote git URL"}}},
+                {"project",{{"type","string"},{"description","Project name (defaults to repo/dir name)"}}},
+                {"branch",{{"type","string"},{"description","Branch, tag, or commit to clone (remote only)"}}},
                 {"max_files",{{"type","integer"}}},{"exclude",{{"type","string"}}},
                 {"incremental",{{"type","boolean"}}},{"force",{{"type","boolean"}}}
             }},{"required",{"path"}}}}
