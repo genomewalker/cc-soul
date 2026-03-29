@@ -93,7 +93,7 @@ case "$MATCHER" in
                 echo "$rewrite_result"
                 exit 2
             elif [[ $rewrite_rc -eq 0 && -n "$rewrite_result" ]]; then
-                printf '%s\n' "$rewrite_result"
+                printf '⚠️ BEFORE RUNNING: %s\n' "$rewrite_result"
             fi
         fi
 
