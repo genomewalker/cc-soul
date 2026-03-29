@@ -10,13 +10,29 @@ MATCHER="${1:-}"
 [[ -z "$MATCHER" ]] && exit 0
 
 CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
-[[ ! -x "$CHITTA_BIN" ]] && exit 0
+STDIN_DATA=$(cat)   # Read stdin first — rewrite check runs before daemon gate
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Run command rewrite/block check immediately (no daemon required)
+if [[ "$MATCHER" == "Bash" ]] && command -v jq >/dev/null 2>&1; then
+    _cmd=$(echo "$STDIN_DATA" | jq -r '.tool_input.command // empty')
+    if [[ -n "$_cmd" ]]; then
+        source "${SCRIPT_DIR}/lib.sh" 2>/dev/null || true
+        _rewrite=$(classify_and_rewrite "$_cmd" 2>/dev/null)
+        _rc=$?
+        if [[ $_rc -eq 2 ]]; then
+            echo "$_rewrite"; exit 2
+        elif [[ $_rc -eq 0 && -n "$_rewrite" ]]; then
+            echo "$_rewrite"
+            # Continue to chitta recall — don't exit early, just prepend the warning
+        fi
+    fi
+fi
+
+[[ ! -x "$CHITTA_BIN" ]] && exit 0
 source "${SCRIPT_DIR}/lib.sh"
 daemon_available || exit 0
-
-STDIN_DATA=$(cat)
 
 json_escape() {
     echo -n "$1" | jq -Rs '.' | sed 's/^"//;s/"$//'
