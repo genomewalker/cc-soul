@@ -22,10 +22,84 @@ json_escape() {
     echo -n "$1" | jq -Rs '.' | sed 's/^"//;s/"$//'
 }
 
+classify_and_rewrite() {
+    local cmd="$1"
+
+    if echo "$cmd" | grep -qE '^\s*rm\s+-rf\s+(/|~/?\s*$)'; then
+        echo '{"permissionDecision":"block","reason":"rm -rf on / or ~ is destructive"}'
+        return 2
+    fi
+    if echo "$cmd" | grep -qE '^\s*chmod\s+-R\s+777\s+/\s*$'; then
+        echo '{"permissionDecision":"block","reason":"chmod -R 777 / is destructive"}'
+        return 2
+    fi
+    if echo "$cmd" | grep -qE '^\s*dd\s+.*of=/dev/sd[a-z]'; then
+        echo '{"permissionDecision":"block","reason":"dd writing to raw disk device"}'
+        return 2
+    fi
+
+    local rewritten=""
+    local reason=""
+
+    if echo "$cmd" | grep -qE '^\s*cat\s+'; then
+        local file
+        file=$(echo "$cmd" | sed -n 's/^\s*cat\s\+\(.*\)/\1/p' | head -1)
+        if [[ -n "$file" && -f "$file" ]]; then
+            local lines
+            lines=$(wc -l < "$file" 2>/dev/null || echo 0)
+            if [[ "$lines" -gt 500 ]]; then
+                rewritten="head -200 $file && wc -l $file"
+                reason="File has $lines lines; showing head + line count"
+            fi
+        fi
+    elif echo "$cmd" | grep -qE '^\s*find\s+(/|~)\s+-name'; then
+        if ! echo "$cmd" | grep -q 'maxdepth'; then
+            rewritten=$(echo "$cmd" | sed 's/\(find\s\+[^ ]*\)/\1 -maxdepth 5/')
+            reason="Unbounded find on / or ~; added -maxdepth 5"
+        fi
+    elif echo "$cmd" | grep -qE '^\s*grep\s+-r\s+'; then
+        local has_path
+        has_path=$(echo "$cmd" | sed 's/^\s*grep\s\+-r\s\+//' | sed "s/^'[^']*'//;s/^\"[^\"]*\"//;s/^[^ ]*//" | sed 's/^\s*//')
+        if [[ -z "$has_path" || "$has_path" == "|"* ]]; then
+            if ! echo "$cmd" | grep -q 'head'; then
+                rewritten="$cmd | head -200"
+                reason="Unbounded recursive grep; added head limit"
+            fi
+        fi
+    elif echo "$cmd" | grep -qE '^\s*ls\s+.*-[^ ]*R' || echo "$cmd" | grep -qE '^\s*ls\s+-la\s+/\s*$'; then
+        if ! echo "$cmd" | grep -q 'head'; then
+            rewritten="$cmd | head -100"
+            reason="Large directory listing; added head limit"
+        fi
+    fi
+
+    if [[ -n "$rewritten" ]]; then
+        local esc_cmd esc_reason
+        esc_cmd=$(echo -n "$rewritten" | jq -Rs .)
+        esc_reason=$(echo -n "$reason" | jq -Rs .)
+        echo "{\"permissionDecision\":\"allow\",\"updatedInput\":{\"command\":${esc_cmd}},\"reason\":${esc_reason}}"
+        return 0
+    fi
+
+    return 1
+}
+
 case "$MATCHER" in
     Bash)
         command=$(echo "$STDIN_DATA" | jq -r '.tool_input.command // empty')
         [[ -z "$command" ]] && exit 0
+
+        if command -v jq >/dev/null 2>&1; then
+            rewrite_result=$(classify_and_rewrite "$command")
+            rewrite_rc=$?
+            if [[ $rewrite_rc -eq 2 ]]; then
+                echo "$rewrite_result"
+                exit 2
+            elif [[ $rewrite_rc -eq 0 && -n "$rewrite_result" ]]; then
+                echo "$rewrite_result"
+                exit 0
+            fi
+        fi
 
         query=""
         tags=""

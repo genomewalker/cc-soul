@@ -58,13 +58,66 @@ json_escape() {
     echo -n "$1" | jq -Rs '.' | sed 's/^"//;s/"$//'
 }
 
-# Build query from command and error
-query="$command"
-if [[ -n "$stderr" ]]; then
-    # Extract key error terms
-    error_terms=$(echo "$stderr" | grep -oiE '(error|failed|not found|permission denied|no such|cannot|invalid)' | head -3 | tr '\n' ' ')
-    [[ -n "$error_terms" ]] && query="$query $error_terms"
-fi
+detect_output_type() {
+    local out="$1"
+    local err="$2"
+    local combined="$out$err"
+
+    if echo "$combined" | grep -qE '(FAILED|PASSED|test result:|not ok|ok [0-9]+ test)'; then
+        echo "TestResults"
+    elif echo "$combined" | grep -qE '(error\[E[0-9]|undefined reference|ld: |make\[|CMake Error)'; then
+        echo "BuildOutput"
+    elif echo "$combined" | grep -qE '(^[0-9]{4}-[0-9]{2}-[0-9]{2}|\[(INFO|WARN|ERROR)\])'; then
+        echo "LogOutput"
+    elif echo "$out" | grep -qE '^\s*[\{\[]'; then
+        echo "JsonOutput"
+    else
+        echo "Generic"
+    fi
+}
+
+build_typed_query() {
+    local cmd="$1"
+    local out="$2"
+    local err="$3"
+    local otype="$4"
+
+    case "$otype" in
+        TestResults)
+            local test_name
+            test_name=$(echo "$out$err" | grep -iE '(FAILED|not ok)' | head -1 | sed 's/.*FAILED\s*//;s/.*not ok\s*[0-9]*\s*//' | head -c 100)
+            local framework
+            framework=$(echo "$cmd" | grep -oE '(pytest|cargo test|jest|mocha|rspec|go test|npm test)' | head -1)
+            echo "test failure $test_name $framework"
+            ;;
+        BuildOutput)
+            local error_line
+            error_line=$(echo "$out$err" | grep -m1 'error' | head -c 120)
+            local lang
+            lang=$(echo "$cmd" | grep -oE '(cargo|cmake|make|gcc|g\+\+|rustc|javac|go build|npm run build)' | head -1)
+            echo "build error $lang $error_line"
+            ;;
+        LogOutput)
+            local error_msg
+            error_msg=$(echo "$out$err" | grep -i 'ERROR' | head -1 | sed 's/.*ERROR[]\s:]*//' | head -c 120)
+            local service
+            service=$(echo "$cmd" | awk '{print $1}' | sed 's|.*/||')
+            echo "error $service $error_msg"
+            ;;
+        *)
+            local q="$cmd"
+            if [[ -n "$err" ]]; then
+                local error_terms
+                error_terms=$(echo "$err" | grep -oiE '(error|failed|not found|permission denied|no such|cannot|invalid)' | head -3 | tr '\n' ' ')
+                [[ -n "$error_terms" ]] && q="$q $error_terms"
+            fi
+            echo "$q"
+            ;;
+    esac
+}
+
+output_type=$(detect_output_type "$output" "$stderr")
+query=$(build_typed_query "$command" "$output" "$stderr" "$output_type")
 
 escaped_query=$(json_escape "$query")
 
