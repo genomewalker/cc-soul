@@ -27,6 +27,14 @@ get_socket_dir() {
     fi
 }
 
+# Check if the chitta daemon is reachable via its Unix socket.
+# Used as a gate in hooks: daemon_available || exit 0
+daemon_available() {
+    local socket
+    socket=$(get_socket_path 2>/dev/null)
+    [[ -n "$socket" && -S "$socket" ]]
+}
+
 # Compute socket path from mind path — matches C++ socket_path_for_mind()
 get_socket_path() {
     local mind_path="${CHITTA_DB_PATH:-${CHITTA_MIND:-$HOME/.claude/mind}}"
