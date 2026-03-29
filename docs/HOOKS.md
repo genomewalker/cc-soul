@@ -155,9 +155,10 @@ CC-Soul responds to these Claude Code events:
 **When:** Before Read, Edit, Write, or Bash tools execute
 
 **What CC-Soul Does (pre-tool-hook.sh):**
-- **Read**: Injects past memories about the file being read
-- **Edit/Write**: Surfaces past decisions about the file being edited
-- **Bash**: Detects command patterns (R, Python, git) and injects relevant corrections
+- **Safety intercepts**: Blocks destructive commands (`rm -rf /`, `chmod -R 777 /`, `dd` to raw disks) — exits 2 with an explanation before they run.
+- **Large file rewriting**: `cat` on files >500 lines is intercepted, a compact alternative (`head -200 + wc -l`) is run instead, and the output is returned directly. The original command is blocked (exit 2). Real token savings.
+- **Command rewrites**: Unbounded `find` on `/` or `~` gets `-maxdepth 5`; unbounded recursive `grep` gets `| head -200`; large directory listings are capped.
+- **Bash pattern recall**: Detects R, Python, conda, git, cmake, and daemon patterns; injects relevant corrections and gotchas from memory before you run.
 
 ### PreCompact
 
@@ -216,7 +217,7 @@ When installed as a Claude Code plugin, hooks are defined in `hooks/hooks.json`:
       {
         "matcher": "Bash",
         "hooks": [
-          {"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-hook.sh Bash", "timeout": 3}
+          {"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-hook.sh Bash", "timeout": 10}
         ]
       }
     ],
@@ -267,7 +268,7 @@ When installed standalone, `smart-install.sh` configures hooks in settings.json:
     "PreToolUse": [{
       "matcher": "Read|Edit|Write",
       "hooks": [
-        {"type": "command", "command": "~/.claude/hooks/pre-tool-hook.sh", "timeout": 5}
+        {"type": "command", "command": "~/.claude/hooks/pre-tool-hook.sh", "timeout": 10}
       ]
     }]
   }
@@ -313,8 +314,10 @@ Each lifecycle event is handled by a dedicated script in the `hooks/` directory.
 | `prompt-hook.sh` | UserPromptSubmit | full_resonate search, code symbol injection, anticipation prediction, learning detection |
 | `stop-hook.sh` | Stop | Auto-learning extraction, anticipation recording, ledger save, auto-checkpoint |
 | `pre-compact-hook.sh` | PreCompact | Save ledger checkpoint before context compaction |
-| `pre-tool-hook.sh` | PreToolUse | Surface file memories, past decisions, command corrections |
+| `pre-tool-hook.sh` | PreToolUse | Safety intercepts (destructive commands), large-file rewriting (exit 2 block), pattern-based memory recall |
 | `post-bash-hook.sh` | PostToolUse | Record significant file changes as signals |
+| `log-bash-history.sh` | PostToolUse (async) | Append every Bash command to history for pattern learning |
+| `memory-intercept.sh` | PostToolUse:Write (async) | Capture Write operations to learn what you build |
 | `distill.sh` | Background | Transcript distillation into compressed wisdom nodes |
 
 **Communication:** All scripts use Unix domain socket to talk to daemon directly (fast path). Falls back to `chitta` thin client if socket unavailable. Socket path is derived from mind path using djb2 hash: `/tmp/chitta-{hash}.sock`.

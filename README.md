@@ -23,7 +23,7 @@ CC-soul gives Claude Code persistent memory across sessions. It learns your pref
 - **MacOS portability** — all Linux-only APIs guarded with `#ifdef __linux__`. The daemon builds and runs on macOS.
 - **FilterLevel on BM25 code ingestion** — Signatures-only or MinimalContext modes for leaner code indexing in chitta-field.
 - **recall_with_fallback chain** — semantic → BM25 → recency. Recall never returns empty.
-- **Pre-tool hook improvements** — large-file advisory (`cat` on files >500 lines runs `head -200` and blocks the original call); output-type-aware recall (TestResults, BuildOutput, LogOutput recognized and routed separately).
+- **Pre-tool hook** — `cat` on files >500 lines is intercepted: a compact alternative runs instead and the original call is blocked (exit 2). Destructive commands (`rm -rf /`, `dd` to raw devices) are blocked outright. Output-type-aware recall: TestResults, BuildOutput, LogOutput routed separately.
 - **Turn discipline** — warns after 15 turns without storing a memory, prompting consolidation.
 - **Milestone auto-detection** — milestones detected in conversation are stored directly via the write queue.
 - **chitta-research** — autonomous research system built on chitta-field. See section below.

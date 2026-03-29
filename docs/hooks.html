@@ -372,7 +372,7 @@
           <svg viewBox="0 0 20 20" fill="none"><path d="M4 4 L10 4 L10 8 L16 8 L16 16 L4 16 Z" stroke="#9DB2D9" stroke-width="1.2"/><line x1="7" y1="11" x2="13" y2="11" stroke="#9DB2D9" stroke-width="0.75" opacity="0.5"/><line x1="7" y1="13" x2="11" y2="13" stroke="#9DB2D9" stroke-width="0.75" opacity="0.5"/></svg>
         </div>
         <span class="tools-category-name">Key Scripts</span>
-        <span class="tools-category-count">8 scripts</span>
+        <span class="tools-category-count">10 scripts</span>
         <span class="tools-category-toggle">&#x25BE;</span>
       </div>
       <div class="tools-list">
@@ -380,8 +380,10 @@
         <div class="tool-row reveal"><span class="tool-name">prompt-hook.sh</span><span class="tool-desc">UserPromptSubmit handler &mdash; full_resonate search, code symbol injection, anticipation prediction, learning opportunity detection.</span></div>
         <div class="tool-row reveal"><span class="tool-name">stop-hook.sh</span><span class="tool-desc">Stop handler &mdash; auto-learning extraction, correction/preference/milestone detection, anticipation recording, ledger save, auto-checkpoint.</span></div>
         <div class="tool-row reveal"><span class="tool-name">pre-compact-hook.sh</span><span class="tool-desc">PreCompact handler &mdash; saves ledger checkpoint before context compaction.</span></div>
-        <div class="tool-row reveal"><span class="tool-name">pre-tool-hook.sh</span><span class="tool-desc">PreToolUse handler &mdash; surfaces file memories, past decisions, and command corrections before Read/Edit/Bash.</span></div>
+        <div class="tool-row reveal"><span class="tool-name">pre-tool-hook.sh</span><span class="tool-desc">PreToolUse handler &mdash; blocks destructive commands (exit 2), rewrites and executes compact alternatives for large files, injects pattern-based corrections from memory.</span></div>
         <div class="tool-row reveal"><span class="tool-name">post-bash-hook.sh</span><span class="tool-desc">PostToolUse handler &mdash; records significant file changes as signals.</span></div>
+        <div class="tool-row reveal"><span class="tool-name">log-bash-history.sh</span><span class="tool-desc">PostToolUse async handler &mdash; appends every Bash command to history for pattern learning.</span></div>
+        <div class="tool-row reveal"><span class="tool-name">memory-intercept.sh</span><span class="tool-desc">PostToolUse:Write async handler &mdash; captures Write operations to learn what you build.</span></div>
         <div class="tool-row reveal"><span class="tool-name">subconscious.sh</span><span class="tool-desc">Daemon lifecycle management &mdash; start, stop, restart, status, and health checks for the <code style="color: var(--aura-300);">chittad</code> background process.</span></div>
         <div class="tool-row reveal"><span class="tool-name">distill.sh</span><span class="tool-desc">Background transcript distillation &mdash; processes conversation transcripts into compressed wisdom nodes.</span></div>
       </div>
@@ -449,7 +451,7 @@
     <span class="code-key">"UserPromptSubmit"</span><span class="code-punct">:</span> <span class="code-punct">[{</span> <span class="code-key">"type"</span><span class="code-punct">:</span> <span class="code-str">"command"</span><span class="code-punct">,</span> <span class="code-key">"command"</span><span class="code-punct">:</span> <span class="code-str">"~/.claude/hooks/prompt-hook.sh"</span> <span class="code-punct">}],</span>
     <span class="code-key">"Stop"</span><span class="code-punct">:</span> <span class="code-punct">[{</span> <span class="code-key">"type"</span><span class="code-punct">:</span> <span class="code-str">"command"</span><span class="code-punct">,</span> <span class="code-key">"command"</span><span class="code-punct">:</span> <span class="code-str">"~/.claude/hooks/stop-hook.sh"</span> <span class="code-punct">}],</span>
     <span class="code-key">"PreCompact"</span><span class="code-punct">:</span> <span class="code-punct">[{</span> <span class="code-key">"type"</span><span class="code-punct">:</span> <span class="code-str">"command"</span><span class="code-punct">,</span> <span class="code-key">"command"</span><span class="code-punct">:</span> <span class="code-str">"~/.claude/hooks/pre-compact-hook.sh"</span> <span class="code-punct">}],</span>
-    <span class="code-key">"PreToolUse"</span><span class="code-punct">:</span> <span class="code-punct">[{</span> <span class="code-key">"type"</span><span class="code-punct">:</span> <span class="code-str">"command"</span><span class="code-punct">,</span> <span class="code-key">"command"</span><span class="code-punct">:</span> <span class="code-str">"~/.claude/hooks/pre-tool-hook.sh"</span> <span class="code-punct">}],</span>
+    <span class="code-key">"PreToolUse"</span><span class="code-punct">:</span> <span class="code-punct">[{</span> <span class="code-key">"type"</span><span class="code-punct">:</span> <span class="code-str">"command"</span><span class="code-punct">,</span> <span class="code-key">"command"</span><span class="code-punct">:</span> <span class="code-str">"~/.claude/hooks/pre-tool-hook.sh"</span><span class="code-punct">,</span> <span class="code-key">"timeout"</span><span class="code-punct">:</span> <span class="code-str">10</span> <span class="code-punct">}],</span>
     <span class="code-key">"PostToolUse"</span><span class="code-punct">:</span> <span class="code-punct">[{</span> <span class="code-key">"type"</span><span class="code-punct">:</span> <span class="code-str">"command"</span><span class="code-punct">,</span> <span class="code-key">"command"</span><span class="code-punct">:</span> <span class="code-str">"~/.claude/hooks/post-bash-hook.sh"</span> <span class="code-punct">}]</span>
   <span class="code-punct">}</span>
 <span class="code-punct">}</span></pre>

@@ -91,7 +91,12 @@
         <strong>chitta_thinking</strong> mines Claude&rsquo;s <code>thinking</code> blocks for perception-change moments every 10 turns.
         <strong>chitta_migrate</strong> auto-detects <code>soul.db</code> or <code>chitta.duckdb</code> and handles either.
         <strong>recall_with_fallback</strong> chain (semantic &rarr; BM25 &rarr; recency) means recall never returns empty.
-        Pre-tool hook now flags large files and routes output types (TestResults, BuildOutput, LogOutput) separately.
+        Pre-tool hook intercepts large files and destructive commands: exits with code 2 to block the original call, runs a compact alternative itself, and returns the output directly &mdash; real token savings, not just an advisory.
+        Output-type-aware recall routes TestResults, BuildOutput, and LogOutput to separate memory categories.
+        <strong>Turn discipline</strong> warns after 15 turns without a memory store, preventing context drift.
+        <strong>MacOS portability</strong> &mdash; all Linux-only APIs guarded; daemon builds and runs on macOS.
+        <strong>FilterLevel on BM25 code ingestion</strong> &mdash; Signatures-only or MinimalContext modes for leaner code indexing.
+        <strong>memory-intercept.sh</strong> captures Write operations asynchronously, learning what you build.
         And <strong>chitta-research</strong> &mdash; a new autonomous research OS built on chitta-field.
         <a href="https://github.com/genomewalker/cc-soul/releases" class="link-sandal">See release notes &rarr;</a>
       </p>
