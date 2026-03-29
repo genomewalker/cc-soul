@@ -43,7 +43,8 @@ classify_and_rewrite() {
 
     if echo "$cmd" | grep -qE '^\s*cat\s+'; then
         local file
-        file=$(echo "$cmd" | sed -n 's/^\s*cat\s\+\(.*\)/\1/p' | head -1)
+        # Strip pipes/redirects before extracting filename
+        file=$(echo "$cmd" | sed -n 's/^\s*cat\s\+\([^ |&;>]*\).*/\1/p' | head -1)
         if [[ -n "$file" && -f "$file" ]]; then
             local lines
             lines=$(wc -l < "$file" 2>/dev/null || echo 0)
@@ -75,8 +76,8 @@ classify_and_rewrite() {
 
     if [[ -n "$rewritten" ]]; then
         # updatedInput not supported in current Claude Code — inject strong advisory instead
-        echo "⚠️ RTK-rewrite: $reason"
-        echo "Run this instead: $rewritten"
+        echo "⚠️ Large output warning: $reason"
+        echo "Consider running instead: $rewritten"
         return 0
     fi
 
