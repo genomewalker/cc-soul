@@ -1,3 +1,25 @@
+# Planning/brainstorm docs (local only)
+ALL_PROPOSALS.md
+CONTRACTS.md
+HOW_TO_MAKE_IT_BETTER.md
+IMPLEMENTATION_PLAN.md
+PLAN-*.md
+POLICY.md
+SCALE_*.md
+SOUL_MEMORY_*.md
+WEAK_AREAS_*.md
+
+# Session state
+claude-progress.json
+.claude/plan.md
+
+# Chitta data files
+.entities
+.predicates
+
+# Generated test artifacts
+tests/shepherd/.snakemake/
+
 # Python
 __pycache__/
 *.py[cod]
