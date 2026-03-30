@@ -606,6 +606,24 @@ public:
         return std::string(reinterpret_cast<char*>(buf.data()), written);
     }
 
+    /// Query all events matching domain+kind across all targets. Returns JSON array (newest-first).
+    std::string get_events_by_domain_kind(const std::string& domain, const std::string& kind,
+                                          size_t limit = 100) {
+        std::vector<uint8_t> buf(64 * 1024);
+        size_t written = 0;
+        int r = cf_get_events_by_domain_kind(handle_,
+            domain.c_str(), kind.c_str(), limit,
+            buf.data(), buf.size(), &written);
+        if (r == -2) {
+            buf.resize(512 * 1024);
+            r = cf_get_events_by_domain_kind(handle_,
+                domain.c_str(), kind.c_str(), limit,
+                buf.data(), buf.size(), &written);
+        }
+        if (r != 0 || written == 0) return "[]";
+        return std::string(reinterpret_cast<char*>(buf.data()), written);
+    }
+
     /// Iterate the event log from from_seqno, invoking cb(op_json, seqno) for each entry.
     void iterate_log(uint64_t from_seqno,
                      std::function<void(const std::string& op_json, uint64_t seqno)> cb) {

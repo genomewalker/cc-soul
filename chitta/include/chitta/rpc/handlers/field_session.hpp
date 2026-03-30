@@ -715,44 +715,85 @@
     DuckDBToolResult tool_session_list(const json& params) {
         bool active_only = params.value("active_only", false);
 
-        std::string raw = field_store_->session_list(active_only);
-        json sessions_json;
+        // Fetch all session register events from the event log (replayed from WAL on startup).
+        std::string reg_raw = field_store_->get_events_by_domain_kind("session", "register", 200);
+        json reg_events;
         try {
-            sessions_json = json::parse(raw, nullptr, false);
+            reg_events = json::parse(reg_raw, nullptr, false);
         } catch (...) {
-            sessions_json = json::array();
+            reg_events = json::array();
         }
-        if (sessions_json.is_discarded() || !sessions_json.is_array()) {
-            sessions_json = json::array();
+        if (reg_events.is_discarded() || !reg_events.is_array()) {
+            reg_events = json::array();
         }
 
-        // Fall back to keyword recall when native list is empty
-        if (sessions_json.empty()) {
-            auto hits = field_store_->recall_keyword("session register", 20);
-            for (const auto& h : hits) {
-                sessions_json.push_back({
-                    {"memory_id", h.memory_id},
-                    {"content",   h.content},
-                    {"score",     h.score}
-                });
+        // Build map: session_id -> latest register event (dedup by target).
+        std::unordered_map<std::string, json> by_session;
+        for (const auto& ev : reg_events) {
+            std::string sid = ev.value("target", "");
+            if (sid.empty()) continue;
+            auto it = by_session.find(sid);
+            if (it == by_session.end()) {
+                by_session[sid] = ev;
+            } else {
+                // Keep newer (events are newest-first from get_events_by_domain_kind,
+                // so first occurrence is already the latest — skip duplicates).
             }
         }
 
-        if (sessions_json.empty()) {
+        if (active_only) {
+            // Fetch deregister events and remove those sessions.
+            std::string dereg_raw = field_store_->get_events_by_domain_kind("session", "deregister", 200);
+            json dereg_events;
+            try {
+                dereg_events = json::parse(dereg_raw, nullptr, false);
+            } catch (...) {
+                dereg_events = json::array();
+            }
+            if (!dereg_events.is_discarded() && dereg_events.is_array()) {
+                for (const auto& ev : dereg_events) {
+                    std::string sid = ev.value("target", "");
+                    if (!sid.empty()) by_session.erase(sid);
+                }
+            }
+        }
+
+        if (by_session.empty()) {
             return DuckDBToolResult::ok("No sessions found", {
                 {"count",    0},
-                {"sessions", json::array()},
-                {"note",     "session state tracked via events"}
+                {"sessions", json::array()}
             });
         }
 
+        json sessions_out = json::array();
+        for (const auto& [sid, ev] : by_session) {
+            json entry = {
+                {"session_id", sid},
+                {"realm",      ev.value("realm", "")},
+                {"ts_ms",      ev.value("ts_ms", 0)},
+                {"event_id",   ev.value("event_id", 0)}
+            };
+            // Merge payload fields (pid, transcript_path, project_dir, metadata).
+            if (ev.contains("payload") && ev["payload"].is_object()) {
+                for (const auto& [k, v] : ev["payload"].items()) {
+                    entry[k] = v;
+                }
+            }
+            sessions_out.push_back(entry);
+        }
+
+        // Sort by ts_ms descending.
+        std::sort(sessions_out.begin(), sessions_out.end(), [](const json& a, const json& b) {
+            return a.value("ts_ms", int64_t(0)) > b.value("ts_ms", int64_t(0));
+        });
+
         std::ostringstream ss;
-        ss << sessions_json.size() << " session(s) found\n";
-        ss << "Note: session state tracked via events\n";
+        ss << sessions_out.size() << " session(s) found";
+        if (active_only) ss << " (active only)";
 
         return DuckDBToolResult::ok(ss.str(), {
-            {"count",    sessions_json.size()},
-            {"sessions", sessions_json}
+            {"count",    sessions_out.size()},
+            {"sessions", sessions_out}
         });
     }
 
