@@ -3,7 +3,58 @@
   "hooks": {
     "SessionStart": [
       {
-        "matcher": "*",
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/subconscious.sh start",
+            "timeout": 8,
+            "statusMessage": "awakening…"
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-start-hook.sh",
+            "timeout": 10,
+            "statusMessage": "recalling context…"
+          }
+        ]
+      },
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/compact-restore-hook.sh",
+            "timeout": 5,
+            "statusMessage": "restoring context…"
+          }
+        ]
+      },
+      {
+        "matcher": "resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/subconscious.sh start",
+            "timeout": 8,
+            "statusMessage": "awakening…"
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-start-hook.sh",
+            "timeout": 10,
+            "statusMessage": "resuming…"
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/resume-inject-hook.sh",
+            "timeout": 3,
+            "statusMessage": "preparing recap…"
+          }
+        ]
+      },
+      {
+        "matcher": "clear",
         "hooks": [
           {
             "type": "command",
@@ -53,6 +104,34 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-compact-hook.sh",
             "statusMessage": "consolidating memory…"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/subagent-stop-hook.sh",
+            "timeout": 5,
+            "statusMessage": "capturing learnings…",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "FileChanged": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/file-changed-hook.sh",
+            "timeout": 15,
+            "statusMessage": "re-indexing…",
+            "async": true
           }
         ]
       }

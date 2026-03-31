@@ -195,10 +195,17 @@ while IFS= read -r marker; do
 done <<< "$(echo "$RESPONSE" | grep -oE '\[USED:[a-zA-Z0-9_-]+\]')"
 
 # ===========================================
-# IMPLICIT RESONANCE: Detect memory usage without [USED] markers
+# Token diet: expensive analysis only fires every Nth turn
+# Saves daemon calls + transcript scans on non-enrichment turns
+# ===========================================
+STOP_ENRICH_INTERVAL="${CC_SOUL_STOP_ENRICH_INTERVAL:-3}"
+STOP_ENRICH_TURN=$(( TURN_INDEX % STOP_ENRICH_INTERVAL == 0 || TURN_INDEX <= 1 ? 1 : 0 ))
+
+# ===========================================
+# IMPLICIT RESONANCE: Detect memory usage without [USED] markers (periodic)
 # ===========================================
 _ir_mem_file="${MIND_PATH}/.exposed_memories_${SESSION_ID}"
-if [[ -f "$_ir_mem_file" ]]; then
+if [[ -f "$_ir_mem_file" && $STOP_ENRICH_TURN -eq 1 ]]; then
     # Get last assistant response from transcript for comparison
     _ir_response=$(grep -F '"role":"assistant"' "$TRANSCRIPT_PATH" 2>/dev/null | \
         tail -3 | jq -r '.message.content[]? | select(.type=="text") | .text' 2>/dev/null | tr -d '\n' | head -c 2000 || true)
@@ -349,7 +356,7 @@ if [[ "$CLAUDE_LEARNED" == "false" && -n "$LAST_USER_MSG" ]]; then
 fi
 
 # ===========================================
-# NARRATIVE EVENT LOGGING: Log assistant response and tool uses
+# NARRATIVE EVENT LOGGING: Log assistant response and tool uses (periodic)
 # ===========================================
 SESSION_ID="${SESSION_ID_INPUT:-default}"
 
@@ -369,8 +376,8 @@ djb2_hash() {
 MIND_HASH=$(djb2_hash "$MIND_PATH")
 SOCKET_PATH="${CHITTA_SOCKET:-/tmp/chitta-${MIND_HASH}.sock}"
 
-# Log assistant_message event (first line of response)
-if [[ -S "$SOCKET_PATH" && -n "$RESPONSE" ]]; then
+# Log assistant_message event (first line of response) — periodic
+if [[ -S "$SOCKET_PATH" && -n "$RESPONSE" && $STOP_ENRICH_TURN -eq 1 ]]; then
     summary=$(echo "$RESPONSE" | grep -v '^$' | grep -v '^\[' | head -1 | head -c 200 | tr '\n' ' ' | sed 's/"/\\"/g')
     [[ -n "$summary" ]] && queue_write "narrative_log" "{\"session_id\":\"$SESSION_ID\",\"kind\":\"assistant_message\",\"summary\":$(echo "$summary" | jq -Rs .)}"
 
@@ -390,9 +397,9 @@ if [[ -S "$SOCKET_PATH" && -n "$RESPONSE" ]]; then
 fi
 
 # ==============================================
-# SUS Phase 3: Extract session token usage
+# SUS Phase 3: Extract session token usage (periodic)
 # ==============================================
-if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
+if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" && $STOP_ENRICH_TURN -eq 1 ]]; then
     _sus3_token_usage=$(grep -F '"type":"assistant"' "$TRANSCRIPT_PATH" 2>/dev/null | \
         jq -s '[.[].message.usage // {}] |
         {
@@ -429,11 +436,11 @@ if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
 fi
 
 # ===========================================
-# ANTICIPATION OUTCOME: Track prediction correctness
+# ANTICIPATION OUTCOME: Track prediction correctness (periodic)
 # ===========================================
 PREDICTIONS_FILE="$MIND_PATH/.last_predictions.json"
 
-if [[ -f "$PREDICTIONS_FILE" ]]; then
+if [[ -f "$PREDICTIONS_FILE" && $STOP_ENRICH_TURN -eq 1 ]]; then
     # Extract tool usage from transcript (tool names from assistant's actions)
     TOOLS_USED=$(jq -r '.[] | select(.role=="assistant") | .message.content[]? | select(.type=="tool_use") | .name' "$TRANSCRIPT_PATH" 2>/dev/null | tail -10)
 
@@ -486,10 +493,9 @@ fi
 # stop-hook previously stored noisy user-message-word → tools-used habits — removed.
 
 # ===========================================
-# CALIBRATION: Track prediction accuracy by domain
+# CALIBRATION: Track prediction accuracy by domain (periodic)
 # ===========================================
-# Debugging calibration: error detected and resolution attempted
-if echo "$RESPONSE" | grep -qiE '(error|failed|exception|bug)'; then
+if [[ $STOP_ENRICH_TURN -eq 1 ]] && echo "$RESPONSE" | grep -qiE '(error|failed|exception|bug)'; then
     # Check if resolution was attempted (edit/fix patterns in response)
     if echo "$RESPONSE" | grep -qiE '(fixed|resolved|updated|corrected|the issue was)'; then
         queue_write "calibration_record" "{\"domain\":\"debugging\",\"success\":true}"
@@ -500,8 +506,8 @@ if echo "$RESPONSE" | grep -qiE '(error|failed|exception|bug)'; then
     fi
 fi
 
-# Code generation calibration: Edit/Write tools used
-if echo "$TOOLS_FROM_TRANSCRIPT" | grep -qiE '(Edit|Write)'; then
+# Code generation calibration: Edit/Write tools used (periodic)
+if [[ $STOP_ENRICH_TURN -eq 1 ]] && echo "$TOOLS_FROM_TRANSCRIPT" | grep -qiE '(Edit|Write)'; then
     # Success if no errors in response after code changes
     if ! echo "$RESPONSE" | grep -qiE '(error|failed|syntax error|compilation failed)'; then
         queue_write "calibration_record" "{\"domain\":\"code_generation\",\"success\":true}"
@@ -512,19 +518,19 @@ if echo "$TOOLS_FROM_TRANSCRIPT" | grep -qiE '(Edit|Write)'; then
     fi
 fi
 
-# Architecture calibration: design/architecture discussions
-if echo "$RESPONSE" | grep -qiE '(architecture|design pattern|refactor|abstraction|interface|module|component|structure)'; then
+# Architecture calibration: design/architecture discussions (periodic)
+if [[ $STOP_ENRICH_TURN -eq 1 ]] && echo "$RESPONSE" | grep -qiE '(architecture|design pattern|refactor|abstraction|interface|module|component|structure)'; then
     # Record architecture discussion (success = we provided guidance)
     queue_write "calibration_record" "{\"domain\":\"architecture\",\"success\":true}"
     echo "[soul] +calibration: architecture discussion" >&2
 fi
 
 # ===========================================
-# BEHAVIORAL PROBE: Score response for sycophancy/hedging/shallow reasoning
+# BEHAVIORAL PROBE: Score response for sycophancy/hedging/shallow reasoning (periodic)
 # Only runs if probe centroids are seeded (probe_status check is cheap).
 # Stores result as a triplet for session-start hook to read next session.
 # ===========================================
-if [[ ${#RESPONSE} -gt 100 ]]; then
+if [[ ${#RESPONSE} -gt 100 && $STOP_ENRICH_TURN -eq 1 ]]; then
     # Sample the first 400 chars — enough for a signal, cheap to embed
     PROBE_TEXT=$(echo "$RESPONSE" | head -c 400 | tr '\n' ' ')
 

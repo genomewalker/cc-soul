@@ -61,31 +61,24 @@ TOOLS = [
     ),
     Tool(
         name="recall",
-        description="Search memory by semantic similarity with realm filtering",
+        description="Search memory. Strategies: semantic (default), priority (by importance), temporal (by time), hybrid (semantic+keyword+graph), smart (auto-routed best match)",
         inputSchema={
                 "properties": {
-                        "include_global": {
-                                "description": "Include global memories (default: True)",
-                                "type": "boolean"
-                        },
-                        "limit": {
-                                "description": "Max results (default 10)",
-                                "anyOf": [
-                                        {
-                                                "type": "integer"
-                                        },
-                                        {
-                                                "type": "string"
-                                        }
-                                ]
-                        },
-                        "min_confidence": {
-                                "description": "Minimum confidence threshold (default: 0)",
-                                "type": "number"
+                        "strategy": {
+                                "description": "Search strategy: semantic|priority|temporal|hybrid|smart (default: semantic)",
+                                "type": "string"
                         },
                         "query": {
                                 "description": "Search query",
                                 "type": "string"
+                        },
+                        "limit": {
+                                "description": "Max results (default 10)",
+                                "anyOf": [{"type": "integer"}, {"type": "string"}]
+                        },
+                        "min_confidence": {
+                                "description": "Minimum confidence threshold (default: 0)",
+                                "type": "number"
                         },
                         "realm": {
                                 "description": "Filter by realm (empty = all realms)",
@@ -94,6 +87,10 @@ TOOLS = [
                         "tag": {
                                 "description": "Filter by tag",
                                 "type": "string"
+                        },
+                        "include_global": {
+                                "description": "Include global memories (default: True)",
+                                "type": "boolean"
                         }
                 },
                 "required": [
@@ -4398,6 +4395,103 @@ COMPOSITE_TOOLS = [
             "properties": {
                 "realm": {"type": "string", "description": "Filter by realm/project"}
             }
+        }
+    ),
+    # ====================================================================
+    # Consolidated gateway tools — reduce visible tool count
+    # ====================================================================
+    Tool(
+        name="sadhana",
+        description="Autonomous background learning loop control. Actions: start, stop, pause, resume, status, list, checkpoint, set_goal, set_interval, set_model",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "description": "start|stop|pause|resume|status|list|checkpoint|set_goal|set_interval|set_model"},
+                "id": {"anyOf": [{"type": "integer"}, {"type": "string"}], "description": "Sadhana ID (for stop/pause/resume/status/checkpoint)"},
+                "goal": {"type": "string", "description": "Goal text (for set_goal)"},
+                "interval": {"anyOf": [{"type": "integer"}, {"type": "string"}], "description": "Interval in seconds (for set_interval)"},
+                "model": {"type": "string", "description": "Model name (for set_model/start)"},
+                "max_turns": {"anyOf": [{"type": "integer"}, {"type": "string"}], "description": "Max turns (for start)"},
+            },
+            "required": ["action"]
+        }
+    ),
+    Tool(
+        name="learn",
+        description="Store learning in soul memory. Types: correction (wrong→right fix), preference (user style), insight (generalizable wisdom), approach (what worked in a state), outcome (did suggestion help?), milestone (achievement), analysis (reproducible analysis with data/scripts)",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "type": {"type": "string", "description": "correction|preference|insight|approach|outcome|milestone|analysis"},
+                "wrong": {"type": "string", "description": "What was wrong (correction)"},
+                "correct": {"type": "string", "description": "What is correct (correction)"},
+                "context": {"type": "string", "description": "Context for the learning"},
+                "preference": {"type": "string", "description": "Preference text (preference)"},
+                "category": {"type": "string", "description": "Category (preference)"},
+                "insight": {"type": "string", "description": "Insight text (insight)"},
+                "domain": {"type": "string", "description": "Domain (insight/analysis)"},
+                "approach": {"type": "string", "description": "Approach text (approach)"},
+                "state": {"type": "string", "description": "State/mood (approach)"},
+                "outcome": {"type": "string", "description": "Outcome (approach)"},
+                "suggestion": {"type": "string", "description": "Suggestion (outcome)"},
+                "helped": {"type": "boolean", "description": "Did it help? (outcome)"},
+                "details": {"type": "string", "description": "Details (outcome)"},
+                "milestone": {"type": "string", "description": "Milestone text (milestone)"},
+                "name": {"type": "string", "description": "Analysis name (analysis)"},
+                "description": {"type": "string", "description": "Description (analysis)"},
+                "data_paths": {"type": "array", "items": {"type": "string"}, "description": "Data paths (analysis)"},
+                "script_paths": {"type": "array", "items": {"type": "string"}, "description": "Script paths (analysis)"},
+                "findings": {"type": "string", "description": "Findings (analysis)"},
+                "project": {"type": "string", "description": "Project (analysis)"},
+            },
+            "required": ["type"]
+        }
+    ),
+    Tool(
+        name="research",
+        description="Curiosity-driven research. Actions: cycle (get topic to research), topics (list research topics), store (save findings)",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "description": "cycle|topics|store"},
+                "topic": {"type": "string", "description": "Topic (store)"},
+                "findings": {"type": "string", "description": "Findings (store)"},
+                "sources": {"type": "array", "items": {"type": "string"}, "description": "URLs (store)"},
+                "gap_id": {"anyOf": [{"type": "integer"}, {"type": "string"}], "description": "Gap ID to resolve (store)"},
+                "source": {"type": "string", "description": "Topic source: gaps|weak|suggest (topics)"},
+                "limit": {"anyOf": [{"type": "integer"}, {"type": "string"}], "description": "Max results"},
+                "realm": {"type": "string", "description": "Filter by realm"},
+            },
+            "required": ["action"]
+        }
+    ),
+    Tool(
+        name="triplets",
+        description="Knowledge graph operations. Actions: connect (create temporal triplet), query (query temporal triplets), history (triplet history for a subject/object)",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "description": "connect|query|history"},
+                "subject": {"type": "string", "description": "Subject entity"},
+                "predicate": {"type": "string", "description": "Relationship type"},
+                "object": {"type": "string", "description": "Object entity"},
+                "limit": {"anyOf": [{"type": "integer"}, {"type": "string"}], "description": "Max results"},
+            },
+            "required": ["action"]
+        }
+    ),
+    Tool(
+        name="memory_edit",
+        description="Edit memory metadata. Actions: set_type (change memory type), set_priority (change priority tier)",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "description": "set_type|set_priority"},
+                "id": {"anyOf": [{"type": "integer"}, {"type": "string"}], "description": "Memory ID"},
+                "type": {"type": "string", "description": "New type (for set_type)"},
+                "tier": {"type": "string", "description": "New priority tier (for set_priority)"},
+            },
+            "required": ["action", "id"]
         }
     ),
 ]

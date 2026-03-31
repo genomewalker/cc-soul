@@ -4,6 +4,14 @@ description: Learn codebase structure with tree-sitter + SSL patterns
 execution: task
 model: inherit
 aliases: [learn-codebase, map-code]
+hooks:
+  PostToolUse:
+    - matcher: "Read"
+      hooks:
+        - type: command
+          command: "bash ${CLAUDE_PLUGIN_ROOT}/../hooks/codebase-learn-post-read.sh"
+          timeout: 10
+          once: true
 ---
 
 # Codebase Learn
