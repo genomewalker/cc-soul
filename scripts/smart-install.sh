@@ -496,6 +496,13 @@ configure_permissions() {
         fi
     done
 
+    # Disable Claude Code's built-in auto-memory (chitta owns recall)
+    if ! echo "$updated" | jq -e '.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY' &>/dev/null; then
+        updated=$(echo "$updated" | jq '.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1"')
+        ((added++)) || true
+        echo "[cc-soul] Disabled Claude Code auto-memory (chitta handles recall)"
+    fi
+
     # Write back if changed
     if [[ $added -gt 0 ]]; then
         echo "$updated" | jq '.' > "$settings_file"
@@ -621,10 +628,28 @@ configure_hooks() {
     # Uses ~/.claude/hooks/ for portability (independent of plugin location)
     # ============================================================
 
-    # SessionStart: awakening + context injection
+    # SessionStart: source-specific matchers (startup/compact/resume/clear)
     if ! echo "$updated" | jq -e '.hooks.SessionStart[]? | select(.hooks[]?.command | contains("session-start-hook.sh"))' &>/dev/null; then
-        local session_start_hook='{"matcher":"*","hooks":[{"type":"command","command":"~/.claude/hooks/subconscious.sh start","statusMessage":"awakening…"},{"type":"command","command":"~/.claude/hooks/session-start-hook.sh","statusMessage":"recalling context…"}]}'
-        updated=$(echo "$updated" | jq --argjson hook "$session_start_hook" '.hooks.SessionStart = ((.hooks.SessionStart // []) + [$hook])')
+        local ss_startup='{"matcher":"startup","hooks":[{"type":"command","command":"~/.claude/hooks/subconscious.sh start","timeout":8,"statusMessage":"awakening…"},{"type":"command","command":"~/.claude/hooks/session-start-hook.sh","timeout":10,"statusMessage":"recalling context…"}]}'
+        local ss_compact='{"matcher":"compact","hooks":[{"type":"command","command":"~/.claude/hooks/compact-restore-hook.sh","timeout":5,"statusMessage":"restoring context…"}]}'
+        local ss_resume='{"matcher":"resume","hooks":[{"type":"command","command":"~/.claude/hooks/subconscious.sh start","timeout":8,"statusMessage":"awakening…"},{"type":"command","command":"~/.claude/hooks/session-start-hook.sh","timeout":10,"statusMessage":"resuming…"},{"type":"command","command":"~/.claude/hooks/resume-inject-hook.sh","timeout":3,"statusMessage":"preparing recap…"}]}'
+        local ss_clear='{"matcher":"clear","hooks":[{"type":"command","command":"~/.claude/hooks/subconscious.sh start","timeout":8,"statusMessage":"awakening…"},{"type":"command","command":"~/.claude/hooks/session-start-hook.sh","timeout":10,"statusMessage":"recalling context…"}]}'
+        updated=$(echo "$updated" | jq --argjson s "$ss_startup" --argjson c "$ss_compact" --argjson r "$ss_resume" --argjson cl "$ss_clear" \
+            '.hooks.SessionStart = ((.hooks.SessionStart // []) + [$s, $c, $r, $cl])')
+        ((added++)) || true
+    fi
+
+    # FileChanged: auto-index project files when watched files change
+    if ! echo "$updated" | jq -e '.hooks.FileChanged[]? | select(.hooks[]?.command | contains("file-changed-hook.sh"))' &>/dev/null; then
+        local fc_hook='{"matcher":"*","hooks":[{"type":"command","command":"~/.claude/hooks/file-changed-hook.sh","timeout":15,"statusMessage":"re-indexing…"}]}'
+        updated=$(echo "$updated" | jq --argjson hook "$fc_hook" '.hooks.FileChanged = ((.hooks.FileChanged // []) + [$hook])')
+        ((added++)) || true
+    fi
+
+    # SubagentStop: capture team/agent learnings
+    if ! echo "$updated" | jq -e '.hooks.SubagentStop[]? | select(.hooks[]?.command | contains("subagent-stop-hook.sh"))' &>/dev/null; then
+        local sa_hook='{"matcher":"*","hooks":[{"type":"command","command":"~/.claude/hooks/subagent-stop-hook.sh","timeout":5,"statusMessage":"capturing learnings…","async":true}]}'
+        updated=$(echo "$updated" | jq --argjson hook "$sa_hook" '.hooks.SubagentStop = ((.hooks.SubagentStop // []) + [$hook])')
         ((added++)) || true
     fi
 

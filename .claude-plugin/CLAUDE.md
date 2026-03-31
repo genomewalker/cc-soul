@@ -15,6 +15,8 @@
 
 **MCP first**: Use `mcp__chitta__*` tools. CLI only when MCP unavailable.
 
+**Auto-memory disabled**: Claude Code's built-in MEMORY.md system is disabled (`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`). Chitta owns all recall. Do NOT write to `~/.claude/projects/*/memory/` — use `remember` instead.
+
 **Proactive learning triggers**:
 | Trigger | Tool |
 |---------|------|

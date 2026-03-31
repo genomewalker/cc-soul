@@ -4,6 +4,33 @@ aliases: [watch, monitor, tend, guard, pipeline]
 description: Autonomous pipeline monitor using sense-think-act loop. Watches snakemake/nextflow jobs, detects errors, applies fixes from memory, restarts on failure.
 execution: direct
 allowed-tools: Read, Grep, Glob, Bash, mcp__chitta__*, mcp__zellij-mcp__*
+hooks:
+  Stop:
+    - matcher: ""
+      hooks:
+        - type: command
+          command: "bash $CLAUDE_PLUGIN_ROOT/../hooks/shepherd-stop-hook.sh"
+  UserPromptSubmit:
+    - matcher: ""
+      hooks:
+        - type: command
+          command: "bash $CLAUDE_PLUGIN_ROOT/../hooks/shepherd-prompt-hook.sh"
+  PostToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: prompt
+          prompt: |
+            You are a pipeline safety monitor. The following is the output from a Bash command run during pipeline monitoring.
+
+            $ARGUMENTS
+
+            Evaluate ONLY for CATASTROPHIC issues — data corruption, filesystem full, permission denied on critical output, segfault in main process, or unrecoverable SLURM/HPC failures (CANCELLED, NODE_FAIL).
+
+            Return {"ok": true} if the output is normal, shows expected errors (retryable), or is just progress output.
+            Return {"ok": false, "reason": "CRITICAL: <one-line description>"} ONLY for genuinely catastrophic failures that require immediate human intervention.
+
+            Be conservative — most errors are retryable and should return ok: true.
+          timeout: 10
 ---
 
 # Shepherd - Autonomous Pipeline Monitor

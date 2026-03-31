@@ -20,15 +20,18 @@ source "${SCRIPT_DIR}/lib.sh"
 SOCKET_PATH=$(get_socket_path)
 
 # Parse JSON input
+# Claude Code provides: session_id, transcript_path, source (startup|resume|clear|compact)
 INPUT=$(cat)
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
 TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty')
+HOOK_SOURCE=$(echo "$INPUT" | jq -r '.source // "startup"')
 
-# Clean stale per-session sentinels so continuity fires on every new session
+# Clean stale per-session sentinels — but NOT on compact (same session continues)
 MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
-rm -f "$MIND_PATH/.session_active" "$MIND_PATH/.gaps_surfaced"
-# Clean stale dedup files from previous sessions
-rm -f "$MIND_PATH/.stop_dedup_"* 2>/dev/null || true
+if [[ "$HOOK_SOURCE" != "compact" ]]; then
+    rm -f "$MIND_PATH/.session_active" "$MIND_PATH/.gaps_surfaced"
+    rm -f "$MIND_PATH/.stop_dedup_"* 2>/dev/null || true
+fi
 
 # Initialize turn-discipline counter to current turn so the discipline nudge
 # measures idle turns within THIS session, not across session boundaries.
@@ -168,10 +171,15 @@ fi
 # ledger_load returns the most recent entry for the project
 LEDGER_JSON=$(timeout "$MAX_WAIT" "$CHITTA_BIN" ledger_load --project "$REALM" --json 2>/dev/null || echo "{}")
 
-# Check if this is a post-compaction session (mood = pre-compact)
+# Check if this is a post-compaction session
+# Primary signal: Claude Code passes source="compact" in hook input (authoritative)
+# Fallback: ledger mood="pre-compact" (requires daemon to have saved checkpoint before compact)
 MOOD=$(echo "$LEDGER_JSON" | jq -r '.mood // empty')
+IS_POST_COMPACT=false
+[[ "$HOOK_SOURCE" == "compact" ]] && IS_POST_COMPACT=true
+[[ "$MOOD" == "pre-compact" ]] && IS_POST_COMPACT=true
 
-if [[ "$MOOD" == "pre-compact" ]]; then
+if [[ "$IS_POST_COMPACT" == "true" ]]; then
     # This is a continuation after compaction - inject full state
     echo ""
     echo "[session-restored]"
@@ -447,6 +455,45 @@ if [[ -n "$SESSION_ID" && "$SESSION_ID" != "default" ]]; then
         bash "$NOTIFY_SCRIPT" "$SESSION_ID" 5 </dev/null >/dev/null 2>&1 &
         disown $! 2>/dev/null || true
     fi
+fi
+
+# ===========================================
+# WATCH PATHS: Register key project files for FileChanged hooks
+# Only emits on startup/resume (compact-restore-hook handles its own)
+# ===========================================
+if [[ -n "$PROJECT_DIR" && -d "$PROJECT_DIR" ]]; then
+    _wp_array="["
+    _wp_first=true
+    for _wp_f in Snakefile Nextfile pyproject.toml Cargo.toml CMakeLists.txt package.json go.mod Makefile; do
+        if [[ -f "$PROJECT_DIR/$_wp_f" ]]; then
+            $_wp_first && _wp_first=false || _wp_array+=","
+            _wp_array+="\"$PROJECT_DIR/$_wp_f\""
+        fi
+    done
+    _wp_array+="]"
+
+    # If we have watchPaths, emit them as JSON hookSpecificOutput on fd 3
+    # which we'll merge at exit. For now, save to temp file.
+    if [[ "$_wp_array" != "[]" ]]; then
+        echo "$_wp_array" > "$MIND_PATH/.watch_paths_$$"
+    fi
+fi
+
+# ===========================================
+# FINAL OUTPUT: Wrap in JSON if watchPaths exist, otherwise plain text passthrough
+# Plain text was already emitted to stdout above. JSON hookSpecificOutput requires
+# ALL stdout to be JSON (no mixed mode). Since session-start-hook emits plain text
+# throughout, we only use JSON wrapper when we have watchPaths to register.
+# ===========================================
+_wp_file="$MIND_PATH/.watch_paths_$$"
+if [[ -f "$_wp_file" ]]; then
+    _wp_json=$(cat "$_wp_file")
+    rm -f "$_wp_file"
+    # Note: plain text was already printed to stdout. We can't retroactively wrap it.
+    # Instead, emit the watchPaths as a separate line for potential future JSON parsing.
+    # The FileChanged watcher is also registered by compact-restore-hook.sh (which does use JSON).
+    # For startup/resume, register watchPaths via the daemon's file_watch RPC as fallback.
+    queue_write "file_watch_register" "{\"session_id\":\"$SESSION_ID\",\"paths\":$_wp_json}" 2>/dev/null || true
 fi
 
 exit 0

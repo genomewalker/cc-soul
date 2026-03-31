@@ -256,33 +256,34 @@ if [[ $turns_since_store -ge $STORE_INTERVAL && $TURN_INDEX -gt 0 ]]; then
 fi
 
 # ===========================================
-# NARRATIVE: Get current work mode and log user message
+# NARRATIVE: Log user message (always) + get status (periodic)
 # ===========================================
 NARRATIVE_STATUS=""
 
-# Log user_message event via CLI (fire-and-forget)
-# First, ensure gate is initialized for this session
+# Log user_message event via CLI (fire-and-forget, always runs)
 timeout 0.5 "$CHITTA_BIN" gate_init --session_id "$SESSION_ID" >/dev/null 2>&1 || true
-
-# Log the user message event
 summary=$(echo "$QUERY" | head -c 200 | tr '\n' ' ')
 timeout 0.5 "$CHITTA_BIN" narrative_log --session_id "$SESSION_ID" --kind "user_message" --summary "$summary" >/dev/null 2>&1 || true
 
-# Get narrative status
-response=$(timeout 1 "$CHITTA_BIN" narrative_status --session_id "$SESSION_ID" --json 2>/dev/null || true)
+# Token diet: narrative/anticipation/habits/goals only fire every Nth turn
+# Saves 4-6 daemon calls and ~200-400 output tokens on non-Nth turns
+ENRICH_INTERVAL="${CC_SOUL_ENRICH_INTERVAL:-5}"
+ENRICH_TURN=$(( TURN_INDEX % ENRICH_INTERVAL == 0 || TURN_INDEX <= 1 ? 1 : 0 ))
 
-if [[ -n "$response" ]]; then
-    mode=$(echo "$response" | jq -r '.metadata.mode // "unknown"' 2>/dev/null)
-    confidence=$(echo "$response" | jq -r '.metadata.confidence // 0' 2>/dev/null)
-    if [[ "$mode" != "unknown" && "$mode" != "null" ]]; then
-        # Format as percentage
-        conf_pct=$(awk "BEGIN {printf \"%.0f\", $confidence * 100}")
-        NARRATIVE_STATUS="[narrative:$mode:$conf_pct%]"
+if [[ $ENRICH_TURN -eq 1 ]]; then
+    response=$(timeout 1 "$CHITTA_BIN" narrative_status --session_id "$SESSION_ID" --json 2>/dev/null || true)
+    if [[ -n "$response" ]]; then
+        mode=$(echo "$response" | jq -r '.metadata.mode // "unknown"' 2>/dev/null)
+        confidence=$(echo "$response" | jq -r '.metadata.confidence // 0' 2>/dev/null)
+        if [[ "$mode" != "unknown" && "$mode" != "null" ]]; then
+            conf_pct=$(awk "BEGIN {printf \"%.0f\", $confidence * 100}")
+            NARRATIVE_STATUS="[narrative:$mode:$conf_pct%]"
+        fi
     fi
 fi
 
 # ===========================================
-# ANTICIPATION: Predict likely next actions (using new anticipation_filter)
+# ANTICIPATION: Predict likely next actions (periodic — token diet)
 # ===========================================
 ANTICIPATIONS=""
 PREDICTIONS_FILE="$MIND_PATH/.last_predictions.json"
@@ -290,102 +291,102 @@ PREDICTIONS_FILE="$MIND_PATH/.last_predictions.json"
 # Clear old predictions
 rm -f "$PREDICTIONS_FILE" 2>/dev/null
 
-# Call anticipation_filter via CLI to get gated predictions
-response=$(timeout 1 "$CHITTA_BIN" anticipation_filter --session_id "$SESSION_ID" --max 3 --json 2>/dev/null || true)
-
-if [[ -n "$response" ]]; then
-    candidates=$(echo "$response" | jq -r '.metadata.candidates // []' 2>/dev/null)
-
-    if [[ "$candidates" != "[]" && -n "$candidates" ]]; then
-        # Save predictions to temp file for stop-hook
-        echo "$candidates" > "$PREDICTIONS_FILE"
-
-        # Extract predictions
-        while read -r candidate; do
-            [[ -z "$candidate" ]] && continue
-
-            id=$(echo "$candidate" | jq -r '.id // 0' 2>/dev/null)
-            prediction=$(echo "$candidate" | jq -r '.prediction // ""' 2>/dev/null)
-            source=$(echo "$candidate" | jq -r '.source // "rule"' 2>/dev/null)
-            confidence=$(echo "$candidate" | jq -r '.confidence // 0' 2>/dev/null)
-
-            if [[ -n "$prediction" && "$prediction" != "null" ]]; then
-                conf_pct=$(awk "BEGIN {printf \"%.0f\", $confidence * 100}")
-                ANTICIPATIONS="${ANTICIPATIONS}[anticipate:$source:$conf_pct%] ${prediction}
-"
-            fi
-        done <<< "$(echo "$candidates" | jq -c '.[]' 2>/dev/null)"
-    fi
-fi
-
-# Fall back to old anticipation_predict if no candidates from filter
-if [[ -z "$ANTICIPATIONS" ]]; then
-    context=$(echo "$QUERY" | tr '\n' ' ')
-    response=$(timeout 1 "$CHITTA_BIN" anticipation_predict --context "$context" --limit 3 --json 2>/dev/null || true)
+if [[ $ENRICH_TURN -eq 1 ]]; then
+    # Call anticipation_filter via CLI to get gated predictions
+    response=$(timeout 1 "$CHITTA_BIN" anticipation_filter --session_id "$SESSION_ID" --max 3 --json 2>/dev/null || true)
 
     if [[ -n "$response" ]]; then
-        patterns=$(echo "$response" | jq -r '.metadata.patterns // []' 2>/dev/null)
+        candidates=$(echo "$response" | jq -r '.metadata.candidates // []' 2>/dev/null)
 
-        if [[ "$patterns" != "[]" && -n "$patterns" ]]; then
-            while read -r pattern; do
-                [[ -z "$pattern" ]] && continue
+        if [[ "$candidates" != "[]" && -n "$candidates" ]]; then
+            echo "$candidates" > "$PREDICTIONS_FILE"
 
-                freq=$(echo "$pattern" | jq -r '.frequency // 0' 2>/dev/null)
-                success=$(echo "$pattern" | jq -r '.success_count // 0' 2>/dev/null)
-                action=$(echo "$pattern" | jq -r '.action // ""' 2>/dev/null)
+            while read -r candidate; do
+                [[ -z "$candidate" ]] && continue
+                prediction=$(echo "$candidate" | jq -r '.prediction // ""' 2>/dev/null)
+                source=$(echo "$candidate" | jq -r '.source // "rule"' 2>/dev/null)
+                confidence=$(echo "$candidate" | jq -r '.confidence // 0' 2>/dev/null)
 
-                if [[ "$freq" -gt 2 || "$success" -gt 0 ]] && [[ -n "$action" ]]; then
-                    ANTICIPATIONS="${ANTICIPATIONS}[anticipate] ${action}
+                if [[ -n "$prediction" && "$prediction" != "null" ]]; then
+                    conf_pct=$(awk "BEGIN {printf \"%.0f\", $confidence * 100}")
+                    ANTICIPATIONS="${ANTICIPATIONS}[anticipate:$source:$conf_pct%] ${prediction}
 "
                 fi
-            done <<< "$(echo "$patterns" | jq -c '.[]' 2>/dev/null)"
+            done <<< "$(echo "$candidates" | jq -c '.[]' 2>/dev/null)"
+        fi
+    fi
+
+    # Fall back to old anticipation_predict if no candidates from filter
+    if [[ -z "$ANTICIPATIONS" ]]; then
+        context=$(echo "$QUERY" | tr '\n' ' ')
+        response=$(timeout 1 "$CHITTA_BIN" anticipation_predict --context "$context" --limit 3 --json 2>/dev/null || true)
+
+        if [[ -n "$response" ]]; then
+            patterns=$(echo "$response" | jq -r '.metadata.patterns // []' 2>/dev/null)
+
+            if [[ "$patterns" != "[]" && -n "$patterns" ]]; then
+                while read -r pattern; do
+                    [[ -z "$pattern" ]] && continue
+                    freq=$(echo "$pattern" | jq -r '.frequency // 0' 2>/dev/null)
+                    success=$(echo "$pattern" | jq -r '.success_count // 0' 2>/dev/null)
+                    action=$(echo "$pattern" | jq -r '.action // ""' 2>/dev/null)
+
+                    if [[ "$freq" -gt 2 || "$success" -gt 0 ]] && [[ -n "$action" ]]; then
+                        ANTICIPATIONS="${ANTICIPATIONS}[anticipate] ${action}
+"
+                    fi
+                done <<< "$(echo "$patterns" | jq -c '.[]' 2>/dev/null)"
+            fi
         fi
     fi
 fi
 
 # ===========================================
-# HABITS: Surface strong habits matching context
+# HABITS: Surface strong habits matching context (periodic — token diet)
 # ===========================================
 HABITS_OUTPUT=""
-# Build context from query for habit matching
-context=$(echo "$QUERY" | head -c 100 | tr '\n' ' ')
-response=$(timeout 1 "$CHITTA_BIN" habit_match --context "$context" --min_strength 0.7 --json 2>/dev/null || true)
+if [[ $ENRICH_TURN -eq 1 ]]; then
+    context=$(echo "$QUERY" | head -c 100 | tr '\n' ' ')
+    response=$(timeout 1 "$CHITTA_BIN" habit_match --context "$context" --min_strength 0.7 --json 2>/dev/null || true)
 
-if [[ -n "$response" ]]; then
-    habits_array=$(echo "$response" | jq -c '.metadata.habits // []' 2>/dev/null)
-    if [[ "$habits_array" != "[]" && -n "$habits_array" ]]; then
-        while read -r habit; do
-            [[ -z "$habit" ]] && continue
-            response_text=$(echo "$habit" | jq -r '.response // ""' 2>/dev/null)
-            strength=$(echo "$habit" | jq -r '.strength // 0' 2>/dev/null)
-            if [[ -n "$response_text" && "$response_text" != "null" ]]; then
-                strength_pct=$(awk "BEGIN {printf \"%.0f\", $strength * 100}")
-                HABITS_OUTPUT="${HABITS_OUTPUT}[habit:${strength_pct}%] ${response_text}
+    if [[ -n "$response" ]]; then
+        habits_array=$(echo "$response" | jq -c '.metadata.habits // []' 2>/dev/null)
+        if [[ "$habits_array" != "[]" && -n "$habits_array" ]]; then
+            while read -r habit; do
+                [[ -z "$habit" ]] && continue
+                response_text=$(echo "$habit" | jq -r '.response // ""' 2>/dev/null)
+                strength=$(echo "$habit" | jq -r '.strength // 0' 2>/dev/null)
+                if [[ -n "$response_text" && "$response_text" != "null" ]]; then
+                    strength_pct=$(awk "BEGIN {printf \"%.0f\", $strength * 100}")
+                    HABITS_OUTPUT="${HABITS_OUTPUT}[habit:${strength_pct}%] ${response_text}
 "
-            fi
-        done <<< "$(echo "$habits_array" | jq -c '.[]' 2>/dev/null)"
+                fi
+            done <<< "$(echo "$habits_array" | jq -c '.[]' 2>/dev/null)"
+        fi
     fi
 fi
 
 # ===========================================
-# GOALS: Surface active goals for context
+# GOALS: Surface active goals for context (periodic — token diet)
 # ===========================================
 GOALS_OUTPUT=""
-response=$(timeout 1 "$CHITTA_BIN" goal_list --status "active" --limit 3 --json 2>/dev/null || true)
-if [[ -n "$response" ]]; then
-    goals_array=$(echo "$response" | jq -c '.metadata.goals // []' 2>/dev/null)
-    if [[ "$goals_array" != "[]" && -n "$goals_array" ]]; then
-        while read -r goal; do
-            [[ -z "$goal" ]] && continue
-            id=$(echo "$goal" | jq -r '.id // ""' 2>/dev/null)
-            title=$(echo "$goal" | jq -r '.title // ""' 2>/dev/null)
-            progress=$(echo "$goal" | jq -r '.progress // 0' 2>/dev/null)
-            if [[ -n "$title" && "$title" != "null" ]]; then
-                progress_pct=$(awk "BEGIN {printf \"%.0f\", $progress * 100}")
-                GOALS_OUTPUT="${GOALS_OUTPUT}[goal:${id}] ${title} (${progress_pct}%)
+if [[ $ENRICH_TURN -eq 1 ]]; then
+    response=$(timeout 1 "$CHITTA_BIN" goal_list --status "active" --limit 3 --json 2>/dev/null || true)
+    if [[ -n "$response" ]]; then
+        goals_array=$(echo "$response" | jq -c '.metadata.goals // []' 2>/dev/null)
+        if [[ "$goals_array" != "[]" && -n "$goals_array" ]]; then
+            while read -r goal; do
+                [[ -z "$goal" ]] && continue
+                id=$(echo "$goal" | jq -r '.id // ""' 2>/dev/null)
+                title=$(echo "$goal" | jq -r '.title // ""' 2>/dev/null)
+                progress=$(echo "$goal" | jq -r '.progress // 0' 2>/dev/null)
+                if [[ -n "$title" && "$title" != "null" ]]; then
+                    progress_pct=$(awk "BEGIN {printf \"%.0f\", $progress * 100}")
+                    GOALS_OUTPUT="${GOALS_OUTPUT}[goal:${id}] ${title} (${progress_pct}%)
 "
-            fi
-        done <<< "$(echo "$goals_array" | jq -c '.[]' 2>/dev/null)"
+                fi
+            done <<< "$(echo "$goals_array" | jq -c '.[]' 2>/dev/null)"
+        fi
     fi
 fi
 
@@ -467,54 +468,101 @@ if [[ -n "$MSG_SESSION_ID" && "$MSG_SESSION_ID" != "default" ]]; then
 fi
 
 # ===========================================
-# OUTPUT - Learning hints FIRST (so Claude sees them immediately)
+# OUTPUT — Priority-ordered, budget-capped (~800 chars ≈ ~200 tokens)
 # ===========================================
-# Learning hints at top - these are action items for Claude
-if [[ -n "$LEARNING_HINTS" ]]; then
-    echo "$LEARNING_HINTS"
-fi
+# Token diet: accumulate into FINAL_OUTPUT, enforce hard cap.
+# Priority order (highest first): learning hints > cross-session msgs >
+# memories > narrative > goals > curiosity > habits > anticipations
+MAX_OUTPUT_CHARS="${CC_SOUL_MAX_OUTPUT_CHARS:-800}"
+FINAL_OUTPUT=""
 
-# Narrative status (work mode context)
-if [[ -n "$NARRATIVE_STATUS" ]]; then
-    echo "$NARRATIVE_STATUS"
-fi
+_append() {
+    local text="$1"
+    [[ -z "$text" ]] && return
+    local current_len=${#FINAL_OUTPUT}
+    local remaining=$((MAX_OUTPUT_CHARS - current_len))
+    [[ $remaining -le 20 ]] && return  # Not enough room for anything useful
+    if [[ ${#text} -gt $remaining ]]; then
+        text="${text:0:$remaining}"
+    fi
+    FINAL_OUTPUT="${FINAL_OUTPUT}${text}"
+}
 
-# Goals (active objectives)
-if [[ -n "$GOALS_OUTPUT" ]]; then
-    echo -n "$GOALS_OUTPUT"
-fi
+# 1. Learning hints (action items — highest priority)
+_append "$LEARNING_HINTS"
+[[ -n "$LEARNING_HINTS" ]] && _append $'\n'
 
-# Curiosity gaps (unresolved knowledge)
-if [[ -n "$CURIOSITY_OUTPUT" ]]; then
-    echo "$CURIOSITY_OUTPUT"
-fi
-
-# Cross-session messages
+# 2. Cross-session messages (time-sensitive)
 if [[ -n "$CROSS_SESSION_MSGS" ]]; then
-    echo "[cross-session messages]"
-    echo "$CROSS_SESSION_MSGS"
-    echo "[/cross-session messages]"
+    _append "[cross-session messages]"$'\n'
+    _append "$CROSS_SESSION_MSGS"$'\n'
+    _append "[/cross-session messages]"$'\n'
 fi
 
-# Habits (strong patterns)
-if [[ -n "$HABITS_OUTPUT" ]]; then
-    echo -n "$HABITS_OUTPUT"
-fi
-
+# 3. Memories (core value)
 # Save full exposed memory content for implicit resonance detection (stop-hook)
 if [[ ${COUNT:-0} -gt 0 && -n "${memories:-}" && -n "${MIND_PATH:-}" && -n "${SESSION_ID:-}" ]]; then
     printf '%s\n' "$memories" > "${MIND_PATH}/.exposed_memories_${SESSION_ID}"
 fi
-
-# Then memories
 if [[ -n "$OUTPUT" && $COUNT -gt 0 ]]; then
-    echo "[soul]"
-    echo -n "$OUTPUT"
+    _append "[soul]"$'\n'
+    _append "$OUTPUT"
 fi
 
-# Anticipations last
-if [[ -n "$ANTICIPATIONS" ]]; then
-    echo "$ANTICIPATIONS"
+# 4. Narrative status (one-liner, cheap)
+[[ -n "$NARRATIVE_STATUS" ]] && _append "${NARRATIVE_STATUS}"$'\n'
+
+# 5. Goals
+[[ -n "$GOALS_OUTPUT" ]] && _append "$GOALS_OUTPUT"
+
+# 6. Curiosity
+[[ -n "$CURIOSITY_OUTPUT" ]] && _append "${CURIOSITY_OUTPUT}"$'\n'
+
+# 7. Habits
+[[ -n "$HABITS_OUTPUT" ]] && _append "$HABITS_OUTPUT"
+
+# 8. Anticipations (lowest priority)
+[[ -n "$ANTICIPATIONS" ]] && _append "$ANTICIPATIONS"
+
+# ===========================================
+# EMIT: Structured JSON hookSpecificOutput
+# JSON output → Claude Code creates hook_additional_context attachment
+# (managed independently during compaction, not just system-reminder text)
+# Plain text fallback if jq unavailable
+# ===========================================
+if [[ -n "$FINAL_OUTPUT" ]]; then
+    # Strip trailing whitespace
+    FINAL_OUTPUT=$(echo -n "$FINAL_OUTPUT" | sed 's/[[:space:]]*$//')
+
+    if command -v jq &>/dev/null; then
+        # Emit as JSON hookSpecificOutput for UserPromptSubmit
+        # systemMessage: urgent items shown as warning to user (corrections)
+        # additionalContext: everything else, injected as context attachment
+        SYSTEM_MSG=""
+        if [[ -n "$LEARNING_HINTS" && "$LEARNING_HINTS" == *"CORRECTION"* ]]; then
+            SYSTEM_MSG="$LEARNING_HINTS"
+        fi
+
+        JSON_OUT=$(jq -n \
+            --arg ctx "$FINAL_OUTPUT" \
+            --arg sys "$SYSTEM_MSG" \
+            '{
+                hookSpecificOutput: {
+                    hookEventName: "UserPromptSubmit",
+                    additionalContext: $ctx
+                }
+            } + (if $sys != "" then {systemMessage: $sys} else {} end)' 2>/dev/null)
+
+        if [[ -n "$JSON_OUT" && "$JSON_OUT" == "{"* ]]; then
+            echo "$JSON_OUT"
+        else
+            # jq failed at runtime — fall back to plain text
+            echo "$FINAL_OUTPUT"
+        fi
+    else
+        # Fallback: plain text (starts without {, so Claude Code treats as plain text)
+        echo "$FINAL_OUTPUT"
+    fi
 fi
 
 exit 0

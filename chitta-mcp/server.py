@@ -119,11 +119,23 @@ ADVANCED_TOOLS = {
     "explore_expand", "explore_neighbors", "explore_peek", "explore_recall",
     # Claims/entities
     "get_entities", "get_policies", "get_relationship_events", "query_claims",
-    # Learning (specialized - composite tools)
+    # Learning — individual learn_* tools replaced by unified `learn` gateway
     "learn_analysis", "learn_approach", "learn_codebase", "learn_correction",
     "learn_insight", "learn_milestone", "learn_outcome", "learn_preference",
-    # Research (internal - composite tools)
+    # Research — individual research_* tools replaced by unified `research` gateway
     "research_cycle", "research_store", "research_topics",
+    # Recall variants — replaced by unified `recall` with strategy param
+    "recall_by_priority", "recall_temporal", "hybrid_recall", "smart_recall",
+    # Sadhana — individual sadhana_* tools replaced by unified `sadhana` gateway
+    "sadhana_checkpoint", "sadhana_list", "sadhana_pause", "sadhana_resume",
+    "sadhana_set_goal", "sadhana_set_interval", "sadhana_set_model",
+    "sadhana_start", "sadhana_status", "sadhana_stop",
+    # Triplets — individual tools replaced by unified `triplets` gateway
+    "connect_temporal", "query_triplets_temporal", "triplet_history",
+    # Memory edit — individual tools replaced by unified `memory_edit` gateway
+    "set_memory_type", "set_priority_tier",
+    # Maintenance — move to hidden
+    "rebuild_fts_index", "health_check", "memory_type_stats", "expand_query",
     # Misc advanced
     "insight_global", "insight_promote", "list_aspects", "list_by_aspect",
     "full_resonate", "grow", "connect", "query",
@@ -1445,6 +1457,111 @@ Example:
         return f"REPL Error: {e}"
 
 
+# ============================================================================
+# Consolidated gateway handlers — reduce tool count for token efficiency
+# ============================================================================
+
+def handle_recall_gateway(arguments: dict) -> str:
+    """Unified recall with strategy routing.
+
+    Strategies: semantic (default), priority, temporal, hybrid, smart
+    """
+    strategy = arguments.pop("strategy", "semantic")
+    tool_map = {
+        "semantic": "recall",
+        "priority": "recall_by_priority",
+        "temporal": "recall_temporal",
+        "hybrid": "hybrid_recall",
+        "smart": "smart_recall",
+    }
+    tool = tool_map.get(strategy, "recall")
+    return daemon_call(tool, arguments)
+
+
+def handle_sadhana_gateway(arguments: dict) -> str:
+    """Unified sadhana control.
+
+    Actions: start, stop, pause, resume, status, list, checkpoint,
+             set_goal, set_interval, set_model
+    """
+    action = arguments.pop("action", "status")
+    tool = f"sadhana_{action}"
+    return daemon_call(tool, arguments)
+
+
+def handle_learn_gateway(arguments: dict) -> str:
+    """Unified learning gateway.
+
+    Types: correction, preference, insight, approach, outcome, milestone, analysis
+    """
+    learn_type = arguments.pop("type", "")
+    if not learn_type:
+        return "Error: 'type' parameter required (correction/preference/insight/approach/outcome/milestone/analysis)"
+    handler_map = {
+        "correction": handle_learn_correction,
+        "preference": handle_learn_preference,
+        "insight": handle_learn_insight,
+        "approach": handle_learn_approach,
+        "outcome": handle_learn_outcome,
+        "milestone": handle_learn_milestone,
+        "analysis": handle_learn_analysis,
+    }
+    handler = handler_map.get(learn_type)
+    if not handler:
+        return f"Unknown learn type: {learn_type}. Use: {', '.join(handler_map.keys())}"
+    return handler(arguments)
+
+
+def handle_research_gateway(arguments: dict) -> str:
+    """Unified research gateway.
+
+    Actions: topics, store, cycle
+    """
+    action = arguments.pop("action", "cycle")
+    handler_map = {
+        "topics": handle_research_topics,
+        "store": handle_research_store,
+        "cycle": handle_research_cycle,
+    }
+    handler = handler_map.get(action)
+    if not handler:
+        return f"Unknown research action: {action}. Use: {', '.join(handler_map.keys())}"
+    return handler(arguments)
+
+
+def handle_triplets_gateway(arguments: dict) -> str:
+    """Unified triplet operations.
+
+    Actions: connect (default), query, history
+    """
+    action = arguments.pop("action", "connect")
+    tool_map = {
+        "connect": "connect_temporal",
+        "query": "query_triplets_temporal",
+        "history": "triplet_history",
+    }
+    tool = tool_map.get(action, "connect_temporal")
+    return daemon_call(tool, arguments)
+
+
+def handle_memory_edit_gateway(arguments: dict) -> str:
+    """Unified memory editing.
+
+    Actions: set_type, set_priority
+    """
+    action = arguments.pop("action", "")
+    if not action:
+        return "Error: 'action' required (set_type/set_priority)"
+    tool_map = {
+        "set_type": "set_memory_type",
+        "set_priority": "set_priority_tier",
+    }
+    tool = tool_map.get(action)
+    if not tool:
+        return f"Unknown action: {action}. Use: {', '.join(tool_map.keys())}"
+    return daemon_call(tool, arguments)
+
+
 # Map composite tool names to handlers
 COMPOSITE_HANDLERS = {
     "advanced": handle_advanced,
@@ -1454,6 +1571,14 @@ COMPOSITE_HANDLERS = {
     "symbol_callers": handle_symbol_callers,
     "symbol_callees": handle_symbol_callees,
     "smart_context": handle_smart_context,
+    # Consolidated gateways (replace individual tools)
+    "recall": handle_recall_gateway,
+    "sadhana": handle_sadhana_gateway,
+    "learn": handle_learn_gateway,
+    "research": handle_research_gateway,
+    "triplets": handle_triplets_gateway,
+    "memory_edit": handle_memory_edit_gateway,
+    # Individual learn_* still callable via advanced gateway or direct daemon
     "learn_correction": handle_learn_correction,
     "learn_preference": handle_learn_preference,
     "learn_insight": handle_learn_insight,
@@ -1461,7 +1586,7 @@ COMPOSITE_HANDLERS = {
     "learn_outcome": handle_learn_outcome,
     "learn_milestone": handle_learn_milestone,
     "learn_analysis": handle_learn_analysis,
-    # Curiosity-driven research
+    # Individual research_* still callable
     "research_topics": handle_research_topics,
     "research_store": handle_research_store,
     "research_cycle": handle_research_cycle,
