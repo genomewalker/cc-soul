@@ -1,10 +1,10 @@
 ---
-name: resume
+name: recap
 description: Token-savvy session continuation. Rebuilds working context from transcript + soul memories in ~1500 tokens instead of replaying full history. Use when starting a new session to continue previous work.
 execution: direct
 ---
 
-# Resume: Token-Savvy Session Continuation
+# Recap: Token-Savvy Session Continuation
 
 Reconstructs working context from a previous session's transcript and soul memories,
 fitting the result into ~1500 tokens. This replaces `claude --resume` which replays
@@ -101,12 +101,12 @@ git log --oneline -5
 ps aux | grep -E "cresearch|chittad" | grep -v grep | awk '{print $11}'
 ```
 
-### Step 5: Synthesize the resume block
+### Step 5: Synthesize the recap block
 
 Combine everything into a structured block under 1500 tokens:
 
 ```markdown
-## Session Resume: <session_id>
+## Session Recap: <session_id>
 
 ### What was being done
 <2-3 sentences from user messages — the primary task and subtasks>
@@ -177,7 +177,7 @@ The session_id is the filename without `.jsonl`.
 ## Example
 
 ```
-/resume
+/recap
 → Reads transcript from last session
 → Extracts: "User was implementing multi-round hypotheses in chitta-research hotr.
    Key fix: labeled 'outer loop with break to avoid Noop. Deployed binary was stale.

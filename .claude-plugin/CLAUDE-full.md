@@ -558,7 +558,7 @@ Hooks handle the mechanics:
 **Ledger:** Preserves work state (todos, decisions, blockers) across sessions.
 ```bash
 /checkpoint  # Save state before /clear
-/resume      # Restore context in new session
+/recap       # Restore context in new session
 ```
 
 ## Quick Reference
