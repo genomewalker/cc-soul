@@ -59,12 +59,42 @@
             entries.push_back({h.memory_id, h.content, h.confidence, h.strength, std::move(emb)});
         }
 
-        // Pairwise comparison — O(n^2) but n <= candidate_limit (small)
+        // Pairwise comparison with free-energy merge criterion (FEP §4.3).
+        // Instead of pure cosine threshold, we check whether merging reduces
+        // total free energy: F_merge = merge_loss + λ·complexity_gain < 0.
+        // Falls back to cosine threshold when reconstruction error unavailable.
+        const float fe_lambda = 0.5f;  // complexity penalty weight
         std::vector<DupPair> pairs;
         for (size_t i = 0; i < entries.size(); ++i) {
             for (size_t j = i + 1; j < entries.size(); ++j) {
                 float sim = cosine_sim(entries[i].embedding, entries[j].embedding);
-                if (sim >= threshold) {
+                if (sim < threshold * 0.8f) continue;  // fast reject
+
+                // Try free-energy criterion
+                float err_i = field_store_->reconstruction_error(entries[i].id);
+                float err_j = field_store_->reconstruction_error(entries[j].id);
+
+                bool should_merge;
+                if (err_i >= 0.0f && err_j >= 0.0f) {
+                    // Compute merged embedding (mean)
+                    std::vector<float> merged(entries[i].embedding.size());
+                    for (size_t d = 0; d < merged.size(); ++d) {
+                        merged[d] = 0.5f * (entries[i].embedding[d] + entries[j].embedding[d]);
+                    }
+                    // Merge loss: how much reconstruction quality degrades
+                    float avg_err = 0.5f * (err_i + err_j);
+                    // Complexity gain: keeping two memories vs one
+                    float complexity_gain = 1.0f;  // fixed cost of one extra memory
+                    // Free energy: merge if the complexity saving outweighs accuracy loss
+                    float free_energy = avg_err - fe_lambda * complexity_gain;
+                    // Also require minimum cosine similarity
+                    should_merge = (free_energy < 0.0f || sim >= threshold) && sim >= threshold * 0.9f;
+                } else {
+                    // Fallback: pure cosine threshold
+                    should_merge = sim >= threshold;
+                }
+
+                if (should_merge) {
                     pairs.push_back({
                         entries[i].id, entries[j].id, sim,
                         entries[i].content.substr(0, 100),

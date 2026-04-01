@@ -456,12 +456,40 @@ body::before {
 <section class="changelog-section">
   <div class="container">
 
+    <!-- 5.3.0 -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v5.3.0</span>
+        <span class="version-date">April 1, 2026</span>
+        <span class="version-latest">Latest</span>
+      </div>
+      <div class="version-body">
+        <h4>Added</h4>
+        <ul>
+          <li><strong>FEP attractor network</strong> &mdash; Self-orthogonalizing memory representations derived from the Free Energy Principle (Spisak &amp; Friston, Neurocomputing 2026). Three-phase integration across chitta-field and the C++ daemon.</li>
+          <li><strong>Asymmetric prototype transitions</strong> &mdash; Forward direction gets full coupling strength; reverse is attenuated to 0.3&times;. Sequential data produces non-equilibrium dynamics.</li>
+          <li><strong>Asymmetric triplet weights</strong> &mdash; New <code>reverse_weight</code> field with <code>#[serde(default)]</code> backward compatibility.</li>
+          <li><strong>Surprise-modulated plasticity</strong> &mdash; Reconstruction error modulates decay rate. High-surprise memories resist forgetting; predictable ones fade faster.</li>
+          <li><strong>Attractor-based pattern completion</strong> &mdash; <code>attractor_settle()</code> iteratively blends query with prototype centroids and follows asymmetric transitions. New <code>Route::Attractor</code> in route learner.</li>
+          <li><strong>Hopfield network</strong> &mdash; Asymmetric energy-based attractor network over memory co-activations with multi-hop directed settling.</li>
+          <li><strong>Self-orthogonalizing encoder</strong> &mdash; FEP-derived learning rule: prediction error + complexity penalty + Gram-Schmidt decorrelation between active atoms.</li>
+          <li><strong>Free-energy merge criterion</strong> &mdash; Deduplication uses accuracy-vs-complexity tradeoff instead of fixed cosine threshold.</li>
+          <li><strong>Adaptive vigilance</strong> &mdash; Prototype creation threshold adjusts based on aggregate reconstruction error.</li>
+          <li><strong>New FFI exports</strong> &mdash; <code>cf_reconstruction_error</code>, <code>cf_memory_surprise</code>, <code>cf_search_attractor</code>, <code>cf_hopfield_co_retrieval</code>, <code>cf_hopfield_stats</code>, <code>cf_adapt_vigilance</code>.</li>
+        </ul>
+        <h4>Fixed</h4>
+        <ul>
+          <li>Negative <code>start_turn</code> in <code>read_transcript</code> &mdash; Python-style negative offsets now work correctly.</li>
+          <li>CLI parser treats <code>-5</code> after <code>--start_turn</code> as a value, not a flag.</li>
+        </ul>
+      </div>
+    </article>
+
     <!-- 3.43.x -->
     <article class="changelog-version reveal">
       <div class="version-header">
         <span class="version-number">v3.43.35</span>
         <span class="version-date">February 25, 2026</span>
-        <span class="version-latest">Latest</span>
       </div>
 
       <div class="change-category">

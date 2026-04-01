@@ -14,7 +14,17 @@
 
 CC-soul gives Claude Code persistent memory across sessions. It learns your preferences, remembers your codebase structure, anticipates your needs, and gets smarter the more you use it. One command to install. Zero commands to operate.
 
-## What's New in v5.0.0
+## What's New in v5.3.0
+
+- **FEP attractor network** — self-orthogonalizing memory representations derived from the Free Energy Principle (Spisak & Friston, 2026). Memories naturally decorrelate, resist catastrophic forgetting, and support attractor-based pattern completion.
+- **Asymmetric couplings** — prototype transitions and triplet weights now encode directionality. Sequential data produces asymmetric connections (A→B ≠ B→A), enabling non-equilibrium dynamics in the association graph.
+- **Surprise-modulated plasticity** — reconstruction error (how poorly the sparse encoder predicts a memory) modulates decay rate. Surprising memories resist forgetting; predictable ones fade faster.
+- **Attractor recall** — new cortical recall path that iteratively settles partial cues into stored attractor basins via prototype blending and directed transition following.
+- **Hopfield network** — asymmetric energy-based attractor network over memory co-activations. Pattern completion propagates through multi-hop directed couplings.
+- **Free-energy merge criterion** — deduplication now uses a principled accuracy-vs-complexity tradeoff instead of a pure cosine threshold.
+- **Self-orthogonalizing encoder** — Hebbian update replaced with FEP-derived rule: prediction error + complexity penalty + Gram-Schmidt decorrelation between active atoms.
+
+## What's in v5.0.0
 
 - **HNSW semantic index** — activates automatically above 2,000 memories; falls back to IVF+LSH below that threshold. Dense recall at scale without configuration.
 - **PoE domain reliability** — corrections automatically lower recall scores for the domain they target. Mistakes don't just get overwritten — the field learns not to trust that area.
@@ -231,11 +241,13 @@ CC-soul's memory lives in chitta-field — a pure Rust cognitive substrate that 
 **What makes it different:**
 
 - **Sparse associative codes** — each memory activates 64 of 16,384 feature dimensions. Recall is driven by pattern overlap, not keyword search. Related memories cluster naturally.
+- **Self-orthogonalizing encoder** — FEP-derived learning rule with complexity penalty and Gram-Schmidt decorrelation. Representations naturally become orthogonal, maximizing mutual information and resisting catastrophic forgetting.
+- **Asymmetric Hopfield network** — directed couplings from co-retrieval order enable energy-based pattern completion over the association graph.
 - **HNSW semantic index** — activates above 2,000 memories for dense vector recall; falls back to IVF+LSH below that threshold. No manual tuning.
 - **Write-ahead log** — every operation is durable before it applies in-memory. Restart the daemon; it replays the log and picks up exactly where it left off.
 - **Multi-instance writes** — multiple Claude windows share the same memory field simultaneously. Each writer owns its own segment file; no locking, no contention.
 - **Statically linked** — compiled into `libchitta_field.a`, then linked into the daemon. No database server, no IPC sockets, no NFS file handles to hang on.
-- **Organic decay** — memories fade through a demotion tier system driven by access patterns, not arbitrary TTLs. What you use survives. What you don't, fades.
+- **Surprise-modulated decay** — memories fade based on access patterns and reconstruction surprise. Unique memories resist forgetting; redundant ones fade naturally.
 
 ```
 Memory written                        Memory recalled

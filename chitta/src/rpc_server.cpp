@@ -826,7 +826,8 @@ int run_cli(const std::string& socket_path, const std::string& tool,
             std::string key = arg.substr(2);
             // Normalize hyphens to underscores for consistency with JSON keys
             std::replace(key.begin(), key.end(), '-', '_');
-            if (i + 1 < argc && argv[i + 1][0] != '-') {
+            if (i + 1 < argc && (argv[i + 1][0] != '-' ||
+                                   (argv[i + 1][0] == '-' && std::isdigit(static_cast<unsigned char>(argv[i + 1][1]))))) {
                 std::string value = argv[++i];
                 // Try to parse as JSON object/array, number, or boolean
                 if (value == "true") {

@@ -384,6 +384,7 @@
     <a href="#cortical"   class="submenu-toc-link" data-section="cortical">Cortical Index</a>
     <a href="#multiwrite" class="submenu-toc-link" data-section="multiwrite">Multi-Writer</a>
     <a href="#decay"      class="submenu-toc-link" data-section="decay">Organic Decay</a>
+    <a href="#fep"        class="submenu-toc-link" data-section="fep">FEP Attractors</a>
     <a href="#ops"        class="submenu-toc-link" data-section="ops">Op Catalog</a>
     <a href="#integration" class="submenu-toc-link" data-section="integration">Integration</a>
   </div>
@@ -627,6 +628,48 @@ posting_index: HashMap&lt;<span class="ty">u32</span>, Vec&lt;<span class="ty">u
     <div class="cf-prose reveal reveal-delay-3" style="margin-top:var(--space-5);max-width:640px">
       <p>Demotion is logged as a <code>DemoteMemory</code> Op, so it survives restarts. A memory that was cold before a restart is still cold after replay. The tier is part of the persisted state, not recomputed on load.</p>
       <p>The <code>StateDelta</code> Op handles strength and confidence adjustments separately — the ResonanceLearner applies Bayesian updates via <code>UpdateState</code> ops, which are also WAL-logged before application.</p>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══ FEP ATTRACTOR NETWORK ═══ -->
+<section class="cf-page-section" id="fep">
+  <div class="container">
+    <div class="reveal"><div class="section-divider"></div><h2 class="heading-section">FEP attractor network</h2></div>
+    <p class="section-intro reveal reveal-delay-1">Memory representations self-organize according to the Free Energy Principle (Spisak &amp; Friston, Neurocomputing 2026). The encoder, prototype index, and association graph jointly minimize prediction error while controlling model complexity.</p>
+
+    <div class="cf-feature-grid reveal reveal-delay-2">
+      <div class="cf-feature-card">
+        <div class="cf-feature-icon">&#x2662;</div>
+        <h3>Self-orthogonalizing encoder</h3>
+        <p>The FEP-derived learning rule replaces pure Hebbian updates. Each atom update includes a complexity penalty (&lambda;=10<sup>-4</sup>) that pushes unused weights toward zero, plus Gram-Schmidt decorrelation (1% per step) between co-active atoms. Over time, memory representations naturally become orthogonal &mdash; maximizing mutual information and resisting catastrophic forgetting.</p>
+      </div>
+      <div class="cf-feature-card">
+        <div class="cf-feature-icon">&#x21C4;</div>
+        <h3>Asymmetric couplings</h3>
+        <p>Prototype transitions and triplet weights encode directionality. When memories are co-retrieved, the forward direction (A&rarr;B) receives full coupling strength; the reverse (B&rarr;A) is attenuated to 0.3&times;. Sequential data produces non-equilibrium steady-state dynamics &mdash; the same asymmetry Spisak &amp; Friston show generalizes Boltzmann Machines.</p>
+      </div>
+      <div class="cf-feature-card">
+        <div class="cf-feature-icon">&#x29BF;</div>
+        <h3>Attractor recall</h3>
+        <p>Partial cues converge to stored attractor basins. <code>attractor_settle()</code> iteratively blends query sparse codes with prototype centroids and follows directed transitions (3-5 steps). Pattern completion emerges naturally &mdash; a noisy query settles into the nearest stable memory representation.</p>
+      </div>
+      <div class="cf-feature-card">
+        <div class="cf-feature-icon">&#x26A1;</div>
+        <h3>Surprise-modulated plasticity</h3>
+        <p>Reconstruction error (how poorly the encoder predicts a memory) serves as a surprise signal. High-surprise memories resist decay &mdash; they carry unique information. Low-surprise memories fade faster &mdash; they are redundant with existing knowledge. This balances accuracy and complexity, the core FEP tradeoff.</p>
+      </div>
+      <div class="cf-feature-card">
+        <div class="cf-feature-icon">&#x2B21;</div>
+        <h3>Hopfield network</h3>
+        <p>An asymmetric energy-based network over memory co-activations. <code>settle()</code> propagates activation through multi-hop directed couplings with dynamic neighbor discovery. Seeds are clamped; connected memories activate via sigmoid gating. The result: given a few seed memories, the network completes the pattern.</p>
+      </div>
+      <div class="cf-feature-card">
+        <div class="cf-feature-icon">&#x2696;</div>
+        <h3>Free-energy merge criterion</h3>
+        <p>Deduplication uses a principled accuracy-vs-complexity tradeoff instead of a fixed cosine threshold. Two memories merge when the complexity saving of eliminating one outweighs the prediction accuracy lost by combining their representations. <code>F<sub>merge</sub> = loss + &lambda; &middot; complexity &lt; 0</code>.</p>
+      </div>
     </div>
   </div>
 </section>

@@ -2,6 +2,24 @@
 
 All notable changes to cc-soul are documented here.
 
+## [5.3.0] - 2026-04-01
+
+### Added
+- **FEP attractor network** — self-orthogonalizing memory representations derived from the Free Energy Principle (Spisak & Friston, Neurocomputing 2026). Three-phase integration across chitta-field and the C++ daemon.
+- **Asymmetric prototype transitions** — `strengthen_transition` gives full delta to forward direction (a→b), 0.3× to reverse (b→a). Sequential recall order encodes temporal asymmetry.
+- **Asymmetric triplet weights** — new `reverse_weight` field on `TripletEntry` with `#[serde(default)]` backward compatibility. New triplets default to `reverse_weight = weight × 0.3`.
+- **Surprise-modulated plasticity** — `MemoryState.surprise` stores reconstruction error from sparse encoder. `PlasticityLearner` uses it: high surprise → slow decay, low surprise → fast decay.
+- **Attractor-based pattern completion** — `CorticalIndex::attractor_settle()` iteratively blends query with prototype centroids and follows asymmetric transitions (3-5 steps). New `Route::Attractor` in route learner.
+- **Hopfield network module** (`hopfield.rs`) — asymmetric energy-based attractor network over memory co-activations. `settle()` propagates activation through multi-hop directed couplings with dynamic neighbor discovery.
+- **Self-orthogonalizing sparse encoder** — Hebbian update replaced with FEP-derived rule: prediction error + complexity penalty (λ=1e-4) + Gram-Schmidt partial decorrelation (1% per step) between active atoms.
+- **Adaptive vigilance** — `CorticalIndex::adapt_vigilance()` lowers vigilance when prediction error is high (more prototypes needed), raises it when model is accurate.
+- **Free-energy merge criterion** — `find_dup_pairs` uses `cf_reconstruction_error` to check whether merging reduces total free energy (accuracy loss vs complexity gain), with cosine threshold fallback.
+- **New FFI exports** — `cf_reconstruction_error`, `cf_memory_surprise`, `cf_search_attractor`, `cf_hopfield_co_retrieval`, `cf_hopfield_stats`, `cf_adapt_vigilance`.
+
+### Fixed
+- **Negative `start_turn` in `read_transcript`** — negative offsets (Python-style `-5` = 5 from end) now resolve correctly instead of wrapping to huge unsigned values.
+- **CLI parser with negative numbers** — `-5` after `--start_turn` no longer treated as a flag; numeric values with leading minus are recognized as argument values.
+
 ## [5.0.0] - 2026-03-29
 
 ### Added

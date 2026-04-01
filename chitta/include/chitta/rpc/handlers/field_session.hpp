@@ -345,12 +345,21 @@
 
         result["filtered_turns"] = filtered.size();
 
+        // Resolve negative start_turn (Python-style: -1 = last, -30 = 30 from end)
+        size_t effective_start = 0;
+        if (start_turn < 0) {
+            int from_end = static_cast<int>(filtered.size()) + start_turn;
+            effective_start = from_end > 0 ? static_cast<size_t>(from_end) : 0;
+        } else {
+            effective_start = static_cast<size_t>(start_turn);
+        }
+
         // Paginate
         json turns_arr = json::array();
         size_t output_chars = 0;
         const size_t max_output_chars = 30000;
 
-        for (size_t i = static_cast<size_t>(start_turn);
+        for (size_t i = effective_start;
              i < filtered.size() && turns_arr.size() < limit; ++i) {
             const Turn& t = *filtered[i];
 
@@ -379,7 +388,7 @@
 
         result["turns"]      = turns_arr;
         result["returned"]   = turns_arr.size();
-        result["start_turn"] = start_turn;
+        result["start_turn"] = static_cast<int>(effective_start);
 
         std::ostringstream ss;
         ss << "Transcript: " << path << "\n"
@@ -387,8 +396,8 @@
         if (!role_filter.empty() || !keyword.empty()) {
             ss << " (filtered: " << filtered.size() << ")";
         }
-        ss << "\nShowing turns " << start_turn
-           << "-" << (start_turn + static_cast<int>(turns_arr.size()) - 1) << ":\n\n";
+        ss << "\nShowing turns " << effective_start
+           << "-" << (effective_start + turns_arr.size() - 1) << ":\n\n";
 
         for (const auto& t : turns_arr) {
             ss << "[" << t["role"].get<std::string>() << "] ";

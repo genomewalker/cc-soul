@@ -28,6 +28,15 @@ int cf_route_feedback(struct CfHandle* h, uint64_t episode_id, float reward);
 int cf_set_memory_status(struct CfHandle* h, uint64_t memory_id, uint8_t status);
 int cf_set_epistemic_status(struct CfHandle* h, uint64_t memory_id, uint8_t epistemic_status);
 int64_t cf_compact_wal(struct CfHandle* h);
+
+// FEP attractor network FFI
+float cf_reconstruction_error(const struct CfHandle* h, uint64_t memory_id);
+float cf_memory_surprise(const struct CfHandle* h, uint64_t memory_id);
+int cf_search_attractor(const struct CfHandle* h, const float* embedding, size_t dim,
+    size_t k, size_t settle_steps, CfRecallHit* buf, size_t buf_cap, size_t* written);
+int cf_hopfield_co_retrieval(struct CfHandle* h, const uint64_t* ids, size_t count, int64_t ts_ms);
+char* cf_hopfield_stats(const struct CfHandle* h);
+int cf_adapt_vigilance(struct CfHandle* h, float avg_error);
 }
 
 namespace chitta {
@@ -111,6 +120,28 @@ public:
     /// Compact WAL: save full snapshot then delete covered segments. Returns deleted count or -1.
     int64_t compact_wal() {
         return cf_compact_wal(handle_);
+    }
+
+    // ── FEP Attractor Network ───────────────────────────────────────────
+
+    /// Get reconstruction error (surprise) for a memory. Returns [0,1], -1 on error.
+    float reconstruction_error(uint64_t memory_id) {
+        return cf_reconstruction_error(handle_, memory_id);
+    }
+
+    /// Get cached surprise score from memory state.
+    float memory_surprise(uint64_t memory_id) {
+        return cf_memory_surprise(handle_, memory_id);
+    }
+
+    /// Record co-retrieval batch in Hopfield network.
+    void hopfield_co_retrieval(const std::vector<uint64_t>& ids, int64_t ts_ms) {
+        cf_hopfield_co_retrieval(handle_, ids.data(), ids.size(), ts_ms);
+    }
+
+    /// Adapt cortical vigilance based on aggregate reconstruction error.
+    void adapt_vigilance(float avg_error) {
+        cf_adapt_vigilance(handle_, avg_error);
     }
 
     /// Backfill embedding for a memory stored without one (embed_pending=true).

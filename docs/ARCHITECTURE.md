@@ -239,6 +239,18 @@ Recall is a bitset intersection: query SDR vs memory SDR, count shared active bi
 
 A `ProductQuantizer` compresses residual embeddings (32 subvectors, 256 centroids each) to 32 bytes for scale.
 
+### FEP Attractor Network (v5.3)
+
+The encoder, prototype index, and association graph jointly minimize free energy per Spisak & Friston (Neurocomputing 2026):
+
+- **Self-orthogonalizing encoder** — FEP-derived learning rule: prediction error + complexity penalty (λ=1e-4) + Gram-Schmidt decorrelation (1% per step) between co-active atoms. Representations naturally become orthogonal, resisting catastrophic forgetting.
+- **Asymmetric prototype transitions** — Forward direction (a→b) gets full coupling delta; reverse (b→a) gets 0.3×. Sequential recall order encodes temporal asymmetry.
+- **Attractor settle** — `CorticalIndex::attractor_settle()` iteratively blends query with prototype centroids and follows directed transitions (3-5 steps). Partial cues converge to stored attractor basins.
+- **Surprise-modulated plasticity** — Reconstruction error at encode time updates `MemoryState.surprise`. High surprise → slow decay (unique info); low surprise → fast decay (redundant).
+- **Adaptive vigilance** — Prototype creation threshold adjusts based on aggregate reconstruction error. High error → more prototypes; low error → coarser clustering.
+- **Hopfield network** (`organ/hopfield.rs`) — Asymmetric energy-based attractor network over memory co-activations. `settle()` propagates activation through multi-hop directed couplings with dynamic neighbor discovery.
+- **Free-energy merge criterion** — `find_dup_pairs` checks whether merging reduces total free energy (accuracy loss vs complexity gain) instead of using a fixed cosine threshold.
+
 ---
 
 ## Iterative Resonance (CTM-inspired)
