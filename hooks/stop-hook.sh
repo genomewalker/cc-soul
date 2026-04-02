@@ -26,6 +26,17 @@ SESSION_ID_INPUT=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || e
 # Set SESSION_ID early (used by store_turn)
 SESSION_ID="${SESSION_ID_INPUT:-default}"
 
+# Kill msg-notify daemon immediately — before any early-exit paths
+if [[ -n "$SESSION_ID" && "$SESSION_ID" != "default" ]]; then
+    MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
+    PID_FILE="${MIND_PATH}/.msg_notify_pids/${SESSION_ID}.pid"
+    if [[ -f "$PID_FILE" ]]; then
+        old_pid=$(cat "$PID_FILE" 2>/dev/null || true)
+        [[ -n "$old_pid" ]] && kill "$old_pid" 2>/dev/null || true
+        rm -f "$PID_FILE"
+    fi
+fi
+
 # Prevent infinite loops
 [[ "$STOP_HOOK_ACTIVE" == "true" ]] && exit 0
 [[ -z "$TRANSCRIPT_PATH" || ! -f "$TRANSCRIPT_PATH" ]] && exit 0
@@ -736,18 +747,6 @@ if [[ -x "$CHITTA_BIN" ]]; then
         --arg realm "${REALM:-brahman}" \
         '{realm: $realm, threshold: 0.92, dry_run: false, limit: 20}')"
     echo "[consolidation] Queued sleep consolidation for realm=${REALM:-brahman}" >&2
-fi
-
-# Kill msg-notify daemon for this session
-if [[ -n "$SESSION_ID" && "$SESSION_ID" != "default" ]]; then
-    PID_FILE="${MIND_PATH}/.msg_notify_pids/${SESSION_ID}.pid"
-    if [[ -f "$PID_FILE" ]]; then
-        old_pid=$(cat "$PID_FILE" 2>/dev/null || true)
-        if [[ -n "$old_pid" ]]; then
-            kill "$old_pid" 2>/dev/null || true
-        fi
-        rm -f "$PID_FILE"
-    fi
 fi
 
 exit 0
