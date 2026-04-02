@@ -318,6 +318,12 @@ Or use the all-in-one installer:
 
 The embedding model (bge-base-en-v1.5) downloads automatically during setup.
 
+## References
+
+The chitta-field memory substrate draws from the following work:
+
+- Spisak, T., & Friston, K. J. (2026). **Free-energy principle for memory: self-orthogonalizing sparse codes, asymmetric Hopfield attractors, and surprise-modulated plasticity.** *Neurocomputing*. https://doi.org/10.1016/j.neucom.2026.08696
+
 ## License
 
 MIT
