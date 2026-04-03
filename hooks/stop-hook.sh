@@ -27,6 +27,7 @@ SESSION_ID_INPUT=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || e
 SESSION_ID="${SESSION_ID_INPUT:-default}"
 
 # Kill msg-notify daemon immediately — before any early-exit paths
+# Use both PID file and process pattern to catch orphans
 if [[ -n "$SESSION_ID" && "$SESSION_ID" != "default" ]]; then
     MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
     PID_FILE="${MIND_PATH}/.msg_notify_pids/${SESSION_ID}.pid"
@@ -35,6 +36,8 @@ if [[ -n "$SESSION_ID" && "$SESSION_ID" != "default" ]]; then
         [[ -n "$old_pid" ]] && kill "$old_pid" 2>/dev/null || true
         rm -f "$PID_FILE"
     fi
+    # Also kill by pattern — catches orphans whose PID file was lost
+    pkill -f "msg-notify.*${SESSION_ID}" 2>/dev/null || true
 fi
 
 # Prevent infinite loops

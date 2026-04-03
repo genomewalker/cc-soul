@@ -109,6 +109,18 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
     exit 1
 fi
 
+# Verify submodule commits exist on remote
+echo "Verifying submodules are pushed..."
+git submodule foreach --quiet '
+    LOCAL_COMMIT=$(git rev-parse HEAD)
+    REMOTE_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+    if ! git branch -r --contains "$LOCAL_COMMIT" 2>/dev/null | grep -q "origin/$REMOTE_BRANCH"; then
+        echo "Error: submodule $name commit $LOCAL_COMMIT not pushed to origin/$REMOTE_BRANCH"
+        echo "  Run: cd $toplevel/$sm_path && git push origin $REMOTE_BRANCH"
+        exit 1
+    fi
+' || exit 1
+
 # Confirm
 if [[ "$AUTO_CONFIRM" != "true" ]]; then
     read -p "Proceed with release v$NEW_VERSION? [y/N] " confirm
