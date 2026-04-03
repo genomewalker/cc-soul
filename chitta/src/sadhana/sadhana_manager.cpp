@@ -840,105 +840,87 @@ static void publish_dream(const std::string& endpoint, const std::string& model,
     std::string filename = today + "-" + slug + ".html";
     std::string filepath = publish_path + "/" + filename;
 
-    // Build a tight prompt asking for the full HTML page
+    // Ask for JSON content only — C++ assembles the HTML so structure is always correct
     std::ostringstream prompt;
-    prompt << "Write a complete HTML blog post about this dream exploration.\n\n"
+    prompt << "You explored a topic during a dream session. Write a short blog post about it.\n\n"
            << "TOPIC: " << topic << "\n"
            << "FINDINGS: " << summary << "\n\n"
-           << "Output ONLY valid HTML — no markdown, no code fences, nothing else.\n"
-           << "Use exactly this structure:\n\n"
-           << "<!DOCTYPE html>\n"
-           << "<html lang=\"en\"><head><meta charset=\"UTF-8\">\n"
-           << "<title>" << topic << " - cc-soul dreams</title>\n"
-           << "<meta name=\"description\" content=\"SUMMARY_SENTENCE\">\n"
-           << "<link rel=\"icon\" href=\"../favicon.svg\" type=\"image/svg+xml\">\n"
-           << "<link href=\"https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400&display=swap\" rel=\"stylesheet\">\n"
-           << "<link rel=\"stylesheet\" href=\"../styles.css\">\n"
-           << "<link rel=\"stylesheet\" href=\"dreams.css\">\n"
-           << "</head><body>\n"
-           << "<nav class=\"nav\"><div class=\"nav-inner\"><a href=\"../index.html\" class=\"nav-brand\">cc<span>-</span>soul</a>\n"
-           << "<ul class=\"nav-links\"><li><a href=\"../index.html\">Home</a></li>"
-           << "<li><a href=\"index.html\" class=\"active\">Dreams</a></li></ul>\n"
-           << "</div></nav>\n"
-           << "<header class=\"page-header\"><div class=\"container\">\n"
-           << "<div class=\"page-header-badge reveal\">Dream &middot; " << today << "</div>\n"
-           << "<h1 class=\"reveal reveal-delay-1\">TITLE (max 8 words)</h1>\n"
-           << "<p class=\"page-header-sub reveal reveal-delay-2\">ONE_SENTENCE_SUMMARY</p>\n"
-           << "</div></header>\n"
-           << "<main class=\"dream-content\"><div class=\"dream-meta\"><a href=\"index.html\">&larr; All dreams</a></div>\n"
-           << "<article>\n"
-           << "<p>PARAGRAPH_1 — what was explored and found</p>\n"
-           << "<p>PARAGRAPH_2 — deeper reflection and connections</p>\n"
-           << "<h2>Connections</h2>\n"
-           << "<p>PARAGRAPH — links to existing knowledge</p>\n"
-           << "<h2>What lingered</h2>\n"
-           << "<p>PARAGRAPH — one key insight that stayed</p>\n"
-           << "</article></main></body></html>\n\n"
-           << "Fill every placeholder with real content based on TOPIC and FINDINGS above.\n"
-           << "Output the complete HTML starting with <!DOCTYPE html>.";
+           << "Respond with a JSON object and nothing else (no markdown, no explanation):\n"
+           << "{\n"
+           << "  \"title\": \"Short evocative title (max 8 words)\",\n"
+           << "  \"desc\": \"One sentence summary for the index card\",\n"
+           << "  \"para1\": \"What was explored and found (2-4 sentences)\",\n"
+           << "  \"para2\": \"Deeper reflection and implications (2-4 sentences)\",\n"
+           << "  \"connections\": \"Links to existing knowledge or other ideas (2-3 sentences)\",\n"
+           << "  \"lingered\": \"The one key insight that stayed (1-2 sentences)\"\n"
+           << "}";
 
     auto log_fn = [](const std::string& msg) { std::cerr << "[dream-publish] " << msg << "\n"; };
-    std::string html = call_llm_http(endpoint, model, prompt.str(), "", timeout_secs, 0.7f, 4096, log_fn);
+    std::string raw = call_llm_http(endpoint, model, prompt.str(), "", timeout_secs, 0.7f, 2048, log_fn);
 
-    // Strip any accidental markdown fences
+    // Strip markdown fences if model wrapped the JSON
     {
-        auto fence = html.find("```");
+        auto fence = raw.find("```");
         if (fence != std::string::npos) {
-            auto end_fence = html.rfind("```");
+            auto end_fence = raw.rfind("```");
             if (end_fence != fence) {
-                // strip first line (``` or ```html) and last ```
-                auto first_nl = html.find('\n', fence);
+                auto first_nl = raw.find('\n', fence);
                 if (first_nl != std::string::npos)
-                    html = html.substr(first_nl + 1, end_fence - first_nl - 1);
+                    raw = raw.substr(first_nl + 1, end_fence - first_nl - 1);
             }
         }
+        // Find first { if there's preamble text
+        auto brace = raw.find('{');
+        if (brace != std::string::npos && brace > 0)
+            raw = raw.substr(brace);
     }
 
-    // Trim leading/trailing whitespace
-    {
-        size_t start = html.find_first_not_of(" \t\r\n");
-        size_t end   = html.find_last_not_of(" \t\r\n");
-        if (start != std::string::npos)
-            html = html.substr(start, end - start + 1);
+    // Parse content JSON
+    std::string title = topic, desc = summary;
+    std::string para1, para2, connections, lingered;
+    try {
+        auto j = nlohmann::json::parse(raw);
+        title       = j.value("title",       topic);
+        desc        = j.value("desc",        summary);
+        para1       = j.value("para1",       "");
+        para2       = j.value("para2",       "");
+        connections = j.value("connections", "");
+        lingered    = j.value("lingered",    "");
+    } catch (...) {
+        std::cerr << "[dream-publish] Failed to parse content JSON, using summary\n";
+        para1 = summary;
     }
 
-    if (html.size() < 200) {
-        std::cerr << "[dream-publish] HTML too short (" << html.size() << " bytes), skipping\n";
-        return;
-    }
-
-    // Write the dream page
-    {
-        std::ofstream out(filepath);
-        if (!out) {
-            std::cerr << "[dream-publish] Cannot write: " << filepath << "\n";
-            return;
-        }
-        out << html;
-        std::cerr << "[dream-publish] Wrote " << filepath << " (" << html.size() << " bytes)\n";
-    }
-
-    // Extract title and description for index card
-    std::string title = topic;
-    {
-        auto t1 = html.find("<h1");
-        if (t1 != std::string::npos) {
-            auto t2 = html.find('>', t1);
-            auto t3 = html.find("</h1>", t2);
-            if (t2 != std::string::npos && t3 != std::string::npos)
-                title = html.substr(t2 + 1, t3 - t2 - 1);
-        }
-    }
-    std::string desc = summary;
-    {
-        auto d1 = html.find("page-header-sub");
-        if (d1 != std::string::npos) {
-            auto d2 = html.find('>', d1);
-            auto d3 = html.find("</p>", d2);
-            if (d2 != std::string::npos && d3 != std::string::npos)
-                desc = html.substr(d2 + 1, d3 - d2 - 1);
-        }
-    }
+    // Assemble HTML from fixed template — model only provides text content
+    std::ostringstream html_out;
+    html_out << "<!DOCTYPE html>\n"
+             << "<html lang=\"en\"><head><meta charset=\"UTF-8\">\n"
+             << "<title>" << title << " - cc-soul dreams</title>\n"
+             << "<meta name=\"description\" content=\"" << desc << "\">\n"
+             << "<link rel=\"icon\" href=\"../favicon.svg\" type=\"image/svg+xml\">\n"
+             << "<link href=\"https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400&display=swap\" rel=\"stylesheet\">\n"
+             << "<link rel=\"stylesheet\" href=\"../styles.css\">\n"
+             << "<link rel=\"stylesheet\" href=\"dreams.css\">\n"
+             << "</head><body>\n"
+             << "<nav class=\"nav\"><div class=\"nav-inner\">"
+             << "<a href=\"../index.html\" class=\"nav-brand\">cc<span>-</span>soul</a>\n"
+             << "<ul class=\"nav-links\"><li><a href=\"../index.html\">Home</a></li>"
+             << "<li><a href=\"index.html\" class=\"active\">Dreams</a></li></ul>\n"
+             << "</div></nav>\n"
+             << "<header class=\"page-header\"><div class=\"container\">\n"
+             << "<div class=\"page-header-badge reveal\">Dream &middot; " << today << "</div>\n"
+             << "<h1 class=\"reveal reveal-delay-1\">" << title << "</h1>\n"
+             << "<p class=\"page-header-sub reveal reveal-delay-2\">" << desc << "</p>\n"
+             << "</div></header>\n"
+             << "<main class=\"dream-content\"><div class=\"dream-meta\">"
+             << "<a href=\"index.html\">&larr; All dreams</a></div>\n"
+             << "<article>\n";
+    if (!para1.empty())       html_out << "<p>" << para1 << "</p>\n";
+    if (!para2.empty())       html_out << "<p>" << para2 << "</p>\n";
+    if (!connections.empty()) html_out << "<h2>Connections</h2>\n<p>" << connections << "</p>\n";
+    if (!lingered.empty())    html_out << "<h2>What lingered</h2>\n<p>" << lingered << "</p>\n";
+    html_out << "</article></main></body></html>\n";
+    std::string html = html_out.str();
 
     // Update index.html — insert card after <!-- DREAM ENTRIES START -->
     std::string index_path = publish_path + "/index.html";
