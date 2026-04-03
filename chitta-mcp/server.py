@@ -114,7 +114,8 @@ ADVANCED_TOOLS = {
     "long_task_active", "long_task_complete", "long_task_evaluate", "long_task_event",
     "long_task_get", "long_task_snapshot", "long_task_start", "long_task_update",
     # Messaging
-    "msg_history", "msg_inbox", "msg_send", "session_list", "session_sync",
+    "msg_history", "msg_inbox", "msg_send", "msg_respond", "msg_ack", "msg_ack_all",
+    "session_list", "session_sync",
     # Explore tools (RLM-style)
     "explore_expand", "explore_neighbors", "explore_peek", "explore_recall",
     # Claims/entities
@@ -189,6 +190,9 @@ def handle_advanced(arguments: dict) -> str:
             if sid:
                 tool_args = dict(tool_args)
                 tool_args["session_id"] = sid
+                # msg_send uses sender_session_id instead of session_id
+                if tool == "msg_send" and not tool_args.get("sender_session_id"):
+                    tool_args["sender_session_id"] = sid
 
         # Call the hidden tool via daemon
         result = daemon_call(tool, tool_args)
@@ -1612,7 +1616,7 @@ COMPOSITE_HANDLERS = {
 }
 
 # Messaging tools that need session_id auto-injection
-MSG_TOOLS = {"msg_inbox", "msg_send", "msg_ack", "msg_ack_all", "msg_history"}
+MSG_TOOLS = {"msg_inbox", "msg_send", "msg_respond", "msg_ack", "msg_ack_all", "msg_history"}
 
 # Tools that need session_id injection
 SESSION_TOOLS = {
@@ -1780,6 +1784,9 @@ async def call_tool(name: str, arguments: dict):
         sid = get_current_session_id(use_cache=False)
         if sid:
             arguments["session_id"] = sid
+            # msg_send uses sender_session_id instead of session_id
+            if name == "msg_send" and not arguments.get("sender_session_id"):
+                arguments["sender_session_id"] = sid
 
     # Auto-inject session_id for transcript_search if not provided
     # Pass session_id="*" to explicitly search all transcripts
