@@ -1,20 +1,20 @@
 // Included into FieldRpcHandler class body — not a standalone header.
 // Contradiction engine tools: why_active, what_superseded, show_conflicts.
 
-    DuckDBToolResult tool_why_active(const json& params) {
+    ToolResult tool_why_active(const json& params) {
         std::string id_str = params.value("id", "");
-        if (id_str.empty()) return DuckDBToolResult::error("id is required");
+        if (id_str.empty()) return ToolResult::error("id is required");
 
         uint64_t id = 0;
         try { id = std::stoull(id_str); } catch (...) {
-            return DuckDBToolResult::error("invalid id");
+            return ToolResult::error("invalid id");
         }
 
         std::string meta_json = field_store_->get_memory_metadata(id);
-        if (meta_json.empty()) return DuckDBToolResult::error("memory not found");
+        if (meta_json.empty()) return ToolResult::error("memory not found");
 
         auto meta = json::parse(meta_json, nullptr, false);
-        if (meta.is_discarded()) return DuckDBToolResult::error("failed to parse metadata");
+        if (meta.is_discarded()) return ToolResult::error("failed to parse metadata");
 
         std::string status = meta.value("status", "Active");
         std::string epistemic = meta.value("epistemic_status", "UserStated");
@@ -61,16 +61,16 @@
             {"conflicts", conflicts},
             {"confirmations", confirmations},
         };
-        return DuckDBToolResult::ok(ss.str(), data);
+        return ToolResult::ok(ss.str(), data);
     }
 
-    DuckDBToolResult tool_what_superseded(const json& params) {
+    ToolResult tool_what_superseded(const json& params) {
         std::string id_str = params.value("id", "");
-        if (id_str.empty()) return DuckDBToolResult::error("id is required");
+        if (id_str.empty()) return ToolResult::error("id is required");
 
         uint64_t id = 0;
         try { id = std::stoull(id_str); } catch (...) {
-            return DuckDBToolResult::error("invalid id");
+            return ToolResult::error("invalid id");
         }
 
         auto chain = field_store_->get_supersession_chain(id);
@@ -93,18 +93,18 @@
             });
         }
 
-        return DuckDBToolResult::ok(ss.str(), {{"chain", chain_json}});
+        return ToolResult::ok(ss.str(), {{"chain", chain_json}});
     }
 
-    DuckDBToolResult tool_show_conflicts(const json& params) {
+    ToolResult tool_show_conflicts(const json& params) {
         std::string query = params.value("query", "");
-        if (query.empty()) return DuckDBToolResult::error("query is required");
+        if (query.empty()) return ToolResult::error("query is required");
 
         size_t limit = static_cast<size_t>(params.value("limit", 20));
         std::string realm = params.value("realm", "");
 
         auto embedding = embed_query(query);
-        if (embedding.empty()) return DuckDBToolResult::error("Failed to embed query");
+        if (embedding.empty()) return ToolResult::error("Failed to embed query");
 
         auto hits = field_store_->recall(embedding, limit, realm);
 
@@ -143,5 +143,5 @@
             ss << "No contradictions found among recalled memories.\n";
         }
 
-        return DuckDBToolResult::ok(ss.str(), {{"groups", groups}, {"conflict_count", conflict_count}});
+        return ToolResult::ok(ss.str(), {{"groups", groups}, {"conflict_count", conflict_count}});
     }

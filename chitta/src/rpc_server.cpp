@@ -693,6 +693,31 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
       {"text", "Confirmed exemplar text", true, nullptr}}},
 
     {"probe_status", "Show how many exemplars exist per behavioral class", {}},
+
+    // Ingest, Wiki, Training export
+    {"ingest_source", "Ingest external content (URL, file, directory) into memory via SSL distillation",
+     {{"source", "URL, file path, or directory path", true, nullptr},
+      {"realm", "Target realm", false, "brahman"},
+      {"type", "Source type: auto|url|file|directory", false, "auto"},
+      {"model", "LLM model for distillation", false, nullptr},
+      {"max_chunks", "Max chunks to process", false, "30"}}},
+
+    {"wiki_export", "Export memories as Obsidian-compatible .md wiki with backlinks",
+     {{"output_dir", "Output directory", false, nullptr},
+      {"realm", "Filter to specific realm", false, nullptr},
+      {"max_memories", "Max memories per realm", false, "5000"}}},
+
+    {"health_check_start", "Start autonomous health-check sadhana",
+     {{"interval_seconds", "Check interval in seconds", false, "3600"},
+      {"realm", "Realm to monitor", false, "brahman"},
+      {"max_turns", "Max check cycles (0 = unlimited)", false, "0"}}},
+
+    {"export_training_pairs", "Export query-passage pairs as JSONL for embedding fine-tuning",
+     {{"output_path", "Output JSONL path", false, nullptr},
+      {"realm", "Filter to specific realm", false, nullptr},
+      {"max_pairs", "Max pairs to export", false, "10000"},
+      {"min_confidence", "Min confidence threshold", false, "0.5"},
+      {"include_negatives", "Generate hard negatives", false, "true"}}},
 };
 
 // Build set of known tools from specs

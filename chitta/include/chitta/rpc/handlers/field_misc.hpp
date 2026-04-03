@@ -4,12 +4,12 @@
 // Sadhana tools — sadhana_manager_ only, no mind_ dependency
 // ═══════════════════════════════════════════════════════════════════════
 
-    DuckDBToolResult tool_sadhana_start(const json& params) {
+    ToolResult tool_sadhana_start(const json& params) {
         if (!sadhana_manager_)
-            return DuckDBToolResult::error("Sadhana manager not initialized");
+            return ToolResult::error("Sadhana manager not initialized");
 
         std::string goal = params.value("goal", "");
-        if (goal.empty()) return DuckDBToolResult::error("Goal is required");
+        if (goal.empty()) return ToolResult::error("Goal is required");
 
         std::string provider  = params.value("brain_provider", "");
         std::string model     = params.value("brain_model", "");
@@ -21,69 +21,69 @@
             goal_dsl = params["goal_dsl"];
 
         int64_t id = sadhana_manager_->create(goal, provider, model, interval, realm, goal_dsl, max_turns);
-        if (id == 0) return DuckDBToolResult::error("Failed to create sadhana");
+        if (id == 0) return ToolResult::error("Failed to create sadhana");
 
         if (!sadhana_manager_->start(id))
-            return DuckDBToolResult::error("Created sadhana " + std::to_string(id) + " but failed to start");
+            return ToolResult::error("Created sadhana " + std::to_string(id) + " but failed to start");
 
         json result = {{"id", id}, {"state", "running"}, {"goal", goal.substr(0, 100)}};
-        return DuckDBToolResult::ok("Started sadhana " + std::to_string(id), result);
+        return ToolResult::ok("Started sadhana " + std::to_string(id), result);
     }
 
-    DuckDBToolResult tool_sadhana_pause(const json& params) {
+    ToolResult tool_sadhana_pause(const json& params) {
         if (!sadhana_manager_)
-            return DuckDBToolResult::error("Sadhana manager not initialized");
+            return ToolResult::error("Sadhana manager not initialized");
 
         auto [id, id_str] = parse_id(params, "id");
-        if (id == 0) return DuckDBToolResult::error("Invalid sadhana ID");
+        if (id == 0) return ToolResult::error("Invalid sadhana ID");
 
         if (!sadhana_manager_->pause(id))
-            return DuckDBToolResult::error("Failed to pause sadhana " + std::to_string(id));
+            return ToolResult::error("Failed to pause sadhana " + std::to_string(id));
 
-        return DuckDBToolResult::ok("Paused sadhana " + std::to_string(id),
+        return ToolResult::ok("Paused sadhana " + std::to_string(id),
             {{"id", id}, {"state", "paused"}});
     }
 
-    DuckDBToolResult tool_sadhana_resume(const json& params) {
+    ToolResult tool_sadhana_resume(const json& params) {
         if (!sadhana_manager_)
-            return DuckDBToolResult::error("Sadhana manager not initialized");
+            return ToolResult::error("Sadhana manager not initialized");
 
         auto [id, id_str] = parse_id(params, "id");
-        if (id == 0) return DuckDBToolResult::error("Invalid sadhana ID");
+        if (id == 0) return ToolResult::error("Invalid sadhana ID");
 
         if (!sadhana_manager_->resume(id))
-            return DuckDBToolResult::error("Failed to resume sadhana " + std::to_string(id));
+            return ToolResult::error("Failed to resume sadhana " + std::to_string(id));
 
-        return DuckDBToolResult::ok("Resumed sadhana " + std::to_string(id),
+        return ToolResult::ok("Resumed sadhana " + std::to_string(id),
             {{"id", id}, {"state", "running"}});
     }
 
-    DuckDBToolResult tool_sadhana_stop(const json& params) {
+    ToolResult tool_sadhana_stop(const json& params) {
         if (!sadhana_manager_)
-            return DuckDBToolResult::error("Sadhana manager not initialized");
+            return ToolResult::error("Sadhana manager not initialized");
 
         auto [id, id_str] = parse_id(params, "id");
-        if (id == 0) return DuckDBToolResult::error("Invalid sadhana ID");
+        if (id == 0) return ToolResult::error("Invalid sadhana ID");
 
         bool success  = params.value("success", true);
         std::string reason = params.value("reason", "");
 
         if (!sadhana_manager_->stop(id, success, reason))
-            return DuckDBToolResult::error("Failed to stop sadhana " + std::to_string(id));
+            return ToolResult::error("Failed to stop sadhana " + std::to_string(id));
 
         json result = {{"id", id}, {"state", success ? "done" : "failed"}, {"reason", reason}};
-        return DuckDBToolResult::ok("Stopped sadhana " + std::to_string(id), result);
+        return ToolResult::ok("Stopped sadhana " + std::to_string(id), result);
     }
 
-    DuckDBToolResult tool_sadhana_status(const json& params) {
+    ToolResult tool_sadhana_status(const json& params) {
         if (!sadhana_manager_)
-            return DuckDBToolResult::error("Sadhana manager not initialized");
+            return ToolResult::error("Sadhana manager not initialized");
 
         auto [id, id_str] = parse_id(params, "id");
-        if (id == 0) return DuckDBToolResult::error("Invalid sadhana ID");
+        if (id == 0) return ToolResult::error("Invalid sadhana ID");
 
         auto opt = sadhana_manager_->get(id);
-        if (!opt) return DuckDBToolResult::error("Sadhana " + std::to_string(id) + " not found");
+        if (!opt) return ToolResult::error("Sadhana " + std::to_string(id) + " not found");
 
         size_t history_limit = params.value("history_limit", 20);
         auto history = sadhana_manager_->get_history(id, history_limit);
@@ -110,12 +110,12 @@
         std::ostringstream msg;
         msg << "Sadhana " << id << " [" << sadhana_state_to_string(opt->state) << "] "
             << opt->iterations << " iterations";
-        return DuckDBToolResult::ok(msg.str(), result);
+        return ToolResult::ok(msg.str(), result);
     }
 
-    DuckDBToolResult tool_sadhana_list(const json& params) {
+    ToolResult tool_sadhana_list(const json& params) {
         if (!sadhana_manager_)
-            return DuckDBToolResult::error("Sadhana manager not initialized");
+            return ToolResult::error("Sadhana manager not initialized");
 
         std::string state = params.value("state", "");
         std::string realm = params.value("realm", "");
@@ -140,95 +140,95 @@
             });
         }
 
-        return DuckDBToolResult::ok("Found " + std::to_string(sadhanas.size()) + " sadhana(s)", result);
+        return ToolResult::ok("Found " + std::to_string(sadhanas.size()) + " sadhana(s)", result);
     }
 
-    DuckDBToolResult tool_sadhana_set_model(const json& params) {
+    ToolResult tool_sadhana_set_model(const json& params) {
         if (!sadhana_manager_)
-            return DuckDBToolResult::error("Sadhana manager not initialized");
+            return ToolResult::error("Sadhana manager not initialized");
 
         auto [id, id_str] = parse_id(params, "id");
-        if (id == 0) return DuckDBToolResult::error("Invalid sadhana ID");
+        if (id == 0) return ToolResult::error("Invalid sadhana ID");
 
         std::string model = params.value("model", "");
-        if (model.empty()) return DuckDBToolResult::error("model is required");
+        if (model.empty()) return ToolResult::error("model is required");
 
         if (!sadhana_manager_->set_model(id, model))
-            return DuckDBToolResult::error("Failed to set model for sadhana " + std::to_string(id));
+            return ToolResult::error("Failed to set model for sadhana " + std::to_string(id));
 
-        return DuckDBToolResult::ok("Set model to " + model + " for sadhana " + std::to_string(id),
+        return ToolResult::ok("Set model to " + model + " for sadhana " + std::to_string(id),
             {{"id", id}, {"model", model}});
     }
 
-    DuckDBToolResult tool_sadhana_set_goal(const json& params) {
+    ToolResult tool_sadhana_set_goal(const json& params) {
         if (!sadhana_manager_)
-            return DuckDBToolResult::error("Sadhana manager not initialized");
+            return ToolResult::error("Sadhana manager not initialized");
 
         auto [id, id_str] = parse_id(params, "id");
-        if (id == 0) return DuckDBToolResult::error("Invalid sadhana ID");
+        if (id == 0) return ToolResult::error("Invalid sadhana ID");
 
         std::string goal = params.value("goal", "");
-        if (goal.empty()) return DuckDBToolResult::error("goal is required");
+        if (goal.empty()) return ToolResult::error("goal is required");
 
         if (!sadhana_manager_->set_goal(id, goal))
-            return DuckDBToolResult::error("Failed to set goal for sadhana " + std::to_string(id));
+            return ToolResult::error("Failed to set goal for sadhana " + std::to_string(id));
 
-        return DuckDBToolResult::ok("Updated goal for sadhana " + std::to_string(id),
+        return ToolResult::ok("Updated goal for sadhana " + std::to_string(id),
             {{"id", id}, {"goal", goal}});
     }
 
-    DuckDBToolResult tool_sadhana_set_interval(const json& params) {
+    ToolResult tool_sadhana_set_interval(const json& params) {
         if (!sadhana_manager_)
-            return DuckDBToolResult::error("Sadhana manager not initialized");
+            return ToolResult::error("Sadhana manager not initialized");
 
         auto [id, id_str] = parse_id(params, "id");
-        if (id == 0) return DuckDBToolResult::error("Invalid sadhana ID");
+        if (id == 0) return ToolResult::error("Invalid sadhana ID");
 
         int interval = params.value("interval", 0);
-        if (interval <= 0) return DuckDBToolResult::error("interval must be positive");
+        if (interval <= 0) return ToolResult::error("interval must be positive");
 
         if (!sadhana_manager_->set_interval(id, interval))
-            return DuckDBToolResult::error("Failed to set interval for sadhana " + std::to_string(id));
+            return ToolResult::error("Failed to set interval for sadhana " + std::to_string(id));
 
-        return DuckDBToolResult::ok(
+        return ToolResult::ok(
             "Set interval to " + std::to_string(interval) + "s for sadhana " + std::to_string(id),
             {{"id", id}, {"interval", interval}});
     }
 
-    DuckDBToolResult tool_sadhana_set_max_turns(const json& params) {
+    ToolResult tool_sadhana_set_max_turns(const json& params) {
         if (!sadhana_manager_)
-            return DuckDBToolResult::error("Sadhana manager not initialized");
+            return ToolResult::error("Sadhana manager not initialized");
 
         auto [id, id_str] = parse_id(params, "id");
-        if (id == 0) return DuckDBToolResult::error("Invalid sadhana ID");
+        if (id == 0) return ToolResult::error("Invalid sadhana ID");
 
         int max_turns = params.value("max_turns", -1);
-        if (max_turns < 0) return DuckDBToolResult::error("max_turns must be >= 0 (0 = use global default)");
+        if (max_turns < 0) return ToolResult::error("max_turns must be >= 0 (0 = use global default)");
 
         if (!sadhana_manager_->set_max_turns(id, max_turns))
-            return DuckDBToolResult::error("Failed to set max_turns for sadhana " + std::to_string(id));
+            return ToolResult::error("Failed to set max_turns for sadhana " + std::to_string(id));
 
         std::string msg = max_turns == 0
             ? "Reset max_turns to global default for sadhana " + std::to_string(id)
             : "Set max_turns to " + std::to_string(max_turns) + " for sadhana " + std::to_string(id);
-        return DuckDBToolResult::ok(msg, {{"id", id}, {"max_turns", max_turns}});
+        return ToolResult::ok(msg, {{"id", id}, {"max_turns", max_turns}});
     }
 
-    DuckDBToolResult tool_sadhana_checkpoint(const json& params) {
+    ToolResult tool_sadhana_checkpoint(const json& params) {
         if (!sadhana_manager_)
-            return DuckDBToolResult::error("Sadhana manager not initialized");
+            return ToolResult::error("Sadhana manager not initialized");
 
         auto [id, id_str] = parse_id(params, "id");
-        if (id == 0) return DuckDBToolResult::error("Invalid sadhana ID");
+        if (id == 0) return ToolResult::error("Invalid sadhana ID");
 
         std::string status  = params.value("status", "progressed");
         std::string summary = params.value("summary", "");
-        if (summary.empty()) return DuckDBToolResult::error("summary is required");
+        if (summary.empty()) return ToolResult::error("summary is required");
 
         if (!sadhana_manager_->checkpoint(id, status, summary))
-            return DuckDBToolResult::error("Checkpoint failed for sadhana " + std::to_string(id));
+            return ToolResult::error("Checkpoint failed for sadhana " + std::to_string(id));
 
-        return DuckDBToolResult::ok("Checkpoint [" + status + "] for sadhana " + std::to_string(id),
+        return ToolResult::ok("Checkpoint [" + status + "] for sadhana " + std::to_string(id),
             {{"id", id}, {"status", status}, {"summary", summary}});
     }
 
@@ -237,9 +237,9 @@
 // State is tracked via chitta-field events; sadhanas handle execution.
 // ═══════════════════════════════════════════════════════════════════════
 
-    DuckDBToolResult tool_dream_cancel(const json& params) {
+    ToolResult tool_dream_cancel(const json& params) {
         if (!params.contains("id"))
-            return DuckDBToolResult::error("id is required");
+            return ToolResult::error("id is required");
 
         int64_t dream_id = params["id"].is_string()
             ? std::stoll(params["id"].get<std::string>())
@@ -247,13 +247,13 @@
 
         field_store_->emit_event("dream", "cancelled", std::to_string(dream_id), "");
 
-        return DuckDBToolResult::ok("Cancelled dream #" + std::to_string(dream_id),
+        return ToolResult::ok("Cancelled dream #" + std::to_string(dream_id),
             {{"dream_id", dream_id}, {"status", "cancelled"}});
     }
 
-    DuckDBToolResult tool_dream_force_woke(const json& params) {
+    ToolResult tool_dream_force_woke(const json& params) {
         if (!params.contains("id"))
-            return DuckDBToolResult::error("id is required");
+            return ToolResult::error("id is required");
 
         int64_t dream_id = params["id"].is_string()
             ? std::stoll(params["id"].get<std::string>())
@@ -261,17 +261,17 @@
 
         field_store_->emit_event("dream", "force_woke", std::to_string(dream_id), "[force-woke]");
 
-        return DuckDBToolResult::ok("Force-woke dream #" + std::to_string(dream_id),
+        return ToolResult::ok("Force-woke dream #" + std::to_string(dream_id),
             {{"dream_id", dream_id}, {"status", "woke"}});
     }
 
-    DuckDBToolResult tool_dream_start(const json& params) {
+    ToolResult tool_dream_start(const json& params) {
         if (!sadhana_manager_)
-            return DuckDBToolResult::error("Sadhana manager not initialized");
+            return ToolResult::error("Sadhana manager not initialized");
         if (subconscious_) subconscious_->notify_query();
 
         std::string topic = params.value("topic", "");
-        if (topic.empty()) return DuckDBToolResult::error("Topic is required");
+        if (topic.empty()) return ToolResult::error("Topic is required");
 
         std::string realm          = params.value("realm", "brahman");
         std::string publish_path   = params.value("publish_path", "");
@@ -286,10 +286,10 @@
             goal, brain_provider, brain_model, 0, realm, goal_dsl);
 
         if (sadhana_id == 0)
-            return DuckDBToolResult::error("Failed to create dream sadhana");
+            return ToolResult::error("Failed to create dream sadhana");
 
         if (!sadhana_manager_->start(sadhana_id)) {
-            return DuckDBToolResult::error(
+            return ToolResult::error(
                 "Created dream sadhana " + std::to_string(sadhana_id) + " but failed to start");
         }
 
@@ -304,14 +304,14 @@
             {"topic",      topic},
             {"status",     "dreaming"},
         };
-        return DuckDBToolResult::ok(
+        return ToolResult::ok(
             "Dream started: " + topic + " (sadhana #" + std::to_string(sadhana_id) + ")",
             result);
     }
 
-    DuckDBToolResult tool_dream_wander(const json& params) {
+    ToolResult tool_dream_wander(const json& params) {
         if (!sadhana_manager_)
-            return DuckDBToolResult::error("Sadhana manager not initialized");
+            return ToolResult::error("Sadhana manager not initialized");
         if (subconscious_) subconscious_->notify_query();
 
         std::string realm        = params.value("realm", "brahman");
@@ -371,7 +371,7 @@
         return tool_dream_start(start_params);
     }
 
-    DuckDBToolResult tool_dream_list(const json& params) {
+    ToolResult tool_dream_list(const json& params) {
         if (subconscious_) subconscious_->notify_query();
 
         size_t limit      = static_cast<size_t>(params.value("limit", 10));
@@ -392,15 +392,15 @@
             if (dreams.size() >= limit) break;
         }
 
-        return DuckDBToolResult::ok("Found " + std::to_string(dreams.size()) + " dream(s)",
+        return ToolResult::ok("Found " + std::to_string(dreams.size()) + " dream(s)",
             {{"dreams", dreams}, {"count", dreams.size()}});
     }
 
-    DuckDBToolResult tool_dream_status(const json& params) {
+    ToolResult tool_dream_status(const json& params) {
         if (subconscious_) subconscious_->notify_query();
 
         if (!params.contains("id"))
-            return DuckDBToolResult::error("id is required");
+            return ToolResult::error("id is required");
 
         int64_t dream_id = params["id"].is_string()
             ? std::stoll(params["id"].get<std::string>())
@@ -417,13 +417,13 @@
             }
         }
 
-        return DuckDBToolResult::ok("Dream/sadhana #" + std::to_string(dream_id), dream);
+        return ToolResult::ok("Dream/sadhana #" + std::to_string(dream_id), dream);
     }
 
-    DuckDBToolResult tool_impl_start(const json& params) {
+    ToolResult tool_impl_start(const json& params) {
         if (subconscious_) subconscious_->notify_query();
         if (!sadhana_manager_)
-            return DuckDBToolResult::error("Sadhana manager not available");
+            return ToolResult::error("Sadhana manager not available");
 
         std::string realm  = params.value("realm", std::string("brahman"));
         int interval       = params.value("interval_seconds", 86400);
@@ -443,10 +443,10 @@
         int64_t sadhana_id = sadhana_manager_->create(
             goal, "claude", "sonnet", interval, realm, goal_dsl, max_turns);
         if (!sadhana_id)
-            return DuckDBToolResult::error("Failed to create impl sadhana");
+            return ToolResult::error("Failed to create impl sadhana");
 
         if (!sadhana_manager_->start(sadhana_id))
-            return DuckDBToolResult::error("Failed to start impl sadhana");
+            return ToolResult::error("Failed to start impl sadhana");
 
         json result = {
             {"sadhana_id",       sadhana_id},
@@ -455,16 +455,16 @@
             {"interval_seconds", interval},
             {"repo",             repo},
         };
-        return DuckDBToolResult::ok(
+        return ToolResult::ok(
             "Impl sadhana #" + std::to_string(sadhana_id) +
             " started (daily, " + std::to_string(max_turns) + " turns/cycle)",
             result);
     }
 
-    DuckDBToolResult tool_think_wander(const json& params) {
+    ToolResult tool_think_wander(const json& params) {
         if (subconscious_) subconscious_->notify_query();
         if (!sadhana_manager_)
-            return DuckDBToolResult::error("Sadhana manager not available");
+            return ToolResult::error("Sadhana manager not available");
 
         std::string realm = params.value("realm", std::string("brahman"));
         json goal_dsl = {{"kind", "think"}};
@@ -473,12 +473,12 @@
         int64_t sadhana_id = sadhana_manager_->create(
             goal, "claude", "sonnet", 0, realm, goal_dsl, 10);
         if (!sadhana_id)
-            return DuckDBToolResult::error("Failed to create think sadhana");
+            return ToolResult::error("Failed to create think sadhana");
 
         if (!sadhana_manager_->start(sadhana_id))
-            return DuckDBToolResult::error("Failed to start think sadhana");
+            return ToolResult::error("Failed to start think sadhana");
 
-        return DuckDBToolResult::ok("Think sadhana #" + std::to_string(sadhana_id) + " started",
+        return ToolResult::ok("Think sadhana #" + std::to_string(sadhana_id) + " started",
             {{"sadhana_id", sadhana_id}, {"status", "thinking"}, {"realm", realm}});
     }
 
@@ -486,13 +486,13 @@
 // Anticipation tools
 // ═══════════════════════════════════════════════════════════════════════
 
-    DuckDBToolResult tool_anticipation_observe(const json& params) {
+    ToolResult tool_anticipation_observe(const json& params) {
         std::string context = params.value("context", "");
         std::string action  = params.value("action", "");
         std::string realm   = params.value("realm", "brahman");
 
         if (context.empty() || action.empty())
-            return DuckDBToolResult::error("context and action are required");
+            return ToolResult::error("context and action are required");
 
         field_store_->add_triplet(context, "anticipates", action);
 
@@ -500,17 +500,17 @@
         auto embedding = embed_text(text);
         uint64_t id = field_store_->remember("anticipation", realm, text, embedding, 0.7f, 0.001f);
 
-        return DuckDBToolResult::ok("Pattern recorded (id: " + std::to_string(id) + ")",
+        return ToolResult::ok("Pattern recorded (id: " + std::to_string(id) + ")",
             {{"id", std::to_string(id)}});
     }
 
-    DuckDBToolResult tool_anticipation_predict(const json& params) {
+    ToolResult tool_anticipation_predict(const json& params) {
         std::string context   = params.value("context", "");
         size_t limit          = static_cast<size_t>(params.value("limit", 5));
         float min_confidence  = params.value("min_confidence", 0.3f);
         std::string realm     = params.value("realm", "");
 
-        if (context.empty()) return DuckDBToolResult::error("context is required");
+        if (context.empty()) return ToolResult::error("context is required");
 
         // Query triplets for "anticipates" relationships from this context
         std::string triplets_raw = field_store_->query_subject(context);
@@ -551,18 +551,18 @@
 
         std::ostringstream ss;
         ss << "Predicted " << patterns.size() << " action(s) for context: " << context;
-        return DuckDBToolResult::ok(ss.str(), {{"patterns", patterns}});
+        return ToolResult::ok(ss.str(), {{"patterns", patterns}});
     }
 
-    DuckDBToolResult tool_anticipation_success(const json& params) {
+    ToolResult tool_anticipation_success(const json& params) {
         auto [id, id_str] = parse_id(params);
-        if (id <= 0) return DuckDBToolResult::error("id is required");
+        if (id <= 0) return ToolResult::error("id is required");
 
         field_store_->strengthen(static_cast<uint64_t>(id), 0.1f);
-        return DuckDBToolResult::ok("Pattern #" + id_str + " marked successful");
+        return ToolResult::ok("Pattern #" + id_str + " marked successful");
     }
 
-    DuckDBToolResult tool_anticipation_list(const json& params) {
+    ToolResult tool_anticipation_list(const json& params) {
         std::string realm = params.value("realm", "");
         size_t limit      = static_cast<size_t>(params.value("limit", 20));
         std::string sort_by = params.value("sort_by", "confidence");
@@ -597,10 +597,10 @@
             }
         }
 
-        return DuckDBToolResult::ok(ss.str(), {{"count", patterns.size()}, {"patterns", patterns}});
+        return ToolResult::ok(ss.str(), {{"count", patterns.size()}, {"patterns", patterns}});
     }
 
-    DuckDBToolResult tool_anticipation_filter(const json& params) {
+    ToolResult tool_anticipation_filter(const json& params) {
         std::string session_id = params.value("session_id", "");
         size_t max = static_cast<size_t>(params.value("max", 2));
 
@@ -618,19 +618,19 @@
         }
 
         if (candidates.empty()) {
-            return DuckDBToolResult::ok("No predictions pass the annoyance gate", {
+            return ToolResult::ok("No predictions pass the annoyance gate", {
                 {"session_id", session_id}, {"count", 0}, {"candidates", json::array()}
             });
         }
 
-        return DuckDBToolResult::ok(
+        return ToolResult::ok(
             std::to_string(candidates.size()) + " prediction(s) ready to surface",
             {{"session_id", session_id}, {"count", candidates.size()}, {"candidates", candidates}});
     }
 
-    DuckDBToolResult tool_anticipation_gate_status(const json& params) {
+    ToolResult tool_anticipation_gate_status(const json& params) {
         std::string session_id = params.value("session_id", "");
-        return DuckDBToolResult::ok("Annoyance gate status (chitta-field stub)", {
+        return ToolResult::ok("Annoyance gate status (chitta-field stub)", {
             {"session_id",       session_id},
             {"gate_open",        true},
             {"budget_remaining", 5},
@@ -639,9 +639,9 @@
         });
     }
 
-    DuckDBToolResult tool_anticipation_record_outcome(const json& params) {
+    ToolResult tool_anticipation_record_outcome(const json& params) {
         auto [candidate_id, candidate_str] = parse_id(params, "candidate_id");
-        if (candidate_id <= 0) return DuckDBToolResult::error("candidate_id is required");
+        if (candidate_id <= 0) return ToolResult::error("candidate_id is required");
 
         bool correct = params.value("correct", false);
 
@@ -654,7 +654,7 @@
         field_store_->emit_event("anticipation",
             correct ? "correct" : "incorrect", candidate_str, "");
 
-        return DuckDBToolResult::ok(
+        return ToolResult::ok(
             "Recorded outcome: " + std::string(correct ? "correct" : "incorrect") +
             " for candidate #" + candidate_str,
             {{"candidate_id", candidate_id}, {"outcome", correct ? "correct" : "incorrect"}});
@@ -664,14 +664,14 @@
 // Habit tools
 // ═══════════════════════════════════════════════════════════════════════
 
-    DuckDBToolResult tool_habit_observe(const json& params) {
+    ToolResult tool_habit_observe(const json& params) {
         std::string trigger  = params.value("trigger", "");
         std::string response = params.value("response", "");
         std::string realm    = params.value("realm", "brahman");
         static constexpr int MIN_OBSERVATIONS = 3;
 
         if (trigger.empty() || response.empty())
-            return DuckDBToolResult::error("trigger and response are required");
+            return ToolResult::error("trigger and response are required");
 
         // Always strengthen the triplet edge (tracks frequency as weight)
         field_store_->add_triplet(trigger, "triggers", response);
@@ -689,7 +689,7 @@
 
         // Only store a habit memory once the pair has been seen MIN_OBSERVATIONS times
         if (count < MIN_OBSERVATIONS) {
-            return DuckDBToolResult::ok(
+            return ToolResult::ok(
                 "Habit observed (" + std::to_string(count) + "/" +
                 std::to_string(MIN_OBSERVATIONS) + " before stored)",
                 {{"count", count}, {"threshold", MIN_OBSERVATIONS}});
@@ -699,17 +699,17 @@
         auto embedding = embed_text(text);
         uint64_t id = field_store_->remember("habit", realm, text, embedding, 0.7f, 0.001f);
 
-        return DuckDBToolResult::ok(
+        return ToolResult::ok(
             "Habit stored (id: " + std::to_string(id) + ", observations=" + std::to_string(count) + ")",
             {{"id", std::to_string(id)}, {"count", count}});
     }
 
-    DuckDBToolResult tool_habit_match(const json& params) {
+    ToolResult tool_habit_match(const json& params) {
         std::string context   = params.value("context", "");
         float min_strength    = params.value("min_strength", 0.3f);
         std::string realm     = params.value("realm", "");
 
-        if (context.empty()) return DuckDBToolResult::error("context is required");
+        if (context.empty()) return ToolResult::error("context is required");
 
         // Triplet query for "triggers" relationships
         std::string triplets_raw = field_store_->query_subject(context);
@@ -759,30 +759,30 @@
             }
         }
 
-        return DuckDBToolResult::ok(ss.str(), {{"habits", habits}});
+        return ToolResult::ok(ss.str(), {{"habits", habits}});
     }
 
-    DuckDBToolResult tool_habit_strengthen(const json& params) {
+    ToolResult tool_habit_strengthen(const json& params) {
         auto [id, id_str] = parse_id(params);
         float amount = params.value("amount", 0.1f);
-        if (id <= 0) return DuckDBToolResult::error("id is required");
+        if (id <= 0) return ToolResult::error("id is required");
 
         field_store_->strengthen(static_cast<uint64_t>(id), amount);
-        return DuckDBToolResult::ok(
+        return ToolResult::ok(
             "Habit #" + id_str + " strengthened by " + std::to_string(amount));
     }
 
-    DuckDBToolResult tool_habit_weaken(const json& params) {
+    ToolResult tool_habit_weaken(const json& params) {
         auto [id, id_str] = parse_id(params);
         float amount = params.value("amount", 0.05f);
-        if (id <= 0) return DuckDBToolResult::error("id is required");
+        if (id <= 0) return ToolResult::error("id is required");
 
         field_store_->weaken(static_cast<uint64_t>(id), amount);
-        return DuckDBToolResult::ok(
+        return ToolResult::ok(
             "Habit #" + id_str + " weakened by " + std::to_string(amount));
     }
 
-    DuckDBToolResult tool_habit_list(const json& params) {
+    ToolResult tool_habit_list(const json& params) {
         std::string realm   = params.value("realm", "");
         float min_strength  = params.value("min_strength", 0.0f);
         size_t limit        = static_cast<size_t>(params.value("limit", 20));
@@ -814,27 +814,27 @@
             }
         }
 
-        return DuckDBToolResult::ok(ss.str(), {{"count", habits.size()}, {"habits", habits}});
+        return ToolResult::ok(ss.str(), {{"count", habits.size()}, {"habits", habits}});
     }
 
 // ═══════════════════════════════════════════════════════════════════════
 // Profile tools
 // ═══════════════════════════════════════════════════════════════════════
 
-    DuckDBToolResult tool_profile_get(const json& params) {
+    ToolResult tool_profile_get(const json& params) {
         std::string user_id = params.value("user_id", "default");
         auto hits = field_store_->recall_keyword("profile " + user_id, 10);
         json profile_entries = hits_to_results_json(hits);
-        return DuckDBToolResult::ok("Profile entries for " + user_id,
+        return ToolResult::ok("Profile entries for " + user_id,
             {{"user_id", user_id}, {"entries", profile_entries}});
     }
 
-    DuckDBToolResult tool_profile_update(const json& params) {
+    ToolResult tool_profile_update(const json& params) {
         std::string user_id = params.value("user_id", "default");
         std::string field   = params.value("field", "");
         std::string value   = params.value("value", "");
 
-        if (field.empty()) return DuckDBToolResult::error("field is required");
+        if (field.empty()) return ToolResult::error("field is required");
 
         std::string content = "profile:" + field + "=" + value;
         auto embedding = embed_text("profile " + user_id + " " + field + " " + value);
@@ -842,11 +842,11 @@
 
         field_store_->add_triplet("profile:" + user_id, "has_" + field, value);
 
-        return DuckDBToolResult::ok("Profile updated for " + user_id,
+        return ToolResult::ok("Profile updated for " + user_id,
             {{"id", std::to_string(id)}, {"user_id", user_id}, {"field", field}, {"value", value}});
     }
 
-    DuckDBToolResult tool_profile_observe(const json& params) {
+    ToolResult tool_profile_observe(const json& params) {
         std::string observation_type = params.value("observation_type", "");
         std::string value            = params.value("value", "");
         std::string user_id          = params.value("user_id", "default");
@@ -855,7 +855,7 @@
         auto embedding = embed_text(content);
         uint64_t id = field_store_->remember("observation", "brahman", content, embedding, 0.7f, 0.01f);
 
-        return DuckDBToolResult::ok("Observation recorded #" + std::to_string(id),
+        return ToolResult::ok("Observation recorded #" + std::to_string(id),
             {{"id", std::to_string(id)}});
     }
 
@@ -863,13 +863,13 @@
 // Goal tools
 // ═══════════════════════════════════════════════════════════════════════
 
-    DuckDBToolResult tool_goal_set(const json& params) {
+    ToolResult tool_goal_set(const json& params) {
         std::string title       = params.value("title", "");
         std::string description = params.value("description", "");
         std::string deadline    = params.value("deadline", "");
         std::string realm       = params.value("realm", "brahman");
 
-        if (title.empty()) return DuckDBToolResult::error("title is required");
+        if (title.empty()) return ToolResult::error("title is required");
 
         std::string content = title;
         if (!description.empty()) content += ": " + description;
@@ -885,18 +885,18 @@
         auto embedding = embed_text(content);
         uint64_t id = field_store_->remember("goal", realm, content, embedding, 0.9f, 0.0f);
 
-        return DuckDBToolResult::ok("Goal set #" + std::to_string(id),
+        return ToolResult::ok("Goal set #" + std::to_string(id),
             {{"id", std::to_string(id)}, {"title", title}, {"realm", realm}});
     }
 
-    DuckDBToolResult tool_goal_get(const json& params) {
+    ToolResult tool_goal_get(const json& params) {
         auto [id, id_str] = parse_id(params);
-        if (id <= 0) return DuckDBToolResult::error("id is required");
+        if (id <= 0) return ToolResult::error("id is required");
 
         auto hits = field_store_->recall_by_kind("goal", 100);
         for (const auto& h : hits) {
             if (static_cast<int64_t>(h.memory_id) == id) {
-                return DuckDBToolResult::ok("Goal #" + id_str, {
+                return ToolResult::ok("Goal #" + id_str, {
                     {"id",         id_str},
                     {"content",    h.content},
                     {"confidence", h.confidence},
@@ -904,10 +904,10 @@
                 });
             }
         }
-        return DuckDBToolResult::error("Goal #" + id_str + " not found");
+        return ToolResult::error("Goal #" + id_str + " not found");
     }
 
-    DuckDBToolResult tool_goal_list(const json& params) {
+    ToolResult tool_goal_list(const json& params) {
         std::string realm = params.value("realm", "");
         size_t limit      = static_cast<size_t>(params.value("limit", 20));
 
@@ -924,13 +924,13 @@
             });
         }
 
-        return DuckDBToolResult::ok(std::to_string(goals.size()) + " goal(s)",
+        return ToolResult::ok(std::to_string(goals.size()) + " goal(s)",
             {{"goals", goals}, {"count", goals.size()}});
     }
 
-    DuckDBToolResult tool_goal_progress(const json& params) {
+    ToolResult tool_goal_progress(const json& params) {
         auto [id, id_str] = parse_id(params);
-        if (id <= 0) return DuckDBToolResult::error("id is required");
+        if (id <= 0) return ToolResult::error("id is required");
 
         std::string progress  = params.value("progress", "");
         std::string milestone = params.value("milestone", "");
@@ -941,20 +941,20 @@
         field_store_->emit_event("goal", "progress", id_str, payload);
         field_store_->strengthen(static_cast<uint64_t>(id), 0.05f);
 
-        return DuckDBToolResult::ok("Progress recorded for goal #" + id_str,
+        return ToolResult::ok("Progress recorded for goal #" + id_str,
             {{"id", id_str}, {"progress", progress}});
     }
 
-    DuckDBToolResult tool_goal_complete(const json& params) {
+    ToolResult tool_goal_complete(const json& params) {
         auto [id, id_str] = parse_id(params);
-        if (id <= 0) return DuckDBToolResult::error("id is required");
+        if (id <= 0) return ToolResult::error("id is required");
 
         std::string outcome = params.value("outcome", "");
         field_store_->emit_event("goal", "complete", id_str, outcome);
         field_store_->strengthen(static_cast<uint64_t>(id), 0.2f);
         field_store_->add_triplet(id_str, "status", "completed");
 
-        return DuckDBToolResult::ok("Goal #" + id_str + " completed",
+        return ToolResult::ok("Goal #" + id_str + " completed",
             {{"id", id_str}, {"outcome", outcome}});
     }
 
@@ -962,23 +962,23 @@
 // Calibration tools
 // ═══════════════════════════════════════════════════════════════════════
 
-    DuckDBToolResult tool_calibration_record(const json& params) {
+    ToolResult tool_calibration_record(const json& params) {
         std::string domain = params.value("domain", "");
         bool success       = params.value("success", true);
 
-        if (domain.empty()) return DuckDBToolResult::error("domain is required");
+        if (domain.empty()) return ToolResult::error("domain is required");
 
         field_store_->emit_event("calibration",
             success ? "success" : "failure", domain, "");
 
-        return DuckDBToolResult::ok(
+        return ToolResult::ok(
             "Calibration recorded: " + domain + " " + (success ? "success" : "failure"),
             {{"domain", domain}, {"success", success}});
     }
 
-    DuckDBToolResult tool_calibration_score(const json& params) {
+    ToolResult tool_calibration_score(const json& params) {
         std::string domain = params.value("domain", "");
-        if (domain.empty()) return DuckDBToolResult::error("domain is required");
+        if (domain.empty()) return ToolResult::error("domain is required");
 
         auto hits = field_store_->recall_keyword("calibration " + domain, 20);
 
@@ -1001,16 +1001,16 @@
         ss << "Calibration [" << domain << "]: "
            << std::fixed << std::setprecision(1) << (score * 100) << "% ("
            << successes << "/" << total << ")";
-        return DuckDBToolResult::ok(ss.str(), result);
+        return ToolResult::ok(ss.str(), result);
     }
 
 // ═══════════════════════════════════════════════════════════════════════
 // Narrative tools
 // ═══════════════════════════════════════════════════════════════════════
 
-    DuckDBToolResult tool_narrative_status(const json& params) {
+    ToolResult tool_narrative_status(const json& params) {
         std::string session_id = params.value("session_id", get_session_id());
-        return DuckDBToolResult::ok("Narrative status (chitta-field)", {
+        return ToolResult::ok("Narrative status (chitta-field)", {
             {"session_id", session_id},
             {"mode",       "work"},
             {"segment",    "active"},
@@ -1018,34 +1018,34 @@
         });
     }
 
-    DuckDBToolResult tool_narrative_log(const json& params) {
+    ToolResult tool_narrative_log(const json& params) {
         std::string session_id = params.value("session_id", get_session_id());
         std::string kind       = params.value("kind", "");
         std::string summary    = params.value("summary", "");
 
         if (kind.empty() || summary.empty())
-            return DuckDBToolResult::error("kind and summary are required");
+            return ToolResult::error("kind and summary are required");
 
         std::string payload = summary;
         if (params.contains("payload")) payload = params["payload"].dump();
 
         field_store_->emit_event("narrative", kind, session_id, payload);
 
-        return DuckDBToolResult::ok("Event logged, kind: " + kind, {
+        return ToolResult::ok("Event logged, kind: " + kind, {
             {"session_id", session_id},
             {"kind",       kind},
             {"mode",       "work"},
         });
     }
 
-    DuckDBToolResult tool_narrative_history(const json& params) {
+    ToolResult tool_narrative_history(const json& params) {
         std::string session_id = params.value("session_id", get_session_id());
         size_t limit           = static_cast<size_t>(params.value("limit", 20));
 
         auto hits = field_store_->recall_keyword("narrative " + session_id, limit);
         json segments = hits_to_results_json(hits);
 
-        return DuckDBToolResult::ok(
+        return ToolResult::ok(
             std::to_string(segments.size()) + " narrative event(s) for session " + session_id,
             {{"session_id", session_id}, {"count", segments.size()}, {"segments", segments}});
     }
@@ -1054,9 +1054,9 @@
 // Memory management tools (from memory.hpp, adapted for chitta-field)
 // ═══════════════════════════════════════════════════════════════════════
 
-    DuckDBToolResult tool_memory_history(const json& params) {
+    ToolResult tool_memory_history(const json& params) {
         auto [id, id_str] = parse_id(params);
-        if (id <= 0) return DuckDBToolResult::error("id is required");
+        if (id <= 0) return ToolResult::error("id is required");
 
         auto hits = field_store_->recall_by_kind("episode", 1);
         std::string content;
@@ -1070,19 +1070,19 @@
         json versions = json::array();
         versions.push_back({{"version", 1}, {"content", content}});
 
-        return DuckDBToolResult::ok("Memory #" + id_str + " history (chitta-field)",
+        return ToolResult::ok("Memory #" + id_str + " history (chitta-field)",
             {{"id", id_str}, {"versions", versions},
              {"note", "Version history is append-only in chitta-field"}});
     }
 
-    DuckDBToolResult tool_memory_revert(const json& params) {
-        return DuckDBToolResult::error(
+    ToolResult tool_memory_revert(const json& params) {
+        return ToolResult::error(
             "Version history not available in chitta-field backend");
     }
 
-    DuckDBToolResult tool_pin_memory(const json& params) {
+    ToolResult tool_pin_memory(const json& params) {
         auto [id, id_str] = parse_id(params);
-        if (id <= 0) return DuckDBToolResult::error("id is required");
+        if (id <= 0) return ToolResult::error("id is required");
 
         std::string reason = params.value("reason", "");
         field_store_->strengthen(static_cast<uint64_t>(id), 0.3f);
@@ -1090,34 +1090,34 @@
         if (!reason.empty())
             field_store_->add_triplet(id_str, "pin_reason", reason);
 
-        return DuckDBToolResult::ok("Memory #" + id_str + " pinned",
+        return ToolResult::ok("Memory #" + id_str + " pinned",
             {{"id", id_str}, {"reason", reason}});
     }
 
-    DuckDBToolResult tool_unpin_memory(const json& params) {
+    ToolResult tool_unpin_memory(const json& params) {
         auto [id, id_str] = parse_id(params);
-        if (id <= 0) return DuckDBToolResult::error("id is required");
+        if (id <= 0) return ToolResult::error("id is required");
 
         field_store_->weaken(static_cast<uint64_t>(id), 0.1f);
         field_store_->add_triplet(id_str, "pinned", "false");
 
-        return DuckDBToolResult::ok("Memory #" + id_str + " unpinned", {{"id", id_str}});
+        return ToolResult::ok("Memory #" + id_str + " unpinned", {{"id", id_str}});
     }
 
-    DuckDBToolResult tool_list_pinned(const json& params) {
+    ToolResult tool_list_pinned(const json& params) {
         std::string realm = params.value("realm", "");
         size_t limit      = static_cast<size_t>(params.value("limit", 20));
 
         auto hits = field_store_->recall_keyword("pinned", limit);
         json pinned = hits_to_results_json(hits);
 
-        return DuckDBToolResult::ok(std::to_string(pinned.size()) + " pinned memory(ies)",
+        return ToolResult::ok(std::to_string(pinned.size()) + " pinned memory(ies)",
             {{"pinned", pinned}, {"count", pinned.size()}});
     }
 
-    DuckDBToolResult tool_memory_lock(const json& params) {
+    ToolResult tool_memory_lock(const json& params) {
         auto [id, id_str] = parse_id(params);
-        if (id <= 0) return DuckDBToolResult::error("id is required");
+        if (id <= 0) return ToolResult::error("id is required");
 
         std::string holder_id   = params.value("holder_id", "");
         std::string holder_type = params.value("holder_type", "");
@@ -1130,38 +1130,38 @@
         };
         field_store_->emit_event("lock", "acquire", id_str, payload.dump());
 
-        return DuckDBToolResult::ok("Memory #" + id_str + " locked",
+        return ToolResult::ok("Memory #" + id_str + " locked",
             {{"id", id_str}, {"holder_id", holder_id}, {"status", "locked"}});
     }
 
-    DuckDBToolResult tool_memory_unlock(const json& params) {
+    ToolResult tool_memory_unlock(const json& params) {
         auto [id, id_str] = parse_id(params);
-        if (id <= 0) return DuckDBToolResult::error("id is required");
+        if (id <= 0) return ToolResult::error("id is required");
 
         std::string holder_id = params.value("holder_id", "");
         field_store_->emit_event("lock", "release", id_str, holder_id);
 
-        return DuckDBToolResult::ok("Memory #" + id_str + " unlocked",
+        return ToolResult::ok("Memory #" + id_str + " unlocked",
             {{"id", id_str}, {"status", "unlocked"}});
     }
 
-    DuckDBToolResult tool_memory_lock_status(const json& params) {
+    ToolResult tool_memory_lock_status(const json& params) {
         auto [id, id_str] = parse_id(params);
-        if (id <= 0) return DuckDBToolResult::error("id is required");
+        if (id <= 0) return ToolResult::error("id is required");
 
-        return DuckDBToolResult::ok("Lock status for memory #" + id_str,
+        return ToolResult::ok("Lock status for memory #" + id_str,
             {{"id", id_str}, {"locked", false},
              {"note", "Lock state not persisted in chitta-field backend"}});
     }
 
-    DuckDBToolResult tool_propose_change(const json& params) {
+    ToolResult tool_propose_change(const json& params) {
         auto [id, id_str] = parse_id(params);
-        if (id <= 0) return DuckDBToolResult::error("id is required");
+        if (id <= 0) return ToolResult::error("id is required");
 
         std::string content     = params.value("content", "");
         std::string proposed_by = params.value("proposed_by", "");
 
-        if (content.empty()) return DuckDBToolResult::error("content is required");
+        if (content.empty()) return ToolResult::error("content is required");
 
         std::string text = "change to " + id_str + ": " + content;
         if (!proposed_by.empty()) text += " (by " + proposed_by + ")";
@@ -1170,21 +1170,21 @@
         uint64_t proposal_id = field_store_->remember(
             "proposal", "brahman", text, embedding, 0.7f, 0.001f);
 
-        return DuckDBToolResult::ok("Proposal #" + std::to_string(proposal_id) + " created",
+        return ToolResult::ok("Proposal #" + std::to_string(proposal_id) + " created",
             {{"merge_id", std::to_string(proposal_id)}, {"target_id", id_str}});
     }
 
-    DuckDBToolResult tool_list_merge_queue(const json& params) {
+    ToolResult tool_list_merge_queue(const json& params) {
         size_t limit = static_cast<size_t>(params.value("limit", 20));
         auto hits = field_store_->recall_by_kind("proposal", limit);
         json queue = hits_to_results_json(hits);
-        return DuckDBToolResult::ok(std::to_string(queue.size()) + " proposal(s) in queue",
+        return ToolResult::ok(std::to_string(queue.size()) + " proposal(s) in queue",
             {{"queue", queue}, {"count", queue.size()}});
     }
 
-    DuckDBToolResult tool_resolve_merge(const json& params) {
+    ToolResult tool_resolve_merge(const json& params) {
         auto [merge_id, merge_str] = parse_id(params, "merge_id");
-        if (merge_id <= 0) return DuckDBToolResult::error("merge_id is required");
+        if (merge_id <= 0) return ToolResult::error("merge_id is required");
 
         std::string status     = params.value("status", "");
         std::string resolution = params.value("resolution", "");
@@ -1197,7 +1197,7 @@
             field_store_->weaken(static_cast<uint64_t>(merge_id), 0.2f);
         }
 
-        return DuckDBToolResult::ok("Proposal #" + merge_str + " " + status,
+        return ToolResult::ok("Proposal #" + merge_str + " " + status,
             {{"merge_id", merge_str}, {"status", status}});
     }
 
@@ -1205,7 +1205,7 @@
 // File timeline tools
 // ═══════════════════════════════════════════════════════════════════════
 
-    DuckDBToolResult tool_file_timeline(const json& params) {
+    ToolResult tool_file_timeline(const json& params) {
         std::string query      = params.value("query", "");
         std::string session_id = params.value("session_id", "");
         std::string path       = params.value("path", "");
@@ -1217,39 +1217,39 @@
         auto hits = field_store_->recall_keyword(search, limit);
         json events = hits_to_results_json(hits);
 
-        return DuckDBToolResult::ok(std::to_string(events.size()) + " file event(s) found",
+        return ToolResult::ok(std::to_string(events.size()) + " file event(s) found",
             {{"events", events}, {"count", events.size()}});
     }
 
-    DuckDBToolResult tool_file_at_time(const json&) {
-        return DuckDBToolResult::error(
+    ToolResult tool_file_at_time(const json&) {
+        return ToolResult::error(
             "File time machine not available in chitta-field backend");
     }
 
-    DuckDBToolResult tool_file_restore(const json&) {
-        return DuckDBToolResult::error(
+    ToolResult tool_file_restore(const json&) {
+        return ToolResult::error(
             "File restore not available in chitta-field backend");
     }
 
-    DuckDBToolResult tool_file_index_session(const json& params) {
+    ToolResult tool_file_index_session(const json& params) {
         std::string session_id = params.value("session_id", "");
         field_store_->emit_event("file_index", "session", session_id, "{}");
-        return DuckDBToolResult::ok("File index session event emitted",
+        return ToolResult::ok("File index session event emitted",
             {{"session_id", session_id}, {"status", "ok"}});
     }
 
-    DuckDBToolResult tool_file_index_all(const json& params) {
+    ToolResult tool_file_index_all(const json& params) {
         field_store_->emit_event("file_index", "all", "", "{}");
-        return DuckDBToolResult::ok("File index all event emitted", {{"status", "ok"}});
+        return ToolResult::ok("File index all event emitted", {{"status", "ok"}});
     }
 
 // ═══════════════════════════════════════════════════════════════════════
 // Learning and exposure tools
 // ═══════════════════════════════════════════════════════════════════════
 
-    DuckDBToolResult tool_learn_outcome(const json& params) {
+    ToolResult tool_learn_outcome(const json& params) {
         auto [memory_id, memory_str] = parse_id(params, "memory_id");
-        if (memory_id <= 0) return DuckDBToolResult::error("memory_id is required");
+        if (memory_id <= 0) return ToolResult::error("memory_id is required");
 
         std::string outcome = params.value("outcome", "");
         std::string context = params.value("context", "");
@@ -1271,11 +1271,11 @@
             field_store_->route_feedback(episode_id, reward);
         }
 
-        return DuckDBToolResult::ok("Outcome recorded for memory #" + memory_str,
+        return ToolResult::ok("Outcome recorded for memory #" + memory_str,
             {{"memory_id", memory_str}, {"outcome", outcome}, {"reward", reward}});
     }
 
-    DuckDBToolResult tool_log_exposure(const json& params) {
+    ToolResult tool_log_exposure(const json& params) {
         std::string session_id = params.value("session_id", "");
         std::string turn_id    = params.value("turn_id", "");
         std::string hook_type  = params.value("hook_type", "");
@@ -1288,22 +1288,22 @@
 
         field_store_->emit_event("exposure", hook_type, session_id, payload.dump());
 
-        return DuckDBToolResult::ok("Exposure logged for session " + session_id,
+        return ToolResult::ok("Exposure logged for session " + session_id,
             {{"session_id", session_id}, {"hook_type", hook_type}});
     }
 
-    DuckDBToolResult tool_get_sus_metrics(const json&) {
-        return DuckDBToolResult::ok("SUS metrics (chitta-field stub)", {
+    ToolResult tool_get_sus_metrics(const json&) {
+        return ToolResult::ok("SUS metrics (chitta-field stub)", {
             {"exposures", 0},
             {"note",      "SUS metrics not tracked in chitta-field"},
         });
     }
 
-    DuckDBToolResult tool_episode_cluster_status(const json& params) {
+    ToolResult tool_episode_cluster_status(const json& params) {
         float similarity_threshold = params.value("similarity_threshold", 0.8f);
         int min_occurrences        = params.value("min_occurrences", 2);
 
-        return DuckDBToolResult::ok("Episode cluster status (chitta-field stub)", {
+        return ToolResult::ok("Episode cluster status (chitta-field stub)", {
             {"clusters",            0},
             {"similarity_threshold", similarity_threshold},
             {"min_occurrences",      min_occurrences},
@@ -1315,9 +1315,9 @@
 // Insight and aspect tools
 // ═══════════════════════════════════════════════════════════════════════
 
-    DuckDBToolResult tool_insight_promote(const json& params) {
+    ToolResult tool_insight_promote(const json& params) {
         auto [id, id_str] = parse_id(params);
-        if (id <= 0) return DuckDBToolResult::error("id is required");
+        if (id <= 0) return ToolResult::error("id is required");
 
         std::string reason = params.value("reason", "");
         field_store_->strengthen(static_cast<uint64_t>(id), 0.5f);
@@ -1325,11 +1325,11 @@
         if (!reason.empty())
             field_store_->add_triplet(id_str, "promotion_reason", reason);
 
-        return DuckDBToolResult::ok("Insight #" + id_str + " promoted to global",
+        return ToolResult::ok("Insight #" + id_str + " promoted to global",
             {{"id", id_str}, {"reason", reason}});
     }
 
-    DuckDBToolResult tool_insight_global(const json& params) {
+    ToolResult tool_insight_global(const json& params) {
         size_t limit   = static_cast<size_t>(params.value("limit", 20));
         std::string tag = params.value("tag", "");
 
@@ -1347,20 +1347,20 @@
             });
         }
 
-        return DuckDBToolResult::ok(std::to_string(insights.size()) + " global insight(s)",
+        return ToolResult::ok(std::to_string(insights.size()) + " global insight(s)",
             {{"insights", insights}, {"count", insights.size()}});
     }
 
-    DuckDBToolResult tool_list_by_aspect(const json& params) {
+    ToolResult tool_list_by_aspect(const json& params) {
         std::string aspect = params.value("aspect", "");
         size_t limit       = static_cast<size_t>(params.value("limit", 20));
         float min_confidence = params.value("min_confidence", 0.0f);
 
-        if (aspect.empty()) return DuckDBToolResult::error("aspect is required");
+        if (aspect.empty()) return ToolResult::error("aspect is required");
 
         auto it = ASPECT_KINDS.find(aspect);
         if (it == ASPECT_KINDS.end())
-            return DuckDBToolResult::error("Unknown aspect: " + aspect);
+            return ToolResult::error("Unknown aspect: " + aspect);
 
         json results = json::array();
         for (const auto& kind : it->second) {
@@ -1384,18 +1384,18 @@
         if (results.size() > limit)
             results.erase(results.begin() + static_cast<int>(limit), results.end());
 
-        return DuckDBToolResult::ok(
+        return ToolResult::ok(
             std::to_string(results.size()) + " result(s) for aspect '" + aspect + "'",
             {{"aspect", aspect}, {"results", results}, {"count", results.size()}});
     }
 
-    DuckDBToolResult tool_list_aspects(const json&) {
+    ToolResult tool_list_aspects(const json&) {
         json aspects = json::array();
         for (const auto& [key, _] : ASPECT_KINDS) {
             aspects.push_back(key);
         }
         std::sort(aspects.begin(), aspects.end());
-        return DuckDBToolResult::ok(std::to_string(aspects.size()) + " aspect(s) available",
+        return ToolResult::ok(std::to_string(aspects.size()) + " aspect(s) available",
             {{"aspects", aspects}});
     }
 
@@ -1403,12 +1403,12 @@
 // Claims, policies, entities, relationship tools
 // ═══════════════════════════════════════════════════════════════════════
 
-    DuckDBToolResult tool_query_claims(const json& params) {
+    ToolResult tool_query_claims(const json& params) {
         std::string subject   = params.value("subject", "");
         std::string predicate = params.value("predicate", "");
         size_t limit          = static_cast<size_t>(params.value("limit", 20));
 
-        if (subject.empty()) return DuckDBToolResult::error("subject is required");
+        if (subject.empty()) return ToolResult::error("subject is required");
 
         std::string triplets_raw = field_store_->query_subject(subject);
         json triplets_json;
@@ -1427,37 +1427,171 @@
             if (claims.size() >= limit) break;
         }
 
-        return DuckDBToolResult::ok(
+        return ToolResult::ok(
             std::to_string(claims.size()) + " claim(s) for subject '" + subject + "'",
             {{"claims", claims}, {"count", claims.size()}});
     }
 
-    DuckDBToolResult tool_get_policies(const json& params) {
+    ToolResult tool_get_policies(const json& params) {
         size_t limit = static_cast<size_t>(params.value("limit", 20));
         auto hits    = field_store_->recall_by_kind("policy", limit);
         json policies = hits_to_results_json(hits);
-        return DuckDBToolResult::ok(std::to_string(policies.size()) + " policy(ies)",
+        return ToolResult::ok(std::to_string(policies.size()) + " policy(ies)",
             {{"policies", policies}, {"count", policies.size()}});
     }
 
-    DuckDBToolResult tool_get_entities(const json& params) {
+    ToolResult tool_get_entities(const json& params) {
         std::string type = params.value("type", "");
         size_t limit     = static_cast<size_t>(params.value("limit", 20));
 
         auto hits = field_store_->recall_by_kind(type.empty() ? "entity" : type, limit);
         json entities = hits_to_results_json(hits);
-        return DuckDBToolResult::ok(std::to_string(entities.size()) + " entit(y/ies)",
+        return ToolResult::ok(std::to_string(entities.size()) + " entit(y/ies)",
             {{"entities", entities}, {"count", entities.size()}});
     }
 
-    DuckDBToolResult tool_get_relationship_events(const json& params) {
+    ToolResult tool_get_relationship_events(const json& params) {
         std::string event_type = params.value("event_type", "");
         size_t limit           = static_cast<size_t>(params.value("limit", 20));
 
         std::string search = "relationship " + event_type;
         auto hits = field_store_->recall_keyword(search, limit);
         json events = hits_to_results_json(hits);
-        return DuckDBToolResult::ok(std::to_string(events.size()) + " relationship event(s)",
+        return ToolResult::ok(std::to_string(events.size()) + " relationship event(s)",
             {{"events", events}, {"count", events.size()}});
+    }
+
+// ═══════════════════════════════════════════════════════════════════════
+// Tier 1: Ingest source
+// ═══════════════════════════════════════════════════════════════════════
+
+    ToolResult tool_ingest_source(const json& params) {
+        if (!field_store_) return ToolResult::error("Field store unavailable");
+
+        std::string source = params.value("source", "");
+        if (source.empty()) return ToolResult::error("source is required");
+
+        std::string realm = params.value("realm", "brahman");
+
+        IngestConfig config;
+        if (params.contains("model") && params["model"].is_string())
+            config.model = params["model"].get<std::string>();
+        if (params.contains("max_chunks") && params["max_chunks"].is_number_integer())
+            config.max_chunks = params["max_chunks"].get<int>();
+        config.verbose = true;
+
+        SourceType type = SourceType::Auto;
+        std::string type_str = params.value("type", "auto");
+        if (type_str == "url") type = SourceType::Url;
+        else if (type_str == "file") type = SourceType::File;
+        else if (type_str == "directory") type = SourceType::Directory;
+
+        EmbedFn embedder = [this](const std::string& text) { return embed_text(text); };
+        Ingester ingester(*field_store_, embedder, config);
+
+        auto result = ingester.ingest(source, realm, type);
+
+        if (!result.success) return ToolResult::error(result.error);
+
+        return ToolResult::ok(
+            "Ingested " + std::to_string(result.learnings_stored) + " learnings from " + source,
+            {{"source", source},
+             {"realm", realm},
+             {"chunks_processed", result.chunks_processed},
+             {"learnings_stored", result.learnings_stored},
+             {"learnings_deduped", result.learnings_deduped},
+             {"triplets_created", result.triplets_created}});
+    }
+
+// ═══════════════════════════════════════════════════════════════════════
+// Tier 2: Wiki export
+// ═══════════════════════════════════════════════════════════════════════
+
+    ToolResult tool_wiki_export(const json& params) {
+        if (!field_store_) return ToolResult::error("Field store unavailable");
+
+        WikiExportConfig config;
+        if (params.contains("output_dir") && params["output_dir"].is_string())
+            config.output_dir = params["output_dir"].get<std::string>();
+        if (params.contains("realm") && params["realm"].is_string())
+            config.realm = params["realm"].get<std::string>();
+        if (params.contains("max_memories") && params["max_memories"].is_number_integer())
+            config.max_memories = params["max_memories"].get<size_t>();
+
+        WikiExporter exporter(*field_store_, config);
+        auto result = exporter.export_all();
+
+        if (!result.success) return ToolResult::error(result.error);
+
+        return ToolResult::ok(
+            "Exported " + std::to_string(result.memories_exported) + " memories to wiki",
+            {{"pages_written", result.pages_written},
+             {"memories_exported", result.memories_exported},
+             {"backlinks_created", result.backlinks_created},
+             {"output_dir", config.output_dir}});
+    }
+
+// ═══════════════════════════════════════════════════════════════════════
+// Tier 3: Health-check sadhana
+// ═══════════════════════════════════════════════════════════════════════
+
+    ToolResult tool_health_check_start(const json& params) {
+        if (!sadhana_manager_)
+            return ToolResult::error("Sadhana manager not initialized");
+
+        int interval = params.value("interval_seconds", 3600);
+        std::string realm = params.value("realm", "brahman");
+        int max_turns = params.value("max_turns", 0);
+
+        json goal_dsl = {
+            {"kind", "health_check"},
+            {"checks", json::array({"memory_count", "dedup_ratio", "embedding_coverage",
+                                     "stale_memories", "triplet_density"})}
+        };
+
+        std::string goal = "[health] Monitor memory quality in realm=" + realm;
+
+        int64_t id = sadhana_manager_->create(
+            goal, "claude", "sonnet", interval, realm, goal_dsl, max_turns);
+
+        if (id == 0) return ToolResult::error("Failed to create health-check sadhana");
+
+        if (!sadhana_manager_->start(id))
+            return ToolResult::error("Created sadhana " + std::to_string(id) + " but failed to start");
+
+        return ToolResult::ok("Started health-check sadhana " + std::to_string(id),
+            {{"id", id}, {"state", "running"}, {"interval_seconds", interval}, {"realm", realm}});
+    }
+
+// ═══════════════════════════════════════════════════════════════════════
+// Tier 4: Export training pairs
+// ═══════════════════════════════════════════════════════════════════════
+
+    ToolResult tool_export_training_pairs(const json& params) {
+        if (!field_store_) return ToolResult::error("Field store unavailable");
+
+        EmbeddingExportConfig config;
+        if (params.contains("output_path") && params["output_path"].is_string())
+            config.output_path = params["output_path"].get<std::string>();
+        if (params.contains("realm") && params["realm"].is_string())
+            config.realm = params["realm"].get<std::string>();
+        if (params.contains("max_pairs") && params["max_pairs"].is_number_integer())
+            config.max_pairs = params["max_pairs"].get<size_t>();
+        if (params.contains("min_confidence") && params["min_confidence"].is_number())
+            config.min_confidence = params["min_confidence"].get<float>();
+        if (params.contains("include_negatives") && params["include_negatives"].is_boolean())
+            config.include_negatives = params["include_negatives"].get<bool>();
+
+        EmbedFn embedder = [this](const std::string& text) { return embed_text(text); };
+        EmbeddingExporter exporter(*field_store_, embedder, config);
+        auto result = exporter.export_pairs();
+
+        if (!result.success) return ToolResult::error(result.error);
+
+        return ToolResult::ok(
+            "Exported " + std::to_string(result.pairs_exported) + " training pairs",
+            {{"pairs_exported", result.pairs_exported},
+             {"negatives_generated", result.negatives_generated},
+             {"output_path", result.output_path}});
     }
 

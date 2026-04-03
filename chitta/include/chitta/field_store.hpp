@@ -856,7 +856,7 @@ public:
         return std::string(buf.data(), written);
     }
 
-    // ── DuckDB removal: new query/management methods ────────────────────────
+    // ── Query and management methods ────────────────────────────────────────
 
     std::string list_code_files(const std::string& project = "") {
         std::vector<uint8_t> buf(131072);

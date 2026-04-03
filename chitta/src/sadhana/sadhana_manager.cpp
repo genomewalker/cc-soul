@@ -1,5 +1,5 @@
 // SadhanaManager: Fully Agentic Autonomous Agent System implementation
-// Backed by chitta-field task/event APIs (no DuckDB SQL).
+// Backed by chitta-field task/event APIs.
 
 #include <chitta/sadhana/sadhana_manager.hpp>
 #include <iostream>

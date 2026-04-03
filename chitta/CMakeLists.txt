@@ -420,6 +420,9 @@ add_executable(chittad
     src/transcript_parser.cpp
     src/ssl_parser.cpp
     src/native_distiller.cpp
+    src/ingester.cpp
+    src/wiki_export.cpp
+    src/embedding_export.cpp
     src/temporal.cpp
     src/query_intent.cpp
     src/sadhana/brain_provider.cpp

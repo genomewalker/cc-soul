@@ -705,8 +705,7 @@ bool Subconscious::time_for_belief_maintenance() const {
 }
 
 size_t Subconscious::flush_embedding_queue() {
-    // Background embedding no longer uses DuckDB store.
-    // Queue is kept for API compatibility but returns 0.
+    // Queue kept for API compatibility but returns 0.
     std::lock_guard<std::mutex> lock(embedding_queue_mutex_);
     embedding_queue_.clear();
     return 0;

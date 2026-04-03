@@ -1,9 +1,9 @@
 // Included into FieldRpcHandler class body — not a standalone header.
 // Three-lens structured recall and natural language insight query (ask).
 
-    DuckDBToolResult tool_structured_recall(const json& params) {
+    ToolResult tool_structured_recall(const json& params) {
         std::string query = params.value("query", "");
-        if (query.empty()) return DuckDBToolResult::error("query is required");
+        if (query.empty()) return ToolResult::error("query is required");
 
         size_t limit      = static_cast<size_t>(params.value("limit", 15));
         std::string realm = params.value("realm", "");
@@ -71,16 +71,16 @@
             ss << "[" << pct << "% " << r.value("lens","?") << "] "
                << r.value("text","").substr(0, 500) << "\n";
         }
-        return DuckDBToolResult::ok(ss.str(), {{"results", merged}, {"realm", realm}});
+        return ToolResult::ok(ss.str(), {{"results", merged}, {"realm", realm}});
     }
 
     // ── ask: natural language insight query ───────────────────────────────────
     // Takes a natural language question, retrieves relevant memories via
     // structured recall, and synthesizes a grounded answer from them.
     // Answer is formatted for direct use by the agent without further LLM calls.
-    DuckDBToolResult tool_ask(const json& params) {
+    ToolResult tool_ask(const json& params) {
         std::string question = params.value("question", params.value("query", ""));
-        if (question.empty()) return DuckDBToolResult::error("question is required");
+        if (question.empty()) return ToolResult::error("question is required");
 
         size_t limit      = static_cast<size_t>(params.value("limit", 20));
         std::string realm = params.value("realm", "");
@@ -92,7 +92,7 @@
 
         const auto& results = sr.structured["results"];
         if (results.empty()) {
-            return DuckDBToolResult::ok(
+            return ToolResult::ok(
                 "No relevant memories found for: " + question,
                 {{"answer", ""}, {"memories_used", 0}}
             );
@@ -143,5 +143,5 @@
         out["memories_used"] = (int)results.size();
         out["results"]       = results;
         out["question"]      = question;
-        return DuckDBToolResult::ok(answer.str(), out);
+        return ToolResult::ok(answer.str(), out);
     }

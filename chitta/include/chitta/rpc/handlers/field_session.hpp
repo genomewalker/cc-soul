@@ -1,12 +1,12 @@
 // Included into FieldRpcHandler class body — not a standalone header
 
-    DuckDBToolResult tool_transcript_register(const json& params) {
+    ToolResult tool_transcript_register(const json& params) {
         std::string session_id      = params.value("session_id", "");
         std::string transcript_path = params.value("transcript_path", "");
         std::string realm           = params.value("realm", "default");
 
-        if (session_id.empty())      return DuckDBToolResult::error("session_id is required");
-        if (transcript_path.empty()) return DuckDBToolResult::error("transcript_path is required");
+        if (session_id.empty())      return ToolResult::error("session_id is required");
+        if (transcript_path.empty()) return ToolResult::error("transcript_path is required");
 
         json payload = {
             {"path",      transcript_path},
@@ -16,9 +16,9 @@
         uint64_t event_id = field_store_->emit_event(
             "transcript", "register", session_id, payload.dump());
 
-        if (event_id == 0) return DuckDBToolResult::error("Failed to register transcript");
+        if (event_id == 0) return ToolResult::error("Failed to register transcript");
 
-        return DuckDBToolResult::ok("Registered transcript", {
+        return ToolResult::ok("Registered transcript", {
             {"session_id",      session_id},
             {"transcript_path", transcript_path},
             {"realm",           realm},
@@ -26,14 +26,14 @@
         });
     }
 
-    DuckDBToolResult tool_transcript_get(const json& params) {
+    ToolResult tool_transcript_get(const json& params) {
         std::string session_id = params.value("session_id", "");
-        if (session_id.empty()) return DuckDBToolResult::error("session_id is required");
+        if (session_id.empty()) return ToolResult::error("session_id is required");
 
         auto hits = field_store_->recall_keyword(session_id, 5);
         for (const auto& h : hits) {
             if (h.kind == "transcript" || h.content.find(session_id) != std::string::npos) {
-                return DuckDBToolResult::ok("Found transcript event", {
+                return ToolResult::ok("Found transcript event", {
                     {"found",      true},
                     {"session_id", session_id},
                     {"memory_id",  h.memory_id},
@@ -43,13 +43,13 @@
             }
         }
 
-        return DuckDBToolResult::ok("Transcript not found", {
+        return ToolResult::ok("Transcript not found", {
             {"found",      false},
             {"session_id", session_id}
         });
     }
 
-    DuckDBToolResult tool_transcript_list(const json& params) {
+    ToolResult tool_transcript_list(const json& params) {
         size_t limit = static_cast<size_t>(params.value("limit", 50));
 
         // Use native cf_transcript_list if available
@@ -81,51 +81,51 @@
         ss << "Registered transcripts: " << list_json.size() << "\n";
         ss << "Note: session state tracked via events\n";
 
-        return DuckDBToolResult::ok(ss.str(), {
+        return ToolResult::ok(ss.str(), {
             {"transcripts", list_json},
             {"count",       list_json.size()}
         });
     }
 
-    DuckDBToolResult tool_transcript_update(const json& params) {
+    ToolResult tool_transcript_update(const json& params) {
         std::string session_id = params.value("session_id", "");
         int64_t last_line      = params.value("last_line", int64_t(0));
 
-        if (session_id.empty()) return DuckDBToolResult::error("session_id is required");
+        if (session_id.empty()) return ToolResult::error("session_id is required");
 
         json payload = {{"last_line", last_line}};
         uint64_t event_id = field_store_->emit_event(
             "transcript", "progress", session_id, payload.dump());
 
-        if (event_id == 0) return DuckDBToolResult::error("Failed to update transcript progress");
+        if (event_id == 0) return ToolResult::error("Failed to update transcript progress");
 
-        return DuckDBToolResult::ok("Updated transcript progress", {
+        return ToolResult::ok("Updated transcript progress", {
             {"session_id", session_id},
             {"last_line",  last_line},
             {"event_id",   event_id}
         });
     }
 
-    DuckDBToolResult tool_transcript_remove(const json& params) {
+    ToolResult tool_transcript_remove(const json& params) {
         std::string session_id = params.value("session_id", "");
-        if (session_id.empty()) return DuckDBToolResult::error("session_id is required");
+        if (session_id.empty()) return ToolResult::error("session_id is required");
 
         uint64_t event_id = field_store_->emit_event(
             "transcript", "remove", session_id, "");
 
-        if (event_id == 0) return DuckDBToolResult::error("Failed to remove transcript");
+        if (event_id == 0) return ToolResult::error("Failed to remove transcript");
 
-        return DuckDBToolResult::ok("Removed transcript", {
+        return ToolResult::ok("Removed transcript", {
             {"session_id", session_id},
             {"event_id",   event_id}
         });
     }
 
-    DuckDBToolResult tool_transcript_parse(const json& params) {
+    ToolResult tool_transcript_parse(const json& params) {
         std::string session_id = params.value("session_id", "");
         size_t min_turns       = static_cast<size_t>(params.value("min_turns", 4));
 
-        if (session_id.empty()) return DuckDBToolResult::error("session_id is required");
+        if (session_id.empty()) return ToolResult::error("session_id is required");
 
         // Try to locate the transcript path via glob
         std::string path;
@@ -143,12 +143,12 @@
         }
 
         if (path.empty()) {
-            return DuckDBToolResult::error("Could not find transcript for session: " + session_id);
+            return ToolResult::error("Could not find transcript for session: " + session_id);
         }
 
         std::ifstream file(path);
         if (!file) {
-            return DuckDBToolResult::error("Cannot open transcript: " + path);
+            return ToolResult::error("Cannot open transcript: " + path);
         }
 
         std::string line;
@@ -173,7 +173,7 @@
         ss << "  Lines: " << line_number << "\n";
         ss << "  Ready: " << (ready ? "yes" : "no") << "\n";
 
-        return DuckDBToolResult::ok(ss.str(), {
+        return ToolResult::ok(ss.str(), {
             {"session_id",  session_id},
             {"path",        path},
             {"turns_found", turn_count},
@@ -183,12 +183,12 @@
         });
     }
 
-    DuckDBToolResult tool_transcript_search(const json& params) {
+    ToolResult tool_transcript_search(const json& params) {
         std::string query      = params.value("query", "");
         std::string session_id = params.value("session_id", "");
         size_t limit           = static_cast<size_t>(params.value("limit", 10));
 
-        if (query.empty()) return DuckDBToolResult::error("query is required");
+        if (query.empty()) return ToolResult::error("query is required");
 
         // Semantic search via embedding
         auto embedding = embed_query(query);
@@ -233,14 +233,14 @@
         std::ostringstream ss;
         ss << "Found " << results_json.size() << " matching passages for: " << query << "\n";
 
-        return DuckDBToolResult::ok(ss.str(), {
+        return ToolResult::ok(ss.str(), {
             {"query",      query},
             {"results",    results_json},
             {"count",      results_json.size()}
         });
     }
 
-    DuckDBToolResult tool_read_transcript(const json& params) {
+    ToolResult tool_read_transcript(const json& params) {
         std::string path       = params.value("path", "");
         std::string session_id = params.value("session_id", "");
         int start_turn         = params.value("start_turn", 0);
@@ -265,12 +265,12 @@
         }
 
         if (path.empty()) {
-            return DuckDBToolResult::error("No transcript path provided and could not find session");
+            return ToolResult::error("No transcript path provided and could not find session");
         }
 
         std::ifstream file(path);
         if (!file) {
-            return DuckDBToolResult::error("Cannot open transcript: " + path);
+            return ToolResult::error("Cannot open transcript: " + path);
         }
 
         // First pass: collect all turns
@@ -332,7 +332,7 @@
                << "Total turns: " << all_turns.size() << "\n"
                << "Total chars: " << total_chars << "\n"
                << "Lines: " << line_number;
-            return DuckDBToolResult::ok(ss.str(), result);
+            return ToolResult::ok(ss.str(), result);
         }
 
         // Apply filters
@@ -405,15 +405,15 @@
             ss << (c.size() > 100 ? c.substr(0, 100) + "..." : c) << "\n";
         }
 
-        return DuckDBToolResult::ok(ss.str(), result);
+        return ToolResult::ok(ss.str(), result);
     }
 
-    DuckDBToolResult tool_get_turns(const json& params) {
+    ToolResult tool_get_turns(const json& params) {
         std::string session_id = params.value("session_id", "");
         int start_index        = params.value("start_index", 0);
         size_t limit           = static_cast<size_t>(params.value("limit", 50));
 
-        if (session_id.empty()) return DuckDBToolResult::error("session_id is required");
+        if (session_id.empty()) return ToolResult::error("session_id is required");
 
         // Locate transcript path
         std::string path;
@@ -431,7 +431,7 @@
         }
 
         if (path.empty()) {
-            return DuckDBToolResult::ok("Transcript not found for session", {
+            return ToolResult::ok("Transcript not found for session", {
                 {"session_id", session_id},
                 {"turns",      json::array()},
                 {"count",      0}
@@ -448,7 +448,7 @@
         return tool_read_transcript(rp);
     }
 
-    DuckDBToolResult tool_create_episode(const json& params) {
+    ToolResult tool_create_episode(const json& params) {
         std::string session_id   = params.value("session_id", "");
         std::string title        = params.value("title", "");
         int start_turn           = params.value("start_turn", 0);
@@ -457,7 +457,7 @@
         std::string realm        = params.value("realm", "brahman");
 
         if (session_id.empty() || title.empty()) {
-            return DuckDBToolResult::error("session_id and title are required");
+            return ToolResult::error("session_id and title are required");
         }
 
         std::string content = title + ": turns " + std::to_string(start_turn)
@@ -478,7 +478,7 @@
         msg << "Created episode " << episode_id << ": " << title
             << " (turns " << start_turn << "-" << end_turn << ")";
 
-        return DuckDBToolResult::ok(msg.str(), {
+        return ToolResult::ok(msg.str(), {
             {"episode_id",   episode_id},
             {"session_id",   session_id},
             {"title",        title},
@@ -489,12 +489,12 @@
         });
     }
 
-    DuckDBToolResult tool_msg_send(const json& params) {
+    ToolResult tool_msg_send(const json& params) {
         std::string target  = params.value("target", "");
         std::string content = params.value("content", "");
 
-        if (target.empty())  return DuckDBToolResult::error("target is required");
-        if (content.empty()) return DuckDBToolResult::error("content is required");
+        if (target.empty())  return ToolResult::error("target is required");
+        if (content.empty()) return ToolResult::error("content is required");
 
         std::string sender_session_id = params.value("sender_session_id", get_session_id());
         int priority                  = params.value("priority", 1);
@@ -530,7 +530,7 @@
         }
 
         if (targets.empty()) {
-            return DuckDBToolResult::ok("No recipients found", {
+            return ToolResult::ok("No recipients found", {
                 {"target",            target},
                 {"recipients",        0},
                 {"sender_session_id", sender_session_id}
@@ -548,7 +548,7 @@
         std::ostringstream ss;
         ss << "Message sent to " << delivered.size() << " recipient(s)";
 
-        return DuckDBToolResult::ok(ss.str(), {
+        return ToolResult::ok(ss.str(), {
             {"target",            target},
             {"recipients",        delivered.size()},
             {"delivered_to",      delivered},
@@ -557,7 +557,7 @@
         });
     }
 
-    DuckDBToolResult tool_msg_inbox(const json& params) {
+    ToolResult tool_msg_inbox(const json& params) {
         std::string session_id = params.value("session_id", get_session_id());
         size_t limit           = static_cast<size_t>(params.value("limit", 20));
 
@@ -565,7 +565,7 @@
 
         json events = json::parse(events_json_str, nullptr, false);
         if (events.is_discarded() || !events.is_array()) {
-            return DuckDBToolResult::ok("No messages found", {
+            return ToolResult::ok("No messages found", {
                 {"session_id", session_id},
                 {"count",      0},
                 {"messages",   json::array()}
@@ -586,7 +586,7 @@
         }
 
         if (msg_list.empty()) {
-            return DuckDBToolResult::ok("No messages found", {
+            return ToolResult::ok("No messages found", {
                 {"session_id", session_id},
                 {"count",      0},
                 {"messages",   json::array()}
@@ -596,44 +596,44 @@
         std::ostringstream ss;
         ss << msg_list.size() << " message(s) found for " << session_id << "\n";
 
-        return DuckDBToolResult::ok(ss.str(), {
+        return ToolResult::ok(ss.str(), {
             {"session_id", session_id},
             {"count",      msg_list.size()},
             {"messages",   msg_list}
         });
     }
 
-    DuckDBToolResult tool_msg_ack(const json& params) {
+    ToolResult tool_msg_ack(const json& params) {
         std::string message_id = params.value("message_id", "");
         if (message_id.empty()) {
             // Try numeric
             auto [id, id_str] = parse_id(params, "message_id");
-            if (id <= 0) return DuckDBToolResult::error("message_id is required");
+            if (id <= 0) return ToolResult::error("message_id is required");
             message_id = id_str;
         }
 
         uint64_t event_id = field_store_->emit_event(
             "msg", "ack", message_id, "");
 
-        return DuckDBToolResult::ok("Message acknowledged", {
+        return ToolResult::ok("Message acknowledged", {
             {"message_id", message_id},
             {"event_id",   event_id}
         });
     }
 
-    DuckDBToolResult tool_msg_ack_all(const json& params) {
+    ToolResult tool_msg_ack_all(const json& params) {
         std::string session_id = params.value("session_id", get_session_id());
 
         uint64_t event_id = field_store_->emit_event(
             "msg", "ack_all", session_id, "");
 
-        return DuckDBToolResult::ok("All messages acknowledged", {
+        return ToolResult::ok("All messages acknowledged", {
             {"session_id", session_id},
             {"event_id",   event_id}
         });
     }
 
-    DuckDBToolResult tool_msg_history(const json& params) {
+    ToolResult tool_msg_history(const json& params) {
         std::string session_id = params.value("session_id", get_session_id());
         size_t limit           = static_cast<size_t>(params.value("limit", 30));
 
@@ -657,7 +657,7 @@
         }
 
         if (msg_list.empty()) {
-            return DuckDBToolResult::ok("No message history", {
+            return ToolResult::ok("No message history", {
                 {"session_id", session_id},
                 {"count",      0},
                 {"messages",   json::array()}
@@ -667,14 +667,14 @@
         std::ostringstream ss;
         ss << "Message history (" << msg_list.size() << " messages):\n";
 
-        return DuckDBToolResult::ok(ss.str(), {
+        return ToolResult::ok(ss.str(), {
             {"session_id", session_id},
             {"count",      msg_list.size()},
             {"messages",   msg_list}
         });
     }
 
-    DuckDBToolResult tool_session_register(const json& params) {
+    ToolResult tool_session_register(const json& params) {
         std::string session_id      = params.value("session_id", get_session_id());
         std::string realm           = params.value("realm", "brahman");
         std::string transcript_path = params.value("transcript_path", "");
@@ -695,9 +695,9 @@
         uint64_t event_id = field_store_->emit_event(
             "session", "register", session_id, payload.dump(), 0, realm);
 
-        if (event_id == 0) return DuckDBToolResult::error("Failed to register session");
+        if (event_id == 0) return ToolResult::error("Failed to register session");
 
-        return DuckDBToolResult::ok("Session registered", {
+        return ToolResult::ok("Session registered", {
             {"session_id",      session_id},
             {"realm",           realm},
             {"pid",             pid},
@@ -706,22 +706,22 @@
         });
     }
 
-    DuckDBToolResult tool_session_heartbeat(const json& params) {
+    ToolResult tool_session_heartbeat(const json& params) {
         std::string session_id = params.value("session_id", get_session_id());
         std::string metadata   = params.value("metadata", "");
 
         uint64_t event_id = field_store_->emit_event(
             "session", "heartbeat", session_id, metadata);
 
-        if (event_id == 0) return DuckDBToolResult::error("Failed to send heartbeat");
+        if (event_id == 0) return ToolResult::error("Failed to send heartbeat");
 
-        return DuckDBToolResult::ok("Heartbeat sent", {
+        return ToolResult::ok("Heartbeat sent", {
             {"session_id", session_id},
             {"event_id",   event_id}
         });
     }
 
-    DuckDBToolResult tool_session_list(const json& params) {
+    ToolResult tool_session_list(const json& params) {
         bool active_only = params.value("active_only", false);
 
         // Fetch all session register events from the event log (replayed from WAL on startup).
@@ -768,7 +768,7 @@
         }
 
         if (by_session.empty()) {
-            return DuckDBToolResult::ok("No sessions found", {
+            return ToolResult::ok("No sessions found", {
                 {"count",    0},
                 {"sessions", json::array()}
             });
@@ -800,28 +800,28 @@
         ss << sessions_out.size() << " session(s) found";
         if (active_only) ss << " (active only)";
 
-        return DuckDBToolResult::ok(ss.str(), {
+        return ToolResult::ok(ss.str(), {
             {"count",    sessions_out.size()},
             {"sessions", sessions_out}
         });
     }
 
-    DuckDBToolResult tool_session_deregister(const json& params) {
+    ToolResult tool_session_deregister(const json& params) {
         std::string session_id = params.value("session_id", get_session_id());
-        if (session_id.empty()) return DuckDBToolResult::error("session_id is required");
+        if (session_id.empty()) return ToolResult::error("session_id is required");
 
         uint64_t event_id = field_store_->emit_event(
             "session", "deregister", session_id, "");
 
-        if (event_id == 0) return DuckDBToolResult::error("Failed to deregister session");
+        if (event_id == 0) return ToolResult::error("Failed to deregister session");
 
-        return DuckDBToolResult::ok("Session deregistered", {
+        return ToolResult::ok("Session deregistered", {
             {"session_id", session_id},
             {"event_id",   event_id}
         });
     }
 
-    DuckDBToolResult tool_session_sync(const json& params) {
+    ToolResult tool_session_sync(const json& params) {
         std::string projects_dir = params.value("projects_dir", "");
 
         if (projects_dir.empty()) {
@@ -853,7 +853,7 @@
         std::ostringstream ss;
         ss << "Session sync: discovered " << discovered << " transcript(s) in " << projects_dir;
 
-        return DuckDBToolResult::ok(ss.str(), {
+        return ToolResult::ok(ss.str(), {
             {"projects_dir", projects_dir},
             {"discovered",   discovered}
         });

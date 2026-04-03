@@ -116,37 +116,37 @@
     // Tool implementations
     // ═══════════════════════════════════════════════════════════════════════
 
-    DuckDBToolResult tool_enrichment_status(const json&) {
+    ToolResult tool_enrichment_status(const json&) {
         size_t total_symbols = field_store_->symbol_count();
         // No direct "undescribed" count in FieldStore — report total only
         std::ostringstream ss;
         ss << "Code Enrichment Status:\n";
         ss << "  Total symbols: " << total_symbols << "\n";
         ss << "  Code files: " << field_store_->code_file_count() << "\n";
-        return DuckDBToolResult::ok(ss.str(), {
+        return ToolResult::ok(ss.str(), {
             {"total_symbols", total_symbols},
             {"code_files", field_store_->code_file_count()}
         });
     }
 
-    DuckDBToolResult tool_describe_symbol(const json& params) {
+    ToolResult tool_describe_symbol(const json& params) {
         int64_t symbol_id = params.value("symbol_id", static_cast<int64_t>(0));
         std::string description = params.value("description", "");
-        if (symbol_id == 0) return DuckDBToolResult::error("symbol_id is required");
-        if (description.empty()) return DuckDBToolResult::error("description is required");
+        if (symbol_id == 0) return ToolResult::error("symbol_id is required");
+        if (description.empty()) return ToolResult::error("description is required");
 
         int rc = field_store_->set_symbol_description(static_cast<uint64_t>(symbol_id), description);
-        if (rc != 0) return DuckDBToolResult::error("Failed to set symbol description");
+        if (rc != 0) return ToolResult::error("Failed to set symbol description");
 
-        return DuckDBToolResult::ok("Symbol description set", {
+        return ToolResult::ok("Symbol description set", {
             {"symbol_id", symbol_id},
             {"description_length", description.size()}
         });
     }
 
-    DuckDBToolResult tool_embed_symbols(const json& params) {
+    ToolResult tool_embed_symbols(const json& params) {
         if (subconscious_) subconscious_->notify_query();
-        if (!yantra_) return DuckDBToolResult::error("Yantra (embedder) not attached");
+        if (!yantra_) return ToolResult::error("Yantra (embedder) not attached");
 
         // FieldStore doesn't have get_unembedded_symbols — re-embed all found symbols
         // by searching broadly
@@ -154,7 +154,7 @@
         auto symbols = field_store_->search_symbols_by_name("", batch_size);
 
         if (symbols.empty()) {
-            return DuckDBToolResult::ok("No symbols to embed", {{"embedded", 0}});
+            return ToolResult::ok("No symbols to embed", {{"embedded", 0}});
         }
 
         size_t embedded = 0;
@@ -187,25 +187,25 @@
         ss << "Embedded " << embedded << " symbols in " << ms << "ms";
         ss << " (" << std::fixed << std::setprecision(1) << rate << "/sec)";
 
-        return DuckDBToolResult::ok(ss.str(), {
+        return ToolResult::ok(ss.str(), {
             {"embedded", embedded}, {"elapsed_ms", ms}, {"rate_per_sec", rate}
         });
     }
 
-    DuckDBToolResult tool_dedupe_symbols(const json&) {
+    ToolResult tool_dedupe_symbols(const json&) {
         // No direct dedupe in FieldStore — report current count
         size_t count = field_store_->symbol_count();
-        return DuckDBToolResult::ok(
+        return ToolResult::ok(
             "Symbol deduplication not available in chitta-field (symbols: " + std::to_string(count) + ")",
             {{"symbols", count}, {"note", "dedupe requires Rust-side implementation"}}
         );
     }
 
-    DuckDBToolResult tool_extract_symbols(const json& params) {
+    ToolResult tool_extract_symbols(const json& params) {
         std::string path = params.value("path", "");
-        if (path.empty()) return DuckDBToolResult::error("Path is required");
+        if (path.empty()) return ToolResult::error("Path is required");
         if (!std::filesystem::exists(path)) {
-            return DuckDBToolResult::error("Path does not exist: " + path);
+            return ToolResult::error("Path does not exist: " + path);
         }
 
         CodeIntel intel;
@@ -213,8 +213,8 @@
 
         if (symbols.empty()) {
             std::string lang = intel.detect_language(path);
-            if (lang.empty()) return DuckDBToolResult::error("Unsupported file type");
-            return DuckDBToolResult::ok("No symbols found in " + path, {{"symbols", json::array()}});
+            if (lang.empty()) return ToolResult::error("Unsupported file type");
+            return ToolResult::ok("No symbols found in " + path, {{"symbols", json::array()}});
         }
 
         std::ostringstream ss;
@@ -232,7 +232,7 @@
                 {"parent", sym.parent}
             });
         }
-        return DuckDBToolResult::ok(ss.str(), {{"symbols", symbols_json}, {"count", symbols.size()}});
+        return ToolResult::ok(ss.str(), {{"symbols", symbols_json}, {"count", symbols.size()}});
     }
 
     // Returns true if the string looks like a remote URL (https://, git://, git@, ssh://).
@@ -279,11 +279,11 @@
         return std::string(tmpdir);
     }
 
-    DuckDBToolResult tool_learn_codebase(const json& params) {
+    ToolResult tool_learn_codebase(const json& params) {
         if (subconscious_) subconscious_->notify_query();
 
         std::string path = params.value("path", "");
-        if (path.empty()) return DuckDBToolResult::error("Path is required");
+        if (path.empty()) return ToolResult::error("Path is required");
 
         std::string branch = params.value("branch", "");
         bool cloned = false;
@@ -293,13 +293,13 @@
             std::string clone_err;
             clone_tmpdir = clone_remote(path, branch, clone_err);
             if (clone_tmpdir.empty()) {
-                return DuckDBToolResult::error("git clone failed for " + path + ": " + clone_err);
+                return ToolResult::error("git clone failed for " + path + ": " + clone_err);
             }
             cloned = true;
             path = clone_tmpdir;
         } else {
             if (!std::filesystem::exists(path))
-                return DuckDBToolResult::error("Path does not exist: " + path);
+                return ToolResult::error("Path does not exist: " + path);
         }
 
         // Cleanup guard — removes tmpdir when we exit this scope (cloned repos only)
@@ -339,7 +339,7 @@
         // Full extraction — FieldStore doesn't have incremental code_file tracking
         auto result = intel.extract_directory_full(path, exclude, max_files);
         if (result.symbols.empty()) {
-            return DuckDBToolResult::ok("No symbols found in " + path, {{"stored", 0}});
+            return ToolResult::ok("No symbols found in " + path, {{"stored", 0}});
         }
 
         // Store symbols in FieldStore
@@ -402,7 +402,7 @@
             ss << "    " << kind << ": " << count << "\n";
         }
 
-        return DuckDBToolResult::ok(ss.str(), {
+        return ToolResult::ok(ss.str(), {
             {"project", project}, {"path", path},
             {"symbols_stored", symbols_stored},
             {"symbols_embedded", symbols_embedded},
@@ -410,15 +410,15 @@
         });
     }
 
-    DuckDBToolResult tool_find_symbol(const json& params) {
+    ToolResult tool_find_symbol(const json& params) {
         if (subconscious_) subconscious_->notify_query();
 
         std::string name = params.value("name", "");
-        if (name.empty()) return DuckDBToolResult::error("Name is required");
+        if (name.empty()) return ToolResult::error("Name is required");
 
         auto hits = field_store_->search_symbols_by_name(name, 50);
         if (hits.empty()) {
-            return DuckDBToolResult::ok("No symbols found matching '" + name + "'",
+            return ToolResult::ok("No symbols found matching '" + name + "'",
                 {{"symbols", json::array()}});
         }
 
@@ -433,19 +433,19 @@
             ss << "  " << s.kind << " " << s.name << " @" << s.file_path << ":" << s.line_start << "\n";
             symbols_json.push_back(sym_to_json(s));
         }
-        return DuckDBToolResult::ok(ss.str(), {{"symbols", symbols_json}, {"count", symbols_json.size()}});
+        return ToolResult::ok(ss.str(), {{"symbols", symbols_json}, {"count", symbols_json.size()}});
     }
 
-    DuckDBToolResult tool_symbol_callers(const json& params) {
+    ToolResult tool_symbol_callers(const json& params) {
         if (subconscious_) subconscious_->notify_query();
 
         auto sym_opt = resolve_symbol_field(params);
-        if (!sym_opt) return DuckDBToolResult::error("Symbol not found. Provide 'name' or 'id'.");
+        if (!sym_opt) return ToolResult::error("Symbol not found. Provide 'name' or 'id'.");
         const auto& sym = *sym_opt;
 
         auto caller_ids = field_store_->get_callers(sym.id);
         if (caller_ids.empty()) {
-            return DuckDBToolResult::ok(
+            return ToolResult::ok(
                 "No callers found for " + sym.kind + " " + sym.name,
                 {{"symbol", sym.name}, {"callers", json::array()}}
             );
@@ -468,22 +468,22 @@
             }
         }
 
-        return DuckDBToolResult::ok(ss.str(), {
+        return ToolResult::ok(ss.str(), {
             {"symbol", sym.name}, {"symbol_id", sym.id},
             {"callers", callers_json}, {"count", callers_json.size()}
         });
     }
 
-    DuckDBToolResult tool_symbol_callees(const json& params) {
+    ToolResult tool_symbol_callees(const json& params) {
         if (subconscious_) subconscious_->notify_query();
 
         auto sym_opt = resolve_symbol_field(params);
-        if (!sym_opt) return DuckDBToolResult::error("Symbol not found. Provide 'name' or 'id'.");
+        if (!sym_opt) return ToolResult::error("Symbol not found. Provide 'name' or 'id'.");
         const auto& sym = *sym_opt;
 
         auto callee_ids = field_store_->get_callees(sym.id);
         if (callee_ids.empty()) {
-            return DuckDBToolResult::ok(
+            return ToolResult::ok(
                 "No callees found for " + sym.kind + " " + sym.name,
                 {{"symbol", sym.name}, {"callees", json::array()}}
             );
@@ -505,22 +505,22 @@
             }
         }
 
-        return DuckDBToolResult::ok(ss.str(), {
+        return ToolResult::ok(ss.str(), {
             {"symbol", sym.name}, {"symbol_id", sym.id},
             {"callees", callees_json}, {"count", callees_json.size()}
         });
     }
 
-    DuckDBToolResult tool_read_symbol(const json& params) {
+    ToolResult tool_read_symbol(const json& params) {
         if (subconscious_) subconscious_->notify_query();
 
         auto sym_opt = resolve_symbol_field(params);
-        if (!sym_opt) return DuckDBToolResult::error("Symbol not found. Provide 'name' or 'id'.");
+        if (!sym_opt) return ToolResult::error("Symbol not found. Provide 'name' or 'id'.");
         const auto& sym = *sym_opt;
 
         std::string code = read_source_lines(sym.file_path, sym.line_start, sym.line_end);
         if (code.empty()) {
-            return DuckDBToolResult::error("No code found at " + sym.file_path + ":" +
+            return ToolResult::error("No code found at " + sym.file_path + ":" +
                 std::to_string(sym.line_start) + "-" + std::to_string(sym.line_end));
         }
 
@@ -528,19 +528,19 @@
         ss << sym.kind << " " << sym.name << " @" << sym.file_path << ":"
            << sym.line_start << "-" << sym.line_end << "\n\n" << code;
 
-        return DuckDBToolResult::ok(ss.str(), {
+        return ToolResult::ok(ss.str(), {
             {"symbol", sym.name}, {"kind", sym.kind}, {"file", sym.file_path},
             {"line_start", sym.line_start}, {"line_end", sym.line_end}, {"code", code}
         });
     }
 
-    DuckDBToolResult tool_read_function(const json& params) {
+    ToolResult tool_read_function(const json& params) {
         std::string name = params.value("name", "");
-        if (name.empty()) return DuckDBToolResult::error("Function name is required");
+        if (name.empty()) return ToolResult::error("Function name is required");
 
         auto hits = field_store_->search_symbols_by_name(name, 50);
         if (hits.empty()) {
-            return DuckDBToolResult::error("Function/method '" + name + "' not found");
+            return ToolResult::error("Function/method '" + name + "' not found");
         }
 
         // Find exact match with function or method kind
@@ -568,17 +568,17 @@
         ss << sym.kind << " " << sym.name << " @" << sym.file_path << ":"
            << sym.line_start << "-" << sym.line_end << "\n\n" << code;
 
-        return DuckDBToolResult::ok(ss.str(), {
+        return ToolResult::ok(ss.str(), {
             {"symbol", sym.name}, {"kind", sym.kind}, {"file", sym.file_path},
             {"line_start", sym.line_start}, {"line_end", sym.line_end}, {"code", code}
         });
     }
 
-    DuckDBToolResult tool_search_symbols(const json& params) {
+    ToolResult tool_search_symbols(const json& params) {
         if (subconscious_) subconscious_->notify_query();
 
         std::string query = params.value("query", "");
-        if (query.empty()) return DuckDBToolResult::error("Query is required");
+        if (query.empty()) return ToolResult::error("Query is required");
 
         std::string kind = params.value("kind", "");
         size_t limit = static_cast<size_t>(params.value("limit", 10));
@@ -633,7 +633,7 @@
         }
 
         if (symbols_json.empty()) {
-            return DuckDBToolResult::ok("No symbols found for query: " + query,
+            return ToolResult::ok("No symbols found for query: " + query,
                 {{"symbols", json::array()}, {"mode", search_mode}});
         }
 
@@ -641,11 +641,11 @@
         header << "Found " << symbols_json.size() << " symbols for '" << query
                << "' (" << search_mode << ", " << (is_code_query ? "code" : "NL") << " query):\n";
 
-        return DuckDBToolResult::ok(header.str() + ss.str(),
+        return ToolResult::ok(header.str() + ss.str(),
             {{"symbols", symbols_json}, {"count", symbols_json.size()}, {"mode", search_mode}});
     }
 
-    DuckDBToolResult tool_code_context(const json& params) {
+    ToolResult tool_code_context(const json& params) {
         if (subconscious_) subconscious_->notify_query();
 
         std::string path = params.value("path", "");
@@ -673,14 +673,14 @@
             }
         }
 
-        return DuckDBToolResult::ok(ss.str(), result);
+        return ToolResult::ok(ss.str(), result);
     }
 
-    DuckDBToolResult tool_smart_context(const json& params) {
+    ToolResult tool_smart_context(const json& params) {
         if (subconscious_) subconscious_->notify_query();
 
         std::string task = params.value("task", "");
-        if (task.empty()) return DuckDBToolResult::error("task is required");
+        if (task.empty()) return ToolResult::error("task is required");
 
         std::string mode = params.value("mode", "full");
         bool include_memories = params.value("memories", true);
@@ -789,10 +789,10 @@
 
         std::string output = ss.str();
         if (output.empty()) output = "No context found for: " + task;
-        return DuckDBToolResult::ok(output, result);
+        return ToolResult::ok(output, result);
     }
 
-    DuckDBToolResult tool_codebase_overview(const json& params) {
+    ToolResult tool_codebase_overview(const json& params) {
         std::string project = params.value("project", "");
 
         std::string files_json_str = field_store_->list_code_files(project);
@@ -805,7 +805,7 @@
             if (!project.empty()) ss << " for project: " << project;
             ss << "\nRun: learn_codebase --path /your/project --project "
                << (project.empty() ? "myproj" : project);
-            return DuckDBToolResult::ok(ss.str(), {{"files", 0}});
+            return ToolResult::ok(ss.str(), {{"files", 0}});
         }
 
         size_t total_symbols = field_store_->symbol_count();
@@ -826,12 +826,12 @@
         result["symbols"] = total_symbols;
         result["project"] = project;
 
-        return DuckDBToolResult::ok(ss.str(), result);
+        return ToolResult::ok(ss.str(), result);
     }
 
-    DuckDBToolResult tool_clear_codebase(const json& params) {
+    ToolResult tool_clear_codebase(const json& params) {
         std::string project = params.value("project", "");
-        if (project.empty()) return DuckDBToolResult::error("Project name is required");
+        if (project.empty()) return ToolResult::error("Project name is required");
 
         bool dry_run = params.value("dry_run", false);
 
@@ -842,7 +842,7 @@
             ss << "Would clear codebase: " << project << "\n";
             ss << "  Symbols: " << syms << "\n";
             ss << "  Files: " << files << "\n";
-            return DuckDBToolResult::ok(ss.str(), {
+            return ToolResult::ok(ss.str(), {
                 {"project", project}, {"dry_run", true},
                 {"symbols", syms}, {"files", files}
             });
@@ -851,12 +851,12 @@
         int rc = field_store_->clear_project(project);
         std::ostringstream ss;
         ss << "Cleared codebase: " << project << " (rc=" << rc << ")";
-        return DuckDBToolResult::ok(ss.str(), {{"project", project}, {"rc", rc}});
+        return ToolResult::ok(ss.str(), {{"project", project}, {"rc", rc}});
     }
 
-    DuckDBToolResult tool_clear_triplets(const json& params) {
+    ToolResult tool_clear_triplets(const json& params) {
         std::string pattern = params.value("pattern", "");
-        if (pattern.empty()) return DuckDBToolResult::error("Pattern is required");
+        if (pattern.empty()) return ToolResult::error("Pattern is required");
 
         bool dry_run = params.value("dry_run", false);
 
@@ -870,33 +870,33 @@
             std::ostringstream ss;
             ss << (dry_run ? "Would delete " : "No triplets match ") << count
                << " triplets matching: " << pattern;
-            return DuckDBToolResult::ok(ss.str(), {
+            return ToolResult::ok(ss.str(), {
                 {"pattern", pattern}, {"dry_run", dry_run}, {"count", count}
             });
         }
 
         // Triplet deletion not directly supported per-pattern in FieldStore
-        return DuckDBToolResult::ok(
+        return ToolResult::ok(
             "Triplet deletion by pattern not yet supported in chitta-field (found " +
             std::to_string(count) + " matching)",
             {{"pattern", pattern}, {"count", count}, {"note", "requires Rust-side implementation"}}
         );
     }
 
-    DuckDBToolResult tool_resolve_callsites(const json& params) {
+    ToolResult tool_resolve_callsites(const json& params) {
         if (subconscious_) subconscious_->notify_query();
         // FieldStore doesn't have SymbolResolver — callsites are stored as triplets
-        return DuckDBToolResult::ok(
+        return ToolResult::ok(
             "Callsite resolution uses triplet-based call graph in chitta-field",
             {{"note", "call edges stored via cf_add_sym_call_edge"}}
         );
     }
 
-    DuckDBToolResult tool_type_hierarchy(const json& params) {
+    ToolResult tool_type_hierarchy(const json& params) {
         if (subconscious_) subconscious_->notify_query();
 
         std::string name = params.value("name", "");
-        if (name.empty()) return DuckDBToolResult::error("Type name is required");
+        if (name.empty()) return ToolResult::error("Type name is required");
 
         std::string direction = params.value("direction", "both");
 
@@ -957,16 +957,16 @@
             ss << "  (no type relationships found)";
         }
 
-        return DuckDBToolResult::ok(ss.str(), {
+        return ToolResult::ok(ss.str(), {
             {"type", name}, {"ancestors", ancestors}, {"descendants", descendants}
         });
     }
 
-    DuckDBToolResult tool_file_imports(const json& params) {
+    ToolResult tool_file_imports(const json& params) {
         if (subconscious_) subconscious_->notify_query();
 
         std::string path = params.value("path", "");
-        if (path.empty()) return DuckDBToolResult::error("File path is required");
+        if (path.empty()) return ToolResult::error("File path is required");
 
         std::filesystem::path p(path);
         std::string filename = p.filename().string();
@@ -995,14 +995,14 @@
         }
         if (imports.empty()) ss << "  (no imports found)";
 
-        return DuckDBToolResult::ok(ss.str(), {{"file", filename}, {"imports", imports}});
+        return ToolResult::ok(ss.str(), {{"file", filename}, {"imports", imports}});
     }
 
-    DuckDBToolResult tool_file_dependents(const json& params) {
+    ToolResult tool_file_dependents(const json& params) {
         if (subconscious_) subconscious_->notify_query();
 
         std::string module = params.value("module", "");
-        if (module.empty()) return DuckDBToolResult::error("Module name is required");
+        if (module.empty()) return ToolResult::error("Module name is required");
 
         json dependents = json::array();
         std::string raw = field_store_->query_object(module);
@@ -1021,10 +1021,10 @@
         for (const auto& d : dependents) ss << "  " << d["file"].get<std::string>() << "\n";
         if (dependents.empty()) ss << "  (no dependents found)";
 
-        return DuckDBToolResult::ok(ss.str(), {{"module", module}, {"dependents", dependents}});
+        return ToolResult::ok(ss.str(), {{"module", module}, {"dependents", dependents}});
     }
 
-    DuckDBToolResult tool_restore_code_intel_confidence(const json& params) {
+    ToolResult tool_restore_code_intel_confidence(const json& params) {
         float confidence = params.value("confidence", 0.8f);
         bool dry_run = params.value("dry_run", false);
 
@@ -1051,7 +1051,7 @@
             ss << "  Target confidence: " << std::fixed << std::setprecision(2) << confidence << "\n";
         }
 
-        return DuckDBToolResult::ok(ss.str(), {
+        return ToolResult::ok(ss.str(), {
             {"dry_run", dry_run}, {"confidence", confidence}, {"total", total}
         });
     }

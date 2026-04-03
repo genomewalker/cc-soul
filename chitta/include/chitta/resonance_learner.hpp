@@ -25,7 +25,7 @@ class FieldStore;
 // Resonance Configuration
 // ═══════════════════════════════════════════════════════════════════════════
 
-struct DuckDBResonanceConfig {
+struct ResonanceLearnerConfig {
     // Spreading activation
     float spread_strength = 0.5f;
     float spread_decay = 0.5f;
@@ -175,7 +175,7 @@ struct QueryContext {
 struct PendingResonanceOutcome {
     int64_t timestamp;
     std::vector<int64_t> result_ids;
-    DuckDBResonanceConfig params_used;
+    ResonanceLearnerConfig params_used;
     QueryContext context;
     std::unordered_map<int64_t, size_t> id_to_position;
 };
@@ -189,8 +189,8 @@ public:
     ResonanceLearner() : rng_(std::random_device{}()) {}
 
     // Sample parameters using Thompson sampling
-    DuckDBResonanceConfig sample_params(const QueryContext& context) {
-        DuckDBResonanceConfig config;
+    ResonanceLearnerConfig sample_params(const QueryContext& context) {
+        ResonanceLearnerConfig config;
 
         config.spread_strength = spread_strength_.sample_range(rng_, 0.2f, 0.8f);
         config.spread_decay = spread_decay_.sample_range(rng_, 0.3f, 0.7f);
@@ -213,7 +213,7 @@ public:
 
     // Record a resonance call for later credit assignment
     void record_outcome(const std::vector<int64_t>& result_ids,
-                        const DuckDBResonanceConfig& params,
+                        const ResonanceLearnerConfig& params,
                         const QueryContext& context) {
         PendingResonanceOutcome outcome;
         outcome.timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -241,8 +241,8 @@ public:
         process_feedback(id, -amount);
     }
 
-    DuckDBResonanceConfig get_best_params() const {
-        DuckDBResonanceConfig config;
+    ResonanceLearnerConfig get_best_params() const {
+        ResonanceLearnerConfig config;
         config.spread_strength = 0.2f + spread_strength_.mean() * 0.6f;
         config.spread_decay = 0.3f + spread_decay_.mean() * 0.4f;
         config.hebbian_strength = 0.01f + hebbian_strength_.mean() * 0.09f;

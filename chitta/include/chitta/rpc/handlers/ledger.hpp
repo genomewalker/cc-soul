@@ -1,5 +1,5 @@
-// Included into ChittaFieldHandler or DuckDBHandler class body — not a standalone header.
-// Migrated from DuckDB SQL to chitta-field event log.
+// Included into FieldRpcHandler class body — not a standalone header.
+// Backed by chitta-field event log.
 //
 // Storage model: each ledger entry is a domain event with domain="ledger".
 //   save:   emit_event("ledger", "save",   key, payload_json)
@@ -28,7 +28,7 @@
 
     // ── tool implementations ─────────────────────────────────────────────────
 
-    DuckDBToolResult tool_ledger_save(const json& params) {
+    ToolResult tool_ledger_save(const json& params) {
         std::string session_id = get_session_id(params);
         std::string project = params.value("project", "default");
         std::string key = ledger_key(session_id, project);
@@ -69,21 +69,21 @@
             ss << "  Mood: " << payload["mood"].get<std::string>() << "\n";
         }
 
-        return DuckDBToolResult::ok(ss.str(), {
+        return ToolResult::ok(ss.str(), {
             {"event_id", event_id},
             {"session_id", session_id},
             {"project", project}
         });
     }
 
-    DuckDBToolResult tool_ledger_load(const json& params) {
+    ToolResult tool_ledger_load(const json& params) {
         std::string session_id = params.value("session_id", "");
         std::string project = params.value("project", "");
         std::string key = ledger_key(session_id, project);
 
         auto payload_str = field_store_->get_latest_event("ledger", "save", key);
         if (!payload_str) {
-            return DuckDBToolResult::ok("No checkpoint found", {{"found", false}});
+            return ToolResult::ok("No checkpoint found", {{"found", false}});
         }
 
         json entry = parse_json_safe(*payload_str);
@@ -118,10 +118,10 @@
             {"discoveries", entry.value("discoveries", json::array())}
         };
 
-        return DuckDBToolResult::ok(ss.str(), result);
+        return ToolResult::ok(ss.str(), result);
     }
 
-    DuckDBToolResult tool_ledger_list(const json& params) {
+    ToolResult tool_ledger_list(const json& params) {
         std::string filter_project = params.value("project", "");
         size_t limit = params.value("limit", 10);
 
@@ -181,10 +181,10 @@
             });
         }
 
-        return DuckDBToolResult::ok(ss.str(), {{"entries", entries_json}, {"count", entries.size()}});
+        return ToolResult::ok(ss.str(), {{"entries", entries_json}, {"count", entries.size()}});
     }
 
-    DuckDBToolResult tool_ledger_get(const json& params) {
+    ToolResult tool_ledger_get(const json& params) {
         // Accept either "id" (legacy numeric) or "key" (session:project).
         // For field-based storage, key is the canonical identifier.
         std::string key = params.value("key", "");
@@ -193,14 +193,14 @@
             std::string session_id = params.value("session_id", "");
             std::string project = params.value("project", "");
             if (session_id.empty()) {
-                return DuckDBToolResult::error("key or session_id required");
+                return ToolResult::error("key or session_id required");
             }
             key = ledger_key(session_id, project);
         }
 
         auto payload_str = field_store_->get_latest_event("ledger", "save", key);
         if (!payload_str) {
-            return DuckDBToolResult::error("Checkpoint not found: " + key);
+            return ToolResult::error("Checkpoint not found: " + key);
         }
 
         json entry = parse_json_safe(*payload_str);
@@ -238,20 +238,20 @@
             {"discoveries", entry.value("discoveries", json::array())}
         };
 
-        return DuckDBToolResult::ok(ss.str(), result);
+        return ToolResult::ok(ss.str(), result);
     }
 
-    DuckDBToolResult tool_ledger_delete(const json& params) {
+    ToolResult tool_ledger_delete(const json& params) {
         std::string key = params.value("key", "");
         if (key.empty()) {
             std::string session_id = params.value("session_id", "");
             std::string project = params.value("project", "");
             if (session_id.empty()) {
-                return DuckDBToolResult::error("key or session_id required");
+                return ToolResult::error("key or session_id required");
             }
             key = ledger_key(session_id, project);
         }
 
         field_store_->emit_event("ledger", "delete", key, "");
-        return DuckDBToolResult::ok("Deleted checkpoint " + key, {{"key", key}, {"deleted", true}});
+        return ToolResult::ok("Deleted checkpoint " + key, {{"key", key}, {"deleted", true}});
     }

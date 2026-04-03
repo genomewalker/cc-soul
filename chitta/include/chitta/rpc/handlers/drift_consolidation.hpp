@@ -115,7 +115,7 @@
 
     // ── Tool: find_near_duplicates ──────────────────────────────────────────
 
-    DuckDBToolResult tool_find_near_duplicates(const json& params) {
+    ToolResult tool_find_near_duplicates(const json& params) {
         std::string realm = params.value("realm", "");
         size_t limit      = static_cast<size_t>(params.value("limit", 20));
         float threshold   = params.value("threshold", 0.90f);
@@ -141,13 +141,13 @@
             ss << "  [" << pct << "%] #" << p.a_id << " <-> #" << p.b_id << "\n";
         }
 
-        return DuckDBToolResult::ok(ss.str(),
+        return ToolResult::ok(ss.str(),
             {{"pairs", pairs_json}, {"count", pairs.size()}, {"threshold", threshold}});
     }
 
     // ── Tool: consolidate_similar ───────────────────────────────────────────
 
-    DuckDBToolResult tool_consolidate_similar(const json& params) {
+    ToolResult tool_consolidate_similar(const json& params) {
         std::string realm = params.value("realm", "");
         float threshold   = params.value("threshold", 0.92f);
         bool dry_run      = params.value("dry_run", true);
@@ -206,7 +206,7 @@
                << " (sim=" << mp.value("similarity", 0.0f) << ")\n";
         }
 
-        return DuckDBToolResult::ok(ss.str(),
+        return ToolResult::ok(ss.str(),
             {{"merged", merged}, {"pairs", merged_pairs}, {"dry_run", dry_run},
              {"threshold", threshold}});
     }

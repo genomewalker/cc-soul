@@ -1,20 +1,20 @@
 // Included into FieldRpcHandler class body — not a standalone header
 
-    DuckDBToolResult tool_distill_status(const json&) {
+    ToolResult tool_distill_status(const json&) {
         json result = {
             {"model",   get_distill_model()},
             {"enabled", get_distill_enabled()},
             {"backend", "chitta-field"},
         };
-        return DuckDBToolResult::ok(
+        return ToolResult::ok(
             "Distill model: " + get_distill_model() +
             (get_distill_enabled() ? " (enabled)" : " (disabled)"),
             result);
     }
 
-    DuckDBToolResult tool_distill_set_model(const json& params) {
+    ToolResult tool_distill_set_model(const json& params) {
         std::string model = params.value("model", "");
-        if (model.empty()) return DuckDBToolResult::error("model is required");
+        if (model.empty()) return ToolResult::error("model is required");
 
         set_distill_model(model);
 
@@ -23,22 +23,22 @@
         }
 
         json result = {{"model", model}, {"enabled", get_distill_enabled()}};
-        return DuckDBToolResult::ok("Distill model set to " + model, result);
+        return ToolResult::ok("Distill model set to " + model, result);
     }
 
-    DuckDBToolResult tool_suggestion_track(const json& params) {
+    ToolResult tool_suggestion_track(const json& params) {
         std::string content = params.value("content", "");
-        if (content.empty()) return DuckDBToolResult::error("content is required");
+        if (content.empty()) return ToolResult::error("content is required");
 
         std::string realm = params.value("realm", "brahman");
         auto embedding = embed_text(content);
         uint64_t id = field_store_->remember("suggestion", realm, content, embedding, 0.7f, 0.01f);
 
         std::string id_str = std::to_string(id);
-        return DuckDBToolResult::ok("Tracked suggestion #" + id_str, {{"id", id_str}});
+        return ToolResult::ok("Tracked suggestion #" + id_str, {{"id", id_str}});
     }
 
-    DuckDBToolResult tool_suggestion_pending(const json& params) {
+    ToolResult tool_suggestion_pending(const json& params) {
         size_t limit = static_cast<size_t>(params.value("limit", 20));
         auto hits = field_store_->recall_by_kind("suggestion", limit);
 
@@ -56,12 +56,12 @@
 
         std::ostringstream ss;
         ss << pending.size() << " pending suggestion(s)";
-        return DuckDBToolResult::ok(ss.str(), {{"suggestions", pending}, {"count", pending.size()}});
+        return ToolResult::ok(ss.str(), {{"suggestions", pending}, {"count", pending.size()}});
     }
 
-    DuckDBToolResult tool_suggestion_resolve(const json& params) {
+    ToolResult tool_suggestion_resolve(const json& params) {
         auto [id, id_str] = parse_id(params);
-        if (id <= 0) return DuckDBToolResult::error("id is required");
+        if (id <= 0) return ToolResult::error("id is required");
 
         bool helped = params.value("helped", false);
         std::string details = params.value("details", "");
@@ -83,17 +83,17 @@
             {"helped",  helped},
             {"outcome", helped ? "resolved_positive" : "resolved_negative"},
         };
-        return DuckDBToolResult::ok("Suggestion #" + id_str + " resolved", result);
+        return ToolResult::ok("Suggestion #" + id_str + " resolved", result);
     }
 
-    DuckDBToolResult tool_suggestion_count(const json&) {
+    ToolResult tool_suggestion_count(const json&) {
         auto hits = field_store_->recall_by_kind("suggestion", 1000);
         size_t count = hits.size();
-        return DuckDBToolResult::ok(std::to_string(count) + " suggestion(s) tracked",
+        return ToolResult::ok(std::to_string(count) + " suggestion(s) tracked",
             {{"count", count}});
     }
 
-    DuckDBToolResult tool_consolidation_scan(const json& params) {
+    ToolResult tool_consolidation_scan(const json& params) {
         size_t limit = static_cast<size_t>(params.value("limit", 20));
         std::string realm = params.value("realm", "");
 
@@ -106,18 +106,18 @@
                        "use consolidation_auto to trigger server-side scan"},
             {"scanned", limit},
         };
-        return DuckDBToolResult::ok("Consolidation scan: 0 candidate pairs found (stub)", result);
+        return ToolResult::ok("Consolidation scan: 0 candidate pairs found (stub)", result);
     }
 
-    DuckDBToolResult tool_consolidation_merge(const json& params) {
+    ToolResult tool_consolidation_merge(const json& params) {
         auto [primary_id, primary_str] = parse_id(params, "primary_id");
         auto [secondary_id, secondary_str] = parse_id(params, "secondary_id");
         std::string merged_content = params.value("merged_content", "");
 
         if (primary_id <= 0 || secondary_id <= 0)
-            return DuckDBToolResult::error("primary_id and secondary_id are required");
+            return ToolResult::error("primary_id and secondary_id are required");
         if (merged_content.empty())
-            return DuckDBToolResult::error("merged_content is required");
+            return ToolResult::error("merged_content is required");
 
         auto embedding = embed_text(merged_content);
         uint64_t new_id = field_store_->remember(
@@ -132,10 +132,10 @@
             {"secondary_id", secondary_str},
             {"action",       "secondary forgotten, primary strengthened"},
         };
-        return DuckDBToolResult::ok("Merged memories into #" + std::to_string(new_id), result);
+        return ToolResult::ok("Merged memories into #" + std::to_string(new_id), result);
     }
 
-    DuckDBToolResult tool_consolidation_auto(const json& params) {
+    ToolResult tool_consolidation_auto(const json& params) {
         float threshold = params.value("similarity_threshold", 0.92f);
         int max_merges  = params.value("max_merges", 10);
 
@@ -149,10 +149,10 @@
             {"max_merges", max_merges},
             {"note",       "Auto-consolidation event emitted; processed by next cycle"},
         };
-        return DuckDBToolResult::ok("Auto-consolidation scheduled", result);
+        return ToolResult::ok("Auto-consolidation scheduled", result);
     }
 
-    DuckDBToolResult tool_metacognition_corrections(const json& params) {
+    ToolResult tool_metacognition_corrections(const json& params) {
         size_t limit = static_cast<size_t>(params.value("limit", 20));
         auto hits = field_store_->recall_by_kind("correction", limit);
 
@@ -164,19 +164,19 @@
                << c.value("text", "").substr(0, 80) << "\n";
         }
 
-        return DuckDBToolResult::ok(ss.str(), {{"corrections", corrections}, {"count", corrections.size()}});
+        return ToolResult::ok(ss.str(), {{"corrections", corrections}, {"count", corrections.size()}});
     }
 
-    DuckDBToolResult tool_metacognition_outcomes(const json& params) {
+    ToolResult tool_metacognition_outcomes(const json& params) {
         size_t limit = static_cast<size_t>(params.value("limit", 20));
         auto hits = field_store_->recall_keyword("suggestion outcome", limit);
 
         json outcomes = hits_to_results_json(hits);
-        return DuckDBToolResult::ok(std::to_string(outcomes.size()) + " outcome record(s) found",
+        return ToolResult::ok(std::to_string(outcomes.size()) + " outcome record(s) found",
             {{"outcomes", outcomes}, {"count", outcomes.size()}});
     }
 
-    DuckDBToolResult tool_metacognition_evaluate(const json&) {
+    ToolResult tool_metacognition_evaluate(const json&) {
         json stats_j;
         try {
             stats_j = json::parse(field_store_->memory_stats());
@@ -214,15 +214,15 @@
             {"suggestion_hit_rate", suggestion_rate},
             {"avg_confidence",     stats_j.value("avg_confidence", 0.0f)},
         };
-        return DuckDBToolResult::ok(ss.str(), result);
+        return ToolResult::ok(ss.str(), result);
     }
 
-    DuckDBToolResult tool_epiplexity_check(const json& params) {
+    ToolResult tool_epiplexity_check(const json& params) {
         std::string original     = params.value("original", "");
         std::string reconstructed = params.value("reconstructed", "");
 
         if (original.empty() || reconstructed.empty())
-            return DuckDBToolResult::error("original and reconstructed are required");
+            return ToolResult::error("original and reconstructed are required");
 
         // Simple character-level similarity score
         size_t orig_len  = original.size();
@@ -256,24 +256,24 @@
         ss << "Epiplexity score: " << std::fixed << std::setprecision(3) << score
            << " (char_sim=" << char_sim
            << ", compression=" << compression_ratio << ")";
-        return DuckDBToolResult::ok(ss.str(), result);
+        return ToolResult::ok(ss.str(), result);
     }
 
-    DuckDBToolResult tool_ssl_convert(const json& params) {
+    ToolResult tool_ssl_convert(const json& params) {
         std::string content  = params.value("content", "");
         std::string domain   = params.value("domain", "note");
         std::string location = params.value("location", "");
 
-        if (content.empty()) return DuckDBToolResult::error("content is required");
+        if (content.empty()) return ToolResult::error("content is required");
 
         std::string converted = to_ssl_format(content, domain, location);
         json result = {{"converted", converted}, {"already_ssl", converted == content}};
-        return DuckDBToolResult::ok(converted, result);
+        return ToolResult::ok(converted, result);
     }
 
-    DuckDBToolResult tool_curiosity_note_gap(const json& params) {
+    ToolResult tool_curiosity_note_gap(const json& params) {
         std::string gap = params.value("gap", "");
-        if (gap.empty()) return DuckDBToolResult::error("gap is required");
+        if (gap.empty()) return ToolResult::error("gap is required");
 
         std::string context = params.value("context", "");
         std::string realm   = params.value("realm", "brahman");
@@ -285,10 +285,10 @@
         uint64_t id = field_store_->remember("question", realm, content, embedding, 0.7f, 0.0f);
 
         std::string id_str = std::to_string(id);
-        return DuckDBToolResult::ok("Gap noted #" + id_str, {{"id", id_str}});
+        return ToolResult::ok("Gap noted #" + id_str, {{"id", id_str}});
     }
 
-    DuckDBToolResult tool_curiosity_gaps(const json& params) {
+    ToolResult tool_curiosity_gaps(const json& params) {
         size_t limit  = static_cast<size_t>(params.value("limit", 20));
         std::string realm = params.value("realm", "");
 
@@ -307,12 +307,12 @@
 
         std::ostringstream ss;
         ss << gaps.size() << " open gap(s)";
-        return DuckDBToolResult::ok(ss.str(), {{"gaps", gaps}, {"count", gaps.size()}});
+        return ToolResult::ok(ss.str(), {{"gaps", gaps}, {"count", gaps.size()}});
     }
 
-    DuckDBToolResult tool_curiosity_resolve(const json& params) {
+    ToolResult tool_curiosity_resolve(const json& params) {
         auto [id, id_str] = parse_id(params);
-        if (id <= 0) return DuckDBToolResult::error("id is required");
+        if (id <= 0) return ToolResult::error("id is required");
 
         std::string learned = params.value("learned", "");
 
@@ -321,5 +321,5 @@
 
         json result = {{"id", id_str}, {"status", "resolved"}};
         if (!learned.empty()) result["learned"] = learned;
-        return DuckDBToolResult::ok("Gap #" + id_str + " resolved", result);
+        return ToolResult::ok("Gap #" + id_str + " resolved", result);
     }

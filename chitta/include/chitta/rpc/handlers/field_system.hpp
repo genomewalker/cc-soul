@@ -1,7 +1,7 @@
 // Included into FieldRpcHandler class body — not a standalone header
 
-    DuckDBToolResult tool_health_check(const json&) {
-        if (!field_store_) return DuckDBToolResult::error("chitta-field store unavailable");
+    ToolResult tool_health_check(const json&) {
+        if (!field_store_) return ToolResult::error("chitta-field store unavailable");
 
         size_t mem_count = field_store_->memory_count();
         size_t sym_count = field_store_->symbol_count();
@@ -36,10 +36,10 @@
             out["avg_confidence"]   = stats_j.value("avg_confidence", 0.0f);
         }
 
-        return DuckDBToolResult::ok(ss.str(), out);
+        return ToolResult::ok(ss.str(), out);
     }
 
-    DuckDBToolResult tool_version_check() {
+    ToolResult tool_version_check() {
         std::ostringstream ss;
         ss << "chitta " << CHITTA_VERSION << "\n"
            << "backend: chitta-field\n"
@@ -54,11 +54,11 @@
                 {"minor", CHITTA_PROTOCOL_VERSION_MINOR},
             }},
         };
-        return DuckDBToolResult::ok(ss.str(), out);
+        return ToolResult::ok(ss.str(), out);
     }
 
-    DuckDBToolResult tool_cycle(const json&) {
-        if (!field_store_) return DuckDBToolResult::error("chitta-field store unavailable");
+    ToolResult tool_cycle(const json&) {
+        if (!field_store_) return ToolResult::error("chitta-field store unavailable");
 
         field_store_->flush();
 
@@ -73,15 +73,15 @@
            << "  promoted : " << promoted << "\n"
            << "  demoted  : " << demoted  << "\n";
 
-        return DuckDBToolResult::ok(ss.str(), {
+        return ToolResult::ok(ss.str(), {
             {"flushed",  true},
             {"promoted", promoted},
             {"demoted",  demoted},
         });
     }
 
-    DuckDBToolResult tool_cleanup(const json& params) {
-        if (!field_store_) return DuckDBToolResult::error("chitta-field store unavailable");
+    ToolResult tool_cleanup(const json& params) {
+        if (!field_store_) return ToolResult::error("chitta-field store unavailable");
 
         float threshold = params.value("threshold", 0.05f);
 
@@ -98,14 +98,14 @@
         ss << "Cleanup complete: removed " << removed << " memories below confidence "
            << threshold << "\n";
 
-        return DuckDBToolResult::ok(ss.str(), {
+        return ToolResult::ok(ss.str(), {
             {"removed",   removed},
             {"threshold", threshold},
         });
     }
 
-    DuckDBToolResult tool_soul_context(const json&) {
-        if (!field_store_) return DuckDBToolResult::error("chitta-field store unavailable");
+    ToolResult tool_soul_context(const json&) {
+        if (!field_store_) return ToolResult::error("chitta-field store unavailable");
 
         json stats_j;
         try {
@@ -168,11 +168,11 @@
         if (stats_j.contains("count_by_kind"))
             out["count_by_kind"] = stats_j["count_by_kind"];
 
-        return DuckDBToolResult::ok(ss.str(), out);
+        return ToolResult::ok(ss.str(), out);
     }
 
-    DuckDBToolResult tool_resonance_stats(const json&) {
-        return DuckDBToolResult::ok(
+    ToolResult tool_resonance_stats(const json&) {
+        return ToolResult::ok(
             "Resonance learner not available in chitta-field backend",
             {
                 {"status",  "ok"},
@@ -180,8 +180,8 @@
             });
     }
 
-    DuckDBToolResult tool_subconscious_stats(const json&) {
-        if (!field_store_) return DuckDBToolResult::error("chitta-field store unavailable");
+    ToolResult tool_subconscious_stats(const json&) {
+        if (!field_store_) return ToolResult::error("chitta-field store unavailable");
 
         if (subconscious_) {
             const auto& st = subconscious_->stats();
@@ -219,7 +219,7 @@
                 {"hygiene_interval_min",     cfg.hygiene_interval.count()},
                 {"demotion_interval_min",    cfg.demotion_interval.count()},
             };
-            return DuckDBToolResult::ok(ss.str(), out);
+            return ToolResult::ok(ss.str(), out);
         }
 
         size_t mem_count = field_store_->memory_count();
@@ -231,15 +231,15 @@
            << "  memories : " << mem_count << "\n"
            << "  symbols  : " << sym_count << "\n";
 
-        return DuckDBToolResult::ok(ss.str(), {
+        return ToolResult::ok(ss.str(), {
             {"running",      false},
             {"memory_count", mem_count},
             {"symbol_count", sym_count},
         });
     }
 
-    DuckDBToolResult tool_reembed_memories(const json& params) {
-        if (!field_store_) return DuckDBToolResult::error("chitta-field store unavailable");
+    ToolResult tool_reembed_memories(const json& params) {
+        if (!field_store_) return ToolResult::error("chitta-field store unavailable");
 
         size_t limit = static_cast<size_t>(params.value("limit", 500));
 
@@ -249,24 +249,24 @@
         std::ostringstream ss;
         ss << "Reembed request queued for up to " << limit << " memories\n";
 
-        return DuckDBToolResult::ok(ss.str(), {
+        return ToolResult::ok(ss.str(), {
             {"queued", true},
             {"limit",  limit},
         });
     }
 
-    DuckDBToolResult tool_rebuild_fts_index(const json&) {
-        if (!field_store_) return DuckDBToolResult::error("chitta-field store unavailable");
+    ToolResult tool_rebuild_fts_index(const json&) {
+        if (!field_store_) return ToolResult::error("chitta-field store unavailable");
 
         field_store_->emit_event("admin", "rebuild_fts_request", "fts", "{}");
 
-        return DuckDBToolResult::ok("FTS rebuild requested", {
+        return ToolResult::ok("FTS rebuild requested", {
             {"status", "requested"},
         });
     }
 
-    DuckDBToolResult tool_hygiene_stats(const json&) {
-        if (!field_store_) return DuckDBToolResult::error("chitta-field store unavailable");
+    ToolResult tool_hygiene_stats(const json&) {
+        if (!field_store_) return ToolResult::error("chitta-field store unavailable");
 
         json stats_j;
         try {
@@ -297,11 +297,11 @@
         if (stats_j.contains("count_by_kind"))
             out["count_by_kind"] = stats_j["count_by_kind"];
 
-        return DuckDBToolResult::ok(ss.str(), out);
+        return ToolResult::ok(ss.str(), out);
     }
 
-    DuckDBToolResult tool_hygiene_run(const json& params) {
-        if (!field_store_) return DuckDBToolResult::error("chitta-field store unavailable");
+    ToolResult tool_hygiene_run(const json& params) {
+        if (!field_store_) return ToolResult::error("chitta-field store unavailable");
 
         int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
@@ -326,7 +326,7 @@
            << "  demoted  : " << demoted   << "\n"
            << "  removed  : " << removed   << " (confidence < " << threshold << ")\n";
 
-        return DuckDBToolResult::ok(ss.str(), {
+        return ToolResult::ok(ss.str(), {
             {"promoted",  promoted},
             {"demoted",   demoted},
             {"removed",   removed},
@@ -334,21 +334,21 @@
         });
     }
 
-    DuckDBToolResult tool_import_soul(const json& params) {
-        if (!field_store_) return DuckDBToolResult::error("chitta-field store unavailable");
+    ToolResult tool_import_soul(const json& params) {
+        if (!field_store_) return ToolResult::error("chitta-field store unavailable");
 
         std::string content;
         if (params.contains("file") && params["file"].is_string()) {
             std::ifstream f(params["file"].get<std::string>());
             if (!f.is_open()) {
-                return DuckDBToolResult::error("Cannot open file: " + params["file"].get<std::string>());
+                return ToolResult::error("Cannot open file: " + params["file"].get<std::string>());
             }
             content = std::string(std::istreambuf_iterator<char>(f),
                                   std::istreambuf_iterator<char>());
         } else if (params.contains("content") && params["content"].is_string()) {
             content = params["content"].get<std::string>();
         } else {
-            return DuckDBToolResult::error("file or content parameter required");
+            return ToolResult::error("file or content parameter required");
         }
 
         std::string realm = params.value("realm", "brahman");
@@ -407,14 +407,14 @@
         std::ostringstream ss;
         ss << "Imported " << imported << " memories from soul content\n";
 
-        return DuckDBToolResult::ok(ss.str(), {
+        return ToolResult::ok(ss.str(), {
             {"imported", imported},
             {"realm",    realm},
         });
     }
 
-    DuckDBToolResult tool_export_soul(const json& params) {
-        if (!field_store_) return DuckDBToolResult::error("chitta-field store unavailable");
+    ToolResult tool_export_soul(const json& params) {
+        if (!field_store_) return ToolResult::error("chitta-field store unavailable");
 
         size_t limit = static_cast<size_t>(params.value("limit", 500));
 
@@ -445,7 +445,7 @@
         if (params.contains("file") && params["file"].is_string()) {
             std::ofstream f(params["file"].get<std::string>());
             if (!f.is_open()) {
-                return DuckDBToolResult::error("Cannot open file for writing: " +
+                return ToolResult::error("Cannot open file for writing: " +
                     params["file"].get<std::string>());
             }
             f << output;
@@ -454,14 +454,14 @@
         std::ostringstream ss;
         ss << "Exported " << total << " memories\n";
 
-        return DuckDBToolResult::ok(ss.str(), {
+        return ToolResult::ok(ss.str(), {
             {"exported", total},
             {"content",  output},
         });
     }
 
-    DuckDBToolResult tool_chitta_health(const json&) {
-        if (!field_store_) return DuckDBToolResult::error("chitta-field store unavailable");
+    ToolResult tool_chitta_health(const json&) {
+        if (!field_store_) return ToolResult::error("chitta-field store unavailable");
 
         size_t mem_count   = field_store_->memory_count();
         size_t sym_count   = field_store_->symbol_count();
@@ -498,57 +498,57 @@
         };
         if (!yantra_model.empty()) out["yantra_model"] = yantra_model;
 
-        return DuckDBToolResult::ok(ss.str(), out);
+        return ToolResult::ok(ss.str(), out);
     }
 
     // ── Theme tools (stubs — no theme engine in chitta-field) ───────────────
 
-    DuckDBToolResult tool_theme_list(const json& params) {
+    ToolResult tool_theme_list(const json& params) {
         std::string realm = params.value("realm", "");
         size_t limit = params.value("limit", 20);
         auto hits = field_store_->recall_by_kind("theme", limit);
         json themes = hits_to_results_json(hits);
-        return DuckDBToolResult::ok(std::to_string(themes.size()) + " theme(s)",
+        return ToolResult::ok(std::to_string(themes.size()) + " theme(s)",
             {{"themes", themes}, {"count", themes.size()}});
     }
 
-    DuckDBToolResult tool_theme_get(const json& params) {
+    ToolResult tool_theme_get(const json& params) {
         auto id = extract_id(params);
-        if (!id) return DuckDBToolResult::error("id is required");
+        if (!id) return ToolResult::error("id is required");
         auto content = field_store_->get_content(id);
-        return DuckDBToolResult::ok(content.empty() ? "Theme not found" : content,
+        return ToolResult::ok(content.empty() ? "Theme not found" : content,
             {{"id", id}, {"content", content}});
     }
 
-    DuckDBToolResult tool_theme_recall(const json& params) {
+    ToolResult tool_theme_recall(const json& params) {
         std::string query = params.value("query", "");
-        if (query.empty()) return DuckDBToolResult::error("query is required");
+        if (query.empty()) return ToolResult::error("query is required");
         auto emb = embed_query(query);
         auto hits = field_store_->recall(emb, params.value("limit", 10), params.value("realm", ""));
-        return DuckDBToolResult::ok(std::to_string(hits.size()) + " theme result(s)",
+        return ToolResult::ok(std::to_string(hits.size()) + " theme result(s)",
             {{"results", hits_to_results_json(hits)}});
     }
 
-    DuckDBToolResult tool_theme_stats(const json& params) {
+    ToolResult tool_theme_stats(const json& params) {
         auto hits = field_store_->recall_by_kind("theme", 1000);
-        return DuckDBToolResult::ok("Theme stats", {{"total_themes", hits.size()}});
+        return ToolResult::ok("Theme stats", {{"total_themes", hits.size()}});
     }
 
     // ── Realm tools ─────────────────────────────────────────────────────────
 
-    DuckDBToolResult tool_realm_list() {
+    ToolResult tool_realm_list() {
         auto raw = field_store_->realm_list();
         auto realms = json::parse(raw, nullptr, false);
         if (realms.is_discarded()) realms = json::array();
         std::ostringstream ss;
         ss << realms.size() << " realm(s):\n";
         for (const auto& r : realms) ss << "  " << r << "\n";
-        return DuckDBToolResult::ok(ss.str(), {{"realms", realms}});
+        return ToolResult::ok(ss.str(), {{"realms", realms}});
     }
 
-    DuckDBToolResult tool_realm_get(const json& params) {
+    ToolResult tool_realm_get(const json& params) {
         auto [id, id_str] = parse_id(params);
-        if (id_str.empty()) return DuckDBToolResult::error("id is required");
+        if (id_str.empty()) return ToolResult::error("id is required");
         auto raw = field_store_->query_subject("memory:" + id_str);
         auto triplets = json::parse(raw, nullptr, false);
         json realm_list = json::array();
@@ -558,46 +558,46 @@
                     realm_list.push_back(t.value("object", ""));
             }
         }
-        return DuckDBToolResult::ok(std::to_string(realm_list.size()) + " realm(s)",
+        return ToolResult::ok(std::to_string(realm_list.size()) + " realm(s)",
             {{"id", id_str}, {"realms", realm_list}});
     }
 
-    DuckDBToolResult tool_realm_set(const json& params) {
+    ToolResult tool_realm_set(const json& params) {
         auto [id, id_str] = parse_id(params);
         std::string realm = params.value("realm", "");
-        if (id_str.empty() || realm.empty()) return DuckDBToolResult::error("id and realm are required");
+        if (id_str.empty() || realm.empty()) return ToolResult::error("id and realm are required");
         field_store_->add_triplet("memory:" + id_str, "in_realm", realm);
-        return DuckDBToolResult::ok("Realm set", {{"id", id_str}, {"realm", realm}});
+        return ToolResult::ok("Realm set", {{"id", id_str}, {"realm", realm}});
     }
 
-    DuckDBToolResult tool_realm_add(const json& params) {
+    ToolResult tool_realm_add(const json& params) {
         return tool_realm_set(params);
     }
 
-    DuckDBToolResult tool_realm_remove(const json& params) {
+    ToolResult tool_realm_remove(const json& params) {
         auto [id, id_str] = parse_id(params);
         std::string realm = params.value("realm", "");
-        if (id_str.empty() || realm.empty()) return DuckDBToolResult::error("id and realm are required");
+        if (id_str.empty() || realm.empty()) return ToolResult::error("id and realm are required");
         field_store_->emit_event("realm", "remove", "memory:" + id_str, realm);
-        return DuckDBToolResult::ok("Realm removed (event emitted)", {{"id", id_str}, {"realm", realm}});
+        return ToolResult::ok("Realm removed (event emitted)", {{"id", id_str}, {"realm", realm}});
     }
 
-    DuckDBToolResult tool_realm_visibility(const json& params) {
+    ToolResult tool_realm_visibility(const json& params) {
         auto [id, id_str] = parse_id(params);
         int vis = params.value("visibility", 0);
-        if (id_str.empty()) return DuckDBToolResult::error("id is required");
+        if (id_str.empty()) return ToolResult::error("id is required");
         field_store_->emit_event("realm", "visibility", "memory:" + id_str,
                                  std::to_string(vis));
-        return DuckDBToolResult::ok("Visibility set", {{"id", id_str}, {"visibility", vis}});
+        return ToolResult::ok("Visibility set", {{"id", id_str}, {"visibility", vis}});
     }
 
-    DuckDBToolResult tool_realm_detect() {
+    ToolResult tool_realm_detect() {
         const char* env = std::getenv("CHITTA_REALM");
         std::string realm = env ? env : "brahman";
-        return DuckDBToolResult::ok("Realm: " + realm, {{"realm", realm}});
+        return ToolResult::ok("Realm: " + realm, {{"realm", realm}});
     }
 
-    DuckDBToolResult tool_queue_status(const json&) {
+    ToolResult tool_queue_status(const json&) {
         size_t processed = queue_count_ ? queue_count_->load() : 0;
         size_t failed    = queue_fail_count_ ? queue_fail_count_->load() : 0;
         size_t in_file   = 0;
@@ -614,13 +614,13 @@
         std::ostringstream ss;
         ss << "Queue: " << processed << " processed, " << failed << " failed";
         if (in_file > 0) ss << " (" << in_file << " in dead-letter)";
-        return DuckDBToolResult::ok(ss.str(), s);
+        return ToolResult::ok(ss.str(), s);
     }
 
     // ── Memory provenance ────────────────────────────────────────────────────
-    DuckDBToolResult tool_memory_provenance(const json& params) {
+    ToolResult tool_memory_provenance(const json& params) {
         auto [id, id_str] = parse_id(params);
-        if (id_str.empty()) return DuckDBToolResult::error("id is required");
+        if (id_str.empty()) return ToolResult::error("id is required");
 
         // 1. Basic metadata
         auto meta_raw = field_store_->get_memory_metadata(id);
@@ -680,15 +680,15 @@
             {"supersedes", supersedes},
             {"meta", meta},
         };
-        return DuckDBToolResult::ok(ss.str(), result);
+        return ToolResult::ok(ss.str(), result);
     }
 
     // ── Memory effective status ────────────────────────────────────────────────
     // Determines if a memory is active, superseded, or contradicted by
     // inspecting incoming "supersedes" triplets (no new Rust field needed).
-    DuckDBToolResult tool_memory_status(const json& params) {
+    ToolResult tool_memory_status(const json& params) {
         auto [id, id_str] = parse_id(params);
-        if (id_str.empty()) return DuckDBToolResult::error("id is required");
+        if (id_str.empty()) return ToolResult::error("id is required");
 
         // Check if any other memory supersedes this one
         auto raw = field_store_->query_object(std::to_string(id));
@@ -722,17 +722,17 @@
         result["supersedes"]    = supersedes_ids;
         std::string text = "Memory " + std::to_string(id) + ": " + status;
         if (superseded_by > 0) text += " (by " + std::to_string(superseded_by) + ")";
-        return DuckDBToolResult::ok(text, result);
+        return ToolResult::ok(text, result);
     }
 
     // ── WAL compaction ────────────────────────────────────────────────────────
-    DuckDBToolResult tool_compact_wal(const json&) {
-        if (!field_store_) return DuckDBToolResult::error("field store unavailable");
+    ToolResult tool_compact_wal(const json&) {
+        if (!field_store_) return ToolResult::error("field store unavailable");
         // cf_compact_wal saves full snapshot then deletes covered WAL segments
         extern int64_t cf_compact_wal(void*);
         // Use via FieldStore method
         auto raw = field_store_->compact_wal();
-        if (raw < 0) return DuckDBToolResult::error("compaction failed");
+        if (raw < 0) return ToolResult::error("compaction failed");
         std::string msg = "WAL compacted: snapshot saved, " + std::to_string(raw) + " segment(s) deleted";
-        return DuckDBToolResult::ok(msg, {{"segments_deleted", raw}});
+        return ToolResult::ok(msg, {{"segments_deleted", raw}});
     }

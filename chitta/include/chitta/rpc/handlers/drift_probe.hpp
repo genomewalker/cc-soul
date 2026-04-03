@@ -10,25 +10,25 @@
 //   probe_calibrate  — add confirmed example to cluster, recompute mean centroid
 //   probe_status     — list classes and their centroid counts
 
-    DuckDBToolResult tool_probe_seed(const json& params) {
+    ToolResult tool_probe_seed(const json& params) {
         std::string class_name = params.value("class", "");
         std::string text       = params.value("text", "");
         std::string note       = params.value("note", "");
 
         if (class_name.empty() || text.empty()) {
-            return DuckDBToolResult::error("class and text are required");
+            return ToolResult::error("class and text are required");
         }
         static const std::unordered_set<std::string> valid_classes = {
             "sycophantic", "hedging", "shallow", "direct"
         };
         if (valid_classes.find(class_name) == valid_classes.end()) {
-            return DuckDBToolResult::error(
+            return ToolResult::error(
                 "class must be one of: sycophantic, hedging, shallow, direct");
         }
 
         auto embedding = embed_query(text);
         if (embedding.empty()) {
-            return DuckDBToolResult::error("embedding failed");
+            return ToolResult::error("embedding failed");
         }
 
         // Content: store class + note so we can identify the exemplar later
@@ -46,27 +46,27 @@
                 0.0001f                 // very slow decay — centroids should persist
             );
         } catch (const std::exception& e) {
-            return DuckDBToolResult::error(std::string("failed to store centroid: ") + e.what());
+            return ToolResult::error(std::string("failed to store centroid: ") + e.what());
         }
 
         json out;
         out["memory_id"] = mem_id;
         out["class"]     = class_name;
         out["text_preview"] = text.substr(0, 80);
-        return DuckDBToolResult::ok(
+        return ToolResult::ok(
             "Stored probe centroid for class '" + class_name + "' (id=" + std::to_string(mem_id) + ")",
             out);
     }
 
-    DuckDBToolResult tool_behavioral_probe(const json& params) {
+    ToolResult tool_behavioral_probe(const json& params) {
         std::string text = params.value("text", "");
         if (text.empty()) {
-            return DuckDBToolResult::error("text is required");
+            return ToolResult::error("text is required");
         }
 
         auto query_emb = embed_query(text);
         if (query_emb.empty()) {
-            return DuckDBToolResult::error("embedding failed");
+            return ToolResult::error("embedding failed");
         }
 
         // Recall all probe_centroid memories from behavior realm
@@ -92,7 +92,7 @@
         }
 
         if (class_sims.empty()) {
-            return DuckDBToolResult::error(
+            return ToolResult::error(
                 "No probe centroids found. Seed centroids first with probe_seed.");
         }
 
@@ -133,15 +133,15 @@
             ss << "  " << cls << ": " << static_cast<int>(s * 100) << "%\n";
         }
 
-        return DuckDBToolResult::ok(ss.str(), out);
+        return ToolResult::ok(ss.str(), out);
     }
 
-    DuckDBToolResult tool_probe_calibrate(const json& params) {
+    ToolResult tool_probe_calibrate(const json& params) {
         std::string class_name = params.value("class", "");
         std::string text       = params.value("text", "");
 
         if (class_name.empty() || text.empty()) {
-            return DuckDBToolResult::error("class and text are required");
+            return ToolResult::error("class and text are required");
         }
 
         // Delegate to probe_seed — calibration is just adding another exemplar
@@ -159,7 +159,7 @@
         return result;
     }
 
-    DuckDBToolResult tool_probe_status(const json& params) {
+    ToolResult tool_probe_status(const json& params) {
         auto hits = field_store_->recall(
             embed_query("probe centroid behavioral class"), 100, "behavior");
 
@@ -179,7 +179,7 @@
         }
 
         if (class_counts.empty()) {
-            return DuckDBToolResult::ok(
+            return ToolResult::ok(
                 "No probe centroids seeded yet. Use probe_seed to bootstrap.", {});
         }
 
@@ -190,5 +190,5 @@
             ss << "  " << cls << ": " << cnt << " exemplar(s)\n";
             out[cls] = cnt;
         }
-        return DuckDBToolResult::ok(ss.str(), out);
+        return ToolResult::ok(ss.str(), out);
     }

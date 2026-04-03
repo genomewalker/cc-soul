@@ -7,9 +7,9 @@
 
     // ── Core write ops ───────────────────────────────────────────────────────
 
-    DuckDBToolResult tool_remember(const json& params) {
+    ToolResult tool_remember(const json& params) {
         std::string content = params.value("content", "");
-        if (content.empty()) return DuckDBToolResult::error("content is required");
+        if (content.empty()) return ToolResult::error("content is required");
 
         std::string kind  = params.value("type", "episode");
         std::string realm = params.value("realm", "brahman");
@@ -37,20 +37,20 @@
         }
 
         std::string id_str = std::to_string(id);
-        return DuckDBToolResult::ok("Stored memory #" + id_str, {
+        return ToolResult::ok("Stored memory #" + id_str, {
             {"id", id_str}, {"type", kind}, {"realm", realm}
         });
     }
 
-    DuckDBToolResult tool_recall(const json& params) {
+    ToolResult tool_recall(const json& params) {
         std::string query = params.value("query", "");
-        if (query.empty()) return DuckDBToolResult::error("query is required");
+        if (query.empty()) return ToolResult::error("query is required");
 
         size_t limit      = static_cast<size_t>(params.value("limit", 10));
         std::string realm = params.value("realm", "");
 
         auto embedding = embed_query(query);
-        if (embedding.empty()) return DuckDBToolResult::error("Failed to embed query");
+        if (embedding.empty()) return ToolResult::error("Failed to embed query");
 
         auto hits = field_store_->recall(embedding, limit, realm);
 
@@ -98,12 +98,12 @@
                << r.value("text", "").substr(0, 400) << "\n";
         }
 
-        auto result = DuckDBToolResult::ok(ss.str(), {{"results", results_json}, {"realm", realm}});
+        auto result = ToolResult::ok(ss.str(), {{"results", results_json}, {"realm", realm}});
         fire_recall_callback(results_json, 1);
         return result;
     }
 
-    DuckDBToolResult tool_recall_temporal(const json& params) {
+    ToolResult tool_recall_temporal(const json& params) {
         std::string query = params.value("query", "");
         std::string realm = params.value("realm", "");
         size_t limit      = static_cast<size_t>(params.value("limit", 20));
@@ -147,7 +147,7 @@
                 for (const auto& r : merged) {
                     ss << "[" << r.value("type", "?") << "] " << r.value("text", "").substr(0, 400) << "\n";
                 }
-                return DuckDBToolResult::ok(ss.str(), {{"results", merged}, {"count", merged.size()}, {"realm", realm}});
+                return ToolResult::ok(ss.str(), {{"results", merged}, {"count", merged.size()}, {"realm", realm}});
             }
         }
 
@@ -157,12 +157,12 @@
         for (const auto& r : results_json) {
             ss << "[" << r.value("type", "?") << "] " << r.value("text", "").substr(0, 400) << "\n";
         }
-        return DuckDBToolResult::ok(ss.str(), {{"results", results_json}, {"count", hits.size()}, {"realm", realm}});
+        return ToolResult::ok(ss.str(), {{"results", results_json}, {"count", hits.size()}, {"realm", realm}});
     }
 
-    DuckDBToolResult tool_recall_keyword(const json& params) {
+    ToolResult tool_recall_keyword(const json& params) {
         std::string query = params.value("query", "");
-        if (query.empty()) return DuckDBToolResult::error("query is required");
+        if (query.empty()) return ToolResult::error("query is required");
         size_t k = static_cast<size_t>(params.value("limit", 10));
 
         auto hits = field_store_->recall_keyword(query, k);
@@ -175,18 +175,18 @@
             int pct = static_cast<int>(r.value("relevance", 0.0f) * 100);
             ss << "[" << pct << "%] " << r.value("text", "").substr(0, 400) << "\n";
         }
-        return DuckDBToolResult::ok(ss.str(), {{"results", results_json}});
+        return ToolResult::ok(ss.str(), {{"results", results_json}});
     }
 
-    DuckDBToolResult tool_hybrid_recall(const json& params) {
+    ToolResult tool_hybrid_recall(const json& params) {
         std::string query = params.value("query", "");
-        if (query.empty()) return DuckDBToolResult::error("query is required");
+        if (query.empty()) return ToolResult::error("query is required");
 
         size_t limit      = static_cast<size_t>(params.value("limit", 10));
         std::string realm = params.value("realm", "");
 
         auto embedding = embed_query(query);
-        if (embedding.empty()) return DuckDBToolResult::error("Failed to embed query");
+        if (embedding.empty()) return ToolResult::error("Failed to embed query");
 
         auto semantic_hits = field_store_->recall(embedding, limit, realm);
         auto keyword_hits  = field_store_->recall_keyword(query, limit);
@@ -225,14 +225,14 @@
             int pct = static_cast<int>(r.value("relevance", 0.0f) * 100);
             ss << "[" << pct << "%] " << r.value("text", "").substr(0, 400) << "\n";
         }
-        auto result = DuckDBToolResult::ok(ss.str(), {{"results", merged}, {"realm", realm}});
+        auto result = ToolResult::ok(ss.str(), {{"results", merged}, {"realm", realm}});
         fire_recall_callback(merged, 1);
         return result;
     }
 
-    DuckDBToolResult tool_smart_recall(const json& params) {
+    ToolResult tool_smart_recall(const json& params) {
         std::string query = params.value("query", "");
-        if (query.empty()) return DuckDBToolResult::error("query is required");
+        if (query.empty()) return ToolResult::error("query is required");
 
         size_t limit       = static_cast<size_t>(params.value("limit", 20));
         std::string realm  = params.value("realm", "");
@@ -321,7 +321,7 @@
             ss << "[" << pct << "%] [" << r.value("type", "?") << "] "
                << r.value("text", "").substr(0, 400) << "\n";
         }
-        auto result = DuckDBToolResult::ok(ss.str(), {{"results", results}, {"intent", is_code ? "code" : "semantic"}});
+        auto result = ToolResult::ok(ss.str(), {{"results", results}, {"intent", is_code ? "code" : "semantic"}});
         fire_recall_callback(results, 1);
         return result;
     }
@@ -398,15 +398,15 @@
         }
     }
 
-    DuckDBToolResult tool_full_resonate(const json& params) {
+    ToolResult tool_full_resonate(const json& params) {
         std::string query = params.value("query", "");
-        if (query.empty()) return DuckDBToolResult::error("query is required");
+        if (query.empty()) return ToolResult::error("query is required");
 
         size_t k          = static_cast<size_t>(params.value("k", 10));
         std::string realm = params.value("realm", "");
 
         auto q0 = embed_query(query);
-        if (q0.empty()) return DuckDBToolResult::error("Failed to embed query");
+        if (q0.empty()) return ToolResult::error("Failed to embed query");
 
         auto query_embedding = q0;  // mutable copy refined each pass
         float prev_entropy = -1.0f;
@@ -526,10 +526,10 @@
             ss << "[" << pct << "%] [" << r.value("type", "?") << "] "
                << r.value("text", "").substr(0, 400) << "\n";
         }
-        return DuckDBToolResult::ok(ss.str(), {{"results", final_merged}, {"passes", passes_run}});
+        return ToolResult::ok(ss.str(), {{"results", final_merged}, {"passes", passes_run}});
     }
 
-    DuckDBToolResult tool_route_stats(const json&) {
+    ToolResult tool_route_stats(const json&) {
         // Returns route learner statistics via smart_recall diagnostic
         // Since we can't directly inspect the learner, we use the route episode
         // tracking: count how many times each route was selected recently
@@ -541,7 +541,7 @@
         stats["note"] = "Use smart_recall with different queries to observe route selection. Episode IDs are returned in structured result.";
         stats["routes"] = json::array({"Semantic","Keyword","Temporal","Artifact","Hybrid","Full"});
         std::string text = "Route learner: active, 6-arm Thompson sampling\nUse smart_recall to observe route selection via episode_id in results";
-        return DuckDBToolResult::ok(text, stats);
+        return ToolResult::ok(text, stats);
     }
 
     // ── Strength/forget ops ──────────────────────────────────────────────────

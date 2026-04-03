@@ -5,9 +5,9 @@
 //   cooccurrence_graph  — show top co-activated memory pairs for a given memory
 //   labile_memories_top — list the most-accessed memories (labile candidates)
 
-    DuckDBToolResult tool_cooccurrence_graph(const json& params) {
+    ToolResult tool_cooccurrence_graph(const json& params) {
         uint64_t id = extract_id(params);
-        if (id == 0) return DuckDBToolResult::error("id is required");
+        if (id == 0) return ToolResult::error("id is required");
 
         size_t limit = static_cast<size_t>(params.value("limit", 10));
 
@@ -40,10 +40,10 @@
                << " w=" << e.value("weight", 0.0f) << "\n";
         }
 
-        return DuckDBToolResult::ok(ss.str(), {{"edges", edges}, {"id", std::to_string(id)}});
+        return ToolResult::ok(ss.str(), {{"edges", edges}, {"id", std::to_string(id)}});
     }
 
-    DuckDBToolResult tool_labile_memories_top(const json& params) {
+    ToolResult tool_labile_memories_top(const json& params) {
         std::string realm = params.value("realm", "");
         size_t limit = static_cast<size_t>(params.value("limit", 20));
 
@@ -75,5 +75,5 @@
             ss << "  #" << h.memory_id << " [" << h.access_count << " accesses] " << preview << "\n";
         }
 
-        return DuckDBToolResult::ok(ss.str(), {{"memories", results}, {"count", results.size()}});
+        return ToolResult::ok(ss.str(), {{"memories", results}, {"count", results.size()}});
     }

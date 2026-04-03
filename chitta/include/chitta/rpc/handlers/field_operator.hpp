@@ -1,74 +1,74 @@
 // Included into FieldRpcHandler class body — not a standalone header.
 // Operator control tools: approve_memory, reject_memory, conflict_inspector, disable_source, memory_history.
 
-    DuckDBToolResult tool_approve_memory(const json& params) {
+    ToolResult tool_approve_memory(const json& params) {
         std::string id_str = params.value("id", "");
-        if (id_str.empty()) return DuckDBToolResult::error("id is required");
+        if (id_str.empty()) return ToolResult::error("id is required");
 
         uint64_t id = 0;
         try { id = std::stoull(id_str); } catch (...) {
-            return DuckDBToolResult::error("invalid id");
+            return ToolResult::error("invalid id");
         }
 
         std::string meta_json = field_store_->get_memory_metadata(id);
-        if (meta_json.empty()) return DuckDBToolResult::error("memory not found");
+        if (meta_json.empty()) return ToolResult::error("memory not found");
 
         auto meta = json::parse(meta_json, nullptr, false);
-        if (meta.is_discarded()) return DuckDBToolResult::error("failed to parse metadata");
+        if (meta.is_discarded()) return ToolResult::error("failed to parse metadata");
 
         std::string status = meta.value("status", "Active");
         if (status != "Proposed") {
-            return DuckDBToolResult::error("memory is not in Proposed state (current: " + status + ")");
+            return ToolResult::error("memory is not in Proposed state (current: " + status + ")");
         }
 
         field_store_->set_memory_status(id, 0); // 0 = Active
-        return DuckDBToolResult::ok(
+        return ToolResult::ok(
             "Memory #" + id_str + " approved: Proposed -> Active",
             {{"id", id_str}, {"old_status", "Proposed"}, {"new_status", "Active"}}
         );
     }
 
-    DuckDBToolResult tool_reject_memory(const json& params) {
+    ToolResult tool_reject_memory(const json& params) {
         std::string id_str = params.value("id", "");
-        if (id_str.empty()) return DuckDBToolResult::error("id is required");
+        if (id_str.empty()) return ToolResult::error("id is required");
 
         uint64_t id = 0;
         try { id = std::stoull(id_str); } catch (...) {
-            return DuckDBToolResult::error("invalid id");
+            return ToolResult::error("invalid id");
         }
 
         std::string meta_json = field_store_->get_memory_metadata(id);
-        if (meta_json.empty()) return DuckDBToolResult::error("memory not found");
+        if (meta_json.empty()) return ToolResult::error("memory not found");
 
         auto meta = json::parse(meta_json, nullptr, false);
-        if (meta.is_discarded()) return DuckDBToolResult::error("failed to parse metadata");
+        if (meta.is_discarded()) return ToolResult::error("failed to parse metadata");
 
         std::string status = meta.value("status", "Active");
         if (status != "Proposed") {
-            return DuckDBToolResult::error("memory is not in Proposed state (current: " + status + ")");
+            return ToolResult::error("memory is not in Proposed state (current: " + status + ")");
         }
 
         field_store_->set_memory_status(id, 3); // 3 = Archived
-        return DuckDBToolResult::ok(
+        return ToolResult::ok(
             "Memory #" + id_str + " rejected: Proposed -> Archived",
             {{"id", id_str}, {"old_status", "Proposed"}, {"new_status", "Archived"}}
         );
     }
 
-    DuckDBToolResult tool_promote_memory(const json& params) {
+    ToolResult tool_promote_memory(const json& params) {
         std::string id_str = params.value("id", "");
-        if (id_str.empty()) return DuckDBToolResult::error("id is required");
+        if (id_str.empty()) return ToolResult::error("id is required");
 
         uint64_t id = 0;
         try { id = std::stoull(id_str); } catch (...) {
-            return DuckDBToolResult::error("invalid id");
+            return ToolResult::error("invalid id");
         }
 
         std::string meta_json = field_store_->get_memory_metadata(id);
-        if (meta_json.empty()) return DuckDBToolResult::error("memory not found");
+        if (meta_json.empty()) return ToolResult::error("memory not found");
 
         auto meta = json::parse(meta_json, nullptr, false);
-        if (meta.is_discarded()) return DuckDBToolResult::error("failed to parse metadata");
+        if (meta.is_discarded()) return ToolResult::error("failed to parse metadata");
 
         std::string status = meta.value("status", "Active");
 
@@ -81,28 +81,28 @@
 
         auto it = chain.find(status);
         if (it == chain.end()) {
-            return DuckDBToolResult::error(
+            return ToolResult::error(
                 "cannot promote memory in status " + status +
                 " (only Proposed/Observed/Verified can be promoted)");
         }
 
         field_store_->set_memory_status(id, it->second.first);
         std::string new_status = it->second.second;
-        return DuckDBToolResult::ok(
+        return ToolResult::ok(
             "Memory #" + id_str + " promoted: " + status + " → " + new_status,
             {{"id", id_str}, {"old_status", status}, {"new_status", new_status}}
         );
     }
 
-    DuckDBToolResult tool_conflict_inspector(const json& params) {
+    ToolResult tool_conflict_inspector(const json& params) {
         std::string query = params.value("query", "");
-        if (query.empty()) return DuckDBToolResult::error("query is required");
+        if (query.empty()) return ToolResult::error("query is required");
 
         size_t limit = static_cast<size_t>(params.value("limit", 10));
         std::string realm = params.value("realm", "");
 
         auto embedding = embed_query(query);
-        if (embedding.empty()) return DuckDBToolResult::error("Failed to embed query");
+        if (embedding.empty()) return ToolResult::error("Failed to embed query");
 
         auto hits = field_store_->recall(embedding, limit, realm);
 
@@ -146,35 +146,35 @@
             results.push_back(std::move(entry));
         }
 
-        return DuckDBToolResult::ok(ss.str(), {{"results", results}});
+        return ToolResult::ok(ss.str(), {{"results", results}});
     }
 
-    DuckDBToolResult tool_disable_source(const json& params) {
+    ToolResult tool_disable_source(const json& params) {
         std::string source = params.value("source", "");
-        if (source.empty()) return DuckDBToolResult::error("source is required");
+        if (source.empty()) return ToolResult::error("source is required");
 
         field_store_->add_triplet("system", "denied_source", source);
 
-        return DuckDBToolResult::ok(
+        return ToolResult::ok(
             "Source '" + source + "' added to deny-list. New memories from this source will be rejected.",
             {{"source", source}, {"action", "denied"}}
         );
     }
 
-    DuckDBToolResult tool_operator_memory_history(const json& params) {
+    ToolResult tool_operator_memory_history(const json& params) {
         std::string id_str = params.value("id", "");
-        if (id_str.empty()) return DuckDBToolResult::error("id is required");
+        if (id_str.empty()) return ToolResult::error("id is required");
 
         uint64_t id = 0;
         try { id = std::stoull(id_str); } catch (...) {
-            return DuckDBToolResult::error("invalid id");
+            return ToolResult::error("invalid id");
         }
 
         std::string meta_json = field_store_->get_memory_metadata(id);
-        if (meta_json.empty()) return DuckDBToolResult::error("memory not found");
+        if (meta_json.empty()) return ToolResult::error("memory not found");
 
         auto meta = json::parse(meta_json, nullptr, false);
-        if (meta.is_discarded()) return DuckDBToolResult::error("failed to parse metadata");
+        if (meta.is_discarded()) return ToolResult::error("failed to parse metadata");
 
         std::string content = field_store_->get_content(id);
 
@@ -219,5 +219,5 @@
            << " | Supersession chain: " << chain.size() << " entries\n"
            << "  Content: " << content.substr(0, 300) << "\n";
 
-        return DuckDBToolResult::ok(ss.str(), {{"history", json::array({snapshot})}});
+        return ToolResult::ok(ss.str(), {{"history", json::array({snapshot})}});
     }

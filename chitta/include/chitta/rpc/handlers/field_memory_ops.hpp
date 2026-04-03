@@ -2,30 +2,30 @@
 // Memory operation tools: strengthen, weaken, forget, observe, grow, update, query,
 // explore, kind/priority ops, and triplet graph tools.
 
-    DuckDBToolResult tool_strengthen(const json& params) {
+    ToolResult tool_strengthen(const json& params) {
         uint64_t id  = extract_id(params);
         float amount = params.value("amount", 0.1f);
-        if (id == 0) return DuckDBToolResult::error("id is required");
+        if (id == 0) return ToolResult::error("id is required");
         field_store_->strengthen(id, amount);
-        return DuckDBToolResult::ok("Strengthened memory #" + std::to_string(id));
+        return ToolResult::ok("Strengthened memory #" + std::to_string(id));
     }
 
-    DuckDBToolResult tool_weaken(const json& params) {
+    ToolResult tool_weaken(const json& params) {
         uint64_t id  = extract_id(params);
         float amount = params.value("amount", 0.1f);
-        if (id == 0) return DuckDBToolResult::error("id is required");
+        if (id == 0) return ToolResult::error("id is required");
         field_store_->weaken(id, amount);
-        return DuckDBToolResult::ok("Weakened memory #" + std::to_string(id));
+        return ToolResult::ok("Weakened memory #" + std::to_string(id));
     }
 
-    DuckDBToolResult tool_forget(const json& params) {
+    ToolResult tool_forget(const json& params) {
         uint64_t id = extract_id(params);
-        if (id == 0) return DuckDBToolResult::error("id is required");
+        if (id == 0) return ToolResult::error("id is required");
         field_store_->forget(id);
-        return DuckDBToolResult::ok("Forgot memory #" + std::to_string(id));
+        return ToolResult::ok("Forgot memory #" + std::to_string(id));
     }
 
-    DuckDBToolResult tool_batch_forget(const json& params) {
+    ToolResult tool_batch_forget(const json& params) {
         size_t count = 0;
         if (params.contains("ids") && params["ids"].is_array()) {
             for (const auto& v : params["ids"]) {
@@ -43,15 +43,15 @@
                 count++;
             }
         }
-        return DuckDBToolResult::ok("Forgot " + std::to_string(count) + " memories", {{"count", count}});
+        return ToolResult::ok("Forgot " + std::to_string(count) + " memories", {{"count", count}});
     }
 
     // ── Observe (hook learning) ──────────────────────────────────────────────
 
-    DuckDBToolResult tool_observe(const json& params) {
+    ToolResult tool_observe(const json& params) {
         std::string title   = params.value("title", "");
         std::string content = params.value("content", "");
-        if (content.empty()) return DuckDBToolResult::error("content is required");
+        if (content.empty()) return ToolResult::error("content is required");
 
         std::string category = params.value("category", "episode");
         std::string realm    = params.value("realm", "brahman");
@@ -139,14 +139,14 @@
             }
         }
 
-        return DuckDBToolResult::ok("Observed [" + category + "] #" + std::to_string(id),
+        return ToolResult::ok("Observed [" + category + "] #" + std::to_string(id),
             {{"id", std::to_string(id)}, {"category", category}, {"confidence", confidence}});
     }
 
-    DuckDBToolResult tool_grow(const json& params) {
+    ToolResult tool_grow(const json& params) {
         std::string type    = params.value("type", "wisdom");
         std::string content = params.value("content", "");
-        if (content.empty()) return DuckDBToolResult::error("content is required");
+        if (content.empty()) return ToolResult::error("content is required");
 
         std::string title = params.value("title", "");
         std::string ssl = title.empty() ? to_ssl_format(content, type) :
@@ -166,16 +166,16 @@
             }
         }
 
-        return DuckDBToolResult::ok("Grew " + type + " #" + std::to_string(id),
+        return ToolResult::ok("Grew " + type + " #" + std::to_string(id),
             {{"id", std::to_string(id)}, {"type", type}});
     }
 
-    DuckDBToolResult tool_get(const json& params) {
+    ToolResult tool_get(const json& params) {
         uint64_t id = extract_id(params);
-        if (id == 0) return DuckDBToolResult::error("id is required");
+        if (id == 0) return ToolResult::error("id is required");
 
         std::string content = field_store_->get_content(id);
-        if (content.empty()) return DuckDBToolResult::error("Memory not found: " + std::to_string(id));
+        if (content.empty()) return ToolResult::error("Memory not found: " + std::to_string(id));
 
         std::string meta_json = field_store_->get_memory_metadata(id);
         json meta = meta_json.empty() ? json::object() : json::parse(meta_json, nullptr, false);
@@ -190,15 +190,15 @@
             result["strength"]   = meta.value("strength", 0.0f);
         }
 
-        return DuckDBToolResult::ok(content.substr(0, 500), result);
+        return ToolResult::ok(content.substr(0, 500), result);
     }
 
-    DuckDBToolResult tool_expand_memory(const json& params) {
+    ToolResult tool_expand_memory(const json& params) {
         uint64_t id = extract_id(params);
-        if (id == 0) return DuckDBToolResult::error("id is required");
+        if (id == 0) return ToolResult::error("id is required");
 
         std::string content = field_store_->get_content(id);
-        if (content.empty()) return DuckDBToolResult::error("Memory not found");
+        if (content.empty()) return ToolResult::error("Memory not found");
 
         std::string meta_json = field_store_->get_memory_metadata(id);
         json result;
@@ -216,13 +216,13 @@
             result["associations"] = hits_to_results_json(assoc);
         }
 
-        return DuckDBToolResult::ok(content, result);
+        return ToolResult::ok(content, result);
     }
 
-    DuckDBToolResult tool_update(const json& params) {
+    ToolResult tool_update(const json& params) {
         uint64_t id = extract_id(params);
         std::string content = params.value("content", "");
-        if (id == 0 || content.empty()) return DuckDBToolResult::error("id and content are required");
+        if (id == 0 || content.empty()) return ToolResult::error("id and content are required");
 
         // Re-store: forget old, remember new with same kind/realm
         std::string meta_json = field_store_->get_memory_metadata(id);
@@ -244,11 +244,11 @@
         // Link old→new for audit
         field_store_->add_triplet(std::to_string(new_id), "updated_from", std::to_string(id));
 
-        return DuckDBToolResult::ok("Updated → #" + std::to_string(new_id),
+        return ToolResult::ok("Updated → #" + std::to_string(new_id),
             {{"old_id", std::to_string(id)}, {"new_id", std::to_string(new_id)}});
     }
 
-    DuckDBToolResult tool_query(const json& params) {
+    ToolResult tool_query(const json& params) {
         std::string subject = params.value("subject", "");
         std::string object  = params.value("object", "");
 
@@ -277,15 +277,15 @@
         }
 
         if (subject.empty() && object.empty()) {
-            return DuckDBToolResult::error("subject or object required");
+            return ToolResult::error("subject or object required");
         }
 
-        return DuckDBToolResult::ok(ss.str(), {{"triplets", results_json}});
+        return ToolResult::ok(ss.str(), {{"triplets", results_json}});
     }
 
-    DuckDBToolResult tool_tag(const json& params) {
+    ToolResult tool_tag(const json& params) {
         uint64_t id = extract_id(params);
-        if (id == 0) return DuckDBToolResult::error("id is required");
+        if (id == 0) return ToolResult::error("id is required");
 
         std::string add_tag = params.value("add", "");
         std::string rm_tag  = params.value("remove", "");
@@ -295,21 +295,21 @@
         }
         if (!rm_tag.empty()) {
             bool removed = field_store_->forget_triplet(std::to_string(id), "tagged", rm_tag);
-            if (!removed) return DuckDBToolResult::ok("Tag not found", {{"id", std::to_string(id)}, {"tag", rm_tag}});
+            if (!removed) return ToolResult::ok("Tag not found", {{"id", std::to_string(id)}, {"tag", rm_tag}});
         }
 
-        return DuckDBToolResult::ok("OK", {{"id", std::to_string(id)}});
+        return ToolResult::ok("OK", {{"id", std::to_string(id)}});
     }
 
     // ── Exploration primitives ───────────────────────────────────────────────
 
-    DuckDBToolResult tool_explore_recall(const json& params) {
+    ToolResult tool_explore_recall(const json& params) {
         std::string query = params.value("query", "");
-        if (query.empty()) return DuckDBToolResult::error("query is required");
+        if (query.empty()) return ToolResult::error("query is required");
         size_t limit = static_cast<size_t>(params.value("limit", 10));
 
         auto embedding = embed_query(query);
-        if (embedding.empty()) return DuckDBToolResult::error("Failed to embed query");
+        if (embedding.empty()) return ToolResult::error("Failed to embed query");
 
         auto hits = field_store_->recall(embedding, limit);
         json results = json::array();
@@ -325,25 +325,25 @@
             int pct = static_cast<int>(h.score * 100);
             ss << "[" << pct << "%] #" << h.memory_id << " " << preview << "\n";
         }
-        return DuckDBToolResult::ok(ss.str(), {{"results", results}});
+        return ToolResult::ok(ss.str(), {{"results", results}});
     }
 
-    DuckDBToolResult tool_explore_peek(const json& params) {
+    ToolResult tool_explore_peek(const json& params) {
         uint64_t id = extract_id(params);
-        if (id == 0) return DuckDBToolResult::error("id is required");
+        if (id == 0) return ToolResult::error("id is required");
         std::string content = field_store_->get_content(id);
-        if (content.empty()) return DuckDBToolResult::error("Not found");
+        if (content.empty()) return ToolResult::error("Not found");
         std::string preview = content.substr(0, 200);
-        return DuckDBToolResult::ok(preview, {{"id", std::to_string(id)}, {"preview", preview}});
+        return ToolResult::ok(preview, {{"id", std::to_string(id)}, {"preview", preview}});
     }
 
-    DuckDBToolResult tool_explore_expand(const json& params) {
+    ToolResult tool_explore_expand(const json& params) {
         return tool_get(params);
     }
 
-    DuckDBToolResult tool_explore_neighbors(const json& params) {
+    ToolResult tool_explore_neighbors(const json& params) {
         std::string node = params.value("node", "");
-        if (node.empty()) return DuckDBToolResult::error("node is required");
+        if (node.empty()) return ToolResult::error("node is required");
 
         std::string raw = field_store_->list_triplets_for_entity(node, 50);
         try {
@@ -354,15 +354,15 @@
                 ss << "  " << t.value("subject", "?") << " → " << t.value("predicate", "?")
                    << " → " << t.value("object", "?") << "\n";
             }
-            return DuckDBToolResult::ok(ss.str(), {{"triplets", arr}});
+            return ToolResult::ok(ss.str(), {{"triplets", arr}});
         } catch (...) {
-            return DuckDBToolResult::ok(raw);
+            return ToolResult::ok(raw);
         }
     }
 
     // ── Memory management ────────────────────────────────────────────────────
 
-    DuckDBToolResult tool_list_memories_brief(const json& params) {
+    ToolResult tool_list_memories_brief(const json& params) {
         size_t limit      = static_cast<size_t>(params.value("limit", 200));
         std::string realm = params.value("realm", "");
         std::string kind  = params.value("kind", "");
@@ -384,22 +384,22 @@
                 results.push_back(brief);
                 ss << "#" << m.value("id", 0) << " [" << m.value("kind", "?") << "] " << preview << "\n";
             }
-            return DuckDBToolResult::ok(ss.str(), {{"memories", results}, {"count", results.size()}});
+            return ToolResult::ok(ss.str(), {{"memories", results}, {"count", results.size()}});
         } catch (...) {
-            return DuckDBToolResult::ok(raw);
+            return ToolResult::ok(raw);
         }
     }
 
-    DuckDBToolResult tool_forget_kind(const json& params) {
+    ToolResult tool_forget_kind(const json& params) {
         std::string kind  = params.value("kind", "");
         std::string realm = params.value("realm", "");
         size_t limit      = static_cast<size_t>(params.value("limit", 5000));
-        if (kind.empty()) return DuckDBToolResult::error("kind is required");
+        if (kind.empty()) return ToolResult::error("kind is required");
 
         std::string raw = field_store_->list_memories(kind, realm, "recency", limit, 0);
         json arr;
         try { arr = json::parse(raw); } catch (...) {
-            return DuckDBToolResult::error("failed to list memories");
+            return ToolResult::error("failed to list memories");
         }
 
         size_t deleted = 0, failed = 0;
@@ -413,41 +413,41 @@
             try { field_store_->forget(id); ++deleted; } catch (...) { ++failed; }
         }
 
-        return DuckDBToolResult::ok(
+        return ToolResult::ok(
             "Deleted " + std::to_string(deleted) + " " + kind + " memories"
             + (failed ? " (" + std::to_string(failed) + " failed)" : ""),
             {{"deleted", deleted}, {"failed", failed}, {"kind", kind}});
     }
 
-    DuckDBToolResult tool_set_priority_tier(const json& params) {
+    ToolResult tool_set_priority_tier(const json& params) {
         // Priority tiers stored as triplets
         uint64_t id = extract_id(params, "memory_id");
         int tier = params.value("tier", 0);
-        if (id == 0) return DuckDBToolResult::error("memory_id is required");
+        if (id == 0) return ToolResult::error("memory_id is required");
         field_store_->add_triplet(std::to_string(id), "priority_tier", std::to_string(tier));
-        return DuckDBToolResult::ok("Set tier " + std::to_string(tier) + " for #" + std::to_string(id));
+        return ToolResult::ok("Set tier " + std::to_string(tier) + " for #" + std::to_string(id));
     }
 
-    DuckDBToolResult tool_set_memory_type(const json& params) {
+    ToolResult tool_set_memory_type(const json& params) {
         uint64_t id = extract_id(params, "memory_id");
         std::string type = params.value("type", "");
-        if (id == 0 || type.empty()) return DuckDBToolResult::error("memory_id and type are required");
+        if (id == 0 || type.empty()) return ToolResult::error("memory_id and type are required");
         field_store_->update_memory_kind(id, type);
-        return DuckDBToolResult::ok("Set type to '" + type + "' for #" + std::to_string(id));
+        return ToolResult::ok("Set type to '" + type + "' for #" + std::to_string(id));
     }
 
-    DuckDBToolResult tool_memory_type_stats(const json& params) {
+    ToolResult tool_memory_type_stats(const json& params) {
         std::string realm = params.value("realm", "");
         std::string raw = field_store_->memory_stats(realm);
         try {
             auto j = json::parse(raw);
-            return DuckDBToolResult::ok(j.dump(2), j);
+            return ToolResult::ok(j.dump(2), j);
         } catch (...) {
-            return DuckDBToolResult::ok(raw);
+            return ToolResult::ok(raw);
         }
     }
 
-    DuckDBToolResult tool_recall_by_priority(const json& params) {
+    ToolResult tool_recall_by_priority(const json& params) {
         // Simple: recall by strength (high confidence first = de-facto priority)
         std::string query = params.value("query", "");
         std::string realm = params.value("realm", "");
@@ -465,55 +465,55 @@
                 tokens_used += est_tokens;
                 results.push_back(m);
             }
-            return DuckDBToolResult::ok("Priority recall: " + std::to_string(results.size()) + " memories",
+            return ToolResult::ok("Priority recall: " + std::to_string(results.size()) + " memories",
                 {{"results", results}, {"tokens_used", tokens_used}});
         } catch (...) {
-            return DuckDBToolResult::ok(raw);
+            return ToolResult::ok(raw);
         }
     }
 
-    DuckDBToolResult tool_expand_query(const json& params) {
+    ToolResult tool_expand_query(const json& params) {
         std::string query = params.value("query", "");
-        if (query.empty()) return DuckDBToolResult::error("query is required");
+        if (query.empty()) return ToolResult::error("query is required");
         auto eq = expand_query(query);
-        return DuckDBToolResult::ok(
+        return ToolResult::ok(
             "lex: " + eq.lex + "\nvec: " + eq.vec + "\nhyde: " + eq.hyde,
             {{"lex", eq.lex}, {"vec", eq.vec}, {"hyde", eq.hyde}});
     }
 
-    DuckDBToolResult tool_connect(const json& params) {
+    ToolResult tool_connect(const json& params) {
         std::string subject   = params.value("subject", "");
         std::string predicate = params.value("predicate", "");
         std::string object    = params.value("object", "");
         if (subject.empty() || predicate.empty() || object.empty())
-            return DuckDBToolResult::error("subject, predicate, and object are required");
+            return ToolResult::error("subject, predicate, and object are required");
         field_store_->add_triplet(subject, predicate, object);
-        return DuckDBToolResult::ok(subject + " --[" + predicate + "]--> " + object,
+        return ToolResult::ok(subject + " --[" + predicate + "]--> " + object,
             {{"subject", subject}, {"predicate", predicate}, {"object", object}});
     }
 
-    DuckDBToolResult tool_connect_temporal(const json& params) {
+    ToolResult tool_connect_temporal(const json& params) {
         std::string subject    = params.value("subject", "");
         std::string predicate  = params.value("predicate", "");
         std::string object     = params.value("object", "");
         std::string valid_from = params.value("valid_from", "");
         std::string valid_to   = params.value("valid_to", "");
         if (subject.empty() || predicate.empty() || object.empty())
-            return DuckDBToolResult::error("subject, predicate, and object are required");
+            return ToolResult::error("subject, predicate, and object are required");
         field_store_->add_triplet(subject, predicate, object);
         json payload = {{"valid_from", valid_from}, {"valid_to", valid_to}};
         field_store_->emit_event("triplet", "temporal", subject + "|" + predicate + "|" + object,
                                  payload.dump());
-        return DuckDBToolResult::ok(subject + " --[" + predicate + "]--> " + object + " (temporal)",
+        return ToolResult::ok(subject + " --[" + predicate + "]--> " + object + " (temporal)",
             {{"subject", subject}, {"predicate", predicate}, {"object", object},
              {"valid_from", valid_from}, {"valid_to", valid_to}});
     }
 
-    DuckDBToolResult tool_triplet_history(const json& params) {
+    ToolResult tool_triplet_history(const json& params) {
         std::string subject   = params.value("subject", "");
         std::string predicate = params.value("predicate", "");
         if (subject.empty() || predicate.empty())
-            return DuckDBToolResult::error("subject and predicate are required");
+            return ToolResult::error("subject and predicate are required");
         auto raw = field_store_->query_subject(subject);
         auto triplets = json::parse(raw, nullptr, false);
         json results = json::array();
@@ -523,11 +523,11 @@
                     results.push_back(t);
             }
         }
-        return DuckDBToolResult::ok(std::to_string(results.size()) + " history entries",
+        return ToolResult::ok(std::to_string(results.size()) + " history entries",
             {{"subject", subject}, {"predicate", predicate}, {"history", results}});
     }
 
-    DuckDBToolResult tool_query_triplets_temporal(const json& params) {
+    ToolResult tool_query_triplets_temporal(const json& params) {
         std::string subject   = params.value("subject", "");
         std::string predicate = params.value("predicate", "");
         std::string object    = params.value("object", "");
@@ -553,12 +553,12 @@
                 }
             }
         }
-        return DuckDBToolResult::ok(std::to_string(results.size()) + " triplet(s)",
+        return ToolResult::ok(std::to_string(results.size()) + " triplet(s)",
             {{"triplets", results}, {"count", results.size()}});
     }
 
     // ── List by lifecycle status ────────────────────────────────────────────────
-    DuckDBToolResult tool_list_by_status(const json& params) {
+    ToolResult tool_list_by_status(const json& params) {
         std::string status_filter = params.value("status", "superseded");
         size_t limit = params.value("limit", 50);
         std::string realm = params.value("realm", "");
@@ -567,7 +567,7 @@
         std::string raw = field_store_->list_memories("", realm, "recency", limit * 3, 0);
         json all_mems = json::parse(raw, nullptr, false);
         if (all_mems.is_discarded() || !all_mems.is_array()) {
-            return DuckDBToolResult::ok("0 memories with status=" + status_filter,
+            return ToolResult::ok("0 memories with status=" + status_filter,
                 {{"memories", json::array()}, {"status_filter", status_filter}});
         }
 
@@ -595,7 +595,7 @@
             ss << "  [" << entry.value("status","?") << "] #" << entry.value("id","?")
                << " " << entry.value("text","").substr(0,80) << "\n";
         }
-        return DuckDBToolResult::ok(ss.str(), {{"memories", filtered}, {"status_filter", status_filter}});
+        return ToolResult::ok(ss.str(), {{"memories", filtered}, {"status_filter", status_filter}});
     }
 
     // ── Structured recall: three-lens retrieval ───────────────────────────────

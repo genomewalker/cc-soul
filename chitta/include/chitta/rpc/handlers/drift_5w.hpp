@@ -7,7 +7,7 @@
 
 #include <cmath>
 
-    DuckDBToolResult tool_5w_search(const json& params) {
+    ToolResult tool_5w_search(const json& params) {
         std::string realm = params.value("realm", "");
         size_t limit = static_cast<size_t>(params.value("limit", 10));
 
@@ -21,7 +21,7 @@
         }
 
         if (dimensions.empty()) {
-            return DuckDBToolResult::error("at least one of who/what/when/where/why must be provided");
+            return ToolResult::error("at least one of who/what/when/where/why must be provided");
         }
 
         // Merge map: memory_id -> {best_score, result_json, matched_dimensions}
@@ -79,15 +79,15 @@
                << r.value("text", "").substr(0, 100) << "\n";
         }
 
-        return DuckDBToolResult::ok(ss.str(), {
+        return ToolResult::ok(ss.str(), {
             {"results", arr},
             {"dimensions_queried", dimensions.size()}
         });
     }
 
-    DuckDBToolResult tool_recall_ucb1(const json& params) {
+    ToolResult tool_recall_ucb1(const json& params) {
         std::string query = params.value("query", "");
-        if (query.empty()) return DuckDBToolResult::error("query is required");
+        if (query.empty()) return ToolResult::error("query is required");
 
         std::string realm = params.value("realm", "");
         size_t limit = static_cast<size_t>(params.value("limit", 10));
@@ -95,7 +95,7 @@
         size_t fetch_k = static_cast<size_t>(params.value("fetch_k", 40));
 
         auto embedding = embed_query(query);
-        if (embedding.empty()) return DuckDBToolResult::error("Failed to embed query");
+        if (embedding.empty()) return ToolResult::error("Failed to embed query");
 
         auto hits = field_store_->recall(embedding, fetch_k, realm);
         size_t total = field_store_->memory_count();
@@ -150,5 +150,5 @@
                << r.value("text", "").substr(0, 100) << "\n";
         }
 
-        return DuckDBToolResult::ok(ss.str(), {{"results", arr}, {"total_memories", total}});
+        return ToolResult::ok(ss.str(), {{"results", arr}, {"total_memories", total}});
     }

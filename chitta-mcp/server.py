@@ -143,6 +143,8 @@ ADVANCED_TOOLS = {
     "file_timeline", "file_at_time", "file_restore", "file_index_session",
     # SUS metrics
     "get_sus_metrics",
+    # Ingest, Wiki, Training export
+    "ingest_source", "wiki_export", "health_check_start", "export_training_pairs",
 }
 
 # Combined set of tools to hide from listing (but still callable)

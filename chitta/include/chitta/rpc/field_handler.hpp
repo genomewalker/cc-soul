@@ -1,6 +1,5 @@
 #pragma once
-// FieldRpcHandler: standalone RPC handler backed by FieldStore + VakYantra.
-// Replaces DuckDBRpcHandler — no DuckDB or DuckDBMind dependency.
+// FieldRpcHandler: RPC handler backed by FieldStore + VakYantra.
 
 #include "../field_store.hpp"
 #include "../vak.hpp"
@@ -9,6 +8,9 @@
 #include "../sadhana/sadhana_manager.hpp"
 #include "../version.hpp"
 #include "../daemon_config.hpp"
+#include "../ingester.hpp"
+#include "../wiki_export.hpp"
+#include "../embedding_export.hpp"
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
@@ -39,13 +41,12 @@ namespace chitta {
 
 using json = nlohmann::json;
 
-// Reuse DuckDBToolResult so included handler files (ledger.hpp, long_task.hpp) compile as-is.
-struct DuckDBToolResult {
+struct ToolResult {
     bool is_error = false;
     std::string text;
     json structured;
-    static DuckDBToolResult ok(const std::string& t, const json& s = json()) { return {false, t, s}; }
-    static DuckDBToolResult error(const std::string& msg) { return {true, msg, json()}; }
+    static ToolResult ok(const std::string& t, const json& s = json()) { return {false, t, s}; }
+    static ToolResult error(const std::string& msg) { return {true, msg, json()}; }
 };
 
 inline std::string display_path(const std::string& file_path) {
@@ -215,7 +216,7 @@ private:
     std::atomic<bool> distill_enabled_{true};
 
     std::vector<json> tools_;
-    std::unordered_map<std::string, std::function<DuckDBToolResult(const json&)>> handlers_;
+    std::unordered_map<std::string, std::function<ToolResult(const json&)>> handlers_;
     std::unordered_map<std::string, std::string> tool_visibility_;
 
     // ── Embedding helpers ───────────────────────────────────────────────────
@@ -541,7 +542,7 @@ private:
         return {{"jsonrpc", "2.0"}, {"id", id}, {"error", {{"code", code}, {"message", msg}}}};
     }
 
-    json make_tool_response(const json& id, const DuckDBToolResult& result) {
+    json make_tool_response(const json& id, const ToolResult& result) {
         json content = json::array();
         content.push_back({{"type", "text"}, {"text", result.text}});
         return {{"jsonrpc", "2.0"}, {"id", id}, {"result", {
@@ -2332,6 +2333,54 @@ private:
         // Override memory_history handler with richer operator version
         handlers_["memory_history"] = [this](const json& p) { return tool_operator_memory_history(p); };
 
+        // ── Tier 1: Ingest source ──────────────────────────────────────────
+        tools_.push_back({{"name","ingest_source"},
+            {"description","Ingest external content (URL, file, directory) into memory via SSL distillation"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"source",{{"type","string"},{"description","URL, file path, or directory path"}}},
+                {"realm",{{"type","string"},{"description","Target realm (default: brahman)"}}},
+                {"type",{{"type","string"},{"description","Source type: auto|url|file|directory (default: auto)"}}},
+                {"model",{{"type","string"},{"description","LLM model for distillation"}}},
+                {"max_chunks",{{"type","integer"},{"description","Max chunks to process (default: 30)"}}}
+            }},{"required",{"source"}}}}
+        });
+        handlers_["ingest_source"] = [this](const json& p) { return tool_ingest_source(p); };
+
+        // ── Tier 2: Wiki export ────────────────────────────────────────────
+        tools_.push_back({{"name","wiki_export"},
+            {"description","Export memories as Obsidian-compatible .md wiki with backlinks"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"output_dir",{{"type","string"},{"description","Output directory (default: ~/.claude/wiki/)"}}},
+                {"realm",{{"type","string"},{"description","Filter to specific realm (default: all)"}}},
+                {"max_memories",{{"type","integer"},{"description","Max memories per realm (default: 5000)"}}}
+            }}}}
+        });
+        handlers_["wiki_export"] = [this](const json& p) { return tool_wiki_export(p); };
+
+        // ── Tier 3: Health-check sadhana ───────────────────────────────────
+        tools_.push_back({{"name","health_check_start"},
+            {"description","Start autonomous health-check sadhana that monitors memory quality, dedup ratio, and embedding coverage"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"interval_seconds",{{"type","integer"},{"description","Check interval in seconds (default: 3600)"}}},
+                {"realm",{{"type","string"},{"description","Realm to monitor (default: brahman)"}}},
+                {"max_turns",{{"type","integer"},{"description","Max check cycles (default: 0 = unlimited)"}}}
+            }}}}
+        });
+        handlers_["health_check_start"] = [this](const json& p) { return tool_health_check_start(p); };
+
+        // ── Tier 4: Export training pairs ──────────────────────────────────
+        tools_.push_back({{"name","export_training_pairs"},
+            {"description","Export query-passage pairs as JSONL for BGE embedding fine-tuning"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"output_path",{{"type","string"},{"description","Output JSONL path (default: ~/.claude/training/pairs.jsonl)"}}},
+                {"realm",{{"type","string"},{"description","Filter to specific realm (default: all)"}}},
+                {"max_pairs",{{"type","integer"},{"description","Max pairs to export (default: 10000)"}}},
+                {"min_confidence",{{"type","number"},{"description","Min confidence threshold (default: 0.5)"}}},
+                {"include_negatives",{{"type","boolean"},{"description","Generate hard negatives (default: true)"}}}
+            }}}}
+        });
+        handlers_["export_training_pairs"] = [this](const json& p) { return tool_export_training_pairs(p); };
+
         classify_tools();
     }
 
@@ -2354,7 +2403,8 @@ private:
             "cycle", "anticipation_gate_status", "anticipation_record_outcome",
             "session_register", "session_heartbeat", "session_deregister", "msg_ack",
             "file_index_session", "file_index_all",
-            "chitta_health"
+            "chitta_health",
+            "ingest_source", "wiki_export", "health_check_start", "export_training_pairs"
         };
 
         static const std::vector<std::string> advanced_tools = {

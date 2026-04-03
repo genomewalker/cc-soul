@@ -1,5 +1,5 @@
-// Included into ChittaFieldHandler or DuckDBHandler class body — not a standalone header.
-// Migrated from DuckDB SQL to chitta-field task + event APIs.
+// Included into FieldRpcHandler class body — not a standalone header.
+// Backed by chitta-field task + event APIs.
 //
 // Storage model:
 //   task_create()          — creates a task record in chitta-field
@@ -29,12 +29,12 @@
 
     // ── tool implementations ─────────────────────────────────────────────────
 
-    DuckDBToolResult tool_long_task_start(const json& params) {
+    ToolResult tool_long_task_start(const json& params) {
         std::string task_id = params.value("task_id", "");
         std::string goal = params.value("goal", "");
 
         if (task_id.empty() || goal.empty()) {
-            return DuckDBToolResult::error("task_id and goal are required");
+            return ToolResult::error("task_id and goal are required");
         }
 
         std::string realm = params.value("realm", "brahman");
@@ -59,7 +59,7 @@
         int64_t ts = field_now_ms();
         int rc = field_store_->task_create(task_id, "long_task", payload.dump(), ts);
         if (rc != 0) {
-            return DuckDBToolResult::error("Failed to create task: " + task_id);
+            return ToolResult::error("Failed to create task: " + task_id);
         }
 
         // Start the task
@@ -72,22 +72,22 @@
            << "  Goal: " << goal.substr(0, 100) << (goal.size() > 100 ? "..." : "") << "\n"
            << "  Realm: " << realm;
 
-        return DuckDBToolResult::ok(ss.str(), {
+        return ToolResult::ok(ss.str(), {
             {"task_id", task_id},
             {"realm", realm},
             {"status", "active"}
         });
     }
 
-    DuckDBToolResult tool_long_task_get(const json& params) {
+    ToolResult tool_long_task_get(const json& params) {
         std::string task_id = params.value("task_id", "");
         if (task_id.empty()) {
-            return DuckDBToolResult::error("task_id is required");
+            return ToolResult::error("task_id is required");
         }
 
         std::string raw = field_store_->task_get(task_id);
         if (raw.empty()) {
-            return DuckDBToolResult::error("Task not found: " + task_id);
+            return ToolResult::error("Task not found: " + task_id);
         }
 
         json task = parse_json_obj(raw);
@@ -116,10 +116,10 @@
            << "Goal: " << goal.substr(0, 200) << "\n"
            << "Iterations: " << payload.value("iterations", 0);
 
-        return DuckDBToolResult::ok(ss.str(), result);
+        return ToolResult::ok(ss.str(), result);
     }
 
-    DuckDBToolResult tool_long_task_active(const json& params) {
+    ToolResult tool_long_task_active(const json& params) {
         std::string filter_realm = params.value("realm", "");
 
         // Scan event log for active tasks.
@@ -145,7 +145,7 @@
         });
 
         if (active_tasks.empty()) {
-            return DuckDBToolResult::ok(
+            return ToolResult::ok(
                 "No active task" + (filter_realm.empty() ? "" : " in realm " + filter_realm),
                 {{"found", false}});
         }
@@ -171,19 +171,19 @@
            << "Goal: " << goal.substr(0, 200) << "\n"
            << "Iterations: " << result.value("iterations", 0);
 
-        return DuckDBToolResult::ok(ss.str(), result);
+        return ToolResult::ok(ss.str(), result);
     }
 
-    DuckDBToolResult tool_long_task_update(const json& params) {
+    ToolResult tool_long_task_update(const json& params) {
         std::string task_id = params.value("task_id", "");
         if (task_id.empty()) {
-            return DuckDBToolResult::error("task_id is required");
+            return ToolResult::error("task_id is required");
         }
 
         // Get current payload
         std::string raw = field_store_->task_get(task_id);
         if (raw.empty()) {
-            return DuckDBToolResult::error("Task not found: " + task_id);
+            return ToolResult::error("Task not found: " + task_id);
         }
 
         json task = parse_json_obj(raw);
@@ -206,15 +206,15 @@
         field_store_->task_update_payload(task_id, payload.dump(), ts);
         field_store_->emit_event("long_task", "update", task_id, payload.dump());
 
-        return DuckDBToolResult::ok("Updated task: " + task_id, {{"task_id", task_id}, {"updated", true}});
+        return ToolResult::ok("Updated task: " + task_id, {{"task_id", task_id}, {"updated", true}});
     }
 
-    DuckDBToolResult tool_long_task_complete(const json& params) {
+    ToolResult tool_long_task_complete(const json& params) {
         std::string task_id = params.value("task_id", "");
         std::string outcome = params.value("outcome", "");
 
         if (task_id.empty() || outcome.empty()) {
-            return DuckDBToolResult::error("task_id and outcome are required");
+            return ToolResult::error("task_id and outcome are required");
         }
 
         // Update payload with outcome
@@ -232,19 +232,19 @@
         field_store_->task_transition(task_id, "complete", ts);
         field_store_->emit_event("long_task", "complete", task_id, json({{"outcome", outcome}}).dump());
 
-        return DuckDBToolResult::ok("Completed task: " + task_id, {
+        return ToolResult::ok("Completed task: " + task_id, {
             {"task_id", task_id},
             {"status", "completed"},
             {"outcome", outcome}
         });
     }
 
-    DuckDBToolResult tool_long_task_event(const json& params) {
+    ToolResult tool_long_task_event(const json& params) {
         std::string task_id = params.value("task_id", "");
         std::string kind = params.value("kind", "");
 
         if (task_id.empty() || kind.empty()) {
-            return DuckDBToolResult::error("task_id and kind are required");
+            return ToolResult::error("task_id and kind are required");
         }
 
         json event_payload = {{"payload", params.value("payload", "")}};
@@ -258,10 +258,10 @@
 
         uint64_t event_id = field_store_->emit_event("long_task", kind, task_id, event_payload.dump());
 
-        return DuckDBToolResult::ok("Event logged", {{"event_id", event_id}, {"task_id", task_id}, {"kind", kind}});
+        return ToolResult::ok("Event logged", {{"event_id", event_id}, {"task_id", task_id}, {"kind", kind}});
     }
 
-    DuckDBToolResult tool_unified_checkpoint(const json& params) {
+    ToolResult tool_unified_checkpoint(const json& params) {
         std::string realm = params.value("realm", "brahman");
         std::string mood = params.value("mood", "flowing");
         std::string summary = params.value("summary", "");
@@ -313,7 +313,7 @@
                << "  Event #" << event_id << " (kind: checkpoint)\n"
                << "  Mood: " << mood;
 
-            return DuckDBToolResult::ok(ss.str(), {
+            return ToolResult::ok(ss.str(), {
                 {"mode", "long_task"},
                 {"task_id", active_task_id},
                 {"event_id", event_id}
@@ -330,26 +330,26 @@
 
             uint64_t event_id = field_store_->emit_event("ledger", "save", key, ledger_payload.dump());
 
-            return DuckDBToolResult::ok(
+            return ToolResult::ok(
                 "Checkpoint saved to ledger event #" + std::to_string(event_id) + " (no active long task)",
                 {{"mode", "ledger"}, {"event_id", event_id}}
             );
         }
     }
 
-    DuckDBToolResult tool_long_task_snapshot(const json& params) {
+    ToolResult tool_long_task_snapshot(const json& params) {
         std::string task_id = params.value("task_id", "");
         std::string mode = params.value("mode", "inject");
         size_t max_tokens = params.value("max_tokens", 2000);
         size_t max_chars = max_tokens * 4;
 
         if (task_id.empty()) {
-            return DuckDBToolResult::error("task_id is required");
+            return ToolResult::error("task_id is required");
         }
 
         std::string raw = field_store_->task_get(task_id);
         if (raw.empty()) {
-            return DuckDBToolResult::error("Task not found: " + task_id);
+            return ToolResult::error("Task not found: " + task_id);
         }
 
         json task = parse_json_obj(raw);
@@ -449,18 +449,18 @@
             {"snapshot", snapshot}
         };
 
-        return DuckDBToolResult::ok(snapshot, result);
+        return ToolResult::ok(snapshot, result);
     }
 
-    DuckDBToolResult tool_long_task_evaluate(const json& params) {
+    ToolResult tool_long_task_evaluate(const json& params) {
         std::string task_id = params.value("task_id", "");
         if (task_id.empty()) {
-            return DuckDBToolResult::error("task_id is required");
+            return ToolResult::error("task_id is required");
         }
 
         std::string raw = field_store_->task_get(task_id);
         if (raw.empty()) {
-            return DuckDBToolResult::error("Task not found: " + task_id);
+            return ToolResult::error("Task not found: " + task_id);
         }
 
         json task = parse_json_obj(raw);
@@ -512,5 +512,5 @@
             {"iterations", payload.value("iterations", 0)}
         };
 
-        return DuckDBToolResult::ok(ss.str(), result);
+        return ToolResult::ok(ss.str(), result);
     }

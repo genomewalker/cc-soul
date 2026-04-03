@@ -12,13 +12,13 @@
 #include <sstream>
 #include <cmath>
 
-    DuckDBToolResult tool_compact_context(const json& params) {
+    ToolResult tool_compact_context(const json& params) {
         if (!params.contains("messages") || !params["messages"].is_array())
-            return DuckDBToolResult::error("messages (array) is required");
+            return ToolResult::error("messages (array) is required");
 
         const auto& messages = params["messages"];
         if (messages.empty())
-            return DuckDBToolResult::ok("No messages to compact", {
+            return ToolResult::ok("No messages to compact", {
                 {"messages", json::array()},
                 {"stats", {{"before_tokens",0},{"after_tokens",0},{"dropped",0},
                            {"dropped_pct",0.0},{"distilled",0},{"embedding",false}}}});
@@ -108,7 +108,7 @@
         if (target_tokens >= total_tokens) {
             json stats = {{"before_tokens",total_tokens},{"after_tokens",total_tokens},
                           {"dropped",0},{"dropped_pct",0.0},{"distilled",0},{"embedding",has_embedder}};
-            return DuckDBToolResult::ok("Already within budget", {{"messages",messages},{"stats",stats}});
+            return ToolResult::ok("Already within budget", {{"messages",messages},{"stats",stats}});
         }
 
         // ── Pre-embed all non-system messages (once, reused for both scoring + distillation) ──
@@ -282,5 +282,5 @@
             ss << ", " << distilled_count << " distilled into memory";
         ss << ", " << std::fixed << std::setprecision(1) << dropped_pct << "%)";
 
-        return DuckDBToolResult::ok(ss.str(), {{"messages", kept_messages}, {"stats", stats}});
+        return ToolResult::ok(ss.str(), {{"messages", kept_messages}, {"stats", stats}});
     }

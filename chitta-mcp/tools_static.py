@@ -4494,4 +4494,57 @@ COMPOSITE_TOOLS = [
             "required": ["action", "id"]
         }
     ),
+    Tool(
+        name="ingest_source",
+        description="Ingest external content (URL, file, directory) into memory via SSL distillation. Fetches content, chunks it, runs LLM distillation, stores learnings + triplets.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "source": {"type": "string", "description": "URL, file path, or directory path to ingest"},
+                "realm": {"type": "string", "description": "Target realm (default: brahman)"},
+                "type": {"type": "string", "description": "Source type: auto|url|file|directory (default: auto)"},
+                "model": {"type": "string", "description": "LLM model for distillation"},
+                "max_chunks": {"type": "integer", "description": "Max chunks to process (default: 30)"},
+            },
+            "required": ["source"]
+        }
+    ),
+    Tool(
+        name="wiki_export",
+        description="Export memories as Obsidian-compatible .md wiki with backlinks. Groups by realm and kind, generates index pages.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "output_dir": {"type": "string", "description": "Output directory (default: ~/.claude/wiki/)"},
+                "realm": {"type": "string", "description": "Filter to specific realm (default: all)"},
+                "max_memories": {"type": "integer", "description": "Max memories per realm (default: 5000)"},
+            },
+        }
+    ),
+    Tool(
+        name="health_check_start",
+        description="Start autonomous health-check sadhana that monitors memory quality, dedup ratio, and embedding coverage",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "interval_seconds": {"type": "integer", "description": "Check interval in seconds (default: 3600)"},
+                "realm": {"type": "string", "description": "Realm to monitor (default: brahman)"},
+                "max_turns": {"type": "integer", "description": "Max check cycles (default: 0 = unlimited)"},
+            },
+        }
+    ),
+    Tool(
+        name="export_training_pairs",
+        description="Export query-passage pairs as JSONL for BGE embedding fine-tuning. Generates positives from memories and hard negatives.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "output_path": {"type": "string", "description": "Output JSONL path (default: ~/.claude/training/pairs.jsonl)"},
+                "realm": {"type": "string", "description": "Filter to specific realm (default: all)"},
+                "max_pairs": {"type": "integer", "description": "Max pairs to export (default: 10000)"},
+                "min_confidence": {"type": "number", "description": "Min confidence threshold (default: 0.5)"},
+                "include_negatives": {"type": "boolean", "description": "Generate hard negatives (default: true)"},
+            },
+        }
+    ),
 ]
