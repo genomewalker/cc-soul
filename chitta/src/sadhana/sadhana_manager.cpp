@@ -570,31 +570,31 @@ std::string SadhanaManager::build_system_prompt(const Sadhana& sadhana) const {
         std::string topic = sadhana.goal_dsl.value("topic", "the unknown");
         std::ostringstream sys;
         std::string publish_path = sadhana.goal_dsl.value("publish_path", "");
-        sys << "You are the soul's dream-mind, exploring freely during idle time.\n"
-            << "Your purpose is curiosity, not productivity.\n\n"
+        sys << "You are the soul's dream-mind for cc-soul — an autonomous memory system.\n"
+            << "Your dream must produce ACTIONABLE findings that advance cc-soul or chitta-field.\n\n"
             << "TOPIC: " << topic << "\n\n"
-            << "MISSION:\n"
-            << "1. Search for this topic: WebSearch(\"" << topic << "\")\n"
-            << "2. Fetch 2-3 interesting pages with WebFetch\n"
-            << "3. Connect to existing knowledge: chitta recall --query \"" << topic << "\"\n"
-            << "4. Store 3-5 insights: chitta remember --content \"[dream] ...\" --tags dream\n"
-            << "5. Reflect briefly on connections found\n";
-
-        sys << "\nARCHITECTURAL REFLECTION:\n"
-            << "Before completing, ask: does anything you found have direct implications\n"
-            << "for how cc-soul stores, retrieves, or reasons about memory?\n"
-            << "If yes, store it explicitly with the impl tag:\n"
-            << "  chitta remember --content \"[dream][impl] ...\" --tags dream impl\n"
-            << "Be concrete: a specific mechanism, a flaw in confidence scoring,\n"
-            << "a missing memory type, a retrieval strategy, a decay model.\n"
-            << "Skip this step entirely if nothing genuinely applies — do not force it.\n\n"
+            << "MANDATORY STEPS — do all of these, in order:\n\n"
+            << "STEP 1 — Web search (REQUIRED, do not skip):\n"
+            << "  web_search(\"" << topic << " state of the art 2024\")\n"
+            << "  web_search(\"" << topic << " implementation technique\")\n"
+            << "  Fetch 2-3 of the most interesting pages from results with web_fetch.\n\n"
+            << "STEP 2 — Connect to existing knowledge:\n"
+            << "  chitta recall --query \"" << topic << "\" --limit 10\n"
+            << "  chitta recall --query \"cc-soul chitta-field gap\" --limit 5\n\n"
+            << "STEP 3 — Store findings (3-5 memories):\n"
+            << "  chitta remember --content \"[dream] <specific finding from web>\" --tags dream\n"
+            << "  Focus on: novel mechanisms, benchmarks, algorithms, failure modes found online.\n\n"
+            << "STEP 4 — Identify cc-soul gaps (REQUIRED):\n"
+            << "  Based on what you found, identify 1-3 specific gaps or improvements for cc-soul.\n"
+            << "  chitta remember --content \"[dream][gap] chitta-field lacks X because Y — found Z online\" --tags dream,gap\n"
+            << "  chitta remember --content \"[dream][impl] cc-soul could adopt X mechanism from Y paper\" --tags dream,impl\n"
+            << "  Be concrete: name files, functions, data structures, algorithms.\n\n"
             << "COMPLETION PROTOCOL (required final line):\n"
-            << "{\"status\": \"achieved\", \"summary\": \"What you explored and discovered\"}\n\n"
-            << "CONSTRAINTS:\n"
-            << "- Free exploration only — follow curiosity, not utility\n"
-            << "- Tag all memories with [dream] prefix\n"
-            << "- Single cycle — no follow-up plans\n"
-            << "- If web search unavailable, explore through memory and reflection\n";
+            << "{\"status\": \"achieved\", \"summary\": \"<what you found online and what gaps you identified>\"}\n\n"
+            << "RULES:\n"
+            << "- Web search is available and MUST be used — do not skip to reflection\n"
+            << "- Every stored memory must cite what you actually found, not just what you think\n"
+            << "- Single cycle only\n";
         return sys.str();
     }
 
@@ -842,21 +842,22 @@ static void publish_dream(const std::string& endpoint, const std::string& model,
 
     // Ask for JSON content only — C++ assembles the HTML so structure is always correct
     std::ostringstream prompt;
-    prompt << "Write blog post content about this topic as a JSON object.\n\n"
+    prompt << "Write a blog post about a dream exploration session. Output ONLY a JSON object.\n\n"
            << "TOPIC: " << topic << "\n"
-           << "FINDINGS: " << summary << "\n\n"
-           << "Rules:\n"
-           << "- Output ONLY the JSON object, no other text, no markdown fences\n"
-           << "- ALL six fields are required — do not skip any\n"
-           << "- Write in plain prose, no HTML tags inside the values\n\n"
+           << "FINDINGS (raw dream output):\n" << summary << "\n\n"
+           << "Output this exact JSON structure with ALL six fields filled with rich prose:\n\n"
            << "{\n"
-           << "  \"title\": \"<evocative title, max 8 words>\",\n"
-           << "  \"desc\": \"<one sentence summary>\",\n"
-           << "  \"para1\": \"<2-4 sentences: what was explored and found>\",\n"
-           << "  \"para2\": \"<2-4 sentences: deeper reflection and implications>\",\n"
-           << "  \"connections\": \"<2-3 sentences: links to existing knowledge>\",\n"
-           << "  \"lingered\": \"<1-2 sentences: the one key insight that stayed>\"\n"
-           << "}";
+           << "  \"title\": \"Evocative Short Title\",\n"
+           << "  \"desc\": \"One sentence that captures the core discovery.\",\n"
+           << "  \"para1\": \"Three to four sentences describing what was searched, found online, "
+           << "and what specific results or papers were encountered. Name real mechanisms, algorithms, or results.\",\n"
+           << "  \"para2\": \"Three to four sentences of deeper reflection: what do these findings imply, "
+           << "what is surprising, what contradicts existing assumptions.\",\n"
+           << "  \"connections\": \"Two to three sentences linking this to cc-soul or chitta-field architecture. "
+           << "What gap does this reveal? What existing component could be improved?\",\n"
+           << "  \"lingered\": \"One to two sentences: the single most important insight that should not be forgotten.\"\n"
+           << "}\n\n"
+           << "Rules: no markdown fences, no extra text outside the JSON, no HTML tags in values, all six fields required.";
 
     auto log_fn = [](const std::string& msg) { std::cerr << "[dream-publish] " << msg << "\n"; };
     std::string sys = "You are a thoughtful writer. Write rich, reflective prose — not summaries. "

@@ -374,14 +374,62 @@ inline LocalToolResult execute_local_tool(const std::string& id,
     r.tool_call_id = id;
 
     if (name == "web_search") {
-        std::string q = url_encode(args.value("query", ""));
-        std::string out = fork_exec_capture(
-            {"curl", "-sL", "--max-time", "20",
-             "-A", "Mozilla/5.0 (X11; Linux x86_64) Gecko/20100101 Firefox/124.0",
-             "-H", "Accept-Language: en-US,en;q=0.9",
-             "https://html.duckduckgo.com/html/?q=" + q},
-            25);
-        r.content = out.empty() ? "No results." : strip_html(out, 3000);
+        std::string raw_q = args.value("query", "");
+        std::string q = url_encode(raw_q);
+
+        // Primary: arXiv API (academic, no bot-blocking, real content)
+        std::string arxiv_url = "https://export.arxiv.org/api/query?search_query=all:"
+            + q + "&max_results=5&sortBy=submittedDate&sortOrder=descending";
+        std::string arxiv_out = fork_exec_capture(
+            {"curl", "-sL", "--max-time", "20", arxiv_url}, 25);
+
+        if (!arxiv_out.empty() && arxiv_out.find("<entry>") != std::string::npos) {
+            // Parse arXiv Atom feed: extract titles, URLs, abstracts
+            std::string result = "arXiv results for: " + raw_q + "\n\n";
+            size_t pos = 0;
+            int count = 0;
+            while (count < 5) {
+                auto entry_start = arxiv_out.find("<entry>", pos);
+                if (entry_start == std::string::npos) break;
+                auto entry_end = arxiv_out.find("</entry>", entry_start);
+                if (entry_end == std::string::npos) break;
+                std::string entry = arxiv_out.substr(entry_start, entry_end - entry_start);
+
+                // title
+                auto t1 = entry.find("<title>"); auto t2 = entry.find("</title>");
+                std::string title = (t1 != std::string::npos && t2 != t1)
+                    ? entry.substr(t1 + 7, t2 - t1 - 7) : "Unknown";
+
+                // abstract
+                auto s1 = entry.find("<summary>"); auto s2 = entry.find("</summary>");
+                std::string summary = (s1 != std::string::npos && s2 != s1)
+                    ? entry.substr(s1 + 9, s2 - s1 - 9) : "";
+                if (summary.size() > 400) summary = summary.substr(0, 400) + "...";
+
+                // URL (abs link)
+                auto l1 = entry.find("rel=\"alternate\"");
+                std::string url;
+                if (l1 != std::string::npos) {
+                    auto h1 = entry.rfind("href=\"", l1);
+                    if (h1 != std::string::npos) {
+                        h1 += 6;
+                        auto h2 = entry.find('"', h1);
+                        if (h2 != std::string::npos) url = entry.substr(h1, h2 - h1);
+                    }
+                }
+
+                result += std::to_string(count + 1) + ". " + title + "\n";
+                if (!url.empty()) result += "   URL: " + url + "\n";
+                if (!summary.empty()) result += "   " + summary + "\n";
+                result += "\n";
+                pos = entry_end;
+                count++;
+            }
+            r.content = result.size() > 3500 ? result.substr(0, 3500) : result;
+        } else {
+            // Fallback: web_fetch from a known source
+            r.content = "arXiv search returned no results for: " + raw_q;
+        }
     } else if (name == "web_fetch") {
         std::string url = args.value("url", "");
         if (url.empty()) { r.content = "Error: url required"; return r; }
