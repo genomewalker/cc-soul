@@ -120,6 +120,9 @@ while IFS= read -r line; do
     # Skip low confidence
     [[ "$conf" -lt "$MIN_CONFIDENCE" ]] && continue
 
+    # Skip episode thinking-blocks — internal reasoning traces, never useful as injected context
+    [[ "$line" =~ \[episode\].*\[thinking.block: ]] && continue
+
     # Code symbol filtering is now done server-side via --partnership-only flag
 
     # Truncate and add
