@@ -1,40 +1,46 @@
 ---
 name: recap
-description: Token-savvy session continuation. Rebuilds working context from transcript + soul memories in ~1500 tokens instead of replaying full history. Use when starting a new session to continue previous work.
+description: "Token-savvy session continuation. Rebuilds working context from transcript + soul memories in ~1500 tokens instead of replaying full history. Use when starting a new session to continue previous work."
 execution: direct
+aliases: [resume]
 ---
 
 # Recap: Token-Savvy Session Continuation
 
 Reconstructs working context from a previous session's transcript and soul memories,
-fitting the result into ~1500 tokens. This replaces `claude --resume` which replays
-the entire conversation history (often 300k+ tokens with cache invalidation issues).
+fitting the result into ~1500 tokens.
 
-## Process
+## Step 0: Detect Environment
 
-### Step 1: Identify the session
-
-If a session_id is provided, use it. Otherwise auto-detect:
+**First, determine which tool you are running in:**
 
 ```bash
-# Transcript files live at ~/.claude/projects/<encoded-cwd>/<session-id>.jsonl
-# Find the most recent one that ISN'T the current session
-PROJECT_DIR=$(ls -dt ~/.claude/projects/*/  | head -1)  # or derive from CWD
-ls -t "$PROJECT_DIR"*.jsonl | head -5
+# Codex: ~/.codex/sessions/ exists and has recent content
+# Claude Code: ~/.claude/projects/ with encoded-cwd dirs
+ls ~/.codex/sessions/ 2>/dev/null && echo "CODEX" || echo "CLAUDE"
 ```
 
-Pick the **second most recent** file (the first is the current session being written to).
-Extract the session_id from the filename (strip path and .jsonl extension).
+Then follow the appropriate path below.
 
-If the user says "last N" or "pick", show the 5 most recent with sizes:
+---
+
+## Claude Code Path
+
+### Step 1 (Claude): Identify the session
+
 ```bash
-ls -lht ~/.claude/projects/<encoded-cwd>/*.jsonl | head -5
+# Transcript files: ~/.claude/projects/<encoded-cwd>/<session-id>.jsonl
+# encoded-cwd = working dir with / → - and leading -
+# Example: /maps/projects/foo/bar → -maps-projects-foo-bar
+ls -t ~/.claude/projects/-<encoded-cwd>/*.jsonl | head -5
 ```
 
-### Step 2: Extract key signals from transcript
+Pick the **second most recent** (first = current session being written to).
+Session_id = filename without `.jsonl`.
 
-Read **user messages only** (these carry intent). Read in two passes: first half and last half,
-since the last portion is usually where the active work is:
+### Step 2 (Claude): Extract key signals
+
+Read user messages in two passes:
 
 ```tool
 mcp__chitta__read_transcript({
@@ -44,8 +50,6 @@ mcp__chitta__read_transcript({
   limit: 30
 })
 ```
-
-Then read the tail:
 
 ```tool
 mcp__chitta__read_transcript({
@@ -57,19 +61,7 @@ mcp__chitta__read_transcript({
 })
 ```
 
-**When reading user messages, IGNORE these noise patterns:**
-- `<local-command-*>` blocks (model switches, login, plugin commands)
-- `<command-name>` blocks (slash commands)
-- `<task-notification>` blocks (agent completions)
-- `<system-reminder>` blocks (hook output)
-- `[Request interrupted by user]`
-- Repeated identical messages (user often retypes when switching models)
-- `<local-command-stdout>` blocks
-
-**Focus ONLY on lines that express intent:** actual questions, requests, corrections,
-confirmations. These are typically short, informal, often with typos.
-
-Read **last 15 assistant messages** for decisions:
+Read last 15 assistant messages:
 
 ```tool
 mcp__chitta__read_transcript({
@@ -81,9 +73,91 @@ mcp__chitta__read_transcript({
 })
 ```
 
-### Step 3: Get soul context for the session
+---
 
-Query soul for memories tagged with the session or relevant work:
+## Codex Path
+
+### Step 1 (Codex): Find recent sessions for current project
+
+```bash
+# Codex transcripts: ~/.codex/sessions/YYYY/MM/DD/rollout-<datetime>-<uuid>.jsonl
+# Session meta (first line) contains cwd — use to filter by current project
+CWD=$(pwd)
+python3 - <<'EOF'
+import os, json, glob
+cwd = os.getcwd()
+sessions = []
+for f in glob.glob(os.path.expanduser("~/.codex/sessions/**/*.jsonl"), recursive=True):
+    try:
+        first = json.loads(open(f).readline())
+        if first.get("payload", {}).get("cwd") == cwd:
+            sessions.append((os.path.getmtime(f), f))
+    except: pass
+for mtime, path in sorted(sessions, reverse=True)[:5]:
+    sid = os.path.basename(path).replace(".jsonl", "").split("-", 3)[-1]  # UUID part
+    size = os.path.getsize(path)
+    print(f"{path}  [{sid}]  {size//1024}KB")
+EOF
+```
+
+Pick the most recent (the current session has no prior turns worth recapping).
+Session path = the full file path. Session_id = the UUID suffix after the timestamp.
+
+### Step 2 (Codex): Extract key signals from transcript
+
+Use python3 to parse the Codex JSONL format (different from Claude's format):
+
+```bash
+# Read user messages from a Codex transcript
+python3 - <<'EOF'
+import json, sys
+
+TRANSCRIPT = "/path/to/rollout-....jsonl"  # fill in
+MAX_CHARS = 150
+LIMIT = 40
+ROLE_FILTER = "user"  # or "assistant" or "" for both
+
+turns = []
+for line in open(TRANSCRIPT):
+    d = json.loads(line)
+    if d.get("type") == "response_item":
+        p = d["payload"]
+        role = p.get("role", "")
+        if ROLE_FILTER and role != ROLE_FILTER:
+            continue
+        content = p.get("content", "")
+        if isinstance(content, list):
+            content = " ".join(b.get("text","") for b in content if isinstance(b,dict) and b.get("type")=="text")
+        content = str(content).strip()
+        if content:
+            turns.append((role, content[:MAX_CHARS]))
+
+# First half
+for role, text in turns[:20]:
+    print(f"[{role}] {text}")
+print("--- tail ---")
+for role, text in turns[-20:]:
+    print(f"[{role}] {text}")
+EOF
+```
+
+Run twice: once for user messages (ROLE_FILTER="user"), once for assistant (ROLE_FILTER="assistant").
+
+**When reading user messages, IGNORE these noise patterns:**
+- `<local-command-*>` blocks (model switches, login, plugin commands)
+- `<command-name>` blocks (slash commands)
+- `<task-notification>` blocks (agent completions)
+- `<system-reminder>` blocks (hook output)
+- `[Request interrupted by user]`
+- Repeated identical messages
+
+**Focus ONLY on lines that express intent:** questions, requests, corrections, confirmations.
+
+---
+
+## Step 3: Get soul context
+
+Query soul for memories relevant to what was being worked on:
 
 ```tool
 mcp__chitta__smart_context({
@@ -93,15 +167,14 @@ mcp__chitta__smart_context({
 })
 ```
 
-### Step 4: Get current environment state
+## Step 4: Get current environment state
 
 ```bash
 git status --short
 git log --oneline -5
-ps aux | grep -E "cresearch|chittad" | grep -v grep | awk '{print $11}'
 ```
 
-### Step 5: Synthesize the recap block
+## Step 5: Synthesize the recap block
 
 Combine everything into a structured block under 1500 tokens:
 
@@ -117,7 +190,6 @@ Combine everything into a structured block under 1500 tokens:
 ### Current state
 - **Branch**: <branch>
 - **Uncommitted**: <files or "clean">
-- **Running**: <processes>
 
 ### Pending work
 <What was left unfinished — derived from last user messages + soul context>
@@ -147,40 +219,8 @@ Combine everything into a structured block under 1500 tokens:
 | Key context | 450 tokens |
 | **Total** | **~1500 tokens** |
 
-Compare: `claude --resume` typically sends 100k-300k tokens of raw history.
-
 ## Arguments
 
-- No args: resume from most recent *previous* session in current project (auto-detect)
+- No args: resume from most recent previous session for current project (auto-detect)
 - `<session_id>`: resume from specific session
 - `last N`: show last N sessions to pick from
-
-## Auto-Detection Logic
-
-The transcript directory for the current project is:
-```
-~/.claude/projects/<encoded-cwd>/
-```
-
-Where `<encoded-cwd>` is the working directory with `/` replaced by `-` and leading `-`.
-For example: `/maps/projects/fernandezguerra/apps/repos/cc-soul` →
-`-maps-projects-fernandezguerra-apps-repos-cc-soul`
-
-To find the previous session:
-```bash
-# List transcripts by recency, skip the current (being written to = largest/newest)
-ls -t ~/.claude/projects/-maps-projects-.../*.jsonl | sed -n '2p'
-```
-
-The session_id is the filename without `.jsonl`.
-
-## Example
-
-```
-/recap
-→ Reads transcript from last session
-→ Extracts: "User was implementing multi-round hypotheses in chitta-research hotr.
-   Key fix: labeled 'outer loop with break to avoid Noop. Deployed binary was stale.
-   Pending: verify hotr generates round-2 hypotheses with web refs."
-→ ~1200 tokens instead of ~250k
-```
