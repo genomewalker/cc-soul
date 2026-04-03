@@ -124,6 +124,13 @@ void NativeDistiller::store_learnings(
         log("[distill]   +" + learning.category + ": " +
             learning.title.substr(0, 60) + "...");
 
+        // Apply affect dimensions if present (from [AFFECT] learnings)
+        if (learning.affect_valence != 0.0f || learning.affect_arousal != 0.0f) {
+            field_store_->set_affect(mem_id, learning.affect_valence, learning.affect_arousal);
+            log("[distill]     affect: v=" + std::to_string(learning.affect_valence) +
+                " a=" + std::to_string(learning.affect_arousal));
+        }
+
         // Link to episode memory via DerivedFrom edge (edge_type=0)
         if (episode_mem_id > 0) {
             field_store_->add_edge(mem_id, episode_mem_id, 0, 1.0f);

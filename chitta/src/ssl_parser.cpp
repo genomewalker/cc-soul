@@ -37,7 +37,23 @@ std::string SSLParser::type_to_category(const std::string& type) {
     if (type == "PATTERN") return "pattern";
     if (type == "PREFERENCE") return "preference";
     if (type == "FAILURE") return "failure";
+    if (type == "AFFECT") return "affect";
     return "wisdom";
+}
+
+// Parse affect valence/arousal from content like "(valence:-0.7, arousal:0.8)"
+static void parse_affect_values(const std::string& content, float& valence, float& arousal) {
+    static const std::regex affect_pattern(
+        R"(valence:\s*([+\-]?\d+\.?\d*)\s*,\s*arousal:\s*(\d+\.?\d*))");
+    std::smatch match;
+    if (std::regex_search(content, match, affect_pattern)) {
+        try {
+            valence = std::stof(match[1].str());
+            arousal = std::stof(match[2].str());
+            valence = std::max(-1.0f, std::min(1.0f, valence));
+            arousal = std::max(0.0f, std::min(1.0f, arousal));
+        } catch (...) {}
+    }
 }
 
 // Extract @file:line citations from text
@@ -93,7 +109,7 @@ SSLParser::Result SSLParser::parse(const std::string& output) {
     std::vector<SSLCitation> current_citations;
 
     // Regex for typed markers
-    static const std::regex type_pattern(R"(^\[(SOLUTION|GOTCHA|DECISION|PATTERN|PREFERENCE|FAILURE)\]\s+(.*)$)");
+    static const std::regex type_pattern(R"(^\[(SOLUTION|GOTCHA|DECISION|PATTERN|PREFERENCE|FAILURE|AFFECT)\]\s+(.*)$)");
     static const std::regex triplet_pattern(R"(^\[TRIPLET\]\s+(\S+)\s+(\S+)\s+(.+)$)");
     static const std::regex cite_line_pattern(R"(^\[CITE\]\s+)");
 
@@ -116,6 +132,11 @@ SSLParser::Result SSLParser::parse(const std::string& output) {
         // Add explicit [CITE] citations collected during parsing
         learning.citations = std::move(current_citations);
         current_citations.clear();
+
+        // Parse affect valence/arousal if AFFECT type
+        if (learning.type == "AFFECT") {
+            parse_affect_values(current_content, learning.affect_valence, learning.affect_arousal);
+        }
 
         // Also extract inline @file:line citations from content
         auto inline_cites = extract_inline_citations(current_content);

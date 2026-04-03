@@ -24,6 +24,7 @@ Before writing any output, mentally scan the conversation for each lens:
 4. **Time-sensitive facts** — things that will change or expire (versions, deadlines, states, corrections to prior beliefs)
 5. **Corrections** — explicit or implicit updates to something previously believed or done differently
 6. **Technical knowledge** — patterns, solutions, failures, gotchas, design decisions with lasting value
+7. **Affect & emotional tone** — frustration, excitement, confusion, eureka moments, confidence shifts during the session
 
 Emit SSL lines only for findings that are non-obvious and worth remembering.
 
@@ -47,6 +48,7 @@ Types:
 | [FAILURE] | What did not work and why |
 | [CORRECTION] | Updates to prior beliefs: supersedes earlier knowledge |
 | [EVENT] | Significant action taken this session (deployed, merged, configured) |
+| [AFFECT] | Emotional tone shift: frustration, eureka, confidence, confusion (valence:±1.0, arousal:0-1) |
 
 SSL symbols:
 
@@ -101,6 +103,9 @@ When referencing specific code, include @file:line. Use [CITE] for multiple:
 [CORRECTION] [embeddings] :memory:→was-wrong-path→correct-path-is-~/.claude/mind
 
 [EVENT] [release] v4.0.26→deployed→gradmem-active @2026-03-21
+
+[AFFECT] [session] frustration→high+confidence→low (valence:-0.7, arousal:0.8)
+[AFFECT] [session] eureka→resolution+satisfaction (valence:+0.9, arousal:0.6)
 
 [TRIPLET] GradMemWriter uses FieldStore
 [TRIPLET] gradmemd_snapshot supersedes session_embedding

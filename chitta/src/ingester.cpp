@@ -295,6 +295,13 @@ void Ingester::store_learnings(const SSLParser::Result& ssl, const std::string& 
         if (mem_id == 0) continue;
         result.learnings_stored++;
 
+        // Apply affect dimensions if present
+        if (learning.affect_valence != 0.0f || learning.affect_arousal != 0.0f) {
+            field_store_->set_affect(mem_id, learning.affect_valence, learning.affect_arousal);
+            log("[ingest]     affect: v=" + std::to_string(learning.affect_valence) +
+                " a=" + std::to_string(learning.affect_arousal));
+        }
+
         // Link to source episode
         if (episode_id > 0) {
             field_store_->add_triplet(std::to_string(mem_id), "derived_from",

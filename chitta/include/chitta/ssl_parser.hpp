@@ -18,11 +18,13 @@ struct SSLCitation {
 };
 
 struct SSLLearning {
-    std::string type;       // SOLUTION, GOTCHA, DECISION, PATTERN, PREFERENCE, FAILURE
+    std::string type;       // SOLUTION, GOTCHA, DECISION, PATTERN, PREFERENCE, FAILURE, AFFECT
     std::string content;    // Full content including [ε] lines
     std::string title;      // First line (truncated to 100 chars)
     std::string category;   // Lowercase type for observe() category
     std::vector<SSLCitation> citations;  // Code locations referenced
+    float affect_valence = 0.0f;  // -1.0 (negative) to +1.0 (positive), 0 = neutral
+    float affect_arousal = 0.0f;  // 0.0 (calm) to 1.0 (intense)
 };
 
 struct SSLTriplet {

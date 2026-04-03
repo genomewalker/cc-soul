@@ -275,6 +275,12 @@ private:
                 {"realm",      h.realm},
                 {"confidence", h.confidence},
             };
+            if (h.affect_valence != 0.0f || h.affect_arousal != 0.0f) {
+                entry["affect"] = {
+                    {"valence", h.affect_valence},
+                    {"arousal", h.affect_arousal},
+                };
+            }
             if (explain) {
                 entry["explain"] = {
                     {"semantic_weight",  h.semantic_weight},

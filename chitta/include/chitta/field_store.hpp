@@ -27,6 +27,7 @@ int cf_select_route(struct CfHandle* h, const char* query,
 int cf_route_feedback(struct CfHandle* h, uint64_t episode_id, float reward);
 int cf_set_memory_status(struct CfHandle* h, uint64_t memory_id, uint8_t status);
 int cf_set_epistemic_status(struct CfHandle* h, uint64_t memory_id, uint8_t epistemic_status);
+int cf_set_affect(struct CfHandle* h, uint64_t memory_id, float valence, float arousal);
 int64_t cf_compact_wal(struct CfHandle* h);
 
 // FEP attractor network FFI
@@ -57,6 +58,8 @@ struct FieldRecallHit {
     float       status_mul       = 0.0f;
     float       epistemic_mul    = 0.0f;
     float       strength_factor  = 0.0f;
+    float       affect_valence   = 0.0f;
+    float       affect_arousal   = 0.0f;
 };
 
 /// Thin RAII C++ wrapper around the chitta-field C FFI.
@@ -115,6 +118,11 @@ public:
     /// Set epistemic status: 0=UserStated 1=ToolDerived 2=ModelInferred 3=AutonomousSynthesis
     void set_epistemic_status(uint64_t id, uint8_t es) {
         cf_set_epistemic_status(handle_, id, es);
+    }
+
+    /// Set affect dimensions: valence [-1,1], arousal [0,1].
+    void set_affect(uint64_t id, float valence, float arousal) {
+        cf_set_affect(handle_, id, valence, arousal);
     }
 
     /// Compact WAL: save full snapshot then delete covered segments. Returns deleted count or -1.
@@ -977,6 +985,8 @@ private:
             h.status_mul       = buf[i].status_mul;
             h.epistemic_mul    = buf[i].epistemic_mul;
             h.strength_factor  = buf[i].strength_factor;
+            h.affect_valence   = buf[i].affect_valence;
+            h.affect_arousal   = buf[i].affect_arousal;
 
             // Fetch content (has written out-param)
             written = 0;
