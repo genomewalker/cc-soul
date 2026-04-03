@@ -574,10 +574,25 @@ install_python_packages() {
     # Install chitta-mcp (MCP server)
     local mcp_dir="$PLUGIN_DIR/chitta-mcp"
     if [[ -d "$mcp_dir" ]]; then
+        local reinstall=false
         if ! command -v chitta-mcp &> /dev/null; then
+            reinstall=true
+        else
+            # Reinstall if version changed
+            local installed_ver
+            installed_ver=$(python3 -c "import importlib.metadata; print(importlib.metadata.version('chitta-mcp'))" 2>/dev/null || echo "")
+            local pkg_ver
+            pkg_ver=$(grep '^version' "$mcp_dir/pyproject.toml" 2>/dev/null | head -1 | grep -oP '[\d.]+' || echo "")
+            [[ -n "$pkg_ver" && "$installed_ver" != "$pkg_ver" ]] && reinstall=true
+        fi
+        if [[ "$reinstall" == "true" ]]; then
             if $python_cmd -m pip install -q -e "$mcp_dir" --user 2>/dev/null; then
                 echo "[cc-soul] Installed chitta-mcp"
             fi
+        fi
+        # Always update MCP server config to use entrypoint (version-independent)
+        if [[ -f "$PLUGIN_DIR/scripts/configure-mcp.sh" ]]; then
+            bash "$PLUGIN_DIR/scripts/configure-mcp.sh" 2>/dev/null || true
         fi
     fi
 
