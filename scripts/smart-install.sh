@@ -590,7 +590,14 @@ install_python_packages() {
                 echo "[cc-soul] Installed chitta-mcp"
             fi
         fi
-        # Always update MCP server config to use entrypoint (version-independent)
+        # Symlink chitta-mcp to ~/.local/bin so it's on PATH for Codex and other tools
+        local chitta_mcp_bin
+        chitta_mcp_bin=$(command -v chitta-mcp 2>/dev/null || true)
+        if [[ -n "$chitta_mcp_bin" && "$chitta_mcp_bin" != "${HOME}/.local/bin/chitta-mcp" ]]; then
+            mkdir -p "${HOME}/.local/bin"
+            ln -sf "$chitta_mcp_bin" "${HOME}/.local/bin/chitta-mcp"
+        fi
+        # Always update Claude Code MCP server config to use entrypoint (version-independent)
         if [[ -f "$PLUGIN_DIR/scripts/configure-mcp.sh" ]]; then
             bash "$PLUGIN_DIR/scripts/configure-mcp.sh" 2>/dev/null || true
         fi
