@@ -452,17 +452,22 @@ if [[ -n "$MSG_SESSION_ID" && "$MSG_SESSION_ID" != "default" ]]; then
     fi
 
     # Check for cross-session messages via daemon (authoritative)
-    response=$(timeout 1 "$CHITTA_BIN" msg_inbox --session_id "$MSG_SESSION_ID" --limit 3 --min_priority 1 --auto_ack --json 2>/dev/null || true)
+    response=$(timeout 1 "$CHITTA_BIN" msg_inbox --session_id "$MSG_SESSION_ID" --limit 3 --min_priority 1 --json 2>/dev/null || true)
     if [[ -n "$response" ]]; then
         msg_count=$(echo "$response" | jq -r '.count // 0' 2>/dev/null)
         if [[ "$msg_count" -gt 0 ]]; then
             # Format messages based on priority:
-            # priority 3 = [MSG:URGENT:realm], priority 2 = [MSG:important:realm], else = [msg:realm]
+            # priority 3 = [MSG:URGENT:sender], priority 2 = [MSG:important:sender], else = [msg:sender]
             CROSS_SESSION_MSGS=$(echo "$response" | jq -r '.messages[] |
-                if .priority == 3 then "[MSG:URGENT:\(.sender_realm)] \(.content | .[0:150])"
-                elif .priority == 2 then "[MSG:important:\(.sender_realm)] \(.content | .[0:150])"
-                else "[msg:\(.sender_realm)] \(.content | .[0:150])"
+                (.sender_session_id | if . == "" or . == null then "unknown" else . end) as $sender |
+                if .score >= 3 then "[MSG:URGENT:\($sender)] \(.content | .[0:150])"
+                elif .score >= 2 then "[MSG:important:\($sender)] \(.content | .[0:150])"
+                else "[msg:\($sender)] \(.content | .[0:150])"
                 end' 2>/dev/null || true)
+            # Ack all messages that were just read
+            echo "$response" | jq -r '.messages[].memory_id' 2>/dev/null | while read -r mid; do
+                [[ -n "$mid" && "$mid" != "null" ]] && timeout 0.3 "$CHITTA_BIN" msg_ack --message_id "$mid" >/dev/null 2>&1 || true
+            done
         fi
     fi
 fi
