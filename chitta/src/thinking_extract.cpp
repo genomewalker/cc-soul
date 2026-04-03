@@ -12,6 +12,7 @@
 
 #include <chitta/socket_client.hpp>
 #include <chitta/version.hpp>
+#include <chitta/llm_http.hpp>
 #include <fstream>
 #include <iostream>
 #include <regex>
@@ -236,8 +237,33 @@ int main(int argc, char* argv[]) {
     int stored = 0;
     double confidence = min_conf / 100.0;
 
+    // Discover GPU endpoint once for gemma4:26b distillation
+    std::string gpu_endpoint = chitta::discover_gpu_endpoint("gemma4:26b",
+        [&](const std::string& m) { if (verbose) std::cerr << m << "\n"; });
+    if (verbose) {
+        std::cerr << "[thinking] Distillation endpoint: "
+                  << (gpu_endpoint.empty() ? "none (storing verbatim)" : gpu_endpoint) << "\n";
+    }
+
+    auto trim_ws = [](std::string s) -> std::string {
+        auto f = s.find_first_not_of(" \n\r\t");
+        if (f == std::string::npos) return "";
+        auto l = s.find_last_not_of(" \n\r\t");
+        return s.substr(f, l - f + 1);
+    };
+
     for (auto& [label, snippet] : insights) {
-        std::string content = "[thinking-block:" + label + "] " + snippet;
+        std::string text = snippet;
+        if (!gpu_endpoint.empty()) {
+            std::string distilled = chitta::call_llm_http(
+                gpu_endpoint, "gemma4:26b",
+                "Summarize this thinking-block in 1-2 sentences, capturing the core insight:\n\n" + snippet,
+                "You are a concise knowledge distiller. Output only the 1-2 sentence summary.",
+                30, 0.1f, 120);
+            distilled = trim_ws(distilled);
+            if (!distilled.empty()) text = distilled;
+        }
+        std::string content = "[thinking-block:" + label + "] " + text;
         json req = {
             {"jsonrpc", "2.0"},
             {"id",      1},

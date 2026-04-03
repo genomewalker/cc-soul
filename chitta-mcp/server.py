@@ -183,6 +183,13 @@ def handle_advanced(arguments: dict) -> str:
             # Check if it's a valid daemon tool at all
             return f"Unknown tool: {tool}\nUse action='list' to see available hidden tools."
 
+        # Inject session_id for messaging tools if not already provided
+        if tool in MSG_TOOLS and not tool_args.get("session_id"):
+            sid = get_current_session_id(use_cache=False)
+            if sid:
+                tool_args = dict(tool_args)
+                tool_args["session_id"] = sid
+
         # Call the hidden tool via daemon
         result = daemon_call(tool, tool_args)
         return f"[{tool}]\n{result}"
@@ -1653,13 +1660,13 @@ def get_current_session_id(use_cache: bool = True) -> Optional[str]:
     ppid_session = None
     sessions = []
     try:
-        result = daemon_call("session_list", {}, structured=True)
+        result = daemon_call("session_list", {"active_only": True}, structured=True)
         data = json.loads(result)
         sessions = data.get("sessions", [])
 
         # Look for session matching our PPID
         for s in sessions:
-            if s.get("pid") == ppid and s.get("status") == "active":
+            if s.get("pid") == ppid:
                 ppid_session = s.get("session_id")
                 break
     except (json.JSONDecodeError, KeyError, TypeError):
@@ -1689,12 +1696,11 @@ def get_current_session_id(use_cache: bool = True) -> Optional[str]:
     # 4. Single active session fallback
     try:
         if not sessions:
-            result = daemon_call("session_list", {}, structured=True)
+            result = daemon_call("session_list", {"active_only": True}, structured=True)
             data = json.loads(result)
             sessions = data.get("sessions", [])
-        active_sessions = [s for s in sessions if s.get("status") == "active"]
-        if len(active_sessions) == 1:
-            current_session_id = active_sessions[0].get("session_id")
+        if len(sessions) == 1:
+            current_session_id = sessions[0].get("session_id")
             return current_session_id
     except (json.JSONDecodeError, KeyError, TypeError):
         pass
