@@ -922,6 +922,17 @@ static void publish_dream(const std::string& endpoint, const std::string& model,
     html_out << "</article></main></body></html>\n";
     std::string html = html_out.str();
 
+    // Write the dream page
+    {
+        std::ofstream out(filepath);
+        if (!out) {
+            std::cerr << "[dream-publish] Cannot write: " << filepath << "\n";
+            return;
+        }
+        out << html;
+        std::cerr << "[dream-publish] Wrote " << filepath << " (" << html.size() << " bytes)\n";
+    }
+
     // Update index.html — insert card after <!-- DREAM ENTRIES START -->
     std::string index_path = publish_path + "/index.html";
     std::string index_html;
