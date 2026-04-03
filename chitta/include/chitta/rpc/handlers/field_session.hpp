@@ -497,12 +497,22 @@
         if (content.empty()) return ToolResult::error("content is required");
 
         std::string sender_session_id = params.value("sender_session_id", get_session_id());
+        std::string sender_realm      = params.value("sender_realm", "");
         int priority                  = params.value("priority", 1);
         std::string content_type      = params.value("content_type", "text");
+
+        // Auto-detect sender hostname for remote tracing
+        std::string sender_host;
+        {
+            char buf[256];
+            if (gethostname(buf, sizeof(buf)) == 0) sender_host = buf;
+        }
 
         json payload = {
             {"content",           content},
             {"sender_session_id", sender_session_id},
+            {"sender_realm",      sender_realm},
+            {"sender_host",       sender_host},
             {"priority",          priority},
             {"content_type",      content_type}
         };
@@ -582,6 +592,8 @@
                 {"memory_id",         event_id},
                 {"content",           payload.value("content", "")},
                 {"sender_session_id", payload.value("sender_session_id", "")},
+                {"sender_realm",      payload.value("sender_realm", "")},
+                {"sender_host",       payload.value("sender_host", "")},
                 {"content_type",      payload.value("content_type", "text")},
                 {"score",             payload.value("priority", 1)},
                 {"ts_ms",             ev.value("ts_ms", 0)}

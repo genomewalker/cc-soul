@@ -193,6 +193,10 @@ def handle_advanced(arguments: dict) -> str:
                 # msg_send uses sender_session_id instead of session_id
                 if tool == "msg_send" and not tool_args.get("sender_session_id"):
                     tool_args["sender_session_id"] = sid
+                    if not tool_args.get("sender_realm"):
+                        realm = get_current_realm()
+                        if realm:
+                            tool_args["sender_realm"] = realm
 
         # Call the hidden tool via daemon
         result = daemon_call(tool, tool_args)
@@ -1787,6 +1791,10 @@ async def call_tool(name: str, arguments: dict):
             # msg_send uses sender_session_id instead of session_id
             if name == "msg_send" and not arguments.get("sender_session_id"):
                 arguments["sender_session_id"] = sid
+                if not arguments.get("sender_realm"):
+                    realm = get_current_realm()
+                    if realm:
+                        arguments["sender_realm"] = realm
 
     # Auto-inject session_id for transcript_search if not provided
     # Pass session_id="*" to explicitly search all transcripts

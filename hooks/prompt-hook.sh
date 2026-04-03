@@ -462,10 +462,14 @@ if [[ -n "$MSG_SESSION_ID" && "$MSG_SESSION_ID" != "default" ]]; then
             # Format messages based on priority:
             # priority 3 = [MSG:URGENT:sender], priority 2 = [MSG:important:sender], else = [msg:sender]
             CROSS_SESSION_MSGS=$(echo "$response" | jq -r '.messages[] |
-                (.sender_session_id | if . == "" or . == null then "unknown" else . end) as $sender |
-                if .score >= 3 then "[MSG:URGENT:\($sender)] \(.content | .[0:150])"
-                elif .score >= 2 then "[MSG:important:\($sender)] \(.content | .[0:150])"
-                else "[msg:\($sender)] \(.content | .[0:150])"
+                (.sender_session_id | if . == "" or . == null then "unknown" else .[0:8] end) as $sender |
+                (.sender_realm      | if . == "" or . == null then "" else "@\(.)" end) as $realm |
+                (.sender_host       | if . == "" or . == null then "" else "/\(.)" end) as $host |
+                (.memory_id | tostring) as $mid |
+                "\($sender)\($realm)\($host)" as $from |
+                if .score >= 3 then "[MSG:URGENT:\($from)|id:\($mid)] \(.content)"
+                elif .score >= 2 then "[MSG:important:\($from)|id:\($mid)] \(.content)"
+                else "[msg:\($from)|id:\($mid)] \(.content)"
                 end' 2>/dev/null || true)
             # Ack all messages that were just read
             echo "$response" | jq -r '.messages[].memory_id' 2>/dev/null | while read -r mid; do
