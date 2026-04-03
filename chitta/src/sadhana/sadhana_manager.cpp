@@ -859,7 +859,9 @@ static void publish_dream(const std::string& endpoint, const std::string& model,
            << "}";
 
     auto log_fn = [](const std::string& msg) { std::cerr << "[dream-publish] " << msg << "\n"; };
-    std::string raw = call_llm_http(endpoint, model, prompt.str(), "", timeout_secs, 0.7f, 2048, log_fn);
+    std::string sys = "You are a thoughtful writer. Write rich, reflective prose — not summaries. "
+                      "Each field should contain full, developed sentences that explore the ideas deeply.";
+    std::string raw = call_llm_http(endpoint, model, prompt.str(), sys, timeout_secs, 0.7f, 4096, log_fn);
 
     // Strip markdown fences if model wrapped the JSON
     {
@@ -1106,9 +1108,10 @@ std::string SadhanaManager::run_cycle(Sadhana& sadhana) {
                     int timeout_secs = config_.max_agent_timeout_ms / 1000;
                     std::string model = sadhana.brain_model.empty()
                         ? "gemma4:26b" : sadhana.brain_model;
-                    publish_dream(endpoint, model, topic,
-                                  summary.empty() ? "Exploration completed." : summary,
-                                  publish_path, timeout_secs);
+                    // Pass full dream output for richer context; fall back to summary
+                    std::string findings = clean_output.empty() ? summary : clean_output;
+                    if (findings.size() > 4000) findings = findings.substr(findings.size() - 4000);
+                    publish_dream(endpoint, model, topic, findings, publish_path, timeout_secs);
                 } else {
                     std::cerr << "[dream-publish] No local endpoint — skipping publish\n";
                 }
