@@ -574,9 +574,12 @@
 
         json msg_list = json::array();
         for (const auto& ev : events) {
+            uint64_t event_id = ev.value("event_id", (uint64_t)0);
+            // Skip acknowledged messages
+            if (field_store_->has_event("msg", "ack", std::to_string(event_id))) continue;
             json payload = ev.value("payload", json::object());
             msg_list.push_back({
-                {"memory_id",         ev.value("event_id", 0)},
+                {"memory_id",         event_id},
                 {"content",           payload.value("content", "")},
                 {"sender_session_id", payload.value("sender_session_id", "")},
                 {"content_type",      payload.value("content_type", "text")},

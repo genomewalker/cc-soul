@@ -663,6 +663,11 @@ public:
         return std::string(reinterpret_cast<char*>(buf.data()), written);
     }
 
+    /// Check whether any event exists for (domain, kind, target). Returns true if found.
+    bool has_event(const std::string& domain, const std::string& kind, const std::string& target) {
+        return cf_has_event(handle_, domain.c_str(), kind.c_str(), target.c_str()) == 1;
+    }
+
     /// Look up a single event by event_id. Returns JSON object string, or "{}" if not found.
     std::string get_event_by_id(uint64_t event_id) {
         std::vector<uint8_t> buf(32 * 1024);
