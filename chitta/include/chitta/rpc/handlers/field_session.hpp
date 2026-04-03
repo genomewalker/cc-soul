@@ -603,6 +603,52 @@
         });
     }
 
+    // Reply to a message using the original sender and target from the event.
+    // Params: message_id (int), content (str), session_id (optional str override)
+    ToolResult tool_msg_respond(const json& params) {
+        auto [msg_id, msg_id_str] = parse_id(params, "message_id");
+        if (msg_id <= 0) return ToolResult::error("message_id is required");
+
+        std::string content = params.value("content", "");
+        if (content.empty()) return ToolResult::error("content is required");
+
+        // Look up original event to find sender and original target
+        auto ev_str = field_store_->get_event_by_id(static_cast<uint64_t>(msg_id));
+        json ev = json::parse(ev_str, nullptr, false);
+        if (ev.is_discarded() || !ev.contains("target")) {
+            return ToolResult::error("message_id not found");
+        }
+
+        std::string original_target = ev.value("target", "");  // who received it (= us)
+        json payload = ev.value("payload", json::object());
+        std::string reply_to = payload.value("sender_session_id", ""); // who sent it (= reply target)
+
+        if (reply_to.empty()) return ToolResult::error("original message has no sender_session_id");
+
+        // Use caller-supplied session_id if given, otherwise use original_target (who the message was for)
+        std::string my_session_id = params.value("session_id", original_target);
+        if (my_session_id.empty()) my_session_id = get_session_id();
+
+        int priority         = params.value("priority", 1);
+        std::string ctype    = params.value("content_type", "text");
+
+        json reply_payload = {
+            {"content",           content},
+            {"sender_session_id", my_session_id},
+            {"priority",          priority},
+            {"content_type",      ctype},
+            {"reply_to_id",       msg_id}
+        };
+        uint64_t event_id = field_store_->emit_event("msg", "send", reply_to, reply_payload.dump());
+
+        return ToolResult::ok("Reply sent to " + reply_to, {
+            {"event_id",   event_id},
+            {"target",     reply_to},
+            {"sender",     my_session_id},
+            {"reply_to_id", msg_id}
+        });
+    }
+
     ToolResult tool_msg_ack(const json& params) {
         std::string message_id = params.value("message_id", "");
         if (message_id.empty()) {

@@ -663,6 +663,15 @@ public:
         return std::string(reinterpret_cast<char*>(buf.data()), written);
     }
 
+    /// Look up a single event by event_id. Returns JSON object string, or "{}" if not found.
+    std::string get_event_by_id(uint64_t event_id) {
+        std::vector<uint8_t> buf(32 * 1024);
+        size_t written = 0;
+        int r = cf_get_event_by_id(handle_, event_id, buf.data(), buf.size(), &written);
+        if (r != 0 || written == 0) return "{}";
+        return std::string(reinterpret_cast<char*>(buf.data()), written);
+    }
+
     /// Iterate the event log from from_seqno, invoking cb(op_json, seqno) for each entry.
     void iterate_log(uint64_t from_seqno,
                      std::function<void(const std::string& op_json, uint64_t seqno)> cb) {

@@ -1398,6 +1398,15 @@ private:
         });
         handlers_["msg_ack_all"] = [this](const json& p) { return tool_msg_ack_all(p); };
 
+        tools_.push_back({{"name","msg_respond"},{"description","Reply to a message using the original sender/target from the event"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"message_id",{{"type","integer"},{"description","Event ID of the message to reply to"}}},
+                {"content",{{"type","string"},{"description","Reply content"}}},
+                {"session_id",{{"type","string"},{"description","Override sender session_id (defaults to original target)"}}}
+            }},{"required",{"message_id","content"}}}}
+        });
+        handlers_["msg_respond"] = [this](const json& p) { return tool_msg_respond(p); };
+
         tools_.push_back({{"name","msg_history"},{"description","Get message history"},
             {"inputSchema",{{"type","object"},{"properties",{
                 {"session_id",{{"type","string"}}},{"limit",{{"type","integer"}}}
