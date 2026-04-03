@@ -14,6 +14,16 @@ namespace chitta {
 
 using json = nlohmann::json;
 
+static std::string json_str(const json& j, const std::string& key) {
+    if (!j.contains(key)) return "";
+    const auto& v = j[key];
+    if (v.is_string()) return v.get<std::string>();
+    if (v.is_number_integer()) return std::to_string(v.get<int64_t>());
+    if (v.is_number_unsigned()) return std::to_string(v.get<uint64_t>());
+    if (v.is_number_float()) return std::to_string(v.get<double>());
+    return v.dump();
+}
+
 WikiExporter::WikiExporter(FieldStore& field, const WikiExportConfig& config)
     : field_store_(&field), config_(config) {
     if (config_.output_dir.empty()) {
@@ -68,15 +78,15 @@ std::string WikiExporter::get_backlinks(const std::string& memory_id) {
 }
 
 std::string WikiExporter::memory_to_markdown(const json& mem, const std::string& backlinks) {
-    std::string id   = mem.value("id", "");
-    std::string text = mem.value("text", "");
+    std::string id   = json_str(mem, "id");
+    std::string text = mem.value("content", "");
     std::string kind = mem.value("kind", "unknown");
     std::string realm = mem.value("realm", "");
     float confidence = mem.value("confidence", 0.0f);
     float strength   = mem.value("strength", 0.0f);
 
     std::ostringstream md;
-    md << "### " << text.substr(0, 80) << "\n\n";
+    md << "### " << text.substr(0, std::min<size_t>(80, text.size())) << "\n\n";
     md << text << "\n\n";
     md << "**ID**: " << id
        << " | **Kind**: " << kind
@@ -160,7 +170,7 @@ WikiExportResult WikiExporter::export_all() {
             kind_page << mems.size() << " entries\n\n";
 
             for (const auto& mem : mems) {
-                std::string id = mem.value("id", "");
+                std::string id = json_str(mem, "id");
                 std::string backlinks = get_backlinks(id);
                 if (!backlinks.empty()) result.backlinks_created++;
 

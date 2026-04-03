@@ -12,6 +12,16 @@ namespace chitta {
 
 using json = nlohmann::json;
 
+static std::string json_str(const json& j, const std::string& key) {
+    if (!j.contains(key)) return "";
+    const auto& v = j[key];
+    if (v.is_string()) return v.get<std::string>();
+    if (v.is_number_integer()) return std::to_string(v.get<int64_t>());
+    if (v.is_number_unsigned()) return std::to_string(v.get<uint64_t>());
+    if (v.is_number_float()) return std::to_string(v.get<double>());
+    return v.dump();
+}
+
 EmbeddingExporter::EmbeddingExporter(FieldStore& field, EmbedFn embedder,
                                      const EmbeddingExportConfig& config)
     : field_store_(&field), embedder_(std::move(embedder)), config_(config) {
@@ -99,7 +109,7 @@ EmbeddingExportResult EmbeddingExporter::export_pairs() {
 
     // Generate positive pairs: query → passage
     for (const auto& mem : all_memories) {
-        std::string content = mem.value("text", "");
+        std::string content = mem.value("content", "");
         if (content.size() < 20) continue;
 
         std::string query = make_query(content);
@@ -110,7 +120,7 @@ EmbeddingExportResult EmbeddingExporter::export_pairs() {
         pair["pos"] = content;
 
         // Triplet-derived context as additional positive signal
-        std::string id = mem.value("id", "");
+        std::string id = json_str(mem, "id");
         if (!id.empty()) {
             std::string triplets_raw = field_store_->list_triplets_for_entity(id, 5);
             if (!triplets_raw.empty()) {
@@ -145,7 +155,7 @@ EmbeddingExportResult EmbeddingExporter::export_pairs() {
             size_t neg_idx = (i + n / 2 + rng() % std::max<size_t>(1, n / 4)) % n;
             if (neg_idx == i) neg_idx = (i + 1) % n;
 
-            std::string neg_content = all_memories[neg_idx].value("text", "");
+            std::string neg_content = all_memories[neg_idx].value("content", "");
             if (neg_content.empty()) continue;
 
             // Augment the existing line with neg field
