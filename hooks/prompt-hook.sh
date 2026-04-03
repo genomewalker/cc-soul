@@ -309,7 +309,7 @@ if [[ $ENRICH_TURN -eq 1 ]]; then
 
                 if [[ -n "$prediction" && "$prediction" != "null" ]]; then
                     conf_pct=$(awk "BEGIN {printf \"%.0f\", $confidence * 100}")
-                    ANTICIPATIONS="${ANTICIPATIONS}[anticipate:$source:$conf_pct%] ${prediction}
+                    ANTICIPATIONS="${ANTICIPATIONS}[anticipate:$source:$conf_pct%] ${prediction:0:100}
 "
                 fi
             done <<< "$(echo "$candidates" | jq -c '.[]' 2>/dev/null)"
@@ -332,7 +332,7 @@ if [[ $ENRICH_TURN -eq 1 ]]; then
                     action=$(echo "$pattern" | jq -r '.action // ""' 2>/dev/null)
 
                     if [[ "$freq" -gt 2 || "$success" -gt 0 ]] && [[ -n "$action" ]]; then
-                        ANTICIPATIONS="${ANTICIPATIONS}[anticipate] ${action}
+                        ANTICIPATIONS="${ANTICIPATIONS}[anticipate] ${action:0:100}
 "
                     fi
                 done <<< "$(echo "$patterns" | jq -c '.[]' 2>/dev/null)"
@@ -358,7 +358,7 @@ if [[ $ENRICH_TURN -eq 1 ]]; then
                 strength=$(echo "$habit" | jq -r '.strength // 0' 2>/dev/null)
                 if [[ -n "$response_text" && "$response_text" != "null" ]]; then
                     strength_pct=$(awk "BEGIN {printf \"%.0f\", $strength * 100}")
-                    HABITS_OUTPUT="${HABITS_OUTPUT}[habit:${strength_pct}%] ${response_text}
+                    HABITS_OUTPUT="${HABITS_OUTPUT}[habit:${strength_pct}%] ${response_text:0:100}
 "
                 fi
             done <<< "$(echo "$habits_array" | jq -c '.[]' 2>/dev/null)"
@@ -382,7 +382,7 @@ if [[ $ENRICH_TURN -eq 1 ]]; then
                 progress=$(echo "$goal" | jq -r '.progress // 0' 2>/dev/null)
                 if [[ -n "$title" && "$title" != "null" ]]; then
                     progress_pct=$(awk "BEGIN {printf \"%.0f\", $progress * 100}")
-                    GOALS_OUTPUT="${GOALS_OUTPUT}[goal:${id}] ${title} (${progress_pct}%)
+                    GOALS_OUTPUT="${GOALS_OUTPUT}[goal:${id}] ${title:0:80} (${progress_pct}%)
 "
                 fi
             done <<< "$(echo "$goals_array" | jq -c '.[]' 2>/dev/null)"
