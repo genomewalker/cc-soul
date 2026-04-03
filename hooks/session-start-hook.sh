@@ -451,9 +451,13 @@ if [[ -n "$SESSION_ID" && "$SESSION_ID" != "default" ]]; then
             fi
             rm -f "$PID_FILE"
         fi
-        # Start fresh daemon (background, detached)
-        bash "$NOTIFY_SCRIPT" "$SESSION_ID" 5 </dev/null >/dev/null 2>&1 &
+        # Copy script to temp to avoid NFS lock on plugin marketplace dir
+        NOTIFY_TMP="/tmp/msg-notify-$$.sh"
+        cp "$NOTIFY_SCRIPT" "$NOTIFY_TMP"
+        chmod +x "$NOTIFY_TMP"
+        bash "$NOTIFY_TMP" "$SESSION_ID" 5 </dev/null >/dev/null 2>&1 &
         disown $! 2>/dev/null || true
+        rm -f "$NOTIFY_TMP"
     fi
 fi
 
