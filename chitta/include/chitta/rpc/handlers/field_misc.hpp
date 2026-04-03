@@ -1476,6 +1476,10 @@
         IngestConfig config;
         if (params.contains("model") && params["model"].is_string())
             config.model = params["model"].get<std::string>();
+        if (params.contains("endpoint") && params["endpoint"].is_string())
+            config.endpoint = params["endpoint"].get<std::string>();
+        if (params.contains("backend") && params["backend"].is_string())
+            config.backend = params["backend"].get<std::string>();
         if (params.contains("max_chunks") && params["max_chunks"].is_number_integer())
             config.max_chunks = params["max_chunks"].get<int>();
         config.verbose = true;

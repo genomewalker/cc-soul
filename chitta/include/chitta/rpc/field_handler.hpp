@@ -2340,7 +2340,9 @@ private:
                 {"source",{{"type","string"},{"description","URL, file path, or directory path"}}},
                 {"realm",{{"type","string"},{"description","Target realm (default: brahman)"}}},
                 {"type",{{"type","string"},{"description","Source type: auto|url|file|directory (default: auto)"}}},
-                {"model",{{"type","string"},{"description","LLM model for distillation"}}},
+                {"model",{{"type","string"},{"description","LLM model (default: gemma4:26b)"}}},
+                {"endpoint",{{"type","string"},{"description","OpenAI-compatible endpoint (auto-discovered if empty)"}}},
+                {"backend",{{"type","string"},{"description","Backend: http (Ollama/vLLM, default) or opencode"}}},
                 {"max_chunks",{{"type","integer"},{"description","Max chunks to process (default: 30)"}}}
             }},{"required",{"source"}}}}
         });

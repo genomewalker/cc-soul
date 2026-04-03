@@ -16,8 +16,9 @@ namespace chitta {
 enum class SourceType { Auto, Url, File, Directory };
 
 struct IngestConfig {
-    std::string model = "opencode/minimax-m2.5-free";
-    std::string local_model_path = "";
+    std::string model = "gemma4:26b";
+    std::string endpoint = "";       // OpenAI-compatible endpoint (auto-discovered if empty)
+    std::string backend = "http";    // "http" (Ollama/vLLM) or "opencode" (fork/exec)
     int timeout_secs = 180;
     size_t chunk_size_chars = 8000;
     size_t chunk_overlap = 500;
@@ -58,6 +59,9 @@ private:
     std::vector<std::string> read_directory(const std::string& path);
     std::vector<std::string> chunk_text(const std::string& text);
     std::string call_llm(const std::string& prompt);
+    std::string call_llm_http(const std::string& prompt);
+    std::string call_llm_opencode(const std::string& prompt);
+    std::string discover_endpoint();
     std::string build_ingest_prompt(const std::string& chunk, const std::string& source);
     void store_learnings(const SSLParser::Result& ssl, const std::string& realm,
                          const std::string& source, IngestResult& result);
