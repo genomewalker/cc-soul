@@ -1,0 +1,40 @@
+{
+  "name": "cc-soul",
+  "version": "5.4.3",
+  "description": "Persistent memory and code intelligence for Codex. Learns preferences, remembers codebases, anticipates needs. 150+ tools. Local-first.",
+  "author": {
+    "name": "Antonio Fernandez-Guerra",
+    "url": "https://github.com/genomewalker"
+  },
+  "homepage": "https://github.com/genomewalker/cc-soul",
+  "repository": "https://github.com/genomewalker/cc-soul",
+  "license": "MIT",
+  "keywords": [
+    "memory",
+    "persistence",
+    "code-intelligence",
+    "mcp",
+    "local-first",
+    "learning",
+    "identity",
+    "wisdom",
+    "continuity",
+    "soul"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "cc-soul",
+    "shortDescription": "Persistent soul memory and code intelligence",
+    "longDescription": "cc-soul gives Codex persistent memory (recall/remember), code intelligence (symbol search, call graphs), autonomous learning, codebase indexing, pipeline monitoring, and 150+ specialized tools via the chitta daemon.",
+    "developerName": "Antonio Fernandez-Guerra",
+    "category": "Productivity",
+    "capabilities": ["Interactive", "Read", "Write"],
+    "websiteURL": "https://github.com/genomewalker/cc-soul",
+    "defaultPrompt": [
+      "Recall what I learned about this codebase",
+      "Remember that tests must pass before merging",
+      "Search my memory for debugging patterns"
+    ]
+  }
+}

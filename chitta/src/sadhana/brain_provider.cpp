@@ -259,7 +259,7 @@ BrainResult ClaudeBrain::think(const std::string& prompt, const BrainConfig& con
     return result;
 }
 
-// LocalBrain implementation (HTTP to Ollama/vLLM)
+// LocalBrain implementation (HTTP to Ollama/vLLM with tool calling)
 BrainResult LocalBrain::think(const std::string& prompt, const BrainConfig& config) {
     BrainResult result;
     auto start_time = std::chrono::steady_clock::now();
@@ -274,9 +274,12 @@ BrainResult LocalBrain::think(const std::string& prompt, const BrainConfig& conf
     }
 
     int timeout_secs = config.timeout_ms / 1000;
-    std::string output = call_llm_http(
+    int max_turns    = config.max_turns > 0 ? config.max_turns : 20;
+
+    auto log_fn = [](const std::string& msg) { std::cerr << msg << "\n"; };
+    std::string output = call_llm_http_with_tools(
         cached_endpoint_, model_, prompt,
-        config.system_prompt, timeout_secs);
+        config.system_prompt, max_turns, timeout_secs, log_fn);
 
     auto end_time = std::chrono::steady_clock::now();
     result.duration_ms = static_cast<int>(

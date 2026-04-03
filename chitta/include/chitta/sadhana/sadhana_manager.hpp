@@ -134,8 +134,8 @@ struct SadhanaConfig {
     int max_agent_turns = 20;               // Default max turns per cycle (overridable per-sadhana)
     int default_interval_seconds = 300;     // 5 minutes between cycles
     bool enable_learning = true;            // Remind agent to use memory tools
-    std::string default_brain_provider = "claude";
-    std::string default_brain_model = "sonnet";
+    std::string default_brain_provider = "local";
+    std::string default_brain_model = "gemma4:26b";
 
     // Hardening settings (guardrails)
     int max_consecutive_failures = 5;

@@ -275,8 +275,9 @@
 
         std::string realm          = params.value("realm", "brahman");
         std::string publish_path   = params.value("publish_path", "");
-        std::string brain_provider = params.value("brain_provider", "claude");
-        std::string brain_model    = params.value("brain_model", "sonnet");
+        const auto& cfg = sadhana_manager_->config();
+        std::string brain_provider = params.value("brain_provider", cfg.default_brain_provider);
+        std::string brain_model    = params.value("brain_model",    cfg.default_brain_model);
 
         json goal_dsl = {{"kind", "dream"}, {"topic", topic}};
         if (!publish_path.empty()) goal_dsl["publish_path"] = publish_path;
@@ -361,11 +362,12 @@
             topic = seeds[static_cast<size_t>(now_ms) % seeds.size()];
         }
 
+        const auto& cfg = sadhana_manager_->config();
         json start_params = {
             {"topic",          topic},
             {"realm",          realm},
-            {"brain_provider", "local"},
-            {"brain_model",    "gemma4:26b"},
+            {"brain_provider", cfg.default_brain_provider},
+            {"brain_model",    cfg.default_brain_model},
         };
         if (!publish_path.empty()) start_params["publish_path"] = publish_path;
         return tool_dream_start(start_params);

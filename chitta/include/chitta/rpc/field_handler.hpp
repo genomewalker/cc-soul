@@ -1898,7 +1898,9 @@ private:
         // Dream
         tools_.push_back({{"name","dream_start"},{"description","Start an autonomous dream"},
             {"inputSchema",{{"type","object"},{"properties",{
-                {"topic",{{"type","string"}}},{"realm",{{"type","string"}}},{"publish_path",{{"type","string"}}}
+                {"topic",{{"type","string"}}},{"realm",{{"type","string"}}},{"publish_path",{{"type","string"}}},
+                {"brain_provider",{{"type","string"},{"description","Brain provider: claude or local"}}},
+                {"brain_model",{{"type","string"},{"description","Model name, e.g. gemma4:26b or sonnet"}}}
             }},{"required",{"topic"}}}}
         });
         handlers_["dream_start"] = [this](const json& p) { return tool_dream_start(p); };

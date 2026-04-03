@@ -106,6 +106,9 @@ public:
         return {"gemma4:26b", "gemma4:12b", "qwen3-coder", "llama3.1:8b"};
     }
 
+    // Returns cached endpoint (populated after first think() call)
+    std::string endpoint() const { return cached_endpoint_; }
+
 private:
     std::string model_;
     std::string cached_endpoint_;

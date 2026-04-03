@@ -5,6 +5,9 @@
 #include <iostream>
 #include <sstream>
 #include <regex>
+#include <fstream>
+#include <chrono>
+#include <ctime>
 #include <sys/wait.h>
 
 namespace chitta {
@@ -296,10 +299,10 @@ std::optional<Sadhana> SadhanaManager::get(int64_t id) {
         json task = json::parse(task_json);
         // task_get returns: {task_id, kind, status, payload, created_at, updated_at}
         json payload;
-        if (task.contains("payload") && task["payload"].is_string()) {
-            payload = json::parse(task["payload"].get<std::string>());
-        } else if (task.contains("payload") && task["payload"].is_object()) {
-            payload = task["payload"];
+        if (task.contains("payload_json") && task["payload_json"].is_string()) {
+            payload = json::parse(task["payload_json"].get<std::string>());
+        } else if (task.contains("payload_json") && task["payload_json"].is_object()) {
+            payload = task["payload_json"];
         } else {
             return std::nullopt;
         }
@@ -325,10 +328,10 @@ std::vector<Sadhana> SadhanaManager::list(const std::string& state_filter,
             if (sadhanas.size() >= limit) break;
 
             json payload;
-            if (task.contains("payload") && task["payload"].is_string()) {
-                payload = json::parse(task["payload"].get<std::string>());
-            } else if (task.contains("payload") && task["payload"].is_object()) {
-                payload = task["payload"];
+            if (task.contains("payload_json") && task["payload_json"].is_string()) {
+                payload = json::parse(task["payload_json"].get<std::string>());
+            } else if (task.contains("payload_json") && task["payload_json"].is_object()) {
+                payload = task["payload_json"];
             } else {
                 continue;
             }
@@ -577,42 +580,6 @@ std::string SadhanaManager::build_system_prompt(const Sadhana& sadhana) const {
             << "4. Store 3-5 insights: chitta remember --content \"[dream] ...\" --tags dream\n"
             << "5. Reflect briefly on connections found\n";
 
-        if (!publish_path.empty()) {
-            sys << "\nBLOG POST (write if findings are genuinely interesting — skip if unremarkable):\n"
-                << "After storing memories, if this dream revealed something worth sharing:\n"
-                << "6. Generate a slug: lowercase topic, spaces to hyphens, strip non-alphanumeric except hyphens\n"
-                << "   Example: \"quantum foam\" → \"quantum-foam\"\n"
-                << "7. Write the post to: " << publish_path << "/$(date +%Y-%m-%d)-SLUG.html\n"
-                << "   - Copy nav/header/footer structure from " << publish_path << "/index.html\n"
-                << "   - page-header-badge: \"Dream · $(date +%Y-%m-%d)\"\n"
-                << "   - h1: the topic title\n"
-                << "   - page-header-sub: one-line summary of what you found\n"
-                << "   - Body: <main class=\"container dream-content\"><article>\n"
-                << "     * 2-3 paragraphs of reflective prose (not bullet points)\n"
-                << "     * <h2>Connections</h2> — how this links to existing memory\n"
-                << "     * <h2>What lingered</h2> — the one insight that stayed\n"
-                << "     * </article></main>\n"
-                << "   - Add <link rel=\"stylesheet\" href=\"dreams.css\"> in <head>\n"
-                << "8. Update " << publish_path << "/index.html — insert after <!-- DREAM ENTRIES START -->:\n"
-                << "   python3 -c \"\n"
-                << "path = '" << publish_path << "/index.html'\n"
-                << "content = open(path).read()\n"
-                << "entry = open(path).read()  # (build the entry string, then replace)\n"
-                << "# entry = '<article class=\\\"dream-card\\\">'\n"
-                << "#       + '<div class=\\\"dream-date\\\">DATE</div>'\n"
-                << "#       + '<h3 class=\\\"dream-title\\\"><a href=\\\"SLUG.html\\\">TOPIC</a></h3>'\n"
-                << "#       + '<p class=\\\"dream-summary\\\">ONE LINE</p>'\n"
-                << "#       + '</article>'\n"
-                << "open(path, 'w').write(content.replace(\n"
-                << "  '<!-- DREAM ENTRIES START -->', '<!-- DREAM ENTRIES START -->\\n' + entry))\n"
-                << "\"\n"
-                << "9. Commit and push:\n"
-                << "   REPO=$(git -C " << publish_path << " rev-parse --show-toplevel)\n"
-                << "   git -C \"$REPO\" add docs/dreams/\n"
-                << "   git -C \"$REPO\" commit -m \"dream: " << topic << "\"\n"
-                << "   git -C \"$REPO\" push 2>/dev/null || true\n";
-        }
-
         sys << "\nARCHITECTURAL REFLECTION:\n"
             << "Before completing, ask: does anything you found have direct implications\n"
             << "for how cc-soul stores, retrieves, or reasons about memory?\n"
@@ -679,9 +646,10 @@ std::string SadhanaManager::build_system_prompt(const Sadhana& sadhana) const {
                 << "  ls /tmp/impl-*.patch 2>/dev/null\n"
                 << "  Select the most recent patch file. If none: {\"status\": \"blocked\", \"summary\": \"No proposed patch found — run propose phase first\"}\n\n"
                 << "STEP 2 — Review gate (REQUIRED before any deploy):\n"
-                << "  Call mcp__chitta-bridge__opencode_review with:\n"
-                << "    code_or_file: the full contents of the patch file\n"
-                << "    focus: \"Is this change safe, correct, and minimal? Does it fit cc-soul architecture? Output APPROVED or REJECTED with one sentence reason.\"\n\n"
+                << "  Read the patch file and check chitta memory for related patterns:\n"
+                << "    chitta recall --query \"impl correction rejected pattern\" --limit 10\n"
+                << "  Self-review the patch: is it safe, correct, and minimal? Does it fit cc-soul architecture?\n"
+                << "  Output your verdict: APPROVED or REJECTED with one sentence reason.\n\n"
                 << "STEP 3a — If APPROVED:\n";
             if (allow_deploy) {
                 sys << "  cd \"$WORKTREE\" && git apply /tmp/impl-" << sadhana.id << ".patch\n"
@@ -833,6 +801,183 @@ json SadhanaManager::extract_last_json(const std::string& text) {
 }
 
 // ============================================================================
+// ============================================================================
+// Dream publishing (daemon-side)
+// ============================================================================
+
+static std::string dream_date_str() {
+    auto now = std::chrono::system_clock::now();
+    std::time_t t = std::chrono::system_clock::to_time_t(now);
+    std::tm tm_buf;
+    localtime_r(&t, &tm_buf);
+    char buf[12];
+    strftime(buf, sizeof(buf), "%Y-%m-%d", &tm_buf);
+    return std::string(buf);
+}
+
+// Sanitize a string for use as an HTML filename slug
+static std::string slugify(const std::string& s) {
+    std::string out;
+    for (char c : s) {
+        if (std::isalnum(static_cast<unsigned char>(c))) {
+            out += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        } else if (!out.empty() && out.back() != '-') {
+            out += '-';
+        }
+    }
+    while (!out.empty() && out.back() == '-') out.pop_back();
+    if (out.size() > 50) out = out.substr(0, 50);
+    return out.empty() ? "dream" : out;
+}
+
+// Ask the LLM for a blog post about this topic+summary, write files to publish_path
+static void publish_dream(const std::string& endpoint, const std::string& model,
+                          const std::string& topic, const std::string& summary,
+                          const std::string& publish_path, int timeout_secs)
+{
+    std::string today = dream_date_str();
+    std::string slug  = slugify(topic);
+    std::string filename = today + "-" + slug + ".html";
+    std::string filepath = publish_path + "/" + filename;
+
+    // Ask for JSON content only — C++ assembles the HTML so structure is always correct
+    std::ostringstream prompt;
+    prompt << "Write blog post content about this topic as a JSON object.\n\n"
+           << "TOPIC: " << topic << "\n"
+           << "FINDINGS: " << summary << "\n\n"
+           << "Rules:\n"
+           << "- Output ONLY the JSON object, no other text, no markdown fences\n"
+           << "- ALL six fields are required — do not skip any\n"
+           << "- Write in plain prose, no HTML tags inside the values\n\n"
+           << "{\n"
+           << "  \"title\": \"<evocative title, max 8 words>\",\n"
+           << "  \"desc\": \"<one sentence summary>\",\n"
+           << "  \"para1\": \"<2-4 sentences: what was explored and found>\",\n"
+           << "  \"para2\": \"<2-4 sentences: deeper reflection and implications>\",\n"
+           << "  \"connections\": \"<2-3 sentences: links to existing knowledge>\",\n"
+           << "  \"lingered\": \"<1-2 sentences: the one key insight that stayed>\"\n"
+           << "}";
+
+    auto log_fn = [](const std::string& msg) { std::cerr << "[dream-publish] " << msg << "\n"; };
+    std::string raw = call_llm_http(endpoint, model, prompt.str(), "", timeout_secs, 0.7f, 2048, log_fn);
+
+    // Strip markdown fences if model wrapped the JSON
+    {
+        auto fence = raw.find("```");
+        if (fence != std::string::npos) {
+            auto end_fence = raw.rfind("```");
+            if (end_fence != fence) {
+                auto first_nl = raw.find('\n', fence);
+                if (first_nl != std::string::npos)
+                    raw = raw.substr(first_nl + 1, end_fence - first_nl - 1);
+            }
+        }
+        // Find first { if there's preamble text
+        auto brace = raw.find('{');
+        if (brace != std::string::npos && brace > 0)
+            raw = raw.substr(brace);
+    }
+
+    // Parse content JSON
+    std::string title = topic, desc = summary;
+    std::string para1, para2, connections, lingered;
+    try {
+        auto j = nlohmann::json::parse(raw);
+        title       = j.value("title",       topic);
+        desc        = j.value("desc",        summary);
+        para1       = j.value("para1",       "");
+        para2       = j.value("para2",       "");
+        connections = j.value("connections", "");
+        lingered    = j.value("lingered",    "");
+    } catch (...) {
+        std::cerr << "[dream-publish] Failed to parse content JSON, using summary\n";
+        para1 = summary;
+    }
+
+    // Assemble HTML from fixed template — model only provides text content
+    std::ostringstream html_out;
+    html_out << "<!DOCTYPE html>\n"
+             << "<html lang=\"en\"><head><meta charset=\"UTF-8\">\n"
+             << "<title>" << title << " - cc-soul dreams</title>\n"
+             << "<meta name=\"description\" content=\"" << desc << "\">\n"
+             << "<link rel=\"icon\" href=\"../favicon.svg\" type=\"image/svg+xml\">\n"
+             << "<link href=\"https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400&display=swap\" rel=\"stylesheet\">\n"
+             << "<link rel=\"stylesheet\" href=\"../styles.css\">\n"
+             << "<link rel=\"stylesheet\" href=\"dreams.css\">\n"
+             << "</head><body>\n"
+             << "<nav class=\"nav\"><div class=\"nav-inner\">"
+             << "<a href=\"../index.html\" class=\"nav-brand\">cc<span>-</span>soul</a>\n"
+             << "<ul class=\"nav-links\"><li><a href=\"../index.html\">Home</a></li>"
+             << "<li><a href=\"index.html\" class=\"active\">Dreams</a></li></ul>\n"
+             << "</div></nav>\n"
+             << "<header class=\"page-header\"><div class=\"container\">\n"
+             << "<div class=\"page-header-badge reveal\">Dream &middot; " << today << "</div>\n"
+             << "<h1 class=\"reveal reveal-delay-1\">" << title << "</h1>\n"
+             << "<p class=\"page-header-sub reveal reveal-delay-2\">" << desc << "</p>\n"
+             << "</div></header>\n"
+             << "<main class=\"dream-content\"><div class=\"dream-meta\">"
+             << "<a href=\"index.html\">&larr; All dreams</a></div>\n"
+             << "<article>\n";
+    if (!para1.empty())       html_out << "<p>" << para1 << "</p>\n";
+    if (!para2.empty())       html_out << "<p>" << para2 << "</p>\n";
+    if (!connections.empty()) html_out << "<h2>Connections</h2>\n<p>" << connections << "</p>\n";
+    if (!lingered.empty())    html_out << "<h2>What lingered</h2>\n<p>" << lingered << "</p>\n";
+    html_out << "</article></main></body></html>\n";
+    std::string html = html_out.str();
+
+    // Write the dream page
+    {
+        std::ofstream out(filepath);
+        if (!out) {
+            std::cerr << "[dream-publish] Cannot write: " << filepath << "\n";
+            return;
+        }
+        out << html;
+        std::cerr << "[dream-publish] Wrote " << filepath << " (" << html.size() << " bytes)\n";
+    }
+
+    // Update index.html — insert card after <!-- DREAM ENTRIES START -->
+    std::string index_path = publish_path + "/index.html";
+    std::string index_html;
+    {
+        std::ifstream in(index_path);
+        if (!in) {
+            std::cerr << "[dream-publish] Cannot read index: " << index_path << "\n";
+            return;
+        }
+        std::ostringstream ss;
+        ss << in.rdbuf();
+        index_html = ss.str();
+    }
+
+    const std::string marker = "<!-- DREAM ENTRIES START -->";
+    auto pos = index_html.find(marker);
+    if (pos == std::string::npos) {
+        std::cerr << "[dream-publish] Marker not found in index.html\n";
+        return;
+    }
+
+    std::ostringstream card;
+    card << "\n    <article class=\"dream-card\">"
+         << "<div class=\"dream-date\">" << today << "</div>"
+         << "<h3 class=\"dream-title\"><a href=\"" << filename << "\">" << title << "</a></h3>"
+         << "<p class=\"dream-summary\">" << desc << "</p>"
+         << "</article>";
+
+    index_html.insert(pos + marker.size(), card.str());
+
+    {
+        std::ofstream out(index_path);
+        if (!out) {
+            std::cerr << "[dream-publish] Cannot write index: " << index_path << "\n";
+            return;
+        }
+        out << index_html;
+        std::cerr << "[dream-publish] Updated index.html\n";
+    }
+}
+
+// ============================================================================
 // Core agentic cycle
 // ============================================================================
 
@@ -941,6 +1086,34 @@ std::string SadhanaManager::run_cycle(Sadhana& sadhana) {
 
     // Handle completion
     if (status == "achieved") {
+        // Daemon-side dream publishing
+        if (sadhana.goal_dsl.is_object() &&
+            sadhana.goal_dsl.value("kind", "") == "dream") {
+            std::string publish_path = sadhana.goal_dsl.value("publish_path", "");
+            std::string topic        = sadhana.goal_dsl.value("topic", "unknown");
+            if (!publish_path.empty()) {
+                // Find local LLM endpoint for publishing
+                std::string endpoint;
+                {
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    auto it = running_.find(sadhana.id);
+                    if (it != running_.end()) {
+                        auto* lb = dynamic_cast<LocalBrain*>(it->second.brain.get());
+                        if (lb) endpoint = lb->endpoint();
+                    }
+                }
+                if (!endpoint.empty()) {
+                    int timeout_secs = config_.max_agent_timeout_ms / 1000;
+                    std::string model = sadhana.brain_model.empty()
+                        ? "gemma4:26b" : sadhana.brain_model;
+                    publish_dream(endpoint, model, topic,
+                                  summary.empty() ? "Exploration completed." : summary,
+                                  publish_path, timeout_secs);
+                } else {
+                    std::cerr << "[dream-publish] No local endpoint — skipping publish\n";
+                }
+            }
+        }
         stop(sadhana.id, true, summary.empty() ? "Goal achieved" : summary);
     } else if (status == "blocked") {
         pause(sadhana.id);

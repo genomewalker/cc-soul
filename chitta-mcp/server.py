@@ -135,7 +135,15 @@ ADVANCED_TOOLS = {
     # Memory edit — individual tools replaced by unified `memory_edit` gateway
     "set_memory_type", "set_priority_tier",
     # Maintenance — move to hidden
-    "rebuild_fts_index", "health_check", "memory_type_stats", "expand_query",
+    "rebuild_fts_index", "compact_wal", "health_check", "memory_type_stats", "expand_query",
+    "distill_set_model", "cooccurrence_graph", "find_near_duplicates", "labile_memories_top",
+    "consolidate_similar", "queue_status", "resonance_stats", "route_stats",
+    # Dream management (start/wander/list/status stay accessible via dream skill)
+    "dream_start", "dream_wander", "dream_list", "dream_status", "dream_force_woke",
+    # Probe / calibration
+    "probe_calibrate", "probe_seed", "probe_status", "behavioral_probe",
+    # Sadhana (use sadhana gateway)
+    "sadhana_set_max_turns",
     # Misc advanced
     "insight_global", "insight_promote", "list_aspects", "list_by_aspect",
     "full_resonate", "grow", "connect", "query",
