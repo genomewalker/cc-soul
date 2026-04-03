@@ -28,8 +28,7 @@ bool run_distillation(
 ) {
     NativeDistillConfig native_config;
     native_config.model = handler ? handler->get_distill_model() : config.model;
-    native_config.local_model_path = config.local_model_path;
-    native_config.timeout_secs = 150;
+    native_config.timeout_secs = 180;
     native_config.min_turns = config.min_turns;
     native_config.verbose = verbose_mode;
 

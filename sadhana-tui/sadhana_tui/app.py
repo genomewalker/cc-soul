@@ -472,7 +472,7 @@ class NewAgentModal(ModalScreen[dict | None]):
             with Horizontal():
                 with Vertical(classes="field-row"):
                     yield Label("brain", classes="field-label")
-                    yield Select([("claude", "claude"), ("opencode", "opencode")], value="claude", id="brain")
+                    yield Select([("claude", "claude"), ("local", "local")], value="local", id="brain")
                 with Vertical(classes="field-row"):
                     yield Label("model", classes="field-label")
                     yield Select([("haiku", "haiku"), ("sonnet", "sonnet"), ("opus", "opus")], value="haiku", id="model")

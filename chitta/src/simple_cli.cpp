@@ -94,29 +94,8 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
         return 1;
     }
 
-    // Check if opencode is available for distillation
-    // Note: After daemonize(), std::system("command -v ...") may fail because
-    // the forked shell doesn't source profile files. Search PATH directly instead.
-    auto find_in_path = [](const char* name) -> bool {
-        const char* path_env = getenv("PATH");
-        if (!path_env) return false;
-        std::string path_str(path_env);
-        std::istringstream iss(path_str);
-        std::string dir;
-        while (std::getline(iss, dir, ':')) {
-            std::string full = dir + "/" + name;
-            if (access(full.c_str(), X_OK) == 0) return true;
-        }
-        return false;
-    };
+    // Distillation uses HTTP to Ollama/vLLM (endpoint auto-discovered)
     if (distill_config.enabled) {
-        bool found = find_in_path("opencode");
-        if (!found) {
-            std::cerr << "[daemon] ERROR: opencode not found in PATH\n";
-            std::cerr << "[daemon] Distillation requires opencode. Install it or use --no-distill\n";
-            release_lock(lock);
-            return 1;
-        }
         std::cerr << "[daemon] Distillation enabled (timer=" << distill_config.interval_minutes
                   << "m, min_turns=" << distill_config.min_turns
                   << ", model=" << distill_config.model;
@@ -127,21 +106,10 @@ int cmd_daemon(FieldStore& field_store, VakYantra* yantra, int interval,
         std::cerr << ")\n";
     }
 
-    // Check for enrichment (uses same opencode)
     if (enrich_config.enabled) {
-        // opencode already checked above if distillation enabled; check here if only enrichment
-        if (!distill_config.enabled) {
-            bool found = find_in_path("opencode");
-            if (!found) {
-                std::cerr << "[daemon] WARNING: opencode not found, disabling code enrichment\n";
-                enrich_config.enabled = false;
-            }
-        }
-        if (enrich_config.enabled) {
-            std::cerr << "[daemon] Code enrichment enabled (interval=" << enrich_config.interval_minutes
-                      << "m, batch=" << enrich_config.batch_size
-                      << ", idle=" << enrich_config.idle_seconds << "s)\n";
-        }
+        std::cerr << "[daemon] Code enrichment enabled (interval=" << enrich_config.interval_minutes
+                  << "m, batch=" << enrich_config.batch_size
+                  << ", idle=" << enrich_config.idle_seconds << "s)\n";
     }
 
     if (!pid_file.empty()) {
@@ -774,15 +742,14 @@ void print_usage(const char* prog) {
               << "  --distill-interval MINS  Timer-based interval (default: 15, safety net)\n"
               << "  --distill-min-turns N    Min turns before distilling (default: 4)\n"
               << "  --distill-script PATH    Distillation script path (ignored, uses native)\n"
-              << "  --distill-model MODEL    OpenCode model (default: github-copilot/gpt-5-mini)\n"
-              << "  --distill-local-model PATH  Local GGUF model via llama-cli (overrides opencode)\n"
+              << "  --distill-model MODEL    LLM model for distillation (default: gemma4:26b)\n"
               << "  --distill-token-trigger N  Token-triggered: chars threshold (default: 120000 ~30k tokens, 0=off)\n"
               << "  --distill-cooldown SECS  Min seconds between token-triggered distillations (default: 180)\n"
               << "  --no-distill             Disable automatic distillation\n"
               << "\nCode Enrichment (semantic descriptions):\n"
               << "  --enrich-interval MINS   Enrichment interval (default: 2)\n"
               << "  --enrich-batch N         Symbols per batch (default: 10)\n"
-              << "  --enrich-model MODEL     OpenCode model (default: github-copilot/gpt-5-mini)\n"
+              << "  --enrich-model MODEL     LLM model for enrichment (default: gemma4:26b)\n"
               << "  --no-enrich              Disable code enrichment\n"
               << "\nSubconscious (background processing):\n"
               << "  --no-hygiene             Disable hygiene (decay, pruning, consolidation)\n"
@@ -860,8 +827,6 @@ int main(int argc, char* argv[]) {
             distill_config.script_path = argv[++i];
         } else if (strcmp(argv[i], "--distill-model") == 0 && i + 1 < argc) {
             distill_config.model = argv[++i];
-        } else if (strcmp(argv[i], "--distill-local-model") == 0 && i + 1 < argc) {
-            distill_config.local_model_path = argv[++i];
         } else if (strcmp(argv[i], "--distill-token-trigger") == 0 && i + 1 < argc) {
             distill_config.token_trigger_chars = safe_stoi(argv[++i], "--distill-token-trigger");
         } else if (strcmp(argv[i], "--distill-cooldown") == 0 && i + 1 < argc) {

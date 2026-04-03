@@ -34,8 +34,7 @@ struct DistillConfig {
     int interval_minutes = 15;
     int min_turns = 4;
     std::string script_path;
-    std::string model = "github-copilot/gpt-5-mini";
-    std::string local_model_path;
+    std::string model = "gemma4:26b";
     bool enabled = true;
     int64_t token_trigger_chars = 120000;
     int cooldown_seconds = 180;
@@ -46,7 +45,7 @@ struct EnrichConfig {
     int batch_size = 3;
     int idle_seconds = 30;
     std::string script_path;
-    std::string model = "github-copilot/gpt-5-mini";
+    std::string model = "gemma4:26b";
     bool enabled = true;
 };
 

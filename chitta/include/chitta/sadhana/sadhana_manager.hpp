@@ -72,7 +72,7 @@ struct Sadhana {
     std::string goal;
     json goal_dsl;                  // Structured goal (optional)
     SadhanaState state = SadhanaState::Pending;
-    std::string brain_provider;     // "claude" or "opencode"
+    std::string brain_provider;     // "claude" or "local"
     std::string brain_model;        // "sonnet", "opus", "haiku", etc.
     int64_t created_at = 0;
     int64_t updated_at = 0;

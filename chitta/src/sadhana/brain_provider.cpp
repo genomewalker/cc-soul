@@ -259,22 +259,38 @@ BrainResult ClaudeBrain::think(const std::string& prompt, const BrainConfig& con
     return result;
 }
 
-// OpenCodeBrain implementation
-BrainResult OpenCodeBrain::think(const std::string& prompt, const BrainConfig& config) {
-    std::vector<std::string> args = {
-        opencode_path_,
-        "run",
-        "-m", model_,
-        "--print-logs"
-    };
+// LocalBrain implementation (HTTP to Ollama/vLLM)
+BrainResult LocalBrain::think(const std::string& prompt, const BrainConfig& config) {
+    BrainResult result;
+    auto start_time = std::chrono::steady_clock::now();
 
-    for (const auto& arg : config.extra_args) {
-        args.push_back(arg);
+    if (cached_endpoint_.empty()) {
+        cached_endpoint_ = discover_gpu_endpoint(model_);
     }
 
-    args.push_back(prompt);
+    if (cached_endpoint_.empty()) {
+        result.error = "No GPU endpoint found";
+        return result;
+    }
 
-    return execute_with_timeout(args, "", config.timeout_ms, config.working_dir);
+    int timeout_secs = config.timeout_ms / 1000;
+    std::string output = call_llm_http(
+        cached_endpoint_, model_, prompt,
+        config.system_prompt, timeout_secs);
+
+    auto end_time = std::chrono::steady_clock::now();
+    result.duration_ms = static_cast<int>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count());
+
+    if (!output.empty()) {
+        result.success = true;
+        result.output = output;
+        result.exit_code = 0;
+    } else {
+        result.error = "Empty response from " + cached_endpoint_;
+    }
+
+    return result;
 }
 
 }  // namespace chitta

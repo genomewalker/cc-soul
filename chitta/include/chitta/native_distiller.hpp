@@ -1,20 +1,19 @@
 #pragma once
-// NativeDistiller: C++ distillation replacing distill.sh
+// NativeDistiller: C++ distillation
 //
 // Extracts learnings from conversation transcripts using LLM + SSL format:
 // 1. Parse JSONL transcript (streaming, handles any file size)
 // 2. Build SSL prompt
-// 3. Call opencode for extraction (model is user-configurable)
+// 3. Call LLM via HTTP (Ollama/vLLM endpoint, auto-discovered)
 // 4. Parse SSL output
 // 5. Store via FieldStore
 //    - Dedup: if a near-identical memory exists (cosine > threshold), strengthen
 //      the existing one instead of creating a duplicate
-//
-// Replaces the shell-based distill.sh for robustness on large files.
 
 #include "transcript_parser.hpp"
 #include "ssl_parser.hpp"
 #include "field_store.hpp"
+#include "llm_http.hpp"
 #include <string>
 #include <functional>
 #include <vector>
@@ -29,9 +28,9 @@ struct TranscriptState {
 };
 
 struct NativeDistillConfig {
-    std::string model = "opencode/minimax-m2.5-free";  // LLM model — overridden by --distill-model
-    std::string local_model_path = "";        // If set, use llama-cli instead of opencode
-    int timeout_secs = 120;                   // Timeout for opencode/llama-cli call
+    std::string model = "gemma4:26b";         // LLM model — overridden by --distill-model
+    std::string endpoint = "";                // HTTP endpoint (auto-discovered if empty)
+    int timeout_secs = 180;                   // Timeout for HTTP call
     int min_turns = 5;                        // Minimum turns for distillation
     bool verbose = false;                     // Enable verbose logging
     float dedup_threshold = 0.92f;            // Cosine similarity above which we strengthen
@@ -71,7 +70,6 @@ public:
     void set_log_callback(LogCallback cb) { log_callback_ = cb; }
 
     // Set cancellation check callback - return true to abort distillation
-    // Checked periodically during opencode execution
     using CancelCallback = std::function<bool()>;
     void set_cancel_callback(CancelCallback cb) { cancel_callback_ = cb; }
 
@@ -84,12 +82,10 @@ private:
     SSLParser ssl_parser_;
     LogCallback log_callback_;
     CancelCallback cancel_callback_;
+    std::string cached_endpoint_;
 
-    // Call opencode with prompt, return output
-    std::string call_opencode(const std::string& prompt);
-
-    // Call local GGUF model via llama-cli, return output
-    std::string call_local_model(const std::string& prompt);
+    // Call LLM via HTTP (Ollama/vLLM)
+    std::string call_llm(const std::string& prompt);
 
     // Store learnings via FieldStore with dedup
     void store_learnings(

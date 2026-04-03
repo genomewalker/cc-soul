@@ -61,8 +61,8 @@ This continues until the goal is achieved or the sadhana is stopped.
 │  │  ┌─────────────────┐    ┌─────────────────────────────────────┐ │   │
 │  │  │ SadhanaManager  │    │           BrainProvider              │ │   │
 │  │  │                 │    │  ┌───────────┐  ┌───────────────┐   │ │   │
-│  │  │ • tick() loop   │───▶│  │  Claude   │  │   OpenCode    │   │ │   │
-│  │  │ • state machine │    │  │  (API)    │  │   (local)     │   │ │   │
+│  │  │ • tick() loop   │───▶│  │  Claude   │  │    Local      │   │ │   │
+│  │  │ • state machine │    │  │  (API)    │  │  (Ollama)     │   │ │   │
 │  │  │ • history       │    │  └───────────┘  └───────────────┘   │ │   │
 │  │  └─────────────────┘    └─────────────────────────────────────┘ │   │
 │  │           │                                                       │   │
@@ -83,7 +83,7 @@ This continues until the goal is achieved or the sadhana is stopped.
 | Component | Purpose |
 |-----------|---------|
 | **SadhanaManager** | Orchestrates all sadhanas, runs tick loop every 100ms |
-| **BrainProvider** | LLM abstraction (Claude API or OpenCode local) |
+| **BrainProvider** | LLM abstraction (Claude API or local Ollama/vLLM) |
 | **chitta-field Storage** | Persistent state, history, and memory integration |
 | **Sadhana TUI** | Optional terminal interface for monitoring |
 
@@ -248,12 +248,12 @@ Uses Anthropic's Claude API:
 - Requires `ANTHROPIC_API_KEY`
 - Best for complex reasoning
 
-### OpenCode (Local)
+### Local (Ollama/vLLM)
 
-Uses local LLM via OpenCode:
-- Models: `gpt-5-mini`, `github-copilot/gpt-5-mini`
+Uses local LLM via HTTP (auto-discovered GPU endpoint):
+- Models: `gemma4:26b`, `qwen3-coder`, `llama3.1:8b`
 - No API key needed
-- Faster, cheaper, good for simple monitoring
+- GPU endpoint auto-discovered (cached URL → SLURM → localhost → chitta-gpu start)
 
 ## Use Cases
 

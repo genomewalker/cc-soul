@@ -3,7 +3,7 @@
 Chitta MCP Server - Python bridge to chittad daemon.
 
 Uses the official MCP SDK to expose chitta tools to Claude Code.
-Tools are defined statically (like opencode-bridge) for proper discovery.
+Tools are defined statically (like chitta-bridge) for proper discovery.
 
 Includes composite tools for token-efficient code intelligence:
 - read_symbol: Read just a symbol's code, not entire file

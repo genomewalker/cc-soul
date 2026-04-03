@@ -679,7 +679,7 @@ std::string SadhanaManager::build_system_prompt(const Sadhana& sadhana) const {
                 << "  ls /tmp/impl-*.patch 2>/dev/null\n"
                 << "  Select the most recent patch file. If none: {\"status\": \"blocked\", \"summary\": \"No proposed patch found — run propose phase first\"}\n\n"
                 << "STEP 2 — Review gate (REQUIRED before any deploy):\n"
-                << "  Call mcp__opencode-bridge__opencode_review with:\n"
+                << "  Call mcp__chitta-bridge__opencode_review with:\n"
                 << "    code_or_file: the full contents of the patch file\n"
                 << "    focus: \"Is this change safe, correct, and minimal? Does it fit cc-soul architecture? Output APPROVED or REJECTED with one sentence reason.\"\n\n"
                 << "STEP 3a — If APPROVED:\n";

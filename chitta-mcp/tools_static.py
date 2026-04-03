@@ -3301,7 +3301,7 @@ TOOLS = [
                                 "type": "string"
                         },
                         "brain_provider": {
-                                "description": "LLM provider: claude or opencode (default: claude)",
+                                "description": "LLM provider: claude or local (default: local)",
                                 "type": "string"
                         },
                         "goal": {

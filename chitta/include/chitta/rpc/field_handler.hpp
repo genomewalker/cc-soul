@@ -2342,7 +2342,6 @@ private:
                 {"type",{{"type","string"},{"description","Source type: auto|url|file|directory (default: auto)"}}},
                 {"model",{{"type","string"},{"description","LLM model (default: gemma4:26b)"}}},
                 {"endpoint",{{"type","string"},{"description","OpenAI-compatible endpoint (auto-discovered if empty)"}}},
-                {"backend",{{"type","string"},{"description","Backend: http (Ollama/vLLM, default) or opencode"}}},
                 {"max_chunks",{{"type","integer"},{"description","Max chunks to process (default: 30)"}}}
             }},{"required",{"source"}}}}
         });

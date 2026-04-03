@@ -101,41 +101,51 @@ def chunk_text(text: str, chunk_words: int = 300, overlap: int = 50) -> list[str
     return chunks
 
 
-OPENCODE_BIN = "opencode"
-OPENCODE_MODEL = "google/gemini-2.0-flash"   # free model — change as needed
+LLM_MODEL = "gemma4:26b"
 
 
-def call_opencode(text: str, timeout: int = 60) -> str | None:
-    """Call opencode run with --format json and parse text events."""
-    prompt = SYSTEM_PROMPT + "\n\n## Text\n\n" + text
+def _discover_endpoint() -> str | None:
+    """Discover GPU endpoint: cached URL files → localhost."""
+    import glob, urllib.request
+    for path in glob.glob("/tmp/ollama-server-*.url"):
+        try:
+            url = open(path).read().strip()
+            urllib.request.urlopen(url + "/v1/models", timeout=3)
+            return url
+        except Exception:
+            pass
     try:
-        r = subprocess.run(
-            [OPENCODE_BIN, "run", prompt,
-             "--model", OPENCODE_MODEL,
-             "--format", "json"],
-            capture_output=True, text=True, timeout=timeout,
-            stdin=subprocess.DEVNULL,
-        )
-        if r.returncode != 0 or not r.stdout.strip():
-            return None
-        # Parse JSON-lines: collect type=text events
-        parts = []
-        for line in r.stdout.splitlines():
-            if not line.strip():
-                continue
-            try:
-                event = json.loads(line)
-                if event.get("type") == "text":
-                    text_part = event.get("part", {}).get("text", "")
-                    if text_part:
-                        parts.append(text_part)
-            except json.JSONDecodeError:
-                continue
-        return "".join(parts).strip() or None
-    except subprocess.TimeoutExpired:
+        urllib.request.urlopen("http://localhost:11434/v1/models", timeout=3)
+        return "http://localhost:11434"
+    except Exception:
         return None
+
+
+def call_llm(text: str, timeout: int = 60) -> str | None:
+    """Call LLM via HTTP (Ollama/vLLM)."""
+    endpoint = _discover_endpoint()
+    if not endpoint:
+        print("  [warn] No GPU endpoint found", file=sys.stderr)
+        return None
+    prompt = SYSTEM_PROMPT + "\n\n## Text\n\n" + text
+    import urllib.request
+    req_body = json.dumps({
+        "model": LLM_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.3,
+        "max_tokens": 4096,
+    }).encode()
+    try:
+        req = urllib.request.Request(
+            endpoint + "/v1/chat/completions",
+            data=req_body,
+            headers={"Content-Type": "application/json"},
+        )
+        resp = urllib.request.urlopen(req, timeout=timeout)
+        data = json.loads(resp.read().decode())
+        return data["choices"][0]["message"]["content"].strip() or None
     except Exception as e:
-        print(f"  [warn] opencode error: {e}", file=sys.stderr)
+        print(f"  [warn] LLM error: {e}", file=sys.stderr)
         return None
 
 
@@ -212,7 +222,7 @@ def main():
 
             chunks = chunk_text(text)[:args.chunks_per_article]
             for j, chunk in enumerate(chunks):
-                chosen_raw = call_opencode(chunk)
+                chosen_raw = call_llm(chunk)
                 if not chosen_raw:
                     skipped += 1
                     continue

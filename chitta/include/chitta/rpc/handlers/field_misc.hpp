@@ -364,8 +364,8 @@
         json start_params = {
             {"topic",          topic},
             {"realm",          realm},
-            {"brain_provider", "opencode"},
-            {"brain_model",    "gpt-4o"},
+            {"brain_provider", "local"},
+            {"brain_model",    "gemma4:26b"},
         };
         if (!publish_path.empty()) start_params["publish_path"] = publish_path;
         return tool_dream_start(start_params);
@@ -438,7 +438,7 @@
             "Autonomous self-improvement loop for cc-soul. "
             "Each cycle: find one pending [impl]/[thought][impl]/[dream][impl] memory, "
             "implement the change in " + repo + ", "
-            "run opencode review gate, commit only if approved.";
+            "run review gate, commit only if approved.";
 
         int64_t sadhana_id = sadhana_manager_->create(
             goal, "claude", "sonnet", interval, realm, goal_dsl, max_turns);
@@ -1478,8 +1478,6 @@
             config.model = params["model"].get<std::string>();
         if (params.contains("endpoint") && params["endpoint"].is_string())
             config.endpoint = params["endpoint"].get<std::string>();
-        if (params.contains("backend") && params["backend"].is_string())
-            config.backend = params["backend"].get<std::string>();
         if (params.contains("max_chunks") && params["max_chunks"].is_number_integer())
             config.max_chunks = params["max_chunks"].get<int>();
         config.verbose = true;

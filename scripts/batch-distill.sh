@@ -8,7 +8,7 @@ set -euo pipefail
 MIN_SIZE="${MIN_SIZE:-10M}"
 DRY_RUN=false
 DISTILL_SCRIPT="${DISTILL_SCRIPT:-$(dirname "$0")/../hooks/distill.sh}"
-MODEL="${MODEL:-github-copilot/gpt-5-mini}"
+MODEL="${MODEL:-gemma4:26b}"
 CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
 
 # Parse args
@@ -23,7 +23,7 @@ while [[ $# -gt 0 ]]; do
             echo "Options:"
             echo "  --dry-run     Show what would be distilled without running"
             echo "  --min-size    Minimum file size (default: 10M)"
-            echo "  --model       OpenCode model (default: github-copilot/gpt-5-mini)"
+            echo "  --model       LLM model (default: gemma4:26b)"
             exit 0
             ;;
         *) echo "Unknown option: $1"; exit 1 ;;

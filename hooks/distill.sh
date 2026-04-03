@@ -145,13 +145,52 @@ CONVERSATION:
 
 Output ONLY SSL-formatted learnings (no explanations, no markdown headers):'
 
-echo "[distill] Session $SESSION_ID: Calling OpenCode ($MODEL)..."
+# Discover GPU endpoint (cached URL files → SLURM → localhost)
+ENDPOINT=""
+for f in /tmp/ollama-server-*.url; do
+    [[ -f "$f" ]] || continue
+    url=$(cat "$f" 2>/dev/null | tr -d '\n')
+    if curl -sL --max-time 3 "$url/v1/models" 2>/dev/null | grep -q "data"; then
+        ENDPOINT="$url"; break
+    fi
+done
+[[ -z "$ENDPOINT" ]] && curl -sL --max-time 3 "http://localhost:11434/v1/models" 2>/dev/null | grep -q "data" && ENDPOINT="http://localhost:11434"
 
-# Call with timeout (2 min max)
-RESULT=$(echo "$PROMPT" | timeout 120 opencode run -m "$MODEL" 2>/dev/null || echo "")
+if [[ -z "$ENDPOINT" ]]; then
+    echo "[distill] No GPU endpoint found — cannot distill" >&2
+    exit 0
+fi
+
+echo "[distill] Session $SESSION_ID: Calling $MODEL via $ENDPOINT..."
+
+# Build JSON request
+TMPJSON="/tmp/chitta-distill-$$.json"
+python3 -c "
+import json, sys
+prompt = sys.stdin.read()
+req = {'model': '$MODEL', 'messages': [
+    {'role': 'system', 'content': 'You are a knowledge distiller. Extract learnings in SSL v0.2 format. Output ONLY SSL-formatted learnings.'},
+    {'role': 'user', 'content': prompt}
+], 'temperature': 0.3, 'max_tokens': 4096}
+json.dump(req, open('$TMPJSON', 'w'), ensure_ascii=True)
+" <<< "$PROMPT"
+
+RESPONSE=$(curl -sL --max-time 180 \
+    -H "Content-Type: application/json" \
+    -d "@$TMPJSON" \
+    "$ENDPOINT/v1/chat/completions" 2>/dev/null || echo "")
+rm -f "$TMPJSON"
+
+RESULT=$(echo "$RESPONSE" | python3 -c "
+import json, sys
+try:
+    r = json.load(sys.stdin)
+    print(r['choices'][0]['message']['content'])
+except: pass
+" 2>/dev/null || echo "")
 
 if [[ -z "$RESULT" ]]; then
-    echo "[distill] No result from OpenCode" >&2
+    echo "[distill] No result from LLM" >&2
     exit 0
 fi
 

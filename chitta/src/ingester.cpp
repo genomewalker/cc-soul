@@ -7,10 +7,7 @@
 #include <algorithm>
 #include <unistd.h>
 #include <sys/wait.h>
-#include <signal.h>
 #include <fcntl.h>
-#include <cstdlib>
-#include <thread>
 
 namespace chitta {
 
@@ -231,228 +228,25 @@ Output ONLY SSL-formatted learnings (no explanations, no markdown headers):)";
 }
 
 std::string Ingester::call_llm(const std::string& prompt) {
-    if (config_.backend == "opencode")
-        return call_llm_opencode(prompt);
-    return call_llm_http(prompt);
-}
-
-std::string Ingester::discover_endpoint() {
-    if (!config_.endpoint.empty()) return config_.endpoint;
-    // Auto-discover: try common Ollama endpoints
-    static const std::vector<std::string> candidates = {
-        "http://dandygpun01fl:11434",
-        "http://localhost:11434",
-        "http://127.0.0.1:11434",
-    };
-    for (const auto& ep : candidates) {
-        int stdout_pipe[2];
-        if (pipe(stdout_pipe) < 0) continue;
-        pid_t pid = fork();
-        if (pid == 0) {
-            close(stdout_pipe[0]);
-            dup2(stdout_pipe[1], STDOUT_FILENO);
-            int devnull = open("/dev/null", O_WRONLY);
-            if (devnull >= 0) { dup2(devnull, STDERR_FILENO); close(devnull); }
-            close(stdout_pipe[1]);
-            std::string url = ep + "/v1/models";
-            execlp("curl", "curl", "-sL", "--max-time", "3", url.c_str(), nullptr);
-            _exit(1);
-        }
-        close(stdout_pipe[1]);
-        std::string out;
-        std::array<char, 4096> buf;
-        ssize_t n;
-        while ((n = read(stdout_pipe[0], buf.data(), buf.size())) > 0)
-            out.append(buf.data(), n);
-        close(stdout_pipe[0]);
-        int status;
-        waitpid(pid, &status, 0);
-        if (!out.empty() && out.find("data") != std::string::npos) {
-            config_.endpoint = ep;
-            log("[ingest] Discovered endpoint: " + ep);
-            return ep;
+    if (cached_endpoint_.empty()) {
+        cached_endpoint_ = config_.endpoint;
+        if (cached_endpoint_.empty()) {
+            cached_endpoint_ = discover_gpu_endpoint(config_.model,
+                [this](const std::string& msg) { log(msg); });
         }
     }
-    return "";
-}
 
-static std::string sanitize_utf8(const std::string& input) {
-    std::string out;
-    out.reserve(input.size());
-    for (size_t i = 0; i < input.size(); ) {
-        unsigned char c = static_cast<unsigned char>(input[i]);
-        if (c < 0x80) {
-            // Control chars except \n \r \t → space
-            if (c < 0x20 && c != '\n' && c != '\r' && c != '\t')
-                out += ' ';
-            else
-                out += static_cast<char>(c);
-            ++i;
-        } else if ((c & 0xE0) == 0xC0 && i + 1 < input.size() &&
-                   (static_cast<unsigned char>(input[i+1]) & 0xC0) == 0x80) {
-            out += input[i]; out += input[i+1]; i += 2;
-        } else if ((c & 0xF0) == 0xE0 && i + 2 < input.size() &&
-                   (static_cast<unsigned char>(input[i+1]) & 0xC0) == 0x80 &&
-                   (static_cast<unsigned char>(input[i+2]) & 0xC0) == 0x80) {
-            out += input[i]; out += input[i+1]; out += input[i+2]; i += 3;
-        } else if ((c & 0xF8) == 0xF0 && i + 3 < input.size() &&
-                   (static_cast<unsigned char>(input[i+1]) & 0xC0) == 0x80 &&
-                   (static_cast<unsigned char>(input[i+2]) & 0xC0) == 0x80 &&
-                   (static_cast<unsigned char>(input[i+3]) & 0xC0) == 0x80) {
-            out += input[i]; out += input[i+1]; out += input[i+2]; out += input[i+3]; i += 4;
-        } else {
-            out += ' ';  // replace invalid byte
-            ++i;
-        }
-    }
-    return out;
-}
-
-std::string Ingester::call_llm_http(const std::string& prompt) {
-    std::string endpoint = discover_endpoint();
-    if (endpoint.empty()) {
-        log("[ingest] No OpenAI-compatible endpoint found, falling back to opencode");
-        return call_llm_opencode(prompt);
-    }
-
-    // Build JSON request body for /v1/chat/completions
-    std::string safe_prompt = sanitize_utf8(prompt);
-    nlohmann::json req = {
-        {"model", config_.model},
-        {"messages", nlohmann::json::array({
-            {{"role", "system"}, {"content", "You are a research knowledge extractor. Extract learnings in SSL v0.2 format. Output ONLY SSL-formatted learnings."}},
-            {{"role", "user"}, {"content", safe_prompt}}
-        })},
-        {"temperature", 0.3},
-        {"max_tokens", 4096}
-    };
-    std::string body = req.dump(-1, ' ', true);  // ensure_ascii=true for safe transport
-
-    // Write body to temp file for curl (avoids arg length limits)
-    std::string tmp_path = "/tmp/chitta-ingest-" + std::to_string(getpid()) + ".json";
-    {
-        std::ofstream ofs(tmp_path, std::ios::binary);
-        ofs << body;
-    }
-
-    std::string url = endpoint + "/v1/chat/completions";
-
-    int stdout_pipe[2];
-    if (pipe(stdout_pipe) < 0) { std::remove(tmp_path.c_str()); return ""; }
-
-    pid_t pid = fork();
-    if (pid < 0) { close(stdout_pipe[0]); close(stdout_pipe[1]); std::remove(tmp_path.c_str()); return ""; }
-
-    if (pid == 0) {
-        close(stdout_pipe[0]);
-        dup2(stdout_pipe[1], STDOUT_FILENO);
-        int devnull = open("/dev/null", O_WRONLY);
-        if (devnull >= 0) { dup2(devnull, STDERR_FILENO); close(devnull); }
-        close(stdout_pipe[1]);
-        std::string timeout_str = std::to_string(config_.timeout_secs);
-        execlp("curl", "curl", "-sL",
-               "--max-time", timeout_str.c_str(),
-               "-H", "Content-Type: application/json",
-               "-d", ("@" + tmp_path).c_str(),
-               url.c_str(), nullptr);
-        _exit(1);
-    }
-
-    close(stdout_pipe[1]);
-    std::string output;
-    std::array<char, 8192> buffer;
-    ssize_t n;
-    while ((n = read(stdout_pipe[0], buffer.data(), buffer.size())) > 0)
-        output.append(buffer.data(), n);
-    close(stdout_pipe[0]);
-    waitpid(pid, nullptr, 0);
-
-    // Clean up temp file
-    std::remove(tmp_path.c_str());
-
-    // Parse OpenAI response
-    try {
-        auto resp = nlohmann::json::parse(output);
-        if (resp.contains("choices") && !resp["choices"].empty()) {
-            return resp["choices"][0]["message"]["content"].get<std::string>();
-        }
-        if (resp.contains("error")) {
-            log("[ingest] LLM error: " + resp["error"].value("message", "unknown"));
-        }
-    } catch (...) {
-        log("[ingest] Failed to parse LLM response (" + std::to_string(output.size()) + " bytes)");
-    }
-    return "";
-}
-
-std::string Ingester::call_llm_opencode(const std::string& prompt) {
-    int stdin_pipe[2], stdout_pipe[2];
-    if (pipe(stdin_pipe) < 0 || pipe(stdout_pipe) < 0) return "";
-
-    pid_t pid = fork();
-    if (pid < 0) {
-        close(stdin_pipe[0]); close(stdin_pipe[1]);
-        close(stdout_pipe[0]); close(stdout_pipe[1]);
+    if (cached_endpoint_.empty()) {
+        log("[ingest] No GPU endpoint found — cannot call LLM");
         return "";
     }
 
-    if (pid == 0) {
-        close(stdin_pipe[1]); close(stdout_pipe[0]);
-        dup2(stdin_pipe[0], STDIN_FILENO);
-        dup2(stdout_pipe[1], STDERR_FILENO);
-        int devnull = open("/dev/null", O_WRONLY);
-        if (devnull >= 0) { dup2(devnull, STDOUT_FILENO); close(devnull); }
-        close(stdin_pipe[0]); close(stdout_pipe[1]);
-        execlp("opencode", "opencode", "run", "-m", config_.model.c_str(), nullptr);
-        _exit(1);
-    }
-
-    close(stdin_pipe[0]); close(stdout_pipe[1]);
-
-    ssize_t written = 0;
-    size_t total = prompt.size();
-    const char* data = prompt.data();
-    while (written < static_cast<ssize_t>(total)) {
-        ssize_t n_written = write(stdin_pipe[1], data + written, total - written);
-        if (n_written <= 0) break;
-        written += n_written;
-    }
-    close(stdin_pipe[1]);
-
-    std::string output;
-    std::array<char, 4096> buffer;
-    int flags = fcntl(stdout_pipe[0], F_GETFL, 0);
-    fcntl(stdout_pipe[0], F_SETFL, flags | O_NONBLOCK);
-
-    auto start = std::chrono::steady_clock::now();
-    bool finished = false;
-
-    while (!finished) {
-        auto elapsed = std::chrono::steady_clock::now() - start;
-        if (std::chrono::duration_cast<std::chrono::seconds>(elapsed).count() >= config_.timeout_secs) {
-            kill(pid, SIGKILL); waitpid(pid, nullptr, 0);
-            close(stdout_pipe[0]);
-            log("[ingest] LLM timeout after " + std::to_string(config_.timeout_secs) + "s");
-            return "";
-        }
-
-        int status;
-        int result = waitpid(pid, &status, WNOHANG);
-        if (result != 0) finished = true;
-
-        ssize_t n;
-        while ((n = read(stdout_pipe[0], buffer.data(), buffer.size())) > 0)
-            output.append(buffer.data(), n);
-
-        if (!finished) std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-
-    ssize_t n;
-    while ((n = read(stdout_pipe[0], buffer.data(), buffer.size())) > 0)
-        output.append(buffer.data(), n);
-
-    close(stdout_pipe[0]);
-    return output;
+    return call_llm_http(
+        cached_endpoint_, config_.model, prompt,
+        "You are a research knowledge extractor. Extract learnings in SSL v0.2 format. "
+        "Output ONLY SSL-formatted learnings.",
+        config_.timeout_secs, 0.3f, 4096,
+        [this](const std::string& msg) { log(msg); });
 }
 
 void Ingester::store_learnings(const SSLParser::Result& ssl, const std::string& realm,

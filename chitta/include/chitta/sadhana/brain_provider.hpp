@@ -3,10 +3,11 @@
 //
 // Provides a uniform interface for interacting with different LLM backends:
 // - ClaudeBrain: Uses `claude --dangerously-skip-permissions --max-turns N -p`
-// - OpenCodeBrain: Uses `opencode` CLI
+// - LocalBrain: Uses HTTP to Ollama/vLLM (auto-discovered GPU endpoint)
 //
-// Each provider executes the LLM via fork/exec with timeout handling.
+// Each provider executes the LLM via fork/exec or HTTP with timeout handling.
 
+#include <chitta/llm_http.hpp>
 #include <string>
 #include <vector>
 #include <memory>
@@ -87,28 +88,27 @@ private:
     std::string claude_path_ = "claude";  // Assumes claude is in PATH
 };
 
-// OpenCode brain provider
-// Executes: opencode <prompt>
-class OpenCodeBrain : public BrainProvider {
+// Local brain provider (HTTP to Ollama/vLLM)
+class LocalBrain : public BrainProvider {
 public:
-    explicit OpenCodeBrain(const std::string& model = "gpt-4o")
+    explicit LocalBrain(const std::string& model = "gemma4:26b")
         : model_(model) {}
 
     BrainResult think(const std::string& prompt,
                        const BrainConfig& config = {}) override;
 
-    std::string provider_name() const override { return "opencode"; }
+    std::string provider_name() const override { return "local"; }
     std::string model_name() const override { return model_; }
 
     void set_model(const std::string& model) override { model_ = model; }
 
     std::vector<std::string> available_models() const override {
-        return {"gpt-4o", "gpt-4o-mini", "o1", "o1-mini"};
+        return {"gemma4:26b", "gemma4:12b", "qwen3-coder", "llama3.1:8b"};
     }
 
 private:
     std::string model_;
-    std::string opencode_path_ = "opencode";  // Assumes opencode is in PATH
+    std::string cached_endpoint_;
 };
 
 // Factory function to create brain provider by name
@@ -116,11 +116,11 @@ inline std::unique_ptr<BrainProvider> create_brain(const std::string& provider,
                                                      const std::string& model = "") {
     if (provider == "claude") {
         return std::make_unique<ClaudeBrain>(model.empty() ? "sonnet" : model);
-    } else if (provider == "opencode") {
-        return std::make_unique<OpenCodeBrain>(model.empty() ? "gpt-4o" : model);
+    } else if (provider == "local") {
+        return std::make_unique<LocalBrain>(model.empty() ? "gemma4:26b" : model);
     }
-    // Default to Claude
-    return std::make_unique<ClaudeBrain>(model.empty() ? "sonnet" : model);
+    // Default to local
+    return std::make_unique<LocalBrain>(model.empty() ? "gemma4:26b" : model);
 }
 
 }  // namespace chitta

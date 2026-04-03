@@ -646,8 +646,8 @@ static const std::vector<ToolSpec> TOOL_SPECS = {
     {"dream_start", "Start a dream: autonomous web exploration on a topic",
      {{"topic", "Topic to explore", true, nullptr},
       {"realm", "Realm", false, nullptr},
-      {"brain_provider", "Brain provider (claude/opencode)", false, "opencode"},
-      {"brain_model", "Brain model name", false, "gpt-4o"},
+      {"brain_provider", "Brain provider (claude/local)", false, "local"},
+      {"brain_model", "Brain model name", false, "gemma4:26b"},
       {"max_concurrent", "Max concurrent dreams allowed", false, "2"}}},
 
     {"dream_wander", "Auto-pick a topic from curiosity gaps and start dreaming",

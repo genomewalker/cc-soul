@@ -56,6 +56,6 @@ Daemon distillation settings (in `chittad --help`):
 
 If distillation isn't running:
 1. Check daemon is running: `chitta health_check`
-2. Check opencode is available: `which opencode`
+2. Check GPU endpoint is reachable: `curl -s http://localhost:11434/v1/models`
 3. Check transcript is registered: `chitta transcript_list`
 4. Check queue is being processed: `ls -la /tmp/chitta-queue.jsonl*`

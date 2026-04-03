@@ -1,5 +1,5 @@
 #!/bin/bash
-# enrich-code.sh - Generate semantic descriptions for code symbols using OpenCode
+# enrich-code.sh - Generate semantic descriptions for code symbols
 #
 # Called by chittad with a temp file containing symbol info:
 #   SYMBOL_ID=<id>
@@ -8,11 +8,11 @@
 #   FILE_PATH=<source file>
 #   LINE_START=<start line>
 #   LINE_END=<end line>
-#   MODEL=<opencode model>
+#   MODEL=<LLM model>
 #
 # The script should:
 # 1. Extract code snippet from file
-# 2. Call OpenCode for description
+# 2. Call LLM via HTTP (Ollama/vLLM) for description
 # 3. Store as memory and link to symbol
 
 # Don't use set -e: we want the script to continue even if parts fail
@@ -32,7 +32,7 @@ LINE_START=$(grep '^LINE_START=' "$TEMP_FILE" | cut -d= -f2)
 LINE_END=$(grep '^LINE_END=' "$TEMP_FILE" | cut -d= -f2)
 MODEL=$(grep '^MODEL=' "$TEMP_FILE" | cut -d= -f2)
 
-MODEL="${MODEL:-github-copilot/gpt-5-mini}"
+MODEL="${MODEL:-gemma4:26b}"
 CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
 
 if [[ -z "$SYMBOL_ID" || -z "$FILE_PATH" ]]; then
@@ -72,7 +72,7 @@ case "$EXT" in
     *) LANG="code" ;;
 esac
 
-# Build prompt for OpenCode
+# Build prompt
 PROMPT="Describe this $LANG $KIND in 1-2 sentences. Focus on what it does, not how.
 
 $KIND: $NAME
@@ -85,11 +85,49 @@ $CODE
 Response format (one line only):
 $NAME: <description>"
 
-# Call OpenCode
-RESULT=$(echo "$PROMPT" | timeout 30 opencode run -m "$MODEL" 2>/dev/null || true)
+# Discover GPU endpoint
+ENDPOINT=""
+for f in /tmp/ollama-server-*.url; do
+    [[ -f "$f" ]] || continue
+    url=$(cat "$f" 2>/dev/null | tr -d '\n')
+    if curl -sL --max-time 3 "$url/v1/models" 2>/dev/null | grep -q "data"; then
+        ENDPOINT="$url"; break
+    fi
+done
+[[ -z "$ENDPOINT" ]] && curl -sL --max-time 3 "http://localhost:11434/v1/models" 2>/dev/null | grep -q "data" && ENDPOINT="http://localhost:11434"
+
+if [[ -z "$ENDPOINT" ]]; then
+    echo "[enrich] No GPU endpoint found for $NAME" >&2
+    exit 0
+fi
+
+# Call LLM via HTTP
+TMPJSON="/tmp/chitta-enrich-$$.json"
+python3 -c "
+import json, sys
+prompt = sys.stdin.read()
+req = {'model': '$MODEL', 'messages': [
+    {'role': 'user', 'content': prompt}
+], 'temperature': 0.3, 'max_tokens': 256}
+json.dump(req, open('$TMPJSON', 'w'), ensure_ascii=True)
+" <<< "$PROMPT"
+
+RESPONSE=$(curl -sL --max-time 30 \
+    -H "Content-Type: application/json" \
+    -d "@$TMPJSON" \
+    "$ENDPOINT/v1/chat/completions" 2>/dev/null || echo "")
+rm -f "$TMPJSON"
+
+RESULT=$(echo "$RESPONSE" | python3 -c "
+import json, sys
+try:
+    r = json.load(sys.stdin)
+    print(r['choices'][0]['message']['content'])
+except: pass
+" 2>/dev/null || echo "")
 
 if [[ -z "$RESULT" ]]; then
-    echo "[enrich] No result from OpenCode for $NAME" >&2
+    echo "[enrich] No result from LLM for $NAME" >&2
     exit 0
 fi
 

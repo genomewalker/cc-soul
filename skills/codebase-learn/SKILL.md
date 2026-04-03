@@ -150,7 +150,7 @@ chitta learn_codebase --path /path/to/cc-soul/chitta --project cc-soul
 
 ## Semantic Enrichment (Background)
 
-The daemon automatically generates semantic descriptions for symbols using OpenCode:
+The daemon automatically generates semantic descriptions for symbols using a local LLM (Ollama/vLLM):
 
 ```bash
 # Check enrichment status

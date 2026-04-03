@@ -249,18 +249,36 @@ def generate_pairs_with_distillation(
 ) -> int:
     """
     Strategy 2: Run existing distillation on transcripts to generate labels.
-    Requires opencode/claude to be available. Higher quality but slower.
+    Uses HTTP to Ollama/vLLM (auto-discovered GPU endpoint). Higher quality but slower.
     """
-    import subprocess
+    import subprocess, urllib.request, glob as globmod
+
+    # Discover endpoint
+    endpoint = None
+    for path in globmod.glob("/tmp/ollama-server-*.url"):
+        try:
+            url = open(path).read().strip()
+            urllib.request.urlopen(url + "/v1/models", timeout=3)
+            endpoint = url
+            break
+        except Exception:
+            pass
+    if not endpoint:
+        try:
+            urllib.request.urlopen("http://localhost:11434/v1/models", timeout=3)
+            endpoint = "http://localhost:11434"
+        except Exception:
+            print("No GPU endpoint found — skipping distillation labels")
+            return 0
 
     transcripts = sorted(
         [p for p in CLAUDE_PROJECTS.rglob("*.jsonl")
          if "subagents" not in str(p) and p.stat().st_size > 50_000],
         key=lambda p: p.stat().st_size,
         reverse=True,
-    )[:200]  # Generate 200 high-quality pairs
+    )[:200]
 
-    print(f"Generating labels for {len(transcripts)} transcripts via distillation...")
+    print(f"Generating labels for {len(transcripts)} transcripts via distillation ({endpoint})...")
 
     pairs = []
     for i, transcript_path in enumerate(transcripts):
@@ -271,18 +289,25 @@ def generate_pairs_with_distillation(
 
         conversation = build_conversation(turns, max_tokens)
 
-        # Build the SSL prompt (same as NativeDistiller)
         from ssl_prompt import EXTRACTION_PROMPT
         prompt = EXTRACTION_PROMPT + "\n\n## Conversation\n\n" + conversation
 
-        # Call opencode
+        # Call LLM via HTTP
         try:
-            result = subprocess.run(
-                ["opencode", "run", "--model", "claude-haiku-4-5", "--no-cwd",
-                 "--print", prompt],
-                capture_output=True, text=True, timeout=120
+            import json as json_mod
+            req_body = json_mod.dumps({
+                "model": "gemma4:26b",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.3, "max_tokens": 4096,
+            }).encode()
+            req = urllib.request.Request(
+                endpoint + "/v1/chat/completions",
+                data=req_body,
+                headers={"Content-Type": "application/json"},
             )
-            ssl_output = result.stdout.strip()
+            resp = urllib.request.urlopen(req, timeout=180)
+            data = json_mod.loads(resp.read().decode())
+            ssl_output = data["choices"][0]["message"]["content"].strip()
             if not ssl_output:
                 continue
         except Exception as e:
