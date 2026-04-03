@@ -155,7 +155,7 @@ sedi "s/\"version\": \"[^\"]*\"/\"version\": \"$NEW_VERSION\"/" \
 
 # Sync skills from source to codex plugin
 echo "Syncing skills to codex-plugin/..."
-rsync -a --delete skills/ codex-plugin/skills/
+rsync -a --delete --exclude='_conventions' skills/ codex-plugin/skills/
 
 # Update chitta-mcp/pyproject.toml
 echo "Updating chitta-mcp/pyproject.toml..."
