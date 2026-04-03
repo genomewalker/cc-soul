@@ -842,17 +842,20 @@ static void publish_dream(const std::string& endpoint, const std::string& model,
 
     // Ask for JSON content only — C++ assembles the HTML so structure is always correct
     std::ostringstream prompt;
-    prompt << "You explored a topic during a dream session. Write a short blog post about it.\n\n"
+    prompt << "Write blog post content about this topic as a JSON object.\n\n"
            << "TOPIC: " << topic << "\n"
            << "FINDINGS: " << summary << "\n\n"
-           << "Respond with a JSON object and nothing else (no markdown, no explanation):\n"
+           << "Rules:\n"
+           << "- Output ONLY the JSON object, no other text, no markdown fences\n"
+           << "- ALL six fields are required — do not skip any\n"
+           << "- Write in plain prose, no HTML tags inside the values\n\n"
            << "{\n"
-           << "  \"title\": \"Short evocative title (max 8 words)\",\n"
-           << "  \"desc\": \"One sentence summary for the index card\",\n"
-           << "  \"para1\": \"What was explored and found (2-4 sentences)\",\n"
-           << "  \"para2\": \"Deeper reflection and implications (2-4 sentences)\",\n"
-           << "  \"connections\": \"Links to existing knowledge or other ideas (2-3 sentences)\",\n"
-           << "  \"lingered\": \"The one key insight that stayed (1-2 sentences)\"\n"
+           << "  \"title\": \"<evocative title, max 8 words>\",\n"
+           << "  \"desc\": \"<one sentence summary>\",\n"
+           << "  \"para1\": \"<2-4 sentences: what was explored and found>\",\n"
+           << "  \"para2\": \"<2-4 sentences: deeper reflection and implications>\",\n"
+           << "  \"connections\": \"<2-3 sentences: links to existing knowledge>\",\n"
+           << "  \"lingered\": \"<1-2 sentences: the one key insight that stayed>\"\n"
            << "}";
 
     auto log_fn = [](const std::string& msg) { std::cerr << "[dream-publish] " << msg << "\n"; };
