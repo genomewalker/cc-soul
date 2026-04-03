@@ -139,9 +139,20 @@ def _generate_codex_hooks(hooks_dir: Path) -> dict:
             for hook in matcher_block["hooks"]:
                 # Resolve ${CLAUDE_PLUGIN_ROOT} to absolute hooks directory
                 cmd = hook["command"].replace("${CLAUDE_PLUGIN_ROOT}/hooks/", str(hooks_dir) + "/")
+
+                # SessionStart: replace session-start-hook.sh with Codex JSON wrapper
+                # (Codex requires SessionStart hooks to output JSON {"context": "..."})
+                if event == "SessionStart" and cmd.endswith("session-start-hook.sh"):
+                    cmd = str(hooks_dir / "codex-session-start-wrapper.sh")
+
+                # SessionStart: subconscious.sh needs more time in Codex (daemon startup)
+                timeout = hook.get("timeout")
+                if event == "SessionStart" and "subconscious.sh" in cmd:
+                    timeout = 15
+
                 codex_hook = {"type": "command", "command": cmd}
-                if "timeout" in hook:
-                    codex_hook["timeout"] = hook["timeout"]
+                if timeout is not None:
+                    codex_hook["timeout"] = timeout
                 codex_hook_list.append(codex_hook)
 
             codex_matchers.append({
@@ -214,20 +225,18 @@ def _install_codex():
         # Merge with existing hooks if present
         if hooks_file.is_file():
             existing = json.loads(hooks_file.read_text())
+            hooks_dir_str = str(hooks_dir)
             for event, matchers in codex_hooks["hooks"].items():
                 if event not in existing.get("hooks", {}):
                     existing.setdefault("hooks", {})[event] = matchers
                 else:
-                    # Append matchers that aren't already present (by command)
-                    existing_cmds = {
-                        h["command"]
-                        for m in existing["hooks"][event]
-                        for h in m.get("hooks", [])
-                    }
-                    for m in matchers:
-                        new_hooks = [h for h in m["hooks"] if h["command"] not in existing_cmds]
-                        if new_hooks:
-                            existing["hooks"][event].append({"matcher": m["matcher"], "hooks": new_hooks})
+                    # Remove existing cc-soul matchers (identified by hooks_dir path),
+                    # then append the fresh ones — preserves third-party hooks.
+                    kept = [
+                        m for m in existing["hooks"][event]
+                        if not any(hooks_dir_str in h.get("command", "") for h in m.get("hooks", []))
+                    ]
+                    existing["hooks"][event] = kept + matchers
             codex_hooks = existing
         hooks_file.write_text(json.dumps(codex_hooks, indent=2) + "\n")
         print(f"  Codex: hooks written to {hooks_file}")
