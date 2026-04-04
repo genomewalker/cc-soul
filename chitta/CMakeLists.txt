@@ -407,6 +407,34 @@ if(NOT EXISTS "${CHITTA_FIELD_LIB}")
 endif()
 message(STATUS "chitta-field: ${CHITTA_FIELD_LIB}")
 
+# rtk — token-optimized command filter (submodule at cc-soul/rtk)
+set(_RTK_SUBMODULE "${CMAKE_CURRENT_SOURCE_DIR}/../rtk")
+set(_RTK_BIN "${CMAKE_CURRENT_SOURCE_DIR}/../bin/rtk")
+if(EXISTS "${_RTK_SUBMODULE}/Cargo.toml")
+    find_program(CARGO_EXECUTABLE HINTS "$ENV{HOME}/.cargo/bin" NAMES cargo)
+    if(CARGO_EXECUTABLE)
+        # Resolve rustc alongside cargo (avoid conda's rustc 1.70 shadowing rustup's 1.92+)
+        get_filename_component(_CARGO_DIR "${CARGO_EXECUTABLE}" DIRECTORY)
+        set(_RUSTC_EXECUTABLE "${_CARGO_DIR}/rustc")
+        add_custom_command(
+            OUTPUT "${_RTK_BIN}"
+            COMMAND ${CMAKE_COMMAND} -E env
+                "RUSTUP_TOOLCHAIN=stable"
+                "RUSTC=${_RUSTC_EXECUTABLE}"
+                "${CARGO_EXECUTABLE}" build --release --manifest-path "${_RTK_SUBMODULE}/Cargo.toml"
+            COMMAND ${CMAKE_COMMAND} -E copy "${_RTK_SUBMODULE}/target/release/rtk" "${_RTK_BIN}"
+            DEPENDS "${_RTK_SUBMODULE}/src"
+            COMMENT "Building rtk token filter"
+        )
+        add_custom_target(rtk ALL DEPENDS "${_RTK_BIN}")
+        message(STATUS "rtk: will build from ${_RTK_SUBMODULE}")
+    else()
+        message(STATUS "rtk: cargo not found, skipping")
+    endif()
+else()
+    message(STATUS "rtk: submodule not found at ${_RTK_SUBMODULE}, skipping")
+endif()
+
 # Daemon/admin tool
 add_executable(chittad
     src/simple_cli.cpp

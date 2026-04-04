@@ -11,7 +11,7 @@ MATCHER="${1:-}"
 [[ -z "$MATCHER" ]] && exit 0
 
 CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
-RTK_BIN="${RTK_BIN:-$HOME/.claude/bin/chitta-rtk}"
+RTK_BIN="${RTK_BIN:-$HOME/.claude/bin/rtk}"
 STDIN_DATA=$(cat)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

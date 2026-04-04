@@ -1,3 +1,6 @@
 [submodule "chitta-field"]
 	path = chitta-field
 	url = https://github.com/genomewalker/chitta-field.git
+[submodule "rtk"]
+	path = rtk
+	url = https://github.com/rtk-ai/rtk.git
