@@ -349,6 +349,9 @@ build_from_source() {
     if [[ -n "$CHITTA_FIELD_ROOT" ]]; then
         cmake_args="$cmake_args -DCHITTA_FIELD_ROOT=$CHITTA_FIELD_ROOT"
     fi
+    # Pass rustup-managed cargo explicitly so cmake doesn't pick up conda/system cargo
+    local _cargo_exe
+    _cargo_exe=$(find_cargo 2>/dev/null) && cmake_args="$cmake_args -DCARGO_EXECUTABLE=$_cargo_exe"
     local onnx_info
     if onnx_info=$(detect_onnx_runtime); then
         local onnx_include="${onnx_info%%|*}"
