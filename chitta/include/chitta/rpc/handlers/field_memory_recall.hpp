@@ -48,11 +48,34 @@
 
         size_t limit      = static_cast<size_t>(params.value("limit", 10));
         std::string realm = params.value("realm", "");
+        std::string tag   = params.value("tag", "");
 
         auto embedding = embed_query(query);
         if (embedding.empty()) return ToolResult::error("Failed to embed query");
 
-        auto hits = field_store_->recall(embedding, limit, realm);
+        // Fetch more than needed so tag filtering has candidates to work with
+        size_t fetch_limit = tag.empty() ? limit : limit * 8;
+        auto hits = field_store_->recall(embedding, fetch_limit, realm);
+
+        // Hard-filter by tag: keep only memories that have (id, "tagged", tag) triplet
+        if (!tag.empty() && !hits.empty()) {
+            std::string triplets_json = field_store_->query_object(tag);
+            std::unordered_set<uint64_t> tagged_ids;
+            try {
+                auto tj = json::parse(triplets_json);
+                for (const auto& t : tj) {
+                    if (t.value("predicate", "") == "tagged") {
+                        try { tagged_ids.insert(std::stoull(t.value("subject", "0"))); }
+                        catch (...) {}
+                    }
+                }
+            } catch (...) {}
+            hits.erase(
+                std::remove_if(hits.begin(), hits.end(),
+                    [&](const FieldRecallHit& h) { return tagged_ids.find(h.memory_id) == tagged_ids.end(); }),
+                hits.end());
+            if (hits.size() > limit) hits.resize(limit);
+        }
 
         // Hebbian co-occurrence: strengthen associations between co-retrieved memories
         if (hits.size() >= 2) {
