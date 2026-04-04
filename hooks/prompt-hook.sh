@@ -34,15 +34,29 @@ TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null 
 [[ -z "$QUERY" ]] && exit 0
 [[ ! -x "$CHITTA_BIN" ]] && exit 0
 
-# Save user message for Stop hook to analyze
+# Strip system markup (task-notifications, system-reminders, command blocks) to get real user intent.
+# When a message is purely system markup (e.g. task-notification firing UserPromptSubmit),
+# skip all processing — no soul context needed.
+CLEAN_QUERY=$(echo "$QUERY" | python3 -c "
+import sys, re
+text = sys.stdin.read()
+text = re.sub(r'<(task-notification|system-reminder|command-name|command-message|local-command-\w+)[^>]*>.*?</\1>', '', text, flags=re.DOTALL|re.IGNORECASE)
+print(text.strip())
+" 2>/dev/null || echo "$QUERY")
+[[ -z "$CLEAN_QUERY" ]] && exit 0
+
+# Save cleaned message for Stop hook compliance detection (no system markup pollution)
 mkdir -p "$MIND_PATH"
-echo "$QUERY" > "$MIND_PATH/.last_user_message"
+echo "$CLEAN_QUERY" > "$MIND_PATH/.last_user_message"
 
 # Get turn index (locked read+increment via lib.sh)
 TURN_INDEX=$(get_next_turn "$SESSION_ID")
 
 # Store user turn in lossless conversation storage (uses lib.sh queue_write with ack_id)
 queue_write "store_turn" "{\"session_id\":\"$SESSION_ID\",\"role\":\"user\",\"content\":$(echo "$QUERY" | jq -Rs .),\"turn_index\":$TURN_INDEX}"
+
+# Use clean query for all recall and pattern detection (strip markup from QUERY)
+QUERY="$CLEAN_QUERY"
 
 # Skip daemon-dependent operations immediately if daemon is not running.
 # queue_write above is file-based (no daemon needed), everything below requires it.
