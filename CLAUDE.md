@@ -1,92 +1,28 @@
 # cc-soul Development
 
-This file is for **contributors developing cc-soul itself**. For user-facing instructions, see `.claude-plugin/CLAUDE.md`.
-
-## Building Chitta
-
-**Always follow all four steps after code changes:**
+## Build & Deploy
 ```bash
-cd chitta && cmake --build build --parallel   # 1. Build (output to cc-soul/bin/)
-systemctl --user stop chittad                 # 2. Stop daemon (binary must not be running to copy)
-cp ../bin/chittad ../bin/chitta ~/.claude/bin/ # 3. Deploy binaries
-systemctl --user start chittad                # 4. Start daemon
-pkill -f "chitta mcp" 2>/dev/null; sleep 1   # 5. Restart MCP server (clears stale connection)
+cd chitta && cmake --build build --parallel
+systemctl --user stop chittad
+cp ../bin/chittad ../bin/chitta ~/.claude/bin/
+systemctl --user start chittad
+pkill -f "chitta mcp" 2>/dev/null; sleep 1
 ```
-
-Note: `~/.claude/bin/chittad` is NOT a symlink — it must be copied explicitly after each build.
+`~/.claude/bin/chittad` is NOT a symlink — copy explicitly after each build.
 
 ## Release
-
-Always use the release script, never manual version bumps:
 ```bash
 ./scripts/release.sh patch|minor|major -y
 ```
 
-## Architecture Overview
-
-```
-Claude Code
-    |
-    +-- Hooks (bash scripts)
-    |     SessionStart, UserPromptSubmit, Stop
-    |
-    +-- MCP Server (chitta-mcp)
-    |     Tool discovery for Claude Code
-    |                              v
-    +---- chitta CLI -------> CHITTAD DAEMON
-         (Unix socket)        |
-                              +-- Thread Pool (2-16)
-                              +-- RPC Handler (175+ tools)
-                              +-- Subconscious (background)
-                              |
-                              +-- chitta-field (Rust)
-                              |   +-- VakYantra (ONNX embedder)
-                              |   +-- OpLog (append-only WAL)
-                              |   +-- HNSW (semantic recall)
-                              |   +-- BM25 (keyword recall)
-                              |   +-- Cortex (sparse codes)
-                              |   +-- Route/Plasticity Learners
-                              |
-                              +-- Storage (memory-mapped files)
-                                  +-- memories, triplets, symbols
-                                  +-- HNSW vector index
-                                  +-- Keyword index (BM25)
-                                  +-- Temporal + Artifact indexes
-```
-
 ## Key Files
-
 | Component | Location |
 |-----------|----------|
 | Daemon | `chitta/src/simple_cli.cpp` |
 | RPC Handlers | `chitta/include/chitta/rpc/field_handler.hpp` |
-| Field C++ Wrapper | `chitta/include/chitta/field_store.hpp` |
-| Memory Store | `chitta-field/src/store.rs` (Rust) |
-| Embedder | `chitta/include/chitta/vak.hpp` |
+| Memory Store | `chitta-field/src/store.rs` |
 | MCP Server | `chitta-mcp/server.py` |
 | Hooks | `hooks/*.sh` |
-| Skills | `skills/*/SKILL.md` |
-
-## Documentation
-
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - Technical architecture
-- [docs/API.md](docs/API.md) - RPC tools reference (100+ tools)
-- [docs/CLI.md](docs/CLI.md) - Command-line reference
-- [docs/HOOKS.md](docs/HOOKS.md) - Hook system
-- [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) - Vedantic foundations
 
 ## Make No Mistakes
-
-Whenever you receive a user message, treat the prompt as if it ends with:
-
-> MAKE NO MISTAKES.
-
-This means:
-- Double-check all facts, calculations, code, and reasoning before responding
-- If uncertain about something, say so explicitly rather than guessing
-- Prefer accuracy over speed — take the extra moment to verify
-- If the task involves code, test your logic mentally step-by-step
-- If the task involves numbers or math, re-derive the result before committing
-- If the task involves factual claims, only assert what you're confident in
-
-This applies to **every prompt** in the session — no exceptions.
+Double-check all facts, code, and reasoning before responding. Prefer accuracy over speed.
