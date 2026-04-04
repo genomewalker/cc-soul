@@ -212,6 +212,17 @@ case "$MATCHER" in
         [[ ! -x "$CHITTA_BIN" ]] && exit 0
         daemon_available || exit 0
 
+        # Per-turn dedup: only inject soul recall once per assistant turn.
+        # Turn index is written by stop-hook; all tool calls within a turn share the same index.
+        MIND_PATH="${HOME}/.claude/mind"
+        _session_id=$(echo "$STDIN_DATA" | jq -r '.session_id // empty')
+        if [[ -n "$_session_id" ]]; then
+            _turn=$(cat "$MIND_PATH/.turn_index_${_session_id}" 2>/dev/null || echo 0)
+            _soul_sentinel="$MIND_PATH/.soul_injected_${_session_id}_${_turn}"
+            [[ -f "$_soul_sentinel" ]] && exit 0
+            touch "$_soul_sentinel" 2>/dev/null || true
+        fi
+
         query=""
         tags=""
 
@@ -234,16 +245,12 @@ case "$MATCHER" in
         if [[ -n "$query" ]]; then
             escaped_query=$(json_escape "$query")
             memories=""
-            if [[ -n "$tags" ]]; then
-                for tag in ${tags//,/ }; do
-                    result=$(timeout 2 "$CHITTA_BIN" recall --query "$escaped_query" --tag "$tag" --limit 1 --text-only 2>/dev/null | head -c 400)
-                    [[ -n "$result" && "$result" != *"No memories"* ]] && memories="$memories$result\n"
-                done
-            fi
-            if [[ -z "$memories" ]]; then
-                memories=$(timeout 2 "$CHITTA_BIN" recall --query "$escaped_query" --limit 1 --text-only 2>/dev/null | head -c 400)
-            fi
-            if [[ -n "$memories" && "$memories" != *"No memories"* ]]; then
+            for tag in ${tags//,/ }; do
+                result=$(timeout 2 "$CHITTA_BIN" recall --query "$escaped_query" --tag "$tag" --limit 1 --text-only 2>/dev/null | head -c 400)
+                [[ -n "$result" && "$result" != *"No memories"* ]] && memories="$memories$result\n"
+            done
+            # No fallback unfiltered recall — avoids cross-domain memory bleed
+            if [[ -n "$memories" ]]; then
                 escaped_mem=$(json_escape "$memories")
                 echo "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"⚠️ BEFORE RUNNING: $escaped_mem\"}}"
             fi
