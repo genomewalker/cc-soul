@@ -250,7 +250,7 @@ cmd_start() {
         support_interval=true
     fi
 
-    local daemon_args=(daemon "--path" "$MIND_PATH")
+    local daemon_args=(daemon "--path" "$MIND_PATH" "--no-autonomous")
     if [[ "$support_interval" == "true" ]]; then
         daemon_args+=("--interval" "$INTERVAL")
     fi

@@ -443,7 +443,7 @@
             "run review gate, commit only if approved.";
 
         int64_t sadhana_id = sadhana_manager_->create(
-            goal, "claude", "sonnet", interval, realm, goal_dsl, max_turns);
+            goal, "local", "gemma4:26b", interval, realm, goal_dsl, max_turns);
         if (!sadhana_id)
             return ToolResult::error("Failed to create impl sadhana");
 
@@ -473,7 +473,7 @@
         std::string goal = "[think] Internal memory synthesis: find patterns, connect gaps";
 
         int64_t sadhana_id = sadhana_manager_->create(
-            goal, "claude", "sonnet", 0, realm, goal_dsl, 10);
+            goal, "local", "gemma4:26b", 0, realm, goal_dsl, 10);
         if (!sadhana_id)
             return ToolResult::error("Failed to create think sadhana");
 
@@ -1556,7 +1556,7 @@
         std::string goal = "[health] Monitor memory quality in realm=" + realm;
 
         int64_t id = sadhana_manager_->create(
-            goal, "claude", "sonnet", interval, realm, goal_dsl, max_turns);
+            goal, "local", "gemma4:26b", interval, realm, goal_dsl, max_turns);
 
         if (id == 0) return ToolResult::error("Failed to create health-check sadhana");
 

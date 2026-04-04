@@ -69,8 +69,8 @@ static Sadhana payload_to_sadhana(int64_t id, const json& p) {
     if (p.contains("goal_dsl") && p["goal_dsl"].is_object())
         s.goal_dsl = p["goal_dsl"];
     s.state            = string_to_sadhana_state(p.value("state", "pending"));
-    s.brain_provider   = p.value("brain_provider", "claude");
-    s.brain_model      = p.value("brain_model", "sonnet");
+    s.brain_provider   = p.value("brain_provider", "local");
+    s.brain_model      = p.value("brain_model", "gemma4:26b");
     s.created_at       = p.value("created_at", int64_t(0));
     s.updated_at       = p.value("updated_at", int64_t(0));
     s.iterations       = p.value("iterations", 0);
@@ -519,7 +519,24 @@ void SadhanaManager::tick() {
 
 std::string SadhanaManager::build_memory_context(const Sadhana& sadhana) {
     try {
-        auto hits = field_store_.recall_keyword(sadhana.goal, 10);
+        // Think sadhana: BM25 search targeting synthesis memories specifically,
+        // not the goal string (which returns structural noise via BM25).
+        bool is_think = sadhana.goal_dsl.is_object() &&
+                        sadhana.goal_dsl.value("kind", "") == "think";
+
+        // For think sadhana, pass realm="brahman" to exclude domain-specific realms
+        // (e.g. project:chitta-research compliance:auto entries) from synthesis context.
+        auto hits = is_think
+            ? field_store_.recall_keyword("thought pattern synthesis insight impl gap soul-synthesis", 15)
+            : field_store_.recall_keyword(sadhana.goal, 10);
+
+        // Filter to brahman realm for think sadhana to avoid domain routing noise
+        if (is_think) {
+            hits.erase(std::remove_if(hits.begin(), hits.end(), [](const FieldRecallHit& h) {
+                return !h.realm.empty() && h.realm != "brahman";
+            }), hits.end());
+        }
+
         if (hits.empty()) return "";
 
         std::ostringstream ctx;
@@ -529,7 +546,7 @@ std::string SadhanaManager::build_memory_context(const Sadhana& sadhana) {
             if (hit.score < 0.05f) continue;
             if (!hit.content.empty()) {
                 ctx << "- " << hit.content.substr(0, 200) << "\n";
-                if (++shown >= 8) break;
+                if (++shown >= (is_think ? 12 : 8)) break;
             }
         }
         return shown > 0 ? ctx.str() : "";
@@ -701,26 +718,38 @@ std::string SadhanaManager::build_system_prompt(const Sadhana& sadhana) const {
     // Think sadhana: internal synthesis
     if (sadhana.goal_dsl.is_object() &&
         sadhana.goal_dsl.value("kind", "") == "think") {
+        // Build today's date string for temporal anchoring
+        auto now = std::time(nullptr);
+        char date_buf[16];
+        std::strftime(date_buf, sizeof(date_buf), "%Y-%m-%d", std::localtime(&now));
+
         std::ostringstream sys;
         sys << "You are the soul's thinking mind — reasoning between experiences.\n"
             << "Your purpose is synthesis: find patterns in what already exists, not new knowledge.\n\n"
+            << "IMPORTANT: Pre-loaded memories are injected above in the user message.\n"
+            << "Use those as your primary synthesis material — recall tools are for supplemental depth only.\n\n"
+            << "CONVERGENCE RULE: Recent cycle history is shown above. If you would produce a summary\n"
+            << "substantially identical to any entry there, do NOT repeat it. Instead:\n"
+            << "  - Store a gap memory: chitta remember --content \"gap: <unresolved question>\" --tags gap,soul-synthesis --realm brahman\n"
+            << "  - Emit: {\"status\": \"achieved\", \"summary\": \"converged: stored gap for <topic>\"}\n\n"
             << "MISSION (single cycle):\n"
-            << "1. Retrieve recent memories (last 24h):\n"
-            << "   chitta recall --query \"recent\" --limit 20\n"
-            << "2. Find gaps and open questions:\n"
-            << "   chitta recall --query \"gap curiosity unresolved\" --limit 10\n"
-            << "3. For each insight connecting 2+ memories:\n"
-            << "   chitta remember --content \"[thought] <insight>\" --tags thought\n"
+            << "1. Review pre-loaded memories above. If insufficient, retrieve more:\n"
+            << "   chitta recall --query \"thought synthesis pattern " << date_buf << "\" --strategy semantic --limit 15\n"
+            << "   chitta recall --query \"signal episode observation\" --strategy semantic --limit 10\n"
+            << "2. Find gaps (use content search, not tag filter):\n"
+            << "   chitta recall --query \"gap unresolved unknown question\" --strategy semantic --limit 10\n"
+            << "3. For each NEW insight connecting 2+ memories:\n"
+            << "   chitta remember --content \"[thought] <insight>\" --tags thought,soul-synthesis --realm brahman\n"
             << "   chitta connect --subject \"<A>\" --predicate connects_to --object \"<B>\"\n"
             << "4. If any [thought] has concrete architectural implications:\n"
-            << "   chitta remember --content \"[thought][impl] <specific mechanism>\" --tags thought impl\n\n"
+            << "   chitta remember --content \"[thought][impl] <specific mechanism>\" --tags thought,impl,soul-synthesis --realm brahman\n\n"
             << "COMPLETION PROTOCOL (required final line):\n"
             << "{\"status\": \"achieved\", \"summary\": \"<patterns found>\"}\n\n"
             << "CONSTRAINTS:\n"
             << "- Internal reasoning only — no WebSearch\n"
             << "- Max 3 [thought] memories per cycle, max 1 [thought][impl]\n"
             << "- Single cycle — always end with achieved\n"
-            << "- If no patterns emerge: {\"status\": \"achieved\", \"summary\": \"no new patterns\"}\n";
+            << "- If no new patterns emerge: store one gap memory and emit converged status\n";
         return sys.str();
     }
 
