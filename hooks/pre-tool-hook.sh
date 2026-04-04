@@ -205,6 +205,10 @@ case "$MATCHER" in
         fi
 
         # Stage 2: Soul memory — surface corrections/gotchas
+        # Skip for subagent calls (agent_id present) — saves 2s timeout per tool call
+        agent_id=$(echo "$STDIN_DATA" | jq -r '.agent_id // empty')
+        [[ -n "$agent_id" ]] && exit 0
+
         [[ ! -x "$CHITTA_BIN" ]] && exit 0
         daemon_available || exit 0
 
