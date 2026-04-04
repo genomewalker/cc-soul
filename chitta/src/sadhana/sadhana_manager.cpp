@@ -527,7 +527,7 @@ std::string SadhanaManager::build_memory_context(const Sadhana& sadhana) {
         // For think sadhana, pass realm="brahman" to exclude domain-specific realms
         // (e.g. project:chitta-research compliance:auto entries) from synthesis context.
         auto hits = is_think
-            ? field_store_.recall_keyword("thought pattern synthesis insight impl gap soul-synthesis", 15)
+            ? field_store_.recall_keyword("thought pattern synthesis insight impl gap soul-synthesis soul-thought", 15)
             : field_store_.recall_keyword(sadhana.goal, 10);
 
         // Filter to brahman realm for think sadhana to avoid domain routing noise
@@ -730,7 +730,7 @@ std::string SadhanaManager::build_system_prompt(const Sadhana& sadhana) const {
             << "Use those as your primary synthesis material — recall tools are for supplemental depth only.\n\n"
             << "CONVERGENCE RULE: Recent cycle history is shown above. If you would produce a summary\n"
             << "substantially identical to any entry there, do NOT repeat it. Instead:\n"
-            << "  - Store a gap memory: chitta remember --content \"gap: <unresolved question>\" --tags gap,soul-synthesis --realm brahman\n"
+            << "  - Store a gap memory: chitta remember --content \"gap: <unresolved question>\" --tags gap,soul-thought,soul-synthesis --realm brahman\n"
             << "  - Emit: {\"status\": \"achieved\", \"summary\": \"converged: stored gap for <topic>\"}\n\n"
             << "MISSION (single cycle):\n"
             << "1. Review pre-loaded memories above. If insufficient, retrieve more:\n"
@@ -739,10 +739,10 @@ std::string SadhanaManager::build_system_prompt(const Sadhana& sadhana) const {
             << "2. Find gaps (use content search, not tag filter):\n"
             << "   chitta recall --query \"gap unresolved unknown question\" --strategy semantic --limit 10\n"
             << "3. For each NEW insight connecting 2+ memories:\n"
-            << "   chitta remember --content \"[thought] <insight>\" --tags thought,soul-synthesis --realm brahman\n"
+            << "   chitta remember --content \"[thought] <insight>\" --tags thought,soul-thought,soul-synthesis --realm brahman\n"
             << "   chitta connect --subject \"<A>\" --predicate connects_to --object \"<B>\"\n"
             << "4. If any [thought] has concrete architectural implications:\n"
-            << "   chitta remember --content \"[thought][impl] <specific mechanism>\" --tags thought,impl,soul-synthesis --realm brahman\n\n"
+            << "   chitta remember --content \"[thought][impl] <specific mechanism>\" --tags thought,soul-thought,impl,soul-synthesis --realm brahman\n\n"
             << "COMPLETION PROTOCOL (required final line):\n"
             << "{\"status\": \"achieved\", \"summary\": \"<patterns found>\"}\n\n"
             << "CONSTRAINTS:\n"
