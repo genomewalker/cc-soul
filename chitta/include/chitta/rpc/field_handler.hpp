@@ -11,6 +11,7 @@
 #include "../ingester.hpp"
 #include "../wiki_export.hpp"
 #include "../embedding_export.hpp"
+#include "../query_intent.hpp"
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
@@ -294,26 +295,32 @@ private:
         return arr;
     }
 
+    // Reciprocal Rank Fusion — scale-invariant across semantic (cosine) and BM25 scores.
+    // RRF(d) = sum_i 1/(k + rank_i(d)), k=60 per standard practice.
+    // Each document gets contributions from every list it appears in; union of both lists.
     static json merge_results(const json& a, const json& b) {
-        std::unordered_map<std::string, json> seen;
-        auto insert = [&](const json& arr) {
+        constexpr float kRRF = 60.0f;
+        std::unordered_map<std::string, float> rrf_scores;
+        std::unordered_map<std::string, json> entries;
+
+        auto process = [&](const json& arr) {
+            int rank = 1;
             for (const auto& entry : arr) {
                 std::string id = entry.value("id", "");
-                if (id.empty()) continue;
-                auto it = seen.find(id);
-                if (it == seen.end()) {
-                    seen[id] = entry;
-                } else {
-                    float cur  = it->second.value("relevance", 0.0f);
-                    float cand = entry.value("relevance", 0.0f);
-                    if (cand > cur) it->second = entry;
-                }
+                if (id.empty()) { rank++; continue; }
+                rrf_scores[id] += 1.0f / (kRRF + rank);
+                if (entries.find(id) == entries.end()) entries[id] = entry;
+                rank++;
             }
         };
-        insert(a);
-        insert(b);
+        process(a);
+        process(b);
+
         json merged = json::array();
-        for (auto& [id, entry] : seen) merged.push_back(entry);
+        for (auto& [id, entry] : entries) {
+            entry["relevance"] = rrf_scores[id];
+            merged.push_back(entry);
+        }
         std::sort(merged.begin(), merged.end(), [](const json& x, const json& y) {
             return x.value("relevance", 0.0f) > y.value("relevance", 0.0f);
         });

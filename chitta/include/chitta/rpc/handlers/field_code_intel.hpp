@@ -692,15 +692,43 @@
         size_t mem_limit = fast ? 3 : 5;
         size_t sym_limit = fast ? 3 : 5;
 
+        // Classify query intent for optimal recall routing (Omni-SimpleMem §3.2.2)
+        chitta::QueryIntentClassifier intent_clf;
+        auto intent = intent_clf.classify(task);
+        bool is_temporal     = (intent.type == chitta::QueryIntentType::Temporal);
+        bool is_code_intent  = (intent.type == chitta::QueryIntentType::Code);
+        bool is_relationship = (intent.type == chitta::QueryIntentType::Relationship);
+
         std::ostringstream ss;
         json result;
 
-        // 1. MEMORIES
+        // 1. MEMORIES — routed by intent
         json memories_json = json::array();
         if (include_memories) {
-            auto emb = embed_query(task);
-            if (!emb.empty()) {
-                auto hits = field_store_->recall(emb, mem_limit, realm);
+            std::vector<FieldRecallHit> hits;
+
+            if (is_temporal) {
+                // Temporal: last 30 days, re-ranked by recency
+                int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count();
+                hits = field_store_->recall_temporal(
+                    now_ms - (int64_t)30 * 24 * 3600 * 1000, now_ms,
+                    mem_limit * 2, realm);
+            } else if (is_code_intent) {
+                // Code: BM25 keyword search
+                hits = field_store_->recall_keyword(task, mem_limit);
+            } else if (is_relationship) {
+                // Relationship: skip dense recall, let graph section handle it
+                // (triplet neighbors cover this better)
+            } else {
+                // Default: dense semantic recall
+                auto emb = embed_query(task);
+                if (!emb.empty()) {
+                    hits = field_store_->recall(emb, mem_limit, realm);
+                }
+            }
+
+            if (!hits.empty()) {
                 ss << "[mem]\n";
                 for (const auto& h : hits) {
                     int pct = static_cast<int>(std::min(h.score, 1.0f) * 100);
@@ -708,13 +736,17 @@
                     std::string title = h.content.substr(0, 60);
                     size_t newline = title.find('\n');
                     if (newline != std::string::npos) title = title.substr(0, newline);
-
                     ss << "[" << pct << "%:" << type_short << ":#" << h.memory_id << "] " << title << "\n";
+
+                    // Progressive pyramid: depth of content scales with relevance
+                    size_t text_limit = (h.score >= 0.75f) ? 300
+                                      : (h.score >= 0.50f) ? 120
+                                                           : 60;
                     memories_json.push_back({
                         {"id", std::to_string(h.memory_id)},
                         {"relevance", h.score},
                         {"type", h.kind},
-                        {"text", h.content}
+                        {"text", h.content.substr(0, std::min(h.content.size(), text_limit))}
                     });
                 }
             }
