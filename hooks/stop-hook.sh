@@ -327,6 +327,14 @@ if [[ "$CLAUDE_LEARNED" == "false" && -n "$LAST_USER_MSG" ]]; then
 
     # Auto-store correction if detected but Claude didn't learn
     if [[ "$CORRECTION_DETECTED" == "true" ]]; then
+        # Guard: skip content that looks like an LLM system prompt (role assignment).
+        # These enter via copy-paste of agenda participant configs and are NOT corrections.
+        if echo "$CORRECTION_TEXT" | grep -qiE "^[[:space:]]*(You are (a |an |the )[a-zA-Z]|You are \*\*)"; then
+            echo "[soul] skip compliance:auto — content looks like LLM system prompt, not a correction" >&2
+            CORRECTION_DETECTED=false
+        fi
+    fi
+    if [[ "$CORRECTION_DETECTED" == "true" ]]; then
         echo "[soul] ⚠️ COMPLIANCE: Correction detected but learn_correction not called" >&2
         ssl_content="[compliance:auto] User correction: $CORRECTION_TEXT"
         emit_event "$DEDUP_FILE" "correction" "hook_compliance" "$ssl_content" "0.95" "compliance detector: user corrected assistant" "$REALM"
