@@ -253,70 +253,30 @@ case "$MATCHER" in
         line_count=$(wc -l < "$file_path" 2>/dev/null || echo 0)
         [[ "$line_count" -le 200 ]] && exit 0
 
-        head_n=100
-        tail_n=50
-        omitted=$(( line_count - head_n - tail_n ))
-        output=$(head -n "$head_n" "$file_path"; echo ""; echo "... [$omitted lines omitted, total $line_count] ..."; echo ""; tail -n "$tail_n" "$file_path")
-        printf '[RTK:Read] %s (%d lines)\n\n%s\n' "$file_path" "$line_count" "$output"
-        exit 2
+        # Use updatedInput to limit Read to 150 lines + advisory context.
+        # exit 2 with plain text doesn't work for native tools (only Bash).
+        offset=$(echo "$STDIN_DATA" | jq -r '.tool_input.offset // 0')
+        escaped_path=$(echo -n "$file_path" | jq -Rs '.')
+        printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[hook] Large file (%d lines). Reading first 150. Use offset for later sections.","updatedInput":{"file_path":%s,"limit":150,"offset":%s}}}' \
+            "$line_count" "$escaped_path" "$offset"
         ;;
 
     Grep)
-        pattern=$(echo "$STDIN_DATA" | jq -r '.tool_input.pattern // empty')
-        path=$(echo "$STDIN_DATA" | jq -r '.tool_input.path // "."')
-        glob=$(echo "$STDIN_DATA" | jq -r '.tool_input.glob // empty')
         output_mode=$(echo "$STDIN_DATA" | jq -r '.tool_input.output_mode // "files_with_matches"')
-        [[ -z "$pattern" ]] && exit 0
-
-        # Only compress content-mode results (files_with_matches is already compact)
         [[ "$output_mode" != "content" ]] && exit 0
 
-        args=(-n --color=never)
-        [[ -n "$glob" ]] && args+=(--glob "$glob")
-        raw=$(rg "${args[@]}" "$pattern" "$path" 2>/dev/null | head -500)
-        total=$(echo "$raw" | wc -l)
-
-        if [[ "$total" -le 50 ]]; then
-            exit 0  # Small — let native tool handle it
-        fi
-
-        # Group by file, show up to 5 matches per file
-        output=$(echo "$raw" | awk -F: '
-            {
-                file=$1; rest=substr($0, index($0,$2))
-                counts[file]++
-                if (counts[file] <= 5) lines[file] = lines[file] "  " rest "\n"
-            }
-            END {
-                for (f in counts) {
-                    printf "%s: %d match%s\n", f, counts[f], (counts[f]>1?"es":"")
-                    printf "%s", lines[f]
-                    if (counts[f] > 5) printf "  ... [%d more]\n", counts[f]-5
-                }
-            }
-        ')
-        printf '[RTK:Grep] pattern=%s  total=%d matches\n\n%s\n' "$pattern" "$total" "$output"
-        exit 2
+        # Inject head_limit:50 into tool input — no pre-run, native tool handles once.
+        updated=$(echo "$STDIN_DATA" | jq '.tool_input + {"head_limit": 50}')
+        printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[hook] Grep content mode — capped at 50 matches.","updatedInput":%s}}' "$updated"
         ;;
 
     Glob)
         pattern=$(echo "$STDIN_DATA" | jq -r '.tool_input.pattern // empty')
         [[ -z "$pattern" ]] && exit 0
 
-        # Count results first — only compress if large
-        count=$(python3 -c "import glob, sys; print(len(glob.glob('$pattern', recursive=True)))" 2>/dev/null || echo 0)
-        [[ "$count" -le 50 ]] && exit 0
-
-        results=$(python3 -c "
-import glob, sys
-hits = sorted(glob.glob('$pattern', recursive=True))
-for h in hits[:100]:
-    print(h)
-if len(hits) > 100:
-    print(f'... [{len(hits)-100} more]')
-" 2>/dev/null)
-        printf '[RTK:Glob] pattern=%s  %d files\n\n%s\n' "$pattern" "$count" "$results"
-        exit 2
+        # Inject head_limit:100 — Glob returns sorted by mtime, 100 is usually enough.
+        updated=$(echo "$STDIN_DATA" | jq '.tool_input + {"head_limit": 100}')
+        printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","updatedInput":%s}}' "$updated"
         ;;
 
     *)
