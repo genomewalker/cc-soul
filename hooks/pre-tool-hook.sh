@@ -272,6 +272,16 @@ case "$MATCHER" in
         file_path=$(echo "$STDIN_DATA" | jq -r '.tool_input.file_path // empty')
         [[ -z "$file_path" || ! -f "$file_path" ]] && exit 0
 
+        # Check patch manifest — advisory if file was patched this session
+        FP_BIN="${HOME}/.claude/bin/fp"
+        if [[ -x "$FP_BIN" ]]; then
+            manifest_out=$(echo "$STDIN_DATA" | "$FP_BIN" --read-hook 2>/dev/null)
+            if [[ -n "$manifest_out" ]]; then
+                echo "$manifest_out"
+                exit 0
+            fi
+        fi
+
         # Only compress large files (≤200 lines pass through untouched)
         line_count=$(wc -l < "$file_path" 2>/dev/null || echo 0)
         [[ "$line_count" -le 200 ]] && exit 0
