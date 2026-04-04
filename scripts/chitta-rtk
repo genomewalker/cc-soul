@@ -1,0 +1,437 @@
+#!/usr/bin/env python3
+"""
+chitta-rtk: native token-optimized command output filter.
+Drop-in for the RTK binary — no external dependencies.
+
+Usage: chitta-rtk <subcmd> [args...]
+       chitta-rtk --exec <cmd>    # run cmd, filter stdout
+"""
+
+import sys
+import os
+import re
+import subprocess
+import shlex
+from pathlib import Path
+
+
+# ── Helpers ────────────────────────────────────────────────────────────────────
+
+def run(cmd: list[str], **kw) -> tuple[str, int]:
+    r = subprocess.run(cmd, capture_output=True, text=True, **kw)
+    return (r.stdout + r.stderr).strip(), r.returncode
+
+
+def strip_ansi(s: str) -> str:
+    return re.sub(r'\x1b\[[0-9;]*[mK]', '', s)
+
+
+def compact_lines(text: str, limit: int = 200) -> str:
+    lines = text.splitlines()
+    if len(lines) <= limit:
+        return text
+    head = lines[:limit // 2]
+    tail = lines[-(limit // 2):]
+    return '\n'.join(head) + f'\n... [{len(lines) - limit} lines omitted] ...\n' + '\n'.join(tail)
+
+
+# ── git ────────────────────────────────────────────────────────────────────────
+
+def git(args: list[str]) -> int:
+    sub = args[0] if args else ''
+
+    if sub == 'status':
+        out, rc = run(['git', 'status', '--short', '--branch'])
+        print(out)
+        return rc
+
+    if sub == 'log':
+        extra = args[1:] if len(args) > 1 else ['-20']
+        # Ensure --oneline
+        if '--oneline' not in extra and '-oneline' not in extra:
+            extra = ['--oneline'] + extra
+        out, rc = run(['git', 'log'] + extra)
+        print(compact_lines(out, 60))
+        return rc
+
+    if sub == 'diff':
+        # Show stat + minimal context
+        stat, _ = run(['git', 'diff', '--stat'] + args[1:])
+        diff, rc = run(['git', 'diff', '--unified=1'] + args[1:])
+        lines = [l for l in diff.splitlines()
+                 if l.startswith(('+', '-', '@@', 'diff', 'index', '---', '+++'))
+                 and not l.startswith(('--- a/', '+++ b/'))]
+        print(stat)
+        if lines:
+            print('\n'.join(lines[:100]))
+        return rc
+
+    if sub in ('add', 'commit', 'push', 'pull', 'fetch', 'rebase', 'merge', 'stash',
+               'checkout', 'switch', 'branch', 'tag', 'reset', 'restore'):
+        out, rc = run(['git'] + args)
+        # Keep only non-empty, non-boilerplate lines
+        keep = []
+        skip = re.compile(r'^\s*$|Counting objects|Compressing objects|Writing objects|remote: Counting|remote: Compressing|Delta compression')
+        for line in out.splitlines():
+            if not skip.search(line):
+                keep.append(line)
+        print('\n'.join(keep[:40]))
+        return rc
+
+    # Fallthrough: pass through
+    return os.execvp('git', ['git'] + args)
+
+
+# ── ls ─────────────────────────────────────────────────────────────────────────
+
+def ls(args: list[str]) -> int:
+    out, rc = run(['ls', '--color=never', '-la'] + args)
+    lines = out.splitlines()
+    # Strip total line, format compactly
+    result = []
+    for line in lines:
+        if line.startswith('total '):
+            continue
+        parts = line.split()
+        if len(parts) >= 9:
+            perms, size, name = parts[0], parts[4], ' '.join(parts[8:])
+            result.append(f'{perms:12} {int(size):>10,}  {name}')
+        else:
+            result.append(line)
+    print(f'({len(result)} entries)')
+    print('\n'.join(result[:80]))
+    if len(result) > 80:
+        print(f'... [{len(result) - 80} more]')
+    return rc
+
+
+# ── find ───────────────────────────────────────────────────────────────────────
+
+def find(args: list[str]) -> int:
+    if '-maxdepth' not in ' '.join(args):
+        args = [args[0], '-maxdepth', '5'] + args[1:] if args else ['.', '-maxdepth', '5']
+    out, rc = run(['find'] + args)
+    lines = out.splitlines()
+    print('\n'.join(lines[:150]))
+    if len(lines) > 150:
+        print(f'... [{len(lines) - 150} more results]')
+    return rc
+
+
+# ── grep ───────────────────────────────────────────────────────────────────────
+
+def grep(args: list[str]) -> int:
+    out, rc = run(['grep'] + args)
+    lines = strip_ansi(out).splitlines()
+    # Group by file
+    by_file: dict[str, list[str]] = {}
+    for line in lines:
+        if ':' in line:
+            file, _, rest = line.partition(':')
+            by_file.setdefault(file, []).append(rest)
+        else:
+            by_file.setdefault('', []).append(line)
+    total = 0
+    for file, matches in sorted(by_file.items()):
+        print(f'{file}: {len(matches)} match{"es" if len(matches)>1 else ""}')
+        for m in matches[:5]:
+            print(f'  {m.strip()}')
+        if len(matches) > 5:
+            print(f'  ... [{len(matches)-5} more]')
+        total += len(matches)
+    print(f'\nTotal: {total} matches in {len(by_file)} file(s)')
+    return rc
+
+
+# ── diff ───────────────────────────────────────────────────────────────────────
+
+def diff(args: list[str]) -> int:
+    out, rc = run(['diff'] + args)
+    lines = out.splitlines()
+    # Show only changed lines + hunks headers
+    keep = [l for l in lines if l.startswith(('+', '-', '@')) and not l.startswith(('---', '+++'))]
+    print('\n'.join(keep[:100]))
+    if len(keep) > 100:
+        print(f'... [{len(keep)-100} more changed lines]')
+    return rc
+
+
+# ── test runners ───────────────────────────────────────────────────────────────
+
+def test(args: list[str]) -> int:
+    if not args:
+        print('Usage: chitta-rtk test <pytest|cargo|go> [args]')
+        return 1
+
+    runner = args[0]
+    rest = args[1:]
+
+    if runner == 'pytest':
+        out, rc = run(['pytest'] + rest)
+        return _filter_pytest(out, rc)
+
+    if runner == 'cargo':
+        out, rc = run(['cargo', 'test'] + rest)
+        return _filter_cargo_test(out, rc)
+
+    if runner == 'go':
+        out, rc = run(['go', 'test'] + rest)
+        return _filter_go_test(out, rc)
+
+    # Unknown runner — pass through
+    out, rc = run([runner] + rest)
+    print(compact_lines(out, 100))
+    return rc
+
+
+def _filter_pytest(out: str, rc: int) -> int:
+    lines = strip_ansi(out).splitlines()
+    if rc == 0:
+        # Show just summary
+        for line in lines[-10:]:
+            if line.strip():
+                print(line)
+        return rc
+    # Show failures
+    in_fail = False
+    for line in lines:
+        if re.match(r'^(FAILED|ERROR|E\s)', line):
+            in_fail = True
+        if in_fail or re.match(r'^(=+|short test|_+)', line):
+            print(line)
+    return rc
+
+
+def _filter_cargo_test(out: str, rc: int) -> int:
+    lines = strip_ansi(out).splitlines()
+    if rc == 0:
+        for line in lines:
+            if 'test result' in line or 'running' in line:
+                print(line)
+        return rc
+    for line in lines:
+        if re.match(r'^(FAILED|error|test.*FAILED|failures:)', line, re.I):
+            print(line)
+    return rc
+
+
+def _filter_go_test(out: str, rc: int) -> int:
+    lines = strip_ansi(out).splitlines()
+    for line in lines:
+        if re.match(r'^(FAIL|ok|---)', line):
+            print(line)
+    return rc
+
+
+# ── cargo ──────────────────────────────────────────────────────────────────────
+
+def cargo(args: list[str]) -> int:
+    sub = args[0] if args else ''
+
+    if sub == 'test':
+        out, rc = run(['cargo', 'test'] + args[1:])
+        return _filter_cargo_test(out, rc)
+
+    if sub in ('build', 'check'):
+        out, rc = run(['cargo'] + args)
+        lines = strip_ansi(out).splitlines()
+        keep = [l for l in lines if re.match(r'^\s*(error|warning|Compiling|Finished|error\[)', l, re.I)]
+        print('\n'.join(keep[:60]))
+        return rc
+
+    if sub == 'clippy':
+        out, rc = run(['cargo', 'clippy'] + args[1:])
+        lines = strip_ansi(out).splitlines()
+        keep = [l for l in lines if re.match(r'^\s*(error|warning|help|note|\s+-->', l)]
+        print('\n'.join(keep[:80]))
+        return rc
+
+    return os.execvp('cargo', ['cargo'] + args)
+
+
+# ── docker ─────────────────────────────────────────────────────────────────────
+
+def docker(args: list[str]) -> int:
+    sub = args[0] if args else ''
+
+    if sub == 'ps':
+        out, rc = run(['docker', 'ps'] + args[1:])
+        lines = out.splitlines()
+        # Strip wide ID, show compact: name, image, status, ports
+        for line in lines[:30]:
+            parts = re.split(r'\s{2,}', line.strip())
+            if len(parts) >= 6:
+                print(f'{parts[-1]:<25} {parts[1]:<30} {parts[4]:<15} {parts[5] if len(parts)>5 else ""}')
+            else:
+                print(line)
+        return rc
+
+    if sub == 'images':
+        out, rc = run(['docker', 'images'] + args[1:])
+        print(compact_lines(out, 30))
+        return rc
+
+    if sub == 'logs':
+        out, rc = run(['docker', 'logs', '--tail', '50'] + args[1:])
+        # Dedup
+        seen: dict[str, int] = {}
+        for line in out.splitlines():
+            key = re.sub(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}', '<ts>', line)
+            seen[key] = seen.get(key, 0) + 1
+        for line, count in seen.items():
+            print(f'[x{count}] {line}' if count > 1 else line)
+        return rc
+
+    return os.execvp('docker', ['docker'] + args)
+
+
+# ── read ───────────────────────────────────────────────────────────────────────
+
+def read_file(args: list[str]) -> int:
+    if not args:
+        print('Usage: chitta-rtk read <file>')
+        return 1
+    path = Path(args[0])
+    if not path.exists():
+        print(f'File not found: {path}')
+        return 1
+    lines = path.read_text(errors='replace').splitlines()
+    total = len(lines)
+    if total <= 200:
+        print('\n'.join(lines))
+    else:
+        print('\n'.join(lines[:100]))
+        print(f'\n... [{total - 150} lines omitted, total {total}] ...\n')
+        print('\n'.join(lines[-50:]))
+    return 0
+
+
+# ── SLURM (domain-specific) ────────────────────────────────────────────────────
+
+def slurm(args: list[str]) -> int:
+    sub = args[0] if args else 'queue'
+
+    if sub in ('q', 'queue', 'squeue'):
+        out, rc = run(['squeue', '--me', '--format=%.10i %.9P %.30j %.8u %.2t %.10M %.6D %R'])
+        print(out)
+        return rc
+
+    if sub in ('sacct', 'acct'):
+        out, rc = run(['sacct', '-u', os.environ.get('USER', ''), '--format=JobID,JobName%20,State,Elapsed,CPUTime,MaxRSS'] + args[1:])
+        lines = out.splitlines()
+        print('\n'.join(lines[:40]))
+        return rc
+
+    if sub in ('log', 'logs'):
+        log_file = args[1] if len(args) > 1 else None
+        if not log_file:
+            # Find most recent slurm log
+            logs = sorted(Path('.').glob('slurm-*.out'), key=lambda p: p.stat().st_mtime, reverse=True)
+            if not logs:
+                print('No slurm-*.out files found')
+                return 1
+            log_file = str(logs[0])
+        out, rc = run(['tail', '-100', log_file])
+        # Filter progress bars and boilerplate
+        lines = [l for l in out.splitlines()
+                 if not re.match(r'^\s*\[=+\s*\]|\r', l) and l.strip()]
+        print('\n'.join(lines[-60:]))
+        return rc
+
+    return os.execvp('squeue', ['squeue'] + args)
+
+
+# ── snakemake ──────────────────────────────────────────────────────────────────
+
+def snakemake(args: list[str]) -> int:
+    out, rc = run(['snakemake'] + args)
+    lines = strip_ansi(out).splitlines()
+    keep = []
+    for line in lines:
+        # Keep: rule names, errors, job counts, completion
+        if re.match(r'(rule |Error|error|Job|jobs|steps|Finished|Waiting|Building|localrule|checkpoint)', line, re.I):
+            keep.append(line)
+    print('\n'.join(keep[:80]))
+    if rc != 0:
+        # Show last 20 lines on failure
+        print('\n--- tail ---')
+        print('\n'.join(lines[-20:]))
+    return rc
+
+
+# ── curl ───────────────────────────────────────────────────────────────────────
+
+def curl(args: list[str]) -> int:
+    # Add silent flag if not present, capture output
+    extra = [] if any(a in ('-s', '--silent') for a in args) else ['-s']
+    out, rc = run(['curl'] + extra + args)
+    # Try JSON pretty-print with schema
+    try:
+        import json
+        data = json.loads(out)
+        if isinstance(data, dict):
+            # Show structure with types, truncate long values
+            def _schema(d, depth=0):
+                if depth > 3: return '...'
+                if isinstance(d, dict):
+                    parts = []
+                    for k, v in list(d.items())[:10]:
+                        parts.append(f'{"  "*depth}{k}: {_schema(v, depth+1)}')
+                    if len(d) > 10:
+                        parts.append(f'{"  "*depth}... [{len(d)-10} more keys]')
+                    return '\n' + '\n'.join(parts)
+                elif isinstance(d, list):
+                    return f'[{len(d)} items: {type(d[0]).__name__ if d else "empty"}]'
+                elif isinstance(d, str) and len(d) > 80:
+                    return f'"{d[:77]}..."'
+                return repr(d)
+            print(_schema(data))
+        elif isinstance(data, list):
+            print(f'Array: {len(data)} items')
+            for item in data[:3]:
+                print(f'  {str(item)[:100]}')
+            if len(data) > 3:
+                print(f'  ... [{len(data)-3} more]')
+        else:
+            print(str(data)[:200])
+    except Exception:
+        print(compact_lines(out, 100))
+    return rc
+
+
+# ── dispatch ───────────────────────────────────────────────────────────────────
+
+CMDS = {
+    'git': git,
+    'ls': lambda a: ls(a),
+    'find': find,
+    'grep': grep,
+    'diff': diff,
+    'test': test,
+    'cargo': cargo,
+    'docker': docker,
+    'read': read_file,
+    'slurm': slurm,
+    'snakemake': snakemake,
+    'curl': curl,
+}
+
+def main():
+    args = sys.argv[1:]
+    if not args:
+        print('Usage: chitta-rtk <cmd> [args...]')
+        print('Commands:', ', '.join(sorted(CMDS)))
+        sys.exit(1)
+
+    cmd = args[0]
+    rest = args[1:]
+
+    if cmd in CMDS:
+        sys.exit(CMDS[cmd](rest))
+    else:
+        print(f'Unknown command: {cmd}', file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()
