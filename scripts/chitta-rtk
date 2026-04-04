@@ -399,6 +399,63 @@ def curl(args: list[str]) -> int:
     return rc
 
 
+# ── gh ─────────────────────────────────────────────────────────────────────────
+
+def gh(args: list[str]) -> int:
+    sub = args[0] if args else ''
+    sub2 = args[1] if len(args) > 1 else ''
+
+    if sub == 'pr' and sub2 in ('list', 'view', 'status'):
+        out, rc = run(['gh', 'pr'] + args[1:])
+        lines = strip_ansi(out).splitlines()
+        # For list: keep table rows (number, title, branch, status)
+        if sub2 == 'list':
+            print('\n'.join(lines[:30]))
+        elif sub2 == 'view':
+            # Keep title, state, author, labels, body header, checks
+            keep = []
+            in_body = False
+            for line in lines:
+                if re.match(r'^(title:|state:|author:|labels:|milestone:|number:|url:|checks:|Reviews?:)', line, re.I):
+                    keep.append(line)
+                elif line.startswith('--'):
+                    in_body = True
+                elif in_body and len(keep) < 25:
+                    keep.append(line)
+            print('\n'.join(keep[:25]))
+        else:
+            print(compact_lines(out, 30))
+        return rc
+
+    if sub == 'issue' and sub2 in ('list', 'view', 'status'):
+        out, rc = run(['gh', 'issue'] + args[1:])
+        lines = strip_ansi(out).splitlines()
+        if sub2 == 'list':
+            print('\n'.join(lines[:30]))
+        elif sub2 == 'view':
+            keep = []
+            for line in lines[:20]:
+                if re.match(r'^(title:|state:|author:|labels:|number:|url:|assignees:)', line, re.I) or line.strip():
+                    keep.append(line)
+            print('\n'.join(keep[:20]))
+        else:
+            print(compact_lines(out, 30))
+        return rc
+
+    if sub == 'run' and sub2 in ('list', 'view', 'status'):
+        out, rc = run(['gh', 'run'] + args[1:])
+        lines = strip_ansi(out).splitlines()
+        # Keep: status lines, job names, failures
+        keep = [l for l in lines if re.match(r'.*(pass|fail|success|error|cancel|skipped|✓|✗|X|completed|in_progress)', l, re.I)]
+        if not keep:
+            keep = lines[:20]
+        print('\n'.join(keep[:25]))
+        return rc
+
+    # Fallthrough
+    return os.execvp('gh', ['gh'] + args)
+
+
 # ── dispatch ───────────────────────────────────────────────────────────────────
 
 CMDS = {
@@ -414,6 +471,7 @@ CMDS = {
     'slurm': slurm,
     'snakemake': snakemake,
     'curl': curl,
+    'gh': gh,
 }
 
 def main():
