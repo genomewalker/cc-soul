@@ -147,6 +147,106 @@
             "statusMessage": "checking command patterns…"
           }
         ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/charge-check.sh Agent",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/charge-check.sh Task",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__chitta-bridge__opencode_start",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/charge-check.sh opencode_start",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__chitta-bridge__codex_start",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/charge-check.sh codex_start",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__chitta-bridge__parallel_agents",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/charge-check.sh parallel_agents",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__chitta-bridge__opencode_discuss",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/charge-check.sh opencode_discuss",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__chitta-bridge__codex_discuss",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/charge-check.sh codex_discuss",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__chitta-bridge__codex_run",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/charge-check.sh codex_run",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__chitta-bridge__web_search",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/charge-check.sh web_search",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__chitta-bridge__web_fetch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/charge-check.sh web_fetch",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "PostToolUse": [
