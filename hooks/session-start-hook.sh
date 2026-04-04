@@ -45,6 +45,22 @@ fi
 [[ ! -x "$CHITTA_BIN" ]] && exit 0
 daemon_available || exit 0
 
+# Detect subagent session: SubagentStart hook writes sentinel before session starts
+SENTINEL="${MIND_PATH}/.pending_subagent_start"
+IS_SUBAGENT=false
+if [[ "$HOOK_SOURCE" == "startup" && -f "$SENTINEL" ]]; then
+    age=$(($(date +%s) - $(stat -c %Y "$SENTINEL" 2>/dev/null || echo 0)))
+    if [[ "$age" -lt 30 ]]; then
+        IS_SUBAGENT=true
+    fi
+    rm -f "$SENTINEL"
+fi
+
+if [[ "$IS_SUBAGENT" == "true" ]]; then
+    # Register session only (no output — SubagentStart hook already injected context)
+    [[ -n "$SESSION_ID" ]] && timeout "$MAX_WAIT" "$CHITTA_BIN" session_register --session_id "$SESSION_ID" --realm "brahman" --pid "${PPID:-$$}" >/dev/null 2>&1 || true
+    exit 0
+fi
 
 # Derive project directory from transcript path
 # Transcript path: ~/.claude/projects/-maps-projects-X-Y-Z/session.jsonl
