@@ -121,6 +121,18 @@ rtk_rewrite() {
         return 0
     fi
 
+    # snakemake
+    if echo "$cmd" | grep -qE '^\s*snakemake(\s|$)'; then
+        echo "$RTK_BIN $(echo "$cmd" | sed 's/^\s*//')"
+        return 0
+    fi
+
+    # nextflow
+    if echo "$cmd" | grep -qE '^\s*nextflow(\s+run|\s+log|\s+list)'; then
+        echo "$RTK_BIN $(echo "$cmd" | sed 's/^\s*//')"
+        return 0
+    fi
+
     # curl (single URL, no -o/-O output flags)
     if echo "$cmd" | grep -qE '^\s*curl\s+' && ! echo "$cmd" | grep -qE '\s-[oO]\s'; then
         local rest
@@ -288,6 +300,23 @@ case "$MATCHER" in
         # Inject head_limit:100 — Glob returns sorted by mtime, 100 is usually enough.
         updated=$(echo "$STDIN_DATA" | jq '.tool_input + {"head_limit": 100}')
         printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","updatedInput":%s}}' "$updated"
+        ;;
+
+    Edit)
+        FP_BIN="${HOME}/.claude/bin/fp"
+        [[ ! -x "$FP_BIN" ]] && exit 0
+        # fp --hook reads the full tool JSON, applies patch, exits 2 with confirmation.
+        # exit 2 → Claude skips its own Edit execution (fp already wrote the file).
+        echo "$STDIN_DATA" | "$FP_BIN" --hook
+        exit $?
+        ;;
+
+    Write)
+        FP_BIN="${HOME}/.claude/bin/fp"
+        [[ ! -x "$FP_BIN" ]] && exit 0
+        # Block Write on existing files ≥50 lines — suggest file_patch instead.
+        echo "$STDIN_DATA" | "$FP_BIN" --write-hook
+        exit $?
         ;;
 
     *)
