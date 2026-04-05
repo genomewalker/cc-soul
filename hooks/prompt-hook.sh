@@ -117,13 +117,24 @@ else
     _sem_pid=$!
     _hyb_out=$(timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "$QUERY" --strategy hybrid --limit 5 2>/dev/null || true) &
     _hyb_pid=$!
-    wait "$_sem_pid" "$_hyb_pid" 2>/dev/null || true
+    # Pure keyword lane: BM25 only, surfaces exact tokens (filenames, IDs, paths)
+    # regardless of semantic similarity. Use --toon for consistent parseable output.
+    _kw_out=$(timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "$QUERY" --strategy keyword \
+              --limit 3 --toon 2>/dev/null || true) &
+    _kw_pid=$!
+    wait "$_sem_pid" "$_hyb_pid" "$_kw_pid" 2>/dev/null || true
+
+    # Keyword lane TOON format: results[N]{...}: id,realm,relevance,similarity,text,type
+    # Extract text field and reformat as [hyb][50%] [type] text
+    _kw_fmt=$(printf '%s\n' "$_kw_out" | grep -v '^\(realm:\|results\[' | \
+              sed 's/^ [0-9]*,[0-9]*,[^,]*,[^,]*,[^,]*,"\(.*\)",\([a-z]*\)$/[hyb][50%] [\2] \1/' | \
+              grep '^\[hyb\]' | grep -v '\[thought\]' || true)
 
     # Merge: prefix hybrid lines with [hyb] marker so filter can use lower threshold.
-    # Strip [thought] synthesis episodes from hybrid lane — they flood recall for any query
-    # and are already present in the semantic lane when relevant.
+    # Strip [thought] from hybrid+keyword lanes — soul:meta artifacts, not domain knowledge.
     memories=$(printf '%s\n' "$_sem_out"; \
-               printf '%s\n' "$_hyb_out" | grep -v '\[thought\]' | sed 's/^\[/[hyb]/')
+               printf '%s\n' "$_hyb_out" | grep -v '\[thought\]' | sed 's/^\[/[hyb]/'; \
+               printf '%s\n' "$_kw_fmt")
 fi
 
 if [[ -z "$memories" || "$memories" == *"No memories"* ]]; then
