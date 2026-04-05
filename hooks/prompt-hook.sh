@@ -109,10 +109,21 @@ result = handle_smart_context({'mode': 'rlm', 'task': '''$QUERY'''})
 print(result)
 " 2>/dev/null || true)
 else
-    # Structured recall: facts (F) + context (C) + temporal (T) lenses merged
-    # Falls back to smart_recall if structured_recall unavailable
-    memories=$(timeout "$MAX_WAIT" "$CHITTA_BIN" structured_recall --query "$QUERY" --limit 8 2>/dev/null || \
-               timeout "$MAX_WAIT" "$CHITTA_BIN" smart_recall --query "$QUERY" --limit 6 2>/dev/null || true)
+    # Run structured recall + hybrid recall in parallel, then merge.
+    # Hybrid (BM25 + semantic + graph) catches literal tokens (filenames, IDs, paths)
+    # that pure semantic recall misses when they have low cosine similarity.
+    _sem_out=$(timeout "$MAX_WAIT" "$CHITTA_BIN" structured_recall --query "$QUERY" --limit 8 2>/dev/null || \
+               timeout "$MAX_WAIT" "$CHITTA_BIN" smart_recall --query "$QUERY" --limit 6 2>/dev/null || true) &
+    _sem_pid=$!
+    _hyb_out=$(timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "$QUERY" --strategy hybrid --limit 5 2>/dev/null || true) &
+    _hyb_pid=$!
+    wait "$_sem_pid" "$_hyb_pid" 2>/dev/null || true
+
+    # Merge: prefix hybrid lines with [hyb] marker so filter can use lower threshold.
+    # Strip [thought] synthesis episodes from hybrid lane — they flood recall for any query
+    # and are already present in the semantic lane when relevant.
+    memories=$(printf '%s\n' "$_sem_out"; \
+               printf '%s\n' "$_hyb_out" | grep -v '\[thought\]' | sed 's/^\[/[hyb]/')
 fi
 
 if [[ -z "$memories" || "$memories" == *"No memories"* ]]; then
@@ -131,8 +142,14 @@ while IFS= read -r line; do
     conf=$(echo "$line" | grep -oE '\[[0-9]+%\]' | head -1 | tr -d '[]%')
     [[ -z "$conf" ]] && continue
 
-    # Skip low confidence
-    [[ "$conf" -lt "$MIN_CONFIDENCE" ]] && continue
+    # Hybrid-lane results use BM25 keyword matching — allow lower confidence threshold
+    # (they surface literal tokens: filenames, IDs, paths that semantic misses)
+    if [[ "$line" == \[hyb\]* ]]; then
+        [[ "$conf" -lt 1 ]] && continue
+        line="${line#\[hyb\]}"  # strip marker before output
+    else
+        [[ "$conf" -lt "$MIN_CONFIDENCE" ]] && continue
+    fi
 
     # Skip episode thinking-blocks — internal reasoning traces, never useful as injected context
     [[ "$line" =~ \[episode\].*\[thinking.block: ]] && continue

@@ -1816,6 +1816,14 @@ async def call_tool(name: str, arguments: dict):
         if realm:
             arguments["realm"] = realm
 
+    # Route [thought] synthesis memories to soul:meta realm so they never pollute
+    # domain recall queries. Any content prefixed with [thought] is a synthesis
+    # artifact — useful for soul cycles but invisible noise to bam/code/task queries.
+    if name == "remember" and not arguments.get("realm"):
+        content = arguments.get("content", "")
+        if content.lstrip().startswith("[thought]"):
+            arguments["realm"] = "soul:meta"
+
     # Check if this is a composite tool
     loop = asyncio.get_event_loop()
     if name in COMPOSITE_HANDLERS:
