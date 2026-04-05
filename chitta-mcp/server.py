@@ -392,6 +392,25 @@ server = Server("chitta-mcp")
 current_session_id: Optional[str] = None  # Track current session for auto-defaults
 current_realm: Optional[str] = None  # Track current realm for auto-defaults
 
+# P0: Internal realm classification — prefixes that must land in soul:meta
+_INTERNAL_REALM_PREFIXES = (
+    "[thought]", "[impl]", "[thinking-block:", "[thinking.block:",
+)
+
+def _classify_internal_realm(content: str) -> Optional[str]:
+    """Return 'soul:meta' if content is an internal synthesis artifact, else None."""
+    stripped = content.lstrip()
+    for prefix in _INTERNAL_REALM_PREFIXES:
+        if stripped.startswith(prefix):
+            return "soul:meta"
+    return None
+
+# P3: Hook idempotency dedup cache — (source_tool, content_hash) -> epoch_s
+import hashlib as _hashlib
+import time as _time
+_hook_dedup_cache: dict = {}
+_HOOK_DEDUP_WINDOW_S = 60.0
+
 
 def ensure_daemon() -> bool:
     """Ensure daemon is running and connected.
@@ -1804,7 +1823,32 @@ async def call_tool(name: str, arguments: dict):
         elif current_session_id and not arguments.get("session_id"):
             arguments["session_id"] = current_session_id
 
-    # Auto-inject realm for store operations
+    # P0: Classify internal realm FIRST — overrides any auto-injection.
+    # [thought], [impl], [thinking-block:] are synthesis artifacts that must
+    # never land in domain recall regardless of what realm is currently active.
+    if name == "remember":
+        internal = _classify_internal_realm(arguments.get("content", ""))
+        if internal:
+            arguments["realm"] = internal
+
+    # P3: Idempotency guard for compliance hook memories within a 60s window.
+    if name == "remember":
+        source_tool = arguments.get("source_tool", "")
+        if source_tool and "compliance" in source_tool:
+            _content_key = _hashlib.md5(
+                arguments.get("content", "")[:128].encode()
+            ).hexdigest()
+            _cache_key = (source_tool, _content_key)
+            _now = _time.time()
+            if _now - _hook_dedup_cache.get(_cache_key, 0.0) < _HOOK_DEDUP_WINDOW_S:
+                return [TextContent(type="text", text="[dedup] skipped duplicate compliance memory")]
+            _hook_dedup_cache[_cache_key] = _now
+            if len(_hook_dedup_cache) > 2000:
+                cutoff = _now - _HOOK_DEDUP_WINDOW_S
+                for k in [k for k, v in _hook_dedup_cache.items() if v < cutoff]:
+                    del _hook_dedup_cache[k]
+
+    # Auto-inject realm for store operations (only if not already set by P0)
     if name in REALM_STORE_TOOLS and not arguments.get("realm"):
         realm = get_current_realm()
         if realm:
@@ -1815,14 +1859,6 @@ async def call_tool(name: str, arguments: dict):
         realm = get_current_realm()
         if realm:
             arguments["realm"] = realm
-
-    # Route [thought] synthesis memories to soul:meta realm so they never pollute
-    # domain recall queries. Any content prefixed with [thought] is a synthesis
-    # artifact — useful for soul cycles but invisible noise to bam/code/task queries.
-    if name == "remember" and not arguments.get("realm"):
-        content = arguments.get("content", "")
-        if content.lstrip().startswith("[thought]"):
-            arguments["realm"] = "soul:meta"
 
     # Check if this is a composite tool
     loop = asyncio.get_event_loop()

@@ -83,8 +83,22 @@
     ToolResult tool_cleanup(const json& params) {
         if (!field_store_) return ToolResult::error("chitta-field store unavailable");
 
-        float threshold = params.value("threshold", 0.05f);
+        std::string mode = params.value("mode", "confidence");
 
+        if (mode == "dedupe") {
+            // Delegate to consolidate_similar which has access to the embedding
+            // index and correctly handles the Supersede lifecycle.
+            float sim_threshold = params.value("threshold", 0.88f);
+            json dedupe_params = {
+                {"threshold",  sim_threshold},
+                {"limit",      params.value("limit", 500)},
+                {"dry_run",    params.value("dry_run", false)},
+            };
+            return tool_consolidate_similar(dedupe_params);
+        }
+
+        // Default mode: remove low-confidence memories
+        float threshold = params.value("threshold", 0.05f);
         auto candidates = field_store_->recall_by_kind("wisdom", 1000);
         size_t removed = 0;
         for (const auto& hit : candidates) {
@@ -566,7 +580,7 @@
         auto [id, id_str] = parse_id(params);
         std::string realm = params.value("realm", "");
         if (id_str.empty() || realm.empty()) return ToolResult::error("id and realm are required");
-        field_store_->add_triplet("memory:" + id_str, "in_realm", realm);
+        if (!field_store_->set_realm(id, realm)) return ToolResult::error("memory not found");
         return ToolResult::ok("Realm set", {{"id", id_str}, {"realm", realm}});
     }
 

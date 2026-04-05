@@ -868,6 +868,11 @@ public:
         return cf_update_memory_kind(handle_, memory_id, new_kind.c_str()) == 0;
     }
 
+    /// Set the primary realm of a memory, updating in-memory indexes immediately.
+    bool set_realm(uint64_t memory_id, const std::string& new_realm) {
+        return cf_set_realm(handle_, memory_id, new_realm.c_str()) == 0;
+    }
+
     /// 10. List all triplets where entity is subject OR object. Returns JSON string.
     std::string list_triplets_for_entity(const std::string& entity, size_t limit = 100) {
         std::vector<char> buf(65536);
