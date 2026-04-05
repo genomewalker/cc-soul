@@ -154,6 +154,10 @@ while IFS= read -r line; do
     # Skip episode thinking-blocks — internal reasoning traces, never useful as injected context
     [[ "$line" =~ \[episode\].*\[thinking.block: ]] && continue
 
+    # Skip [thought] synthesis memories — soul:meta artifacts, not domain knowledge.
+    # Soul cycles that need [thought] memories query soul:meta explicitly.
+    [[ "$line" =~ \[thought\] ]] && continue
+
     # Code symbol filtering is now done server-side via --partnership-only flag
 
     # Truncate and add
