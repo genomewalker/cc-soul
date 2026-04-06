@@ -58,6 +58,20 @@ queue_write "store_turn" "{\"session_id\":\"$SESSION_ID\",\"role\":\"user\",\"co
 # Use clean query for all recall and pattern detection (strip markup from QUERY)
 QUERY="$CLEAN_QUERY"
 
+# ===========================================
+# CACHE EXPIRY WARNING: Warn when >5 min idle
+# ===========================================
+LAST_STOP_FILE="${MIND_PATH}/.last_stop_time"
+if [[ -f "$LAST_STOP_FILE" ]]; then
+    LAST_STOP=$(cat "$LAST_STOP_FILE" 2>/dev/null || echo 0)
+    NOW=$(date +%s)
+    GAP=$(( NOW - LAST_STOP ))
+    if [[ $GAP -gt 300 ]]; then
+        GAP_MIN=$(( GAP / 60 ))
+        echo "[cache-expired: ${GAP_MIN}m idle — full context re-prices at 10x; consider /compact first]"
+    fi
+fi
+
 # Skip daemon-dependent operations immediately if daemon is not running.
 # queue_write above is file-based (no daemon needed), everything below requires it.
 daemon_available || exit 0

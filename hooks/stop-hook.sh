@@ -760,4 +760,7 @@ if [[ -x "$CHITTA_BIN" ]]; then
     echo "[consolidation] Queued sleep consolidation for realm=${REALM:-brahman}" >&2
 fi
 
+# Record stop timestamp so prompt-hook can warn when cache has expired (>5 min idle)
+echo "$(date +%s)" > "${MIND_PATH}/.last_stop_time"
+
 exit 0
