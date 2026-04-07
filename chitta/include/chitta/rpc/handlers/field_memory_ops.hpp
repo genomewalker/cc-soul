@@ -415,10 +415,11 @@
 
     ToolResult tool_list_memories_brief(const json& params) {
         size_t limit      = static_cast<size_t>(params.value("limit", 200));
+        size_t offset     = static_cast<size_t>(params.value("offset", 0));
         std::string realm = params.value("realm", "");
         std::string kind  = params.value("kind", "");
 
-        std::string raw = field_store_->list_memories(kind, realm, "recency", limit, 0);
+        std::string raw = field_store_->list_memories(kind, realm, "recency", limit, offset);
         try {
             auto arr = json::parse(raw);
             std::ostringstream ss;
@@ -426,14 +427,15 @@
             for (const auto& m : arr) {
                 std::string content = m.value("content", "");
                 std::string preview = content.substr(0, 80);
+                uint64_t mid = m["id"].is_number() ? m["id"].get<uint64_t>() : 0;
                 json brief = {
-                    {"id", m.value("id", 0)},
+                    {"id", mid},
                     {"kind", m.value("kind", "")},
                     {"preview", preview},
                     {"confidence", m.value("confidence", 0.0f)},
                 };
                 results.push_back(brief);
-                ss << "#" << m.value("id", 0) << " [" << m.value("kind", "?") << "] " << preview << "\n";
+                ss << "#" << mid << " [" << m.value("kind", "?") << "] " << preview << "\n";
             }
             return ToolResult::ok(ss.str(), {{"memories", results}, {"count", results.size()}});
         } catch (...) {
