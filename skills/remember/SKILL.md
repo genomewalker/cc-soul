@@ -22,17 +22,21 @@ Quickly store something in soul memory.
 3. **Store** - Call `remember` tool
 4. **Confirm** - Show what was stored
 
-## SSL Formatting
+## SSL v0.3 Formatting
 
-If input doesn't start with `[domain]`, auto-detect and wrap:
+If input doesn't start with `[domain]`, auto-detect, wrap, and add affect:
 
-| Pattern | Domain |
-|---------|--------|
-| "prefer..." / "always..." / "never..." | `[preference]` |
-| "when X, do Y" | `[pattern]` |
-| "watch out..." / "gotcha..." | `[gotcha]` |
-| "decided..." / "chose..." | `[decision]` |
-| Other | `[note]` |
+| Pattern | Domain | Default Affect |
+|---------|--------|----------------|
+| "prefer..." / "always..." / "never..." | `[preference]` | A:+0.2,0.1 |
+| "when X, do Y" | `[pattern]` | A:+0.3,0.2 |
+| "watch out..." / "gotcha..." | `[gotcha]` | A:-0.3,0.5 |
+| "decided..." / "chose..." | `[decision]` | A:+0.3,0.3 |
+| "fixed..." / "solved..." | `[solution]` | A:+0.5,0.4 |
+| Other | `[note]` | A:0.0,0.1 |
+
+Add `F:FLAG` when structurally significant (ORIGIN, CORE, PIVOT, GENESIS, TURNING).
+Add `→@ref` when referencing a known topic.
 
 ## Tool Call
 
@@ -40,7 +44,7 @@ If input doesn't start with `[domain]`, auto-detect and wrap:
 {
   "tool": "remember",
   "args": {
-    "content": "[domain] formatted content here",
+    "content": "[domain] formatted content here A:v,a",
     "tags": ["user-added"]
   }
 }
@@ -50,17 +54,20 @@ If input doesn't start with `[domain]`, auto-detect and wrap:
 
 ```
 /remember always run tests before committing
-→ [preference] always run tests before committing
+→ [preference] always→run-tests-before-commit A:+0.2,0.1 F:CORE
 
 /remember when debugging, check logs first
-→ [pattern] when debugging → check logs first
+→ [pattern] debugging→check-logs-first A:+0.3,0.2
 
 /remember gotcha: the API returns 200 even on errors
-→ [gotcha] the API returns 200 even on errors
+→ [gotcha] API→returns-200-on-errors A:-0.3,0.5
+
+/remember decided to use sqlite over postgres for metadata
+→ [decision] sqlite>postgres|metadata|simpler A:+0.4,0.3 F:PIVOT
 ```
 
 ## Output
 
 ```
-Remembered: [domain] content
+Remembered: [domain] content A:v,a
 ```

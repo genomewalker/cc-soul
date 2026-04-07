@@ -131,12 +131,16 @@ queue_write() {
 }
 
 # emit_event — structured soul event with provenance.
-# Usage: emit_event <dedup_file> <category> <source> <content> <confidence> <evidence> <realm>
+# Usage: emit_event <dedup_file> <category> <source> <content> <confidence> <evidence> <realm> [valence] [arousal] [flags] [refs]
 #   category:   solution|gotcha|preference|decision|failure|pattern|correction|curiosity_gap
 #   source:     hook_regex|hook_compliance|distillation|mcp_tool
 #   content:    raw learning text (SSL-formatted by caller or this function)
 #   confidence: 0.5 (provisional/hook) or 0.85 (distillation) or 1.0 (explicit)
 #   evidence:   what triggered this (e.g. "regex match on [SOLUTION]")
+#   valence:    affect valence -1.0..+1.0 (optional)
+#   arousal:    affect arousal 0.0..1.0 (optional)
+#   flags:      comma-separated semantic flags: ORIGIN,CORE,PIVOT,GENESIS,TURNING (optional)
+#   refs:       comma-separated cross-references: tag names or memory IDs (optional)
 emit_event() {
     local dedup_file="$1"
     local category="$2"
@@ -145,6 +149,10 @@ emit_event() {
     local confidence="${5:-0.7}"
     local evidence="${6:-}"
     local realm="${7:-brahman}"
+    local valence="${8:-}"
+    local arousal="${9:-}"
+    local flags="${10:-}"
+    local refs="${11:-}"
 
     # Quality gate: minimum length
     if [[ ${#content} -lt 30 ]]; then return; fi
@@ -160,7 +168,62 @@ emit_event() {
     local title
     title=$(echo "$content" | head -c 100)
 
-    queue_write "observe" "{\"category\":\"$category\",\"title\":$(echo "$title" | jq -Rs .),\"content\":$(echo "$content" | jq -Rs .),\"confidence\":$confidence,\"source\":$(echo "$source" | jq -Rs .),\"evidence\":$(echo "$evidence" | jq -Rs .),\"realm\":$(echo "$realm" | jq -Rs .)}"
+    # Build JSON args with optional affect/flags/refs
+    local args
+    args="{\"category\":\"$category\",\"title\":$(echo "$title" | jq -Rs .),\"content\":$(echo "$content" | jq -Rs .),\"confidence\":$confidence,\"source\":$(echo "$source" | jq -Rs .),\"evidence\":$(echo "$evidence" | jq -Rs .),\"realm\":$(echo "$realm" | jq -Rs .)}"
+
+    # Append optional SSL v0.3 fields
+    if [[ -n "$valence" ]]; then
+        args=$(echo "$args" | jq --arg v "$valence" '. + {valence: ($v | tonumber)}')
+    fi
+    if [[ -n "$arousal" ]]; then
+        args=$(echo "$args" | jq --arg a "$arousal" '. + {arousal: ($a | tonumber)}')
+    fi
+    if [[ -n "$flags" ]]; then
+        args=$(echo "$args" | jq --arg f "$flags" '. + {flags: $f}')
+    fi
+    if [[ -n "$refs" ]]; then
+        args=$(echo "$args" | jq --arg r "$refs" '. + {refs: $r}')
+    fi
+
+    queue_write "observe" "$args"
+}
+
+# parse_ssl_annotations — extract A:v,a F:FLAG →@ref from an SSL line
+# Sets global variables: _SSL_VALENCE, _SSL_AROUSAL, _SSL_FLAGS, _SSL_REFS, _SSL_CLEAN
+# Usage: parse_ssl_annotations "line of SSL"
+parse_ssl_annotations() {
+    local line="$1"
+    _SSL_VALENCE=""
+    _SSL_AROUSAL=""
+    _SSL_FLAGS=""
+    _SSL_REFS=""
+    _SSL_CLEAN="$line"
+
+    # Extract A:valence,arousal
+    if [[ "$line" =~ A:([+-]?[0-9]*\.?[0-9]+),([0-9]*\.?[0-9]+) ]]; then
+        _SSL_VALENCE="${BASH_REMATCH[1]}"
+        _SSL_AROUSAL="${BASH_REMATCH[2]}"
+        _SSL_CLEAN="${_SSL_CLEAN//${BASH_REMATCH[0]}/}"
+    fi
+
+    # Extract F:FLAG (comma-separated flags possible: F:PIVOT,ORIGIN)
+    if [[ "$line" =~ F:([A-Z_,]+) ]]; then
+        _SSL_FLAGS="${BASH_REMATCH[1]}"
+        _SSL_CLEAN="${_SSL_CLEAN//${BASH_REMATCH[0]}/}"
+    fi
+
+    # Extract →@ref (multiple possible)
+    local refs=""
+    while [[ "$_SSL_CLEAN" =~ →@([a-zA-Z0-9_-]+) ]]; do
+        [[ -n "$refs" ]] && refs="$refs,"
+        refs="${refs}${BASH_REMATCH[1]}"
+        _SSL_CLEAN="${_SSL_CLEAN//${BASH_REMATCH[0]}/}"
+    done
+    _SSL_REFS="$refs"
+
+    # Trim trailing whitespace from cleaned line
+    _SSL_CLEAN="${_SSL_CLEAN%"${_SSL_CLEAN##*[![:space:]]}"}"
 }
 
 # Guard: fail if CHITTA_SANDBOX=1 and running in main worktree

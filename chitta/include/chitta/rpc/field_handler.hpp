@@ -761,11 +761,15 @@ private:
         handlers_["batch_forget"] = [this](const json& p) { return tool_batch_forget(p); };
 
         // Observe/Grow
-        tools_.push_back({{"name","observe"},{"description","Store an observation/learning"},
+        tools_.push_back({{"name","observe"},{"description","Store an observation/learning (SSL v0.3)"},
             {"inputSchema",{{"type","object"},{"properties",{
                 {"category",{{"type","string"}}},{"title",{{"type","string"}}},
                 {"content",{{"type","string"}}},{"tags",{{"type","string"}}},
-                {"confidence",{{"type","number"}}}
+                {"confidence",{{"type","number"}}},
+                {"valence",{{"type","number"},{"description","Affect valence: -1.0 to +1.0"}}},
+                {"arousal",{{"type","number"},{"description","Affect arousal: 0.0 to 1.0"}}},
+                {"flags",{{"type","string"},{"description","Structural flags: ORIGIN,CORE,PIVOT,GENESIS,TURNING"}}},
+                {"refs",{{"type","string"},{"description","Cross-references: comma-separated tag names or memory IDs"}}}
             }},{"required",{"title","content"}}}}
         });
         handlers_["observe"] = [this](const json& p) { return tool_observe(p); };
@@ -823,6 +827,15 @@ private:
             }},{"required",{"id"}}}}
         });
         handlers_["tag"] = [this](const json& p) { return tool_tag(p); };
+
+        tools_.push_back({{"name","set_affect"},{"description","Set affect dimensions (valence, arousal) on a memory"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"id",{{"type","string"}}},
+                {"valence",{{"type","number"},{"description","Emotional valence: -1.0 to +1.0"}}},
+                {"arousal",{{"type","number"},{"description","Emotional arousal: 0.0 to 1.0"}}}
+            }},{"required",{"id","valence","arousal"}}}}
+        });
+        handlers_["set_affect"] = [this](const json& p) { return tool_set_affect(p); };
 
         // ── Code Intelligence tools ─────────────────────────────────────────
         tools_.push_back({{"name","extract_symbols"},{"description","Extract symbols from source file using tree-sitter"},

@@ -114,6 +114,46 @@
             }
         }
 
+        // Affect dimensions: valence (-1..+1) and arousal (0..1)
+        if (id > 0 && (params.contains("valence") || params.contains("arousal"))) {
+            float valence = params.value("valence", 0.0f);
+            float arousal = params.value("arousal", 0.0f);
+            field_store_->set_affect(id, valence, arousal);
+        }
+
+        // Semantic flags: structural importance markers stored as tags
+        if (id > 0 && params.contains("flags") && params["flags"].is_string()) {
+            std::istringstream fss(params["flags"].get<std::string>());
+            std::string flag;
+            while (std::getline(fss, flag, ',')) {
+                flag.erase(0, flag.find_first_not_of(' '));
+                flag.erase(flag.find_last_not_of(' ') + 1);
+                if (!flag.empty()) {
+                    field_store_->add_triplet(std::to_string(id), "has_flag", flag);
+                }
+            }
+        }
+
+        // Cross-references: create association edges from →@ref annotations
+        if (id > 0 && params.contains("refs") && params["refs"].is_string()) {
+            std::istringstream rss(params["refs"].get<std::string>());
+            std::string ref;
+            while (std::getline(rss, ref, ',')) {
+                ref.erase(0, ref.find_first_not_of(' '));
+                ref.erase(ref.find_last_not_of(' ') + 1);
+                if (!ref.empty()) {
+                    // Try numeric ID first, fall back to tag-based lookup
+                    try {
+                        uint64_t ref_id = std::stoull(ref);
+                        field_store_->add_edge(id, ref_id, 2 /*CoRetrieved*/, 0.5f);
+                    } catch (...) {
+                        // Store as named reference triplet
+                        field_store_->add_triplet(std::to_string(id), "references", ref);
+                    }
+                }
+            }
+        }
+
         // Correction supersession: when category=correction, weaken semantically similar memories
         if (category == "correction" && id > 0 && !embedding.empty()) {
             auto hits = field_store_->recall(embedding, 5, realm);
@@ -168,6 +208,17 @@
 
         return ToolResult::ok("Grew " + type + " #" + std::to_string(id),
             {{"id", std::to_string(id)}, {"type", type}});
+    }
+
+    ToolResult tool_set_affect(const json& params) {
+        uint64_t id = extract_id(params);
+        if (id == 0) return ToolResult::error("id is required");
+        float valence = params.value("valence", 0.0f);
+        float arousal = params.value("arousal", 0.0f);
+        field_store_->set_affect(id, valence, arousal);
+        return ToolResult::ok("Set affect on #" + std::to_string(id) +
+            " (v=" + std::to_string(valence) + " a=" + std::to_string(arousal) + ")",
+            {{"id", std::to_string(id)}, {"valence", valence}, {"arousal", arousal}});
     }
 
     ToolResult tool_get(const json& params) {

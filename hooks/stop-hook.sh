@@ -44,44 +44,34 @@ fi
 [[ "$STOP_HOOK_ACTIVE" == "true" ]] && exit 0
 [[ -z "$TRANSCRIPT_PATH" || ! -f "$TRANSCRIPT_PATH" ]] && exit 0
 
-# Convert to SSL format
+# Convert to SSL v0.3 format
 # Input: category, raw content
-# Output: SSL formatted string
-# Note: Uses global $REALM set by realm_detect (line 105)
+# Output: SSL formatted string (v0.3 with domain prefix)
+# Note: Uses global $REALM set by realm_detect
 to_ssl() {
     local category="$1"
     local content="$2"
 
-    # Use detected realm (falls back to "brahman" if unset)
     local domain="${REALM:-brahman}"
-
-    # Extract key parts using → notation
-    # Try to find pattern: subject verb/action object/result
     local ssl_content
 
     case "$category" in
         solution)
-            # [domain] problem→solution @location
             ssl_content="[$domain:sol] $content"
             ;;
         gotcha)
-            # [domain] trap→consequence
             ssl_content="[$domain:gotcha] $content"
             ;;
         preference)
-            # [partnership] user→prefers→X
             ssl_content="[partnership:pref] Antonio→$content"
             ;;
         decision)
-            # [domain] chose→X over Y→because Z
             ssl_content="[$domain:dec] $content"
             ;;
         failure)
-            # [domain] tried→X→failed because Y
             ssl_content="[$domain:fail] $content"
             ;;
         pattern)
-            # [domain] when X→do Y
             ssl_content="[$domain:pat] $content"
             ;;
         *)
@@ -177,16 +167,19 @@ fi
 DEDUP_FILE="$MIND_PATH/.stop_dedup_${SESSION_ID}"
 touch "$DEDUP_FILE"
 
-# Extract typed learnings → convert to SSL → queue with provenance
+# Extract typed learnings → convert to SSL v0.3 → queue with provenance + affect/flags/refs
 LEARNED=0
 while IFS= read -r line; do
     if [[ "$line" =~ ^\[(SOLUTION|GOTCHA|PREFERENCE|DECISION|FAILURE|PATTERN|LEARN|CORRECTION|EVENT)\] ]]; then
         type="${BASH_REMATCH[1]}"
         raw_content="${line#\[$type\] }"
         category=$(map_category "$type")
-        ssl_content=$(to_ssl "$category" "$raw_content")
+
+        # Parse v0.3 annotations before converting to SSL
+        parse_ssl_annotations "$raw_content"
+        ssl_content=$(to_ssl "$category" "$_SSL_CLEAN")
         title=$(echo "$ssl_content" | head -c 60)
-        emit_event "$DEDUP_FILE" "$category" "hook_regex" "$ssl_content" "0.7" "regex match on [$type]" "$REALM"
+        emit_event "$DEDUP_FILE" "$category" "hook_regex" "$ssl_content" "0.7" "regex match on [$type]" "$REALM" "$_SSL_VALENCE" "$_SSL_AROUSAL" "$_SSL_FLAGS" "$_SSL_REFS"
         [[ $? -eq 0 ]] && { echo "[soul] +${type,,}: $title" >&2; ((LEARNED++)) || true; }
     fi
 done <<< "$RESPONSE"

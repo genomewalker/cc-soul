@@ -54,39 +54,67 @@ if [[ ${#CONVERSATION} -gt $MAX_CHARS ]]; then
 ${tail_part}"
 fi
 
-# SSL v0.2 prompt with typed markers
-PROMPT='Extract learnings from this conversation in SSL v0.2 format.
+# SSL v0.3 prompt with typed markers, affect, flags, and cross-refs
+PROMPT='Extract learnings from this conversation in SSL v0.3 format.
 
-## SSL Format
+## SSL v0.3 Format
 
-Each learning has a TYPE and uses SSL compression:
+Two tiers depending on memory type:
 
+### Tier 1: Code-bearing (SOLUTION, GOTCHA, PATTERN)
 ```
-[TYPE] [domain] subject→action→result @location
+[TYPE] [domain] subject→action→result @location F:FLAG A:v,a →@ref
 [ε] exact_command_or_code_verbatim
+```
+
+### Tier 2: Narrative (DECISION, PREFERENCE, FAILURE) — denser, no [ε] needed
+```
+[TYPE] [domain] choice>alternative|reason+context F:FLAG A:v,a →@ref
 ```
 
 ## Types (choose most specific)
 
-| Type | Use for |
-|------|---------|
-| [SOLUTION] | What worked: commands, fixes, approaches that succeeded |
-| [GOTCHA] | Traps: counterintuitive behavior, silent failures, edge cases |
-| [DECISION] | Design choices: why X over Y, tradeoffs considered |
-| [PATTERN] | Reusable techniques: approaches that generalize |
-| [PREFERENCE] | User preferences: workflow, style, communication |
-| [FAILURE] | What did not work and why (valuable negative knowledge) |
+| Type | Tier | Use for |
+|------|------|---------|
+| [SOLUTION] | 1 | What worked: commands, fixes, approaches that succeeded |
+| [GOTCHA] | 1 | Traps: counterintuitive behavior, silent failures, edge cases |
+| [PATTERN] | 1 | Reusable techniques: approaches that generalize |
+| [DECISION] | 2 | Design choices: why X over Y, tradeoffs considered |
+| [PREFERENCE] | 2 | User preferences: workflow, style, communication |
+| [FAILURE] | 2 | What did not work and why (valuable negative knowledge) |
 
 ## SSL Symbols
 
 | Symbol | Meaning | Example |
 |--------|---------|---------|
 | → | produces/leads to | cmake→build→binary |
-| \| | or/alternative | patch\|minor\|major |
+| > | chose over (Tier 2) | sqlite>postgres |
+| \| | or/alternative/reason | patch\|minor\|major |
 | + | with/and | config+flags |
 | @ | location | @simple_cli.cpp:720 |
 | ! | negation | →!working |
 | ? | uncertainty | regulates? |
+
+## Annotations (append to TYPE line, space-separated)
+
+| Annotation | Meaning | Values |
+|------------|---------|--------|
+| F:FLAG | Structural importance | ORIGIN, CORE, PIVOT, GENESIS, TURNING |
+| A:v,a | Affect (valence,arousal) | v: -1.0..+1.0, a: 0.0..1.0 |
+| →@ref | Cross-reference | tag name linking to related memory |
+
+### Flag guide
+- ORIGIN: where an idea first appeared
+- CORE: foundational to the project/system
+- PIVOT: changed direction or approach
+- GENESIS: birth of a component/feature
+- TURNING: breakthrough moment
+
+### Affect guide
+- Positive valence (+): success, satisfaction, relief
+- Negative valence (-): frustration, failure, confusion
+- High arousal (>0.5): breakthrough, urgent fix, critical discovery
+- Low arousal (<0.3): routine, minor preference, background pattern
 
 ## Relationships
 
@@ -94,36 +122,42 @@ Each learning has a TYPE and uses SSL compression:
 [TRIPLET] subject predicate object
 ```
 
-Use for: calls, uses, contains, implements, depends_on, derived_from
+Use for: calls, uses, contains, implements, depends_on, derived_from, supersedes
 
 ## Rules
 
-1. **Preserve verbatim**: Commands, code, formulas, thresholds go in [ε] lines
-2. **Compress prose**: Convert explanations to SSL arrows
+1. **Preserve verbatim**: Commands, code, formulas, thresholds go in [ε] lines (Tier 1 only)
+2. **Compress prose**: Tier 2 types use dense symbol chains — no [ε] line
 3. **Be specific**: Include file paths, line numbers, exact values
 4. **No fluff**: Skip obvious/trivial learnings
 5. **High signal**: Each learning should be reconstructable from SSL alone
+6. **Affect required**: Every learning must have A:v,a — estimate from conversation tone
+7. **Flags when applicable**: Add F: only when structurally significant (not every memory)
+8. **Cross-ref when related**: Use →@tag to link learnings that reference each other
 
 ## Good Examples
 
+### Tier 1 (code-bearing):
 ```
-[SOLUTION] [chitta] parallel-build→4x-faster @cmake
+[SOLUTION] [chitta] parallel-build→4x-faster @cmake A:+0.6,0.3
 [ε] cmake --build build --parallel
 
-[GOTCHA] [daemon] thread_pool→blocks-if-handler-throws @simple_cli.cpp:776
+[GOTCHA] [daemon] thread_pool→blocks-if-handler-throws @simple_cli.cpp:776 A:-0.4,0.7 F:CORE
 [ε] wrap handler.handle() in try-catch, return error JSON
 
-[DECISION] [rpc] async-response-queue→eventfd-wake→poll-returns-immediately
-[ε] write(wake_fd_, &val, sizeof(val)) after queue_response()
-
-[PATTERN] [hooks] fire-and-forget→queue-file→daemon-processes-async
+[PATTERN] [hooks] fire-and-forget→queue-file→daemon-processes-async A:+0.3,0.2 →@queue-architecture
 [ε] echo json >> /tmp/chitta-queue.jsonl
+```
 
-[PREFERENCE] [partnership] Antonio→no-shortcuts+proper-solutions-only
+### Tier 2 (narrative — dense, no [ε]):
+```
+[DECISION] [arch] sqlite>postgres|metadata|single-file+no-daemon+<100k A:+0.5,0.4 F:PIVOT
+[PREFERENCE] [partnership] no-shortcuts+proper-solutions+no-stubs A:+0.2,0.1 F:CORE
+[FAILURE] [http] http-daemon>unix-socket|200ms-latency+hooks-need-<50ms A:-0.3,0.6 →@queue-architecture
+```
 
-[FAILURE] [http] http-daemon→too-slow-for-hooks→switched-to-unix-socket
-[ε] PreToolUse needs <50ms, HTTP added 200ms latency
-
+### Triplets:
+```
 [TRIPLET] ThreadPool contains worker_loop
 [TRIPLET] daemon uses ThreadPool
 [TRIPLET] health_check bypasses ThreadPool
@@ -132,9 +166,11 @@ Use for: calls, uses, contains, implements, depends_on, derived_from
 ## Bad (avoid)
 
 - Generic summaries without specifics
-- Learnings without [ε] when code/commands are involved
+- Learnings without [ε] when code/commands are involved (Tier 1)
 - Obvious things (e.g., "files should be saved")
 - Duplicating what is already in code comments
+- Missing A: annotations
+- Verbose Tier 2 entries (use > and | instead of prose)
 
 ---
 
@@ -157,31 +193,85 @@ done
 [[ -z "$ENDPOINT" ]] && curl -sL --max-time 3 "http://localhost:11434/v1/models" 2>/dev/null | grep -q "data" && ENDPOINT="http://localhost:11434"
 
 if [[ -z "$ENDPOINT" ]]; then
-    echo "[distill] No GPU endpoint found — cannot distill" >&2
-    exit 0
+    echo "[distill] No GPU endpoint — using deterministic SSL fallback" >&2
+
+    # Deterministic fallback: rule-based pattern extraction when no LLM is available.
+    # Extracts basic SSL from conversation using regex patterns. Lower quality than
+    # LLM distillation but ensures memories are always captured.
+    FALLBACK_RESULT=""
+
+    # Pattern: "fixed X" / "fix for X" / "the fix was X"
+    while IFS= read -r match; do
+        [[ -z "$match" ]] && continue
+        clean=$(echo "$match" | sed 's/^[[:space:]]*//' | head -c 200)
+        FALLBACK_RESULT+="[SOLUTION] [${REALM}] ${clean} A:+0.5,0.4"$'\n'
+    done <<< "$(echo "$CONVERSATION" | grep -ioP '(?:fixed|fix for|the fix was|resolved by|solved by)\s+\K[^\n.]{10,}' | head -5)"
+
+    # Pattern: "chose X over Y" / "decided to X" / "went with X"
+    while IFS= read -r match; do
+        [[ -z "$match" ]] && continue
+        clean=$(echo "$match" | sed 's/^[[:space:]]*//' | head -c 200)
+        FALLBACK_RESULT+="[DECISION] [${REALM}] ${clean} A:+0.3,0.3"$'\n'
+    done <<< "$(echo "$CONVERSATION" | grep -ioP '(?:chose|decided to|went with|picked|selected)\s+\K[^\n.]{10,}' | head -5)"
+
+    # Pattern: "prefer X" / "always X" / "never X"
+    while IFS= read -r match; do
+        [[ -z "$match" ]] && continue
+        clean=$(echo "$match" | sed 's/^[[:space:]]*//' | head -c 200)
+        FALLBACK_RESULT+="[PREFERENCE] [partnership] ${clean} A:+0.2,0.1"$'\n'
+    done <<< "$(echo "$CONVERSATION" | grep -ioP '(?:I prefer|always |never |don.t ever)\s*\K[^\n.]{10,}' | head -5)"
+
+    # Pattern: "watch out for X" / "careful with X" / "gotcha:" / "trap:"
+    while IFS= read -r match; do
+        [[ -z "$match" ]] && continue
+        clean=$(echo "$match" | sed 's/^[[:space:]]*//' | head -c 200)
+        FALLBACK_RESULT+="[GOTCHA] [${REALM}] ${clean} A:-0.3,0.5"$'\n'
+    done <<< "$(echo "$CONVERSATION" | grep -ioP '(?:watch out for|careful with|gotcha:|trap:|beware of)\s*\K[^\n.]{10,}' | head -5)"
+
+    # Pattern: "failed because" / "didn't work" / "error was"
+    while IFS= read -r match; do
+        [[ -z "$match" ]] && continue
+        clean=$(echo "$match" | sed 's/^[[:space:]]*//' | head -c 200)
+        FALLBACK_RESULT+="[FAILURE] [${REALM}] ${clean} A:-0.4,0.5"$'\n'
+    done <<< "$(echo "$CONVERSATION" | grep -ioP '(?:failed because|didn.t work|error was|broke because)\s*\K[^\n.]{10,}' | head -5)"
+
+    if [[ -z "$FALLBACK_RESULT" ]]; then
+        echo "[distill] Deterministic fallback: no patterns matched" >&2
+        exit 0
+    fi
+
+    echo "[distill] Deterministic fallback: extracted patterns" >&2
+    RESULT="$FALLBACK_RESULT"
+
+    # Fall through to the same parsing logic below
+    # (skip the LLM call section by jumping past it)
+    SKIP_LLM=true
 fi
 
-echo "[distill] Session $SESSION_ID: Calling $MODEL via $ENDPOINT..."
+# Gate: skip LLM call if fallback already produced results
+if [[ "${SKIP_LLM:-false}" != "true" ]]; then
 
-# Build JSON request
-TMPJSON="/tmp/chitta-distill-$$.json"
-python3 -c "
+    echo "[distill] Session $SESSION_ID: Calling $MODEL via $ENDPOINT..."
+
+    # Build JSON request
+    TMPJSON="/tmp/chitta-distill-$$.json"
+    python3 -c "
 import json, sys
 prompt = sys.stdin.read()
 req = {'model': '$MODEL', 'messages': [
-    {'role': 'system', 'content': 'You are a knowledge distiller. Extract learnings in SSL v0.2 format. Output ONLY SSL-formatted learnings.'},
+    {'role': 'system', 'content': 'You are a knowledge distiller. Extract learnings in SSL v0.3 format. Output ONLY SSL-formatted learnings with A:v,a affect annotations.'},
     {'role': 'user', 'content': prompt}
 ], 'temperature': 0.3, 'max_tokens': 4096}
 json.dump(req, open('$TMPJSON', 'w'), ensure_ascii=True)
 " <<< "$PROMPT"
 
-RESPONSE=$(curl -sL --max-time 180 \
-    -H "Content-Type: application/json" \
-    -d "@$TMPJSON" \
-    "$ENDPOINT/v1/chat/completions" 2>/dev/null || echo "")
-rm -f "$TMPJSON"
+    RESPONSE=$(curl -sL --max-time 180 \
+        -H "Content-Type: application/json" \
+        -d "@$TMPJSON" \
+        "$ENDPOINT/v1/chat/completions" 2>/dev/null || echo "")
+    rm -f "$TMPJSON"
 
-RESULT=$(echo "$RESPONSE" | python3 -c "
+    RESULT=$(echo "$RESPONSE" | python3 -c "
 import json, sys
 try:
     r = json.load(sys.stdin)
@@ -189,12 +279,17 @@ try:
 except: pass
 " 2>/dev/null || echo "")
 
-if [[ -z "$RESULT" ]]; then
-    echo "[distill] No result from LLM" >&2
-    exit 0
-fi
+    if [[ -z "$RESULT" ]]; then
+        echo "[distill] No result from LLM" >&2
+        exit 0
+    fi
+fi  # end SKIP_LLM gate
 
-echo "[distill] Processing SSL results..."
+# Source shared library for parse_ssl_annotations
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib.sh" 2>/dev/null || true
+
+echo "[distill] Processing SSL v0.3 results..."
 
 # Get turn range for this session (for hierarchical retrieval)
 TURN_RANGE=$("$CHITTA_BIN" sql_query --query "SELECT MIN(turn_index), MAX(turn_index) FROM conversation_turn WHERE session_id = '$SESSION_ID'" 2>/dev/null | grep -E '^[0-9]' || echo "0 0")
@@ -228,16 +323,38 @@ store_current() {
         *) cat="wisdom" ;;
     esac
 
+    # Parse SSL v0.3 annotations from first line
+    local first_line="${CURRENT_CONTENT%%$'\n'*}"
+    parse_ssl_annotations "$first_line"
+
+    # Replace first line with cleaned version (annotations stripped from content)
+    if [[ "$CURRENT_CONTENT" == *$'\n'* ]]; then
+        CURRENT_CONTENT="${_SSL_CLEAN}"$'\n'"${CURRENT_CONTENT#*$'\n'}"
+    else
+        CURRENT_CONTENT="${_SSL_CLEAN}"
+    fi
+
     # Extract title (first line, truncated)
     local title="${CURRENT_CONTENT%%$'\n'*}"
     title="${title:0:100}"
 
-    # Store via observe (creates memory with proper category)
-    local resp=$("$CHITTA_BIN" observe --category "$cat" --title "$title" --content "$CURRENT_CONTENT" --realm "$REALM" --json 2>/dev/null || echo "")
+    # Build observe args with optional v0.3 fields
+    local observe_args="--category \"$cat\" --title \"$title\" --content \"$CURRENT_CONTENT\" --realm \"$REALM\" --json"
+    [[ -n "$_SSL_VALENCE" ]] && observe_args="$observe_args --valence $_SSL_VALENCE"
+    [[ -n "$_SSL_AROUSAL" ]] && observe_args="$observe_args --arousal $_SSL_AROUSAL"
+    [[ -n "$_SSL_FLAGS" ]] && observe_args="$observe_args --flags \"$_SSL_FLAGS\""
+    [[ -n "$_SSL_REFS" ]] && observe_args="$observe_args --refs \"$_SSL_REFS\""
+
+    # Store via observe (creates memory with proper category + affect/flags/refs)
+    local resp=$(eval "$CHITTA_BIN" observe $observe_args 2>/dev/null || echo "")
 
     if echo "$resp" | grep -q '"id"'; then
         local id=$(echo "$resp" | grep -oP '"id"\s*:\s*"\K[^"]+' | head -1)
-        echo "[distill]   +${CURRENT_TYPE,,}: ${title:0:60}..."
+        local affect_info=""
+        [[ -n "$_SSL_VALENCE" ]] && affect_info=" A:${_SSL_VALENCE},${_SSL_AROUSAL}"
+        local flag_info=""
+        [[ -n "$_SSL_FLAGS" ]] && flag_info=" F:${_SSL_FLAGS}"
+        echo "[distill]   +${CURRENT_TYPE,,}: ${title:0:50}...${affect_info}${flag_info}"
         ((STORED++)) || true
 
         # Link to episode if we have one
