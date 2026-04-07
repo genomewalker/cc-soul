@@ -756,4 +756,22 @@ fi
 # Record stop timestamp so prompt-hook can warn when cache has expired (>5 min idle)
 echo "$(date +%s)" > "${MIND_PATH}/.last_stop_time"
 
+# ═══════════════════════════════════════════════════════════════════════════
+# SESSION COST TELEMETRY: Log subagent count + transcript size for analysis
+# ═══════════════════════════════════════════════════════════════════════════
+if [[ -n "${SESSION_ID:-}" ]]; then
+    AGENT_COUNT_FILE="$MIND_PATH/.subagent_count_${SESSION_ID}"
+    AGENT_COUNT=$(cat "$AGENT_COUNT_FILE" 2>/dev/null || echo 0)
+    TRANSCRIPT_SIZE=0
+    [[ -n "${TRANSCRIPT_PATH:-}" && -f "$TRANSCRIPT_PATH" ]] && \
+        TRANSCRIPT_SIZE=$(stat -c%s "$TRANSCRIPT_PATH" 2>/dev/null || echo 0)
+    TRANSCRIPT_MB=$(( TRANSCRIPT_SIZE / 1048576 ))
+    TURN_INDEX=$(cat "$MIND_PATH/.turn_index_${SESSION_ID}" 2>/dev/null || echo 0)
+
+    if [[ $AGENT_COUNT -gt 0 || $TRANSCRIPT_MB -gt 10 ]]; then
+        queue_write "remember" "{\"content\":\"[session-cost] ${SESSION_ID:0:8}: ${TURN_INDEX} turns, ${AGENT_COUNT} subagents, ${TRANSCRIPT_MB}MB transcript @realm:${REALM:-brahman}\",\"kind\":\"episode\",\"tags\":[\"session-cost\"]}"
+        echo "[telemetry] ${TURN_INDEX} turns, ${AGENT_COUNT} subagents, ${TRANSCRIPT_MB}MB" >&2
+    fi
+fi
+
 exit 0

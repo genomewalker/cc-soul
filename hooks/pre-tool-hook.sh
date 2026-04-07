@@ -329,6 +329,41 @@ case "$MATCHER" in
         exit $?
         ;;
 
+    Agent)
+        # ─── Subagent budget tracking ────────────────────────────────────────────
+        # Each subagent cold-starts a new cache window (~$5-50 per agent).
+        # Track count per session and warn/advise when spending is high.
+        MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
+        _session_id=$(echo "$STDIN_DATA" | jq -r '.session_id // empty')
+        if [[ -n "$_session_id" ]]; then
+            AGENT_COUNT_FILE="$MIND_PATH/.subagent_count_${_session_id}"
+            AGENT_COUNT=$(cat "$AGENT_COUNT_FILE" 2>/dev/null || echo 0)
+            AGENT_COUNT=$((AGENT_COUNT + 1))
+            echo "$AGENT_COUNT" > "$AGENT_COUNT_FILE"
+
+            AGENT_WARN_THRESHOLD="${CC_SOUL_AGENT_WARN:-20}"
+            AGENT_HARD_LIMIT="${CC_SOUL_AGENT_LIMIT:-50}"
+
+            if [[ $AGENT_COUNT -gt $AGENT_HARD_LIMIT ]]; then
+                printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[agent-budget] %d/%d subagents spawned this session. Each agent cold-starts a new cache (~$5-50). Consider batching work into fewer agents, or start a fresh session with /recap."}}\n' \
+                    "$AGENT_COUNT" "$AGENT_HARD_LIMIT"
+            elif [[ $AGENT_COUNT -gt $AGENT_WARN_THRESHOLD ]]; then
+                printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[agent-budget] %d subagents this session. Each spawns a new cache window. Batch independent queries into single agents where possible."}}\n' \
+                    "$AGENT_COUNT"
+            fi
+
+            # Model routing advice: suggest haiku for exploration/research subagents
+            agent_type=$(echo "$STDIN_DATA" | jq -r '.tool_input.subagent_type // .tool_input.description // empty' 2>/dev/null)
+            agent_model=$(echo "$STDIN_DATA" | jq -r '.tool_input.model // empty' 2>/dev/null)
+            if [[ -z "$agent_model" ]]; then
+                # No model override — check if this is a research/exploration task
+                if echo "$agent_type" | grep -qiE '(explore|search|find|research|grep|glob|read)'; then
+                    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[token-hint] Exploration subagent inherits parent model. Add model:\"haiku\" for 10x cheaper research agents."}}\n'
+                fi
+            fi
+        fi
+        ;;
+
     *)
         exit 0
         ;;
