@@ -362,7 +362,9 @@ else
             [[ "$tags" =~ wontfix|verified ]] && continue
 
             # Track surface count
-            current=$(grep -c "^${corr_id}$" "$SURFACE_COUNT_FILE" 2>/dev/null || echo "0")
+            current=$(grep -c "^${corr_id}$" "$SURFACE_COUNT_FILE" 2>/dev/null | tail -1 || echo "0")
+            current="${current//[^0-9]/}"
+            [[ -z "$current" ]] && current=0
             if [[ "$current" -ge "$CORRECTION_MAX_SURFACES" ]]; then
                 continue  # Suppressed after N surfaces without action
             fi
@@ -379,7 +381,7 @@ else
     fi
 
     # Check for compliance failures (missed learning opportunities)
-    compliance=$(timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "compliance fail" --tag "compliance" --limit 2 --text-only 2>/dev/null | head -c 300 || true)
+    compliance=$(timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "compliance:auto user correction" --limit 2 --text-only 2>/dev/null | head -c 300 || true)
     if [[ -n "$compliance" && "$compliance" != *"No memories"* ]]; then
         echo ""
         echo "⚠️ [compliance-issues] Recent missed corrections - be more proactive!"
@@ -415,7 +417,7 @@ else
     # ===========================================
     # CACHE BREAK WARNING: Surface recent cache break detections
     # ===========================================
-    _sus3_cb_warn=$(timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "cache break session" --tag "cache-break" --limit 1 --text-only 2>/dev/null | head -c 400 || true)
+    _sus3_cb_warn=$(timeout "$MAX_WAIT" "$CHITTA_BIN" recall --query "cache:break session cache_hit_ratio" --limit 1 --text-only 2>/dev/null | head -c 400 || true)
     if [[ -n "$_sus3_cb_warn" && "$_sus3_cb_warn" != *"No memories"* && "$_sus3_cb_warn" != *"0 memories"* ]]; then
         echo ""
         echo "⚠️ BEFORE RUNNING: [cache] Recent cache break detected:"

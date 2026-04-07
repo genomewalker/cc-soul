@@ -26,12 +26,22 @@
 
         uint64_t id = field_store_->remember(kind, realm, content, embedding, confidence, decay_rate);
 
-        // Create triplets from tags if provided
-        if (params.contains("tags") && params["tags"].is_array()) {
-            for (const auto& tag : params["tags"]) {
-                if (tag.is_string()) {
-                    field_store_->add_triplet(
-                        std::to_string(id), "tagged", tag.get<std::string>());
+        // Create triplets from tags if provided (array or comma-separated string)
+        if (params.contains("tags")) {
+            if (params["tags"].is_array()) {
+                for (const auto& tag : params["tags"]) {
+                    if (tag.is_string()) {
+                        field_store_->add_triplet(
+                            std::to_string(id), "tagged", tag.get<std::string>());
+                    }
+                }
+            } else if (params["tags"].is_string()) {
+                std::istringstream iss(params["tags"].get<std::string>());
+                std::string tag;
+                while (std::getline(iss, tag, ',')) {
+                    tag.erase(0, tag.find_first_not_of(' '));
+                    tag.erase(tag.find_last_not_of(' ') + 1);
+                    if (!tag.empty()) field_store_->add_triplet(std::to_string(id), "tagged", tag);
                 }
             }
         }
@@ -58,7 +68,7 @@
         auto hits = field_store_->recall(embedding, fetch_limit, realm);
 
         // Hard-filter by tag: keep only memories that have (id, "tagged", tag) triplet
-        if (!tag.empty() && !hits.empty()) {
+        if (!tag.empty()) {
             std::string triplets_json = field_store_->query_object(tag);
             std::unordered_set<uint64_t> tagged_ids;
             try {
@@ -70,11 +80,41 @@
                     }
                 }
             } catch (...) {}
-            hits.erase(
-                std::remove_if(hits.begin(), hits.end(),
-                    [&](const FieldRecallHit& h) { return tagged_ids.find(h.memory_id) == tagged_ids.end(); }),
-                hits.end());
-            if (hits.size() > limit) hits.resize(limit);
+
+            if (!tagged_ids.empty()) {
+                // Filter semantic hits to tagged set
+                hits.erase(
+                    std::remove_if(hits.begin(), hits.end(),
+                        [&](const FieldRecallHit& h) { return tagged_ids.find(h.memory_id) == tagged_ids.end(); }),
+                    hits.end());
+
+                // If no semantic hits matched tags, fetch tagged memories directly
+                if (hits.empty()) {
+                    for (uint64_t tid : tagged_ids) {
+                        if (hits.size() >= limit) break;
+                        std::string content = field_store_->get_content(tid);
+                        if (content.empty()) continue;
+                        std::string meta_json = field_store_->get_memory_metadata(tid);
+                        FieldRecallHit h;
+                        h.memory_id    = tid;
+                        h.score        = 1.0f;
+                        h.semantic_score = 0.0f;
+                        h.content      = content;
+                        try {
+                            auto m = json::parse(meta_json);
+                            h.ts_ms        = m.value("ts_ms", int64_t(0));
+                            h.strength     = m.value("strength", 0.5f);
+                            h.confidence   = m.value("confidence", 0.5f);
+                            h.access_count = m.value("access_count", uint32_t(0));
+                            h.kind         = m.value("kind", "episode");
+                            h.realm        = m.value("realm", "");
+                        } catch (...) {}
+                        hits.push_back(std::move(h));
+                    }
+                }
+
+                if (hits.size() > limit) hits.resize(limit);
+            }
         }
 
         // Hebbian co-occurrence: strengthen associations between co-retrieved memories

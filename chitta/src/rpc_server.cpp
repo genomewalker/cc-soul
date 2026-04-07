@@ -902,6 +902,26 @@ int run_cli(const std::string& socket_path, const std::string& tool,
         }
     }
 
+    // Normalize comma-separated strings to arrays for known array keys
+    static const std::set<std::string> ARRAY_KEYS = {"tags", "shared_realms"};
+    for (const auto& key : ARRAY_KEYS) {
+        if (args.contains(key) && args[key].is_string()) {
+            std::string val = args[key].get<std::string>();
+            if (val.find(',') != std::string::npos) {
+                json arr = json::array();
+                std::istringstream iss(val);
+                std::string item;
+                while (std::getline(iss, item, ',')) {
+                    size_t start = item.find_first_not_of(' ');
+                    size_t end = item.find_last_not_of(' ');
+                    if (start != std::string::npos)
+                        arr.push_back(item.substr(start, end - start + 1));
+                }
+                args[key] = arr;
+            }
+        }
+    }
+
     // Validate required parameters
     const ToolSpec* spec = find_tool_spec(tool);
     if (spec) {
