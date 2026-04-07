@@ -506,6 +506,8 @@ def _normalize_args(arguments: dict) -> dict:
                     v = json.loads(stripped)
                 except json.JSONDecodeError:
                     pass  # leave as-is; daemon handles comma-separated strings
+            elif "," in stripped:
+                v = [s.strip() for s in stripped.split(",") if s.strip()]
         result[k] = v
     return result
 

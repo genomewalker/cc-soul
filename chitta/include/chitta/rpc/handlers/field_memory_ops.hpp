@@ -76,14 +76,26 @@
             if (es != 1) field_store_->set_epistemic_status(id, es);
             if (ms != 0) field_store_->set_memory_status(id, ms);
         }
-        if (params.contains("tags") && params["tags"].is_string()) {
-            std::istringstream iss(params["tags"].get<std::string>());
-            std::string tag;
-            while (std::getline(iss, tag, ',')) {
-                tag.erase(0, tag.find_first_not_of(' '));
-                tag.erase(tag.find_last_not_of(' ') + 1);
-                if (!tag.empty()) {
-                    field_store_->add_triplet(std::to_string(id), "tagged", tag);
+        // Auto-tag with category so --tag filter on recall works
+        if (id > 0 && !category.empty() && category != "episode") {
+            field_store_->add_triplet(std::to_string(id), "tagged", category);
+        }
+        if (params.contains("tags")) {
+            if (params["tags"].is_array()) {
+                for (const auto& t : params["tags"]) {
+                    if (t.is_string()) {
+                        field_store_->add_triplet(std::to_string(id), "tagged", t.get<std::string>());
+                    }
+                }
+            } else if (params["tags"].is_string()) {
+                std::istringstream iss(params["tags"].get<std::string>());
+                std::string tag;
+                while (std::getline(iss, tag, ',')) {
+                    tag.erase(0, tag.find_first_not_of(' '));
+                    tag.erase(tag.find_last_not_of(' ') + 1);
+                    if (!tag.empty()) {
+                        field_store_->add_triplet(std::to_string(id), "tagged", tag);
+                    }
                 }
             }
         }
@@ -196,13 +208,21 @@
         float confidence = (type == "wisdom" || type == "belief") ? 0.85f : 0.70f;
         uint64_t id = field_store_->remember(type, "brahman", ssl, embedding, confidence, 0.001f);
 
-        if (params.contains("tags") && params["tags"].is_string()) {
-            std::istringstream iss(params["tags"].get<std::string>());
-            std::string tag;
-            while (std::getline(iss, tag, ',')) {
-                tag.erase(0, tag.find_first_not_of(' '));
-                tag.erase(tag.find_last_not_of(' ') + 1);
-                if (!tag.empty()) field_store_->add_triplet(std::to_string(id), "tagged", tag);
+        if (params.contains("tags")) {
+            if (params["tags"].is_array()) {
+                for (const auto& t : params["tags"]) {
+                    if (t.is_string()) {
+                        field_store_->add_triplet(std::to_string(id), "tagged", t.get<std::string>());
+                    }
+                }
+            } else if (params["tags"].is_string()) {
+                std::istringstream iss(params["tags"].get<std::string>());
+                std::string tag;
+                while (std::getline(iss, tag, ',')) {
+                    tag.erase(0, tag.find_first_not_of(' '));
+                    tag.erase(tag.find_last_not_of(' ') + 1);
+                    if (!tag.empty()) field_store_->add_triplet(std::to_string(id), "tagged", tag);
+                }
             }
         }
 
