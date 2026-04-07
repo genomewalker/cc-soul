@@ -219,6 +219,19 @@ Combine everything into a structured block under 1500 tokens:
 | Key context | 450 tokens |
 | **Total** | **~1500 tokens** |
 
+## When to use /recap vs /compact
+
+| Situation | Action | Why |
+|-----------|--------|-----|
+| Same session, context growing | `/compact` | Preserves conversation, trims tool output |
+| New session, continue previous work | `/recap` | ~1500 tokens vs replaying full history |
+| Session idle >5 min (cache expired) | New session + `/recap` | Avoids cache-write repricing of stale context |
+| >20 subagents spawned | `/compact` or new + `/recap` | Each subagent cold-starts a cache |
+| Transcript >20MB | New session + `/recap` | Reduces cache-write volume |
+
+**Cost perspective**: A 50MB session that resumes after cache expiry re-prices all context
+at cache-write rates (~$18.75/MTok). Starting fresh with /recap costs ~$0.03.
+
 ## Arguments
 
 - No args: resume from most recent previous session for current project (auto-detect)
