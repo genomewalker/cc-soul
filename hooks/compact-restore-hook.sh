@@ -97,6 +97,15 @@ if [[ -n "$SMART_CTX" && "$SMART_CTX" != *"No memories"* ]]; then
     CONTEXT_PARTS+=("[soul-compact]\n${SMART_CTX:0:400}\n[/soul-compact]")
 fi
 
+# Subagent budget carry-forward: warn if count is high post-compact
+if [[ -n "$SESSION_ID" ]]; then
+    AGENT_COUNT_FILE="$MIND_PATH/.subagent_count_${SESSION_ID}"
+    AGENT_COUNT=$(cat "$AGENT_COUNT_FILE" 2>/dev/null || echo 0)
+    if [[ $AGENT_COUNT -gt 15 ]]; then
+        CONTEXT_PARTS+=("[token-budget] ${AGENT_COUNT} subagents spawned pre-compact. Consider batching remaining work or starting fresh with /recap.")
+    fi
+fi
+
 # Emit as JSON hookSpecificOutput for SessionStart
 if [[ ${#CONTEXT_PARTS[@]} -gt 0 ]]; then
     FULL_CONTEXT=""

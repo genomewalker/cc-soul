@@ -31,6 +31,9 @@ MIND_PATH="${CHITTA_DB_PATH:-${HOME}/.claude/mind}"
 if [[ "$HOOK_SOURCE" != "compact" ]]; then
     rm -f "$MIND_PATH/.session_active" "$MIND_PATH/.gaps_surfaced"
     rm -f "$MIND_PATH/.stop_dedup_"* 2>/dev/null || true
+    rm -f "$MIND_PATH/.size_warned_"* 2>/dev/null || true
+    # Reset subagent counter for new session
+    [[ -n "$SESSION_ID" ]] && rm -f "$MIND_PATH/.subagent_count_${SESSION_ID}" 2>/dev/null || true
 fi
 
 # Initialize turn-discipline counter to current turn so the discipline nudge

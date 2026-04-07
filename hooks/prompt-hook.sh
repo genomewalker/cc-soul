@@ -68,7 +68,23 @@ if [[ -f "$LAST_STOP_FILE" ]]; then
     GAP=$(( NOW - LAST_STOP ))
     if [[ $GAP -gt 300 ]]; then
         GAP_MIN=$(( GAP / 60 ))
-        echo "[cache-expired: ${GAP_MIN}m idle — full context re-prices at 10x; consider /compact first]"
+        echo "[cache-expired: ${GAP_MIN}m idle — full context re-prices at cache-write rates; run /compact or start new session with /recap]"
+    fi
+fi
+
+# ===========================================
+# SESSION SIZE WARNING: Warn when transcript is bloating
+# ===========================================
+if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
+    TRANSCRIPT_SIZE=$(stat -c%s "$TRANSCRIPT_PATH" 2>/dev/null || echo 0)
+    TRANSCRIPT_MB=$(( TRANSCRIPT_SIZE / 1048576 ))
+    # >50MB = expensive session, warn every prompt
+    if [[ $TRANSCRIPT_MB -gt 50 ]]; then
+        echo "[context-bloat: ${TRANSCRIPT_MB}MB transcript — consider /compact or start fresh with /recap to reduce cache-write costs]"
+    # >20MB = getting large, warn once
+    elif [[ $TRANSCRIPT_MB -gt 20 && ! -f "$MIND_PATH/.size_warned_${SESSION_ID}" ]]; then
+        echo "[context-growing: ${TRANSCRIPT_MB}MB — /compact saves cache-write tokens; /recap starts lean]"
+        touch "$MIND_PATH/.size_warned_${SESSION_ID}" 2>/dev/null || true
     fi
 fi
 
