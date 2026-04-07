@@ -1,8 +1,11 @@
 #pragma once
-// SSLParser: Parse SSL v0.2 formatted output from LLM distillation
+// SSLParser: Parse SSL v0.3 formatted output from LLM distillation
 //
 // Extracts:
 // - Typed learnings ([SOLUTION], [GOTCHA], etc.) with [ε] verbatim lines
+// - Affect annotations (A:valence,arousal) on any type line
+// - Structural flags (F:ORIGIN,CORE,PIVOT,GENESIS,TURNING)
+// - Cross-references (→@tag)
 // - Triplet relationships ([TRIPLET] subject predicate object)
 
 #include <string>
@@ -19,12 +22,14 @@ struct SSLCitation {
 
 struct SSLLearning {
     std::string type;       // SOLUTION, GOTCHA, DECISION, PATTERN, PREFERENCE, FAILURE, AFFECT
-    std::string content;    // Full content including [ε] lines
+    std::string content;    // Full content including [ε] lines (annotations stripped)
     std::string title;      // First line (truncated to 100 chars)
     std::string category;   // Lowercase type for observe() category
     std::vector<SSLCitation> citations;  // Code locations referenced
     float affect_valence = 0.0f;  // -1.0 (negative) to +1.0 (positive), 0 = neutral
     float affect_arousal = 0.0f;  // 0.0 (calm) to 1.0 (intense)
+    std::vector<std::string> flags;  // Structural flags: ORIGIN, CORE, PIVOT, GENESIS, TURNING
+    std::vector<std::string> refs;   // Cross-references: →@tag names
 };
 
 struct SSLTriplet {

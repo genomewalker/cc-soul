@@ -187,22 +187,26 @@ std::vector<std::string> Ingester::chunk_text(const std::string& text) {
 }
 
 std::string Ingester::build_ingest_prompt(const std::string& chunk, const std::string& source) {
-    return std::string(R"(Extract learnings from this document in SSL v0.2 format.
+    return std::string(R"(Extract learnings from this document in SSL v0.3 format.
 
 Source: )") + source + R"(
 
-## SSL v0.2 format
+## SSL v0.3 format
+
+Two tiers: Tier 1 (code-bearing: SOLUTION, GOTCHA, PATTERN) with [ε], Tier 2 (narrative: DECISION, PREFERENCE, FAILURE) dense.
 
 Types:
-| Type | Use for |
-|------|---------|
-| [SOLUTION] | What worked: commands, fixes, approaches |
-| [GOTCHA] | Traps: counterintuitive behavior, edge cases |
-| [DECISION] | Design choices: why X over Y |
-| [PATTERN] | Reusable techniques that generalize |
-| [CORRECTION] | Updates to prior beliefs |
+| Type | Tier | Use for |
+|------|------|---------|
+| [SOLUTION] | 1 | What worked: commands, fixes, approaches |
+| [GOTCHA] | 1 | Traps: counterintuitive behavior, edge cases |
+| [PATTERN] | 1 | Reusable techniques that generalize |
+| [DECISION] | 2 | Design choices: why X over Y |
+| [CORRECTION] | 1 | Updates to prior beliefs |
 
-SSL symbols: → (produces) | (or) + (with) @ (location) ! (negation) ? (uncertainty)
+SSL symbols: → (produces) > (chose over) | (or/reason) + (with) @ (location) ! (negation) ? (uncertainty)
+
+Annotations: A:v,a (affect: valence,arousal) F:FLAG (ORIGIN,CORE,PIVOT,GENESIS,TURNING) →@ref (cross-reference)
 
 Relationships:
 ```
@@ -211,11 +215,12 @@ Relationships:
 
 ## Rules
 
-1. **Verbatim**: Commands, code, exact values go in [ε] lines
-2. **Compress**: Convert prose to SSL arrows
+1. **Verbatim**: Commands, code, exact values go in [ε] lines (Tier 1 only)
+2. **Compress**: Tier 2 uses dense symbol chains — no [ε]
 3. **Specific**: Include exact values, names, versions
 4. **No fluff**: Only non-obvious findings worth remembering
 5. **Domain tags**: Use [domain] after the type marker
+6. **Affect required**: Every learning must have A:v,a
 
 ---
 
@@ -224,7 +229,7 @@ DOCUMENT:
 
 ---
 
-Output ONLY SSL-formatted learnings (no explanations, no markdown headers):)";
+Output ONLY SSL-formatted learnings with A:v,a affect annotations (no explanations, no markdown headers):)";
 }
 
 std::string Ingester::call_llm(const std::string& prompt) {
@@ -243,8 +248,8 @@ std::string Ingester::call_llm(const std::string& prompt) {
 
     return call_llm_http(
         cached_endpoint_, config_.model, prompt,
-        "You are a research knowledge extractor. Extract learnings in SSL v0.2 format. "
-        "Output ONLY SSL-formatted learnings.",
+        "You are a research knowledge extractor. Extract learnings in SSL v0.3 format. "
+        "Output ONLY SSL-formatted learnings with A:v,a affect annotations.",
         config_.timeout_secs, 0.3f, 4096,
         [this](const std::string& msg) { log(msg); });
 }
@@ -295,11 +300,21 @@ void Ingester::store_learnings(const SSLParser::Result& ssl, const std::string& 
         if (mem_id == 0) continue;
         result.learnings_stored++;
 
-        // Apply affect dimensions if present
+        // Apply affect dimensions (v0.3: from A:v,a on any type)
         if (learning.affect_valence != 0.0f || learning.affect_arousal != 0.0f) {
             field_store_->set_affect(mem_id, learning.affect_valence, learning.affect_arousal);
             log("[ingest]     affect: v=" + std::to_string(learning.affect_valence) +
                 " a=" + std::to_string(learning.affect_arousal));
+        }
+
+        // Apply structural flags (v0.3: F:FLAG)
+        for (const auto& flag : learning.flags) {
+            field_store_->add_triplet(std::to_string(mem_id), "has_flag", flag);
+        }
+
+        // Apply cross-references (v0.3: →@ref)
+        for (const auto& ref : learning.refs) {
+            field_store_->add_triplet(std::to_string(mem_id), "references", ref);
         }
 
         // Link to source episode

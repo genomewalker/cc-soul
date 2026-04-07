@@ -25,8 +25,9 @@ CHITTA_BIN = Path.home() / ".claude" / "bin" / "chitta"
 
 SYSTEM_PROMPT = (
     "You are a memory distiller. Given a text passage, extract the key learnings "
-    "in SSL v0.2 format: [TYPE] [domain] subject→action→result\n"
+    "in SSL v0.3 format: [TYPE] [domain] subject→action→result A:v,a\n"
     "Types: SOLUTION, GOTCHA, DECISION, PATTERN, PREFERENCE, FAILURE\n"
+    "Annotations: A:valence,arousal (required), F:FLAG (when significant)\n"
     "Be concise. Use SSL arrows (→). Max 6 lines.\n"
     "Output ONLY SSL lines, one per line. No preamble, no explanation.\n"
     "If the text has no clear learnings, output a single PATTERN line."

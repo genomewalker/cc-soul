@@ -41,12 +41,24 @@ std::string SSLParser::type_to_category(const std::string& type) {
     return "wisdom";
 }
 
-// Parse affect valence/arousal from content like "(valence:-0.7, arousal:0.8)"
+// Parse affect valence/arousal from SSL v0.3 A:v,a format or legacy (valence:v, arousal:a)
 static void parse_affect_values(const std::string& content, float& valence, float& arousal) {
-    static const std::regex affect_pattern(
-        R"(valence:\s*([+\-]?\d+\.?\d*)\s*,\s*arousal:\s*(\d+\.?\d*))");
+    // v0.3 format: A:+0.5,0.4 or A:-0.3,0.6
+    static const std::regex v03_pattern(R"(A:([+\-]?\d+\.?\d*),(\d+\.?\d*))");
     std::smatch match;
-    if (std::regex_search(content, match, affect_pattern)) {
+    if (std::regex_search(content, match, v03_pattern)) {
+        try {
+            valence = std::stof(match[1].str());
+            arousal = std::stof(match[2].str());
+            valence = std::max(-1.0f, std::min(1.0f, valence));
+            arousal = std::max(0.0f, std::min(1.0f, arousal));
+            return;
+        } catch (...) {}
+    }
+    // Legacy format: (valence:-0.7, arousal:0.8)
+    static const std::regex legacy_pattern(
+        R"(valence:\s*([+\-]?\d+\.?\d*)\s*,\s*arousal:\s*(\d+\.?\d*))");
+    if (std::regex_search(content, match, legacy_pattern)) {
         try {
             valence = std::stof(match[1].str());
             arousal = std::stof(match[2].str());
@@ -54,6 +66,47 @@ static void parse_affect_values(const std::string& content, float& valence, floa
             arousal = std::max(0.0f, std::min(1.0f, arousal));
         } catch (...) {}
     }
+}
+
+// Parse F:FLAG annotations — returns vector of flag names
+static std::vector<std::string> parse_flags(const std::string& content) {
+    std::vector<std::string> flags;
+    static const std::regex flag_pattern(R"(F:([A-Z_,]+))");
+    std::smatch match;
+    if (std::regex_search(content, match, flag_pattern)) {
+        std::istringstream iss(match[1].str());
+        std::string flag;
+        while (std::getline(iss, flag, ',')) {
+            if (!flag.empty()) flags.push_back(flag);
+        }
+    }
+    return flags;
+}
+
+// Parse →@ref cross-references — returns vector of ref names
+static std::vector<std::string> parse_refs(const std::string& content) {
+    std::vector<std::string> refs;
+    static const std::regex ref_pattern(R"(→@([a-zA-Z0-9_-]+))");
+    auto begin = std::sregex_iterator(content.begin(), content.end(), ref_pattern);
+    auto end = std::sregex_iterator();
+    for (auto it = begin; it != end; ++it) {
+        refs.push_back((*it)[1].str());
+    }
+    return refs;
+}
+
+// Strip v0.3 annotations (A:v,a F:FLAG →@ref) from content for clean storage
+static std::string strip_annotations(const std::string& content) {
+    std::string result = content;
+    // Strip A:v,a
+    result = std::regex_replace(result, std::regex(R"(\s*A:[+\-]?\d+\.?\d*,\d+\.?\d*)"), "");
+    // Strip F:FLAG
+    result = std::regex_replace(result, std::regex(R"(\s*F:[A-Z_,]+)"), "");
+    // Strip →@ref
+    result = std::regex_replace(result, std::regex(R"(\s*→@[a-zA-Z0-9_-]+)"), "");
+    // Trim trailing whitespace
+    while (!result.empty() && std::isspace(result.back())) result.pop_back();
+    return result;
 }
 
 // Extract @file:line citations from text
@@ -133,10 +186,16 @@ SSLParser::Result SSLParser::parse(const std::string& output) {
         learning.citations = std::move(current_citations);
         current_citations.clear();
 
-        // Parse affect valence/arousal if AFFECT type
-        if (learning.type == "AFFECT") {
-            parse_affect_values(current_content, learning.affect_valence, learning.affect_arousal);
-        }
+        // Parse v0.3 annotations from all types (affect, flags, refs)
+        parse_affect_values(current_content, learning.affect_valence, learning.affect_arousal);
+        learning.flags = parse_flags(current_content);
+        learning.refs = parse_refs(current_content);
+
+        // Strip annotations from stored content (keep it clean)
+        learning.content = strip_annotations(learning.content);
+        // Recompute title from cleaned content
+        size_t np = learning.content.find('\n');
+        learning.title = learning.content.substr(0, std::min(np == std::string::npos ? learning.content.size() : np, size_t(100)));
 
         // Also extract inline @file:line citations from content
         auto inline_cites = extract_inline_citations(current_content);

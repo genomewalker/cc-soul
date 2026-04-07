@@ -1,20 +1,20 @@
 #pragma once
-// SSL v0.2 Prompt: Structured Semantic Language for distillation
+// SSL v0.3 Prompt: Structured Semantic Language for distillation
 //
 // This prompt extracts learnings from conversations using typed markers:
 // [SOLUTION], [GOTCHA], [DECISION], [PATTERN], [PREFERENCE], [FAILURE]
-// Plus [TRIPLET] for relationships and [ε] for verbatim code/commands
+// Plus [TRIPLET] for relationships, [ε] for verbatim code/commands,
+// A:v,a for affect, F:FLAG for structural importance, →@ref for cross-references
 
 #include <string>
 
 namespace chitta {
 namespace ssl {
 
-// SSL v0.2 extraction prompt — 6-lens structured extraction
-// Scans conversation across six extraction lenses before emitting SSL output.
-constexpr const char* EXTRACTION_PROMPT = R"(Extract learnings from this conversation in SSL v0.2 format.
+// SSL v0.3 extraction prompt — 7-lens structured extraction with two-tier compression
+constexpr const char* EXTRACTION_PROMPT = R"(Extract learnings from this conversation in SSL v0.3 format.
 
-## Step 1: Scan across six lenses
+## Step 1: Scan across seven lenses
 
 Before writing any output, mentally scan the conversation for each lens:
 
@@ -28,38 +28,53 @@ Before writing any output, mentally scan the conversation for each lens:
 
 Emit SSL lines only for findings that are non-obvious and worth remembering.
 
-## Step 2: Output SSL v0.2
+## Step 2: Output SSL v0.3
 
-Format:
+Two tiers depending on memory type:
+
+### Tier 1: Code-bearing (SOLUTION, GOTCHA, PATTERN)
 ```
-[TYPE] [domain] subject→action→result @location
+[TYPE] [domain] subject→action→result @location F:FLAG A:v,a →@ref
 [ε] exact_command_or_code_verbatim
+```
+
+### Tier 2: Narrative (DECISION, PREFERENCE, FAILURE) — denser, no [ε] needed
+```
+[TYPE] [domain] choice>alternative|reason+context F:FLAG A:v,a →@ref
 ```
 
 Types:
 
-| Type | Use for |
-|------|---------|
-| [SOLUTION] | What worked: commands, fixes, approaches that succeeded |
-| [GOTCHA] | Traps: counterintuitive behavior, silent failures, edge cases |
-| [DECISION] | Design choices: why X over Y, tradeoffs considered |
-| [PATTERN] | Reusable techniques: approaches that generalize |
-| [PREFERENCE] | User preferences, working style, identity facts |
-| [FAILURE] | What did not work and why |
-| [CORRECTION] | Updates to prior beliefs: supersedes earlier knowledge |
-| [EVENT] | Significant action taken this session (deployed, merged, configured) |
-| [AFFECT] | Emotional tone shift: frustration, eureka, confidence, confusion (valence:±1.0, arousal:0-1) |
+| Type | Tier | Use for |
+|------|------|---------|
+| [SOLUTION] | 1 | What worked: commands, fixes, approaches that succeeded |
+| [GOTCHA] | 1 | Traps: counterintuitive behavior, silent failures, edge cases |
+| [PATTERN] | 1 | Reusable techniques that generalize |
+| [DECISION] | 2 | Design choices: why X over Y, tradeoffs considered |
+| [PREFERENCE] | 2 | User preferences, working style, identity facts |
+| [FAILURE] | 2 | What did not work and why |
+| [CORRECTION] | 1 | Updates to prior beliefs: supersedes earlier knowledge |
+| [EVENT] | 2 | Significant action taken this session (deployed, merged, configured) |
 
 SSL symbols:
 
 | Symbol | Meaning |
 |--------|---------|
 | → | produces/leads to |
-| \| | or/alternative |
+| > | chose over (Tier 2) |
+| \| | or/alternative/reason |
 | + | with/and |
 | @ | location/file:line |
 | ! | negation |
 | ? | uncertainty |
+
+Annotations (append to TYPE line):
+
+| Annotation | Meaning | Values |
+|------------|---------|--------|
+| A:v,a | Affect (valence,arousal) | v: -1.0..+1.0, a: 0.0..1.0 |
+| F:FLAG | Structural importance | ORIGIN, CORE, PIVOT, GENESIS, TURNING |
+| →@ref | Cross-reference | tag name linking to related memory |
 
 Relationships:
 ```
@@ -71,42 +86,48 @@ Use for: calls, uses, contains, implements, depends_on, derived_from, supersedes
 
 When referencing specific code, include @file:line. Use [CITE] for multiple:
 ```
-[SOLUTION] [build] parallel-cmake→4x-faster @CMakeLists.txt:45
-[GOTCHA] [auth] token-refresh→must-check-expiry-first
+[SOLUTION] [build] parallel-cmake→4x-faster @CMakeLists.txt:45 A:+0.6,0.3
+[GOTCHA] [auth] token-refresh→must-check-expiry-first A:-0.4,0.7 F:CORE
 [CITE] src/auth/token.cpp:234 expiry check
 ```
 
 ## Rules
 
-1. **Verbatim**: Commands, code, exact values go in [ε] lines
-2. **Compress**: Convert explanations to SSL arrows
+1. **Verbatim**: Commands, code, exact values go in [ε] lines (Tier 1 only)
+2. **Compress**: Tier 2 types use dense symbol chains — no [ε] line
 3. **Specific**: File paths, line numbers, exact values when available
 4. **No fluff**: Skip obvious things
 5. **Corrections are first-class**: If something was previously wrong, emit [CORRECTION] — these supersede old beliefs
+6. **Affect required**: Every learning must have A:v,a — estimate from conversation tone
+7. **Flags when significant**: Add F: only for structurally important entries (origins, pivots, core decisions)
+8. **Cross-ref when related**: Use →@tag to link learnings that reference each other
 
 ## Examples
 
+### Tier 1 (code-bearing):
 ```
-[SOLUTION] [chitta] parallel-build→4x-faster @cmake
+[SOLUTION] [chitta] parallel-build→4x-faster @cmake A:+0.6,0.3
 [ε] cmake --build build --parallel
 
-[GOTCHA] [daemon] thread_pool→blocks-if-handler-throws @simple_cli.cpp:776
+[GOTCHA] [daemon] thread_pool→blocks-if-handler-throws @simple_cli.cpp:776 A:-0.4,0.7 F:CORE
+[ε] wrap handler.handle() in try-catch, return error JSON
 
-[DECISION] [rpc] async-queue→eventfd-wake→poll-returns-immediately
+[PATTERN] [hooks] fire-and-forget→queue-file→daemon-processes-async A:+0.3,0.2 →@queue-architecture
+[ε] echo json >> /tmp/chitta-queue.jsonl
 
-[PATTERN] [hooks] fire-and-forget→queue-file→daemon-processes-async
+[CORRECTION] [embeddings] :memory:→was-wrong-path→correct-path-is-~/.claude/mind A:+0.1,0.3
+```
 
-[PREFERENCE] [partnership] Antonio→no-shortcuts+proper-solutions-only
+### Tier 2 (narrative — dense, no [ε]):
+```
+[DECISION] [arch] sqlite>postgres|metadata|single-file+no-daemon+<100k A:+0.5,0.4 F:PIVOT
+[PREFERENCE] [partnership] no-shortcuts+proper-solutions+no-stubs A:+0.2,0.1 F:CORE
+[FAILURE] [http] http-daemon>unix-socket|200ms-latency+hooks-need-<50ms A:-0.3,0.6 →@queue-architecture
+[EVENT] [release] v5.7.0→deployed→ssl-v0.3-active A:+0.8,0.5 F:GENESIS
+```
 
-[FAILURE] [http] http-daemon→too-slow-for-hooks→switched-to-unix-socket
-
-[CORRECTION] [embeddings] :memory:→was-wrong-path→correct-path-is-~/.claude/mind
-
-[EVENT] [release] v4.0.26→deployed→gradmem-active @2026-03-21
-
-[AFFECT] [session] frustration→high+confidence→low (valence:-0.7, arousal:0.8)
-[AFFECT] [session] eureka→resolution+satisfaction (valence:+0.9, arousal:0.6)
-
+### Triplets:
+```
 [TRIPLET] GradMemWriter uses FieldStore
 [TRIPLET] gradmemd_snapshot supersedes session_embedding
 ```
@@ -119,7 +140,7 @@ CONVERSATION:
 // Build complete prompt with conversation content
 inline std::string build_prompt(const std::string& conversation) {
     return std::string(EXTRACTION_PROMPT) + conversation +
-           "\n\n---\n\nOutput ONLY SSL-formatted learnings (no explanations, no markdown headers):";
+           "\n\n---\n\nOutput ONLY SSL-formatted learnings with A:v,a affect annotations (no explanations, no markdown headers):";
 }
 
 } // namespace ssl

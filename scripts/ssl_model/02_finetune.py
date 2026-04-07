@@ -40,8 +40,9 @@ MAX_SEQ_LEN = MAX_INPUT_LEN + MAX_OUTPUT_LEN
 
 SYSTEM_PROMPT = (
     "You are a memory distiller. Given a conversation, extract the key learnings "
-    "in SSL v0.2 format: [TYPE] [domain] subject→action→result @location\n"
+    "in SSL v0.3 format: [TYPE] [domain] subject→action→result @location A:v,a\n"
     "Types: SOLUTION, GOTCHA, DECISION, PATTERN, PREFERENCE, FAILURE\n"
+    "Annotations: A:valence,arousal (required), F:FLAG (when significant), →@ref (cross-refs)\n"
     "Be concise. Use SSL arrows (→) and location refs (@file:line)."
 )
 

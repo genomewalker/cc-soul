@@ -60,8 +60,8 @@ std::string NativeDistiller::call_llm(const std::string& prompt) {
 
     return call_llm_http(
         cached_endpoint_, config_.model, prompt,
-        "You are a knowledge distiller. Extract learnings in SSL v0.2 format. "
-        "Output ONLY SSL-formatted learnings.",
+        "You are a knowledge distiller. Extract learnings in SSL v0.3 format. "
+        "Output ONLY SSL-formatted learnings with A:v,a affect annotations.",
         config_.timeout_secs, 0.3f, 4096,
         [this](const std::string& msg) { log(msg); });
 }
@@ -124,11 +124,23 @@ void NativeDistiller::store_learnings(
         log("[distill]   +" + learning.category + ": " +
             learning.title.substr(0, 60) + "...");
 
-        // Apply affect dimensions if present (from [AFFECT] learnings)
+        // Apply affect dimensions (v0.3: from A:v,a on any type)
         if (learning.affect_valence != 0.0f || learning.affect_arousal != 0.0f) {
             field_store_->set_affect(mem_id, learning.affect_valence, learning.affect_arousal);
             log("[distill]     affect: v=" + std::to_string(learning.affect_valence) +
                 " a=" + std::to_string(learning.affect_arousal));
+        }
+
+        // Apply structural flags (v0.3: F:FLAG)
+        for (const auto& flag : learning.flags) {
+            field_store_->add_triplet(std::to_string(mem_id), "has_flag", flag);
+            log("[distill]     flag: " + flag);
+        }
+
+        // Apply cross-references (v0.3: →@ref)
+        for (const auto& ref : learning.refs) {
+            field_store_->add_triplet(std::to_string(mem_id), "references", ref);
+            log("[distill]     ref: →@" + ref);
         }
 
         // Link to episode memory via DerivedFrom edge (edge_type=0)
