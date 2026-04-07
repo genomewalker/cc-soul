@@ -201,7 +201,13 @@ body::before {
   background: rgba(255,34,85,0.06);
 }
 #hdr-total { color: var(--violet); }
-#hdr-time { color: var(--dim); font-size: 9px; margin-left: auto; letter-spacing: 1px; }
+#hdr-time { color: var(--dim); font-size: 9px; letter-spacing: 1px; }
+.hdr-btn {
+  cursor: pointer; padding: 2px 6px; font-size: 8px; letter-spacing: 1.5px;
+  border: 1px solid var(--b-cyan); color: var(--cyan); background: rgba(0,212,255,0.04);
+  transition: all 0.15s; user-select: none;
+}
+.hdr-btn:hover { background: rgba(0,212,255,0.12); color: #fff; }
 
 /* ── Search ────────────────────────────────────────────────────────────────── */
 #hud-search {
@@ -392,6 +398,11 @@ body::before {
   <div class="hdr-badge" id="hdr-mem-badge">— MEM</div>
   <span id="hdr-total" style="font-size:9px;letter-spacing:1px"></span>
   <span id="hdr-time" style="font-size:8px;letter-spacing:1px;color:var(--dim)"></span>
+  <span class="hdr-sep">·</span>
+  <span class="hdr-btn" onclick="toggleBrowser()" title="Memory Browser">◉ MEM</span>
+  <span class="hdr-btn" onclick="toggleSkills()" title="Skill Registry">◆ SKILL</span>
+  <span class="hdr-btn" onclick="toggleAgents()" title="Agent Registry">◈ AGENT</span>
+  <span class="hdr-btn" onclick="toggleTriplets()" title="Triplet Explorer">▸ SPO</span>
 </div>
 
 <!-- Search -->
@@ -445,6 +456,56 @@ body::before {
   <span class="bk tl"></span><span class="bk tr"></span><span class="bk bl"></span><span class="bk br"></span>
   <div class="ph"><span class="ph-dot violet"></span><span class="ph-label">recall stream</span><span class="ph-right">click → focus</span></div>
   <div class="recall-list pb" id="recall-feed"></div>
+</div>
+
+<!-- Memory Browser -->
+<div class="panel" id="hud-browser" style="display:none;position:fixed;right:10px;top:50%;transform:translateY(-50%);width:340px;max-height:70vh;z-index:200;">
+  <span class="bk tl"></span><span class="bk tr"></span><span class="bk bl"></span><span class="bk br"></span>
+  <div class="ph"><span class="ph-dot cyan"></span><span class="ph-label">memory browser</span><span class="ph-right" style="cursor:pointer" onclick="toggleBrowser()">✕</span></div>
+  <div style="padding:4px 8px;position:relative;z-index:2">
+    <input id="mem-search" type="text" placeholder="search memories…" autocomplete="off" spellcheck="false"
+           style="width:100%;background:rgba(0,20,40,0.8);border:1px solid var(--b-cyan);color:var(--text);padding:4px 8px;font-size:10px;font-family:inherit;outline:none;">
+    <select id="mem-kind-filter" style="margin-top:4px;width:100%;background:rgba(0,20,40,0.8);border:1px solid var(--b-cyan);color:var(--text);padding:3px;font-size:9px;font-family:inherit;">
+      <option value="">all kinds</option>
+      <option value="wisdom">wisdom</option><option value="episode">episode</option>
+      <option value="habit">habit</option><option value="belief">belief</option>
+      <option value="correction">correction</option><option value="insight">insight</option>
+    </select>
+  </div>
+  <div id="mem-results" style="overflow-y:auto;max-height:calc(70vh - 100px);scrollbar-width:thin;scrollbar-color:var(--dim2) transparent;padding:4px 8px;position:relative;z-index:2;">
+    <span style="color:var(--dim);font-size:9px">Type to search…</span>
+  </div>
+</div>
+
+<!-- Skills Panel -->
+<div class="panel" id="hud-skills" style="display:none;position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:500px;max-height:70vh;z-index:200;">
+  <span class="bk tl"></span><span class="bk tr"></span><span class="bk bl"></span><span class="bk br"></span>
+  <div class="ph"><span class="ph-dot"></span><span class="ph-label">skill registry</span><span class="ph-right" style="cursor:pointer" onclick="toggleSkills()">✕</span></div>
+  <div id="skills-content" style="overflow-y:auto;max-height:calc(70vh - 40px);scrollbar-width:thin;scrollbar-color:var(--dim2) transparent;padding:8px;position:relative;z-index:2;">
+    <span style="color:var(--dim);font-size:9px">Loading…</span>
+  </div>
+</div>
+
+<!-- Agents Panel -->
+<div class="panel" id="hud-agents" style="display:none;position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:500px;max-height:70vh;z-index:200;">
+  <span class="bk tl"></span><span class="bk tr"></span><span class="bk bl"></span><span class="bk br"></span>
+  <div class="ph"><span class="ph-dot amber"></span><span class="ph-label">agent registry</span><span class="ph-right" style="cursor:pointer" onclick="toggleAgents()">✕</span></div>
+  <div id="agents-content" style="overflow-y:auto;max-height:calc(70vh - 40px);scrollbar-width:thin;scrollbar-color:var(--dim2) transparent;padding:8px;position:relative;z-index:2;">
+    <span style="color:var(--dim);font-size:9px">Loading…</span>
+  </div>
+</div>
+
+<!-- Triplet Explorer -->
+<div class="panel panel-violet" id="hud-triplets" style="display:none;position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:560px;max-height:70vh;z-index:200;">
+  <span class="bk tl"></span><span class="bk tr"></span><span class="bk bl"></span><span class="bk br"></span>
+  <div class="ph"><span class="ph-dot violet"></span><span class="ph-label">triplet explorer</span><span class="ph-right" style="cursor:pointer" onclick="toggleTriplets()">✕</span></div>
+  <div style="padding:4px 8px;position:relative;z-index:2">
+    <input id="triplet-search" type="text" placeholder="entity name…" autocomplete="off" spellcheck="false"
+           style="width:100%;background:rgba(0,20,40,0.8);border:1px solid var(--b-violet);color:var(--text);padding:4px 8px;font-size:10px;font-family:inherit;outline:none;">
+  </div>
+  <div id="triplet-results" style="overflow-y:auto;max-height:calc(70vh - 80px);scrollbar-width:thin;scrollbar-color:var(--dim2) transparent;padding:4px 8px;position:relative;z-index:2;">
+    <span style="color:var(--dim);font-size:9px">Search for an entity to see its triplets…</span>
+  </div>
 </div>
 
 <!-- Legend -->
@@ -875,8 +936,123 @@ fetch(`${serverUrl}/health`).then(r=>r.json()).then(d=>{
 }).catch(()=>{});
 
 // Make all panels draggable (skip header which is full-width)
-['hud-search','hud-stats','hud-inspector','hud-recall','hud-instances','hud-legend']
+['hud-search','hud-stats','hud-inspector','hud-recall','hud-instances','hud-legend',
+ 'hud-browser','hud-skills','hud-agents','hud-triplets']
   .forEach(id => { const el = document.getElementById(id); if (el) makeDraggable(el); });
+
+// ── Toggle panels ────────────────────────────────────────────────────────────
+function togglePanel(id) {
+  const el = document.getElementById(id);
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+function toggleBrowser()  { togglePanel('hud-browser'); }
+function toggleSkills()   { togglePanel('hud-skills');  if (document.getElementById('hud-skills').style.display !== 'none') loadSkills(); }
+function toggleAgents()   { togglePanel('hud-agents');  if (document.getElementById('hud-agents').style.display !== 'none') loadAgents(); }
+function toggleTriplets()  { togglePanel('hud-triplets'); }
+
+// ── Memory Browser ───────────────────────────────────────────────────────────
+let memSearchTimer = null;
+document.getElementById('mem-search').addEventListener('input', e => {
+  clearTimeout(memSearchTimer);
+  memSearchTimer = setTimeout(() => searchMemories(e.target.value), 300);
+});
+document.getElementById('mem-kind-filter').addEventListener('change', () => {
+  searchMemories(document.getElementById('mem-search').value);
+});
+
+function searchMemories(q) {
+  const kind = document.getElementById('mem-kind-filter').value;
+  const params = new URLSearchParams();
+  if (q) params.set('q', q);
+  if (kind) params.set('kind', kind);
+  params.set('limit', '40');
+  fetch(`${serverUrl}/api/memories?${params}`).then(r => r.json()).then(data => {
+    const container = document.getElementById('mem-results');
+    if (!data || !data.length) { container.innerHTML = '<span style="color:var(--dim);font-size:9px">No results</span>'; return; }
+    container.innerHTML = data.map(m => {
+      const c = (m.content || '').substring(0, 150);
+      const k = m.kind || 'unknown';
+      const color = KIND_COLOR[k] || '#2a4a6a';
+      return `<div style="padding:4px 0;border-bottom:1px solid rgba(0,212,255,0.05);cursor:pointer" onclick="inspectNode('${m.id}')">
+        <div style="display:flex;align-items:center;gap:5px">
+          <span style="width:5px;height:5px;border-radius:50%;background:${color};flex-shrink:0"></span>
+          <span style="font-size:8px;letter-spacing:1px;color:${color};text-transform:uppercase">${k}</span>
+          <span style="font-size:8px;color:var(--dim);margin-left:auto">${(m.strength||0).toFixed(2)}</span>
+        </div>
+        <div style="font-size:9.5px;color:var(--text);line-height:1.4;margin-top:2px;word-break:break-word">${c}</div>
+      </div>`;
+    }).join('');
+  }).catch(() => {});
+}
+
+// ── Skills Panel ─────────────────────────────────────────────────────────────
+function loadSkills() {
+  fetch(`${serverUrl}/api/skills`).then(r => r.json()).then(data => {
+    const container = document.getElementById('skills-content');
+    if (!data || !data.length) { container.innerHTML = '<span style="color:var(--dim)">No skills registered</span>'; return; }
+    container.innerHTML = data.map(s => `
+      <div style="padding:6px;border:1px solid var(--b-cyan);margin-bottom:6px;position:relative;z-index:2">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="color:var(--cyan);font-size:10px;font-weight:600">${s.skill_id}</span>
+          <span style="color:var(--dim);font-size:8px;letter-spacing:1px">v${s.latest_version}</span>
+        </div>
+      </div>
+    `).join('');
+  }).catch(() => {});
+}
+
+// ── Agents Panel ─────────────────────────────────────────────────────────────
+function loadAgents() {
+  fetch(`${serverUrl}/api/agents`).then(r => r.json()).then(data => {
+    const container = document.getElementById('agents-content');
+    if (!data || !data.length) { container.innerHTML = '<span style="color:var(--dim)">No agents registered</span>'; return; }
+    container.innerHTML = data.map(a => {
+      const statusColor = a.status === 'Active' ? 'var(--green)' : a.status === 'Revoked' ? 'var(--red)' : 'var(--dim)';
+      return `<div style="padding:6px;border:1px solid var(--b-cyan);margin-bottom:6px;position:relative;z-index:2">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="color:var(--amber);font-size:10px;font-weight:600">${a.display_name || a.agent_id}</span>
+          <span style="color:${statusColor};font-size:8px;letter-spacing:1px;border:1px solid;padding:1px 4px">${a.status}</span>
+        </div>
+        <div style="color:var(--dim);font-size:9px;margin-top:3px">${a.description || ''}</div>
+        <div style="display:flex;gap:12px;margin-top:4px;font-size:8px;color:var(--dim)">
+          <span>memories: <span style="color:var(--text)">${a.memory_count}</span></span>
+          <span>sessions: <span style="color:var(--text)">${a.session_count}</span></span>
+          <span style="margin-left:auto">${new Date(a.last_seen_ms).toLocaleString()}</span>
+        </div>
+      </div>`;
+    }).join('');
+  }).catch(() => {});
+}
+
+// ── Triplet Explorer ─────────────────────────────────────────────────────────
+let tripletTimer = null;
+document.getElementById('triplet-search').addEventListener('input', e => {
+  clearTimeout(tripletTimer);
+  tripletTimer = setTimeout(() => searchTriplets(e.target.value), 400);
+});
+
+function searchTriplets(entity) {
+  if (!entity || entity.length < 2) return;
+  fetch(`${serverUrl}/api/triplets?entity=${encodeURIComponent(entity)}&limit=80`)
+    .then(r => r.json()).then(data => {
+      const container = document.getElementById('triplet-results');
+      const triplets = data.triplets || data;
+      if (!triplets || !triplets.length) {
+        container.innerHTML = '<span style="color:var(--dim);font-size:9px">No triplets found</span>';
+        return;
+      }
+      container.innerHTML = triplets.map(t => {
+        const s = t.subject || '?', p = t.predicate || '?', o = t.object || '?';
+        const w = (t.weight || 0).toFixed(2);
+        return `<div style="padding:3px 0;border-bottom:1px solid rgba(155,95,255,0.06);font-size:9.5px">
+          <span style="color:var(--cyan);cursor:pointer" onclick="document.getElementById('triplet-search').value='${s}';searchTriplets('${s}')">${s}</span>
+          <span style="color:var(--violet);margin:0 4px">—${p}→</span>
+          <span style="color:var(--green);cursor:pointer" onclick="document.getElementById('triplet-search').value='${o}';searchTriplets('${o}')">${o}</span>
+          <span style="color:var(--dim);font-size:8px;margin-left:6px">(${w})</span>
+        </div>`;
+      }).join('');
+    }).catch(() => {});
+}
 </script>
 </body>
 </html>

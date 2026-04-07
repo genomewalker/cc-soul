@@ -20,6 +20,8 @@
            << "  yantra   : " << (yantra_ ? "loaded" : "unavailable") << "\n"
            << "  backend  : chitta-field\n";
 
+        std::string chain = field_store_->chain_head();
+
         json out = {
             {"status",           "ok"},
             {"memory_count",     mem_count},
@@ -30,6 +32,7 @@
             {"protocol_major",   CHITTA_PROTOCOL_VERSION_MAJOR},
             {"protocol_minor",   CHITTA_PROTOCOL_VERSION_MINOR},
             {"pid",              static_cast<int>(getpid())},
+            {"chain_head",       chain.empty() ? "none (v1 data)" : chain},
         };
         if (!stats_j.is_null() && stats_j.contains("count_by_kind")) {
             out["count_by_kind"]    = stats_j["count_by_kind"];

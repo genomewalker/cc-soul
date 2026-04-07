@@ -165,6 +165,93 @@ public:
             res.set_content(fetch_memory_detail(id), "application/json");
         });
 
+        // ── Memory search/browse API ──────────────────────────────────────
+        svr_.Get("/api/memories", [this](const httplib::Request& req, httplib::Response& res) {
+            std::string kind = req.has_param("kind") ? req.get_param_value("kind") : "";
+            std::string query = req.has_param("q") ? req.get_param_value("q") : "";
+            size_t limit = 50;
+            size_t offset = 0;
+            if (req.has_param("limit")) try { limit = std::stoul(req.get_param_value("limit")); } catch(...) {}
+            if (req.has_param("offset")) try { offset = std::stoul(req.get_param_value("offset")); } catch(...) {}
+
+            std::string raw;
+            if (!query.empty()) {
+                // Keyword search
+                CfRecallHit hits[100];
+                size_t written = 0;
+                size_t max_hits = std::min(limit, size_t(100));
+                cf_recall_keyword(field_->handle(), query.c_str(), max_hits, hits, max_hits, &written);
+                json arr = json::array();
+                for (size_t i = 0; i < written; ++i) {
+                    json m;
+                    m["id"] = std::to_string(hits[i].memory_id);
+                    m["score"] = hits[i].score;
+                    m["strength"] = hits[i].strength;
+                    m["confidence"] = hits[i].confidence;
+                    m["ts_ms"] = hits[i].ts_ms;
+                    std::string content = field_->get_content(hits[i].memory_id);
+                    m["content"] = utf8_trunc(content, 200);
+                    // Get kind
+                    char kbuf[256] = {};
+                    if (cf_get_kind(field_->handle(), hits[i].memory_id,
+                                    reinterpret_cast<uint8_t*>(kbuf), sizeof(kbuf)) == 0) {
+                        m["kind"] = std::string(kbuf);
+                    }
+                    arr.push_back(m);
+                }
+                res.set_content(arr.dump(), "application/json");
+            } else {
+                raw = field_->list_memories(kind, "", "strength", limit, offset);
+                res.set_content(raw, "application/json");
+            }
+        });
+
+        // ── Triplet graph API ────────────────────────────────────────────
+        svr_.Get("/api/triplets", [this](const httplib::Request& req, httplib::Response& res) {
+            std::string entity = req.has_param("entity") ? req.get_param_value("entity") : "";
+            std::string subject = req.has_param("subject") ? req.get_param_value("subject") : "";
+            size_t limit = 100;
+            if (req.has_param("limit")) try { limit = std::stoul(req.get_param_value("limit")); } catch(...) {}
+
+            std::string raw;
+            if (!entity.empty()) {
+                raw = field_->list_triplets_for_entity(entity, limit);
+            } else if (!subject.empty()) {
+                raw = field_->query_subject(subject);
+            } else {
+                raw = "[]";
+            }
+            res.set_content(raw, "application/json");
+        });
+
+        // ── Skill registry API ───────────────────────────────────────────
+        svr_.Get("/api/skills", [this](const httplib::Request&, httplib::Response& res) {
+            std::string raw = field_->skill_list();
+            res.set_content(raw, "application/json");
+        });
+
+        svr_.Get(R"(/api/skills/(.+))", [this](const httplib::Request& req, httplib::Response& res) {
+            std::string skill_id = req.matches[1];
+            uint32_t version = 0;
+            if (req.has_param("version")) try { version = std::stoul(req.get_param_value("version")); } catch(...) {}
+            std::string raw = field_->skill_read(skill_id, version);
+            if (raw.empty()) { res.status = 404; res.set_content(R"({"error":"not found"})", "application/json"); return; }
+            res.set_content(raw, "application/json");
+        });
+
+        // ── Agent registry API ───────────────────────────────────────────
+        svr_.Get("/api/agents", [this](const httplib::Request&, httplib::Response& res) {
+            std::string raw = field_->agent_list();
+            res.set_content(raw, "application/json");
+        });
+
+        svr_.Get(R"(/api/agents/(.+))", [this](const httplib::Request& req, httplib::Response& res) {
+            std::string agent_id = req.matches[1];
+            std::string raw = field_->agent_get(agent_id);
+            if (raw.empty()) { res.status = 404; res.set_content(R"({"error":"not found"})", "application/json"); return; }
+            res.set_content(raw, "application/json");
+        });
+
         svr_.Get("/events", [this](const httplib::Request&, httplib::Response& res) {
             res.set_header("Cache-Control", "no-cache");
             res.set_header("X-Accel-Buffering", "no");

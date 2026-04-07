@@ -38,6 +38,25 @@ int cf_search_attractor(const struct CfHandle* h, const float* embedding, size_t
 int cf_hopfield_co_retrieval(struct CfHandle* h, const uint64_t* ids, size_t count, int64_t ts_ms);
 char* cf_hopfield_stats(const struct CfHandle* h);
 int cf_adapt_vigilance(struct CfHandle* h, float avg_error);
+int cf_chain_head(const struct CfHandle* h, uint8_t* out);
+void cf_free_string(char* s);
+
+// Skill registry FFI
+int cf_skill_upload(struct CfHandle* h, const char* skill_id, const char* content,
+    const char* uploaded_by, const char* tags_json, int64_t ts_ms);
+char* cf_skill_read(const struct CfHandle* h, const char* skill_id, uint32_t version);
+char* cf_skill_list(const struct CfHandle* h);
+char* cf_skill_search(const struct CfHandle* h, const char* query, size_t limit);
+int cf_skill_deprecate(struct CfHandle* h, const char* skill_id);
+
+// Agent registry FFI
+int cf_agent_upsert(struct CfHandle* h, const char* agent_id,
+    const char* display_name, const char* description, int64_t ts_ms);
+int cf_agent_record_activity(struct CfHandle* h, const char* agent_id, int64_t ts_ms);
+int cf_agent_record_session(struct CfHandle* h, const char* agent_id, int64_t ts_ms);
+char* cf_agent_get(const struct CfHandle* h, const char* agent_id);
+char* cf_agent_list(const struct CfHandle* h);
+int cf_agent_disable(struct CfHandle* h, const char* agent_id);
 }
 
 namespace chitta {
@@ -128,6 +147,22 @@ public:
     /// Compact WAL: save full snapshot then delete covered segments. Returns deleted count or -1.
     int64_t compact_wal() {
         return cf_compact_wal(handle_);
+    }
+
+    /// Return the chain tip hash as a 64-char hex string. Empty if only V1 data.
+    std::string chain_head() const {
+        uint8_t buf[32] = {};
+        if (cf_chain_head(handle_, buf) != 0) return "";
+        bool all_zero = true;
+        for (int i = 0; i < 32; ++i) { if (buf[i]) { all_zero = false; break; } }
+        if (all_zero) return "";
+        static const char* hex = "0123456789abcdef";
+        std::string out(64, '0');
+        for (int i = 0; i < 32; ++i) {
+            out[i*2]   = hex[buf[i] >> 4];
+            out[i*2+1] = hex[buf[i] & 0xf];
+        }
+        return out;
     }
 
     // ── FEP Attractor Network ───────────────────────────────────────────
@@ -970,6 +1005,89 @@ public:
             ids.data(), ids.size(), buf, sizeof(buf), &written);
         if (r != 0) return "{}";
         return std::string(buf, written);
+    }
+
+    // ── Skill Registry ───────────────────────────────────────────────
+
+    /// Upload a new skill version. Returns the version number.
+    int skill_upload(const std::string& skill_id, const std::string& content,
+                     const std::string& uploaded_by, const std::string& tags_json, int64_t ts_ms) {
+        return cf_skill_upload(handle_, skill_id.c_str(), content.c_str(),
+            uploaded_by.c_str(), tags_json.c_str(), ts_ms);
+    }
+
+    /// Read a skill version as JSON. version=0 means latest.
+    std::string skill_read(const std::string& skill_id, uint32_t version = 0) {
+        char* json = cf_skill_read(handle_, skill_id.c_str(), version);
+        if (!json) return "";
+        std::string result(json);
+        cf_free_string(json);
+        return result;
+    }
+
+    /// List all skills as JSON array.
+    std::string skill_list() {
+        char* json = cf_skill_list(handle_);
+        if (!json) return "[]";
+        std::string result(json);
+        cf_free_string(json);
+        return result;
+    }
+
+    /// Search skills by query. Returns JSON array.
+    std::string skill_search(const std::string& query, size_t limit = 20) {
+        char* json = cf_skill_search(handle_, query.c_str(), limit);
+        if (!json) return "[]";
+        std::string result(json);
+        cf_free_string(json);
+        return result;
+    }
+
+    /// Deprecate a skill.
+    int skill_deprecate(const std::string& skill_id) {
+        return cf_skill_deprecate(handle_, skill_id.c_str());
+    }
+
+    // ── Agent Registry ──────────────────────────────────────────────
+
+    /// Register or update an agent. Returns 1 if new, 0 if updated.
+    int agent_upsert(const std::string& agent_id, const std::string& display_name,
+                     const std::string& description, int64_t ts_ms) {
+        return cf_agent_upsert(handle_, agent_id.c_str(), display_name.c_str(),
+            description.c_str(), ts_ms);
+    }
+
+    /// Record activity for an agent.
+    int agent_record_activity(const std::string& agent_id, int64_t ts_ms) {
+        return cf_agent_record_activity(handle_, agent_id.c_str(), ts_ms);
+    }
+
+    /// Record a session for an agent.
+    int agent_record_session(const std::string& agent_id, int64_t ts_ms) {
+        return cf_agent_record_session(handle_, agent_id.c_str(), ts_ms);
+    }
+
+    /// Get an agent record as JSON.
+    std::string agent_get(const std::string& agent_id) {
+        char* json = cf_agent_get(handle_, agent_id.c_str());
+        if (!json) return "";
+        std::string result(json);
+        cf_free_string(json);
+        return result;
+    }
+
+    /// List all agents as JSON array.
+    std::string agent_list() {
+        char* json = cf_agent_list(handle_);
+        if (!json) return "[]";
+        std::string result(json);
+        cf_free_string(json);
+        return result;
+    }
+
+    /// Disable (revoke) an agent.
+    int agent_disable(const std::string& agent_id) {
+        return cf_agent_disable(handle_, agent_id.c_str());
     }
 
     CfHandle* handle() const { return handle_; }
