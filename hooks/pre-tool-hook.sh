@@ -282,16 +282,36 @@ case "$MATCHER" in
             fi
         fi
 
+        # Code intelligence advisory: if chitta has this file's directory indexed, suggest smart_context/read_symbol
+        advisory=""
+        if [[ -x "$CHITTA_BIN" ]] && daemon_available; then
+            dir_path=$(dirname "$file_path")
+            dir_syms=$(timeout 1 "$CHITTA_BIN" code_context --path "$dir_path" --json 2>/dev/null | jq -r '.dir_symbols // 0' 2>/dev/null || echo 0)
+            if [[ "$dir_syms" -gt 0 ]]; then
+                advisory="[code-intel] File is indexed in chitta ($dir_syms symbols in dir). Prefer: smart_context(task) → read_symbol(file,symbol) → symbol_patch/file_patch. Saves 60-90% tokens vs Read+Edit."
+            fi
+        fi
+
         # Only compress large files (≤200 lines pass through untouched)
         line_count=$(wc -l < "$file_path" 2>/dev/null || echo 0)
-        [[ "$line_count" -le 200 ]] && exit 0
+        if [[ "$line_count" -le 200 ]]; then
+            # Small file — pass through, but still advise code-intel if available
+            if [[ -n "$advisory" ]]; then
+                printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"%s"}}' "$advisory"
+            fi
+            exit 0
+        fi
 
         # Use updatedInput to limit Read to 150 lines + advisory context.
-        # exit 2 with plain text doesn't work for native tools (only Bash).
         offset=$(echo "$STDIN_DATA" | jq -r '.tool_input.offset // 0')
         escaped_path=$(echo -n "$file_path" | jq -Rs '.')
-        printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[hook] Large file (%d lines). Reading first 150. Use offset for later sections.","updatedInput":{"file_path":%s,"limit":150,"offset":%s}}}' \
-            "$line_count" "$escaped_path" "$offset"
+        if [[ -n "$advisory" ]]; then
+            printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[hook] Large file (%d lines). Reading first 150. Use offset for later sections. %s","updatedInput":{"file_path":%s,"limit":150,"offset":%s}}}' \
+                "$line_count" "$advisory" "$escaped_path" "$offset"
+        else
+            printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[hook] Large file (%d lines). Reading first 150. Use offset for later sections.","updatedInput":{"file_path":%s,"limit":150,"offset":%s}}}' \
+                "$line_count" "$escaped_path" "$offset"
+        fi
         ;;
 
     Grep)
@@ -313,6 +333,16 @@ case "$MATCHER" in
         ;;
 
     Edit)
+        # Code intelligence advisory: suggest symbol_patch/file_patch for indexed files
+        file_path=$(echo "$STDIN_DATA" | jq -r '.tool_input.file_path // empty')
+        if [[ -n "$file_path" && -x "$CHITTA_BIN" ]] && daemon_available; then
+            dir_path=$(dirname "$file_path")
+            dir_syms=$(timeout 1 "$CHITTA_BIN" code_context --path "$dir_path" --json 2>/dev/null | jq -r '.dir_symbols // 0' 2>/dev/null || echo 0)
+            if [[ "$dir_syms" -gt 0 ]]; then
+                printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"[code-intel] File is indexed. Prefer symbol_patch(file,symbol,body) or file_patch(file,old_str,new_str) — no Read needed, fewer tokens."}}\n'
+            fi
+        fi
+
         FP_BIN="${HOME}/.claude/bin/fp"
         [[ ! -x "$FP_BIN" ]] && exit 0
         # fp --hook reads the full tool JSON, applies patch, exits 2 with confirmation.
