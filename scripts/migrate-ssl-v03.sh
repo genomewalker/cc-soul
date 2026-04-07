@@ -5,7 +5,6 @@
 #   1. Scans all memories for format version (v0.3, v0.2, legacy)
 #   2. For v0.2 memories: adds default affect values based on category
 #   3. Detects structurally significant memories and adds F: flags
-#   4. Tags migrated memories as ssl-v0.3
 #
 # Usage:
 #   ./scripts/migrate-ssl-v03.sh [--dry-run] [--limit N] [--realm REALM]
@@ -28,7 +27,6 @@ while [[ $# -gt 0 ]]; do
             echo "Migrates SSL v0.2 memories to v0.3 format by adding:"
             echo "  - A:v,a affect annotations (default values based on category)"
             echo "  - F:FLAG structural flags (detected from content patterns)"
-            echo "  - ssl-v0.3 tag"
             echo ""
             echo "Options:"
             echo "  --dry-run   Show what would be changed without modifying anything"
@@ -50,7 +48,16 @@ if ! "$CHITTA_BIN" health_check &>/dev/null; then
     exit 1
 fi
 
-# Default affect values by category
+# ── Helper: send JSON-RPC to daemon via pipe ──────────────────────────────────
+
+rpc_call() {
+    local tool="$1" args="$2"
+    echo "{\"method\":\"tools/call\",\"params\":{\"name\":\"$tool\",\"arguments\":$args},\"id\":1}" \
+        | "$CHITTA_BIN" 2>/dev/null
+}
+
+# ── Default affect values by category ─────────────────────────────────────────
+
 default_affect() {
     local category="$1"
     case "$category" in
@@ -67,29 +74,26 @@ default_affect() {
     esac
 }
 
-# Detect structural flags from content
+# ── Detect structural flags from content ──────────────────────────────────────
+
 detect_flags() {
     local content="$1"
     local flags=""
 
-    # ORIGIN: first mention, birth, started, created, invented
     if echo "$content" | grep -qiE '(first|birth|started|created|invented|initial|began|introduced)'; then
         flags="ORIGIN"
     fi
 
-    # PIVOT: changed, switched, migrated, replaced, moved from/to
     if echo "$content" | grep -qiE '(changed|switched|migrated|replaced|moved from|pivoted|reversed|abandoned)'; then
         [[ -n "$flags" ]] && flags="$flags,"
         flags="${flags}PIVOT"
     fi
 
-    # CORE: always, fundamental, essential, critical, must, foundation
     if echo "$content" | grep -qiE '(always|fundamental|essential|critical|must|foundation|core|cornerstone)'; then
         [[ -n "$flags" ]] && flags="$flags,"
         flags="${flags}CORE"
     fi
 
-    # TURNING: breakthrough, finally, eureka, realized, key insight
     if echo "$content" | grep -qiE '(breakthrough|finally|eureka|realized|key insight|turning point|game.changer)'; then
         [[ -n "$flags" ]] && flags="$flags,"
         flags="${flags}TURNING"
@@ -98,32 +102,26 @@ detect_flags() {
     echo "$flags"
 }
 
-# Detect format version of a memory
+# ── Detect format version of a memory ─────────────────────────────────────────
+
 detect_version() {
     local content="$1"
-    # v0.3: has A:v,a annotation
     if echo "$content" | grep -qP 'A:[+-]?[0-9.]+,[0-9.]+'; then
         echo "v0.3"
-    # v0.2: has → arrows but no A: annotation
     elif echo "$content" | grep -qF '→'; then
         echo "v0.2"
-    # legacy: prose
     else
         echo "legacy"
     fi
 }
+
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 echo "=== SSL v0.3 Migration ==="
 echo "Mode: $([ "$DRY_RUN" = true ] && echo 'DRY RUN' || echo 'LIVE')"
 [[ -n "$REALM_FILTER" ]] && echo "Realm: $REALM_FILTER"
 [[ "$LIMIT" -gt 0 ]] && echo "Limit: $LIMIT"
 echo ""
-
-# Get all memory IDs with their categories
-QUERY="SELECT id, kind, realm FROM memory_state WHERE deleted = 0"
-[[ -n "$REALM_FILTER" ]] && QUERY="$QUERY AND realm = '$REALM_FILTER'"
-QUERY="$QUERY ORDER BY id"
-[[ "$LIMIT" -gt 0 ]] && QUERY="$QUERY LIMIT $LIMIT"
 
 STATS_V03=0
 STATS_V02=0
@@ -132,69 +130,142 @@ STATS_MIGRATED=0
 STATS_FLAGGED=0
 STATS_SKIPPED=0
 STATS_ERRORS=0
+PROCESSED=0
 
-# Process each memory
-while IFS='|' read -r mem_id kind realm; do
-    [[ -z "$mem_id" ]] && continue
-    [[ "$mem_id" =~ ^[^0-9] ]] && continue  # skip header rows
+# Memory kinds to process (from hygiene_stats)
+KINDS=("wisdom" "insight" "episode" "signal" "milestone" "habit" "claim" "goal" "research_event")
+BATCH_SIZE=500
 
-    # Get memory content
-    content=$("$CHITTA_BIN" get --id "$mem_id" --text-only 2>/dev/null || echo "")
-    [[ -z "$content" ]] && { ((STATS_SKIPPED++)) || true; continue; }
+for kind in "${KINDS[@]}"; do
+    echo "--- Scanning kind: $kind ---"
+    offset=0
+    kind_total=0
 
-    version=$(detect_version "$content")
-
-    case "$version" in
-        v0.3)
-            ((STATS_V03++)) || true
-            continue
-            ;;
-        v0.2)
-            ((STATS_V02++)) || true
-            ;;
-        legacy)
-            ((STATS_LEGACY++)) || true
-            ;;
-    esac
-
-    # Already tagged as ssl-v0.3? Skip
-    if "$CHITTA_BIN" query --subject "$mem_id" --predicate "tagged" --object "ssl-v0.3" 2>/dev/null | grep -q "ssl-v0.3"; then
-        ((STATS_SKIPPED++)) || true
-        continue
-    fi
-
-    # Determine affect values
-    affect=$(default_affect "$kind")
-    valence="${affect%,*}"
-    arousal="${affect#*,}"
-
-    # Detect structural flags
-    flags=$(detect_flags "$content")
-
-    if [[ "$DRY_RUN" == "true" ]]; then
-        echo "  #$mem_id [$kind] ($version) → A:$affect${flags:+ F:$flags}"
-    else
-        # Set affect via queue (daemon routes to tool_set_affect)
-        QUEUE_FILE="${CHITTA_QUEUE:-/tmp/chitta-queue.jsonl}"
-        echo "{\"tool\":\"set_affect\",\"args\":{\"id\":\"$mem_id\",\"valence\":$valence,\"arousal\":$arousal},\"ts\":$(date +%s)}" >> "$QUEUE_FILE"
-        ((STATS_MIGRATED++)) || true
-
-        # Add structural flags as triplets
-        if [[ -n "$flags" ]]; then
-            IFS=',' read -ra flag_arr <<< "$flags"
-            for flag in "${flag_arr[@]}"; do
-                echo "{\"tool\":\"connect\",\"args\":{\"subject\":\"$mem_id\",\"predicate\":\"has_flag\",\"object\":\"$flag\"},\"ts\":$(date +%s)}" >> "$QUEUE_FILE"
-            done
-            ((STATS_FLAGGED++)) || true
+    while true; do
+        # List memory IDs via JSON-RPC with pagination
+        raw=$(rpc_call "list_memories_brief" "{\"kind\":\"$kind\",\"limit\":$BATCH_SIZE,\"offset\":$offset}")
+        if [[ -z "$raw" ]]; then
+            break
         fi
 
-        # Tag as migrated
-        echo "{\"tool\":\"tag\",\"args\":{\"id\":\"$mem_id\",\"add\":\"ssl-v0.3\"},\"ts\":$(date +%s)}" >> "$QUEUE_FILE"
+        # Extract memory IDs from structured response
+        ids=$(echo "$raw" | python3 -c "
+import json, sys
+try:
+    d = json.load(sys.stdin)
+    mems = d.get('result',{}).get('structured',{}).get('memories',[]) or []
+    for m in mems:
+        print(m['id'])
+except Exception:
+    pass
+" 2>/dev/null)
 
-        echo "  + #$mem_id [$kind] A:$affect${flags:+ F:$flags}"
-    fi
+        if [[ -z "$ids" ]]; then
+            break
+        fi
 
-done < <("$CHITTA_BIN" sql_query --query "$QUERY" --text-only 2>/dev/null || echo "")
+        batch_count=$(echo "$ids" | wc -l)
+        kind_total=$((kind_total + batch_count))
+        echo "  Batch at offset $offset: $batch_count memories (total $kind_total $kind)"
+
+    while IFS= read -r mem_id; do
+        [[ -z "$mem_id" ]] && continue
+
+        # Check limit
+        if [[ "$LIMIT" -gt 0 && "$PROCESSED" -ge "$LIMIT" ]]; then
+            echo "  Hit limit ($LIMIT), stopping."
+            break 2
+        fi
+
+        # Get memory content (default text mode; --text-only strips too aggressively)
+        content=$("$CHITTA_BIN" get --id "$mem_id" 2>/dev/null || echo "")
+        if [[ -z "$content" ]]; then
+            ((STATS_SKIPPED++)) || true
+            continue
+        fi
+
+        # Realm filter
+        if [[ -n "$REALM_FILTER" ]]; then
+            mem_realm=$("$CHITTA_BIN" get --id "$mem_id" --json 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin).get('result',{}).get('structured',{}).get('realm',''))" 2>/dev/null || echo "")
+            if [[ "$mem_realm" != "$REALM_FILTER" ]]; then
+                ((STATS_SKIPPED++)) || true
+                continue
+            fi
+        fi
+
+        version=$(detect_version "$content")
+
+        case "$version" in
+            v0.3)
+                ((STATS_V03++)) || true
+                continue
+                ;;
+            v0.2)
+                ((STATS_V02++)) || true
+                ;;
+            legacy)
+                ((STATS_LEGACY++)) || true
+                ;;
+        esac
+
+        # Determine affect values — detect category from content if possible
+        category="$kind"
+        if echo "$content" | grep -qiP '^\[SOLUTION\]'; then category="solution"
+        elif echo "$content" | grep -qiP '^\[GOTCHA\]'; then category="gotcha"
+        elif echo "$content" | grep -qiP '^\[DECISION\]'; then category="decision"
+        elif echo "$content" | grep -qiP '^\[PATTERN\]'; then category="pattern"
+        elif echo "$content" | grep -qiP '^\[PREFERENCE\]'; then category="preference"
+        elif echo "$content" | grep -qiP '^\[FAILURE\]'; then category="failure"
+        elif echo "$content" | grep -qiP '^\[CORRECTION\]'; then category="correction"
+        fi
+
+        affect=$(default_affect "$category")
+        valence="${affect%,*}"
+        arousal="${affect#*,}"
+
+        # Detect structural flags
+        flags=$(detect_flags "$content")
+
+        if [[ "$DRY_RUN" == "true" ]]; then
+            echo "  #$mem_id [$kind→$category] ($version) → A:$affect${flags:+ F:$flags}"
+        else
+            # Set affect via JSON-RPC
+            rpc_call "set_affect" "{\"id\":\"$mem_id\",\"valence\":$valence,\"arousal\":$arousal}" >/dev/null 2>&1
+            ((STATS_MIGRATED++)) || true
+
+            # Add structural flags as triplets
+            if [[ -n "$flags" ]]; then
+                IFS=',' read -ra flag_arr <<< "$flags"
+                for flag in "${flag_arr[@]}"; do
+                    "$CHITTA_BIN" connect --subject "$mem_id" --predicate "has_flag" --object "$flag" >/dev/null 2>&1 || true
+                done
+                ((STATS_FLAGGED++)) || true
+            fi
+
+            echo "  + #$mem_id [$kind→$category] A:$affect${flags:+ F:$flags}"
+        fi
+
+        ((PROCESSED++)) || true
+
+        # Progress every 100
+        if [[ $((PROCESSED % 100)) -eq 0 ]]; then
+            echo "  ... processed $PROCESSED memories so far"
+        fi
+
+    done <<< "$ids"
+
+        # Next page
+        offset=$((offset + BATCH_SIZE))
+        if [[ "$batch_count" -lt "$BATCH_SIZE" ]]; then
+            break  # last page
+        fi
+
+        # Check limit
+        if [[ "$LIMIT" -gt 0 && "$PROCESSED" -ge "$LIMIT" ]]; then
+            break
+        fi
+    done  # pagination loop
+done
 
 echo ""
 echo "=== Migration Summary ==="
@@ -205,6 +276,7 @@ echo "Migrated:      $STATS_MIGRATED"
 echo "Flagged:       $STATS_FLAGGED"
 echo "Skipped:       $STATS_SKIPPED"
 echo "Errors:        $STATS_ERRORS"
+echo "Total scanned: $PROCESSED"
 
 if [[ "$DRY_RUN" == "true" ]]; then
     echo ""
