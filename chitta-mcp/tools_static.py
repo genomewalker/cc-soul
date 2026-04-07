@@ -4547,4 +4547,100 @@ COMPOSITE_TOOLS = [
             },
         }
     ),
+    # ── Skill Registry ─────────────────────────────────────────────────────────
+    Tool(
+        name="skill_upload",
+        description="Upload a new version of a reusable skill. Skills are immutable versioned text blobs (prompts, templates, procedures).",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "skill_id": {"type": "string", "description": "Unique skill identifier"},
+                "content": {"type": "string", "description": "Skill content (prompt, template, procedure)"},
+                "uploaded_by": {"type": "string", "description": "Agent or user who uploaded"},
+                "tags": {"type": "array", "items": {"type": "string"}, "description": "Tags for search"},
+            },
+            "required": ["skill_id", "content"],
+        }
+    ),
+    Tool(
+        name="skill_read",
+        description="Read a skill version. version=0 means latest.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "skill_id": {"type": "string", "description": "Skill identifier"},
+                "version": {"type": "integer", "description": "Version number (0=latest)"},
+            },
+            "required": ["skill_id"],
+        }
+    ),
+    Tool(
+        name="skill_list",
+        description="List all registered skills with their latest version number.",
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
+        name="skill_search",
+        description="Search skills by text match on id, tags, or content.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search query"},
+                "limit": {"type": "integer", "description": "Max results (default: 20)"},
+            },
+            "required": ["query"],
+        }
+    ),
+    Tool(
+        name="skill_deprecate",
+        description="Deprecate a skill (marks latest version as deprecated).",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "skill_id": {"type": "string", "description": "Skill identifier to deprecate"},
+            },
+            "required": ["skill_id"],
+        }
+    ),
+    # ── Agent Registry ─────────────────────────────────────────────────────────
+    Tool(
+        name="agent_upsert",
+        description="Register or update an agent identity in the multi-agent registry.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "agent_id": {"type": "string", "description": "Unique agent identifier"},
+                "display_name": {"type": "string", "description": "Human-readable name"},
+                "description": {"type": "string", "description": "What this agent does"},
+            },
+            "required": ["agent_id"],
+        }
+    ),
+    Tool(
+        name="agent_get",
+        description="Get an agent's identity record.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "agent_id": {"type": "string", "description": "Agent identifier"},
+            },
+            "required": ["agent_id"],
+        }
+    ),
+    Tool(
+        name="agent_list",
+        description="List all registered agents.",
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
+        name="agent_disable",
+        description="Disable (revoke) an agent.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "agent_id": {"type": "string", "description": "Agent identifier to disable"},
+            },
+            "required": ["agent_id"],
+        }
+    ),
 ]

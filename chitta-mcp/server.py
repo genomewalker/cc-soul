@@ -154,6 +154,10 @@ ADVANCED_TOOLS = {
     "get_sus_metrics",
     # Ingest, Wiki, Training export
     "ingest_source", "wiki_export", "health_check_start", "export_training_pairs",
+    # Skill registry
+    "skill_upload", "skill_read", "skill_list", "skill_search", "skill_deprecate",
+    # Agent registry
+    "agent_upsert", "agent_get", "agent_list", "agent_disable",
 }
 
 # Combined set of tools to hide from listing (but still callable)
@@ -1872,6 +1876,24 @@ async def call_tool(name: str, arguments: dict):
 
 
 def main():
+    import sys
+
+    # Check for --http mode (streamable HTTP MCP for Codex/Cursor/Copilot)
+    http_mode = "--http" in sys.argv or os.environ.get("CHITTA_MCP_HTTP")
+    port = int(os.environ.get("CHITTA_MCP_PORT", "9481"))
+
+    # Parse --port from argv
+    for i, arg in enumerate(sys.argv):
+        if arg == "--port" and i + 1 < len(sys.argv):
+            port = int(sys.argv[i + 1])
+
+    if http_mode:
+        _run_http(port)
+    else:
+        _run_stdio()
+
+
+def _run_stdio():
     async def run():
         init_options = InitializationOptions(
             server_name="chitta-mcp",
@@ -1880,6 +1902,50 @@ def main():
         )
         async with stdio_server() as (read_stream, write_stream):
             await server.run(read_stream, write_stream, init_options)
+
+    asyncio.run(run())
+
+
+def _run_http(port: int):
+    """Run as streamable HTTP MCP server for Codex, Cursor, Copilot CLI etc."""
+    from starlette.applications import Starlette
+    from starlette.routing import Mount
+    from starlette.responses import JSONResponse
+    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+
+    session_manager = StreamableHTTPSessionManager(
+        app=server,
+        json_response=True,
+        stateless=True,
+    )
+
+    from starlette.routing import Route
+
+    async def health(request):
+        return JSONResponse({"status": "ok", "server": "chitta-mcp", "transport": "http"})
+
+    app = Starlette(
+        routes=[
+            Route("/health", health),
+            Mount("/mcp", app=session_manager.handle_request),
+        ],
+    )
+
+    async def run():
+        import uvicorn
+
+        config = uvicorn.Config(
+            app,
+            host="127.0.0.1",
+            port=port,
+            log_level="warning",
+        )
+        http_server = uvicorn.Server(config)
+
+        logger.warning(f"chitta-mcp HTTP listening on http://127.0.0.1:{port}/mcp")
+
+        async with session_manager.run():
+            await http_server.serve()
 
     asyncio.run(run())
 

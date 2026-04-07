@@ -585,6 +585,8 @@ private:
     #include "handlers/drift_consolidation.hpp"
     #include "handlers/drift_recall.hpp"
     #include "handlers/drift_probe.hpp"
+    #include "handlers/field_skill.hpp"
+    #include "handlers/field_agent.hpp"
 
     // ═══════════════════════════════════════════════════════════════════════
     // register_tools() — all tool schemas and handler bindings
@@ -1578,6 +1580,69 @@ private:
             }},{"required",{"id"}}}}
         });
         handlers_["curiosity_resolve"] = [this](const json& p) { return tool_curiosity_resolve(p); };
+
+        // ── Skill Registry ──────────────────────────────────────────────────
+        tools_.push_back({{"name","skill_upload"},{"description","Upload a new skill version"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"skill_id",{{"type","string"}}},{"content",{{"type","string"}}},
+                {"uploaded_by",{{"type","string"}}},{"tags",{{"type","array"},{"items",{{"type","string"}}}}}
+            }},{"required",{"skill_id","content"}}}}
+        });
+        handlers_["skill_upload"] = [this](const json& p) { return tool_skill_upload(p); };
+
+        tools_.push_back({{"name","skill_read"},{"description","Read a skill version (0=latest)"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"skill_id",{{"type","string"}}},{"version",{{"type","integer"}}}
+            }},{"required",{"skill_id"}}}}
+        });
+        handlers_["skill_read"] = [this](const json& p) { return tool_skill_read(p); };
+
+        tools_.push_back({{"name","skill_list"},{"description","List all skills"},
+            {"inputSchema",{{"type","object"},{"properties",json::object()}}}
+        });
+        handlers_["skill_list"] = [this](const json&) { return tool_skill_list(); };
+
+        tools_.push_back({{"name","skill_search"},{"description","Search skills by query"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"query",{{"type","string"}}},{"limit",{{"type","integer"}}}
+            }},{"required",{"query"}}}}
+        });
+        handlers_["skill_search"] = [this](const json& p) { return tool_skill_search(p); };
+
+        tools_.push_back({{"name","skill_deprecate"},{"description","Deprecate a skill"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"skill_id",{{"type","string"}}}
+            }},{"required",{"skill_id"}}}}
+        });
+        handlers_["skill_deprecate"] = [this](const json& p) { return tool_skill_deprecate(p); };
+
+        // ── Agent Registry ─────────────────────────────────────────────────
+        tools_.push_back({{"name","agent_upsert"},{"description","Register or update an agent"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"agent_id",{{"type","string"}}},{"display_name",{{"type","string"}}},
+                {"description",{{"type","string"}}}
+            }},{"required",{"agent_id"}}}}
+        });
+        handlers_["agent_upsert"] = [this](const json& p) { return tool_agent_upsert(p); };
+
+        tools_.push_back({{"name","agent_get"},{"description","Get agent record"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"agent_id",{{"type","string"}}}
+            }},{"required",{"agent_id"}}}}
+        });
+        handlers_["agent_get"] = [this](const json& p) { return tool_agent_get(p); };
+
+        tools_.push_back({{"name","agent_list"},{"description","List all agents"},
+            {"inputSchema",{{"type","object"},{"properties",json::object()}}}
+        });
+        handlers_["agent_list"] = [this](const json&) { return tool_agent_list(); };
+
+        tools_.push_back({{"name","agent_disable"},{"description","Disable an agent"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"agent_id",{{"type","string"}}}
+            }},{"required",{"agent_id"}}}}
+        });
+        handlers_["agent_disable"] = [this](const json& p) { return tool_agent_disable(p); };
 
         // ── Misc tools ──────────────────────────────────────────────────────
 
