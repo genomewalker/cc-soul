@@ -1025,6 +1025,21 @@ private:
         });
         handlers_["compact_wal"] = [this](const json& p) { return tool_compact_wal(p); };
 
+        tools_.push_back({{"name","trim_realm_names"},{"description","Fix realm names with trailing whitespace/newlines"},
+            {"inputSchema",{{"type","object"},{"properties",json::object()}}}
+        });
+        handlers_["trim_realm_names"] = [this](const json& p) { return tool_trim_realm_names(p); };
+
+        tools_.push_back({{"name","save_spectral_snapshot"},{"description","Save spectral stats snapshot for drift tracking"},
+            {"inputSchema",{{"type","object"},{"properties",json::object()}}}
+        });
+        handlers_["save_spectral_snapshot"] = [this](const json& p) { return tool_save_spectral_snapshot(p); };
+
+        tools_.push_back({{"name","spectral_drift"},{"description","Compare current embedding geometry with last snapshot"},
+            {"inputSchema",{{"type","object"},{"properties",json::object()}}}
+        });
+        handlers_["spectral_drift"] = [this](const json& p) { return tool_spectral_drift(p); };
+
         tools_.push_back({{"name","queue_status"},{"description","Show async queue stats: processed, failed, dead-letter path"},
             {"inputSchema",{{"type","object"},{"properties",json::object()}}}
         });

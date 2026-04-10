@@ -39,6 +39,57 @@
             out["avg_confidence"]   = stats_j.value("avg_confidence", 0.0f);
         }
 
+        // Per-realm/kind embedding geometry ("Geometry of Forgetting")
+        try {
+            auto spectral_j = json::parse(field_store_->spectral_stats_by_realm());
+            auto& by_realm = spectral_j["by_realm"];
+            auto& by_kind  = spectral_j["by_kind"];
+            auto& anomalies = spectral_j["anomalies"];
+
+            if (by_realm.is_array() && !by_realm.empty()) {
+                // Top 5 largest realms
+                std::vector<json> sorted(by_realm.begin(), by_realm.end());
+                std::sort(sorted.begin(), sorted.end(), [](const json& a, const json& b) {
+                    return a.value("count", 0) > b.value("count", 0);
+                });
+                ss << "\nTop realms (embedding geometry):\n";
+                size_t shown = std::min(sorted.size(), size_t(5));
+                for (size_t i = 0; i < shown; ++i) {
+                    ss << "  " << sorted[i].value("group", "?")
+                       << " (" << sorted[i].value("count", 0) << ")"
+                       << "  dim=" << std::fixed << std::setprecision(1)
+                       << sorted[i].value("effective_dim", 0.0)
+                       << "  iso=" << std::setprecision(3)
+                       << sorted[i].value("isotropy", 0.0)
+                       << "  cos=" << std::setprecision(3)
+                       << sorted[i].value("mean_cosine_sim", 0.0) << "\n";
+                }
+                out["spectral_by_realm"] = by_realm;
+            }
+            if (by_kind.is_array() && !by_kind.empty()) {
+                ss << "\nBy kind:\n";
+                for (const auto& k : by_kind) {
+                    ss << "  " << k.value("group", "?")
+                       << " (" << k.value("count", 0) << ")"
+                       << "  dim=" << std::fixed << std::setprecision(1)
+                       << k.value("effective_dim", 0.0)
+                       << "  iso=" << std::setprecision(3)
+                       << k.value("isotropy", 0.0)
+                       << "  cos=" << std::setprecision(3)
+                       << k.value("mean_cosine_sim", 0.0) << "\n";
+                }
+                out["spectral_by_kind"] = by_kind;
+            }
+            if (anomalies.is_array() && !anomalies.empty()) {
+                ss << "\nAnomalies:\n";
+                for (const auto& a : anomalies) {
+                    ss << "  ! " << a.value("group", "?")
+                       << ": " << a.value("detail", "") << "\n";
+                }
+                out["anomalies"] = anomalies;
+            }
+        } catch (...) {}
+
         return ToolResult::ok(ss.str(), out);
     }
 
@@ -172,6 +223,54 @@
             }
         }
 
+        // Per-realm/kind embedding geometry (compact: top 5 realms + anomalies only)
+        json spectral_j;
+        try {
+            spectral_j = json::parse(field_store_->spectral_stats_by_realm());
+            auto& by_realm = spectral_j["by_realm"];
+            auto& by_kind  = spectral_j["by_kind"];
+            auto& anomalies = spectral_j["anomalies"];
+
+            if (by_realm.is_array() && !by_realm.empty()) {
+                std::vector<json> sorted(by_realm.begin(), by_realm.end());
+                std::sort(sorted.begin(), sorted.end(), [](const json& a, const json& b) {
+                    return a.value("count", 0) > b.value("count", 0);
+                });
+                ss << "\nTop realms:\n";
+                size_t shown = std::min(sorted.size(), size_t(5));
+                for (size_t i = 0; i < shown; ++i) {
+                    ss << "  " << sorted[i].value("group", "?")
+                       << " (" << sorted[i].value("count", 0) << ")"
+                       << "  dim=" << std::fixed << std::setprecision(1)
+                       << sorted[i].value("effective_dim", 0.0)
+                       << "  iso=" << std::setprecision(3)
+                       << sorted[i].value("isotropy", 0.0)
+                       << "  cos=" << std::setprecision(3)
+                       << sorted[i].value("mean_cosine_sim", 0.0) << "\n";
+                }
+            }
+            if (by_kind.is_array() && !by_kind.empty()) {
+                ss << "\nBy kind:\n";
+                for (const auto& k : by_kind) {
+                    ss << "  " << k.value("group", "?")
+                       << " (" << k.value("count", 0) << ")"
+                       << "  dim=" << std::fixed << std::setprecision(1)
+                       << k.value("effective_dim", 0.0)
+                       << "  iso=" << std::setprecision(3)
+                       << k.value("isotropy", 0.0)
+                       << "  cos=" << std::setprecision(3)
+                       << k.value("mean_cosine_sim", 0.0) << "\n";
+                }
+            }
+            if (anomalies.is_array() && !anomalies.empty()) {
+                ss << "\nAnomalies:\n";
+                for (const auto& a : anomalies) {
+                    ss << "  ! " << a.value("group", "?")
+                       << ": " << a.value("detail", "") << "\n";
+                }
+            }
+        } catch (...) {}
+
         json out = {
             {"version",         CHITTA_VERSION},
             {"total_memories",  total_memories},
@@ -184,6 +283,11 @@
         };
         if (stats_j.contains("count_by_kind"))
             out["count_by_kind"] = stats_j["count_by_kind"];
+        if (!spectral_j.is_null()) {
+            if (spectral_j.contains("by_realm"))  out["spectral_by_realm"] = spectral_j["by_realm"];
+            if (spectral_j.contains("by_kind"))   out["spectral_by_kind"]  = spectral_j["by_kind"];
+            if (spectral_j.contains("anomalies")) out["anomalies"]         = spectral_j["anomalies"];
+        }
 
         return ToolResult::ok(ss.str(), out);
     }
@@ -740,6 +844,52 @@
         std::string text = "Memory " + std::to_string(id) + ": " + status;
         if (superseded_by > 0) text += " (by " + std::to_string(superseded_by) + ")";
         return ToolResult::ok(text, result);
+    }
+
+    // ── Realm hygiene ──────────────────────────────────────────────────────────
+    ToolResult tool_trim_realm_names(const json&) {
+        if (!field_store_) return ToolResult::error("field store unavailable");
+        auto count = field_store_->trim_realm_names();
+        std::string msg = "Trimmed " + std::to_string(count) + " realm name(s)";
+        return ToolResult::ok(msg, {{"trimmed", count}});
+    }
+
+    // ── Spectral snapshots ──────────────────────────────────────────────────
+    ToolResult tool_save_spectral_snapshot(const json&) {
+        if (!field_store_) return ToolResult::error("field store unavailable");
+        auto filename = field_store_->save_spectral_snapshot();
+        if (filename.empty()) return ToolResult::error("failed to save snapshot");
+        return ToolResult::ok("Saved: " + filename, {{"filename", filename}});
+    }
+
+    ToolResult tool_spectral_drift(const json&) {
+        if (!field_store_) return ToolResult::error("field store unavailable");
+        auto drift_json = field_store_->spectral_drift();
+        json drift_j;
+        try { drift_j = json::parse(drift_json); } catch (...) { drift_j = json::object(); }
+
+        if (drift_j.contains("error")) {
+            return ToolResult::ok(drift_j.value("error", "unknown"), drift_j);
+        }
+
+        std::ostringstream ss;
+        double age = drift_j.value("snapshot_age_hours", 0.0);
+        size_t total = drift_j.value("total_drifted", size_t(0));
+        ss << "Drift since " << std::fixed << std::setprecision(1) << age << "h ago: "
+           << total << " group(s) changed\n";
+
+        if (drift_j.contains("drifts") && drift_j["drifts"].is_array()) {
+            for (const auto& d : drift_j["drifts"]) {
+                double iso_d = d.value("isotropy_delta", 0.0);
+                double cos_d = d.value("cosine_delta", 0.0);
+                ss << "  " << d.value("group", "?")
+                   << "  iso " << (iso_d >= 0 ? "+" : "") << std::setprecision(3) << iso_d
+                   << "  cos " << (cos_d >= 0 ? "+" : "") << std::setprecision(3) << cos_d
+                   << "\n";
+            }
+        }
+
+        return ToolResult::ok(ss.str(), drift_j);
     }
 
     // ── WAL compaction ────────────────────────────────────────────────────────

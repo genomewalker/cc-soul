@@ -57,6 +57,15 @@ int cf_agent_record_session(struct CfHandle* h, const char* agent_id, int64_t ts
 char* cf_agent_get(const struct CfHandle* h, const char* agent_id);
 char* cf_agent_list(const struct CfHandle* h);
 int cf_agent_disable(struct CfHandle* h, const char* agent_id);
+
+// Spectral stats FFI
+int cf_spectral_stats_by_realm(struct CfHandle* h,
+    uint8_t* buf, size_t buf_cap, size_t* written);
+int64_t cf_trim_realm_names(struct CfHandle* h);
+int cf_save_spectral_snapshot(struct CfHandle* h,
+    uint8_t* buf, size_t buf_cap, size_t* written);
+int cf_spectral_drift(struct CfHandle* h,
+    uint8_t* buf, size_t buf_cap, size_t* written);
 }
 
 namespace chitta {
@@ -850,6 +859,38 @@ public:
         size_t written = 0;
         const char* realm_ptr = realm.empty() ? nullptr : realm.c_str();
         int r = cf_memory_stats(handle_, realm_ptr, buf.data(), buf.size(), &written);
+        if (r != 0) return "{}";
+        return std::string(reinterpret_cast<char*>(buf.data()), written);
+    }
+
+    /// Per-realm embedding geometry stats (effective dimensionality, isotropy, mean cosine sim).
+    std::string spectral_stats_by_realm() {
+        std::vector<uint8_t> buf(65536);
+        size_t written = 0;
+        int r = cf_spectral_stats_by_realm(handle_, buf.data(), buf.size(), &written);
+        if (r != 0) return "[]";
+        return std::string(reinterpret_cast<char*>(buf.data()), written);
+    }
+
+    /// Trim trailing whitespace from realm names. Returns count fixed.
+    int64_t trim_realm_names() {
+        return cf_trim_realm_names(handle_);
+    }
+
+    /// Save spectral snapshot for drift tracking.
+    std::string save_spectral_snapshot() {
+        std::vector<uint8_t> buf(4096);
+        size_t written = 0;
+        int r = cf_save_spectral_snapshot(handle_, buf.data(), buf.size(), &written);
+        if (r != 0) return "";
+        return std::string(reinterpret_cast<char*>(buf.data()), written);
+    }
+
+    /// Get spectral drift since last snapshot.
+    std::string spectral_drift() {
+        std::vector<uint8_t> buf(65536);
+        size_t written = 0;
+        int r = cf_spectral_drift(handle_, buf.data(), buf.size(), &written);
         if (r != 0) return "{}";
         return std::string(reinterpret_cast<char*>(buf.data()), written);
     }
