@@ -88,6 +88,9 @@ struct FieldRecallHit {
     float       strength_factor  = 0.0f;
     float       affect_valence   = 0.0f;
     float       affect_arousal   = 0.0f;
+    float       actr_activation  = 0.0f;
+    float       surprise_boost   = 1.0f;
+    float       arousal_boost    = 1.0f;
 };
 
 /// Thin RAII C++ wrapper around the chitta-field C FFI.
@@ -1165,6 +1168,9 @@ private:
             h.strength_factor  = buf[i].strength_factor;
             h.affect_valence   = buf[i].affect_valence;
             h.affect_arousal   = buf[i].affect_arousal;
+            h.actr_activation  = buf[i].actr_activation;
+            h.surprise_boost   = buf[i].surprise_boost;
+            h.arousal_boost    = buf[i].arousal_boost;
 
             // Fetch content (has written out-param)
             written = 0;
