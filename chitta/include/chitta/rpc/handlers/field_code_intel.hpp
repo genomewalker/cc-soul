@@ -692,6 +692,15 @@
         size_t mem_limit = fast ? 3 : 5;
         size_t sym_limit = fast ? 3 : 5;
 
+        // Affective context for mood-congruent recall + frustration-escalation
+        float qv = std::numeric_limits<float>::quiet_NaN();
+        float qa = std::numeric_limits<float>::quiet_NaN();
+        if (params.contains("query_valence") && params.contains("query_arousal")) {
+            qv = params["query_valence"].get<float>();
+            qa = params["query_arousal"].get<float>();
+        }
+        bool has_affect = !std::isnan(qv);
+
         // Classify query intent for optimal recall routing (Omni-SimpleMem §3.2.2)
         chitta::QueryIntentClassifier intent_clf;
         auto intent = intent_clf.classify(task);
@@ -721,10 +730,12 @@
                 // Relationship: skip dense recall, let graph section handle it
                 // (triplet neighbors cover this better)
             } else {
-                // Default: dense semantic recall
+                // Default: dense semantic recall (with affect if available)
                 auto emb = embed_query(task);
                 if (!emb.empty()) {
-                    hits = field_store_->recall(emb, mem_limit, realm);
+                    hits = has_affect
+                        ? field_store_->recall_ctx(emb, mem_limit, realm, qv, qa)
+                        : field_store_->recall(emb, mem_limit, realm);
                 }
             }
 

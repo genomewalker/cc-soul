@@ -8,11 +8,23 @@
         size_t limit      = static_cast<size_t>(params.value("limit", 15));
         std::string realm = params.value("realm", "");
 
+        // Affective context for mood-congruent recall (Bower 1981) and
+        // frustration-escalation correction boost.
+        float qv = std::numeric_limits<float>::quiet_NaN();
+        float qa = std::numeric_limits<float>::quiet_NaN();
+        if (params.contains("query_valence") && params.contains("query_arousal")) {
+            qv = params["query_valence"].get<float>();
+            qa = params["query_arousal"].get<float>();
+        }
+        bool has_affect = !std::isnan(qv);
+
         // ── Lens 1: direct facts — semantic + keyword on raw query ────────────
         auto emb1 = embed_query(query);
         json lens1_results = json::array();
         if (!emb1.empty()) {
-            auto sem_hits = field_store_->recall(emb1, limit, realm);
+            auto sem_hits = has_affect
+                ? field_store_->recall_ctx(emb1, limit, realm, qv, qa)
+                : field_store_->recall(emb1, limit, realm);
             auto kw_hits  = field_store_->recall_keyword(query, limit);
             lens1_results = merge_results(hits_to_results_json(sem_hits), hits_to_results_json(kw_hits));
         }
@@ -23,7 +35,9 @@
         auto emb2 = embed_query(ctx_query);
         json lens2_results = json::array();
         if (!emb2.empty()) {
-            auto ctx_hits = field_store_->recall(emb2, limit, realm);
+            auto ctx_hits = has_affect
+                ? field_store_->recall_ctx(emb2, limit, realm, qv, qa)
+                : field_store_->recall(emb2, limit, realm);
             lens2_results = hits_to_results_json(ctx_hits);
         }
 

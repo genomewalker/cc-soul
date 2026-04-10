@@ -30,6 +30,13 @@ int cf_set_epistemic_status(struct CfHandle* h, uint64_t memory_id, uint8_t epis
 int cf_set_affect(struct CfHandle* h, uint64_t memory_id, float valence, float arousal);
 int64_t cf_compact_wal(struct CfHandle* h);
 
+// Affective recall FFI
+int cf_recall_semantic_ctx(struct CfHandle* h,
+    const float* query_embedding, size_t embedding_len,
+    const char* realm, size_t k,
+    float query_valence, float query_arousal,
+    CfRecallHit* buf, size_t buf_cap, size_t* written);
+
 // FEP attractor network FFI
 float cf_reconstruction_error(const struct CfHandle* h, uint64_t memory_id);
 float cf_memory_surprise(const struct CfHandle* h, uint64_t memory_id);
@@ -91,6 +98,8 @@ struct FieldRecallHit {
     float       actr_activation  = 0.0f;
     float       surprise_boost   = 1.0f;
     float       arousal_boost    = 1.0f;
+    float       mood_congruence  = 1.0f;
+    float       frustration_boost = 1.0f;
 };
 
 /// Thin RAII C++ wrapper around the chitta-field C FFI.
@@ -279,6 +288,31 @@ public:
             handle_,
             query_embedding.data(), query_embedding.size(),
             realm_ptr, k,
+            buf, MAX_HITS, &written
+        );
+        if (r != 0) throw std::runtime_error(last_error());
+        return hits_to_results(buf, written);
+    }
+
+    /// Semantic recall with affective context — mood-congruent retrieval.
+    /// Pass NaN for valence/arousal to disable affect matching.
+    std::vector<FieldRecallHit> recall_ctx(
+        const std::vector<float>& query_embedding,
+        size_t                    k,
+        const std::string&        realm,
+        float                     query_valence,
+        float                     query_arousal
+    ) {
+        constexpr size_t MAX_HITS = 256;
+        CfRecallHit buf[MAX_HITS];
+        size_t written = 0;
+
+        const char* realm_ptr = realm.empty() ? nullptr : realm.c_str();
+        int r = cf_recall_semantic_ctx(
+            handle_,
+            query_embedding.data(), query_embedding.size(),
+            realm_ptr, k,
+            query_valence, query_arousal,
             buf, MAX_HITS, &written
         );
         if (r != 0) throw std::runtime_error(last_error());
@@ -1171,6 +1205,8 @@ private:
             h.actr_activation  = buf[i].actr_activation;
             h.surprise_boost   = buf[i].surprise_boost;
             h.arousal_boost    = buf[i].arousal_boost;
+            h.mood_congruence  = buf[i].mood_congruence;
+            h.frustration_boost = buf[i].frustration_boost;
 
             // Fetch content (has written out-param)
             written = 0;
