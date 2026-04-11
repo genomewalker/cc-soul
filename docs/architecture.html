@@ -389,6 +389,35 @@
     <span class="ty">float</span> code_symbol_weight  = <span class="val">0.5f</span>;
 };</pre>
     </div>
+
+    <!-- ScoringPipeline -->
+    <h3 style="font-family: var(--font-display); font-size: var(--text-xl); color: var(--lotus-200); font-weight: 500; margin-top: var(--space-7); margin-bottom: var(--space-3);" class="reveal">ScoringPipeline <span style="font-size: var(--text-xs); color: var(--ash-400); font-weight: 400;">v5.11+</span></h3>
+    <p style="font-size: var(--text-sm); color: var(--ash-300); line-height: 1.7; max-width: 720px; margin-bottom: var(--space-4);" class="reveal reveal-delay-1">Post-resonance scoring uses a neuroplastic trait-based pipeline of 12 composable factors. Each factor has independent weight, bias, and type-specific parameters. All configuration lives in <code>scoring.json</code> with hot-reload &mdash; no rebuild required to tune scoring behavior.</p>
+
+    <table class="comp-table reveal reveal-delay-2">
+      <thead>
+        <tr><th>Factor</th><th>Source</th><th>Description</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="class-name">Relevance</td><td class="file-name">Cosine similarity</td><td class="role-desc">Base semantic match score</td></tr>
+        <tr><td class="class-name">ACT-R</td><td class="file-name">Access history</td><td class="role-desc">Anderson &amp; Schooler (1991) power-law decay over access timestamps</td></tr>
+        <tr><td class="class-name">Strength</td><td class="file-name">Memory strength</td><td class="role-desc">Reinforcement from repeated access</td></tr>
+        <tr><td class="class-name">Confidence</td><td class="file-name">Bayesian posterior</td><td class="role-desc">Beta posterior mean over observation history</td></tr>
+        <tr><td class="class-name">Surprise</td><td class="file-name">FEP &sect;2.3</td><td class="role-desc">Reconstruction error as surprise signal</td></tr>
+        <tr><td class="class-name">Arousal</td><td class="file-name">Affect dimensions</td><td class="role-desc">Flashbulb memory effect: high-arousal memories boosted</td></tr>
+        <tr><td class="class-name">MoodCongruence</td><td class="file-name">Query affect</td><td class="role-desc">Bower (1981): valence/arousal alignment between query and memory</td></tr>
+        <tr><td class="class-name">FrustrationEscalation</td><td class="file-name">Query affect</td><td class="role-desc">Negative valence + high arousal boosts corrections/preferences</td></tr>
+        <tr><td class="class-name">Status</td><td class="file-name">Demotion tier</td><td class="role-desc">Tier-based weight (hot &gt; warm &gt; cool &gt; cold)</td></tr>
+        <tr><td class="class-name">Epistemic</td><td class="file-name">Node type</td><td class="role-desc">Type-based multiplier (corrections, preferences weighted higher)</td></tr>
+        <tr><td class="class-name">Kind</td><td class="file-name">Node kind</td><td class="role-desc">Fine-grained kind multiplier</td></tr>
+        <tr><td class="class-name">RealmReliability</td><td class="file-name">Realm stats</td><td class="role-desc">Per-realm reliability based on historical feedback</td></tr>
+      </tbody>
+    </table>
+
+    <div class="config-block reveal">
+      <div class="config-block-title">ScoringPipeline formula</div>
+      <pre>final_score = <span class="cm">&Sigma;</span> (<span class="ty">factor_weight</span> <span class="cm">&times;</span> <span class="ty">factor_score</span> + <span class="ty">factor_bias</span>)</pre>
+    </div>
   </div>
 </section>
 

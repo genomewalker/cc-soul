@@ -456,12 +456,184 @@ body::before {
 <section class="changelog-section">
   <div class="container">
 
+    <!-- 5.11.0–5.11.2 -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v5.11.0&ndash;5.11.2</span>
+        <span class="version-date">April 10&ndash;11, 2026</span>
+        <span class="version-latest">Latest</span>
+      </div>
+      <div class="version-body">
+        <h4>Added</h4>
+        <ul>
+          <li><strong>ScoringPipeline</strong> &mdash; Neuroplastic trait-based scoring architecture. 12 composable scoring factors (Relevance, ACT-R, Strength, Confidence, Surprise, Arousal, MoodCongruence, FrustrationEscalation, Status, Epistemic, Kind, RealmReliability). Runtime-configurable via <code>scoring.json</code> with hot-reload.</li>
+          <li><strong>Externalized scoring constants</strong> &mdash; All 30+ hardcoded scoring constants moved to <code>scoring.json</code>. Every factor has independent weight, bias, and parameters.</li>
+          <li><strong>StrengthFactor</strong> &mdash; Added to pipeline (was missing from initial release).</li>
+        </ul>
+        <h4>Fixed</h4>
+        <ul>
+          <li>V6&rarr;V7 snapshot migration for <code>access_timestamps</code> field.</li>
+          <li>Safety guards: fallback snapshot loading (tries all snapshots if best fails), refuse-to-start-empty protection (prevents silent data loss when snapshots cannot deserialize).</li>
+          <li>CI test fixes for scoring decomposition.</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 5.10.0–5.10.1 -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v5.10.0&ndash;5.10.1</span>
+        <span class="version-date">April 10, 2026</span>
+      </div>
+      <div class="version-body">
+        <h4>Added</h4>
+        <ul>
+          <li><strong>ACT-R base-level activation</strong> &mdash; Anderson &amp; Schooler (1991) power-law decay over access history. Frequently and recently accessed memories get higher activation.</li>
+          <li><strong>Surprise-weighted scoring</strong> &mdash; FEP &sect;2.3 surprise signal modulates retrieval score. High-surprise memories are boosted during recall.</li>
+          <li><strong>Arousal-modulated retrieval</strong> &mdash; Flashbulb memory effect: high-arousal memories receive retrieval boost proportional to arousal intensity.</li>
+          <li><strong>Mood-congruent recall</strong> &mdash; Bower (1981): query affect is matched against memory affect for boosted retrieval when valence/arousal align.</li>
+          <li><strong>Frustration-escalation correction boost</strong> &mdash; Negative valence + high arousal boosts correction and preference memories, surfacing fixes when the user is frustrated.</li>
+          <li><strong>New FFI</strong> &mdash; <code>cf_recall_semantic_ctx</code> with query affect context for affect-aware retrieval.</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 5.9.0 -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v5.9.0</span>
+        <span class="version-date">April 10, 2026</span>
+      </div>
+      <div class="version-body">
+        <h4>Added</h4>
+        <ul>
+          <li><strong>Spectral geometry stats</strong> &mdash; Graph-theoretic analysis of the memory triplet network: eigenvalue spectrum, clustering coefficients, and connectivity metrics.</li>
+          <li><strong>Anomaly detection</strong> &mdash; Automatic detection of anomalous memory patterns using spectral methods.</li>
+          <li><strong>Realm hygiene</strong> &mdash; Automated cleanup of orphaned or miscategorized realm assignments.</li>
+          <li><strong>Drift tracking</strong> &mdash; Monitor semantic drift of memory clusters over time.</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 5.8.0–5.8.3 -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v5.8.0&ndash;5.8.3</span>
+        <span class="version-date">April 7&ndash;8, 2026</span>
+      </div>
+      <div class="version-body">
+        <h4>Added</h4>
+        <ul>
+          <li><strong>Skill versioning</strong> &mdash; Skills track version history, enabling rollback and diffing across iterations.</li>
+          <li><strong>Agent registry</strong> &mdash; Central registry of known agents with capabilities and routing metadata.</li>
+          <li><strong>Dashboard expansion</strong> &mdash; New panels for skill versions, agent status, and memory health.</li>
+        </ul>
+        <h4>Fixed</h4>
+        <ul>
+          <li>Tag system &mdash; consistent creation, filtering, and surfacing across all layers.</li>
+          <li>Chain replay tolerance + code-intel advisory hooks.</li>
+          <li><code>kind_mul</code> in score decomposition test.</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 5.7.0–5.7.1 -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v5.7.0&ndash;5.7.1</span>
+        <span class="version-date">April 7, 2026</span>
+      </div>
+      <div class="version-body">
+        <h4>Added</h4>
+        <ul>
+          <li><strong>SSL v0.3</strong> &mdash; Soul Shorthand Language v0.3: affect encoding, semantic flags, cross-references, and two-tier compression for compact memory serialization.</li>
+          <li><strong>Token budget tracking</strong> &mdash; Session size, subagent caps, and cost telemetry tracked per hook invocation.</li>
+        </ul>
+        <h4>Fixed</h4>
+        <ul>
+          <li><code>list_memories_brief</code> ID truncation and rewrite migration script.</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 5.6.0–5.6.5 -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v5.6.0&ndash;5.6.5</span>
+        <span class="version-date">April 4&ndash;5, 2026</span>
+      </div>
+      <div class="version-body">
+        <h4>Added</h4>
+        <ul>
+          <li><strong>Edit/Write interception</strong> &mdash; <code>fp</code> (file-patch) hooks intercept Edit and Write tool calls for diff-first editing. Snakemake/Nextflow RTK support.</li>
+          <li><strong>Charge system</strong> &mdash; Hierarchical token budget for expensive casts. <code>/checkpoint</code> reclaims +20 charge.</li>
+          <li><strong>Cache expiry warning</strong> &mdash; Hook warns on idle &gt;5 min when prompt cache is about to expire.</li>
+          <li><strong>Realm-aware novelty gate</strong> &mdash; P1&ndash;P2 novelty gating with kind scoring per realm.</li>
+        </ul>
+        <h4>Fixed</h4>
+        <ul>
+          <li>Route <code>[thought]</code> memories to <code>soul:meta</code> realm; hybrid lane in prompt-hook.</li>
+          <li>Keyword recall lane for exact token matching.</li>
+          <li>Filter <code>[thought]</code> synthesis memories from prompt-hook output.</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 5.5.0–5.5.25 -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v5.5.0&ndash;5.5.25</span>
+        <span class="version-date">April 3&ndash;4, 2026</span>
+      </div>
+      <div class="version-body">
+        <h4>Added</h4>
+        <ul>
+          <li><strong>LocalBrain tool-calling</strong> &mdash; Real tool-calling for local LLM (gemma4:26b) via HTTP backend. Daemon-side dream publishing with JSON content assembly.</li>
+          <li><strong>Unified Codex plugin</strong> &mdash; <code>chitta-mcp-install [claude-code|codex|all]</code> for cross-platform plugin deployment.</li>
+          <li><strong>chitta-rtk</strong> &mdash; Native token-optimized command filter (RTK). Compiled Rust submodule replaces script-based approach. Handles <code>gh pr/issue/run</code>.</li>
+          <li><strong>Intercept native tools</strong> &mdash; Pre-tool-hook intercepts Read/Grep/Glob for token savings.</li>
+          <li><strong>Rich message metadata</strong> &mdash; <code>sender_realm</code>, <code>sender_host</code>, <code>memory_id</code> in inbox; full content display.</li>
+          <li><strong>Thinking distillation</strong> &mdash; Distill thinking-block snippets via gemma4:26b.</li>
+          <li><strong>Messaging system</strong> &mdash; <code>msg_respond</code> tool for reply routing; <code>msg_inbox</code> filtering and ack.</li>
+        </ul>
+        <h4>Fixed</h4>
+        <ul>
+          <li>Per-turn soul recall dedup + remove unfiltered fallback recall.</li>
+          <li>Tag param in recall was ignored &mdash; now hard-filters by triplet lookup.</li>
+          <li>Skip soul recall for subagent Bash calls via <code>agent_id</code> detection.</li>
+          <li>Skip session-start topology for subagent sessions.</li>
+          <li>Strip system markup from prompt-hook before recall.</li>
+          <li>Codex SessionStart hooks &mdash; JSON wrapper + dedup merge + 15s subconscious timeout.</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 5.4.0–5.4.3 -->
+    <article class="changelog-version reveal">
+      <div class="version-header">
+        <span class="version-number">v5.4.0&ndash;5.4.3</span>
+        <span class="version-date">April 3, 2026</span>
+      </div>
+      <div class="version-body">
+        <h4>Added</h4>
+        <ul>
+          <li><strong>Ingest/wiki/health-check/training-export pipelines</strong> &mdash; DuckDB naming cleanup and unified data pipeline tooling.</li>
+          <li><strong>Affect dimensions</strong> &mdash; Full stack integration of valence and arousal affect dimensions across storage, retrieval, and display.</li>
+          <li><strong>HTTP backend for ingester</strong> &mdash; Uses Ollama/vLLM directly (default: gemma4:26b). Removes all opencode dependencies.</li>
+        </ul>
+        <h4>Fixed</h4>
+        <ul>
+          <li>Prevent release with unpushed submodules.</li>
+          <li>Copy <code>msg-notify</code> to <code>/tmp</code> before exec to avoid NFS lock on plugin dir.</li>
+        </ul>
+      </div>
+    </article>
+
     <!-- 5.3.0 -->
     <article class="changelog-version reveal">
       <div class="version-header">
         <span class="version-number">v5.3.0</span>
         <span class="version-date">April 1, 2026</span>
-        <span class="version-latest">Latest</span>
       </div>
       <div class="version-body">
         <h4>Added</h4>
