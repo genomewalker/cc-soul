@@ -128,6 +128,19 @@ char* cf_intervention_stats(const struct CfHandle* h);
 char* cf_list_open_interventions(const struct CfHandle* h);
 int   cf_close_stale_interventions(struct CfHandle* h, int64_t threshold_ms);
 
+// Agent Protocol Memory (Layer 8)
+char* cf_register_task(struct CfHandle* h, const char* params_json);
+int   cf_update_task(struct CfHandle* h, const char* params_json);
+char* cf_add_delegation(struct CfHandle* h, const char* params_json);
+char* cf_link_evidence(struct CfHandle* h, const char* params_json);
+char* cf_add_probe(struct CfHandle* h, const char* params_json);
+int   cf_resolve_probe(struct CfHandle* h, const char* params_json);
+char* cf_set_criterion(struct CfHandle* h, const char* params_json);
+char* cf_get_task(const struct CfHandle* h, uint64_t task_id);
+char* cf_query_tasks(const struct CfHandle* h, const char* params_json);
+char* cf_agent_protocol_stats(const struct CfHandle* h);
+char* cf_auto_complete_tasks(struct CfHandle* h);
+
 // Spectral stats FFI
 int cf_spectral_stats_by_realm(struct CfHandle* h,
     uint8_t* buf, size_t buf_cap, size_t* written);
