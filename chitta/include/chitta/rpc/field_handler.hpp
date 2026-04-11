@@ -587,6 +587,8 @@ private:
     #include "handlers/drift_probe.hpp"
     #include "handlers/field_skill.hpp"
     #include "handlers/field_agent.hpp"
+    #include "handlers/trajectory_compact.hpp"
+    #include "handlers/constraint.hpp"
 
     // ═══════════════════════════════════════════════════════════════════════
     // register_tools() — all tool schemas and handler bindings
@@ -2274,6 +2276,119 @@ private:
             }}
         });
         handlers_["compact_context"] = [this](const json& p) { return tool_compact_context(p); };
+
+        // ── Trajectory compaction (Latent Briefing) ─────────────────────────
+        tools_.push_back({
+            {"name", "trajectory_compact"},
+            {"description", "Attention-weighted turn selection from a transcript. "
+                "Embeds each turn, scores by cosine similarity to the task description, "
+                "applies MAD adaptive threshold, enforces token budget. "
+                "Returns a lossless subset of the most task-relevant turns."},
+            {"inputSchema", {{"type", "object"},
+                {"properties", {
+                    {"task", {{"type", "string"}, {"description", "What the downstream agent needs to accomplish"}}},
+                    {"session_id", {{"type", "string"}, {"description", "Session ID (auto-finds transcript)"}}},
+                    {"path", {{"type", "string"}, {"description", "Direct path to JSONL transcript"}}},
+                    {"budget_tokens", {{"type", "integer"}, {"description", "Target token budget (default 4000)"}}},
+                    {"mad_k", {{"type", "number"}, {"description", "MAD threshold multiplier (default 1.5, lower=more turns)"}}},
+                    {"role_filter", {{"type", "string"}, {"description", "Filter by role: user, assistant, or empty for all"}}},
+                    {"include_system", {{"type", "boolean"}, {"description", "Include system turns (default false)"}}}
+                }}, {"required", {"task"}}
+            }}
+        });
+        handlers_["trajectory_compact"] = [this](const json& p) { return tool_trajectory_compact(p); };
+
+        // ── Layer 1: Executable Constraints ─────────────────────────────────
+        tools_.push_back({{"name","assert_fact"},{"description","Assert a constraint fact (subject-predicate-object) with provenance and scope. Auto-detects conflicts and creates rival branches."},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"subject",{{"type","string"},{"description","Entity (e.g. 'user', 'project-X')"}}},
+                {"predicate",{{"type","string"},{"description","Relation (e.g. 'prefers', 'uses', 'located-in')"}}},
+                {"object",{{"type","string"},{"description","Value (e.g. 'Rust', 'vim', 'Copenhagen')"}}},
+                {"confidence",{{"type","number"},{"description","Confidence 0-1 (default 0.8)"}}},
+                {"scope",{{"type","string"},{"description","Scope: global, realm name, or session (default: global)"}}},
+                {"branch_id",{{"type","integer"},{"description","Branch to assert into (0=trunk)"}}},
+                {"provenance_source",{{"type","string"},{"description","Source: user, tool, distillation, inference"}}},
+                {"confidence_basis",{{"type","string"},{"description","Basis: stated, observed, derived, corrected"}}}
+            }},{"required",{"subject","predicate","object"}}}}});
+        handlers_["assert_fact"] = [this](const json& p) { return tool_assert_fact(p); };
+
+        tools_.push_back({{"name","retract_fact"},{"description","Soft-retract a constraint fact (preserves history)"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"fact_id",{{"type","integer"},{"description","Fact ID to retract"}}}
+            }},{"required",{"fact_id"}}}}});
+        handlers_["retract_fact"] = [this](const json& p) { return tool_retract_fact(p); };
+
+        tools_.push_back({{"name","query_unify"},{"description","Pattern-match query against constraint store (unification with wildcards)"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"subject",{{"type","string"},{"description","Subject filter (omit for wildcard)"}}},
+                {"predicate",{{"type","string"},{"description","Predicate filter"}}},
+                {"object",{{"type","string"},{"description","Object filter"}}},
+                {"scope",{{"type","string"},{"description","Scope filter"}}}
+            }}}}});
+        handlers_["query_unify"] = [this](const json& p) { return tool_query_unify(p); };
+
+        tools_.push_back({{"name","query_chain"},{"description","Follow predicate chain: A→B→C through constraint facts"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"subject",{{"type","string"},{"description","Starting entity"}}},
+                {"predicates",{{"type","array"},{"items",{{"type","string"}}},{"description","Ordered list of predicates to follow"}}}
+            }},{"required",{"subject","predicates"}}}}});
+        handlers_["query_chain"] = [this](const json& p) { return tool_query_chain(p); };
+
+        tools_.push_back({{"name","explain_fact"},{"description","Explain a fact: provenance chain + supporting/conflicting facts"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"fact_id",{{"type","integer"},{"description","Fact ID to explain"}}}
+            }},{"required",{"fact_id"}}}}});
+        handlers_["explain_fact"] = [this](const json& p) { return tool_explain_fact(p); };
+
+        tools_.push_back({{"name","branch_create"},{"description","Fork a rival branch for conflicting interpretations"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"parent_id",{{"type","integer"},{"description","Parent branch ID (0=trunk)"}}},
+                {"scope",{{"type","string"},{"description","Branch scope (default: global)"}}}
+            }}}}});
+        handlers_["branch_create"] = [this](const json& p) { return tool_branch_create(p); };
+
+        tools_.push_back({{"name","branch_resolve"},{"description","Resolve a branch conflict: winner stays, loser abandoned"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"winner_id",{{"type","integer"},{"description","Branch ID that wins"}}},
+                {"loser_id",{{"type","integer"},{"description","Branch ID to abandon"}}}
+            }},{"required",{"winner_id","loser_id"}}}}});
+        handlers_["branch_resolve"] = [this](const json& p) { return tool_branch_resolve(p); };
+
+        // ── Layer 2: Trigger Tissue ─────────────────────────────────────────
+        tools_.push_back({{"name","trigger_add"},{"description","Create a trigger automaton (prospective memory). Arms on creation, fires when conditions met or tension exceeds threshold."},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"name",{{"type","string"},{"description","Human-readable trigger name"}}},
+                {"condition",{{"type","object"},{"description","Trigger condition (TimeAfter, ConstraintMatch, EventMatch, AllOf, AnyOf)"}}},
+                {"action",{{"type","object"},{"description","Action on fire (Notify, InjectMemory, EmitEvent, RememberFact)"}}},
+                {"deadline_ms",{{"type","integer"},{"description","Deadline timestamp ms (0=no deadline)"}}},
+                {"tension_threshold",{{"type","number"},{"description","Tension level to auto-fire (default 0.8)"}}},
+                {"gain",{{"type","number"},{"description","Emotional importance 0-1 (default 0.5)"}}},
+                {"realm",{{"type","string"},{"description","Realm scope (default: global)"}}}
+            }},{"required",{"name","condition","action"}}}}});
+        handlers_["trigger_add"] = [this](const json& p) { return tool_trigger_add(p); };
+
+        tools_.push_back({{"name","trigger_list"},{"description","List all triggers with their status"},
+            {"inputSchema",{{"type","object"}}}});
+        handlers_["trigger_list"] = [this](const json& p) { return tool_trigger_list(p); };
+
+        tools_.push_back({{"name","trigger_fire"},{"description","Manually fire a trigger"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"trigger_id",{{"type","integer"},{"description","Trigger ID to fire"}}}
+            }},{"required",{"trigger_id"}}}}});
+        handlers_["trigger_fire"] = [this](const json& p) { return tool_trigger_fire(p); };
+
+        tools_.push_back({{"name","trigger_dismiss"},{"description","Expire/dismiss a trigger without firing"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"trigger_id",{{"type","integer"},{"description","Trigger ID to dismiss"}}}
+            }},{"required",{"trigger_id"}}}}});
+        handlers_["trigger_dismiss"] = [this](const json& p) { return tool_trigger_dismiss(p); };
+
+        // ── Layer 3: Predictive Memory ──────────────────────────────────────
+        tools_.push_back({{"name","predict_needed"},{"description","Get predicted next-needed memories from the Markov chain access predictor"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"k",{{"type","integer"},{"description","Number of predictions (default 8)"}}}
+            }}}}});
+        handlers_["predict_needed"] = [this](const json& p) { return tool_predict_needed(p); };
 
         // ── Drift-memory tools ───────────────────────────────────────────────
         tools_.push_back({{"name","set_evidence_type"},{"description","Tag a memory with its epistemological evidence class (observation/inference/hearsay/authoritative/prediction)"},
