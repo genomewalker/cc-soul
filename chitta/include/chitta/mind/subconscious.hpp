@@ -119,6 +119,7 @@ struct SubconsciousStats {
     std::atomic<size_t> debts_auto_resolved{0};
     std::atomic<size_t> wisdom_candidates_created{0};
     std::atomic<size_t> scorer_updates{0};
+    std::atomic<size_t> interventions_auto_closed{0};
     std::atomic<int64_t> last_belief_maintenance_at{0};
     std::atomic<int64_t> last_learning_cycle_at{0};
     std::atomic<int64_t> last_hygiene_at{0};
