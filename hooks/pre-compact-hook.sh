@@ -1,12 +1,12 @@
 #!/bin/bash
-# PreCompact hook: Save FULL session state before context compaction
+# PreCompact hook: Save structured session state before context compaction
 #
-# LOSSLESS: Captures everything needed to resume seamlessly
-# - Files read during session (with line ranges)
-# - Decisions made
-# - Current tasks and progress
-# - Blockers and discoveries
-# - Understanding built
+# Extracts operational truth from transcript:
+# - User intent (from user messages, not assistant prose)
+# - Data/code paths (from tool args + text patterns)
+# - Commands executed (from Bash tool calls)
+# - Progress signals (done/next/blockers from natural language)
+# - Decisions (from natural language, not just [DECISION] markers)
 
 # Don't use set -e: we want to save as much state as possible even if parts fail
 
@@ -27,8 +27,6 @@ REAL_SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
 [[ ! -x "$CHITTA_BIN" ]] && exit 0
 
 # Derive project directory from transcript path
-# Transcript path: ~/.claude/projects/-maps-projects-X-Y-Z/session.jsonl
-# Encoded path uses dashes, but dir names can have hyphens too (e.g., cc-soul)
 decode_project_path() {
     local encoded="${1:1}"  # Skip leading dash
     local path_so_far=""
@@ -77,68 +75,188 @@ NEXT_STEPS="[]"
 SNAPSHOT=""
 
 if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
-    # Extract assistant message text content (properly unescaped via jq)
-    # This gives us clean text without JSON escaping
-    ASSISTANT_TEXT=$(cat "$TRANSCRIPT_PATH" | \
-        jq -r 'select(.type=="assistant") | .message.content[]? | select(.type=="text") | .text' 2>/dev/null | \
-        tail -10000)
 
-    # Extract files read (from Read tool calls in raw JSON)
-    FILES_RAW=$(grep -oE '"file_path"\s*:\s*"[^"]+"' "$TRANSCRIPT_PATH" 2>/dev/null | \
-        sed 's/"file_path"\s*:\s*"//' | sed 's/"$//' | sort -u | tail -20)
-    if [[ -n "$FILES_RAW" ]]; then
-        ACTIVE_FILES=$(echo "$FILES_RAW" | jq -R . | jq -s .)
+    # ── Extract user messages (intent source) ─────────────────────────────
+    USER_TEXT=$(jq -r '
+        select(.type=="user") |
+        (if (.message.content|type)=="array"
+         then (.message.content | map(.text // "") | join(" "))
+         else (.message.content // "" | tostring)
+         end)
+    ' "$TRANSCRIPT_PATH" 2>/dev/null \
+        | sed '/^\s*$/d' \
+        | grep -vE '<(system-reminder|command-name|command-message|task-notification|local-command)' \
+        | grep -v '^\[Request interrupted' \
+        | tail -20)
+
+    # ── Extract assistant text ────────────────────────────────────────────
+    ASSISTANT_TEXT=$(jq -r '
+        select(.type=="assistant") |
+        .message.content[]? | select(.type=="text") | .text
+    ' "$TRANSCRIPT_PATH" 2>/dev/null | tail -5000)
+
+    ALL_TEXT=$(printf '%s\n%s\n' "$USER_TEXT" "$ASSISTANT_TEXT")
+
+    # ── Extract paths (fix file_path + filePath mismatch) ─────────────────
+    # From tool call arguments
+    TOOL_PATHS=$(jq -r '.. | objects | (.filePath // .file_path // .transcript_path // empty)' \
+        "$TRANSCRIPT_PATH" 2>/dev/null | sort -u | tail -40)
+
+    # From text content (data file extensions)
+    TEXT_PATHS=$(printf '%s\n' "$ALL_TEXT" | \
+        grep -oE '(/[^[:space:]"'\''<>|]+\.(bam|cram|sam|vcf|bcf|fastq|fastq\.gz|fq|fq\.gz|tsv|csv|jsonl|parquet|mcaf|ktax|py|rs|sh|cpp|hpp|h|c|ts|js|toml|yaml|yml))' \
+        2>/dev/null | sort -u | tail -30)
+
+    # From Bash command arguments (paths referenced in commands)
+    CMD_PATHS=$(jq -r '
+        select(.type=="assistant") |
+        .message.content[]? |
+        select(.type=="tool_use" and .name=="Bash") |
+        .input.command // empty
+    ' "$TRANSCRIPT_PATH" 2>/dev/null \
+        | grep -oE '(/[^[:space:]"'\''<>|]+\.(bam|cram|sam|vcf|bcf|fastq|fastq\.gz|fq|fq\.gz|tsv|csv|jsonl|parquet|mcaf|ktax))' \
+        2>/dev/null | sort -u | tail -20)
+
+    # Combine all paths, split into data vs code
+    ALL_PATHS=$(printf '%s\n%s\n%s\n' "$TOOL_PATHS" "$TEXT_PATHS" "$CMD_PATHS" | sort -u | grep -v '^\s*$')
+
+    DATA_PATHS_RAW=$(printf '%s\n' "$ALL_PATHS" | \
+        grep -Ei '\.(bam|cram|sam|vcf|bcf|fastq|fastq\.gz|fq|fq\.gz|tsv|csv|parquet|mcaf|ktax)$' | head -20)
+    CODE_PATHS_RAW=$(printf '%s\n' "$ALL_PATHS" | \
+        grep -Ei '\.(py|rs|sh|cpp|hpp|h|c|ts|js|toml|yaml|yml)$' | head -20)
+
+    # Merge data + code into active_files (data first — higher priority)
+    if [[ -n "$DATA_PATHS_RAW" || -n "$CODE_PATHS_RAW" ]]; then
+        ACTIVE_FILES=$(printf '%s\n%s\n' "$DATA_PATHS_RAW" "$CODE_PATHS_RAW" | \
+            grep -v '^\s*$' | head -30 | jq -R . | jq -s .)
+    else
+        # Fallback: tool file_path args
+        FILES_RAW=$(grep -oE '"file_path"\s*:\s*"[^"]+"' "$TRANSCRIPT_PATH" 2>/dev/null | \
+            sed 's/"file_path"\s*:\s*"//' | sed 's/"$//' | sort -u | tail -20)
+        if [[ -n "$FILES_RAW" ]]; then
+            ACTIVE_FILES=$(echo "$FILES_RAW" | jq -R . | jq -s .)
+        fi
     fi
 
-    # Extract typed markers from clean assistant text
-    # [DECISION] - design choices
-    DECISIONS_RAW=$(echo "$ASSISTANT_TEXT" | grep -oE '^\[DECISION\].*$' | sed 's/\[DECISION\]\s*//' | head -10)
-    if [[ -n "$DECISIONS_RAW" ]]; then
-        DECISIONS=$(echo "$DECISIONS_RAW" | jq -R . | jq -s .)
+    # ── Extract commands run (from Bash tool calls) ───────────────────────
+    CMDS_RUN=$(jq -r '
+        select(.type=="assistant") |
+        .message.content[]? |
+        select(.type=="tool_use" and .name=="Bash") |
+        .input.command // empty
+    ' "$TRANSCRIPT_PATH" 2>/dev/null \
+        | grep -v '^\s*$' \
+        | grep -vE '^(cat|echo|ls |pwd|cd )' \
+        | tail -30 \
+        | awk '{ line=substr($0, 1, 200); if (!seen[line]++) print line }' \
+        | tail -15)
+
+    # ── Extract progress signals (natural language) ───────────────────────
+    # "Done" signals — things already completed/tested
+    DONE_LINES=$(printf '%s\n' "$ALL_TEXT" | \
+        grep -iE '\b(done|completed|finished|already (ran|tested|running|profiled|built|created)|passed|success(fully)?|works|working|resolved|confirmed|verified)\b' \
+        2>/dev/null | grep -v '^\s*$' | \
+        awk '{ line=substr($0, 1, 200); if (!seen[line]++) print line }' | tail -10)
+
+    # "Next" signals
+    NEXT_LINES=$(printf '%s\n' "$ALL_TEXT" | \
+        grep -iE '\b(next|todo|remaining|follow[- ]?up|then we|plan to|need to|should|still need)\b' \
+        2>/dev/null | grep -v '^\s*$' | \
+        awk '{ line=substr($0, 1, 200); if (!seen[line]++) print line }' | tail -10)
+
+    # "Blocker" signals
+    BLOCKER_LINES=$(printf '%s\n' "$ALL_TEXT" | \
+        grep -iE '\b(blocked|blocker|fail(ed|ure|s)|error|cannot|can'\''t|stuck|timeout|broken|crash|missing)\b' \
+        2>/dev/null | grep -v '^\s*$' | \
+        awk '{ line=substr($0, 1, 200); if (!seen[line]++) print line }' | tail -8)
+
+    # "Decision" signals (natural language, not just [DECISION] markers)
+    DECISION_LINES=$(printf '%s\n' "$ALL_TEXT" | \
+        grep -iE '\b(we (chose|decided|switched|went with|use)|decision|instead of|prefer|better to|approach:|strategy:)\b' \
+        2>/dev/null | grep -v '^\s*$' | \
+        awk '{ line=substr($0, 1, 200); if (!seen[line]++) print line }' | tail -8)
+    # Also pick up explicit markers if present
+    MARKER_DECISIONS=$(printf '%s\n' "$ASSISTANT_TEXT" | \
+        grep -oE '^\[(DECISION|SOLUTION|GOTCHA)\].*$' | head -5)
+    if [[ -n "$MARKER_DECISIONS" ]]; then
+        DECISION_LINES=$(printf '%s\n%s' "$DECISION_LINES" "$MARKER_DECISIONS")
     fi
 
-    # [BLOCKER] - things blocking progress
-    BLOCKERS_RAW=$(echo "$ASSISTANT_TEXT" | grep -oE '^\[BLOCKER\].*$' | sed 's/\[BLOCKER\]\s*//' | head -5)
-    if [[ -n "$BLOCKERS_RAW" ]]; then
-        BLOCKERS=$(echo "$BLOCKERS_RAW" | jq -R . | jq -s .)
+    # Build JSON arrays
+    DECISIONS=$(printf '%s\n' "$DECISION_LINES" | grep -v '^\s*$' | head -10 | jq -R . | jq -s .)
+    BLOCKERS=$(printf '%s\n' "$BLOCKER_LINES" | grep -v '^\s*$' | head -8 | jq -R . | jq -s .)
+    NEXT_STEPS=$(printf '%s\n' "$NEXT_LINES" | grep -v '^\s*$' | head -8 | jq -R . | jq -s .)
+
+    # ── Build discoveries: what's already been done/tested ────────────────
+    # This is the ANTI-CONFABULATION field — things that must not be suggested as pending
+    ALREADY_DONE=()
+    if [[ -n "$DATA_PATHS_RAW" ]]; then
+        ALREADY_DONE+=("Real data files actively used: $(echo "$DATA_PATHS_RAW" | head -5 | tr '\n' ', ' | sed 's/, $//')")
+    fi
+    if [[ -n "$CMDS_RUN" ]]; then
+        ALREADY_DONE+=("Commands executed this session (do NOT suggest re-running):")
+        while IFS= read -r cmd; do
+            ALREADY_DONE+=("  ran: $cmd")
+        done <<< "$(echo "$CMDS_RUN" | tail -8)"
+    fi
+    if [[ -n "$DONE_LINES" ]]; then
+        while IFS= read -r line; do
+            ALREADY_DONE+=("$line")
+        done <<< "$(echo "$DONE_LINES" | head -5)"
+    fi
+    DISCOVERIES=$(printf '%s\n' "${ALREADY_DONE[@]}" | grep -v '^\s*$' | jq -R . | jq -s .)
+
+    # ── Build structured snapshot ─────────────────────────────────────────
+    # User intent from last meaningful user messages
+    INTENT=$(printf '%s\n' "$USER_TEXT" | tail -5 | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g' | head -c 500)
+
+    # Data paths summary
+    DATA_SUMMARY=""
+    if [[ -n "$DATA_PATHS_RAW" ]]; then
+        DATA_SUMMARY="Data in active use: $(echo "$DATA_PATHS_RAW" | head -8 | tr '\n' ', ' | sed 's/, $//')"
     fi
 
-    # [SOLUTION] and [GOTCHA] - discoveries
-    DISCOVERIES_RAW=$(echo "$ASSISTANT_TEXT" | grep -oE '^\[(SOLUTION|GOTCHA)\].*$' | head -10)
-    if [[ -n "$DISCOVERIES_RAW" ]]; then
-        DISCOVERIES=$(echo "$DISCOVERIES_RAW" | jq -R . | jq -s .)
+    # Commands summary
+    CMD_SUMMARY=""
+    if [[ -n "$CMDS_RUN" ]]; then
+        CMD_SUMMARY="Already executed: $(echo "$CMDS_RUN" | tail -8 | tr '\n' '; ' | sed 's/; $//' | head -c 600)"
     fi
 
-    # Build snapshot: last significant chunk of assistant text
-    SNAPSHOT=$(echo "$ASSISTANT_TEXT" | tail -100 | grep -v '^$' | tail -20 | head -c 2000)
+    # Done summary
+    DONE_SUMMARY=""
+    if [[ -n "$DONE_LINES" ]]; then
+        DONE_SUMMARY="Completed: $(echo "$DONE_LINES" | head -5 | tr '\n' '; ' | sed 's/; $//' | head -c 400)"
+    fi
 
-    # If snapshot is too short, add file context
+    # Next summary
+    NEXT_SUMMARY=""
+    if [[ -n "$NEXT_LINES" ]]; then
+        NEXT_SUMMARY="Pending: $(echo "$NEXT_LINES" | head -5 | tr '\n' '; ' | sed 's/; $//' | head -c 400)"
+    fi
+
+    # Assemble snapshot as structured text (this is what restore hook uses for smart_context query)
+    SNAPSHOT_PARTS=()
+    [[ -n "$INTENT" ]] && SNAPSHOT_PARTS+=("Goal: $INTENT")
+    [[ -n "$DATA_SUMMARY" ]] && SNAPSHOT_PARTS+=("$DATA_SUMMARY")
+    [[ -n "$CMD_SUMMARY" ]] && SNAPSHOT_PARTS+=("$CMD_SUMMARY")
+    [[ -n "$DONE_SUMMARY" ]] && SNAPSHOT_PARTS+=("$DONE_SUMMARY")
+    [[ -n "$NEXT_SUMMARY" ]] && SNAPSHOT_PARTS+=("$NEXT_SUMMARY")
+
+    SNAPSHOT=$(printf '%s\n' "${SNAPSHOT_PARTS[@]}" | head -c 2000)
+
+    # Fallback if snapshot is too short
     if [[ ${#SNAPSHOT} -lt 100 ]]; then
         SNAPSHOT="Context compacted ($TRIGGER). Files: $(echo "$ACTIVE_FILES" | jq -r '.[:5] | join(", ")')"
     fi
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    # Extract and persist key contextual facts as memories (no LLM needed)
-    # ═══════════════════════════════════════════════════════════════════════════
-
-    # Extract operational knowledge patterns:
-    # - "use X for/to/via Y" patterns
-    # - "X is the working/correct host/server"
-    # - "works via/through X"
-    # - host names, SSH commands, rclone, proxy info
-    FACTS_RAW=$(echo "$ASSISTANT_TEXT" | grep -iE \
+    # ── Persist key contextual facts as memories ──────────────────────────
+    FACTS_RAW=$(printf '%s\n' "$ASSISTANT_TEXT" | grep -iE \
         '(use [a-z]+ (for|to|via|through)|is the (working|correct|proper|right)|works? (via|through|by|with)|connect (to|through|via)|host[: ][a-z]|server[: ][a-z]|proxy|socks|ssh [^$]|rclone|important:|note:|remember:)' \
         2>/dev/null | grep -v '^\s*$' | head -10)
 
-    # Also extract context around markers (lines near decisions/solutions)
-    MARKER_CONTEXT=$(echo "$ASSISTANT_TEXT" | grep -B2 -A2 -E '^\[(DECISION|BLOCKER|SOLUTION|GOTCHA)\]' 2>/dev/null \
-        | grep -v '^\[(DECISION|BLOCKER|SOLUTION|GOTCHA)\]' | grep -v '^--$' | head -10)
-
-    # Combine and deduplicate
-    ALL_FACTS=$(printf "%s\n%s" "$FACTS_RAW" "$MARKER_CONTEXT" | sort -u | grep -v '^\s*$' | head -15)
+    ALL_FACTS=$(printf "%s\n" "$FACTS_RAW" | sort -u | grep -v '^\s*$' | head -15)
 
     if [[ -n "$ALL_FACTS" ]]; then
-        # Store as wisdom memory with pre-compact provenance
         FACT_CONTENT=$(printf "[pre-compact:%s] Key context from session\n%s" "$REALM" "$ALL_FACTS")
         FACT_ARGS=$(jq -n \
             --arg category "wisdom" \
@@ -154,7 +272,6 @@ fi
 # Check for active TaskList todos
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Try to get pending tasks from the task system (if available in transcript)
 TASK_INFO=$(grep -oE '"subject"\s*:\s*"[^"]*".*"status"\s*:\s*"(pending|in_progress)"' "$TRANSCRIPT_PATH" 2>/dev/null | head -5 || true)
 if [[ -n "$TASK_INFO" ]]; then
     TODOS=$(echo "$TASK_INFO" | while read -r line; do
@@ -168,7 +285,6 @@ fi
 # Queue comprehensive ledger save
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Build the full ledger entry
 LEDGER_ARGS=$(jq -n \
     --arg session_id "$SESSION_ID" \
     --arg project "$REALM" \
@@ -178,6 +294,7 @@ LEDGER_ARGS=$(jq -n \
     --argjson todos "$TODOS" \
     --argjson blockers "$BLOCKERS" \
     --argjson discoveries "$DISCOVERIES" \
+    --argjson next_steps "$NEXT_STEPS" \
     --arg snapshot "$SNAPSHOT" \
     '{
         session_id: $session_id,
@@ -188,6 +305,7 @@ LEDGER_ARGS=$(jq -n \
         todos: $todos,
         blockers: $blockers,
         discoveries: $discoveries,
+        next_steps: $next_steps,
         snapshot: $snapshot
     }')
 
@@ -196,39 +314,30 @@ queue_write "ledger_save" "$LEDGER_ARGS"
 # Report what was captured
 file_count=$(echo "$ACTIVE_FILES" | jq 'length')
 decision_count=$(echo "$DECISIONS" | jq 'length')
+discovery_count=$(echo "$DISCOVERIES" | jq 'length')
 todo_count=$(echo "$TODOS" | jq 'length')
 
-echo "[checkpoint] $SESSION_ID: files=$file_count decisions=$decision_count todos=$todo_count" >&2
+echo "[checkpoint] $SESSION_ID: files=$file_count decisions=$decision_count discoveries=$discovery_count todos=$todo_count" >&2
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Trigger immediate distillation via daemon
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Use real session_id if available, otherwise derive from transcript path
 DISTILL_SESSION_ID="$REAL_SESSION_ID"
 if [[ -z "$DISTILL_SESSION_ID" && -n "$TRANSCRIPT_PATH" ]]; then
     DISTILL_SESSION_ID=$(basename "$TRANSCRIPT_PATH" .jsonl)
 fi
 
 if [[ -n "$DISTILL_SESSION_ID" && -n "$TRANSCRIPT_PATH" ]]; then
-    # Ensure transcript is registered (in case session-start didn't fire)
     queue_write "transcript_register" "{\"session_id\":\"$DISTILL_SESSION_ID\",\"transcript_path\":$(echo "$TRANSCRIPT_PATH" | jq -Rs .),\"realm\":\"$REALM\"}"
-
-    # Trigger immediate distillation before compaction loses context
     queue_write "distill_trigger" "{\"session_id\":\"$DISTILL_SESSION_ID\"}"
-
     echo "[distill] Triggered for $DISTILL_SESSION_ID" >&2
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 # COMPACT_CONTEXT: Memory-aware turn scoring before compaction
-#
-# Uses chitta's semantic memory to identify which conversation turns are
-# already captured as memories (safe to drop) vs novel content (must keep).
-# Stores a scored snapshot so the soul knows what was semantically important.
 # ═══════════════════════════════════════════════════════════════════════════
 if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" && -x "$CHITTA_BIN" ]]; then
-    # Parse JSONL transcript → messages array (last 60 turns, skip empty content)
     MESSAGES_JSON=$(jq -sc '[
         .[] |
         select(.type == "user" or .type == "assistant") |
@@ -246,7 +355,6 @@ if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" && -x "$CHITTA_BIN" ]]; the
     ] | .[-60:]' "$TRANSCRIPT_PATH" 2>/dev/null || echo "[]")
 
     if [[ "$MESSAGES_JSON" != "[]" && "$MESSAGES_JSON" != "null" ]]; then
-        # Build JSON-RPC request — use thin client mode (stdin) for complex nested params
         COMPACT_RPC=$(jq -n \
             --argjson messages "$MESSAGES_JSON" \
             --arg query "${SNAPSHOT:0:300}" \
@@ -267,7 +375,6 @@ if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" && -x "$CHITTA_BIN" ]]; the
 
             echo "[compact_context] ${before}→${after} tok | ${dropped}% memory-covered drops | embedding=${embedded}" >&2
 
-            # Persist compaction metadata as an episode so the soul tracks what survived
             if [[ -n "$before" && "$before" != "0" ]]; then
                 queue_write "observe" "$(jq -n \
                     --arg realm "$REALM" \

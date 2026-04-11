@@ -1,9 +1,12 @@
 #!/bin/bash
-# SessionStart hook for source=compact: Lightweight context restoration
+# SessionStart hook for source=compact: Structured context restoration
 #
 # After compaction, Claude Code re-runs SessionStart hooks. The full session-start-hook.sh
 # is expensive (topology queries, corrections, auto-index, realm-retag, behavioral probes).
-# Post-compact we only need: ledger state + smart_context + session re-registration.
+# Post-compact we restore: ledger state (authoritative) + targeted smart_context (enrichment).
+#
+# Anti-confabulation: if data paths or executed commands are in the ledger,
+# we emit explicit guardrails telling Claude not to suggest redoing them.
 
 CHITTA_BIN="${CHITTA_BIN:-$HOME/.claude/bin/chitta}"
 MAX_WAIT="${CC_SOUL_MAX_WAIT:-2}"
@@ -21,13 +24,31 @@ TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty')
 daemon_available || exit 0
 
 # Detect realm (fast, needed for ledger_load)
+# Derive project directory from transcript path (must match pre-compact logic)
+decode_project_path() {
+    local encoded="${1:1}"  # Skip leading dash
+    local path_so_far=""
+    IFS='-' read -ra PARTS <<< "$encoded"
+    for part in "${PARTS[@]}"; do
+        local test_path="$path_so_far/$part"
+        if [[ -d "$test_path" ]]; then
+            path_so_far="$test_path"
+        else
+            local alt_path="$path_so_far-$part"
+            if [[ -d "$alt_path" ]]; then
+                path_so_far="$alt_path"
+            else
+                path_so_far="$test_path"
+            fi
+        fi
+    done
+    echo "$path_so_far"
+}
+
 PROJECT_DIR=""
 if [[ -n "$TRANSCRIPT_PATH" ]]; then
-    # Reuse decode logic from session-start-hook.sh
     PROJECT_ENCODED=$(dirname "$TRANSCRIPT_PATH" | xargs basename)
-    # Simple decode: try direct path reconstruction
-    DECODED=$(echo "$PROJECT_ENCODED" | sed 's/^-/\//' | sed 's/-/\//g')
-    [[ -d "$DECODED" ]] && PROJECT_DIR="$DECODED"
+    PROJECT_DIR=$(decode_project_path "$PROJECT_ENCODED")
 fi
 
 if [[ -n "$PROJECT_DIR" && -d "$PROJECT_DIR" ]]; then
@@ -47,57 +68,130 @@ if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
     queue_write "transcript_register" "{\"session_id\":\"$SESSION_ID\",\"transcript_path\":$(echo "$TRANSCRIPT_PATH" | jq -Rs .),\"realm\":\"$REALM\"}"
 fi
 
-# Load ledger for state restoration
+# ═══════════════════════════════════════════════════════════════════════════
+# Load ledger state (authoritative truth)
+# ═══════════════════════════════════════════���═══════════════════════════════
+
 LEDGER_JSON=$(timeout "$MAX_WAIT" "$CHITTA_BIN" ledger_load --project "$REALM" --json 2>/dev/null || echo "{}")
 
-# Build JSON output with additionalContext + watchPaths
 CONTEXT_PARTS=()
 
-# Ledger state restoration
 if [[ -n "$LEDGER_JSON" && "$LEDGER_JSON" != "{}" ]]; then
-    RESTORE_TEXT="[session-restored]"
+    # ── Structured state restoration ──────────────────────────────────────
+    RESTORE_TEXT="[session-state]"
 
-    ACTIVE_FILES=$(echo "$LEDGER_JSON" | jq -r '.active_files // [] | .[]' 2>/dev/null)
-    if [[ -n "$ACTIVE_FILES" ]]; then
-        RESTORE_TEXT="${RESTORE_TEXT}\nFiles: $(echo "$ACTIVE_FILES" | tr '\n' ', ' | sed 's/, $//')"
-    fi
-
+    # Snapshot = goal + data + commands + progress (structured by pre-compact)
     SNAPSHOT=$(echo "$LEDGER_JSON" | jq -r '.snapshot // empty')
     if [[ -n "$SNAPSHOT" && ${#SNAPSHOT} -gt 20 ]]; then
-        RESTORE_TEXT="${RESTORE_TEXT}\nContext: ${SNAPSHOT:0:300}"
+        RESTORE_TEXT="${RESTORE_TEXT}\n${SNAPSHOT:0:1500}"
     fi
 
-    DECISIONS=$(echo "$LEDGER_JSON" | jq -r '.decisions // [] | .[:3] | .[]' 2>/dev/null)
+    # Active files (data paths are highest priority)
+    ACTIVE_FILES=$(echo "$LEDGER_JSON" | jq -r '.active_files // [] | .[:15] | .[]' 2>/dev/null)
+    if [[ -n "$ACTIVE_FILES" ]]; then
+        RESTORE_TEXT="${RESTORE_TEXT}\nActive files: $(echo "$ACTIVE_FILES" | tr '\n' ', ' | sed 's/, $//')"
+    fi
+
+    # Decisions
+    DECISIONS=$(echo "$LEDGER_JSON" | jq -r '.decisions // [] | .[:5] | .[]' 2>/dev/null)
     if [[ -n "$DECISIONS" ]]; then
         RESTORE_TEXT="${RESTORE_TEXT}\nDecisions: $(echo "$DECISIONS" | tr '\n' '; ' | sed 's/; $//')"
     fi
 
-    TODOS=$(echo "$LEDGER_JSON" | jq -r '.todos // [] | .[] | "[\(.status)] \(.content)"' 2>/dev/null)
-    if [[ -n "$TODOS" ]]; then
-        RESTORE_TEXT="${RESTORE_TEXT}\nTasks: $(echo "$TODOS" | head -3 | tr '\n' '; ' | sed 's/; $//')"
+    # Next steps
+    NEXT=$(echo "$LEDGER_JSON" | jq -r '.next_steps // [] | .[:5] | .[]' 2>/dev/null)
+    if [[ -n "$NEXT" ]]; then
+        RESTORE_TEXT="${RESTORE_TEXT}\nNext steps: $(echo "$NEXT" | tr '\n' '; ' | sed 's/; $//')"
     fi
 
-    BLOCKERS=$(echo "$LEDGER_JSON" | jq -r '.blockers // [] | .[:2] | .[]' 2>/dev/null)
+    # Blockers
+    BLOCKERS=$(echo "$LEDGER_JSON" | jq -r '.blockers // [] | .[:3] | .[]' 2>/dev/null)
     if [[ -n "$BLOCKERS" ]]; then
         RESTORE_TEXT="${RESTORE_TEXT}\nBlockers: $(echo "$BLOCKERS" | tr '\n' '; ')"
     fi
 
-    DISCOVERIES=$(echo "$LEDGER_JSON" | jq -r '.discoveries // [] | .[:5] | .[]' 2>/dev/null)
-    if [[ -n "$DISCOVERIES" ]]; then
-        RESTORE_TEXT="${RESTORE_TEXT}\nDiscoveries: $(echo "$DISCOVERIES" | tr '\n' '; ' | sed 's/; $//')"
+    # Todos
+    TODOS=$(echo "$LEDGER_JSON" | jq -r '.todos // [] | .[] | "[\(.status)] \(.content)"' 2>/dev/null)
+    if [[ -n "$TODOS" ]]; then
+        RESTORE_TEXT="${RESTORE_TEXT}\nTasks: $(echo "$TODOS" | head -5 | tr '\n' '; ' | sed 's/; $//')"
     fi
 
-    RESTORE_TEXT="${RESTORE_TEXT}\n[/session-restored]"
+    RESTORE_TEXT="${RESTORE_TEXT}\n[/session-state]"
     CONTEXT_PARTS+=("$RESTORE_TEXT")
+
+    # ── Anti-confabulation guardrails ─────────────────────────────────────
+    # The discoveries field contains "already done" items from pre-compact
+    DISCOVERIES=$(echo "$LEDGER_JSON" | jq -r '.discoveries // [] | .[]' 2>/dev/null)
+    HAS_DATA_PATHS=$(echo "$LEDGER_JSON" | jq -r '.active_files // [] | map(select(test("\\.(bam|cram|sam|vcf|bcf|fastq|mcaf|ktax|tsv|csv|parquet)$"; "i"))) | length' 2>/dev/null)
+
+    GUARDRAILS=""
+    if [[ -n "$DISCOVERIES" || "${HAS_DATA_PATHS:-0}" -gt 0 ]]; then
+        GUARDRAILS="[anti-confab] MANDATORY RULES FOR THIS RESUMED SESSION:"
+        GUARDRAILS="${GUARDRAILS}\n1. [session-state] above is AUTHORITATIVE. Do not contradict it."
+        GUARDRAILS="${GUARDRAILS}\n2. Never propose as pending anything listed under 'Already done' or 'Already executed'."
+        GUARDRAILS="${GUARDRAILS}\n3. If uncertain, ask — do not guess or confabulate session history."
+
+        if [[ "${HAS_DATA_PATHS:-0}" -gt 0 ]]; then
+            GUARDRAILS="${GUARDRAILS}\n4. FORBIDDEN CLAIM: 'ready to test on real data' / 'when you have files' — real data IS present and WAS used."
+        fi
+
+        if [[ -n "$DISCOVERIES" ]]; then
+            GUARDRAILS="${GUARDRAILS}\nAlready done:"
+            # Compact format: one line per item
+            while IFS= read -r line; do
+                [[ -n "$line" ]] && GUARDRAILS="${GUARDRAILS}\n- $line"
+            done <<< "$(echo "$DISCOVERIES" | head -10)"
+        fi
+
+        GUARDRAILS="${GUARDRAILS}\n[/anti-confab]"
+        CONTEXT_PARTS+=("$GUARDRAILS")
+    fi
 fi
 
-# Smart context for current work (fast mode)
-SMART_CTX=$(timeout "$MAX_WAIT" "$CHITTA_BIN" smart_context --task "session continuation after compaction" --mode fast --limit 200 2>/dev/null || true)
-if [[ -n "$SMART_CTX" && "$SMART_CTX" != *"No memories"* ]]; then
-    CONTEXT_PARTS+=("[soul-compact]\n${SMART_CTX:0:400}\n[/soul-compact]")
+# ═════════════════════════════════════════���═════════════════════════════════
+# Targeted smart_context enrichment (secondary — not truth source)
+# ═══════════════════════════════════════════════════════════════════════════
+# Use the actual snapshot content as the query, not a generic string
+
+# Multi-facet parallel smart_context queries using actual session content
+SC_TMP=$(mktemp -d)
+
+# Extract query seeds from ledger
+SC_GOAL=$(echo "$SNAPSHOT" | grep -m1 '^Goal:' | head -c 300)
+SC_DATA=$(echo "$LEDGER_JSON" | jq -r '.active_files // [] | .[:5] | join(", ")' 2>/dev/null)
+SC_DECISIONS=$(echo "$LEDGER_JSON" | jq -r '.decisions // [] | .[:3] | join("; ")' 2>/dev/null)
+
+# Run parallel facet queries (each capped at MAX_WAIT)
+if [[ -n "$SC_GOAL" ]]; then
+    timeout "$MAX_WAIT" "$CHITTA_BIN" smart_context --task "$SC_GOAL" --mode fast --limit 200 \
+        2>/dev/null > "$SC_TMP/goal.txt" &
+fi
+if [[ -n "$SC_DATA" ]]; then
+    timeout "$MAX_WAIT" "$CHITTA_BIN" smart_context --task "data artifacts: $SC_DATA" --mode fast --limit 200 \
+        2>/dev/null > "$SC_TMP/data.txt" &
+fi
+if [[ -n "$SC_DECISIONS" ]]; then
+    timeout "$MAX_WAIT" "$CHITTA_BIN" smart_context --task "decisions: $SC_DECISIONS" --mode fast --limit 200 \
+        2>/dev/null > "$SC_TMP/decisions.txt" &
+fi
+# Fallback: if no seeds, use realm-level query
+if [[ -z "$SC_GOAL" && -z "$SC_DATA" ]]; then
+    timeout "$MAX_WAIT" "$CHITTA_BIN" smart_context --task "session continuation: $REALM project" --mode fast --limit 300 \
+        2>/dev/null > "$SC_TMP/fallback.txt" &
+fi
+wait
+
+# Merge, dedupe, cap
+SMART_CTX=$(cat "$SC_TMP"/*.txt 2>/dev/null | sed '/^\s*$/d' | sed '/No memories/d' | awk '!seen[$0]++' | head -25 | head -c 800)
+rm -rf "$SC_TMP"
+
+if [[ -n "$SMART_CTX" ]]; then
+    CONTEXT_PARTS+=("[soul-context]\n${SMART_CTX}\n[/soul-context]")
 fi
 
-# Subagent budget carry-forward: warn if count is high post-compact
+# ═══════════════════════════════════════════════════════════════════════════
+# Subagent budget carry-forward
+# ═════════════════════════════════════════════��═════════════════════════════
 if [[ -n "$SESSION_ID" ]]; then
     AGENT_COUNT_FILE="$MIND_PATH/.subagent_count_${SESSION_ID}"
     AGENT_COUNT=$(cat "$AGENT_COUNT_FILE" 2>/dev/null || echo 0)
@@ -106,7 +200,9 @@ if [[ -n "$SESSION_ID" ]]; then
     fi
 fi
 
+# ═══════════════════════════════════════════════════════════════════════════
 # Emit as JSON hookSpecificOutput for SessionStart
+# ═══════════════════════════════════════════════════════════════════════════
 if [[ ${#CONTEXT_PARTS[@]} -gt 0 ]]; then
     FULL_CONTEXT=""
     for part in "${CONTEXT_PARTS[@]}"; do
@@ -128,7 +224,6 @@ if [[ ${#CONTEXT_PARTS[@]} -gt 0 ]]; then
         WATCH_PATHS="$PATHS_ARRAY"
     fi
 
-    # Emit JSON (stdout starts with { → Claude Code parses as hookSpecificOutput)
     printf '%s' "$(jq -n \
         --arg ctx "$(printf '%b' "$FULL_CONTEXT")" \
         --argjson wp "$WATCH_PATHS" \
@@ -140,7 +235,6 @@ if [[ ${#CONTEXT_PARTS[@]} -gt 0 ]]; then
             }
         }')"
 else
-    # No context to restore — emit minimal JSON
     printf '%s' '{"hookSpecificOutput":{"hookEventName":"SessionStart"}}'
 fi
 
