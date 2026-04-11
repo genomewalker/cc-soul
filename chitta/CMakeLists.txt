@@ -411,15 +411,28 @@ message(STATUS "chitta-field: ${CHITTA_FIELD_LIB}")
 set(_RTK_SUBMODULE "${CMAKE_CURRENT_SOURCE_DIR}/../rtk")
 set(_RTK_BIN "${CMAKE_CURRENT_SOURCE_DIR}/../bin/rtk")
 if(EXISTS "${_RTK_SUBMODULE}/Cargo.toml")
-    find_program(CARGO_EXECUTABLE HINTS "$ENV{HOME}/.cargo/bin" NAMES cargo)
+    # Prefer rustup's cargo over conda/system cargo
+    execute_process(COMMAND rustup which cargo OUTPUT_VARIABLE _RUSTUP_CARGO OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    if(_RUSTUP_CARGO)
+        set(CARGO_EXECUTABLE "${_RUSTUP_CARGO}")
+    else()
+        find_program(CARGO_EXECUTABLE HINTS "$ENV{HOME}/.cargo/bin" NAMES cargo)
+    endif()
     if(CARGO_EXECUTABLE)
-        # Resolve rustc alongside cargo (avoid conda's rustc 1.70 shadowing rustup's 1.92+)
+        # Read toolchain from rust-toolchain.toml if present, fall back to 1.92.0
+        set(_RTK_TOOLCHAIN "1.92.0")
+        if(EXISTS "${_RTK_SUBMODULE}/rust-toolchain.toml")
+            file(STRINGS "${_RTK_SUBMODULE}/rust-toolchain.toml" _TC_LINE REGEX "channel = ")
+            if(_TC_LINE)
+                string(REGEX REPLACE ".*channel = \"([^\"]+)\".*" "\\1" _RTK_TOOLCHAIN "${_TC_LINE}")
+            endif()
+        endif()
         get_filename_component(_CARGO_DIR "${CARGO_EXECUTABLE}" DIRECTORY)
         set(_RUSTC_EXECUTABLE "${_CARGO_DIR}/rustc")
         add_custom_command(
             OUTPUT "${_RTK_BIN}"
             COMMAND ${CMAKE_COMMAND} -E env
-                "RUSTUP_TOOLCHAIN=stable"
+                "RUSTUP_TOOLCHAIN=${_RTK_TOOLCHAIN}"
                 "RUSTC=${_RUSTC_EXECUTABLE}"
                 "${CARGO_EXECUTABLE}" build --release --manifest-path "${_RTK_SUBMODULE}/Cargo.toml"
             COMMAND ${CMAKE_COMMAND} -E copy "${_RTK_SUBMODULE}/target/release/rtk" "${_RTK_BIN}"
