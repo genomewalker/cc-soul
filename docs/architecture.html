@@ -392,7 +392,7 @@
 
     <!-- ScoringPipeline -->
     <h3 style="font-family: var(--font-display); font-size: var(--text-xl); color: var(--lotus-200); font-weight: 500; margin-top: var(--space-7); margin-bottom: var(--space-3);" class="reveal">ScoringPipeline <span style="font-size: var(--text-xs); color: var(--ash-400); font-weight: 400;">v5.11+</span></h3>
-    <p style="font-size: var(--text-sm); color: var(--ash-300); line-height: 1.7; max-width: 720px; margin-bottom: var(--space-4);" class="reveal reveal-delay-1">Post-resonance scoring uses a neuroplastic trait-based pipeline of 12 composable factors. Each factor has independent weight, bias, and type-specific parameters. All configuration lives in <code>scoring.json</code> with hot-reload &mdash; no rebuild required to tune scoring behavior.</p>
+    <p style="font-size: var(--text-sm); color: var(--ash-300); line-height: 1.7; max-width: 720px; margin-bottom: var(--space-4);" class="reveal reveal-delay-1">Post-resonance scoring uses a neuroplastic trait-based pipeline of 18 composable factors. Each factor has independent weight, bias, and type-specific parameters. All configuration lives in <code>scoring.json</code> with hot-reload &mdash; no rebuild required to tune scoring behavior.</p>
 
     <table class="comp-table reveal reveal-delay-2">
       <thead>
@@ -411,6 +411,12 @@
         <tr><td class="class-name">Epistemic</td><td class="file-name">Node type</td><td class="role-desc">Type-based multiplier (corrections, preferences weighted higher)</td></tr>
         <tr><td class="class-name">Kind</td><td class="file-name">Node kind</td><td class="role-desc">Fine-grained kind multiplier</td></tr>
         <tr><td class="class-name">RealmReliability</td><td class="file-name">Realm stats</td><td class="role-desc">Per-realm reliability based on historical feedback</td></tr>
+        <tr><td class="class-name">InterferenceDensity</td><td class="file-name">Competitor crowding</td><td class="role-desc">Price of Meaning: penalty for local competitor density</td></tr>
+        <tr><td class="class-name">SpacingBoost</td><td class="file-name">Access spacing</td><td class="role-desc">Geometry of Forgetting: well-spaced accesses boost recall</td></tr>
+        <tr><td class="class-name">PredictionBoost</td><td class="file-name">Markov chain</td><td class="role-desc">Layer 3: predicted-next-needed memories boosted</td></tr>
+        <tr><td class="class-name">SurpriseDomain</td><td class="file-name">Surprise Memory</td><td class="role-desc">Layer 4: &ldquo;actual&rdquo; outcomes boosted; wrong &ldquo;expected&rdquo; suppressed</td></tr>
+        <tr><td class="class-name">EpistemicDebt</td><td class="file-name">Epistemic Debt</td><td class="role-desc">Layer 5: memories in uncertain domains get 1.1&times; boost</td></tr>
+        <tr><td class="class-name">IntegrationWeight</td><td class="file-name">Integration Kernel</td><td class="role-desc">Layer 6: learned recall source weight as multiplier [0&ndash;2]</td></tr>
       </tbody>
     </table>
 

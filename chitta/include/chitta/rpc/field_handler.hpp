@@ -589,6 +589,7 @@ private:
     #include "handlers/field_agent.hpp"
     #include "handlers/trajectory_compact.hpp"
     #include "handlers/constraint.hpp"
+    #include "handlers/meta_memory.hpp"
 
     // ═══════════════════════════════════════════════════════════════════════
     // register_tools() — all tool schemas and handler bindings
@@ -2389,6 +2390,116 @@ private:
                 {"k",{{"type","integer"},{"description","Number of predictions (default 8)"}}}
             }}}}});
         handlers_["predict_needed"] = [this](const json& p) { return tool_predict_needed(p); };
+
+        // ── Layer 4: Surprise Memory ─────────────────────────────────────────
+        tools_.push_back({{"name","record_surprise"},{"description","Record a prediction error event — what was expected vs what actually happened"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"context_sketch",{{"type","string"},{"description","What was happening when the surprise occurred"}}},
+                {"action",{{"type","string"},{"description","What action was taken"}}},
+                {"expected",{{"type","string"},{"description","What was predicted/expected (optional)"}}},
+                {"actual",{{"type","string"},{"description","What actually happened (required)"}}},
+                {"surprise_magnitude",{{"type","number"},{"description","How surprising [0-1] (default 0.5)"}}},
+                {"domain",{{"type","string"},{"description","Domain: recall, tool, user_correction, constraint (default general)"}}},
+                {"realm",{{"type","string"},{"description","Realm filter (default global)"}}},
+                {"session_id",{{"type","string"},{"description","Session ID (optional)"}}},
+                {"source_memory_id",{{"type","integer"},{"description","Related memory ID (optional)"}}}
+            }},{"required",{"actual"}}}}});
+        handlers_["record_surprise"] = [this](const json& p) { return tool_record_surprise(p); };
+
+        tools_.push_back({{"name","query_surprises"},{"description","Query recorded surprise/prediction-error events with filters"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"domain",{{"type","string"},{"description","Filter by domain"}}},
+                {"realm",{{"type","string"},{"description","Filter by realm"}}},
+                {"min_magnitude",{{"type","number"},{"description","Minimum surprise magnitude"}}},
+                {"since_ms",{{"type","integer"},{"description","Only events after this timestamp (ms)"}}},
+                {"limit",{{"type","integer"},{"description","Max results (default 50)"}}}
+            }}}}});
+        handlers_["query_surprises"] = [this](const json& p) { return tool_query_surprises(p); };
+
+        tools_.push_back({{"name","get_blind_spots"},{"description","Identify recurring surprise patterns — domains/actions where predictions consistently fail"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"realm",{{"type","string"},{"description","Filter by realm"}}},
+                {"limit",{{"type","integer"},{"description","Max blind spots (default 10)"}}}
+            }}}}});
+        handlers_["get_blind_spots"] = [this](const json& p) { return tool_get_blind_spots(p); };
+
+        tools_.push_back({{"name","surprise_stats"},{"description","Summary statistics for surprise memory: counts, avg magnitude, domain breakdown"},
+            {"inputSchema",{{"type","object"}}}});
+        handlers_["surprise_stats"] = [this](const json& p) { return tool_surprise_stats(p); };
+
+        // ── Layer 5: Epistemic Debt ──────────────────────────────────────────
+        tools_.push_back({{"name","register_debt"},{"description","Register an epistemic uncertainty — competing hypotheses that need resolution"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"pattern",{{"type","string"},{"description","The uncertain pattern/belief (required)"}}},
+                {"competing_hypotheses",{{"type","array"},{"items",{{"type","string"}}},{"description","Competing explanations"}}},
+                {"discriminating_test",{{"type","string"},{"description","How to distinguish between hypotheses"}}},
+                {"fragility_score",{{"type","number"},{"description","How fragile this belief is [0-1] (default 0.5)"}}},
+                {"domain",{{"type","string"},{"description","Domain (default general)"}}},
+                {"realm",{{"type","string"},{"description","Realm (default global)"}}},
+                {"session_id",{{"type","string"},{"description","Session ID (optional)"}}}
+            }},{"required",{"pattern"}}}}});
+        handlers_["register_debt"] = [this](const json& p) { return tool_register_debt(p); };
+
+        tools_.push_back({{"name","resolve_debt"},{"description","Mark an epistemic debt as resolved with a resolution"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"debt_id",{{"type","integer"},{"description","Debt ID to resolve"}}},
+                {"resolution",{{"type","string"},{"description","How the uncertainty was resolved"}}}
+            }},{"required",{"debt_id","resolution"}}}}});
+        handlers_["resolve_debt"] = [this](const json& p) { return tool_resolve_debt(p); };
+
+        tools_.push_back({{"name","defer_debt"},{"description","Defer an epistemic debt for later investigation"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"debt_id",{{"type","integer"},{"description","Debt ID to defer"}}}
+            }},{"required",{"debt_id"}}}}});
+        handlers_["defer_debt"] = [this](const json& p) { return tool_defer_debt(p); };
+
+        tools_.push_back({{"name","query_debts"},{"description","Query epistemic debts with filters"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"status",{{"type","string"},{"description","Filter: open, resolved, deferred"}}},
+                {"domain",{{"type","string"},{"description","Filter by domain"}}},
+                {"realm",{{"type","string"},{"description","Filter by realm"}}},
+                {"min_fragility",{{"type","number"},{"description","Minimum fragility score"}}},
+                {"limit",{{"type","integer"},{"description","Max results (default 50)"}}}
+            }}}}});
+        handlers_["query_debts"] = [this](const json& p) { return tool_query_debts(p); };
+
+        tools_.push_back({{"name","get_fragile_decisions"},{"description","List open epistemic debts sorted by fragility — decisions most likely to be wrong"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"threshold",{{"type","number"},{"description","Minimum fragility threshold (default 0.5)"}}},
+                {"limit",{{"type","integer"},{"description","Max results (default 20)"}}}
+            }}}}});
+        handlers_["get_fragile_decisions"] = [this](const json& p) { return tool_get_fragile_decisions(p); };
+
+        tools_.push_back({{"name","debt_stats"},{"description","Summary statistics for epistemic debt: counts by status, avg fragility"},
+            {"inputSchema",{{"type","object"}}}});
+        handlers_["debt_stats"] = [this](const json& p) { return tool_debt_stats(p); };
+
+        // ── Layer 6: Integration Kernel ──────────────────────────────────────
+        tools_.push_back({{"name","record_feedback"},{"description","Record whether a recall source was useful — updates learned source weights"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"query_domain",{{"type","string"},{"description","Domain of the query (default general)"}}},
+                {"source",{{"type","string"},{"description","Source: semantic, keyword, temporal, artifact, association (required)"}}},
+                {"was_useful",{{"type","boolean"},{"description","Whether the source's results were useful (default true)"}}}
+            }},{"required",{"source"}}}}});
+        handlers_["record_feedback"] = [this](const json& p) { return tool_record_feedback(p); };
+
+        tools_.push_back({{"name","get_source_weights"},{"description","View learned recall source weights — how much each source is trusted per domain"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"domain",{{"type","string"},{"description","Filter by domain (omit for all)"}}}
+            }}}}});
+        handlers_["get_source_weights"] = [this](const json& p) { return tool_get_source_weights(p); };
+
+        tools_.push_back({{"name","update_source_weight"},{"description","Manually override a recall source weight"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"source",{{"type","string"},{"description","Source name (required)"}}},
+                {"domain",{{"type","string"},{"description","Domain (default general)"}}},
+                {"weight",{{"type","number"},{"description","New weight [0-2] (default 1.0)"}}}
+            }},{"required",{"source"}}}}});
+        handlers_["update_source_weight"] = [this](const json& p) { return tool_update_source_weight(p); };
+
+        tools_.push_back({{"name","integration_stats"},{"description","Per-source success rates and learned weights across all domains"},
+            {"inputSchema",{{"type","object"}}}});
+        handlers_["integration_stats"] = [this](const json& p) { return tool_integration_stats(p); };
 
         // ── Drift-memory tools ───────────────────────────────────────────────
         tools_.push_back({{"name","set_evidence_type"},{"description","Tag a memory with its epistemological evidence class (observation/inference/hearsay/authoritative/prediction)"},
