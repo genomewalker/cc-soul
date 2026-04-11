@@ -14,6 +14,18 @@
 
 CC-soul gives Claude Code persistent memory across sessions. It learns your preferences, remembers your codebase structure, anticipates your needs, and gets smarter the more you use it. One command to install. Zero commands to operate.
 
+## What's New in v5.15.0
+
+- **Autonomous Learning Pipeline** — closes the feedback loops from prediction errors to memory adaptation. The system now *acts* on what it records, pushing from "remembering" (~70%) to "learning" (~90%).
+- **Surprise Credit (Move 1)** — hysteresis-gated strength adjustments. Rolling per-memory credit tracks consecutive surprise directions; gate threshold (|credit| ≥ 0.75, streak ≥ 2) prevents noise from triggering updates. Strength deltas clamped to ±0.08.
+- **Integration Kernel Feedback (Move 2)** — repeated recall failures auto-decrease source trust. Hard threshold (magnitude ≥ 0.55) sends immediate negative feedback; soft threshold (≥ 0.25 with 2/8 repeated failures) triggers delayed feedback.
+- **Debt Auto-Resolution (Move 3)** — epistemic debts with sufficient evidence (confidence ≥ 0.70) are auto-resolved by the subconscious learning cycle.
+- **Wisdom Promotion (Move 5)** — clustered surprise patterns become wisdom candidates with lifecycle FSM: candidate → provisional → trusted → demoted.
+- **Learned Scorer (Move 6)** — per-factor weight deltas learned from outcome calibration overlay the immutable scoring baseline.
+- **9 new MCP tools** — `surprise_learning_stats`, `upsert_wisdom_candidate`, `update_wisdom_lifecycle`, `query_wisdom_candidates`, `wisdom_promotion_stats`, `attach_debt_evidence`, `update_scorer_model`, `learned_scorer_stats`, `effective_scorer_weights`
+- **5 new WAL op codes** — `OP_UPDATE_SURPRISE_CREDIT=44`, `OP_UPSERT_WISDOM_CANDIDATE=45`, `OP_UPDATE_WISDOM_LIFECYCLE=46`, `OP_UPDATE_SCORER_MODEL=47`, `OP_ATTACH_DEBT_EVIDENCE=48`
+- **Subconscious learning cycle** — 30-minute deferred job auto-resolves debts, refreshes scorer stats, and prepares wisdom candidates.
+
 ## What's New in v5.14.0
 
 - **Surprise Memory (Layer 4)** — prediction error tuples that reveal blind spots. Record what was expected vs what actually happened; query recurring surprise patterns; identify domains where predictions consistently fail. Surprise-boosted memories surface more readily in recall. [[Friston 2010]](https://doi.org/10.1038/nrn2787)

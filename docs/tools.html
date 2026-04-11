@@ -998,6 +998,29 @@
       </div>
     </div>
 
+    <!-- AUTONOMOUS LEARNING -->
+    <div class="tools-category collapsed" id="cat-learning">
+      <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tools-category-icon">
+          <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="#9DB2D9" stroke-width="1" opacity="0.5"/><path d="M7 10l2 2 4-4" stroke="#9DB2D9" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.7"/></svg>
+        </div>
+        <span class="tools-category-name">Autonomous Learning</span>
+        <span class="tools-category-count">9 tools</span>
+        <span class="tools-category-toggle">&#x25BE;</span>
+      </div>
+      <div class="tools-list">
+        <div class="tool-row"><span class="tool-name">surprise_learning_stats</span><span class="tool-desc">Rolling surprise credit stats &mdash; tracked memories, gates passed, strength adjustments</span></div>
+        <div class="tool-row"><span class="tool-name">upsert_wisdom_candidate</span><span class="tool-desc">Create or update a wisdom candidate from clustered surprise patterns</span></div>
+        <div class="tool-row"><span class="tool-name">update_wisdom_lifecycle</span><span class="tool-desc">Advance candidate through lifecycle: candidate &rarr; provisional &rarr; trusted &rarr; demoted</span></div>
+        <div class="tool-row"><span class="tool-name">query_wisdom_candidates</span><span class="tool-desc">Query wisdom candidates by lifecycle stage and/or domain</span></div>
+        <div class="tool-row"><span class="tool-name">wisdom_promotion_stats</span><span class="tool-desc">Overview of wisdom promotion pipeline &mdash; total candidates by lifecycle stage</span></div>
+        <div class="tool-row"><span class="tool-name">attach_debt_evidence</span><span class="tool-desc">Attach supporting evidence (memory IDs + confidence) to an epistemic debt</span></div>
+        <div class="tool-row"><span class="tool-name">update_scorer_model</span><span class="tool-desc">Apply learned weight deltas to the scoring model from outcome calibration</span></div>
+        <div class="tool-row"><span class="tool-name">learned_scorer_stats</span><span class="tool-desc">Current learned scoring model &mdash; version, factor count, loss, outcome count</span></div>
+        <div class="tool-row"><span class="tool-name">effective_scorer_weights</span><span class="tool-desc">Show effective scoring weights &mdash; baseline + learned deltas for all factors</span></div>
+      </div>
+    </div>
+
     <!-- DEBUG (hidden in collapsed by default) -->
     <div class="tools-category collapsed" id="cat-debug">
       <div class="tools-category-header" onclick="this.parentElement.classList.toggle('collapsed')">

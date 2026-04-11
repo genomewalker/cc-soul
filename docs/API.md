@@ -1725,4 +1725,82 @@ Per-source success rates and learned weights across all domains. No parameters.
 
 ---
 
+## Autonomous Learning (Moves 1-6)
+
+### surprise_learning_stats
+
+Rolling surprise credit stats — tracked memories, gates passed, strength adjustments. No parameters.
+
+### upsert_wisdom_candidate
+
+Create or update a wisdom candidate from clustered surprise patterns.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `cluster_key` | string | Yes | Unique key for this pattern cluster (domain+action+sig) |
+| `domain` | string | No | Knowledge domain |
+| `action` | string | No | Action or behavior pattern |
+| `summary` | string | No | Human-readable summary of the wisdom |
+| `episode_ids` | array | No | Surprise event IDs supporting this candidate |
+| `debt_ids` | array | No | Resolved debt IDs linked to this candidate |
+| `support_count` | integer | No | Number of supporting episodes |
+| `cross_session_count` | integer | No | Number of distinct sessions with evidence |
+| `mean_surprise` | number | No | Average surprise magnitude across episodes |
+| `promotion_score` | number | No | Computed promotion readiness score 0-1 |
+
+### update_wisdom_lifecycle
+
+Advance a wisdom candidate through lifecycle stages.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `candidate_id` | integer | Yes | Wisdom candidate ID |
+| `new_state` | integer | Yes | 0=candidate, 1=provisional, 2=trusted, 3=demoted |
+
+### query_wisdom_candidates
+
+Query wisdom candidates by lifecycle stage and/or domain.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `lifecycle` | integer | No | Filter by lifecycle (0-3) |
+| `domain` | string | No | Filter by domain |
+| `limit` | integer | No | Max results (default 50) |
+
+### wisdom_promotion_stats
+
+Overview of wisdom promotion pipeline — total candidates by lifecycle stage. No parameters.
+
+### attach_debt_evidence
+
+Attach supporting evidence to an epistemic debt.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `debt_id` | integer | Yes | Epistemic debt ID |
+| `memory_ids` | array | No | Memory IDs that serve as evidence |
+| `confidence` | number | No | Evidence confidence 0-1 (default 0.5) |
+| `note` | string | No | Optional note about the evidence |
+
+### update_scorer_model
+
+Apply learned weight deltas to the scoring model from outcome calibration.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `weights` | object | No | Factor name → {delta, min_delta, max_delta} |
+| `model_version` | integer | No | Monotonic version number |
+| `mean_loss` | number | No | EWMA loss from calibration |
+| `outcome_count` | integer | No | Total outcomes used for calibration |
+
+### learned_scorer_stats
+
+Current learned scoring model — version, factor count, loss, outcome count. No parameters.
+
+### effective_scorer_weights
+
+Show effective scoring weights — baseline + learned deltas for all factors. No parameters.
+
+---
+
 *100+ tools. One soul.*

@@ -1043,6 +1043,22 @@ Recall source arbitration with learned weights. Tracks which recall sources (sem
 | `update_source_weight` | Manual weight override |
 | `integration_stats` | Per-source success rates across all domains |
 
+### Autonomous Learning (Moves 1-6)
+
+Closes feedback loops from prediction errors to memory adaptation.
+
+| Tool | Description |
+|------|-------------|
+| `surprise_learning_stats` | Rolling surprise credit stats — tracked memories, gates passed |
+| `upsert_wisdom_candidate` | Create/update wisdom candidate from clustered surprises |
+| `update_wisdom_lifecycle` | Advance candidate: candidate → provisional → trusted → demoted |
+| `query_wisdom_candidates` | Query by lifecycle stage and/or domain |
+| `wisdom_promotion_stats` | Pipeline overview — candidates by lifecycle stage |
+| `attach_debt_evidence` | Attach evidence (memory IDs + confidence) to an epistemic debt |
+| `update_scorer_model` | Apply learned weight deltas from outcome calibration |
+| `learned_scorer_stats` | Current model version, factor count, loss |
+| `effective_scorer_weights` | Baseline + learned deltas for all scoring factors |
+
 ---
 
-*Version 5.14 — Meta-memory layers (surprise, epistemic debt, integration kernel), 18-factor scoring pipeline, chitta-field organic substrate.*
+*Version 5.15 — Autonomous learning pipeline (surprise credit, wisdom promotion, learned scorer), subconscious learning cycle, 18-factor scoring pipeline, chitta-field organic substrate.*
