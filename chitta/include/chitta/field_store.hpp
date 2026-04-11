@@ -117,6 +117,17 @@ char* cf_learned_scorer_stats(const struct CfHandle* h);
 char* cf_effective_scorer_weights(const struct CfHandle* h);
 char* cf_auto_resolve_debts(struct CfHandle* h, float threshold);
 
+// Intervention Ledger (Layer 7)
+char* cf_start_intervention(struct CfHandle* h, const char* params_json);
+char* cf_add_observation(struct CfHandle* h, const char* params_json);
+int   cf_close_intervention(struct CfHandle* h, uint64_t intervention_id, uint8_t status);
+int   cf_record_attribution(struct CfHandle* h, const char* params_json);
+char* cf_query_interventions(const struct CfHandle* h, const char* params_json);
+char* cf_get_intervention(const struct CfHandle* h, uint64_t intervention_id);
+char* cf_intervention_stats(const struct CfHandle* h);
+char* cf_list_open_interventions(const struct CfHandle* h);
+int   cf_close_stale_interventions(struct CfHandle* h, int64_t threshold_ms);
+
 // Spectral stats FFI
 int cf_spectral_stats_by_realm(struct CfHandle* h,
     uint8_t* buf, size_t buf_cap, size_t* written);

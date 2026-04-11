@@ -758,13 +758,18 @@ void Subconscious::run_learning_cycle() {
                 if (!scorer.is_discarded()) {
                     uint64_t outcomes = scorer.value("outcome_count", uint64_t(0));
                     uint64_t version = scorer.value("model_version", uint64_t(0));
-                    // Scorer updates are driven by accumulated outcome signals.
-                    // The actual weight delta computation happens in the Rust layer.
-                    // This cycle ensures the stats are fresh for dream/think callbacks.
                     if (outcomes > 0 && version > 0) {
                         stats_.scorer_updates.store(version);
                     }
                 }
+            }
+        }
+
+        // Layer 7: Auto-close stale open interventions (> 30 min)
+        {
+            int closed = cf_close_stale_interventions(field_store_->handle(), 1800000LL);
+            if (closed > 0) {
+                stats_.interventions_auto_closed += static_cast<size_t>(closed);
             }
         }
     } catch (const std::exception& e) {

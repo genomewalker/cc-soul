@@ -591,6 +591,7 @@ private:
     #include "handlers/constraint.hpp"
     #include "handlers/meta_memory.hpp"
     #include "handlers/learning.hpp"
+    #include "handlers/intervention.hpp"
 
     // ═══════════════════════════════════════════════════════════════════════
     // register_tools() — all tool schemas and handler bindings
@@ -2567,6 +2568,77 @@ private:
             {"inputSchema",{{"type","object"}}}});
         handlers_["effective_scorer_weights"] = [this](const json& p) { return tool_effective_scorer_weights(field_store_, p); };
 
+        // ── Layer 7: Intervention Ledger ─────────────────────────────────────
+        tools_.push_back({{"name","start_intervention"},{"description","Begin tracking an agent intervention — records intent, action, preconditions and expected observables before execution"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"realm",{{"type","string"},{"description","Realm: coding, research, planning (default: coding)"}}},
+                {"session_id",{{"type","string"},{"description","Current session ID"}}},
+                {"task_id",{{"type","integer"},{"description","Optional task ID"}}},
+                {"agent_id",{{"type","string"},{"description","Agent performing the action"}}},
+                {"domain",{{"type","string"},{"description","Domain area (e.g. git, filesystem, testing, compiler)"}}},
+                {"intent",{{"type","string"},{"description","What the agent intends to achieve"}}},
+                {"action_type",{{"type","integer"},{"description","0=ToolCall 1=MultiStepPlan 2=Delegation 3=Edit 4=Command"}}},
+                {"action_ref",{{"type","string"},{"description","Reference to the action (tool name, file path, command)"}}},
+                {"preconditions",{{"type","array"},{"items",{{"type","string"}}},{"description","Known preconditions"}}},
+                {"expected_observables",{{"type","array"},{"items",{{"type","string"}}},{"description","What success looks like"}}},
+                {"reversal_cost",{{"type","integer"},{"description","0=None 1=Low 2=Medium 3=High"}}}
+            }},{"required",{"intent","action_ref"}}}}});
+        handlers_["start_intervention"] = [this](const json& p) { return tool_start_intervention(field_store_, p); };
+
+        tools_.push_back({{"name","add_observation"},{"description","Record an observation during an open intervention (stdout, test result, file diff, etc.)"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"intervention_id",{{"type","integer"},{"description","Intervention ID from start_intervention"}}},
+                {"kind",{{"type","integer"},{"description","0=Stdout 1=Stderr 2=FileDiff 3=TestResult 4=EnvState 5=UserFeedback"}}},
+                {"summary",{{"type","string"},{"description","Human-readable observation summary"}}},
+                {"confidence",{{"type","number"},{"description","Confidence in this observation (0.0-1.0)"}}},
+                {"evidence_refs",{{"type","array"},{"items",{{"type","integer"}}},{"description","Memory IDs that constitute evidence"}}}
+            }},{"required",{"intervention_id","summary"}}}}});
+        handlers_["add_observation"] = [this](const json& p) { return tool_add_observation(field_store_, p); };
+
+        tools_.push_back({{"name","close_intervention"},{"description","Close an intervention with its final outcome status"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"intervention_id",{{"type","integer"},{"description","Intervention ID to close"}}},
+                {"status",{{"type","integer"},{"description","0=Open 1=Succeeded 2=Failed 3=Partial 4=Aborted"}}}
+            }},{"required",{"intervention_id","status"}}}}});
+        handlers_["close_intervention"] = [this](const json& p) { return tool_close_intervention(field_store_, p); };
+
+        tools_.push_back({{"name","record_attribution"},{"description","Attribute a closed intervention to a causal class — routes feedback to the appropriate learning subsystem"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"intervention_id",{{"type","integer"},{"description","Intervention ID"}}},
+                {"primary_class",{{"type","integer"},{"description","0=MemoryRecallError 1=SourceTrustError 2=ProcedureError 3=ToolExecutionError 4=EnvironmentShift 5=HiddenPrecondition 6=AmbiguousState 7=GoalSpecError 8=UserOverride 9=ExternalNondeterminism"}}},
+                {"secondary_class",{{"type","integer"},{"description","Optional secondary attribution class (same enum)"}}},
+                {"confidence_delta",{{"type","number"},{"description","Magnitude of the learning signal (0.0-1.0)"}}},
+                {"surprise_id",{{"type","integer"},{"description","Linked surprise event ID if available"}}},
+                {"debt_ids",{{"type","array"},{"items",{{"type","integer"}}},{"description","Linked epistemic debt IDs"}}},
+                {"source_memory_ids",{{"type","array"},{"items",{{"type","integer"}}},{"description","Memory IDs that contributed to this outcome"}}},
+                {"skill_memory_ids",{{"type","array"},{"items",{{"type","integer"}}},{"description","Skill memory IDs that were applied"}}},
+                {"note",{{"type","string"},{"description","Optional human-readable note"}}}
+            }},{"required",{"intervention_id","primary_class"}}}}});
+        handlers_["record_attribution"] = [this](const json& p) { return tool_record_attribution(field_store_, p); };
+
+        tools_.push_back({{"name","query_interventions"},{"description","Query the intervention ledger with optional filters"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"realm",{{"type","string"},{"description","Filter by realm"}}},
+                {"session_id",{{"type","string"},{"description","Filter by session ID"}}},
+                {"status",{{"type","integer"},{"description","Filter by status (0-4)"}}},
+                {"limit",{{"type","integer"},{"description","Max results (default 50)"}}}
+            }}}}});
+        handlers_["query_interventions"] = [this](const json& p) { return tool_query_interventions(field_store_, p); };
+
+        tools_.push_back({{"name","get_intervention"},{"description","Get a single intervention record by ID"},
+            {"inputSchema",{{"type","object"},{"properties",{
+                {"intervention_id",{{"type","integer"},{"description","Intervention ID"}}}
+            }},{"required",{"intervention_id"}}}}});
+        handlers_["get_intervention"] = [this](const json& p) { return tool_get_intervention(field_store_, p); };
+
+        tools_.push_back({{"name","intervention_stats"},{"description","Show intervention ledger statistics — total, open, succeeded, failed, aborted counts"},
+            {"inputSchema",{{"type","object"}}}});
+        handlers_["intervention_stats"] = [this](const json& p) { return tool_intervention_stats(field_store_, p); };
+
+        tools_.push_back({{"name","list_open_interventions"},{"description","List all currently open (in-progress) interventions"},
+            {"inputSchema",{{"type","object"}}}});
+        handlers_["list_open_interventions"] = [this](const json& p) { return tool_list_open_interventions(field_store_, p); };
+
         // ── Drift-memory tools ───────────────────────────────────────────────
         tools_.push_back({{"name","set_evidence_type"},{"description","Tag a memory with its epistemological evidence class (observation/inference/hearsay/authoritative/prediction)"},
             {"inputSchema",{{"type","object"},{"properties",{
@@ -2835,7 +2907,11 @@ private:
             "upsert_wisdom_candidate", "update_wisdom_lifecycle",
             "query_wisdom_candidates", "wisdom_promotion_stats",
             "attach_debt_evidence",
-            "update_scorer_model", "learned_scorer_stats", "effective_scorer_weights"
+            "update_scorer_model", "learned_scorer_stats", "effective_scorer_weights",
+            // Layer 7: Intervention Ledger
+            "start_intervention", "add_observation", "close_intervention",
+            "record_attribution", "query_interventions", "get_intervention",
+            "intervention_stats", "list_open_interventions"
         };
 
         for (const auto& name : internal_tools) tool_visibility_[name] = "internal";

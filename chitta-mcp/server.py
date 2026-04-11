@@ -181,6 +181,10 @@ ADVANCED_TOOLS = {
     "query_wisdom_candidates", "wisdom_promotion_stats",
     "attach_debt_evidence",
     "update_scorer_model", "learned_scorer_stats", "effective_scorer_weights",
+    # Layer 7: Intervention Ledger
+    "start_intervention", "add_observation", "close_intervention",
+    "record_attribution", "query_interventions", "get_intervention",
+    "intervention_stats", "list_open_interventions",
 }
 
 # Combined set of tools to hide from listing (but still callable)
